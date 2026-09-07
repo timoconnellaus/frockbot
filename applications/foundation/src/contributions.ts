@@ -57,10 +57,6 @@ import {
   type FlockGatewayHost,
 } from "@frockbot/plugin-flock/backend";
 import {
-  backendContribution as packagePublisherGatewayContribution,
-  type PackagePublisherGatewayHost,
-} from "@frockbot/plugin-package-publisher/backend";
-import {
   backendContribution as routinesGatewayContribution,
   type RoutinesGatewayHost,
 } from "@frockbot/plugin-routines/backend";
@@ -102,10 +98,6 @@ import {
   type BotTemplateUserApplicationHostV1,
 } from "@frockbot/plugin-bot-template/user";
 import {
-  userContribution as packagePublisherUserContribution,
-  type PackagePublisherUserApplicationHostV1,
-} from "@frockbot/plugin-package-publisher/user";
-import {
   userContribution as machineUserContribution,
   type MachineUserApplicationHostV1,
 } from "@frockbot/plugin-user-machine/user";
@@ -141,7 +133,6 @@ export {
   botTemplateGatewayContribution,
   computerGatewayContribution,
   flockGatewayContribution,
-  packagePublisherGatewayContribution,
   routinesGatewayContribution,
   searchGatewayContribution,
   settingsGatewayContribution,
@@ -152,7 +143,6 @@ export {
   ollamaCloudUserContribution,
   frockAiUserContribution,
   botTemplateUserContribution,
-  packagePublisherUserContribution,
   machineUserContribution,
   searchUserContribution,
   auditUserContribution,
@@ -231,8 +221,7 @@ export type FoundationGatewayHost = {
   SubagentsGatewayHost &
   MachineGatewayHostV1 &
   SearchGatewayHost &
-  AuditGatewayHost &
-  PackagePublisherGatewayHost;
+  AuditGatewayHost;
 
 /**
  * Every User Durable Object host slice, in one object. Each Package names its
@@ -250,7 +239,6 @@ export type FoundationUserBackendHostV1 = {
   OllamaCloudUserApplicationHostV1 &
   FrockAiUserApplicationHostV1 &
   BotTemplateUserApplicationHostV1 &
-  PackagePublisherUserApplicationHostV1 &
   MachineUserApplicationHostV1 &
   SearchUserApplicationHostV1 &
   AuditUserApplicationHostV1 &
@@ -310,7 +298,6 @@ function backendDescriptorsV1(): readonly AnyBackendDescriptor[] {
     botTemplateGatewayContribution,
     computerGatewayContribution,
     flockGatewayContribution,
-    packagePublisherGatewayContribution,
     routinesGatewayContribution,
     searchGatewayContribution,
     settingsGatewayContribution,
@@ -321,7 +308,6 @@ function backendDescriptorsV1(): readonly AnyBackendDescriptor[] {
     ollamaCloudUserContribution,
     frockAiUserContribution,
     botTemplateUserContribution,
-    packagePublisherUserContribution,
     machineUserContribution,
     searchUserContribution,
     auditUserContribution,

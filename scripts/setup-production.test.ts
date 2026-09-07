@@ -305,9 +305,6 @@ exit 0
     // The host must be current before the app version that binds to it
     // (ADR 0004, two-Worker deploy ordering).
     const order = deploymentSteps.map((step) => step.name);
-    expect(order.indexOf("Deploy computer host")).toBeGreaterThan(
-      order.indexOf("Deploy bundler Worker"),
-    );
     expect(order.indexOf("Deploy computer host")).toBeLessThan(
       order.indexOf("Deploy Worker"),
     );

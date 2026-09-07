@@ -637,24 +637,6 @@ class MemoryConfiguration
       registered: true,
     });
   }
-  readPackageRevisions() {
-    return Promise.resolve({
-      schemaVersion: 1 as const,
-      revision: 0,
-      revisions: [],
-    });
-  }
-  publishPackage(): Promise<never> {
-    return Promise.reject(
-      new Error("publication is not configured in this test"),
-    );
-  }
-  rollbackPackage(): Promise<never> {
-    return Promise.reject(new Error("rollback is not configured in this test"));
-  }
-  activeApplicationHash(): Promise<undefined> {
-    return Promise.resolve(undefined);
-  }
   listTemplateShares() {
     return Promise.resolve({ schemaVersion: 1 as const, shares: [] });
   }

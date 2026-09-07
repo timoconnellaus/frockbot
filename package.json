@@ -14,7 +14,7 @@
     "uuid": "^11.1.1"
   },
   "scripts": {
-    "build:webui": "bun run --filter @frockbot/plugin-ui-theme build && bun run --filter @frockbot/plugin-shell build && bun run --filter @frockbot/plugin-settings build && bun run --filter @frockbot/plugin-custom-models build && bun run --filter @frockbot/plugin-routines build && bun run --filter @frockbot/plugin-bot-template build && bun run --filter @frockbot/plugin-package-publisher build && bun run --filter @frockbot/plugin-flock build && bun run --filter @frockbot/plugin-computer build",
+    "build:webui": "bun run --filter @frockbot/plugin-ui-theme build && bun run --filter @frockbot/plugin-shell build && bun run --filter @frockbot/plugin-settings build && bun run --filter @frockbot/plugin-custom-models build && bun run --filter @frockbot/plugin-routines build && bun run --filter @frockbot/plugin-bot-template build && bun run --filter @frockbot/plugin-flock build && bun run --filter @frockbot/plugin-computer build",
     "build:cloudflare": "bun scripts/build-applets-package.ts && bun run --filter @frockbot/cloudflare build",
     "build:marketing": "bun run --filter @frockbot/marketing build",
     "bootstrap:npm-trust": "./scripts/bootstrap-npm-trust.sh",

@@ -29,7 +29,6 @@ import {
   type BotCapabilitiesStub,
   type IsolateModelInvocationV1,
   type NormalizedModelRequest,
-  type PackageBundlerBinding,
   type PackageIframeCompositionV1,
   type PackageIframeToolCommandV1,
   type TurnTypeV1,
@@ -113,7 +112,6 @@ import {
   mergeFoundationRuntimePackages,
   createFoundationHostedRuntimePackages,
   mergeFoundationRuntimePackagesV1,
-  type PackagePublisherAgentHost,
 } from "@frockbot/application-foundation/runtime";
 import {
   cancelStoredRun,
@@ -163,16 +161,6 @@ import {
   type CompositionMountHost,
   type CompositionQuarantineV1,
 } from "@frockbot/kernel-composition/activation";
-import {
-  createPackageAuthoringHost,
-  createR2AuthoringArtifactStore,
-  readAuthoredCompositionMemberSourceV1,
-} from "./backend-authoring.js";
-import {
-  type CatalogAwarePackageCatalogHost,
-  createPackageCatalogHost,
-  createR2BotPackageCatalogReader,
-} from "./backend-package-catalog.js";
 import {
   createBotComputerSyncHost,
   declaredPackageRootsV1,
@@ -362,13 +350,6 @@ import type {
   RoutineRunListViewV1,
 } from "@frockbot/plugin-routines/shared";
 import {
-  authorshipManifestKey,
-  decodeAuthoringQuotaReceiptV1,
-  type AuthoredManifestRecordV1,
-  type AuthoringQuotaBinding,
-  type PackageAuthoringHost,
-} from "@frockbot/plugin-authoring";
-import {
   BOT_ISOLATE_COMPATIBILITY_DATE,
   createIsolateCapabilityHost,
   createR2PackageArtifactStore,
@@ -422,11 +403,6 @@ import {
 } from "./run-protocol.js";
 import { notificationIdV1 } from "./notification-id.js";
 import { runFailureCopyV1 } from "./run-failure-copy.js";
-import {
-  type CompositionManifestSourcesV1,
-  compositionMemberManifestDocumentV1,
-  compositionMemberManifestV1,
-} from "./composition-manifest.js";
 import {
   BOT_DEBUG_DEFAULT_RUN_LIMIT_V1,
   BOT_DEBUG_EVENT_BYTES_V1,
@@ -571,7 +547,6 @@ export interface BotStateEnv {
    * The Package bundler service (plan Step 3/D4). Optional so a host without
    * Bot authoring still compiles; `package_author` then refuses visibly.
    */
-  PACKAGE_BUNDLER?: PackageBundlerBinding;
   /** Optional in local and workerd hosts, which have no Vectorize simulator. */
   MEMORY_INDEX?: VectorizeIndex;
   /** The native AI binding consumed through the image Package adapter. */
@@ -1269,61 +1244,19 @@ export class ShellBotBackendContribution {
     return { schemaVersion: 1, skills: entries };
   }
 
-  /** The two places this Bot's manifests live; see `composition-manifest.ts`. */
-  private compositionManifestSources(): CompositionManifestSourcesV1 {
-    return {
-      stored: (manifestHash) =>
-        this.ctx.storage.get<AuthoredManifestRecordV1>(
-          authorshipManifestKey(manifestHash),
-        ),
-      application: (member) => this.readApplicationMemberManifest(member),
-    };
-  }
-
   /**
-   * The manifest a **mount** is handed: the stored document, byte-for-byte
-   * what `manifestHash` was taken over at authoring time.
-   *
-   * Decoding rebuilds the object (`decodeV5` always writes a `configuration`
-   * key, for one), so a decoded manifest does not canonicalize back to the
-   * recorded hash. Every mount re-verifies that hash
-   * (`botIsolatePackageDescriptorV1`), so the raw document is the only thing
-   * that can be handed to it.
+   * The manifest a mount is handed. Every mount re-verifies the hash
+   * (`botIsolatePackageDescriptorV1`), so the plan's manifest is accepted only
+   * when it hashes to exactly what the generation recorded.
    */
   private readCompositionMemberManifestDocument(
     member: CompositionMemberV1,
   ): Promise<unknown | undefined> {
-    return compositionMemberManifestDocumentV1(
-      member,
-      this.compositionManifestSources(),
-    );
+    return this.readCompositionMemberManifest(member);
   }
 
-  /**
-   * The same manifest as the typed shape, for the callers that are not mounts:
-   * commands and UI views, which read fields rather than re-hash the document.
-   */
-  private readCompositionMemberManifest(
-    member: CompositionMemberV1,
-  ): Promise<FrockBotManifest | undefined> {
-    return compositionMemberManifestV1(
-      member,
-      this.compositionManifestSources(),
-    );
-  }
-
-  /**
-   * The manifest of a member the *application* declared, not the Bot.
-   *
-   * `authorship:manifest:<hash>` is written by the authoring path and by a
-   * Catalog install, so it exists for every member a Bot or its User put into
-   * the Composition. A first-party artifact-backed member came from neither: it
-   * is in the compiled application, whose manifests are already in this bundle.
-   * The `manifestHash` is still what decides — the plan's manifest is accepted
-   * only when it hashes to exactly what the generation recorded — so this is a
-   * second *place* to look, never a second answer.
-   */
-  private async readApplicationMemberManifest(
+  /** The manifest of an artifact-backed member the application declared. */
+  private async readCompositionMemberManifest(
     member: CompositionMemberV1,
   ): Promise<FrockBotManifest | undefined> {
     if (!member.artifact) return undefined;
@@ -1636,17 +1569,11 @@ export class ShellBotBackendContribution {
           }
         : {}),
     };
-    let mountedRoot: ShellMountedComposition["root"] | undefined;
-    let mountedGeneration: CompositionGenerationV1 | undefined;
-    const currentToolNames = (): readonly string[] =>
-      mountedRoot?.tools.registeredNames?.() ?? [];
     const runtime = await this.agentRuntime(
       input.identity,
       settings,
       input.admittedRequest,
       turn,
-      currentToolNames,
-      () => mountedGeneration,
     );
     const promptParts = [
       `You are ${settings.profile.name}.`,
@@ -1707,8 +1634,6 @@ export class ShellBotBackendContribution {
           ...(isolate ? { isolate } : {}),
           ...(appletRouting ? { applets: appletRouting } : {}),
         }).mount(mounting, signal);
-        mountedRoot = mounted.root;
-        mountedGeneration = mounted.generation;
         return mounted;
       },
     };
@@ -4274,90 +4199,6 @@ export class ShellBotBackendContribution {
     };
   }
 
-  /**
-   * The narrow User Durable Object RPC the Bot uses to reserve one authored
-   * generation against the durable per-User quota (D7).
-   */
-  private authoringQuota(identity: BotIdentity): AuthoringQuotaBinding {
-    const id = this.env.USER_CONFIGURATIONS.idFromName(identity.userId);
-    // SAFETY: this namespace is bound to UserConfiguration; generated Worker
-    // types do not expose its RPC surface.
-    const rpc = this.env.USER_CONFIGURATIONS.get(id) as unknown as {
-      reserveAuthoringQuota(input: unknown): Promise<unknown>;
-    };
-    return {
-      reserve: async (request) =>
-        decodeAuthoringQuotaReceiptV1(await rpc.reserveAuthoringQuota(request)),
-    };
-  }
-
-  /** The authoring seam one admitted Turn runs under. */
-  private authoringHost(
-    identity: BotIdentity,
-    turn: { runId: string; turnId: string },
-    currentToolNames: () => readonly string[],
-    mountedGeneration: () => CompositionGenerationV1 | undefined,
-  ): PackageAuthoringHost {
-    const artifacts = this.env.APPLICATION_ARTIFACTS;
-    return createPackageAuthoringHost({
-      storage: {
-        get: (key) => this.ctx.storage.get(key),
-        put: (entries) => this.ctx.storage.put(entries),
-        list: (options) => this.ctx.storage.list(options),
-      },
-      composition: this.authority.composition,
-      ...(this.env.PACKAGE_BUNDLER
-        ? { bundler: this.env.PACKAGE_BUNDLER }
-        : {}),
-      ...(artifacts
-        ? { artifacts: createR2AuthoringArtifactStore(artifacts) }
-        : {}),
-      quota: this.authoringQuota(identity),
-      userId: identity.userId,
-      botId: identity.botId,
-      runId: turn.runId,
-      turnId: turn.turnId,
-      compatibilityDate: BOT_ISOLATE_COMPATIBILITY_DATE,
-      currentToolNames,
-      mountedGeneration,
-      activationFailures: this.authority.compositionFailures,
-    });
-  }
-
-  /** Catalog reads plus the two-authority mutation seam for one admitted Turn. */
-  private packageCatalogHost(
-    identity: BotIdentity,
-    turn: { runId: string; turnId: string },
-  ): CatalogAwarePackageCatalogHost | undefined {
-    if (!this.env.PACKAGE_CATALOG || !this.env.APPLICATION_ARTIFACTS) {
-      return undefined;
-    }
-    const user = this.userConfiguration(identity);
-    return createPackageCatalogHost({
-      storage: {
-        get: (key) => this.ctx.storage.get(key),
-        put: (entries) => this.ctx.storage.put(entries),
-      },
-      composition: this.authority.composition,
-      catalog: createR2BotPackageCatalogReader(
-        this.env.PACKAGE_CATALOG,
-        this.env.APPLICATION_ARTIFACTS,
-      ),
-      user: {
-        read: () =>
-          user.readConfiguration({
-            schemaVersion: 1,
-            userId: identity.userId,
-          }),
-        execute: (command) => user.executeConfiguration(command),
-      },
-      userId: identity.userId,
-      botId: identity.botId,
-      runId: turn.runId,
-      turnId: turn.turnId,
-    });
-  }
-
   private async agentRuntime(
     identity: BotIdentity,
     settings: BotSettingsViewV1,
@@ -4380,9 +4221,6 @@ export class ShellBotBackendContribution {
       /** The task a child Turn is running, in a Subagent Durable Object. */
       subagentTaskId?: string;
     },
-    currentToolNames: () => readonly string[] = () => [],
-    mountedGeneration: () => CompositionGenerationV1 | undefined = () =>
-      undefined,
   ): Promise<{
     agentPackages: FoundationAgentPackage[];
     capabilities: EnabledCapabilityV1[];
@@ -4487,29 +4325,10 @@ export class ShellBotBackendContribution {
     // Filled in once this Turn's model binding is resolved, below. The tool
     // and the prompt section both read it lazily, from inside the Turn.
     const subagentModels: SubagentModelOptionV1[] = [];
-    const packageCatalog = turn
-      ? this.packageCatalogHost(identity, turn)
-      : undefined;
-    const baseAuthoring = turn
-      ? this.authoringHost(identity, turn, currentToolNames, mountedGeneration)
-      : undefined;
-    const authoring: PackageAuthoringHost | undefined =
-      baseAuthoring && packageCatalog
-        ? {
-            ...baseAuthoring,
-            undo: async (request) =>
-              (await packageCatalog.undoCatalogChange(request)) ??
-              baseAuthoring.undo(request),
-          }
-        : baseAuthoring;
     const resolvedAgentPackages: FoundationAgentPackage[] = [
       ...createFoundationHostedRuntimePackages(application, {
         userId: identity.userId,
         readSecret,
-        // A Bot authors a Package only inside an admitted Turn, whose run and
-        // session the artifact provenance names.
-        ...(authoring ? { authoring } : {}),
-        ...(packageCatalog ? { packageCatalog } : {}),
         ...(turn
           ? {
               skills: createBotSkillsHost(
@@ -4734,22 +4553,6 @@ export class ShellBotBackendContribution {
               },
             }
           : {}),
-        packagePublisher: {
-          read: () =>
-            this.userConfiguration(identity).readPackageRevisions(
-              identity.userId,
-            ),
-          publish: (command) =>
-            this.userConfiguration(identity).publishPackage(
-              identity.userId,
-              command,
-            ),
-          rollback: (command) =>
-            this.userConfiguration(identity).rollbackPackage(
-              identity.userId,
-              command,
-            ),
-        },
       }),
       ...(await createFoundationEnabledRuntimePackages(application, plan, {
         userId: identity.userId,
@@ -5370,7 +5173,6 @@ export class ShellBotBackendContribution {
       botId: identity.botId,
       generation,
       currentGenerationId: current.generationId,
-      readMemberSource: (member) => this.readCompositionMemberSource(member),
       failures: await this.authority.compositionFailures.list(generationId),
       ...(await this.compositionQuarantineView(generationId)),
     });
@@ -5383,19 +5185,6 @@ export class ShellBotBackendContribution {
     const quarantine =
       await this.authority.compositionFailures.quarantine(generationId);
     return quarantine === undefined ? {} : { quarantine };
-  }
-
-  /** Reads the immutable TypeScript source retained beside an authored artifact. */
-  private async readCompositionMemberSource(
-    member: CompositionMemberV1,
-  ): Promise<string | undefined> {
-    const bucket = this.env.APPLICATION_ARTIFACTS;
-    if (!bucket) return undefined;
-    return readAuthoredCompositionMemberSourceV1({
-      storage: { get: (key) => this.ctx.storage.get(key) },
-      artifacts: createR2AuthoringArtifactStore(bucket),
-      member,
-    });
   }
 
   /**
@@ -6206,17 +5995,6 @@ export class ShellBotBackendContribution {
     executeConfiguration(
       input: Extract<ConfigurationCommandV1, { type: `user/${string}` }>,
     ): Promise<OperationReceiptV1>;
-    readPackageRevisions(
-      userId: string,
-    ): ReturnType<PackagePublisherAgentHost["read"]>;
-    publishPackage(
-      userId: string,
-      command: Parameters<PackagePublisherAgentHost["publish"]>[0],
-    ): ReturnType<PackagePublisherAgentHost["publish"]>;
-    rollbackPackage(
-      userId: string,
-      command: Parameters<PackagePublisherAgentHost["rollback"]>[0],
-    ): ReturnType<PackagePublisherAgentHost["rollback"]>;
     leaseModelCredential(
       userId: string,
       connectionId: string,
@@ -6269,15 +6047,6 @@ export class ShellBotBackendContribution {
     const rpc = this.env.USER_CONFIGURATIONS.get(id) as unknown as {
       readConfiguration(input: unknown): Promise<UserSettingsViewV1>;
       executeConfiguration(input: unknown): Promise<unknown>;
-      readPackageRevisions(
-        input: unknown,
-      ): ReturnType<PackagePublisherAgentHost["read"]>;
-      publishPackage(
-        input: unknown,
-      ): ReturnType<PackagePublisherAgentHost["publish"]>;
-      rollbackPackage(
-        input: unknown,
-      ): ReturnType<PackagePublisherAgentHost["rollback"]>;
       leaseModelCredential(input: unknown): Promise<unknown>;
       settleModelCredential(input: unknown): Promise<void>;
       leaseToolCredential(input: unknown): Promise<unknown>;
@@ -6333,12 +6102,6 @@ export class ShellBotBackendContribution {
           ? undefined
           : decodeMachineCommandResultV1(stored, "machine command result");
       },
-      readPackageRevisions: (userId) =>
-        rpc.readPackageRevisions({ schemaVersion: 1, userId }),
-      publishPackage: (userId, command) =>
-        rpc.publishPackage({ schemaVersion: 1, userId, command }),
-      rollbackPackage: (userId, command) =>
-        rpc.rollbackPackage({ schemaVersion: 1, userId, command }),
       // Flock state crosses a Durable Object seam, so it decodes on arrival
       // rather than being trusted in the shape RPC happened to return.
       listBots: async (userId) =>

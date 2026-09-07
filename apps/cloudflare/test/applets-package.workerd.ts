@@ -1,31 +1,14 @@
 // The Applets Package pressure test, in workerd.
 //
-// "The Applets Package itself must be buildable inside a Bot with identical
-// functionality" (plan D6). This suite takes the exact bytes the foundation
-// ships — `APPLETS_PACKAGE_MODULE_V1` and both inline pages — authors them
-// through the production `package_author` path, mounts the resulting
-// generation through the real `BOT_PACKAGES` Worker Loader, and holds the
-// result against the shipped member.
-//
-// Why byte-for-byte matters here and not only "equivalent": the isolate's
-// loader identity is a digest over the module text, so two members whose
-// artifacts share a content hash are the same code in the same wrapper behind
-// the same loader id. Proving that hash equal is what makes every later
-// behavioural claim about one member a claim about the other. The declarations
-// — tools, pages, entries, slots — are compared separately, because those
-// travel in the manifest and a `package_author` that dropped or reshaped one
-// would still bundle identical bytes.
-//
-// The second half runs the shipped member for real: a provisioned Bot, the
-// foundation Composition, the real isolate host, and `applet_list` and
-// `applet_create` called by a scripted model. That is what proves the
-// artifact-backed first-party member is not merely present but mounted, tool-
-// registered, and reaching `ctx.applets` and `ctx.workspace`.
+// The shipped Applets member, run for real: a provisioned Bot, the foundation
+// Composition, the real isolate host, and `applet_list` and `applet_create`
+// called by a scripted model. That is what proves the artifact-backed
+// first-party member is not merely present but mounted, tool-registered, and
+// reaching `ctx.applets` and `ctx.workspace`.
 import { env } from "cloudflare:workers";
 import { describe, expect, test } from "vitest";
 import {
   APPLETS_PACKAGE_ARTIFACT_V1,
-  APPLETS_PACKAGE_MODULE_V1,
   APPLETS_PACKAGE_PAGES_V1,
 } from "@frockbot/application-foundation/generated/applets-artifact";
 import { compileFoundationApplication } from "@frockbot/application-foundation/runtime";
@@ -38,10 +21,6 @@ const APPLETS_SPECIFIER = "@frockbot/plugin-applets";
 
 function suffix(): string {
   return crypto.randomUUID().slice(0, 8);
-}
-
-function probe(name: string) {
-  return env.AUTHORING.getByName(name);
 }
 
 function botStub(userId: string, botId: string) {
@@ -91,30 +70,6 @@ interface ManifestLike {
 
 const shipped = appletsManifest as unknown as ManifestLike;
 
-/** The `package_author` input that reproduces the shipped Package exactly. */
-function authorTheAppletsPackage(): Record<string, unknown> {
-  const client = shipped.contributions.client!;
-  return {
-    packageId: shipped.id,
-    displayName: "Applets",
-    tools: (shipped.tools ?? []).map((tool) => ({
-      name: tool.name,
-      description: tool.description,
-      inputSchema: tool.inputSchema,
-    })),
-    source: APPLETS_PACKAGE_MODULE_V1,
-    ui: {
-      pages: (client.pages ?? []).map((page) => ({
-        id: page.id,
-        html: APPLETS_PACKAGE_PAGES_V1.find((built) => built.id === page.id)!
-          .html,
-        mounts: page.mounts,
-      })),
-      entries: client.entries,
-    },
-  };
-}
-
 /** The one tool result a scripted single-call Turn recorded. */
 function toolResult(turn: {
   events: Array<{ type: string; content?: string; isError?: boolean }>;
@@ -140,99 +95,6 @@ describe("the Applets Package as the foundation ships it", () => {
     expect(shipped.contributions.backend).toBeUndefined();
     expect(shipped.contributions.client?.kind).toBe("iframe");
     expect(shipped.roots).toEqual([{ id: "source", scope: "user" }]);
-  });
-});
-
-describe("the same Package authored through package_author", () => {
-  test("bundles to the identical artifact and declares the identical tools, pages, and entries", async () => {
-    const id = suffix();
-    const stub = probe(`applets-author-${id}`);
-
-    const turn = await stub.runTurn({
-      runId: `run-applets-${id}`,
-      userId: `user-${id}`,
-      botId: `bot-${id}`,
-      tool: "package_author",
-      input: authorTheAppletsPackage(),
-    });
-
-    expect(turn.text).toContain('ok:Authored Package "applets"');
-    const generationId = turn.pinnedGenerationId;
-    expect(generationId).toBeDefined();
-
-    // A second Turn, so the pending generation the authoring Turn proposed is
-    // the one that mounts — activation is at the next admitted Turn.
-    await stub.runTurn({
-      runId: `run-applets-mount-${id}`,
-      userId: `user-${id}`,
-      botId: `bot-${id}`,
-      tool: "applet_list",
-      input: {},
-    });
-
-    const authored = await stub.member(
-      (await stub.currentGeneration()).generationId,
-      "applets",
-    );
-    expect(authored?.provenance.kind).toBe("bot");
-    // The whole point: the same bytes, so the same loader identity and the
-    // same behaviour, reached through the Bot's own authoring path.
-    expect(authored?.artifact?.contentHash).toBe(
-      APPLETS_PACKAGE_ARTIFACT_V1.contentHash,
-    );
-    expect(authored?.artifact?.size).toBe(APPLETS_PACKAGE_ARTIFACT_V1.size);
-
-    // The tools the mounted isolate actually registered, not the ones the
-    // manifest claims: the isolate host refuses a mount whose health report
-    // disagrees with the manifest, so this list is the module's own answer.
-    const registered = await stub.mountedToolNames();
-    // An isolate-loaded member's tools are disclosed under its Package id, so
-    // the registry names them `applets/<tool>`.
-    for (const tool of shipped.tools ?? []) {
-      expect(registered).toContain(`applets/${tool.name}`);
-    }
-
-    const authoredManifest = (await stub.memberManifest(
-      (await stub.currentGeneration()).generationId,
-      "applets",
-    )) as ManifestLike;
-    expect((authoredManifest.tools ?? []).map((tool) => tool.name)).toEqual(
-      (shipped.tools ?? []).map((tool) => tool.name),
-    );
-    expect(authoredManifest.tools).toEqual(shipped.tools);
-    expect(authoredManifest.contributions.client?.pages).toEqual(
-      shipped.contributions.client?.pages,
-    );
-    expect(authoredManifest.contributions.client?.entries).toEqual(
-      shipped.contributions.client?.entries,
-    );
-    expect(authoredManifest.contributions.runtime?.host).toBe("bot-isolate");
-  });
-
-  test("its tools answer exactly as the shipped member's do", async () => {
-    const id = suffix();
-    const stub = probe(`applets-behaviour-${id}`);
-    const identity = { userId: `user-${id}`, botId: `bot-${id}` };
-
-    await stub.runTurn({
-      runId: `run-author-${id}`,
-      ...identity,
-      tool: "package_author",
-      input: authorTheAppletsPackage(),
-    });
-    const listed = await stub.runTurn({
-      runId: `run-list-${id}`,
-      ...identity,
-      tool: "applet_list",
-      input: {},
-    });
-
-    // The probe's Bot Durable Object has no admitted Turn of its own, so the
-    // Applet capability answers `unavailable` — and the module's own words for
-    // that are what a Bot would read. What matters is that the *module*
-    // produced them: this is the shipped module text, mounted from an
-    // artifact a Bot authored.
-    expect(listed.text).toContain("Applets are unavailable");
   });
 });
 

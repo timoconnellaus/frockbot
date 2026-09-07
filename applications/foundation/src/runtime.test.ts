@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
   compileFoundationApplication,
-  compileFoundationApplicationDeclarations,
   createFoundationEnabledRuntimePackages,
   mergeFoundationRuntimePackages,
   createFoundationBackendContributions,
@@ -28,7 +27,6 @@ describe("foundation application", () => {
       "flock",
       "audit",
       "auth",
-      "authoring",
       "settings",
       "bot-template",
       "clock",
@@ -42,8 +40,6 @@ describe("foundation application", () => {
       "user-machine",
       "machine-messages",
       "memory",
-      "package-catalog",
-      "package-publisher",
       "provider-anthropic",
       "provider-flock-ai",
       "provider-foundation",
@@ -65,7 +61,6 @@ describe("foundation application", () => {
         "computer",
         "credentials",
         "user-machine",
-        "package-publisher",
         "provider-flock-ai",
         "provider-ollama-cloud",
         "routines",
@@ -76,7 +71,6 @@ describe("foundation application", () => {
         "shell",
         "applets",
         "flock",
-        "authoring",
         "bot-template",
         "clock",
         "computer",
@@ -88,8 +82,6 @@ describe("foundation application", () => {
         "user-machine",
         "machine-messages",
         "memory",
-        "package-catalog",
-        "package-publisher",
         "provider-anthropic",
         "provider-flock-ai",
         "provider-foundation",
@@ -112,7 +104,6 @@ describe("foundation application", () => {
         "computer",
         "custom-models",
         "user-machine",
-        "package-publisher",
         "routines",
         "search",
       ],
@@ -385,9 +376,6 @@ describe("foundation application", () => {
         Promise.reject(new Error("not used while composing")),
       revertComposition: () =>
         Promise.reject(new Error("not used while composing")),
-      read: () =>
-        Promise.resolve({ schemaVersion: 1, revision: 0, revisions: [] }),
-      rollback: () => Promise.reject(new Error("not used while composing")),
       listRoutines: () => Promise.reject(new Error("not used while composing")),
       executeRoutineCommand: () =>
         Promise.reject(new Error("not used while composing")),
@@ -433,7 +421,6 @@ describe("foundation application", () => {
       "bot-template",
       "computer",
       "flock",
-      "package-publisher",
       "routines",
       "search",
       "settings",
@@ -458,7 +445,7 @@ describe("foundation application", () => {
           lifecycle.mount({ specifier, startConnection() {} }),
       });
     expect(botBackend.contributions).toHaveLength(3);
-    expect(userBackend.contributions).toHaveLength(10);
+    expect(userBackend.contributions).toHaveLength(9);
     const userSpecifiers = userBackend.contributions.map(
       (contribution) => contribution.specifier,
     );
@@ -502,16 +489,9 @@ describe("foundation application", () => {
         computerHost: {
           effect: () => Promise.reject(new Error("not invoked while mounting")),
         },
-        packagePublisher: {
-          read: () =>
-            Promise.resolve({ schemaVersion: 1, revision: 0, revisions: [] }),
-          publish: () => Promise.reject(new Error("not used while composing")),
-          rollback: () => Promise.reject(new Error("not used while composing")),
-        },
       }).map((pkg) => pkg.specifier),
     ).toEqual([
       "@frockbot/plugin-credentials",
-      "@frockbot/plugin-package-publisher",
       "@frockbot/plugin-fly-sprite",
       "@frockbot/plugin-computer",
     ]);
@@ -531,17 +511,10 @@ describe("foundation application", () => {
             list: () => Promise.resolve({ status: "ok", entries: [] }),
           },
         },
-        packagePublisher: {
-          read: () =>
-            Promise.resolve({ schemaVersion: 1, revision: 0, revisions: [] }),
-          publish: () => Promise.reject(new Error("not used while composing")),
-          rollback: () => Promise.reject(new Error("not used while composing")),
-        },
       }).map((pkg) => pkg.specifier),
     ).toEqual([
       "@frockbot/plugin-skills",
       "@frockbot/plugin-credentials",
-      "@frockbot/plugin-package-publisher",
       "@frockbot/plugin-fly-sprite",
       "@frockbot/plugin-computer",
     ]);

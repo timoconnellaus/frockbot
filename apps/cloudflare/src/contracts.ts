@@ -74,12 +74,6 @@ import type {
   TaskViewV1,
 } from "@frockbot/plugin-subagents/shared";
 import type {
-  PackagePublicationReceiptV1,
-  PackageRevisionHistoryV1,
-  PublishPackageCommandV1,
-  RollbackPackageCommandV1,
-} from "@frockbot/plugin-package-publisher/shared";
-import type {
   ClientConversationListV1,
   ClientConversationOutcomeV1,
   ClientRunLookupQueryV1,
@@ -427,58 +421,6 @@ export interface PackageArtifactStore {
   loadPackageArtifact(contentHash: string): Promise<string>;
 }
 
-/**
- * The `PACKAGE_BUNDLER` service binding (`apps/cloudflare-bundler`). Defined
- * here until `@frockbot/kernel-composition` owns `ArtifactRefV1` (Step 2); the
- * shapes are the plan's verbatim v1 DTOs and must stay in step with
- * `apps/cloudflare-bundler/src/contracts.ts`.
- */
-export interface ArtifactRefV1 {
-  contentHash: string;
-  size: number;
-  mediaType: "application/javascript";
-  bundlerVersion: string;
-}
-
-export interface UiArtifactRefV1 {
-  contentHash: string;
-  size: number;
-  mediaType: "text/html";
-  bundlerVersion: string;
-}
-
-export interface BundleRequestV1 {
-  schemaVersion: 1;
-  effectId: string;
-  target: "bot-isolate";
-  compatibilityDate: string;
-  entry: "package.ts";
-  sources: { path: string; text: string }[];
-  uiPages?: { id: string; html: string }[];
-}
-
-export type BundleResultV1 =
-  | {
-      schemaVersion: 1;
-      effectId: string;
-      status: "bundled";
-      artifact: ArtifactRefV1;
-      uiArtifacts?: { id: string; artifact: UiArtifactRefV1; html: string }[];
-      module: string;
-      diagnostics: string[];
-    }
-  | {
-      schemaVersion: 1;
-      effectId: string;
-      status: "failed";
-      failure: string;
-      diagnostics: string[];
-    };
-
-export interface BundlerBinding {
-  bundle(request: BundleRequestV1): Promise<BundleResultV1>;
-}
-
 export interface AuthSession {
   user: {
     id: string;
@@ -595,24 +537,6 @@ export interface UserConfigurationBinding {
     packageId: string;
     effectId: string;
   }): Promise<void>;
-  readPackageRevisions(request: {
-    schemaVersion: 1;
-    userId: string;
-  }): Promise<PackageRevisionHistoryV1>;
-  publishPackage(request: {
-    schemaVersion: 1;
-    userId: string;
-    command: PublishPackageCommandV1;
-  }): Promise<PackagePublicationReceiptV1>;
-  rollbackPackage(request: {
-    schemaVersion: 1;
-    userId: string;
-    command: RollbackPackageCommandV1;
-  }): Promise<PackagePublicationReceiptV1>;
-  activeApplicationHash(request: {
-    schemaVersion: 1;
-    userId: string;
-  }): Promise<string | undefined>;
   listTemplateShares(request: {
     schemaVersion: 1;
     userId: string;

@@ -48,14 +48,6 @@ import {
   BotNotFoundError,
 } from "@frockbot/plugin-flock/shared";
 import {
-  AUTHORING_QUOTA_CONFIG_KEY,
-  AUTHORING_QUOTA_DAY,
-  decodeAuthoringQuotaConfigV1,
-  reserveAuthoringQuotaV1,
-  type AuthoringQuotaConfigV1,
-  type AuthoringQuotaReceiptV1,
-} from "@frockbot/plugin-authoring/quota";
-import {
   releaseSubagentSlotV1,
   reserveSubagentSlotV1,
   type SubagentSlotReceiptV1,
@@ -104,12 +96,7 @@ import {
   type ClientAuditPageV1,
 } from "@frockbot/plugin-audit";
 import type { BotAuditRpc } from "./audit.js";
-import {
-  decodePublishPackageCommandV1,
-  decodeRollbackPackageCommandV1,
-} from "@frockbot/plugin-package-publisher/shared";
 import type { WorkerLoader } from "./contracts.js";
-import { createPackagePublicationHost } from "./package-publication.js";
 import { R2PackageCatalog } from "./package-catalog.js";
 import {
   decodeRpcEnvelopeV1,
@@ -123,7 +110,6 @@ import {
   rpcDecodedValue,
   rpcJsonRecord,
   rpcJsonSnapshotV1,
-  rpcObject,
 } from "./durable-rpc.js";
 import { loggedEntryV1 } from "./entry-boundary.js";
 
@@ -226,10 +212,6 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
               : name === "BETTER_AUTH_URL"
                 ? this.env.BETTER_AUTH_URL
                 : this.env.CREDENTIAL_KEYRING,
-          packagePublisher: createPackagePublicationHost(
-            this.env,
-            this.ctx.storage,
-          ),
           ...(this.env.PACKAGE_CATALOG
             ? { catalog: new R2PackageCatalog(this.env.PACKAGE_CATALOG) }
             : {}),
@@ -455,12 +437,6 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     MountedFoundationUserBackend["flock"]
   > {
     return (await this.contributions()).flock;
-  }
-
-  private async publisherContribution(): Promise<
-    MountedFoundationUserBackend["publisher"]
-  > {
-    return (await this.contributions()).publisher;
   }
 
   /**
@@ -706,35 +682,6 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
   }
 
   /**
-   * D7. The User Durable Object is the authority for User-scoped quotas: the
-   * Bot's Durable Object reserves one authored-generation unit here before it
-   * records an authorship intent. Reservation is idempotent on `effectId`, so
-   * a resumed Turn does not consume a second unit, and a breach is a refusal
-   * receipt rather than a throw — the Bot records the visible failure.
-   */
-  async reserveAuthoringQuota(
-    input: unknown,
-  ): Promise<AuthoringQuotaReceiptV1> {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      botId: rpcBotId,
-      effectId: rpcString(200),
-      day: rpcPattern(AUTHORING_QUOTA_DAY, 10),
-      sourceBytes: rpcInteger({ minimum: 0, maximum: 64 * 1024 * 1024 }),
-      retainedGenerations: rpcInteger({ minimum: 0, maximum: 1_000_000 }),
-    });
-    return reserveAuthoringQuotaV1(this.ctx.storage, {
-      schemaVersion: 1,
-      userId: request.userId as string,
-      botId: request.botId as string,
-      effectId: request.effectId as string,
-      day: request.day as string,
-      sourceBytes: request.sourceBytes as number,
-      retainedGenerations: request.retainedGenerations as number,
-    });
-  }
-
-  /**
    * The per-User concurrent-subagent bound.
    *
    * A Bot's own bound is countable in its Durable Object; a User's is not,
@@ -803,26 +750,6 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
       requesterId: request.requesterId as string,
       runId: request.runId as string,
     });
-  }
-
-  /** The durable per-User authoring quota configuration; defaults when unset. */
-  async readAuthoringQuota(input: unknown): Promise<AuthoringQuotaConfigV1> {
-    decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
-    return decodeAuthoringQuotaConfigV1(
-      await this.ctx.storage.get<unknown>(AUTHORING_QUOTA_CONFIG_KEY),
-    );
-  }
-
-  async configureAuthoringQuota(
-    input: unknown,
-  ): Promise<AuthoringQuotaConfigV1> {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      quota: rpcDecoded(decodeAuthoringQuotaConfigV1),
-    });
-    const quota = request.quota as AuthoringQuotaConfigV1;
-    await this.ctx.storage.put(AUTHORING_QUOTA_CONFIG_KEY, quota);
-    return quota;
   }
 
   // ---------------------------------------------------------------------
@@ -1108,7 +1035,6 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     for (const contribution of contributions.connections.values()) {
       await contribution.alarm?.();
     }
-    await contributions.publisher.recover();
     // An import left mid-apply by an eviction resumes here, from the first
     // step its record does not already mark done. The eviction is exactly what
     // clears the in-memory identity, so the durable pin is what this reads.
@@ -1349,42 +1275,6 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
       request.userId as string,
       request.packageId as string,
     );
-  }
-
-  async readPackageRevisions(input: unknown) {
-    const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
-    await this.assertFlockIdentity(request.userId as string);
-    return (await this.publisherContribution()).read();
-  }
-
-  async publishPackage(input: unknown) {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      command: rpcDecoded(decodePublishPackageCommandV1),
-    });
-    const userId = request.userId as string;
-    await this.assertFlockIdentity(userId);
-    return (await this.publisherContribution()).publish(
-      userId,
-      request.command as ReturnType<typeof decodePublishPackageCommandV1>,
-    );
-  }
-
-  async rollbackPackage(input: unknown) {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      command: rpcDecoded(decodeRollbackPackageCommandV1),
-    });
-    await this.assertFlockIdentity(request.userId as string);
-    return (await this.publisherContribution()).rollback(
-      request.command as ReturnType<typeof decodeRollbackPackageCommandV1>,
-    );
-  }
-
-  async activeApplicationHash(input: unknown) {
-    const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
-    await this.assertFlockIdentity(request.userId as string);
-    return (await this.publisherContribution()).activeApplicationHash();
   }
 
   private async searchContribution(): Promise<

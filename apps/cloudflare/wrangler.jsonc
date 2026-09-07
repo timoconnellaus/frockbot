@@ -33,15 +33,7 @@
       "binding": "APPLETS",
     },
   ],
-  // One array: a second "services" key would silently replace this one, and
-  // the app would deploy with PACKAGE_BUNDLER unbound.
   "services": [
-    // Package bundling runs outside the Durable Object, in a Worker with no
-    // outbound bindings of its own (plan Step 3 / decision D4).
-    {
-      "binding": "PACKAGE_BUNDLER",
-      "service": "frockbot-cloudflare-bundler",
-    },
     // The shared Computer host (ADR 0004). It holds SPRITES_TOKEN and the
     // Sprites SDK; this Worker sends only an opaque credential reference.
     {
@@ -170,10 +162,6 @@
       ],
       "services": [
         {
-          "binding": "PACKAGE_BUNDLER",
-          "service": "frockbot-cloudflare-bundler",
-        },
-        {
           "binding": "COMPUTER_HOST",
           "service": "frockbot-computer-host",
         },
@@ -254,13 +242,12 @@
     // Vectorize index, and its own Durable Object namespaces, because a
     // Durable Object namespace is per-Worker and this is a different Worker.
     //
-    // `PACKAGE_BUNDLER` and `COMPUTER_HOST` are deliberately the production
-    // Workers. Both are stateless request handlers holding no per-user data —
-    // the bundler has no bindings at all, and the Computer host owns only the
-    // Sprites credential — so staging exercises the same host production does
-    // rather than paying for a second container deployment. The consequence is
-    // the same ordering constraint production has: a change to either Worker's
-    // contract ships with a tag, so staging sees it only once that tag lands.
+    // `COMPUTER_HOST` is deliberately the production Worker. It is a stateless
+    // request handler holding no per-user data — it owns only the Sprites
+    // credential — so staging exercises the same host production does rather
+    // than paying for a second container deployment. The consequence is the
+    // same ordering constraint production has: a change to the host's contract
+    // ships with a tag, so staging sees it only once that tag lands.
     "staging": {
       "name": "frockbot-cloudflare-staging",
       "routes": [
@@ -285,10 +272,6 @@
         },
       ],
       "services": [
-        {
-          "binding": "PACKAGE_BUNDLER",
-          "service": "frockbot-cloudflare-bundler",
-        },
         {
           "binding": "COMPUTER_HOST",
           "service": "frockbot-computer-host",
@@ -394,10 +377,6 @@
       // uses a Computer, and a binding that is declared but unreachable is what
       // production looks like when a dependency is down.
       "services": [
-        {
-          "binding": "PACKAGE_BUNDLER",
-          "service": "frockbot-cloudflare-bundler",
-        },
         {
           "binding": "COMPUTER_HOST",
           "service": "frockbot-computer-host",

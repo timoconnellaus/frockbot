@@ -137,7 +137,6 @@ import type { BotDebugQueryV1 } from "@frockbot/plugin-shell/debug-protocol";
 import { BotState, type OwnedBotTurnCommand } from "./bot-state.js";
 import type {
   ApplicationArtifactStore,
-  BundlerBinding,
   PackageArtifactStore,
   BotConfigurationBinding,
   BotNotificationIntent,
@@ -213,9 +212,6 @@ interface Env {
   APPLET_VIEWER_SECRET?: string;
   APPLICATION_ARTIFACTS: R2Bucket;
   UI_ARTIFACT_HOSTS?: string;
-  // `apps/cloudflare-bundler`; the Bot Durable Object calls it after recording
-  // its authorship intent (plan Step 3, decision D4).
-  PACKAGE_BUNDLER: BundlerBinding;
   MEMORY_FILES: R2Bucket;
   /**
    * The remote Package Catalog. Optional so a deployment without one still
@@ -561,10 +557,6 @@ function userConfigurationStub(env: Env, userId: string): UserConfigurationRpc {
     getConnection: (request) => rpc.getConnection(request),
     leaseModelCredential: (request) => rpc.leaseModelCredential(request),
     settleModelCredential: (request) => rpc.settleModelCredential(request),
-    readPackageRevisions: (request) => rpc.readPackageRevisions(request),
-    publishPackage: (request) => rpc.publishPackage(request),
-    rollbackPackage: (request) => rpc.rollbackPackage(request),
-    activeApplicationHash: (request) => rpc.activeApplicationHash(request),
     listTemplateShares: (request) => rpc.listTemplateShares(request),
     executeTemplateCommand: (request) => rpc.executeTemplateCommand(request),
     resolveTemplateShare: (request) => rpc.resolveTemplateShare(request),
@@ -1976,17 +1968,6 @@ const createGatewayBackendContributions = createImmutablePlanRequestFactory(
             }),
           ),
         ),
-      read: (userId) =>
-        userConfigurationStub(env, userId).readPackageRevisions({
-          schemaVersion: 1,
-          userId,
-        }),
-      rollback: (userId, command) =>
-        userConfigurationStub(env, userId).rollbackPackage({
-          schemaVersion: 1,
-          userId,
-          command,
-        }),
     }),
 );
 
@@ -2140,11 +2121,7 @@ export default {
         ...(env.FROCKBOT_ADMIN_EMAILS
           ? { adminEmails: env.FROCKBOT_ADMIN_EMAILS }
           : {}),
-        applicationHashFor: async (userId) =>
-          (await userConfigurationStub(env, userId).activeApplicationHash({
-            schemaVersion: 1,
-            userId,
-          })) ?? env.DEFAULT_APPLICATION_HASH,
+        applicationHashFor: async () => env.DEFAULT_APPLICATION_HASH,
         nativeAppletBootstrap: (userId, appletId, navigationEpoch) =>
           runtimeExports
             .UserBotState({ props: { userId } })

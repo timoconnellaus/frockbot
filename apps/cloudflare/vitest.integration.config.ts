@@ -152,13 +152,6 @@ export default defineConfig({
         //   binds an auxiliary RPC fake in `vitest.config.ts` where deletion
         //   paging itself is under test. `AI` is bound above because image
         //   generation exercises it throughout this integration suite.
-        // - `PACKAGE_BUNDLER`: `BotStateEnv` types it optional precisely so a
-        //   host without Bot authoring still runs; the Bot Durable Object then
-        //   refuses `package_author` visibly instead of throwing. No test in
-        //   this layer authors a Package, and `test/authoring.workerd.ts`
-        //   already covers that seam with `test/package-bundler-fake.ts`. The
-        //   auxiliary-RPC-Worker pattern above is what would wire it in the
-        //   day a test here needs it.
       },
     }),
   ],

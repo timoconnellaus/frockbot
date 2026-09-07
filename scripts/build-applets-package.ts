@@ -57,6 +57,8 @@ const APPLETS_SPECIFIER = "@frockbot/plugin-applets";
  * event exactly as it is for the Worker bundler.
  */
 const APPLETS_BUNDLER_VERSION = "frockbot-applets-esbuild@0.28.2";
+/** The version an inline page artifact records; part of every page hash. */
+const PACKAGE_UI_ARTIFACT_VERSION = "frockbot-inline-html@1";
 
 /** Content addressing, the same digest the bundler and the loader agree on. */
 async function sha256Hex(text: string): Promise<string> {
@@ -229,8 +231,6 @@ async function buildAll(): Promise<Built> {
   // root, where the workspace's package names are not resolvable.
   const { PACKAGE_IFRAME_HELPER_JS_V1 } =
     await import("../packages/kernel-contracts/src/iframe-ui.ts");
-  const { PACKAGE_UI_ARTIFACT_VERSION } =
-    await import("../packages/kernel-contracts/src/authoring.ts");
 
   const template = await templateModule();
   const module = await packageModule();
