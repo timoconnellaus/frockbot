@@ -23,11 +23,16 @@ Map<String, Object?> viewActionInputV1(
   final properties = (schema['properties'] as Map).cast<String, Object?>();
   final declared = ((node['input'] as Map?) ?? const {})
       .cast<String, Object?>();
+  // A null is not an answer. It is what a field that was never set holds, and
+  // dropping it here is what lets a required key refuse by name rather than by
+  // failing a type check the person cannot read.
   final input = <String, Object?>{
     for (final entry in declared.entries)
-      if (properties.containsKey(entry.key)) entry.key: entry.value,
+      if (properties.containsKey(entry.key) && entry.value != null)
+        entry.key: entry.value,
     for (final entry in values.entries)
-      if (properties.containsKey(entry.key)) entry.key: entry.value,
+      if (properties.containsKey(entry.key) && entry.value != null)
+        entry.key: entry.value,
   };
   for (final name in (schema['required'] as List).cast<String>()) {
     if (!input.containsKey(name)) {

@@ -60,3 +60,44 @@ abstract final class ShellIds {
 /// Annotating merges the identifier onto the node that has the label instead.
 Widget identified(String identifier, Widget child) =>
     Semantics(identifier: identifier, child: child);
+
+/// Settings: the account surfaces, and the Bot's own panel.
+///
+/// The names follow the Vue specs' selectors where those specs name a thing —
+/// `bot-settings.e2e.ts`, `settings-models.e2e.ts` and `profile.e2e.ts` — so
+/// each can be rewritten against Flutter Web with the same intent rather than
+/// re-derived from the widgets.
+abstract final class SettingsIds {
+  static const document = 'settings-document';
+  static const refresh = 'settings-refresh';
+  static const modelsLink = 'settings-models';
+  static const connectorsLink = 'settings-connections';
+  static const modelField = 'settings-model-field';
+  static const modelPicker = 'model-picker';
+  static const modelPickerSearch = 'model-picker-search';
+
+  static const profileTrigger = ShellIds.sidebarProfile;
+  static const profileMenu = 'profile-menu';
+  static const profileName = 'profile-name';
+  static const profileSettings = 'profile-settings';
+  static const profileModels = 'profile-models';
+  static const profileConnections = 'profile-connections';
+  static const profileSignOut = 'profile-sign-out';
+
+  static const botSettings = 'bot-settings';
+  static const botAvatar = 'bot-avatar';
+  static const botName = 'bot-name';
+  static const botLabel = 'bot-label';
+  static const botPinned = 'bot-pinned';
+  static const botDescription = 'bot-description';
+  static const botNotifications = 'bot-notifications';
+  static const botModel = 'bot-model';
+  static const botAdvanced = 'bot-advanced';
+  static const botTitle = 'bot-title';
+  static const botHidden = 'bot-hidden-from-sidebar';
+  static const botIdentity = 'bot-info-identity';
+  static const botMembers = 'bot-info-members';
+  static const botSave = 'bot-settings-save';
+
+  static String modelOption(String label) => 'model-option-$label';
+}

@@ -6,6 +6,7 @@
  *   bun scripts/native-dev.ts up       build, seed, serve, boot, install
  *   bun scripts/native-dev.ts serve    restart the Workers on the existing state
  *   bun scripts/native-dev.ts app      rebuild and reinstall the app alone
+ *   bun scripts/native-dev.ts web      the same app in a browser, one origin
  *   bun scripts/native-dev.ts seed     re-seed the development User's Bot and model
  *   bun scripts/native-dev.ts smoke    sign in, send a message, expect a reply
  *   bun scripts/native-dev.ts down     stop everything this script started
@@ -62,6 +63,7 @@ const mainCheckout =
 const workerPort = process.env.FROCKBOT_NATIVE_WORKER_PORT ?? "8797";
 const computerHostPort = process.env.FROCKBOT_NATIVE_COMPUTER_PORT ?? "8799";
 const appletBuildPort = process.env.FROCKBOT_NATIVE_APPLET_BUILD_PORT ?? "8801";
+const webPort = process.env.FROCKBOT_NATIVE_WEB_PORT ?? "8803";
 // One origin for everyone: `adb reverse` lends the emulator the host's
 // loopback, so the app, the Worker and `BETTER_AUTH_URL` all name this — and
 // `wrangler dev` rewrites every request URL to its bound address anyway, so
@@ -965,6 +967,93 @@ function status(
   console.log();
 }
 
+/**
+ * The same Flutter app in a browser, in front of the same Worker.
+ *
+ * One origin for both, because that is what the deployed shape is: the browser
+ * build has no token to send, so its credential is ambient and the Worker must
+ * look like the page's own origin. The development user header stands in for
+ * the session cookie the deploy will have.
+ */
+async function web({ build = true }: { build?: boolean } = {}): Promise<void> {
+  const dist = resolve(nativeRoot, "build/web");
+  if (build || !existsSync(resolve(dist, "index.html"))) {
+    say("building the Flutter web bundle");
+    run(
+      [
+        "flutter",
+        "build",
+        "web",
+        "--release",
+        `--dart-define=FROCKBOT_ORIGIN=http://127.0.0.1:${webPort}`,
+        "--dart-define=FROCKBOT_DEV_AUTH=true",
+      ],
+      { cwd: nativeRoot },
+    );
+  }
+  const upstream = hostOrigin;
+  const proxy = async (request: Request, url: URL) => {
+    const headers = new Headers(request.headers);
+    headers.set("x-frockbot-user-id", DEVELOPMENT_USER);
+    headers.delete("host");
+    headers.delete("accept-encoding");
+    const answer = await fetch(`${upstream}${url.pathname}${url.search}`, {
+      method: request.method,
+      headers,
+      body: request.body,
+      // @ts-expect-error Bun accepts this for a streamed body.
+      duplex: "half",
+      redirect: "manual",
+    });
+    // The fetch already decoded the body; forwarding the upstream's
+    // content-encoding tells the browser to decode it a second time.
+    const out = new Headers(answer.headers);
+    out.delete("content-encoding");
+    out.delete("content-length");
+    return new Response(answer.body, { status: answer.status, headers: out });
+  };
+  Bun.serve({
+    port: Number(webPort),
+    idleTimeout: 60,
+    async fetch(request, server) {
+      const url = new URL(request.url);
+      if (url.pathname.startsWith("/api/")) {
+        if (request.headers.get("upgrade")?.toLowerCase() === "websocket") {
+          return server.upgrade(request, {
+            data: { path: url.pathname + url.search },
+          })
+            ? (undefined as unknown as Response)
+            : new Response("upgrade failed", { status: 400 });
+        }
+        return proxy(request, url);
+      }
+      const path = url.pathname === "/" ? "/index.html" : url.pathname;
+      const file = resolve(dist, `.${path}`);
+      return file.startsWith(dist) && existsSync(file)
+        ? new Response(Bun.file(file))
+        : new Response(Bun.file(resolve(dist, "index.html")));
+    },
+    websocket: {
+      open(ws) {
+        const socket = new WebSocket(
+          `${upstream.replace("http", "ws")}${(ws.data as { path: string }).path}`,
+          { headers: DEVELOPMENT_HEADERS } as never,
+        );
+        (ws.data as { upstream?: WebSocket }).upstream = socket;
+        socket.onmessage = (event) => ws.send(event.data as string);
+        socket.onclose = () => ws.close();
+      },
+      message(ws, message) {
+        (ws.data as { upstream?: WebSocket }).upstream?.send(message as string);
+      },
+      close(ws) {
+        (ws.data as { upstream?: WebSocket }).upstream?.close();
+      },
+    },
+  });
+  say(`the web app is on http://127.0.0.1:${webPort} — ctrl-c to stop`);
+}
+
 async function up(): Promise<void> {
   const vars = ensureDevVars();
   down();
@@ -995,6 +1084,9 @@ switch (process.argv[2] ?? "up") {
     adb(serial, "shell", "am", "start", "-n", `${APP}/.MainActivity`);
     break;
   }
+  case "web":
+    await web({ build: process.argv[3] !== "--no-build" });
+    break;
   case "seed":
     // Re-seed the development User against a running stack: the Bot, and
     // the Ollama connection once OLLAMA_API_KEY lands in .dev.vars.
@@ -1014,6 +1106,6 @@ switch (process.argv[2] ?? "up") {
     break;
   default:
     die(
-      "usage: bun scripts/native-dev.ts [up|serve|app|seed|smoke|down|status]",
+      "usage: bun scripts/native-dev.ts [up|serve|app|web|seed|smoke|down|status]",
     );
 }

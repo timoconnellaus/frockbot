@@ -157,3 +157,47 @@ test("browser and native Settings share one owner, revision, pending identity an
     ).status,
   ).toBe(409);
 });
+
+test("the same settings come back as a ViewDocument the renderer can save through", async () => {
+  const userId = freshUserId("settings-document");
+  const frame = decodeProtocol(
+    "SettingsFrame",
+    await (await asUser(userId, "/api/settings/application")).json(),
+  );
+  const document = decodeProtocol(
+    "ViewDocument",
+    await (
+      await asUser(userId, "/api/settings/application?as=document")
+    ).json(),
+  );
+  expect(document.surfaceId).toBe("settings-application");
+  expect(document.revision).toBe(frame.revision);
+  const save = document.actions.find((action) => action.id === "save-0")!;
+  expect(Object.keys(save.schema.properties)).toEqual([
+    "sectionId",
+    "f0.name",
+    "f0.email",
+  ]);
+  // The action the renderer assembles is the command this route already takes.
+  const receipt = decodeProtocol(
+    "SettingsReceipt",
+    await (
+      await postAsUser(userId, "/api/settings/application", {
+        schemaVersion: 1,
+        commandId: "from-a-view",
+        expectedRevision: document.revision,
+        sectionId: "profile",
+        ownerId: userId,
+        values: { name: "Rendered" },
+      })
+    ).json(),
+  );
+  expect(receipt.status).toBe("applied");
+  const next = decodeProtocol(
+    "ViewDocument",
+    await (
+      await asUser(userId, "/api/settings/application?as=document")
+    ).json(),
+  );
+  expect(next.revision).toBe(document.revision + 1);
+});

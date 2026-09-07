@@ -124,13 +124,25 @@ class ViewFieldNode extends StatelessWidget {
       () => field.value.value,
     );
     final enabled = field.editable && !scope.controller.busy;
+    final host = field.choiceSource == null
+        ? null
+        : scope.fields[field.choiceSource];
+    if (host != null) {
+      return host(
+        context,
+        field,
+        id,
+        value,
+        enabled ? (next) => scope.controller.change(id, next) : null,
+      );
+    }
     final decoration = InputDecoration(
       labelText: field.label,
       helperText: field.hint,
       helperMaxLines: 4,
     );
     if (field.kind == 'boolean') {
-      return SwitchListTile.adaptive(
+      return SwitchListTile(
         contentPadding: EdgeInsets.zero,
         title: Text(field.label),
         subtitle: field.hint == null ? null : Text(field.hint!),
