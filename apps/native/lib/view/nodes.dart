@@ -258,6 +258,12 @@ class ViewActionNode extends StatelessWidget {
       viewActionIdentifierV1(node['actionId']! as String),
       Align(
         alignment: Alignment.centerLeft,
+        // Sized to the button under loose constraints, which is what a `row`
+        // group gives it: without this the `Wrap` hands each control the full
+        // width and four side-by-side controls become four stacked ones. A
+        // `column` group constrains its children tightly, so there the factor
+        // changes nothing and the button still sits left.
+        widthFactor: 1,
         child: switch (node['style']) {
           'primary' => FilledButton(onPressed: press, child: Text(label)),
           'danger' => OutlinedButton(

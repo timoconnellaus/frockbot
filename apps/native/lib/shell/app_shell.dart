@@ -15,6 +15,7 @@ import 'package:flutter/material.dart';
 import '../activity/controller.dart';
 import '../activity/page.dart';
 import '../admin/page.dart';
+import '../audit/page.dart';
 import '../client/auth.dart' show developmentAuth;
 import '../client/bot_sessions.dart';
 import '../client/transport.dart';
@@ -22,9 +23,10 @@ import '../connections/page.dart';
 import '../extensions/fallback.dart';
 import '../plugins/page.dart';
 import '../recovery/page.dart';
+import '../routines/page.dart';
+import '../search/overlay.dart';
 import '../settings/bot_settings.dart';
 import '../settings/page.dart';
-import '../theme/states.dart';
 import '../view/sample_page.dart';
 import '../protocol/client_wire.generated.dart' as wire;
 import 'chat_pane.dart';
@@ -73,10 +75,16 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   wire.BotRegistration? selected;
   String? workingRunId;
   BotSettingsController? botSettings;
+  RoutineInboxController? routineInbox;
   String? error;
   bool loaded = false;
   bool navOpen = false;
   bool panelOpen = false;
+
+  /// Which right-panel entry is on. The region holds two — the Bot's settings
+  /// and its Routines — and shows one, because a column is a place to read one
+  /// thing rather than a stack of everything a feature registered.
+  String panelKey = 'bot-settings';
   bool showHidden = false;
   bool isAdmin = false;
   TranscriptLine? openRun;
@@ -211,7 +219,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     final bot = bots.where((bot) => bot.botId.value == saved).firstOrNull;
     if (bot == null) return;
     setState(() => selected = bot);
-    _adoptBotSettings(bot.botId.value);
+    _adoptBotPanels(bot.botId.value);
   }
 
   /// A deployment with no identity directory leaves the sidebar one plain
@@ -267,7 +275,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       openRun = null;
       panelOpen = false;
     });
-    _adoptBotSettings(botId);
+    _adoptBotPanels(botId);
     unawaited(
       widget.store
           .write('selection.${widget.userId}', botId)
@@ -275,23 +283,57 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     );
   }
 
-  /// The Bot's own settings are a feature in the `right-panel` region, which is
-  /// how the Vue shell mounts them too: the shell draws the region and never
-  /// imports the panel's contents.
-  void _adoptBotSettings(String botId) {
+  /// The Bot's own settings and its Routines are features in the `right-panel`
+  /// region, which is how the Vue shell mounts them too: the shell draws the
+  /// region and never imports what goes in it.
+  void _adoptBotPanels(String botId) {
+    final name =
+        bots.where((bot) => bot.botId.value == botId).map(_name).firstOrNull ??
+        botId;
     botSettings?.dispose();
+    routineInbox?.dispose();
     final controller = BotSettingsController(widget.api, botId);
+    final inbox = RoutineInboxController(widget.api, botId);
     botSettings = controller;
+    routineInbox = inbox;
+    inbox.addListener(_repaint);
     slots.register(
       ShellSlot.rightPanel,
       'bot-settings',
-      (context) => BotSettingsView(
-        controller: controller,
-        onClose: () => setState(() => panelOpen = false),
-        onSaved: load,
+      (context) => SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+        child: BotSettingsView(controller: controller, onSaved: load),
+      ),
+      label: 'Settings',
+    );
+    slots.register(
+      ShellSlot.rightPanel,
+      'routines',
+      (context) => RoutinesView(
+        api: widget.api,
+        store: widget.store,
+        userId: widget.userId,
+        botId: botId,
+        botName: name,
+        chrome: false,
+        onOpenRun: _openRun,
+        onInbox: inbox.adopt,
+      ),
+      label: 'Routines',
+    );
+    // A firing that finished while the app was open is only ever visible as a
+    // count, so the badge is read on this Bot's own signal rather than on a
+    // click that may never come.
+    slots.register(
+      ShellSlot.headerActions,
+      'routine-inbox',
+      (context) => RoutineInboxBadge(
+        controller: inbox,
+        onOpen: () => _openPanel('routines'),
       ),
     );
     unawaited(controller.load());
+    unawaited(inbox.load());
   }
 
   void _push(Widget page) {
@@ -322,12 +364,103 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         }),
       );
     }
-    return slots.filled(ShellSlot.rightPanel)
-        ? const SingleChildScrollView(
-            padding: EdgeInsets.all(16),
-            child: SlotRegion(ShellSlot.rightPanel),
-          )
-        : null;
+    final keys = slots.keys(ShellSlot.rightPanel);
+    if (keys.isEmpty) return null;
+    final key = keys.contains(panelKey) ? panelKey : keys.first;
+    return identified(
+      ShellIds.slot(ShellSlot.rightPanel.id),
+      Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 8, 4, 4),
+            child: Row(
+              children: [
+                Expanded(
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: SegmentedButton<String>(
+                      showSelectedIcon: false,
+                      segments: [
+                        for (final entry in keys)
+                          ButtonSegment(
+                            value: entry,
+                            label: Text(
+                              slots.labelOf(ShellSlot.rightPanel, entry) ??
+                                  entry,
+                            ),
+                          ),
+                      ],
+                      selected: {key},
+                      onSelectionChanged: (next) =>
+                          setState(() => panelKey = next.first),
+                    ),
+                  ),
+                ),
+                identified(
+                  ShellIds.rightPanelClose,
+                  IconButton(
+                    tooltip: 'Close the panel',
+                    onPressed: () => setState(() => panelOpen = false),
+                    icon: const Icon(Icons.close),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const Divider(height: 1),
+          Expanded(child: slots.buildOne(context, ShellSlot.rightPanel, key)!),
+        ],
+      ),
+    );
+  }
+
+  /// Opens one right-panel entry. On the phone the panel is a page: a drawer
+  /// over a full-width conversation is the same thing with less room and a
+  /// scrim in the way.
+  void _openPanel(String key) {
+    if (shellTierForWidth(MediaQuery.sizeOf(context).width) ==
+        ShellTier.single) {
+      _pushPanel(key);
+      return;
+    }
+    setState(() {
+      openRun = null;
+      panelKey = key;
+      panelOpen = true;
+    });
+  }
+
+  void _pushPanel(String key) {
+    final bot = selected;
+    final controller = botSettings;
+    if (bot == null) return;
+    if (key == 'routines') {
+      _push(
+        RoutinesView(
+          api: widget.api,
+          store: widget.store,
+          userId: widget.userId,
+          botId: bot.botId.value,
+          botName: _name(bot),
+          onInbox: routineInbox?.adopt,
+        ),
+      );
+      return;
+    }
+    if (controller == null) return;
+    _push(
+      Scaffold(
+        appBar: AppBar(title: const Text('Bot settings')),
+        body: SafeArea(
+          top: false,
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+            child: BotSettingsView(controller: controller, onSaved: load),
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -391,7 +524,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                   onPressed: _rightPanel() == null
                       ? null
                       : tier == ShellTier.single && openRun == null
-                      ? _pushBotSettings
+                      ? () => _pushPanel(panelKey)
                       : () => setState(() => panelOpen = !panelOpen),
                   icon: Icon(
                     openRun == null
@@ -431,14 +564,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                   changed: load,
                 ),
               ),
-              onSearch: () => showSearch<void>(
-                context: context,
-                delegate: _BotSearch(
-                  bots: bots,
-                  name: _name,
-                  onSelect: _select,
-                ),
-              ),
+              onSearch: _openSearch,
               onProfile: _openProfile,
               onInbox: () => _push(
                 ActivityPage(controller: activity, openBot: _openBotFromInbox),
@@ -490,23 +616,23 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     if (mounted) _select(botId);
   }
 
-  /// On the phone the panel is a page: a drawer over a full-width conversation
-  /// is the same thing with less room and a scrim in the way.
-  void _pushBotSettings() {
-    final controller = botSettings;
-    if (controller == null) return;
-    _push(
-      Scaffold(
-        appBar: AppBar(title: const Text('Bot settings')),
-        body: SafeArea(
-          top: false,
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
-            child: BotSettingsView(controller: controller, onSaved: load),
-          ),
-        ),
-      ),
-    );
+  /// Search over every conversation this account has, which is the backend's
+  /// index rather than the names the sidebar happens to hold. A chosen hit is
+  /// its Bot and its Turn: the shell opens the Bot and the transcript scrolls
+  /// to the Turn.
+  Future<void> _openSearch() async {
+    setState(() => navOpen = false);
+    final hit = await showSearchOverlayV1(context, widget.api);
+    if (hit == null || !mounted) return;
+    if (bots.every((bot) => bot.botId.value != hit.botId)) await load();
+    if (!mounted) return;
+    _select(hit.botId);
+    // The Turn may sit further back than the newest page, so the transcript is
+    // asked to reach it and says so itself when it cannot.
+    widget.sessions
+        .open(widget.userId, hit.botId)
+        .controller
+        .focusRun(hit.runId);
   }
 
   void _openSettings() => _push(
@@ -521,141 +647,167 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
+      // The sheet grew past a hand-held screen once the account had more than
+      // a handful of surfaces on it, and a sheet that overflows loses whatever
+      // is at the bottom of it.
+      isScrollControlled: true,
       builder: (sheet) => identified(
         SettingsIds.profileMenu,
         SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              identified(
-                SettingsIds.profileName,
-                ListTile(
-                  leading: const CircleAvatar(
-                    child: Icon(Icons.person_outline),
-                  ),
-                  title: FutureBuilder<String>(
-                    future: _displayName(),
-                    builder: (context, answer) =>
-                        Text(answer.data ?? widget.userId),
-                  ),
-                  subtitle: const Text('Signed in'),
-                ),
-              ),
-              const Divider(height: 1),
-              identified(
-                SettingsIds.profileSettings,
-                ListTile(
-                  leading: const Icon(Icons.settings_outlined),
-                  title: const Text('Settings'),
-                  onTap: () {
-                    Navigator.of(sheet).pop();
-                    _openSettings();
-                  },
-                ),
-              ),
-              identified(
-                SettingsIds.profileModels,
-                ListTile(
-                  leading: const Icon(Icons.auto_awesome_rounded),
-                  title: const Text('Models'),
-                  onTap: () {
-                    Navigator.of(sheet).pop();
-                    _push(
-                      SettingsPage(
-                        api: widget.api,
-                        store: widget.store,
-                        userId: widget.userId,
-                        home: 'models',
-                      ),
-                    );
-                  },
-                ),
-              ),
-              identified(
-                SettingsIds.profileConnections,
-                ListTile(
-                  leading: const Icon(Icons.link_outlined),
-                  title: const Text('Connectors'),
-                  onTap: () {
-                    Navigator.of(sheet).pop();
-                    _push(
-                      ConnectionsPage(
-                        api: widget.api,
-                        store: widget.store,
-                        userId: widget.userId,
-                      ),
-                    );
-                  },
-                ),
-              ),
-              identified(
-                PluginIds.profileEntry,
-                ListTile(
-                  leading: const Icon(Icons.extension_outlined),
-                  title: const Text('Plugins'),
-                  onTap: () {
-                    Navigator.of(sheet).pop();
-                    _push(
-                      PluginsPage(
-                        api: widget.api,
-                        store: widget.store,
-                        userId: widget.userId,
-                      ),
-                    );
-                  },
-                ),
-              ),
-              // Admin belongs to the deployment, not to the account, so the
-              // entry is here only for someone the gateway already answers it
-              // for. A non-admin is not offered a door that refuses them.
-              if (isAdmin)
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
                 identified(
-                  AdminIds.profileEntry,
+                  SettingsIds.profileName,
                   ListTile(
-                    leading: const Icon(Icons.shield_outlined),
-                    title: const Text('Admin'),
+                    leading: const CircleAvatar(
+                      child: Icon(Icons.person_outline),
+                    ),
+                    title: FutureBuilder<String>(
+                      future: _displayName(),
+                      builder: (context, answer) =>
+                          Text(answer.data ?? widget.userId),
+                    ),
+                    subtitle: const Text('Signed in'),
+                  ),
+                ),
+                const Divider(height: 1),
+                identified(
+                  SettingsIds.profileSettings,
+                  ListTile(
+                    leading: const Icon(Icons.settings_outlined),
+                    title: const Text('Settings'),
                     onTap: () {
                       Navigator.of(sheet).pop();
-                      _push(AdminPage(api: widget.api));
+                      _openSettings();
                     },
                   ),
                 ),
-              // A development build can look at the ViewNode renderer before a
-              // plugin produces a document; the shipped app has no such door.
-              if (developmentAuth)
+                identified(
+                  SettingsIds.profileModels,
+                  ListTile(
+                    leading: const Icon(Icons.auto_awesome_rounded),
+                    title: const Text('Models'),
+                    onTap: () {
+                      Navigator.of(sheet).pop();
+                      _push(
+                        SettingsPage(
+                          api: widget.api,
+                          store: widget.store,
+                          userId: widget.userId,
+                          home: 'models',
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                identified(
+                  SettingsIds.profileConnections,
+                  ListTile(
+                    leading: const Icon(Icons.link_outlined),
+                    title: const Text('Connectors'),
+                    onTap: () {
+                      Navigator.of(sheet).pop();
+                      _push(
+                        ConnectionsPage(
+                          api: widget.api,
+                          store: widget.store,
+                          userId: widget.userId,
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                identified(
+                  AuditIds.recoveryEntry,
+                  ListTile(
+                    leading: const Icon(Icons.history_rounded),
+                    title: const Text('Audit log'),
+                    subtitle: const Text('Every effect your Bots performed'),
+                    onTap: () {
+                      Navigator.of(sheet).pop();
+                      _push(
+                        AuditPage(
+                          api: widget.api,
+                          store: widget.store,
+                          userId: widget.userId,
+                          botId: selected?.botId.value,
+                          botName: selected == null ? null : _name(selected!),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                identified(
+                  PluginIds.profileEntry,
+                  ListTile(
+                    leading: const Icon(Icons.extension_outlined),
+                    title: const Text('Plugins'),
+                    onTap: () {
+                      Navigator.of(sheet).pop();
+                      _push(
+                        PluginsPage(
+                          api: widget.api,
+                          store: widget.store,
+                          userId: widget.userId,
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                // Admin belongs to the deployment, not to the account, so the
+                // entry is here only for someone the gateway already answers it
+                // for. A non-admin is not offered a door that refuses them.
+                if (isAdmin)
+                  identified(
+                    AdminIds.profileEntry,
+                    ListTile(
+                      leading: const Icon(Icons.shield_outlined),
+                      title: const Text('Admin'),
+                      onTap: () {
+                        Navigator.of(sheet).pop();
+                        _push(AdminPage(api: widget.api));
+                      },
+                    ),
+                  ),
+                // A development build can look at the ViewNode renderer before a
+                // plugin produces a document; the shipped app has no such door.
+                if (developmentAuth)
+                  ListTile(
+                    leading: const Icon(Icons.dashboard_customize_outlined),
+                    title: const Text('View sample'),
+                    onTap: () {
+                      Navigator.of(sheet).pop();
+                      _push(
+                        ViewSamplePage(
+                          store: widget.store,
+                          userId: widget.userId,
+                        ),
+                      );
+                    },
+                  ),
                 ListTile(
-                  leading: const Icon(Icons.dashboard_customize_outlined),
-                  title: const Text('View sample'),
+                  leading: const Icon(Icons.refresh),
+                  title: const Text('Refresh'),
                   onTap: () {
                     Navigator.of(sheet).pop();
-                    _push(
-                      ViewSamplePage(
-                        store: widget.store,
-                        userId: widget.userId,
-                      ),
-                    );
+                    unawaited(load());
                   },
                 ),
-              ListTile(
-                leading: const Icon(Icons.refresh),
-                title: const Text('Refresh'),
-                onTap: () {
-                  Navigator.of(sheet).pop();
-                  unawaited(load());
-                },
-              ),
-              identified(
-                SettingsIds.profileSignOut,
-                ListTile(
-                  leading: const Icon(Icons.logout),
-                  title: const Text('Sign out'),
-                  onTap: () {
-                    Navigator.of(sheet).pop();
-                    unawaited(widget.onSignOut());
-                  },
+                identified(
+                  SettingsIds.profileSignOut,
+                  ListTile(
+                    leading: const Icon(Icons.logout),
+                    title: const Text('Sign out'),
+                    onTap: () {
+                      Navigator.of(sheet).pop();
+                      unawaited(widget.onSignOut());
+                    },
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -684,61 +836,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     activity.removeListener(_repaint);
     activity.dispose();
     botSettings?.dispose();
+    routineInbox?.dispose();
     slots.dispose();
     super.dispose();
-  }
-}
-
-/// Search over the Bot list. It is a read of what the sidebar already holds,
-/// which is what makes it available before any network answer.
-class _BotSearch extends SearchDelegate<void> {
-  final List<wire.BotRegistration> bots;
-  final String Function(wire.BotRegistration) name;
-  final void Function(String botId) onSelect;
-  _BotSearch({required this.bots, required this.name, required this.onSelect});
-
-  List<wire.BotRegistration> get _matches => [
-    for (final bot in bots)
-      if (name(bot).toLowerCase().contains(query.trim().toLowerCase())) bot,
-  ];
-
-  @override
-  List<Widget> buildActions(BuildContext context) => [
-    IconButton(onPressed: () => query = '', icon: const Icon(Icons.clear)),
-  ];
-
-  @override
-  Widget buildLeading(BuildContext context) => IconButton(
-    onPressed: () => close(context, null),
-    icon: const Icon(Icons.arrow_back),
-  );
-
-  @override
-  Widget buildResults(BuildContext context) => buildSuggestions(context);
-
-  @override
-  Widget buildSuggestions(BuildContext context) {
-    final matches = _matches;
-    if (matches.isEmpty) {
-      return FrockEmptyState(
-        title: 'Nothing matched',
-        detail: 'No Bot’s name contains “$query”.',
-        action: 'Clear',
-        onAction: () => query = '',
-        icon: Icons.search_off,
-      );
-    }
-    return ListView(
-      children: [
-        for (final bot in matches)
-          ListTile(
-            title: Text(name(bot)),
-            onTap: () {
-              onSelect(bot.botId.value);
-              close(context, null);
-            },
-          ),
-      ],
-    );
   }
 }

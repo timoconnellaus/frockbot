@@ -164,6 +164,42 @@ describe("Routines gateway routes", () => {
     ).toBe(400);
   });
 
+  test("`as=document` answers the Routines and the inbox as one document", async () => {
+    const route = contribution();
+    await call(route, "/api/bots/scout/routines", {
+      method: "POST",
+      body: JSON.stringify(CREATE),
+    });
+    const response = await call(route, "/api/bots/scout/routines?as=document");
+    expect(response?.status).toBe(200);
+    const document = (await response!.json()) as {
+      surfaceId: string;
+      actions: { id: string }[];
+    };
+    expect(document.surfaceId).toBe("routines");
+    expect(document.actions.map((action) => action.id)).toContain(
+      "acknowledge-inbox",
+    );
+    // The list read is unchanged for a client that wants a list.
+    expect(
+      await (await call(route, "/api/bots/scout/routines"))!.json(),
+    ).toMatchObject({ botId: "scout" });
+  });
+
+  test("`as=document` is the only parameter, and only on the list read", async () => {
+    const route = contribution();
+    expect(
+      (await call(route, "/api/bots/scout/routines?as=frame"))?.status,
+    ).toBe(400);
+    expect(
+      (await call(route, "/api/bots/scout/routines?as=document&limit=5"))
+        ?.status,
+    ).toBe(400);
+    expect(
+      (await call(route, "/api/bots/scout/routines/inbox?as=document"))?.status,
+    ).toBe(400);
+  });
+
   test("answers nothing without an authenticated User", async () => {
     const route = contribution();
     const url = new URL("https://bot.frockbot.com/api/bots/scout/routines");

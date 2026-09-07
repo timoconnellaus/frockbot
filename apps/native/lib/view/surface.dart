@@ -35,6 +35,16 @@ class ViewSurfacePage extends StatefulWidget {
   final String refreshId;
   final Map<String, ViewFieldBuilder> fields;
 
+  /// Set where the surface is a region rather than a page — the right panel
+  /// has no back gesture, so the way out is a control the panel draws.
+  final VoidCallback? onClose;
+
+  /// Off where the surface is drawn inside chrome that already names it: the
+  /// right panel has its own header, and two titles saying "Routines" is one
+  /// too many. The refresh comes with the title, so it goes too — the panel's
+  /// pull-to-refresh is still the way to read again.
+  final bool chrome;
+
   const ViewSurfacePage({
     super.key,
     required this.title,
@@ -44,6 +54,8 @@ class ViewSurfacePage extends StatefulWidget {
     required this.documentId,
     required this.refreshId,
     this.fields = const {},
+    this.onClose,
+    this.chrome = true,
   });
 
   @override
@@ -133,9 +145,61 @@ class _ViewSurfacePageState extends State<ViewSurfacePage>
     final controller = widget.controller;
     final document = controller.document;
     final view = this.view;
+    final body = SafeArea(
+      top: false,
+      child: document == null || view == null
+          ? controller.busy
+                ? FrockLoading(label: 'Loading ${widget.title.toLowerCase()}')
+                : FrockEmptyState(
+                    icon: Icons.cloud_off_rounded,
+                    title: '${widget.title} couldn’t load',
+                    detail:
+                        controller.message ??
+                        'Check your connection and try again.',
+                    action: 'Try again',
+                    onAction: controller.load,
+                  )
+          : RefreshIndicator(
+              onRefresh: controller.load,
+              child: ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
+                children: [
+                  Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 680),
+                      child: identified(
+                        widget.documentId,
+                        ViewDocumentView(
+                          key: ValueKey(
+                            '${controller.surfaceId}.${document.revision}',
+                          ),
+                          document: document,
+                          controller: view,
+                          fields: widget.fields,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+    );
+    if (!widget.chrome) return body;
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.title),
+        automaticallyImplyLeading: widget.onClose == null,
+        leading: widget.onClose == null
+            ? null
+            : identified(
+                ShellIds.rightPanelClose,
+                IconButton(
+                  tooltip: 'Close ${widget.title.toLowerCase()}',
+                  onPressed: widget.onClose,
+                  icon: const Icon(Icons.close),
+                ),
+              ),
         actions: [
           identified(
             widget.refreshId,
@@ -147,46 +211,7 @@ class _ViewSurfacePageState extends State<ViewSurfacePage>
           ),
         ],
       ),
-      body: SafeArea(
-        top: false,
-        child: document == null || view == null
-            ? controller.busy
-                  ? FrockLoading(label: 'Loading ${widget.title.toLowerCase()}')
-                  : FrockEmptyState(
-                      icon: Icons.cloud_off_rounded,
-                      title: '${widget.title} couldn’t load',
-                      detail:
-                          controller.message ??
-                          'Check your connection and try again.',
-                      action: 'Try again',
-                      onAction: controller.load,
-                    )
-            : RefreshIndicator(
-                onRefresh: controller.load,
-                child: ListView(
-                  physics: const AlwaysScrollableScrollPhysics(),
-                  padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
-                  children: [
-                    Center(
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 680),
-                        child: identified(
-                          widget.documentId,
-                          ViewDocumentView(
-                            key: ValueKey(
-                              '${controller.surfaceId}.${document.revision}',
-                            ),
-                            document: document,
-                            controller: view,
-                            fields: widget.fields,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-      ),
+      body: body,
     );
   }
 }

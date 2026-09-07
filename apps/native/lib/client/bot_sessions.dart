@@ -29,13 +29,47 @@ class BotSession {
   /// Starting is done once per session, however often its view is rebuilt.
   Future<void> start() => _started ??= _start();
 
+  String get _conversationsPath =>
+      '/api/bots/${Uri.encodeComponent(botId)}/conversations';
+
+  /// Puts the current conversation down and starts the next.
+  ///
+  /// The Bot keeps every Turn of the one just ended: it is still listed and
+  /// still readable by naming it. A Bot mid-Turn refuses with its reason — the
+  /// log a running Turn is appending to is not something a press may pull out
+  /// from under it — and the refusal reaches the caller rather than half-ending
+  /// a conversation.
+  Future<void> startConversation() async {
+    final list = wire.ConversationList.fromJson(
+      await api.request(_conversationsPath, body: const {'schemaVersion': 1}),
+    );
+    if (disposed) return;
+    conversations = list.conversations;
+    // The new conversation is the one the transcript shows, and it is empty:
+    // reading it back is the only thing that proves both.
+    await controller.selectConversation(null);
+    controller.changed();
+  }
+
+  /// Reads the conversation list again, so a rename or a new one shows.
+  Future<void> refreshConversations() async {
+    try {
+      final list = wire.ConversationList.fromJson(
+        await api.request(_conversationsPath),
+      );
+      if (disposed) return;
+      conversations = list.conversations;
+      controller.changed();
+    } catch (_) {
+      // The picker keeps the list it has; nothing is lost but a new entry.
+    }
+  }
+
   Future<void> _start() async {
     await controller.initialize();
     try {
       final list = wire.ConversationList.fromJson(
-        await api.request(
-          '/api/bots/${Uri.encodeComponent(botId)}/conversations',
-        ),
+        await api.request(_conversationsPath),
       );
       if (disposed) return;
       conversations = list.conversations;
