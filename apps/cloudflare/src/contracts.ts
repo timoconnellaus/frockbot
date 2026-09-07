@@ -667,7 +667,6 @@ export interface BotConfigurationBinding {
 export interface GatewayDependencies {
   /** Explicit Slice 2 prototype; absent until signed-target qualification. */
   nativeAuth?: import("./native-auth.js").NativeAuth;
-  saveNativeForm?(userId: string, command: unknown): Promise<unknown>;
   nativeAppletBootstrap?(
     userId: string,
     appletId: string,

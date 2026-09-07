@@ -99,13 +99,8 @@ declare const validators: {
     value: unknown,
   ): value is ProtocolTypes["ActionValueSchema"];
   isActionSchema(value: unknown): value is ProtocolTypes["ActionSchema"];
-  isA2uiContribution(
-    value: unknown,
-  ): value is ProtocolTypes["A2uiContribution"];
-  isA2uiSurface(value: unknown): value is ProtocolTypes["A2uiSurface"];
-  isA2uiActionCommand(
-    value: unknown,
-  ): value is ProtocolTypes["A2uiActionCommand"];
+  isViewNode(value: unknown): value is ProtocolTypes["ViewNode"];
+  isViewDocument(value: unknown): value is ProtocolTypes["ViewDocument"];
   isSurfaceUnavailable(
     value: unknown,
   ): value is ProtocolTypes["SurfaceUnavailable"];

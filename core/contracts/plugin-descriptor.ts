@@ -58,6 +58,16 @@ export interface PluginToolV1 {
   inputSchema: Record<string, unknown>;
 }
 
+/**
+ * One view a plugin offers in a slot. The plugin returns a `ViewDocument` for
+ * `surfaceId` and the host renders it with the host's own widgets; the plugin
+ * ships no markup. Account-scoped, like every other thing a User enables.
+ */
+export interface PluginViewV1 {
+  slot: PluginSlotV1;
+  surfaceId: string;
+}
+
 export interface PluginDescriptorV1 {
   id: string;
   displayName: string;
@@ -66,13 +76,17 @@ export interface PluginDescriptorV1 {
   actions: PluginActionV1[];
   grants: PluginGrantV1[];
   slots?: PluginSlotV1[];
+  views?: PluginViewV1[];
   /** Always all three: a plugin sees the whole context or none of it. */
   contextKeys: readonly ["user", "bot", "session"];
 }
 
 const PLUGIN_ID = /^[a-z][a-z0-9-]{0,63}$/;
 const PLUGIN_TOOL_NAME = /^[a-z][a-z0-9_]{0,63}$/;
+/** The `Identifier` the client wire schema accepts as a `ViewDocument.surfaceId`. */
+const PLUGIN_SURFACE_ID = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
 const MAX_PLUGIN_TOOLS_V1 = 64;
+const MAX_PLUGIN_VIEWS_V1 = 16;
 
 function record(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -146,6 +160,19 @@ function decodePluginToolV1(input: unknown, label: string): PluginToolV1 {
   };
 }
 
+function decodePluginViewV1(input: unknown, label: string): PluginViewV1 {
+  const value = record(input, label);
+  exactKeys(value, ["slot", "surfaceId"], [], label);
+  const surfaceId = boundedString(value.surfaceId, `${label}.surfaceId`, 128);
+  if (!PLUGIN_SURFACE_ID.test(surfaceId)) {
+    throw new Error(`${label}.surfaceId is invalid`);
+  }
+  return {
+    slot: vocabulary([value.slot], PLUGIN_SLOTS_V1, `${label}.slot`)[0]!,
+    surfaceId,
+  };
+}
+
 export function decodePluginDescriptorV1(
   input: unknown,
   label = "plugin descriptor",
@@ -162,7 +189,7 @@ export function decodePluginDescriptorV1(
       "grants",
       "contextKeys",
     ],
-    ["slots"],
+    ["slots", "views"],
     label,
   );
   const id = boundedString(value.id, `${label}.id`, 64);
@@ -188,6 +215,21 @@ export function decodePluginDescriptorV1(
     value.slots === undefined
       ? undefined
       : vocabulary(value.slots, PLUGIN_SLOTS_V1, `${label}.slots`);
+  if (
+    value.views !== undefined &&
+    (!Array.isArray(value.views) || value.views.length > MAX_PLUGIN_VIEWS_V1)
+  ) {
+    throw new Error(`${label}.views must be a bounded array`);
+  }
+  const views = (value.views as unknown[] | undefined)?.map((view, index) =>
+    decodePluginViewV1(view, `${label}.views[${index}]`),
+  );
+  if (
+    views &&
+    new Set(views.map((view) => view.surfaceId)).size !== views.length
+  ) {
+    throw new Error(`${label}.views contains duplicate surface ids`);
+  }
   return {
     id,
     displayName: boundedString(value.displayName, `${label}.displayName`, 128),
@@ -196,6 +238,7 @@ export function decodePluginDescriptorV1(
     actions: vocabulary(value.actions, PLUGIN_ACTIONS_V1, `${label}.actions`),
     grants: vocabulary(value.grants, PLUGIN_GRANTS_V1, `${label}.grants`),
     ...(slots === undefined ? {} : { slots }),
+    ...(views === undefined ? {} : { views }),
     contextKeys: [...PLUGIN_CONTEXT_KEYS_V1],
   };
 }

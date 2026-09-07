@@ -2502,160 +2502,153 @@
       "required": ["type", "properties", "required", "additionalProperties"],
       "additionalProperties": false
     },
-    "A2uiContribution": {
+    "ViewNode": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "text" },
+            "text": { "type": "string", "minLength": 1, "maxLength": 4000 },
+            "style": { "enum": ["body", "heading", "label", "status"] }
+          },
+          "required": ["type", "text"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "group" },
+            "orientation": { "enum": ["row", "column"] },
+            "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+            "collapsed": { "type": "boolean" },
+            "children": {
+              "type": "array",
+              "minItems": 0,
+              "maxItems": 256,
+              "items": { "$ref": "#/$defs/ViewNode" }
+            }
+          },
+          "required": ["type", "orientation", "children"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "field" },
+            "field": { "$ref": "#/$defs/SettingField" }
+          },
+          "required": ["type", "field"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "action" },
+            "actionId": { "$ref": "#/$defs/Identifier" },
+            "label": { "type": "string", "minLength": 1, "maxLength": 100 },
+            "style": { "enum": ["primary", "secondary", "danger"] },
+            "input": {
+              "type": "object",
+              "maxProperties": 32,
+              "propertyNames": { "$ref": "#/$defs/Identifier" },
+              "additionalProperties": { "$ref": "#/$defs/Json" }
+            }
+          },
+          "required": ["type", "actionId", "label"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "list" },
+            "empty": { "type": "string", "minLength": 1, "maxLength": 200 },
+            "rows": {
+              "type": "array",
+              "minItems": 0,
+              "maxItems": 256,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": { "$ref": "#/$defs/Identifier" },
+                  "node": { "$ref": "#/$defs/ViewNode" },
+                  "actionId": { "$ref": "#/$defs/Identifier" },
+                  "selected": { "type": "boolean" }
+                },
+                "required": ["id", "node"],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": ["type", "rows"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "embed" },
+            "kind": { "enum": ["image", "frame"] },
+            "source": { "type": "string", "minLength": 1, "maxLength": 2048 },
+            "label": { "type": "string", "minLength": 1, "maxLength": 200 },
+            "aspectRatio": { "type": "number", "minimum": 0.1, "maximum": 10 }
+          },
+          "required": ["type", "kind", "source", "label"],
+          "additionalProperties": false,
+          "allOf": [
+            {
+              "if": {
+                "type": "object",
+                "properties": { "kind": { "const": "image" } },
+                "required": ["kind"]
+              },
+              "then": {
+                "type": "object",
+                "properties": { "source": { "$ref": "#/$defs/HttpsUrl" } },
+                "required": ["source"]
+              }
+            },
+            {
+              "if": {
+                "type": "object",
+                "properties": { "kind": { "const": "frame" } },
+                "required": ["kind"]
+              },
+              "then": {
+                "type": "object",
+                "properties": { "source": { "$ref": "#/$defs/Identifier" } },
+                "required": ["source"]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "ViewDocument": {
       "type": "object",
       "properties": {
-        "schemaVersion": {
-          "const": 1
+        "schemaVersion": { "const": 1 },
+        "surfaceId": { "$ref": "#/$defs/Identifier" },
+        "revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
-        "kind": {
-          "const": "a2ui"
-        },
-        "slot": {
-          "enum": [
-            "frockbot.application-settings-sections",
-            "frockbot.bot-settings-sections",
-            "frockbot.right-panel",
-            "frockbot.tool-result",
-            "frockbot.surface"
-          ]
-        },
-        "artifact": {
-          "$ref": "#/$defs/ImmutableArtifact"
-        },
-        "protocolVersion": {
-          "const": "0.9.1"
-        },
-        "catalog": {
-          "$ref": "#/$defs/CatalogRef"
-        },
+        "root": { "$ref": "#/$defs/ViewNode" },
         "actions": {
           "type": "array",
+          "minItems": 0,
+          "maxItems": 32,
           "items": {
             "type": "object",
             "properties": {
-              "id": {
-                "$ref": "#/$defs/Identifier"
-              },
-              "schema": {
-                "$ref": "#/$defs/ActionSchema"
-              }
+              "id": { "$ref": "#/$defs/Identifier" },
+              "schema": { "$ref": "#/$defs/ActionSchema" }
             },
             "required": ["id", "schema"],
             "additionalProperties": false
-          },
-          "minItems": 0,
-          "maxItems": 32
-        },
-        "webFallback": {
-          "$ref": "#/$defs/WebArtifact"
-        }
-      },
-      "required": [
-        "schemaVersion",
-        "kind",
-        "slot",
-        "artifact",
-        "protocolVersion",
-        "catalog",
-        "actions"
-      ],
-      "additionalProperties": false
-    },
-    "A2uiSurface": {
-      "type": "object",
-      "properties": {
-        "schemaVersion": {
-          "const": 1
-        },
-        "surfaceId": {
-          "$ref": "#/$defs/Identifier"
-        },
-        "userId": {
-          "$ref": "#/$defs/Identifier"
-        },
-        "botId": {
-          "$ref": "#/$defs/BotId"
-        },
-        "packageId": {
-          "$ref": "#/$defs/Identifier"
-        },
-        "generationId": {
-          "$ref": "#/$defs/GenerationId"
-        },
-        "revision": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 9007199254740991
-        },
-        "cursor": {
-          "$ref": "#/$defs/ObserverCursor"
-        },
-        "contribution": {
-          "$ref": "#/$defs/A2uiContribution"
-        },
-        "snapshot": {
-          "$ref": "#/$defs/ImmutableArtifact"
-        }
-      },
-      "required": [
-        "schemaVersion",
-        "surfaceId",
-        "userId",
-        "botId",
-        "packageId",
-        "generationId",
-        "revision",
-        "cursor",
-        "contribution",
-        "snapshot"
-      ],
-      "additionalProperties": false
-    },
-    "A2uiActionCommand": {
-      "type": "object",
-      "properties": {
-        "schemaVersion": {
-          "const": 1
-        },
-        "commandId": {
-          "$ref": "#/$defs/Identifier"
-        },
-        "surfaceId": {
-          "$ref": "#/$defs/Identifier"
-        },
-        "packageId": {
-          "$ref": "#/$defs/Identifier"
-        },
-        "generationId": {
-          "$ref": "#/$defs/GenerationId"
-        },
-        "revision": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 9007199254740991
-        },
-        "actionId": {
-          "$ref": "#/$defs/Identifier"
-        },
-        "input": {
-          "type": "object",
-          "maxProperties": 32,
-          "additionalProperties": {
-            "$ref": "#/$defs/Json"
           }
         }
       },
-      "required": [
-        "schemaVersion",
-        "commandId",
-        "surfaceId",
-        "packageId",
-        "generationId",
-        "revision",
-        "actionId",
-        "input"
-      ],
+      "required": ["schemaVersion", "surfaceId", "revision", "root", "actions"],
       "additionalProperties": false
     },
     "SurfaceUnavailable": {

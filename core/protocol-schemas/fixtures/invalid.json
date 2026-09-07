@@ -578,19 +578,81 @@
     "value": null
   },
   {
-    "name": "A2uiContribution wrong shape",
-    "schema": "A2uiContribution",
-    "value": null
+    "name": "ViewNode unknown node type",
+    "schema": "ViewNode",
+    "value": {
+      "type": "card",
+      "text": "Ready."
+    }
   },
   {
-    "name": "A2uiSurface wrong shape",
-    "schema": "A2uiSurface",
-    "value": null
+    "name": "ViewNode embed image refuses a non-https source",
+    "schema": "ViewNode",
+    "value": {
+      "type": "embed",
+      "kind": "image",
+      "source": "javascript:alert(1)",
+      "label": "Last screenshot"
+    }
   },
   {
-    "name": "A2uiActionCommand wrong shape",
-    "schema": "A2uiActionCommand",
-    "value": null
+    "name": "ViewNode embed frame refuses a url in place of a host frame name",
+    "schema": "ViewNode",
+    "value": {
+      "type": "embed",
+      "kind": "frame",
+      "source": "https://attacker.example/frame.html",
+      "label": "Applet preview"
+    }
+  },
+  {
+    "name": "ViewNode group child is not a node",
+    "schema": "ViewNode",
+    "value": {
+      "type": "group",
+      "orientation": "column",
+      "children": [
+        {
+          "component": "Column"
+        }
+      ]
+    }
+  },
+  {
+    "name": "ViewNode action carries no label",
+    "schema": "ViewNode",
+    "value": {
+      "type": "action",
+      "actionId": "select-region"
+    }
+  },
+  {
+    "name": "ViewDocument wrong shape",
+    "schema": "ViewDocument",
+    "value": {
+      "schemaVersion": 1,
+      "surfaceId": "deploy-target",
+      "revision": 3,
+      "actions": []
+    }
+  },
+  {
+    "name": "ViewDocument action declares no input schema",
+    "schema": "ViewDocument",
+    "value": {
+      "schemaVersion": 1,
+      "surfaceId": "deploy-target",
+      "revision": 3,
+      "root": {
+        "type": "text",
+        "text": "Ready."
+      },
+      "actions": [
+        {
+          "id": "select-region"
+        }
+      ]
+    }
   },
   {
     "name": "SurfaceUnavailable wrong shape",
@@ -762,81 +824,6 @@
       "schemaVersion": 1,
       "action": "stop",
       "commandId": "stop-1"
-    }
-  },
-  {
-    "name": "iframe masquerading as a2ui",
-    "schema": "A2uiContribution",
-    "value": {
-      "schemaVersion": 1,
-      "kind": "iframe",
-      "slot": "frockbot.application-settings-sections",
-      "artifact": {
-        "contentHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "size": 1,
-        "mediaType": "application/json"
-      },
-      "protocolVersion": "0.9.1",
-      "catalog": {
-        "id": "command-1",
-        "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-      },
-      "actions": []
-    }
-  },
-  {
-    "name": "a2ui trust chrome takeover",
-    "schema": "A2uiContribution",
-    "value": {
-      "schemaVersion": 1,
-      "kind": "a2ui",
-      "slot": "root",
-      "artifact": {
-        "contentHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "size": 1,
-        "mediaType": "application/json"
-      },
-      "protocolVersion": "0.9.1",
-      "catalog": {
-        "id": "command-1",
-        "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-      },
-      "actions": []
-    }
-  },
-  {
-    "name": "a2ui executable artifact",
-    "schema": "A2uiContribution",
-    "value": {
-      "schemaVersion": 1,
-      "kind": "a2ui",
-      "slot": "frockbot.application-settings-sections",
-      "artifact": {
-        "contentHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "size": 1,
-        "mediaType": "application/javascript"
-      },
-      "protocolVersion": "0.9.1",
-      "catalog": {
-        "id": "command-1",
-        "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-      },
-      "actions": []
-    }
-  },
-  {
-    "name": "a2ui action native bridge",
-    "schema": "A2uiActionCommand",
-    "value": {
-      "schemaVersion": 1,
-      "commandId": "command-1",
-      "surfaceId": "command-1",
-      "packageId": "command-1",
-      "generationId": "command-1",
-      "revision": 0,
-      "actionId": "command-1",
-      "input": {},
-      "nativeApi": "clipboard.read"
     }
   },
   {

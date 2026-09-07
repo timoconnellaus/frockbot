@@ -19,8 +19,8 @@ import 'client/bot_sessions.dart';
 import 'client/chat_controller.dart';
 import 'client/plain_store.dart';
 import 'client/transport.dart';
-import 'extensions/catalog.dart';
 import 'extensions/fallback.dart';
+import 'view/sample_page.dart';
 import 'protocol/client_wire.generated.dart' as wire;
 
 void main() {
@@ -410,6 +410,19 @@ class _FrockBotAppState extends State<FrockBotApp> with WidgetsBindingObserver {
               title: const Text('Refresh'),
               onTap: restore,
             ),
+            // A development build can look at the ViewNode renderer before a
+            // plugin produces a document; the shipped app has no such door.
+            if (developmentAuth)
+              ListTile(
+                leading: const Icon(Icons.dashboard_customize_outlined),
+                title: const Text('View sample'),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) =>
+                        ViewSamplePage(store: store, userId: userId!),
+                  ),
+                ),
+              ),
             ListTile(
               leading: const Icon(Icons.settings_outlined),
               title: const Text('Settings'),
@@ -488,16 +501,6 @@ class _FrockBotAppState extends State<FrockBotApp> with WidgetsBindingObserver {
                           AppletDirectoryPage(api: api, userId: userId!),
                     ),
                   ),
-                ),
-              if (const bool.fromEnvironment('NATIVE_ACCEPTANCE'))
-                IconButton(
-                  tooltip: 'Form preview',
-                  onPressed: () => Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (_) => FormPreview(api: api, store: store),
-                    ),
-                  ),
-                  icon: const Icon(Icons.dynamic_form_outlined),
                 ),
             ],
           ),
@@ -937,87 +940,4 @@ class _ChatPaneState extends State<ChatPane> {
     focus.dispose();
     super.dispose();
   }
-}
-
-class FormPreview extends StatefulWidget {
-  final NativeApi api;
-  final LocalStore store;
-  const FormPreview({super.key, required this.api, required this.store});
-  @override
-  State<FormPreview> createState() => _FormPreviewState();
-}
-
-class _FormPreviewState extends State<FormPreview> {
-  bool hostile = false;
-  @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Form preview')),
-    body: SingleChildScrollView(
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        children: [
-          CatalogRegion(
-            document: hostile
-                ? [
-                    {
-                      'id': 'root',
-                      'component': 'Column',
-                      'children': ['root'],
-                    },
-                  ]
-                : deterministicForm,
-            submit: (input) async {
-              final sessionJson = await widget.store.read('session');
-              if (sessionJson == null) {
-                throw const RequestFailure('Sign in to save.');
-              }
-              final user = wire.AuthSessionView.fromJson(
-                jsonDecode(sessionJson),
-              ).userId.value;
-              final key = 'form-command/$user';
-              final saved = await widget.store.read(key);
-              Map<String, dynamic>? prior = saved == null
-                  ? null
-                  : jsonDecode(saved) as Map<String, dynamic>;
-              Future<void> submit(Map<String, dynamic> command) async {
-                final value = await widget.api.request(
-                  '/api/native/qualification-form',
-                  body: command,
-                );
-                if (value is! Map ||
-                    value['schemaVersion'] != 1 ||
-                    value['commandId'] != command['commandId'] ||
-                    value['status'] != 'saved') {
-                  throw const FormatException('Invalid save receipt');
-                }
-              }
-
-              if (prior != null) {
-                // First reconcile any uncertain earlier save, under its old id.
-                await submit(prior);
-                if (jsonEncode(prior['input']) == jsonEncode(input)) return;
-              }
-              final command = <String, dynamic>{
-                'schemaVersion': 1,
-                'commandId': randomId(),
-                'surfaceId': 'qualification',
-                'revision': 1,
-                'input': input,
-              };
-              await widget.store.write(key, jsonEncode(command));
-              await submit(command);
-            },
-          ),
-          TextButton(
-            onPressed: () => setState(() {
-              hostile = !hostile;
-            }),
-            child: Text(
-              hostile ? 'Show sample form' : 'Check unavailable form',
-            ),
-          ),
-        ],
-      ),
-    ),
-  );
 }

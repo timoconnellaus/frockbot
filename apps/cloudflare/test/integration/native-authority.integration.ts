@@ -51,27 +51,3 @@ it("the User owner persists native issuance and revocation, refusing other User 
     status: "refused",
   });
 });
-
-it("the deterministic save replays the durable receipt and rejects cross-User or stale form data", async () => {
-  const userId = freshUserId("native");
-  const stub = env.USER_CONFIGURATIONS.get(
-    env.USER_CONFIGURATIONS.idFromName(userId),
-  );
-  const command = {
-    schemaVersion: 1,
-    commandId: "save-proof",
-    surfaceId: "qualification",
-    revision: 1,
-    input: { name: "Pixel" },
-  };
-  const rpc = { schemaVersion: 1, userId, command };
-  expect(await stub.saveNativeForm(rpc)).toEqual(
-    await stub.saveNativeForm(rpc),
-  );
-  expect(
-    await stub.saveNativeForm({ ...rpc, userId: "another-user" }),
-  ).toMatchObject({ status: "refused" });
-  expect(
-    await stub.saveNativeForm({ ...rpc, command: { ...command, revision: 2 } }),
-  ).toMatchObject({ status: "refused" });
-});

@@ -1999,17 +1999,6 @@ export default {
         auth: gatewayAuth(env, {
           mayCreateAccount: (email) => mayCreateAccount(env, email),
         }),
-        saveNativeForm: (userId, command) => {
-          const stub = env.USER_CONFIGURATIONS.get(
-            env.USER_CONFIGURATIONS.idFromName(userId),
-          );
-          // SAFETY: USER_CONFIGURATIONS is bound to the reviewed UserConfiguration class.
-          const rpc = stub as unknown as Pick<
-            UserConfiguration,
-            "saveNativeForm"
-          >;
-          return rpc.saveNativeForm({ schemaVersion: 1, userId, command });
-        },
         ...(nativeReturnUrisFor(env).length > 0 && env.BETTER_AUTH_SECRET
           ? {
               nativeAuth: createNativeAuth({

@@ -9,7 +9,7 @@ This document is the plan to reach the architecture described in [`architecture.
 |                  | Before                                           | After                                   |
 | ---------------- | ------------------------------------------------ | --------------------------------------- |
 | Packages         | 74, of which 44 plugins                          | ~7 modules                              |
-| Clients          | Vue + Flutter + A2UI                             | Flutter, plus web sign-in and marketing |
+| Clients          | Vue + Flutter + a third UI language              | Flutter, plus web sign-in and marketing |
 | Agent loop       | 1,785 lines, provider I/O and durability braided | ~300-line durable loop over the AI SDK  |
 | Plugin runtime   | cordis, 158 import sites                         | frock-compose                           |
 | Applet authoring | on the User's Computer, via Miniflare            | a cloud build service                   |
@@ -70,7 +70,10 @@ Frock Compose was the last module to be cut. `frock-compose/` is one flat worksp
 
 The Computer is out of the loop entirely. Applets declares no durable root to it, so nothing is mirrored onto a Sprite; the `applets` provisioning phase, the `applet` PATH shim, the unpinned `@frockbot/applet-sdk@latest` install, the two doctor checks and the `applet dev` preview-tab branch are gone, and provisioning is five phases. The SDK lost its CLI and its `bin` with them — the service is the only thing that builds an Applet — and the end-to-end Workspace seed door went the same way, its last caller having been the `dist/` seeding a publish no longer reads. The last cut was 488 insertions against 1,807 deletions; the step as a whole is 7,354 insertions against 2,543 deletions, and what it bought was a build service and a Computer with no Applet-shaped operation left in it.
 
-**9. Flutter to parity, Vue out.** The long pole. One Flutter client, on the phone and on the web — `bot.frockbot.com` is an app behind sign-in, so Flutter Web's first-load cost buys one codebase instead of two. Each surface ported, then its Vue original deleted in the same change. Includes the ViewNode renderer — six node types — which replaces A2UI as the way a plugin renders.
+**9. Flutter to parity, Vue out.** _In progress._ The long pole. One Flutter client, on the phone and on the web — `bot.frockbot.com` is an app behind sign-in, so Flutter Web's first-load cost buys one codebase instead of two. Each surface ported, then its Vue original deleted in the same change. Includes the ViewNode renderer — six node types — which replaces the third UI language as the way a plugin renders.
+
+- _PR 1, done._ The Flutter app compiles for the web. `dart:io` leaves `lib/` except inside `*_io.dart`, and a test keeps it there; four seams pick an implementation by conditional import — HTTP and the socket, the credential, the sign-in door and the durable store. The phone's behaviour and the transport's public API are unchanged, and CI builds `flutter build web`.
+- _PR 4, done._ `ViewNode` and `ViewDocument` are in the client wire schema and rendered by `apps/native/lib/view/` — six node types, the budgets checked before a widget is built, and `embed` naming a host-owned region rather than shipping markup. `PluginDescriptorV1` gains account-scoped `views`. The third UI language went out in the same change: its two Flutter packages, the vendored `0.9.1` spec, the catalog adapter, `FormPreview`, its three wire types and the qualification-form route beneath them — 2,065 lines. Nothing produces a document until the surfaces that use it land, so the renderer's callers are its tests and a development-only sample page.
 
 **10. Narrow the Computer.** Extract Fly from `computer/` and `apps/computer-host` behind the `ComputerHost` interface, so a k8s host is an implementation rather than a rewrite. Step 8 left the host generic — it has no Applet-shaped operation — so this is a substitution. `syncWorkspaceRootNowV1` and the `reconcileRoot` seam beneath it lost their only caller with the Applet publish pull and go out here, with the rest of the narrowing.
 
