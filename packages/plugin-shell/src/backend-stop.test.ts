@@ -1,3 +1,4 @@
+import { shellTestApplicationV1 } from "./backend-application.fixture.js";
 import { describe, expect, test } from "bun:test";
 import type { SessionEvent } from "@frockbot/kernel-contracts";
 import {
@@ -74,6 +75,7 @@ const user: UserSettingsViewV1 = {
 
 function host(storage: MemoryStorage): ShellBotBackendHost {
   return {
+    ...shellTestApplicationV1(),
     state: { storage } as unknown as DurableObjectState,
     env: {
       USER_CONFIGURATIONS: {

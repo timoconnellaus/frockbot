@@ -5,15 +5,33 @@ import {
   botMemoryRootV1,
   createTestMemoryFilesV1,
 } from "@frockbot/plugin-memory";
-import type { FoundationRuntime } from "./runtime.js";
+import clockFeature from "@frockbot/plugin-clock/agent";
+import echoFeature from "@frockbot/plugin-echo/agent";
+import identityFeature from "@frockbot/plugin-identity/agent";
+import foundationProviderFeature from "@frockbot/plugin-provider-foundation/runtime";
+import type { FoundationAgentPackage, FoundationRuntime } from "./runtime.js";
 import { createFoundationRuntime } from "./runtime.js";
 
 const runtimes: FoundationRuntime[] = [];
 const allowEffect = () => Promise.resolve(true);
 
+/**
+ * The Packages a host mounts on every Turn. This runtime composes no list of
+ * its own, so the test names the four it asserts against.
+ */
+function basePackages(): FoundationAgentPackage[] {
+  return [
+    { id: "identity", feature: identityFeature },
+    { id: "provider-foundation", feature: foundationProviderFeature },
+    { id: "echo", feature: echoFeature },
+    { id: "clock", feature: clockFeature },
+  ];
+}
+
 async function createRuntime(): Promise<FoundationRuntime> {
   const runtime = await createFoundationRuntime(undefined, {
     admitEffect: allowEffect,
+    agentPackages: basePackages(),
   });
   runtimes.push(runtime);
   return runtime;
@@ -45,6 +63,7 @@ describe("foundation runtime", () => {
       systemPromptSection:
         "You are Housework.\n\nResearch, marketing, admin.\n\nKeep the household organized.",
       admitEffect: allowEffect,
+      agentPackages: basePackages(),
     });
     runtimes.push(runtime);
     runtime.agent.agent.send("hello");
@@ -107,6 +126,7 @@ describe("foundation runtime", () => {
   test("keeps a manifest-bounded tool out of a chat Turn's model request", async () => {
     const runtime = await createFoundationRuntime(undefined, {
       admitEffect: allowEffect,
+      agentPackages: basePackages(),
     });
     runtimes.push(runtime);
     // The producer is the Composition host: a Capability whose manifest admits
@@ -147,6 +167,7 @@ describe("foundation runtime", () => {
     const runtime = await createFoundationRuntime(undefined, {
       admitEffect: allowEffect,
       turnType: "automation",
+      agentPackages: basePackages(),
     });
     runtimes.push(runtime);
 
@@ -171,6 +192,7 @@ describe("foundation runtime", () => {
       sessionId: "alice:primary",
       admitEffect: allowEffect,
       agentPackages: [
+        ...basePackages(),
         {
           id: "@frockbot/plugin-memory",
           feature: createMemoryRuntimeFeature({

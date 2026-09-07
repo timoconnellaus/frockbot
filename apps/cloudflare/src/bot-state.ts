@@ -3,7 +3,7 @@ import {
   BotStateChannel,
   BOT_STATE_CHANNEL_INTERNAL_PATH,
 } from "./bot-state-channel.js";
-import { createFoundationHostedRuntimePackages } from "@frockbot/application-foundation/runtime";
+import { foundationShellApplicationV1 } from "@frockbot/application-foundation/runtime";
 import {
   computerBotContribution,
   createFoundationBackendContributions,
@@ -451,6 +451,7 @@ export class BotState extends DurableObject<BotStateEnv> {
           backendHost: "bot",
           mountedContributions,
           shell: {
+            ...foundationShellApplicationV1,
             state: this.ctx,
             env: this.backendEnv,
             outboundFetch: this.outboundFetch,
@@ -546,7 +547,7 @@ export class BotState extends DurableObject<BotStateEnv> {
           !flock ||
           !computer ||
           mounted.contributions.length !==
-            backendDescriptorsV1().filter(
+            backendDescriptorsV1.filter(
               (descriptor) => descriptor.host === "bot",
             ).length
         ) {

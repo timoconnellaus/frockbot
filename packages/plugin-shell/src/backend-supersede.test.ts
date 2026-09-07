@@ -1,3 +1,4 @@
+import { shellTestApplicationV1 } from "./backend-application.fixture.js";
 /**
  * What a superseded Turn does to the durable state the Shell owns: how its
  * unsettled effects are classified, what it leaves for the Turn that replaced
@@ -80,6 +81,7 @@ const user: UserSettingsViewV1 = {
 
 function host(storage: MemoryStorage): ShellBotBackendHost {
   return {
+    ...shellTestApplicationV1(),
     state: { storage } as unknown as DurableObjectState,
     env: {
       USER_CONFIGURATIONS: {

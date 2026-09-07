@@ -70,12 +70,7 @@ import {
   decodeCredentialLeaseV1,
   type CredentialLeaseV1,
 } from "@frockbot/connection-core";
-import {
-  FOUNDATION_PACKAGES_V1,
-  FOUNDATION_PACKAGE_VERSION_V1,
-  foundationPackageV1,
-  createFoundationModelRuntimePackage,
-} from "@frockbot/application-foundation/runtime";
+import type { ShellApplicationV1 } from "./backend-runtime.js";
 import {
   applyBotProfilePatchV1,
   configurationCommandFingerprintV1,
@@ -108,10 +103,6 @@ import {
   resolveEffectiveBotModelV1,
   type UserSettingsViewV1,
 } from "@frockbot/configuration-core";
-import {
-  createFoundationEnabledRuntimePackages,
-  createFoundationHostedRuntimePackages,
-} from "@frockbot/application-foundation/runtime";
 import {
   cancelStoredRun,
   completeStoredRun,
@@ -573,7 +564,7 @@ export type CreateBotDurableAuthority = <Snapshot>(
   options: BotDurableAuthorityOptions<Snapshot>,
 ) => BotDurableAuthority<Snapshot>;
 
-export interface ShellBotBackendHost {
+export interface ShellBotBackendHost extends ShellApplicationV1 {
   state: DurableObjectState;
   env: BotStateEnv;
   assertLifecycleActive?(
@@ -629,16 +620,11 @@ export function requirePackageUiToolDeclarationV1(
   return contribution;
 }
 
-/**
- * The deployment's Packages in the shape the configuration resolvers read.
- *
- * A first-party Package's version is the deploy, so every row carries the one
- * deployment version rather than a version of its own.
- */
-function executionPackagesV1() {
-  return FOUNDATION_PACKAGES_V1.map((pkg) => ({
+/** The application's Packages in the shape the configuration resolvers read. */
+function executionPackagesV1(application: ShellApplicationV1) {
+  return application.packages.map((pkg) => ({
     packageId: pkg.id,
-    version: FOUNDATION_PACKAGE_VERSION_V1,
+    version: application.packageVersion,
     settings: [...(pkg.settings ?? [])],
     capabilities: [...(pkg.capabilities ?? [])],
     connectionTypes: [...(pkg.connectionTypes ?? [])],
@@ -648,6 +634,7 @@ function executionPackagesV1() {
 export class ShellBotBackendContribution {
   readonly ctx: DurableObjectState;
   readonly env: BotStateEnv;
+  private readonly application: ShellApplicationV1;
   private readonly lifecycleAdmission?: ShellBotBackendHost["assertLifecycleActive"];
   private readonly outboundFetch?: typeof fetch;
   private readonly configurationActivities = new Map<
@@ -708,6 +695,11 @@ export class ShellBotBackendContribution {
   constructor(host: ShellBotBackendHost) {
     this.ctx = host.state;
     this.env = host.env;
+    this.application = {
+      packages: host.packages,
+      packageVersion: host.packageVersion,
+      runtime: host.runtime,
+    };
     this.lifecycleAdmission = host.assertLifecycleActive;
     this.outboundFetch = host.outboundFetch;
     this.invalidateComputerProjectionFile =
@@ -879,7 +871,7 @@ export class ShellBotBackendContribution {
         schemaVersion: 1,
         userId: identity.userId,
       });
-      const packages = executionPackagesV1();
+      const packages = executionPackagesV1(this.application);
       if (command.values) {
         packageValues = decodeInstalledPackageSettingsPatchV1({
           packageId: command.packageId,
@@ -1821,7 +1813,7 @@ export class ShellBotBackendContribution {
     const effective = resolveEffectiveBotModelV1({
       bot: settings,
       user,
-      packages: executionPackagesV1(),
+      packages: executionPackagesV1(this.application),
     });
     const binding = effective.binding;
     const model =
@@ -4018,7 +4010,7 @@ export class ShellBotBackendContribution {
       schemaVersion: 1,
       userId: identity.userId,
     });
-    const packageDefinitions = executionPackagesV1();
+    const packageDefinitions = executionPackagesV1(this.application);
     const plan = resolveBotExecutionPlanV1({
       bot: settings,
       user,
@@ -4029,7 +4021,7 @@ export class ShellBotBackendContribution {
     // Computer sync below; nothing else reads it.
     const packageRoots = declaredPackageRootsV1({
       installations: user.packages,
-      packages: FOUNDATION_PACKAGES_V1,
+      packages: this.application.packages,
     });
     const readSecret = (name: string) => {
       // SAFETY: Worker secrets are dynamic string bindings not enumerable in Env.
@@ -4069,7 +4061,9 @@ export class ShellBotBackendContribution {
       const installation = user.packages.find(
         (candidate) => candidate.packageId === packageId,
       );
-      const declared = foundationPackageV1(packageId);
+      const declared = this.application.packages.find(
+        (definition) => definition.id === packageId,
+      );
       return resolvePackageSettingValuesV1(
         [...(declared?.settings ?? [])],
         installation?.values,
@@ -4102,7 +4096,7 @@ export class ShellBotBackendContribution {
     // and the prompt section both read it lazily, from inside the Turn.
     const subagentModels: SubagentModelOptionV1[] = [];
     const resolvedAgentPackages: FoundationAgentPackage[] = [
-      ...createFoundationHostedRuntimePackages({
+      ...this.application.runtime.hosted({
         userId: identity.userId,
         readSecret,
         ...(turn
@@ -4327,7 +4321,7 @@ export class ShellBotBackendContribution {
             }
           : {}),
       }),
-      ...(await createFoundationEnabledRuntimePackages(plan, {
+      ...(await this.application.runtime.enabled(plan, {
         userId: identity.userId,
         readSecret,
         authorizeConnection: authorizeEnabledConnection,
@@ -4417,7 +4411,7 @@ export class ShellBotBackendContribution {
     }
     const bindingPackageId = binding.packageId;
     agentPackages.push(
-      createFoundationModelRuntimePackage(binding, {
+      this.application.runtime.model(binding, {
         accountId: identity.userId,
         connectionId: binding.connection.connectionId,
         leaseCredential: (
@@ -4481,6 +4475,8 @@ export class ShellBotBackendContribution {
         }),
       );
     }
+    // Last, so every provider an earlier Package registered is already there.
+    agentPackages.push(...this.application.runtime.base());
     return {
       agentPackages,
       capabilities: structuredClone(plan.capabilities),
@@ -5960,7 +5956,7 @@ export class ShellBotBackendContribution {
     const plan = resolveBotExecutionPlanV1({
       bot: settings,
       user,
-      packages: executionPackagesV1(),
+      packages: executionPackagesV1(this.application),
     });
     return { settings, user, plan };
   }

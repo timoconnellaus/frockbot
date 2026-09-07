@@ -1,3 +1,4 @@
+import { shellTestApplicationV1 } from "./backend-application.fixture.js";
 // The foreground `Task` wait (memory-v2 F4).
 //
 // A `Task {background:false}` that answered "dispatched" the instant anything
@@ -12,7 +13,10 @@ import type {
   TaskRecordV1,
 } from "@frockbot/plugin-subagents/records";
 import { taskKeyV1 } from "@frockbot/plugin-subagents/storage-keys";
-import type { ShellBotBackendHost } from "./backend.js";
+import {
+  ShellBotBackendContribution,
+  type ShellBotBackendHost,
+} from "./backend.js";
 
 const identity = { userId: "user-1", botId: "primary" };
 const TASK_ID = "task-1";
@@ -81,6 +85,7 @@ const user: UserSettingsViewV1 = {
 
 function host(storage: MemoryStorage): ShellBotBackendHost {
   return {
+    ...shellTestApplicationV1(),
     state: { storage } as unknown as DurableObjectState,
     env: {
       USER_CONFIGURATIONS: {
@@ -100,19 +105,8 @@ interface Waiting {
   wait(taskId: string): Promise<TaskOutcomeV1 | undefined>;
 }
 
-/**
- * Exposes the wait and removes its sleep, which is the whole point of it.
- *
- * The class is reached through a dynamic import rather than a top-level one:
- * the Shell's backend and the foundation application import each other, and a
- * static import from a test module reads the class while it is still
- * initializing.
- */
-async function waiting(host: ShellBotBackendHost): Promise<Waiting> {
-  // The application first: it is the half of the cycle that has to finish
-  // initializing before the Shell's class is readable.
-  await import("@frockbot/application-foundation/contributions");
-  const { ShellBotBackendContribution } = await import("./backend.js");
+/** Exposes the wait and removes its sleep, which is the whole point of it. */
+function waiting(host: ShellBotBackendHost): Waiting {
   return new (class extends ShellBotBackendContribution {
     sleeps = 0;
 
@@ -165,7 +159,7 @@ async function fixture(
   stored: TaskRecordV1,
 ): Promise<{ storage: MemoryStorage; contribution: Waiting }> {
   const storage = new MemoryStorage();
-  const contribution = await waiting(host(storage));
+  const contribution = waiting(host(storage));
   await contribution.materializeSettings(identity, { name: "Primary" });
   storage.values.set(taskKeyV1(stored.taskId), structuredClone(stored));
   return { storage, contribution };
