@@ -1,5 +1,7 @@
 import { decodeProtocol } from "@frockbot/core/protocol-schemas";
 import { settingsDocumentV1 } from "@frockbot/app/settings/document";
+import { connectionsDocumentV1 } from "@frockbot/app/settings/connections-document";
+import { pluginsDocumentV1 } from "@frockbot/app/settings/plugins-document";
 import { nativeFallbackResponse } from "./native-fallback.js";
 import { accountIsAdmitted } from "./account-admission.js";
 import { isNativeAuthPath, readNativeJsonBody } from "./native-auth.js";
@@ -803,14 +805,40 @@ export function createGateway(dependencies: GatewayDependencies) {
     if (url.pathname === "/api/settings/connections") {
       if (request.method !== "GET") return jsonError(405, "method not allowed");
       try {
-        const frame = await dependencies
-          .userConfigurationFor(userId)
-          .readConnectionsFrame({ schemaVersion: 1, userId });
-        return Response.json(decodeProtocol("ConnectionsFrame", frame), {
-          headers: { "cache-control": "no-store" },
-        });
+        const frame = decodeProtocol(
+          "ConnectionsFrame",
+          await dependencies
+            .userConfigurationFor(userId)
+            .readConnectionsFrame({ schemaVersion: 1, userId }),
+        );
+        return Response.json(
+          url.searchParams.get("as") === "document"
+            ? connectionsDocumentV1(frame)
+            : frame,
+          { headers: { "cache-control": "no-store" } },
+        );
       } catch {
         return jsonError(503, "Connections are temporarily unavailable.");
+      }
+    }
+
+    if (url.pathname === "/api/settings/plugins") {
+      if (request.method !== "GET") return jsonError(405, "method not allowed");
+      try {
+        const frame = decodeProtocol(
+          "PluginsFrame",
+          await dependencies
+            .userConfigurationFor(userId)
+            .readPluginsFrame({ schemaVersion: 1, userId }),
+        );
+        return Response.json(
+          url.searchParams.get("as") === "document"
+            ? pluginsDocumentV1(frame)
+            : frame,
+          { headers: { "cache-control": "no-store" } },
+        );
+      } catch {
+        return jsonError(503, "Plugins are temporarily unavailable.");
       }
     }
 

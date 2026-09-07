@@ -1,6 +1,7 @@
 import type {
   SettingsFrame,
   ConnectionsFrame,
+  PluginsFrame,
   SettingsChangeCommand,
 } from "@frockbot/core/protocol-schemas";
 import {
@@ -467,6 +468,10 @@ export interface UserConfigurationBinding {
     schemaVersion: 1;
     userId: string;
   }): Promise<ConnectionsFrame>;
+  readPluginsFrame(request: {
+    schemaVersion: 1;
+    userId: string;
+  }): Promise<PluginsFrame>;
   readSettingsFrame(
     request: UserConfigurationReadRpcV1 & { home: "application" | "models" },
   ): Promise<SettingsFrame>;

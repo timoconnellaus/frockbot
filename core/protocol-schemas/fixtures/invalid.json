@@ -1412,6 +1412,25 @@
     }
   },
   {
+    "name": "PluginsFrame rejects an unknown enablement state",
+    "schema": "PluginsFrame",
+    "value": {
+      "schemaVersion": 1,
+      "ownerId": "tim",
+      "revision": 3,
+      "plugins": [
+        {
+          "packageId": "provider-ollama-cloud",
+          "version": "1.0.0",
+          "displayName": "Ollama Cloud",
+          "summary": "Models",
+          "state": "half-on",
+          "home": "models"
+        }
+      ]
+    }
+  },
+  {
     "name": "ConnectionsFrame refuses credential metadata",
     "schema": "ConnectionsFrame",
     "value": {

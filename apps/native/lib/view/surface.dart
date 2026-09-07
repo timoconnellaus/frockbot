@@ -1,0 +1,192 @@
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+
+import '../client/transport.dart';
+import '../protocol/client_wire.generated.dart' as wire;
+import '../shell/semantics.dart';
+import '../theme/states.dart';
+import 'action.dart';
+import 'document.dart';
+import 'embed.dart';
+
+/// What a page over `ViewDocumentView` needs from whoever owns the read.
+///
+/// A surface is a document, whether it is busy, why it could not be shown, and
+/// where one action lands. Everything else — the controller per revision, the
+/// pull to refresh, the empty state, the chrome — is the same on every such
+/// page, and is written once below.
+abstract class ViewSurfaceController extends ChangeNotifier {
+  wire.ViewDocument? get document;
+  bool get busy;
+  String? get message;
+  String get surfaceId;
+  Future<void> load();
+  Future<Map<String, Object?>> dispatch(Map<String, Object?> command);
+}
+
+/// A host over `ViewDocumentView`, with the surface's own chrome.
+class ViewSurfacePage extends StatefulWidget {
+  final String title;
+  final ViewSurfaceController controller;
+  final LocalStore store;
+  final String userId;
+  final String documentId;
+  final String refreshId;
+  final Map<String, ViewFieldBuilder> fields;
+
+  const ViewSurfacePage({
+    super.key,
+    required this.title,
+    required this.controller,
+    required this.store,
+    required this.userId,
+    required this.documentId,
+    required this.refreshId,
+    this.fields = const {},
+  });
+
+  @override
+  State<ViewSurfacePage> createState() => _ViewSurfacePageState();
+}
+
+class _ViewSurfacePageState extends State<ViewSurfacePage>
+    with WidgetsBindingObserver {
+  ViewController? view;
+  int? shown;
+  bool reloadWanted = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    widget.controller.addListener(_adopt);
+    unawaited(widget.controller.load());
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    widget.controller.removeListener(_adopt);
+    view?.removeListener(_afterAction);
+    view?.dispose();
+    widget.controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState phase) {
+    if (phase == AppLifecycleState.resumed) {
+      unawaited(widget.controller.load());
+    }
+  }
+
+  /// One controller per revision: a change moves the revision on, and the
+  /// values a person had typed against the previous one — a credential above
+  /// all — are no longer answers to it.
+  void _adopt() {
+    final document = widget.controller.document;
+    if (!mounted) return;
+    if (document == null || document.revision == shown) {
+      setState(() {});
+      return;
+    }
+    view?.removeListener(_afterAction);
+    view?.dispose();
+    final next = ViewController(
+      store: widget.store,
+      userId: widget.userId,
+      surfaceId: widget.controller.surfaceId,
+      revision: document.revision,
+      dispatch: _dispatch,
+    );
+    next.addListener(_afterAction);
+    setState(() {
+      shown = document.revision;
+      view = next;
+    });
+    unawaited(next.restore());
+  }
+
+  /// A change the owner accepted moves the revision, so the document is read
+  /// again — but only once the command that moved it has finished being
+  /// confirmed, so the controller is never replaced under its own dispatch.
+  void _afterAction() {
+    if (!mounted) return;
+    setState(() {});
+    if (!reloadWanted || view!.busy || view!.pending != null) return;
+    reloadWanted = false;
+    unawaited(widget.controller.load());
+  }
+
+  Future<Map<String, Object?>> _dispatch(Map<String, Object?> command) async {
+    final receipt = await widget.controller.dispatch(command);
+    // Anything the owner acted on can have moved the revision, refused or
+    // applied: the document is the authority on what happened, so it is read
+    // again either way.
+    reloadWanted = true;
+    return receipt;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = widget.controller;
+    final document = controller.document;
+    final view = this.view;
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(widget.title),
+        actions: [
+          identified(
+            widget.refreshId,
+            IconButton(
+              tooltip: 'Refresh ${widget.title.toLowerCase()}',
+              onPressed: controller.busy ? null : controller.load,
+              icon: const Icon(Icons.refresh_rounded),
+            ),
+          ),
+        ],
+      ),
+      body: SafeArea(
+        top: false,
+        child: document == null || view == null
+            ? controller.busy
+                  ? FrockLoading(label: 'Loading ${widget.title.toLowerCase()}')
+                  : FrockEmptyState(
+                      icon: Icons.cloud_off_rounded,
+                      title: '${widget.title} couldn’t load',
+                      detail:
+                          controller.message ??
+                          'Check your connection and try again.',
+                      action: 'Try again',
+                      onAction: controller.load,
+                    )
+            : RefreshIndicator(
+                onRefresh: controller.load,
+                child: ListView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
+                  children: [
+                    Center(
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 680),
+                        child: identified(
+                          widget.documentId,
+                          ViewDocumentView(
+                            key: ValueKey(
+                              '${controller.surfaceId}.${document.revision}',
+                            ),
+                            document: document,
+                            controller: view,
+                            fields: widget.fields,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+      ),
+    );
+  }
+}

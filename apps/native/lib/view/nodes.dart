@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 
 import '../protocol/client_wire.generated.dart' as wire;
+import '../shell/semantics.dart';
 import 'document.dart';
 import 'embed.dart';
 
@@ -76,35 +77,38 @@ class _ViewGroupNodeState extends State<ViewGroupNode> {
             children: children,
           );
     if (title == null) return body;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        InkWell(
-          onTap: widget.node.containsKey('collapsed')
-              ? () => setState(() => open = !open)
-              : null,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Semantics(
-                    header: true,
-                    child: Text(
-                      title,
-                      style: Theme.of(context).textTheme.titleMedium,
+    return identified(
+      viewGroupIdentifierV1(title),
+      Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          InkWell(
+            onTap: widget.node.containsKey('collapsed')
+                ? () => setState(() => open = !open)
+                : null,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Semantics(
+                      header: true,
+                      child: Text(
+                        title,
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
                     ),
                   ),
-                ),
-                if (widget.node.containsKey('collapsed'))
-                  Icon(open ? Icons.expand_less : Icons.expand_more),
-              ],
+                  if (widget.node.containsKey('collapsed'))
+                    Icon(open ? Icons.expand_less : Icons.expand_more),
+                ],
+              ),
             ),
           ),
-        ),
-        if (open) body,
-      ],
+          if (open) body,
+        ],
+      ),
     );
   }
 }
@@ -118,6 +122,7 @@ class ViewFieldNode extends StatelessWidget {
     final field = wire.SettingField.fromJson(node['field']);
     final scope = ViewScope.of(context);
     final id = field.id.value;
+    if (field.kind == 'secret') scope.controller.secrets.add(id);
     // The plugin's value is the seed; after that the person owns it.
     final value = scope.controller.values.putIfAbsent(
       id,
@@ -136,6 +141,20 @@ class ViewFieldNode extends StatelessWidget {
         enabled ? (next) => scope.controller.change(id, next) : null,
       );
     }
+    return identified(
+      viewFieldIdentifierV1(id),
+      _input(context, field, id, value, enabled, scope),
+    );
+  }
+
+  Widget _input(
+    BuildContext context,
+    wire.SettingField field,
+    String id,
+    Object? value,
+    bool enabled,
+    ViewScope scope,
+  ) {
     final decoration = InputDecoration(
       labelText: field.label,
       helperText: field.hint,
@@ -151,16 +170,27 @@ class ViewFieldNode extends StatelessWidget {
       );
     }
     if (field.kind == 'select') {
+      // Choices are keyed by their encoded value, which both de-duplicates two
+      // choices that mean the same thing and answers the only question the
+      // dropdown asks: is the current value one of them? A setting that has
+      // never been set is not, and the field shows it as unset rather than
+      // refusing to build.
+      final choices = <String, String>{
+        for (final choice in field.choices ?? const <wire.SettingChoice>[])
+          jsonEncode(choice.value.value): choice.label,
+      };
+      final current = jsonEncode(value);
       return DropdownButtonFormField<String>(
-        initialValue: jsonEncode(value),
+        initialValue: choices.containsKey(current) ? current : null,
         decoration: decoration,
         isExpanded: true,
+        hint: const Text('Not set'),
         items: [
-          for (final choice in field.choices ?? const <wire.SettingChoice>[])
+          for (final choice in choices.entries)
             DropdownMenuItem(
-              value: jsonEncode(choice.value.value),
+              value: choice.key,
               child: Text(
-                choice.label,
+                choice.value,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
               ),
@@ -173,6 +203,21 @@ class ViewFieldNode extends StatelessWidget {
                 }
               }
             : null,
+      );
+    }
+    // A secret is never seeded and never read back: the document carries no
+    // value for it, the widget starts empty however often it rebuilds, and the
+    // only place the typed characters go is the action input that carries them
+    // to the credential route.
+    if (field.kind == 'secret') {
+      return TextFormField(
+        enabled: enabled,
+        obscureText: true,
+        autocorrect: false,
+        enableSuggestions: false,
+        decoration: decoration,
+        onChanged: (next) =>
+            scope.controller.change(id, next.isEmpty ? null : next),
       );
     }
     final number = field.kind == 'number';
@@ -209,19 +254,22 @@ class ViewActionNode extends StatelessWidget {
             scope.controller.pending != null
         ? null
         : () => scope.controller.submit(node, schema);
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: switch (node['style']) {
-        'primary' => FilledButton(onPressed: press, child: Text(label)),
-        'danger' => OutlinedButton(
-          onPressed: press,
-          style: OutlinedButton.styleFrom(
-            foregroundColor: Theme.of(context).colorScheme.error,
+    return identified(
+      viewActionIdentifierV1(node['actionId']! as String),
+      Align(
+        alignment: Alignment.centerLeft,
+        child: switch (node['style']) {
+          'primary' => FilledButton(onPressed: press, child: Text(label)),
+          'danger' => OutlinedButton(
+            onPressed: press,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: Theme.of(context).colorScheme.error,
+            ),
+            child: Text(label),
           ),
-          child: Text(label),
-        ),
-        _ => OutlinedButton(onPressed: press, child: Text(label)),
-      },
+          _ => OutlinedButton(onPressed: press, child: Text(label)),
+        },
+      ),
     );
   }
 }

@@ -101,3 +101,62 @@ abstract final class SettingsIds {
 
   static String modelOption(String label) => 'model-option-$label';
 }
+
+/// Connectors: the accounts a User authorizes for every Bot they own.
+///
+/// The names follow what `connect-ollama.e2e.ts` selects on — the provider
+/// card, the connect form's three fields, the connect button and the account
+/// row's state line — so that spec can be rewritten against Flutter Web with
+/// the same intent rather than re-derived from the widgets. A provider's own
+/// controls are named by the projected field ids, which is the one place the
+/// document's conventions surface in a selector.
+abstract final class ConnectorIds {
+  static const document = 'connections-document';
+  static const refresh = 'connections-refresh';
+
+  /// The connect form of the provider at `index`, field by field. These are
+  /// the projected ids from `connectionsDocumentV1`.
+  static String connectLabel(int index) =>
+      viewFieldIdentifierV1('c$index.label');
+  static String connectKey(int index) => viewFieldIdentifierV1('c$index.key');
+  static String connectSetting(int index, String setting) =>
+      viewFieldIdentifierV1('c$index.s.$setting');
+
+  static String group(String title) => viewGroupIdentifierV1(title);
+  static String action(String actionId) => viewActionIdentifierV1(actionId);
+}
+
+/// A `field` node's identifier: the id the document gave it.
+String viewFieldIdentifierV1(String id) => 'view-field-$id';
+
+/// An `action` node's identifier. Several nodes may name one declared action —
+/// a row's Disconnect is the same action as the next row's — so a spec that
+/// means one of them scopes to the group it is in.
+String viewActionIdentifierV1(String actionId) => 'view-action-$actionId';
+
+/// A titled `group` node's identifier.
+///
+/// A title is prose a projection wrote, so it is slugged rather than used as
+/// it stands: a selector should not have to know how a Package spelled its own
+/// name. Two groups that slug the same are two matches, which is what a spec
+/// scoping to one of them already has to handle.
+String viewGroupIdentifierV1(String title) =>
+    'view-group-${title.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '-').replaceAll(RegExp(r'^-|-$'), '')}';
+
+/// Plugins: what a User has, and whether it is on.
+///
+/// `defaults.e2e.ts` proves a fresh account needs none of this — no model
+/// prompt, no plugin to enable — so what it selects on here is absence. The
+/// names exist so a spec can say so.
+abstract final class PluginIds {
+  static const document = 'plugins-document';
+  static const refresh = 'plugins-refresh';
+  static const profileEntry = 'profile-plugins';
+}
+
+/// Admin: the deployment's own surface, reachable only by an admin.
+abstract final class AdminIds {
+  static const refresh = 'admin-refresh';
+  static const signups = 'admin-signups';
+  static const profileEntry = 'profile-admin';
+}

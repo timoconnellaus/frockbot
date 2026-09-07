@@ -13,6 +13,7 @@ export {
   type PackageConfigurationHomeV1,
   type ConfigurationHomeFactsV1,
 } from "./configuration-home.js";
+export { modelRuntimeLabel, topbarModelLabelV1 } from "./model-presentation.js";
 import {
   decodeInstalledPackageSettingsPatchV1,
   decodeInstalledPackageSettingIdsV1,

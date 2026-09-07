@@ -76,6 +76,11 @@ class ViewController extends ChangeNotifier {
   final int revision;
   final ViewActionDispatch dispatch;
   final values = <String, Object?>{};
+
+  /// Field ids holding a credential. A secret is not part of the document, so
+  /// it is dropped the moment the command that carried it has been answered
+  /// rather than kept around for a second press.
+  final secrets = <String>{};
   Map<String, Object?>? pending;
   bool busy = false;
   String? message;
@@ -150,6 +155,9 @@ class ViewController extends ChangeNotifier {
       } else {
         await store.delete(_key);
         pending = null;
+        for (final id in secrets) {
+          values.remove(id);
+        }
         message = receipt['status'] == 'applied'
             ? 'Done.'
             : 'That action couldn’t be completed. Refresh and try again.';

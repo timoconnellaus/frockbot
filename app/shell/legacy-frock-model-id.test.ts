@@ -5,7 +5,7 @@ import {
   resolveBotModelBindingV1,
   type UserSettingsViewV1,
 } from "@frockbot/core/configuration";
-import { modelRuntimeLabel } from "./client/model-presentation.js";
+import { modelRuntimeLabel } from "@frockbot/core/configuration";
 
 /**
  * Bots bound before the provider was renamed carry `@flock/auto` in durable
