@@ -122,7 +122,9 @@ Map<String, String> turnAnchors(List<TranscriptLine> lines) {
 List<TranscriptLine> orderTranscript(List<TranscriptLine> lines, String now) {
   final anchors = turnAnchors(lines);
   String keyOf(TranscriptLine line) =>
-      (line.role == LineRole.system ? line.at : anchors[line.runId] ?? line.at) ??
+      (line.role == LineRole.system
+          ? line.at
+          : anchors[line.runId] ?? line.at) ??
       now;
   final indexed = [
     for (var index = 0; index < lines.length; index++) (index, lines[index]),
@@ -439,6 +441,43 @@ List<TranscriptLine> projectRuns(List<Map<String, dynamic>> runs) {
           ),
         );
     }
+  }
+  return lines;
+}
+
+/// What a compaction says. The summary itself is deliberately not on the wire:
+/// every Turn it covers is still readable, unchanged, immediately above this
+/// line, and the summary is what the model carries rather than what a person
+/// reads.
+const compactedAnnouncementText =
+    'Earlier messages are now carried as a summary. They are all still here to read.';
+
+/// Projects the conversation's announcements as system lines.
+///
+/// They belong to the Session rather than to a Turn, and they carry the
+/// timestamp of the place they belong — a compaction is dated at the end of
+/// the range it covers, not when the summariser ran — so `orderTranscript`
+/// seats each one between the Turns it happened between.
+List<TranscriptLine> projectAnnouncements(List<Object?> announcements) {
+  final lines = <TranscriptLine>[];
+  for (final value in announcements) {
+    if (value is! Map) continue;
+    final announcement = value.cast<String, Object?>();
+    final id = announcement['announcementId'];
+    if (id is! String) continue;
+    final renamed = announcement['type'] == 'bot/renamed';
+    lines.add(
+      TranscriptLine(
+        id: id,
+        runId: id,
+        role: LineRole.system,
+        text: renamed
+            ? 'Renamed to ${announcement['to']} by ${announcement['namedBy']}'
+            : compactedAnnouncementText,
+        at: announcement['at'] as String?,
+        status: LineStatus.completed,
+      ),
+    );
   }
   return lines;
 }

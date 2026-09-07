@@ -305,6 +305,15 @@ Screens (no router; `MaterialApp(home:)` plus `Navigator.push`):
   document, plus the controller that carries enablement to the settings route
 - `AdminPage` — `lib/admin/page.dart`: the deployment's signups switch, over
   `/api/admin/policy`
+- `RoutinesView` — `lib/routines/page.dart`: what a Bot does on its own and
+  what it left behind, in the `right-panel` slot beside Bot settings and a page
+  on the phone. `RoutineRunsPage` (`lib/routines/runs.dart`) is one Routine's
+  firings, and one firing opens on the Work view.
+- `AuditPage` — `lib/audit/page.dart`: every effect a Bot performed, filtered
+  by kind, with an audited effect's Turn opening on the Work view
+- `SearchOverlay` — `lib/search/overlay.dart` over `lib/search/controller.dart`:
+  the backend index across every Bot, debounced, with each of its four states
+  named
 - `AppletDirectoryPage` → `AppletPage` — `lib/extensions/fallback.dart:77`, `:157`
 - `ViewSamplePage` — `lib/view/sample_page.dart:117`, reachable only from a `--dart-define=FROCKBOT_DEV_AUTH=true` build
 
@@ -323,7 +332,7 @@ Auth is PKCE in the system browser (`lib/client/auth.dart:17`), returning over a
 
 WebView is used in one place, `AppletPage` (`lib/extensions/fallback.dart:157-465`), loading the anonymous bootstrap at `ui.bot.frockbot.com/native-fallback` (server side `apps/cloudflare/src/native-fallback.ts:34`). It never receives the native session.
 
-**Capability gap.** Present in web, absent in native: Bot creation, starting a conversation, sheep recipe editing, routines, Bot templates, registered machines, the Computer overlay, and package iframe entries. Native search reads the Bot list this client already holds rather than the backend search route. Present in native, absent in web: a connector's accounts and a model provider's on one surface rather than two.
+**Capability gap.** Present in web, absent in native: Bot creation, sheep recipe editing, writing a Routine and its webhook key, Bot templates, registered machines, the Computer overlay, and package iframe entries. Present in native, absent in web: a connector's accounts and a model provider's on one surface rather than two.
 
 Present in native, absent in web: a durable offline store of directory, transcripts and drafts; inbox as a first-class screen; Bot archive, restore and delete UI with composition-generation and audit detail; deep-link-to-Bot; PKCE system-browser sign-in; tool receipts on a Work view rather than inside the thread.
 
@@ -387,6 +396,61 @@ empty however often it rebuilds; and the typed characters travel only on the
 action input that carries them to the credential route, after which
 `ViewController` drops them. Nothing about a credential is ever in a document
 the server sent.
+
+**Routines and Audit, the same way again.** Two more projections in that
+family, both reached with `?as=document`:
+
+- `app/routines/routines-document.ts` over a `RoutinesFrame`
+  (`GET /api/bots/:botId/routines`, the one route in that group that takes a
+  query parameter at all). The frame is the two reads the Vue section made
+  separately — the Routines a Bot holds and the completion inbox the header
+  badge counts — because a client that had to ask twice could show a list and
+  a badge that disagreed. Five action kinds: three Routine commands the route
+  already takes, the inbox command on the inbox route, and the run log, which
+  is navigation and belongs to no route.
+- `app/audit/audit-document.ts` over an `AuditFrame` (`GET /api/audit`). Four
+  kinds: the filter and the page, which the host owns because the host owns
+  the read; the rebuild command; and opening an audited effect's Turn on the
+  Work view. The projection infers nothing — an effect whose outcome the
+  durable log does not know is drawn as "Outcome unknown" in the same place a
+  success would be.
+
+Neither frame carries a revision the way `SettingsFrame` does, and neither
+command fences on one: a Routine is its own durable record, so an unrelated
+edit must not make a Routine write conflict, and an audit page is a projection
+of facts the Bots already hold. Each projection derives a revision from its own
+bytes instead — FNV-1a over what the document says — so `ViewSurfacePage`
+adopts a fresh controller exactly when what it is showing has changed and keeps
+the one it has when nothing did.
+
+The `right-panel` region now shows one entry at a time rather than stacking
+every registered builder: an entry registers with a label, the region draws a
+selector over them, and `ViewSurfacePage`'s `chrome` flag is off inside it
+because the region already carries the title. On the phone each entry is a page.
+
+**The rest of PR 8.** The completions badge is `RoutineInboxBadge` in the
+`header-actions` region, matching `RoutineInboxBadge.vue`: a Routine firing has
+no `send_to_user` and its Turn is filtered out of the visible transcript, so a
+count is the only place a completion becomes visible. "Mark all read" means the
+entries the document carried — an empty `entryIds` on the wire acknowledges
+everything, including a firing that landed a second ago and has never been on
+screen.
+
+Search is `lib/search/`, over `GET /api/search`, and replaces the Bot-list
+`SearchDelegate` the shell cut left, which could only match a name the sidebar
+already held. Every state is named — nothing typed, nothing found, rebuilding,
+truncated — and a chosen hit opens its Bot and brings its Turn into view;
+`ChatController.focusRunId` carries that as far as the loaded page reaches, and
+a Turn further back is simply absent rather than pretended at.
+
+"New conversation" sits in the conversation header beside the picker
+(`BotSession.startConversation`). A Bot mid-Turn refuses with its reason, said
+where the press was. The Session's announcements — a rename, a compaction —
+are `LineRole.system` lines projected by `projectAnnouncements`; the `/turns`
+route already carried them (`projectClientAnnouncementsV1`) and no Flutter
+client read them. `orderTranscript` already seated a system line by its own
+timestamp, which is why a compaction marker lands between the Turns it covers
+and the first verbatim one.
 
 ### ViewNode — how a plugin renders
 

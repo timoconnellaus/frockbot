@@ -443,4 +443,69 @@ void main() {
       );
     });
   });
+
+  group('the conversation\'s own announcements', () {
+    test('a rename and a compaction each become one system line', () {
+      final lines = projectAnnouncements([
+        {
+          'type': 'bot/renamed',
+          'announcementId': 'announcement-3',
+          'at': '2026-09-05T12:19:30.000Z',
+          'from': 'Scout',
+          'to': 'Test',
+          'namedBy': 'user',
+        },
+        {
+          'type': 'conversation/compacted',
+          'announcementId': 'compaction-9',
+          'at': '2026-09-05T12:18:00.000Z',
+          'throughTurn': 4,
+        },
+      ]);
+      expect(lines.map((line) => line.role), everyElement(LineRole.system));
+      expect(lines.first.text, 'Renamed to Test by user');
+      // The summary itself is never on the wire: every Turn it covers is
+      // still readable, unchanged, immediately above the line.
+      expect(lines.last.text, compactedAnnouncementText);
+      expect(lines.map((line) => line.id), ['announcement-3', 'compaction-9']);
+    });
+
+    test('a marker is seated among the Turns it happened between', () {
+      expect(
+        thread([
+          line(
+            runId: 'run-a',
+            role: LineRole.user,
+            text: 'first',
+            at: '2026-09-05T12:19:00.000Z',
+          ),
+          line(
+            runId: 'run-b',
+            role: LineRole.user,
+            text: 'second',
+            at: '2026-09-05T12:20:00.000Z',
+          ),
+          ...projectAnnouncements([
+            {
+              'type': 'conversation/compacted',
+              'announcementId': 'compaction-1',
+              'at': '2026-09-05T12:19:30.000Z',
+              'throughTurn': 1,
+            },
+          ]),
+        ]),
+        ['user: first', 'system: $compactedAnnouncementText', 'user: second'],
+      );
+    });
+
+    test('an announcement this client cannot read is skipped, not thrown', () {
+      expect(
+        projectAnnouncements([
+          'nonsense',
+          {'type': 'bot/renamed'},
+        ]),
+        isEmpty,
+      );
+    });
+  });
 }

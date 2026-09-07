@@ -154,6 +154,59 @@ abstract final class PluginIds {
   static const profileEntry = 'profile-plugins';
 }
 
+/// Routines: what a Bot does on its own, and what it left behind.
+///
+/// The names follow what `routines.e2e.ts` selects on — the section, a
+/// Routine's card, its controls and the delete confirmation — so that spec can
+/// be rewritten against Flutter Web with the same intent. The completions
+/// badge and its drawer follow `RoutineInboxBadge.vue`: a count, a trigger and
+/// one acknowledgement per entry.
+abstract final class RoutineIds {
+  static const document = 'routines-document';
+  static const refresh = 'routines-refresh';
+  static const panel = 'routines-panel';
+  static const panelToggle = 'routines-panel-toggle';
+  static const inboxBadge = 'routine-inbox-badge';
+  static const inboxDrawer = 'routine-inbox-drawer';
+  static const runLog = 'routine-run-log';
+  static const confirmDelete = 'routine-delete-confirm';
+
+  static String run(String runId) => 'routine-run-$runId';
+  static String action(String actionId) => viewActionIdentifierV1(actionId);
+}
+
+/// Audit: every effect a Bot performed, and what the log can and cannot say.
+abstract final class AuditIds {
+  static const document = 'audit-document';
+  static const refresh = 'audit-refresh';
+  static const recoveryEntry = 'recovery-audit-entry';
+}
+
+/// Search: every conversation this account has, and the Bots that had them.
+///
+/// The overlay replaces the Bot-list `SearchDelegate` the shell cut left, so
+/// the sidebar's own trigger keeps its name and everything below it is new.
+abstract final class SearchIds {
+  static const trigger = ShellIds.sidebarSearch;
+  static const overlay = 'search-overlay';
+  static const field = 'search-field';
+  static const rebuild = 'search-rebuild';
+  static const includeArchived = 'search-include-archived';
+  static const includeTools = 'search-include-tools';
+  static const note = 'search-note';
+
+  static String group(String botId) => 'search-group-$botId';
+  static String hit(String runId) => 'search-hit-$runId';
+}
+
+/// Conversations: the one a Bot is holding, and the ones it has put down.
+abstract final class ConversationIds {
+  static const newConversation = 'new-conversation';
+  static const picker = 'conversation-picker';
+
+  static String option(String conversationId) => 'conversation-$conversationId';
+}
+
 /// Admin: the deployment's own surface, reachable only by an admin.
 abstract final class AdminIds {
   static const refresh = 'admin-refresh';

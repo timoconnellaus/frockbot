@@ -23,6 +23,7 @@ import {
   type AuditRebuildReceiptV1,
   type ClientAuditPageV1,
 } from "./shared.js";
+import { auditDocumentV1 } from "./audit-document.js";
 import { defineGatewayContribution } from "@frockbot/core/contracts/contributions";
 
 export interface AuditGatewayHost {
@@ -39,7 +40,16 @@ export interface AuditBackendRouteContribution {
   ): Promise<Response | undefined>;
 }
 
-const ALLOWED_PARAMS = new Set(["botId", "kind", "target", "before", "limit"]);
+const ALLOWED_PARAMS = new Set([
+  "botId",
+  "kind",
+  "target",
+  "before",
+  "limit",
+  // Not part of the query: it asks for the same page in the vocabulary the
+  // host renders every plugin view in, and is stripped before decoding.
+  "as",
+]);
 
 /** The query string, decoded into the exact DTO. */
 export function decodeAuditRequestQueryV1(url: URL): AuditQueryV1 {
@@ -128,8 +138,26 @@ export function createAuditBackendContribution(
             { status: 405 },
           );
         }
+        const query = decodeAuditRequestQueryV1(url);
+        const page = await host.readAudit(userId, query);
+        // The page is what this route produces; `as=document` asks for the
+        // same entries as a `ViewDocument`. Nothing else about the route
+        // changes, so a client that wants the page keeps getting one.
+        if (url.searchParams.get("as") !== "document") {
+          return Response.json(page);
+        }
         return Response.json(
-          await host.readAudit(userId, decodeAuditRequestQueryV1(url)),
+          auditDocumentV1({
+            schemaVersion: 1,
+            botId: query.botId ?? "",
+            entries: page.entries,
+            total: page.total,
+            indexState: page.indexState,
+            ...(query.kind === undefined ? {} : { kind: query.kind }),
+            ...(page.page.nextCursor === undefined
+              ? {}
+              : { nextCursor: page.page.nextCursor }),
+          }),
         );
       } catch (error) {
         return errorResponse(error);

@@ -17,7 +17,7 @@ import 'transcript_model.dart';
 
 export 'transcript_model.dart';
 
-class TranscriptView extends StatelessWidget {
+class TranscriptView extends StatefulWidget {
   final List<TranscriptLine> lines;
 
   /// The message the person has sent but the backend has not confirmed. It is
@@ -35,6 +35,11 @@ class TranscriptView extends StatelessWidget {
   final void Function(String url)? onOpenLink;
   final VoidCallback? onOpenSettings;
   final String storageKey;
+
+  /// A Turn the reader asked to be taken to — a search hit. It is brought into
+  /// view and marked, once. A Turn further back than the loaded page is simply
+  /// not here, and the thread says nothing rather than pretending to scroll.
+  final String? focusRunId;
   const TranscriptView({
     super.key,
     required this.lines,
@@ -48,17 +53,65 @@ class TranscriptView extends StatelessWidget {
     this.onRetryTurn,
     this.onOpenLink,
     this.onOpenSettings,
+    this.focusRunId,
   });
+
+  @override
+  State<TranscriptView> createState() => _TranscriptViewState();
+}
+
+class _TranscriptViewState extends State<TranscriptView> {
+  final GlobalKey focusKey = GlobalKey();
+  String? focused;
+
+  String? get pendingText => widget.pendingText;
+  bool get loading => widget.loading;
+  bool get hasEarlier => widget.hasEarlier;
+  ApprovalsController? get approvals => widget.approvals;
+  Future<void> Function({bool older}) get onRefresh => widget.onRefresh;
+  void Function(TranscriptLine line) get onOpenRun => widget.onOpenRun;
+  void Function(TranscriptLine line)? get onRetryTurn => widget.onRetryTurn;
+  void Function(String url)? get onOpenLink => widget.onOpenLink;
+  VoidCallback? get onOpenSettings => widget.onOpenSettings;
+  String get storageKey => widget.storageKey;
 
   @override
   Widget build(BuildContext context) {
     final now = DateTime.now();
-    final ordered = orderTranscript(lines, now.toUtc().toIso8601String());
+    final ordered = orderTranscript(
+      widget.lines,
+      now.toUtc().toIso8601String(),
+    );
     final drain = supersedeDrainState(ordered, now);
+    final target = widget.focusRunId;
+    var marked = false;
     final rows = <Widget>[];
     for (final line in ordered) {
-      final widget = _row(context, line, drain);
-      if (widget != null) rows.add(widget);
+      final row = _row(context, line, drain);
+      if (row == null) continue;
+      if (target != null && !marked && line.runId == target) {
+        marked = true;
+        rows.add(
+          Container(
+            key: focusKey,
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.primary
+                  .withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: row,
+          ),
+        );
+        continue;
+      }
+      rows.add(row);
+    }
+    if (marked && focused != target) {
+      focused = target;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final box = focusKey.currentContext;
+        if (box != null) Scrollable.ensureVisible(box, alignment: 0.4);
+      });
     }
     if (pendingText != null) {
       rows.add(
@@ -212,8 +265,9 @@ class _Bubble extends StatelessWidget {
           ),
         ),
         child: Row(
-          mainAxisAlignment:
-              mine ? MainAxisAlignment.end : MainAxisAlignment.start,
+          mainAxisAlignment: mine
+              ? MainAxisAlignment.end
+              : MainAxisAlignment.start,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             if (!mine) ...[
@@ -226,7 +280,12 @@ class _Bubble extends StatelessWidget {
             Flexible(
               child: Container(
                 constraints: const BoxConstraints(maxWidth: 720),
-                margin: EdgeInsets.fromLTRB(mine ? 56 : 0, 6, mine ? 16 : 56, 6),
+                margin: EdgeInsets.fromLTRB(
+                  mine ? 56 : 0,
+                  6,
+                  mine ? 16 : 56,
+                  6,
+                ),
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
                   color: mine
@@ -331,9 +390,8 @@ class _Announcement extends StatelessWidget {
       child: Text(
         text,
         textAlign: TextAlign.center,
-        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-          color: Theme.of(context).colorScheme.onSurfaceVariant,
-        ),
+        style: Theme.of(context).textTheme.bodySmall
+            ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
       ),
     ),
   );

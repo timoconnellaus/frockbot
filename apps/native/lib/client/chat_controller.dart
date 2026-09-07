@@ -38,6 +38,17 @@ class ChatController extends ChangeNotifier {
   bool loading = false;
   bool _disposed = false;
   ConnectionState connection = ConnectionState.connecting;
+
+  /// The conversation's own announcements — a rename, a compaction — as the
+  /// newest page carried them. They belong to the Session rather than to a
+  /// Turn, so only the newest page has them and an older page never clears
+  /// what it does not carry.
+  List<Object?> announcements = const [];
+
+  /// A Turn a search hit named. The thread brings it into view if it is on the
+  /// loaded page; one further back is simply not here, and nothing pretends
+  /// otherwise.
+  String? focusRunId;
   final Map<String, Map<String, dynamic>> _runs = {};
   List<Map<String, dynamic>> get runs => _runs.values.toList()
     ..sort(
@@ -169,6 +180,7 @@ class ChatController extends ChangeNotifier {
       for (final run in page['runs'] as List) {
         _put(Map<String, dynamic>.from(run as Map));
       }
+      if (!older) announcements = (page['announcements'] as List?) ?? const [];
       if (older || before == null || _cachedCursor) {
         before = (page['page'] as Map)['nextCursor'] as String?;
         _cachedCursor = false;
@@ -188,7 +200,15 @@ class ChatController extends ChangeNotifier {
     conversationId = id;
     before = null;
     _runs.clear();
+    announcements = const [];
+    focusRunId = null;
     await refresh();
+  }
+
+  /// Takes the reader to one Turn of this conversation.
+  void focusRun(String runId) {
+    focusRunId = runId;
+    changed();
   }
 
   Future<void> send(String text) async {

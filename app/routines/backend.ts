@@ -45,6 +45,7 @@ import {
   type RoutineRunDetailViewV1,
   type RoutineRunListViewV1,
 } from "./shared.js";
+import { routinesDocumentV1 } from "./routines-document.js";
 import { defineGatewayContribution } from "@frockbot/core/contracts/contributions";
 
 /** One delivery, as the Bot Durable Object answers it. */
@@ -274,7 +275,16 @@ export function createRoutinesBackendContribution(
       const runs = ROUTINE_RUNS.exec(url.pathname);
       const run = ROUTINE_RUN.exec(url.pathname);
       if (!list && !inbox && !runs && !run) return undefined;
-      if ([...url.searchParams.keys()].length > 0) {
+      // One parameter, on one route: `as=document` asks the list read for the
+      // Routines and the inbox together, in the vocabulary the host renders
+      // every plugin view in. Everything else is still refused rather than
+      // quietly ignored.
+      const asDocument =
+        list !== null &&
+        request.method === "GET" &&
+        url.searchParams.get("as") === "document";
+      const parameters = [...url.searchParams.keys()];
+      if (parameters.length > (asDocument ? 1 : 0)) {
         return jsonError(400, "Routine routes take no query parameters");
       }
       try {
@@ -337,10 +347,21 @@ export function createRoutinesBackendContribution(
           );
         }
         if (request.method === "GET") {
+          const view = decodeRoutineListViewV1(
+            await host.listRoutines(context.userId, botId),
+          );
+          if (!asDocument) return Response.json(view);
+          const inboxView = decodeRoutineInboxViewV1(
+            await host.listRoutineInbox(context.userId, botId),
+          );
           return Response.json(
-            decodeRoutineListViewV1(
-              await host.listRoutines(context.userId, botId),
-            ),
+            routinesDocumentV1({
+              schemaVersion: 1,
+              botId,
+              routines: view.routines,
+              inbox: inboxView.entries,
+              unacknowledged: inboxView.unacknowledged,
+            }),
           );
         }
         if (request.method !== "POST") {

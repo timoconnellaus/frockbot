@@ -31,15 +31,27 @@ enum ShellSlot {
   final String id;
 }
 
+/// One thing a feature put in a region: what to draw, and what to call it
+/// where the region shows one entry at a time.
+typedef ShellSlotEntry = ({String? label, WidgetBuilder builder});
+
 /// The entries each region holds, in registration order.
 class ShellSlots extends ChangeNotifier {
-  final Map<ShellSlot, Map<String, WidgetBuilder>> _entries = {
-    for (final slot in ShellSlot.values) slot: <String, WidgetBuilder>{},
+  final Map<ShellSlot, Map<String, ShellSlotEntry>> _entries = {
+    for (final slot in ShellSlot.values) slot: <String, ShellSlotEntry>{},
   };
 
   /// Registers under [key], replacing any entry the same key already holds.
-  void register(ShellSlot slot, String key, WidgetBuilder builder) {
-    _entries[slot]![key] = builder;
+  ///
+  /// [label] is what a region that shows one entry at a time calls this one.
+  /// A region that draws every entry — the header actions — ignores it.
+  void register(
+    ShellSlot slot,
+    String key,
+    WidgetBuilder builder, {
+    String? label,
+  }) {
+    _entries[slot]![key] = (label: label, builder: builder);
     notifyListeners();
   }
 
@@ -49,14 +61,29 @@ class ShellSlots extends ChangeNotifier {
 
   bool filled(ShellSlot slot) => _entries[slot]!.isNotEmpty;
 
+  /// The keys a region holds, in registration order.
+  List<String> keys(ShellSlot slot) => _entries[slot]!.keys.toList();
+
+  String? labelOf(ShellSlot slot, String key) => _entries[slot]![key]?.label;
+
+  /// One entry, or nothing where the region does not hold that key.
+  Widget? buildOne(BuildContext context, ShellSlot slot, String key) {
+    final entry = _entries[slot]![key];
+    return entry == null
+        ? null
+        : KeyedSubtree(key: ValueKey(key), child: entry.builder(context));
+  }
+
   List<Widget> build(BuildContext context, ShellSlot slot) => [
     for (final entry in _entries[slot]!.entries)
-      KeyedSubtree(key: ValueKey(entry.key), child: entry.value(context)),
+      KeyedSubtree(
+        key: ValueKey(entry.key),
+        child: entry.value.builder(context),
+      ),
   ];
 
   static ShellSlots of(BuildContext context) {
-    final scope = context
-        .dependOnInheritedWidgetOfExactType<ShellSlotScope>();
+    final scope = context.dependOnInheritedWidgetOfExactType<ShellSlotScope>();
     assert(scope != null, 'No ShellSlotScope above this widget');
     return scope!.notifier!;
   }
@@ -102,7 +129,10 @@ class SlotRegion extends StatelessWidget {
     return identified(
       ShellIds.slot(slot.id),
       direction == Axis.vertical
-          ? Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: spaced)
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: spaced,
+            )
           : Row(mainAxisSize: MainAxisSize.min, children: spaced),
     );
   }

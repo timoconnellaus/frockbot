@@ -177,6 +177,38 @@ describe("the audit gateway route", () => {
     expect(read?.status).toBe(405);
   });
 
+  test("`as=document` answers the same page as a document, and is not a filter", async () => {
+    const gateway = host();
+    const route = createAuditBackendContribution(gateway);
+    const { request, url: target } = get(
+      "/api/audit?botId=foreman&kind=shell&as=document",
+    );
+    const response = await route.route(request, target, context);
+    expect(response?.status).toBe(200);
+    const document = await response!.json<{
+      surfaceId: string;
+      actions: { id: string }[];
+    }>();
+    expect(document.surfaceId).toBe("audit");
+    expect(document.actions.map((action) => action.id)).toEqual([
+      "filter-kind",
+      "load-more",
+      "rebuild",
+      "open-run",
+    ]);
+    // `as` never reaches the query the User Durable Object is asked.
+    expect(gateway.queries.at(-1)).toEqual({
+      schemaVersion: 1,
+      botId: "foreman",
+      kind: "shell",
+    });
+
+    // A client that wants the page keeps getting one.
+    const page = get("/api/audit?botId=foreman");
+    const plain = await route.route(page.request, page.url, context);
+    expect(await plain!.json<{ total: number }>()).toMatchObject({ total: 1 });
+  });
+
   test("turns an unexpected failure into a 500, not a leaked stack", async () => {
     const route = createAuditBackendContribution(
       host({
