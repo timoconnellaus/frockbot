@@ -17,7 +17,7 @@
  * The page never opens the socket itself: the host sends an `init` postMessage
  * carrying the theme tokens and a short-lived viewer token, and `createApplet`
  * connects from that. `connect(init)` is the same path, called by hand, which
- * is what `applet dev` and the tests use.
+ * is what the tests use.
  */
 
 import type { Collection } from "@tanstack/db";

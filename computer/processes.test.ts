@@ -420,42 +420,6 @@ describe("stopping a background process", () => {
     ]);
     await harness.dispose();
   });
-
-  test("closes the Bot's tabs on an applet dev origin when its process stops", async () => {
-    const computer = fakeComputer();
-    const held = storage();
-    const harness = await mount(computer, held);
-    const launched = JSON.parse(
-      (
-        await call(harness, "computer_exec", {
-          command: "applet dev --port 8787",
-          background: true,
-        })
-      ).content,
-    ) as { processId: string };
-    await call(harness, "computer_browser", {
-      action: "navigate",
-      url: "http://127.0.0.1:8787/",
-    });
-    computer.state = {
-      alive: false,
-      exitCode: 143,
-      logTail: "http://127.0.0.1:8787/\nterminated",
-    };
-
-    const stopped = await call(harness, "computer_process_stop", {
-      processId: launched.processId,
-    });
-
-    expect(stopped.isError).toBe(false);
-    expect(computer.calls).toEqual([
-      `launch:${launched.processId}:applet dev --port 8787`,
-      "browser:navigate",
-      `stop:${launched.processId}`,
-      "browser:close-origins:http://127.0.0.1:8787",
-    ]);
-    await harness.dispose();
-  });
 });
 
 describe("releasing a Bot's Turn", () => {

@@ -1,11 +1,10 @@
 /**
  * The whole Applet build, as five named stages over one directory.
  *
- * `applet check` and `applet build` are two entry points onto these stages;
- * the cloud build service is a third. There is one implementation of each, so
- * a Bot that checks its Applet locally and a publish that builds it in the
- * cloud cannot disagree about whether the code is admissible or about what it
- * hashes to.
+ * `applet_check` and `applet_publish` are the two ways in, and both reach
+ * these stages through the same build service. There is one implementation of
+ * each stage, so a check and the publish that follows it cannot disagree about
+ * whether the code is admissible or about what it hashes to.
  *
  * A stage that fails stops the run and names itself, which is what turns a
  * wall of diagnostics into "your `server.ts` does not type-check". The two

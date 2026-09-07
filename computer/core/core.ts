@@ -641,8 +641,8 @@ export interface ComputerControl {
  * Why one run of the durable-root sync happened.
  *
  * `publish` is the only reason outside the Turn's own policy, and it is one
- * root rather than all of them: an Applet publish reads the built artifact
- * from the Workspace *store*, so the bytes `applet build` left on the Computer
+ * root rather than all of them: a caller reads the bytes from the Workspace
+ * *store*, so what a shell left on the Computer
  * have to reach the store before it looks. It is recorded
  * under its own name rather than borrowed from `signal`, because a record that
  * said "the watcher moved" when a publish asked would be a record nobody could
@@ -668,7 +668,7 @@ export type ComputerSyncReasonV1 = "open" | "signal" | "turn-end" | "publish";
  *
  * A required path is the only thing a sync caller asserts about: "these exact
  * bytes must be readable from the store when this returns". Reporting it is
- * what lets the caller's own failure be honest — an Applet publish that cannot
+ * what lets the caller's own failure be honest — a caller that cannot
  * read `dist/manifest.json` can say the Computer held it at hash X and the
  * store answered `not-found`, instead of telling a Bot to run a build whose
  * output is demonstrably on disk (production, 2026-09-04).

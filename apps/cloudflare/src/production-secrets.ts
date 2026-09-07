@@ -177,12 +177,6 @@ export const NON_SECRET_WORKER_SETTINGS_V1: readonly NonSecretWorkerSettingV1[] 
       forbiddenLive:
         "anybody reaching the deployment can sign in as any identity without Google",
     },
-    {
-      name: "WORKSPACE_SEED_TOKEN",
-      why: "Opens the Workspace seed door; set by the end-to-end harness only.",
-      forbiddenLive:
-        "whoever holds the token can write a Bot's Workspace without a Computer",
-    },
   ];
 
 /** Every name the deploy's secrets file may carry, required first. */

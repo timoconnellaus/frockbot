@@ -2,11 +2,13 @@
 
 The SDK a FrockBot Applet is written against: a schema-first Durable Object
 server, a TanStack DB client over one real-time socket, a precompiled component
-kit on the theme tokens, a linter, and the `applet` CLI.
+kit on the theme tokens, a linter, and the build pipeline the cloud build
+service runs.
 
-See [ADR 0022](../../docs/adr/0022-applets-as-instance-packages.md) for why an
-Applet's state is a Durable Object facet the kernel owns the lifecycle of, and
-`docs/plans/applets.md` §8 for this package's place in the build.
+An Applet is authored with the `applet_*` tools, built by `apps/applet-build`,
+and mounted as a Durable Object facet from an immutable artifact. There is no
+CLI: nothing outside the service builds an Applet, and no Computer is involved
+at any point.
 
 ## Entry points
 
@@ -17,29 +19,24 @@ Applet's state is a Durable Object facet the kernel owns the lifecycle of, and
 | `@frockbot/applet-sdk/kit`      | the fourteen components (`src/kit/README.md`)            |
 | `@frockbot/applet-sdk/lint`     | the flat ESLint config and the five custom rules         |
 | `@frockbot/applet-sdk/protocol` | wire protocol v1, for the kernel and for tests           |
+| `@frockbot/applet-sdk/build`    | `runAppletBuildV1` — the five stages, for the service    |
 
-## The CLI
+## The build
 
-```sh
-applet new "Weekly Todos" # scaffold from template/
-applet check              # tsc + lint; path:line:col message; non-zero on error
-applet build              # dist/{server.js,ui.html,manifest.json}
-applet dev                # Miniflare on a local port; prints a URL, opens nothing
-```
+`runAppletBuildV1(directory, { mode })` is five named stages over one
+directory: `descriptor`, `typecheck`, `lint`, `bundle`, `describe`. `check`
+stops after the linter; `build` goes on to the artifacts. A stage that fails
+stops the run and names itself, and every failure is a list of
+`{file, line, column, message, severity}`.
 
-`applet build` derives `manifest.json`'s tool declarations by mounting the built
-`dist/server.js` in Miniflare and calling `health()` — the same question the
-kernel asks the facet before it admits a generation, so the manifest cannot
-disagree with the code.
+`manifest.json`'s tool declarations are derived by mounting the built
+`server.js` in Miniflare and calling `health()` — the same question the kernel
+asks the facet before it admits a generation, so the manifest cannot disagree
+with the code.
 
-**The published CLI runs under Node.** `prepublishOnly` bundles
-`src/cli/main.ts` to `dist/cli.mjs`, and the package's `bin` points there. The
-Computer's `applets` provisioning phase installs this package and its runtime
-once under the shared Computer runtime; an in-place runtime update repairs that
-installation when it is missing. An Applet project deliberately has no
-`node_modules` of its own. The checker and bundler resolve SDK, React, and
-TanStack imports from the shared installation, while project dependency trees
-remain reproducible scratch and never enter the durable-root sync.
+`template/` is the scaffold a new Applet starts as.
+`scripts/build-applets-assets.ts` turns it into `applets/template.generated.ts`,
+which `applet_create` writes through the Workspace.
 
 ## What runs where
 
@@ -50,9 +47,9 @@ page served from the anonymous artifact origin into a sandboxed iframe, which
 receives its theme tokens and a short-lived viewer token through the host's
 `init` message and opens exactly one WebSocket back to the facet.
 
-The Cloudflare programming model is not hidden and ADR 0022 says so: an Applet
-is a Durable Object with SQLite and hibernating sockets. What the SDK does hide
-is every binding name — an author sees `tables`, `tools`, and `this.db`.
+The Cloudflare programming model is not hidden: an Applet is a Durable Object
+with SQLite and hibernating sockets. What the SDK does hide is every binding
+name — an author sees `tables`, `tools`, and `this.db`.
 
 ## Wire protocol v1
 
@@ -77,5 +74,5 @@ bun test test spike
 
 Pure modules and the client are tested in `bun test`: the store runs against
 `bun:sqlite`, and `test/loopback.ts` joins the real protocol server to the real
-client transport through a pair of fake sockets. `test/cli.test.ts` and
-`spike/` run the built Applet in Miniflare for real.
+client transport through a pair of fake sockets. `test/build.test.ts` and
+`spike/` run the real pipeline and the built Applet in Miniflare.

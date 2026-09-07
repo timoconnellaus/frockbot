@@ -14,7 +14,9 @@ function pkg(
 
 const packages = [
   pkg("image", [{ id: "generated", scope: "user" }]),
-  pkg("applets", [{ id: "source", scope: "user" }]),
+  // Applets declares no root: its source is authored and built in the cloud,
+  // and nothing on a Computer reads it.
+  pkg("applets"),
   pkg("clock"),
 ];
 
@@ -29,10 +31,7 @@ describe("the durable roots a User's Packages declare", () => {
         ],
         packages,
       }),
-    ).toEqual([
-      { packageId: "applets", rootId: "source" },
-      { packageId: "image", rootId: "generated" },
-    ]);
+    ).toEqual([{ packageId: "image", rootId: "generated" }]);
   });
 
   test("a Package that declares no root contributes none", () => {
@@ -76,10 +75,10 @@ describe("the Computer sync seam", () => {
 
   test("carries the declared roots to the provider", () => {
     const host = createBotComputerSyncHost({ WORKSPACE_SYNC_FILES: store }, [
-      { packageId: "applets", rootId: "source" },
+      { packageId: "image", rootId: "generated" },
     ]);
     expect(host?.packageRoots).toEqual([
-      { packageId: "applets", rootId: "source" },
+      { packageId: "image", rootId: "generated" },
     ]);
   });
 
@@ -93,7 +92,7 @@ describe("the Computer sync seam", () => {
   test("no store binding is no sync at all, roots or not", () => {
     expect(
       createBotComputerSyncHost({}, [
-        { packageId: "applets", rootId: "source" },
+        { packageId: "image", rootId: "generated" },
       ]),
     ).toBeUndefined();
   });

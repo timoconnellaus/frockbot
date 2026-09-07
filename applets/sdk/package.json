@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": false,
   "type": "module",
-  "description": "Authoring SDK for FrockBot Applets: schema-first Durable Object server, TanStack DB client, component kit, linter, and the `applet` CLI.",
+  "description": "Authoring SDK for FrockBot Applets: schema-first Durable Object server, TanStack DB client, component kit, linter, and the build pipeline.",
   "license": "UNLICENSED",
   "exports": {
     "./server": "./src/server/index.ts",
@@ -14,19 +14,13 @@
     "./build": "./src/build/pipeline.ts",
     "./package.json": "./package.json"
   },
-  "bin": {
-    "applet": "./dist/cli.mjs"
-  },
   "files": [
-    "dist",
     "src",
     "types",
     "template",
     "README.md"
   ],
   "scripts": {
-    "build": "bun scripts/build-cli.ts",
-    "prepublishOnly": "bun scripts/build-cli.ts",
     "test": "bun test test spike",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },

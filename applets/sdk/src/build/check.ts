@@ -1,5 +1,5 @@
 /**
- * `applet check` — the type checker and the linter, one diagnostic list.
+ * The check stage — the type checker and the linter, one diagnostic list.
  *
  * The Applet has no `node_modules`: it is source at a durable root. So the
  * compiler options are built here from `paths.ts` rather than from a tsconfig
@@ -106,7 +106,7 @@ export async function typeCheckApplet(
     });
 }
 
-/** Everything `applet check` reports, in source order. */
+/** Everything the check stage reports, in source order. */
 export async function checkApplet(
   directory: string,
 ): Promise<AppletDiagnostic[]> {

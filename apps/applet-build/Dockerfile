@@ -25,9 +25,9 @@ COPY apps/applet-build/container ./container
 RUN chmod 755 container/entrypoint.sh
 
 # The pipeline's sources resolve their siblings through `.js` specifiers, which
-# esbuild and Bun honour and Node's ESM resolver does not — the same reason the
-# SDK publishes a bundled `bin`. So the server is bundled here, with the four
-# packages that load their own workers, binaries and WASM by path left external.
+# esbuild and Bun honour and Node's ESM resolver does not. So the server is
+# bundled here, with the four packages that load their own workers, binaries
+# and WASM by path left external.
 #
 # The output lands in the SDK's own `dist/` on purpose: `paths.ts` finds the SDK
 # root by walking up to the `package.json` that names it, and from there the

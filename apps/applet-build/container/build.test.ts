@@ -1,22 +1,19 @@
 /**
- * The point of the service, asserted: what it returns is what `applet build`
- * writes.
+ * The point of the service, asserted: the same source posted to it and built
+ * beside it yields the same bytes.
  *
- * Both sides run the SDK's `src/build/` pipeline, so this is a golden
- * equivalence rather than a comparison of two derivations — and it is worth
- * holding because the alternative, a second implementation of the bundle or of
- * `this.tool(...)`, is exactly what the manifest's hashes would silently
- * disagree about.
+ * Both sides run the SDK's `src/build/` pipeline over a directory of their
+ * own, so what this holds is that the artifacts are a function of the source
+ * and nothing else — not of where the build ran. They are not: esbuild writes
+ * each module's path into the unminified bundle, and until the labels were
+ * made stable two builds of identical source hashed differently and every
+ * publish of unchanged code wrote a new R2 object.
  */
 
 import { describe, expect, test } from "bun:test";
-import { mkdtemp, readFile, readdir } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-
-import { buildApplet } from "../../../applets/sdk/src/cli/build.ts";
-import { newApplet } from "../../../applets/sdk/src/cli/new.ts";
 import type { AppletBuildSourceFileV1 } from "@frockbot/applets/build-contract";
+import { runAppletBuildV1 } from "@frockbot/applet-sdk/build";
+import { scaffoldTemplateV1 } from "../../../applets/sdk/test/scaffold.ts";
 import { buildAppletRequestV1 } from "./build.ts";
 
 const APPLET_ID = "vgpqfaCcwnPlzjYdb2mI.weekly-todos";
@@ -26,21 +23,14 @@ async function scaffold(): Promise<{
   directory: string;
   files: AppletBuildSourceFileV1[];
 }> {
-  const parent = await mkdtemp(join(tmpdir(), "applet-build-golden-"));
-  const { directory } = await newApplet({ name: "Weekly Todos", parent });
-  const files: AppletBuildSourceFileV1[] = [];
-  for (const entry of await readdir(directory, { withFileTypes: true })) {
-    if (!entry.isFile()) continue;
-    files.push({
-      path: entry.name,
-      text: await readFile(join(directory, entry.name), "utf8"),
-    });
-  }
+  const { directory, files } = await scaffoldTemplateV1({
+    prefix: "applet-build-golden-",
+  });
   return { directory, files };
 }
 
 describe("the Applet build service", () => {
-  test("returns the artifacts `applet build` writes, hash for hash", async () => {
+  test("returns the artifacts a build beside it writes, hash for hash", async () => {
     const { directory, files } = await scaffold();
 
     const service = await buildAppletRequestV1({
@@ -50,16 +40,17 @@ describe("the Applet build service", () => {
       mode: "build",
       files,
     });
-    const local = await buildApplet(directory);
+    const local = await runAppletBuildV1(directory, { mode: "build" });
 
     expect(service.status).toBe("built");
     if (service.status !== "built") return;
+    if (local.status !== "built") throw new Error("the local build failed");
     expect(service.manifest?.hashes).toEqual(local.manifest.hashes);
     expect(service.manifest?.tools.map((tool) => tool.name)).toEqual(
       local.manifest.tools.map((tool) => tool.name),
     );
-    expect(service.server).toBe(await readFile(local.serverPath, "utf8"));
-    expect(service.ui).toBe(await readFile(local.uiPath, "utf8"));
+    expect(service.server).toBe(local.server);
+    expect(service.ui).toBe(local.ui);
   }, 180_000);
 
   test("a passing check carries no artifact", async () => {

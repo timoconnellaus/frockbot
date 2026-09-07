@@ -9,14 +9,11 @@ A FrockBot Applet. Two files are yours:
 
 ## The loop
 
-```sh
-applet check # type-check and lint; every problem prints as path:line:col message
-applet build # dist/server.js, dist/ui.html, dist/manifest.json
-applet dev   # serves the built Applet; prints a URL, opens nothing
-```
-
-Open the printed URL in the Computer's browser to look at it. Publish with
-`applet_publish` once `applet check` is clean.
+`applet_files` and `applet_read_file` to see what is here, `applet_write_file`
+to change it, then `applet_check` — it type-checks, lints, bundles and boots
+your server, and answers either with every problem as `path:line:col message`
+or with the tools it declares and a URL for the page. Publish with
+`applet_publish` once the check is clean.
 
 ## Rules the linter enforces
 

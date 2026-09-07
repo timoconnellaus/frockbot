@@ -169,7 +169,7 @@ function isOverloadedTransportFailure(error: unknown): boolean {
   );
 }
 
-/** A local HTTP origin an Applet preview can own; public sites never qualify. */
+/** A local HTTP origin a Bot may have opened; public sites never qualify. */
 export function localPreviewOriginV1(value: string): string | undefined {
   try {
     const url = new URL(value);
@@ -180,19 +180,6 @@ export function localPreviewOriginV1(value: string): string | undefined {
   } catch {
     return undefined;
   }
-}
-
-function localPreviewOriginsV1(value: string): string[] {
-  const found = new Set<string>();
-  for (const match of value.matchAll(/https?:\/\/[^\s"'<>]+/g)) {
-    const origin = localPreviewOriginV1(match[0].replace(/[),.;!?]+$/g, ""));
-    if (origin) found.add(origin);
-  }
-  return [...found];
-}
-
-function runsAppletPreviewV1(command: string): boolean {
-  return /(?:^|[\s;&|])(?:[^\s;&|]*\/)?applet\s+dev(?:\s|$)/.test(command);
 }
 
 /** The wake-free, Turn-scoped projection shared by prompt render and its log. */
@@ -518,14 +505,11 @@ export async function recordComputerSyncV1(
  * THE ONE SANCTIONED EXTRA CALLER. {@link ComputerTurnSync} was deliberately
  * narrowed — "a caller cannot get the policy wrong because there is no way to
  * ask for a sync at another time" — and this function is the single, named
- * exception to that sentence, added for Applet publish: "Publishing reads the
- * built artifact from the durable root through the Workspace file surface."
- * `applet build` writes `<appletId>/dist/` on the Computer with an ordinary
- * shell write, and the publish reads it from the *store*. Without a push
- * between those two the publish would read the previous build, or nothing, and
- * record a generation for bytes that never existed — a wrong artifact rather
- * than a visible failure. The Turn's own `turn-end` push is too late: publish
- * happens inside the Turn.
+ * exception to that sentence: a caller that has to read bytes a shell has just
+ * written needs them in the *store* first. Without a push between those two it
+ * would read the previous contents, or nothing, and record a generation for
+ * bytes that never existed — a wrong answer rather than a visible failure. The
+ * Turn's own `turn-end` push is too late: the read happens inside the Turn.
  *
  * It stays narrow in four ways, and the narrowness is the reason it is
  * allowed. It reconciles one root and not the Workspace. It wakes nothing: it
@@ -590,7 +574,7 @@ export async function syncWorkspaceRootNowV1(request: {
  * `computer/sync` event or has nothing to record. A caller cannot get the
  * policy wrong because there is no way to ask for a sync at another time —
  * with exactly one named exception, {@link syncWorkspaceRootNowV1}, which
- * reconciles a single root for an Applet publish and is documented there.
+ * reconciles a single declared root and is documented there.
  */
 class ComputerTurnSync {
   #turn = 0;
@@ -1184,22 +1168,6 @@ export function createComputerAgentFeature(
             } catch {
               // A mirror that could not be written never withholds an outcome
               // that was read.
-            }
-            if (
-              action === "stop" &&
-              runsAppletPreviewV1(held.command) &&
-              computer.browser
-            ) {
-              const origins = localPreviewOriginsV1(observed.logTail);
-              if (origins.length > 0) {
-                await closePreviewTabs(
-                  computer,
-                  origins,
-                  `${context.effectId}:close-preview-tabs`,
-                  context.signal,
-                );
-                for (const origin of origins) previewOrigins.delete(origin);
-              }
             }
             if (action === "logs") {
               return {

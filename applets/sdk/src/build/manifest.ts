@@ -7,7 +7,7 @@ import { APPLET_CONTRACT_VERSION } from "../protocol/index.js";
 import type { AppletToolDeclarationV1 } from "../server/applet.js";
 
 export interface AppletDescriptorV1 {
-  /** `/^[a-z][a-z0-9-]{0,31}$/`; the directory name `applet new` creates. */
+  /** `/^[a-z][a-z0-9-]{0,31}$/`; the scaffold's directory name. */
   id: string;
   displayName: string;
   contract: 1;
@@ -50,9 +50,7 @@ export async function readDescriptor(
   try {
     text = await readFile(path, "utf8");
   } catch {
-    throw new Error(
-      `No applet.json in ${directory}; run \`applet new <name>\` first`,
-    );
+    throw new Error(`No applet.json in ${directory}`);
   }
   return decodeDescriptor(JSON.parse(text));
 }

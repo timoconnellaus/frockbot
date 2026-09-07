@@ -93,7 +93,7 @@ export function typeCheckerPaths(): Record<string, string[]> {
     paths["react/jsx-runtime"] = [join(types, "jsx-runtime.d.ts")];
     paths["react/*"] = [join(types, "*")];
   } catch {
-    // No React declarations available; `applet check` reports the import.
+    // No React declarations available; the check stage reports the import.
   }
   return paths;
 }

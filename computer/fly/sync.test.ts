@@ -421,17 +421,17 @@ const MOUNTS = {
   userSkills: "/home/box/agent-data/workflows",
   botMemory: `/home/box/agent-data/agents/${computerBotKey(BOT)}/memory`,
   userMemory: "/home/box/agent-data/user-memory",
-  // The Applet source root, resolved from the layout's one `package-declared`
-  // template. Nothing about Applets is in this Package.
-  appletSource: "/home/box/agent-data/user-packages/applets/source",
+  // A `package-declared` root, resolved from the layout's one template for
+  // that kind. No Package id is written into the Computer Package.
+  packageDeclared: "/home/box/agent-data/user-packages/image/generated",
 };
 
-/** The Applets Package's declared source root, as the host would supply it. */
-const APPLET_SOURCE_PACKAGE_ROOT = { packageId: "applets", rootId: "source" };
-const appletSourceRoot: WorkspaceRootV1 = {
+/** The Image Package's declared root, as the host would supply it. */
+const DECLARED_PACKAGE_ROOT = { packageId: "image", rootId: "generated" };
+const declaredRoot: WorkspaceRootV1 = {
   kind: "package-declared",
   userId: USER,
-  ...APPLET_SOURCE_PACKAGE_ROOT,
+  ...DECLARED_PACKAGE_ROOT,
 };
 
 interface Harness {
@@ -814,13 +814,13 @@ describe("the durable-root sync, Package-declared roots", () => {
       index += 1
     ) {
       sprite.shellWrite(
-        MOUNTS.appletSource,
+        MOUNTS.packageDeclared,
         `to-dos/src/file-${index.toString().padStart(4, "0")}.ts`,
         `export const value${index} = ${index};`,
       );
     }
 
-    const outcome = await surface.scan(appletSourceRoot);
+    const outcome = await surface.scan(declaredRoot);
 
     if (outcome.status !== "ok") throw new Error(outcome.reason);
     expect(outcome.scan.entries).toHaveLength(
@@ -839,7 +839,7 @@ describe("the durable-root sync, Package-declared roots", () => {
       botDirectoryKey: computerBotKey,
     });
 
-    await surface.scan(appletSourceRoot, [
+    await surface.scan(declaredRoot, [
       "todo/dist/server.js",
       "todo/dist/ui.html",
       "todo/dist/manifest.json",
@@ -864,74 +864,71 @@ describe("the durable-root sync, Package-declared roots", () => {
   // Computer Package's Workspace layout **and by Package manifests**". The
   // layout half was always here; a `package-declared` root reaches the sync
   // only when a host supplies the Packages that declared it, which is what
-  // `declaredPackageRootsV1` in `plugin-shell/src/backend-computer.ts` now
-  // does. Without that list the root below is simply not synchronized.
+  // `declaredPackageRootsV1` in `app/shell/backend-computer.ts` now does.
+  // Without that list the root below is simply not synchronized.
   test("a root nobody declared is not synchronized at all", () => {
     const { roots } = harness();
     expect(roots.some((root) => root.kind === "package-declared")).toBe(false);
   });
 
   test("a declared root round-trips: store to Computer, and a shell write back", async () => {
-    // This is the root Applet source lives in, and source edits still move in
-    // both directions while reproducible build trees do not enter the
-    // ordinary whole-Workspace manifest.
+    // Edits move in both directions, while reproducible build trees do not
+    // enter the ordinary whole-Workspace manifest.
     const { sprite, store, sync, roots } = harness({
-      packageRoots: [APPLET_SOURCE_PACKAGE_ROOT],
+      packageRoots: [DECLARED_PACKAGE_ROOT],
     });
-    expect(roots).toContainEqual(appletSourceRoot);
+    expect(roots).toContainEqual(declaredRoot);
 
-    const appletId = "pub-user-1.0123456789abcdef0123456789abcdef";
+    const folder = "pub-user-1.0123456789abcdef0123456789abcdef";
     await writeToStore(
       store,
-      appletSourceRoot,
-      `${appletId}/server.ts`,
-      "export class TodoApplet {}",
+      declaredRoot,
+      `${folder}/server.ts`,
+      "export const value = 1;",
       BOT_WRITER,
     );
 
     await sync();
 
-    expect(sprite.text(`${MOUNTS.appletSource}/${appletId}/server.ts`)).toBe(
-      "export class TodoApplet {}",
+    expect(sprite.text(`${MOUNTS.packageDeclared}/${folder}/server.ts`)).toBe(
+      "export const value = 1;",
     );
 
     // An ordinary shell source edit on the Computer is mirrored back.
     sprite.shellWrite(
-      MOUNTS.appletSource,
-      `${appletId}/server.ts`,
-      "export class TodoApplet { health() {} }",
+      MOUNTS.packageDeclared,
+      `${folder}/server.ts`,
+      "export const value = 2;",
     );
     const pushed = await sync();
 
     const built = await store.read({
-      root: appletSourceRoot,
-      path: `${appletId}/server.ts`,
+      root: declaredRoot,
+      path: `${folder}/server.ts`,
     });
     if (built.status !== "ok") throw new Error(built.reason);
-    expect(decoder.decode(built.file.bytes)).toBe(
-      "export class TodoApplet { health() {} }",
-    );
+    expect(decoder.decode(built.file.bytes)).toBe("export const value = 2;");
     // A shell wrote it, so nothing claims to know which Bot did: the artifact
     // is data, never provenance.
     expect(built.file.generation.writer).toEqual({ kind: "unattributed" });
     expect(pushed.failures).toEqual([]);
   });
 
-  test("a large node_modules tree cannot prevent Applet source from syncing", async () => {
+  test("a large node_modules tree cannot prevent source from syncing", async () => {
     const { sprite, store, sync } = harness({
-      packageRoots: [APPLET_SOURCE_PACKAGE_ROOT],
+      packageRoots: [DECLARED_PACKAGE_ROOT],
     });
-    const appletId = "to-dos";
+    const folder = "to-dos";
     sprite.maxScanOutputBytes = 10_000;
     sprite.shellWrite(
-      MOUNTS.appletSource,
-      `${appletId}/server.ts`,
-      "export class TodoApplet {}",
+      MOUNTS.packageDeclared,
+      `${folder}/server.ts`,
+      "export const value = 1;",
     );
     for (let index = 0; index < 200; index += 1) {
       sprite.shellWrite(
-        MOUNTS.appletSource,
-        `${appletId}/node_modules/dependency-${index}/package.json`,
+        MOUNTS.packageDeclared,
+        `${folder}/node_modules/dependency-${index}/package.json`,
         JSON.stringify({ name: `dependency-${index}` }),
       );
     }
@@ -941,56 +938,54 @@ describe("the durable-root sync, Package-declared roots", () => {
     expect(report.failures).toEqual([]);
     expect(report.roots.at(-1)).toMatchObject({ ignored: 1, omitted: 0 });
     const source = await store.read({
-      root: appletSourceRoot,
-      path: `${appletId}/server.ts`,
+      root: declaredRoot,
+      path: `${folder}/server.ts`,
     });
     if (source.status !== "ok") throw new Error(source.reason);
-    expect(decoder.decode(source.file.bytes)).toBe(
-      "export class TodoApplet {}",
-    );
+    expect(decoder.decode(source.file.bytes)).toBe("export const value = 1;");
     expect(
       await store.read({
-        root: appletSourceRoot,
-        path: `${appletId}/node_modules/dependency-0/package.json`,
+        root: declaredRoot,
+        path: `${folder}/node_modules/dependency-0/package.json`,
       }),
     ).toMatchObject({ status: "not-found" });
   });
 
   test("an empty replacement Computer restores source but not legacy project dependencies", async () => {
     const { sprite, store, sync } = harness({
-      packageRoots: [APPLET_SOURCE_PACKAGE_ROOT],
+      packageRoots: [DECLARED_PACKAGE_ROOT],
     });
-    const appletId = "pub-user-1.0123456789abcdef0123456789abcdef";
+    const folder = "pub-user-1.0123456789abcdef0123456789abcdef";
     await writeToStore(
       store,
-      appletSourceRoot,
-      `${appletId}/server.ts`,
-      "export class TodoApplet {}",
+      declaredRoot,
+      `${folder}/server.ts`,
+      "export const value = 1;",
       BOT_WRITER,
     );
     // A pre-policy generation stays in object storage for audit/recovery, but
     // a new Computer must not materialize it back into the project.
     await writeToStore(
       store,
-      appletSourceRoot,
-      `${appletId}/node_modules/dependency/package.json`,
+      declaredRoot,
+      `${folder}/node_modules/dependency/package.json`,
       '{"name":"dependency"}',
       BOT_WRITER,
     );
 
     const report = await sync();
 
-    expect(sprite.text(`${MOUNTS.appletSource}/${appletId}/server.ts`)).toBe(
-      "export class TodoApplet {}",
+    expect(sprite.text(`${MOUNTS.packageDeclared}/${folder}/server.ts`)).toBe(
+      "export const value = 1;",
     );
     expect(
       sprite.text(
-        `${MOUNTS.appletSource}/${appletId}/node_modules/dependency/package.json`,
+        `${MOUNTS.packageDeclared}/${folder}/node_modules/dependency/package.json`,
       ),
     ).toBeUndefined();
     expect(
       report.roots.find((item) => item.root.kind === "package-declared"),
-    ).toMatchObject({ pulled: [`${appletId}/server.ts`], ignored: 1 });
+    ).toMatchObject({ pulled: [`${folder}/server.ts`], ignored: 1 });
   });
 });
 
@@ -1415,15 +1410,15 @@ describe("the durable-root sync on the Computer handle", () => {
   });
 
   test("a by-design dependency exclusion is still an ok sync, counted but not narrated", async () => {
-    const { sprite, open } = providerHarness([APPLET_SOURCE_PACKAGE_ROOT]);
+    const { sprite, open } = providerHarness([DECLARED_PACKAGE_ROOT]);
     const handle = await open();
     sprite.shellWrite(
-      MOUNTS.appletSource,
+      MOUNTS.packageDeclared,
       "todo/src/index.ts",
       "export const todo = true;",
     );
     sprite.shellWrite(
-      MOUNTS.appletSource,
+      MOUNTS.packageDeclared,
       "todo/node_modules/dependency/package.json",
       '{"name":"dependency"}',
     );
@@ -1440,35 +1435,31 @@ describe("the durable-root sync on the Computer handle", () => {
     expect(summary.detail).toBe("");
   });
 
-  // The sync-now seam, provider side: an Applet publish needs the bytes
-  // `applet build` left on the Computer to be in the store before it reads
-  // them, and it needs that for one root, not the Workspace.
+  // The sync-now seam, provider side: a caller that has to read bytes a shell
+  // just wrote needs them in the store first, and needs that for one root
+  // rather than for the Workspace.
   test("reconciles one declared root on demand and refuses a root it does not sync", async () => {
-    const { sprite, store, open } = providerHarness([
-      APPLET_SOURCE_PACKAGE_ROOT,
-    ]);
+    const { sprite, store, open } = providerHarness([DECLARED_PACKAGE_ROOT]);
     const handle = await open();
-    const appletId = "pub-user-1.0123456789abcdef0123456789abcdef";
+    const folder = "pub-user-1.0123456789abcdef0123456789abcdef";
     sprite.shellWrite(MOUNTS.skills, "unrelated.md", "not this root");
     sprite.shellWrite(
-      MOUNTS.appletSource,
-      `${appletId}/dist/server.js`,
+      MOUNTS.packageDeclared,
+      `${folder}/dist/server.js`,
       "export class A{}",
     );
 
-    const summary = await handle.sync!.reconcileRoot!(
-      appletSourceRoot,
-      "publish",
-      { requiredPaths: [`${appletId}/dist/server.js`] },
-    );
+    const summary = await handle.sync!.reconcileRoot!(declaredRoot, "publish", {
+      requiredPaths: [`${folder}/dist/server.js`],
+    });
 
     expect(summary.status).toBe("ok");
     expect(summary.pushed).toBe(1);
     expect(
       (
         await store.read({
-          root: appletSourceRoot,
-          path: `${appletId}/dist/server.js`,
+          root: declaredRoot,
+          path: `${folder}/dist/server.js`,
         })
       ).status,
     ).toBe("ok");
@@ -1483,65 +1474,59 @@ describe("the durable-root sync on the Computer handle", () => {
       {
         kind: "package-declared",
         userId: USER,
-        packageId: "image",
-        rootId: "generated",
+        packageId: "notes",
+        rootId: "pages",
       },
       "publish",
     );
     expect(refused.status).toBe("refused");
   });
 
-  // Production, 2026-09-04, run 76b4f8d9: `applet build` wrote `dist/`, the
-  // publish sync answered `pushed=0 removed=0 failures=0`, and the publish then
-  // read `dist/manifest.json` as `not-found` and told the Bot to build again.
+  // Production, 2026-09-04, run 76b4f8d9: a shell wrote `dist/`, the sync
+  // answered `pushed=0 removed=0 failures=0`, and the caller then read
+  // `dist/manifest.json` as `not-found`.
   // The reconcile had trusted the sidecar: hash matched, entry "clean",
   // nothing to do — while the store held no object for it at all. A required
   // path is the one thing the caller has asserted about, so the Computer's
   // copy of it decides, not its sidecar.
-  // The state a fresh `applet build` leaves: three files under an ignored
-  // directory, none of them ever synced, so none of them has a sidecar. The
-  // publish names all three, and all three must be readable from the store
+  // The state a fresh build leaves: three files under an ignored directory,
+  // none of them ever synced, so none of them has a sidecar. The caller names
+  // all three, and all three must be readable from the store
   // when the reconcile returns — the last one included. (`sync-script.test.ts`
   // is where the shell that emits their manifest rows is held to that; this is
   // the reconcile above it.)
   test("carries every required file of a fresh build that has no sidecars", async () => {
-    const { sprite, store, open } = providerHarness([
-      APPLET_SOURCE_PACKAGE_ROOT,
-    ]);
+    const { sprite, store, open } = providerHarness([DECLARED_PACKAGE_ROOT]);
     const handle = await open();
-    const appletId = "pub-user-1.0123456789abcdef0123456789abcdef";
+    const folder = "pub-user-1.0123456789abcdef0123456789abcdef";
     const built = {
-      "dist/server.js": "export class Applet {}",
+      "dist/server.js": "export const value = 1;",
       "dist/ui.html": "<h1>todo</h1>",
       "dist/manifest.json": '{"contract":1,"tools":[]}',
     };
     for (const [file, text] of Object.entries(built)) {
-      sprite.shellWrite(MOUNTS.appletSource, `${appletId}/${file}`, text);
+      sprite.shellWrite(MOUNTS.packageDeclared, `${folder}/${file}`, text);
     }
-    expect(sprite.keys(`${MOUNTS.appletSource}/.frockbot-generations`)).toEqual(
-      [],
-    );
+    expect(
+      sprite.keys(`${MOUNTS.packageDeclared}/.frockbot-generations`),
+    ).toEqual([]);
 
-    const summary = await handle.sync!.reconcileRoot!(
-      appletSourceRoot,
-      "publish",
-      {
-        requiredPaths: Object.keys(built).map((file) => `${appletId}/${file}`),
-      },
-    );
+    const summary = await handle.sync!.reconcileRoot!(declaredRoot, "publish", {
+      requiredPaths: Object.keys(built).map((file) => `${folder}/${file}`),
+    });
 
     expect(summary).toMatchObject({ status: "ok", pushed: 3, failures: 0 });
     expect(summary.required).toEqual(
       Object.entries(built).map(([file, text]) => ({
-        path: `${appletId}/${file}`,
+        path: `${folder}/${file}`,
         contentHash: sha256(encoder.encode(text)),
         durable: true,
       })),
     );
     for (const [file, text] of Object.entries(built)) {
       const read = await store.read({
-        root: appletSourceRoot,
-        path: `${appletId}/${file}`,
+        root: declaredRoot,
+        path: `${folder}/${file}`,
       });
       expect(read.status).toBe("ok");
       if (read.status === "ok") {
@@ -1551,37 +1536,35 @@ describe("the durable-root sync on the Computer handle", () => {
   });
 
   test("pushes a required file the store is missing even when its sidecar says clean", async () => {
-    const { sprite, store, open } = providerHarness([
-      APPLET_SOURCE_PACKAGE_ROOT,
-    ]);
+    const { sprite, store, open } = providerHarness([DECLARED_PACKAGE_ROOT]);
     const handle = await open();
-    const appletId = "pub-user-1.0123456789abcdef0123456789abcdef";
-    const path = `${appletId}/dist/manifest.json`;
+    const folder = "pub-user-1.0123456789abcdef0123456789abcdef";
+    const path = `${folder}/dist/manifest.json`;
     const manifest = '{"tools":[{"name":"add"},{"name":"list"}]}';
-    sprite.shellWrite(MOUNTS.appletSource, path, manifest);
+    sprite.shellWrite(MOUNTS.packageDeclared, path, manifest);
     // One good publish: the store takes the bytes and the Computer records the
     // sidecar that attributes them.
-    await handle.sync!.reconcileRoot!(appletSourceRoot, "publish", {
+    await handle.sync!.reconcileRoot!(declaredRoot, "publish", {
       requiredPaths: [path],
     });
-    const stat = await store.stat({ root: appletSourceRoot, path });
+    const stat = await store.stat({ root: declaredRoot, path });
     expect(stat.status).toBe("ok");
     if (stat.status !== "ok") return;
     // The object goes; the sidecar and the built file do not.
     await store.delete({
-      path: { root: appletSourceRoot, path },
+      path: { root: declaredRoot, path },
       writer: USER_WRITER,
       expectedGenerationId: stat.entry.generation.generationId,
     });
     expect(
-      sprite.files.has(`${MOUNTS.appletSource}/.frockbot-generations/${path}`),
+      sprite.files.has(
+        `${MOUNTS.packageDeclared}/.frockbot-generations/${path}`,
+      ),
     ).toBe(true);
 
-    const summary = await handle.sync!.reconcileRoot!(
-      appletSourceRoot,
-      "publish",
-      { requiredPaths: [path] },
-    );
+    const summary = await handle.sync!.reconcileRoot!(declaredRoot, "publish", {
+      requiredPaths: [path],
+    });
 
     expect(summary).toMatchObject({
       status: "ok",
@@ -1589,7 +1572,7 @@ describe("the durable-root sync on the Computer handle", () => {
       removed: 0,
       failures: 0,
     });
-    const read = await store.read({ root: appletSourceRoot, path });
+    const read = await store.read({ root: declaredRoot, path });
     expect(read.status).toBe("ok");
     if (read.status === "ok")
       expect(decoder.decode(read.file.bytes)).toBe(manifest);
@@ -1604,83 +1587,77 @@ describe("the durable-root sync on the Computer handle", () => {
   // output — the publish's own artifact — on the way past.
   test("never removes a required file from the Computer because the store lacks it", async () => {
     const { sprite, store, generations, open } = providerHarness([
-      APPLET_SOURCE_PACKAGE_ROOT,
+      DECLARED_PACKAGE_ROOT,
     ]);
     const handle = await open();
-    const appletId = "pub-user-1.0123456789abcdef0123456789abcdef";
-    const path = `${appletId}/dist/server.js`;
-    sprite.shellWrite(MOUNTS.appletSource, path, "export class A{}");
-    await handle.sync!.reconcileRoot!(appletSourceRoot, "publish", {
+    const folder = "pub-user-1.0123456789abcdef0123456789abcdef";
+    const path = `${folder}/dist/server.js`;
+    sprite.shellWrite(MOUNTS.packageDeclared, path, "export class A{}");
+    await handle.sync!.reconcileRoot!(declaredRoot, "publish", {
       requiredPaths: [path],
     });
-    const stat = await store.stat({ root: appletSourceRoot, path });
+    const stat = await store.stat({ root: declaredRoot, path });
     if (stat.status !== "ok") throw new Error("the first push did not land");
     // A recorded store-side delete: the ledger holds a tombstone, so this is a
     // removal by every rule the sync knows — and a required path still wins.
     await store.delete({
-      path: { root: appletSourceRoot, path },
+      path: { root: declaredRoot, path },
       writer: USER_WRITER,
       expectedGenerationId: stat.entry.generation.generationId,
     });
-    expect((await generations.current(appletSourceRoot, path))?.deleted).toBe(
-      true,
-    );
+    expect((await generations.current(declaredRoot, path))?.deleted).toBe(true);
 
-    await handle.sync!.reconcileRoot!(appletSourceRoot, "publish", {
+    await handle.sync!.reconcileRoot!(declaredRoot, "publish", {
       requiredPaths: [path],
     });
 
-    expect(sprite.text(`${MOUNTS.appletSource}/${path}`)).toBe(
+    expect(sprite.text(`${MOUNTS.packageDeclared}/${path}`)).toBe(
       "export class A{}",
     );
-    expect((await store.read({ root: appletSourceRoot, path })).status).toBe(
-      "ok",
-    );
+    expect((await store.read({ root: declaredRoot, path })).status).toBe("ok");
   });
 
   // A store that lost the object but kept the generation the sidecar names is
   // repaired rather than re-written: the bytes already match, so a second
   // generation for identical content would be noise in the ledger.
   test("repairs a required file's sidecar without writing a second generation", async () => {
-    const { sprite, store, open } = providerHarness([
-      APPLET_SOURCE_PACKAGE_ROOT,
-    ]);
+    const { sprite, store, open } = providerHarness([DECLARED_PACKAGE_ROOT]);
     const handle = await open();
-    const appletId = "pub-user-1.0123456789abcdef0123456789abcdef";
-    const path = `${appletId}/dist/manifest.json`;
-    sprite.shellWrite(MOUNTS.appletSource, path, '{"tools":[]}');
-    await handle.sync!.reconcileRoot!(appletSourceRoot, "publish", {
+    const folder = "pub-user-1.0123456789abcdef0123456789abcdef";
+    const path = `${folder}/dist/manifest.json`;
+    sprite.shellWrite(MOUNTS.packageDeclared, path, '{"tools":[]}');
+    await handle.sync!.reconcileRoot!(declaredRoot, "publish", {
       requiredPaths: [path],
     });
-    // `rm -rf dist && applet build` reproducing byte-identical output, with the
+    // A rebuild reproducing byte-identical output, with the
     // sidecar lost: the store already holds these bytes.
-    sprite.files.delete(`${MOUNTS.appletSource}/.frockbot-generations/${path}`);
-
-    const summary = await handle.sync!.reconcileRoot!(
-      appletSourceRoot,
-      "publish",
-      { requiredPaths: [path] },
+    sprite.files.delete(
+      `${MOUNTS.packageDeclared}/.frockbot-generations/${path}`,
     );
+
+    const summary = await handle.sync!.reconcileRoot!(declaredRoot, "publish", {
+      requiredPaths: [path],
+    });
 
     expect(summary).toMatchObject({ status: "ok", pushed: 0, conflicts: 0 });
     expect(summary.required).toMatchObject([{ path, durable: true }]);
     expect(
-      sprite.files.has(`${MOUNTS.appletSource}/.frockbot-generations/${path}`),
+      sprite.files.has(
+        `${MOUNTS.packageDeclared}/.frockbot-generations/${path}`,
+      ),
     ).toBe(true);
   });
 
   // A required file the Computer simply does not have is still a truthful
   // answer, and the caller is owed the fact rather than a silent `ok`.
   test("reports a required file the Computer does not hold", async () => {
-    const { open } = providerHarness([APPLET_SOURCE_PACKAGE_ROOT]);
+    const { open } = providerHarness([DECLARED_PACKAGE_ROOT]);
     const handle = await open();
     const path = "pub-user-1.0123456789abcdef0123456789abcdef/dist/ui.html";
 
-    const summary = await handle.sync!.reconcileRoot!(
-      appletSourceRoot,
-      "publish",
-      { requiredPaths: [path] },
-    );
+    const summary = await handle.sync!.reconcileRoot!(declaredRoot, "publish", {
+      requiredPaths: [path],
+    });
 
     expect(summary.status).toBe("ok");
     expect(summary.required).toEqual([{ path, durable: false }]);
@@ -1710,30 +1687,26 @@ describe("the durable-root sync on the Computer handle", () => {
     ).toBe("ok");
   });
 
-  // Production, 2026-09-04: `applet build` wrote a 470 KB `dist/ui.html`, and
+  // Production, 2026-09-04: a build wrote a 470 KB `dist/ui.html`, and
   // every publish that followed failed, because one `base64` of the file was
   // 627 KB of answer and the storage command may answer 500 KB. Both directions
   // are checked at 700 KB, which is past that ceiling and past the point where
   // one script could carry the base64 either.
   test("pushes a file far larger than one storage command can answer, byte for byte", async () => {
-    const { sprite, store, open } = providerHarness([
-      APPLET_SOURCE_PACKAGE_ROOT,
-    ]);
+    const { sprite, store, open } = providerHarness([DECLARED_PACKAGE_ROOT]);
     const handle = await open();
-    const appletId = "pub-user-1.0123456789abcdef0123456789abcdef";
+    const folder = "pub-user-1.0123456789abcdef0123456789abcdef";
     const page = largeText(700_000);
-    sprite.shellWrite(MOUNTS.appletSource, `${appletId}/dist/ui.html`, page);
+    sprite.shellWrite(MOUNTS.packageDeclared, `${folder}/dist/ui.html`, page);
 
-    const summary = await handle.sync!.reconcileRoot!(
-      appletSourceRoot,
-      "publish",
-      { requiredPaths: [`${appletId}/dist/ui.html`] },
-    );
+    const summary = await handle.sync!.reconcileRoot!(declaredRoot, "publish", {
+      requiredPaths: [`${folder}/dist/ui.html`],
+    });
 
     expect(summary).toMatchObject({ status: "ok", pushed: 1, failures: 0 });
     const stored = await store.read({
-      root: appletSourceRoot,
-      path: `${appletId}/dist/ui.html`,
+      root: declaredRoot,
+      path: `${folder}/dist/ui.html`,
     });
     expect(stored.status).toBe("ok");
     if (stored.status === "ok") {

@@ -269,17 +269,16 @@ describe("the Computer Package as the sync's caller", () => {
 });
 
 /**
- * The one sanctioned caller outside the Turn's own sync policy. `applet
- * build` writes `dist/` on the Computer with a shell, and an Applet publish
- * reads those bytes from the *store*; without a push in between it would
- * publish the previous build, or nothing.
+ * The one sanctioned caller outside the Turn's own sync policy: it reconciles
+ * a single declared root so a caller can read from the *store* bytes a shell
+ * has just written onto the Computer.
  */
 describe("syncWorkspaceRootNowV1", () => {
-  const appletsRoot: WorkspaceRootV1 = {
+  const declaredRoot: WorkspaceRootV1 = {
     kind: "package-declared",
     userId: "user-1",
-    packageId: "applets",
-    rootId: "source",
+    packageId: "image",
+    rootId: "generated",
   };
 
   async function sessionHarness() {
@@ -323,7 +322,7 @@ describe("syncWorkspaceRootNowV1", () => {
       sessions: harness.sessions,
       sessionId: "session-1",
       turn: 3,
-      root: appletsRoot,
+      root: declaredRoot,
       requiredPaths: ["todo/dist/server.js", "todo/dist/ui.html"],
     });
 
@@ -361,7 +360,7 @@ describe("syncWorkspaceRootNowV1", () => {
       sessions: harness.sessions,
       sessionId: "session-1",
       turn: 1,
-      root: appletsRoot,
+      root: declaredRoot,
     });
 
     expect(summary.status).toBe("refused");
@@ -384,7 +383,7 @@ describe("syncWorkspaceRootNowV1", () => {
       sessions: harness.sessions,
       sessionId: "session-1",
       turn: 1,
-      root: appletsRoot,
+      root: declaredRoot,
     });
 
     expect(summary.status).toBe("unavailable");
@@ -402,7 +401,7 @@ describe("syncWorkspaceRootNowV1", () => {
       sessions: harness.sessions,
       sessionId: "session-1",
       turn: 1,
-      root: appletsRoot,
+      root: declaredRoot,
     });
 
     expect(summary.status).toBe("refused");

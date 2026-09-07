@@ -954,7 +954,6 @@ function createTestGateway(
     adminEmails?: string;
   },
   openBotStateChannel?: NonNullable<GatewayDependencies["openBotStateChannel"]>,
-  workspaceSeed?: NonNullable<GatewayDependencies["workspaceSeed"]>,
 ) {
   const loader = new DirectWorkerLoader();
   const states = new Map<string, MemoryBotState>();
@@ -990,7 +989,6 @@ function createTestGateway(
       return configurationFor(userId);
     },
     ...(openBotStateChannel ? { openBotStateChannel } : {}),
-    ...(workspaceSeed ? { workspaceSeed } : {}),
     backendContributions: [
       createFlockBackendContribution({
         listBots: (userId) => configurationFor(userId).listBots(),
@@ -2652,65 +2650,6 @@ describe("Cross-origin access for configured clients", () => {
     );
     expect(accepted.status).toBe(200);
     expect(loader.ids).toEqual(["mobile-user:foundation-v1"]);
-  });
-});
-
-describe("the Workspace seed door", () => {
-  const seedRequest = (token: string | undefined, body: unknown) =>
-    new Request("https://frockbot.test/api/workspace-seed/alice/bot-1", {
-      method: "PUT",
-      headers: {
-        ...(token ? { authorization: `Bearer ${token}` } : {}),
-        "content-type": "application/json",
-      },
-      body: JSON.stringify(body),
-    });
-  const body = {
-    root: {
-      kind: "package-declared",
-      userId: "alice",
-      packageId: "applets",
-      rootId: "source",
-    },
-    path: "u.applet/dist/server.js",
-    bytesBase64: Buffer.from("export {}", "utf8").toString("base64"),
-    mediaType: "application/javascript",
-  };
-
-  test("does not exist in a deployment that sets no seed token", async () => {
-    const { gateway } = createTestGateway();
-    expect((await gateway(seedRequest("anything", body))).status).toBe(404);
-  });
-
-  test("refuses a missing or wrong token and lands a User write with the right one", async () => {
-    const writes: unknown[] = [];
-    const { gateway } = createTestGateway(
-      undefined,
-      undefined,
-      true,
-      undefined,
-      undefined,
-      undefined,
-      {
-        token: "seed-secret",
-        write: (userId, botId, request) => {
-          writes.push({ userId, botId, ...request });
-          return Promise.resolve({ status: "written", generationId: "g-1" });
-        },
-      },
-    );
-    expect((await gateway(seedRequest(undefined, body))).status).toBe(401);
-    expect((await gateway(seedRequest("wrong", body))).status).toBe(401);
-    expect(writes).toEqual([]);
-
-    const response = await gateway(seedRequest("seed-secret", body));
-    expect(response.status).toBe(200);
-    const answer = (await response.json()) as {
-      status: string;
-      generationId: string;
-    };
-    expect(answer).toEqual({ status: "written", generationId: "g-1" });
-    expect(writes).toEqual([{ userId: "alice", botId: "bot-1", ...body }]);
   });
 });
 

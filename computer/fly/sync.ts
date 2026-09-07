@@ -129,7 +129,7 @@ export const WORKSPACE_SYNC_IGNORED_DIRECTORIES_V1 = [
   ".git",
   // Wrangler's local cache. It is regenerated on demand and its first file,
   // `.wrangler/cache/cf.json`, is a single minified line — which is what the
-  // Applet canvas opened on before this was excluded (2026-09-05).
+  // canvas opened on before this was excluded (2026-09-05).
   ".wrangler",
   "dist",
   "build",
@@ -1210,8 +1210,8 @@ export class FlySpriteSyncSurface implements ComputerSyncSurfaceV1 {
       // iteration. The list is newline-*separated*, not newline-terminated, so
       // `read` consumes the final path and then reports EOF, and a plain
       // `while read` throws that path away. Every publish therefore lost the
-      // last file it named: `dist/manifest.json`, which is why an Applet that
-      // had just been built was published as "not-found: run `applet build`"
+      // last file it named: `dist/manifest.json`, which is why a tree that
+      // had just been built read back as "not-found"
       // (production, 2026-09-04 and 2026-09-05). `REL` is primed so `set -u`
       // has something to read on an empty list.
       'REL=""',
@@ -1312,7 +1312,7 @@ export class FlySpriteSyncSurface implements ComputerSyncSurfaceV1 {
    *
    * A command's answer has a hard ceiling, and base64 is a third larger than
    * the bytes it carries, so one `base64` of a whole file stopped working long
-   * before a file got large: half a megabyte of built Applet page is two thirds
+   * before a file got large: half a megabyte of built page is two thirds
    * of a megabyte of answer, and the command was refused rather than truncated.
    * So the first command answers the size and digest and the first chunk, and
    * one command per further chunk brings the rest. The digest is the proof the

@@ -15,9 +15,9 @@
  * the manifest to the facet's own `health()`, so any disagreement is a failed
  * publish. Running the code is the only derivation that cannot drift.
  *
- * Nothing here touches the output directory. `applet build` writes `dist/`;
- * the build service returns the same three strings over its contract, and the
- * hashes agree because there is one implementation.
+ * Nothing here touches a filesystem beyond the source it is given: the build
+ * service returns these three strings over its contract, and the app stores
+ * them under their content hashes.
  */
 
 import { createHash, randomUUID } from "node:crypto";

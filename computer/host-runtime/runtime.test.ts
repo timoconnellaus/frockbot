@@ -13,14 +13,6 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, test } from "bun:test";
 import {
-  APPLET_SDK_VERSION,
-  appletSdkInstallScript,
-  APPLET_SHIM_PATH,
-  appletShimScript,
-  APPLETS_ROOT,
-  APPLETS_RUNTIME_FILES,
-  APPLETS_SDK_FAILURE_PATH,
-  MINIFLARE_VERSION,
   BIN_ROOT,
   BOTS_ROOT,
   boxDoctorScript,
@@ -457,10 +449,9 @@ state running`);
     );
   });
 
-  test("the update runner replaces files and only repairs Applet dependencies", () => {
+  test("the update runner only replaces files it owns", () => {
     expect(UPDATE_PHASES.map((phase) => phase.name)).toEqual([
       "runtime",
-      "applets",
       "reference",
     ]);
     for (const phase of UPDATE_PHASES) {
@@ -469,153 +460,7 @@ state running`);
     const updateDocument = UPDATE_PHASES.map((phase) => phase.body).join("\n");
     expect(updateDocument).not.toContain("apt-get");
     expect(updateDocument).not.toContain("playwright-core/cli.js install");
-    // An in-place update swaps names over files it owns. It installs the SDK
-    // only while absent, and fills the four shared React dependencies only
-    // when the resolution probe proves an older installation needs repair.
-    expect(updateDocument).not.toContain("miniflare@");
-    const installs = updateDocument
-      .split("\n")
-      .filter((line) => line.includes("npm install"));
-    expect(installs).toEqual([
-      `  if npm install --prefix ${APPLETS_ROOT} --no-audit --no-fund @frockbot/applet-sdk@${APPLET_SDK_VERSION}; then`,
-      `    npm install --prefix ${APPLETS_ROOT} --no-audit --no-fund react@19.2.8 react-dom@19.2.8 @types/react@19.2.18 @types/react-dom@19.2.4 || true`,
-    ]);
-    expect(updateDocument).toContain(
-      `if [ ! -d ${APPLETS_ROOT}/node_modules/@frockbot/applet-sdk ]; then`,
-    );
-  });
-
-  test("the SDK install follows the published dist-tag, not a number", () => {
-    // v0.3.12 published `@frockbot/applet-sdk` as 0.3.12; a pinned "0.1.0"
-    // never existed and left every Computer without an SDK.
-    expect(APPLET_SDK_VERSION).toBe("latest");
-  });
-});
-
-describe("the applets phase", () => {
-  test("installs the Applets runtime after the browser", () => {
-    const names = PROVISION_PHASES.map((phase) => phase.name);
-    expect(names).toEqual([
-      "layout",
-      "packages",
-      "runtime",
-      "browser",
-      "applets",
-      "reference",
-    ]);
-  });
-
-  test("installs miniflare and the SDK into a prefix of their own", () => {
-    const applets = PROVISION_PHASES.find((phase) => phase.name === "applets")!;
-    // Not the runtime root: the browser driver and the Applets runtime are two
-    // dependency trees, and one resolution over both would let an Applets
-    // upgrade move `playwright-core`.
-    expect(applets.body).toContain(
-      `npm install --prefix ${APPLETS_ROOT} --no-audit --no-fund miniflare@${MINIFLARE_VERSION}`,
-    );
-    expect(applets.body).toContain(
-      `npm install --prefix ${APPLETS_ROOT} --no-audit --no-fund @frockbot/applet-sdk@${APPLET_SDK_VERSION}`,
-    );
-    expect(APPLETS_ROOT.startsWith(`${RUNTIME_ROOT}/`)).toBe(true);
-  });
-
-  test("recreates shared Applet dependencies outside every durable source root", () => {
-    const provision = PROVISION_PHASES.find(
-      (phase) => phase.name === "applets",
-    )!.body;
-    const update = UPDATE_PHASES.find(
-      (phase) => phase.name === "applets",
-    )!.body;
-
-    expect(APPLETS_ROOT).toBe(`${RUNTIME_ROOT}/applets`);
-    expect(APPLETS_ROOT).not.toContain("/agent-data/");
-    expect(provision).toContain(appletSdkInstallScript);
-    expect(update).toContain(appletSdkInstallScript);
-    expect(appletSdkInstallScript).toContain(
-      `npm install --prefix ${APPLETS_ROOT}`,
-    );
-    expect(appletSdkInstallScript).not.toContain("user-packages");
-  });
-
-  test("repairs old SDK installs and verifies every shared build import", () => {
-    const fallback =
-      `npm install --prefix ${APPLETS_ROOT} --no-audit --no-fund ` +
-      "react@19.2.8 react-dom@19.2.8 @types/react@19.2.18 @types/react-dom@19.2.4";
-    const fallbackProbe = `cd ${APPLETS_ROOT} && node -e "require.resolve('react-dom/client')"`;
-
-    expect(appletSdkInstallScript).toContain(fallback);
-    expect(appletSdkInstallScript).toContain(fallbackProbe);
-    expect(appletSdkInstallScript).toContain(
-      `SDK_RESOLUTION_ERROR=$(cd ${APPLETS_ROOT} && node -e`,
-    );
-    for (const specifier of [
-      "react-dom/client",
-      "react",
-      "@frockbot/applet-sdk/client",
-    ]) {
-      expect(appletSdkInstallScript).toContain(`'${specifier}'`);
-    }
-    expect(appletSdkInstallScript.indexOf(fallbackProbe)).toBeLessThan(
-      appletSdkInstallScript.indexOf(fallback),
-    );
-    expect(appletSdkInstallScript.indexOf(fallback)).toBeLessThan(
-      appletSdkInstallScript.indexOf("SDK_RESOLUTION_ERROR=$(cd"),
-    );
-    expect(appletSdkInstallScript).toContain(`> ${APPLETS_SDK_FAILURE_PATH}`);
-  });
-
-  test("an SDK that cannot be fetched or resolved leaves a record and not a failed run", () => {
-    // A Computer whose SDK could not be installed or resolved still browses,
-    // execs, and syncs, so the phase records the failure for the doctor rather
-    // than failing provisioning.
-    const applets = PROVISION_PHASES.find((phase) => phase.name === "applets")!;
-    expect(applets.body).toContain(`> ${APPLETS_SDK_FAILURE_PATH}`);
-    expect(applets.body).toContain(`rm -f ${APPLETS_SDK_FAILURE_PATH}`);
-    expect(boxDoctorScript).toContain("record applets-sdk fail");
-    expect(boxDoctorScript).toContain("record applets-sdk pass");
-    expect(
-      boxDoctorScript.indexOf(`[ -f ${APPLETS_SDK_FAILURE_PATH} ]`),
-    ).toBeLessThan(
-      boxDoctorScript.indexOf(
-        `[ -d ${APPLETS_ROOT}/node_modules/@frockbot/applet-sdk ]`,
-      ),
-    );
-  });
-
-  test("runs again rather than once so old SDK installs can be repaired", () => {
-    const applets = PROVISION_PHASES.find((phase) => phase.name === "applets")!;
-    expect(applets.always).toBe(true);
-    expect(provisionScript).not.toContain('[ ! -f "$MARKERS/applets"');
-    // Both installs are guarded, so a second run on a provisioned Computer is
-    // two directory tests.
-    expect(applets.body).toContain(`[ ! -d ${APPLETS_ROOT}/node_modules/`);
-  });
-
-  test("puts `applet` on the tenant's PATH, execing the SDK's own binary", () => {
-    // `bin` leads a tenant's PATH after `shims`, and `shims` holds refusals —
-    // this is a real command, so it belongs in `bin`.
-    expect(APPLET_SHIM_PATH).toBe(`${BIN_ROOT}/applet`);
-    expect(appletShimScript).toContain('exec "$APPLET" "$@"');
-    expect(appletShimScript).toContain(
-      `APPLET=${APPLETS_ROOT}/node_modules/.bin/applet`,
-    );
-    // The node shim on the base image re-execs itself for ever without this.
-    expect(appletShimScript).toContain("/etc/profile.d/languages_paths");
-    expect(APPLETS_RUNTIME_FILES[0]!.mode).toBe(0o755);
-    // Declared, so the digest moves when the shim does and an existing
-    // Computer is actually reached by the change.
-    expect(RUNTIME_DOCUMENT_FILES.map((file) => file.path)).toContain(
-      APPLET_SHIM_PATH,
-    );
-  });
-
-  test("the reference set tells a Bot the command exists and where it is", () => {
-    const layout = REFERENCE_DOCS.find(
-      (document) => document.name === "layout.md",
-    );
-    expect(layout?.content).toContain("applet build");
-    expect(layout?.content).toContain(APPLETS_ROOT);
-    expect(layout?.content).toContain("user-packages/applets/source");
+    expect(updateDocument).not.toContain("npm install");
   });
 });
 
@@ -1352,10 +1197,10 @@ describe("the GUI is never driven from the shell", () => {
       "cat /home/box/chromium.log",
       "ls /home/box/bin/xdotool",
       "printf '%s' scrotum",
-      // A file written through a heredoc is data, however its lines start.
-      // This is the Applet case: a Bot writing ui.tsx was refused because
-      // the TypeScript began with `import`.
-      'D=/tmp/applet; cat > "$D/ui.tsx" <<\'EOF\'\nimport { useState } from "react";\nimport { mount } from "@frockbot/applet-sdk/client";\nEOF\nls "$D"',
+      // A file written through a heredoc is data, however its lines start:
+      // a Bot writing TypeScript was refused because a line began with
+      // `import`.
+      'D=/tmp/work; cat > "$D/ui.tsx" <<\'EOF\'\nimport { useState } from "react";\nimport { render } from "./render";\nEOF\nls "$D"',
       "python3 - <<EOF\nimport os\nprint(os.getcwd())\nEOF",
       "cat <<-'DONE'\n\tchromium --headless\n\tDONE",
       'echo "xdotool key Return"',
@@ -1501,8 +1346,6 @@ describe("box-doctor", () => {
         "browser-profile",
         "browser-identity",
         "sync-signal",
-        "applets",
-        "applets-sdk",
         "reference-docs",
         "launcher",
         "clock",

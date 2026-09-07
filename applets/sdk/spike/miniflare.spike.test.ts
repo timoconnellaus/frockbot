@@ -16,7 +16,7 @@
  * 3. `useSQLite: true` on the DO binding is required; without it
  *    `ctx.storage.sql` is absent.
  * 4. Function `serviceBindings` work as documented — `async (request) =>
- *    Response` — which is how `applet dev` answers `CAPABILITIES` with
+ *    Response` — which is how the runtime answers `CAPABILITIES` with
  *    `{ status: "unavailable", reason: "dev" }` in this slice.
  * 5. A WebSocket upgrade forwarded from the worker to `stub.fetch(request)`
  *    reaches `webSocketMessage` on the hibernation API, and a Node client
@@ -24,7 +24,7 @@
  *    reports. `port: 0` picks a free port.
  * 6. One instance per process. Two `Miniflare` instances alive at once in the
  *    same Node process made `await mf.ready` hang here; disposing before
- *    starting the next is reliable, and is what this file and `applet dev` do.
+ *    starting the next is reliable, and is what this file does.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
