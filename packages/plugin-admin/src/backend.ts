@@ -4,7 +4,7 @@ import {
   type DeploymentPolicyV1,
   type SetSignupsCommandV1,
 } from "./shared.js";
-import { defineGatewayContribution } from "@frockbot/kernel-contracts/contributions";
+import { defineGatewayContribution } from "@frockbot/core/contracts/contributions";
 
 export interface AdminGatewayHost {
   readDeploymentPolicy(): Promise<DeploymentPolicyV1>;

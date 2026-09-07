@@ -428,7 +428,7 @@ jobs:
           fi
 
           bun -e '
-            import { parseCredentialKeyringV1 } from "./packages/connection-core/src/index.ts";
+            import { parseCredentialKeyringV1 } from "./core/connection/index.ts";
             parseCredentialKeyringV1(process.env.CREDENTIAL_KEYRING ?? "");
           '
 

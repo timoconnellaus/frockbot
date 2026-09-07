@@ -5,7 +5,7 @@ import {
   type ExecutionPackageDefinition,
   type ModelBindingV1,
   type UserSettingsViewV1,
-} from "@frockbot/configuration-core";
+} from "@frockbot/core/configuration";
 import { customModelsDefinitionV1 } from "./definition.js";
 
 const platformModel: ModelBindingV1 = {

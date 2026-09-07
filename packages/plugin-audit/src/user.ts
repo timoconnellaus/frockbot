@@ -28,7 +28,7 @@ import {
   type AuditEntrySourceV1,
   type AuditSqlV1,
 } from "./store.js";
-import { defineUserBackendContribution } from "@frockbot/kernel-contracts/contributions";
+import { defineUserBackendContribution } from "@frockbot/core/contracts/contributions";
 
 export interface AuditUserBackendHost {
   /** The User Durable Object's own SQL storage. */

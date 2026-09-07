@@ -1,6 +1,6 @@
 // What one Messages call becomes on the Mac, proved without a Mac.
 import { describe, expect, test } from "bun:test";
-import type { MachineMessagesCallV1 } from "@frockbot/machine-protocol";
+import type { MachineMessagesCallV1 } from "@frockbot/core/machine-protocol";
 import {
   MACHINE_MESSAGES_AUTOMATION_REFUSAL_V1,
   MACHINE_MESSAGES_FULL_DISK_REFUSAL_V1,

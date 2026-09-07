@@ -2,9 +2,9 @@ import type {
   SettingsFrame,
   SettingsChangeCommand,
   SettingsReceipt,
-} from "@frockbot/protocol-schemas";
-import type { SkillRefV1 } from "@frockbot/kernel-contracts";
-import type { BotStateTopicV1 } from "@frockbot/protocol";
+} from "@frockbot/core/protocol-schemas";
+import type { SkillRefV1 } from "@frockbot/core/contracts";
+import type { BotStateTopicV1 } from "@frockbot/core/protocol";
 import {
   decodeRevokeConnectionResultV1,
   decodeStartConnectionResultV1,
@@ -12,8 +12,8 @@ import {
   type ConnectionCommandV1,
   type StartConnectionResult,
   // pi-lens-ignore: ts:2307
-} from "@frockbot/connection-core";
-import { decodeExternalAuthorizationUrl } from "@frockbot/protocol";
+} from "@frockbot/core/connection";
+import { decodeExternalAuthorizationUrl } from "@frockbot/core/protocol";
 
 export { decodeExternalAuthorizationUrl };
 
@@ -33,7 +33,7 @@ import type {
   ConfigurationQueryV1,
   ConfigurationViewV1,
   OperationReceiptV1,
-} from "@frockbot/configuration-core";
+} from "@frockbot/core/configuration";
 import {
   createApp,
   defineComponent,
@@ -59,7 +59,7 @@ export interface ClientTurnEvent {
   /**
    * A `send/to-user` payload, carried untyped because the client core holds no
    * product shapes. The Package that owns the send surface decodes it with the
-   * versioned decoder in kernel-contracts before drawing it.
+   * versioned decoder in core/contracts before drawing it.
    */
   payload?: unknown;
   /** A `wake/parent` hand-off message. */
@@ -165,8 +165,8 @@ export interface ClientRun {
 
 export interface AgentTransport {
   readSettingsOptions?(
-    query: import("@frockbot/protocol-schemas").SettingsOptionsQuery,
-  ): Promise<import("@frockbot/protocol-schemas").SettingsOptionsPage>;
+    query: import("@frockbot/core/protocol-schemas").SettingsOptionsQuery,
+  ): Promise<import("@frockbot/core/protocol-schemas").SettingsOptionsPage>;
   readSettingsFrame?(home: "application" | "models"): Promise<SettingsFrame>;
   changeSettings?(
     home: "application" | "models",

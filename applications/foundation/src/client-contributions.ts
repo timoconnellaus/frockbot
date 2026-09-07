@@ -12,7 +12,7 @@
  * client Contribution mounts into slots an earlier one declares.
  */
 import type { ClientPlugin } from "@frockbot/client-core";
-import type { ClientContributionDescriptorV1 } from "@frockbot/kernel-contracts/contributions";
+import type { ClientContributionDescriptorV1 } from "@frockbot/core/contracts/contributions";
 
 import { clientContribution as uiThemeClient } from "@frockbot/plugin-ui-theme/client";
 import { clientContribution as authClient } from "@frockbot/plugin-auth/client";

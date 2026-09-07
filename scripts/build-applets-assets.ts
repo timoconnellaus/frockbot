@@ -115,7 +115,7 @@ async function pagesModule(): Promise<string> {
   // Imported by path, not by specifier: this script runs from the repository
   // root, where the workspace's package names are not resolvable.
   const { PACKAGE_IFRAME_HELPER_JS_V1 } =
-    await import("../packages/kernel-contracts/src/iframe-ui.ts");
+    await import("../core/contracts/iframe-ui.ts");
   const pages: Array<{
     id: string;
     contentHash: string;

@@ -4,7 +4,7 @@
 // an in-memory storage, so the identity assertion, the packages projection and
 // the Connection projection are the product's own rather than a stub's.
 import { describe, expect, it } from "bun:test";
-import type { BotSettingsViewV1 } from "@frockbot/configuration-core";
+import type { BotSettingsViewV1 } from "@frockbot/core/configuration";
 import {
   createUserSettingsBackendContribution,
   type UserSettingsStorage,
@@ -13,7 +13,7 @@ import {
 import {
   parseBotTemplateDocumentV1,
   templateObjectKeyV1,
-} from "@frockbot/template-core";
+} from "@frockbot/core/template";
 import { createBotTemplateUserBackendContribution } from "./user.ts";
 import type { TemplateBlobStoreV1, TemplateBotReaderV1 } from "./user.ts";
 

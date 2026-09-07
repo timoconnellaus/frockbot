@@ -30,7 +30,7 @@
 // are chat-only, because the approval that gates them is a chat-only payload —
 // an automation Turn has no voice to ask with. Row 49 therefore ships
 // `partial`; see the plan's open decision 3.
-import { packageAdmissionCeilingV1 } from "@frockbot/kernel-contracts";
+import { packageAdmissionCeilingV1 } from "@frockbot/core/contracts";
 import {
   MACHINE_LIMITS_V1,
   MachineDecodeError,
@@ -41,7 +41,7 @@ import {
   type MachineListEntryV1,
   type MachineListViewV1,
   type MachineOpV1,
-} from "@frockbot/machine-protocol";
+} from "@frockbot/core/machine-protocol";
 import {
   decodeTurnTypeV1,
   type Session,
@@ -51,7 +51,7 @@ import {
   type TurnTypeV1,
   type AgentRuntimeV1,
   type RuntimeFeatureV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import { userMachineDefinitionV1 } from "./definition.js";
 import {
   machineApprovalActionV1,

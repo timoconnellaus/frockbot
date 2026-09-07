@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { type Session } from "@frockbot/kernel-contracts";
+import { type Session } from "@frockbot/core/contracts";
 import { createAgentRuntimeHarness } from "@frockbot/plugin-testkit";
 import {
   createGenerateImageTool,

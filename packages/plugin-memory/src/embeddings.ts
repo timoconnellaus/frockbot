@@ -1,4 +1,4 @@
-import { remoteCallV1 } from "@frockbot/kernel-contracts";
+import { remoteCallV1 } from "@frockbot/core/contracts";
 import {
   EMBEDDING_MODEL,
   type EmbedMemory,

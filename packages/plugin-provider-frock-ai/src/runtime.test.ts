@@ -7,8 +7,8 @@ import {
   ModelRequestDeadlineError,
   ModelProviderFailureError,
   type NormalizedModelRequest,
-} from "@frockbot/kernel-contracts";
-import type { LoopAgentRuntimeV1 } from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
+import type { LoopAgentRuntimeV1 } from "@frockbot/core/contracts";
 import { createAgentRuntimeHarness } from "@frockbot/plugin-testkit";
 import {
   FROCK_AI_CONNECTION_GENERATION,

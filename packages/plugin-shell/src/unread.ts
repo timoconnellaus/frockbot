@@ -17,7 +17,7 @@
 import {
   canonicalCommandFingerprintV1,
   isPublicIdentifier,
-} from "@frockbot/configuration-core";
+} from "@frockbot/core/configuration";
 import { decodeRunCursorV1 } from "./run-cursor.js";
 
 /** The single durable key the whole record lives under. */

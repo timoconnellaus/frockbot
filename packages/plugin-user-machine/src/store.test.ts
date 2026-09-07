@@ -3,7 +3,7 @@ import {
   MACHINE_LIMITS_V1,
   machineConnectedV1,
   type MachineCommandV1,
-} from "@frockbot/machine-protocol";
+} from "@frockbot/core/machine-protocol";
 import {
   claimMachineCommandV1,
   dispatchMachineCommandV1,

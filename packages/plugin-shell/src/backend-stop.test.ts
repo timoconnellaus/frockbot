@@ -1,10 +1,10 @@
 import { shellTestApplicationV1 } from "./backend-application.fixture.js";
 import { describe, expect, test } from "bun:test";
-import type { SessionEvent } from "@frockbot/kernel-contracts";
+import type { SessionEvent } from "@frockbot/core/contracts";
 import {
   initializeBotSettingsV1,
   type UserSettingsViewV1,
-} from "@frockbot/configuration-core";
+} from "@frockbot/core/configuration";
 import {
   createShellBotBackendContribution,
   type ShellBotBackendHost,
@@ -14,7 +14,7 @@ import {
   type StoredRun,
 } from "./backend-contracts.js";
 import { interruptedRunSettlementV1 } from "./backend-recovery.js";
-import { SessionEventLog } from "@frockbot/kernel-do";
+import { SessionEventLog } from "@frockbot/core/durable";
 
 class MemoryStorage {
   readonly values = new Map<string, unknown>();

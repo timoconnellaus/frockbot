@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   USER_PROFILE_PLACEHOLDER_NAME_V1,
   type UserSettingsViewV1,
-} from "@frockbot/configuration-core";
+} from "@frockbot/core/configuration";
 import {
   createUserSettingsBackendContribution,
   type AvailableUserPackage,

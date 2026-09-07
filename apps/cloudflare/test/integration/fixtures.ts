@@ -11,7 +11,7 @@ import {
   runInDurableObject,
   SELF,
 } from "cloudflare:test";
-import type { SessionEvent } from "@frockbot/kernel-contracts";
+import type { SessionEvent } from "@frockbot/core/contracts";
 import { beforeAll, expect, vi } from "vitest";
 import {
   OLLAMA_BAD_API_KEY,

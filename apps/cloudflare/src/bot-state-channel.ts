@@ -1,8 +1,8 @@
 import type {
   BotStateChannelFrameV1,
   BotStateTopicV1,
-} from "@frockbot/protocol";
-import { decodeBotStateCursorV1 } from "@frockbot/protocol";
+} from "@frockbot/core/protocol";
+import { decodeBotStateCursorV1 } from "@frockbot/core/protocol";
 import type {
   ComputerBotStorage,
   ComputerBotTransaction,

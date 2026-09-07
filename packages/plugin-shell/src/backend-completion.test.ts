@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { type SessionEvent } from "@frockbot/kernel-contracts";
-import { initializeBotSettingsV1 } from "@frockbot/configuration-core";
-import { SessionEventLog } from "@frockbot/kernel-do";
+import { type SessionEvent } from "@frockbot/core/contracts";
+import { initializeBotSettingsV1 } from "@frockbot/core/configuration";
+import { SessionEventLog } from "@frockbot/core/durable";
 import {
   botTurnCommandFingerprintV1,
   type BotTurnCompletion,

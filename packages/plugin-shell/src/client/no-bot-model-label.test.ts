@@ -1,6 +1,6 @@
 import { plugin } from "bun";
 import { expect, test } from "bun:test";
-import type { UserSettingsViewV1 } from "@frockbot/configuration-core";
+import type { UserSettingsViewV1 } from "@frockbot/core/configuration";
 import type { Ref } from "vue";
 import type { FrockBotWebData } from "../shared.js";
 

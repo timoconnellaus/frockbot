@@ -19,7 +19,7 @@
 // root in the Bot's. A host that binds nothing gets `undefined` and the Memory
 // Package is then not mounted at all: a Turn with no readable Memory root
 // injects no Memory, visibly, rather than inventing a second store.
-import type { WorkspaceFilesV1 } from "@frockbot/kernel-contracts";
+import type { WorkspaceFilesV1 } from "@frockbot/core/contracts";
 import type {
   MemoryProjectsV1,
   MemoryRuntimeHostV1,

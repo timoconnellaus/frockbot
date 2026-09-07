@@ -1,4 +1,4 @@
-import type { ConnectionModelCatalogV1 } from "@frockbot/connection-core";
+import type { ConnectionModelCatalogV1 } from "@frockbot/core/connection";
 
 // The provider is Frock AI. Its *stored* identity strings still read `flock-`:
 // every existing User has them written into their Connection, their installed

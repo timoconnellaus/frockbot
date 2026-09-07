@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { BOT_ISOLATE_CONTEXT_KEYS_V1 } from "@frockbot/kernel-contracts";
+import { BOT_ISOLATE_CONTEXT_KEYS_V1 } from "@frockbot/core/contracts";
 import {
   BOT_ISOLATE_DEADLINE_SOURCE,
   BOT_ISOLATE_INVOCATION_SOURCE,

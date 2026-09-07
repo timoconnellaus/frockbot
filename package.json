@@ -6,6 +6,7 @@
   "workspaces": [
     "applications/*",
     "apps/*",
+    "core",
     "packages/*"
   ],
   "overrides": {
@@ -25,9 +26,9 @@
     "dev:cloudflare": "bun run --filter @frockbot/cloudflare dev",
     "dev": "bun run build:webui && bun run dev:cloudflare",
     "build": "bun run build:webui && bun run build:cloudflare && bun run build:marketing",
-    "typecheck": "bun scripts/check-client-protocol.ts && bun scripts/check-kernel-imports.ts && bun scripts/check-computer-host-imports.ts && bun scripts/generate-isolate-context-catalog.ts --check && bun scripts/build-applets-assets.ts --check && bun scripts/typecheck.ts",
+    "typecheck": "bun scripts/check-client-protocol.ts && bun scripts/check-core-imports.ts && bun scripts/check-computer-host-imports.ts && bun scripts/generate-isolate-context-catalog.ts --check && bun scripts/build-applets-assets.ts --check && bun scripts/typecheck.ts",
     "lint:ui-styles": "bun scripts/check-ui-styles.ts",
-    "lint:kernel-imports": "bun scripts/check-kernel-imports.ts",
+    "lint:core-imports": "bun scripts/check-core-imports.ts",
     "lint:computer-host-imports": "bun scripts/check-computer-host-imports.ts",
     "test": "bun test",
     "format": "prettier --write .",

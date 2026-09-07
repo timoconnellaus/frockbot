@@ -42,7 +42,7 @@ import {
   type MachineListViewV1,
   type MachineRecordV1,
   type MachineResultReceiptV1,
-} from "@frockbot/machine-protocol";
+} from "@frockbot/core/machine-protocol";
 import {
   MACHINE_PREFIX,
   machineKeyV1,

@@ -1,7 +1,7 @@
 // The Bot half of the Audit Package: the projection, and the bounded outbox
 // that carries its entries across the Bot/User seam.
 //
-// The kernel imports no Package, so nothing here is called from `kernel-do`.
+// Core imports no Package, so nothing here is called from `core/durable`.
 // The Bot Durable Object projects a *settled* run — one that has already
 // reached a durable terminal state — and hands the entries to a narrow
 // `AuditSinkV1` its host constructs, the same shape the Memory Package reaches

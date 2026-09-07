@@ -10,7 +10,7 @@ import {
   type AppletBuildViewV1,
   type AppletSourceViewV1,
   type PackageIframeCompositionV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import type { ClientSkillCatalogV1 } from "@frockbot/plugin-shell/skill-protocol";
 import { createFoundationBackendContributions } from "@frockbot/application-foundation/runtime";
 import { FIRST_PARTY_PACKAGE_ARTIFACTS_V1 } from "@frockbot/plugin-applets/pages";
@@ -65,7 +65,7 @@ import {
   decodeCompositionGenerationViewV1,
   decodeBotIdV1,
   type BotSettingsViewV1,
-} from "@frockbot/configuration-core";
+} from "@frockbot/core/configuration";
 import {
   decodeRoutineCommandReceiptV1,
   decodeRoutineInboxReceiptV1,
@@ -91,7 +91,7 @@ import {
   decodeMachinePairingOfferV1,
   decodeMachinePollResultV1,
   decodeMachineResultReceiptV1,
-} from "@frockbot/machine-protocol";
+} from "@frockbot/core/machine-protocol";
 import {
   decodeClientSearchRebuildReceiptV1,
   decodeSearchIndexResultsV1,
@@ -112,7 +112,7 @@ import {
 import {
   parseTemplateShareIdV1,
   type TemplateVisibilityV1,
-} from "@frockbot/template-core";
+} from "@frockbot/core/template";
 import {
   decodeDeploymentPolicyV1,
   type DeploymentPolicyV1,
@@ -170,11 +170,11 @@ import {
   APPLETS_UNAVAILABLE_MESSAGE_V1,
   APPLET_VIEWER_TOKEN_TTL_MS,
   APPLET_VIEWER_UNCONFIGURED_DETAIL_V1,
-} from "@frockbot/kernel-do";
+} from "@frockbot/core/durable";
 import {
   decodeAppletGenerationV1,
   decodeAppletSummaryV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import type { AppletState } from "./applet-state.js";
 export { BotCapabilities } from "./bot-capabilities.js";
 // The Applet authority: the Durable Object that owns one Applet instance,
@@ -345,7 +345,7 @@ interface BotStateRpc extends BotConfigurationBinding {
   listSkills(): Promise<ClientSkillCatalogV1>;
   listPackageUi(): Promise<PackageIframeCompositionV1>;
   runPackageUiTool(
-    command: import("@frockbot/kernel-contracts").PackageIframeToolCommandV1,
+    command: import("@frockbot/core/contracts").PackageIframeToolCommandV1,
   ): Promise<BotTurnResult>;
   readWorkspaceFileV1(path: unknown): Promise<ClientWorkspaceFileV1>;
   readAppletSourceV1(appletId: string): Promise<AppletSourceViewV1>;
@@ -862,7 +862,7 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
       this.ctx.props.userId,
       request.botId as string,
     ).runPackageUiTool(
-      request.command as import("@frockbot/kernel-contracts").PackageIframeToolCommandV1,
+      request.command as import("@frockbot/core/contracts").PackageIframeToolCommandV1,
     );
   }
 

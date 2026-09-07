@@ -2,7 +2,7 @@
 // transcript and the Bot keeps working". The harness log named the sequence.
 //
 //   ✘ Uncaught Error: This Bot is still working on a Turn. …
-//     at packages/kernel-do/src/authority.ts:1049
+//     at core/durable/authority.ts:1049
 //   ✘ Uncaught TypeError: Can't read from request stream after response has
 //     been sent.
 //   ✘ kj::getCaughtExceptionAsKj() … disconnected: Broken pipe

@@ -40,7 +40,7 @@ import {
   type MachineRecordV1,
   type MachineResultReceiptV1,
   type MachineTokenClaimsV1,
-} from "@frockbot/machine-protocol";
+} from "@frockbot/core/machine-protocol";
 import {
   machinePairingCodeDigestV1,
   machinePairingNonceV1,
@@ -76,7 +76,7 @@ import {
   type MachineDispatchOutcomeV1,
   type MachineStorageV1,
 } from "./store.js";
-import { defineUserBackendContribution } from "@frockbot/kernel-contracts/contributions";
+import { defineUserBackendContribution } from "@frockbot/core/contracts/contributions";
 
 export interface MachineUserBackendHost {
   /** The User Durable Object's own storage. */

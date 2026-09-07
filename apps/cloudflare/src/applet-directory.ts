@@ -21,11 +21,11 @@ import {
   APPLET_MAX_PER_USER_V1,
   type AppletDirectoryEntryV1,
   type AppletToolDeclarationV1,
-} from "@frockbot/kernel-do";
+} from "@frockbot/core/durable";
 import type {
   AppletProvenanceV1,
   AppletSummaryV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 
 /** The directory as a Bot isolate and the hosted client read it. */
 export interface AppletDirectoryViewV1 {

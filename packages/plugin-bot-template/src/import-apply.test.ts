@@ -14,7 +14,7 @@ import {
   canonicalBotTemplateDocumentV1,
   templateContentHashV1,
   type BotTemplateV1,
-} from "@frockbot/template-core";
+} from "@frockbot/core/template";
 import { createBotTemplateUserBackendContribution } from "./user.ts";
 import type {
   TemplateBlobStoreV1,

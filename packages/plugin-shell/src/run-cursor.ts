@@ -6,7 +6,7 @@
  * types the first depends on into a browser-side program. So the format lives
  * here, with nothing but an identifier check under it.
  */
-import { isPublicIdentifier } from "@frockbot/configuration-core";
+import { isPublicIdentifier } from "@frockbot/core/configuration";
 
 /** `run-index:<acceptedAt ISO, 24 chars>:<runId>`, as the kernel writes it. */
 export const RUN_CURSOR_PATTERN = /^run-index:(.{24}):(.+)$/;

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { PackageInstallationView } from "@frockbot/configuration-core";
+import type { PackageInstallationView } from "@frockbot/core/configuration";
 import type { PluginCatalogItem } from "@frockbot/plugin-shell/shared";
 import {
   configurablePackages,

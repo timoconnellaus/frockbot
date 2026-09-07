@@ -2,7 +2,7 @@ import type {
   ConnectionView,
   ModelBindingV1,
   PackageInstallationView,
-} from "@frockbot/configuration-core";
+} from "@frockbot/core/configuration";
 import type { PluginCatalogItem } from "@frockbot/plugin-shell/shared";
 
 export function isModelConnectionEligible(input: {

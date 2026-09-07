@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { SessionStore, type Session } from "@frockbot/kernel-contracts";
+import { SessionStore, type Session } from "@frockbot/core/contracts";
 import {
   createSkillLoadTool,
   createSkillWriteTool,

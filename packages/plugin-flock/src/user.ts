@@ -22,7 +22,7 @@ import {
   type CreateBotCommandV1,
   type FlockReceiptV1,
 } from "./shared.js";
-import { defineUserBackendContribution } from "@frockbot/kernel-contracts/contributions";
+import { defineUserBackendContribution } from "@frockbot/core/contracts/contributions";
 
 const DIRECTORY_KEY = "flock:directory:v1";
 const RECEIPT_PREFIX = "flock:create-receipt:";

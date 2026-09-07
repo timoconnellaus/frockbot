@@ -25,7 +25,7 @@ import {
   type SearchQueryV1,
   type SearchRowKindV1,
 } from "./shared.js";
-import { defineGatewayContribution } from "@frockbot/kernel-contracts/contributions";
+import { defineGatewayContribution } from "@frockbot/core/contracts/contributions";
 
 export interface SearchGatewayHost {
   searchTranscripts(

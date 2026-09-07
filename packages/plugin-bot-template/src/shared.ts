@@ -2,7 +2,7 @@
 //
 // "Cross-runtime communication uses narrow, versioned DTOs, and every inbound
 // value is decoded at its seam." The template *document* lives in
-// `@frockbot/template-core`, because it is a product
+// `@frockbot/core/template`, because it is a product
 // artifact several runtimes read without this Package mounted. What lives here
 // is the traffic around it: the commands a User issues, the receipts they get
 // back, and the summary of what an export packed and what it scrubbed.
@@ -17,7 +17,7 @@ import {
   TemplateDecodeError,
   type TemplateShareRecordV1,
   type TemplateVisibilityV1,
-} from "@frockbot/template-core";
+} from "@frockbot/core/template";
 
 export { TemplateDecodeError };
 

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { type SessionEvent } from "@frockbot/kernel-contracts";
-import { initializeBotSettingsV1 } from "@frockbot/configuration-core";
+import { type SessionEvent } from "@frockbot/core/contracts";
+import { initializeBotSettingsV1 } from "@frockbot/core/configuration";
 import type { StoredRun } from "./backend-contracts.js";
 import { planBotRunRecovery } from "./backend-recovery.js";
 import {

@@ -16,7 +16,7 @@
 // The index is process-local by construction. It holds no authority and is
 // never the source of a fact — a search result is hydrated back out of the
 // files before it is shown.
-import { remoteCallV1 } from "@frockbot/kernel-contracts";
+import { remoteCallV1 } from "@frockbot/core/contracts";
 import { chunkMarkdown, type MemoryChunk } from "./chunker.js";
 import { memoryDocumentKeyV1, type MemoryDocumentV1 } from "./documents.js";
 import type { EmbedMemory, MemoryVectorIndex } from "./types.js";

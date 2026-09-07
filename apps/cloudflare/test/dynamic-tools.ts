@@ -15,9 +15,9 @@ import type {
   LlmMessage,
   ToolCall,
   ToolSchema,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 
-/** The meta-tools `@frockbot/plugin-tools` contributes to every registry. */
+/** The meta-tools `@frockbot/core/tools` contributes to every registry. */
 export const META_TOOL_NAMES_V1 = [
   "get_dynamic_tools",
   "call_dynamic_tool",

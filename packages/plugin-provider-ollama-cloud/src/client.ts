@@ -2,7 +2,7 @@
 import {
   decodeConnectionModelCatalogV1,
   type ConnectionModelV1,
-} from "@frockbot/connection-core";
+} from "@frockbot/core/connection";
 
 export type OllamaFetch = (
   input: string | URL | Request,

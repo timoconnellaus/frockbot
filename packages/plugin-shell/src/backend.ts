@@ -1,6 +1,6 @@
 import type { RoutineWriterV1 } from "@frockbot/plugin-routines/records";
 import { turnToolCatalogPin } from "./tool-catalog-pin.js";
-import type { AgentEffectAdmission } from "@frockbot/kernel-agent-loop/agent";
+import type { AgentEffectAdmission } from "@frockbot/core/agent-loop/agent";
 import {
   decodeIsolateMemoryReadRequestV1,
   decodeIsolateMemoryWriteRequestV1,
@@ -30,8 +30,8 @@ import {
   type PackageIframeToolCommandV1,
   type TurnTypeV1,
   type WorkspaceFilesV1,
-} from "@frockbot/kernel-contracts";
-import { canonicalJson, sha256 } from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
+import { canonicalJson, sha256 } from "@frockbot/core/contracts";
 import type { ComputerRegistry } from "@frockbot/computer-core";
 import {
   appletSourceFilePathV1,
@@ -61,7 +61,7 @@ import {
   type BotTurnExecutionInput,
   type OwnedBotTurnCommand,
   type StoredRunOriginV1,
-} from "@frockbot/kernel-do";
+} from "@frockbot/core/durable";
 import type {
   FoundationAgentPackage,
   RuntimeModelSelection,
@@ -69,7 +69,7 @@ import type {
 import {
   decodeCredentialLeaseV1,
   type CredentialLeaseV1,
-} from "@frockbot/connection-core";
+} from "@frockbot/core/connection";
 import type { ShellApplicationV1 } from "./backend-runtime.js";
 import {
   applyBotProfilePatchV1,
@@ -102,7 +102,7 @@ import {
   resolveBotExecutionPlanV1,
   resolveEffectiveBotModelV1,
   type UserSettingsViewV1,
-} from "@frockbot/configuration-core";
+} from "@frockbot/core/configuration";
 import {
   cancelStoredRun,
   completeStoredRun,
@@ -113,7 +113,7 @@ import {
   latestModelRequestJournalState,
   planBotRunRecovery,
 } from "./backend-recovery.js";
-import { COMPOSITION_CURRENT_KEY } from "@frockbot/kernel-do";
+import { COMPOSITION_CURRENT_KEY } from "@frockbot/core/durable";
 import {
   bootstrapCompositionGeneration,
   createShellCompositionHost,
@@ -134,19 +134,19 @@ import {
   APPLET_FOCUSED_KEY,
   decodeFocusedAppletV1,
   type FocusedAppletV1,
-} from "@frockbot/kernel-do";
+} from "@frockbot/core/durable";
 import {
   decodeAppletProvenanceV1,
   decodeAppletSummaryV1,
   decodeAppletToolDeclarationV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import { compositionFailureTurnTextV1 } from "./backend-composition-input.js";
 import {
   activateCompositionV1,
   type CompositionFailureV1,
   type CompositionMountHost,
   type CompositionQuarantineV1,
-} from "@frockbot/kernel-do";
+} from "@frockbot/core/durable";
 import {
   createBotComputerSyncHost,
   declaredPackageRootsV1,
@@ -298,7 +298,7 @@ import {
   type MachineCommandResultV1,
   type MachineCommandV1,
   type MachineListViewV1,
-} from "@frockbot/machine-protocol";
+} from "@frockbot/core/machine-protocol";
 import { decodeMachineTargetViewV1 } from "@frockbot/plugin-user-machine/target";
 import type { MachineTargetViewV1 } from "@frockbot/plugin-user-machine/target";
 import {
@@ -346,7 +346,7 @@ import type { BotIsolateLoader } from "@frockbot/compose-frockbot";
 import type {
   CompositionGenerationV1,
   CompositionMemberV1,
-} from "@frockbot/kernel-do";
+} from "@frockbot/core/durable";
 import {
   projectCompositionGenerationV1,
   projectFirstPartyPackageIframeV1,
@@ -423,7 +423,7 @@ import {
   type SidebarMessagePreviewV1,
   type SidebarPreviewRunV1,
 } from "./unread.js";
-import { defineBotBackendContribution } from "@frockbot/kernel-contracts/contributions";
+import { defineBotBackendContribution } from "@frockbot/core/contracts/contributions";
 
 export const BOT_CONFIGURATION_KEY = "bot-configuration";
 const CONFIGURATION_RECEIPT_PREFIX = "configuration-receipt:";

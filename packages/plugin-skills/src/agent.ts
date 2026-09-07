@@ -29,12 +29,12 @@ import type {
   WorkspaceFilesV1,
   WorkspaceReadsV1,
   WorkspaceWriteRequestV1,
-} from "@frockbot/kernel-contracts";
-import { formatSkillRefV1, parseSkillRefV1 } from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
+import { formatSkillRefV1, parseSkillRefV1 } from "@frockbot/core/contracts";
 import type {
   AgentRuntimeV1,
   RuntimeFeatureV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import {
   botInstructionRootV1,
   countSkillDocumentsV1,

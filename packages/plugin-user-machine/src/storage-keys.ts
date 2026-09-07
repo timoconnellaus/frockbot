@@ -4,9 +4,9 @@
 // Package availability, Connections, credentials, the Computer assignment,
 // User settings, quotas" — a machine is a User asset, so its registry, its
 // command queue and its results live here and nowhere else. The keys live in
-// the Package rather than in `@frockbot/kernel-do` for the same reason
-// `plugin-routines/src/storage-keys.ts` does: the kernel holds no product
-// policy and imports no Package.
+// the Package rather than in `@frockbot/core/durable` for the same reason
+// `plugin-routines/src/storage-keys.ts` does: core holds no product policy and
+// imports no Package.
 //
 // None of these prefixes collide with the landed set (`user:`, `memory:`,
 // `settings:`, `connection:`, `credential:`, `routine-*`, `template-*`).

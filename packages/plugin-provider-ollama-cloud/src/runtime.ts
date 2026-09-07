@@ -5,9 +5,9 @@ import {
   ModelProviderFailureError,
   type NormalizedModelRequest,
   type RuntimeFeatureV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import type { CredentialLeaseRuntime } from "@frockbot/plugin-credentials/user";
-import type { CredentialLeaseV1 } from "@frockbot/connection-core";
+import type { CredentialLeaseV1 } from "@frockbot/core/connection";
 import {
   type ModelRequestDeadlineOptionsV1,
   OpenAICompatibleHttpError,

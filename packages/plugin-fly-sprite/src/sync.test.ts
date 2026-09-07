@@ -10,15 +10,15 @@ import {
   type WorkspaceGenerationV1,
   type WorkspaceRootV1,
   type WorkspaceWriterV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import {
   createObjectWorkspaceFilesV1,
   workspaceObjectKeyV1,
-} from "@frockbot/workspace-store";
+} from "@frockbot/core/workspace-store";
 import {
   createInMemoryObjectBucketV1,
   createInMemoryWorkspaceGenerationsV1,
-} from "@frockbot/workspace-store/testing";
+} from "@frockbot/core/workspace-store/testing";
 import { computerBotKey, FlySpriteComputer } from "./computer.ts";
 import { FakeComputerHost, type FakeComputerRunV1 } from "./host-double.ts";
 import { FLY_WORKSPACE_LAYOUT, FlySpriteComputerProvider } from "./provider.ts";

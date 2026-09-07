@@ -3,16 +3,16 @@
 //
 // The Workspace half is deliberately *not* faked here: the tests build a real
 // `createObjectWorkspaceFilesV1` over the in-memory bucket and generation
-// ledger from `@frockbot/workspace-store/testing`, so what they prove is the
+// ledger from `@frockbot/core/workspace-store/testing`, so what they prove is the
 // production store's behaviour and not a double's. What this module supplies
 // is the two seams that genuinely have no implementation in this Package: the
 // durable Project authority, and a deterministic clock.
-import { createObjectWorkspaceFilesV1 } from "@frockbot/workspace-store";
+import { createObjectWorkspaceFilesV1 } from "@frockbot/core/workspace-store";
 import {
   createInMemoryObjectBucketV1,
   createInMemoryWorkspaceGenerationsV1,
-} from "@frockbot/workspace-store/testing";
-import type { WorkspaceFilesV1 } from "@frockbot/kernel-contracts";
+} from "@frockbot/core/workspace-store/testing";
+import type { WorkspaceFilesV1 } from "@frockbot/core/contracts";
 import type { MemoryProjectsOutcomeV1, MemoryProjectsV1 } from "./projects.js";
 import type { MemoryProjectV1 } from "./render.js";
 import { MemoryStore } from "./store.js";

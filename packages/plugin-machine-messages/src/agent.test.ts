@@ -6,7 +6,7 @@ import {
   type ToolCall,
   type ToolExecutionContext,
   type TurnTypeV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import {
   type AgentRuntimeHarness,
   createAgentRuntimeHarness,
@@ -16,7 +16,7 @@ import type {
   MachineListEntryV1,
   MachineListViewV1,
   MachineMessagesPermissionsV1,
-} from "@frockbot/machine-protocol";
+} from "@frockbot/core/machine-protocol";
 import type { MachineRuntimeHostV1 } from "@frockbot/plugin-user-machine/agent";
 import {
   decodeMachineIntentRecordV1,

@@ -10,7 +10,7 @@ import { frockBotWebDataKey } from "@frockbot/plugin-shell/shared";
 import type {
   TemplateShareRecordV1,
   TemplateVisibilityV1,
-} from "@frockbot/template-core";
+} from "@frockbot/core/template";
 import { computed, inject, ref, watch } from "vue";
 import { templateSharePathV1 } from "../shared.js";
 import { botTemplateStateKey } from "./state.js";

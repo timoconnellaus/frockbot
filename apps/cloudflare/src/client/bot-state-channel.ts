@@ -2,7 +2,7 @@ import {
   decodeBotStateChannelFrameV1,
   decodeBotStateCursorV1,
   type BotStateTopicV1,
-} from "@frockbot/protocol";
+} from "@frockbot/core/protocol";
 
 export type BotStateChannelStatus =
   "connecting" | "open" | "fallback" | "hidden";

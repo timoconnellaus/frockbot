@@ -4,7 +4,7 @@ import type {
   Json,
   SettingChoice,
   SettingsOptionsPage,
-} from "@frockbot/protocol-schemas";
+} from "@frockbot/core/protocol-schemas";
 import { inject, nextTick, onBeforeUnmount, ref } from "vue";
 import { settingsFrameClientKey } from "./settings-frames.js";
 const props = defineProps<{

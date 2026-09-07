@@ -1,4 +1,4 @@
-import type { PackageDefinitionV1 } from "@frockbot/kernel-contracts";
+import type { PackageDefinitionV1 } from "@frockbot/core/contracts";
 import {
   type AuditUserBackendContribution,
   type AuditUserBackendHost,

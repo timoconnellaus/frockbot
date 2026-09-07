@@ -10,7 +10,7 @@ import {
   ModelProviderFailureError,
   ModelRequestDeadlineError,
   type NormalizedModelRequest,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import { OpenAICompatibleProvider } from "./index.js";
 
 const request: NormalizedModelRequest = {

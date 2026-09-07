@@ -25,7 +25,7 @@ import {
   decodeMachineResultReceiptV1,
   machineRoutePathV1,
   type MachineCommandV1,
-} from "@frockbot/machine-protocol";
+} from "@frockbot/core/machine-protocol";
 import {
   createMachineBackendContribution,
   type MachineBackendRouteContribution,

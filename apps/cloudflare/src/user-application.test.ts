@@ -12,7 +12,7 @@ import {
 import {
   APPLETS_UNAVAILABLE_MESSAGE_V1,
   BotTurnRefusedError,
-} from "@frockbot/kernel-do";
+} from "@frockbot/core/durable";
 
 function rpcBindingFor(state: BotStateBinding): UserBotStateBinding {
   return {

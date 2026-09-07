@@ -16,11 +16,11 @@ import {
   type CompositionMemberV1,
   decodeCompositionGenerationV1,
   type CompositionGenerationV1,
-} from "@frockbot/kernel-do";
+} from "@frockbot/core/durable";
 import {
   APPLET_FOCUSED_KEY,
   type AppletGenerationV1,
-} from "@frockbot/kernel-do";
+} from "@frockbot/core/durable";
 
 const USER = "user-42";
 const APPLET = `${USER}.${"a".repeat(32)}`;

@@ -9,9 +9,9 @@ import {
   type PackageInstallationView,
   type ModelBindingV1,
   type ResolvedModelBindingV1,
-} from "../../../configuration-core/src/index.js";
-import { resolvePackageSettingValuesV1 } from "../../../configuration-core/src/package-settings.js";
-import type { PackageSettingDefinition } from "@frockbot/kernel-contracts";
+} from "../../../../core/configuration/index.js";
+import { resolvePackageSettingValuesV1 } from "../../../../core/configuration/package-settings.js";
+import type { PackageSettingDefinition } from "@frockbot/core/contracts";
 function compareIdentifiers(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }

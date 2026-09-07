@@ -17,7 +17,7 @@ import ModelsSurface from "./ModelsSurface.vue";
 import PluginsSurface from "./PluginsSurface.vue";
 import UserProfileTrigger from "./UserProfileTrigger.vue";
 import UserSettingsSurface from "./UserSettingsSurface.vue";
-import { defineClientContribution } from "@frockbot/kernel-contracts/contributions";
+import { defineClientContribution } from "@frockbot/core/contracts/contributions";
 
 export const settingsClientPlugin: ClientPlugin = (ctx) => {
   const surfaces = ctx.inject(clientSurfaceRegistryKey);

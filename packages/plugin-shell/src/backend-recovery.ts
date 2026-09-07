@@ -3,11 +3,11 @@ import {
   Session,
   type SessionEvent,
   validateToolOccurrenceJournal,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import {
   planBotRunRecovery as planKernelBotRunRecovery,
   type BotRunRecoveryPlan,
-} from "@frockbot/kernel-do";
+} from "@frockbot/core/durable";
 import {
   requireStoredRunV1,
   storedRunCodecV1,
@@ -19,7 +19,7 @@ export {
   latestModelRequestJournalState,
   type BotRunRecoveryPlan,
   type ModelRequestJournalState,
-} from "@frockbot/kernel-do";
+} from "@frockbot/core/durable";
 
 /**
  * Everything a fenced run — one a durable Stop or a later user message

@@ -36,7 +36,7 @@ at the cited location. Items the re-orientation already removes are marked; see
 
 16. **The dynamic Package system has no dynamic member.** No Composition member carries an `artifact`. The isolate host, the `BOT_PACKAGES` loader and the capability contract are all still here; nothing produces a Package artifact until the step 8 build service.
 
-17. **Applet members carry a `provenance: PackageProvenanceV1` field** (`kernel-do/src/composition/generation.ts`) whose variants describe Packages, two lines below a comment stating that an Applet is not a Package member.
+17. **Applet members carry a `provenance: PackageProvenanceV1` field** (`core/durable/composition/generation.ts`) whose variants describe Packages, two lines below a comment stating that an Applet is not a Package member.
 
 18. **A first-party Package's installation row still carries a `version`.** Its definition has none — a first-party Package's version is the deploy — so every row carries the single `FOUNDATION_PACKAGE_VERSION_V1` constant and every version comparison in the configuration resolvers is a tautology. The field survives because it is durable User state; removing it belongs with step 7.
 
@@ -74,7 +74,7 @@ at the cited location. Items the re-orientation already removes are marked; see
 
 35. **Tool calls never stream incrementally** (`packages/provider-openai-compatible/src/index.ts:696-708`), so a long tool-argument generation displays nothing until `finish`.
 
-36. **Manifest schema versions are inconsistent**: `plugin-models` and `plugin-provider-foundation` declare `schemaVersion: 2`; the other providers declare `4`.
+36. **Manifest schema versions are inconsistent**: `core/models` and `plugin-provider-foundation` declare `schemaVersion: 2`; the other providers declare `4`.
 
 37. **The `flock` to `frock` rename is partial.** Code reads `FROCK_AI_*` with `FLOCK_AI_*` fallbacks (`apps/cloudflare/src/index.ts:249-256`), while the Cloudflare resources (`FROCK_AI_GATEWAY_ID: "flock"`, `FROCK_AI_AUTO_ROUTE: "flock-auto"`), the package `@frockbot/plugin-flock` and every stored id remain `flock`.
 

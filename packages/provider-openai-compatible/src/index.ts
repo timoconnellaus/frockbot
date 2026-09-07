@@ -13,7 +13,7 @@ import {
   type ResponseFormatNoteV1,
   type RuntimeFeatureV1,
   type StructuredOutputSupportV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import { APICallError, type LanguageModelV4StreamPart } from "@ai-sdk/provider";
 import { OpenAICompatibleChatLanguageModel } from "@ai-sdk/openai-compatible";
 import type { FetchFunction } from "@ai-sdk/provider-utils";

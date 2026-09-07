@@ -9,12 +9,9 @@ const interfaceNames = [
   "BotPackageExecutionContextV1",
   "BotPackageHookContextV1",
 ] as const;
-const sourcePath = new URL(
-  "../packages/kernel-contracts/src/isolate.ts",
-  import.meta.url,
-);
+const sourcePath = new URL("../core/contracts/isolate.ts", import.meta.url);
 const outputPath = new URL(
-  "../packages/kernel-contracts/src/isolate-context-catalog.generated.ts",
+  "../core/contracts/isolate-context-catalog.generated.ts",
   import.meta.url,
 );
 

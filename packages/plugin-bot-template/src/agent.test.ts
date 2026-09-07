@@ -5,7 +5,7 @@ import {
   type ToolCall,
   type ToolExecutionContext,
   type TurnTypeV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import { createAgentRuntimeHarness } from "@frockbot/plugin-testkit";
 import {
   BOT_EXPORT_TEMPLATE_TOOL_V1,

@@ -9,7 +9,7 @@ import {
   type LoopAgentRuntimeV1,
   type NormalizedModelRequest,
   type RuntimeFeatureV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import {
   classifyOpenAICompatibleFailureV1,
   type ModelRequestDeadlineOptionsV1,

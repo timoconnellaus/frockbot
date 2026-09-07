@@ -2,7 +2,7 @@
 //
 // The durable Workspace, under a root this Package's definition declares:
 // `{kind: "package-declared", userId, packageId: "image", rootId: "generated"}`
-// (`kernel-contracts/src/workspace.ts`). Object storage backs it, every write
+// (`core/contracts/workspace.ts`). Object storage backs it, every write
 // records its writer and produces a generation, and the durable-root sync
 // presents it on the Computer as a real file the Bot can open with ordinary
 // file tools — none of which is true of a data URL in the event log, the
@@ -22,7 +22,7 @@ import {
   normalizeWorkspaceRelativePathV1,
   type WorkspacePathV1,
   type WorkspaceRootV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 
 /** The Package id the declared root belongs to. Matches `./definition.ts`. */
 export const IMAGE_PACKAGE_ID_V1 = "image";

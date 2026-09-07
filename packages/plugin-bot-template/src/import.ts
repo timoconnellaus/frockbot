@@ -19,8 +19,8 @@ import type {
   TemplateSheepRecipeV1,
   TemplateSkillV1,
   TemplateRoutineV1,
-} from "@frockbot/template-core";
-import { TemplateDecodeError } from "@frockbot/template-core";
+} from "@frockbot/core/template";
+import { TemplateDecodeError } from "@frockbot/core/template";
 
 export type TemplateImportPackageStatusV1 =
   "will-install" | "already-installed" | "missing";

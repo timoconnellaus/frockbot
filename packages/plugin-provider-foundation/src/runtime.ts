@@ -4,7 +4,7 @@ import {
   type LlmStreamEvent,
   ModelProviderFailureError,
   type RuntimeFeatureV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 
 export const FOUNDATION_PROVIDER = "foundation";
 export const FOUNDATION_MODEL = "deterministic-v1";

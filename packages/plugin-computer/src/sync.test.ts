@@ -13,12 +13,12 @@ import {
   type ComputerProvider,
   type ComputerSyncSummaryV1,
 } from "@frockbot/computer-core";
-import { createAgentLoop } from "@frockbot/kernel-agent-loop";
+import { createAgentLoop } from "@frockbot/core/agent-loop";
 import type {
   LlmProvider,
   SessionEvent,
   WorkspaceRootV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import { createAgentRuntimeHarness } from "@frockbot/plugin-testkit";
 import { createComputerAgentFeature, syncWorkspaceRootNowV1 } from "./agent.js";
 

@@ -17,7 +17,7 @@ import {
   type MachineCommandOutcomeV1,
   type MachineCommandResultV1,
   type MachineCommandV1,
-} from "@frockbot/machine-protocol";
+} from "@frockbot/core/machine-protocol";
 
 /** The longest preview a delivery carries. One line, not a transcript. */
 export const MACHINE_RESULT_PREVIEW_MAX = 400;

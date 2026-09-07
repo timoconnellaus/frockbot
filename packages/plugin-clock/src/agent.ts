@@ -4,7 +4,7 @@ import {
   type NormalizedModelRequest,
   type RuntimeFeatureV1,
   type ToolDefinition,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 
 function currentTime(): string {
   return new Intl.DateTimeFormat(undefined, {

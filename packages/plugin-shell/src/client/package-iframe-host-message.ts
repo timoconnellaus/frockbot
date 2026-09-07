@@ -1,4 +1,4 @@
-import type { PackageIframeHostMessageV2 } from "@frockbot/kernel-contracts";
+import type { PackageIframeHostMessageV2 } from "@frockbot/core/contracts";
 
 type MessageTarget = Pick<Window, "postMessage">;
 

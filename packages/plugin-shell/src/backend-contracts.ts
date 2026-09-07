@@ -4,13 +4,13 @@ import {
   createStoredRunCodecV1,
   type StoredRunCodecV1,
   type StoredRunV1,
-} from "@frockbot/kernel-do";
+} from "@frockbot/core/durable";
 import {
   decodeBotSettingsViewV1,
   isPublicIdentifier,
   migrateStoredBotSettingsV1,
   type BotSettingsViewV1,
-} from "@frockbot/configuration-core";
+} from "@frockbot/core/configuration";
 
 export {
   botStopCommandFingerprintV1,
@@ -24,7 +24,7 @@ export {
   type StoredRunPhase,
   type StoredRunStatus,
   type UnreadableStoredRunV1,
-} from "@frockbot/kernel-do";
+} from "@frockbot/core/durable";
 
 export type StoredRun = StoredRunV1<BotSettingsViewV1>;
 

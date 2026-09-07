@@ -19,13 +19,10 @@
   "dependencies": {
     "@frockbot/client-core": "workspace:*",
     "@frockbot/client-ui": "workspace:*",
-    "@frockbot/configuration-core": "workspace:*",
-    "@frockbot/connection-core": "workspace:*",
-    "@frockbot/kernel-contracts": "workspace:*",
+    "@frockbot/core": "workspace:*",
     "@frockbot/plugin-auth": "workspace:*",
     "@frockbot/plugin-shell": "workspace:*",
-    "vue": "3.5.41",
-    "@frockbot/protocol-schemas": "workspace:*"
+    "vue": "3.5.41"
   },
   "devDependencies": {
     "@types/bun": "1.4.0",

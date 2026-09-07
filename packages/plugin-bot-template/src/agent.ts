@@ -12,14 +12,14 @@
 // `public` is a click in Bot settings, and there is no tool argument, no
 // second tool, and no host method here that could do it. What the tool returns
 // is an `agent-card` naming what was packed and what was scrubbed — the one
-// voice a Bot has to its User (`kernel-contracts/src/send-to-user.ts`).
+// voice a Bot has to its User (`core/contracts/send-to-user.ts`).
 //
 // REPLAY. `idempotent: true`, and honestly so: the staging command id is
 // derived from the durable tool-call occurrence, so a replay after eviction
 // carries the same `commandId`, meets the receipt the User Durable Object
 // already wrote, and reports the share it already made instead of staging a
 // second one.
-import { packageAdmissionCeilingV1 } from "@frockbot/kernel-contracts";
+import { packageAdmissionCeilingV1 } from "@frockbot/core/contracts";
 import {
   decodeTurnTypeV1,
   type AgentRuntimeV1,
@@ -29,7 +29,7 @@ import {
   type ToolExecutionContext,
   type ToolExecutionResult,
   type TurnTypeV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import { botTemplateDefinitionV1 } from "./definition.js";
 import { describeTemplateSummaryV1 } from "./scrub.js";
 import type { TemplateShareReceiptV1 } from "./shared.js";

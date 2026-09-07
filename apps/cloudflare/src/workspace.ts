@@ -17,14 +17,14 @@
 import type {
   WorkspaceFilesV1,
   WorkspaceGenerationsV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import {
   createObjectWorkspaceFilesV1,
   workspaceObjectPrefixV1,
   type ObjectBucketV1,
   type ObjectHeadV1,
   type WorkspaceStoreSurfaceV1,
-} from "@frockbot/workspace-store";
+} from "@frockbot/core/workspace-store";
 
 function head(object: R2Object): ObjectHeadV1 {
   return {

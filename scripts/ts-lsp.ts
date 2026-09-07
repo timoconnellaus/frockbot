@@ -18,9 +18,9 @@ import { join, resolve } from "node:path";
 
 const repoRoot = resolve(import.meta.dirname, "..");
 
-// Any package on ^7.0.2 will do; protocol is the smallest and has no siblings
-// that would drag it back to the bridge.
-const anchor = join(repoRoot, "packages/protocol/package.json");
+// Any package on ^7.0.2 will do; core has no siblings that would drag it back
+// to the bridge.
+const anchor = join(repoRoot, "core/package.json");
 
 const platformPackage = `@typescript/typescript-${process.platform}-${process.arch}`;
 

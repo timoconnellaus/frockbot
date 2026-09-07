@@ -98,7 +98,7 @@ import {
   type WorkspaceRootV1,
   type WorkspaceSyncEffectsV1,
   type WorkspaceSyncEffectV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import type { FlySpriteAgentComputer } from "./computer.js";
 import {
   SYNC_CONFLICTS_DIR,
@@ -298,7 +298,7 @@ export interface ComputerSyncSurfaceV1 {
 
 /**
  * Where a push records its intent, and the record it writes. Both are declared
- * by the kernel (`@frockbot/kernel-contracts`), because the Bot's Durable
+ * by the kernel (`@frockbot/core/contracts`), because the Bot's Durable
  * Object implements the interface and a Package may not declare what an
  * authority must store. `createWorkspaceSidecarEffectsV1` below is the
  * Workspace half, which § Durable effects also allows ("in the Bot's Durable
@@ -307,7 +307,7 @@ export interface ComputerSyncSurfaceV1 {
 export type {
   WorkspaceSyncEffectV1,
   WorkspaceSyncEffectsV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 
 /** A conflict the sync preserved and is surfacing. */
 export interface WorkspaceSyncConflictV1 {

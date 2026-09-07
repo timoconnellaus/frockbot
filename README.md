@@ -248,10 +248,22 @@ apps/
   native/           Flutter client for the hosted application
 applications/
   foundation/       The composed application every deployment loads
+core/
+  contracts/        Session, LLM, prompt, and tool execution contracts
+  durable/          Bot Durable Object admission, log, cursor, scheduling, and Composition generations
+  agent-loop/       Concrete event-sourced durable agent loop and Agent registry
+  configuration/    Versioned durable User/Bot settings contracts
+  connection/       Provider-neutral Connection transport result contracts
+  workspace-store/  Object-storage durable-root store and its generation ledger
+  secret-shapes/    Declared shapes of the deployment's secrets
+  template/         Bot template recipe document and its decoder
+  protocol/         Commands and events shared across process seams
+  protocol-schemas/ Generated protocol schemas shared by clients
+  machine-protocol/ Contracts for registered User machines and their tokens
+  models/           Model role bindings and the provider-neutral model registry
+  prompt/           System prompt assembly from Package contributions
+  tools/            The trusted tool registry and its guards
 packages/
-  kernel-contracts/ Session, LLM, prompt, and tool execution contracts
-  kernel-agent-loop/ Concrete event-sourced durable agent loop and Agent registry
-  kernel-do/        Bot Durable Object admission, log, cursor, scheduling, and Composition generations
   compose-core/     Framework-agnostic runtime extension surface for Compose
   compose-frockbot/ The plugin descriptor and the Bot isolate host that loads a member's artifact
   applet-sdk/       Applet authoring SDK, component kit, linter, and `applet` CLI
@@ -260,14 +272,6 @@ packages/
   computer-core/    Provider registry and capability interfaces for Computers
   computer-host-protocol/  Versioned v1 DTOs and decoders for the Computer host seam
   computer-host-runtime/   The Computer's on-Sprite layout, scripts, and Sprite naming
-  configuration-core/ Versioned durable User/Bot settings contracts
-  connection-core/  Provider-neutral Connection transport result contracts
-  workspace-store/  Object-storage durable-root store and its generation ledger
-  template-core/    Bot template recipe document and its decoder
-  machine-protocol/ Contracts for registered User machines and their tokens
-  secret-shapes/    Declared shapes of the deployment's secrets
-  protocol/         Commands and events shared across process seams
-  protocol-schemas/ Generated protocol schemas shared by clients
   plugin-clock/     Reference package with agent, host, and WebUI contributions
   plugin-echo/      Minimal reference Package used by tests and examples
   plugin-testkit/   Shared test doubles and harnesses for Package authors
@@ -285,8 +289,6 @@ packages/
   plugin-image/     generate_image through Cloudflare's AI binding, fenced by the Workspace
   plugin-machine-messages/ Message delivery to and from a User's registered machines
   plugin-memory/    Bot, User and Project Markdown memory over the Workspace store
-  plugin-models/    Model role bindings and the provider-neutral model registry
-  plugin-prompt/    System prompt assembly from Package contributions
   plugin-provider-foundation/ Deterministic credential-free development provider
   plugin-provider-anthropic/  Optional Anthropic (Claude) model provider
   plugin-provider-frock-ai/  Built-in credential-free Frock AI model provider
@@ -297,7 +299,6 @@ packages/
   plugin-shell/     Hosted application geometry and surface presenter
   plugin-skills/    Skill catalog, disclosure on demand, and managed Skills
   plugin-subagents/ Subagent Tasks, their Durable Object hosts, and their records
-  plugin-tools/     The trusted tool registry and its guards
   plugin-ui-theme/  Global semantic tokens for hosted client Contributions
   plugin-user-machine/ Registered-machine enrollment and pairing
   plugin-web/       web_search and a bounded, SSRF-classified web_fetch

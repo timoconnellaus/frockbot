@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   ModelProviderFailureError,
   type NormalizedModelRequest,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import {
   OpenAICompatibleProvider,
   planOpenAICompatibleRequestV1,

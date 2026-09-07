@@ -26,7 +26,7 @@
 //    record, the Shell's expiry alarm, the Shell's settlement — by calling the
 //    very factory `machine_exec` is built from. There is no second approval
 //    mechanism here, and there is deliberately no way to write one.
-import { packageAdmissionCeilingV1 } from "@frockbot/kernel-contracts";
+import { packageAdmissionCeilingV1 } from "@frockbot/core/contracts";
 import {
   MACHINE_MESSAGES_LIMITS_V1,
   MachineDecodeError,
@@ -35,7 +35,7 @@ import {
   type MachineCommandV1,
   type MachineMessagesCallV1,
   type MachineOpV1,
-} from "@frockbot/machine-protocol";
+} from "@frockbot/core/machine-protocol";
 import {
   createMachineApprovalToolV1,
   machineTargetRefusalV1,
@@ -62,7 +62,7 @@ import {
   type ToolExecutionContext,
   type ToolExecutionResult,
   type TurnTypeV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import { machineMessagesDefinitionV1 } from "./definition.js";
 
 export const MESSAGES_CHECK_PERMISSIONS_TOOL_V1 =

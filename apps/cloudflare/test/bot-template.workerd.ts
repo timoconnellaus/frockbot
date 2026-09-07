@@ -17,7 +17,7 @@ import {
   parseBotTemplateDocumentV1,
   parseTemplateShareIdV1,
   templateObjectKeyV1,
-} from "@frockbot/template-core";
+} from "@frockbot/core/template";
 import type {
   TemplateShareListViewV1,
   TemplateShareReceiptV1,

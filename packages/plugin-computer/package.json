@@ -28,15 +28,11 @@
     "@frockbot/client-ui": "workspace:*",
     "@frockbot/computer-core": "workspace:*",
     "@frockbot/computer-host-runtime": "workspace:*",
-    "@frockbot/kernel-agent-loop": "workspace:*",
-    "@frockbot/kernel-contracts": "workspace:*",
-    "@frockbot/plugin-prompt": "workspace:*",
+    "@frockbot/core": "workspace:*",
     "@frockbot/plugin-shell": "workspace:*",
-    "@frockbot/plugin-tools": "workspace:*",
     "vue": "3.5.41"
   },
   "devDependencies": {
-    "@frockbot/plugin-models": "workspace:*",
     "@frockbot/plugin-testkit": "workspace:*",
     "@types/bun": "1.4.0",
     "@types/node": "26.2.0",

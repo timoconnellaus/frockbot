@@ -8,7 +8,7 @@ import {
   type LlmMessage,
   type SessionEvent,
   type SessionEventInput,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import {
   assessCompactionV1,
   compactionMessageV1,

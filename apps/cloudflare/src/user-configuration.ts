@@ -1,4 +1,4 @@
-import { decodeProtocol } from "@frockbot/protocol-schemas";
+import { decodeProtocol } from "@frockbot/core/protocol-schemas";
 import { saveNativeQualificationForm } from "./native-form.js";
 import { DurableObject } from "cloudflare:workers";
 import {
@@ -13,17 +13,17 @@ import {
 import {
   decodeConnectionCommandIdV1,
   decodeConnectionCommandV1,
-} from "@frockbot/connection-core";
+} from "@frockbot/core/connection";
 import {
   decodeBotSettingsViewV1,
   type UserSettingsViewV1,
   decodeUserConfigurationExecuteRpcV1,
   decodeUserConfigurationReadRpcV1,
-} from "@frockbot/configuration-core";
+} from "@frockbot/core/configuration";
 import {
   MAX_TEMPLATE_BYTES_V1,
   parseTemplateShareIdV1,
-} from "@frockbot/template-core";
+} from "@frockbot/core/template";
 import {
   decodeRoutineCommandReceiptV1,
   decodeRoutineListViewV1,
@@ -55,16 +55,16 @@ import {
   reserveAgentTurnSlotV1,
   type AgentTurnSlotReceiptV1,
 } from "@frockbot/plugin-flock/quota";
-import { machineTokenClaimsV1 } from "@frockbot/machine-protocol";
+import { machineTokenClaimsV1 } from "@frockbot/core/machine-protocol";
 import {
   appletStateNameV1,
   DurableWorkspaceGenerations,
-} from "@frockbot/kernel-do";
+} from "@frockbot/core/durable";
 import {
   decodeAppletProvenanceV1,
   decodeAppletToolDeclarationV1,
   type AppletSummaryV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import {
   AppletDirectory,
   type AppletDirectoryViewV1,
@@ -77,7 +77,7 @@ import {
   normalizeWorkspaceRelativePathV1,
   type WorkspaceGenerationRecordV1,
   type WorkspaceRootV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import type { MemoryProjectV1 } from "@frockbot/plugin-memory/agent";
 import {
   SEARCH_MAX_ROW_PAGE_V1,

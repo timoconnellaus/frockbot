@@ -9,10 +9,7 @@
 // Precedence here is the Memory precedence: own (`bot`) before `project`
 // before `user`, "the most specific wins", applied after scoring so a strong
 // shared hit still ranks above a weak own one within the same document.
-import {
-  remoteCallV1,
-  type MemoryScopeNameV1,
-} from "@frockbot/kernel-contracts";
+import { remoteCallV1, type MemoryScopeNameV1 } from "@frockbot/core/contracts";
 import {
   memoryVectorNamespaceV1,
   type MemoryIndexChunkV1,

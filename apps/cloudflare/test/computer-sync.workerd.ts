@@ -22,7 +22,7 @@
 import { env } from "cloudflare:workers";
 import { evictDurableObject } from "cloudflare:test";
 import { describe, expect, test } from "vitest";
-import type { WorkspaceRootV1 } from "@frockbot/kernel-contracts";
+import type { WorkspaceRootV1 } from "@frockbot/core/contracts";
 
 function bot(name: string) {
   return env.BOT_STATES.getByName(name);

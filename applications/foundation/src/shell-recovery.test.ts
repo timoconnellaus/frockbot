@@ -2,9 +2,9 @@ import { describe, expect, test } from "bun:test";
 import {
   parseCredentialKeyringV1,
   sealCredentialV1,
-} from "@frockbot/connection-core";
-import type { UserSettingsViewV1 } from "@frockbot/configuration-core";
-import { SessionEventLog } from "@frockbot/kernel-do";
+} from "@frockbot/core/connection";
+import type { UserSettingsViewV1 } from "@frockbot/core/configuration";
+import { SessionEventLog } from "@frockbot/core/durable";
 import { createShellBotBackendContribution } from "@frockbot/plugin-shell/backend";
 import type { StoredRun } from "@frockbot/plugin-shell/backend-contracts";
 import { foundationShellApplicationV1 } from "./runtime.js";

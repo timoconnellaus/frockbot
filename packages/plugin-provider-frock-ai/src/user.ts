@@ -3,13 +3,13 @@ import type {
   OperationReceiptV1,
   UserConfigurationCommandV1,
   UserSettingsViewV1,
-} from "@frockbot/configuration-core";
+} from "@frockbot/core/configuration";
 import {
   decodeConnectionCommandReceiptV1,
   decodeConnectionCommandV1,
   type ConnectionCommandReceiptV1,
   type ConnectionCommandV1,
-} from "@frockbot/connection-core";
+} from "@frockbot/core/connection";
 import {
   FROCK_AI_CONNECTION_GENERATION,
   FROCK_AI_CONNECTION_ID,
@@ -19,7 +19,7 @@ import {
   FROCK_AI_PROVIDER_TYPE,
   frockAiStaticCatalogV1,
 } from "./catalog.js";
-import { defineUserBackendContribution } from "@frockbot/kernel-contracts/contributions";
+import { defineUserBackendContribution } from "@frockbot/core/contracts/contributions";
 
 // Durable storage keys. They read `flock-` because they are already written in
 // every existing User's Durable Object; see the note in `catalog.ts`.

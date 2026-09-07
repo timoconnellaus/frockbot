@@ -5,8 +5,8 @@ import {
   isPublicIdentifier,
   type BotNameProvenanceV1,
   type BotSelfWriterV1,
-} from "@frockbot/configuration-core";
-export type { BotSelfWriterV1 } from "@frockbot/configuration-core";
+} from "@frockbot/core/configuration";
+export type { BotSelfWriterV1 } from "@frockbot/core/configuration";
 import assetManifest from "../assets/manifest.json" with { type: "json" };
 
 export const FLOCK_DIRECTORY_LIMIT = 100;

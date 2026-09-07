@@ -4,8 +4,8 @@ import type {
   BotConfigurationCommandV1,
   BotSettingsViewV1,
   UserSettingsViewV1,
-} from "@frockbot/configuration-core";
-import { SessionEventLog } from "@frockbot/kernel-do";
+} from "@frockbot/core/configuration";
+import { SessionEventLog } from "@frockbot/core/durable";
 import { createShellBotBackendContribution } from "@frockbot/plugin-shell/backend";
 import { createIsolateCapabilityHost } from "@frockbot/plugin-shell/backend-isolate";
 import { notificationIdV1 } from "@frockbot/plugin-shell/notification-id";

@@ -27,7 +27,7 @@
 // the WebUI that renders a send, so there is no cross-Package seam to cross.
 // Nothing here reaches the kernel: admission is a declaration the tool
 // registry enforces, and `endsTurn` is a boolean the Agent loop carries.
-import { packageAdmissionCeilingV1 } from "@frockbot/kernel-contracts";
+import { packageAdmissionCeilingV1 } from "@frockbot/core/contracts";
 import {
   decodeSendToUserPayloadV1,
   decodeTurnTypeV1,
@@ -39,7 +39,7 @@ import {
   type TurnTypeV1,
   type AgentRuntimeV1,
   type RuntimeFeatureV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import {
   automationParentPointerV1,
   chatWindowV1,

@@ -20,7 +20,7 @@ import {
   type ComputerMachineEvent,
 } from "./state-machine.js";
 import "./styles.css";
-import { defineClientContribution } from "@frockbot/kernel-contracts/contributions";
+import { defineClientContribution } from "@frockbot/core/contracts/contributions";
 
 export const PROJECTION_POLL_INTERVAL_MS = 20_000;
 export const ACTIVE_PROJECTION_POLL_INTERVAL_MS = 1_500;

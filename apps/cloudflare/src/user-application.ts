@@ -6,7 +6,7 @@ import {
   decodeBotIdV1,
   isApplicationDeploymentHash,
   isRpcIdentifier,
-} from "@frockbot/configuration-core";
+} from "@frockbot/core/configuration";
 import {
   APPLET_ID_V1,
   decodeAppletFocusViewV1,
@@ -14,7 +14,7 @@ import {
   decodeAppletUiViewV1,
   decodePackageIframeToolCommandV1,
   type PackageIframeCatalogV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import type {
   ClientNotificationAcknowledgementV1,
   ClientNotificationListV1,
@@ -36,7 +36,7 @@ import { decodeApprovalDecisionCommandV1 } from "@frockbot/plugin-shell/approval
 import {
   APPLETS_UNAVAILABLE_MESSAGE_V1,
   botTurnRefusalCodeV1,
-} from "@frockbot/kernel-do";
+} from "@frockbot/core/durable";
 import type { UserApplicationEnv } from "./contracts.js";
 import { answeredEntryV1, entryFailureStatusV1 } from "./entry-boundary.js";
 import { INSIGHTS_REPORT_ORIGIN, INSIGHTS_SCRIPT_ORIGIN } from "./insights.js";

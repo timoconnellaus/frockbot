@@ -18,7 +18,7 @@ import type {
   AppletBuildViewV1,
   AppletSourceViewV1,
   AppletSummaryV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import type { WebChatMessage, WebToolActivity } from "../shared.js";
 
 /**

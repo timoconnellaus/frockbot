@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { UiButton, UiField } from "@frockbot/client-ui";
-import type { Json, SettingsFrame } from "@frockbot/protocol-schemas";
+import type { Json, SettingsFrame } from "@frockbot/core/protocol-schemas";
 import { ref } from "vue";
 import SettingsModelPicker from "./SettingsModelPicker.vue";
 const props = defineProps<{

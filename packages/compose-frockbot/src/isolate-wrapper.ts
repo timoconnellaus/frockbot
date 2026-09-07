@@ -12,7 +12,7 @@
 import {
   BOT_ISOLATE_HOOK_EVENTS_V1,
   type BotPackageContextV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 
 /**
  * The deadline guard, shared verbatim between the generated wrapper and the

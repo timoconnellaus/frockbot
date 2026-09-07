@@ -15,18 +15,18 @@
 // slug against the catalog this Turn was offered, and calls the host seam the
 // Bot Durable Object supplied; every durable decision — the bounds, the record,
 // the dispatch — is made behind that seam, where the storage is.
-import { packageAdmissionCeilingV1 } from "@frockbot/kernel-contracts";
+import { packageAdmissionCeilingV1 } from "@frockbot/core/contracts";
 import type {
   PromptSection,
   ToolDefinition,
   ToolExecutionContext,
   ToolExecutionResult,
   TurnTypeV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import type {
   AgentRuntimeV1,
   RuntimeFeatureV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import { subagentsDefinitionV1 } from "./definition.js";
 import {
   renderAvailableSubagentModelsPromptV1,

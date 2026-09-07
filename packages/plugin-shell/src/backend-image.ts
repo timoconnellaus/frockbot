@@ -17,7 +17,7 @@
 // HIBERNATION. Nothing here reaches the Computer. The image lands in object
 // storage through `WORKSPACE_FILES`, with its generation recorded in this
 // Durable Object, so `generate_image` works with the Computer hibernated.
-import type { WorkspaceFilesV1 } from "@frockbot/kernel-contracts";
+import type { WorkspaceFilesV1 } from "@frockbot/core/contracts";
 import type { ImageRuntimeHostV1 } from "@frockbot/plugin-image/agent";
 import type {
   ImageModelInputV1,

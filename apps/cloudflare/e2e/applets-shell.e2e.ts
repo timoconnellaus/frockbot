@@ -6,7 +6,7 @@
 // focuses, and draws is the production client bundle, and only what the
 // backend has not landed yet is faked. When those routes arrive the stubs come
 // out and nothing in the assertions changes.
-import { PACKAGE_IFRAME_HELPER_JS_V1 } from "@frockbot/kernel-contracts";
+import { PACKAGE_IFRAME_HELPER_JS_V1 } from "@frockbot/core/contracts";
 import type { Page, TestInfo } from "@playwright/test";
 import { test, expect, provisionThroughUi } from "./fixtures.ts";
 import { E2E_OLLAMA_GOOD_API_KEY } from "./harness.ts";

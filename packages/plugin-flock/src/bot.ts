@@ -17,7 +17,7 @@ import {
   type SheepIdentityViewV1,
   type UpdateSheepCommandV1,
 } from "./shared.js";
-import { defineBotBackendContribution } from "@frockbot/kernel-contracts/contributions";
+import { defineBotBackendContribution } from "@frockbot/core/contracts/contributions";
 
 const IDENTITY_KEY = "flock:sheep:v1";
 const RECEIPT_PREFIX = "flock:sheep-receipt:";

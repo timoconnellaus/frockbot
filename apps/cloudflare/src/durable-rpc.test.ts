@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   decodeRevertCompositionCommandV1,
   MAX_COMPOSITION_GENERATION_PAGE_V1,
-} from "@frockbot/configuration-core";
+} from "@frockbot/core/configuration";
 import {
   decodeBotAgentRunRpcV1,
   decodeBotRunRpcV1,

@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   BOT_ISOLATE_HOOK_EVENTS_V1,
   LoopHookListV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import type {
   BotCapabilitiesStub,
   IsolateHealthV1,
@@ -12,7 +12,7 @@ import type {
   ToolDefinition,
   ToolExecutionContext,
   ToolNamespaceRegistration,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import {
   BotIsolateContributionHost,
   botIsolateModuleSetHashV1,

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { PackageIframeHostMessageV2 } from "@frockbot/kernel-contracts";
+import type { PackageIframeHostMessageV2 } from "@frockbot/core/contracts";
 import { postPackageIframeHostMessage } from "./package-iframe-host-message.js";
 
 describe("Package iframe host messages", () => {

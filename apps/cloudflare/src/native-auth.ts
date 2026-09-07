@@ -2,7 +2,7 @@ import {
   isProtocolValue,
   type AuthStartCommand,
   type ClientHello,
-} from "@frockbot/protocol-schemas";
+} from "@frockbot/core/protocol-schemas";
 import {
   clientCompatibilityResponse,
   CLIENT_HELLO_HEADER,

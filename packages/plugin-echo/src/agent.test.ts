@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   type LlmStreamEvent,
   type NormalizedModelRequest,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import { createAgentRuntimeHarness } from "@frockbot/plugin-testkit";
 import echoFeature, { ECHO_TOOL_NAME } from "./agent.js";
 

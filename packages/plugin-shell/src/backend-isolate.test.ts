@@ -3,7 +3,7 @@ import type {
   IsolateConnectionV1,
   LlmStreamEvent,
   NormalizedModelRequest,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import {
   createIsolateCapabilityHost,
   isolateBindingDigestV1,

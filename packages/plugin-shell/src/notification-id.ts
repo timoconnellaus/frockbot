@@ -1,4 +1,4 @@
-import { isPublicIdentifier } from "@frockbot/configuration-core";
+import { isPublicIdentifier } from "@frockbot/core/configuration";
 
 /**
  * The acknowledge decoder's ceiling: `isPublicIdentifier` admits a leading

@@ -1,6 +1,6 @@
 import type { ClientPlugin } from "@frockbot/client-core";
 import "./theme.css";
-import { defineClientContribution } from "@frockbot/kernel-contracts/contributions";
+import { defineClientContribution } from "@frockbot/core/contracts/contributions";
 
 export const uiThemeClientPlugin: ClientPlugin = () => undefined;
 

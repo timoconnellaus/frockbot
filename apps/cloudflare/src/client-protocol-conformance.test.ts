@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
-import valid from "../../../packages/protocol-schemas/fixtures/valid.json";
-import invalid from "../../../packages/protocol-schemas/fixtures/invalid.json";
+import valid from "../../../core/protocol-schemas/fixtures/valid.json";
+import invalid from "../../../core/protocol-schemas/fixtures/invalid.json";
 import {
   decodeAcknowledgement,
   decodeNotificationList,
@@ -8,14 +8,14 @@ import {
 import {
   decodeBotStateChannelFrameV1,
   decodeBotStateCursorV1,
-} from "@frockbot/protocol";
+} from "@frockbot/core/protocol";
 import {
   decodeAppletViewerTokenV1,
   decodeAppletListViewV1,
   decodeAppletSummaryV1,
   decodeSendToUserPayloadV1,
   decodeSkillRefV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import {
   decodeClientConversationListV1,
   decodeClientNotificationAcknowledgementCommandV1,
@@ -47,7 +47,7 @@ import {
 } from "@frockbot/plugin-flock/shared";
 
 import { decodeClientAuditPageV1 } from "@frockbot/plugin-audit";
-import { decodeCompositionGenerationListViewV1 } from "@frockbot/configuration-core";
+import { decodeCompositionGenerationListViewV1 } from "@frockbot/core/configuration";
 
 const existing: Record<string, (value: unknown) => unknown> = {
   TurnCommand: decodeClientTurnCommandV1,

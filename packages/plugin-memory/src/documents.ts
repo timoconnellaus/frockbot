@@ -12,7 +12,7 @@ import type {
   WorkspaceMemoryRootV1,
   WorkspacePathV1,
   WorkspaceReadsV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import {
   memoryFileKindV1,
   memoryProjectIdOfRootV1,

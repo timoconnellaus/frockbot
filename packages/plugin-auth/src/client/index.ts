@@ -6,7 +6,7 @@ import AuthGate from "./AuthGate.vue";
 import { createBrowserAuthSessionClient } from "./browser.js";
 import "@frockbot/client-core/fonts.css";
 import "./styles.css";
-import { defineClientContribution } from "@frockbot/kernel-contracts/contributions";
+import { defineClientContribution } from "@frockbot/core/contracts/contributions";
 
 export const authClientPlugin: ClientPlugin = (ctx: ClientPluginContext) => [
   ctx.provide(authSessionClientKey, createBrowserAuthSessionClient()),

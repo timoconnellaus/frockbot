@@ -10,7 +10,7 @@ import type {
   IsolateModelOutcomeV1,
   IsolateScheduleOutcomeV1,
   IsolateWorkspaceOutcomeV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import {
   decodeIsolateCapabilityListV1,
   decodeIsolateMemoryReadRequestV1,
@@ -22,7 +22,7 @@ import {
   decodeIsolateWorkspacePathV1,
   decodeIsolateWorkspaceWriteRequestV1,
   decodeNormalizedModelRequestV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import {
   matchesAdmittedConnectionV1,
   type BotCapabilitiesPropsV1,

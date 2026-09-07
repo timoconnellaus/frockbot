@@ -4,7 +4,7 @@ import {
   decodeUserSettingsViewV1,
   resolveBotModelBindingV1,
   type UserSettingsViewV1,
-} from "@frockbot/configuration-core";
+} from "@frockbot/core/configuration";
 import { modelRuntimeLabel } from "./client/model-presentation.js";
 
 /**

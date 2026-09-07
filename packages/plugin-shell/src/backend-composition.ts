@@ -9,7 +9,7 @@ import {
   type FoundationRuntime,
   type RuntimeModelSelection,
 } from "@frockbot/agent-runtime/runtime";
-import type { AgentEffectAdmission } from "@frockbot/kernel-agent-loop/agent";
+import type { AgentEffectAdmission } from "@frockbot/core/agent-loop/agent";
 import {
   bootstrapGeneration,
   CompositionMountFailureError,
@@ -18,7 +18,7 @@ import {
   type CompositionHost,
   type CompositionMemberV1,
   type MountedComposition,
-} from "@frockbot/kernel-do";
+} from "@frockbot/core/durable";
 import {
   BotIsolateContributionHost,
   type ActiveContribution,
@@ -31,7 +31,7 @@ import {
   type PersistSessionEvents,
   type SessionEvent,
   type TurnTypeV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 
 /**
  * The generation a Bot starts on: empty.

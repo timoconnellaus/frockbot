@@ -9,7 +9,7 @@ import {
   type SettingsFrame,
   type SettingsOptionsQuery,
   type SettingsOptionsPage,
-} from "@frockbot/protocol-schemas";
+} from "@frockbot/core/protocol-schemas";
 import type { InjectionKey } from "vue";
 export type SettingsHome = "application" | "models";
 export interface SettingsFrameClient {

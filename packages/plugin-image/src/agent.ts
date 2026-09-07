@@ -41,12 +41,12 @@ import type {
   WorkspaceFilesV1,
   WorkspacePathV1,
   WorkspaceWriteRequestV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import {
   WORKSPACE_MAX_FILE_BYTES,
   type AgentRuntimeV1,
   type RuntimeFeatureV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import {
   decodeImageDimensionsV1,
   sha256HexOfTextV1,

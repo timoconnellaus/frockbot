@@ -19,7 +19,7 @@ import {
   APPLET_ROLLBACK_FACET_NAME_V1,
   APPLET_TRIAL_KEY,
   APPLET_VIEWER_TOKEN_TTL_MS,
-} from "@frockbot/kernel-do";
+} from "@frockbot/core/durable";
 
 const OWNER = "user-applets";
 

@@ -8,7 +8,7 @@ import {
   type PackageIframeContributionViewV1,
   type PackageIframeHostMessageV2,
   type PackageIframePageViewV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { frockBotWebDataKey } from "../shared.js";
 import { postPackageIframeHostMessage } from "./package-iframe-host-message.js";

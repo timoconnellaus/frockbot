@@ -25,7 +25,7 @@ import {
   decodeMachineOpV1,
   type MachineCommandV1,
   type MachineOpV1,
-} from "@frockbot/machine-protocol";
+} from "@frockbot/core/machine-protocol";
 
 /**
  * The approval id — and therefore the command id — one Turn's `effectId` maps

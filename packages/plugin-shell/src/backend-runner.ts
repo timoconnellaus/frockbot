@@ -1,7 +1,7 @@
 import type {
   AgentEffectAdmission,
   AgentHandle,
-} from "@frockbot/kernel-agent-loop/agent";
+} from "@frockbot/core/agent-loop/agent";
 import {
   type PersistSessionEvents,
   type SessionEvent,
@@ -9,12 +9,12 @@ import {
   turnFailureMessage,
   type TurnTypeV1,
   validateToolOccurrenceJournal,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import type { ShellMountedComposition } from "./backend-composition.js";
 import {
   BotTurnExecutionError,
   BotTurnRecoveryRequiredError,
-} from "@frockbot/kernel-do";
+} from "@frockbot/core/durable";
 import type { BotTurnCommand, BotTurnCompletion } from "./backend-contracts.js";
 import {
   compactionInFlightV1,

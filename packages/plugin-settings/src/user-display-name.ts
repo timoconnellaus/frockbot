@@ -1,7 +1,7 @@
 import {
   isChosenUserName,
   USER_PROFILE_PLACEHOLDER_NAME_V1,
-} from "@frockbot/configuration-core";
+} from "@frockbot/core/configuration";
 
 export function resolveUserDisplayName(input: {
   savedName?: string;

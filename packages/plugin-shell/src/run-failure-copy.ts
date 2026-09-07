@@ -2,15 +2,15 @@ import type {
   ModelProviderFailureClassV1,
   SessionEvent,
   TurnOutcome,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import {
   MODEL_FIRST_BYTE_DEADLINE_REASON_V1,
   MODEL_IDLE_DEADLINE_REASON_V1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import {
   STEP_LIMIT_REASON_V1,
   TURN_DEADLINE_REASON_V1,
-} from "@frockbot/kernel-agent-loop";
+} from "@frockbot/core/agent-loop";
 
 /**
  * The one place a Turn that did not finish is turned into a sentence for the

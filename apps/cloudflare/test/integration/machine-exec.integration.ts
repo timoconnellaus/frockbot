@@ -16,7 +16,7 @@
 //      command itself absent and a digest in its place.
 import { SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
-import { machineRoutePathV1 } from "@frockbot/machine-protocol";
+import { machineRoutePathV1 } from "@frockbot/core/machine-protocol";
 import { MachineAgentDriverV1 } from "@frockbot/plugin-user-machine/testing";
 import type { AuditEntryV1 } from "@frockbot/plugin-audit";
 import { toolCallTriggerPrompt } from "../harness/miniflare.ts";

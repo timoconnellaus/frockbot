@@ -32,7 +32,7 @@ import {
   type TemplateRoutineV1,
   type TemplateSheepRecipeV1,
   type TemplateSkillV1,
-} from "@frockbot/template-core";
+} from "@frockbot/core/template";
 import type {
   TemplateExportSummaryV1,
   TemplateOmissionReasonV1,

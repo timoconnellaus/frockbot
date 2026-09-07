@@ -25,7 +25,7 @@ import type {
   RuntimeFeatureV1,
   ToolDefinition,
   ToolExecutionResult,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import { classifyWebFetchUrlV1, type SsrfRefusalReasonV1 } from "./ssrf.js";
 
 export type WebFetchFn = (

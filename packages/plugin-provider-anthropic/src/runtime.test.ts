@@ -2,11 +2,11 @@ import { describe, expect, test } from "bun:test";
 import {
   ModelProviderFailureError,
   type NormalizedModelRequest,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import {
   parseCredentialKeyringV1,
   sealCredentialV1,
-} from "@frockbot/connection-core";
+} from "@frockbot/core/connection";
 import { CredentialLeaseRuntime } from "@frockbot/plugin-credentials/user";
 import {
   type AgentRuntimeHarness,

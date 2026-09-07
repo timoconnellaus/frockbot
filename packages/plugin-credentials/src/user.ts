@@ -6,8 +6,8 @@ import {
   openCredentialV1,
   parseCredentialKeyringV1,
   sealCredentialV1,
-} from "@frockbot/connection-core";
-import { defineUserBackendContribution } from "@frockbot/kernel-contracts/contributions";
+} from "@frockbot/core/connection";
+import { defineUserBackendContribution } from "@frockbot/core/contracts/contributions";
 export { createCredentialsFeature, CredentialLeaseRuntime } from "./runtime.js";
 
 const CREDENTIAL_PREFIX = "credential:";

@@ -12,7 +12,7 @@ import type {
   ComputerHostEffectRequestV1,
   ComputerHostEffectResponseV1,
 } from "@frockbot/computer-core/host-protocol";
-import type { RuntimeFeatureV1 } from "@frockbot/kernel-contracts";
+import type { RuntimeFeatureV1 } from "@frockbot/core/contracts";
 
 export const SHARED_COMPUTER_PROVIDER_ID = "shared-computer";
 

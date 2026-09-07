@@ -25,7 +25,7 @@ import {
   type WorkspaceGenerationRecordV1,
   type WorkspaceGenerationsV1,
   type WorkspaceRootV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import type {
   MemoryProjectsOutcomeV1,
   MemoryProjectsV1,

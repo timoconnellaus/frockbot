@@ -9,7 +9,7 @@ import {
   resolveEffectiveBotModelV1,
   type UserConfigurationCommandV1,
   type UserSettingsViewV1,
-} from "@frockbot/configuration-core";
+} from "@frockbot/core/configuration";
 import type { WorkerLoader } from "./contracts.js";
 import {
   LEGACY_DEFAULT_PACKAGES_MARKER_KEY,

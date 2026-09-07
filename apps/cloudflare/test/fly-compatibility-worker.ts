@@ -1,5 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
-import { type SessionEvent } from "@frockbot/kernel-contracts";
+import { type SessionEvent } from "@frockbot/core/contracts";
 import { ComputerRegistry } from "@frockbot/computer-core";
 import {
   ComputerHostClient,
@@ -14,11 +14,11 @@ import {
   DurableWorkspaceSyncEffects,
   SessionEventLog,
   type BotTurnExecutionInput,
-} from "@frockbot/kernel-do";
+} from "@frockbot/core/durable";
 import {
   isWorkspaceConflictV1,
   workspaceRootKeyV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import type {
   WorkspaceFilesV1,
   WorkspaceGenerationV1,
@@ -26,9 +26,9 @@ import type {
   WorkspaceRootV1,
   WorkspaceWriteOutcomeV1,
   WorkspaceWriterV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import { createDurableWorkspaceFilesV1 } from "../src/workspace.ts";
-import { SessionStore } from "@frockbot/kernel-contracts";
+import { SessionStore } from "@frockbot/core/contracts";
 import {
   createMemoryWriteTool,
   MemoryProjection,
@@ -52,18 +52,18 @@ import {
   bootstrapGeneration,
   type CompositionGenerationV1,
   type MountedComposition,
-} from "@frockbot/kernel-do";
+} from "@frockbot/core/durable";
 import {
   activateCompositionV1,
   CompositionMountFailureError,
   type CompositionFailurePhaseV1,
   type CompositionFailureV1,
-} from "@frockbot/kernel-do";
+} from "@frockbot/core/durable";
 import { BotState } from "../src/bot-state.ts";
 import { BOT_CONFIGURATION_KEY } from "@frockbot/plugin-shell/backend";
 import { ISOLATE_MODEL_REQUEST_PREFIX } from "@frockbot/plugin-shell/backend-isolate";
 import { notificationIdV1 } from "@frockbot/plugin-shell/notification-id";
-import type { BotSettingsViewV1 } from "@frockbot/configuration-core";
+import type { BotSettingsViewV1 } from "@frockbot/core/configuration";
 import { UserConfiguration } from "../src/user-configuration.ts";
 export { DeploymentPolicy } from "../src/deployment-policy.ts";
 

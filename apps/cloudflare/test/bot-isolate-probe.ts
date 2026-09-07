@@ -13,7 +13,7 @@ import type {
   LlmStreamEvent,
   NormalizedModelRequest,
   SessionEvent,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import {
   bootstrapGeneration,
   compositionArtifactSetHashV1,
@@ -21,7 +21,7 @@ import {
   type ArtifactRefV1,
   type CompositionGenerationV1,
   type CompositionMemberV1,
-} from "@frockbot/kernel-do";
+} from "@frockbot/core/durable";
 import { decodePluginDescriptorV1 } from "@frockbot/compose-frockbot";
 import type {
   BotIsolateLoader,
@@ -39,7 +39,7 @@ import {
 import type {
   IsolateConnectionV1,
   IsolateModelBindingV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import type { FoundationAgentPackage } from "@frockbot/agent-runtime/runtime";
 import type { BotCapabilities } from "../src/bot-capabilities.ts";
 import type { WorkerdBotState } from "./fly-compatibility-worker.ts";

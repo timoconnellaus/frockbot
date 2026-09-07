@@ -6,7 +6,7 @@ import {
 } from "@frockbot/client-core";
 import AdminSurface from "./AdminSurface.vue";
 import { adminRequestKey } from "./state.js";
-import { defineClientContribution } from "@frockbot/kernel-contracts/contributions";
+import { defineClientContribution } from "@frockbot/core/contracts/contributions";
 
 export const ADMIN_SURFACE_ID = "admin";
 

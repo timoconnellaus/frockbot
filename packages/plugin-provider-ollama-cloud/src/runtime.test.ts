@@ -8,11 +8,11 @@ import {
   ModelRequestDeadlineError,
   type LoopAgentRuntimeV1,
   type NormalizedModelRequest,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import {
   parseCredentialKeyringV1,
   sealCredentialV1,
-} from "@frockbot/connection-core";
+} from "@frockbot/core/connection";
 import { CredentialLeaseRuntime } from "@frockbot/plugin-credentials/user";
 import {
   type AgentRuntimeHarness,

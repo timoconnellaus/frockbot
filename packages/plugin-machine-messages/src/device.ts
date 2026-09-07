@@ -24,7 +24,7 @@ import {
   MACHINE_MESSAGES_LIMITS_V1,
   type MachineMessagesCallV1,
   type MachineMessagesPermissionsV1,
-} from "@frockbot/machine-protocol";
+} from "@frockbot/core/machine-protocol";
 import type { MachineCommandReportV1 } from "@frockbot/plugin-user-machine/device";
 import type { MachineMessagesOpRunnerV1 } from "@frockbot/plugin-user-machine/device-runner";
 

@@ -18,7 +18,7 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import type { WorkspaceRootV1 } from "@frockbot/kernel-contracts";
+import type { WorkspaceRootV1 } from "@frockbot/core/contracts";
 import { computerBotKey } from "./computer.ts";
 import { FLY_WORKSPACE_LAYOUT } from "./provider.ts";
 import { FlySpriteSyncSurface } from "./sync.ts";

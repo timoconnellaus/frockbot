@@ -7,7 +7,7 @@
 // lint, and preview — and it has to survive hibernation, cold start, host
 // migration, and an image rebuild. That is the definition of a durable root,
 // and `package-declared` is the only kind a Package declares for itself
-// (`kernel-contracts/src/workspace.ts`).
+// (`core/contracts/workspace.ts`).
 //
 // The root is User-scoped, like every `package-declared` root: Applets are
 // account-wide, so one User's Bots share the root and an Applet a Bot wrote is
@@ -25,7 +25,7 @@ import {
   normalizeWorkspaceRelativePathV1,
   type WorkspacePathV1,
   type WorkspaceRootV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 // The Applet id shape is the share id, `<publicUserId>.<random>`, and
 // this is its one validator. Reused rather than re-expressed: a second regex
 // for the same shape is a second answer to "is this id well formed", and the
@@ -35,7 +35,7 @@ import {
 import {
   parseTemplateShareIdV1,
   TemplateDecodeError,
-} from "@frockbot/template-core";
+} from "@frockbot/core/template";
 
 /** The Package id the declared root belongs to. Matches `./definition.ts`. */
 export const APPLETS_PACKAGE_ID_V1 = "applets";

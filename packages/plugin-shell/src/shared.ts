@@ -1,4 +1,4 @@
-export { decodeExternalAuthorizationUrl } from "@frockbot/protocol";
+export { decodeExternalAuthorizationUrl } from "@frockbot/core/protocol";
 
 import type {
   JsonValue,
@@ -8,7 +8,7 @@ import type {
   BotProfilePatchV1,
   BotSettingsViewV1,
   UserSettingsViewV1,
-} from "@frockbot/configuration-core";
+} from "@frockbot/core/configuration";
 import type {
   AppletBuildViewV1,
   AppletSourceViewV1,
@@ -17,8 +17,8 @@ import type {
   PackageIframeContributionViewV1,
   SendToUserPayloadV1,
   SkillRefV1,
-} from "@frockbot/kernel-contracts";
-import type { PackageSettingDefinition } from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
+import type { PackageSettingDefinition } from "@frockbot/core/contracts";
 import type { ClientSkillCatalogEntryV1 } from "./skill-protocol.js";
 import type { ApprovalCardViewV1 } from "./approvals.js";
 import type { AppletCanvasFailureV1 } from "./client/applet-canvas-failure.js";
@@ -300,7 +300,7 @@ export interface FrockBotWebData {
   connectorCatalogErrors?: Record<string, string>;
   connectorCatalog?: Record<
     string,
-    import("@frockbot/connection-core").ConnectorCatalogEntryV1[]
+    import("@frockbot/core/connection").ConnectorCatalogEntryV1[]
   >;
   /**
    * The Bot's invocable Skills, for the composer's `/` and `@` popover. Refs,

@@ -11,15 +11,15 @@ import {
   type CompositionGenerationListViewV1,
   type CompositionGenerationViewV1,
   type RevertCompositionCommandV1,
-} from "@frockbot/configuration-core";
+} from "@frockbot/core/configuration";
 import {
   decodeConnectionCommandIdV1,
   decodeConnectionCommandReceiptV1,
   decodeConnectionCommandV1,
   type ConnectionCommandReceiptV1,
   type ConnectionCommandV1,
-} from "@frockbot/connection-core";
-import { defineGatewayContribution } from "@frockbot/kernel-contracts/contributions";
+} from "@frockbot/core/connection";
+import { defineGatewayContribution } from "@frockbot/core/contracts/contributions";
 
 export interface SettingsConnectionGatewayHost {
   executeConnection(

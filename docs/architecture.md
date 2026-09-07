@@ -36,12 +36,12 @@ Deploy paths:
 
 ## 2. Durable Objects
 
-Four classes in the app Worker, exported from `apps/cloudflare/src/index.ts:178-182`. `packages/kernel-do` defines no Durable Object class; it is the storage and authority library `BotState` delegates to.
+Four classes in the app Worker, exported from `apps/cloudflare/src/index.ts:178-182`. `core/durable` defines no Durable Object class; it is the storage and authority library `BotState` delegates to.
 
 ### `BotState` — `apps/cloudflare/src/bot-state.ts:369`
 
 - Binding `BOT_STATES`; id `idFromName("<userId>:<botId>")` (`apps/cloudflare/src/index.ts:456`, `:571`).
-- Authoritative for all Bot-scoped state: identity, runs, admission fences, the pending and agent-lane queues, the session event log, notifications, conversations, Composition generations and pointers, Workspace file generations and conflicts, the memory vector purge journal. Keys are enumerated in `packages/kernel-do/src/storage-keys.ts:1-177`.
+- Authoritative for all Bot-scoped state: identity, runs, admission fences, the pending and agent-lane queues, the session event log, notifications, conversations, Composition generations and pointers, Workspace file generations and conflicts, the memory vector purge journal. Keys are enumerated in `core/durable/storage-keys.ts:1-177`.
 - Storage is key-value only — `ctx.storage.get/put/list/delete/transaction`. The class contains no `sql.exec`.
 - Roughly 90 RPC methods (`bot-state.ts:920-2350`), each taking `input: unknown` and decoding through an envelope decoder. They include `run`/`runAgent`, the `isolate*` loopback surface, Composition reads and reverts, routines, tasks, approvals, notifications, `debugSnapshot` and `fenceRunAdmission`.
 - `alarm()` drains the memory purge journal, then the mounted contribution's alarm, then the audit outbox.
@@ -56,7 +56,7 @@ Four classes in the app Worker, exported from `apps/cloudflare/src/index.ts:178-
 
 ### `AppletState` — `apps/cloudflare/src/applet-state.ts:228`
 
-- Binding `APPLET_STATES`; id `idFromName("<userId>:<appletId>")` (`packages/kernel-do/src/applets.ts:139`).
+- Binding `APPLET_STATES`; id `idFromName("<userId>:<appletId>")` (`core/durable/applets.ts:139`).
 - Authoritative for one Applet instance's generation history, pointers, failures, mount input and trial record. Key-value storage.
 - The Applet's own code and data live in a facet mounted from an R2 artifact through the `APPLETS` Worker Loader (`:245-289`).
 - `fetch()` at `:872` forwards the Applet socket upgrade into the facet. `alarm()` at `:924` is scheduled only through `holdAlarmForFacet` (`:913`), because facets cannot set their own alarms.
@@ -86,7 +86,7 @@ Four classes in the app Worker, exported from `apps/cloudflare/src/index.ts:178-
 
 5. **Bot Durable Object.** `apps/cloudflare/src/bot-state.ts:1168` `run()` decodes the envelope, materializes the identity and calls `shell.run(...)`.
 
-6. **Shell.** `packages/plugin-shell/src/backend.ts:1255` yields any in-flight compaction, calls `followDeploymentComposition()` and `resolveAppletComposition()`, then delegates to `BotDurableAuthority.run` (`packages/kernel-do/src/authority.ts:293`): recover whatever the object holds, check for a settled replay, then `acceptRun`. An accepted run executes inline; otherwise it is durably queued — one user-lane slot, FIFO agent lane — and promoted by `runQueuedRun` (`:332`).
+6. **Shell.** `packages/plugin-shell/src/backend.ts:1255` yields any in-flight compaction, calls `followDeploymentComposition()` and `resolveAppletComposition()`, then delegates to `BotDurableAuthority.run` (`core/durable/authority.ts:293`): recover whatever the object holds, check for a settled replay, then `acceptRun`. An accepted run executes inline; otherwise it is durably queued — one user-lane slot, FIFO agent lane — and promoted by `runQueuedRun` (`:332`).
 
 7. **Mount.** `activateCompositionV1` reads the pin and builds the Turn's runtime through `createShellCompositionHost` (`packages/plugin-shell/src/backend-composition.ts:274`).
 
@@ -100,9 +100,9 @@ Four classes in the app Worker, exported from `apps/cloudflare/src/index.ts:178-
 
 ---
 
-## 4. Agent loop — `packages/kernel-agent-loop/`
+## 4. Agent loop — `core/agent-loop/`
 
-The Turn's state machine lives in `src/index.ts`; the external work it dispatches lives beside it, reached through the `LoopRuntime` seam in `src/runtime.ts`. `src/model-request.ts` owns provider dispatch and stream consumption, `src/tool-execution.ts` tool calls, `src/resume.ts` the replay of a durable log, `src/errors.ts` the classified failures.
+The Turn's state machine lives in `index.ts`; the external work it dispatches lives beside it, reached through the `LoopRuntime` seam in `runtime.ts`. `model-request.ts` owns provider dispatch and stream consumption, `tool-execution.ts` tool calls, `resume.ts` the replay of a durable log, `errors.ts` the classified failures.
 
 ### At-most-once by idempotency key
 
@@ -128,7 +128,7 @@ Exhausting the loop throws `StepLimitReachedError`, which settles the Turn as `i
 
 ### Deadlines and limits
 
-- `TURN_DEADLINE_MS_V1` — 15 minutes, defined in `@frockbot/kernel-contracts` and re-exported here, because the Durable Object also reads it to decide whether a run still marked `running` can be running.
+- `TURN_DEADLINE_MS_V1` — 15 minutes, defined in `@frockbot/core/contracts` and re-exported here, because the Durable Object also reads it to decide whether a run still marked `running` can be running.
 - The deadline aborts the same `AbortController` that Stop uses; `#turnDeadlineReached` distinguishes them, and its branch is evaluated first so a Turn the clock ended is reported as timed out rather than as one the person stopped.
 - `MODEL_REQUEST_ATTEMPTS_V1 = 2` — first attempt plus one retry, for an unknown failure.
 
@@ -138,7 +138,7 @@ Types written: `input/queued`, `turn/start`, `composition/pinned`, `turn/admissi
 
 One `model/request` is written per _dispatch_, all carrying the same request. The count of them under one `requestId` is the number of times that call was sent, and each one marks the point where the answer so far starts again — which is how a partial reply is projected after a re-issue.
 
-Persistence is `SessionEventLog` (`packages/kernel-do/src/session-event-log.ts`) into Durable Object key-value storage: 256 KB pages, 16 KB inline threshold, 8 KB excerpts, payloads chunked at 128 KB.
+Persistence is `SessionEventLog` (`core/durable/session-event-log.ts`) into Durable Object key-value storage: 256 KB pages, 16 KB inline threshold, 8 KB excerpts, payloads chunked at 128 KB.
 
 ### Resumption after eviction — `#resumeTurn`
 
@@ -180,13 +180,13 @@ Provider-reported token counts are used when present. Otherwise `estimateModelUs
 
 Composition is the untrusted layer and nothing else. First-party Packages are ordinary imports: `applications/foundation/src/packages.ts` lists the 29 the deployment ships as `PackageDefinitionV1` records, and a Package that carries data (settings, Capabilities, Connection Types, durable roots, dependencies) exports its own definition from its own package. There is no manifest, no compiler and no application hash over a plan.
 
-1. On first use the Bot Durable Object receives an empty bootstrap generation (`packages/plugin-shell/src/backend-composition.ts`; `packages/kernel-do/src/composition/generation.ts`). A Bot that has installed and authored nothing composes nothing, which is why a release no longer has to rewrite every Bot's generation to follow the deploy.
+1. On first use the Bot Durable Object receives an empty bootstrap generation (`packages/plugin-shell/src/backend-composition.ts`; `core/durable/composition/generation.ts`). A Bot that has installed and authored nothing composes nothing, which is why a release no longer has to rewrite every Bot's generation to follow the deploy.
 2. At admission, `activateCompositionV1` (`packages/plugin-shell/src/backend.ts`) reads the pin, mounts, verifies, commits and records last-known-good.
 3. Mounting builds one runtime per Turn (`backend-composition.ts`): the registries, a `LoopHookListV1`, and the features the host lists, mounted in that order by `mountRuntimeFeaturesV1`. Neither the Shell nor `apps/agent-runtime` imports an application: the Shell's Bot host carries the deployment's `PackageDefinitionV1` list, its one Package version, and four factories — `base`, `hosted`, `enabled`, `model` — that turn a Package id into a mounted feature (`packages/plugin-shell/src/backend-runtime.ts`). `applications/foundation` fills them in as `foundationShellApplicationV1`, and `apps/cloudflare/src/bot-state.ts` spreads that into the host. The base Packages — identity, the built-in model, the two demo tools and the Shell's own voice — are appended last, so a provider an earlier Package registered is already there. Every member goes through `BotIsolateContributionHost`, whose hooks are appended to the same list after the app's. Applet members register as tools routed to `APPLET_STATES`.
 
 ### Generation shape
 
-`CompositionGenerationV1` — `packages/kernel-do/src/composition/generation.ts`:
+`CompositionGenerationV1` — `core/durable/composition/generation.ts`:
 
 ```
 { schemaVersion: 1, generationId, artifactSetHash, parentGenerationId?,
@@ -202,11 +202,11 @@ Composition is the untrusted layer and nothing else. First-party Packages are or
 
 ### Where the pin lives
 
-`DurableCompositionStore` (`packages/kernel-do/src/composition-store.ts:74`) writes into the Bot Durable Object: `composition:current` (a `{generationId, artifactSetHash}` pin), `composition:generation:<id>`, `composition:index:<createdAt>:<id>`, `composition:last-known-good`, plus failure, failure-count and quarantine keys. Pinning is compare-and-swap; a lost race raises `CompositionPinConflictError` and the caller re-reads and re-derives (four attempts).
+`DurableCompositionStore` (`core/durable/composition-store.ts:74`) writes into the Bot Durable Object: `composition:current` (a `{generationId, artifactSetHash}` pin), `composition:generation:<id>`, `composition:index:<createdAt>:<id>`, `composition:last-known-good`, plus failure, failure-count and quarantine keys. Pinning is compare-and-swap; a lost race raises `CompositionPinConflictError` and the caller re-reads and re-derives (four attempts).
 
 An in-flight Turn keeps the generation it pinned. Activation takes effect at the next admitted Turn.
 
-### Activation and failure — `packages/kernel-do/src/composition/activation.ts`
+### Activation and failure — `core/durable/composition/activation.ts`
 
 Failure phases are `resolve | bundle | mount | health`, declared with the host that raises them (`packages/compose-frockbot/src/failure.ts`). `activateCompositionV1` reads the pin, mounts and verifies, then commits and clears failures. On failure it records the attempt, marks the generation `failed` or `quarantined`, mounts last-known-good, notifies, and admits the Turn on the fallback. The quarantine threshold is three attempts; a quarantined generation is never retried. If last-known-good is itself the failing generation, the error is rethrown.
 
@@ -268,7 +268,7 @@ Transport is REST over `dart:io HttpClient` with the base URL hardcoded to `http
 
 Auth is PKCE in the system browser (`lib/client/auth.dart:17`), returning over an App Link validated in `accept()` (`:60`). The session token lives in `flutter_secure_storage`; the directory, drafts, cached transcripts and cursors are plaintext JSON on disk (`lib/client/plain_store.dart:13`, `:97`).
 
-`lib/protocol/client_wire.generated.dart` (987 lines) is generated by `scripts/generate-dart-protocol.ts:119` from `packages/protocol-schemas/schema/client-wire.schema.json`. Its classes wrap an opaque `Object? _json` and validate; they are not typed models, so call sites index by string.
+`lib/protocol/client_wire.generated.dart` (987 lines) is generated by `scripts/generate-dart-protocol.ts:119` from `core/protocol-schemas/schema/client-wire.schema.json`. Its classes wrap an opaque `Object? _json` and validate; they are not typed models, so call sites index by string.
 
 WebView is used in one place, `AppletPage` (`lib/extensions/fallback.dart:157-465`), loading the anonymous bootstrap at `ui.bot.frockbot.com/native-fallback` (server side `apps/cloudflare/src/native-fallback.ts:34`). It never receives the native session.
 
@@ -282,20 +282,20 @@ Both speak the same REST API and the same state-channel WebSocket. Native valida
 
 ## 7. Model providers
 
-`ctx.llm` is `LlmRegistry` — `packages/plugin-models/src/llm.ts:15-40`. It is a `Map<providerId, LlmProvider>` that dispatches on `request.provider`, wraps the call in the `modelStream` hook, then validates structured output. The kernel-declared interfaces are `LlmProvider`, `ModelInvocation` and `ModelProviderRegistration` in `packages/kernel-contracts/src/model-invocation.ts`.
+`ctx.llm` is `LlmRegistry` — `core/models/llm.ts:15-40`. It is a `Map<providerId, LlmProvider>` that dispatches on `request.provider`, wraps the call in the `modelStream` hook, then validates structured output. The kernel-declared interfaces are `LlmProvider`, `ModelInvocation` and `ModelProviderRegistration` in `core/contracts/model-invocation.ts`.
 
-Stream events (`packages/kernel-contracts/src/types.ts:158-166`): `text-delta`, `tool-call`, `usage`, `response-format-note`, `structured-output-failure`, `finish`.
+Stream events (`core/contracts/types.ts:158-166`): `text-delta`, `tool-call`, `usage`, `response-format-note`, `structured-output-failure`, `finish`.
 
 ### Selection
 
-- `resolveEffectiveBotModelV1` (`packages/configuration-core/src/index.ts:652-760`): a Bot-scoped Package setting with `role: "model"`, else a User-scoped one, else `user.platformModel`. Two enabled packages both declaring a model setting is a hard conflict. A broken choice falls back to the platform model and records `fallback.from`.
+- `resolveEffectiveBotModelV1` (`core/configuration/index.ts:652-760`): a Bot-scoped Package setting with `role: "model"`, else a User-scoped one, else `user.platformModel`. Two enabled packages both declaring a model setting is a hard conflict. A broken choice falls back to the platform model and records `fallback.from`.
 - `resolveBotModelBindingV1` (`:588-621`) yields `ready`, `requires-resolution` or `unavailable`.
 - The Turn resolves the effective model, refuses if it changed mid-reply, and mounts the provider plugin itself as a runtime Package for that Turn (`packages/plugin-shell/src/backend.ts:4965-5090`). The resulting `modelSelection` flows through `backend.ts:1792` → `backend-composition.ts:297` → `apps/agent-runtime/src/runtime.ts:557-583`, where it overrides the default provider and model and becomes `AgentOptions.modelBinding`.
 - Package-to-provider-type mapping is a two-entry map at `applications/foundation/src/runtime.ts:369-419`: `@frockbot/plugin-provider-ollama-cloud/runtime` → `ollama-cloud`, `@frockbot/plugin-provider-frock-ai/runtime` → `flock-ai`. Anything else resolves to `Bot model provider "X" is unavailable` (`:1084-1089`).
 
 ### Packages
 
-**`packages/provider-openai-compatible`** — a shared transport library, not a plugin. Response decoding — SSE framing, tool-call accumulation, finish reason and the non-streamed body — is the Vercel AI SDK's `OpenAICompatibleChatLanguageModel`, handed the already-open stream through a loopback `fetch`; request mapping, failure classification and the deadlines stay here, because the Frock AI gateway and Ollama's native endpoint reach this seam with a stream rather than a URL. `OpenAICompatibleProvider` (`src/index.ts:884-967`) issues `fetch` to `${baseUrl}/chat/completions` with `authorization: Bearer`. Request planning is `planOpenAICompatibleRequestV1` (`:367-455`): `stream: true` with `stream_options.include_usage`; tools as `{type: "function", function: {...}}`; `response_format` in an `openai` dialect and a `workers-ai` dialect, degrading to `json_object` and then to prompt-injected instructions, emitting a `response-format-note` at each step. Stream bytes are capped at 1 MiB per event and 16 MiB per response before they reach the decoder. Tool calls are emitted only after the stream terminates, and a stream that ends without a terminal marker throws. Deadlines are 120 s to first byte and 60 s idle (`packages/kernel-contracts/src/model-invocation.ts:88-131`), applied by `streamWithModelRequestDeadlinesV1` (`:852`).
+**`packages/provider-openai-compatible`** — a shared transport library, not a plugin. Response decoding — SSE framing, tool-call accumulation, finish reason and the non-streamed body — is the Vercel AI SDK's `OpenAICompatibleChatLanguageModel`, handed the already-open stream through a loopback `fetch`; request mapping, failure classification and the deadlines stay here, because the Frock AI gateway and Ollama's native endpoint reach this seam with a stream rather than a URL. `OpenAICompatibleProvider` (`src/index.ts:884-967`) issues `fetch` to `${baseUrl}/chat/completions` with `authorization: Bearer`. Request planning is `planOpenAICompatibleRequestV1` (`:367-455`): `stream: true` with `stream_options.include_usage`; tools as `{type: "function", function: {...}}`; `response_format` in an `openai` dialect and a `workers-ai` dialect, degrading to `json_object` and then to prompt-injected instructions, emitting a `response-format-note` at each step. Stream bytes are capped at 1 MiB per event and 16 MiB per response before they reach the decoder. Tool calls are emitted only after the stream terminates, and a stream that ends without a terminal marker throws. Deadlines are 120 s to first byte and 60 s idle (`core/contracts/model-invocation.ts:88-131`), applied by `streamWithModelRequestDeadlinesV1` (`:852`).
 
 **`packages/plugin-provider-frock-ai`** — package id `provider-flock-ai`, provider type `flock-ai`. Calls Cloudflare AI Gateway through one of two transports, chosen at `apps/cloudflare/src/frock-ai.ts:132`: with an account id and token, a raw fetch to `https://gateway.ai.cloudflare.com/v1/<account>/<gateway>/compat/chat/completions` with `cf-aig-authorization` (`:55-58`, `:163-180`); otherwise the `AI` binding's `gateway(id).run({provider: "compat", endpoint: "chat/completions"})` (`:195-207`). Only the compat transport accepts a `dynamic/<route>` model. Model ids are `@frock/*` with legacy `@flock/*` normalized (`src/catalog.ts:30-38`); `@frock/auto` maps to the `dynamic/flock-auto` route, a concrete id to `workers-ai/@cf/...`, and a structured-output request on Auto is pinned to `workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast` (`:21-22`, `:92-101`). The static catalog has two entries: `@frock/auto` and `@frock/deepseek-ai/deepseek-v4-flash-0731` (`:49-56`, `:104-124`). `src/user.ts:192-275` bootstraps an ambient `flock-ai-ambient` Connection and sets it as `platformModel` for every User, which is what lets a new Bot answer with no configuration. `src/runtime.ts:224-255` tags the Agent on a permanent failure and rewrites the next request to `@frock/auto`. `reconciliation.retrieve` returns `not-retrievable` (`:133-140`). Stored ids are `flock-*`; display strings are `Frock` (`catalog.ts:3-8`).
 
@@ -303,7 +303,7 @@ Stream events (`packages/kernel-contracts/src/types.ts:158-166`): `text-delta`, 
 
 **`packages/plugin-provider-foundation`** — provider id `foundation`, model `deterministic-v1` (`src/runtime.ts:8-9`). It echoes the last user message prefixed `"Built-in model: "`, or echoes tool output, and reports `structuredOutput: "none"`. It is the default in `createFoundationRuntime` and is overridden by `modelSelection`.
 
-**`packages/plugin-models`** — the registry service. Also implements `structured<T>()` by streaming with a `json_schema` response format and validating the accumulated text.
+**`core/models`** — the registry service. Also implements `structured<T>()` by streaming with a `json_schema` response format and validating the accumulated text.
 
 **`packages/plugin-custom-models`** — client-only, `defaultEnablement: "disabled"`. Contributes a Vue `BotModelSection` into slot `frockbot.bot-settings-sections` and declares the Bot-scoped `role: "model"` setting. It has no runtime and no provider; it is the model picker.
 
@@ -450,7 +450,7 @@ Admin is membership of the comma-separated `FROCKBOT_ADMIN_EMAILS` secret (`apps
 4. **Computer host** — `apps/computer-host/vitest.config.ts` plus `bun test src container`. Opt-in live suites `test:live` and `test:live:desktop` are not run by CI.
 5. **Playwright** — `apps/cloudflare/e2e/playwright.config.ts`, `**/*.e2e.ts`, `fullyParallel: false`, `workers: 1`, 240 s timeout, 4-way CI sharding through `balanced-shard-reporter.ts`, `webServer` of `bun e2e/serve.ts`. Roughly 28 spec files.
 6. **Flutter** — `apps/native/test/*.dart` (14 files) plus `integration_test/settings_screens.dart`, which is a screenshot runner.
-7. **Gate scripts** — run under `typecheck`: `scripts/check-client-protocol.ts`, `scripts/check-kernel-imports.ts`, `scripts/check-computer-host-imports.ts`, `scripts/generate-isolate-context-catalog.ts --check`, `scripts/build-applets-assets.ts --check` (the SDK scaffold, the Applets Skill and the two page HTMLs, as strings the Worker bundle can carry), then `scripts/typecheck.ts`. Plus `lint:ui-styles` (`scripts/check-ui-styles.ts`).
+7. **Gate scripts** — run under `typecheck`: `scripts/check-client-protocol.ts`, `scripts/check-core-imports.ts`, `scripts/check-computer-host-imports.ts`, `scripts/generate-isolate-context-catalog.ts --check`, `scripts/build-applets-assets.ts --check` (the SDK scaffold, the Applets Skill and the two page HTMLs, as strings the Worker bundle can carry), then `scripts/typecheck.ts`. Plus `lint:ui-styles` (`scripts/check-ui-styles.ts`).
 
 ### `.github/workflows/ci.yml`
 
@@ -480,6 +480,6 @@ On pull request `opened`, `reopened` and `ready_for_review`. Skips drafts and fo
 
 ### `.github/workflows/native.yml`
 
-On pull requests touching `apps/native/**`, `packages/protocol-schemas/**`, `scripts/*protocol*`, `scripts/*native*` or itself. Advisory (`continue-on-error: true`). Runs `scripts/check-native-pins.py`, then runs `flutter pub get --enforce-lockfile`, `flutter analyze` and `flutter test` only when Flutter is installed and its `frameworkRevision` equals `4cf24164269a5ebf0c16a028a00727d0e77bbb05`.
+On pull requests touching `apps/native/**`, `core/protocol-schemas/**`, `scripts/*protocol*`, `scripts/*native*` or itself. Advisory (`continue-on-error: true`). Runs `scripts/check-native-pins.py`, then runs `flutter pub get --enforce-lockfile`, `flutter analyze` and `flutter test` only when Flutter is installed and its `frameworkRevision` equals `4cf24164269a5ebf0c16a028a00727d0e77bbb05`.
 
 ---

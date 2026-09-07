@@ -2,7 +2,7 @@ import {
   packageConfigurationHomeV1,
   type PackageConfigurationHomeV1,
   type PackageInstallationView,
-} from "@frockbot/configuration-core";
+} from "@frockbot/core/configuration";
 import type { PluginCatalogItem } from "@frockbot/plugin-shell/shared";
 
 /**

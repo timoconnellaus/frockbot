@@ -3,7 +3,7 @@ import { expect, test } from "bun:test";
 import type {
   SettingsChangeCommand,
   SettingsFrame,
-} from "@frockbot/protocol-schemas";
+} from "@frockbot/core/protocol-schemas";
 import {
   createSettingsFrameClient,
   type SettingsPendingStore,

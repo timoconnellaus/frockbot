@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { clientSurfaceRegistryKey } from "@frockbot/client-core";
 import { UiButton } from "@frockbot/client-ui";
-import type { ConnectionView } from "@frockbot/configuration-core";
+import type { ConnectionView } from "@frockbot/core/configuration";
 import {
   frockBotWebDataKey,
   type PluginCatalogItem,

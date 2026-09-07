@@ -21,7 +21,7 @@ import {
   type MachineEnrollmentReceiptV1,
   type MachineListViewV1,
   type MachinePairingOfferV1,
-} from "@frockbot/machine-protocol";
+} from "@frockbot/core/machine-protocol";
 
 interface MachineRpc {
   createMachinePairing(input: unknown): Promise<MachinePairingOfferV1>;

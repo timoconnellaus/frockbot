@@ -13,8 +13,8 @@ import {
   type BotSettingsViewV1,
   type ConfigurationCommandV1,
   type OperationReceiptV1,
-} from "@frockbot/configuration-core";
-import type { SessionEvent } from "@frockbot/kernel-contracts";
+} from "@frockbot/core/configuration";
+import type { SessionEvent } from "@frockbot/core/contracts";
 import {
   createBotCreateTool,
   createBotMessageTool,

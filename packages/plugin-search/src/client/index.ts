@@ -24,7 +24,7 @@ import {
   type SearchWebData,
 } from "./state.js";
 import "./styles.css";
-import { defineClientContribution } from "@frockbot/kernel-contracts/contributions";
+import { defineClientContribution } from "@frockbot/core/contracts/contributions";
 
 export const SEARCH_SURFACE_ID = "search";
 

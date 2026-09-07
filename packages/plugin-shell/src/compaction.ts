@@ -27,7 +27,7 @@ import {
   type Session,
   type SessionEvent,
   type StructuredOutputSchemaV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 
 /**
  * The share of the history budget above which a compaction is due.

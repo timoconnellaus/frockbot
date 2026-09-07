@@ -9,7 +9,7 @@ import {
   type ConfigurationCommandV1,
   type ModelBindingV1,
   type UserSettingsViewV1,
-} from "@frockbot/configuration-core";
+} from "@frockbot/core/configuration";
 import {
   frockBotWebDataKey,
   type FrockBotWebData,

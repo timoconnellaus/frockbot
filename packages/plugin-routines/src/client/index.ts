@@ -28,7 +28,7 @@ import {
   type RoutineFormSubmissionV1,
   type RoutinesClientState,
 } from "./state.js";
-import { defineClientContribution } from "@frockbot/kernel-contracts/contributions";
+import { defineClientContribution } from "@frockbot/core/contracts/contributions";
 
 /*
  * A refusal's own sentence first, then a presentable one.

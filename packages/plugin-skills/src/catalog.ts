@@ -14,7 +14,7 @@
 // instruction roots — its own and its User's — written under the Bot's own
 // authority or its User's, are loaded as instructions." That sentence is
 // decided in exactly one place —
-// `isLoadableSkillSourceV1` in `@frockbot/kernel-contracts` — and this module
+// `isLoadableSkillSourceV1` in `@frockbot/core/contracts` — and this module
 // calls it. There is no second opinion here and no override: a candidate the
 // predicate refuses is recorded as a refusal and never read as an instruction.
 //
@@ -44,7 +44,7 @@ import {
   type WorkspaceEntryV1,
   type WorkspaceInstructionRootV1,
   type WorkspaceReadsV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import { loadManagedSkillsV1 } from "./managed.js";
 import {
   SKILL_FILE_NAME,

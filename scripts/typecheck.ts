@@ -26,21 +26,26 @@ interface Target {
   dir: string;
 }
 
-const targets: Target[] = [];
+const manifestPaths = ["core/package.json"];
 for (const group of ["packages", "apps", "applications"]) {
-  for (const manifestPath of new Bun.Glob(`${group}/*/package.json`).scanSync({
-    cwd: repoRoot,
-    onlyFiles: true,
-  })) {
-    const manifest = JSON.parse(
-      readFileSync(join(repoRoot, manifestPath), "utf8"),
-    ) as { name?: string; scripts?: Record<string, string> };
-    if (!manifest.name || !manifest.scripts?.typecheck) continue;
-    targets.push({
-      name: manifest.name,
-      dir: join(repoRoot, manifestPath.replace(/\/package\.json$/, "")),
-    });
-  }
+  manifestPaths.push(
+    ...new Bun.Glob(`${group}/*/package.json`).scanSync({
+      cwd: repoRoot,
+      onlyFiles: true,
+    }),
+  );
+}
+
+const targets: Target[] = [];
+for (const manifestPath of manifestPaths) {
+  const manifest = JSON.parse(
+    readFileSync(join(repoRoot, manifestPath), "utf8"),
+  ) as { name?: string; scripts?: Record<string, string> };
+  if (!manifest.name || !manifest.scripts?.typecheck) continue;
+  targets.push({
+    name: manifest.name,
+    dir: join(repoRoot, manifestPath.replace(/\/package\.json$/, "")),
+  });
 }
 targets.sort((a, b) => a.name.localeCompare(b.name));
 

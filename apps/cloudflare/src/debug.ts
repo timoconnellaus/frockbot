@@ -3,7 +3,7 @@ import {
   isBotDebugQueryRefusalV1,
   type BotDebugQueryV1,
 } from "@frockbot/plugin-shell/debug-protocol";
-import { decodeBotIdV1 } from "@frockbot/configuration-core";
+import { decodeBotIdV1 } from "@frockbot/core/configuration";
 
 /**
  * The operator surface: `/api/debug/*`, authorized by a shared token rather

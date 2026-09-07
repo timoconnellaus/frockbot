@@ -16,11 +16,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@frockbot/configuration-core": "workspace:*",
-    "@frockbot/connection-core": "workspace:*",
-    "@frockbot/kernel-agent-loop": "workspace:*",
-    "@frockbot/kernel-contracts": "workspace:*",
-    "@frockbot/plugin-models": "workspace:*",
+    "@frockbot/core": "workspace:*",
     "@frockbot/provider-openai-compatible": "workspace:*"
   },
   "devDependencies": {

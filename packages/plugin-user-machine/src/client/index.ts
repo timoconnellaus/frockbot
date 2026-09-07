@@ -3,7 +3,7 @@
 // The Computer settings section: the user's own machines, live.
 //
 // Everything here goes through `ctx.transport.hostedRequest`, which is the
-// session, and through `@frockbot/machine-protocol`'s decoders, which are the
+// session, and through `@frockbot/core/machine-protocol`'s decoders, which are the
 // seam. The one thing that does not is the desktop bridge — `window
 // .frockbotMachineAgent`, exposed by the Electron preload — and its answers
 // are decoded too, because a different runtime is a seam whoever owns it.
@@ -29,7 +29,7 @@ import {
   decodeMachineListViewV1,
   decodeMachinePairingOfferV1,
   machineRoutePathV1,
-} from "@frockbot/machine-protocol";
+} from "@frockbot/core/machine-protocol";
 import { ref } from "vue";
 import { decodeMachineDeviceAgentStatusV1 } from "../device.js";
 import MachineSection from "./MachineSection.vue";
@@ -39,7 +39,7 @@ import {
   type MachineAgentBridgeV1,
   type MachinesClientState,
 } from "./state.js";
-import { defineClientContribution } from "@frockbot/kernel-contracts/contributions";
+import { defineClientContribution } from "@frockbot/core/contracts/contributions";
 
 /** The surface the section opens. Not a settings anchor: a registered surface. */
 export const MACHINE_SURFACE_ID_V1 = "user-machines";

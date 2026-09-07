@@ -5,7 +5,7 @@
 // of. Dated by when the summariser ran, it landed under the newest reply,
 // which says the opposite of what it means.
 import { describe, expect, test } from "bun:test";
-import type { SessionEvent } from "@frockbot/kernel-contracts";
+import type { SessionEvent } from "@frockbot/core/contracts";
 import { projectClientAnnouncementsV1 } from "./run-protocol.js";
 import { projectAnnouncements } from "./client/index.js";
 import { COMPACTED_ANNOUNCEMENT_TEXT_V1 } from "./compaction.js";

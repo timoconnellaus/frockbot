@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { initializeBotSettingsV1 } from "@frockbot/configuration-core";
+import { initializeBotSettingsV1 } from "@frockbot/core/configuration";
 import { requireStoredRunV1, type StoredRun } from "./backend-contracts.js";
 
 function storedRun(): StoredRun {

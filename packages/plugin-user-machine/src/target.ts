@@ -15,7 +15,7 @@ import {
   MachineDecodeError,
   decodeMachineListEntryV1,
   type MachineListEntryV1,
-} from "@frockbot/machine-protocol";
+} from "@frockbot/core/machine-protocol";
 
 export interface MachineTargetViewV1 {
   schemaVersion: 1;

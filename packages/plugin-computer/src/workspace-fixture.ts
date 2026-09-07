@@ -15,7 +15,7 @@ import type {
   WorkspacePathV1,
   WorkspaceRootV1,
   WorkspaceWriterV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 
 export const FAKE_WORKSPACE_LAYOUT: WorkspaceLayoutV1 = {
   schemaVersion: 1,

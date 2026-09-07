@@ -6,7 +6,7 @@ import type {
   Json,
   SettingsFrame,
   SettingsChangeCommand,
-} from "@frockbot/protocol-schemas";
+} from "@frockbot/core/protocol-schemas";
 import { inject, onMounted, ref, watch } from "vue";
 import { settingsLinkV1 } from "@frockbot/plugin-shell/settings-links";
 import {

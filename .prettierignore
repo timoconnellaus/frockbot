@@ -18,7 +18,7 @@ bun.lock
 packages/applet-sdk/template/
 
 # Standalone Ajv bundle: reproducibility is checked by generate-typescript-protocol.
-packages/protocol-schemas/src/validators.generated.js
+core/protocol-schemas/validators.generated.js
 
 # Pinned upstream platform adapter; preserve original source formatting.
 apps/native/vendor/

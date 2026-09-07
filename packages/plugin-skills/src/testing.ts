@@ -18,7 +18,7 @@ import {
   type WorkspaceWriteOutcomeV1,
   type WorkspaceWriteRequestV1,
   type WorkspaceWriterV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 
 export interface FakeWorkspaceSeedV1 {
   root: WorkspaceRootV1;

@@ -5,7 +5,7 @@
 // Bots, and a Project Memory root per Project that a Bot has joined."
 //
 // Sharding is not decided here. `memoryShardPathV1` in
-// `@frockbot/kernel-contracts` owns `by-agent/<botId>/`, and this module calls
+// `@frockbot/core/contracts` owns `by-agent/<botId>/`, and this module calls
 // it; a second spelling of the shard prefix is exactly the bug the contract
 // exists to prevent. What this module owns is GrokBot's file layout inside a
 // shard — `profile.md` beside `log/YYYY-MM.md` — and the mapping from a
@@ -16,7 +16,7 @@ import {
   type MemoryScopeNameV1,
   type WorkspaceMemoryRootV1,
   type WorkspacePathV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 
 /** The Bot whose Memory is being read or written, and its User. */
 export interface MemoryOwnerV1 {

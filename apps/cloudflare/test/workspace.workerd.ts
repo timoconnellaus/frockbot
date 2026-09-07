@@ -20,7 +20,7 @@ import { describe, expect, test } from "vitest";
 import type {
   WorkspaceRootV1,
   WorkspaceWriterV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import { provisionBot } from "./provision-bot.ts";
 
 function bot(name: string) {

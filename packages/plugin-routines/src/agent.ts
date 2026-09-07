@@ -19,7 +19,7 @@ import type {
   RuntimeFeatureV1,
   ToolDefinition,
   ToolExecutionContext,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import {
   ROUTINE_NAME_MAX_LENGTH,
   ROUTINE_PROMPT_MAX_LENGTH,

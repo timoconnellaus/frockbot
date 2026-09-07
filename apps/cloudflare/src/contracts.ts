@@ -2,12 +2,12 @@ import type {
   SettingsFrame,
   ConnectionsFrame,
   SettingsChangeCommand,
-} from "@frockbot/protocol-schemas";
+} from "@frockbot/core/protocol-schemas";
 import {
   type BotIsolateEntrypoint,
   type BotIsolateEnv,
   type SessionEvent,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import type { MachineResultDeliveryV1 } from "@frockbot/plugin-user-machine/delivery";
 import type { DebugGatewaySurface } from "./debug.js";
 import type {
@@ -23,7 +23,7 @@ import type {
   UserConfigurationExecuteRpcV1,
   UserConfigurationReadRpcV1,
   UserSettingsViewV1,
-} from "@frockbot/configuration-core";
+} from "@frockbot/core/configuration";
 import type {
   ConnectionCommandReceiptV1,
   ConnectionCommandV1,
@@ -31,7 +31,7 @@ import type {
   CredentialLeaseV1,
   RevokeConnectionResult,
   StartConnectionResult,
-} from "@frockbot/connection-core";
+} from "@frockbot/core/connection";
 import type { MemoryVector, MemoryVectorMatch } from "@frockbot/plugin-memory";
 // Flock DTOs cross only the authenticated hosted/backend seam.
 import type {
@@ -53,7 +53,7 @@ import type {
   TemplateShareListViewV1,
   TemplateShareReceiptV1,
 } from "@frockbot/plugin-bot-template/shared";
-import type { TemplateVisibilityV1 } from "@frockbot/template-core";
+import type { TemplateVisibilityV1 } from "@frockbot/core/template";
 import type {
   ApprovalDecisionCommandV1,
   ApprovalDecisionReceiptV1,
@@ -249,11 +249,11 @@ export interface UserBotStateBinding {
   listPackageUi(input: {
     schemaVersion: 1;
     botId: string;
-  }): Promise<import("@frockbot/kernel-contracts").PackageIframeCompositionV1>;
+  }): Promise<import("@frockbot/core/contracts").PackageIframeCompositionV1>;
   runPackageUiTool(input: {
     schemaVersion: 1;
     botId: string;
-    command: import("@frockbot/kernel-contracts").PackageIframeToolCommandV1;
+    command: import("@frockbot/core/contracts").PackageIframeToolCommandV1;
   }): Promise<BotTurnResult>;
   readWorkspaceFileV1(input: {
     schemaVersion: 1;
@@ -299,13 +299,13 @@ export interface UserBotStateBinding {
     schemaVersion: 1;
     botId: string;
     appletId: string;
-  }): Promise<import("@frockbot/kernel-contracts").AppletSourceViewV1>;
+  }): Promise<import("@frockbot/core/contracts").AppletSourceViewV1>;
   /** The outcome last recorded for `applet check` or `applet build`. */
   readAppletBuildV1(input: {
     schemaVersion: 1;
     botId: string;
     appletId: string;
-  }): Promise<import("@frockbot/kernel-contracts").AppletBuildViewV1>;
+  }): Promise<import("@frockbot/core/contracts").AppletBuildViewV1>;
   listNotifications(input: {
     schemaVersion: 1;
     botId: string;
@@ -340,7 +340,7 @@ export interface UserApplicationEnv {
 /**
  * The loader-side `WorkerCode`. `env` is generic because two kinds of isolate
  * are loaded from this Worker: a user application (`UserApplicationEnv`) and a
- * Bot Package (`BotIsolateEnv`, from `@frockbot/kernel-contracts`), which sees
+ * Bot Package (`BotIsolateEnv`, from `@frockbot/core/contracts`), which sees
  * only `IDENTITY` and the loopback `CAPABILITIES` service binding.
  */
 export interface WorkerCode<Env = UserApplicationEnv> {
@@ -472,9 +472,9 @@ export interface UserConfigurationBinding {
   ): Promise<SettingsFrame>;
   readSettingsOptions(
     request: UserConfigurationReadRpcV1 & {
-      query: import("@frockbot/protocol-schemas").SettingsOptionsQuery;
+      query: import("@frockbot/core/protocol-schemas").SettingsOptionsQuery;
     },
-  ): Promise<import("@frockbot/protocol-schemas").SettingsOptionsPage>;
+  ): Promise<import("@frockbot/core/protocol-schemas").SettingsOptionsPage>;
   changeSettings(
     request: UserConfigurationReadRpcV1 & {
       home: "application" | "models";

@@ -12,7 +12,7 @@ import {
   type CompositionAppletMemberV1,
   type CompositionGenerationV1,
   type CompositionMemberV1,
-} from "@frockbot/kernel-do";
+} from "@frockbot/core/durable";
 import { createShellCompositionHost } from "./backend-composition.js";
 
 const USER = "user-1";
