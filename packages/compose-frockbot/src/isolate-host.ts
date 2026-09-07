@@ -37,16 +37,17 @@ import {
   type ToolRegistration,
   type TurnTypeV1,
 } from "@frockbot/kernel-contracts";
-import { CompositionMountFailureError } from "./activation.ts";
-import { canonicalJson, sha256 } from "./compiler.ts";
-import type { CompositionMemberV1 } from "./generation.ts";
-import type {
-  ActiveContribution,
-  ContributionHost,
-  PackageDescriptor,
-  PreparedContribution,
-} from "./index.ts";
-import { decodeFrockBotManifest, type FrockBotManifest } from "./manifest.ts";
+import { CompositionMountFailureError } from "@frockbot/kernel-composition/activation";
+import { canonicalJson, sha256 } from "@frockbot/kernel-composition/compiler";
+import type { CompositionMemberV1 } from "@frockbot/kernel-composition/generation";
+import {
+  decodeFrockBotManifest,
+  type ActiveContribution,
+  type ContributionHost,
+  type FrockBotManifest,
+  type PackageDescriptor,
+  type PreparedContribution,
+} from "@frockbot/kernel-composition";
 import {
   BOT_ISOLATE_MAIN_MODULE,
   BOT_ISOLATE_WRAPPER_SOURCE,

@@ -206,7 +206,6 @@ export function storedRunRecordV2<Snapshot>(
 }
 
 export interface DirectToolCommandV1 {
-  generationId: string;
   packageId: string;
   name: string;
   input: unknown;
@@ -357,12 +356,11 @@ function decodeDirectToolCommandV1(value: unknown): DirectToolCommandV1 {
     throw new Error("stored run has invalid direct tool command");
   }
   const candidate = value as Record<PropertyKey, unknown>;
-  const fields = ["generationId", "packageId", "name", "input"];
+  const fields = ["packageId", "name", "input"];
   if (
     Reflect.ownKeys(candidate).length !== fields.length ||
     Object.keys(candidate).length !== fields.length ||
     !fields.every((field) => Object.hasOwn(candidate, field)) ||
-    !boundedString(candidate.generationId, 256) ||
     !boundedString(candidate.packageId, 64) ||
     !boundedString(candidate.name, 64) ||
     !/^[a-z][a-z0-9_]{0,63}$/.test(candidate.name)
@@ -383,7 +381,6 @@ function decodeDirectToolCommandV1(value: unknown): DirectToolCommandV1 {
     throw new Error("stored run has invalid direct tool input");
   }
   return {
-    generationId: candidate.generationId,
     packageId: candidate.packageId,
     name: candidate.name,
     input,

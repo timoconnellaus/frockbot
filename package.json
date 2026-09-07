@@ -15,7 +15,7 @@
   },
   "scripts": {
     "build:webui": "bun run --filter @frockbot/plugin-ui-theme build && bun run --filter @frockbot/plugin-shell build && bun run --filter @frockbot/plugin-settings build && bun run --filter @frockbot/plugin-custom-models build && bun run --filter @frockbot/plugin-routines build && bun run --filter @frockbot/plugin-bot-template build && bun run --filter @frockbot/plugin-flock build && bun run --filter @frockbot/plugin-computer build",
-    "build:cloudflare": "bun scripts/build-applets-package.ts && bun run --filter @frockbot/cloudflare build",
+    "build:cloudflare": "bun scripts/build-applets-assets.ts && bun run --filter @frockbot/cloudflare build",
     "build:marketing": "bun run --filter @frockbot/marketing build",
     "bootstrap:npm-trust": "./scripts/bootstrap-npm-trust.sh",
     "dogfood:dev": "./scripts/dogfood/dev-stack.sh",
@@ -25,7 +25,7 @@
     "dev:cloudflare": "bun run --filter @frockbot/cloudflare dev",
     "dev": "bun run build:webui && bun run dev:cloudflare",
     "build": "bun run build:webui && bun run build:cloudflare && bun run build:marketing",
-    "typecheck": "bun scripts/check-client-protocol.ts && bun scripts/check-kernel-imports.ts && bun scripts/check-computer-host-imports.ts && bun scripts/generate-isolate-context-catalog.ts --check && bun scripts/build-applets-package.ts --check && bun scripts/typecheck.ts",
+    "typecheck": "bun scripts/check-client-protocol.ts && bun scripts/check-kernel-imports.ts && bun scripts/check-computer-host-imports.ts && bun scripts/generate-isolate-context-catalog.ts --check && bun scripts/build-applets-assets.ts --check && bun scripts/typecheck.ts",
     "lint:ui-styles": "bun scripts/check-ui-styles.ts",
     "lint:kernel-imports": "bun scripts/check-kernel-imports.ts",
     "lint:computer-host-imports": "bun scripts/check-computer-host-imports.ts",

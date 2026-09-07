@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./feature": "./src/feature.ts",
     "./manifest": "./src/manifest.ts",
+    "./pages": "./src/pages.ts",
     "./root": "./src/root.ts",
     "./package.json": "./package.json"
   },
@@ -14,6 +16,7 @@
   },
   "dependencies": {
     "@frockbot/kernel-contracts": "workspace:*",
+    "@frockbot/kernel-do": "workspace:*",
     "@frockbot/template-core": "workspace:*"
   },
   "devDependencies": {

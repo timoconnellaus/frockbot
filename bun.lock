@@ -94,6 +94,7 @@
         "@frockbot/agent-runtime": "workspace:*",
         "@frockbot/application-foundation": "workspace:*",
         "@frockbot/client-core": "workspace:*",
+        "@frockbot/compose-frockbot": "workspace:*",
         "@frockbot/computer-core": "workspace:*",
         "@frockbot/configuration-core": "workspace:*",
         "@frockbot/connection-core": "workspace:*",
@@ -443,6 +444,7 @@
       "version": "0.0.1",
       "dependencies": {
         "@frockbot/kernel-contracts": "workspace:*",
+        "@frockbot/kernel-do": "workspace:*",
         "@frockbot/template-core": "workspace:*",
       },
       "devDependencies": {
@@ -847,6 +849,7 @@
         "@frockbot/application-foundation": "workspace:*",
         "@frockbot/client-core": "workspace:*",
         "@frockbot/client-ui": "workspace:*",
+        "@frockbot/compose-frockbot": "workspace:*",
         "@frockbot/computer-core": "workspace:*",
         "@frockbot/computer-host-protocol": "workspace:*",
         "@frockbot/configuration-core": "workspace:*",

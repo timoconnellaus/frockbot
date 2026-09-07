@@ -54,7 +54,6 @@ function catalog(
   return {
     schemaVersion: 1,
     botId: "bot-1",
-    generationId: "generation-1",
     artifactOrigin: "https://ui.example.com",
     contributions,
   };

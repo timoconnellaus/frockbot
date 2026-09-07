@@ -251,12 +251,12 @@ applications/
 packages/
   kernel-contracts/ Session, LLM, prompt, and tool execution contracts
   kernel-agent-loop/ Concrete event-sourced durable agent loop and Agent registry
-  kernel-composition/ Package manifest, activation, isolate host, and compiler
+  kernel-composition/ Package manifest, activation, Composition generations, and compiler
   kernel-do/        Bot Durable Object admission, log, cursor, and scheduling
   compose-core/     Framework-agnostic runtime extension surface for Compose
   compose-agent/    Framework-neutral agent primitives built on Compose
   compose-cloudflare/ Dynamic Worker and Durable Object facet hosts for Compose
-  compose-frockbot/ Projections from FrockBot manifests to the Compose vocabulary
+  compose-frockbot/ The Bot isolate host: loads a member's artifact as a Dynamic Worker
   compose-tools/    Framework-neutral composer tool definitions over a Compose client
   compose-typescript/ Type-check and transpile Compose plugin source against its stubs
   applet-sdk/       Applet authoring SDK, component kit, linter, and `applet` CLI
@@ -277,7 +277,7 @@ packages/
   plugin-echo/      Minimal reference Package used by tests and examples
   plugin-testkit/   Shared test doubles and harnesses for Package authors
   plugin-admin/     Deployment policy administration surface
-  plugin-applets/   Bot-authored Applets: source root, build, and publication
+  plugin-applets/   Applets: the seven applet_* tools, the source root, and the shell's pages
   plugin-audit/     Audited-effect projection and the User's rebuildable audit table
   plugin-auth/      Authenticated identity contributions for the hosted gateway
   plugin-bot-template/ Bot template export, share records, and guarded import

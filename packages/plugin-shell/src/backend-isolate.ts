@@ -15,7 +15,7 @@ import type {
   NormalizedModelRequest,
 } from "@frockbot/kernel-contracts";
 import { encodeIsolateModelEventLineV1 } from "@frockbot/kernel-contracts";
-import type { BotIsolateArtifactStore } from "@frockbot/kernel-composition/isolate";
+import type { BotIsolateArtifactStore } from "@frockbot/compose-frockbot";
 
 export type { IsolateModelBindingV1 } from "@frockbot/kernel-contracts";
 
@@ -137,7 +137,6 @@ export function createIsolateCapabilityHost(
         tools: true,
         memory: options.memory,
         workspace: options.workspace,
-        notify: true,
         schedule: true,
       });
     },
@@ -304,29 +303,20 @@ async function sha256Hex(value: string): Promise<string> {
  * address before a byte of it becomes code. Artifacts are immutable content,
  * not state; the hash is the only thing that makes them safe to mount.
  *
- * `bundled` is a second *place* to find the same immutable bytes, not a second
- * kind of thing. A first-party Package that ships as an artifact-backed member
- * is built at build time and travels inside this bundle, so its bytes are
- * already here and object storage never has to be seeded for a deploy to be
- * correct. Object storage still wins when it holds the object, the digest is
- * still verified either way, and nothing is ever *built* here — which is what
- * "Composition consumes immutable content-addressed artifacts and never builds
- * them" asks of this seam.
+ * Nothing is ever *built* here, which is what "Composition consumes immutable
+ * content-addressed artifacts and never builds them" asks of this seam.
  */
 export function createR2PackageArtifactStore(
   bucket: R2Bucket,
-  bundled?: ReadonlyMap<string, string>,
 ): BotIsolateArtifactStore {
   return {
     async loadPackageArtifact(contentHash: string): Promise<string> {
       const key = `packages/${contentHash}.mjs`;
       const object = await bucket.get(key);
-      const module = object
-        ? await object.text()
-        : (bundled?.get(key) ??
-          (() => {
-            throw new Error(`package artifact "${contentHash}" is missing`);
-          })());
+      if (!object) {
+        throw new Error(`package artifact "${contentHash}" is missing`);
+      }
+      const module = await object.text();
       if ((await sha256Hex(module)) !== contentHash) {
         throw new Error(
           `package artifact "${contentHash}" failed hash verification`,

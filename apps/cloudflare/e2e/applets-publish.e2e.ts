@@ -126,18 +126,9 @@ async function runTool(
   name: string,
   input: unknown = {},
 ): Promise<void> {
-  // The Applets member is isolate-loaded, so its tools are disclosed under
-  // the `applets` namespace and a model reaches them only through
-  // `call_dynamic_tool`; the scripted model does exactly that.
-  await sendMessage(
-    page,
-    `${text}\n${e2eToolCallPrompt("call_dynamic_tool", {
-      namespace: "applets",
-      toolName: name,
-      arguments: input,
-      mcpDetails: { description: `${name} for the User` },
-    })}`,
-  );
+  // The Applets tools are first-party registrations, so the scripted model
+  // calls them by name.
+  await sendMessage(page, `${text}\n${e2eToolCallPrompt(name, input)}`);
 }
 
 async function appletIdNamed(page: Page, displayName: string): Promise<string> {

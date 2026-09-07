@@ -450,7 +450,7 @@ export interface SessionEventMap {
     turn: number;
     step: number;
     effectId: string;
-    effect: "author" | "undo" | "catalog-change";
+    effect: "author" | "undo";
     reason: string;
     /** The durable failure record, when the host wrote one. */
     failureId?: string;
@@ -461,26 +461,6 @@ export interface SessionEventMap {
     event: string;
     generationId: string;
     message: string;
-  };
-  /** Durable session intent before a Catalog installation effect. */
-  "package/catalog-change-intent": {
-    turn: number;
-    step: number;
-    effectId: string;
-    action: "install" | "update" | "remove";
-    catalogId?: string;
-    packageId?: string;
-    contentHash?: string;
-  };
-  /** The pending Composition generation produced by that Catalog change. */
-  "package/catalog-changed": {
-    turn: number;
-    step: number;
-    effectId: string;
-    action: "install" | "update" | "remove";
-    packageId: string;
-    contentHash?: string;
-    generationId: string;
   };
   /** Durable intent before a Bot-origin Composition revert is proposed. */
   "package/undo-intent": {
@@ -1672,14 +1652,8 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
       turn();
       step();
       eventString(event.effectId, "session event.effectId");
-      if (
-        event.effect !== "author" &&
-        event.effect !== "undo" &&
-        event.effect !== "catalog-change"
-      ) {
-        throw new Error(
-          'session event.effect must be "author", "undo" or "catalog-change"',
-        );
+      if (event.effect !== "author" && event.effect !== "undo") {
+        throw new Error('session event.effect must be "author" or "undo"');
       }
       eventString(event.reason, "session event.reason", true);
       if (Object.hasOwn(event, "failureId")) {
@@ -1696,80 +1670,6 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
       eventString(event.event, "session event.event");
       eventString(event.generationId, "session event.generationId");
       eventString(event.message, "session event.message");
-      break;
-    case "package/catalog-change-intent":
-      requireEventKeys(
-        event,
-        keys(
-          "turn",
-          "step",
-          "effectId",
-          "action",
-          ...(Object.hasOwn(event, "catalogId") ? ["catalogId"] : []),
-          ...(Object.hasOwn(event, "packageId") ? ["packageId"] : []),
-          ...(Object.hasOwn(event, "contentHash") ? ["contentHash"] : []),
-        ),
-        "session event",
-      );
-      turn();
-      step();
-      eventString(event.effectId, "session event.effectId");
-      if (
-        event.action !== "install" &&
-        event.action !== "update" &&
-        event.action !== "remove"
-      ) {
-        throw new Error("session event.action is invalid");
-      }
-      if (event.catalogId !== undefined)
-        eventString(event.catalogId, "session event.catalogId");
-      if (event.packageId !== undefined)
-        eventString(event.packageId, "session event.packageId");
-      if (event.contentHash !== undefined)
-        eventString(event.contentHash, "session event.contentHash");
-      if (
-        (event.action === "remove" &&
-          (event.packageId === undefined ||
-            event.catalogId !== undefined ||
-            event.contentHash !== undefined)) ||
-        // An install or update names a Catalog entry and never a bare package
-        // id. `contentHash` is optional there: a first-party entry names
-        // reviewed compiled-in code, publishes no bundle, and so pins no
-        // artifact hash.
-        (event.action !== "remove" &&
-          (event.catalogId === undefined || event.packageId !== undefined))
-      ) {
-        throw new Error("session Catalog change intent identity is invalid");
-      }
-      break;
-    case "package/catalog-changed":
-      requireEventKeys(
-        event,
-        keys(
-          "turn",
-          "step",
-          "effectId",
-          "action",
-          "packageId",
-          "generationId",
-          ...(Object.hasOwn(event, "contentHash") ? ["contentHash"] : []),
-        ),
-        "session event",
-      );
-      turn();
-      step();
-      eventString(event.effectId, "session event.effectId");
-      eventString(event.packageId, "session event.packageId");
-      eventString(event.generationId, "session event.generationId");
-      if (event.contentHash !== undefined)
-        eventString(event.contentHash, "session event.contentHash");
-      if (
-        event.action !== "install" &&
-        event.action !== "update" &&
-        event.action !== "remove"
-      ) {
-        throw new Error("session event.action is invalid");
-      }
       break;
     case "package/undo-intent":
       requireEventKeys(

@@ -332,7 +332,6 @@ describe("isolate identity and capabilities", () => {
         tools: true,
         memory: true,
         workspace: false,
-        notify: true,
         schedule: true,
       }),
     ).toMatchObject({
@@ -341,7 +340,6 @@ describe("isolate identity and capabilities", () => {
       tools: true,
       memory: true,
       workspace: false,
-      notify: true,
       schedule: true,
     });
   });
@@ -354,7 +352,6 @@ describe("isolate identity and capabilities", () => {
         tools: true,
         memory: true,
         workspace: true,
-        notify: true,
         schedule: true,
         packageId: "package-local-authority",
       }),

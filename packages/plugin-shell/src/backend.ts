@@ -4,7 +4,6 @@ import type { AgentEffectAdmission } from "@frockbot/kernel-agent-loop/agent";
 import {
   decodeIsolateMemoryReadRequestV1,
   decodeIsolateMemoryWriteRequestV1,
-  decodeIsolateNotificationRequestV1,
   decodeIsolateScheduleRequestV1,
   decodeIsolateToolRequestV1,
   decodeIsolateWorkspaceDeleteRequestV1,
@@ -18,7 +17,6 @@ import {
   type IsolateConnectionOutcomeV1,
   type IsolateConnectionV1,
   type IsolateMemoryOutcomeV1,
-  type IsolateNotificationOutcomeV1,
   type IsolateToolOutcomeV1,
   type IsolateWorkspaceOutcomeV1,
   type PersistSessionEvents,
@@ -36,12 +34,19 @@ import {
 } from "@frockbot/kernel-contracts";
 import {
   decodeFrockBotManifest,
-  isClientIframeContribution,
   type FrockBotManifest,
 } from "@frockbot/kernel-composition";
 import { canonicalJson, sha256 } from "@frockbot/kernel-composition/compiler";
 import type { ComputerRegistry } from "@frockbot/computer-core";
-import { appletsSourceRootV1 } from "@frockbot/plugin-applets/root";
+import {
+  appletSourceFilePathV1,
+  appletsSourceRootV1,
+} from "@frockbot/plugin-applets/root";
+import type {
+  AppletCapabilityHostV1,
+  AppletsRuntimeHostV1,
+} from "@frockbot/plugin-applets/feature";
+import { firstPartyPackageToolAllowedV1 } from "@frockbot/plugin-applets/pages";
 import { syncWorkspaceRootNowV1 } from "@frockbot/plugin-computer/agent";
 import {
   ACTIVE_RUN_KEY,
@@ -135,7 +140,6 @@ import {
   APPLET_DIST_FILES_V1,
   appletRpcSnapshotV1 as rpcJsonSnapshotV1,
   resolveAppletCompositionV1,
-  type AppletCapabilityHostV1,
   type AppletInstanceNamespaceV1,
   type AppletUserDirectoryV1,
 } from "./backend-applets.js";
@@ -148,8 +152,6 @@ import {
   decodeAppletProvenanceV1,
   decodeAppletSummaryV1,
   decodeAppletToolDeclarationV1,
-  decodeIsolateAppletsRequestV1,
-  type IsolateAppletsOutcomeV1,
 } from "@frockbot/kernel-contracts";
 import { compositionFailureTurnTextV1 } from "./backend-composition-input.js";
 import {
@@ -353,14 +355,14 @@ import {
   type IsolateModelRequestRecordV1,
 } from "./backend-isolate.js";
 import { memoryScopeRootV1 } from "@frockbot/plugin-memory/roots";
-import type { BotIsolateLoader } from "@frockbot/kernel-composition/isolate";
+import type { BotIsolateLoader } from "@frockbot/compose-frockbot";
 import type {
   CompositionGenerationV1,
   CompositionMemberV1,
 } from "@frockbot/kernel-composition/generation";
 import {
   projectCompositionGenerationV1,
-  projectPackageIframeCompositionV1,
+  projectFirstPartyPackageIframeV1,
 } from "./composition-views.js";
 import { executeBotTurn, executeDirectToolTurn } from "./backend-runner.js";
 import { yieldCompactionWorkV1 } from "./compaction-scheduler.js";
@@ -592,13 +594,6 @@ export interface ShellBotBackendHost {
    * no honest way to dispatch one.
    */
   subagents?: SubagentDurableBindingV1;
-  /**
-   * Immutable Package artifacts this bundle already carries, by object key.
-   *
-   * The application supplies these; the shell only hands them to the artifact
-   * store as a second place to look. See `createR2PackageArtifactStore`.
-   */
-  bundledPackageArtifacts?: ReadonlyMap<string, string>;
   invalidateComputerProjectionFile?(
     userId: string,
     botId: string,
@@ -626,21 +621,14 @@ function optionalStoredRun(input: unknown): StoredRun | undefined {
 /** Server-side allowlist for the untrusted page's only effectful message. */
 export function requirePackageUiToolDeclarationV1(
   catalog: PackageIframeCompositionV1,
-  command: Pick<
-    PackageIframeToolCommandV1,
-    "generationId" | "packageId" | "name"
-  >,
+  command: Pick<PackageIframeToolCommandV1, "packageId" | "name">,
 ): PackageIframeCompositionV1["contributions"][number] {
   const contribution = catalog.contributions.find(
     (candidate) => candidate.packageId === command.packageId,
   );
-  if (
-    catalog.generationId !== command.generationId ||
-    !contribution ||
-    !contribution.declaredTools.includes(command.name)
-  ) {
+  if (!contribution || !contribution.declaredTools.includes(command.name)) {
     throw new Error(
-      `Package "${command.packageId}" did not declare tool "${command.name}" in generation "${command.generationId}"`,
+      `Package "${command.packageId}" did not declare tool "${command.name}"`,
     );
   }
   return contribution;
@@ -650,7 +638,6 @@ export class ShellBotBackendContribution {
   readonly ctx: DurableObjectState;
   readonly env: BotStateEnv;
   private readonly compileApplication: typeof compileFoundationApplication;
-  private readonly bundledPackageArtifacts?: ReadonlyMap<string, string>;
   private readonly lifecycleAdmission?: ShellBotBackendHost["assertLifecycleActive"];
   private readonly outboundFetch?: typeof fetch;
   private readonly configurationActivities = new Map<
@@ -713,7 +700,6 @@ export class ShellBotBackendContribution {
     this.env = host.env;
     this.compileApplication =
       host.compileApplication ?? compileFoundationApplication;
-    this.bundledPackageArtifacts = host.bundledPackageArtifacts;
     this.lifecycleAdmission = host.assertLifecycleActive;
     this.outboundFetch = host.outboundFetch;
     this.invalidateComputerProjectionFile =
@@ -1172,7 +1158,6 @@ export class ShellBotBackendContribution {
         acceptedAt: new Date().toISOString(),
         text: `${contribution.displayName} · ${command.name}`,
         directTool: {
-          generationId: command.generationId,
           packageId: command.packageId,
           name: command.name,
           input: command.input,
@@ -1259,34 +1244,12 @@ export class ShellBotBackendContribution {
     return document;
   }
 
-  private async requireCompositionMemberManifest(
-    member: CompositionMemberV1,
-  ): Promise<FrockBotManifest> {
-    const manifest = await this.readCompositionMemberManifest(member);
-    if (!manifest) {
-      throw new Error(
-        `package "${member.packageId}" manifest "${member.manifestHash}" is unavailable`,
-      );
-    }
-    return manifest;
-  }
-
-  /** Active fail-closed Composition projected as inert iframe metadata. */
+  /** The first-party page registry, as inert iframe metadata for one Bot. */
   async listPackageUi(
     identity: BotIdentity,
   ): Promise<PackageIframeCompositionV1> {
     await this.validateIdentity(identity);
-    const current = await this.authority.composition.current();
-    const generation =
-      current.status === "active" || current.status === "superseded"
-        ? current
-        : await this.authority.composition.lastKnownGood();
-    return projectPackageIframeCompositionV1({
-      botId: identity.botId,
-      generation,
-      readMemberManifest: (member) =>
-        this.readCompositionMemberManifest(member),
-    });
+    return projectFirstPartyPackageIframeV1(identity.botId);
   }
 
   /**
@@ -1667,33 +1630,14 @@ export class ShellBotBackendContribution {
     try {
       const directTool = input.command.directTool;
       if (directTool) {
+        // The page registry is the declaration, and it is checked again here
+        // rather than trusted from the admitted command: a durable run replayed
+        // after a deploy that withdrew a page must not still run its tool.
         if (
-          directTool.generationId !== activation.mounted.generation.generationId
+          !firstPartyPackageToolAllowedV1(directTool.packageId, directTool.name)
         ) {
           throw new Error(
-            "Package UI command does not match the mounted Composition generation",
-          );
-        }
-        // Artifact-backed, not "not first-party": what makes a Package's page
-        // able to name one of its tools is that the Package is loaded from an
-        // immutable artifact with a manifest, which a first-party Package gets
-        // too.
-        const member = activation.mounted.generation.members.find(
-          (candidate) =>
-            candidate.packageId === directTool.packageId &&
-            candidate.artifact !== undefined,
-        );
-        if (!member)
-          throw new Error("Package UI command names an unavailable Package");
-        const manifest = await this.requireCompositionMemberManifest(member);
-        const client = manifest.contributions.client;
-        if (
-          !client ||
-          !isClientIframeContribution(client) ||
-          !(manifest.tools ?? []).some((tool) => tool.name === directTool.name)
-        ) {
-          throw new Error(
-            `Package "${directTool.packageId}" did not declare tool "${directTool.name}" for its iframe`,
+            `Package "${directTool.packageId}" did not declare tool "${directTool.name}" for its pages`,
           );
         }
         return await executeDirectToolTurn({
@@ -1856,10 +1800,7 @@ export class ShellBotBackendContribution {
       runId: turn.runId,
       turnId: turn.runId,
       loader,
-      artifacts: createR2PackageArtifactStore(
-        artifacts,
-        this.bundledPackageArtifacts,
-      ),
+      artifacts: createR2PackageArtifactStore(artifacts),
       manifestFor: (member) =>
         this.requireCompositionMemberManifestDocument(member),
       capabilitiesFor: (member) =>
@@ -2327,6 +2268,67 @@ export class ShellBotBackendContribution {
     });
   }
 
+  /**
+   * The Applets feature's seam for one admitted Turn, or `undefined` when this
+   * host cannot reach Applets at all.
+   *
+   * The capability host is built per call rather than once: it closes over the
+   * Turn's mounted runtime, which is what lets a publish pull the Applet's
+   * `dist/` off the Computer, and that runtime does not exist yet when a Turn's
+   * features are assembled.
+   */
+  private appletsRuntimeHost(
+    identity: BotIdentity,
+    turn: { sessionId: string; runId: string; turnId: string },
+  ): AppletsRuntimeHostV1 | undefined {
+    const files = this.env.WORKSPACE_FILES;
+    if (!this.env.APPLET_STATES || !this.env.APPLICATION_ARTIFACTS || !files) {
+      return undefined;
+    }
+    const capability = (): AppletCapabilityHostV1 => {
+      const host = this.appletCapabilityHost(identity, this.activeTurn);
+      if (!host) throw new Error("Applets are unavailable");
+      return host;
+    };
+    return {
+      applets: {
+        list: () => capability().list(),
+        create: (input, scope) => capability().create(input, scope),
+        publish: (input, scope) => capability().publish(input, scope),
+        revert: (input, scope) => capability().revert(input, scope),
+        delete: (input) => capability().delete(input),
+        focus: (input) => capability().focus(input),
+        generations: (input) => capability().generations(input),
+        readFocused: () => capability().readFocused(),
+      },
+      turn,
+      writeSource: async (input) => {
+        const outcome = await files.write({
+          path: appletSourceFilePathV1(
+            identity.userId,
+            input.appletId,
+            input.path,
+          ),
+          bytes: input.bytes,
+          writer: {
+            kind: "bot",
+            botId: identity.botId,
+            sessionId: turn.sessionId,
+            turnId: turn.turnId,
+            runId: turn.runId,
+          },
+          expectedGenerationId: null,
+          mediaType: input.mediaType,
+        });
+        if (outcome.status !== "ok") {
+          throw new Error(
+            `the Applet was created but "${input.path}" could not be written: ${outcome.status}`,
+          );
+        }
+      },
+    };
+  }
+
   /** The User Durable Object's Applet directory, decoded on arrival. */
   private appletUserDirectory(identity: BotIdentity): AppletUserDirectoryV1 {
     const id = this.env.USER_CONFIGURATIONS.idFromName(identity.userId);
@@ -2410,88 +2412,6 @@ export class ShellBotBackendContribution {
         );
       },
     };
-  }
-
-  /**
-   * The Applet capability at the isolate boundary. One RPC with an operation,
-   * because seven near-identical forwarders would say nothing seven times; the
-   * shapes are decoded here and the outcomes are declared, never thrown.
-   */
-  async isolateApplets(
-    input: IsolateCallScopeV1,
-  ): Promise<IsolateAppletsOutcomeV1> {
-    const active = this.activeIsolateTurn(input);
-    if (!active) {
-      return {
-        status: "unavailable",
-        reason: "the Package is not running in this Bot's active Composition",
-      };
-    }
-    const identity = { userId: input.userId, botId: input.botId };
-    const host = this.appletCapabilityHost(identity, active);
-    if (!host) {
-      return { status: "unavailable", reason: "Applets are unavailable" };
-    }
-    const request = decodeIsolateAppletsRequestV1(input.request);
-    const scope = {
-      sessionId: input.sessionId,
-      runId: input.runId,
-      turnId: input.turnId,
-      effectId: `applet:${input.turnId}:${request.op}:${
-        "appletId" in request ? request.appletId : "new"
-      }`,
-    };
-    try {
-      switch (request.op) {
-        case "list":
-          return { status: "available", value: await host.list() };
-        case "create":
-          return {
-            status: "available",
-            value: await host.create(
-              { displayName: request.displayName },
-              scope,
-            ),
-          };
-        case "publish":
-          return {
-            status: "available",
-            value: await host.publish({ appletId: request.appletId }, scope),
-          };
-        case "revert":
-          return {
-            status: "available",
-            value: await host.revert(
-              {
-                appletId: request.appletId,
-                generationId: request.generationId,
-              },
-              scope,
-            ),
-          };
-        case "delete":
-          return {
-            status: "available",
-            value: await host.delete({ appletId: request.appletId }),
-          };
-        case "focus":
-          return {
-            status: "available",
-            value: await host.focus({ appletId: request.appletId }),
-          };
-        case "generations":
-          return {
-            status: "available",
-            value: await host.generations({ appletId: request.appletId }),
-          };
-      }
-    } catch (error) {
-      return {
-        status: "unavailable",
-        reason:
-          error instanceof Error ? error.message : "the Applet call failed",
-      };
-    }
   }
 
   /** The Session's focused Applet, as the shell and its route read it. */
@@ -2732,27 +2652,6 @@ export class ShellBotBackendContribution {
       generation: connection.generation,
       expiresAt: new Date(Date.now() + 5 * 60_000).toISOString(),
     };
-  }
-
-  async isolateNotify(
-    input: IsolateCallScopeV1,
-  ): Promise<IsolateNotificationOutcomeV1> {
-    if (!this.activeIsolateTurn(input)) {
-      return { status: "unavailable", reason: "notifications are unavailable" };
-    }
-    const request = decodeIsolateNotificationRequestV1(input.request);
-    await this.authority.recordNotification({
-      notificationId: notificationIdV1(
-        "package",
-        input.packageId,
-        request.notificationId,
-      ),
-      runId: input.runId,
-      createdAt: new Date().toISOString(),
-      title: request.title,
-      body: request.body,
-    });
-    return { status: "recorded" };
   }
 
   async isolateSchedule(
@@ -4325,6 +4224,15 @@ export class ShellBotBackendContribution {
                   : undefined,
               ),
             }
+          : {}),
+        // A Bot builds an Applet only inside an admitted Turn: the publish is
+        // a durable effect whose intent record has to name the Session and Turn
+        // that asked for it, and the scaffold write names the same writer.
+        ...(turn
+          ? (() => {
+              const applets = this.appletsRuntimeHost(identity, turn);
+              return applets ? { applets } : {};
+            })()
           : {}),
         // A Bot changes its own identity, or adds a Bot to its User's flock,
         // only inside an admitted Turn whose Session and Turn the write names.

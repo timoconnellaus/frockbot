@@ -211,22 +211,20 @@ An in-flight Turn keeps the generation it pinned. Activation takes effect at the
 
 Failure phases are `resolve | bundle | mount | health` (`:22`). `activateCompositionV1` (`:318`) reads the pin, mounts and verifies, then commits and clears failures. On failure it records the attempt, marks the generation `failed` or `quarantined`, mounts last-known-good, notifies, and admits the Turn on the fallback. The quarantine threshold is three attempts (`:65`); a quarantined generation is never retried. If last-known-good is itself the failing generation, the error is rethrown (`:377-390`).
 
-### Isolate loading — `packages/kernel-composition/src/isolate-host.ts`
+### Isolate loading — `packages/compose-frockbot/src/isolate-host.ts`
 
 - Loading uses the `BOT_PACKAGES` Worker Loader binding, typed structurally as `BotIsolateLoader` (`:72`). There is no dynamic `import()`.
 - `loader.get(loaderId, () => ({compatibilityDate, mainModule, modules, globalOutbound: null, env: {IDENTITY, CAPABILITIES}, limits: {cpuMs: 5000, subRequests: 5}}))` (`:434-455`).
 - The loader id is `isolateLoaderIdV1({userId, artifactSetHash: botIsolateModuleSetHashV1(artifactContentHash, bindingDigest)})` (`:273`). The module-set hash covers wrapper version, wrapper source hash, package hash and binding digest (`:146-158`), because a loader id is served from cache with the `env` it was first loaded with.
-- Artifacts come from `createR2PackageArtifactStore` (`packages/plugin-shell/src/backend-isolate.ts:316`): R2 key `packages/<contentHash>.mjs`, falling back to artifacts compiled into the Worker, then sha-256 verified before load.
+- Artifacts come from `createR2PackageArtifactStore` (`packages/plugin-shell/src/backend-isolate.ts`): R2 key `packages/<contentHash>.mjs`, sha-256 verified before load.
 - `BotIsolateContributionHost.prepare` (`:266`) loads the artifact, mounts and calls `entrypoint.health()` as one guarded phase, then requires `health.ok`, non-empty tools, a matching `packageId`, and tool and hook names equal to the stored manifest's (`:305-345`). It also enforces the manifest's admission ceiling (`:162`).
 - `BotCapabilities` (`apps/cloudflare/src/bot-capabilities.ts:68`), a `WorkerEntrypoint`, is the loopback through which an isolate reaches the kernel. It is minted per Turn at `packages/plugin-shell/src/backend.ts:2069-2125`.
 
 ### Built-in versus dynamic
 
-34 of the 35 members carry no `artifact` and resolve from the compiled contribution tables. `createFoundationRuntimeApplication` (`applications/foundation/src/runtime.ts:1152`) filters the runtime table to `pkg.artifact === undefined`, then removes 19 runtime ids that mount only inside an admitted Turn.
+Every member carries no `artifact` and resolves from the compiled contribution tables. `createFoundationRuntimeApplication` (`applications/foundation/src/runtime.ts`) filters the runtime table to `pkg.artifact === undefined`, then removes the runtime ids that mount only inside an admitted Turn.
 
-Exactly one member carries an `artifact`: `@frockbot/plugin-applets` (`frockbot.application.json:167`). Its bytes are checked in at `applications/foundation/generated/applets-artifact.ts` as `FIRST_PARTY_PACKAGE_ARTIFACTS_V1` and wired into the Durable Object at `apps/cloudflare/src/bot-state.ts:514`.
-
-Nothing else produces an artifact-bearing member today: Bot authoring returns with the step 8 build service (`plan.md`).
+Nothing produces an artifact-bearing member today. The isolate host, the `BOT_PACKAGES` loader and the capability contract are all still here and still exercised by the Applet instance path; a _Package_ artifact returns with the step 8 build service (`plan.md`).
 
 ---
 
@@ -318,7 +316,9 @@ Adjacent, outside the loop: image generation uses Workers AI ids directly (`pack
 
 ### Authoring
 
-The Bot writes Applet code on the Computer with ordinary file tools. `packages/plugin-applets` exposes seven tools — `applet_list`, `applet_create`, `applet_publish`, `applet_revert`, `applet_delete`, `applet_focus`, `applet_generations` (`packages/plugin-applets/frockbot.json:49-143`, implementations at `src/package.ts:36-145` and `:307-394`). The Package mounts as a `bot-isolate` and reaches the kernel only through `ctx.applets`. `applet_create` scaffolds from templates into the durable root `applets/source/<appletId>/` (`src/root.ts:41-108`), mounted on the Sprite at `/home/box/agent-data/user-packages/applets/source`. Guidance ships at `packages/plugin-applets/skills/applets.md`.
+The Bot writes Applet code on the Computer with ordinary file tools. `packages/plugin-applets` exposes seven tools — `applet_list`, `applet_create`, `applet_publish`, `applet_revert`, `applet_delete`, `applet_focus`, `applet_generations` — as an ordinary first-party runtime feature, `createAppletsFeature` (`packages/plugin-applets/src/feature.ts`), mounted for one admitted Turn beside Memory and Skills (`applications/foundation/src/runtime.ts`). Its host is `createAppletCapabilityHostV1` (`packages/plugin-shell/src/backend-applets.ts`), built per call because a publish needs the Turn's mounted Computer. `applet_create` scaffolds from templates into the durable root `applets/source/<appletId>/` (`src/root.ts`), mounted on the Sprite at `/home/box/agent-data/user-packages/applets/source`. Guidance ships at `packages/plugin-applets/skills/applets.md`.
+
+The Applets Package keeps a manifest for one reason: it declares that durable root, which the Computer's durable-root sync reads from the compiled application (`declaredPackageRootsV1`).
 
 ### Build
 
@@ -331,7 +331,11 @@ R2 `APPLICATION_ARTIFACTS`, content-addressed as `packages/<sha256>.mjs` and `.h
 ### Execution
 
 - **Server.** `env.APPLETS.get(...)` with `globalOutbound: null`, an env of exactly `IDENTITY` and `CAPABILITIES`, and `limits {cpuMs: 5000, subRequests: 10}` (`applet-state.ts:245-273`). The loaded class is mounted as a Durable Object facet (`:297-308`) under a snapshot, trial and commit publish protocol with `facets.clone` rollback (`:479-613`).
-- **UI.** `ui.html` is served from the anonymous origin `ui.<host>` (`apps/cloudflare/src/gateway.ts:139-176`) and nested in an `<iframe sandbox="allow-scripts">` inside the Package's own `canvas.html`, handshaken by postMessage, then connected over a WebSocket gated by an HMAC viewer token (`gateway.ts:434-516`).
+- **UI.** `ui.html` is served from the anonymous origin `ui.<host>` (`apps/cloudflare/src/gateway.ts:139-176`) and nested in an `<iframe sandbox="allow-scripts">` inside the Applets Package's own `canvas.html`, handshaken by postMessage, then connected over a WebSocket gated by an HMAC viewer token (`gateway.ts:434-516`).
+
+### First-party pages
+
+`list.html` and `canvas.html` (`packages/plugin-applets/src/pages/`) are declared by a static registry, `FIRST_PARTY_PACKAGE_UI_V1` (`packages/plugin-applets/src/pages.ts`): page id, digest, html, the tool names that page may call, and where it mounts. `projectFirstPartyPackageIframeV1` (`packages/plugin-shell/src/composition-views.ts`) reshapes it for the client and `requirePackageUiToolDeclarationV1` authorizes a page's tool command against it. There is no Composition generation in either: a first-party page ships in the deployment, so there is nothing for a generation to fence. The bridge protocol (`PACKAGE_IFRAME_HELPER_JS_V1`) is unchanged — it is the page contract a Bot-authored page will reuse.
 
 ### SDK
 
@@ -447,7 +451,7 @@ Admin is membership of the comma-separated `FROCKBOT_ADMIN_EMAILS` secret (`apps
 4. **Computer host** — `apps/computer-host/vitest.config.ts` plus `bun test src container`. Opt-in live suites `test:live` and `test:live:desktop` are not run by CI.
 5. **Playwright** — `apps/cloudflare/e2e/playwright.config.ts`, `**/*.e2e.ts`, `fullyParallel: false`, `workers: 1`, 240 s timeout, 4-way CI sharding through `balanced-shard-reporter.ts`, `webServer` of `bun e2e/serve.ts`. Roughly 28 spec files.
 6. **Flutter** — `apps/native/test/*.dart` (14 files) plus `integration_test/settings_screens.dart`, which is a screenshot runner.
-7. **Gate scripts** — run under `typecheck`: `scripts/check-client-protocol.ts`, `scripts/check-kernel-imports.ts`, `scripts/check-computer-host-imports.ts`, `scripts/generate-isolate-context-catalog.ts --check`, `scripts/build-applets-package.ts --check`, then `scripts/typecheck.ts`. Plus `lint:ui-styles` (`scripts/check-ui-styles.ts`).
+7. **Gate scripts** — run under `typecheck`: `scripts/check-client-protocol.ts`, `scripts/check-kernel-imports.ts`, `scripts/check-computer-host-imports.ts`, `scripts/generate-isolate-context-catalog.ts --check`, `scripts/build-applets-assets.ts --check` (the SDK scaffold, the Applets Skill and the two page HTMLs, as strings the Worker bundle can carry), then `scripts/typecheck.ts`. Plus `lint:ui-styles` (`scripts/check-ui-styles.ts`).
 
 ### `.github/workflows/ci.yml`
 

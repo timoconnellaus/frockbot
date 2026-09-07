@@ -200,36 +200,8 @@ const BOT_ISOLATE_CONTEXT_PROPERTY_SOURCE_V1 = {
         return capabilities.workspaceDelete(request);
       },
     }`,
-  applets: `{
-      list: function () {
-        return capabilities.applets({ op: "list" });
-      },
-      create: function (input) {
-        return capabilities.applets({ op: "create", displayName: input.displayName });
-      },
-      publish: function (input) {
-        return capabilities.applets({ op: "publish", appletId: input.appletId });
-      },
-      revert: function (input) {
-        return capabilities.applets({
-          op: "revert",
-          appletId: input.appletId,
-          generationId: input.generationId,
-        });
-      },
-      delete: function (input) {
-        return capabilities.applets({ op: "delete", appletId: input.appletId });
-      },
-      focus: function (input) {
-        return capabilities.applets({ op: "focus", appletId: input.appletId });
-      },
-      generations: function (input) {
-        return capabilities.applets({ op: "generations", appletId: input.appletId });
-      },
-    }`,
   connection:
     "function (connectionId) { return capabilities.connection(connectionId); }",
-  notify: "function (request) { return capabilities.notify(request); }",
   schedule: "function (request) { return capabilities.schedule(request); }",
 } satisfies Record<keyof BotPackageContextV1, string>;
 

@@ -34,7 +34,7 @@ at the cited location. Items the re-orientation already removes are marked; see
 
 15. **The `genui` / `a2ui_core` dependency is inert.** It is imported in `apps/native/lib/extensions/catalog.dart:5-6`, used by one widget instantiated only by the gated `FormPreview`, and its document is the hardcoded `deterministicForm` const (`:11-20`). `A2ui*` names appear only in the schema and generated type files; no backend produces an A2ui surface and no client consumes one.
 
-16. **The dynamic Package system has one dynamic member.** `@frockbot/plugin-applets` is the only member with an `artifact`, and its bytes are checked into `applications/foundation/generated/applets-artifact.ts`.
+16. **The dynamic Package system has no dynamic member.** No Composition member carries an `artifact`. The isolate host, the `BOT_PACKAGES` loader and the capability contract are all still here; nothing produces a Package artifact until the step 8 build service.
 
 17. **`applications/foundation/src/runtime.ts:1153-1200` deletes 19 runtime ids by hardcoded string**, directly below the claim in `contributions.ts` that nothing branches on a Package's identity.
 
@@ -52,7 +52,7 @@ at the cited location. Items the re-orientation already removes are marked; see
 
 24. **`@frockbot/applet-sdk` is not published to npm**; the Computer installs dist-tag `latest` and writes `.sdk-unavailable` on failure.
 
-25. **`packages/plugin-applets/package.json` lacks the `frockbot.manifest` field and a `./package` export**, working only because a build script bundles it into the checked-in foundation artifact.
+25. **`packages/plugin-applets/package.json` lacks the `frockbot.manifest` field**, so its manifest is reached through the `./manifest` export rather than the field every other Package declares.
 
 26. ~~**`computer_screenshot` captures the whole 5120×720 root window.**~~ **Fixed.** The capture was a bare `scrot` with no `-a` clip, so one Bot's screenshot contained its siblings' windows. It now clips to the Bot's slot, read from the same `bots/<key>/slot` file the VNC viewer clips by.
 

@@ -1948,16 +1948,11 @@ function migrateCatalogRelativeUserSettingsV1(
     if (!installation) return true;
     const packageId = storedDataValueV1(installation, "packageId");
     const version = storedDataValueV1(installation, "version");
-    const provenance = storedDataValueV1(installation, "provenance");
     if (typeof packageId !== "string" || typeof version !== "string") {
       return true;
     }
-    // The facts supplied here are the running application's first-party
-    // Catalog. Remote Catalog installations have a separate pinned authority
-    // and must never be inferred retired from absence here.
-    if (provenance === "catalog") return true;
-    // A different immutable version remains a visible, repairable Catalog
-    // mismatch. Only an id absent from the Catalog proves that the Package was
+    // A different immutable version remains a visible, repairable mismatch.
+    // Only an id absent from the deployment proves that the Package was
     // retired and that its row is now orphaned durable state.
     const retained = !migrate || availablePackageIds.has(packageId);
     if (!retained) retiredFirstPartyPackageIds.add(packageId);
@@ -2431,11 +2426,6 @@ const COMPOSITION_GENERATION_STATUSES_V1: readonly CompositionGenerationStatusVi
 
 export type CompositionProvenanceViewV1 =
   | { kind: "first-party" }
-  | {
-      kind: "catalog";
-      catalogId: string;
-      catalogGeneration: string;
-    }
   | { kind: "user"; userId: string; authoredAt: string }
   | {
       kind: "bot";
@@ -2594,25 +2584,6 @@ function compositionProvenanceView(
   if (kind === "first-party") {
     exactRecord(input, "Composition provenance", ["kind"]);
     return { kind: "first-party" };
-  }
-  if (kind === "catalog") {
-    const value = exactRecord(input, "Composition provenance", [
-      "kind",
-      "catalogId",
-      "catalogGeneration",
-    ]);
-    return {
-      kind: "catalog",
-      catalogId: identifier(
-        value.catalogId,
-        "Composition provenance catalogId",
-      ),
-      catalogGeneration: text(
-        value.catalogGeneration,
-        "Composition provenance catalogGeneration",
-        256,
-      ),
-    };
   }
   if (kind === "user") {
     const value = exactRecord(input, "Composition provenance", [

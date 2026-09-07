@@ -1851,7 +1851,6 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           JSON.stringify({
             schemaVersion: 1,
             commandId: crypto.randomUUID(),
-            generationId: catalog.generationId,
             packageId: contribution.packageId,
             name,
             input,

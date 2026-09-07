@@ -8,7 +8,7 @@ import {
   BOT_ISOLATE_PACKAGE_MODULE,
   BOT_ISOLATE_WRAPPER_SOURCE,
   botIsolateModuleMap,
-} from "./isolate-wrapper.ts";
+} from "../src/isolate-wrapper.ts";
 
 type Deadline = (work: () => unknown, deadlineMs: number) => Promise<unknown>;
 

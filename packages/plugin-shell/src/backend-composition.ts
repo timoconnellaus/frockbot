@@ -33,7 +33,7 @@ import {
   type BotIsolateArtifactStore,
   type BotIsolateLimits,
   type BotIsolateLoader,
-} from "@frockbot/kernel-composition/isolate";
+} from "@frockbot/compose-frockbot";
 import type { ActiveContribution } from "@frockbot/kernel-composition";
 import {
   type BotCapabilitiesStub,

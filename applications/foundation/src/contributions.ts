@@ -12,9 +12,8 @@
  * > never from a switch over Package identity.
  *
  * A member of the plan that carries an `artifact` is not in this table at all:
- * it loads through `packages/kernel-composition/src/isolate-host.ts` like any
- * Bot-authored Package. That is the seam an artifact-backed first-party
- * Package — the Applets Package — arrives through, and
+ * it loads through `packages/compose-frockbot/src/isolate-host.ts` like any
+ * Bot-authored Package. No member carries one today, and
  * {@link assertFoundationBackendContributionsResolvable} is where a member
  * that is neither artifact-backed nor in the table becomes a compile error of
  * the application.

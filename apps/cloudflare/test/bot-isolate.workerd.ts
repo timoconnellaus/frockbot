@@ -310,7 +310,6 @@ describe("the isolate capability binding", () => {
       tools: true,
       memory: true,
       workspace: true,
-      notify: true,
       schedule: true,
     });
   });

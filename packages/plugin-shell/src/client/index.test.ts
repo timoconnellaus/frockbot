@@ -553,7 +553,6 @@ describe("Bot selection", () => {
             return Promise.resolve({
               schemaVersion: 1,
               botId: "primary",
-              generationId: "generation-ui",
               artifactOrigin: "https://ui.app.example",
               contributions: [contribution],
             });
@@ -616,7 +615,6 @@ describe("Bot selection", () => {
     expect(JSON.parse(toolRequest?.body ?? "null")).toEqual({
       schemaVersion: 1,
       commandId: expect.any(String),
-      generationId: "generation-ui",
       packageId: "weather-page",
       name: "weather_lookup",
       input: { city: "Sydney" },
