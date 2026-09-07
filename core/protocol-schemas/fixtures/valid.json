@@ -236,6 +236,50 @@
     }
   },
   {
+    "name": "FlockReceipt valid",
+    "schema": "FlockReceipt",
+    "value": {
+      "schemaVersion": 1,
+      "commandId": "command-1",
+      "status": "applied",
+      "revision": 3
+    }
+  },
+  {
+    "name": "SheepIdentity valid",
+    "schema": "SheepIdentity",
+    "value": {
+      "schemaVersion": 1,
+      "botId": "default",
+      "revision": 2,
+      "sheep": {
+        "schemaVersion": 1,
+        "background": "hot-pink",
+        "upper": "upper-neutral",
+        "middle": "middle-neutral",
+        "lower": "lower-neutral"
+      }
+    }
+  },
+  {
+    "name": "BotSheepCommand valid",
+    "schema": "BotSheepCommand",
+    "value": {
+      "schemaVersion": 1,
+      "type": "bot/update-sheep",
+      "commandId": "command-1",
+      "expectedRevision": 2,
+      "botId": "default",
+      "sheep": {
+        "schemaVersion": 1,
+        "background": "hot-pink",
+        "upper": "upper-neutral",
+        "middle": "middle-neutral",
+        "lower": "lower-neutral"
+      }
+    }
+  },
+  {
     "name": "SkillRef valid",
     "schema": "SkillRef",
     "value": {
@@ -892,7 +936,7 @@
     "value": {
       "schemaVersion": 1,
       "commandId": "command-1",
-      "text": "Hello 🐑 こんにちは"
+      "text": "Hello \ud83d\udc11 \u3053\u3093\u306b\u3061\u306f"
     }
   },
   {
@@ -1176,7 +1220,7 @@
           ]
         }
       ],
-      "modelInUse": "Auto · Frock AI"
+      "modelInUse": "Auto \u00b7 Frock AI"
     }
   },
   {

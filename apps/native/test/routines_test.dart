@@ -468,4 +468,162 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Morning brief'), findsWidgets);
   });
+  group('the editor turns one press into', () {
+    Map<String, Object?> save(Map<String, Object?> input) => {
+      'commandId': 'c1',
+      'input': {'kind': 'save-routine', ...input},
+    };
+
+    test('a create when it names no Routine', () {
+      expect(
+        routineCommandV1(
+          save({
+            'routine.name': '  Morning brief  ',
+            'routine.prompt': 'Summarise overnight email.',
+            'routine.timing': 'schedule',
+            'routine.schedule': ' 0 9 * * * ',
+            'routine.timezone': 'Australia/Sydney',
+          }),
+          'bot-1',
+        ),
+        {
+          'schemaVersion': 1,
+          'commandId': 'c1',
+          'botId': 'bot-1',
+          'type': 'routine/create',
+          'name': 'Morning brief',
+          'prompt': 'Summarise overnight email.',
+          'schedule': '0 9 * * *',
+          'timezone': 'Australia/Sydney',
+        },
+      );
+    });
+
+    test('an update when it does, carrying every field the form held', () {
+      final command = routineCommandV1(
+        save({
+          'routineId': 'r1',
+          'routine.name': 'Evening brief',
+          'routine.prompt': 'Summarise the day.',
+          'routine.timing': 'schedule',
+          'routine.schedule': '0 18 * * *',
+          'routine.timezone': 'UTC',
+        }),
+        'bot-1',
+      );
+      expect(command['type'], 'routine/update');
+      expect(command['routineId'], 'r1');
+      expect(command['name'], 'Evening brief');
+    });
+
+    test('a webhook Routine, which carries a trigger and never a schedule', () {
+      final command = routineCommandV1(
+        save({
+          'routine.name': 'On demand',
+          'routine.prompt': 'Do the thing.',
+          'routine.timing': 'webhook',
+          'routine.schedule': '0 9 * * *',
+          'routine.timezone': 'UTC',
+        }),
+        'bot-1',
+      );
+      expect(command['trigger'], {'kind': 'webhook'});
+      expect(command.containsKey('schedule'), isFalse);
+    });
+
+    test('a refusal said before anything is sent', () {
+      expect(
+        () => routineCommandV1(
+          save({'routine.name': '  ', 'routine.prompt': 'x', 'routine.timing': 'schedule'}),
+          'bot-1',
+        ),
+        throwsFormatException,
+      );
+      expect(
+        () => routineCommandV1(
+          save({'routine.name': 'x', 'routine.prompt': ' ', 'routine.timing': 'schedule'}),
+          'bot-1',
+        ),
+        throwsFormatException,
+      );
+      // A scheduled Routine with no schedule would be refused by the route; it
+      // is refused here instead, beside the field it is about.
+      expect(
+        () => routineCommandV1(
+          save({
+            'routine.name': 'x',
+            'routine.prompt': 'y',
+            'routine.timing': 'schedule',
+            'routine.schedule': '   ',
+          }),
+          'bot-1',
+        ),
+        throwsFormatException,
+      );
+    });
+
+    test('nothing at all, when the form was opened and left alone', () {
+      final seeds = routineEditorSeedsV1({
+        'type': 'group',
+        'orientation': 'column',
+        'children': [
+          for (final pair in const [
+            ('routine.name', 'Morning brief'),
+            ('routine.prompt', 'Summarise overnight email.'),
+            ('routine.timing', 'schedule'),
+            ('routine.schedule', '0 9 * * *'),
+            ('routine.timezone', 'Australia/Sydney'),
+          ])
+            {
+              'type': 'field',
+              'field': {
+                'id': pair.$1,
+                'label': pair.$1,
+                'kind': 'text',
+                'value': pair.$2,
+                'editable': true,
+              },
+            },
+        ],
+      });
+      final untouched = save({
+        'routineId': 'r1',
+        'routine.name': 'Morning brief',
+        'routine.prompt': 'Summarise overnight email.',
+        'routine.timing': 'schedule',
+        'routine.schedule': '0 9 * * *',
+        'routine.timezone': 'Australia/Sydney',
+      });
+      expect(routineSaveIsNoOpV1(untouched, seeds), isTrue);
+      final edited = save({
+        'routineId': 'r1',
+        'routine.name': 'Morning brief',
+        'routine.prompt': 'Summarise overnight email.',
+        'routine.timing': 'webhook',
+        'routine.schedule': '0 9 * * *',
+        'routine.timezone': 'Australia/Sydney',
+      });
+      expect(routineSaveIsNoOpV1(edited, seeds), isFalse);
+      // A create names no Routine, so it is never a no-op.
+      expect(
+        routineSaveIsNoOpV1(save(const {'routine.name': 'x'}), seeds),
+        isFalse,
+      );
+    });
+
+    test('the two key commands the route takes', () {
+      for (final pair in [
+        ('rotate-key', 'routine/rotate-key'),
+        ('revoke-key', 'routine/revoke-key'),
+      ]) {
+        expect(
+          routineCommandV1({
+            'commandId': 'c1',
+            'input': {'kind': pair.$1, 'routineId': 'r1'},
+          }, 'bot-1')['type'],
+          pair.$2,
+        );
+      }
+    });
+  });
 }

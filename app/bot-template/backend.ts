@@ -33,6 +33,10 @@ import {
   type TemplateShareReceiptV1,
 } from "./shared.js";
 import { defineGatewayContribution } from "@frockbot/core/contracts/contributions";
+import {
+  templateImportsDocumentV1,
+  templateSharesDocumentV1,
+} from "./templates-document.js";
 
 export interface PublishedTemplateV1 {
   hash: string;
@@ -183,16 +187,21 @@ export function createBotTemplateBackendContribution(
         return undefined;
       }
       if (!context.userId) return jsonError(401, "authentication required");
-      if ([...url.searchParams.keys()].length > 0) {
+      // One parameter, on the two reads: `as=document` asks for the same list
+      // in the vocabulary the host renders every view in.
+      const asDocument =
+        request.method === "GET" && url.searchParams.get("as") === "document";
+      if ([...url.searchParams.keys()].length > (asDocument ? 1 : 0)) {
         return jsonError(400, "the template route takes no query parameters");
       }
       if (url.pathname === IMPORTS_PATH) {
         try {
           if (request.method === "GET") {
+            const view = decodeTemplateImportListViewV1(
+              await host.listTemplateImports(context.userId),
+            );
             return Response.json(
-              decodeTemplateImportListViewV1(
-                await host.listTemplateImports(context.userId),
-              ),
+              asDocument ? templateImportsDocumentV1(view) : view,
             );
           }
           if (request.method !== "POST") {
@@ -219,10 +228,11 @@ export function createBotTemplateBackendContribution(
       }
       try {
         if (request.method === "GET") {
+          const view = decodeTemplateShareListViewV1(
+            await host.listTemplateShares(context.userId),
+          );
           return Response.json(
-            decodeTemplateShareListViewV1(
-              await host.listTemplateShares(context.userId),
-            ),
+            asDocument ? templateSharesDocumentV1(view) : view,
           );
         }
         if (request.method !== "POST") {

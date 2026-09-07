@@ -45,6 +45,15 @@ class ViewSurfacePage extends StatefulWidget {
   /// pull-to-refresh is still the way to read again.
   final bool chrome;
 
+  /// Drawn above the document, by the host, out of what the host knows and the
+  /// document does not.
+  ///
+  /// That is one thing and always the same thing: a secret the authority
+  /// minted once, on a receipt — a webhook key, a pairing code. A document can
+  /// be read twice, so a value that exists once cannot be in one; it lives
+  /// here for as long as the person is looking at it and nowhere else.
+  final WidgetBuilder? banner;
+
   const ViewSurfacePage({
     super.key,
     required this.title,
@@ -56,6 +65,7 @@ class ViewSurfacePage extends StatefulWidget {
     this.fields = const {},
     this.onClose,
     this.chrome = true,
+    this.banner,
   });
 
   @override
@@ -165,6 +175,13 @@ class _ViewSurfacePageState extends State<ViewSurfacePage>
                 physics: const AlwaysScrollableScrollPhysics(),
                 padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
                 children: [
+                  if (widget.banner case final WidgetBuilder draw)
+                    Center(
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 680),
+                        child: draw(context),
+                      ),
+                    ),
                   Center(
                     child: ConstrainedBox(
                       constraints: const BoxConstraints(maxWidth: 680),

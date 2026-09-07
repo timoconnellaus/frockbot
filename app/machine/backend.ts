@@ -59,6 +59,7 @@ import {
   type MachineTokenClaimsV1,
 } from "@frockbot/core/machine-protocol";
 import { verifyMachinePairingCodeV1 } from "./pairing.js";
+import { machinesDocumentV1 } from "./machines-document.js";
 import { defineGatewayContribution } from "@frockbot/core/contracts/contributions";
 
 /** What one machine call carries into the User Durable Object. */
@@ -237,7 +238,13 @@ export function createMachineBackendContribution(
       const isPair = PAIR.test(url.pathname);
       const isList = LIST.test(url.pathname);
       if (!revoke && !isPair && !isList) return undefined;
-      if ([...url.searchParams.keys()].length > 0) {
+      // One parameter, on one route: `as=document` asks the registry read for
+      // the same machines in the vocabulary the host renders every view in.
+      const asDocument =
+        isList &&
+        request.method === "GET" &&
+        url.searchParams.get("as") === "document";
+      if ([...url.searchParams.keys()].length > (asDocument ? 1 : 0)) {
         return jsonError(400, "machine routes take no query parameters");
       }
       try {
@@ -270,9 +277,8 @@ export function createMachineBackendContribution(
         if (request.method !== "GET") {
           return jsonError(405, "method not allowed");
         }
-        return Response.json(
-          decodeMachineListViewV1(await host.listMachines(userId)),
-        );
+        const view = decodeMachineListViewV1(await host.listMachines(userId));
+        return Response.json(asDocument ? machinesDocumentV1(view) : view);
       } catch (error) {
         return errorResponse(error);
       }

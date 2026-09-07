@@ -275,18 +275,21 @@ export function createRoutinesBackendContribution(
       const runs = ROUTINE_RUNS.exec(url.pathname);
       const run = ROUTINE_RUN.exec(url.pathname);
       if (!list && !inbox && !runs && !run) return undefined;
-      // One parameter, on one route: `as=document` asks the list read for the
+      // Two parameters, on one route: `as=document` asks the list read for the
       // Routines and the inbox together, in the vocabulary the host renders
-      // every plugin view in. Everything else is still refused rather than
-      // quietly ignored.
+      // every plugin view in, and `edit` names the Routine whose values seed
+      // that document's one editor. Which form is open is navigation, so it is
+      // asked for on the read rather than written anywhere. Everything else is
+      // still refused rather than quietly ignored.
       const asDocument =
         list !== null &&
         request.method === "GET" &&
         url.searchParams.get("as") === "document";
-      const parameters = [...url.searchParams.keys()];
-      if (parameters.length > (asDocument ? 1 : 0)) {
+      const allowed = asDocument ? ["as", "edit"] : [];
+      if ([...url.searchParams.keys()].some((key) => !allowed.includes(key))) {
         return jsonError(400, "Routine routes take no query parameters");
       }
+      const editing = asDocument ? url.searchParams.get("edit") : null;
       try {
         const botId = pathSegment((list ?? inbox ?? runs ?? run)![1]!);
         if (run) {
@@ -354,6 +357,12 @@ export function createRoutinesBackendContribution(
           const inboxView = decodeRoutineInboxViewV1(
             await host.listRoutineInbox(context.userId, botId),
           );
+          // A Routine the reader named but that is no longer here — deleted
+          // from another device — seeds nothing rather than an empty form
+          // claiming to edit it.
+          const edited = view.routines.find(
+            (routine) => routine.routineId === editing,
+          );
           return Response.json(
             routinesDocumentV1({
               schemaVersion: 1,
@@ -361,6 +370,7 @@ export function createRoutinesBackendContribution(
               routines: view.routines,
               inbox: inboxView.entries,
               unacknowledged: inboxView.unacknowledged,
+              ...(edited ? { editing: edited } : {}),
             }),
           );
         }

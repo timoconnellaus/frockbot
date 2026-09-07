@@ -7,6 +7,7 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../flock/sheep.dart';
 import '../theme/frock_theme.dart';
 import '../theme/states.dart';
 import 'markdown.dart';
@@ -40,6 +41,9 @@ class TranscriptView extends StatefulWidget {
   /// view and marked, once. A Turn further back than the loaded page is simply
   /// not here, and the thread says nothing rather than pretending to scroll.
   final String? focusRunId;
+
+  /// The Bot's sheep background. Every avatar in the thread is this Bot's.
+  final String? background;
   const TranscriptView({
     super.key,
     required this.lines,
@@ -54,6 +58,7 @@ class TranscriptView extends StatefulWidget {
     this.onOpenLink,
     this.onOpenSettings,
     this.focusRunId,
+    this.background,
   });
 
   @override
@@ -126,7 +131,7 @@ class _TranscriptViewState extends State<TranscriptView> {
     if (rows.isEmpty) {
       return loading
           ? const FrockLoading(label: 'Loading your conversation')
-          : const _EmptyThread();
+          : _EmptyThread(background: widget.background);
     }
     return identified(
       ShellIds.transcript,
@@ -184,6 +189,7 @@ class _TranscriptViewState extends State<TranscriptView> {
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
         child: WorkingIndicator(
           line: line,
+          background: widget.background,
           label: line.stopRequested
               ? 'Stopping…'
               : line.pending
@@ -215,6 +221,7 @@ class _TranscriptViewState extends State<TranscriptView> {
     return _Bubble(
       id: line.id,
       mine: false,
+      background: widget.background,
       pending: line.pending,
       failed: line.status == LineStatus.error,
       child: Column(
@@ -238,6 +245,7 @@ class _Bubble extends StatelessWidget {
   final bool mine;
   final bool pending;
   final bool failed;
+  final String? background;
   final Widget child;
   const _Bubble({
     required this.id,
@@ -245,6 +253,7 @@ class _Bubble extends StatelessWidget {
     required this.child,
     this.pending = false,
     this.failed = false,
+    this.background,
   });
 
   @override
@@ -271,9 +280,9 @@ class _Bubble extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             if (!mine) ...[
-              const Padding(
-                padding: EdgeInsets.only(left: 16, top: 10),
-                child: SheepAvatar(size: 28),
+              Padding(
+                padding: const EdgeInsets.only(left: 16, top: 10),
+                child: SheepAvatar(size: 28, background: background),
               ),
               const SizedBox(width: 8),
             ],
@@ -398,7 +407,8 @@ class _Announcement extends StatelessWidget {
 }
 
 class _EmptyThread extends StatelessWidget {
-  const _EmptyThread();
+  final String? background;
+  const _EmptyThread({this.background});
 
   @override
   Widget build(BuildContext context) {
@@ -410,7 +420,7 @@ class _EmptyThread extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const SheepAvatar(size: 64),
+            SheepAvatar(size: 64, background: background),
             const SizedBox(height: 24),
             Text(
               'What would you like to work on?',

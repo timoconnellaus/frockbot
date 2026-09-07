@@ -10,6 +10,7 @@ library;
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../client/transport.dart';
 import '../protocol/client_wire.generated.dart' as wire;
@@ -36,6 +37,15 @@ class RoutinesController extends ViewSurfaceController {
   /// Called with the unacknowledged count each read reports, so the badge and
   /// the sidebar row say the same number this surface does.
   final void Function(int unacknowledged)? onInbox;
+
+  /// Which Routine the editor is seeded from. Navigation, not a command: it is
+  /// asked for on the read and written nowhere.
+  String? editing;
+
+  /// A webhook key the authority just minted. It came back on a receipt and
+  /// exists once, so it is kept here for as long as the person is looking at
+  /// it and never asked for again — a rotate is the only way to see one twice.
+  Map<String, Object?>? mintedKey;
 
   wire.ViewDocument? _document;
   bool _busy = false;
@@ -73,7 +83,9 @@ class RoutinesController extends ViewSurfaceController {
     _changed();
     try {
       final next = wire.ViewDocument.fromJson(
-        await api.request('$_path?as=document'),
+        await api.request(
+          '$_path?as=document${editing == null ? '' : '&edit=${Uri.encodeQueryComponent(editing!)}'}',
+        ),
       );
       if (next.surfaceId.value != surfaceId) {
         throw const FormatException('Routines surface mismatch');
@@ -94,14 +106,37 @@ class RoutinesController extends ViewSurfaceController {
   @override
   Future<Map<String, Object?>> dispatch(Map<String, Object?> command) async {
     final kind = routineActionKindV1(command);
+    final applied = {'commandId': command['commandId'], 'status': 'applied'};
     if (kind == 'open-runs') {
       openRuns?.call(routineIdV1(command) ?? '');
-      return {'commandId': command['commandId'], 'status': 'applied'};
+      return applied;
+    }
+    // Which form is open is this host's to answer: the read that follows is
+    // what seeds it, so nothing is dispatched anywhere.
+    if (kind == 'edit-routine') {
+      editing = routineIdV1(command);
+      return applied;
+    }
+    if (kind == 'cancel-edit') {
+      editing = null;
+      return applied;
     }
     if (kind == 'delete-routine' && confirmDelete != null) {
       if (!await confirmDelete!(routineIdV1(command) ?? '')) {
         return {'commandId': command['commandId'], 'status': 'refused'};
       }
+    }
+    // Saving a form nobody edited would be refused by the route, which is
+    // right of it — an update that changes nothing is not an update. It is not
+    // a failure to the person who pressed Save, though, so the editor closes
+    // on what is already true and nothing is sent.
+    if (kind == 'save-routine' &&
+        routineSaveIsNoOpV1(
+          command,
+          routineEditorSeedsV1(_document?.root.toJson()),
+        )) {
+      editing = null;
+      return applied;
     }
     final answer = await api.request(
       kind == 'acknowledge-inbox' ? '$_path/inbox' : _path,
@@ -109,7 +144,23 @@ class RoutinesController extends ViewSurfaceController {
           ? routineInboxCommandV1(command, botId, unacknowledgedOnScreen)
           : routineCommandV1(command, botId),
     );
-    return ((answer as Map?) ?? const {}).cast<String, Object?>();
+    final receipt = ((answer as Map?) ?? const {}).cast<String, Object?>();
+    // A save answers the form: the editor closes and the list it changed is
+    // what the reader is left looking at.
+    if (kind == 'save-routine' && receipt['status'] == 'applied') {
+      editing = null;
+    }
+    // The plaintext key is on this receipt and on nothing else, ever.
+    if (kind == 'rotate-key') {
+      mintedKey = (receipt['hook'] as Map?)?.cast<String, Object?>();
+    }
+    if (kind == 'revoke-key') mintedKey = null;
+    return receipt;
+  }
+
+  void forgetKey() {
+    mintedKey = null;
+    _changed();
   }
 
   @override
@@ -193,6 +244,14 @@ class _RoutinesViewState extends State<RoutinesView> {
     );
   }
 
+  late final RoutinesController controller = RoutinesController(
+    widget.api,
+    widget.botId,
+    openRuns: _openRuns,
+    confirmDelete: _confirmDelete,
+    onInbox: widget.onInbox,
+  );
+
   @override
   Widget build(BuildContext context) => identified(
     RoutineIds.panel,
@@ -204,14 +263,91 @@ class _RoutinesViewState extends State<RoutinesView> {
       refreshId: RoutineIds.refresh,
       onClose: widget.onClose,
       chrome: widget.chrome,
-      controller: RoutinesController(
-        widget.api,
-        widget.botId,
-        openRuns: _openRuns,
-        confirmDelete: _confirmDelete,
-        onInbox: widget.onInbox,
-      ),
+      controller: controller,
+      banner: (context) => WebhookKeyCard(controller: controller),
     ),
+  );
+}
+
+/// The webhook key, the one time it exists.
+///
+/// The Bot keeps only a digest of it, so this is the only moment anyone can
+/// read the key — which is why the card says so before it says anything else,
+/// and why dismissing it is a deliberate press rather than a reload.
+class WebhookKeyCard extends StatelessWidget {
+  final RoutinesController controller;
+  const WebhookKeyCard({super.key, required this.controller});
+
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: controller,
+    builder: (context, _) {
+      final mint = controller.mintedKey;
+      if (mint == null) return const SizedBox.shrink();
+      final token = mint['token'] as String? ?? '';
+      final path = mint['path'] as String? ?? '';
+      final theme = Theme.of(context);
+      return identified(
+        RoutineIds.webhookKey,
+        Card(
+          margin: const EdgeInsets.only(bottom: 12),
+          color: theme.colorScheme.secondaryContainer,
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Semantics(
+                  header: true,
+                  child: Text(
+                    'Webhook key, version ${mint['keyVersion']}',
+                    style: theme.textTheme.titleSmall,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'This is the only time you’ll see this key. Copy it now — you’ll need a new one otherwise.',
+                  style: theme.textTheme.bodySmall,
+                ),
+                const SizedBox(height: 12),
+                SelectableText(path, style: theme.textTheme.bodySmall),
+                const SizedBox(height: 8),
+                SelectableText(token, style: theme.textTheme.bodySmall),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 12,
+                  children: [
+                    identified(
+                      RoutineIds.webhookCopy,
+                      FilledButton.tonal(
+                        onPressed: () async {
+                          await Clipboard.setData(
+                            ClipboardData(text: token),
+                          );
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Key copied.')),
+                            );
+                          }
+                        },
+                        child: const Text('Copy key'),
+                      ),
+                    ),
+                    identified(
+                      RoutineIds.webhookDismiss,
+                      TextButton(
+                        onPressed: controller.forgetKey,
+                        child: const Text('Done'),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    },
   );
 }
 

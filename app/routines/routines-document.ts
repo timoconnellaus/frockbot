@@ -27,6 +27,11 @@ export const ROUTINE_ACTION_KINDS_V1 = [
   "delete-routine",
   "acknowledge-inbox",
   "open-runs",
+  "edit-routine",
+  "cancel-edit",
+  "save-routine",
+  "rotate-key",
+  "revoke-key",
 ] as const;
 
 export type RoutineActionKindV1 = (typeof ROUTINE_ACTION_KINDS_V1)[number];
@@ -46,6 +51,16 @@ export interface RoutinesFrameV1 {
   routines: RoutineViewV1[];
   inbox: RoutineInboxEntryViewV1[];
   unacknowledged: number;
+  /**
+   * The Routine the reader asked to edit, if any. There is one editor on the
+   * surface, seeded from here, rather than a form per Routine: a form per
+   * Routine would be a second copy of every prompt in the document and would
+   * spend one of the thirty-two declared actions on each of them.
+   *
+   * Which Routine that is is navigation — the host asks for the document
+   * again, naming it — so no route owns the choice.
+   */
+  editing?: RoutineViewV1;
 }
 
 /** The renderer's node budget, checked before it builds a widget. */
@@ -54,6 +69,24 @@ const NODE_LIMIT = 512;
 const INBOX_LIMIT = 20;
 
 const IDENTIFIER: ActionValueSchema = { type: "string", maxLength: 128 };
+const TEXT = (maxLength: number): ActionValueSchema => ({
+  type: "string",
+  maxLength,
+});
+/** What a Routine fires on. Exactly one of the two, which the codec enforces. */
+const TIMING: ActionValueSchema = {
+  type: "string",
+  enum: ["schedule", "webhook"],
+};
+
+/** The field ids the editor's one form uses, and the action that reads them. */
+export const ROUTINE_EDITOR_FIELDS_V1 = {
+  name: "routine.name",
+  prompt: "routine.prompt",
+  timing: "routine.timing",
+  schedule: "routine.schedule",
+  timezone: "routine.timezone",
+} as const;
 const KIND: ActionValueSchema = {
   type: "string",
   enum: [...ROUTINE_ACTION_KINDS_V1],
@@ -126,6 +159,10 @@ export function routinesRevisionV1(frame: RoutinesFrameV1): number {
   const text = JSON.stringify([
     frame.botId,
     frame.unacknowledged,
+    // The editor's seeds are part of what the document says, so naming a
+    // different Routine moves the revision and the host adopts a controller
+    // whose field values are answers to the form now on screen.
+    frame.editing?.routineId ?? "",
     frame.routines.map((routine) => [
       routine.routineId,
       routine.name,
@@ -136,6 +173,7 @@ export function routinesRevisionV1(frame: RoutinesFrameV1): number {
       routine.lastRunAt,
       routine.nextRunAt,
       routine.updatedAt,
+      routine.hookKeyVersion ?? 0,
     ]),
     frame.inbox.map((entry) => [
       entry.entryId,
@@ -190,6 +228,7 @@ function routineFacts(routine: RoutineViewV1): string {
 
 function routineNode(routine: RoutineViewV1): ViewNode {
   const id = routine.routineId;
+  const webhook = routine.schedule === undefined;
   return {
     type: "group",
     orientation: "column",
@@ -201,6 +240,10 @@ function routineNode(routine: RoutineViewV1): ViewNode {
         type: "group",
         orientation: "row",
         children: [
+          press("edit-routine", "Edit", {
+            kind: "edit-routine",
+            routineId: id,
+          }),
           press("set-routine-enabled", routine.enabled ? "Pause" : "Resume", {
             kind: "set-routine-enabled",
             routineId: id,
@@ -211,12 +254,121 @@ function routineNode(routine: RoutineViewV1): ViewNode {
             routineId: id,
           }),
           press("open-runs", "Run log", { kind: "open-runs", routineId: id }),
+          // A key belongs to a webhook Routine and to nothing else, and the
+          // route refuses one for a scheduled Routine — so the controls are
+          // absent rather than offered and then refused.
+          ...(webhook
+            ? [
+                press(
+                  "rotate-key",
+                  routine.hookKeyVersion ? "Rotate key" : "Mint key",
+                  { kind: "rotate-key", routineId: id },
+                ),
+              ]
+            : []),
+          ...(webhook && routine.hookKeyVersion
+            ? [
+                press(
+                  "revoke-key",
+                  "Revoke key",
+                  { kind: "revoke-key", routineId: id },
+                  "danger",
+                ),
+              ]
+            : []),
           press(
             "delete-routine",
             "Delete",
             { kind: "delete-routine", routineId: id },
             "danger",
           ),
+        ],
+      },
+    ],
+  };
+}
+
+function field(
+  id: string,
+  label: string,
+  value: string | null,
+  extra: Record<string, unknown> = {},
+): ViewNode {
+  return {
+    type: "field",
+    field: { id, label, kind: "text", value, editable: true, ...extra },
+  } as ViewNode;
+}
+
+/**
+ * The one editor: a new Routine, or the one the reader asked to edit.
+ *
+ * Collapsed when nothing is being edited, so a surface a person came to read
+ * is not mostly a form. Expanded the moment a Routine is named, because being
+ * named is what asked for it.
+ */
+function editorNode(frame: RoutinesFrameV1): ViewNode {
+  const editing = frame.editing;
+  const ids = ROUTINE_EDITOR_FIELDS_V1;
+  const webhook = editing !== undefined && editing.schedule === undefined;
+  // A schedule is meant in the day the person who wrote it is living in, and
+  // this side of the wire cannot know that day: the phone has no IANA zone to
+  // send. So a new Routine inherits the zone this Bot's Routines already use,
+  // which is the closest thing to it that is actually known, and says so.
+  const inherited = frame.routines.at(-1)?.timezone ?? "UTC";
+  return {
+    type: "group",
+    orientation: "column",
+    title: editing ? `Edit ${editing.name}` : "New Routine",
+    collapsed: editing === undefined,
+    children: [
+      field(ids.name, "Name", editing?.name ?? null, {
+        maxLength: 100,
+        required: true,
+      }),
+      field(ids.prompt, "Prompt", editing?.prompt ?? null, {
+        maxLength: 8000,
+        hint: "What the Routine does when it fires.",
+      }),
+      {
+        type: "field",
+        field: {
+          id: ids.timing,
+          label: "Fires on",
+          kind: "select",
+          value: webhook ? "webhook" : "schedule",
+          editable: true,
+          choices: [
+            { label: "A schedule", value: "schedule" },
+            { label: "A webhook", value: "webhook" },
+          ],
+        },
+      } as ViewNode,
+      field(ids.schedule, "Schedule", editing?.schedule ?? "0 9 * * *", {
+        maxLength: 256,
+        hint: "cron, or @daily / @every 15m. Ignored for a webhook Routine, which is given a key instead.",
+      }),
+      field(ids.timezone, "Time zone", editing?.timezone ?? inherited, {
+        maxLength: 64,
+        hint: `The zone the schedule is read in, like Australia/Sydney.${
+          editing ? "" : ` Starting from ${inherited}.`
+        }`,
+      }),
+      {
+        type: "group",
+        orientation: "row",
+        children: [
+          press(
+            "save-routine",
+            editing ? "Save changes" : "Create Routine",
+            editing
+              ? { kind: "save-routine", routineId: editing.routineId }
+              : { kind: "save-routine" },
+            "primary",
+          ),
+          ...(editing
+            ? [press("cancel-edit", "Cancel", { kind: "cancel-edit" })]
+            : []),
         ],
       },
     ],
@@ -257,15 +409,17 @@ export function routinesDocumentV1(frame: RoutinesFrameV1): ViewDocument {
       }${unread > 0 ? ` · ${unread > 99 ? "99+" : unread} unread` : ""}`,
     ),
   ];
-  // The root and the count above, plus what the tail always costs: the empty
+  children.push(editorNode(frame));
+  // The root and the count above, the editor's group with its five fields and
+  // its two controls in their row, plus what the tail always costs: the empty
   // or overflow line, the inbox's own group, its empty line and "Mark all
   // read". Reserved up front so the last Routine admitted cannot be the reason
-  // the inbox does not fit.
-  let nodes = 7;
+  // the editor or the inbox does not fit.
+  let nodes = 16;
   let complete = true;
-  // The Routine's own group, its two lines, the controls' row and the four
-  // controls in it.
-  const routineCost = 8;
+  // The Routine's own group, its two lines, the controls' row and the six
+  // controls a webhook Routine puts in it.
+  const routineCost = 10;
   for (const routine of frame.routines) {
     if (nodes + routineCost > NODE_LIMIT) {
       complete = false;
@@ -373,6 +527,72 @@ export function routinesDocumentV1(frame: RoutinesFrameV1): ViewDocument {
           type: "object",
           properties: { kind: KIND, entryId: IDENTIFIER },
           required: ["kind"],
+          additionalProperties: false,
+        },
+      },
+      {
+        // Navigation: the host reads the document again, naming the Routine
+        // whose values seed the editor. No route owns which form is open.
+        id: "edit-routine",
+        schema: {
+          type: "object",
+          properties: { kind: KIND, routineId: IDENTIFIER },
+          required: ["kind", "routineId"],
+          additionalProperties: false,
+        },
+      },
+      {
+        id: "cancel-edit",
+        schema: {
+          type: "object",
+          properties: { kind: KIND },
+          required: ["kind"],
+          additionalProperties: false,
+        },
+      },
+      {
+        // One action for both verbs: a `routineId` names the Routine to
+        // update, and its absence is what "create" means. The five field ids
+        // are declared here, which is what lets their current values travel
+        // with the press and nothing else.
+        id: "save-routine",
+        schema: {
+          type: "object",
+          properties: {
+            kind: KIND,
+            routineId: IDENTIFIER,
+            [ROUTINE_EDITOR_FIELDS_V1.name]: TEXT(100),
+            [ROUTINE_EDITOR_FIELDS_V1.prompt]: TEXT(8000),
+            [ROUTINE_EDITOR_FIELDS_V1.timing]: TIMING,
+            [ROUTINE_EDITOR_FIELDS_V1.schedule]: TEXT(256),
+            [ROUTINE_EDITOR_FIELDS_V1.timezone]: TEXT(64),
+          },
+          required: [
+            "kind",
+            ROUTINE_EDITOR_FIELDS_V1.name,
+            ROUTINE_EDITOR_FIELDS_V1.prompt,
+            ROUTINE_EDITOR_FIELDS_V1.timing,
+          ],
+          additionalProperties: false,
+        },
+      },
+      {
+        // The minted key comes back on the receipt and is never in a
+        // document: it exists once, and a document can be read twice.
+        id: "rotate-key",
+        schema: {
+          type: "object",
+          properties: { kind: KIND, routineId: IDENTIFIER },
+          required: ["kind", "routineId"],
+          additionalProperties: false,
+        },
+      },
+      {
+        id: "revoke-key",
+        schema: {
+          type: "object",
+          properties: { kind: KIND, routineId: IDENTIFIER },
+          required: ["kind", "routineId"],
           additionalProperties: false,
         },
       },

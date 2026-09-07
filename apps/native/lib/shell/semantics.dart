@@ -171,8 +171,73 @@ abstract final class RoutineIds {
   static const runLog = 'routine-run-log';
   static const confirmDelete = 'routine-delete-confirm';
 
+  /// The editor's fields are the projection's own ids, so a spec names them the
+  /// way it names any other field. There is one form on the surface — a new
+  /// Routine, or the one the reader asked to edit — so the ids do not carry a
+  /// Routine in them.
+  static String editorField(String field) =>
+      viewFieldIdentifierV1('routine.$field');
+
+  /// The minted webhook key, which is host chrome: it comes back on a receipt,
+  /// once, and is never in a document.
+  static const webhookKey = 'routine-webhook-key';
+  static const webhookCopy = 'routine-webhook-copy';
+  static const webhookDismiss = 'routine-webhook-dismiss';
+
   static String run(String runId) => 'routine-run-$runId';
   static String action(String actionId) => viewActionIdentifierV1(actionId);
+}
+
+/// Flock: adding a Bot, and putting one away.
+///
+/// The names follow what `delete-bot.e2e.ts` and `bot-info.e2e.ts` select on —
+/// the create gesture, the danger zone's three verbs, and the one confirmation
+/// they share, whose title carries the Bot's name. The create sheet's names are
+/// new: the Vue overlay's wardrobe was four selects and this is one choice.
+abstract final class FlockIds {
+  static const createTrigger = ShellIds.sidebarCreateBot;
+  static const createSheet = 'flock-create';
+  static const createName = 'flock-create-name';
+  static const createFirstMessage = 'flock-create-first-message';
+  static const createBackground = 'flock-create-background';
+  static const createReroll = 'flock-create-reroll';
+  static const createSubmit = 'flock-create-submit';
+  static const colourSheet = 'flock-colour';
+
+  static const dangerZone = 'flock-danger-zone';
+  static const archiveBot = 'flock-archive-bot';
+  static const restoreBot = 'flock-restore-bot';
+  static const deleteBot = 'flock-delete-bot';
+  static const lifecycleConfirm = 'flock-lifecycle-confirm';
+
+  static String createBackgroundOption(String id) => 'flock-background-$id';
+}
+
+/// Bot templates: packing a Bot up, and unpacking someone else's.
+///
+/// Both halves are projections, so the controls are named by the document's own
+/// conventions and only the surface's chrome is named here.
+abstract final class TemplateIds {
+  static const shareDocument = 'template-share-document';
+  static const shareRefresh = 'template-share-refresh';
+  static const importDocument = 'template-import-document';
+  static const importRefresh = 'template-import-refresh';
+  static const profileEntry = 'profile-templates';
+}
+
+/// Registered machines: the computers a Bot may reach, and the code that
+/// registers one.
+///
+/// The pairing code is host chrome rather than a node, for the same reason a
+/// `SettingField.secret` is never seeded: it exists once, on a receipt, and is
+/// never in a document the server could send twice.
+abstract final class MachineIds {
+  static const document = 'machines-document';
+  static const refresh = 'machines-refresh';
+  static const profileEntry = 'profile-machines';
+  static const pairingCode = 'machine-pairing-code';
+  static const pairingCopy = 'machine-pairing-copy';
+  static const pairingDismiss = 'machine-pairing-dismiss';
 }
 
 /// Audit: every effect a Bot performed, and what the log can and cannot say.
