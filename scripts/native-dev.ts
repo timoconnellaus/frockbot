@@ -826,20 +826,20 @@ async function smoke(): Promise<void> {
   say("waiting for the signed-in home, then opening the Bot");
   // The composer's accessibility hint; its visible placeholder is longer.
   const composer = "Message";
+  // The shell's sidebar toggle on a phone, which is also what the empty state
+  // offers: either one opens the Bot list.
+  const openBots = "Your Bots";
   await waitFor(
     "the signed-in home",
     async () => {
       const nodes = dump(serial);
-      return Boolean(
-        find(nodes, "Open navigation menu") || find(nodes, composer),
-      );
+      return Boolean(find(nodes, openBots) || find(nodes, composer));
     },
     90_000,
   );
   if (!find(dump(serial), composer)) {
     // A fresh sign-in lands on "Choose a Bot to begin" with the drawer closed.
-    if (!find(dump(serial), BOT_NAME))
-      await tap(serial, ["Open navigation menu"]);
+    if (!find(dump(serial), BOT_NAME)) await tap(serial, [openBots]);
     await tap(serial, [BOT_NAME]);
     await waitFor(
       "the conversation",
@@ -860,23 +860,41 @@ async function smoke(): Promise<void> {
   adb(serial, "shell", "input", "text", message.replaceAll(" ", "%s"));
   await tap(serial, ["Send"]);
 
+  // The shell's own words, which are never the Bot's. A running Turn is the
+  // animated row and says nothing at all; these are the states that do.
   const status = new Set([
-    "Working…",
+    "Working",
     "Waiting…",
     "Stopping…",
-    "Stopped",
+    "Stopping the previous reply…",
+    "Still stopping the previous reply",
+    "You stopped this.",
+    "Used 1 tool",
+    "Check message status",
     "Checking whether your message went through…",
   ]);
+  // Every sentence the projection writes for a Turn that did not finish.
+  const failed = [
+    "This Bot couldn't finish its reply.",
+    "This Bot wouldn't do that.",
+    "This reply stopped before it finished.",
+    "The model couldn't finish its reply.",
+    "Something the Bot was using didn't work.",
+    "This Turn ran for 15 minutes",
+    "The model did not start replying within 2 minutes",
+    "The model stopped part-way through its reply",
+    "This Bot used all the steps it had",
+  ];
   let reply: string | undefined;
   let outcome: string | undefined;
   await waitFor(
     "a reply from the Bot",
     async () => {
       const nodes = dump(serial);
-      if (
-        nodes.some((node) => node.text === "The reply couldn’t be completed.")
-      )
-        die("the Turn failed — see the Worker log");
+      const broke = nodes.find((node) =>
+        failed.some((sentence) => node.text.startsWith(sentence)),
+      );
+      if (broke) die(`the Turn failed: ${broke.text} — see the Worker log`);
       reply = nodes
         .map((node) => node.text)
         .find(

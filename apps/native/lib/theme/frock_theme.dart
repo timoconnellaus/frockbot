@@ -157,17 +157,35 @@ abstract final class FrockTheme {
 
 class SheepAvatar extends StatelessWidget {
   final double size;
-  const SheepAvatar({super.key, this.size = 40});
+
+  /// A working Bot wears a ring. It is the only thing an avatar ever says
+  /// about a Turn: what the Turn is doing belongs on the Work view.
+  final bool working;
+  const SheepAvatar({super.key, this.size = 40, this.working = false});
   @override
-  Widget build(BuildContext context) => ClipRRect(
-    borderRadius: BorderRadius.circular(size * 0.27),
-    child: Image.asset(
-      'assets/sheep.png',
-      width: size,
-      height: size,
-      excludeFromSemantics: true,
-    ),
-  );
+  Widget build(BuildContext context) {
+    final avatar = ClipRRect(
+      borderRadius: BorderRadius.circular(size * 0.27),
+      child: Image.asset(
+        'assets/sheep.png',
+        width: size,
+        height: size,
+        excludeFromSemantics: true,
+      ),
+    );
+    if (!working) return avatar;
+    return Container(
+      padding: const EdgeInsets.all(2),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(size * 0.34),
+        border: Border.all(
+          color: Theme.of(context).colorScheme.primary,
+          width: 2,
+        ),
+      ),
+      child: avatar,
+    );
+  }
 }
 
 /// Finite, quiet placeholders: no idle animation or accessibility chatter.

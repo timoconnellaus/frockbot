@@ -1,0 +1,678 @@
+/// The shell's own surfaces: the three tiers, the slot registry, the sidebar's
+/// grouping and pin order, the send payload cards, and the identifiers the
+/// browser specs select on.
+library;
+
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:frockbot_native/protocol/client_wire.generated.dart' as wire;
+import 'package:frockbot_native/shell/desktop_layout.dart';
+import 'package:frockbot_native/shell/markdown.dart';
+import 'package:frockbot_native/shell/run_view.dart';
+import 'package:frockbot_native/shell/semantics.dart';
+import 'package:frockbot_native/shell/send_payload.dart';
+import 'package:frockbot_native/shell/sidebar.dart';
+import 'package:frockbot_native/shell/slots.dart';
+import 'package:frockbot_native/shell/transcript.dart';
+import 'package:frockbot_native/theme/frock_theme.dart';
+
+wire.BotRegistration bot(String botId, String name) =>
+    wire.BotRegistration.fromJson({
+      'schemaVersion': 1,
+      'botId': botId,
+      'registeredAt': '2026-09-05T00:00:00.000Z',
+      'initialName': name,
+      'sheep': {
+        'schemaVersion': 1,
+        'background': 'a',
+        'upper': 'b',
+        'middle': 'c',
+        'lower': 'd',
+      },
+    });
+
+wire.UnreadView unread({
+  required String botId,
+  int count = 0,
+  bool capped = false,
+  bool isUnread = false,
+  bool working = false,
+}) => wire.UnreadView.fromJson({
+  'schemaVersion': 1,
+  'botId': botId,
+  'count': count,
+  'capped': capped,
+  'unread': isUnread,
+  'manuallyUnread': false,
+  'working': working,
+});
+
+Widget host(Widget child) => MaterialApp(
+  theme: FrockTheme.theme(Brightness.dark),
+  home: Scaffold(body: child),
+);
+
+/// Finds a widget by the identifier the browser specs would select on.
+Finder byIdentifier(String identifier) => find.byWidgetPredicate(
+  (widget) => widget is Semantics && widget.properties.identifier == identifier,
+);
+
+void main() {
+  group('the three responsive tiers', () {
+    test('match the stylesheet the Vue shell has', () {
+      expect(shellTierForWidth(390), ShellTier.single);
+      expect(shellTierForWidth(640), ShellTier.single);
+      expect(shellTierForWidth(641), ShellTier.dual);
+      expect(shellTierForWidth(980), ShellTier.dual);
+      expect(shellTierForWidth(981), ShellTier.triple);
+      expect(shellTierForWidth(1440), ShellTier.triple);
+    });
+
+    testWidgets('draws three panes at a desk and one on a phone', (
+      tester,
+    ) async {
+      Widget layout() => host(
+        ShellLayout(
+          navOpen: false,
+          panelOpen: true,
+          onDismiss: () {},
+          sidebar: const Text('bots'),
+          conversation: const Text('thread'),
+          rightPanel: const Text('work'),
+        ),
+      );
+
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.view.resetPhysicalSize);
+
+      tester.view.physicalSize = const Size(1440, 900);
+      await tester.pumpWidget(layout());
+      await tester.pumpAndSettle();
+      expect(byIdentifier(ShellIds.sidebar), findsOneWidget);
+      expect(byIdentifier(ShellIds.rightPanel), findsOneWidget);
+      expect(byIdentifier(ShellIds.scrim).evaluate().isNotEmpty, isTrue);
+
+      // At 900 the right panel is a drawer, so the columns are two: the Bot
+      // list and the conversation, which is what the person reads.
+      tester.view.physicalSize = const Size(900, 800);
+      await tester.pumpWidget(layout());
+      await tester.pumpAndSettle();
+      expect(tester.getSize(byIdentifier(ShellIds.sidebar)).width, 288);
+      expect(
+        tester.getSize(byIdentifier(ShellIds.conversation)).width,
+        900 - shellSidebarWidth,
+      );
+
+      // On a phone both are drawers and the conversation has the window.
+      tester.view.physicalSize = const Size(390, 780);
+      await tester.pumpWidget(layout());
+      await tester.pumpAndSettle();
+      expect(tester.getSize(byIdentifier(ShellIds.conversation)).width, 390);
+    });
+
+    testWidgets('a parked drawer is not read out or hit-tested', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(390, 780);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      var dismissed = 0;
+      await tester.pumpWidget(
+        host(
+          ShellLayout(
+            navOpen: false,
+            panelOpen: false,
+            onDismiss: () => dismissed++,
+            sidebar: const Text('bots'),
+            conversation: const Text('thread'),
+            rightPanel: const Text('work'),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      // The scrim is inert while nothing is open.
+      await tester.tapAt(const Offset(200, 400));
+      expect(dismissed, 0);
+    });
+  });
+
+  group('the slot registry', () {
+    testWidgets('draws what a feature registered, and nothing before', (
+      tester,
+    ) async {
+      final slots = ShellSlots();
+      addTearDown(slots.dispose);
+      await tester.pumpWidget(
+        host(
+          ShellSlotScope(
+            slots: slots,
+            child: const SlotRegion(ShellSlot.rightPanel),
+          ),
+        ),
+      );
+      expect(byIdentifier(ShellIds.slot('right-panel')), findsNothing);
+      expect(slots.filled(ShellSlot.rightPanel), isFalse);
+
+      slots.register(
+        ShellSlot.rightPanel,
+        'bot-panel',
+        (_) => const Text('Bot panel'),
+      );
+      await tester.pump();
+      expect(find.text('Bot panel'), findsOneWidget);
+      expect(byIdentifier(ShellIds.slot('right-panel')), findsOneWidget);
+
+      slots.remove(ShellSlot.rightPanel, 'bot-panel');
+      await tester.pump();
+      expect(find.text('Bot panel'), findsNothing);
+    });
+
+    test('names its three regions the way the Vue slots are named', () {
+      expect([for (final slot in ShellSlot.values) slot.id], [
+        'right-panel',
+        'overlays',
+        'header-actions',
+      ]);
+    });
+  });
+
+  group('the sidebar splits pinned Bots out of the list', () {
+    String id(wire.BotRegistration value) => value.botId.value;
+
+    test('orders the tiles by pin time, earliest first', () {
+      final bots = [bot('a', 'A'), bot('b', 'B'), bot('c', 'C')];
+      final split = partitionPinnedSidebarBots(bots, id, {
+        'a': const SidebarProfile(pinnedAt: '2026-09-05T00:00:00.000Z'),
+        'c': const SidebarProfile(pinnedAt: '2026-01-01T00:00:00.000Z'),
+      });
+
+      expect([for (final value in split.pinned) id(value)], ['c', 'a']);
+      expect([for (final value in split.rest) id(value)], ['b']);
+    });
+
+    test('keeps list order for ties and for an unparseable instant', () {
+      final bots = [bot('a', 'A'), bot('b', 'B')];
+      final split = partitionPinnedSidebarBots(bots, id, {
+        'a': const SidebarProfile(pinnedAt: 'not an instant'),
+        'b': const SidebarProfile(pinnedAt: 'also not one'),
+      });
+
+      expect([for (final value in split.pinned) id(value)], ['a', 'b']);
+    });
+
+    test('a blank pin is not a pin', () {
+      final split = partitionPinnedSidebarBots([bot('a', 'A')], id, {
+        'a': const SidebarProfile(pinnedAt: '   '),
+      });
+
+      expect(split.pinned, isEmpty);
+      expect(split.rest.length, 1);
+    });
+  });
+
+  group('the sidebar groups by label', () {
+    String id(wire.BotRegistration value) => value.botId.value;
+
+    test('stays one plain list until a visible Bot has a label', () {
+      final grouped = groupSidebarBots([bot('a', 'A'), bot('b', 'B')], id, {});
+
+      expect(grouped.showHeadings, isFalse);
+      expect(grouped.groups.single.key, 'all');
+      expect(grouped.groups.single.bots.length, 2);
+    });
+
+    test('folds case and keeps the first spelling, unassigned last', () {
+      final grouped = groupSidebarBots(
+        [bot('a', 'A'), bot('b', 'B'), bot('c', 'C')],
+        id,
+        {
+          'a': const SidebarProfile(label: 'Work'),
+          'b': const SidebarProfile(label: ' work '),
+        },
+      );
+
+      expect(grouped.showHeadings, isTrue);
+      expect([for (final group in grouped.groups) group.label], [
+        'Work',
+        'Unassigned',
+      ]);
+      expect(grouped.groups.first.bots.length, 2);
+      expect(grouped.groups.last.bots.single.botId.value, 'c');
+    });
+
+    test('offers no Unassigned group when every Bot has a label', () {
+      final grouped = groupSidebarBots([bot('a', 'A')], id, {
+        'a': const SidebarProfile(label: 'Work'),
+      });
+
+      expect(grouped.groups.length, 1);
+    });
+  });
+
+  group('the sidebar row', () {
+    test('says how many unread, and nothing at zero', () {
+      expect(unreadBadgeLabel(null), isNull);
+      expect(unreadBadgeLabel(unread(botId: 'a')), isNull);
+      expect(
+        unreadBadgeLabel(unread(botId: 'a', count: 0, isUnread: true)),
+        isNull,
+      );
+      expect(
+        unreadBadgeLabel(unread(botId: 'a', count: 3, isUnread: true)),
+        '3',
+      );
+      expect(
+        unreadBadgeLabel(
+          unread(botId: 'a', count: 99, capped: true, isUnread: true),
+        ),
+        '99+',
+      );
+    });
+
+    test('says a time today, a weekday this week, a date beyond it', () {
+      final now = DateTime(2026, 9, 8, 15, 0);
+      expect(
+        formatSidebarMessageTime(
+          DateTime(2026, 9, 8, 9, 5).toUtc().toIso8601String(),
+          now,
+        ),
+        '9:05 am',
+      );
+      expect(
+        formatSidebarMessageTime(
+          DateTime(2026, 9, 5, 9, 5).toUtc().toIso8601String(),
+          now,
+        ),
+        'Saturday',
+      );
+      expect(
+        formatSidebarMessageTime(
+          DateTime(2026, 1, 5, 9, 5).toUtc().toIso8601String(),
+          now,
+        ),
+        '1/5',
+      );
+      expect(formatSidebarMessageTime('not an instant', now), '');
+    });
+
+    testWidgets('carries a stable identifier per Bot and per group', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        host(
+          ShellSidebar(
+            bots: [bot('scout', 'Scout'), bot('rosemary', 'Rosemary')],
+            profiles: const {
+              'scout': SidebarProfile(label: 'Work'),
+              'rosemary': SidebarProfile(pinnedAt: '2026-01-01T00:00:00.000Z'),
+            },
+            unread: {
+              'scout': unread(botId: 'scout', count: 2, isUnread: true),
+            },
+            archived: const {},
+            activeBotId: 'scout',
+            workingBotId: null,
+            loaded: true,
+            showHidden: false,
+            inboxCount: 1,
+            onSelect: (_) {},
+            onCreateBot: () {},
+            onSearch: () {},
+            onProfile: () {},
+            onInbox: () {},
+            onManage: () {},
+            onToggleHidden: () {},
+            onRetry: () async {},
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(byIdentifier(ShellIds.sidebarBot('scout')), findsOneWidget);
+      expect(byIdentifier(ShellIds.sidebarPinned('rosemary')), findsOneWidget);
+      expect(byIdentifier(ShellIds.sidebarGroup('label:work')), findsOneWidget);
+      expect(byIdentifier(ShellIds.sidebarCreateBot), findsOneWidget);
+      expect(byIdentifier(ShellIds.sidebarSearch), findsOneWidget);
+      expect(byIdentifier(ShellIds.sidebarProfile), findsOneWidget);
+      expect(byIdentifier(ShellIds.sidebarInbox), findsOneWidget);
+      expect(find.text('2'), findsOneWidget);
+      // A pinned Bot is a tile instead of a row, never both.
+      expect(byIdentifier(ShellIds.sidebarBot('rosemary')), findsNothing);
+    });
+
+    testWidgets('an unreadable list offers the read again', (tester) async {
+      var retries = 0;
+      await tester.pumpWidget(
+        host(
+          ShellSidebar(
+            bots: const [],
+            profiles: const {},
+            unread: const {},
+            archived: const {},
+            activeBotId: null,
+            workingBotId: null,
+            loaded: true,
+            error: 'Couldn’t reach FrockBot.',
+            showHidden: false,
+            inboxCount: 0,
+            onSelect: (_) {},
+            onCreateBot: () {},
+            onSearch: () {},
+            onProfile: () {},
+            onInbox: () {},
+            onManage: () {},
+            onToggleHidden: () {},
+            onRetry: () async {
+              retries++;
+            },
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('No Bots yet. Add your first sheep.'), findsNothing);
+      await tester.tap(byIdentifier(ShellIds.sidebarRetry));
+      expect(retries, 1);
+    });
+  });
+
+  group('one user-facing send, drawn', () {
+    Widget send(Map<String, Object?> payload) =>
+        host(SendPayloadView(send: SendPayloadLine(payload)));
+
+    testWidgets('a widget shows the question and answers none of it', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        send({
+          'type': 'widget',
+          'widget': {
+            'prompt': 'Which one?',
+            'options': ['A', 'B'],
+            'allowCustom': true,
+          },
+        }),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Which one?'), findsOneWidget);
+      expect(find.text('A'), findsOneWidget);
+      expect(find.text('Any other answer is accepted too.'), findsOneWidget);
+      expect(find.byType(FilledButton), findsNothing);
+    });
+
+    testWidgets('an approval offers both answers and names its risk', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        host(
+          SendPayloadView(
+            send: const SendPayloadLine({
+              'type': 'approval',
+              'approvalId': 'ap-1',
+              'action': 'Delete the production bucket',
+              'risk': 'high',
+            }),
+            approvals: null,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('HIGH'), findsOneWidget);
+      expect(find.text('Delete the production bucket'), findsOneWidget);
+    });
+
+    testWidgets('a secret request sends the person to Settings', (
+      tester,
+    ) async {
+      var opened = 0;
+      await tester.pumpWidget(
+        host(
+          SendPayloadView(
+            send: const SendPayloadLine({
+              'type': 'secret-request',
+              'prompt': 'I need the Stripe key.',
+              'secretName': 'STRIPE_KEY',
+            }),
+            onOpenSettings: () => opened++,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Open Settings'));
+      expect(opened, 1);
+    });
+
+    // A Turn's history has to render on a client older than the Bot that
+    // produced it.
+    testWidgets('a payload this build cannot draw says so', (tester) async {
+      await tester.pumpWidget(send({'type': 'something-newer'}));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('This client cannot display that message.'),
+        findsOneWidget,
+      );
+    });
+  });
+
+  group('assistant text is Markdown', () {
+    test('splits blocks the way the web client does', () {
+      final blocks = parseMarkdownBlocks(
+        '# Title\n\nA line\nand its continuation\n\n- one\n- two\n\n'
+        '```\ncode\n```\n\n> quoted\n\n---',
+      );
+
+      expect([for (final block in blocks) block.kind], [
+        MarkdownBlockKind.heading,
+        MarkdownBlockKind.paragraph,
+        MarkdownBlockKind.listItem,
+        MarkdownBlockKind.listItem,
+        MarkdownBlockKind.code,
+        MarkdownBlockKind.quote,
+        MarkdownBlockKind.rule,
+      ]);
+      expect(blocks[1].text, 'A line\nand its continuation');
+      expect(blocks[4].text, 'code');
+    });
+
+    test('code wins over emphasis, so a path survives verbatim', () {
+      final runs = parseMarkdownInline('use `a_b_c` and **bold**');
+
+      expect(runs[1].text, 'a_b_c');
+      expect(runs[1].code, isTrue);
+      expect(runs.last.bold, isTrue);
+    });
+
+    test('a link keeps its label and its href', () {
+      final runs = parseMarkdownInline('see [the docs](https://example.com)');
+
+      expect(runs[1].text, 'the docs');
+      expect(runs[1].href, 'https://example.com');
+    });
+
+    testWidgets('renders without a sanitizer because nothing is markup', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        host(const ShellMarkdown(text: '<script>alert(1)</script>')),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('<script>'), findsOneWidget);
+    });
+  });
+
+  group('the trail says how hard a Turn is working', () {
+    ActivityTrailSample sample({
+      int characters = 0,
+      int toolStarts = 0,
+      int toolSettles = 0,
+      int sends = 0,
+      String status = 'streaming',
+    }) => ActivityTrailSample(
+      characters: characters,
+      toolStarts: toolStarts,
+      toolSettles: toolSettles,
+      sends: sends,
+      status: status,
+    );
+
+    test('a settled Turn emits nothing at all', () {
+      final stepped = activityTrailStep(
+        activityTrailBegin(sample(), Duration.zero),
+        sample(status: 'completed'),
+        const Duration(seconds: 1),
+      );
+
+      expect(stepped.plan.active, isFalse);
+      expect(stepped.plan.state, ActivityTrailState.ended);
+      expect(stepped.plan.rate, 0);
+    });
+
+    test('an open Turn with nothing arriving still trickles', () {
+      final stepped = activityTrailStep(
+        activityTrailBegin(sample(), Duration.zero),
+        sample(),
+        const Duration(seconds: 3),
+      );
+
+      expect(stepped.plan.state, ActivityTrailState.waiting);
+      expect(stepped.plan.rate, activityTrailTrickleRate);
+    });
+
+    test('the rate is capped however fast the text arrives', () {
+      final stepped = activityTrailStep(
+        activityTrailBegin(sample(), Duration.zero),
+        sample(characters: 100000),
+        const Duration(milliseconds: 100),
+      );
+
+      expect(stepped.plan.rate, activityTrailMaxRate);
+      expect(stepped.plan.state, ActivityTrailState.running);
+    });
+
+    // A reconnect replaying a whole Turn must not fire two hundred bursts.
+    test('bursts are bounded per step', () {
+      final stepped = activityTrailStep(
+        activityTrailBegin(sample(), Duration.zero),
+        sample(toolStarts: 50, toolSettles: 50, sends: 50),
+        const Duration(milliseconds: 100),
+      );
+
+      expect(stepped.plan.bursts.length, activityTrailMaxBurstsPerStep);
+    });
+
+    // A send superseding the model's own draft is not negative work.
+    test('a shorter projection is no work rather than negative work', () {
+      final stepped = activityTrailStep(
+        activityTrailBegin(sample(characters: 500), Duration.zero),
+        sample(characters: 10),
+        const Duration(milliseconds: 100),
+      );
+
+      expect(stepped.plan.rate, activityTrailTrickleRate);
+    });
+  });
+
+  group('a Turn\'s receipts live on the run view, not in the thread', () {
+    testWidgets('the thread offers a way in and names no tool', (
+      tester,
+    ) async {
+      TranscriptLine? opened;
+      await tester.pumpWidget(
+        host(
+          TranscriptView(
+            lines: projectRuns([
+              {
+                'runId': 'run-a',
+                'input': 'do it',
+                'status': 'completed',
+                'admittedAt': '2026-09-05T00:00:00.000Z',
+                'responseText': 'Done.',
+                'events': [
+                  {
+                    'type': 'tool/call',
+                    'call': {'id': 't1', 'name': 'workspace_write'},
+                  },
+                  {
+                    'type': 'tool/result',
+                    'callId': 't1',
+                    'content': 'wrote 1 file',
+                    'isError': false,
+                  },
+                ],
+              },
+            ]),
+            loading: false,
+            hasEarlier: false,
+            storageKey: 'test',
+            onRefresh: ({bool older = false}) async {},
+            onOpenRun: (line) => opened = line,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('workspace_write'), findsNothing);
+      await tester.tap(byIdentifier(ShellIds.openRun('run-a')));
+      expect(opened?.tools.single.name, 'workspace_write');
+    });
+
+    testWidgets('the run view names them', (tester) async {
+      final line = projectRuns([
+        {
+          'runId': 'run-a',
+          'input': 'do it',
+          'status': 'completed',
+          'admittedAt': '2026-09-05T00:00:00.000Z',
+          'events': [
+            {
+              'type': 'tool/call',
+              'call': {'id': 't1', 'name': 'workspace_write'},
+            },
+            {
+              'type': 'tool/result',
+              'callId': 't1',
+              'content': 'wrote 1 file',
+              'isError': false,
+            },
+          ],
+        },
+      ]).last;
+
+      await tester.pumpWidget(host(RunView(line: line)));
+      await tester.pumpAndSettle();
+
+      expect(byIdentifier(ShellIds.runView), findsOneWidget);
+      expect(find.text('workspace_write'), findsOneWidget);
+    });
+
+    testWidgets('a reply that used no tools says so rather than nothing', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        host(
+          RunView(
+            line: projectRuns([
+              {
+                'runId': 'run-a',
+                'input': 'hi',
+                'status': 'completed',
+                'admittedAt': '2026-09-05T00:00:00.000Z',
+                'events': const <Object>[],
+              },
+            ]).last,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('This reply used no tools.'), findsOneWidget);
+    });
+  });
+}

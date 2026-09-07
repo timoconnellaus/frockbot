@@ -250,20 +250,62 @@ The chat view lives in `app/shell/client/FrockBotApp.vue` (2108 lines). The tran
 
 `apps/native/README.md:3` states that the Vue application is the production client and that the Flutter app does not claim acceptance. `apps/native/qualification.json:2` records `"status": "unqualified-prototype"`. `.github/workflows/native.yml:18` is advisory: analyze and test only, no APK or IPA build, no release job.
 
+`lib/main.dart` is the app entry and the sign-in door and nothing else: the
+`MaterialApp`, the session, and the `?bot=` deep link, which it hands to the
+shell through a `ValueNotifier` rather than acting on. Everything a person
+looks at is `lib/shell/`.
+
+**The shell layout.** `lib/shell/desktop_layout.dart` has the three tiers the
+Vue stylesheet has, at the same two widths. Above 980 points the shell is three
+columns — the Bot list, the conversation, and the right panel. At or below 980
+the right panel becomes a drawer over the conversation; at or below 640 the Bot
+list goes the same way and the conversation has the window. A region is a
+column or a drawer, never both, so nothing is built twice; a parked drawer is
+inert to the pointer, to assistive technology and to its own tickers, and one
+scrim serves whichever drawer is open.
+
+**The slot registry.** `lib/shell/slots.dart` is the Flutter analogue of the
+Vue `<k-slot>`: three named regions — `right-panel`, `overlays`,
+`header-actions` — that a feature registers a `WidgetBuilder` into and the
+shell draws where the region belongs. An empty region draws nothing, so the
+layout reserves no space for a feature that is not there. Trust chrome is never
+a slot: the transcript, the composer and the Bot list are the shell's own.
+
+**Semantics identifiers.** Flutter Web draws to a canvas, so a browser spec can
+only select the engine's accessibility tree. Every interactive widget carries a
+`Semantics(identifier:)` whose name is written once in
+`lib/shell/semantics.dart`, and Playwright selects on
+`[flt-semantics-identifier="chat-composer"]`.
+
 Screens (no router; `MaterialApp(home:)` plus `Navigator.push`):
 
-- `FrockBotApp` — `lib/main.dart:31`, build at `:324`, `ThemeMode.dark` hardcoded at `:330`
+- `FrockBotApp` — `lib/main.dart:31`, `ThemeMode.dark` hardcoded
 - `SignInPage` — `lib/auth/sign_in_page.dart:5`
-- Bot directory — inline `ListView`, `lib/main.dart:342-448`, responsive split at width ≥ 800 (`:449`)
-- `ConversationView` `lib/main.dart:546` → `ChatPane` `:630`
+- `AppShell` — `lib/shell/app_shell.dart`: the directory, the identities the
+  sidebar groups by, the unread fan-out, the drawers and the slot registry
+- `ShellSidebar` — `lib/shell/sidebar.dart`: pinned tiles in pin order, label
+  groups, unread badges, hidden Bots, search, create and the profile sheet
+- `ChatPane` / `ConversationView` — `lib/shell/chat_pane.dart` over
+  `lib/shell/transcript.dart`, `composer.dart`, `markdown.dart`,
+  `send_payload.dart` and `skill_menu.dart`
+- `RunView` — `lib/shell/run_view.dart`: a Turn's tool receipts, on the right
+  panel at wide widths and as a page on the phone. The thread never names a
+  tool; it offers one control that opens this.
 - `ActivityPage` — `lib/activity/page.dart:9`
 - `BotRecoveryPage` — `lib/recovery/page.dart:11`, detail with three tabs at `:202`
 - `SettingsPage` — `lib/settings/page.dart:14`, `ModelPicker` at `lib/settings/model_picker.dart:10`
 - `ConnectionsPage` — `lib/connections/page.dart:12`
 - `AppletDirectoryPage` → `AppletPage` — `lib/extensions/fallback.dart:77`, `:157`
-- `ViewSamplePage` — `lib/view/sample_page.dart:117`, reachable only from a `--dart-define=FROCKBOT_DEV_AUTH=true` build (`lib/main.dart:415`)
+- `ViewSamplePage` — `lib/view/sample_page.dart:117`, reachable only from a `--dart-define=FROCKBOT_DEV_AUTH=true` build
 
-Transport is REST over `dart:io HttpClient` with the base URL hardcoded to `https://bot.frockbot.com` (`lib/client/transport.dart:10`), plus one read-only WebSocket at `/api/bots/{botId}/state-channel` (`:229`) with a strict `cursor + 1` contiguity rule (`lib/client/state_channel.dart:69-82`), a 4096-byte frame cap and 1–30 s backoff.
+The thread's rules are the Vue shell's, ported without change and with its
+tests: a Turn is ordered as a unit by its own user message's stamp
+(`transcript_model.dart`), the working row says the previous reply is being
+stopped only while a supersede drains, a draft belongs to the Bot it was typed
+for and survives a refusal (`composer.dart`), and readiness and the draft are
+separate questions so Try again works with an empty composer.
+
+Transport is REST over `package:http` behind a conditional import (`lib/client/transport.dart`, `transport_io.dart`, `transport_web.dart`) with the base URL defaulting to `https://bot.frockbot.com`, plus one read-only WebSocket at `/api/bots/{botId}/state-channel` (`:229`) with a strict `cursor + 1` contiguity rule (`lib/client/state_channel.dart:69-82`), a 4096-byte frame cap and 1–30 s backoff.
 
 Auth is PKCE in the system browser (`lib/client/auth.dart:17`), returning over an App Link validated in `accept()` (`:60`). The session token lives in `flutter_secure_storage`; the directory, drafts, cached transcripts and cursors are plaintext JSON on disk (`lib/client/plain_store.dart:13`, `:97`).
 
@@ -271,9 +313,9 @@ Auth is PKCE in the system browser (`lib/client/auth.dart:17`), returning over a
 
 WebView is used in one place, `AppletPage` (`lib/extensions/fallback.dart:157-465`), loading the anonymous bootstrap at `ui.bot.frockbot.com/native-fallback` (server side `apps/cloudflare/src/native-fallback.ts:34`). It never receives the native session.
 
-**Capability gap.** Present in web, absent in native: Bot creation, starting a conversation, in-app connector authorize and revoke, model configuration, admin, search, flock and avatar editing, routines, Bot templates, registered machines, the Computer overlay, and package iframe entries. Native settings are a generic server-described form renderer rather than plugin surfaces.
+**Capability gap.** Present in web, absent in native: Bot creation, starting a conversation, in-app connector authorize and revoke, model configuration, admin, flock and avatar editing, routines, Bot templates, registered machines, the Computer overlay, and package iframe entries. Native settings are a generic server-described form renderer rather than plugin surfaces. Native search reads the Bot list this client already holds rather than the backend search route.
 
-Present in native, absent in web: a durable offline store of directory, transcripts and drafts; inbox as a first-class screen; Bot archive, restore and delete UI with composition-generation and audit detail; deep-link-to-Bot; PKCE system-browser sign-in.
+Present in native, absent in web: a durable offline store of directory, transcripts and drafts; inbox as a first-class screen; Bot archive, restore and delete UI with composition-generation and audit detail; deep-link-to-Bot; PKCE system-browser sign-in; tool receipts on a Work view rather than inside the thread.
 
 Both speak the same REST API and the same state-channel WebSocket. Native validates every payload against the shared schema; the web client uses hand-written decoders.
 
