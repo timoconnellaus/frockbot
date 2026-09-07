@@ -606,72 +606,181 @@
     }
   },
   {
-    "name": "A2uiContribution valid",
-    "schema": "A2uiContribution",
+    "name": "ViewNode text",
+    "schema": "ViewNode",
     "value": {
-      "schemaVersion": 1,
-      "kind": "a2ui",
-      "slot": "frockbot.application-settings-sections",
-      "artifact": {
-        "contentHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "size": 1,
-        "mediaType": "application/json"
-      },
-      "protocolVersion": "0.9.1",
-      "catalog": {
-        "id": "command-1",
-        "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-      },
-      "actions": []
+      "type": "text",
+      "text": "Ready.",
+      "style": "status"
     }
   },
   {
-    "name": "A2uiSurface valid",
-    "schema": "A2uiSurface",
+    "name": "ViewNode group carries every other node type",
+    "schema": "ViewNode",
     "value": {
-      "schemaVersion": 1,
-      "surfaceId": "command-1",
-      "userId": "command-1",
-      "botId": "default",
-      "packageId": "command-1",
-      "generationId": "command-1",
-      "revision": 0,
-      "cursor": "0",
-      "contribution": {
-        "schemaVersion": 1,
-        "kind": "a2ui",
-        "slot": "frockbot.application-settings-sections",
-        "artifact": {
-          "contentHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          "size": 1,
-          "mediaType": "application/json"
+      "type": "group",
+      "orientation": "column",
+      "title": "Deploy target",
+      "children": [
+        {
+          "type": "text",
+          "text": "Choose where this Applet runs.",
+          "style": "body"
         },
-        "protocolVersion": "0.9.1",
-        "catalog": {
-          "id": "command-1",
-          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        {
+          "type": "field",
+          "field": {
+            "id": "region",
+            "label": "Region",
+            "kind": "select",
+            "value": "syd",
+            "editable": true,
+            "choices": [
+              {
+                "label": "Sydney",
+                "value": "syd"
+              },
+              {
+                "label": "Frankfurt",
+                "value": "fra"
+              }
+            ]
+          }
         },
-        "actions": []
-      },
-      "snapshot": {
-        "contentHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "size": 1,
-        "mediaType": "application/json"
-      }
+        {
+          "type": "list",
+          "empty": "No regions are available yet.",
+          "rows": [
+            {
+              "id": "syd",
+              "selected": true,
+              "actionId": "select-region",
+              "node": {
+                "type": "text",
+                "text": "Sydney",
+                "style": "label"
+              }
+            }
+          ]
+        },
+        {
+          "type": "embed",
+          "kind": "frame",
+          "source": "applet-viewer",
+          "label": "Applet preview"
+        },
+        {
+          "type": "action",
+          "actionId": "select-region",
+          "label": "Use this region",
+          "style": "primary",
+          "input": {
+            "confirm": true
+          }
+        }
+      ]
     }
   },
   {
-    "name": "A2uiActionCommand valid",
-    "schema": "A2uiActionCommand",
+    "name": "ViewNode embed image names an https source",
+    "schema": "ViewNode",
+    "value": {
+      "type": "embed",
+      "kind": "image",
+      "source": "https://ui.bot.frockbot.com/packages/preview.png",
+      "label": "Last screenshot",
+      "aspectRatio": 1.6
+    }
+  },
+  {
+    "name": "ViewDocument valid",
+    "schema": "ViewDocument",
     "value": {
       "schemaVersion": 1,
-      "commandId": "command-1",
-      "surfaceId": "command-1",
-      "packageId": "command-1",
-      "generationId": "command-1",
-      "revision": 0,
-      "actionId": "command-1",
-      "input": {}
+      "surfaceId": "deploy-target",
+      "revision": 3,
+      "root": {
+        "type": "group",
+        "orientation": "column",
+        "title": "Deploy target",
+        "children": [
+          {
+            "type": "text",
+            "text": "Choose where this Applet runs.",
+            "style": "body"
+          },
+          {
+            "type": "field",
+            "field": {
+              "id": "region",
+              "label": "Region",
+              "kind": "select",
+              "value": "syd",
+              "editable": true,
+              "choices": [
+                {
+                  "label": "Sydney",
+                  "value": "syd"
+                },
+                {
+                  "label": "Frankfurt",
+                  "value": "fra"
+                }
+              ]
+            }
+          },
+          {
+            "type": "list",
+            "empty": "No regions are available yet.",
+            "rows": [
+              {
+                "id": "syd",
+                "selected": true,
+                "actionId": "select-region",
+                "node": {
+                  "type": "text",
+                  "text": "Sydney",
+                  "style": "label"
+                }
+              }
+            ]
+          },
+          {
+            "type": "embed",
+            "kind": "frame",
+            "source": "applet-viewer",
+            "label": "Applet preview"
+          },
+          {
+            "type": "action",
+            "actionId": "select-region",
+            "label": "Use this region",
+            "style": "primary",
+            "input": {
+              "confirm": true
+            }
+          }
+        ]
+      },
+      "actions": [
+        {
+          "id": "select-region",
+          "schema": {
+            "type": "object",
+            "properties": {
+              "region": {
+                "type": "string",
+                "maxLength": 64
+              },
+              "confirm": {
+                "type": "boolean"
+              }
+            },
+            "required": ["region"],
+            "additionalProperties": false
+          }
+        }
+      ]
     }
   },
   {
@@ -783,7 +892,7 @@
     "value": {
       "schemaVersion": 1,
       "commandId": "command-1",
-      "text": "Hello \ud83d\udc11 \u3053\u3093\u306b\u3061\u306f"
+      "text": "Hello 🐑 こんにちは"
     }
   },
   {
@@ -980,55 +1089,6 @@
         "expiresAt": "2026-09-05T00:00:00.000Z",
         "socketUrl": "wss://bot.frockbot.com/view"
       }
-    }
-  },
-  {
-    "name": "A2uiSurface accepts published generation",
-    "schema": "A2uiSurface",
-    "value": {
-      "schemaVersion": 1,
-      "surfaceId": "command-1",
-      "userId": "command-1",
-      "botId": "default",
-      "packageId": "command-1",
-      "generationId": "2026-09-05T00:52:26.826Z:e0e3ce78fabf9eca",
-      "revision": 0,
-      "cursor": "0",
-      "contribution": {
-        "schemaVersion": 1,
-        "kind": "a2ui",
-        "slot": "frockbot.application-settings-sections",
-        "artifact": {
-          "contentHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          "size": 1,
-          "mediaType": "application/json"
-        },
-        "protocolVersion": "0.9.1",
-        "catalog": {
-          "id": "command-1",
-          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-        },
-        "actions": []
-      },
-      "snapshot": {
-        "contentHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "size": 1,
-        "mediaType": "application/json"
-      }
-    }
-  },
-  {
-    "name": "A2uiActionCommand accepts published generation",
-    "schema": "A2uiActionCommand",
-    "value": {
-      "schemaVersion": 1,
-      "commandId": "command-1",
-      "surfaceId": "command-1",
-      "packageId": "command-1",
-      "generationId": "2026-09-05T00:52:26.826Z:e0e3ce78fabf9eca",
-      "revision": 0,
-      "actionId": "command-1",
-      "input": {}
     }
   },
   {

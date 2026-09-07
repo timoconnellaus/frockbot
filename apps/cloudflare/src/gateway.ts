@@ -678,40 +678,6 @@ export function createGateway(dependencies: GatewayDependencies) {
         );
       }
     }
-    if (
-      url.pathname === "/api/native/qualification-form" &&
-      dependencies.nativeAuth &&
-      dependencies.saveNativeForm
-    ) {
-      if (!nativeIdentity?.session)
-        return jsonError(401, "Please sign in again.");
-      if (request.method !== "POST")
-        return jsonError(405, "method not allowed");
-      try {
-        const result = await dependencies.saveNativeForm(
-          userId,
-          await readNativeJsonBody(request),
-        );
-        if (
-          !result ||
-          typeof result !== "object" ||
-          !("status" in result) ||
-          result.status !== "saved"
-        )
-          return jsonError(
-            409,
-            "Could not save this form. Reopen it and try again.",
-          );
-        return Response.json(result, {
-          headers: { "cache-control": "no-store" },
-        });
-      } catch {
-        return jsonError(
-          409,
-          "Could not save this form. Reopen it and try again.",
-        );
-      }
-    }
     const nativeApplet = url.pathname.match(
       /^\/api\/native\/applets\/([^/]+)\/bootstrap$/,
     );

@@ -261,7 +261,7 @@ Screens (no router; `MaterialApp(home:)` plus `Navigator.push`):
 - `SettingsPage` — `lib/settings/page.dart:14`, `ModelPicker` at `lib/settings/model_picker.dart:10`
 - `ConnectionsPage` — `lib/connections/page.dart:12`
 - `AppletDirectoryPage` → `AppletPage` — `lib/extensions/fallback.dart:77`, `:157`
-- `FormPreview` — `lib/main.dart:933`, reachable only under `--dart-define=NATIVE_ACCEPTANCE` (`:488`)
+- `ViewSamplePage` — `lib/view/sample_page.dart:117`, reachable only from a `--dart-define=FROCKBOT_DEV_AUTH=true` build (`lib/main.dart:415`)
 
 Transport is REST over `dart:io HttpClient` with the base URL hardcoded to `https://bot.frockbot.com` (`lib/client/transport.dart:10`), plus one read-only WebSocket at `/api/bots/{botId}/state-channel` (`:229`) with a strict `cursor + 1` contiguity rule (`lib/client/state_channel.dart:69-82`), a 4096-byte frame cap and 1–30 s backoff.
 
@@ -276,6 +276,31 @@ WebView is used in one place, `AppletPage` (`lib/extensions/fallback.dart:157-46
 Present in native, absent in web: a durable offline store of directory, transcripts and drafts; inbox as a first-class screen; Bot archive, restore and delete UI with composition-generation and audit detail; deep-link-to-Bot; PKCE system-browser sign-in.
 
 Both speak the same REST API and the same state-channel WebSocket. Native validates every payload against the shared schema; the web client uses hand-written decoders.
+
+### ViewNode — how a plugin renders
+
+A plugin does not ship UI. It returns a `ViewDocument` and the host draws it, which is what keeps trust chrome out of a plugin's reach.
+
+`ViewNode` is a discriminated union on `type` in `core/protocol-schemas/schema/client-wire.schema.json`, over exactly six types:
+
+| Type     | What it is                                                                                                      |
+| -------- | --------------------------------------------------------------------------------------------------------------- |
+| `text`   | Prose, a heading, a label or a status line — `style ∈ body \| heading \| label \| status`                       |
+| `group`  | A container: `orientation ∈ row \| column`, an optional title, an optional collapsed state, and children        |
+| `field`  | One typed input bound to a key: the existing `SettingField`/`SettingChoice` shapes, unchanged                   |
+| `action` | A button naming a declared action id, with an optional literal input map                                        |
+| `list`   | Rows, each with an id, a child node, an optional action id and a selected state                                 |
+| `embed`  | A host-owned region: `kind: image` with an https source, or `kind: frame` naming a region the host draws itself |
+
+`ViewDocument` is `{schemaVersion, surfaceId, revision, root, actions}`, where `actions` is `{id, schema: ActionSchema}` pairs. An action's submitted input is the node's declared map overlaid with the current value of every `field` whose id the action's schema names; a key the schema does not declare never travels, and a missing required key refuses before dispatch.
+
+`embed`'s frame names are the host's, not the plugin's: `applet-viewer` and `computer-viewer` exist now (`apps/native/lib/view/embed.dart`), their widgets arriving with the surfaces that own them, and a name this host does not offer draws a trust-neutral placeholder. `ui.bot.frockbot.com/packages/<sha256>.html` survives only for the Applet's own arbitrary web page, reached through `embed`.
+
+**Budgets**, checked by `ViewDocumentView` before it builds a widget (`lib/view/budgets.dart`): 512 nodes, depth 16, 262,144 bytes. A document past any of them is refused whole rather than half-rendered. The schema's own shape caps are separate — 256 children per `group`, 256 rows per `list`, 32 declared actions.
+
+**The plugin declaration.** `PluginDescriptorV1.views` is `{slot, surfaceId}[]` (`core/contracts/plugin-descriptor.ts`), account-scoped, with `PLUGIN_SLOTS_V1` as the slot vocabulary and at most 16 entries with distinct surface ids. Rendering is not wired into the isolate host yet; that lands with the surfaces that use it.
+
+The renderer is `apps/native/lib/view/`: `budgets.dart`, `action.dart` (input assembly and the retained command envelope), `document.dart` (`ViewDocumentView`, `ViewScope`), `nodes.dart` (one widget per node type), `embed.dart` (the frame registry) and `sample_page.dart` (a development-only page, so the renderer can be looked at on a device before a plugin produces a document).
 
 ---
 

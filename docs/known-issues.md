@@ -32,7 +32,7 @@ at the cited location. Items the re-orientation already removes are marked; see
 
 14. **The Flutter app is not the shipping client.** `apps/native/README.md:3` and `apps/native/qualification.json:2` both say prototype, and `native.yml` is advisory with no build, sign or publish job. `apps/native/android/app/build.gradle.kts:12-13` hard-errors unless an `installedCode` value derived from a connected device is supplied, so the Android build cannot run unattended. There is no iOS directory.
 
-15. **The `genui` / `a2ui_core` dependency is inert.** It is imported in `apps/native/lib/extensions/catalog.dart:5-6`, used by one widget instantiated only by the gated `FormPreview`, and its document is the hardcoded `deterministicForm` const (`:11-20`). `A2ui*` names appear only in the schema and generated type files; no backend produces an A2ui surface and no client consumes one.
+15. ~~**The `genui` / `a2ui_core` dependency is inert.**~~ **Fixed.** The A2UI path is gone: both packages, the vendored `0.9.1` schemas, the catalog adapter, `FormPreview`, the three `A2ui*` wire types and the qualification-form route the preview posted to. The `ViewNode` renderer (`apps/native/lib/view/`) replaces it.
 
 16. **The dynamic Package system has no dynamic member.** No Composition member carries an `artifact`. The isolate host, the `BOT_PACKAGES` loader and the capability contract are all still here; nothing produces a Package artifact until the step 8 build service.
 

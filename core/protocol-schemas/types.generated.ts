@@ -483,44 +483,52 @@ export type ActionSchema = {
   required: Array<Identifier>;
   additionalProperties: false;
 };
-export type A2uiContribution = {
+export type ViewNode =
+  | {
+      type: "text";
+      text: string;
+      style?: "body" | "heading" | "label" | "status";
+    }
+  | {
+      type: "group";
+      orientation: "row" | "column";
+      title?: string;
+      collapsed?: boolean;
+      children: Array<ViewNode>;
+    }
+  | { type: "field"; field: SettingField }
+  | {
+      type: "action";
+      actionId: Identifier;
+      label: string;
+      style?: "primary" | "secondary" | "danger";
+      input?: {
+        [key: string]: Json;
+      };
+    }
+  | {
+      type: "list";
+      empty?: string;
+      rows: Array<{
+        id: Identifier;
+        node: ViewNode;
+        actionId?: Identifier;
+        selected?: boolean;
+      }>;
+    }
+  | {
+      type: "embed";
+      kind: "image" | "frame";
+      source: string;
+      label: string;
+      aspectRatio?: number;
+    };
+export type ViewDocument = {
   schemaVersion: 1;
-  kind: "a2ui";
-  slot:
-    | "frockbot.application-settings-sections"
-    | "frockbot.bot-settings-sections"
-    | "frockbot.right-panel"
-    | "frockbot.tool-result"
-    | "frockbot.surface";
-  artifact: ImmutableArtifact;
-  protocolVersion: "0.9.1";
-  catalog: CatalogRef;
+  surfaceId: Identifier;
+  revision: number;
+  root: ViewNode;
   actions: Array<{ id: Identifier; schema: ActionSchema }>;
-  webFallback?: WebArtifact;
-};
-export type A2uiSurface = {
-  schemaVersion: 1;
-  surfaceId: Identifier;
-  userId: Identifier;
-  botId: BotId;
-  packageId: Identifier;
-  generationId: GenerationId;
-  revision: number;
-  cursor: ObserverCursor;
-  contribution: A2uiContribution;
-  snapshot: ImmutableArtifact;
-};
-export type A2uiActionCommand = {
-  schemaVersion: 1;
-  commandId: Identifier;
-  surfaceId: Identifier;
-  packageId: Identifier;
-  generationId: GenerationId;
-  revision: number;
-  actionId: Identifier;
-  input: {
-    [key: string]: Json;
-  };
 };
 export type SurfaceUnavailable = {
   schemaVersion: 1;
@@ -803,9 +811,8 @@ export interface ProtocolTypes {
   FallbackBootstrap: FallbackBootstrap;
   ActionValueSchema: ActionValueSchema;
   ActionSchema: ActionSchema;
-  A2uiContribution: A2uiContribution;
-  A2uiSurface: A2uiSurface;
-  A2uiActionCommand: A2uiActionCommand;
+  ViewNode: ViewNode;
+  ViewDocument: ViewDocument;
   SurfaceUnavailable: SurfaceUnavailable;
   UnreadDirectory: UnreadDirectory;
   RunLookup: RunLookup;

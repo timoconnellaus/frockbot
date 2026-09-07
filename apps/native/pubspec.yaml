@@ -10,9 +10,6 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  genui: 0.10.2
-  a2ui_core: 0.1.1
-  json_schema_builder: 0.1.7
   webview_flutter: 4.14.1
   webview_flutter_android: 4.14.1
   webview_flutter_wkwebview: 3.26.1
