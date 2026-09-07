@@ -16,13 +16,6 @@
 // inventing a transfer the protocol does not have. Widening the protocol is a
 // version bump and belongs with whoever adds the route.
 
-import type {
-  DesktopMachineExecResult,
-  DesktopMachineFileResult,
-  DesktopMachineExecRequest,
-  DesktopMachineFileRequest,
-  DesktopMachineIdentity,
-} from "@frockbot/desktop-core";
 import {
   MACHINE_LIMITS_V1,
   type MachineCapabilityV1,
@@ -35,12 +28,43 @@ import type {
   MachineCommandRunnerV1,
 } from "./device.js";
 
+export interface DesktopMachineIdentity {
+  /** The machine's own name for itself. A hostname. */
+  label: string;
+  platform: "macos" | "windows" | "linux";
+}
+
+export interface DesktopMachineExecRequest {
+  command: string;
+  cwd?: string;
+  timeoutMs: number;
+  /** Each stream is cut at this many bytes; `truncated` says whether it was. */
+  maxOutputBytes: number;
+}
+
+export interface DesktopMachineExecResult {
+  /** Absent when the process was killed rather than exiting. */
+  exitCode?: number;
+  stdout: string;
+  stderr: string;
+  truncated: boolean;
+  /** The command outlived `timeoutMs` and was killed. */
+  timedOut: boolean;
+}
+
+export interface DesktopMachineFileRequest {
+  path: string;
+  maxBytes: number;
+}
+
+export interface DesktopMachineFileResult {
+  bytesBase64: string;
+  truncated: boolean;
+}
+
 /**
- * The desktop host, structurally.
- *
- * `DesktopMachineHostCapability` satisfies this, and so does a plain object in
- * a test. The runner never needs the cordis `Service` half of the capability,
- * so it does not ask for it.
+ * The desktop host, structurally: the two verbs and one fact that can only run
+ * on the laptop itself. A plain object in a test satisfies it.
  */
 export interface MachineDeviceHostV1 {
   identity(): DesktopMachineIdentity;

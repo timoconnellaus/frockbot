@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import {
   type LlmProvider,
+  LoopHookListV1,
   type NormalizedModelRequest,
 } from "@frockbot/kernel-contracts";
-import { Context } from "cordis";
 import { LlmRegistry } from "./llm.js";
 
 const schema = {
@@ -40,17 +40,16 @@ function fakeProvider(content: string): LlmProvider {
   };
 }
 
-async function mounted(content: string): Promise<Context> {
-  const root = new Context();
-  await root.plugin(LlmRegistry);
-  root.llm.register(fakeProvider(content));
-  return root;
+function mounted(content: string): LlmRegistry {
+  const llm = new LlmRegistry(new LoopHookListV1());
+  llm.register(fakeProvider(content));
+  return llm;
 }
 
 describe("structured output through a fake provider", () => {
   test("round-trips a validated typed value", async () => {
-    const root = await mounted('{"answer":"yes"}');
-    const result = await root.llm.structured<{ answer: string }>(
+    const llm = mounted('{"answer":"yes"}');
+    const result = await llm.structured<{ answer: string }>(
       request(),
       { name: "answer", schema },
       new AbortController().signal,
@@ -60,13 +59,12 @@ describe("structured output through a fake provider", () => {
       value: { answer: "yes" },
       raw: '{"answer":"yes"}',
     });
-    await root.fiber.dispose();
   });
 
   test("emits and returns a typed validation failure", async () => {
-    const root = await mounted('{"answer":4}');
+    const llm = mounted('{"answer":4}');
     const events = [];
-    for await (const event of root.llm.stream(
+    for await (const event of llm.stream(
       {
         ...request(),
         responseFormat: { type: "json_schema", name: "answer", schema },
@@ -90,7 +88,7 @@ describe("structured output through a fake provider", () => {
       },
     });
 
-    const result = await root.llm.structured<{ answer: string }>(
+    const result = await llm.structured<{ answer: string }>(
       { ...request(), requestId: "request-2" },
       { name: "answer", schema },
       new AbortController().signal,
@@ -99,13 +97,11 @@ describe("structured output through a fake provider", () => {
     if (result.status === "failed") {
       expect(result.failure.code).toBe("schema-mismatch");
     }
-    await root.fiber.dispose();
   });
 
   test("emits a typed invalid-JSON failure for schema-free JSON mode", async () => {
-    const root = new Context();
-    await root.plugin(LlmRegistry);
-    root.llm.register({
+    const llm = new LlmRegistry(new LoopHookListV1());
+    llm.register({
       id: "fake-json",
       supports: { structuredOutput: "json" },
       async *stream(modelRequest) {
@@ -115,7 +111,7 @@ describe("structured output through a fake provider", () => {
       },
     });
     const events = [];
-    for await (const event of root.llm.stream(
+    for await (const event of llm.stream(
       {
         ...request(),
         provider: "fake-json",
@@ -129,6 +125,5 @@ describe("structured output through a fake provider", () => {
       type: "structured-output-failure",
       failure: { code: "invalid-json" },
     });
-    await root.fiber.dispose();
   });
 });

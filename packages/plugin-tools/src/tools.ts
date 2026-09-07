@@ -1,8 +1,9 @@
-import { type Context, Service } from "cordis";
 import {
   admittedSubagentRolesV1,
   admittedTurnTypesV1,
   isSubagentRoleAdmittedV1,
+  type LoopHookListV1,
+  type PromptSectionRegistration,
   type ToolCall,
   type ToolDefinition,
   type ToolExecution,
@@ -337,15 +338,17 @@ interface ResolvedDynamicCall {
   registered: RegisteredTool;
 }
 
-export class ToolRegistry extends Service implements ToolExecution {
+export class ToolRegistry implements ToolExecution {
   private nativeDefinitions = new Map<string, RegisteredTool>();
   private dynamicDefinitions = new Map<string, Map<string, RegisteredTool>>();
   private namespaces = new Map<string, ToolNamespaceRegistration>();
   private guards: ToolGuard[] = [];
   private preparedDefinitions = new WeakMap<object, RegisteredTool>();
 
-  constructor(ctx: Context) {
-    super(ctx, "tools");
+  constructor(
+    private readonly hooks: LoopHookListV1,
+    systemPrompt?: PromptSectionRegistration,
+  ) {
     this.namespaces.set(FROCKBOT_TOOL_NAMESPACE, {
       name: FROCKBOT_TOOL_NAMESPACE,
       external: false,
@@ -368,16 +371,13 @@ export class ToolRegistry extends Service implements ToolExecution {
           isError: true,
         }),
     });
-    // A ToolRegistry is useful in narrow test/runtime roots without prompt
-    // assembly. When the prompt Package is present, this lifecycle-owned child
-    // registration activates and disappears with the registry.
-    void ctx.inject(["systemPrompt"], (promptCtx) =>
-      promptCtx.systemPrompt.register({
-        id: "dynamic-tool-catalog",
-        order: 70,
-        render: (context) => this.renderDynamicToolCatalog(context.turnType),
-      }),
-    );
+    // A registry is useful without prompt assembly — narrow tests, direct tool
+    // Turns — and lists its catalog only when there is a prompt to list it in.
+    systemPrompt?.register({
+      id: "dynamic-tool-catalog",
+      order: 70,
+      render: (context) => this.renderDynamicToolCatalog(context.turnType),
+    });
   }
 
   private installMetaTool(definition: ToolDefinition): void {
@@ -587,70 +587,65 @@ export class ToolRegistry extends Service implements ToolExecution {
     registered: RegisteredTool | undefined,
     context: ToolExecutionContext,
   ): Promise<ToolPreparation> {
-    const prepared = await this.ctx.waterfall(
-      "tools/pre-execute",
-      call,
-      context,
-      async () => {
-        if (!registered) {
-          return {
-            kind: "denied",
-            call,
-            result: {
-              content: this.unknownToolRefusal(call.name),
-              isError: true,
-            },
-          };
-        }
-        // Defence in depth: the catalog was already trimmed, so a call that
-        // arrives here names a tool the model was never offered.
-        if (!registered.admitted.includes(context.turnType)) {
-          return {
-            kind: "denied",
-            call,
-            result: {
-              content: `Tool is not available on a ${context.turnType} turn: ${call.name}`,
-              isError: true,
-            },
-          };
-        }
-        // The same defence on the second dimension. A `browserUse` subagent that
-        // names `computer_exec` was never offered it, and the ceiling says so
-        // here as well as in the catalog.
-        if (
-          !isSubagentRoleAdmittedV1(
-            registered.admittedRoles,
-            context.subagentRole,
-          )
-        ) {
-          return {
-            kind: "denied",
-            call,
-            result: {
-              content: `Tool is not available to a ${context.subagentRole} subagent: ${call.name}`,
-              isError: true,
-            },
-          };
-        }
-        const definition = registered.definition;
-        if (definition.validate && !definition.validate(call.input)) {
-          return {
-            kind: "denied",
-            call,
-            result: {
-              content: `Invalid input for tool: ${call.name}`,
-              isError: true,
-            },
-          };
-        }
+    const prepared = await this.hooks.prepareTool(call, context, async () => {
+      if (!registered) {
         return {
-          kind: "ready",
+          kind: "denied",
           call,
-          idempotent: definition.idempotent ?? false,
+          result: {
+            content: this.unknownToolRefusal(call.name),
+            isError: true,
+          },
         };
-      },
-    );
-    // A pre-execute listener can add a denial. Once denied, neither a guard
+      }
+      // Defence in depth: the catalog was already trimmed, so a call that
+      // arrives here names a tool the model was never offered.
+      if (!registered.admitted.includes(context.turnType)) {
+        return {
+          kind: "denied",
+          call,
+          result: {
+            content: `Tool is not available on a ${context.turnType} turn: ${call.name}`,
+            isError: true,
+          },
+        };
+      }
+      // The same defence on the second dimension. A `browserUse` subagent that
+      // names `computer_exec` was never offered it, and the ceiling says so
+      // here as well as in the catalog.
+      if (
+        !isSubagentRoleAdmittedV1(
+          registered.admittedRoles,
+          context.subagentRole,
+        )
+      ) {
+        return {
+          kind: "denied",
+          call,
+          result: {
+            content: `Tool is not available to a ${context.subagentRole} subagent: ${call.name}`,
+            isError: true,
+          },
+        };
+      }
+      const definition = registered.definition;
+      if (definition.validate && !definition.validate(call.input)) {
+        return {
+          kind: "denied",
+          call,
+          result: {
+            content: `Invalid input for tool: ${call.name}`,
+            isError: true,
+          },
+        };
+      }
+      return {
+        kind: "ready",
+        call,
+        idempotent: definition.idempotent ?? false,
+      };
+    });
+    // A prepare hook can add a denial. Once denied, neither a guard
     // nor anything registered later can turn the call back into executable
     // work. Guards themselves return only a reason, so they have no vocabulary
     // with which to lift another guard's denial.
@@ -678,29 +673,15 @@ export class ToolRegistry extends Service implements ToolExecution {
     const definition = this.isRegistered(registered)
       ? registered.definition
       : undefined;
-    const initial = await this.ctx.waterfall(
-      "tools/execute",
-      preparation.call,
-      context,
-      () => {
-        if (!definition) {
-          return Promise.resolve({
-            content: `Tool became unavailable: ${preparation.call.name}`,
-            isError: true,
-          });
-        }
-        return definition.execute(preparation.call.input, context);
-      },
+    const initial: ToolExecutionResult = definition
+      ? await definition.execute(preparation.call.input, context)
+      : {
+          content: `Tool became unavailable: ${preparation.call.name}`,
+          isError: true,
+        };
+    return this.hooks.toolResult(preparation.call, initial, context, () =>
+      Promise.resolve(initial),
     );
-    const result = await this.ctx.waterfall(
-      "tools/post-execute",
-      preparation.call,
-      initial,
-      context,
-      () => Promise.resolve(initial),
-    );
-    this.ctx.emit("tools/result", preparation.call, result);
-    return result;
   }
 
   private resolveDynamicCall(

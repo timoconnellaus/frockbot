@@ -1,23 +1,19 @@
 import { describe, expect, test } from "bun:test";
-import { Context } from "cordis";
-import { SessionStore } from "@frockbot/kernel-contracts";
-import { ToolRegistry } from "@frockbot/plugin-tools";
+import { createAgentRuntimeHarness } from "@frockbot/plugin-testkit";
 import type { ShellMountedComposition } from "./backend-composition.js";
 import { executeDirectToolTurn } from "./backend-runner.js";
 
 describe("Package iframe direct tool Turn", () => {
   test("journals intent before execution and returns the result in the ordinary Session log", async () => {
-    const root = new Context();
-    await root.plugin(SessionStore);
-    await root.plugin(ToolRegistry);
-    const session = root.sessions.create("user:bot");
+    const runtime = createAgentRuntimeHarness();
+    const session = runtime.sessions.create("user:bot");
     let calls = 0;
-    root.tools.registerNamespace({
+    runtime.tools.registerNamespace({
       name: "weather-page",
       external: true,
       status: "ready",
     });
-    root.tools.register({
+    runtime.tools.register({
       name: "weather_lookup",
       namespace: "weather-page",
       description: "Weather",
@@ -40,14 +36,13 @@ describe("Package iframe direct tool Turn", () => {
       status: "active" as const,
     };
     const composition = {
-      root,
       generation,
       runtime: {
-        root,
+        services: runtime,
         agent: { agent: { session, botId: "bot", id: "bot" } },
       },
       verify: () => Promise.resolve(),
-      dispose: () => root.fiber.dispose(),
+      dispose: () => runtime.dispose(),
     } as unknown as ShellMountedComposition;
 
     const result = await executeDirectToolTurn({

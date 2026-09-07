@@ -27,10 +27,11 @@ import {
   type WebSearchV1,
 } from "@frockbot/plugin-web/contract";
 import type { CredentialLeaseV1 } from "@frockbot/connection-core";
-// The `credentialLease` service is declared once, by `./runtime.ts`; this
-// module consumes that augmentation rather than restating it.
-import type {} from "./runtime.js";
-import type { Plugin } from "cordis";
+import type {
+  AgentRuntimeV1,
+  RuntimeFeatureV1,
+} from "@frockbot/kernel-contracts";
+import type { CredentialLeaseRuntime } from "@frockbot/plugin-credentials/user";
 import {
   DEFAULT_OLLAMA_API_BASE_URL,
   decodeOllamaApiBaseUrl,
@@ -224,10 +225,13 @@ class ConnectionBackedWebSearch implements WebSearchV1 {
 }
 
 /** Mount `web_search` for one authorized Connection. */
-export function createOllamaWebSearchRuntimePlugin(
+export function createOllamaWebSearchFeature(
   config: OllamaWebSearchRuntimeConfig,
-): Plugin.Function {
-  const plugin: Plugin.Function = (ctx) => {
+): RuntimeFeatureV1<AgentRuntimeV1 & { credentials?: CredentialLeaseRuntime }> {
+  return (runtime) => {
+    if (!runtime.credentials) {
+      throw new Error("Credential Store Contribution is not configured");
+    }
     const client = new OllamaCloudWebSearchClient({
       ...(config.apiBaseUrl === undefined
         ? {}
@@ -235,15 +239,13 @@ export function createOllamaWebSearchRuntimePlugin(
       ...(config.fetch ? { fetch: config.fetch } : {}),
     });
     const definition = createWebSearchToolDefinitionV1(
-      new ConnectionBackedWebSearch(config, ctx.credentialLease, client),
+      new ConnectionBackedWebSearch(config, runtime.credentials, client),
     );
-    return ctx.tools.register(definition, {
+    return runtime.tools.register(definition, {
       admissionCeiling: ["chat", "automation", "subagent"],
       subagentRoleCeiling: ["executor"],
     });
   };
-  plugin.inject = ["tools", "credentialLease"];
-  return plugin;
 }
 
 /**
@@ -269,7 +271,9 @@ export function createConfiguredOllamaWebSearchRuntimeContribution(config: {
   ): Promise<CredentialLeaseV1>;
   settleCredential(effectId: string): Promise<void>;
   fetch?: OllamaFetch;
-}): Plugin.Function | undefined {
+}):
+  | RuntimeFeatureV1<AgentRuntimeV1 & { credentials?: CredentialLeaseRuntime }>
+  | undefined {
   if (
     config.capability.packageId !== "provider-ollama-cloud" ||
     config.capability.capabilityId !== "ollama-cloud-web-search" ||
@@ -277,7 +281,7 @@ export function createConfiguredOllamaWebSearchRuntimeContribution(config: {
   ) {
     return undefined;
   }
-  return createOllamaWebSearchRuntimePlugin({
+  return createOllamaWebSearchFeature({
     accountId: config.accountId,
     connectionId: config.connectionId,
     connectionGeneration: config.connectionGeneration,

@@ -20,14 +20,12 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@frockbot/kernel-agent-loop": "workspace:*",
     "@frockbot/kernel-contracts": "workspace:*",
     "@frockbot/machine-protocol": "workspace:*",
-    "@frockbot/plugin-user-machine": "workspace:*",
-    "cordis": "4.0.0-rc.8"
+    "@frockbot/plugin-user-machine": "workspace:*"
   },
   "devDependencies": {
-    "@frockbot/plugin-tools": "workspace:*",
+    "@frockbot/plugin-testkit": "workspace:*",
     "@types/bun": "1.4.0",
     "typescript": "^7.0.2"
   },

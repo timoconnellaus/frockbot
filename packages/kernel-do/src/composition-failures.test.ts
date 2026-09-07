@@ -12,7 +12,6 @@ import {
   type CompositionMemberV1,
   type MountedComposition,
 } from "@frockbot/kernel-composition/generation";
-import type { Context } from "cordis";
 import { DurableCompositionFailureLog } from "./composition-failures.ts";
 import { DurableCompositionStore } from "./composition-store.ts";
 import {
@@ -133,7 +132,6 @@ async function authored(
 function mounted(generation: CompositionGenerationV1): MountedComposition {
   return {
     generation,
-    root: {} as Context,
     verify: () => Promise.resolve(),
     dispose: () => Promise.resolve(),
   };

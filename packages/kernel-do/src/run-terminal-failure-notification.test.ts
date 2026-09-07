@@ -40,10 +40,7 @@ function failureNotification(run: StoredRunV1<Snapshot>) {
 }
 
 function journal(): SessionEvent[] {
-  const events: SessionEvent[] = [];
-  const session = new Session(SESSION_ID, (envelope) => {
-    events.push(envelope.event);
-  });
+  const session = new Session(SESSION_ID);
   session.appendBatch([
     { type: "turn/start", turn: 1 },
     { type: "step/start", turn: 1, step: 1 },
@@ -55,7 +52,7 @@ function journal(): SessionEvent[] {
       text: "hello",
     },
   ]);
-  return events;
+  return [...session.events];
 }
 
 function storedRun(

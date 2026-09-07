@@ -33,7 +33,6 @@
     "@frockbot/configuration-core": "workspace:*",
     "@frockbot/kernel-contracts": "workspace:*",
     "@frockbot/plugin-shell": "workspace:*",
-    "cordis": "4.0.0-rc.8",
     "vue": "3.5.41"
   },
   "devDependencies": {

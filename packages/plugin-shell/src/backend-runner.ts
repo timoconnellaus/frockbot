@@ -41,8 +41,7 @@ function appendedSessionEvents(
 
 /**
  * Classifies one finished Agent handle against the durable history it started
- * from. Shared by the Composition-mounted and the resident execution paths, so
- * both reach exactly the same durable terminal or recovery outcome.
+ * from, so every path reaches the same durable terminal or recovery outcome.
  */
 function settleBotTurn(
   handle: AgentHandle,
@@ -223,7 +222,10 @@ export async function executeDirectToolTurn(
         turnType: "chat" as const,
         signal,
       };
-      const preparation = await composition.root.tools.prepare(call, context);
+      const preparation = await composition.runtime.services.tools.prepare(
+        call,
+        context,
+      );
       let result;
       if (!existing.intent) {
         session.append({
@@ -260,7 +262,7 @@ export async function executeDirectToolTurn(
           throw new Error("Package UI tool effect was fenced by Stop");
         }
         try {
-          result = await composition.root.tools.executePrepared(
+          result = await composition.runtime.services.tools.executePrepared(
             preparation,
             context,
           );
@@ -342,76 +344,5 @@ export async function executeBotTurn(
     } else {
       await composition.dispose();
     }
-  }
-}
-
-export interface ExecuteResidentBotTurnOptions {
-  botId: string;
-  command: BotTurnCommand;
-  previousEvents: readonly SessionEvent[];
-  persistSessionEvents: PersistSessionEvents;
-  beforeStart(): Promise<boolean>;
-  admitEffect(effect: AgentEffectAdmission): Promise<boolean>;
-  resume?: boolean;
-}
-
-export interface ResidentTurnRuntime {
-  execute(input: {
-    botId: string;
-    sessionId: string;
-    runId: string;
-    previousEvents: readonly SessionEvent[];
-    persistSessionEvents: PersistSessionEvents;
-    beforeStart(): Promise<boolean>;
-    admitEffect(effect: AgentEffectAdmission): Promise<boolean>;
-    resume?: boolean;
-    text: string;
-    skills?: SkillRefV1[];
-    turnType: TurnTypeV1;
-    subagentRole?: string;
-  }): Promise<AgentHandle>;
-}
-
-/**
- * Runs one Turn on the Bot Durable Object's resident Cordis root. The root
- * outlives the Turn, so nothing is disposed here; the durable effect fence and
- * the session persistence are the caller's.
- */
-export async function executeResidentBotTurn(
-  runtime: ResidentTurnRuntime,
-  options: ExecuteResidentBotTurnOptions,
-): Promise<BotTurnCompletion> {
-  const {
-    botId,
-    command,
-    previousEvents,
-    persistSessionEvents,
-    beforeStart,
-    admitEffect,
-    resume,
-  } = options;
-  let handle: AgentHandle | undefined;
-  try {
-    handle = await runtime.execute({
-      botId,
-      sessionId: command.sessionId,
-      runId: command.runId,
-      previousEvents,
-      persistSessionEvents,
-      beforeStart,
-      admitEffect,
-      resume,
-      text: command.text,
-      ...(command.skills ? { skills: command.skills } : {}),
-      turnType: command.turnType ?? "chat",
-      ...(command.subagentRole ? { subagentRole: command.subagentRole } : {}),
-    });
-    return settleBotTurn(handle, command, previousEvents);
-  } catch (error) {
-    turnExecutionError(
-      error,
-      previousEvents,
-      handle ? [...handle.agent.session.events] : [...previousEvents],
-    );
   }
 }

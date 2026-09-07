@@ -1,9 +1,10 @@
 import {
+  type AgentRuntimeV1,
   type LlmStreamEvent,
   type NormalizedModelRequest,
+  type RuntimeFeatureV1,
   type ToolDefinition,
 } from "@frockbot/kernel-contracts";
-import type { Plugin } from "cordis";
 
 export const ECHO_TOOL_NAME = "echo";
 
@@ -74,14 +75,15 @@ async function* requestEchoTool(
   };
 }
 
-export const echoAgentPlugin: Plugin.Function = (ctx) => {
-  const unregisterTool = ctx.tools.register(echoTool);
-  const unregisterMiddleware = ctx.on("llm/stream", (request, signal, next) => {
-    const text = requestedEchoText(request);
-    return text ? requestEchoTool(text, signal) : next();
+export const echoFeature: RuntimeFeatureV1<AgentRuntimeV1> = (runtime) => {
+  const unregisterTool = runtime.tools.register(echoTool);
+  const unregisterHooks = runtime.hooks.add({
+    modelStream: (request, signal, next) => {
+      const text = requestedEchoText(request);
+      return text ? requestEchoTool(text, signal) : next();
+    },
   });
-  return [unregisterTool, unregisterMiddleware];
+  return [unregisterTool, unregisterHooks];
 };
-echoAgentPlugin.inject = ["tools", "llm"];
 
-export default echoAgentPlugin;
+export default echoFeature;

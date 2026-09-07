@@ -23,11 +23,12 @@
     "@frockbot/connection-core": "workspace:*",
     "@frockbot/kernel-agent-loop": "workspace:*",
     "@frockbot/kernel-contracts": "workspace:*",
+    "@frockbot/plugin-credentials": "workspace:*",
     "@frockbot/plugin-models": "workspace:*",
-    "@frockbot/provider-openai-compatible": "workspace:*",
-    "cordis": "4.0.0-rc.8"
+    "@frockbot/provider-openai-compatible": "workspace:*"
   },
   "devDependencies": {
+    "@frockbot/plugin-testkit": "workspace:*",
     "@types/bun": "1.4.0",
     "typescript": "^7.0.2"
   },

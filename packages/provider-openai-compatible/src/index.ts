@@ -1,4 +1,5 @@
 import {
+  type AgentRuntimeV1,
   boundedModelProviderReasonV1,
   type LlmMessage,
   type LlmProvider,
@@ -10,12 +11,12 @@ import {
   type ModelProviderFailureClassV1,
   type NormalizedModelRequest,
   type ResponseFormatNoteV1,
+  type RuntimeFeatureV1,
   type StructuredOutputSupportV1,
 } from "@frockbot/kernel-contracts";
 import { APICallError, type LanguageModelV4StreamPart } from "@ai-sdk/provider";
 import { OpenAICompatibleChatLanguageModel } from "@ai-sdk/openai-compatible";
 import type { FetchFunction } from "@ai-sdk/provider-utils";
-import type { Plugin } from "cordis";
 
 export type JsonValue =
   null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
@@ -1215,11 +1216,9 @@ export class OpenAICompatibleProvider implements LlmProvider {
   }
 }
 
-export function createOpenAICompatiblePlugin(
+export function createOpenAICompatibleFeature(
   config: OpenAICompatibleConfig,
-): Plugin.Function {
-  const plugin: Plugin.Function = (ctx) =>
-    ctx.llm.register(new OpenAICompatibleProvider(config));
-  plugin.inject = ["llm"];
-  return plugin;
+): RuntimeFeatureV1<AgentRuntimeV1> {
+  return (runtime) =>
+    runtime.llm.register(new OpenAICompatibleProvider(config));
 }

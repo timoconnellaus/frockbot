@@ -6,24 +6,33 @@ import { afterEach, describe, expect, test } from "bun:test";
 import {
   LlmEffectNotStartedError,
   type LlmProvider,
+  LoopHookListV1,
   ModelProviderFailureError,
   SessionStore,
 } from "@frockbot/kernel-contracts";
 import { LlmRegistry } from "@frockbot/plugin-models";
 import { SystemPromptRegistry } from "@frockbot/plugin-prompt";
 import { ToolRegistry } from "@frockbot/plugin-tools";
-import { AgentRegistry } from "./agent.js";
-import { Context, type Plugin } from "cordis";
-import { AgentLoop, TURN_DEADLINE_REASON_V1 } from "./index.js";
+import {
+  type AgentLoop,
+  createAgentLoop,
+  TURN_DEADLINE_REASON_V1,
+} from "./index.js";
 
-const roots: Context[] = [];
+interface LoopFixture {
+  hooks: LoopHookListV1;
+  tools: ToolRegistry;
+  loop: AgentLoop;
+}
+
+const loops: AgentLoop[] = [];
 const allowEffect = () => Promise.resolve(true);
 
 afterEach(async () => {
-  await Promise.all(roots.splice(0).map((root) => root.fiber.dispose()));
+  await Promise.all(loops.splice(0).map((loop) => loop.dispose()));
 });
 
-async function mount(
+function mount(
   provider: LlmProvider,
   config: {
     turnDeadlineMs?: number;
@@ -33,30 +42,27 @@ async function mount(
       sleep?: (milliseconds: number, signal: AbortSignal) => Promise<void>;
     };
   } = {},
-): Promise<Context> {
-  const root = new Context();
-  roots.push(root);
-  await root.plugin(SessionStore, {});
-  await root.plugin(SystemPromptRegistry);
-  await root.plugin(LlmRegistry);
-  await root.plugin(ToolRegistry);
-  await root.plugin(AgentRegistry);
-  const promptPlugin: Plugin.Function = (ctx) =>
-    ctx.systemPrompt.register({ id: "identity", render: () => "Be useful." });
-  promptPlugin.inject = ["systemPrompt"];
-  const providerPlugin: Plugin.Function = (ctx) => ctx.llm.register(provider);
-  providerPlugin.inject = ["llm"];
-  await root.plugin(promptPlugin);
-  await root.plugin(providerPlugin);
-  await root.plugin(AgentLoop, {
-    maxSteps: 4,
-    composition: {
-      generationId: "generation-1",
-      artifactSetHash: "a".repeat(64),
+): LoopFixture {
+  const hooks = new LoopHookListV1();
+  const sessions = new SessionStore();
+  const systemPrompt = new SystemPromptRegistry(hooks);
+  const llm = new LlmRegistry(hooks);
+  const tools = new ToolRegistry(hooks, systemPrompt);
+  systemPrompt.register({ id: "identity", render: () => "Be useful." });
+  llm.register(provider);
+  const loop = createAgentLoop(
+    { sessions, systemPrompt, llm, tools, hooks },
+    {
+      maxSteps: 4,
+      composition: {
+        generationId: "generation-1",
+        artifactSetHash: "a".repeat(64),
+      },
+      ...config,
     },
-    ...config,
-  });
-  return root;
+  );
+  loops.push(loop);
+  return { hooks, tools, loop };
 }
 
 describe("a Turn that runs out of wall clock", () => {
@@ -74,8 +80,8 @@ describe("a Turn that runs out of wall clock", () => {
         });
       },
     };
-    const root = await mount(provider, { turnDeadlineMs: 25 });
-    const handle = await root.agents.create({
+    const { loop } = mount(provider, { turnDeadlineMs: 25 });
+    const handle = await loop.create({
       botId: "deadline-bot",
       sessionId: "deadline",
       provider: "silent",
@@ -120,24 +126,21 @@ describe("a Turn that runs out of wall clock", () => {
         yield { type: "finish" as const, reason: "tool-calls" as const };
       },
     };
-    const root = await mount(provider, { turnDeadlineMs: 40 });
-    const toolPlugin: Plugin.Function = (ctx) =>
-      ctx.tools.register({
-        name: "stall",
-        description: "Never answers.",
-        inputSchema: { type: "object" },
-        execute: (_input, context) =>
-          new Promise((_resolve, reject) => {
-            context.signal.addEventListener(
-              "abort",
-              () => reject(context.signal.reason),
-              { once: true },
-            );
-          }),
-      });
-    toolPlugin.inject = ["tools"];
-    await root.plugin(toolPlugin);
-    const handle = await root.agents.create({
+    const { loop, tools } = mount(provider, { turnDeadlineMs: 40 });
+    tools.register({
+      name: "stall",
+      description: "Never answers.",
+      inputSchema: { type: "object" },
+      execute: (_input, context) =>
+        new Promise((_resolve, reject) => {
+          context.signal.addEventListener(
+            "abort",
+            () => reject(context.signal.reason),
+            { once: true },
+          );
+        }),
+    });
+    const handle = await loop.create({
       botId: "deadline-tool-bot",
       sessionId: "deadline-tool",
       provider: "one-tool-then-silence",
@@ -168,23 +171,25 @@ describe("a Turn that runs out of wall clock", () => {
         throw new Error("the Turn should never have got this far");
       },
     };
-    const root = await mount(provider, { turnDeadlineMs: 25 });
+    const { loop, hooks } = mount(provider, { turnDeadlineMs: 25 });
     // Stalling before the first model request leaves no uncertain effect, so
     // the Turn settles on its own terms and the reason it carries is the one
     // under test. The deadline aborts the same controller Stop does; the
     // person must not be told they stopped it.
     let stalled: (() => void) | undefined;
-    root.on("agent/pre-step", async (_agent, _inputs, _turn, _step, next) => {
-      await new Promise<void>((_resolve, reject) => {
-        stalled = () => reject(new Error("stalled"));
-      });
-      return next();
+    hooks.add({
+      preStep: async (_agent, _inputs, _turn, _step, next) => {
+        await new Promise<void>((_resolve, reject) => {
+          stalled = () => reject(new Error("stalled"));
+        });
+        return next();
+      },
     });
     // The deadline aborts the loop's controller, which the stalled hook does
     // not itself watch; releasing it here stands in for whatever slow thing a
     // real Turn was waiting on noticing that nobody is waiting any more.
     setTimeout(() => stalled?.(), 60);
-    const handle = await root.agents.create({
+    const handle = await loop.create({
       botId: "deadline-reason-bot",
       sessionId: "deadline-reason",
       provider: "never-reached",
@@ -220,8 +225,8 @@ describe("a model request the provider says never started", () => {
         yield { type: "finish", reason: "completed" } as const;
       },
     };
-    const root = await mount(provider);
-    const handle = await root.agents.create({
+    const { loop } = mount(provider);
+    const handle = await loop.create({
       botId: "retry-bot",
       sessionId: "retry",
       provider: "flaky-binding",
@@ -260,8 +265,8 @@ describe("a model request the provider says never started", () => {
         throw new LlmEffectNotStartedError("invalid api key");
       },
     };
-    const root = await mount(provider);
-    const handle = await root.agents.create({
+    const { loop } = mount(provider);
+    const handle = await loop.create({
       botId: "no-retry-bot",
       sessionId: "no-retry",
       provider: "always-rejects",
@@ -291,8 +296,8 @@ describe("a model request the provider says never started", () => {
         throw new Error("connection reset mid-stream");
       },
     };
-    const root = await mount(provider);
-    const handle = await root.agents.create({
+    const { loop } = mount(provider);
+    const handle = await loop.create({
       botId: "uncertain-bot",
       sessionId: "uncertain",
       provider: "uncertain",
@@ -331,7 +336,7 @@ describe("classified model retry policy", () => {
         yield { type: "finish", reason: "completed" } as const;
       },
     };
-    const root = await mount(provider, {
+    const { loop } = mount(provider, {
       retry: {
         now: () => now,
         random: () => 1,
@@ -342,7 +347,7 @@ describe("classified model retry policy", () => {
         },
       },
     });
-    const handle = await root.agents.create({
+    const handle = await loop.create({
       botId: "transient-bot",
       sessionId: "transient",
       provider: provider.id,
@@ -376,8 +381,8 @@ describe("classified model retry policy", () => {
         });
       },
     };
-    const root = await mount(provider);
-    const handle = await root.agents.create({
+    const { loop } = mount(provider);
+    const handle = await loop.create({
       botId: "permanent-bot",
       sessionId: "permanent",
       provider: provider.id,
@@ -408,11 +413,11 @@ describe("classified model retry policy", () => {
         });
       },
     };
-    const root = await mount(provider, {
+    const { loop } = mount(provider, {
       turnDeadlineMs: 400,
       retry: { now: () => 0, random: () => 1 },
     });
-    const handle = await root.agents.create({
+    const handle = await loop.create({
       botId: "bounded-bot",
       sessionId: "bounded",
       provider: provider.id,

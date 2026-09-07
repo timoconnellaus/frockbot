@@ -3,8 +3,6 @@ import {
   ModelProviderFailureError,
   type NormalizedModelRequest,
 } from "@frockbot/kernel-contracts";
-import { LlmRegistry } from "@frockbot/plugin-models";
-import { Context } from "cordis";
 import {
   OpenAICompatibleProvider,
   planOpenAICompatibleRequestV1,

@@ -2,21 +2,21 @@
 // ends a Turn.
 import { describe, expect, test } from "bun:test";
 import {
-  SessionStore,
   type Session,
   type ToolCall,
   type ToolExecutionContext,
   type TurnTypeV1,
   TURN_DEADLINE_MS_V1,
 } from "@frockbot/kernel-contracts";
-import { SystemPromptRegistry } from "@frockbot/plugin-prompt";
-import { ToolRegistry } from "@frockbot/plugin-tools";
-import { Context } from "cordis";
+import {
+  type AgentRuntimeHarness,
+  createAgentRuntimeHarness,
+} from "@frockbot/plugin-testkit";
 import {
   CONVERSATION_PROMPT_SECTION_V1,
   CONVERSATION_PROMPT_TEXT_V1,
   shellAdmissionCeilingV1,
-  shellAgentPlugin,
+  shellAgentFeature,
   PARENT_HANDOFF_CAPABILITY_V1,
   SEND_MESSAGE_ALIAS_V1,
   SEND_TO_USER_TOOL_V1,
@@ -28,23 +28,20 @@ import {
 const SESSION_ID = "user-1:bot-1";
 
 interface Mounted {
-  root: Context;
+  root: AgentRuntimeHarness;
   session: Session;
   dispose(): Promise<void>;
 }
 
 async function mount(): Promise<Mounted> {
-  const root = new Context();
-  await root.plugin(SessionStore);
-  await root.plugin(SystemPromptRegistry);
-  await root.plugin(ToolRegistry);
+  const root = createAgentRuntimeHarness();
   const session = root.sessions.create(SESSION_ID);
   session.appendBatch([
     { type: "turn/start", turn: 4 },
     { type: "step/start", turn: 4, step: 2 },
   ]);
-  await root.plugin(shellAgentPlugin);
-  return { root, session, dispose: () => root.fiber.dispose() };
+  await root.mount(shellAgentFeature);
+  return { root, session, dispose: () => root.dispose() };
 }
 
 function contextFor(turnType: TurnTypeV1): ToolExecutionContext {
@@ -478,8 +475,7 @@ describe("the acknowledgement reaches the user", () => {
   test("assistant text in a tool-calling step is promoted to one send", async () => {
     const mounted = await mount();
     try {
-      await mounted.root.serial(
-        "agent/assistant-text",
+      await mounted.root.hooks.assistantText(
         { session: mounted.session } as never,
         "On it — building the 2027 countdown applet now.",
         { turn: 4, step: 2, requestId: "request-1" },
@@ -509,8 +505,7 @@ describe("the acknowledgement reaches the user", () => {
       // Bob on production, 2026-09-04: the model wrote the acknowledgement as
       // plain text and passed the same line to `send_to_user` in one step, and
       // the person saw two identical bubbles.
-      await mounted.root.serial(
-        "agent/assistant-text",
+      await mounted.root.hooks.assistantText(
         { session: mounted.session } as never,
         "On it — building your to-do applet now.",
         {
@@ -520,8 +515,7 @@ describe("the acknowledgement reaches the user", () => {
           toolNames: [SEND_TO_USER_TOOL_V1, "applet_create"],
         },
       );
-      await mounted.root.serial(
-        "agent/assistant-text",
+      await mounted.root.hooks.assistantText(
         { session: mounted.session } as never,
         "Sending it another way.",
         {
@@ -617,15 +611,13 @@ describe("the acknowledgement reaches the user", () => {
           payload: { type: "text", text: "On it." },
         }),
       );
-      await mounted.root.serial(
-        "agent/assistant-text",
+      await mounted.root.hooks.assistantText(
         { session: mounted.session } as never,
         "On it — building the countdown applet now.",
         { turn: 4, step: 2, requestId: "request-1" },
       );
       // The same step replayed after an eviction promotes nothing new either.
-      await mounted.root.serial(
-        "agent/assistant-text",
+      await mounted.root.hooks.assistantText(
         { session: mounted.session } as never,
         "On it — building the countdown applet now.",
         { turn: 4, step: 2, requestId: "request-1" },

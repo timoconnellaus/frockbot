@@ -309,7 +309,7 @@ describe("Applet tools mounted into a Turn's Composition", () => {
     }).mount(generation, signal);
     try {
       await mounted.verify(signal);
-      const schema = mounted.root.tools
+      const schema = mounted.runtime.services.tools
         .schemas({ turnType: "chat" })
         .find((entry) => entry.name === "add_todo");
       expect(schema).toBeDefined();
@@ -328,9 +328,12 @@ describe("Applet tools mounted into a Turn's Composition", () => {
         turnType: "chat" as const,
         signal,
       };
-      const prepared = await mounted.root.tools.prepare(call, context);
+      const prepared = await mounted.runtime.services.tools.prepare(
+        call,
+        context,
+      );
       expect(prepared.kind).toBe("ready");
-      const outcome = await mounted.root.tools.executePrepared(
+      const outcome = await mounted.runtime.services.tools.executePrepared(
         prepared as Extract<typeof prepared, { kind: "ready" }>,
         context,
       );

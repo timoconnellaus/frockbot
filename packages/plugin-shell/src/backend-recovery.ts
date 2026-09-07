@@ -41,7 +41,7 @@ export function interruptedRunSettlementV1(
     );
   }
   const fenceReason = run.stopRequestedAt ? "Durable Stop" : "A supersede";
-  const session = new Session(run.sessionId, () => {}, latest);
+  const session = new Session(run.sessionId, latest);
   for (const entry of validateToolOccurrenceJournal(run.events).values()) {
     if (!entry.intent || entry.result) continue;
     const intent = entry.intent;

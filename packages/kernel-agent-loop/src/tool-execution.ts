@@ -29,7 +29,7 @@ export async function executeToolsV1(
   occurrences: readonly ToolCallOccurrence[],
   signal: AbortSignal,
 ): Promise<boolean> {
-  const { ctx, session, options } = runtime;
+  const { services, session, options } = runtime;
   let endsTurn = false;
   for (const occurrence of occurrences) {
     signal.throwIfAborted();
@@ -50,7 +50,7 @@ export async function executeToolsV1(
         : { subagentRole: runtime.subagentRole }),
       signal,
     };
-    const preparation = await ctx.tools.prepare(call, context);
+    const preparation = await services.tools.prepare(call, context);
     signal.throwIfAborted();
     if (!existing?.intent) {
       session.append({
@@ -80,7 +80,6 @@ export async function executeToolsV1(
     let result: ToolExecutionResult;
     if (preparation.kind === "denied") {
       result = preparation.result;
-      ctx.emit("tools/result", call, result);
     } else {
       // Re-admitted on every dispatch, including a re-issue of an already
       // journaled intent: admission is keyed by effect id, so a Stop or a
@@ -105,7 +104,7 @@ export async function executeToolsV1(
         throw new EffectAdmissionFencedError(occurrenceId);
       }
       try {
-        result = await ctx.tools.executePrepared(preparation, context);
+        result = await services.tools.executePrepared(preparation, context);
       } catch (error) {
         if (signal.aborted) throw error;
         const message =
@@ -116,7 +115,6 @@ export async function executeToolsV1(
             : uncertainToolFailure(message),
           isError: true,
         };
-        ctx.emit("tools/result", call, result);
       }
     }
     if (result.endsTurn === true) endsTurn = true;

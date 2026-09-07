@@ -1,12 +1,12 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import {
+  LoopHookListV1,
   type PromptAssemblyContext,
   type PromptSection,
   type ToolCall,
   type ToolDefinition,
   type ToolExecutionContext,
 } from "@frockbot/kernel-contracts";
-import { Context, Service } from "cordis";
 import {
   CALL_DYNAMIC_TOOL_NAME,
   FROCKBOT_NAMESPACE_USE_INSTRUCTIONS,
@@ -14,12 +14,8 @@ import {
   ToolRegistry,
 } from "./tools.js";
 
-class PromptFixture extends Service {
+class PromptFixture {
   readonly sections = new Map<string, PromptSection>();
-
-  constructor(ctx: Context) {
-    super(ctx, "systemPrompt");
-  }
 
   register(section: PromptSection): () => void {
     this.sections.set(section.id, section);
@@ -43,14 +39,16 @@ class PromptFixture extends Service {
   }
 }
 
-const roots: Context[] = [];
+interface ToolsFixture {
+  hooks: LoopHookListV1;
+  tools: ToolRegistry;
+  systemPrompt: PromptFixture;
+}
 
-async function rootWithTools(prompt = false): Promise<Context> {
-  const root = new Context();
-  roots.push(root);
-  if (prompt) await root.plugin(PromptFixture);
-  await root.plugin(ToolRegistry);
-  return root;
+function toolsFixture(): ToolsFixture {
+  const hooks = new LoopHookListV1();
+  const systemPrompt = new PromptFixture();
+  return { hooks, tools: new ToolRegistry(hooks, systemPrompt), systemPrompt };
 }
 
 function contextFor(call: ToolCall): ToolExecutionContext {
@@ -66,12 +64,12 @@ function contextFor(call: ToolCall): ToolExecutionContext {
   };
 }
 
-async function invoke(root: Context, name: string, input: unknown) {
+async function invoke(tools: ToolRegistry, name: string, input: unknown) {
   const call = { id: "call-1", name, input };
   const context = contextFor(call);
-  const preparation = await root.tools.prepare(call, context);
+  const preparation = await tools.prepare(call, context);
   if (preparation.kind === "denied") return preparation.result;
-  return root.tools.executePrepared(preparation, context);
+  return tools.executePrepared(preparation, context);
 }
 
 function dynamicTool(
@@ -92,31 +90,27 @@ function dynamicTool(
   };
 }
 
-afterEach(async () => {
-  await Promise.all(roots.splice(0).map((root) => root.fiber.dispose()));
-});
-
 describe("progressive tool disclosure", () => {
   test("keeps namespaced schemas hidden and always exposes the two meta-tools", async () => {
-    const root = await rootWithTools();
-    root.tools.register({
+    const { tools } = toolsFixture();
+    tools.register({
       name: "native_read",
       description: "Native.",
       inputSchema: { type: "object" },
       execute: () => Promise.resolve({ content: "read", isError: false }),
     });
-    root.tools.register(dynamicTool("mail", "search"));
+    tools.register(dynamicTool("mail", "search"));
 
-    expect(
-      root.tools.schemas({ turnType: "chat" }).map(({ name }) => name),
-    ).toEqual(["native_read", GET_DYNAMIC_TOOLS_NAME, CALL_DYNAMIC_TOOL_NAME]);
-    expect(root.tools.registeredNames?.()).toEqual([
+    expect(tools.schemas({ turnType: "chat" }).map(({ name }) => name)).toEqual(
+      ["native_read", GET_DYNAMIC_TOOLS_NAME, CALL_DYNAMIC_TOOL_NAME],
+    );
+    expect(tools.registeredNames?.()).toEqual([
       CALL_DYNAMIC_TOOL_NAME,
       GET_DYNAMIC_TOOLS_NAME,
       "mail/search",
       "native_read",
     ]);
-    const schemas = root.tools.schemas({ turnType: "chat" });
+    const schemas = tools.schemas({ turnType: "chat" });
     for (const name of [GET_DYNAMIC_TOOLS_NAME, CALL_DYNAMIC_TOOL_NAME]) {
       const description = schemas.find(
         (schema) => schema.name === name,
@@ -180,18 +174,18 @@ describe("progressive tool disclosure", () => {
   });
 
   test("returns catalog, pattern, namespace, and single-tool forms", async () => {
-    const root = await rootWithTools();
+    const { tools } = toolsFixture();
     const longDescription = "x".repeat(201);
-    root.tools.registerNamespace({
+    tools.registerNamespace({
       name: "mail",
       description: "Mail namespace",
       status: "ready",
     });
-    root.tools.register(dynamicTool("mail", "search_threads", longDescription));
-    root.tools.register(dynamicTool("mail", "send_message"));
-    root.tools.register(dynamicTool("calendar", "search_events"));
+    tools.register(dynamicTool("mail", "search_threads", longDescription));
+    tools.register(dynamicTool("mail", "send_message"));
+    tools.register(dynamicTool("calendar", "search_events"));
 
-    const catalogResult = await invoke(root, GET_DYNAMIC_TOOLS_NAME, {});
+    const catalogResult = await invoke(tools, GET_DYNAMIC_TOOLS_NAME, {});
     expect(catalogResult.isError).toBe(false);
     const catalog = JSON.parse(catalogResult.content);
     expect(catalog).toMatchObject({
@@ -214,13 +208,13 @@ describe("progressive tool disclosure", () => {
     expect([...truncated]).toHaveLength(200);
     expect(truncated.endsWith("... [truncated]")).toBe(true);
     expect(catalogResult.content).not.toContain("inputSchema");
-    expect(await invoke(root, GET_DYNAMIC_TOOLS_NAME, undefined)).toEqual(
+    expect(await invoke(tools, GET_DYNAMIC_TOOLS_NAME, undefined)).toEqual(
       catalogResult,
     );
 
     const pattern = JSON.parse(
       (
-        await invoke(root, GET_DYNAMIC_TOOLS_NAME, {
+        await invoke(tools, GET_DYNAMIC_TOOLS_NAME, {
           pattern: "threads|calendar",
         })
       ).content,
@@ -238,7 +232,7 @@ describe("progressive tool disclosure", () => {
 
     const scopedPattern = JSON.parse(
       (
-        await invoke(root, GET_DYNAMIC_TOOLS_NAME, {
+        await invoke(tools, GET_DYNAMIC_TOOLS_NAME, {
           namespace: "mail",
           pattern: "send",
         })
@@ -249,7 +243,7 @@ describe("progressive tool disclosure", () => {
     ]);
 
     const namespace = JSON.parse(
-      (await invoke(root, GET_DYNAMIC_TOOLS_NAME, { namespace: "mail" }))
+      (await invoke(tools, GET_DYNAMIC_TOOLS_NAME, { namespace: "mail" }))
         .content,
     );
     expect(namespace.tools).toHaveLength(2);
@@ -267,7 +261,7 @@ describe("progressive tool disclosure", () => {
 
     const single = JSON.parse(
       (
-        await invoke(root, GET_DYNAMIC_TOOLS_NAME, {
+        await invoke(tools, GET_DYNAMIC_TOOLS_NAME, {
           namespace: "mail",
           toolName: "search_threads",
         })
@@ -279,21 +273,21 @@ describe("progressive tool disclosure", () => {
   });
 
   test("returns tool errors for invalid patterns and unknown lookups", async () => {
-    const root = await rootWithTools();
-    root.tools.register(dynamicTool("mail", "search"));
+    const { tools } = toolsFixture();
+    tools.register(dynamicTool("mail", "search"));
 
     for (const pattern of ["[", "(a+)+$", "x".repeat(257)]) {
       expect(
-        await invoke(root, GET_DYNAMIC_TOOLS_NAME, { pattern }),
+        await invoke(tools, GET_DYNAMIC_TOOLS_NAME, { pattern }),
       ).toMatchObject({ isError: true });
     }
     expect(
-      await invoke(root, GET_DYNAMIC_TOOLS_NAME, { namespace: "missing" }),
+      await invoke(tools, GET_DYNAMIC_TOOLS_NAME, { namespace: "missing" }),
     ).toEqual({ content: "Namespace not found", isError: true });
     // A name that was not found says which names there are, so the model can
     // correct a spelling in one step instead of re-reading the catalogue.
     expect(
-      await invoke(root, GET_DYNAMIC_TOOLS_NAME, {
+      await invoke(tools, GET_DYNAMIC_TOOLS_NAME, {
         namespace: "mail",
         toolName: "missing",
       }),
@@ -303,10 +297,10 @@ describe("progressive tool disclosure", () => {
       isError: true,
     });
     expect(
-      await invoke(root, GET_DYNAMIC_TOOLS_NAME, { toolName: "search" }),
+      await invoke(tools, GET_DYNAMIC_TOOLS_NAME, { toolName: "search" }),
     ).toEqual({ content: "toolName requires namespace", isError: true });
     expect(
-      await invoke(root, CALL_DYNAMIC_TOOL_NAME, {
+      await invoke(tools, CALL_DYNAMIC_TOOL_NAME, {
         namespace: "missing",
         toolName: "search",
       }),
@@ -315,7 +309,7 @@ describe("progressive tool disclosure", () => {
       isError: true,
     });
     expect(
-      await invoke(root, CALL_DYNAMIC_TOOL_NAME, {
+      await invoke(tools, CALL_DYNAMIC_TOOL_NAME, {
         namespace: "mail",
         toolName: "missing",
       }),
@@ -332,8 +326,8 @@ describe("progressive tool disclosure", () => {
     // deliberate plumbing test against `echo`, failed identically, and spent
     // seven steps without authoring anything. These are the exact envelopes it
     // sent (user `packages-2`, Bot `smith-b867c90c`, run events seq 18-52).
-    const root = await rootWithTools();
-    root.tools.register(dynamicTool("mail", "search"));
+    const { tools } = toolsFixture();
+    tools.register(dynamicTool("mail", "search"));
 
     const recorded: Array<[unknown, string[]]> = [
       // `{"args": "<json string>", "packageId": …}`
@@ -377,7 +371,7 @@ describe("progressive tool disclosure", () => {
     ];
 
     for (const [input, fragments] of recorded) {
-      const result = await invoke(root, CALL_DYNAMIC_TOOL_NAME, input);
+      const result = await invoke(tools, CALL_DYNAMIC_TOOL_NAME, input);
       expect(result.isError).toBe(true);
       for (const fragment of fragments) {
         expect(result.content).toContain(fragment);
@@ -396,11 +390,11 @@ describe("progressive tool disclosure", () => {
     // F3: `get_dynamic_tools({namespace, toolName})` returned the inner
     // `inputSchema` and nothing else, and the model then sent that inner shape
     // as the whole `call_dynamic_tool` input.
-    const root = await rootWithTools();
-    root.tools.register(dynamicTool("mail", "search"));
+    const { tools } = toolsFixture();
+    tools.register(dynamicTool("mail", "search"));
     const single = JSON.parse(
       (
-        await invoke(root, GET_DYNAMIC_TOOLS_NAME, {
+        await invoke(tools, GET_DYNAMIC_TOOLS_NAME, {
           namespace: "mail",
           toolName: "search",
         })
@@ -419,9 +413,9 @@ describe("progressive tool disclosure", () => {
   });
 
   test("prepares and executes the inner call through every registry hook", async () => {
-    const root = await rootWithTools();
+    const { hooks, tools } = toolsFixture();
     const order: string[] = [];
-    root.tools.register({
+    tools.register({
       ...dynamicTool("frockbot", "write_setup"),
       idempotent: true,
       execute: (input) => {
@@ -429,19 +423,16 @@ describe("progressive tool disclosure", () => {
         return Promise.resolve({ content: "written", isError: false });
       },
     });
-    root.on("tools/pre-execute", async (call, _context, next) => {
-      order.push(`pre:${call.name}`);
-      return next();
+    hooks.add({
+      prepareTool: async (call, _context, next) => {
+        order.push(`pre:${call.name}`);
+        return next();
+      },
+      toolResult: async (call, _result, _context, next) => {
+        order.push(`post:${call.name}`);
+        return next();
+      },
     });
-    root.on("tools/execute", async (call, _context, next) => {
-      order.push(`execute:${call.name}`);
-      return next();
-    });
-    root.on("tools/post-execute", async (call, _result, _context, next) => {
-      order.push(`post:${call.name}`);
-      return next();
-    });
-    root.on("tools/result", (call) => order.push(`result:${call.name}`));
 
     const outer: ToolCall = {
       id: "same-call-id",
@@ -453,7 +444,7 @@ describe("progressive tool disclosure", () => {
       },
     };
     const context = contextFor(outer);
-    const preparation = await root.tools.prepare(outer, context);
+    const preparation = await tools.prepare(outer, context);
     expect(preparation).toMatchObject({
       kind: "ready",
       idempotent: true,
@@ -464,36 +455,34 @@ describe("progressive tool disclosure", () => {
       },
     });
     if (preparation.kind !== "ready") throw new Error("call was denied");
-    expect(await root.tools.executePrepared(preparation, context)).toEqual({
+    expect(await tools.executePrepared(preparation, context)).toEqual({
       content: "written",
       isError: false,
     });
     expect(order).toEqual([
       "pre:write_setup",
-      "execute:write_setup",
       'body:{"value":"one"}',
       "post:write_setup",
-      "result:write_setup",
     ]);
   });
 
   test("requires call metadata for external namespaces and blocks non-ready ones", async () => {
-    const root = await rootWithTools();
-    root.tools.registerNamespace({
+    const { tools } = toolsFixture();
+    tools.registerNamespace({
       name: "mail",
       external: true,
       status: "ready",
     });
-    root.tools.register(dynamicTool("mail", "search"));
-    root.tools.registerNamespace({
+    tools.register(dynamicTool("mail", "search"));
+    tools.registerNamespace({
       name: "calendar",
       external: true,
       status: "needsAuth",
     });
-    root.tools.register(dynamicTool("calendar", "search"));
+    tools.register(dynamicTool("calendar", "search"));
 
     expect(
-      await invoke(root, CALL_DYNAMIC_TOOL_NAME, {
+      await invoke(tools, CALL_DYNAMIC_TOOL_NAME, {
         namespace: "mail",
         toolName: "search",
         arguments: {},
@@ -503,7 +492,7 @@ describe("progressive tool disclosure", () => {
       isError: true,
     });
     expect(
-      await invoke(root, CALL_DYNAMIC_TOOL_NAME, {
+      await invoke(tools, CALL_DYNAMIC_TOOL_NAME, {
         namespace: "mail",
         toolName: "search",
         arguments: { value: "ok" },
@@ -511,7 +500,7 @@ describe("progressive tool disclosure", () => {
       }),
     ).toEqual({ content: '{"value":"ok"}', isError: false });
     expect(
-      await invoke(root, CALL_DYNAMIC_TOOL_NAME, {
+      await invoke(tools, CALL_DYNAMIC_TOOL_NAME, {
         namespace: "calendar",
         toolName: "search",
         mcpDetails: { description: "Search calendar" },
@@ -523,15 +512,15 @@ describe("progressive tool disclosure", () => {
   });
 
   test("propagates an inner tool error as the meta-tool result", async () => {
-    const root = await rootWithTools();
-    root.tools.register({
+    const { tools } = toolsFixture();
+    tools.register({
       ...dynamicTool("frockbot", "fail"),
       execute: () =>
         Promise.resolve({ content: "inner failure", isError: true }),
     });
 
     expect(
-      await invoke(root, CALL_DYNAMIC_TOOL_NAME, {
+      await invoke(tools, CALL_DYNAMIC_TOOL_NAME, {
         namespace: "frockbot",
         toolName: "fail",
       }),
@@ -539,9 +528,9 @@ describe("progressive tool disclosure", () => {
   });
 
   test("renders an escaped prompt catalog and omits the block when empty", async () => {
-    const root = await rootWithTools(true);
+    const { tools, systemPrompt } = toolsFixture();
     expect(
-      (root.systemPrompt as PromptFixture).assemble({
+      systemPrompt.assemble({
         sessionId: "session",
         provider: "provider",
         model: "model",
@@ -549,14 +538,14 @@ describe("progressive tool disclosure", () => {
       }),
     ).resolves.toMatchObject({ text: "" });
 
-    root.tools.registerNamespace({
+    tools.registerNamespace({
       name: "mail&\"'work",
       status: "ready",
       useInstructions: 'Use <schema> & "call".\nThen invoke.',
     });
-    root.tools.register(dynamicTool("mail&\"'work", 'search<"mail'));
-    root.tools.register(dynamicTool("frockbot", "package_author"));
-    const assembly = await root.systemPrompt.assemble({
+    tools.register(dynamicTool("mail&\"'work", 'search<"mail'));
+    tools.register(dynamicTool("frockbot", "package_author"));
+    const assembly = await systemPrompt.assemble({
       sessionId: "session",
       provider: "provider",
       model: "model",
@@ -578,14 +567,14 @@ describe("progressive tool disclosure", () => {
   });
 
   test("rejects duplicate namespace/tool identities but permits the same bare name elsewhere", async () => {
-    const root = await rootWithTools();
-    root.tools.register(dynamicTool("mail-one", "search"));
-    root.tools.register(dynamicTool("mail-two", "search"));
-    expect(() =>
-      root.tools.register(dynamicTool("mail-one", "search")),
-    ).toThrow('tool "mail-one/search" is already registered');
-    root.tools.registerNamespace({ name: "mail-one" });
-    expect(() => root.tools.registerNamespace({ name: "mail-one" })).toThrow(
+    const { tools } = toolsFixture();
+    tools.register(dynamicTool("mail-one", "search"));
+    tools.register(dynamicTool("mail-two", "search"));
+    expect(() => tools.register(dynamicTool("mail-one", "search"))).toThrow(
+      'tool "mail-one/search" is already registered',
+    );
+    tools.registerNamespace({ name: "mail-one" });
+    expect(() => tools.registerNamespace({ name: "mail-one" })).toThrow(
       'tool namespace "mail-one" is already registered',
     );
   });
@@ -598,11 +587,11 @@ describe("the envelope discovery hands back", () => {
     // call without `mcpDetails.description`, while discovery's `callWith`
     // never mentioned the field — so the envelope offered was the envelope
     // refused, and no Applet could be created by chat at all.
-    const root = await rootWithTools();
-    root.tools.register(dynamicTool("applets", "applet_create"));
-    root.tools.registerNamespace({ name: "applets", status: "ready" });
+    const { tools } = toolsFixture();
+    tools.register(dynamicTool("applets", "applet_create"));
+    tools.registerNamespace({ name: "applets", status: "ready" });
 
-    const discovered = await invoke(root, GET_DYNAMIC_TOOLS_NAME, {
+    const discovered = await invoke(tools, GET_DYNAMIC_TOOLS_NAME, {
       namespace: "applets",
       toolName: "applet_create",
     });
@@ -614,7 +603,7 @@ describe("the envelope discovery hands back", () => {
     expect(envelope.input.mcpDetails).toBeUndefined();
 
     // The exact envelope, with only the placeholder arguments made real.
-    const dispatched = await invoke(root, CALL_DYNAMIC_TOOL_NAME, {
+    const dispatched = await invoke(tools, CALL_DYNAMIC_TOOL_NAME, {
       ...envelope.input,
       arguments: { value: "a todo list" },
     });
@@ -624,11 +613,11 @@ describe("the envelope discovery hands back", () => {
   });
 
   test("carries mcpDetails when the namespace really is external", async () => {
-    const root = await rootWithTools();
-    root.tools.register(dynamicTool("linear", "issue_create"));
-    root.tools.registerNamespace({ name: "linear", external: true });
+    const { tools } = toolsFixture();
+    tools.register(dynamicTool("linear", "issue_create"));
+    tools.registerNamespace({ name: "linear", external: true });
 
-    const discovered = await invoke(root, GET_DYNAMIC_TOOLS_NAME, {
+    const discovered = await invoke(tools, GET_DYNAMIC_TOOLS_NAME, {
       namespace: "linear",
       toolName: "issue_create",
     });
@@ -639,7 +628,7 @@ describe("the envelope discovery hands back", () => {
       description: "<one sentence saying why you are calling this>",
     });
 
-    const dispatched = await invoke(root, CALL_DYNAMIC_TOOL_NAME, {
+    const dispatched = await invoke(tools, CALL_DYNAMIC_TOOL_NAME, {
       ...envelope.input,
       arguments: { value: "an issue" },
       mcpDetails: { description: "Filing the bug the User just described." },
@@ -655,10 +644,10 @@ describe("a dynamic tool called by its bare name", () => {
     // `<dynamic_tool_namespaces>`, so the model reaches for it that way. The
     // refusal used to be `Unknown tool: applet_list` and nothing else — a dead
     // end for a tool that was right there.
-    const root = await rootWithTools();
-    root.tools.register(dynamicTool("applets", "applet_list"));
+    const { tools } = toolsFixture();
+    tools.register(dynamicTool("applets", "applet_list"));
 
-    const result = await invoke(root, "applet_list", {});
+    const result = await invoke(tools, "applet_list", {});
 
     expect(result.isError).toBe(true);
     expect(result.content).toContain("applet_list");
@@ -670,11 +659,11 @@ describe("a dynamic tool called by its bare name", () => {
   });
 
   test("names every namespace the bare name is in", async () => {
-    const root = await rootWithTools();
-    root.tools.register(dynamicTool("mail-one", "search"));
-    root.tools.register(dynamicTool("mail-two", "search"));
+    const { tools } = toolsFixture();
+    tools.register(dynamicTool("mail-one", "search"));
+    tools.register(dynamicTool("mail-two", "search"));
 
-    const result = await invoke(root, "search", {});
+    const result = await invoke(tools, "search", {});
 
     expect(result.isError).toBe(true);
     expect(result.content).toContain("mail-one");
@@ -682,21 +671,21 @@ describe("a dynamic tool called by its bare name", () => {
   });
 
   test("routes an external namespace with the mcpDetails its guard demands", async () => {
-    const root = await rootWithTools();
-    root.tools.register(dynamicTool("linear", "issue_create"));
-    root.tools.registerNamespace({ name: "linear", external: true });
+    const { tools } = toolsFixture();
+    tools.register(dynamicTool("linear", "issue_create"));
+    tools.registerNamespace({ name: "linear", external: true });
 
-    const result = await invoke(root, "issue_create", {});
+    const result = await invoke(tools, "issue_create", {});
 
     expect(result.content).toContain("mcpDetails");
     expect(result.content).toContain("description");
   });
 
   test("a name in no namespace still says only that it is unknown", async () => {
-    const root = await rootWithTools();
-    root.tools.register(dynamicTool("applets", "applet_list"));
+    const { tools } = toolsFixture();
+    tools.register(dynamicTool("applets", "applet_list"));
 
-    const result = await invoke(root, "not_a_tool", {});
+    const result = await invoke(tools, "not_a_tool", {});
 
     expect(result.content).toBe("Unknown tool: not_a_tool");
   });

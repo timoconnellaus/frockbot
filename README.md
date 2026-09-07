@@ -1,10 +1,10 @@
 # FrockBot
 
-FrockBot is an experimental Cordis-first application for persistent conversational bots. The hosted WebUI and cloud backend provide the product path.
+FrockBot is an experimental application for persistent conversational bots. The hosted WebUI and cloud backend provide the product path.
 
 The current vertical slice includes:
 
-- a hosted Cordis WebUI/Vue client composed from declared Package Contributions;
+- a hosted Vue client composed from declared Package Contributions;
 - backend-owned Bot Durable Objects running the event-sourced custom agent loop;
 - a durable User-owned Bot directory with Bot-owned settings, sessions, and composable sheep identities;
 - account-wide Package enablement and User-owned Connections;
@@ -261,8 +261,7 @@ packages/
   compose-typescript/ Type-check and transpile Compose plugin source against its stubs
   applet-sdk/       Applet authoring SDK, component kit, linter, and `applet` CLI
   client-core/      Shared client runtime helpers and brand typography stylesheet
-  client-ui/        Cordis-free reusable Vue primitives and surface registry
-  desktop-core/     Shared contracts for a native desktop shell
+  client-ui/        Reusable Vue primitives and surface registry
   computer-core/    Provider registry and capability interfaces for Computers
   computer-host-protocol/  Versioned v1 DTOs and decoders for the Computer host seam
   computer-host-runtime/   The Computer's on-Sprite layout, scripts, and Sprite naming
@@ -375,7 +374,7 @@ Memory has two user-private tiers: **agent** memory belongs to one bot, while **
 
 ## Security model
 
-Cordis contexts provide composition and lifecycle ownership, not security isolation. Generated or unreviewed executable plugins must run inside a restricted process, container, or micro-VM; untrusted rich UI must run in a sandboxed frame rather than the trusted WebUI context.
+The runtime's features and registries provide composition and lifecycle ownership, not security isolation. Generated or unreviewed executable plugins must run inside a restricted process, container, or micro-VM; untrusted rich UI must run in a sandboxed frame rather than the trusted WebUI context.
 
 ## Current limitations
 

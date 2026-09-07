@@ -1,5 +1,5 @@
-// The Shell Package owns the Composition a Turn runs on. First-party members
-// are the compiled Foundation runtime, mounted in the kernel isolate; members
+// The Shell Package owns the Composition a Turn runs on. First-party code is
+// the foundation runtime, ordinary imports in the kernel isolate; members
 // carrying an immutable artifact are Bot isolate members, mounted through the
 // kernel's `BotIsolateContributionHost` as a loaded Dynamic Worker with
 // `globalOutbound` disabled.
@@ -9,7 +9,6 @@ import {
   type FoundationRuntime,
   type RuntimeModelSelection,
 } from "@frockbot/agent-runtime/runtime";
-import { createFoundationRuntimeApplication } from "@frockbot/application-foundation/runtime";
 import type { AgentEffectAdmission } from "@frockbot/kernel-agent-loop/agent";
 import {
   CompositionMountFailureError,
@@ -270,7 +269,7 @@ function memberFailure(error: unknown): MemberVerificationFailure {
   };
 }
 
-/** Mounts one pinned generation as the Cordis root a single Turn runs on. */
+/** Mounts one pinned generation as the runtime a single Turn runs on. */
 export function createShellCompositionHost(
   options: ShellCompositionMountOptions,
 ): ShellCompositionHost {
@@ -281,7 +280,6 @@ export function createShellCompositionHost(
         agentId: options.botId,
         sessionId: options.sessionId,
         sessionEvents: options.sessionEvents,
-        application: await createFoundationRuntimeApplication(),
         composition: {
           generationId: generation.generationId,
           artifactSetHash: generation.artifactSetHash,
@@ -313,8 +311,8 @@ export function createShellCompositionHost(
           const host = new BotIsolateContributionHost({
             loader: isolate.loader,
             artifacts: isolate.artifacts,
-            tools: runtime.root.tools,
-            loop: runtime.root,
+            tools: runtime.services.tools,
+            hooks: runtime.services.hooks,
             userId: isolate.userId,
             botId: options.botId,
             sessionId: options.sessionId,
@@ -326,7 +324,7 @@ export function createShellCompositionHost(
               ? {}
               : { subagentRole: options.subagentRole }),
             recordHookFailure: async (failure) => {
-              const session = runtime.root.sessions.get(options.sessionId);
+              const session = runtime.services.sessions.get(options.sessionId);
               if (!session) {
                 throw new Error(
                   `session "${options.sessionId}" is unavailable for hook failure recording`,
@@ -379,7 +377,7 @@ export function createShellCompositionHost(
         const routing = options.applets;
         for (const tool of applet.tools) {
           unregisterApplets.push(
-            runtime.root.tools.register({
+            runtime.services.tools.register({
               name: tool.name,
               // Provenance travels into the catalog the model reads, so a Bot
               // can tell an Applet's tool from a Package's.
@@ -415,7 +413,6 @@ export function createShellCompositionHost(
 
       return {
         generation,
-        root: runtime.root,
         runtime,
         // First-party members run in the kernel isolate and have nothing to
         // health-check; an isolate member that failed to resolve, mount, or

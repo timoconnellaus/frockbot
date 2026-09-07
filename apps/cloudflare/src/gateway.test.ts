@@ -63,7 +63,6 @@ import type {
 import { RoutineStore } from "@frockbot/plugin-routines/store";
 import { RoutineInboxStore } from "@frockbot/plugin-routines/inbox-store";
 import { createMemoryRoutineStorageV1 } from "@frockbot/plugin-routines/testing";
-import { executeResidentBotTurn } from "./bot-runner.js";
 import {
   applicationDeploymentId,
   createGateway,

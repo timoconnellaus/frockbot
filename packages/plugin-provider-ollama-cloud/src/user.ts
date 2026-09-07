@@ -21,7 +21,6 @@ import type {
   UserSettingsStorage,
   UserSettingsTransaction,
 } from "@frockbot/plugin-settings/user";
-import type { Plugin } from "cordis";
 import {
   decodeOllamaApiBaseUrl,
   OllamaCloudClient,
@@ -2495,13 +2494,6 @@ export function createOllamaCloudUserBackendContribution(
   return new OllamaCloudUserBackendContribution(host);
 }
 
-export function createOllamaCloudUserBackendPlugin(
-  host: OllamaUserBackendHost,
-  lifecycle: { mount(value: OllamaCloudUserBackendContribution): () => void },
-): Plugin {
-  return () => lifecycle.mount(createOllamaCloudUserBackendContribution(host));
-}
-
 /**
  * What an application hands this Contribution: the Ollama Cloud Connection, under the
  * Package's own key so one wide host object can satisfy every Package's slice
@@ -2521,6 +2513,6 @@ export const userContribution = defineUserBackendContribution<
   OllamaCloudUserBackendContribution
 >({
   specifier: "@frockbot/plugin-provider-ollama-cloud/user",
-  create: (host, lifecycle) =>
-    createOllamaCloudUserBackendPlugin(host.ollamaCloud, lifecycle),
+  mount: (host, lifecycle) =>
+    lifecycle.mount(createOllamaCloudUserBackendContribution(host.ollamaCloud)),
 });

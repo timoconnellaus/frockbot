@@ -2,10 +2,9 @@
 // content-addressed artifact as a Dynamic Worker and registers the tools its
 // wrapper reports.
 //
-// It sits beside `LocalCordisContributionHost` because it is the *other*
-// execution host the constitution names — first-party Packages run in the
-// kernel isolate, everything else runs in a loaded Worker with
-// `globalOutbound` disabled and only the Bot's authority bindings.
+// First-party code is ordinary imports in the kernel isolate; everything else
+// runs in a loaded Worker with `globalOutbound` disabled and only the Bot's
+// authority bindings, and this is what loads it.
 //
 // Two loader behaviours are load-bearing here: `.get()` never throws, so mount
 // and `health()` are a single guarded phase; and a reused loader id silently
@@ -26,6 +25,7 @@ import {
   type IsolateHookInvocationV1,
   type LoopAgentRuntimeV1,
   type LoopEventPayloadMapV1,
+  type LoopHookListV1,
   type LoopEventReturnMapV1,
   type LoopStepSnapshotV1,
   loopToolExecutionContextSnapshotV1,
@@ -37,7 +37,6 @@ import {
   type ToolRegistration,
   type TurnTypeV1,
 } from "@frockbot/kernel-contracts";
-import type { Context } from "cordis";
 import { CompositionMountFailureError } from "./activation.ts";
 import { canonicalJson, sha256 } from "./compiler.ts";
 import type { CompositionMemberV1 } from "./generation.ts";
@@ -92,8 +91,8 @@ export interface BotIsolateHostOptions {
   artifacts: BotIsolateArtifactStore;
   /** Where the isolate's tools are registered — the kernel's tool surface. */
   tools: Pick<ToolRegistration, "register" | "registerNamespace">;
-  /** The mounted Bot/generation root. Isolate hook listeners live only here. */
-  loop: Context;
+  /** The Turn's hook list; an isolate's hooks are appended after the app's. */
+  hooks: LoopHookListV1;
   userId: string;
   botId: string;
   sessionId: string;
@@ -485,39 +484,44 @@ export class BotIsolateContributionHost implements ContributionHost {
     entrypoint: BotIsolateEntrypoint,
     event: BotIsolateHookEventNameV1,
   ): () => void {
-    const root = this.options.loop;
+    const hooks = this.options.hooks;
+    // Every hook lets the app's own policy run first and then offers the
+    // Bot-authored code the result, fenced to this Bot and this generation.
     switch (event) {
       case "agent/pre-step":
-        return root.on(event, async (agent, _inputs, turn, step, next) => {
-          const current = await next();
-          if (agent.botId !== this.options.botId) return current;
-          return this.invokeHook(
-            packageId,
-            entrypoint,
-            event,
-            {
-              step: this.stepSnapshot(agent, turn, step),
-              inputs: current.kind === "enter" ? current.inputs : _inputs,
-              decision: current,
-            },
-            current,
-          );
+        return hooks.add({
+          preStep: async (agent, inputs, turn, step, next) => {
+            const current = await next();
+            if (agent.botId !== this.options.botId) return current;
+            return this.invokeHook(
+              packageId,
+              entrypoint,
+              event,
+              {
+                step: this.stepSnapshot(agent, turn, step),
+                inputs: current.kind === "enter" ? current.inputs : inputs,
+                decision: current,
+              },
+              current,
+            );
+          },
         });
       case "system-prompt/assemble":
-        return root.on(event, async (context, next) => {
-          const current = await next();
-          return this.invokeHook(
-            packageId,
-            entrypoint,
-            event,
-            { context: structuredClone(context), assembly: current },
-            current,
-          );
+        return hooks.add({
+          assemblePrompt: async (context, next) => {
+            const current = await next();
+            return this.invokeHook(
+              packageId,
+              entrypoint,
+              event,
+              { context: structuredClone(context), assembly: current },
+              current,
+            );
+          },
         });
       case "agent/message-window":
-        return root.on(
-          event,
-          async (agent, _messages, turn, step, signal, next) => {
+        return hooks.add({
+          messageWindow: async (agent, _messages, turn, step, signal, next) => {
             const current = await next();
             if (agent.botId !== this.options.botId) return current;
             return this.invokeHook(
@@ -532,11 +536,10 @@ export class BotIsolateContributionHost implements ContributionHost {
               signal,
             );
           },
-        );
+        });
       case "agent/tool-exposure":
-        return root.on(
-          event,
-          async (agent, _tools, turn, step, signal, next) => {
+        return hooks.add({
+          toolExposure: async (agent, _tools, turn, step, signal, next) => {
             const current = await next();
             if (agent.botId !== this.options.botId) return current;
             return this.invokeHook(
@@ -548,55 +551,65 @@ export class BotIsolateContributionHost implements ContributionHost {
               signal,
             );
           },
-        );
+        });
       case "tools/pre-execute":
-        return root.on(event, async (call, context, next) => {
-          const current = await next();
-          if (
-            context.botId !== this.options.botId ||
-            context.compositionGenerationId !== this.options.generationId
-          ) {
-            return current;
-          }
-          return this.invokeHook(
-            packageId,
-            entrypoint,
-            event,
-            {
-              call,
-              context: loopToolExecutionContextSnapshotV1(context),
-              preparation: current,
-            },
-            current,
-            context.signal,
-          );
+        return hooks.add({
+          prepareTool: async (call, context, next) => {
+            const current = await next();
+            if (
+              context.botId !== this.options.botId ||
+              context.compositionGenerationId !== this.options.generationId
+            ) {
+              return current;
+            }
+            return this.invokeHook(
+              packageId,
+              entrypoint,
+              event,
+              {
+                call,
+                context: loopToolExecutionContextSnapshotV1(context),
+                preparation: current,
+              },
+              current,
+              context.signal,
+            );
+          },
         });
       case "tools/post-execute":
-        return root.on(event, async (call, _result, context, next) => {
-          const current = await next();
-          if (
-            context.botId !== this.options.botId ||
-            context.compositionGenerationId !== this.options.generationId
-          ) {
-            return current;
-          }
-          return this.invokeHook(
-            packageId,
-            entrypoint,
-            event,
-            {
-              call,
-              context: loopToolExecutionContextSnapshotV1(context),
-              result: current,
-            },
-            current,
-            context.signal,
-          );
+        return hooks.add({
+          toolResult: async (call, _result, context, next) => {
+            const current = await next();
+            if (
+              context.botId !== this.options.botId ||
+              context.compositionGenerationId !== this.options.generationId
+            ) {
+              return current;
+            }
+            return this.invokeHook(
+              packageId,
+              entrypoint,
+              event,
+              {
+                call,
+                context: loopToolExecutionContextSnapshotV1(context),
+                result: current,
+              },
+              current,
+              context.signal,
+            );
+          },
         });
       case "agent/step-continuation":
-        return root.on(
-          event,
-          async (agent, _decision, turn, step, signal, next) => {
+        return hooks.add({
+          stepContinuation: async (
+            agent,
+            _decision,
+            turn,
+            step,
+            signal,
+            next,
+          ) => {
             const current = await next();
             if (agent.botId !== this.options.botId) return current;
             return this.invokeHook(
@@ -611,7 +624,7 @@ export class BotIsolateContributionHost implements ContributionHost {
               signal,
             );
           },
-        );
+        });
     }
   }
 

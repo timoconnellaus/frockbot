@@ -1,13 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { SystemPromptRegistry } from "@frockbot/plugin-prompt";
-import { ToolRegistry } from "@frockbot/plugin-tools";
+import { ComputerError, type ComputerProvider } from "@frockbot/computer-core";
 import {
-  ComputerError,
-  ComputerRegistry,
-  type ComputerProvider,
-} from "@frockbot/computer-core";
-import {
-  createPluginHarness,
+  type AgentRuntimeHarness,
+  createAgentRuntimeHarness,
   verifyPluginPackage,
 } from "@frockbot/plugin-testkit";
 import { SessionStore } from "@frockbot/kernel-contracts";
@@ -15,13 +10,13 @@ import manifest from "../frockbot.json" with { type: "json" };
 import packageJson from "../package.json" with { type: "json" };
 import {
   COMPUTER_OVERLOADED_TOOL_MESSAGE_V1,
-  createComputerAgentPlugin,
+  createComputerAgentFeature,
   HUMAN_CONTROL_PROMPT_LINE,
 } from "./agent.js";
 import { COMPUTER_CONTROL_RECORD_KEY } from "./control-record.js";
 
 async function execute(
-  harness: Awaited<ReturnType<typeof createPluginHarness>>,
+  harness: AgentRuntimeHarness,
   name: string,
   input: unknown,
 ) {
@@ -34,12 +29,12 @@ async function execute(
     effectId: "tool:1:1:0",
     signal: new AbortController().signal,
   };
-  const prepared = await harness.root.tools.prepare(
+  const prepared = await harness.tools.prepare(
     { id: crypto.randomUUID(), name, input },
     context,
   );
   if (prepared.kind !== "ready") throw new Error(prepared.result.content);
-  return harness.root.tools.executePrepared(prepared, context);
+  return harness.tools.executePrepared(prepared, context);
 }
 
 describe("computer agent contribution", () => {
@@ -76,15 +71,10 @@ describe("computer agent contribution", () => {
         };
       },
     };
-    const harness = await createPluginHarness([
-      ComputerRegistry,
-      ToolRegistry,
-      SystemPromptRegistry,
-      SessionStore,
-    ]);
-    harness.root.computers.register(provider);
+    const harness = createAgentRuntimeHarness();
+    harness.computers.register(provider);
     await harness.mount(
-      createComputerAgentPlugin({
+      createComputerAgentFeature({
         userId: "user-1",
         defaultProviderId: "fixture",
       }),
@@ -134,15 +124,10 @@ describe("computer agent contribution", () => {
         close: () => Promise.resolve(),
       }),
     };
-    const harness = await createPluginHarness([
-      ComputerRegistry,
-      ToolRegistry,
-      SystemPromptRegistry,
-      SessionStore,
-    ]);
-    harness.root.computers.register(provider);
+    const harness = createAgentRuntimeHarness();
+    harness.computers.register(provider);
     await harness.mount(
-      createComputerAgentPlugin({
+      createComputerAgentFeature({
         userId: "user-1",
         defaultProviderId: "fixture",
       }),
@@ -212,15 +197,10 @@ describe("computer agent contribution", () => {
         close: () => Promise.resolve(),
       }),
     };
-    const harness = await createPluginHarness([
-      ComputerRegistry,
-      ToolRegistry,
-      SystemPromptRegistry,
-      SessionStore,
-    ]);
-    harness.root.computers.register(provider);
+    const harness = createAgentRuntimeHarness();
+    harness.computers.register(provider);
     await harness.mount(
-      createComputerAgentPlugin({
+      createComputerAgentFeature({
         userId: "user-1",
         defaultProviderId: "fixture",
       }),
@@ -276,15 +256,10 @@ describe("computer agent contribution", () => {
         close: () => Promise.resolve(),
       }),
     };
-    const harness = await createPluginHarness([
-      ComputerRegistry,
-      ToolRegistry,
-      SystemPromptRegistry,
-      SessionStore,
-    ]);
-    harness.root.computers.register(provider);
+    const harness = createAgentRuntimeHarness();
+    harness.computers.register(provider);
     await harness.mount(
-      createComputerAgentPlugin({
+      createComputerAgentFeature({
         userId: "user-1",
         defaultProviderId: "fixture",
       }),
@@ -317,15 +292,10 @@ describe("computer agent contribution", () => {
           close: () => Promise.resolve(),
         }),
       };
-      const harness = await createPluginHarness([
-        ComputerRegistry,
-        ToolRegistry,
-        SystemPromptRegistry,
-        SessionStore,
-      ]);
-      harness.root.computers.register(provider);
+      const harness = createAgentRuntimeHarness();
+      harness.computers.register(provider);
       await harness.mount(
-        createComputerAgentPlugin({
+        createComputerAgentFeature({
           userId: "user-1",
           defaultProviderId: "fixture",
         }),
@@ -357,14 +327,9 @@ describe("computer agent contribution", () => {
       ],
     ]);
     let now = new Date("2026-09-02T00:00:30.000Z");
-    const harness = await createPluginHarness([
-      ComputerRegistry,
-      ToolRegistry,
-      SystemPromptRegistry,
-      SessionStore,
-    ]);
+    const harness = createAgentRuntimeHarness();
     await harness.mount(
-      createComputerAgentPlugin({
+      createComputerAgentFeature({
         userId: "user-1",
         defaultProviderId: "fixture",
         controlRecords: {
@@ -374,18 +339,13 @@ describe("computer agent contribution", () => {
         },
       }),
     );
-    const session = harness.root.sessions.create("session-1");
+    const session = harness.sessions.create("session-1");
     const preStep = (turn: number) =>
-      harness.root.waterfall(
-        "agent/pre-step",
-        { session } as never,
-        [],
-        turn,
-        1,
-        () => Promise.resolve({ kind: "enter" as const, inputs: [] }),
+      harness.hooks.preStep({ session } as never, [], turn, 1, () =>
+        Promise.resolve({ kind: "enter" as const, inputs: [] }),
       );
     const assemble = () =>
-      harness.root.systemPrompt.assemble({
+      harness.systemPrompt.assemble({
         sessionId: "session-1",
         provider: "fixture",
         model: "fixture",
@@ -432,15 +392,10 @@ describe("computer agent contribution", () => {
         close: () => Promise.resolve(),
       }),
     };
-    const harness = await createPluginHarness([
-      ComputerRegistry,
-      ToolRegistry,
-      SystemPromptRegistry,
-      SessionStore,
-    ]);
-    harness.root.computers.register(provider);
+    const harness = createAgentRuntimeHarness();
+    harness.computers.register(provider);
     await harness.mount(
-      createComputerAgentPlugin({
+      createComputerAgentFeature({
         userId: "user-1",
         defaultProviderId: "fixture",
       }),
@@ -456,25 +411,20 @@ describe("computer agent contribution", () => {
   });
 
   test("an unconfigured deployment offers no Computer tool and no Computer prompt", async () => {
-    const harness = await createPluginHarness([
-      ComputerRegistry,
-      ToolRegistry,
-      SystemPromptRegistry,
-      SessionStore,
-    ]);
+    const harness = createAgentRuntimeHarness();
     await harness.mount(
-      createComputerAgentPlugin({
+      createComputerAgentFeature({
         userId: "user-1",
         defaultProviderId: "fixture",
         configured: false,
       }),
     );
 
-    const registered = harness.root.tools.registeredNames?.() ?? [];
+    const registered = harness.tools.registeredNames?.() ?? [];
     expect(registered.filter((name) => name.startsWith("computer_"))).toEqual(
       [],
     );
-    const prompt = await harness.root.systemPrompt.assemble({
+    const prompt = await harness.systemPrompt.assemble({
       sessionId: "session-1",
       provider: "fixture",
       model: "fixture",

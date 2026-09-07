@@ -51,10 +51,9 @@ async function buildModelRequestV1(
   step: number,
   signal: AbortSignal,
 ): Promise<NormalizedModelRequest> {
-  const { ctx, session, options } = runtime;
+  const { services, session, options } = runtime;
   const proposedMessages = session.deriveMessages();
-  const messages = await ctx.waterfall(
-    "agent/message-window",
+  const messages = await services.hooks.messageWindow(
     runtime.agent,
     proposedMessages,
     turn,
@@ -62,14 +61,13 @@ async function buildModelRequestV1(
     signal,
     () => Promise.resolve(proposedMessages),
   );
-  const proposedTools = ctx.tools.schemas({
+  const proposedTools = services.tools.schemas({
     turnType: runtime.turnType,
     ...(runtime.subagentRole === undefined
       ? {}
       : { subagentRole: runtime.subagentRole }),
   });
-  const tools = await ctx.waterfall(
-    "agent/tool-exposure",
+  const tools = await services.hooks.toolExposure(
     runtime.agent,
     proposedTools,
     turn,
@@ -88,7 +86,7 @@ async function buildModelRequestV1(
       ? { modelBinding: structuredClone(options.modelBinding) }
       : {}),
   };
-  return ctx.waterfall("agent/request", runtime.agent, proposed, signal, () =>
+  return services.hooks.request(runtime.agent, proposed, signal, () =>
     Promise.resolve(proposed),
   );
 }
@@ -116,9 +114,9 @@ export async function requestModelV1(
   signal: AbortSignal,
   pending?: NormalizedModelRequest,
 ): Promise<ModelResponse> {
-  const { ctx, session, options } = runtime;
+  const { services, session, options } = runtime;
   validateSettledToolOccurrenceJournal(session.events);
-  const assembly = await ctx.systemPrompt.assemble({
+  const assembly = await services.systemPrompt.assemble({
     sessionId: session.id,
     provider: options.provider,
     model: options.model,
@@ -179,8 +177,7 @@ export async function requestModelV1(
       // A Package can refuse a planned retry, or replace a permanent failure
       // with a provider-owned fallback. It cannot turn a permanent failure
       // into another attempt against the same model.
-      const action = await ctx.waterfall(
-        "agent/request-error",
+      const action = await services.hooks.requestError(
         runtime.agent,
         error,
         signal,
@@ -201,7 +198,6 @@ export async function requestModelV1(
         delayMs,
       });
       await session.flush();
-      ctx.emit("agent/error", runtime.agent, error);
       await runtime.retry.sleep(delayMs, signal);
       // A fallback is a different call — another provider, another binding —
       // so it gets its own key rather than inheriting this one's.
@@ -233,7 +229,7 @@ export async function consumeStreamV1(
     | undefined;
   const startedAt = Date.now();
   try {
-    for await (const event of runtime.ctx.llm.stream(request, signal)) {
+    for await (const event of runtime.services.llm.stream(request, signal)) {
       signal.throwIfAborted();
       if (event.type === "usage") usage = structuredClone(event.usage);
       applyStreamEventV1(

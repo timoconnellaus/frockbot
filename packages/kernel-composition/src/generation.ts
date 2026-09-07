@@ -2,7 +2,6 @@
 // a Bot mounts. The kernel declares the record, its exact v1 codec, and the
 // bootstrap generation; the Durable Object authority owns the storage and the
 // Package that mounts it owns the host.
-import type { Context } from "cordis";
 import { canonicalJson, sha256 } from "./compiler.ts";
 
 export type PackageProvenanceV1 =
@@ -239,7 +238,6 @@ export interface CompositionStore {
 
 export interface MountedComposition {
   readonly generation: CompositionGenerationV1;
-  readonly root: Context;
   verify(signal: AbortSignal): Promise<void>;
   dispose(): Promise<void>;
 }

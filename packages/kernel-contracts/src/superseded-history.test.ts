@@ -16,7 +16,7 @@ import type { SessionEvent } from "./types.js";
 const timestamp = "2026-09-03T00:00:00.000Z";
 
 function session(): Session {
-  return new Session("user-1:primary", () => {});
+  return new Session("user-1:primary");
 }
 
 /**
@@ -137,7 +137,6 @@ describe("the next Turn's request derives from what the superseded Turn recorded
     expect(target.deriveMessages()).toEqual(messages);
     const replayed = new Session(
       "user-1:primary",
-      () => {},
       target.events as readonly SessionEvent[],
     );
     expect(replayed.deriveMessages()).toEqual(messages);

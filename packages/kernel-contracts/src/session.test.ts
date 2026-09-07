@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { Context } from "cordis";
 import {
   SESSION_ATTACHMENT_MAX_BASE64,
   SessionStore,
@@ -14,7 +13,7 @@ import {
   turnFailureMessage,
 } from "./types.js";
 
-const roots: Context[] = [];
+const stores: SessionStore[] = [];
 const timestamp = "2026-08-29T00:00:00.000Z";
 
 function durableEvents(inputs: SessionEventInput[]): SessionEvent[] {
@@ -25,18 +24,17 @@ function durableEvents(inputs: SessionEventInput[]): SessionEvent[] {
   })) as SessionEvent[];
 }
 
-async function createStore(
+function createStore(
   initialSessions?: Readonly<Record<string, readonly SessionEvent[]>>,
   config: Omit<SessionStoreConfig, "initialSessions"> = {},
-): Promise<Context> {
-  const root = new Context();
-  roots.push(root);
-  await root.plugin(SessionStore, { ...config, initialSessions });
-  return root;
+): SessionStore {
+  const store = new SessionStore({ ...config, initialSessions });
+  stores.push(store);
+  return store;
 }
 
-afterEach(async () => {
-  await Promise.all(roots.splice(0).map((root) => root.fiber.dispose()));
+afterEach(() => {
+  for (const store of stores.splice(0)) store.dispose();
 });
 
 test("a model retry is a small exact durable session event", () => {
@@ -321,8 +319,8 @@ describe("SessionStore", () => {
   );
 
   test("replays the exact request under its recorded Composition generation", async () => {
-    const root = await createStore();
-    const session = root.sessions.create("session-1");
+    const store = createStore();
+    const session = store.create("session-1");
     const request: NormalizedModelRequest = {
       requestId: "request-1",
       provider: "scripted",
@@ -442,7 +440,7 @@ describe("SessionStore", () => {
 
   test("flushes appended events through the durable seam in order", async () => {
     const persisted: Array<{ sessionId: string; types: string[] }> = [];
-    const root = await createStore(undefined, {
+    const store = createStore(undefined, {
       persistEvents: async (sessionId, events) => {
         await Promise.resolve();
         persisted.push({
@@ -451,7 +449,7 @@ describe("SessionStore", () => {
         });
       },
     });
-    const session = root.sessions.create("durable-session");
+    const session = store.create("durable-session");
     session.appendBatch([
       { type: "turn/start", turn: 1 },
       { type: "turn/end", turn: 1, outcome: "completed" },
@@ -471,7 +469,7 @@ describe("SessionStore", () => {
   test("a failed durable write is reported and does not stop later writes", async () => {
     const persisted: string[][] = [];
     let failNext = true;
-    const root = await createStore(undefined, {
+    const store = createStore(undefined, {
       persistEvents: async (_sessionId, events) => {
         await Promise.resolve();
         if (failNext) {
@@ -481,7 +479,7 @@ describe("SessionStore", () => {
         persisted.push(events.map((event) => event.type));
       },
     });
-    const session = root.sessions.create("durable-session");
+    const session = store.create("durable-session");
 
     // The Turn fails loudly rather than carrying on in memory over a log that
     // silently stopped being written.
@@ -495,23 +493,23 @@ describe("SessionStore", () => {
   });
 
   test("rehydrates a session and continues its sequence", async () => {
-    const firstRoot = await createStore();
-    const first = firstRoot.sessions.create("durable-session");
+    const firstStore = createStore();
+    const first = firstStore.create("durable-session");
     first.appendBatch([
       { type: "turn/start", turn: 1 },
       { type: "turn/end", turn: 1, outcome: "completed" },
     ]);
     const stored = structuredClone([...first.events]);
 
-    const secondRoot = await createStore({ "durable-session": stored });
-    const rehydrated = secondRoot.sessions.create("durable-session");
+    const secondStore = createStore({ "durable-session": stored });
+    const rehydrated = secondStore.create("durable-session");
     expect(rehydrated.events).toEqual(stored);
     expect(rehydrated.nextTurn()).toBe(2);
     expect(rehydrated.append({ type: "turn/start", turn: 2 }).seq).toBe(3);
   });
 
   test("rejects a non-contiguous durable event log", async () => {
-    const root = await createStore({
+    const store = createStore({
       broken: [
         {
           type: "session/created",
@@ -521,14 +519,12 @@ describe("SessionStore", () => {
         },
       ],
     });
-    expect(() => root.sessions.create("broken")).toThrow(
-      "non-contiguous event log",
-    );
+    expect(() => store.create("broken")).toThrow("non-contiguous event log");
   });
 
   test("preserves open tool intents for effect reconciliation on resume", async () => {
-    const root = await createStore();
-    const session = root.sessions.create("session-resume-tool");
+    const store = createStore();
+    const session = store.create("session-resume-tool");
     session.appendBatch([
       { type: "turn/start", turn: 1 },
       { type: "input/admitted", messageId: "message-1", turn: 1 },
@@ -566,8 +562,8 @@ describe("SessionStore", () => {
   });
 
   test("reconciles unmatched tools, steps, and turns in order", async () => {
-    const root = await createStore();
-    const session = root.sessions.create("session-2");
+    const store = createStore();
+    const session = store.create("session-2");
     session.appendBatch([
       { type: "turn/start", turn: 1 },
       {
@@ -616,11 +612,11 @@ describe("SessionStore", () => {
     expect(session.reconcileInterrupted()).toEqual([]);
   });
 
-  test("disposes all live sessions with its Cordis fiber", async () => {
-    const root = await createStore();
-    const session = root.sessions.create("session-3");
-    await root.fiber.dispose();
-    roots.splice(roots.indexOf(root), 1);
+  test("disposes all live sessions when the store is disposed", () => {
+    const store = createStore();
+    const session = store.create("session-3");
+    store.dispose();
+    stores.splice(stores.indexOf(store), 1);
 
     expect(session.disposed).toBe(true);
     expect(session.events.at(-1)?.type).toBe("session/disposed");
@@ -777,8 +773,8 @@ describe("resolved attachment bytes", () => {
   };
 
   async function sessionWithScreenshot() {
-    const root = await createStore();
-    const session = root.sessions.create("session-1");
+    const store = createStore();
+    const session = store.create("session-1");
     session.append({ type: "turn/start", turn: 1 });
     session.append({ type: "step/start", turn: 1, step: 1 });
     session.append({

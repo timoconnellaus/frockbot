@@ -1,4 +1,3 @@
-import type { Plugin } from "cordis";
 import {
   BotNotFoundError,
   FlockConflictError,
@@ -274,15 +273,6 @@ export function createFlockBackendContribution(
   };
 }
 
-export namespace createFlockBackendContribution {
-  export function plugin(
-    host: FlockGatewayHost,
-    lifecycle: { mount(value: FlockBackendRouteContribution): () => void },
-  ): Plugin {
-    return () => lifecycle.mount(createFlockBackendContribution(host));
-  }
-}
-
 /**
  * The manifest's gateway `backend` entry, resolved by specifier. The
  * application looks this descriptor up in its Contribution table; it never
@@ -293,5 +283,6 @@ export const backendContribution = defineGatewayContribution<
   FlockBackendRouteContribution
 >({
   specifier: "@frockbot/plugin-flock/backend",
-  create: createFlockBackendContribution.plugin,
+  mount: (host, lifecycle) =>
+    lifecycle.mount(createFlockBackendContribution(host)),
 });

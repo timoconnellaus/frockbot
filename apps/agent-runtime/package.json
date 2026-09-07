@@ -16,15 +16,14 @@
     "@frockbot/kernel-agent-loop": "workspace:*",
     "@frockbot/kernel-composition": "workspace:*",
     "@frockbot/kernel-contracts": "workspace:*",
-    "@frockbot/plugin-memory": "workspace:*",
+    "@frockbot/plugin-credentials": "workspace:*",
     "@frockbot/plugin-models": "workspace:*",
     "@frockbot/plugin-prompt": "workspace:*",
     "@frockbot/plugin-tools": "workspace:*",
-    "@frockbot/protocol": "workspace:*",
-    "@frockbot/provider-openai-compatible": "workspace:*",
-    "cordis": "4.0.0-rc.8"
+    "@frockbot/provider-openai-compatible": "workspace:*"
   },
   "devDependencies": {
+    "@frockbot/plugin-memory": "workspace:*",
     "@types/bun": "1.4.0",
     "@types/node": "26.2.0",
     "typescript": "^7.0.2"

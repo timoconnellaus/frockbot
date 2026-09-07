@@ -21,10 +21,11 @@
 // before an external side effect" exempts effects an interface declares
 // read-only, and this is one.
 import type {
+  AgentRuntimeV1,
+  RuntimeFeatureV1,
   ToolDefinition,
   ToolExecutionResult,
 } from "@frockbot/kernel-contracts";
-import type { Plugin } from "cordis";
 import { classifyWebFetchUrlV1, type SsrfRefusalReasonV1 } from "./ssrf.js";
 
 export type WebFetchFn = (
@@ -465,16 +466,14 @@ export function createWebFetchToolDefinitionV1(
 }
 
 /** Mount `web_fetch` into a Bot's runtime. */
-export function createWebRuntimePlugin(
+export function createWebFeature(
   config: WebFetchConfigV1 = {},
-): Plugin.Function {
-  const plugin: Plugin.Function = (ctx) =>
-    ctx.tools.register(createWebFetchToolDefinitionV1(config), {
+): RuntimeFeatureV1<AgentRuntimeV1> {
+  return (runtime) =>
+    runtime.tools.register(createWebFetchToolDefinitionV1(config), {
       admissionCeiling: ["chat", "automation", "subagent"],
       subagentRoleCeiling: ["executor"],
     });
-  plugin.inject = ["tools"];
-  return plugin;
 }
 
 /**
@@ -489,14 +488,14 @@ export function createConfiguredWebFetchRuntimeContribution(config: {
     connectionId?: string;
   };
   fetch?: WebFetchFn;
-}): Plugin.Function | undefined {
+}): RuntimeFeatureV1<AgentRuntimeV1> | undefined {
   if (
     config.capability.packageId !== "web" ||
     config.capability.capabilityId !== "web-fetch"
   ) {
     return undefined;
   }
-  return createWebRuntimePlugin(config.fetch ? { fetch: config.fetch } : {});
+  return createWebFeature(config.fetch ? { fetch: config.fetch } : {});
 }
 
-export default createWebRuntimePlugin;
+export default createWebFeature;

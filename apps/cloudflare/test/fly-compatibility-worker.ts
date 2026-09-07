@@ -3,10 +3,9 @@ import { type SessionEvent } from "@frockbot/kernel-contracts";
 import { ComputerRegistry } from "@frockbot/computer-core";
 import {
   ComputerHostClient,
-  createFlySpriteProviderPlugin,
+  createFlySpriteProviderFeature,
   FlySpriteComputer,
 } from "@frockbot/plugin-fly-sprite";
-import { Context } from "cordis";
 import {
   BotDurableAuthority,
   createStoredRunCodecV1,
@@ -438,17 +437,16 @@ export class WorkerdBotState extends BotState {
       this.backendEnv,
     );
     if (!host?.writer) throw new Error("no Memory surface is bound");
-    const root = new Context();
-    await root.plugin(SessionStore);
+    const sessions = new SessionStore();
     const sessionId = `${input.userId}:${input.botId}`;
-    const session = root.sessions.create(sessionId);
+    const session = sessions.create(sessionId);
     session.appendBatch([
       { type: "turn/start", turn: 1 },
       { type: "step/start", turn: 1, step: 1 },
     ]);
     const tool = createMemoryWriteTool(
       { ...host, writer: host.writer },
-      root.sessions,
+      sessions,
       new MemoryProjection(host),
     );
     const result = await tool.execute(
@@ -469,7 +467,7 @@ export class WorkerdBotState extends BotState {
       },
     );
     const events = [...session.events];
-    await root.fiber.dispose();
+    sessions.dispose();
     return { ...result, events };
   }
 
@@ -837,7 +835,6 @@ export class CompositionProbe extends DurableObject {
   private mounted(generation: CompositionGenerationV1): MountedComposition {
     return {
       generation,
-      root: undefined as never,
       verify: () => Promise.resolve(),
       dispose: () => Promise.resolve(),
     };
@@ -1086,29 +1083,23 @@ export class CompositionProbe extends DurableObject {
  * The live probe it used to carry is retired with the path it probed.
  */
 export class FlyCompatibilityProbe extends DurableObject<FlyCompatibilityEnv> {
-  private root: Context | undefined;
+  private computers: ComputerRegistry | undefined;
 
-  private async createRoot(spriteName: string): Promise<Context> {
-    const root = new Context();
-    try {
-      await root.plugin(ComputerRegistry);
-      const computer = new FlySpriteComputer({
-        spriteName,
-        identity: { userId: "workerd" },
-        host: (identity, tenant) =>
-          new ComputerHostClient({
-            fetcher: this.env.COMPUTER_HOST,
-            hostToken: this.env.COMPUTER_HOST_TOKEN,
-            identity,
-            tenant,
-          }),
-      });
-      await root.plugin(createFlySpriteProviderPlugin(computer));
-      return root;
-    } catch (error) {
-      await root.fiber.dispose();
-      throw error;
-    }
+  private async createComputers(spriteName: string): Promise<ComputerRegistry> {
+    const computers = new ComputerRegistry();
+    const computer = new FlySpriteComputer({
+      spriteName,
+      identity: { userId: "workerd" },
+      host: (identity, tenant) =>
+        new ComputerHostClient({
+          fetcher: this.env.COMPUTER_HOST,
+          hostToken: this.env.COMPUTER_HOST_TOKEN,
+          identity,
+          tenant,
+        }),
+    });
+    await createFlySpriteProviderFeature(computer)({ computers });
+    return computers;
   }
 
   /**
@@ -1124,10 +1115,12 @@ export class FlyCompatibilityProbe extends DurableObject<FlyCompatibilityEnv> {
     | { ok: true; display: string; mediaType: string; bytesBase64: string }
     | { ok: false; message: string }
   > {
-    this.root ??= await this.createRoot("frockbot-workerd-compatibility");
+    this.computers ??= await this.createComputers(
+      "frockbot-workerd-compatibility",
+    );
     const identity = { userId: "workerd" };
-    this.root.computers.assign(identity, "fly-sprite");
-    const computer = await this.root.computers.open(identity, { botId });
+    this.computers.assign(identity, "fly-sprite");
+    const computer = await this.computers.open(identity, { botId });
     try {
       const captured = await computer.screenshot!.capture();
       let binary = "";
@@ -1174,10 +1167,12 @@ export class FlyCompatibilityProbe extends DurableObject<FlyCompatibilityEnv> {
       }
     | { ok: false; message: string }
   > {
-    this.root ??= await this.createRoot("frockbot-workerd-compatibility");
+    this.computers ??= await this.createComputers(
+      "frockbot-workerd-compatibility",
+    );
     const identity = { userId: "workerd" };
-    this.root.computers.assign(identity, "fly-sprite");
-    const computer = await this.root.computers.open(identity, { botId });
+    this.computers.assign(identity, "fly-sprite");
+    const computer = await this.computers.open(identity, { botId });
     try {
       const report = await computer.doctor!.run();
       return { ok: true, ...report };
@@ -1216,10 +1211,12 @@ export class FlyCompatibilityProbe extends DurableObject<FlyCompatibilityEnv> {
     logTail?: string;
     message?: string;
   }> {
-    this.root ??= await this.createRoot("frockbot-workerd-compatibility");
+    this.computers ??= await this.createComputers(
+      "frockbot-workerd-compatibility",
+    );
     const identity = { userId: "workerd" };
-    this.root.computers.assign(identity, "fly-sprite");
-    const computer = await this.root.computers.open(identity, {
+    this.computers.assign(identity, "fly-sprite");
+    const computer = await this.computers.open(identity, {
       botId: input.botId,
     });
     try {
@@ -1288,10 +1285,12 @@ export class FlyCompatibilityProbe extends DurableObject<FlyCompatibilityEnv> {
   }
 
   async mountProvider(): Promise<FlyMountResult> {
-    this.root ??= await this.createRoot("frockbot-workerd-compatibility");
+    this.computers ??= await this.createComputers(
+      "frockbot-workerd-compatibility",
+    );
     const identity = { userId: "workerd" };
-    const assignment = this.root.computers.assign(identity, "fly-sprite");
-    const computer = await this.root.computers.open(identity, {
+    const assignment = this.computers.assign(identity, "fly-sprite");
+    const computer = await this.computers.open(identity, {
       botId: "compatibility",
     });
     await computer.close();

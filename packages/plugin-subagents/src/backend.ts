@@ -16,7 +16,6 @@
 // an execution host with no route of its own, and a task's summary reaches the
 // User through this list and through the parent's transcript — never as a
 // second conversation.
-import type { Plugin } from "cordis";
 import { isTaskIdV1, SubagentDecodeError } from "./records.js";
 import {
   decodeTaskListViewV1,
@@ -184,15 +183,6 @@ export function createSubagentsBackendContribution(
   };
 }
 
-export namespace createSubagentsBackendContribution {
-  export function plugin(
-    host: SubagentsGatewayHost,
-    lifecycle: { mount(value: SubagentsBackendRouteContribution): () => void },
-  ): Plugin {
-    return () => lifecycle.mount(createSubagentsBackendContribution(host));
-  }
-}
-
 /**
  * The manifest's gateway `backend` entry, resolved by specifier. The
  * application looks this descriptor up in its Contribution table; it never
@@ -203,5 +193,6 @@ export const backendContribution = defineGatewayContribution<
   SubagentsBackendRouteContribution
 >({
   specifier: "@frockbot/plugin-subagents/backend",
-  create: createSubagentsBackendContribution.plugin,
+  mount: (host, lifecycle) =>
+    lifecycle.mount(createSubagentsBackendContribution(host)),
 });

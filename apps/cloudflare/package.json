@@ -50,7 +50,6 @@
     "@frockbot/template-core": "workspace:*",
     "@frockbot/workspace-store": "workspace:*",
     "better-auth": "1.7.2",
-    "cordis": "4.0.0-rc.8",
     "vue": "3.5.41",
     "@frockbot/protocol-schemas": "workspace:*"
   },

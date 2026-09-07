@@ -48,7 +48,7 @@ function settledEventsV1(
   const latest = [...previous, ...decoded].map(decodeSessionEvent);
   let repairs: SessionEvent[] = [];
   try {
-    repairs = new Session(sessionId, () => {}, latest).reconcileInterrupted();
+    repairs = new Session(sessionId, latest).reconcileInterrupted();
   } catch {
     repairs = [];
   }

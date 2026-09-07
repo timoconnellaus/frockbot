@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { Context, Service } from "cordis";
-import { ToolRegistry } from "@frockbot/plugin-tools/agent";
+import { createAgentRuntimeHarness } from "@frockbot/plugin-testkit";
 import type { ToolExecutionContext } from "@frockbot/kernel-contracts";
+import type { CredentialLeaseRuntime } from "@frockbot/plugin-credentials/user";
 import type { CredentialLeaseV1 } from "@frockbot/connection-core";
 import {
   createConfiguredOllamaWebSearchRuntimeContribution,
@@ -46,19 +46,17 @@ function lease(effectId: string): CredentialLeaseV1 {
   };
 }
 
-/** The credential-store service the Bot Durable Object mounts for real. */
-class FakeCredentialLease extends Service {
-  opened: string[] = [];
-  constructor(ctx: Context) {
-    super(ctx, "credentialLease");
-  }
-  open(input: {
-    packageId: string;
-    lease: CredentialLeaseV1;
-  }): Promise<string> {
-    this.opened.push(input.packageId);
-    return Promise.resolve(API_KEY);
-  }
+/**
+ * The credential runtime the Bot Durable Object mounts for real. The envelope
+ * here is a fixture, so the key comes back without the keyring's crypto.
+ */
+function fakeCredentials(): CredentialLeaseRuntime {
+  return {
+    open: (input: { packageId: string; lease: CredentialLeaseV1 }) => {
+      void input;
+      return Promise.resolve(API_KEY);
+    },
+  } as unknown as CredentialLeaseRuntime;
 }
 
 function toolContext(effectId = "effect-1"): ToolExecutionContext {
@@ -81,10 +79,9 @@ async function mount(options: {
   const recorded: Recorded[] = [];
   const leased: string[] = [];
   const settled: string[] = [];
-  const root = new Context();
-  await root.plugin(ToolRegistry);
-  await root.plugin(FakeCredentialLease);
-  const plugin = createConfiguredOllamaWebSearchRuntimeContribution({
+  const root = createAgentRuntimeHarness();
+  root.credentials = fakeCredentials();
+  const feature = createConfiguredOllamaWebSearchRuntimeContribution({
     capability: CAPABILITY,
     accountId: "user-1",
     connectionId: CONNECTION_ID,
@@ -109,8 +106,8 @@ async function mount(options: {
       return Promise.resolve(options.respond(entry));
     },
   });
-  expect(plugin).toBeDefined();
-  await root.plugin(plugin!);
+  expect(feature).toBeDefined();
+  await root.mount(feature!);
   return { root, recorded, leased, settled };
 }
 
@@ -175,7 +172,7 @@ describe("the Ollama Cloud web_search Capability", () => {
     expect(settled).toEqual(["effect-1"]);
     // And it never reaches the durable result.
     expect(result.content).not.toContain(API_KEY);
-    await root.fiber.dispose();
+    await root.dispose();
   });
 
   test("carries max_results through and trims the answer to it", async () => {
@@ -201,7 +198,7 @@ describe("the Ollama Cloud web_search Capability", () => {
     expect(
       (JSON.parse(result.content) as { results: unknown[] }).results.length,
     ).toBe(2);
-    await root.fiber.dispose();
+    await root.dispose();
   });
 
   test("caps the request at the Package-level setting the User chose", async () => {
@@ -233,7 +230,7 @@ describe("the Ollama Cloud web_search Capability", () => {
     expect(
       (JSON.parse(result.content) as { results: unknown[] }).results.length,
     ).toBe(2);
-    await root.fiber.dispose();
+    await root.dispose();
   });
 
   test("leaves a request already under the ceiling alone", async () => {
@@ -248,7 +245,7 @@ describe("the Ollama Cloud web_search Capability", () => {
     if (prepared.kind !== "ready") throw new Error("not ready");
     await root.tools.executePrepared(prepared, toolContext());
     expect(JSON.parse(String(recorded[0]?.init?.body)).max_results).toBe(3);
-    await root.fiber.dispose();
+    await root.dispose();
   });
 
   test("refuses arguments outside the contract's bounds", async () => {
@@ -269,7 +266,7 @@ describe("the Ollama Cloud web_search Capability", () => {
       );
       expect({ input, kind: prepared.kind }).toEqual({ input, kind: "denied" });
     }
-    await root.fiber.dispose();
+    await root.dispose();
   });
 
   test("reports a revoked key as a visible tool error", async () => {
@@ -295,7 +292,7 @@ describe("the Ollama Cloud web_search Capability", () => {
     expect(body.message).toContain("401");
     // The lease is settled even when the call fails.
     expect(settled).toEqual(["effect-1"]);
-    await root.fiber.dispose();
+    await root.dispose();
   });
 
   test("refuses a provider answer larger than the response bound", async () => {
@@ -319,7 +316,7 @@ describe("the Ollama Cloud web_search Capability", () => {
     const result = await root.tools.executePrepared(prepared, toolContext());
     expect(result.isError).toBe(true);
     expect(result.content).toContain("too large");
-    await root.fiber.dispose();
+    await root.dispose();
   });
 
   test("is offered on every turn type the manifest admits", async () => {
@@ -335,7 +332,7 @@ describe("the Ollama Cloud web_search Capability", () => {
         names: ["web_search", "get_dynamic_tools", "call_dynamic_tool"],
       });
     }
-    await root.fiber.dispose();
+    await root.dispose();
   });
 
   test("mounts only for the enabled Capability bound to the Connection", () => {

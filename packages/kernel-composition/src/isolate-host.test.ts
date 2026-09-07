@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { Context } from "cordis";
-import { BOT_ISOLATE_HOOK_EVENTS_V1 } from "@frockbot/kernel-contracts";
+import {
+  BOT_ISOLATE_HOOK_EVENTS_V1,
+  LoopHookListV1,
+} from "@frockbot/kernel-contracts";
 import type {
   BotCapabilitiesStub,
   BotIsolateHookEventNameV1,
@@ -148,7 +150,7 @@ function host(
         };
       },
     },
-    loop: new Context(),
+    hooks: new LoopHookListV1(),
     userId: "user-1",
     botId: "bot-1",
     sessionId: "session-1",
@@ -303,18 +305,17 @@ describe("Bot isolate contribution host", () => {
   });
 
   test("runs a declared hook after first-party policy with a snapshot", async () => {
-    const loop = new Context();
+    const hooks = new LoopHookListV1();
     const order: string[] = [];
     let seen: IsolateHookInvocationV1 | undefined;
-    loop.on(
-      "agent/tool-exposure",
-      async (_agent, tools, _turn, _step, _signal, next) => {
+    hooks.add({
+      toolExposure: async (_agent, tools, _turn, _step, _signal, next) => {
         order.push(`first-party:${tools[0]?.name}`);
         return next();
       },
-    );
+    });
     const { host: subject } = host({
-      loop,
+      hooks,
       entrypoint: {
         health: () =>
           Promise.resolve({
@@ -354,8 +355,7 @@ describe("Bot isolate contribution host", () => {
       status: "running" as const,
       session: { id: "session-1" },
     } as never;
-    const result = await loop.waterfall(
-      "agent/tool-exposure",
+    const result = await hooks.toolExposure(
       agent,
       original,
       1,
@@ -363,8 +363,7 @@ describe("Bot isolate contribution host", () => {
       new AbortController().signal,
       () => Promise.resolve(original),
     );
-    const otherBotResult = await loop.waterfall(
-      "agent/tool-exposure",
+    const otherBotResult = await hooks.toolExposure(
       {
         id: "bot-2",
         botId: "bot-2",
@@ -402,7 +401,7 @@ describe("Bot isolate contribution host", () => {
   });
 
   test("bridges every declared isolate waterfall", async () => {
-    const loop = new Context();
+    const hooks = new LoopHookListV1();
     const seen: string[] = [];
     const replacement: Record<string, unknown> = {
       "agent/pre-step": { kind: "reject", reason: "hook rejected" },
@@ -421,7 +420,7 @@ describe("Bot isolate contribution host", () => {
       "agent/step-continuation": { kind: "stop" },
     };
     const { host: subject } = host({
-      loop,
+      hooks,
       entrypoint: {
         health: () =>
           Promise.resolve({
@@ -454,13 +453,12 @@ describe("Bot isolate contribution host", () => {
     const toolContext = executionContext();
 
     expect(
-      await loop.waterfall("agent/pre-step", agent, [], 1, 1, () =>
+      await hooks.preStep(agent, [], 1, 1, () =>
         Promise.resolve({ kind: "enter", inputs: [] }),
       ),
     ).toMatchObject({ kind: "reject" });
     expect(
-      await loop.waterfall(
-        "system-prompt/assemble",
+      await hooks.assemblePrompt(
         {
           sessionId: "session-1",
           provider: "scripted",
@@ -471,29 +469,22 @@ describe("Bot isolate contribution host", () => {
       ),
     ).toMatchObject({ text: "hook prompt" });
     expect(
-      await loop.waterfall(
-        "agent/message-window",
-        agent,
-        [],
-        1,
-        1,
-        signal,
-        () => Promise.resolve([]),
+      await hooks.messageWindow(agent, [], 1, 1, signal, () =>
+        Promise.resolve([]),
       ),
     ).toEqual([{ role: "user", content: "hook window" }]);
     expect(
-      await loop.waterfall("agent/tool-exposure", agent, [], 1, 1, signal, () =>
+      await hooks.toolExposure(agent, [], 1, 1, signal, () =>
         Promise.resolve([]),
       ),
     ).toEqual([]);
     expect(
-      await loop.waterfall("tools/pre-execute", call, toolContext, () =>
+      await hooks.prepareTool(call, toolContext, () =>
         Promise.resolve({ kind: "ready", call, idempotent: true }),
       ),
     ).toMatchObject({ kind: "denied" });
     expect(
-      await loop.waterfall(
-        "tools/post-execute",
+      await hooks.toolResult(
         call,
         { content: "core", isError: false },
         toolContext,
@@ -501,8 +492,7 @@ describe("Bot isolate contribution host", () => {
       ),
     ).toMatchObject({ content: "hook result" });
     expect(
-      await loop.waterfall(
-        "agent/step-continuation",
+      await hooks.stepContinuation(
         agent,
         { kind: "continue" },
         1,
@@ -522,9 +512,9 @@ describe("Bot isolate contribution host", () => {
       () => new Promise<never>(() => {}),
     ]) {
       const failures: string[] = [];
-      const loop = new Context();
+      const hooks = new LoopHookListV1();
       const { host: subject } = host({
-        loop,
+        hooks,
         deadlineMs: 5,
         recordHookFailure: (failure) => {
           failures.push(failure.message);
@@ -551,8 +541,7 @@ describe("Bot isolate contribution host", () => {
           inputSchema: { type: "object" },
         },
       ];
-      const result = await loop.waterfall(
-        "agent/tool-exposure",
+      const result = await hooks.toolExposure(
         {
           id: "bot-1",
           botId: "bot-1",

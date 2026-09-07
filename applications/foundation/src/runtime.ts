@@ -6,11 +6,7 @@ import {
   type ApplicationPackageSelection,
   type ApplicationSource,
 } from "@frockbot/kernel-composition/compiler";
-import type {
-  ContributionResolver,
-  FrockBotManifest,
-  PackageSource,
-} from "@frockbot/kernel-composition";
+import type { FrockBotManifest } from "@frockbot/kernel-composition";
 import type { CredentialLeaseV1 } from "@frockbot/connection-core";
 import type {
   BotExecutionPlanV1,
@@ -24,85 +20,92 @@ import adminManifest from "@frockbot/plugin-admin/manifest";
 import authManifest from "@frockbot/plugin-auth/manifest";
 import botTemplateManifest from "@frockbot/plugin-bot-template/manifest";
 import {
-  createBotTemplateRuntimePlugin,
+  createBotTemplateFeature,
   type BotTemplateRuntimeHostV1,
 } from "@frockbot/plugin-bot-template/agent";
 export type { BotTemplateRuntimeHostV1 } from "@frockbot/plugin-bot-template/agent";
-import clockRuntimePlugin from "@frockbot/plugin-clock/agent";
+import clockFeature from "@frockbot/plugin-clock/agent";
 // Every selected package manifest participates in the compiled application hash.
 import clockManifest from "@frockbot/plugin-clock/manifest";
-import { type Plugin } from "cordis";
+import type {
+  AgentRuntimeV1,
+  RuntimeFeatureV1,
+} from "@frockbot/kernel-contracts";
+import type { CredentialLeaseRuntime } from "@frockbot/plugin-credentials/user";
 
 // pi-lens-ignore: ts:2307
 import computerManifest from "@frockbot/plugin-computer/manifest";
 import {
-  createComputerAgentPlugin,
+  createComputerAgentFeature,
   type ComputerAgentPluginConfig,
   type ComputerProcessStorageV1,
 } from "@frockbot/plugin-computer/agent";
 import {
-  createSharedComputerProviderPlugin,
+  createSharedComputerProviderFeature,
   type SharedComputerHostClient,
 } from "@frockbot/plugin-computer/shared-provider";
 import credentialsManifest from "@frockbot/plugin-credentials/manifest";
-import { createCredentialRuntimePlugin } from "@frockbot/plugin-credentials/user";
+import { createCredentialsFeature } from "@frockbot/plugin-credentials/user";
 import customModelsManifest from "@frockbot/plugin-custom-models/manifest";
 // pi-lens-ignore: ts:2307
 // Runtime implementations are statically bound by the immutable application.
-import echoRuntimePlugin from "@frockbot/plugin-echo/agent";
+import echoFeature from "@frockbot/plugin-echo/agent";
 import flySpriteManifest from "@frockbot/plugin-fly-sprite/manifest";
-import { createFlySpriteProviderPlugin } from "@frockbot/plugin-fly-sprite/agent";
+import { createFlySpriteProviderFeature } from "@frockbot/plugin-fly-sprite/agent";
 import {
   ComputerHostClient,
   type ComputerHostFetcherV1,
 } from "@frockbot/plugin-fly-sprite/host-client";
-import type { ComputerSyncHostV1 } from "@frockbot/computer-core";
+import type {
+  ComputerRegistry,
+  ComputerSyncHostV1,
+} from "@frockbot/computer-core";
 // Flock contributes lifecycle routes and durable User/Bot state.
 import flockManifest from "@frockbot/plugin-flock/manifest";
 import {
-  createFlockRuntimePlugin,
+  createFlockRuntimeFeature,
   type FlockSelfRuntimeHostV1,
 } from "@frockbot/plugin-flock/agent";
 export type { FlockSelfRuntimeHostV1 } from "@frockbot/plugin-flock/agent";
 import echoManifest from "@frockbot/plugin-echo/manifest";
-import identityRuntimePlugin from "@frockbot/plugin-identity/agent";
+import identityFeature from "@frockbot/plugin-identity/agent";
 import identityManifest from "@frockbot/plugin-identity/manifest";
 import memoryManifest from "@frockbot/plugin-memory/manifest";
 import foundationProviderManifest from "@frockbot/plugin-provider-foundation/manifest";
-import foundationProviderPlugin, {
+import foundationProviderFeature, {
   FOUNDATION_MODEL,
   FOUNDATION_PROVIDER,
 } from "@frockbot/plugin-provider-foundation/runtime";
 import ollamaCloudManifest from "@frockbot/plugin-provider-ollama-cloud/manifest";
 import {
-  createOllamaCloudRuntimePlugin,
+  createOllamaCloudFeature,
   ollamaChatBaseUrl,
 } from "@frockbot/plugin-provider-ollama-cloud/runtime";
 import frockAiManifest from "@frockbot/plugin-provider-frock-ai/manifest";
-import { createFrockAiRuntimePlugin } from "@frockbot/plugin-provider-frock-ai/runtime";
+import { createFrockAiFeature } from "@frockbot/plugin-provider-frock-ai/runtime";
 import anthropicManifest from "@frockbot/plugin-provider-anthropic/manifest";
-import { createAnthropicRuntimePlugin } from "@frockbot/plugin-provider-anthropic/runtime";
+import { createAnthropicFeature } from "@frockbot/plugin-provider-anthropic/runtime";
 import routinesManifest from "@frockbot/plugin-routines/manifest";
 import {
-  createRoutinesRuntimePlugin,
+  createRoutinesRuntimeFeature,
   type RoutinesRuntimeHostV1,
 } from "@frockbot/plugin-routines/agent";
 export type { RoutinesRuntimeHostV1 } from "@frockbot/plugin-routines/agent";
 import subagentsManifest from "@frockbot/plugin-subagents/manifest";
 import userMachineManifest from "@frockbot/plugin-user-machine/manifest";
 import machineMessagesManifest from "@frockbot/plugin-machine-messages/manifest";
-import { createMachineMessagesRuntimePlugin } from "@frockbot/plugin-machine-messages/agent";
+import { createMachineMessagesFeature } from "@frockbot/plugin-machine-messages/agent";
 import type { MachineMessagesRuntimeHostV1 } from "@frockbot/plugin-machine-messages/agent";
 export type { MachineMessagesRuntimeHostV1 } from "@frockbot/plugin-machine-messages/agent";
 // The registered machine's six tools. Mounted only for an admitted Turn, whose
 // Session and Turn the intent record it writes has to name.
 import {
-  createMachineRuntimePlugin,
+  createMachineRuntimeFeature,
   type MachineRuntimeHostV1,
 } from "@frockbot/plugin-user-machine/agent";
 export type { MachineRuntimeHostV1 } from "@frockbot/plugin-user-machine/agent";
 import {
-  createSubagentsRuntimePlugin,
+  createSubagentsRuntimeFeature,
   type SubagentsRuntimeHostV1,
 } from "@frockbot/plugin-subagents/agent";
 export type { SubagentsRuntimeHostV1 } from "@frockbot/plugin-subagents/agent";
@@ -114,19 +117,19 @@ import webManifest from "@frockbot/plugin-web/manifest";
 import { createConfiguredWebFetchRuntimeContribution } from "@frockbot/plugin-web/agent";
 import settingsManifest from "@frockbot/plugin-settings/manifest";
 import {
-  createMemoryRuntimePlugin,
+  createMemoryRuntimeFeature,
   type MemoryRuntimeHostV1,
 } from "@frockbot/plugin-memory/agent";
 import imageManifest from "@frockbot/plugin-image/manifest";
 import {
-  createImageRuntimePlugin,
+  createImageFeature,
   type ImageRuntimeHostV1,
 } from "@frockbot/plugin-image/agent";
-import shellAgentPlugin from "@frockbot/plugin-shell/agent";
+import shellAgentFeature from "@frockbot/plugin-shell/agent";
 import shellManifest from "@frockbot/plugin-shell/manifest";
 import skillsManifest from "@frockbot/plugin-skills/manifest";
 import {
-  createSkillsRuntimePlugin,
+  createSkillsRuntimeFeature,
   type SkillsRuntimeHostV1,
 } from "@frockbot/plugin-skills/agent";
 import uiThemeManifest from "@frockbot/plugin-ui-theme/manifest";
@@ -171,14 +174,35 @@ const manifests = new Map<string, unknown>([
   ["@frockbot/plugin-machine-messages", machineMessagesManifest],
 ]);
 
-const runtimeContributions = new Map([
-  ["@frockbot/plugin-identity/agent", identityRuntimePlugin],
-  ["@frockbot/plugin-provider-foundation/runtime", foundationProviderPlugin],
-  ["@frockbot/plugin-echo/agent", echoRuntimePlugin],
-  ["@frockbot/plugin-clock/agent", clockRuntimePlugin],
-  // The Shell's user-facing send tool and parent hand-off; it needs no host.
-  ["@frockbot/plugin-shell/agent", shellAgentPlugin],
-]);
+/** Everything a feature may register into, for one Turn. */
+export interface FoundationRuntimeServicesV1 extends AgentRuntimeV1 {
+  readonly computers: ComputerRegistry;
+  /** Set by the credentials feature; read by every feature mounted after it. */
+  credentials?: CredentialLeaseRuntime;
+}
+
+export type FoundationFeature = RuntimeFeatureV1<FoundationRuntimeServicesV1>;
+
+/** One feature the host hands a Turn, named so a plan can be read back. */
+export interface FoundationRuntimePackage {
+  id: string;
+  feature: FoundationFeature;
+}
+
+/**
+ * The features every Turn mounts whatever its host: the Bot's identity, the
+ * built-in model, the two demo tools and the Shell's own voice. The host's
+ * features mount before these, so a provider they need is already registered.
+ */
+export function foundationBaseRuntimeFeatures(): FoundationFeature[] {
+  return [
+    identityFeature,
+    foundationProviderFeature,
+    echoFeature,
+    clockFeature,
+    shellAgentFeature,
+  ];
+}
 
 /**
  * What the host gives one enabled runtime Contribution. The Connection-bound
@@ -226,7 +250,7 @@ type EnabledRuntimeContributionFactory = (config: {
     expectedGeneration?: string,
   ): Promise<CredentialLeaseV1>;
   settleCredential?(effectId: string): Promise<void>;
-}) => Plugin | undefined | Promise<Plugin | undefined>;
+}) => FoundationFeature | undefined | Promise<FoundationFeature | undefined>;
 
 const enabledRuntimeContributionFactories = new Map<
   string,
@@ -309,7 +333,7 @@ interface ModelRuntimeContributionConfig {
 
 interface ModelRuntimeContributionFactory {
   providerType: string;
-  create(config: ModelRuntimeContributionConfig): Plugin;
+  create(config: ModelRuntimeContributionConfig): FoundationFeature;
 }
 
 const modelRuntimeContributionFactories = new Map<
@@ -329,7 +353,7 @@ const modelRuntimeContributionFactories = new Map<
         if (!leaseCredential || !settleCredential) {
           throw new Error("Ollama Cloud credential host is unavailable");
         }
-        return createOllamaCloudRuntimePlugin({
+        return createOllamaCloudFeature({
           ...config,
           packageId: "provider-ollama-cloud",
           leaseCredential,
@@ -356,7 +380,7 @@ const modelRuntimeContributionFactories = new Map<
         ) {
           throw new Error("Frock AI gateway host is unavailable");
         }
-        return createFrockAiRuntimePlugin({
+        return createFrockAiFeature({
           connectionId,
           connectionGeneration,
           autoRoute: frockAiAutoRoute,
@@ -379,7 +403,7 @@ const modelRuntimeContributionFactories = new Map<
         if (!leaseCredential || !settleCredential) {
           throw new Error("Anthropic credential host is unavailable");
         }
-        return createAnthropicRuntimePlugin({
+        return createAnthropicFeature({
           accountId,
           connectionId,
           packageId: "provider-anthropic",
@@ -474,12 +498,6 @@ export function isUserInstallablePackageV1(
   return !ownsAmbientModel;
 }
 
-export interface FoundationRuntimeApplication {
-  plan: ApplicationPlan;
-  packages: PackageSource[];
-  resolveContribution: ContributionResolver;
-}
-
 export async function compileFoundationApplication(): Promise<ApplicationPlan> {
   return await compileApplicationPlan(
     applicationSource,
@@ -528,29 +546,11 @@ export type {
   MountedFoundationBackend,
 } from "./contributions.js";
 
-export interface FoundationRuntimePackage {
-  specifier: string;
-  contributionSpecifier: string;
-  manifest: unknown;
-  plugin: Plugin;
-}
-
 function runtimePackage(
-  plan: ApplicationPlan,
-  packageId: string,
-  plugin: Plugin,
+  id: string,
+  feature: FoundationFeature,
 ): FoundationRuntimePackage {
-  const pkg = plan.packages.find((candidate) => candidate.id === packageId);
-  const runtime = pkg?.manifest.contributions.runtime;
-  if (!pkg || !runtime) {
-    throw new Error(`foundation runtime package "${packageId}" is unavailable`);
-  }
-  return {
-    specifier: pkg.specifier,
-    contributionSpecifier: contributionSpecifier(pkg.specifier, runtime.entry),
-    manifest: pkg.manifest,
-    plugin,
-  };
+  return { id, feature };
 }
 
 /**
@@ -580,13 +580,13 @@ function computerConfiguredV1(host: {
   );
 }
 
-function computerProviderPlugin(host: {
+function computerProviderFeature(host: {
   readSecret(name: string): string | undefined;
   computerSync?: ComputerSyncHostV1;
   computerHost?: SharedComputerHostClient;
   computerHostBinding?: ComputerHostBinding;
   computerAgentControlOwnerId?: string;
-}): Plugin.Function {
+}): FoundationFeature {
   // `SPRITES_TOKEN` is no longer a credential here — the Computer host holds
   // the only copy, and this Worker could not use one if it had it. It survives
   // as the answer to one question: has this deployment a Computer at all? With
@@ -594,7 +594,7 @@ function computerProviderPlugin(host: {
   // no host of ours has a Sprites account.
   const configured = Boolean(host.readSecret("SPRITES_TOKEN")?.trim());
   const binding = host.computerHostBinding;
-  const fly = createFlySpriteProviderPlugin(undefined, {
+  const fly = createFlySpriteProviderFeature(undefined, {
     ...(configured && binding
       ? {
           host: (identity, tenant) =>
@@ -612,15 +612,18 @@ function computerProviderPlugin(host: {
       : {}),
   });
   const shared = host.computerHost
-    ? createSharedComputerProviderPlugin(host.computerHost)
+    ? createSharedComputerProviderFeature(host.computerHost)
     : undefined;
   if (!shared) return fly;
-  const plugin: Plugin.Function = (ctx) => {
-    ctx.plugin(fly);
-    ctx.plugin(shared);
+  return async (runtime) => {
+    const cleanups = [await fly(runtime), await shared(runtime)];
+    return () => {
+      for (const cleanup of cleanups.toReversed()) {
+        if (typeof cleanup === "function") cleanup();
+        else for (const fn of cleanup ?? []) fn();
+      }
+    };
   };
-  plugin.inject = ["computers"];
-  return plugin;
 }
 
 /**
@@ -761,76 +764,68 @@ export function createFoundationHostedRuntimePackages(
     ...(host.botSelfManagement
       ? [
           runtimePackage(
-            plan,
             "flock",
-            createFlockRuntimePlugin(host.botSelfManagement),
+            createFlockRuntimeFeature(host.botSelfManagement),
           ),
         ]
       : []),
     ...(host.botTemplate
       ? [
           runtimePackage(
-            plan,
             "bot-template",
-            createBotTemplateRuntimePlugin(host.botTemplate),
+            createBotTemplateFeature(host.botTemplate),
           ),
         ]
       : []),
     ...(host.skills
-      ? [runtimePackage(plan, "skills", createSkillsRuntimePlugin(host.skills))]
+      ? [runtimePackage("skills", createSkillsRuntimeFeature(host.skills))]
       : []),
     ...(host.memory
-      ? [runtimePackage(plan, "memory", createMemoryRuntimePlugin(host.memory))]
+      ? [runtimePackage("memory", createMemoryRuntimeFeature(host.memory))]
       : []),
     ...(host.image
-      ? [runtimePackage(plan, "image", createImageRuntimePlugin(host.image))]
+      ? [runtimePackage("image", createImageFeature(host.image))]
       : []),
     ...(host.routines
       ? [
           runtimePackage(
-            plan,
             "routines",
-            createRoutinesRuntimePlugin(host.routines),
+            createRoutinesRuntimeFeature(host.routines),
           ),
         ]
       : []),
     ...(host.subagents
       ? [
           runtimePackage(
-            plan,
             "subagents",
-            createSubagentsRuntimePlugin(host.subagents),
+            createSubagentsRuntimeFeature(host.subagents),
           ),
         ]
       : []),
     ...(host.machines
       ? [
           runtimePackage(
-            plan,
             "user-machine",
-            createMachineRuntimePlugin(host.machines),
+            createMachineRuntimeFeature(host.machines),
           ),
         ]
       : []),
     ...(host.machineMessages
       ? [
           runtimePackage(
-            plan,
             "machine-messages",
-            createMachineMessagesRuntimePlugin(host.machineMessages),
+            createMachineMessagesFeature(host.machineMessages),
           ),
         ]
       : []),
     runtimePackage(
-      plan,
       "credentials",
-      createCredentialRuntimePlugin({ readSecret: host.readSecret }),
+      createCredentialsFeature({ readSecret: host.readSecret }),
     ),
-    runtimePackage(plan, "fly-sprite", computerProviderPlugin(host)),
+    runtimePackage("fly-sprite", computerProviderFeature(host)),
     runtimePackage(
-      plan,
       "computer",
-      createComputerAgentPlugin({
+      createComputerAgentFeature({
         userId: host.userId,
         defaultProviderId: "fly-sprite",
         // Exactly the condition `computerProviderPlugin` uses to hand the
@@ -850,40 +845,6 @@ export function createFoundationHostedRuntimePackages(
       }),
     ),
   ];
-}
-
-/**
- * Collapse runtime Contributions that share a contribution specifier into one.
- *
- * The runtime resolves a Package's declared runtime entry to exactly one
- * Plugin — `resolveContribution` takes the first match and `packages.install`
- * dedupes by specifier — so two entries naming the same Contribution silently
- * lose one. A Package that produces several on purpose, one per enabled
- * Capability, reaches the Bot with all of them by merging them into a single
- * Plugin that mounts each in order; the order is preserved.
- */
-export function mergeFoundationRuntimePackages(
-  packages: readonly FoundationRuntimePackage[],
-): FoundationRuntimePackage[] {
-  const merged: FoundationRuntimePackage[] = [];
-  const byContribution = new Map<string, Plugin[]>();
-  for (const pkg of packages) {
-    const existing = byContribution.get(pkg.contributionSpecifier);
-    if (existing) {
-      existing.push(pkg.plugin);
-      continue;
-    }
-    byContribution.set(pkg.contributionSpecifier, [pkg.plugin]);
-    merged.push(pkg);
-  }
-  return merged.map((pkg) => {
-    const plugins = byContribution.get(pkg.contributionSpecifier) ?? [];
-    if (plugins.length <= 1) return pkg;
-    const composite: Plugin.Function = (ctx) => {
-      for (const plugin of plugins) ctx.plugin(plugin);
-    };
-    return { ...pkg, plugin: composite };
-  });
 }
 
 export async function createFoundationEnabledRuntimePackages(
@@ -963,12 +924,7 @@ export async function createFoundationEnabledRuntimePackages(
         : {}),
     });
     if (!plugin) continue;
-    result.push({
-      specifier: pkg.specifier,
-      contributionSpecifier: specifier,
-      manifest: pkg.manifest,
-      plugin,
-    });
+    result.push({ id: pkg.id, feature: plugin });
   }
   return result;
 }
@@ -1001,10 +957,8 @@ export function createFoundationModelRuntimePackage(
     );
   }
   return {
-    specifier: pkg.specifier,
-    contributionSpecifier: specifier,
-    manifest: pkg.manifest,
-    plugin: factory.create({
+    id: pkg.id,
+    feature: factory.create({
       ...host,
       connectionId: binding.connection.connectionId,
       ...(binding.connection.generation
@@ -1016,118 +970,5 @@ export function createFoundationModelRuntimePackage(
         ? { apiBaseUrl: binding.connection.settings["api-base-url"] }
         : {}),
     }),
-  };
-}
-
-/**
- * Collapse runtime packages that share one Contribution specifier into one.
- *
- * A Package declares exactly one runtime entry, and the runtime host resolves
- * a Contribution specifier to exactly one Plugin, so two packages naming the
- * same entry would silently drop one. `provider-ollama-cloud` is the first
- * Package to reach a Turn twice — once as the Bot's model provider, once as
- * the Connection-backed `web_search` Capability — and both must mount. The
- * merged Plugin mounts each child in order and inherits the union of their
- * injections, so nothing observes the difference.
- */
-export function mergeFoundationRuntimePackagesV1(
-  packages: readonly FoundationRuntimePackage[],
-): FoundationRuntimePackage[] {
-  const merged: FoundationRuntimePackage[] = [];
-  const byContribution = new Map<string, FoundationRuntimePackage[]>();
-  for (const pkg of packages) {
-    const existing = byContribution.get(pkg.contributionSpecifier);
-    if (existing) {
-      existing.push(pkg);
-      continue;
-    }
-    const group = [pkg];
-    byContribution.set(pkg.contributionSpecifier, group);
-    merged.push(pkg);
-  }
-  return merged.map((pkg) => {
-    const group = byContribution.get(pkg.contributionSpecifier) ?? [pkg];
-    if (group.length === 1) return pkg;
-    const children = group.map((member) => member.plugin);
-    const composed: Plugin.Function = (ctx) => {
-      for (const child of children) ctx.plugin(child);
-    };
-    const injections = new Set<string>();
-    for (const child of children) {
-      const declared = (child as { inject?: string[] | undefined }).inject;
-      for (const injection of declared ?? []) injections.add(injection);
-    }
-    if (injections.size > 0) composed.inject = [...injections];
-    return { ...pkg, plugin: composed };
-  });
-}
-
-export async function createFoundationRuntimeApplication(): Promise<FoundationRuntimeApplication> {
-  const plan = await compileFoundationApplication();
-  const runtimeIds = new Set(plan.contributions.runtime);
-  // Computer providers require host authority and are added only by a capable runtime.
-  // Skills mount only for a Turn whose instruction root the host can read.
-  runtimeIds.delete("skills");
-  // Memory mounts only for a Turn whose Memory roots the host can reach.
-  runtimeIds.delete("memory");
-  // Image generation mounts only for a Turn whose Workspace the host can
-  // write, so a generated image records the Session and Turn that produced it.
-  runtimeIds.delete("image");
-  // A Bot changes itself only inside an admitted Turn, which supplies the
-  // self-management host; the Flock's other Contributions are backend and
-  // client, and neither runs here.
-  runtimeIds.delete("flock");
-  // A Bot packs itself into a template only inside an admitted Turn, which
-  // supplies the staging host; the Package's other Contributions are backend
-  // and client, and neither runs here.
-  runtimeIds.delete("bot-template");
-  // Routines mount only for a Turn, so a Routine write records the Session and
-  // Turn that produced it.
-  runtimeIds.delete("routines");
-  // Subagents mount only for a Turn, so a dispatched task names the run that
-  // dispatched it and the Subagent Durable Object it reaches is addressable.
-  runtimeIds.delete("subagents");
-  // The registered machine's tools mount only for a Turn: the control tools
-  // write an intent record the Turn's Session and run name, and the approval
-  // that gates them is a send onto that Turn's own durable log.
-  runtimeIds.delete("user-machine");
-  // The Messages tools mount only behind row 57g's whole gate — the User
-  // setting on, and a connected macOS machine reporting the `messages`
-  // capability — so the host supplies them or nothing does.
-  runtimeIds.delete("machine-messages");
-  runtimeIds.delete("computer");
-  runtimeIds.delete("credentials");
-  runtimeIds.delete("fly-sprite");
-  runtimeIds.delete("provider-ollama-cloud");
-  runtimeIds.delete("provider-flock-ai");
-  runtimeIds.delete("provider-anthropic");
-  // The Web Package's `web_fetch` mounts only while its User keeps the
-  // `web-fetch` Capability enabled.
-  runtimeIds.delete("web");
-  return {
-    plan,
-    packages: plan.packages
-      // An artifact-backed member is not in this table and never should be: its
-      // runtime Contribution is immutable bytes the isolate host loads, not a
-      // plugin compiled into this bundle. The test is the artifact, so a
-      // first-party Package that ships as one needs no entry here and no name
-      // anywhere in this function.
-      .filter((pkg) => pkg.artifact === undefined && runtimeIds.has(pkg.id))
-      .map((pkg) => ({
-        specifier: pkg.specifier,
-        manifest: {
-          ...pkg.manifest,
-          contributions: {
-            runtime: pkg.manifest.contributions.runtime,
-          },
-        },
-      })),
-    resolveContribution: (specifier) => {
-      const plugin = runtimeContributions.get(specifier);
-      if (plugin) return Promise.resolve({ default: plugin });
-      return Promise.reject(
-        new Error(`unknown foundation runtime contribution: ${specifier}`),
-      );
-    },
   };
 }

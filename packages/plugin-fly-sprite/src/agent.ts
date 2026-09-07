@@ -1,6 +1,6 @@
 // Compatibility entry: Fly contributes only a Computer provider at runtime.
 export {
-  createFlySpriteProviderPlugin,
-  flySpriteProviderPlugin,
+  createFlySpriteProviderFeature,
+  flySpriteProviderFeature,
   default,
 } from "./provider.js";

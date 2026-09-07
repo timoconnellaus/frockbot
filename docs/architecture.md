@@ -88,7 +88,7 @@ Four classes in the app Worker, exported from `apps/cloudflare/src/index.ts:178-
 
 6. **Shell.** `packages/plugin-shell/src/backend.ts:1255` yields any in-flight compaction, calls `followDeploymentComposition()` and `resolveAppletComposition()`, then delegates to `BotDurableAuthority.run` (`packages/kernel-do/src/authority.ts:293`): recover whatever the object holds, check for a settled replay, then `acceptRun`. An accepted run executes inline; otherwise it is durably queued — one user-lane slot, FIFO agent lane — and promoted by `runQueuedRun` (`:332`).
 
-7. **Mount.** `activateCompositionV1` reads the pin and builds a Cordis root for the Turn through `createShellCompositionHost` (`packages/plugin-shell/src/backend-composition.ts:274`).
+7. **Mount.** `activateCompositionV1` reads the pin and builds the Turn's runtime through `createShellCompositionHost` (`packages/plugin-shell/src/backend-composition.ts:274`).
 
 8. **Loop.** `executeResidentBotTurn` (`packages/plugin-shell/src/backend-runner.ts:431`) calls `runtime.execute(...)`, then `agent.send({text, skills})` and awaits `whenIdle()`.
 
@@ -183,7 +183,7 @@ The application is a static selection: `applications/foundation/frockbot.applica
 1. On first use the Bot Durable Object receives a bootstrap generation of every compiled member (`packages/plugin-shell/src/backend-composition.ts:47`; `packages/kernel-composition/src/generation.ts:737`).
 2. Before a Turn is admitted, `resolveDeploymentCompositionV1` (`backend-composition.ts:95`) re-derives first-party members against the current deployment and pins a new generation if anything moved. Non-first-party and Applet members carry over verbatim.
 3. At admission, `activateCompositionV1` (`packages/plugin-shell/src/backend.ts:1852`) reads the pin, mounts, verifies, commits and records last-known-good.
-4. Mounting builds a Cordis root per Turn (`backend-composition.ts:274`). First-party members resolve from the compiled contribution table (`applications/foundation/src/contributions.ts`) through `LocalCordisContributionHost` (`packages/kernel-composition/src/index.ts:278`). Artifact-bearing members go through `BotIsolateContributionHost`. Applet members register as tools routed to `APPLET_STATES` (`backend-composition.ts:385-420`).
+4. Mounting builds one runtime per Turn (`backend-composition.ts`): the registries, a `LoopHookListV1`, and the features the host and the foundation list, mounted in order by `mountRuntimeFeaturesV1`. Artifact-bearing members go through `BotIsolateContributionHost`, whose hooks are appended to the same list after the app's. Applet members register as tools routed to `APPLET_STATES` (`backend-composition.ts:385-420`).
 
 ### Generation shape
 
@@ -285,7 +285,7 @@ Both speak the same REST API and the same state-channel WebSocket. Native valida
 
 ## 7. Model providers
 
-`ctx.llm` is `LlmRegistry` — `packages/plugin-models/src/llm.ts:15-40`. It is a `Map<providerId, LlmProvider>` that dispatches on `request.provider`, wraps the call in the `llm/stream` waterfall, then validates structured output. The kernel-declared interfaces are `LlmProvider`, `ModelInvocation` and `ModelProviderRegistration` at `packages/kernel-contracts/src/model-invocation.ts:167-208`, merged onto `cordis.Context` at `:210-212`.
+`ctx.llm` is `LlmRegistry` — `packages/plugin-models/src/llm.ts:15-40`. It is a `Map<providerId, LlmProvider>` that dispatches on `request.provider`, wraps the call in the `modelStream` hook, then validates structured output. The kernel-declared interfaces are `LlmProvider`, `ModelInvocation` and `ModelProviderRegistration` in `packages/kernel-contracts/src/model-invocation.ts`.
 
 Stream events (`packages/kernel-contracts/src/types.ts:158-166`): `text-delta`, `tool-call`, `usage`, `response-format-note`, `structured-output-failure`, `finish`.
 
@@ -304,7 +304,7 @@ Stream events (`packages/kernel-contracts/src/types.ts:158-166`): `text-delta`, 
 
 **`packages/plugin-provider-ollama-cloud`** — provider id `ollama-cloud`, `defaultEnablement: "disabled"`. Takes an API-key Connection and acquires a per-request credential lease against the User Durable Object before any bytes are sent (`src/runtime.ts:133-190`), settling it afterwards; a lease that does not match `connectionId` and `connectionGeneration` is a permanent failure. Base URL comes from the Connection setting `api-base-url`, default `https://ollama.com`, with `/v1` appended (`:74-77`). It delegates to `OpenAICompatibleProvider` (`:229-241`). Behavior forks on hostname: a non-`ollama.com` host uses native `/api/chat` with `format` for JSON Schema, while `ollama.com` reports `structuredOutput: "none"` (`:130-132`, `:278-289`). It also contributes an `ollama-cloud-web-search` tool Capability, so it is the one Package that mounts twice per Turn — handled by `mergeFoundationRuntimePackagesV1` (`applications/foundation/src/runtime.ts:1106-1145`).
 
-**`packages/plugin-provider-foundation`** — provider id `foundation`, model `deterministic-v1` (`src/runtime.ts:8-9`). It echoes the last user message prefixed `"Cordis runtime: "`, or echoes tool output, and reports `structuredOutput: "none"`. It is the default in `agents.create` (`apps/agent-runtime/src/runtime.ts:409-410`) and is overridden by `modelSelection`.
+**`packages/plugin-provider-foundation`** — provider id `foundation`, model `deterministic-v1` (`src/runtime.ts:8-9`). It echoes the last user message prefixed `"Built-in model: "`, or echoes tool output, and reports `structuredOutput: "none"`. It is the default in `createFoundationRuntime` and is overridden by `modelSelection`.
 
 **`packages/plugin-models`** — the registry service. Also implements `structured<T>()` by streaming with a `json_schema` response format and validating the accumulated text.
 

@@ -28,7 +28,6 @@
     "typecheck": "vue-tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@cordisjs/client": "0.8.2",
     "@frockbot/client-core": "workspace:*",
     "@frockbot/client-ui": "workspace:*",
     "@frockbot/computer-core": "workspace:*",
@@ -38,7 +37,6 @@
     "@frockbot/plugin-prompt": "workspace:*",
     "@frockbot/plugin-shell": "workspace:*",
     "@frockbot/plugin-tools": "workspace:*",
-    "cordis": "4.0.0-rc.8",
     "vue": "3.5.41"
   },
   "devDependencies": {

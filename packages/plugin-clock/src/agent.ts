@@ -1,9 +1,10 @@
 import {
+  type AgentRuntimeV1,
   type LlmStreamEvent,
   type NormalizedModelRequest,
+  type RuntimeFeatureV1,
   type ToolDefinition,
 } from "@frockbot/kernel-contracts";
-import type { Plugin } from "cordis";
 
 function currentTime(): string {
   return new Intl.DateTimeFormat(undefined, {
@@ -52,14 +53,15 @@ function shouldRequestClock(request: NormalizedModelRequest): boolean {
   return user?.role === "user" && user.content.trim() === "/time";
 }
 
-export const clockAgentPlugin: Plugin.Function = (ctx) => {
-  const tool = ctx.tools.register(clockTool);
-  const llm = ctx.on("llm/stream", (request, signal, next) => {
-    if (!shouldRequestClock(request)) return next();
-    return requestClockTool(signal);
+export const clockFeature: RuntimeFeatureV1<AgentRuntimeV1> = (runtime) => {
+  const tool = runtime.tools.register(clockTool);
+  const hooks = runtime.hooks.add({
+    modelStream: (request, signal, next) => {
+      if (!shouldRequestClock(request)) return next();
+      return requestClockTool(signal);
+    },
   });
-  return [tool, llm];
+  return [tool, hooks];
 };
-clockAgentPlugin.inject = ["tools", "llm"];
 
-export default clockAgentPlugin;
+export default clockFeature;

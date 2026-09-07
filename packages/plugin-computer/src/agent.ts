@@ -28,6 +28,8 @@
 // failure." Every run appends `computer/sync` to the session event log with
 // what it moved, and nothing on this path can fail a Turn.
 import {
+  type AgentRuntimeV1,
+  type RuntimeFeatureV1,
   type Session,
   type SessionStore,
   type ToolAttachmentV1,
@@ -44,6 +46,7 @@ import {
   type ComputerBackgroundStateV1,
   type ComputerBrowserAction,
   type ComputerHandle,
+  type ComputerRegistry,
   computerSyncSummaryV1,
   type ComputerSyncReasonV1,
   type ComputerSyncSummaryV1,
@@ -53,9 +56,6 @@ import {
   SCRATCH_ROOT,
   shellGuiCommandV1,
 } from "@frockbot/computer-host-runtime";
-// Merges the Agent loop's event declarations into the cordis Context type.
-import type {} from "@frockbot/kernel-agent-loop/agent";
-import type { Plugin } from "cordis";
 import {
   computerProcessStatusV1,
   COMPUTER_PROCESS_COMMAND_MAX,
@@ -703,9 +703,9 @@ async function useComputer<T>(
   }
 }
 
-export function createComputerAgentPlugin(
+export function createComputerAgentFeature(
   config: ComputerAgentPluginConfig,
-): Plugin.Function {
+): RuntimeFeatureV1<AgentRuntimeV1 & { computers: ComputerRegistry }> {
   const userId = config.userId.trim();
   const defaultProviderId = config.defaultProviderId.trim();
   if (!userId) throw new Error("Computer user id must be non-empty");
@@ -713,7 +713,7 @@ export function createComputerAgentPlugin(
     throw new Error("Computer default provider id must be non-empty");
   }
 
-  const plugin: Plugin.Function = (ctx) => {
+  return (runtime) => {
     // A deployment with no Computer offers no Computer tool and no Computer
     // prompt. The alternative — tools that always fail — spends a Turn's model
     // budget discovering what this host already knows, and leaves the model
@@ -722,7 +722,7 @@ export function createComputerAgentPlugin(
     // One Computer per User: the assignment is keyed by the User,
     // and the Bot attaches to it as a tenant.
     const identity = { userId };
-    const turnSync = new ComputerTurnSync(ctx.sessions);
+    const turnSync = new ComputerTurnSync(runtime.sessions);
     const controlPrompt = config.controlRecords
       ? new ComputerControlPromptProjection(config.controlRecords)
       : undefined;
@@ -751,10 +751,10 @@ export function createComputerAgentPlugin(
     };
     const turnOf = (_context: ToolExecutionContext): number => currentTurn;
     const attach = async (botId: string, signal: AbortSignal) => {
-      if (!ctx.computers.assignment(identity)) {
-        ctx.computers.assign(identity, defaultProviderId);
+      if (!runtime.computers.assignment(identity)) {
+        runtime.computers.assign(identity, defaultProviderId);
       }
-      return ctx.computers.open(identity, { botId }, { signal });
+      return runtime.computers.open(identity, { botId }, { signal });
     };
     /**
      * Opens the Computer for one tool call and reconciles the durable roots
@@ -917,7 +917,7 @@ export function createComputerAgentPlugin(
         exitCode?: number;
       },
     ): Promise<void> => {
-      const session = ctx.sessions.get(sessionId);
+      const session = runtime.sessions.get(sessionId);
       if (!session || session.disposed) return;
       session.append({
         type: "computer/process",
@@ -1394,7 +1394,7 @@ export function createComputerAgentPlugin(
               // next model request can show them. They are never recorded:
               // the event log holds the reference, the Workspace holds the
               // image.
-              ctx.sessions
+              runtime.sessions
                 .get(context.sessionId)
                 ?.offerAttachmentBytes(
                   attachment.contentHash,
@@ -1755,99 +1755,101 @@ export function createComputerAgentPlugin(
     };
 
     return [
-      ctx.tools.register(execTool),
-      ...(writer ? [ctx.tools.register(screenshotTool)] : []),
-      ctx.tools.register(doctorTool),
+      runtime.tools.register(execTool),
+      ...(writer ? [runtime.tools.register(screenshotTool)] : []),
+      runtime.tools.register(doctorTool),
       ...(processes && writer
         ? [
-            ctx.tools.register(processCheckTool),
-            ctx.tools.register(processLogsTool),
-            ctx.tools.register(processStopTool),
+            runtime.tools.register(processCheckTool),
+            runtime.tools.register(processLogsTool),
+            runtime.tools.register(processStopTool),
           ]
         : []),
-      ctx.tools.register(browserTool),
-      // A Turn's first step is where the Turn's sync state begins; a Turn that
-      // never touches the Computer never syncs and never wakes one.
-      ctx.on("agent/pre-step", async (agent, _inputs, turn, _step, next) => {
-        if (turn !== currentTurn) {
-          projectionWrites.clear();
-          previewOrigins.clear();
-          // Every Turn's first Computer action is worth a capture, however
-          // soon after the previous Turn's last one it happens.
-          progressCadence.reset();
-        }
-        currentTurn = turn;
-        turnSync.beginTurn(turn);
-        if (controlPrompt?.loadedTurn() !== turn) {
-          await controlPrompt?.refresh(turn, agent.session);
-        }
-        return next();
-      }),
-      // "after a Turn that used the Computer": the Computer is already awake
-      // for this Bot, so the push costs no wake, and a Sprite that paused
-      // mid-Turn answers `unavailable` and the next run finishes the work.
-      ctx.on("agent/turn-stopping", async (agent, turn) => {
-        if (!turnSync.turnUsedTheComputer(turn)) return;
-        let computer;
-        try {
-          computer = await attach(agent.botId, new AbortController().signal);
-        } catch (error) {
-          await turnSync.unavailable(agent.session.id, error);
-          invalidateProjectionWrites(agent.botId);
-          return;
-        }
-        try {
-          if (computer.browser && previewOrigins.size > 0) {
-            const origins = [...previewOrigins];
-            await closePreviewTabs(
-              computer,
-              origins,
-              `computer:${writer?.runId ?? agent.session.id}:${turn}:close-preview-tabs`,
-            );
+      runtime.tools.register(browserTool),
+      runtime.hooks.add({
+        // A Turn's first step is where the Turn's sync state begins; a Turn that
+        // never touches the Computer never syncs and never wakes one.
+        preStep: async (agent, _inputs, turn, _step, next) => {
+          if (turn !== currentTurn) {
+            projectionWrites.clear();
             previewOrigins.clear();
+            // Every Turn's first Computer action is worth a capture, however
+            // soon after the previous Turn's last one it happens.
+            progressCadence.reset();
           }
-          if (writer && computer.workspace) {
-            const root: WorkspaceRootV1 = {
-              kind: "package-declared",
-              userId,
-              packageId: "computer",
-              rootId: COMPUTER_SCREENSHOTS_ROOT_ID,
-            };
-            const botKey = computerBotPathKeyV1(agent.botId);
-            captureSequence += 1;
-            try {
-              await fileComputerScreenshotV1({
+          currentTurn = turn;
+          turnSync.beginTurn(turn);
+          if (controlPrompt?.loadedTurn() !== turn) {
+            await controlPrompt?.refresh(turn, agent.session);
+          }
+          return next();
+        },
+        // "after a Turn that used the Computer": the Computer is already awake
+        // for this Bot, so the push costs no wake, and a Sprite that paused
+        // mid-Turn answers `unavailable` and the next run finishes the work.
+        turnStopping: async (agent, turn) => {
+          if (!turnSync.turnUsedTheComputer(turn)) return;
+          let computer;
+          try {
+            computer = await attach(agent.botId, new AbortController().signal);
+          } catch (error) {
+            await turnSync.unavailable(agent.session.id, error);
+            invalidateProjectionWrites(agent.botId);
+            return;
+          }
+          try {
+            if (computer.browser && previewOrigins.size > 0) {
+              const origins = [...previewOrigins];
+              await closePreviewTabs(
                 computer,
-                workspace: computer.workspace,
-                path: {
-                  root,
-                  path: `${botKey}/${writer.turnId}-${captureSequence}.png`,
-                },
-                writer: {
-                  kind: "bot",
-                  botId: agent.botId,
-                  sessionId: writer.sessionId,
-                  turnId: writer.turnId,
-                  runId: writer.runId,
-                },
-                botKey,
-                effectId: `computer:${writer.runId}:turn-end-screenshot`,
-              });
-              noteProjectionWrite("screenshots");
-            } catch {
-              // Opportunistic capture never changes the Turn outcome. The
-              // provider's human-control refusal is deliberately preserved.
+                origins,
+                `computer:${writer?.runId ?? agent.session.id}:${turn}:close-preview-tabs`,
+              );
+              previewOrigins.clear();
             }
+            if (writer && computer.workspace) {
+              const root: WorkspaceRootV1 = {
+                kind: "package-declared",
+                userId,
+                packageId: "computer",
+                rootId: COMPUTER_SCREENSHOTS_ROOT_ID,
+              };
+              const botKey = computerBotPathKeyV1(agent.botId);
+              captureSequence += 1;
+              try {
+                await fileComputerScreenshotV1({
+                  computer,
+                  workspace: computer.workspace,
+                  path: {
+                    root,
+                    path: `${botKey}/${writer.turnId}-${captureSequence}.png`,
+                  },
+                  writer: {
+                    kind: "bot",
+                    botId: agent.botId,
+                    sessionId: writer.sessionId,
+                    turnId: writer.turnId,
+                    runId: writer.runId,
+                  },
+                  botKey,
+                  effectId: `computer:${writer.runId}:turn-end-screenshot`,
+                });
+                noteProjectionWrite("screenshots");
+              } catch {
+                // Opportunistic capture never changes the Turn outcome. The
+                // provider's human-control refusal is deliberately preserved.
+              }
+            }
+            await turnSync.afterTurn(computer, agent.session.id);
+          } catch (error) {
+            await turnSync.unavailable(agent.session.id, error);
+          } finally {
+            invalidateProjectionWrites(agent.botId);
+            await computer.close();
           }
-          await turnSync.afterTurn(computer, agent.session.id);
-        } catch (error) {
-          await turnSync.unavailable(agent.session.id, error);
-        } finally {
-          invalidateProjectionWrites(agent.botId);
-          await computer.close();
-        }
+        },
       }),
-      ctx.systemPrompt.register({
+      runtime.systemPrompt.register({
         id: "persistent-computer",
         order: 80,
         render: () =>
@@ -1864,8 +1866,6 @@ export function createComputerAgentPlugin(
       }),
     ];
   };
-  plugin.inject = ["computers", "tools", "systemPrompt", "sessions"];
-  return plugin;
 }
 
-export default createComputerAgentPlugin;
+export default createComputerAgentFeature;

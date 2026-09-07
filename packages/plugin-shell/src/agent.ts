@@ -36,9 +36,9 @@ import {
   type ToolExecutionContext,
   type ToolExecutionResult,
   type TurnTypeV1,
+  type AgentRuntimeV1,
+  type RuntimeFeatureV1,
 } from "@frockbot/kernel-contracts";
-// Merges the Agent loop's event declarations into the cordis Context type.
-import type {} from "@frockbot/kernel-agent-loop/agent";
 import {
   automationParentPointerV1,
   chatWindowV1,
@@ -53,7 +53,6 @@ import {
   runCompactionV1,
 } from "./compaction.js";
 import { compactionWorkV1 } from "./compaction-scheduler.js";
-import type { Plugin } from "cordis";
 import manifest from "../frockbot.json" with { type: "json" };
 
 export const SEND_TO_USER_TOOL_V1 = "send_to_user";
@@ -96,11 +95,6 @@ export function shellAdmissionCeilingV1(
 
 function refusal(reason: string): ToolExecutionResult {
   return { content: reason, isError: true };
-}
-
-/** Adapts a cordis fiber to the plain disposer this Package's list holds. */
-function disposeFiber(fiber: { dispose(): unknown }): () => void {
-  return () => void fiber.dispose();
 }
 
 /**
@@ -473,109 +467,108 @@ export const WAKE_PARENT_MESSAGE_LIMIT_V1 = 32_000;
  * legacy alias, and the parent hand-off, each bounded by the turn types its
  * manifest Capability declares.
  */
-export const shellAgentPlugin: Plugin.Function = (ctx) => {
+export const shellAgentFeature: RuntimeFeatureV1<AgentRuntimeV1> = (
+  runtime,
+) => {
   const userVoice = shellAdmissionCeilingV1(USER_VOICE_CAPABILITY_V1);
   const parentHandoff = shellAdmissionCeilingV1(PARENT_HANDOFF_CAPABILITY_V1);
   const disposers = [
     // The voice and the rules for using it are contributed together, so a
     // Composition that admits the send tool always carries the contract.
-    ctx.systemPrompt.register({
+    runtime.systemPrompt.register({
       id: CONVERSATION_PROMPT_SECTION_V1,
       order: CONVERSATION_PROMPT_ORDER_V1,
       render: () => CONVERSATION_PROMPT_TEXT_V1,
     }),
     // Empty for most of a Turn; a countdown and one instruction at the end of
     // its step budget. See `stepBudgetPromptTextV1`.
-    ctx.systemPrompt.register({
+    runtime.systemPrompt.register({
       id: STEP_BUDGET_PROMPT_SECTION_V1,
       order: STEP_BUDGET_PROMPT_ORDER_V1,
       render: (context) => stepBudgetPromptTextV1(context),
     }),
-    ctx.systemPrompt.register({
+    runtime.systemPrompt.register({
       id: TIME_BUDGET_PROMPT_SECTION_V1,
       order: TIME_BUDGET_PROMPT_ORDER_V1,
       render: (context) => timeBudgetPromptTextV1(context),
     }),
-    ctx.tools.register(
-      createSendToUserTool(SEND_TO_USER_TOOL_V1, ctx.sessions),
+    runtime.tools.register(
+      createSendToUserTool(SEND_TO_USER_TOOL_V1, runtime.sessions),
       userVoice ? { admissionCeiling: userVoice } : undefined,
     ),
-    ctx.tools.register(
-      createSendToUserTool(SEND_MESSAGE_ALIAS_V1, ctx.sessions),
+    runtime.tools.register(
+      createSendToUserTool(SEND_MESSAGE_ALIAS_V1, runtime.sessions),
       userVoice ? { admissionCeiling: userVoice } : undefined,
     ),
-    ctx.tools.register(
-      createWakeParentTool(ctx.sessions),
+    runtime.tools.register(
+      createWakeParentTool(runtime.sessions),
       parentHandoff ? { admissionCeiling: parentHandoff } : undefined,
     ),
     // The safety net under the prompt: a model that acknowledges the request
     // in its own text instead of calling `send_to_user` still reaches the
     // person. See `promoteAssistantTextToSendV1`.
-    ctx.on("agent/assistant-text", async (agent, text, position) => {
-      await promoteAssistantTextToSendV1(agent.session, text, position);
+    runtime.hooks.add({
+      assistantText: async (agent, text, position) => {
+        await promoteAssistantTextToSendV1(agent.session, text, position);
+      },
     }),
-    // `ctx.inject` rather than a declared dependency: a host that mounts the
-    // Shell without a model still gets its tools and its transcript
-    // seam, and simply never compacts. The hook is evaluated after `turn/end`
-    // is on the log and flushed — but `agent/turn-stopping` is a hook the loop
-    // *awaits* inside its `finally`, so running the summariser here is exactly
-    // the latency a compaction must never cost. It is handed to the
-    // detached scheduler instead and this returns at once: the Turn ends, the
-    // run settles, the response goes out, and the summariser carries on behind
-    // it. Nothing here may throw, and nothing here may wait.
-    disposeFiber(
-      ctx.inject(["llm"], (scoped) => {
-        scoped.on("agent/turn-stopping", async (agent, turn) => {
-          const session = agent.session;
-          const types = turnTypesByTurnV1(session.events);
-          if ((types.get(turn) ?? "chat") !== "chat") return;
-          compactionWorkV1(session.id).start(async (signal) => {
-            if (signal.aborted) return;
-            await runCompactionV1({
-              session,
-              window: chatWindowV1(session.events, session.deriveMessages()),
-              budget: CHAT_HISTORY_BUDGET_CHARS_V1,
-              currentTurn: turn,
-              newEffectId: () => `compaction-${crypto.randomUUID()}`,
-              summarise: async (request) => {
-                // Two deadlines, one call: the compaction's own, and the abort
-                // a newly admitted Turn raises when it takes the log back.
-                const cancelled = AbortSignal.any([request.signal, signal]);
-                const result =
-                  await scoped.llm.structured<CompactionSummaryPayloadV1>(
-                    {
-                      requestId: `compaction-${crypto.randomUUID()}`,
-                      provider: request.provider,
-                      model: request.model,
-                      system: request.system,
-                      messages: request.messages,
-                      tools: [],
-                      ...(request.modelBinding
-                        ? { modelBinding: request.modelBinding }
-                        : {}),
-                    },
-                    {
-                      name: "conversation_compaction",
-                      schema: COMPACTION_RESPONSE_SCHEMA_V1,
-                    },
-                    cancelled,
-                  );
-                if (result.status === "failed") {
-                  throw new Error(result.failure.message);
-                }
-                return renderCompactionSummaryV1(result.value);
-              },
-            });
+    // The hook is evaluated after `turn/end` is on the log and flushed — but
+    // `turnStopping` is a hook the loop *awaits* inside its `finally`, so
+    // running the summariser here is exactly the latency a compaction must
+    // never cost. It is handed to the detached scheduler instead and this
+    // returns at once: the Turn ends, the run settles, the response goes out,
+    // and the summariser carries on behind it. Nothing here may throw, and
+    // nothing here may wait.
+    runtime.hooks.add({
+      turnStopping: async (agent, turn) => {
+        const session = agent.session;
+        const types = turnTypesByTurnV1(session.events);
+        if ((types.get(turn) ?? "chat") !== "chat") return;
+        compactionWorkV1(session.id).start(async (signal) => {
+          if (signal.aborted) return;
+          await runCompactionV1({
+            session,
+            window: chatWindowV1(session.events, session.deriveMessages()),
+            budget: CHAT_HISTORY_BUDGET_CHARS_V1,
+            currentTurn: turn,
+            newEffectId: () => `compaction-${crypto.randomUUID()}`,
+            summarise: async (request) => {
+              // Two deadlines, one call: the compaction's own, and the abort
+              // a newly admitted Turn raises when it takes the log back.
+              const cancelled = AbortSignal.any([request.signal, signal]);
+              const result =
+                await runtime.llm.structured<CompactionSummaryPayloadV1>(
+                  {
+                    requestId: `compaction-${crypto.randomUUID()}`,
+                    provider: request.provider,
+                    model: request.model,
+                    system: request.system,
+                    messages: request.messages,
+                    tools: [],
+                    ...(request.modelBinding
+                      ? { modelBinding: request.modelBinding }
+                      : {}),
+                  },
+                  {
+                    name: "conversation_compaction",
+                    schema: COMPACTION_RESPONSE_SCHEMA_V1,
+                  },
+                  cancelled,
+                );
+              if (result.status === "failed") {
+                throw new Error(result.failure.message);
+              }
+              return renderCompactionSummaryV1(result.value);
+            },
           });
         });
-      }),
-    ),
+      },
+    }),
     // Applied after the rest of the chain, so this Package has the last word on
     // what history a request carries — the one rule the visible transcript
     // rests on.
-    ctx.on(
-      "agent/message-window",
-      async (agent, _messages, _turn, _step, _signal, next) => {
+    runtime.hooks.add({
+      messageWindow: async (agent, _messages, _turn, _step, _signal, next) => {
         const proposed = await next();
         return turnScopedMessagesV1({
           events: agent.session.events,
@@ -584,12 +577,11 @@ export const shellAgentPlugin: Plugin.Function = (ctx) => {
           sessionId: agent.session.id,
         });
       },
-    ),
+    }),
   ];
   return () => {
     for (const dispose of disposers.toReversed()) dispose();
   };
 };
-shellAgentPlugin.inject = ["tools", "sessions", "systemPrompt"];
 
-export default shellAgentPlugin;
+export default shellAgentFeature;

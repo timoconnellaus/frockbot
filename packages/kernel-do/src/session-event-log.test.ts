@@ -12,7 +12,7 @@ import {
 const SESSION_ID = "user-1:primary";
 
 function journal(systemBytes = 80_000): SessionEvent[] {
-  const session = new Session(SESSION_ID, () => {});
+  const session = new Session(SESSION_ID);
   session.appendBatch([
     { type: "turn/start", turn: 1 },
     { type: "step/start", turn: 1, step: 1 },
@@ -101,7 +101,7 @@ describe("the paged Session event log", () => {
   test("cuts large assistant and tool bodies without losing their exact events", async () => {
     const storage = new MemoryStorage();
     const log = new SessionEventLog(storage);
-    const session = new Session(SESSION_ID, () => {});
+    const session = new Session(SESSION_ID);
     const assistantText = "assistant".repeat(4_000);
     const toolContent = "tool-result".repeat(4_000);
     session.appendBatch([
@@ -172,7 +172,7 @@ describe("the paged Session event log", () => {
   test("appends across fixed-size pages and preserves contiguous ranges", async () => {
     const storage = new MemoryStorage();
     const log = new SessionEventLog(storage);
-    const session = new Session(SESSION_ID, () => {});
+    const session = new Session(SESSION_ID);
     for (let turn = 1; turn <= 40; turn += 1) {
       session.appendBatch([
         { type: "turn/start", turn },
@@ -252,7 +252,7 @@ describe("the paged Session event log", () => {
 
   test("reads a range without hydrating unrelated model requests", async () => {
     const storage = new MemoryStorage();
-    const session = new Session(SESSION_ID, () => {});
+    const session = new Session(SESSION_ID);
     for (let turn = 1; turn <= 12; turn += 1) {
       session.appendBatch([
         { type: "turn/start", turn },
@@ -297,7 +297,7 @@ describe("the paged Session event log", () => {
 
   test("hydrates only the payloads its own range references", async () => {
     const storage = new MemoryStorage();
-    const session = new Session(SESSION_ID, () => {});
+    const session = new Session(SESSION_ID);
     for (let turn = 1; turn <= 12; turn += 1) {
       session.appendBatch([
         { type: "turn/start", turn },

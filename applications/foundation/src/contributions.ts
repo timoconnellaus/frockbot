@@ -34,7 +34,7 @@ import type {
   BackendContributionDescriptorV1,
   ContributionLifecycleV1,
 } from "@frockbot/kernel-contracts/contributions";
-import { Context, type Plugin } from "cordis";
+import type { RuntimeCleanupV1 } from "@frockbot/kernel-contracts";
 
 import {
   backendContribution as adminGatewayContribution,
@@ -190,7 +190,7 @@ export interface FoundationBackendPluginHost<T> {
   resolve(
     specifier: string,
     lifecycle: BackendContributionLifecycle<T>,
-  ): Plugin;
+  ): void | RuntimeCleanupV1 | Promise<void | RuntimeCleanupV1>;
 }
 
 export interface MountedFoundationBackend<T> {
@@ -414,7 +414,7 @@ export function assertFoundationBackendContributionsResolvable(
   }
 }
 
-/** Mount every declared backend Contribution into one owned Cordis root. */
+/** Mount every declared backend Contribution, in plan order. */
 export async function createFoundationBackendContributions(
   plan: ApplicationPlan,
   host: FoundationGatewayHost,
@@ -422,17 +422,14 @@ export async function createFoundationBackendContributions(
 export async function createFoundationBackendContributions<T>(
   plan: ApplicationPlan,
   host: FoundationBackendPluginHost<T>,
-  root?: Context,
 ): Promise<MountedFoundationBackend<T>>;
 export async function createFoundationBackendContributions<T>(
   plan: ApplicationPlan,
   host: FoundationUserBackendHostV1,
-  root?: Context,
 ): Promise<MountedFoundationBackend<T>>;
 export async function createFoundationBackendContributions<T>(
   plan: ApplicationPlan,
   host: FoundationBotBackendHostV1,
-  root?: Context,
 ): Promise<MountedFoundationBackend<T>>;
 export async function createFoundationBackendContributions<T>(
   plan: ApplicationPlan,
@@ -441,11 +438,8 @@ export async function createFoundationBackendContributions<T>(
     | FoundationBackendPluginHost<T>
     | FoundationUserBackendHostV1
     | FoundationBotBackendHostV1,
-  residentRoot?: Context,
 ): Promise<MountedFoundationBackend<BackendRouteContribution | T>> {
-  const ownsRoot = !residentRoot;
-  const root = residentRoot ?? new Context();
-  const fibers: Array<ReturnType<Context["plugin"]>> = [];
+  const cleanups: RuntimeCleanupV1[] = [];
   const contributions: Array<BackendRouteContribution | T> = [];
   const mountedByDescriptor =
     ("mountedContributions" in host && host.mountedContributions) ||
@@ -464,12 +458,15 @@ export async function createFoundationBackendContributions<T>(
         };
       },
     };
+  const unwind = async () => {
+    for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
+  };
   try {
     for (const planned of plannedFoundationBackendContributions(plan)) {
       if (planned.host !== host.backendHost) continue;
-      let plugin: Plugin;
+      let cleanup: void | RuntimeCleanupV1;
       if ("resolve" in host) {
-        plugin = host.resolve(planned.specifier, lifecycle);
+        cleanup = await host.resolve(planned.specifier, lifecycle);
       } else {
         // An artifact-backed member never reaches the table: it loads through
         // the isolate host, exactly as a Bot-authored Package does.
@@ -480,7 +477,7 @@ export async function createFoundationBackendContributions<T>(
             `foundation Contribution "${planned.specifier}" is neither in the application's Contribution table nor artifact-backed`,
           );
         }
-        plugin = descriptor.create(host as never, {
+        cleanup = await descriptor.mount(host as never, {
           mount(contribution: unknown) {
             mountedByDescriptor.record(descriptor, contribution);
             return lifecycle.mount(
@@ -489,13 +486,10 @@ export async function createFoundationBackendContributions<T>(
           },
         });
       }
-      const fiber = root.plugin(plugin);
-      fibers.push(fiber);
-      await fiber;
+      if (cleanup) cleanups.push(cleanup);
     }
   } catch (error) {
-    await Promise.allSettled(fibers.reverse().map((fiber) => fiber.dispose()));
-    if (ownsRoot) await root.fiber.dispose();
+    await unwind();
     throw error;
   }
   let disposed = false;
@@ -505,10 +499,7 @@ export async function createFoundationBackendContributions<T>(
     async dispose() {
       if (disposed) return;
       disposed = true;
-      await Promise.allSettled(
-        fibers.reverse().map((fiber) => fiber.dispose()),
-      );
-      if (ownsRoot) await root.fiber.dispose();
+      await unwind();
     },
   };
 }

@@ -3,6 +3,7 @@ import {
   decodeSessionEvent,
   LlmEffectNotStartedError,
   type LlmProvider,
+  LoopHookListV1,
   type NormalizedModelRequest,
   type LlmStreamEvent,
   type PersistSessionEvents,
@@ -14,11 +15,23 @@ import {
 import { LlmRegistry } from "@frockbot/plugin-models";
 import { SystemPromptRegistry } from "@frockbot/plugin-prompt";
 import { ToolRegistry } from "@frockbot/plugin-tools";
-import { AgentRegistry, type AgentOptions } from "./agent.js";
-import { Context, type Plugin } from "cordis";
-import { AgentLoop, STEP_LIMIT_REASON_V1 } from "./index.js";
+import type { AgentOptions } from "./agent.js";
+import {
+  type AgentLoop,
+  createAgentLoop,
+  STEP_LIMIT_REASON_V1,
+} from "./index.js";
 
-const roots: Context[] = [];
+interface LoopFixture {
+  sessions: SessionStore;
+  systemPrompt: SystemPromptRegistry;
+  llm: LlmRegistry;
+  tools: ToolRegistry;
+  hooks: LoopHookListV1;
+  loop: AgentLoop;
+}
+
+const loops: AgentLoop[] = [];
 const allowEffect = () => Promise.resolve(true);
 const allowEffectOptions = { admitEffect: allowEffect };
 
@@ -37,44 +50,33 @@ const TEST_COMPOSITION = {
   artifactSetHash: "a".repeat(64),
 };
 
-async function mountRuntime(
+function mountRuntime(
   provider: LlmProvider,
   tool?: ToolDefinition | ToolDefinition[],
   persistEvents?: PersistSessionEvents,
   initialSessions?: Record<string, SessionEvent[]>,
-): Promise<Context> {
-  const root = new Context();
-  roots.push(root);
-  await root.plugin(SessionStore, { persistEvents, initialSessions });
-  await root.plugin(SystemPromptRegistry);
-  await root.plugin(LlmRegistry);
-  await root.plugin(ToolRegistry);
-  await root.plugin(AgentRegistry);
+): LoopFixture {
+  const hooks = new LoopHookListV1();
+  const sessions = new SessionStore({ persistEvents, initialSessions });
+  const systemPrompt = new SystemPromptRegistry(hooks);
+  const llm = new LlmRegistry(hooks);
+  const tools = new ToolRegistry(hooks, systemPrompt);
 
-  const promptPlugin: Plugin.Function = (ctx) =>
-    ctx.systemPrompt.register({
-      id: "identity",
-      render: () => "You are the FrockBot test agent.",
-    });
-  promptPlugin.inject = ["systemPrompt"];
-  const providerPlugin: Plugin.Function = (ctx) => ctx.llm.register(provider);
-  providerPlugin.inject = ["llm"];
-  await root.plugin(promptPlugin);
-  await root.plugin(providerPlugin);
-
-  if (tool) {
-    const tools = Array.isArray(tool) ? tool : [tool];
-    const toolPlugin: Plugin.Function = (ctx) => {
-      for (const definition of tools) ctx.tools.register(definition);
-    };
-    toolPlugin.inject = ["tools"];
-    await root.plugin(toolPlugin);
-  }
-  await root.plugin(AgentLoop, {
-    maxSteps: 4,
-    composition: TEST_COMPOSITION,
+  systemPrompt.register({
+    id: "identity",
+    render: () => "You are the FrockBot test agent.",
   });
-  return root;
+  llm.register(provider);
+  for (const definition of tool ? [tool].flat() : []) {
+    tools.register(definition);
+  }
+
+  const loop = createAgentLoop(
+    { sessions, systemPrompt, llm, tools, hooks },
+    { maxSteps: 4, composition: TEST_COMPOSITION },
+  );
+  loops.push(loop);
+  return { sessions, systemPrompt, llm, tools, hooks, loop };
 }
 
 function openToolSessionEvents(
@@ -137,7 +139,11 @@ async function eventually(
 }
 
 afterEach(async () => {
-  await Promise.all(roots.splice(0).map((root) => root.fiber.dispose()));
+  // Disposing waits for the run to go idle, which re-reports a run failure
+  // the test that provoked it has already asserted on.
+  await Promise.all(
+    loops.splice(0).map((loop) => loop.dispose().catch(() => undefined)),
+  );
 });
 
 describe("AgentLoop", () => {
@@ -158,8 +164,8 @@ describe("AgentLoop", () => {
         yield { type: "finish", reason: "completed" };
       },
     };
-    const root = await mountRuntime(provider);
-    const handle = await root.agents.create({
+    const runtime = mountRuntime(provider);
+    const handle = await runtime.loop.create({
       ...allowEffectOptions,
       botId: "bot-usage",
       sessionId: "reported-usage",
@@ -196,8 +202,8 @@ describe("AgentLoop", () => {
         yield { type: "finish", reason: "completed" };
       },
     };
-    const root = await mountRuntime(provider);
-    const handle = await root.agents.create({
+    const runtime = mountRuntime(provider);
+    const handle = await runtime.loop.create({
       ...allowEffectOptions,
       botId: "bot-usage",
       sessionId: "estimated-usage",
@@ -241,21 +247,23 @@ describe("AgentLoop", () => {
         yield { type: "finish", reason: "completed" };
       },
     };
-    const root = await mountRuntime(provider);
-    root.on("agent/request", async (_agent, _request, _signal, next) => ({
-      ...(await next()),
-      responseFormat: {
-        type: "json_schema",
-        name: "answer",
-        schema: {
-          type: "object",
-          properties: { answer: { type: "string" } },
-          required: ["answer"],
-          additionalProperties: false,
+    const runtime = mountRuntime(provider);
+    runtime.hooks.add({
+      request: async (_agent, _request, _signal, next) => ({
+        ...(await next()),
+        responseFormat: {
+          type: "json_schema",
+          name: "answer",
+          schema: {
+            type: "object",
+            properties: { answer: { type: "string" } },
+            required: ["answer"],
+            additionalProperties: false,
+          },
         },
-      },
-    }));
-    const handle = await root.agents.create({
+      }),
+    });
+    const handle = await runtime.loop.create({
       ...allowEffectOptions,
       botId: "bot-structured-failure",
       sessionId: "structured-failure",
@@ -309,32 +317,28 @@ describe("AgentLoop", () => {
         yield { type: "finish", reason: "completed" };
       },
     };
-    const root = await mountRuntime(provider, {
+    const runtime = mountRuntime(provider, {
       name: "original_tool",
       description: "The initially exposed tool.",
       inputSchema: { type: "object" },
       execute: () => Promise.resolve({ content: "ok", isError: false }),
     });
-    root.on("system-prompt/assemble", async (_context, next) => {
-      const assembly = await next();
-      return {
-        text: `${assembly.text}\nHook-shaped system context.`,
-        sections: [
-          ...assembly.sections,
-          { id: "hook", text: "Hook-shaped system context." },
-        ],
-      };
-    });
-    root.on(
-      "agent/message-window",
-      async (_agent, messages, _turn, _step, _signal, next) => [
+    runtime.hooks.add({
+      assemblePrompt: async (_context, next) => {
+        const assembly = await next();
+        return {
+          text: `${assembly.text}\nHook-shaped system context.`,
+          sections: [
+            ...assembly.sections,
+            { id: "hook", text: "Hook-shaped system context." },
+          ],
+        };
+      },
+      messageWindow: async (_agent, messages, _turn, _step, _signal, next) => [
         ...(await next()),
         { role: "user" as const, content: `window:${messages.length}` },
       ],
-    );
-    root.on(
-      "agent/tool-exposure",
-      async (_agent, _tools, _turn, _step, _signal, next) => {
+      toolExposure: async (_agent, _tools, _turn, _step, _signal, next) => {
         await next();
         return [
           {
@@ -344,8 +348,8 @@ describe("AgentLoop", () => {
           },
         ];
       },
-    );
-    const handle = await root.agents.create({
+    });
+    const handle = await runtime.loop.create({
       ...allowEffectOptions,
       botId: "bot-hook-request",
       sessionId: "hook-shaped-request",
@@ -382,14 +386,14 @@ describe("AgentLoop", () => {
         yield { type: "finish", reason: "completed" };
       },
     };
-    const root = await mountRuntime(provider);
+    const runtime = mountRuntime(provider);
     const admissions: Array<{ kind: "model" | "tool"; effectId: string }> = [];
     let intentWasDurable = false;
     const fenceOptions = {
       admitEffect: (effect: { kind: "model" | "tool"; effectId: string }) => {
         admissions.push(effect);
         intentWasDurable =
-          root.sessions
+          runtime.sessions
             .get("fenced-model")
             ?.events.some(
               (event) =>
@@ -399,7 +403,7 @@ describe("AgentLoop", () => {
         return Promise.resolve(false);
       },
     };
-    const handle = await root.agents.create({
+    const handle = await runtime.loop.create({
       ...fenceOptions,
       botId: "bot-1",
       sessionId: "fenced-model",
@@ -448,7 +452,7 @@ describe("AgentLoop", () => {
         return Promise.resolve({ content: "executed", isError: false });
       },
     };
-    const root = await mountRuntime(provider, tool);
+    const runtime = mountRuntime(provider, tool);
     const admissions: Array<{ kind: "model" | "tool"; effectId: string }> = [];
     let toolIntentWasDurable = false;
     const fenceOptions = {
@@ -456,7 +460,7 @@ describe("AgentLoop", () => {
         admissions.push(effect);
         if (effect.kind === "tool") {
           toolIntentWasDurable =
-            root.sessions
+            runtime.sessions
               .get("fenced-tool")
               ?.events.some(
                 (event) =>
@@ -468,7 +472,7 @@ describe("AgentLoop", () => {
         return Promise.resolve(true);
       },
     };
-    const handle = await root.agents.create({
+    const handle = await runtime.loop.create({
       ...fenceOptions,
       botId: "bot-1",
       sessionId: "fenced-tool",
@@ -517,24 +521,23 @@ describe("AgentLoop", () => {
         yield { type: "finish", reason: "completed" };
       },
     };
-    const root = await mountRuntime(
-      provider,
-      undefined,
-      (_sessionId, events) => {
-        durableEvents = [...events];
-        return Promise.resolve();
-      },
-    );
-    root.on("agent/model-outcome-committed", async (_agent, requestId) => {
-      committed.push({
-        requestId,
-        durable: durableEvents.some(
-          (event) =>
-            event.type === "assistant/message" && event.requestId === requestId,
-        ),
-      });
+    const runtime = mountRuntime(provider, undefined, (_sessionId, events) => {
+      durableEvents = [...events];
+      return Promise.resolve();
     });
-    const handle = await root.agents.create({
+    runtime.hooks.add({
+      modelOutcomeCommitted: async (_agent, requestId) => {
+        committed.push({
+          requestId,
+          durable: durableEvents.some(
+            (event) =>
+              event.type === "assistant/message" &&
+              event.requestId === requestId,
+          ),
+        });
+      },
+    });
+    const handle = await runtime.loop.create({
       botId: "bot-1",
       sessionId: "session-1",
       provider: provider.id,
@@ -558,15 +561,11 @@ describe("AgentLoop", () => {
       },
     };
     const durableTypes: string[] = [];
-    const root = await mountRuntime(
-      provider,
-      undefined,
-      (_sessionId, events) => {
-        durableTypes.push(...events.map((event) => event.type));
-        return Promise.resolve();
-      },
-    );
-    const handle = await root.agents.create({
+    const runtime = mountRuntime(provider, undefined, (_sessionId, events) => {
+      durableTypes.push(...events.map((event) => event.type));
+      return Promise.resolve();
+    });
+    const handle = await runtime.loop.create({
       botId: "bot-pinned",
       sessionId: "pinned-session",
       provider: provider.id,
@@ -620,8 +619,8 @@ describe("AgentLoop", () => {
       admission: { turnTypes: ["chat"] },
       execute: () => Promise.resolve({ content: "sent", isError: false }),
     };
-    const root = await mountRuntime(provider, [work, chatOnly]);
-    const handle = await root.agents.create({
+    const runtime = mountRuntime(provider, [work, chatOnly]);
+    const handle = await runtime.loop.create({
       botId: "bot-1",
       sessionId: "admission-catalog",
       provider: provider.id,
@@ -681,10 +680,10 @@ describe("AgentLoop", () => {
       { type: "turn/start", turn: 1 },
       { type: "step/start", turn: 1, step: 1 },
     ].map((event, seq) => ({ ...event, seq, timestamp })) as SessionEvent[];
-    const root = await mountRuntime(provider, chatOnly, undefined, {
+    const runtime = mountRuntime(provider, chatOnly, undefined, {
       "admission-default": initial,
     });
-    const handle = await root.agents.create({
+    const handle = await runtime.loop.create({
       botId: "bot-1",
       sessionId: "admission-default",
       provider: provider.id,
@@ -733,8 +732,8 @@ describe("AgentLoop", () => {
         return Promise.resolve({ content: "sent", isError: false });
       },
     };
-    const root = await mountRuntime(provider, chatOnly);
-    const handle = await root.agents.create({
+    const runtime = mountRuntime(provider, chatOnly);
+    const handle = await runtime.loop.create({
       botId: "bot-1",
       sessionId: "admission-denial",
       provider: provider.id,
@@ -780,8 +779,8 @@ describe("AgentLoop", () => {
           endsTurn: true,
         }),
     };
-    const root = await mountRuntime(provider, handOff);
-    const handle = await root.agents.create({
+    const runtime = mountRuntime(provider, handOff);
+    const handle = await runtime.loop.create({
       botId: "bot-1",
       sessionId: "ends-turn",
       provider: provider.id,
@@ -861,10 +860,10 @@ describe("AgentLoop", () => {
         toolCalls: [{ id: "provider-call", name: "hand_off", input: {} }],
       },
     ].map((event, seq) => ({ ...event, seq, timestamp })) as SessionEvent[];
-    const root = await mountRuntime(provider, handOff, undefined, {
+    const runtime = mountRuntime(provider, handOff, undefined, {
       "ends-turn-resume": initial,
     });
-    const handle = await root.agents.create({
+    const handle = await runtime.loop.create({
       botId: "bot-1",
       sessionId: "ends-turn-resume",
       provider: provider.id,
@@ -896,12 +895,14 @@ describe("AgentLoop", () => {
         yield { type: "finish", reason: "completed" };
       },
     };
-    const root = await mountRuntime(provider);
-    root.on("agent/model-outcome-committed", async () => {
-      attempts += 1;
-      if (attempts === 1) throw new Error("settlement unavailable");
+    const runtime = mountRuntime(provider);
+    runtime.hooks.add({
+      modelOutcomeCommitted: async () => {
+        attempts += 1;
+        if (attempts === 1) throw new Error("settlement unavailable");
+      },
     });
-    const handle = await root.agents.create({
+    const handle = await runtime.loop.create({
       botId: "bot-1",
       sessionId: "settlement-retry",
       provider: provider.id,
@@ -962,13 +963,15 @@ describe("AgentLoop", () => {
         throw new Error("stream must not run");
       },
     };
-    const root = await mountRuntime(provider, undefined, undefined, {
+    const runtime = mountRuntime(provider, undefined, undefined, {
       "durable-assistant": initial,
     });
-    root.on("agent/model-outcome-committed", async (_agent, requestId) => {
-      committed.push(requestId);
+    runtime.hooks.add({
+      modelOutcomeCommitted: async (_agent, requestId) => {
+        committed.push(requestId);
+      },
     });
-    const handle = await root.agents.create({
+    const handle = await runtime.loop.create({
       botId: "bot-1",
       sessionId: "durable-assistant",
       provider: provider.id,
@@ -1015,10 +1018,10 @@ describe("AgentLoop", () => {
         },
       },
     ].map((event, seq) => ({ ...event, seq, timestamp })) as SessionEvent[];
-    const root = await mountRuntime(provider, undefined, undefined, {
+    const runtime = mountRuntime(provider, undefined, undefined, {
       recovering: initial,
     });
-    const handle = await root.agents.create({
+    const handle = await runtime.loop.create({
       ...allowEffectOptions,
       botId: "bot-1",
       sessionId: "recovering",
@@ -1079,10 +1082,10 @@ describe("AgentLoop", () => {
         text: "A",
       },
     ].map((event, seq) => ({ ...event, seq, timestamp })) as SessionEvent[];
-    const root = await mountRuntime(provider, undefined, undefined, {
+    const runtime = mountRuntime(provider, undefined, undefined, {
       partial: initial,
     });
-    const handle = await root.agents.create({
+    const handle = await runtime.loop.create({
       ...allowEffectOptions,
       botId: "partial-bot",
       sessionId: "partial",
@@ -1126,8 +1129,8 @@ describe("AgentLoop", () => {
         yield { type: "finish", reason: "completed" };
       },
     };
-    const root = await mountRuntime(provider);
-    const handle = await root.agents.create({
+    const runtime = mountRuntime(provider);
+    const handle = await runtime.loop.create({
       ...allowEffectOptions,
       botId: "bot-lost",
       sessionId: "agent-lost",
@@ -1169,8 +1172,8 @@ describe("AgentLoop", () => {
         yield { type: "finish", reason: "completed" };
       },
     };
-    const root = await mountRuntime(provider);
-    const handle = await root.agents.create({
+    const runtime = mountRuntime(provider);
+    const handle = await runtime.loop.create({
       ...allowEffectOptions,
       botId: "bot-2",
       sessionId: "agent-2",
@@ -1212,8 +1215,8 @@ describe("AgentLoop", () => {
         );
       },
     };
-    const root = await mountRuntime(provider);
-    const handle = await root.agents.create({
+    const runtime = mountRuntime(provider);
+    const handle = await runtime.loop.create({
       ...allowEffectOptions,
       botId: "bot-no-effect",
       sessionId: "agent-no-effect",
@@ -1247,7 +1250,7 @@ describe("AgentLoop", () => {
           compositionGenerationId: string;
         }
       | undefined;
-    let root: Context;
+    let runtime: LoopFixture;
     const provider: LlmProvider = {
       id: "scripted",
       async *stream(request) {
@@ -1303,7 +1306,7 @@ describe("AgentLoop", () => {
         input !== null &&
         typeof (input as { value?: unknown }).value === "string",
       async execute(input, context) {
-        const session = root.agents.get("general")?.session;
+        const session = runtime.loop.get("general")?.session;
         toolWasJournaled = session?.events.at(-1)?.type === "tool/call";
         toolIntentWasDurable = durableEventTypes.at(-1) === "tool/call";
         const identifiedContext = context as typeof context & {
@@ -1322,21 +1325,23 @@ describe("AgentLoop", () => {
       },
     };
 
-    root = await mountRuntime(provider, tool, (_sessionId, events) => {
+    runtime = mountRuntime(provider, tool, (_sessionId, events) => {
       durableEventTypes.push(...events.map((event) => event.type));
       return Promise.resolve();
     });
-    root.systemPrompt.register({
+    runtime.systemPrompt.register({
       id: "session-observer",
       render: (context) => {
         observedPromptSessionId = context.sessionId;
         return "";
       },
     });
-    root.on("agent/turn-stopping", (agent) => {
-      turnStoppingSawCompletedJournal =
-        agent.session.events.at(-1)?.type === "turn/end";
-      return Promise.resolve();
+    runtime.hooks.add({
+      turnStopping: (agent) => {
+        turnStoppingSawCompletedJournal =
+          agent.session.events.at(-1)?.type === "turn/end";
+        return Promise.resolve();
+      },
     });
     const agentOptions: AgentOptions & { agentId: string } = {
       botId: "general-bot",
@@ -1346,7 +1351,7 @@ describe("AgentLoop", () => {
       model: "test-model",
       ...allowEffectOptions,
     };
-    const handle = await root.agents.create(agentOptions);
+    const handle = await runtime.loop.create(agentOptions);
     handle.agent.send("Use the echo tool.");
     await handle.agent.whenIdle();
 
@@ -1413,7 +1418,7 @@ describe("AgentLoop", () => {
 
     const session = handle.agent.session;
     await handle.dispose();
-    expect(root.agents.list()).toEqual([]);
+    expect(runtime.loop.list()).toEqual([]);
     expect(session.events.at(-1)?.type).toBe("session/disposed");
   });
 
@@ -1446,7 +1451,7 @@ describe("AgentLoop", () => {
       },
     };
     let cancel = () => {};
-    const root = await mountRuntime(
+    const runtime = mountRuntime(
       provider,
       undefined,
       (_sessionId, events) => {
@@ -1456,7 +1461,7 @@ describe("AgentLoop", () => {
       },
       { "agent-flush-cancel": initial },
     );
-    const handle = await root.agents.create({
+    const handle = await runtime.loop.create({
       ...allowEffectOptions,
       botId: "bot-flush-cancel",
       sessionId: "agent-flush-cancel",
@@ -1514,8 +1519,8 @@ describe("AgentLoop", () => {
         });
       },
     };
-    const root = await mountRuntime(provider, tool);
-    const handle = await root.agents.create({
+    const runtime = mountRuntime(provider, tool);
+    const handle = await runtime.loop.create({
       ...allowEffectOptions,
       botId: "bot-tool-cancel",
       sessionId: "agent-tool-cancel",
@@ -1568,10 +1573,10 @@ describe("AgentLoop", () => {
         return Promise.resolve({ content: "settled once", isError: false });
       },
     };
-    const root = await mountRuntime(provider, tool, undefined, {
+    const runtime = mountRuntime(provider, tool, undefined, {
       "recovered-tool-session": openToolSessionEvents(provider.id, tool.name),
     });
-    const handle = await root.agents.create({
+    const handle = await runtime.loop.create({
       ...allowEffectOptions,
       botId: "recovered-tool-bot",
       sessionId: "recovered-tool-session",
@@ -1657,10 +1662,10 @@ describe("AgentLoop", () => {
         return Promise.resolve({ content: "settled", isError: false });
       },
     };
-    const root = await mountRuntime(provider, tool, undefined, {
+    const runtime = mountRuntime(provider, tool, undefined, {
       "idempotent-session": initial,
     });
-    const handle = await root.agents.create({
+    const handle = await runtime.loop.create({
       ...allowEffectOptions,
       botId: "idempotent-bot",
       sessionId: "idempotent-session",
@@ -1736,8 +1741,8 @@ describe("AgentLoop", () => {
         return Promise.resolve({ content: value, isError: false });
       },
     };
-    const root = await mountRuntime(provider, tool);
-    const handle = await root.agents.create({
+    const runtime = mountRuntime(provider, tool);
+    const handle = await runtime.loop.create({
       ...allowEffectOptions,
       botId: "bot-cancel-tools",
       sessionId: "agent-cancel-tools",
@@ -1835,11 +1840,11 @@ describe("AgentLoop", () => {
       validate: () => true,
       execute: () => Promise.reject(new Error("provider revoked")),
     };
-    const root = await mountRuntime(provider, tool, (_sessionId, events) => {
+    const runtime = mountRuntime(provider, tool, (_sessionId, events) => {
       durableTypes.push(...events.map((event) => event.type));
       return Promise.resolve();
     });
-    const handle = await root.agents.create({
+    const handle = await runtime.loop.create({
       ...allowEffectOptions,
       botId: "bot-failure",
       sessionId: "agent-failure",
@@ -1905,10 +1910,10 @@ describe("AgentLoop", () => {
         yield { type: "finish", reason: "completed" };
       },
     };
-    const root = await mountRuntime(provider, undefined, undefined, {
+    const runtime = mountRuntime(provider, undefined, undefined, {
       "resume-session": initial,
     });
-    const handle = await root.agents.create({
+    const handle = await runtime.loop.create({
       ...allowEffectOptions,
       botId: "resume-bot",
       sessionId: "resume-session",
@@ -1994,7 +1999,7 @@ describe("AgentLoop", () => {
         yield { type: "finish", reason: "completed" };
       },
     };
-    const root = await mountRuntime(
+    const runtime = mountRuntime(
       provider,
       {
         name: "echo",
@@ -2011,7 +2016,7 @@ describe("AgentLoop", () => {
       undefined,
       { "resume-tools": initial },
     );
-    const handle = await root.agents.create({
+    const handle = await runtime.loop.create({
       ...allowEffectOptions,
       botId: "resume-bot",
       sessionId: "resume-tools",
@@ -2115,7 +2120,7 @@ describe("AgentLoop", () => {
         yield { type: "finish", reason: "completed" };
       },
     };
-    const root = await mountRuntime(
+    const runtime = mountRuntime(
       provider,
       {
         name: "echo",
@@ -2130,7 +2135,7 @@ describe("AgentLoop", () => {
       undefined,
       { "duplicate-tools": initial },
     );
-    const handle = await root.agents.create({
+    const handle = await runtime.loop.create({
       ...allowEffectOptions,
       botId: "resume-bot",
       sessionId: "duplicate-tools",
@@ -2207,7 +2212,7 @@ describe("AgentLoop", () => {
         throw new Error("structural mismatch must not request the model");
       },
     };
-    const root = await mountRuntime(
+    const runtime = mountRuntime(
       provider,
       {
         name: "echo",
@@ -2221,7 +2226,7 @@ describe("AgentLoop", () => {
       undefined,
       { "mismatched-tools": initial },
     );
-    const handle = await root.agents.create({
+    const handle = await runtime.loop.create({
       ...allowEffectOptions,
       botId: "resume-bot",
       sessionId: "mismatched-tools",
@@ -2298,7 +2303,7 @@ describe("AgentLoop", () => {
     ].map((event, seq) => ({ ...event, seq, timestamp })) as SessionEvent[];
     let modelRequests = 0;
     let toolExecutions = 0;
-    const root = await mountRuntime(
+    const runtime = mountRuntime(
       {
         id: "malformed-tools",
         async *stream() {
@@ -2318,7 +2323,7 @@ describe("AgentLoop", () => {
       undefined,
       { "malformed-tools": initial },
     );
-    const handle = await root.agents.create({
+    const handle = await runtime.loop.create({
       ...allowEffectOptions,
       botId: "resume-bot",
       sessionId: "malformed-tools",
@@ -2371,10 +2376,10 @@ describe("AgentLoop", () => {
         throw new Error("resume must not create another model request");
       },
     };
-    const root = await mountRuntime(provider, undefined, undefined, {
+    const runtime = mountRuntime(provider, undefined, undefined, {
       "resume-text": initial,
     });
-    const handle = await root.agents.create({
+    const handle = await runtime.loop.create({
       ...allowEffectOptions,
       botId: "resume-bot",
       sessionId: "resume-text",
@@ -2431,10 +2436,10 @@ describe("AgentLoop", () => {
         throw new Error("resume must not create another model request");
       },
     };
-    const root = await mountRuntime(provider, undefined, undefined, {
+    const runtime = mountRuntime(provider, undefined, undefined, {
       "resume-ended-text": initial,
     });
-    const handle = await root.agents.create({
+    const handle = await runtime.loop.create({
       ...allowEffectOptions,
       botId: "resume-bot",
       sessionId: "resume-ended-text",
@@ -2521,10 +2526,10 @@ describe("AgentLoop", () => {
         yield { type: "finish", reason: "completed" };
       },
     };
-    const root = await mountRuntime(provider, undefined, undefined, {
+    const runtime = mountRuntime(provider, undefined, undefined, {
       "resume-open-step": initial,
     });
-    const handle = await root.agents.create({
+    const handle = await runtime.loop.create({
       ...allowEffectOptions,
       botId: "resume-bot",
       sessionId: "resume-open-step",
@@ -2559,8 +2564,8 @@ describe("AgentLoop", () => {
         );
       },
     };
-    const root = await mountRuntime(provider);
-    const handle = await root.agents.create({
+    const runtime = mountRuntime(provider);
+    const handle = await runtime.loop.create({
       botId: "reason-bot",
       sessionId: "provider-rejects",
       provider: "provider-rejects",
@@ -2586,8 +2591,8 @@ describe("AgentLoop", () => {
         throw new LlmEffectNotStartedError("x".repeat(900));
       },
     };
-    const root = await mountRuntime(provider);
-    const handle = await root.agents.create({
+    const runtime = mountRuntime(provider);
+    const handle = await runtime.loop.create({
       botId: "reason-bot",
       sessionId: "provider-verbose-failure",
       provider: "provider-verbose-failure",
@@ -2614,8 +2619,8 @@ describe("AgentLoop", () => {
         yield { type: "finish", reason: "completed" };
       },
     };
-    const root = await mountRuntime(provider);
-    const handle = await root.agents.create({
+    const runtime = mountRuntime(provider);
+    const handle = await runtime.loop.create({
       botId: "reason-bot",
       sessionId: "provider-completes",
       provider: "provider-completes",
@@ -2646,17 +2651,13 @@ describe("AgentLoop", () => {
         yield { type: "finish", reason: "tool-calls" };
       },
     };
-    const errors: unknown[] = [];
-    const root = await mountRuntime(provider, {
+    const runtime = mountRuntime(provider, {
       name: "loop_tool",
       description: "Never ends the Turn.",
       inputSchema: { type: "object" },
       execute: () => Promise.resolve({ content: "again", isError: false }),
     });
-    root.on("agent/error", (_agent, error) => {
-      errors.push(error);
-    });
-    const handle = await root.agents.create({
+    const handle = await runtime.loop.create({
       ...allowEffectOptions,
       botId: "step-limit-bot",
       sessionId: "step-limit",
@@ -2672,8 +2673,12 @@ describe("AgentLoop", () => {
       outcome: "interrupted",
       reason: STEP_LIMIT_REASON_V1,
     });
-    // Nothing about the model failed, so nothing is reported as if it had.
-    expect(errors).toEqual([]);
+    // Nothing about the model failed, so the journal reports no model error.
+    expect(
+      handle.agent.session.events.some(
+        (event) => event.type === "turn/end" && event.outcome === "model-error",
+      ),
+    ).toBe(false);
   });
 
   test("a Turn whose first flush fails ends once instead of spinning", async () => {
@@ -2686,7 +2691,7 @@ describe("AgentLoop", () => {
       },
     };
     let writes = 0;
-    const root = await mountRuntime(
+    const runtime = mountRuntime(
       provider,
       undefined,
       // Storage that is simply gone: every durable write rejects.
@@ -2695,7 +2700,7 @@ describe("AgentLoop", () => {
         return Promise.reject(new Error("durable storage is unavailable"));
       },
     );
-    const handle = await root.agents.create({
+    const handle = await runtime.loop.create({
       ...allowEffectOptions,
       botId: "persist-bot",
       sessionId: "persist-fails",
@@ -2736,7 +2741,7 @@ describe("AgentLoop", () => {
       },
     };
     const order: string[] = [];
-    const root = await mountRuntime(provider, {
+    const runtime = mountRuntime(provider, {
       name: "build",
       description: "Does the work the acknowledgement announced.",
       inputSchema: { type: "object" },
@@ -2746,12 +2751,14 @@ describe("AgentLoop", () => {
       },
     });
     const seen: string[] = [];
-    root.on("agent/assistant-text", async (_agent, text, position) => {
-      order.push("assistant-text");
-      seen.push(`${position.turn}:${position.step}:${text}`);
-      seen.push(`tools:${(position.toolNames ?? []).join(",")}`);
+    runtime.hooks.add({
+      assistantText: async (_agent, text, position) => {
+        order.push("assistant-text");
+        seen.push(`${position.turn}:${position.step}:${text}`);
+        seen.push(`tools:${(position.toolNames ?? []).join(",")}`);
+      },
     });
-    const handle = await root.agents.create({
+    const handle = await runtime.loop.create({
       ...allowEffectOptions,
       botId: "bot-ack",
       sessionId: "acknowledging-model",
@@ -2778,12 +2785,14 @@ describe("AgentLoop", () => {
         yield { type: "finish", reason: "completed" };
       },
     };
-    const root = await mountRuntime(provider);
+    const runtime = mountRuntime(provider);
     let raised = 0;
-    root.on("agent/assistant-text", async () => {
-      raised += 1;
+    runtime.hooks.add({
+      assistantText: async () => {
+        raised += 1;
+      },
     });
-    const handle = await root.agents.create({
+    const handle = await runtime.loop.create({
       ...allowEffectOptions,
       botId: "bot-quiet",
       sessionId: "quiet-model",

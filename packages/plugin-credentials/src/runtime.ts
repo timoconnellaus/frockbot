@@ -4,7 +4,7 @@ import {
   openCredentialV1,
   parseCredentialKeyringV1,
 } from "@frockbot/connection-core";
-import { type Context, type Plugin, Service } from "cordis";
+import type { RuntimeFeatureV1 } from "@frockbot/kernel-contracts";
 
 export interface CredentialLeaseOpenRequest {
   accountId: string;
@@ -17,11 +17,10 @@ export interface CredentialRuntimeConfig {
   readSecret(name: "CREDENTIAL_KEYRING"): string | undefined;
 }
 
-export class CredentialLeaseRuntime extends Service {
+export class CredentialLeaseRuntime {
   private readonly keyring;
 
-  constructor(ctx: Context, config: CredentialRuntimeConfig) {
-    super(ctx, "credentialLease");
+  constructor(config: CredentialRuntimeConfig) {
     const serialized = config.readSecret("CREDENTIAL_KEYRING");
     if (!serialized) {
       throw new Error("Credential Store Contribution is not configured");
@@ -50,12 +49,11 @@ export class CredentialLeaseRuntime extends Service {
   }
 }
 
-export function createCredentialRuntimePlugin(
+/** Opens the User's credential leases to every feature mounted after it. */
+export function createCredentialsFeature(
   config: CredentialRuntimeConfig,
-): Plugin.Function {
-  return (ctx) => {
-    new CredentialLeaseRuntime(ctx, config);
+): RuntimeFeatureV1<{ credentials?: CredentialLeaseRuntime }> {
+  return (runtime) => {
+    runtime.credentials = new CredentialLeaseRuntime(config);
   };
 }
-
-export default createCredentialRuntimePlugin;

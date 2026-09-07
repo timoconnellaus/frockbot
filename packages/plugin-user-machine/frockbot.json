@@ -33,11 +33,6 @@
         }
       ],
       "outlets": []
-    },
-    "desktop": {
-      "entry": "./desktop",
-      "execution": "trusted-main",
-      "commands": []
     }
   },
   "configuration": {

@@ -7,7 +7,6 @@ import {
   type WorkspaceSyncEffectsV1,
 } from "@frockbot/kernel-contracts";
 import { createHash } from "node:crypto";
-import { type Context, Service } from "cordis";
 
 /**
  * A stable, provider-neutral directory name for one Bot inside a User-scoped
@@ -1044,13 +1043,9 @@ function guardedHandle(
  * `ComputerIdentityV1` alone. Two Bots of one User share one assignment, one
  * generation, and one provider Computer; each is a tenant on it.
  */
-export class ComputerRegistry extends Service {
+export class ComputerRegistry {
   private readonly providers = new Map<string, ComputerProvider>();
   private readonly assignments = new Map<string, ComputerAssignment>();
-
-  constructor(ctx: Context) {
-    super(ctx, "computers");
-  }
 
   register(provider: ComputerProvider): () => void {
     const id = provider.id.trim();
@@ -1127,11 +1122,5 @@ export class ComputerRegistry extends Service {
         );
       }
     });
-  }
-}
-
-declare module "cordis" {
-  interface Context {
-    computers: ComputerRegistry;
   }
 }

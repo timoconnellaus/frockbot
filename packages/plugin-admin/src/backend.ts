@@ -1,4 +1,3 @@
-import type { Plugin } from "cordis";
 import {
   decodeDeploymentPolicyV1,
   decodeSetSignupsCommandV1,
@@ -111,15 +110,6 @@ export function createAdminBackendContribution(
   };
 }
 
-export namespace createAdminBackendContribution {
-  export function plugin(
-    host: AdminGatewayHost,
-    lifecycle: { mount(value: AdminBackendRouteContribution): () => void },
-  ): Plugin {
-    return () => lifecycle.mount(createAdminBackendContribution(host));
-  }
-}
-
 /**
  * The manifest's gateway `backend` entry, resolved by specifier. The
  * application looks this descriptor up in its Contribution table; it never
@@ -130,5 +120,6 @@ export const backendContribution = defineGatewayContribution<
   AdminBackendRouteContribution
 >({
   specifier: "@frockbot/plugin-admin/backend",
-  create: createAdminBackendContribution.plugin,
+  mount: (host, lifecycle) =>
+    lifecycle.mount(createAdminBackendContribution(host)),
 });

@@ -203,7 +203,7 @@ function host(storage: MemoryStorage, readUser: () => UserSettingsViewV1) {
               start(controller) {
                 controller.enqueue(
                   new TextEncoder().encode(
-                    'data: {"choices":[{"delta":{"content":"Cordis runtime: hello"}}]}\n\n' +
+                    'data: {"choices":[{"delta":{"content":"Built-in model: hello"}}]}\n\n' +
                       'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n' +
                       "data: [DONE]\n\n",
                   ),
@@ -549,7 +549,7 @@ describe("generic per-Turn model resolution", () => {
       text: "hello",
     });
 
-    expect(result.text).toBe("Cordis runtime: hello");
+    expect(result.text).toBe("Built-in model: hello");
     const durableEvents = await new SessionEventLog(storage).read(
       "user-1:primary",
     );

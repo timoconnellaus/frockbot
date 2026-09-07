@@ -8,6 +8,7 @@ import {
 } from "@ai-sdk/provider";
 import type { CredentialLeaseV1 } from "@frockbot/connection-core";
 import {
+  type AgentRuntimeV1,
   boundedModelProviderReasonV1,
   type LlmMessage,
   type LlmProvider,
@@ -15,6 +16,7 @@ import {
   ModelProviderFailureError,
   ModelRequestDeadlineError,
   type NormalizedModelRequest,
+  type RuntimeFeatureV1,
 } from "@frockbot/kernel-contracts";
 import {
   classifyOpenAICompatibleFailureV1,
@@ -24,21 +26,7 @@ import {
   structuredOutputPlanV1,
   systemWithInstructionV1,
 } from "@frockbot/provider-openai-compatible";
-import type { Agent } from "@frockbot/kernel-agent-loop/agent";
-import type { Plugin } from "cordis";
-
-declare module "cordis" {
-  interface Context {
-    credentialLease: CredentialLeaseOpener;
-  }
-
-  interface Events {
-    "agent/model-outcome-committed": (
-      agent: Agent,
-      requestId: string,
-    ) => Promise<void>;
-  }
-}
+import type { CredentialLeaseRuntime } from "@frockbot/plugin-credentials/user";
 
 export const ANTHROPIC_PROVIDER = "anthropic";
 
@@ -460,23 +448,24 @@ class AnthropicProvider implements LlmProvider {
   }
 }
 
-export function createAnthropicRuntimePlugin(
+export function createAnthropicFeature(
   config: AnthropicRuntimeConfig,
-): Plugin.Function {
-  const plugin: Plugin.Function = (ctx) => {
-    const provider = new AnthropicProvider(config, ctx.credentialLease);
-    const disposeProvider = ctx.llm.register(provider);
-    const disposeSettlement = ctx.on(
-      "agent/model-outcome-committed",
-      async (_agent, requestId) => provider.settle(requestId),
-    );
+): RuntimeFeatureV1<AgentRuntimeV1 & { credentials?: CredentialLeaseRuntime }> {
+  return (runtime) => {
+    if (!runtime.credentials) {
+      throw new Error("Credential Store Contribution is not configured");
+    }
+    const provider = new AnthropicProvider(config, runtime.credentials);
+    const disposeProvider = runtime.llm.register(provider);
+    const disposeSettlement = runtime.hooks.add({
+      modelOutcomeCommitted: async (_agent, requestId) =>
+        provider.settle(requestId),
+    });
     return () => {
       disposeSettlement();
       disposeProvider();
     };
   };
-  plugin.inject = ["llm", "credentialLease"];
-  return plugin;
 }
 
-export default createAnthropicRuntimePlugin;
+export default createAnthropicFeature;

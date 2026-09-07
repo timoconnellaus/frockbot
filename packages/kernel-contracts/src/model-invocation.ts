@@ -1,5 +1,3 @@
-// Importing the augmented module is what merges these declarations into cordis.
-import type {} from "cordis";
 import type { LlmStreamEvent, NormalizedModelRequest } from "./types.js";
 import type {
   JsonSchemaResponseFormatV1,
@@ -168,18 +166,4 @@ export interface ModelProviderRegistration {
   register(provider: LlmProvider): () => void;
   get(providerId: string): LlmProvider | undefined;
   list(): LlmProvider[];
-}
-
-declare module "cordis" {
-  interface Context {
-    llm: ModelInvocation & ModelProviderRegistration;
-  }
-
-  interface Events {
-    "llm/stream": (
-      request: NormalizedModelRequest,
-      signal: AbortSignal,
-      next: () => AsyncIterable<LlmStreamEvent>,
-    ) => AsyncIterable<LlmStreamEvent>;
-  }
 }

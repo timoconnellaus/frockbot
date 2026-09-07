@@ -1,46 +1,43 @@
 import { describe, expect, test } from "bun:test";
-import { SystemPromptRegistry } from "@frockbot/plugin-prompt";
 import {
-  createPluginHarness,
+  createAgentRuntimeHarness,
   verifyPluginPackage,
 } from "@frockbot/plugin-testkit";
 import manifest from "../frockbot.json" with { type: "json" };
 import packageJson from "../package.json" with { type: "json" };
-import { createIdentityPlugin, DEFAULT_IDENTITY_TEXT } from "./agent.js";
+import { createIdentityFeature, DEFAULT_IDENTITY_TEXT } from "./agent.js";
 
-describe("identity plugin", () => {
+const assemblyContext = {
+  sessionId: "session",
+  provider: "fixture",
+  model: "fixture",
+  turnType: "chat" as const,
+};
+
+describe("identity feature", () => {
   test("registers and disposes a prompt section", async () => {
-    const harness = await createPluginHarness([SystemPromptRegistry]);
-    const fiber = await harness.mount(createIdentityPlugin());
+    const runtime = createAgentRuntimeHarness();
+    await runtime.mount(createIdentityFeature());
 
-    expect(
-      await harness.root.systemPrompt.assemble({
-        sessionId: "session",
-        provider: "fixture",
-        model: "fixture",
-        turnType: "chat",
-      }),
-    ).toMatchObject({
+    const assembled = await runtime.systemPrompt.assemble(assemblyContext);
+    expect(assembled.text).toContain(DEFAULT_IDENTITY_TEXT);
+    expect(assembled.sections).toContainEqual({
+      id: "identity",
       text: DEFAULT_IDENTITY_TEXT,
-      sections: [{ id: "identity", text: DEFAULT_IDENTITY_TEXT }],
     });
 
-    await fiber.dispose();
+    await runtime.dispose();
+    const afterDispose = await runtime.systemPrompt.assemble(assemblyContext);
     expect(
-      await harness.root.systemPrompt.assemble({
-        sessionId: "session",
-        provider: "fixture",
-        model: "fixture",
-        turnType: "chat",
-      }),
-    ).toEqual({ text: "", sections: [] });
-    await harness.dispose();
+      afterDispose.sections.some((section) => section.id === "identity"),
+    ).toBe(false);
+    expect(afterDispose.text).not.toContain(DEFAULT_IDENTITY_TEXT);
   });
 
   test("supports package-owned identity configuration", async () => {
-    const harness = await createPluginHarness([SystemPromptRegistry]);
-    await harness.mount(
-      createIdentityPlugin({
+    const runtime = createAgentRuntimeHarness();
+    await runtime.mount(
+      createIdentityFeature({
         sectionId: "persona",
         text: "You are a test bot.",
         order: 50,
@@ -48,16 +45,9 @@ describe("identity plugin", () => {
     );
 
     expect(
-      await harness.root.systemPrompt.assemble({
-        sessionId: "session",
-        provider: "fixture",
-        model: "fixture",
-        turnType: "chat",
-      }),
-    ).toMatchObject({
-      sections: [{ id: "persona", text: "You are a test bot." }],
-    });
-    await harness.dispose();
+      (await runtime.systemPrompt.assemble(assemblyContext)).sections,
+    ).toContainEqual({ id: "persona", text: "You are a test bot." });
+    await runtime.dispose();
   });
 
   test("satisfies plugin package conventions", () => {

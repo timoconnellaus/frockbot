@@ -5,7 +5,7 @@ import {
   isClientIframeContribution,
   type FrockBotManifest,
 } from "@frockbot/kernel-composition";
-import { Context, type Plugin } from "cordis";
+export * from "./harness.js";
 
 export interface PluginPackageFixture {
   packageJson: unknown;
@@ -96,37 +96,4 @@ export function verifyPluginPackage(
     manifest,
     contributionKinds: declaredContributionKinds(manifest),
   };
-}
-
-export class PluginHarness {
-  readonly root: Context;
-  private disposed = false;
-
-  constructor(root: Context = new Context()) {
-    this.root = root;
-  }
-
-  async mount(plugin: Plugin) {
-    if (this.disposed) throw new Error("plugin harness is disposed");
-    return await this.root.plugin(plugin);
-  }
-
-  async dispose(): Promise<void> {
-    if (this.disposed) return;
-    this.disposed = true;
-    await this.root.fiber.dispose();
-  }
-}
-
-export async function createPluginHarness(
-  setup: readonly Plugin[] = [],
-): Promise<PluginHarness> {
-  const harness = new PluginHarness();
-  try {
-    for (const plugin of setup) await harness.mount(plugin);
-    return harness;
-  } catch (error) {
-    await harness.dispose();
-    throw error;
-  }
 }

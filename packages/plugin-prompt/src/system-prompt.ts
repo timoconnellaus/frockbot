@@ -1,20 +1,15 @@
-import { type Context, Service } from "cordis";
 import type {
+  LoopHookListV1,
   PromptAssembly,
   PromptAssemblyContext,
   PromptAssemblyService,
   PromptSection,
 } from "@frockbot/kernel-contracts";
 
-export class SystemPromptRegistry
-  extends Service
-  implements PromptAssemblyService
-{
+export class SystemPromptRegistry implements PromptAssemblyService {
   private sections = new Map<string, PromptSection>();
 
-  constructor(ctx: Context) {
-    super(ctx, "systemPrompt");
-  }
+  constructor(private readonly hooks: LoopHookListV1) {}
 
   register(section: PromptSection): () => void {
     if (this.sections.has(section.id)) {
@@ -28,7 +23,7 @@ export class SystemPromptRegistry
   }
 
   assemble(context: PromptAssemblyContext): Promise<PromptAssembly> {
-    return this.ctx.waterfall("system-prompt/assemble", context, async () => {
+    return this.hooks.assemblePrompt(context, async () => {
       const sections = [...this.sections.values()].sort(
         (left, right) => (left.order ?? 0) - (right.order ?? 0),
       );

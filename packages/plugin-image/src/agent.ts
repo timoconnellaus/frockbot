@@ -42,10 +42,11 @@ import type {
   WorkspacePathV1,
   WorkspaceWriteRequestV1,
 } from "@frockbot/kernel-contracts";
-import { WORKSPACE_MAX_FILE_BYTES } from "@frockbot/kernel-contracts";
-// Merges the Agent loop's event declarations into the cordis Context type.
-import type {} from "@frockbot/kernel-agent-loop/agent";
-import type { Plugin } from "cordis";
+import {
+  WORKSPACE_MAX_FILE_BYTES,
+  type AgentRuntimeV1,
+  type RuntimeFeatureV1,
+} from "@frockbot/kernel-contracts";
 import {
   decodeImageDimensionsV1,
   sha256HexOfTextV1,
@@ -576,19 +577,12 @@ async function recordGenerated(
  * it durably; the definition declares none, which the kernel reads as "all of
  * them".
  */
-export function createImageRuntimePlugin(
+export function createImageFeature(
   host: ImageRuntimeHostV1,
-): Plugin.Function {
-  const plugin: Plugin.Function = (ctx) => {
-    const dispose = ctx.tools.register(
-      createGenerateImageTool(host, ctx.sessions),
-      {
-        admissionCeiling: IMAGE_TOOL_TURN_TYPES,
-        subagentRoleCeiling: IMAGE_TOOL_SUBAGENT_ROLES,
-      },
-    );
-    return () => dispose();
-  };
-  plugin.inject = ["tools", "sessions"];
-  return plugin;
+): RuntimeFeatureV1<AgentRuntimeV1> {
+  return (runtime) =>
+    runtime.tools.register(createGenerateImageTool(host, runtime.sessions), {
+      admissionCeiling: IMAGE_TOOL_TURN_TYPES,
+      subagentRoleCeiling: IMAGE_TOOL_SUBAGENT_ROLES,
+    });
 }

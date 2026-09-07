@@ -7,18 +7,17 @@
 // log tail leaves the Computer so a rebuild cannot erase the only evidence a
 // job ran.
 import { describe, expect, test } from "bun:test";
-import { SystemPromptRegistry } from "@frockbot/plugin-prompt";
-import { ToolRegistry } from "@frockbot/plugin-tools";
 import {
-  ComputerRegistry,
   computerBotPathKeyV1,
   type ComputerBackgroundStateV1,
   type ComputerHandle,
   type ComputerProvider,
 } from "@frockbot/computer-core";
-import { createPluginHarness } from "@frockbot/plugin-testkit";
-import { SessionStore } from "@frockbot/kernel-contracts";
-import { createComputerAgentPlugin } from "./agent.js";
+import {
+  type AgentRuntimeHarness,
+  createAgentRuntimeHarness,
+} from "@frockbot/plugin-testkit";
+import { createComputerAgentFeature } from "./agent.js";
 import type { ComputerProcessStorageV1 } from "./process-store.js";
 import { FakeWorkspace } from "./workspace-fixture.js";
 
@@ -114,15 +113,10 @@ function fakeComputer(options: { launchFails?: boolean } = {}): Computer {
 }
 
 async function mount(computer: Computer, held: ComputerProcessStorageV1) {
-  const harness = await createPluginHarness([
-    ComputerRegistry,
-    ToolRegistry,
-    SystemPromptRegistry,
-    SessionStore,
-  ]);
-  harness.root.computers.register(computer.provider);
+  const harness = createAgentRuntimeHarness();
+  harness.computers.register(computer.provider);
   await harness.mount(
-    createComputerAgentPlugin({
+    createComputerAgentFeature({
       userId: "user-1",
       defaultProviderId: "fixture",
       writer: { sessionId: "session-1", turnId: "run-9", runId: "run-9" },
@@ -133,7 +127,7 @@ async function mount(computer: Computer, held: ComputerProcessStorageV1) {
 }
 
 async function call(
-  harness: Awaited<ReturnType<typeof createPluginHarness>>,
+  harness: AgentRuntimeHarness,
   name: string,
   input: unknown,
   effectId = "tool:1:1:0",
@@ -147,12 +141,12 @@ async function call(
     effectId,
     signal: new AbortController().signal,
   };
-  const prepared = await harness.root.tools.prepare(
+  const prepared = await harness.tools.prepare(
     { id: crypto.randomUUID(), name, input },
     context,
   );
   if (prepared.kind !== "ready") throw new Error(prepared.result.content);
-  return harness.root.tools.executePrepared(prepared, context);
+  return harness.tools.executePrepared(prepared, context);
 }
 
 describe("computer_exec with background:true", () => {
@@ -213,15 +207,10 @@ describe("computer_exec with background:true", () => {
 
   test("is refused where there is nowhere durable to record it", async () => {
     const computer = fakeComputer();
-    const harness = await createPluginHarness([
-      ComputerRegistry,
-      ToolRegistry,
-      SystemPromptRegistry,
-      SessionStore,
-    ]);
-    harness.root.computers.register(computer.provider);
+    const harness = createAgentRuntimeHarness();
+    harness.computers.register(computer.provider);
     await harness.mount(
-      createComputerAgentPlugin({
+      createComputerAgentFeature({
         userId: "user-1",
         defaultProviderId: "fixture",
         writer: { sessionId: "session-1", turnId: "run-9", runId: "run-9" },
@@ -238,7 +227,7 @@ describe("computer_exec with background:true", () => {
     expect(computer.calls).toEqual([]);
     // And the tools that read a process are not offered either.
     expect(
-      harness.root.tools.schemas({ turnType: "chat" }).map((tool) => tool.name),
+      harness.tools.schemas({ turnType: "chat" }).map((tool) => tool.name),
     ).not.toContain("computer_process_check");
     await harness.dispose();
   });
@@ -352,7 +341,7 @@ describe("the process tools' admission", () => {
   test("offers check and logs on an automation turn, beside computer_exec", async () => {
     const harness = await mount(fakeComputer(), storage());
     const named = (turnType: "chat" | "automation") =>
-      harness.root.tools.schemas({ turnType }).map((tool) => tool.name);
+      harness.tools.schemas({ turnType }).map((tool) => tool.name);
 
     // A Routine has to be able to collect the outcome of a job a chat Turn
     // started, so these two declare their turn types rather than inheriting
@@ -372,7 +361,7 @@ describe("the Computer tools' subagent roles", () => {
   test("browserUse gets the browser and nothing else on the box", async () => {
     const harness = await mount(fakeComputer(), storage());
     const named = (subagentRole: string) =>
-      harness.root.tools
+      harness.tools
         .schemas({ turnType: "subagent", subagentRole })
         .map((tool) => tool.name);
 
@@ -473,22 +462,17 @@ describe("releasing a Bot's Turn", () => {
   test("closes local preview origins the Bot navigated during the Turn", async () => {
     const computer = fakeComputer();
     const harness = await mount(computer, storage());
-    const session = harness.root.sessions.create("session-1");
+    const session = harness.sessions.create("session-1");
     const agent = { botId: "bot-1", session };
-    await harness.root.waterfall(
-      "agent/pre-step",
-      agent as never,
-      [],
-      1,
-      1,
-      () => Promise.resolve({ kind: "enter" as const, inputs: [] }),
+    await harness.hooks.preStep(agent as never, [], 1, 1, () =>
+      Promise.resolve({ kind: "enter" as const, inputs: [] }),
     );
     await call(harness, "computer_browser", {
       action: "navigate",
       url: "http://localhost:8787/preview",
     });
 
-    await harness.root.serial("agent/turn-stopping", agent as never, 1);
+    await harness.hooks.turnStopping(agent as never, 1);
 
     expect(computer.calls).toEqual([
       "browser:navigate",

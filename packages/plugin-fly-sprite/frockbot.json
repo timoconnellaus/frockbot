@@ -5,12 +5,7 @@
   "version": "0.0.1",
   "compatibility": { "frockbot": ">=0.0.1" },
   "contributions": {
-    "runtime": { "entry": "./provider" },
-    "desktop": {
-      "entry": "./host",
-      "execution": "trusted-main",
-      "commands": []
-    }
+    "runtime": { "entry": "./provider" }
   },
   "permissions": ["network:sprites"]
 }

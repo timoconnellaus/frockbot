@@ -15,7 +15,6 @@ import {
   type ComputerHostFactoryV1,
 } from "./computer.ts";
 import { FakeComputerHost, type FakeComputerRunV1 } from "./host-double.ts";
-import { configuredFlyBotId } from "./host.ts";
 import {
   FlySpriteComputerProvider,
   flySpriteNameForComputer,
@@ -149,8 +148,6 @@ describe("Fly Sprite computer", () => {
     expect(flySpriteNameForComputer({ userId: "owner" })).not.toBe(
       flySpriteNameForComputer({ userId: "owner-2" }),
     );
-    expect(configuredFlyBotId({ FROCKBOT_BOT_ID: "  bot-7  " })).toBe("bot-7");
-    expect(configuredFlyBotId({})).toBe("barebones");
   });
 
   test("attaches each Bot as its own tenant with its own viewer", async () => {
@@ -649,7 +646,7 @@ describe("Fly Sprite computer", () => {
   test("satisfies plugin package conventions", () => {
     expect(verifyPluginPackage({ packageJson, manifest })).toMatchObject({
       name: "@frockbot/plugin-fly-sprite",
-      contributionKinds: ["runtime", "desktop"],
+      contributionKinds: ["runtime"],
     });
   });
 });

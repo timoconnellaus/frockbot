@@ -37,7 +37,6 @@ import {
   type TemplateShareRecordV1,
   type TemplateSheepRecipeV1,
 } from "@frockbot/template-core";
-import type { Plugin } from "cordis";
 import {
   buildBotTemplateV1,
   type TemplateRoutineCandidateV1,
@@ -962,13 +961,6 @@ export function createBotTemplateUserBackendContribution(
   return new BotTemplateUserBackendContribution(host);
 }
 
-export function createBotTemplateUserBackendPlugin(
-  host: BotTemplateUserHostV1,
-  lifecycle: { mount(value: BotTemplateUserBackendContribution): () => void },
-): Plugin {
-  return () => lifecycle.mount(createBotTemplateUserBackendContribution(host));
-}
-
 /**
  * What an application hands this Contribution: the Bot Template share ledger, under the
  * Package's own key so one wide host object can satisfy every Package's slice
@@ -988,6 +980,6 @@ export const userContribution = defineUserBackendContribution<
   BotTemplateUserBackendContribution
 >({
   specifier: "@frockbot/plugin-bot-template/user",
-  create: (host, lifecycle) =>
-    createBotTemplateUserBackendPlugin(host.botTemplate, lifecycle),
+  mount: (host, lifecycle) =>
+    lifecycle.mount(createBotTemplateUserBackendContribution(host.botTemplate)),
 });

@@ -2,15 +2,13 @@ import { describe, expect, test } from "bun:test";
 import {
   compileFoundationApplication,
   createFoundationEnabledRuntimePackages,
-  mergeFoundationRuntimePackages,
   createFoundationBackendContributions,
   createFoundationHostedRuntimePackages,
   createFoundationModelRuntimePackage,
-  createFoundationRuntimeApplication,
+  foundationBaseRuntimeFeatures,
   isPlatformOwnedPackageV1,
   isUserInstallablePackageV1,
 } from "./runtime.js";
-import { Context, type Plugin } from "cordis";
 import { foundationDefaultPackageIds } from "./user.js";
 
 describe("foundation application", () => {
@@ -107,7 +105,7 @@ describe("foundation application", () => {
         "routines",
         "search",
       ],
-      desktop: ["fly-sprite", "user-machine"],
+      desktop: [],
       mobile: [],
     });
     expect(
@@ -167,10 +165,7 @@ describe("foundation application", () => {
       },
     );
 
-    expect(runtimePackage).toMatchObject({
-      specifier: "@frockbot/plugin-provider-ollama-cloud",
-      contributionSpecifier: "@frockbot/plugin-provider-ollama-cloud/runtime",
-    });
+    expect(runtimePackage.id).toBe("provider-ollama-cloud");
     expect(() =>
       createFoundationModelRuntimePackage(
         plan,
@@ -234,27 +229,13 @@ describe("foundation application", () => {
       },
     );
 
-    expect(runtimePackage).toMatchObject({
-      specifier: "@frockbot/plugin-provider-frock-ai",
-      contributionSpecifier: "@frockbot/plugin-provider-frock-ai/runtime",
-    });
+    expect(runtimePackage.id).toBe("provider-flock-ai");
   });
 
-  test("exposes only compiled runtime packages to the runtime host", async () => {
-    const application = await createFoundationRuntimeApplication();
-
+  test("mounts five features on every Turn, whatever the host", () => {
     // Memory is absent: like Skills, it mounts only for a Turn whose Memory
-    // roots the host can reach, so it is never a default runtime package.
-    expect(application.packages.map((pkg) => pkg.manifest)).toHaveLength(5);
-    expect(application.packages.map((pkg) => pkg.specifier)).toEqual([
-      // The Shell contributes the user-facing send tool and the parent
-      // hand-off, and needs no host to do it.
-      "@frockbot/plugin-shell",
-      "@frockbot/plugin-clock",
-      "@frockbot/plugin-echo",
-      "@frockbot/plugin-identity",
-      "@frockbot/plugin-provider-foundation",
-    ]);
+    // roots the host can reach, so it is never a base feature.
+    expect(foundationBaseRuntimeFeatures()).toHaveLength(5);
   });
 
   test("offers only Packages whose enablement is a User choice", async () => {
@@ -435,13 +416,13 @@ describe("foundation application", () => {
     const botBackend =
       await createFoundationBackendContributions<TestContribution>(plan, {
         backendHost: "bot",
-        resolve: (specifier, lifecycle) => () =>
+        resolve: (specifier, lifecycle) =>
           lifecycle.mount({ specifier, executeConfiguration() {} }),
       });
     const userBackend =
       await createFoundationBackendContributions<TestContribution>(plan, {
         backendHost: "user",
-        resolve: (specifier, lifecycle) => () =>
+        resolve: (specifier, lifecycle) =>
           lifecycle.mount({ specifier, startConnection() {} }),
       });
     expect(botBackend.contributions).toHaveLength(3);
@@ -489,12 +470,8 @@ describe("foundation application", () => {
         computerHost: {
           effect: () => Promise.reject(new Error("not invoked while mounting")),
         },
-      }).map((pkg) => pkg.specifier),
-    ).toEqual([
-      "@frockbot/plugin-credentials",
-      "@frockbot/plugin-fly-sprite",
-      "@frockbot/plugin-computer",
-    ]);
+      }).map((pkg) => pkg.id),
+    ).toEqual(["credentials", "fly-sprite", "computer"]);
     expect(requestedSecrets).toEqual(["SPRITES_TOKEN"]);
 
     // The Skills Package mounts only for a Turn whose instruction root the
@@ -511,13 +488,8 @@ describe("foundation application", () => {
             list: () => Promise.resolve({ status: "ok", entries: [] }),
           },
         },
-      }).map((pkg) => pkg.specifier),
-    ).toEqual([
-      "@frockbot/plugin-skills",
-      "@frockbot/plugin-credentials",
-      "@frockbot/plugin-fly-sprite",
-      "@frockbot/plugin-computer",
-    ]);
+      }).map((pkg) => pkg.id),
+    ).toEqual(["skills", "credentials", "fly-sprite", "computer"]);
 
     const webCapability = {
       packageId: "web",
@@ -541,46 +513,6 @@ describe("foundation application", () => {
           ),
       },
     );
-    expect(freshBotRuntime.map((pkg) => pkg.specifier)).toEqual([
-      "@frockbot/plugin-web",
-    ]);
-  });
-});
-
-describe("merging runtime Contributions that share a specifier", () => {
-  test("mounts every one of them, in order, under one Contribution", async () => {
-    const mounted: string[] = [];
-    const pkg = (name: string) => ({
-      specifier: "@frockbot/plugin-web",
-      contributionSpecifier: "@frockbot/plugin-web/agent",
-      manifest: {},
-      plugin: (() => {
-        mounted.push(name);
-      }) as Plugin,
-    });
-    const merged = mergeFoundationRuntimePackages([
-      pkg("lifecycle"),
-      pkg("server-1"),
-      pkg("server-2"),
-      {
-        specifier: "@frockbot/plugin-echo",
-        contributionSpecifier: "@frockbot/plugin-echo/agent",
-        manifest: {},
-        plugin: (() => {
-          mounted.push("echo");
-        }) as Plugin,
-      },
-    ]);
-
-    // One entry per Contribution: the runtime resolves a Package's runtime
-    // entry to exactly one Plugin, so a second entry would be lost silently.
-    expect(merged).toHaveLength(2);
-    const root = new Context();
-    try {
-      for (const entry of merged) await root.plugin(entry.plugin);
-      expect(mounted).toEqual(["lifecycle", "server-1", "server-2", "echo"]);
-    } finally {
-      await root.fiber.dispose();
-    }
+    expect(freshBotRuntime.map((pkg) => pkg.id)).toEqual(["web"]);
   });
 });

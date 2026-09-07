@@ -1,4 +1,3 @@
-import type { Plugin } from "cordis";
 import {
   BotNotFoundError,
   FLOCK_DIRECTORY_LIMIT,
@@ -474,13 +473,6 @@ export function createFlockUserBackendContribution(
   return new FlockUserBackendContribution(host);
 }
 
-export function createFlockUserBackendPlugin(
-  host: FlockUserBackendHost,
-  lifecycle: { mount(value: FlockUserBackendContribution): () => void },
-): Plugin {
-  return () => lifecycle.mount(createFlockUserBackendContribution(host));
-}
-
 /**
  * What an application hands this Contribution: the User's Bot directory, under the
  * Package's own key so one wide host object can satisfy every Package's slice
@@ -500,6 +492,6 @@ export const userContribution = defineUserBackendContribution<
   FlockUserBackendContribution
 >({
   specifier: "@frockbot/plugin-flock/user",
-  create: (host, lifecycle) =>
-    createFlockUserBackendPlugin(host.flock, lifecycle),
+  mount: (host, lifecycle) =>
+    lifecycle.mount(createFlockUserBackendContribution(host.flock)),
 });

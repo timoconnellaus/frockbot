@@ -2,14 +2,15 @@
 // them that asks a person first.
 import { describe, expect, test } from "bun:test";
 import {
-  SessionStore,
   type Session,
   type ToolCall,
   type ToolExecutionContext,
   type TurnTypeV1,
 } from "@frockbot/kernel-contracts";
-import { ToolRegistry } from "@frockbot/plugin-tools";
-import { Context } from "cordis";
+import {
+  type AgentRuntimeHarness,
+  createAgentRuntimeHarness,
+} from "@frockbot/plugin-testkit";
 import type {
   MachineCommandV1,
   MachineListEntryV1,
@@ -28,7 +29,7 @@ import {
   MESSAGES_CHECK_PERMISSIONS_TOOL_V1,
   MESSAGES_FIND_CHATS_TOOL_V1,
   MESSAGES_SEND_TOOL_V1,
-  createMachineMessagesRuntimePlugin,
+  createMachineMessagesFeature,
   machineMessagesAdmissionCeilingV1,
   machineMessagesTurnOfV1,
   type MachineMessagesRuntimeHostV1,
@@ -63,7 +64,7 @@ function entry(
 }
 
 interface Harness {
-  root: Context;
+  runtime: AgentRuntimeHarness;
   session: Session;
   storage: Map<string, unknown>;
   dispatched: MachineCommandV1[];
@@ -73,10 +74,8 @@ interface Harness {
 async function mount(
   options: { entry?: MachineListEntryV1 | undefined; refuse?: string } = {},
 ): Promise<Harness> {
-  const root = new Context();
-  await root.plugin(SessionStore);
-  await root.plugin(ToolRegistry);
-  const session = root.sessions.create(SESSION_ID);
+  const runtime = createAgentRuntimeHarness();
+  const session = runtime.sessions.create(SESSION_ID);
   session.appendBatch([
     { type: "turn/start", turn: 4 },
     { type: "step/start", turn: 4, step: 2 },
@@ -123,13 +122,13 @@ async function mount(
       return { status: "queued", command };
     },
   };
-  await root.plugin(createMachineMessagesRuntimePlugin(host));
+  await runtime.mount(createMachineMessagesFeature(host));
   return {
-    root,
+    runtime,
     session,
     storage: store,
     dispatched,
-    dispose: () => root.fiber.dispose(),
+    dispose: () => runtime.dispose(),
   };
 }
 
@@ -153,9 +152,9 @@ async function invoke(
 ) {
   const call: ToolCall = { id: "call-1", name, input };
   const context = contextFor(turnType);
-  const preparation = await harness.root.tools.prepare(call, context);
+  const preparation = await harness.runtime.tools.prepare(call, context);
   if (preparation.kind === "denied") return preparation.result;
-  return harness.root.tools.executePrepared(preparation, context);
+  return harness.runtime.tools.executePrepared(preparation, context);
 }
 
 describe("admission", () => {
@@ -163,7 +162,7 @@ describe("admission", () => {
     const harness = await mount();
     try {
       const names = (turnType: TurnTypeV1) =>
-        harness.root.tools.schemas({ turnType }).map((tool) => tool.name);
+        harness.runtime.tools.schemas({ turnType }).map((tool) => tool.name);
       for (const tool of MACHINE_MESSAGES_TOOL_NAMES_V1) {
         expect(names("chat")).toContain(tool);
         for (const turnType of ["automation", "subagent"] as const) {
