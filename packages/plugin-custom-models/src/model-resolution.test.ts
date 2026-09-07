@@ -6,8 +6,7 @@ import {
   type ModelBindingV1,
   type UserSettingsViewV1,
 } from "@frockbot/configuration-core";
-import { decodeFrockBotManifest } from "@frockbot/kernel-composition";
-import rawManifest from "../frockbot.json" with { type: "json" };
+import { customModelsDefinitionV1 } from "./definition.js";
 
 const platformModel: ModelBindingV1 = {
   connectionId: "flock-ai",
@@ -22,7 +21,6 @@ const botModel: ModelBindingV1 = {
   providerModelId: "@frock/bot",
 };
 
-const customManifest = decodeFrockBotManifest(rawManifest);
 const packages: ExecutionPackageDefinition[] = [
   {
     packageId: "provider-flock-ai",
@@ -40,9 +38,9 @@ const packages: ExecutionPackageDefinition[] = [
     ],
   },
   {
-    packageId: customManifest.id,
-    version: customManifest.version,
-    settings: customManifest.configuration?.settings ?? [],
+    packageId: customModelsDefinitionV1.id,
+    version: "0.0.1",
+    settings: [...(customModelsDefinitionV1.settings ?? [])],
     capabilities: [],
     connectionTypes: [],
   },

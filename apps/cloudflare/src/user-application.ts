@@ -1,8 +1,7 @@
 import {
-  compileFoundationApplication,
-  isPlatformOwnedPackageV1,
+  FOUNDATION_PACKAGES_V1,
+  FOUNDATION_PACKAGE_VERSION_V1,
 } from "@frockbot/application-foundation/runtime";
-import { foundationDefaultPackageIds } from "@frockbot/application-foundation/user";
 import {
   decodeBotIdV1,
   isApplicationDeploymentHash,
@@ -354,7 +353,6 @@ export function createUserApplication() {
 }
 
 function createUserApplicationRoute() {
-  const application = compileFoundationApplication();
   return async (
     request: Request,
     env: UserApplicationEnv,
@@ -422,33 +420,23 @@ function createUserApplicationRoute() {
       );
     }
     if (request.method === "GET" && url.pathname === "/app-manifest") {
-      const plan = await application;
-      const defaultPackageIds = foundationDefaultPackageIds(plan);
       return Response.json({
         schemaVersion: 1,
         deployment: env.DEPLOYMENT,
-        applicationHash: plan.applicationHash,
-        // The client needs model-provider manifest facts even when a Package
-        // is platform-owned. The backend therefore projects every Package and
-        // marks the ownership decision it derived from immutable manifest
-        // facts; enablement surfaces omit those rows while model resolution
-        // still sees them.
-        packages: plan.packages.map((pkg) => ({
+        // The client needs model-provider facts even when a Package is
+        // platform-owned, so every Package is projected and each carries the
+        // ownership its definition declares; enablement surfaces omit those
+        // rows while model resolution still sees them.
+        packages: FOUNDATION_PACKAGES_V1.map((pkg) => ({
           id: pkg.id,
-          displayName: pkg.manifest.displayName,
-          version: pkg.version,
-          platformOwned: isPlatformOwnedPackageV1(
-            pkg.manifest,
-            defaultPackageIds.has(pkg.id),
-          ),
-          contributions: [
-            ...(pkg.manifest.contributions.backend ? ["backend"] : []),
-            ...(pkg.manifest.contributions.runtime ? ["runtime"] : []),
-            ...(pkg.manifest.contributions.client ? ["client"] : []),
-            ...(pkg.manifest.contributions.desktop ? ["desktop"] : []),
-            ...(pkg.manifest.contributions.mobile ? ["mobile"] : []),
-          ],
-          configuration: pkg.manifest.configuration,
+          displayName: pkg.displayName,
+          version: FOUNDATION_PACKAGE_VERSION_V1,
+          ...(pkg.platformOwned ? { platformOwned: true } : {}),
+          ...(pkg.settings ? { settings: pkg.settings } : {}),
+          ...(pkg.capabilities ? { capabilities: pkg.capabilities } : {}),
+          ...(pkg.connectionTypes
+            ? { connectionTypes: pkg.connectionTypes }
+            : {}),
         })),
       });
     }

@@ -15,6 +15,7 @@
 // slug against the catalog this Turn was offered, and calls the host seam the
 // Bot Durable Object supplied; every durable decision — the bounds, the record,
 // the dispatch — is made behind that seam, where the storage is.
+import { packageAdmissionCeilingV1 } from "@frockbot/kernel-contracts";
 import type {
   PromptSection,
   ToolDefinition,
@@ -26,7 +27,7 @@ import type {
   AgentRuntimeV1,
   RuntimeFeatureV1,
 } from "@frockbot/kernel-contracts";
-import manifest from "../frockbot.json" with { type: "json" };
+import { subagentsDefinitionV1 } from "./definition.js";
 import {
   renderAvailableSubagentModelsPromptV1,
   resolveSubagentModelV1,
@@ -70,21 +71,7 @@ export const SUBAGENT_MODELS_SECTION_V1 = "subagent-models";
 export function subagentsAdmissionCeilingV1(
   capabilityId: string,
 ): readonly TurnTypeV1[] | undefined {
-  const capabilities = (
-    manifest as {
-      configuration?: {
-        capabilities?: Array<{
-          id: string;
-          admission?: { turnTypes: string[] };
-        }>;
-      };
-    }
-  ).configuration?.capabilities;
-  const turnTypes = capabilities?.find(
-    (candidate) => candidate.id === capabilityId,
-  )?.admission?.turnTypes;
-  if (!turnTypes) return undefined;
-  return turnTypes as readonly TurnTypeV1[];
+  return packageAdmissionCeilingV1(subagentsDefinitionV1, capabilityId);
 }
 
 /** One queued `task_message` on its way into the child's next step. */

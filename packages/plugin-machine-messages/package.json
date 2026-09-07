@@ -6,14 +6,10 @@
   "exports": {
     ".": "./src/index.ts",
     "./agent": "./src/agent.ts",
+    "./definition": "./src/definition.ts",
     "./device": "./src/device.ts",
     "./gate": "./src/gate.ts",
-    "./manifest": "./src/manifest.ts",
-    "./frockbot.json": "./frockbot.json",
     "./package.json": "./package.json"
-  },
-  "frockbot": {
-    "manifest": "./frockbot.json"
   },
   "scripts": {
     "test": "bun test src",

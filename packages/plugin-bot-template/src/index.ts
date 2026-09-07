@@ -6,4 +6,3 @@ export {
   type BotTemplateGatewayHostV1,
   type PublishedTemplateV1,
 } from "./backend.js";
-export { default as manifest } from "./manifest.js";

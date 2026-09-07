@@ -33,44 +33,34 @@ import type {
   WorkspaceSyncEffectsV1,
 } from "@frockbot/kernel-contracts";
 import type { ComputerSyncHostV1 } from "@frockbot/computer-core";
-import type { FrockBotManifest } from "@frockbot/kernel-composition";
+import type { PackageDefinitionV1 } from "@frockbot/kernel-contracts";
 
 /**
  * One installed Package, as the durable-root supplier needs to see it: what
- * the User installed, and what that exact version's manifest declares.
+ * the User installed, and what the deployment's definition declares.
  */
 export interface DeclaredPackageRootSourceV1 {
   /** The User's installations, from the User configuration view. */
   installations: readonly {
     packageId: string;
-    version: string;
     state: "installed" | "disabled" | "failed";
   }[];
-  /** The application's compiled Packages, each with the manifest it shipped. */
-  packages: readonly {
-    id: string;
-    version: string;
-    manifest: FrockBotManifest;
-  }[];
+  /** The application's Packages, each with the roots it declares. */
+  packages: readonly PackageDefinitionV1[];
 }
 
 /**
  * The `package-declared` durable roots this User's *enabled* Packages declare.
  *
  * "Durable roots, declared by the Computer Package's Workspace layout and by
- * Package manifests." Until this existed the second half of that sentence had
- * no supplier: `declaredWorkspaceRootsV1` took a `packageRoots` argument that
- * nothing in production passed, so `image/generated` — a root the Image
- * Package has written since it shipped — never reached the durable-root sync
- * and never appeared on a Computer. This is the missing half, and
- * `applets/source` is the reason it could no longer be missing.
+ * Package definitions." `image/generated` and `applets/source` are the two
+ * that exist; both reach the durable-root sync through here.
  *
  * ENABLEMENT decides membership, by the same `state === "installed"` test
- * `resolveBotExecutionPlanV1` applies to Capabilities and against the same
- * exact version the application compiled. A root of a Package the User
- * disabled or never installed is not synchronized: materializing files for a
- * Package that cannot run would grow directories on a Computer that no Bot on
- * it could explain, and would keep syncing them after an uninstall.
+ * `resolveBotExecutionPlanV1` applies to Capabilities. A root of a Package the
+ * User disabled or never installed is not synchronized: materializing files
+ * for a Package that cannot run would grow directories on a Computer that no
+ * Bot on it could explain, and would keep syncing them after an uninstall.
  *
  * SCOPE is the User's, always. A `package-declared` root names no Bot, so this
  * takes no Bot and answers the same for every tenant on one Computer.
@@ -82,11 +72,9 @@ export function declaredPackageRootsV1(
   for (const installation of source.installations) {
     if (installation.state !== "installed") continue;
     const declared = source.packages.find(
-      (candidate) =>
-        candidate.id === installation.packageId &&
-        candidate.version === installation.version,
+      (candidate) => candidate.id === installation.packageId,
     );
-    for (const root of declared?.manifest.roots ?? []) {
+    for (const root of declared?.roots ?? []) {
       const entry = { packageId: installation.packageId, rootId: root.id };
       // One entry per root: the sync walks this list, and a duplicate would
       // reconcile the same root twice in a single pass.

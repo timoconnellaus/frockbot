@@ -1,4 +1,4 @@
-import type { PackageSettingDefinition } from "@frockbot/kernel-composition";
+import type { PackageSettingDefinition } from "@frockbot/kernel-contracts";
 
 export type PackageConfigurationHomeV1 =
   "models" | "connections" | "user-settings" | "none";

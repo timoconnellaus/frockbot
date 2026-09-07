@@ -25,7 +25,6 @@ import {
   createShellCompositionHost,
 } from "@frockbot/plugin-shell/backend-composition";
 import { executeBotTurn } from "@frockbot/plugin-shell/backend-runner";
-import { compileFoundationApplication } from "@frockbot/application-foundation/runtime";
 import { randomSheepRecipeV1 } from "@frockbot/plugin-flock/shared";
 import {
   createClientRunStopReceiptV1,
@@ -97,7 +96,6 @@ class MemoryBotState implements BotStateBinding {
     }
     const previousEvents = this.sessions.get(botId) ?? [];
     const generation = await bootstrapCompositionGeneration(
-      await compileFoundationApplication(),
       "2026-01-01T00:00:00.000Z",
     );
     const run: StoredRun = {

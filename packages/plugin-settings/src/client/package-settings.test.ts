@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { PackageSettingDefinition } from "@frockbot/kernel-composition";
+import type { PackageSettingDefinition } from "@frockbot/kernel-contracts";
 import {
   collectSettingsValues,
   seedSettingsDraft,

@@ -10,7 +10,6 @@ import {
   type FoundationConnectionUserBackendContribution,
   type MountedFoundationUserBackend,
 } from "@frockbot/application-foundation/user";
-import { compileFoundationApplication } from "@frockbot/application-foundation/runtime";
 import {
   decodeConnectionCommandIdV1,
   decodeConnectionCommandV1,
@@ -194,115 +193,111 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
 
   private contributions(): Promise<MountedFoundationUserBackend> {
     if (!this.mounted) {
-      this.mounted = compileFoundationApplication().then((plan) =>
-        createFoundationUserBackendContributions(plan, {
-          storage: this.ctx.storage,
-          readSecret: (name) =>
-            name === "MACHINE_TOKEN_SECRET"
-              ? this.env.MACHINE_TOKEN_SECRET
-              : name === "BETTER_AUTH_URL"
-                ? this.env.BETTER_AUTH_URL
-                : this.env.CREDENTIAL_KEYRING,
-          // The Bot Template seams. The blob store is the artifact bucket,
-          // written through the same collision-checking rule immutable
-          // application artifacts already use; the Bot reader is three
-          // read-only RPCs to the Bot Durable Object that already owns that
-          // state.
-          botTemplate: {
-            bots: this.templateBotReader(),
-            blobs: this.templateBlobStore(),
-            importer: this.templateImportWriter(),
-            readPublishedShare: (shareId: string) =>
-              this.readPublishedShare(shareId),
-          },
-          // The transcript index (parity register row 52). It lives on this
-          // object's own SQL storage because "The User's Durable Object is the
-          // authority for everything User-scoped", and it is a *projection*:
-          // its rows are read back out of the Bots' own stored runs by
-          // `rebuildSearchIndex`, so it holds no authority of its own.
-          search: {
-            sql: this.ctx.storage.sql,
-            projectBotRows: (botId, cursor) => {
-              // Every caller of a rebuild has already passed
-              // `assertFlockIdentity`, so this object knows which User it is;
-              // a rebuild that reached here without one would address an
-              // arbitrary Bot object, so it refuses instead.
-              const userId = this.identity;
-              if (!userId) {
-                throw new Error(
-                  "this User Durable Object has no proven identity to rebuild for",
-                );
-              }
-              const id = this.env.BOT_STATES.idFromName(`${userId}:${botId}`);
-              // SAFETY: BOT_STATES is bound to BotState; generated RPC methods are not represented by workers-types.
-              const rpc = this.env.BOT_STATES.get(
-                id,
-              ) as unknown as BotSearchRpc;
-              return rpc
-                .projectSearchRows({
-                  schemaVersion: 1,
-                  userId,
-                  botId,
-                  ...(cursor === undefined ? {} : { cursor }),
-                })
-                .then(rpcJsonSnapshotV1);
-            },
-          },
-          // The audit table (parity register rows 30 and 30b). Same object,
-          // same SQL storage, same discipline as the transcript index: every
-          // row is a projection of the Bots' own durable session events, and
-          // `rebuildAuditIndex` reads them back from that authority.
-          audit: {
-            sql: this.ctx.storage.sql,
-            projectBotEntries: (botId, cursor) => {
-              const userId = this.identity;
-              if (!userId) {
-                throw new Error(
-                  "this User Durable Object has no proven identity to rebuild for",
-                );
-              }
-              const id = this.env.BOT_STATES.idFromName(`${userId}:${botId}`);
-              // SAFETY: BOT_STATES is bound to BotState; generated RPC methods are not represented by workers-types.
-              const rpc = this.env.BOT_STATES.get(id) as unknown as BotAuditRpc;
-              return rpc
-                .projectAuditEntries({
-                  schemaVersion: 1,
-                  userId,
-                  botId,
-                  ...(cursor === undefined ? {} : { cursor }),
-                })
-                .then(rpcJsonSnapshotV1);
-            },
-          },
-          commandBotLifecycle: async (userId, command) => {
-            const id = this.env.BOT_STATES.idFromName(
-              `${userId}:${command.botId}`,
-            );
-            // SAFETY: BOT_STATES is bound to BotState; generated RPC methods are not represented by workers-types.
-            const rpc = this.env.BOT_STATES.get(id) as unknown as {
-              executeLifecycle(input: unknown): Promise<unknown>;
-            };
-            return decodeBotLifecycleReceiptV1(
-              await rpc.executeLifecycle({
-                schemaVersion: 1,
-                userId,
-                botId: command.botId,
-                command,
-              }),
-            );
-          },
-          readBotLifecycle: async (userId, botId) => {
+      this.mounted = createFoundationUserBackendContributions({
+        storage: this.ctx.storage,
+        readSecret: (name) =>
+          name === "MACHINE_TOKEN_SECRET"
+            ? this.env.MACHINE_TOKEN_SECRET
+            : name === "BETTER_AUTH_URL"
+              ? this.env.BETTER_AUTH_URL
+              : this.env.CREDENTIAL_KEYRING,
+        // The Bot Template seams. The blob store is the artifact bucket,
+        // written through the same collision-checking rule immutable
+        // application artifacts already use; the Bot reader is three
+        // read-only RPCs to the Bot Durable Object that already owns that
+        // state.
+        botTemplate: {
+          bots: this.templateBotReader(),
+          blobs: this.templateBlobStore(),
+          importer: this.templateImportWriter(),
+          readPublishedShare: (shareId: string) =>
+            this.readPublishedShare(shareId),
+        },
+        // The transcript index (parity register row 52). It lives on this
+        // object's own SQL storage because "The User's Durable Object is the
+        // authority for everything User-scoped", and it is a *projection*:
+        // its rows are read back out of the Bots' own stored runs by
+        // `rebuildSearchIndex`, so it holds no authority of its own.
+        search: {
+          sql: this.ctx.storage.sql,
+          projectBotRows: (botId, cursor) => {
+            // Every caller of a rebuild has already passed
+            // `assertFlockIdentity`, so this object knows which User it is;
+            // a rebuild that reached here without one would address an
+            // arbitrary Bot object, so it refuses instead.
+            const userId = this.identity;
+            if (!userId) {
+              throw new Error(
+                "this User Durable Object has no proven identity to rebuild for",
+              );
+            }
             const id = this.env.BOT_STATES.idFromName(`${userId}:${botId}`);
             // SAFETY: BOT_STATES is bound to BotState; generated RPC methods are not represented by workers-types.
-            const rpc = this.env.BOT_STATES.get(id) as unknown as {
-              readLifecycle(input: unknown): Promise<unknown>;
-            };
-            return decodeBotLifecycleViewV1(
-              await rpc.readLifecycle({ schemaVersion: 1, userId, botId }),
-            );
+            const rpc = this.env.BOT_STATES.get(id) as unknown as BotSearchRpc;
+            return rpc
+              .projectSearchRows({
+                schemaVersion: 1,
+                userId,
+                botId,
+                ...(cursor === undefined ? {} : { cursor }),
+              })
+              .then(rpcJsonSnapshotV1);
           },
-        }),
-      );
+        },
+        // The audit table (parity register rows 30 and 30b). Same object,
+        // same SQL storage, same discipline as the transcript index: every
+        // row is a projection of the Bots' own durable session events, and
+        // `rebuildAuditIndex` reads them back from that authority.
+        audit: {
+          sql: this.ctx.storage.sql,
+          projectBotEntries: (botId, cursor) => {
+            const userId = this.identity;
+            if (!userId) {
+              throw new Error(
+                "this User Durable Object has no proven identity to rebuild for",
+              );
+            }
+            const id = this.env.BOT_STATES.idFromName(`${userId}:${botId}`);
+            // SAFETY: BOT_STATES is bound to BotState; generated RPC methods are not represented by workers-types.
+            const rpc = this.env.BOT_STATES.get(id) as unknown as BotAuditRpc;
+            return rpc
+              .projectAuditEntries({
+                schemaVersion: 1,
+                userId,
+                botId,
+                ...(cursor === undefined ? {} : { cursor }),
+              })
+              .then(rpcJsonSnapshotV1);
+          },
+        },
+        commandBotLifecycle: async (userId, command) => {
+          const id = this.env.BOT_STATES.idFromName(
+            `${userId}:${command.botId}`,
+          );
+          // SAFETY: BOT_STATES is bound to BotState; generated RPC methods are not represented by workers-types.
+          const rpc = this.env.BOT_STATES.get(id) as unknown as {
+            executeLifecycle(input: unknown): Promise<unknown>;
+          };
+          return decodeBotLifecycleReceiptV1(
+            await rpc.executeLifecycle({
+              schemaVersion: 1,
+              userId,
+              botId: command.botId,
+              command,
+            }),
+          );
+        },
+        readBotLifecycle: async (userId, botId) => {
+          const id = this.env.BOT_STATES.idFromName(`${userId}:${botId}`);
+          // SAFETY: BOT_STATES is bound to BotState; generated RPC methods are not represented by workers-types.
+          const rpc = this.env.BOT_STATES.get(id) as unknown as {
+            readLifecycle(input: unknown): Promise<unknown>;
+          };
+          return decodeBotLifecycleViewV1(
+            await rpc.readLifecycle({ schemaVersion: 1, userId, botId }),
+          );
+        },
+      });
     }
     return this.mounted;
   }

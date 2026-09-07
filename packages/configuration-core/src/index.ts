@@ -6,7 +6,7 @@ import {
   decodeConnectionAuthorizationViewV1,
   decodeConnectionModelCatalogV1,
 } from "@frockbot/connection-core";
-import type { PackageSettingDefinition } from "@frockbot/kernel-composition";
+import type { PackageSettingDefinition } from "@frockbot/kernel-contracts";
 import { ConfigurationDecodeError } from "./errors.js";
 export {
   packageConfigurationHomeV1,
@@ -1907,7 +1907,8 @@ const PRE_ACCOUNT_WIDE_CONNECTION_METADATA_FIELDS_V1 = [
 export interface StoredUserSettingsPackageV1 {
   packageId: string;
   version: string;
-  dependencies?: Readonly<Record<string, string>>;
+  /** The Package ids that must be enabled beside this one. */
+  dependencies?: readonly string[];
   /** Platform infrastructure is repaired to one enabled first-party row. */
   platformOwned?: boolean;
 }
@@ -2045,10 +2046,7 @@ function migrateCatalogRelativeUserSettingsV1(
         return storedInstallation;
       }
       const pkg = availableVersions.get(`${packageId}\u0000${version}`);
-      if (
-        !pkg ||
-        Object.keys(pkg.dependencies ?? {}).every((id) => enabledIds.has(id))
-      ) {
+      if (!pkg || (pkg.dependencies ?? []).every((id) => enabledIds.has(id))) {
         return storedInstallation;
       }
       changed = true;

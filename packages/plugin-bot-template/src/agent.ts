@@ -19,6 +19,7 @@
 // carries the same `commandId`, meets the receipt the User Durable Object
 // already wrote, and reports the share it already made instead of staging a
 // second one.
+import { packageAdmissionCeilingV1 } from "@frockbot/kernel-contracts";
 import {
   decodeTurnTypeV1,
   type AgentRuntimeV1,
@@ -29,7 +30,7 @@ import {
   type ToolExecutionResult,
   type TurnTypeV1,
 } from "@frockbot/kernel-contracts";
-import manifest from "../frockbot.json" with { type: "json" };
+import { botTemplateDefinitionV1 } from "./definition.js";
 import { describeTemplateSummaryV1 } from "./scrub.js";
 import type { TemplateShareReceiptV1 } from "./shared.js";
 
@@ -61,26 +62,7 @@ export interface BotTemplateRuntimeHostV1 {
 export function botTemplateAdmissionCeilingV1(
   capabilityId: string,
 ): readonly TurnTypeV1[] | undefined {
-  const capabilities = (
-    manifest as {
-      configuration?: {
-        capabilities?: Array<{
-          id: string;
-          admission?: { turnTypes: string[] };
-        }>;
-      };
-    }
-  ).configuration?.capabilities;
-  const turnTypes = capabilities?.find(
-    (candidate) => candidate.id === capabilityId,
-  )?.admission?.turnTypes;
-  if (!turnTypes) return undefined;
-  return turnTypes.map((turnType) =>
-    decodeTurnTypeV1(
-      turnType,
-      `bot-template capability "${capabilityId}" admission`,
-    ),
-  );
+  return packageAdmissionCeilingV1(botTemplateDefinitionV1, capabilityId);
 }
 
 function refusal(reason: string): ToolExecutionResult {

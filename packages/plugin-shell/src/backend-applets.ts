@@ -52,7 +52,7 @@ import {
   type CompositionGenerationV1,
   type CompositionStore,
   type PackageProvenanceV1,
-} from "@frockbot/kernel-composition/generation";
+} from "@frockbot/kernel-do";
 
 /** The durable key one publish intent is recorded under, by effect id. */
 export const APPLET_PUBLISH_EFFECT_PREFIX = "applets:publish-effect:";

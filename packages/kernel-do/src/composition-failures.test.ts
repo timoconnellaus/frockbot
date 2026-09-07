@@ -3,7 +3,7 @@ import {
   activateCompositionV1,
   CompositionMountFailureError,
   type CompositionFailureV1,
-} from "@frockbot/kernel-composition/activation";
+} from "./composition/activation.js";
 import {
   bootstrapGeneration,
   compositionArtifactSetHashV1,
@@ -11,7 +11,7 @@ import {
   type CompositionGenerationV1,
   type CompositionMemberV1,
   type MountedComposition,
-} from "@frockbot/kernel-composition/generation";
+} from "./composition/generation.js";
 import { DurableCompositionFailureLog } from "./composition-failures.ts";
 import { DurableCompositionStore } from "./composition-store.ts";
 import {
@@ -69,9 +69,22 @@ class MemoryStorage {
 
 const authoredMember: CompositionMemberV1 = {
   packageId: "bot-authored-greeter",
-  specifier: "bot:greeter",
   version: "0.0.1",
-  manifestHash: "a".repeat(64),
+  descriptor: {
+    id: "bot-authored-greeter",
+    displayName: "Greeter",
+    version: "0.0.1",
+    tools: [
+      {
+        name: "greet",
+        description: "Greets",
+        inputSchema: { type: "object" },
+      },
+    ],
+    actions: [],
+    grants: [],
+    contextKeys: ["user", "bot", "session"],
+  },
   provenance: {
     kind: "bot",
     packageId: "bot-authored-greeter",
@@ -91,17 +104,7 @@ const authoredMember: CompositionMemberV1 = {
 };
 
 function bootstrap(): Promise<CompositionGenerationV1> {
-  return bootstrapGeneration(
-    [
-      {
-        packageId: "shell",
-        specifier: "@frockbot/plugin-shell",
-        version: "0.0.1",
-        manifest: { id: "shell", version: "0.0.1" },
-      },
-    ],
-    { createdAt: "2026-08-31T00:00:00.000Z" },
-  );
+  return bootstrapGeneration({ createdAt: "2026-08-31T00:00:00.000Z" });
 }
 
 async function authored(

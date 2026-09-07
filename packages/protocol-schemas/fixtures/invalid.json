@@ -1567,7 +1567,12 @@
               "packageId": "example",
               "version": "1.0.0",
               "provenance": {
-                "kind": "first-party"
+                "kind": "bot",
+                "botId": "alpha",
+                "sessionId": "user-1:alpha",
+                "turnId": "turn-1",
+                "runId": "run-1",
+                "authoredAt": "2026-09-05T10:00:00.000Z"
               }
             }
           ],

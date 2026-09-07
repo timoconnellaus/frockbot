@@ -30,6 +30,7 @@
 // are chat-only, because the approval that gates them is a chat-only payload —
 // an automation Turn has no voice to ask with. Row 49 therefore ships
 // `partial`; see the plan's open decision 3.
+import { packageAdmissionCeilingV1 } from "@frockbot/kernel-contracts";
 import {
   MACHINE_LIMITS_V1,
   MachineDecodeError,
@@ -51,7 +52,7 @@ import {
   type AgentRuntimeV1,
   type RuntimeFeatureV1,
 } from "@frockbot/kernel-contracts";
-import manifest from "../frockbot.json" with { type: "json" };
+import { userMachineDefinitionV1 } from "./definition.js";
 import {
   machineApprovalActionV1,
   machineApprovalIdV1,
@@ -94,27 +95,7 @@ export const MACHINE_CONTROL_CAPABILITY_V1 = "machine-control";
 export function machineAdmissionCeilingV1(
   capabilityId: string,
 ): readonly TurnTypeV1[] | undefined {
-  const capabilities = (
-    manifest as {
-      configuration?: {
-        capabilities?: Array<{
-          id: string;
-          admission?: { turnTypes: string[] };
-        }>;
-      };
-    }
-  ).configuration?.capabilities;
-  const capability = capabilities?.find(
-    (candidate) => candidate.id === capabilityId,
-  );
-  const turnTypes = capability?.admission?.turnTypes;
-  if (!turnTypes) return undefined;
-  return turnTypes.map((turnType) =>
-    decodeTurnTypeV1(
-      turnType,
-      `user-machine capability "${capabilityId}" admission`,
-    ),
-  );
+  return packageAdmissionCeilingV1(userMachineDefinitionV1, capabilityId);
 }
 
 /** The Session and Turn one asked-for command is attributed to. */

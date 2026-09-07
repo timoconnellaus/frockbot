@@ -7,13 +7,9 @@
     ".": "./src/index.ts",
     "./backend": "./src/backend.ts",
     "./client": "./src/client/index.ts",
-    "./frockbot.json": "./frockbot.json",
-    "./manifest": "./src/manifest.ts",
+    "./definition": "./src/definition.ts",
     "./package.json": "./package.json",
     "./shared": "./src/shared.ts"
-  },
-  "frockbot": {
-    "manifest": "./frockbot.json"
   },
   "scripts": {
     "test": "bun test src",

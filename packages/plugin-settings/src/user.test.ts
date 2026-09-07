@@ -267,23 +267,14 @@ describe("User settings backend Contribution", () => {
         version: "0.0.1",
         installByDefault: true,
         defaultEnablement: "disabled",
-        dependencies: {
-          settings: ">=0.0.1",
-          shell: ">=0.0.1",
-          "ui-theme": ">=0.0.1",
-        },
+        dependencies: ["settings", "shell", "ui-theme"],
       },
       {
         packageId: "provider-ollama-cloud",
         version: "0.0.1",
         installByDefault: true,
         defaultEnablement: "disabled",
-        dependencies: {
-          "custom-models": ">=0.0.1",
-          credentials: ">=0.0.1",
-          settings: ">=0.0.1",
-          web: ">=0.0.1",
-        },
+        dependencies: ["custom-models", "credentials", "settings", "web"],
       },
       { packageId: "credentials", version: "0.0.1", installByDefault: true },
       { packageId: "settings", version: "0.0.1", installByDefault: true },
@@ -427,45 +418,34 @@ describe("User settings backend Contribution", () => {
         version: "0.0.1",
         installByDefault: true,
         defaultEnablement: "disabled",
-        dependencies: {
-          settings: ">=0.0.1",
-          shell: ">=0.0.1",
-          "ui-theme": ">=0.0.1",
-        },
+        dependencies: ["settings", "shell", "ui-theme"],
       },
       {
         packageId: "provider-ollama-cloud",
         version: "0.0.1",
         installByDefault: true,
         defaultEnablement: "disabled",
-        dependencies: {
-          "custom-models": ">=0.0.1",
-          credentials: ">=0.0.1",
-          settings: ">=0.0.1",
-        },
+        dependencies: ["custom-models", "credentials", "settings"],
       },
       { packageId: "credentials", version: "0.0.1", installByDefault: true },
       {
         packageId: "settings",
         version: "0.0.1",
         installByDefault: true,
-        dependencies: { shell: ">=0.0.1", "ui-theme": ">=0.0.1" },
+        dependencies: ["shell", "ui-theme"],
       },
       {
         packageId: "shell",
         version: "0.0.1",
         installByDefault: true,
-        dependencies: { "ui-theme": ">=0.0.1" },
+        dependencies: ["ui-theme"],
       },
       { packageId: "ui-theme", version: "0.0.1", installByDefault: true },
       {
         packageId: "mcp",
         version: "0.0.1",
         installByDefault: true,
-        dependencies: {
-          credentials: ">=0.0.1",
-          settings: ">=0.0.1",
-        },
+        dependencies: ["credentials", "settings"],
       },
     ];
     await storage.put("user-id", "pre-rollout-user");
@@ -665,7 +645,7 @@ describe("User settings backend Contribution", () => {
         {
           packageId: "provider-ollama-cloud",
           version: "0.0.1",
-          dependencies: { "custom-models": ">=0.0.1" },
+          dependencies: ["custom-models"],
         },
       ],
     });
@@ -1607,7 +1587,7 @@ describe("provider choice is one durable User decision", () => {
     capabilities: [
       { id: "models", kind: "model", connectionTypes: ["account"] },
     ],
-    dependencies: { support: "^1.0.0" },
+    dependencies: ["support"],
   };
   const support: AvailableUserPackage = {
     packageId: "support",

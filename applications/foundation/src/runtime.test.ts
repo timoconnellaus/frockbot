@@ -1,143 +1,75 @@
 import { describe, expect, test } from "bun:test";
 import {
-  compileFoundationApplication,
   createFoundationEnabledRuntimePackages,
   createFoundationBackendContributions,
   createFoundationHostedRuntimePackages,
   createFoundationModelRuntimePackage,
   foundationBaseRuntimeFeatures,
-  isPlatformOwnedPackageV1,
-  isUserInstallablePackageV1,
+  FOUNDATION_PACKAGES_V1,
+  foundationPackageV1,
 } from "./runtime.js";
 import { foundationDefaultPackageIds } from "./user.js";
 
 describe("foundation application", () => {
-  test("compiles one deterministic package graph for every contribution kind", async () => {
-    const first = await compileFoundationApplication();
-    const second = await compileFoundationApplication();
-
-    expect(first.applicationHash).toBe(second.applicationHash);
-    expect(first.packages.map((pkg) => pkg.id)).toEqual([
+  test("lists every Package this deployment ships, once", () => {
+    const ids = FOUNDATION_PACKAGES_V1.map((pkg) => pkg.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids).toEqual([
       "ui-theme",
-      "shell",
-      "admin",
-      "applets",
-      "flock",
-      "audit",
       "auth",
-      "settings",
-      "bot-template",
-      "clock",
-      "computer",
-      "credentials",
-      "custom-models",
-      "echo",
-      "fly-sprite",
+      "admin",
       "identity",
-      "image",
-      "user-machine",
-      "machine-messages",
-      "memory",
-      "provider-anthropic",
-      "provider-flock-ai",
       "provider-foundation",
+      "skills",
+      "echo",
+      "shell",
+      "settings",
+      "custom-models",
+      "routines",
+      "credentials",
       "web",
       "provider-ollama-cloud",
-      "routines",
+      "provider-flock-ai",
+      "provider-anthropic",
+      "flock",
+      "bot-template",
       "search",
-      "skills",
+      "audit",
+      "clock",
+      "memory",
+      "image",
+      "computer",
+      "fly-sprite",
+      "user-machine",
+      "machine-messages",
       "subagents",
-    ]);
-    expect(first.contributions).toEqual({
-      backend: [
-        "shell",
-        "admin",
-        "flock",
-        "audit",
-        "settings",
-        "bot-template",
-        "computer",
-        "credentials",
-        "user-machine",
-        "provider-flock-ai",
-        "provider-ollama-cloud",
-        "routines",
-        "search",
-        "subagents",
-      ],
-      runtime: [
-        "shell",
-        "applets",
-        "flock",
-        "bot-template",
-        "clock",
-        "computer",
-        "credentials",
-        "echo",
-        "fly-sprite",
-        "identity",
-        "image",
-        "user-machine",
-        "machine-messages",
-        "memory",
-        "provider-anthropic",
-        "provider-flock-ai",
-        "provider-foundation",
-        "web",
-        "provider-ollama-cloud",
-        "routines",
-        "skills",
-        "subagents",
-      ],
-      client: [
-        "ui-theme",
-        "shell",
-        "admin",
-        "flock",
-        "audit",
-        "auth",
-        "settings",
-        "bot-template",
-        "computer",
-        "custom-models",
-        "user-machine",
-        "routines",
-        "search",
-      ],
-      desktop: [],
-      mobile: [],
-    });
-    expect(
-      first.packages.find((pkg) => pkg.id === "shell")?.manifest.contributions
-        .backend,
-    ).toEqual([{ entry: "./backend", host: "bot" }]);
-    expect(
-      first.packages.find((pkg) => pkg.id === "settings")?.manifest
-        .contributions.backend,
-    ).toEqual([
-      { entry: "./backend", host: "gateway" },
-      { entry: "./user", host: "user" },
+      "applets",
     ]);
   });
 
-  test("seeds a default-disabled Package and its dependencies", async () => {
-    const plan = await compileFoundationApplication();
-    const packageIds = foundationDefaultPackageIds(plan);
+  test("every declared dependency names a Package this deployment ships", () => {
+    const ids = new Set(FOUNDATION_PACKAGES_V1.map((pkg) => pkg.id));
+    for (const pkg of FOUNDATION_PACKAGES_V1) {
+      for (const dependency of pkg.dependencies ?? []) {
+        expect(ids.has(dependency)).toBe(true);
+      }
+    }
+  });
+
+  test("seeds a default-disabled Package and its dependencies", () => {
+    const packageIds = foundationDefaultPackageIds();
 
     expect(packageIds.has("custom-models")).toBe(true);
     expect(packageIds.has("settings")).toBe(true);
     expect(packageIds.has("shell")).toBe(true);
     expect(packageIds.has("ui-theme")).toBe(true);
-    expect(
-      plan.packages.find((pkg) => pkg.id === "custom-models")?.manifest
-        .defaultEnablement,
-    ).toBe("disabled");
+    expect(foundationPackageV1("custom-models")?.defaultEnablement).toBe(
+      "disabled",
+    );
   });
 
   test("mounts an enabled Ollama model through its Package runtime Contribution", async () => {
-    const plan = await compileFoundationApplication();
     const runtimePackage = createFoundationModelRuntimePackage(
-      plan,
       {
         model: {
           connectionId: "ollama-work",
@@ -167,7 +99,6 @@ describe("foundation application", () => {
     expect(runtimePackage.id).toBe("provider-ollama-cloud");
     expect(() =>
       createFoundationModelRuntimePackage(
-        plan,
         {
           model: {
             connectionId: "ollama-work",
@@ -197,9 +128,7 @@ describe("foundation application", () => {
   });
 
   test("mounts an enabled Frock AI model through the gateway host seam", async () => {
-    const plan = await compileFoundationApplication();
     const runtimePackage = createFoundationModelRuntimePackage(
-      plan,
       {
         model: {
           connectionId: "flock-ai-ambient",
@@ -237,54 +166,31 @@ describe("foundation application", () => {
     expect(foundationBaseRuntimeFeatures()).toHaveLength(5);
   });
 
-  test("offers only Packages whose enablement is a User choice", async () => {
-    const plan = await compileFoundationApplication();
-    const listed = plan.packages
-      .filter((pkg) => isUserInstallablePackageV1(pkg.manifest))
-      .map((pkg) => pkg.id);
+  test("names the Packages the platform owns rather than the User", () => {
+    // The application root, the Packages with no enablement control to offer,
+    // and the ambient zero-configuration model path.
+    const platformOwned = FOUNDATION_PACKAGES_V1.filter(
+      (pkg) => pkg.platformOwned,
+    ).map((pkg) => pkg.id);
 
-    expect(listed).toEqual([
-      "flock",
-      "bot-template",
-      "custom-models",
-      "image",
-      "user-machine",
-      "machine-messages",
-      "provider-anthropic",
-      "web",
-      "provider-ollama-cloud",
-      "routines",
-      "subagents",
+    expect(platformOwned.toSorted()).toEqual([
+      "applets",
+      "auth",
+      "credentials",
+      "provider-flock-ai",
+      "settings",
+      "shell",
+      "ui-theme",
     ]);
-    expect(listed).not.toContain("shell");
-    expect(listed).not.toContain("provider-flock-ai");
-  });
-
-  test("derives platform ownership from application-root, control, and ambient-model facts", async () => {
-    const plan = await compileFoundationApplication();
-    const defaultPackageIds = foundationDefaultPackageIds(plan);
-    const manifest = (packageId: string) =>
-      plan.packages.find((pkg) => pkg.id === packageId)!.manifest;
-
-    const platformOwned = (packageId: string) =>
-      isPlatformOwnedPackageV1(
-        manifest(packageId),
-        defaultPackageIds.has(packageId),
-      );
-    expect(platformOwned("shell")).toBe(true);
-    expect(platformOwned("settings")).toBe(true);
-    expect(platformOwned("provider-flock-ai")).toBe(true);
-    expect(platformOwned("custom-models")).toBe(false);
-    expect(platformOwned("web")).toBe(false);
-    expect(platformOwned("provider-ollama-cloud")).toBe(false);
-    // Audit has no User control, but it is not a default installation. It is
-    // statically mounted rather than repaired into User enablement state.
-    expect(platformOwned("audit")).toBe(false);
+    // Audit has no User control either, but it is not a default installation:
+    // it is statically mounted rather than repaired into enablement state.
+    expect(foundationPackageV1("audit")?.platformOwned).toBeUndefined();
+    expect(foundationPackageV1("custom-models")?.platformOwned).toBeUndefined();
+    expect(foundationPackageV1("web")?.platformOwned).toBeUndefined();
   });
 
   test("resolves declared backend and enabled runtime Contributions through host seams", async () => {
-    const plan = await compileFoundationApplication();
-    const backend = await createFoundationBackendContributions(plan, {
+    const backend = await createFoundationBackendContributions({
       backendHost: "gateway",
       readDeploymentPolicy: () =>
         Promise.resolve({
@@ -413,13 +319,13 @@ describe("foundation application", () => {
       startConnection?(): void;
     }
     const botBackend =
-      await createFoundationBackendContributions<TestContribution>(plan, {
+      await createFoundationBackendContributions<TestContribution>({
         backendHost: "bot",
         resolve: (specifier, lifecycle) =>
           lifecycle.mount({ specifier, executeConfiguration() {} }),
       });
     const userBackend =
-      await createFoundationBackendContributions<TestContribution>(plan, {
+      await createFoundationBackendContributions<TestContribution>({
         backendHost: "user",
         resolve: (specifier, lifecycle) =>
           lifecycle.mount({ specifier, startConnection() {} }),
@@ -460,7 +366,7 @@ describe("foundation application", () => {
     expect(userBackend.contributions).toHaveLength(0);
     const requestedSecrets: string[] = [];
     expect(
-      createFoundationHostedRuntimePackages(plan, {
+      createFoundationHostedRuntimePackages({
         userId: "user-1",
         readSecret: (name) => {
           requestedSecrets.push(name);
@@ -476,7 +382,7 @@ describe("foundation application", () => {
     // The Skills Package mounts only for a Turn whose instruction root the
     // host can read, and then it leads the hosted runtime packages.
     expect(
-      createFoundationHostedRuntimePackages(plan, {
+      createFoundationHostedRuntimePackages({
         userId: "user-1",
         readSecret: () => undefined,
         skills: {
@@ -496,7 +402,6 @@ describe("foundation application", () => {
       kind: "tool" as const,
     };
     const freshBotRuntime = await createFoundationEnabledRuntimePackages(
-      plan,
       {
         schemaVersion: 1,
         botId: "fresh",

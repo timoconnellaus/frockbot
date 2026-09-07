@@ -1,7 +1,7 @@
 // The Shell Package owns the Composition a Turn runs on. First-party code is
-// the foundation runtime, ordinary imports in the kernel isolate; members
-// carrying an immutable artifact are Bot isolate members, mounted through the
-// kernel's `BotIsolateContributionHost` as a loaded Dynamic Worker with
+// the foundation runtime, ordinary imports in this bundle and never a
+// Composition member; every member is untrusted and mounts through
+// `BotIsolateContributionHost` as a loaded Dynamic Worker with
 // `globalOutbound` disabled.
 import {
   createFoundationRuntime,
@@ -11,30 +11,21 @@ import {
 } from "@frockbot/agent-runtime/runtime";
 import type { AgentEffectAdmission } from "@frockbot/kernel-agent-loop/agent";
 import {
+  bootstrapGeneration,
   CompositionMountFailureError,
   type CompositionFailurePhaseV1,
-} from "@frockbot/kernel-composition/activation";
-import type { ApplicationPlan } from "@frockbot/kernel-composition/compiler";
-import {
-  bootstrapGeneration,
-  compositionArtifactSetHashV1,
-  compositionGenerationIdV1,
-  decodeCompositionGenerationV1,
-  pinCompositionWithRetryV1,
   type CompositionGenerationV1,
   type CompositionHost,
   type CompositionMemberV1,
-  type CompositionStore,
   type MountedComposition,
-} from "@frockbot/kernel-composition/generation";
+} from "@frockbot/kernel-do";
 import {
   BotIsolateContributionHost,
-  botIsolatePackageDescriptorV1,
+  type ActiveContribution,
   type BotIsolateArtifactStore,
   type BotIsolateLimits,
   type BotIsolateLoader,
 } from "@frockbot/compose-frockbot";
-import type { ActiveContribution } from "@frockbot/kernel-composition";
 import {
   type BotCapabilitiesStub,
   type PersistSessionEvents,
@@ -42,126 +33,18 @@ import {
   type TurnTypeV1,
 } from "@frockbot/kernel-contracts";
 
-/** The bootstrap generation for a compiled first-party application. */
+/**
+ * The generation a Bot starts on: empty.
+ *
+ * Nothing first-party is a member any more, so a Bot that has installed and
+ * authored nothing composes nothing. This is also why a release no longer
+ * proposes a generation per Bot to follow the deployment: there is nothing in
+ * a generation for a deploy to change.
+ */
 export function bootstrapCompositionGeneration(
-  plan: ApplicationPlan,
   createdAt: string,
 ): Promise<CompositionGenerationV1> {
-  return bootstrapGeneration(
-    plan.packages.map((pkg) => ({
-      packageId: pkg.id,
-      specifier: pkg.specifier,
-      version: pkg.version,
-      manifest: pkg.manifest,
-      // A first-party member the application declared an artifact for loads
-      // through the isolate host, not the application's Contribution table.
-      ...(pkg.artifact ? { artifact: pkg.artifact } : {}),
-    })),
-    { createdAt },
-  );
-}
-
-/** The audit line a deployment-following generation carries. */
-export const DEPLOYMENT_FOLLOW_SUMMARY_V1 =
-  "Updated the built-in Packages to this deployment's";
-
-/**
- * Resolve the deployment's built-in Packages into this Bot's next generation.
- *
- * A first-party member's manifest and artifact live in the compiled
- * application, keyed by hash. A deploy that changes one of them (2026-09-05:
- * the Applets list page) leaves every pinned generation naming a manifest this
- * deployment no longer ships, and every Turn of every Bot fails to mount. A
- * built-in member is the deployment's to update, never the Bot's, so before a
- * Turn is admitted the Bot's first-party members are brought up to the
- * application's, as a new generation with the old one as its parent. Members
- * the Bot or its User put in are carried over exactly as they are; Applet
- * members stay pinned; a deployment that changes nothing proposes nothing.
- *
- * Only the manifest and the artifact decide. A version string that moved with
- * a release while both stayed the same mounts exactly as before, and a
- * generation per Bot per release would eat the User's retention quota for
- * nothing.
- *
- * Compiling the deployment yields, and an active Turn can pin a generation of
- * its own — a Package it just authored — in that window. The pin is therefore
- * a compare-and-swap against the generation this proposal was derived from,
- * and a lost race re-reads and re-derives, which carries the Bot's own members
- * over because they are read from the pointer that won.
- */
-export async function resolveDeploymentCompositionV1(options: {
-  plan: ApplicationPlan;
-  composition: Pick<CompositionStore, "current" | "propose">;
-  now?: Date;
-}): Promise<CompositionGenerationV1 | undefined> {
-  return pinCompositionWithRetryV1(() => deploymentCompositionAttempt(options));
-}
-
-async function deploymentCompositionAttempt(options: {
-  plan: ApplicationPlan;
-  composition: Pick<CompositionStore, "current" | "propose">;
-  now?: Date;
-}): Promise<CompositionGenerationV1 | undefined> {
-  const current = await options.composition.current();
-  const createdAt = (options.now ?? new Date()).toISOString();
-  const deployed = await bootstrapCompositionGeneration(
-    options.plan,
-    createdAt,
-  );
-  const shipped = new Map(
-    deployed.members.map((member) => [member.packageId, member]),
-  );
-  const members: CompositionMemberV1[] = [];
-  let changed = false;
-  for (const member of current.members) {
-    if (member.provenance.kind !== "first-party") {
-      members.push(member);
-      continue;
-    }
-    const replacement = shipped.get(member.packageId);
-    shipped.delete(member.packageId);
-    if (!replacement) {
-      // The deployment no longer ships it; nothing could mount it anyway.
-      changed = true;
-      continue;
-    }
-    if (
-      replacement.manifestHash !== member.manifestHash ||
-      replacement.artifact?.contentHash !== member.artifact?.contentHash
-    ) {
-      changed = true;
-      members.push(replacement);
-    } else {
-      members.push(member);
-    }
-  }
-  for (const added of shipped.values()) {
-    changed = true;
-    members.push(added);
-  }
-  if (!changed) return undefined;
-  const ordered = members.sort((left, right) =>
-    left.packageId.localeCompare(right.packageId),
-  );
-  const applets = current.applets ?? [];
-  const artifactSetHash = await compositionArtifactSetHashV1(ordered, applets);
-  const generation = decodeCompositionGenerationV1({
-    schemaVersion: 1,
-    generationId: compositionGenerationIdV1(createdAt, artifactSetHash),
-    artifactSetHash,
-    parentGenerationId: current.generationId,
-    summary: DEPLOYMENT_FOLLOW_SUMMARY_V1,
-    createdAt,
-    origin: { kind: "bootstrap" },
-    members: ordered,
-    ...(applets.length === 0 ? {} : { applets }),
-    status: "pending",
-  });
-  await options.composition.propose(generation, {
-    pin: true,
-    expectedCurrentGenerationId: current.generationId,
-  });
-  return generation;
+  return bootstrapGeneration({ createdAt });
 }
 
 export interface ShellMountedComposition extends MountedComposition {
@@ -175,8 +58,6 @@ export interface ShellIsolateMountOptions {
   turnId: string;
   loader: BotIsolateLoader;
   artifacts: BotIsolateArtifactStore;
-  /** Reads the exact manifest whose hash the member records. */
-  manifestFor(member: CompositionMemberV1): Promise<unknown>;
   /**
    * Mints the loopback `CAPABILITIES` service binding for one Package —
    * `ctx.exports.BotCapabilities({ props })` in the Durable Object.
@@ -292,12 +173,9 @@ export function createShellCompositionHost(
         ...(options.turnType ? { turnType: options.turnType } : {}),
         ...(options.subagentRole ? { subagentRole: options.subagentRole } : {}),
       });
-      const isolateMembers = generation.members.filter(
-        (member) => member.artifact !== undefined,
-      );
       const active: ActiveContribution[] = [];
       const failures: MemberVerificationFailure[] = [];
-      for (const member of isolateMembers) {
+      for (const member of generation.members) {
         if (!options.isolate) {
           failures.push({
             phase: "mount",
@@ -342,18 +220,7 @@ export function createShellCompositionHost(
               : { deadlineMs: isolate.deadlineMs }),
           });
           // Mount and health-check are one guarded phase (Worker Loader spike).
-          const storedManifest = await isolate.manifestFor(member);
-          const prepared = await host.prepare(
-            await botIsolatePackageDescriptorV1(member, storedManifest),
-          );
-          if (!prepared) {
-            failures.push({
-              phase: "resolve",
-              message: `package "${member.packageId}" declared no Bot isolate contribution`,
-            });
-            continue;
-          }
-          active.push(await prepared.commit());
+          active.push(await (await host.prepare(member)).commit());
         } catch (error) {
           failures.push(memberFailure(error));
         }
@@ -414,10 +281,9 @@ export function createShellCompositionHost(
       return {
         generation,
         runtime,
-        // First-party members run in the kernel isolate and have nothing to
-        // health-check; an isolate member that failed to resolve, mount, or
-        // answer `health()` surfaces here, carrying the load site it failed at
-        // so `activateCompositionV1` records the phase rather than guessing it.
+        // A member that failed to resolve, mount, or answer `health()`
+        // surfaces here, carrying the load site it failed at so
+        // `activateCompositionV1` records the phase rather than guessing it.
         verify: () => {
           if (failures.length === 0) return Promise.resolve();
           return Promise.reject(

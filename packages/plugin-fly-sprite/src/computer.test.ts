@@ -4,10 +4,7 @@ import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import type { ComputerConnectionProgressV1 } from "@frockbot/computer-core";
 import { COMPUTER_UNCONFIGURED_MESSAGE_V1 } from "@frockbot/computer-core";
-import { verifyPluginPackage } from "@frockbot/plugin-testkit";
 import { DESKTOP_GUI_LEASE_KEY } from "@frockbot/computer-host-runtime";
-import manifest from "../frockbot.json" with { type: "json" };
-import packageJson from "../package.json" with { type: "json" };
 import {
   computerBotKey,
   FlySpriteComputer,
@@ -641,12 +638,5 @@ describe("Fly Sprite computer", () => {
     expect(renewed?.id).toBe(lease?.id);
     await computer.control?.release(lease!, undefined, { signal: signal() });
     expect(host.leases.size).toBe(0);
-  });
-
-  test("satisfies plugin package conventions", () => {
-    expect(verifyPluginPackage({ packageJson, manifest })).toMatchObject({
-      name: "@frockbot/plugin-fly-sprite",
-      contributionKinds: ["runtime"],
-    });
   });
 });

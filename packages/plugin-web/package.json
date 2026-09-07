@@ -7,13 +7,9 @@
     ".": "./src/index.ts",
     "./agent": "./src/agent.ts",
     "./contract": "./src/contract.ts",
-    "./ssrf": "./src/ssrf.ts",
-    "./manifest": "./src/manifest.ts",
-    "./frockbot.json": "./frockbot.json",
-    "./package.json": "./package.json"
-  },
-  "frockbot": {
-    "manifest": "./frockbot.json"
+    "./definition": "./src/definition.ts",
+    "./package.json": "./package.json",
+    "./ssrf": "./src/ssrf.ts"
   },
   "scripts": {
     "test": "bun test src",

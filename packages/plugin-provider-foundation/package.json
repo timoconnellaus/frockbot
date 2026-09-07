@@ -5,13 +5,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./runtime": "./src/runtime.ts",
-    "./manifest": "./src/manifest.ts",
-    "./frockbot.json": "./frockbot.json",
-    "./package.json": "./package.json"
-  },
-  "frockbot": {
-    "manifest": "./frockbot.json"
+    "./package.json": "./package.json",
+    "./runtime": "./src/runtime.ts"
   },
   "scripts": {
     "test": "bun test src",

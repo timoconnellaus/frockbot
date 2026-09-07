@@ -11,15 +11,14 @@ import {
 } from "@frockbot/configuration-core";
 import type { PackageIframeCompositionV1 } from "@frockbot/kernel-contracts";
 import { FIRST_PARTY_PACKAGE_UI_V1 } from "@frockbot/plugin-applets/pages";
-import type { FrockBotManifest } from "@frockbot/kernel-composition";
 import type {
   CompositionFailureV1,
   CompositionQuarantineV1,
-} from "@frockbot/kernel-composition/activation";
+} from "@frockbot/kernel-do";
 import type {
   CompositionGenerationV1,
   CompositionMemberV1,
-} from "@frockbot/kernel-composition/generation";
+} from "@frockbot/kernel-do";
 
 /**
  * SEAM — plan Step 5 (authoring). Once the Bot object holds
@@ -80,7 +79,6 @@ function provenanceView(
   member: CompositionMemberV1,
 ): CompositionProvenanceViewV1 {
   const provenance = member.provenance;
-  if (provenance.kind === "first-party") return { kind: "first-party" };
   if (provenance.kind === "user") {
     return {
       kind: "user",

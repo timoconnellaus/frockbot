@@ -9,12 +9,11 @@
     "./backend": "./src/backend.ts",
     "./client": "./src/client/index.ts",
     "./cron": "./src/cron.ts",
+    "./definition": "./src/definition.ts",
     "./firing": "./src/firing.ts",
     "./hook": "./src/hook.ts",
-    "./frockbot.json": "./frockbot.json",
     "./inbox": "./src/inbox.ts",
     "./inbox-store": "./src/inbox-store.ts",
-    "./manifest": "./src/manifest.ts",
     "./package.json": "./package.json",
     "./records": "./src/records.ts",
     "./scheduler": "./src/scheduler.ts",
@@ -22,9 +21,6 @@
     "./storage-keys": "./src/storage-keys.ts",
     "./store": "./src/store.ts",
     "./testing": "./src/testing.ts"
-  },
-  "frockbot": {
-    "manifest": "./frockbot.json"
   },
   "scripts": {
     "test": "bun test src",

@@ -5,15 +5,11 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./definition": "./src/definition.ts",
+    "./package.json": "./package.json",
     "./runtime": "./src/runtime.ts",
     "./user": "./src/user.ts",
-    "./manifest": "./src/manifest.ts",
-    "./frockbot.json": "./frockbot.json",
-    "./package.json": "./package.json",
     "./web-search": "./src/web-search.ts"
-  },
-  "frockbot": {
-    "manifest": "./frockbot.json"
   },
   "scripts": {
     "test": "bun test src",

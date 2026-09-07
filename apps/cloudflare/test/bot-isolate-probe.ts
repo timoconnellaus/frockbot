@@ -21,8 +21,8 @@ import {
   type ArtifactRefV1,
   type CompositionGenerationV1,
   type CompositionMemberV1,
-} from "@frockbot/kernel-composition/generation";
-import { canonicalJson } from "@frockbot/kernel-composition/compiler";
+} from "@frockbot/kernel-do";
+import { decodePluginDescriptorV1 } from "@frockbot/compose-frockbot";
 import type {
   BotIsolateLoader,
   BotIsolateWorkerCode,
@@ -112,7 +112,7 @@ export async function execute(tool, input, ctx) {
     case "leak_probe":
       return JSON.stringify({
         packageId: ctx.packageId,
-        botId: ctx.botId,
+        botId: ctx.bot.botId,
         secret: typeof globalThis.SECRET_TOKEN,
         botStates: typeof globalThis.BOT_STATES,
         loader: typeof globalThis.BOT_PACKAGES,
@@ -166,16 +166,10 @@ export const PROBE_UNDECODABLE_HOOK_SOURCE = PROBE_PACKAGE_SOURCE.replace(
   }];`,
 );
 
-const PROBE_PACKAGE_MANIFEST = {
-  schemaVersion: 3,
-  id: "bot-authored",
+const PROBE_PACKAGE_DESCRIPTOR = decodePluginDescriptorV1({
+  id: PROBE_PACKAGE_ID,
   displayName: "Bot authored probe",
   version: "0.0.1",
-  compatibility: { frockbot: ">=0.0.1" },
-  dependencies: {},
-  contributions: {
-    runtime: { entry: "./package.js", host: "bot-isolate" },
-  },
   tools: [
     "reverse_text",
     "env_keys",
@@ -187,9 +181,10 @@ const PROBE_PACKAGE_MANIFEST = {
     "schedule_surface",
     "context_keys",
   ].map((name) => ({ name, description: name, inputSchema: {} })),
-  hooks: ["agent/tool-exposure"],
-  permissions: [],
-} as const;
+  actions: ["tools.expose"],
+  grants: ["ai", "http", "schedule", "memory", "workspace"],
+  contextKeys: ["user", "bot", "session"],
+});
 
 /** A deliberate syntax error: `prepare()` must fail with a diagnostic, not hang. */
 export const PROBE_BROKEN_SOURCE = `
@@ -304,25 +299,14 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
     artifact?: ArtifactRefV1,
     createdAt = "2026-08-31T00:00:00.000Z",
   ): Promise<CompositionGenerationV1> {
-    const base = await bootstrapGeneration(
-      [
-        {
-          packageId: "shell",
-          specifier: "@frockbot/plugin-shell",
-          version: "0.0.1",
-          manifest: { id: "shell", version: "0.0.1" },
-        },
-      ],
-      { createdAt },
-    );
+    const base = await bootstrapGeneration({ createdAt });
     if (!artifact) return base;
     const members: CompositionMemberV1[] = [
       ...base.members,
       {
         packageId: PROBE_PACKAGE_ID,
-        specifier: "@bot/authored",
         version: "0.0.1",
-        manifestHash: await sha256Hex(canonicalJson(PROBE_PACKAGE_MANIFEST)),
+        descriptor: PROBE_PACKAGE_DESCRIPTOR,
         provenance: {
           kind: "bot" as const,
           packageId: PROBE_PACKAGE_ID,
@@ -404,7 +388,6 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
             return module;
           },
         },
-        manifestFor: () => Promise.resolve(PROBE_PACKAGE_MANIFEST),
         capabilitiesFor: (member) =>
           exports.BotCapabilities({
             props: {

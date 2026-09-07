@@ -27,6 +27,7 @@
 // the WebUI that renders a send, so there is no cross-Package seam to cross.
 // Nothing here reaches the kernel: admission is a declaration the tool
 // registry enforces, and `endsTurn` is a boolean the Agent loop carries.
+import { packageAdmissionCeilingV1 } from "@frockbot/kernel-contracts";
 import {
   decodeSendToUserPayloadV1,
   decodeTurnTypeV1,
@@ -53,7 +54,7 @@ import {
   runCompactionV1,
 } from "./compaction.js";
 import { compactionWorkV1 } from "./compaction-scheduler.js";
-import manifest from "../frockbot.json" with { type: "json" };
+import { shellDefinitionV1 } from "./definition.js";
 
 export const SEND_TO_USER_TOOL_V1 = "send_to_user";
 /** `SAND_LEGACY_SEND_MESSAGE_TOOL_NAME`: an alias, not a second tool. */
@@ -73,24 +74,7 @@ export const PARENT_HANDOFF_CAPABILITY_V1 = "parent-handoff";
 export function shellAdmissionCeilingV1(
   capabilityId: string,
 ): readonly TurnTypeV1[] | undefined {
-  const capabilities = (
-    manifest as {
-      configuration?: {
-        capabilities?: Array<{
-          id: string;
-          admission?: { turnTypes: string[] };
-        }>;
-      };
-    }
-  ).configuration?.capabilities;
-  const capability = capabilities?.find(
-    (candidate) => candidate.id === capabilityId,
-  );
-  const turnTypes = capability?.admission?.turnTypes;
-  if (!turnTypes) return undefined;
-  return turnTypes.map((turnType) =>
-    decodeTurnTypeV1(turnType, `shell capability "${capabilityId}" admission`),
-  );
+  return packageAdmissionCeilingV1(shellDefinitionV1, capabilityId);
 }
 
 function refusal(reason: string): ToolExecutionResult {

@@ -1,7 +1,7 @@
 import type {
   PackageSettingDefinition,
   PackageSettingSchema,
-} from "@frockbot/kernel-composition";
+} from "@frockbot/kernel-contracts";
 
 /**
  * The generated Package settings form, minus the rendering.

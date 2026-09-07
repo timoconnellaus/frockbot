@@ -301,11 +301,19 @@ describe("isolate identity and capabilities", () => {
   test("decodes the identity binding", () => {
     expect(
       decodeIsolateIdentityV1({
+        userId: "user-1",
         botId: "bot-1",
         generationId: "gen-1",
         packageId: "pkg-1",
+        grants: ["ai"],
       }),
-    ).toEqual({ botId: "bot-1", generationId: "gen-1", packageId: "pkg-1" });
+    ).toEqual({
+      userId: "user-1",
+      botId: "bot-1",
+      generationId: "gen-1",
+      packageId: "pkg-1",
+      grants: ["ai"],
+    });
   });
 
   test("decodes a capability list", () => {
@@ -329,7 +337,6 @@ describe("isolate identity and capabilities", () => {
           providerModelId: "model-1",
           connectionGeneration: "generation-1",
         },
-        tools: true,
         memory: true,
         workspace: false,
         schedule: true,
@@ -337,7 +344,6 @@ describe("isolate identity and capabilities", () => {
     ).toMatchObject({
       status: "available",
       connections: [{ connectionId: "connection-1" }],
-      tools: true,
       memory: true,
       workspace: false,
       schedule: true,
@@ -349,7 +355,6 @@ describe("isolate identity and capabilities", () => {
       decodeIsolateCapabilityListV1({
         status: "available",
         connections: [],
-        tools: true,
         memory: true,
         workspace: true,
         schedule: true,

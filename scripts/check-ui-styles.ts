@@ -210,45 +210,6 @@ for (const path of featureStyles) {
   }
 }
 
-const manifests = new Bun.Glob("packages/*/frockbot.json").scanSync({
-  cwd: ".",
-  onlyFiles: true,
-});
-for (const path of manifests) {
-  let manifest: {
-    id?: string;
-    dependencies?: Record<string, string>;
-    contributions?: { client?: unknown; web?: unknown };
-  };
-  try {
-    manifest = JSON.parse(readFileSync(path, "utf8")) as typeof manifest;
-  } catch (error) {
-    failures.push(
-      `${path}: invalid JSON: ${error instanceof Error ? error.message : String(error)}`,
-    );
-    continue;
-  }
-  if (
-    manifest.id === "ui-theme" ||
-    (!manifest.contributions?.client && !manifest.contributions?.web)
-  ) {
-    continue;
-  }
-  // An iframe client never renders in the app origin: its pages are immutable
-  // HTML on an anonymous serving origin, and the host injects the theme tokens
-  // into the frame on `init`. Depending on the theme Package would be
-  // declaring a dependency it cannot import, and a Bot-authored Package with
-  // iframe pages declares no such thing either.
-  const client = manifest.contributions?.client as
-    { kind?: string } | undefined;
-  if (client && typeof client === "object" && client.kind === "iframe") {
-    continue;
-  }
-  if (!manifest.dependencies?.["ui-theme"]) {
-    failures.push(`${path}: client contribution must depend on ui-theme`);
-  }
-}
-
 if (failures.length > 0) {
   process.stderr.write(`${failures.join("\n")}\n`);
   process.exit(1);

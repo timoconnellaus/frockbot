@@ -17,7 +17,7 @@ import {
   type SettingChoice,
   type SettingsOptionsPage,
 } from "@frockbot/protocol-schemas";
-import type { PackageSettingDefinition } from "@frockbot/kernel-composition";
+import type { PackageSettingDefinition } from "@frockbot/kernel-contracts";
 import type { AvailableUserPackage } from "./user.js";
 
 function field(

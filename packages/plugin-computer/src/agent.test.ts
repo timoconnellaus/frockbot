@@ -3,11 +3,8 @@ import { ComputerError, type ComputerProvider } from "@frockbot/computer-core";
 import {
   type AgentRuntimeHarness,
   createAgentRuntimeHarness,
-  verifyPluginPackage,
 } from "@frockbot/plugin-testkit";
 import { SessionStore } from "@frockbot/kernel-contracts";
-import manifest from "../frockbot.json" with { type: "json" };
-import packageJson from "../package.json" with { type: "json" };
 import {
   COMPUTER_OVERLOADED_TOOL_MESSAGE_V1,
   createComputerAgentFeature,
@@ -433,13 +430,6 @@ describe("computer agent contribution", () => {
     expect(prompt.text).not.toContain("Persistent Computer");
     expect(prompt.text).not.toContain("computer_exec");
     await harness.dispose();
-  });
-
-  test("satisfies plugin package conventions", () => {
-    expect(verifyPluginPackage({ packageJson, manifest })).toMatchObject({
-      name: "@frockbot/plugin-computer",
-      contributionKinds: ["backend", "runtime", "client"],
-    });
   });
 });
 

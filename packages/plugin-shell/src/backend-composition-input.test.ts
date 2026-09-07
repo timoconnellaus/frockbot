@@ -22,9 +22,28 @@ describe("Composition failure durable Bot input", () => {
         members: [
           {
             packageId: "weather-lookup",
-            specifier: "bot-authored:weather-lookup",
             version: "0.0.1",
-            manifestHash: "b".repeat(64),
+            descriptor: {
+              id: "weather-lookup",
+              displayName: "weather-lookup",
+              version: "0.0.1",
+              tools: [
+                {
+                  name: "lookup",
+                  description: "Looks up",
+                  inputSchema: { type: "object" },
+                },
+              ],
+              actions: [],
+              grants: [],
+              contextKeys: ["user", "bot", "session"],
+            },
+            artifact: {
+              contentHash: "a".repeat(64),
+              size: 12,
+              mediaType: "application/javascript",
+              bundlerVersion: "worker-bundler@0.2.3",
+            },
             provenance: {
               kind: "bot",
               packageId: "weather-lookup",

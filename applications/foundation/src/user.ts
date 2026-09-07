@@ -1,4 +1,4 @@
-import type { ApplicationPlan } from "@frockbot/kernel-composition/compiler";
+import type { PackageDefinitionV1 } from "@frockbot/kernel-contracts";
 import {
   type AuditUserBackendContribution,
   type AuditUserBackendHost,
@@ -34,7 +34,10 @@ import {
   type UserSettingsBackendContribution,
   type UserSettingsStorage,
 } from "@frockbot/plugin-settings/user";
-import { isPlatformOwnedPackageV1 } from "./runtime.js";
+import {
+  FOUNDATION_PACKAGES_V1,
+  FOUNDATION_PACKAGE_VERSION_V1,
+} from "./packages.js";
 import {
   auditUserContribution,
   botTemplateUserContribution,
@@ -141,94 +144,91 @@ export interface MountedFoundationUserBackend {
  * first repairing invisible dependency rows.
  */
 export function foundationDefaultPackageIds(
-  plan: Pick<ApplicationPlan, "packages">,
+  packages: readonly PackageDefinitionV1[] = FOUNDATION_PACKAGES_V1,
 ): ReadonlySet<string> {
-  const packages = new Map(plan.packages.map((pkg) => [pkg.id, pkg]));
+  const byId = new Map(packages.map((pkg) => [pkg.id, pkg]));
   const packageIds = new Set(
-    plan.packages
+    packages
       .filter(
         (pkg) =>
-          pkg.manifest.defaultEnablement !== undefined ||
-          (pkg.manifest.configuration?.connectionTypes.length ?? 0) > 0 ||
-          (pkg.manifest.configuration?.capabilities.length ?? 0) > 0,
+          pkg.defaultEnablement !== undefined ||
+          (pkg.connectionTypes?.length ?? 0) > 0 ||
+          (pkg.capabilities?.length ?? 0) > 0,
       )
       .map((pkg) => pkg.id),
   );
 
+  // A `Set` visits what the loop adds, so this is the whole closure.
   for (const packageId of packageIds) {
-    const pkg = packages.get(packageId);
-    for (const dependencyId of Object.keys(pkg?.manifest.dependencies ?? {})) {
-      if (packages.has(dependencyId)) packageIds.add(dependencyId);
+    for (const dependencyId of byId.get(packageId)?.dependencies ?? []) {
+      if (byId.has(dependencyId)) packageIds.add(dependencyId);
     }
   }
 
   return packageIds;
 }
 
-export async function createFoundationUserBackendContributions(
-  plan: ApplicationPlan,
-  host: {
-    storage: UserSettingsStorage &
-      CredentialStorage &
-      FlockUserBackendHost["storage"] &
-      MachineStorageV1 & {
-        getAlarm?(): Promise<number | null>;
-        setAlarm(scheduledTime: number | Date): Promise<void>;
-      };
-    readSecret(
-      name: "CREDENTIAL_KEYRING" | "MACHINE_TOKEN_SECRET" | "BETTER_AUTH_URL",
-    ): string | undefined;
-    /**
-     * The Bot lifecycle seam. Archive and restore are Bot authority, so the
-     * User coordinator carries each command to the Bot Durable Object rather
-     * than mutating Bot state itself.
-     */
-    commandBotLifecycle: FlockUserBackendHost["commandBotLifecycle"];
-    readBotLifecycle: FlockUserBackendHost["readBotLifecycle"];
-    /**
-     * The Bot Template seams the adapter owns: the Bot Durable Object reads one
-     * export needs, and the immutable blob store the recipe is published into.
-     */
-    botTemplate: {
-      bots: TemplateBotReaderV1;
-      blobs: TemplateBlobStoreV1;
-      /**
-       * The import half. The writer carries the importing User's own commands
-       * and nothing wider — there is no method on it for a Connection or
-       * model binding, so an import cannot create either. `readPublishedShare`
-       * routes by the share id's owner half, which is the only way this
-       * application ever reaches another User's Durable Object.
-       */
-      importer?: TemplateImportWriterV1;
-      readPublishedShare?(
-        shareId: string,
-      ): Promise<{ hash: string; document: string } | undefined>;
+export async function createFoundationUserBackendContributions(host: {
+  storage: UserSettingsStorage &
+    CredentialStorage &
+    FlockUserBackendHost["storage"] &
+    MachineStorageV1 & {
+      getAlarm?(): Promise<number | null>;
+      setAlarm(scheduledTime: number | Date): Promise<void>;
     };
+  readSecret(
+    name: "CREDENTIAL_KEYRING" | "MACHINE_TOKEN_SECRET" | "BETTER_AUTH_URL",
+  ): string | undefined;
+  /**
+   * The Bot lifecycle seam. Archive and restore are Bot authority, so the
+   * User coordinator carries each command to the Bot Durable Object rather
+   * than mutating Bot state itself.
+   */
+  commandBotLifecycle: FlockUserBackendHost["commandBotLifecycle"];
+  readBotLifecycle: FlockUserBackendHost["readBotLifecycle"];
+  /**
+   * The Bot Template seams the adapter owns: the Bot Durable Object reads one
+   * export needs, and the immutable blob store the recipe is published into.
+   */
+  botTemplate: {
+    bots: TemplateBotReaderV1;
+    blobs: TemplateBlobStoreV1;
     /**
-     * The transcript-index seams the adapter owns: this object's own SQL
-     * storage, and one page of a Bot's projected rows read from that Bot's
-     * Durable Object. The index never invents a row; a rebuild reads them from
-     * the authority that holds the runs.
+     * The import half. The writer carries the importing User's own commands
+     * and nothing wider — there is no method on it for a Connection or
+     * model binding, so an import cannot create either. `readPublishedShare`
+     * routes by the share id's owner half, which is the only way this
+     * application ever reaches another User's Durable Object.
      */
-    search: {
-      sql: SearchUserBackendHost["sql"];
-      projectBotRows: SearchUserBackendHost["projectBotRows"];
-      maxRows?: number;
-    };
-    /**
-     * The audit seams the adapter owns: the same SQL storage, and one page of
-     * a Bot's projected entries read from that Bot's Durable Object.
-     */
-    audit: {
-      sql: AuditUserBackendHost["sql"];
-      projectBotEntries: AuditUserBackendHost["projectBotEntries"];
-      readHostJournalEffectIds?: AuditUserBackendHost["readHostJournalEffectIds"];
-      maxRows?: number;
-      maxAgeMs?: number;
-    };
-  },
-): Promise<MountedFoundationUserBackend> {
-  const defaultPackageIds = foundationDefaultPackageIds(plan);
+    importer?: TemplateImportWriterV1;
+    readPublishedShare?(
+      shareId: string,
+    ): Promise<{ hash: string; document: string } | undefined>;
+  };
+  /**
+   * The transcript-index seams the adapter owns: this object's own SQL
+   * storage, and one page of a Bot's projected rows read from that Bot's
+   * Durable Object. The index never invents a row; a rebuild reads them from
+   * the authority that holds the runs.
+   */
+  search: {
+    sql: SearchUserBackendHost["sql"];
+    projectBotRows: SearchUserBackendHost["projectBotRows"];
+    maxRows?: number;
+  };
+  /**
+   * The audit seams the adapter owns: the same SQL storage, and one page of
+   * a Bot's projected entries read from that Bot's Durable Object.
+   */
+  audit: {
+    sql: AuditUserBackendHost["sql"];
+    projectBotEntries: AuditUserBackendHost["projectBotEntries"];
+    readHostJournalEffectIds?: AuditUserBackendHost["readHostJournalEffectIds"];
+    maxRows?: number;
+    maxAgeMs?: number;
+  };
+}): Promise<MountedFoundationUserBackend> {
+  const defaultPackageIds = foundationDefaultPackageIds();
   const connections = new Map<
     string,
     FoundationConnectionUserBackendContribution
@@ -258,22 +258,16 @@ export async function createFoundationUserBackendContributions(
     get settings() {
       return {
         storage: host.storage,
-        // The declared settings travel with the version: the User
-        // Durable Object validates a `user/set-package-settings` write
-        // against the manifest of the version that User has installed.
-        availablePackages: plan.packages.map((pkg) => ({
+        availablePackages: FOUNDATION_PACKAGES_V1.map((pkg) => ({
           packageId: pkg.id,
-          version: pkg.version,
-          dependencies: pkg.manifest.dependencies,
-          defaultEnablement: pkg.manifest.defaultEnablement,
-          platformOwned: isPlatformOwnedPackageV1(
-            pkg.manifest,
-            defaultPackageIds.has(pkg.id),
-          ),
-          displayName: pkg.manifest.displayName,
-          capabilities: pkg.manifest.configuration?.capabilities ?? [],
-          connectionTypes: pkg.manifest.configuration?.connectionTypes ?? [],
-          settings: pkg.manifest.configuration?.settings ?? [],
+          version: FOUNDATION_PACKAGE_VERSION_V1,
+          dependencies: pkg.dependencies ?? [],
+          defaultEnablement: pkg.defaultEnablement,
+          platformOwned: pkg.platformOwned === true,
+          displayName: pkg.displayName,
+          capabilities: pkg.capabilities ?? [],
+          connectionTypes: pkg.connectionTypes ?? [],
+          settings: pkg.settings ?? [],
           installByDefault: defaultPackageIds.has(pkg.id),
         })),
       };
@@ -319,12 +313,10 @@ export async function createFoundationUserBackendContributions(
           ? { readPublishedShare: host.botTemplate.readPublishedShare }
           : {}),
         // Existence and display name for a template's Package lines both come
-        // from the compiled plan; there is no second index to consult.
-        availablePackages: plan.packages.map((pkg) => ({
+        // from the application's own list; there is no second index to consult.
+        availablePackages: FOUNDATION_PACKAGES_V1.map((pkg) => ({
           packageId: pkg.id,
-          ...(pkg.manifest.displayName
-            ? { displayName: pkg.manifest.displayName }
-            : {}),
+          displayName: pkg.displayName,
         })),
       };
     },
@@ -384,7 +376,7 @@ export async function createFoundationUserBackendContributions(
     | SearchUserBackendContribution
     | AuditUserBackendContribution
     | MachineUserBackendContribution
-  >(plan, applicationHost);
+  >(applicationHost);
 
   const settings = mounted.get(settingsUserContribution);
   const credentials = mounted.get(credentialsUserContribution);

@@ -13,9 +13,10 @@ import {
 } from "./backend-applets.js";
 import {
   compositionArtifactSetHashV1,
+  type CompositionMemberV1,
   decodeCompositionGenerationV1,
   type CompositionGenerationV1,
-} from "@frockbot/kernel-composition/generation";
+} from "@frockbot/kernel-do";
 import {
   APPLET_FOCUSED_KEY,
   type AppletGenerationV1,
@@ -34,19 +35,7 @@ function tool(name: string) {
 }
 
 async function bootstrap(): Promise<CompositionGenerationV1> {
-  const members = [
-    {
-      packageId: "shell",
-      specifier: "@frockbot/plugin-shell",
-      version: "1.0.0",
-      manifestHash: "c".repeat(64),
-      provenance: {
-        kind: "first-party" as const,
-        packageId: "shell",
-        version: "1.0.0",
-      },
-    },
-  ];
+  const members: CompositionMemberV1[] = [];
   const artifactSetHash = await compositionArtifactSetHashV1(members);
   return decodeCompositionGenerationV1({
     schemaVersion: 1,
@@ -105,19 +94,7 @@ describe("Applet Composition members", () => {
   });
 
   test("the artifact set hash moves with the Applet generation", async () => {
-    const members = [
-      {
-        packageId: "shell",
-        specifier: "@frockbot/plugin-shell",
-        version: "1.0.0",
-        manifestHash: "c".repeat(64),
-        provenance: {
-          kind: "first-party" as const,
-          packageId: "shell",
-          version: "1.0.0",
-        },
-      },
-    ];
+    const members: CompositionMemberV1[] = [];
     const withoutApplets = await compositionArtifactSetHashV1(members);
     const first = appletCompositionMembersV1([
       {
@@ -217,7 +194,12 @@ describe("Applet Composition resolution", () => {
         },
       },
       storage,
-      origin: { kind: "user-install", userId: USER },
+      origin: {
+        kind: "bot-authored",
+        runId: "run-1",
+        sessionId: `${USER}:bot-1`,
+        turnId: "turn-1",
+      },
     });
     return { generation, proposed, storage, current };
   }
@@ -240,10 +222,9 @@ describe("Applet Composition resolution", () => {
     expect(proposed[0]?.applets?.[0]?.tools.map((entry) => entry.name)).toEqual(
       ["add_todo"],
     );
-    // The Package members are carried through unchanged.
-    expect(proposed[0]?.members.map((member) => member.packageId)).toEqual([
-      "shell",
-    ]);
+    // The Package members are carried through unchanged: a Bot that has
+    // authored nothing has none, and resolving Applets adds none.
+    expect(proposed[0]?.members).toEqual([]);
     expect(storage.values.get(APPLET_DIRECTORY_REVISION_SEEN_KEY)).toBe(1);
   });
 

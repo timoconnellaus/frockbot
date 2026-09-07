@@ -58,9 +58,9 @@ const PROJECT_ID = /^[a-z0-9][a-z0-9-]{0,127}$/;
 
 /**
  * The kinds of durable root. "durable roots, declared by the Computer
- * Package's Workspace layout and by Package manifests" — the first three are
- * layout roots the constitution names directly, the fourth is a root a Package
- * manifest declares.
+ * Package's Workspace layout and by Package definitions" — the first three are
+ * layout roots the constitution names directly, the fourth is a root a
+ * Package's own `PackageDefinitionV1` declares.
  */
 export type WorkspaceRootKindV1 =
   | "bot-instructions"
@@ -197,11 +197,10 @@ export interface WorkspaceInstructionPathV1 extends WorkspacePathV1 {
  * The first three kinds are the constitution's one provenance vocabulary —
  * "The recorded origin of a Package or change: first-party, User, or Bot, and
  * for a Bot the Session and Turn that produced it" — narrowed to a file
- * writer. They are not a second provenance type: `PackageProvenanceV1` in
- * `@frockbot/kernel-composition` names the same three kinds for a Package
- * artifact, and cannot be imported here because `kernel-composition` depends
- * on `kernel-contracts`, not the other way round. The two must stay in step;
- * the kinds are the contract.
+ * writer. `first-party` survives here and nowhere else: a durable root can be
+ * written by the deployment's own code, while a Composition member is
+ * untrusted by definition and its `PackageProvenanceV1` names only a User or
+ * a Bot.
  *
  * `unattributed` is the fourth kind, and it is not a fourth provenance: it
  * denotes a file whose writer was *not recorded* — written by a process on the

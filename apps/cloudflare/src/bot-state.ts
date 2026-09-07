@@ -3,16 +3,13 @@ import {
   BotStateChannel,
   BOT_STATE_CHANNEL_INTERNAL_PATH,
 } from "./bot-state-channel.js";
-import {
-  compileFoundationApplication,
-  createFoundationHostedRuntimePackages,
-} from "@frockbot/application-foundation/runtime";
+import { createFoundationHostedRuntimePackages } from "@frockbot/application-foundation/runtime";
 import {
   computerBotContribution,
   createFoundationBackendContributions,
   createFoundationMountedContributionsV1,
   flockBotContribution,
-  plannedFoundationBackendContributions,
+  backendDescriptorsV1,
   shellBotContribution,
 } from "@frockbot/application-foundation/contributions";
 import { ComputerRegistry } from "@frockbot/computer-core";
@@ -74,7 +71,6 @@ import {
   decodeIsolateMemoryReadRequestV1,
   decodeIsolateMemoryWriteRequestV1,
   decodeIsolateScheduleRequestV1,
-  decodeIsolateToolRequestV1,
   decodeIsolateWorkspaceDeleteRequestV1,
   decodeIsolateWorkspaceListRequestV1,
   decodeIsolateWorkspacePathV1,
@@ -295,7 +291,6 @@ function decodeMemoryVectorPurgeJournalV1(
 export type { BotStateEnv, OwnedBotTurnCommand };
 
 export interface BotStateDependencies {
-  compileApplication?: typeof compileFoundationApplication;
   outboundFetch?: typeof fetch;
 }
 
@@ -333,7 +328,6 @@ function decodeIsolateCallRpcV1(
 }
 
 export class BotState extends DurableObject<BotStateEnv> {
-  private readonly compileApplication: typeof compileFoundationApplication;
   private readonly outboundFetch?: typeof fetch;
   /**
    * The environment the Shell Package runs under: the Durable Object's
@@ -385,8 +379,6 @@ export class BotState extends DurableObject<BotStateEnv> {
     dependencies: BotStateDependencies = {},
   ) {
     super(ctx, env);
-    this.compileApplication =
-      dependencies.compileApplication ?? compileFoundationApplication;
     this.outboundFetch = dependencies.outboundFetch;
     // The surfaces are built per identity in `bindSurfaces`, not here: they
     // carry the `owner` guard, and a Durable Object learns which User it
@@ -421,7 +413,7 @@ export class BotState extends DurableObject<BotStateEnv> {
     dispose(): Promise<void>;
   }> {
     if (!this.mounted) {
-      const pending = this.compileApplication().then(async (plan) => {
+      const pending = (async () => {
         const computers = new ComputerRegistry();
         const computerConfigured = Boolean(
           this.backendEnv.COMPUTER_HOST &&
@@ -455,17 +447,13 @@ export class BotState extends DurableObject<BotStateEnv> {
           | ShellBotBackendContribution
           | FlockBotBackendContribution
           | ComputerBotBackendContribution
-        >(plan, {
+        >({
           backendHost: "bot",
           mountedContributions,
           shell: {
             state: this.ctx,
             env: this.backendEnv,
             outboundFetch: this.outboundFetch,
-            // One application, compiled once: the Contributions mounted here
-            // and the Composition the Shell bootstraps have to be the same
-            // plan, or a member could be in one and not the other.
-            compileApplication: this.compileApplication,
             // The Durable Object owns the kernel authority; the Shell
             // Package supplies only its configuration and Composition
             // hooks.
@@ -547,11 +535,9 @@ export class BotState extends DurableObject<BotStateEnv> {
             },
           },
         });
-        // The kernel-declared required core set for a Bot, expressed against
-        // the plan's own Contributions: every Bot-host Contribution the plan
-        // declares must have mounted, and each of the three the Bot Durable
-        // Object depends on must be one of them. A Composition that lacks one
-        // never becomes resident.
+        // Every Bot-host Contribution the application lists must have
+        // mounted, and each of the three the Bot Durable Object depends on
+        // must be one of them.
         const shell = mounted.get(shellBotContribution);
         const flock = mounted.get(flockBotContribution);
         const computer = mounted.get(computerBotContribution);
@@ -560,8 +546,8 @@ export class BotState extends DurableObject<BotStateEnv> {
           !flock ||
           !computer ||
           mounted.contributions.length !==
-            plannedFoundationBackendContributions(plan).filter(
-              (planned) => planned.host === "bot",
+            backendDescriptorsV1().filter(
+              (descriptor) => descriptor.host === "bot",
             ).length
         ) {
           await mounted.dispose();
@@ -583,7 +569,7 @@ export class BotState extends DurableObject<BotStateEnv> {
             await disposeComputers();
           },
         };
-      });
+      })();
       this.mounted = pending;
       // A mount that failed is not a durable verdict. Memoizing the rejection
       // made one transient failure — an artifact read, a User RPC, a member
@@ -974,12 +960,6 @@ export class BotState extends DurableObject<BotStateEnv> {
       generationId: request.generationId as string,
       request: request.request as NormalizedModelRequest,
     });
-  }
-
-  async isolateInvokeTool(input: unknown) {
-    return (await this.contribution()).isolateInvokeTool(
-      decodeIsolateCallRpcV1(input, decodeIsolateToolRequestV1) as never,
-    );
   }
 
   async isolateMemoryRead(input: unknown) {

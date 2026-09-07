@@ -1,4 +1,5 @@
 export * from "./applets.js";
+export * from "./canonical-json.js";
 export * from "./contributions.js";
 export * from "./iframe-ui.js";
 export * from "./isolate.js";
@@ -6,6 +7,7 @@ export * from "./isolate-context-catalog.generated.js";
 export * from "./loop-events.js";
 export * from "./loop-hooks.js";
 export * from "./model-invocation.js";
+export * from "./package-definition.js";
 export * from "./prompt-assembly.js";
 export * from "./remote.js";
 export * from "./runtime-feature.js";

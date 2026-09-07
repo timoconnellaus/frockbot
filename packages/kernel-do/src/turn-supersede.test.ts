@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   bootstrapGeneration,
   type CompositionGenerationV1,
-} from "@frockbot/kernel-composition/generation";
+} from "./composition/generation.js";
 import {
   type SessionEvent,
   validateToolOccurrenceJournal,
@@ -33,17 +33,7 @@ const codec = createStoredRunCodecV1<undefined>({
 });
 
 function bootstrap(): Promise<CompositionGenerationV1> {
-  return bootstrapGeneration(
-    [
-      {
-        packageId: "shell",
-        specifier: "@frockbot/plugin-shell",
-        version: "0.0.1",
-        manifest: { id: "shell", version: "0.0.1" },
-      },
-    ],
-    { createdAt: "2026-09-03T00:00:00.000Z" },
-  );
+  return bootstrapGeneration({ createdAt: "2026-09-03T00:00:00.000Z" });
 }
 
 const identity = { userId: "user-1", botId: "primary" };

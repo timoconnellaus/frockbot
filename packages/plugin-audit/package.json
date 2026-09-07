@@ -9,16 +9,12 @@
     "./bot": "./src/bot.ts",
     "./classify": "./src/classify.ts",
     "./client": "./src/client/index.ts",
-    "./frockbot.json": "./frockbot.json",
-    "./manifest": "./src/manifest.ts",
+    "./definition": "./src/definition.ts",
     "./package.json": "./package.json",
     "./shared": "./src/shared.ts",
     "./store": "./src/store.ts",
     "./testing": "./src/testing.ts",
     "./user": "./src/user.ts"
-  },
-  "frockbot": {
-    "manifest": "./frockbot.json"
   },
   "scripts": {
     "test": "bun test src",

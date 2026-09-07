@@ -9,7 +9,7 @@ import {
   type UserSettingsStorage,
   type UserSettingsTransaction,
 } from "@frockbot/plugin-settings/user";
-import manifest from "../frockbot.json" with { type: "json" };
+import { providerOllamaCloudDefinitionV1 } from "./definition.js";
 import {
   decodeOllamaApiBaseUrl,
   DEFAULT_OLLAMA_API_BASE_URL,
@@ -175,13 +175,18 @@ const createCommand = (
 });
 
 describe("Ollama endpoint contract", () => {
-  test("declares the Connection-scoped endpoint setting in its manifest", () => {
+  test("declares the Connection-scoped endpoint setting on its Connection Type", () => {
     // The endpoint belongs to the Connection, so the Connection Type declares
-    // it (manifest v4) rather than the Package. The kernel's own suite proves
-    // every first-party manifest decodes; this asserts what this one declares.
-    expect(manifest.schemaVersion).toBe(4);
-    expect(manifest.configuration.connectionTypes[0]?.settings).toMatchObject([
-      { id: "api-base-url", schemaVersion: 1, schema: { type: "string" } },
+    // it rather than the Package.
+    expect(
+      providerOllamaCloudDefinitionV1.connectionTypes?.[0]?.settings,
+    ).toMatchObject([
+      {
+        id: "api-base-url",
+        schemaVersion: 1,
+        scopes: ["connection"],
+        schema: { type: "string" },
+      },
     ]);
   });
 
@@ -189,7 +194,7 @@ describe("Ollama endpoint contract", () => {
     // The ceiling belongs to the User, not to one Connection: it is the same
     // answer whichever account the search runs through, so it is Package-level
     // and every Connection of this Package obeys it.
-    expect(manifest.configuration.settings).toMatchObject([
+    expect(providerOllamaCloudDefinitionV1.settings).toMatchObject([
       {
         id: "web-search-max-results",
         schemaVersion: 1,

@@ -3,12 +3,7 @@ import {
   type LlmStreamEvent,
   type NormalizedModelRequest,
 } from "@frockbot/kernel-contracts";
-import {
-  createAgentRuntimeHarness,
-  verifyPluginPackage,
-} from "@frockbot/plugin-testkit";
-import manifest from "../frockbot.json" with { type: "json" };
-import packageJson from "../package.json" with { type: "json" };
+import { createAgentRuntimeHarness } from "@frockbot/plugin-testkit";
 import echoFeature, { ECHO_TOOL_NAME } from "./agent.js";
 
 function request(content: string): NormalizedModelRequest {
@@ -86,12 +81,5 @@ describe("echo feature", () => {
     expect(
       runtime.tools.schemas({ turnType: "chat" }).map((tool) => tool.name),
     ).toEqual(["get_dynamic_tools", "call_dynamic_tool"]);
-  });
-
-  test("satisfies plugin package conventions", () => {
-    expect(verifyPluginPackage({ packageJson, manifest })).toMatchObject({
-      name: "@frockbot/plugin-echo",
-      contributionKinds: ["runtime"],
-    });
   });
 });

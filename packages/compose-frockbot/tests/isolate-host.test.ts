@@ -5,64 +5,60 @@ import {
 } from "@frockbot/kernel-contracts";
 import type {
   BotCapabilitiesStub,
-  BotIsolateHookEventNameV1,
+  IsolateHealthV1,
   IsolateHookInvocationV1,
-  TurnTypeV1,
   BotIsolateEntrypoint,
   IsolateToolInvocationV1,
   ToolDefinition,
   ToolExecutionContext,
   ToolNamespaceRegistration,
 } from "@frockbot/kernel-contracts";
-import type { PackageDescriptor } from "@frockbot/kernel-composition";
 import {
-  botIsolateAdmissionCeilingV1,
   BotIsolateContributionHost,
   botIsolateModuleSetHashV1,
+  pluginHookEventsV1,
   raceDeadline,
   type BotIsolateHostOptions,
   type BotIsolateLoadedWorker,
+  type BotIsolateMemberV1,
   type BotIsolateWorkerCode,
 } from "../src/isolate-host.ts";
-import { decodeFrockBotManifest } from "@frockbot/kernel-composition";
+import {
+  decodePluginDescriptorV1,
+  type PluginActionV1,
+  type PluginGrantV1,
+} from "../src/descriptor.ts";
 
 const CONTENT_HASH = "a".repeat(64);
 
-function manifest(hooks: BotIsolateHookEventNameV1[] = []) {
-  return decodeFrockBotManifest({
-    schemaVersion: 3,
-    id: "bot-authored",
-    displayName: "Bot authored",
-    version: "0.0.1",
-    compatibility: { frockbot: "^0.0.1" },
-    dependencies: {},
-    contributions: {
-      runtime: { entry: "./package.js", host: "bot-isolate" },
-    },
-    tools: [
-      {
-        name: "reverse_text",
-        description: "Reverses text",
-        inputSchema: { type: "object" },
-      },
-    ],
-    ...(hooks.length === 0 ? {} : { hooks }),
-    permissions: [],
-  });
-}
-
-function descriptor(
-  hooks: BotIsolateHookEventNameV1[] = [],
-): PackageDescriptor {
+function member(
+  overrides: {
+    actions?: PluginActionV1[];
+    grants?: PluginGrantV1[];
+    slots?: string[];
+    tools?: { name: string; description: string; inputSchema: object }[];
+  } = {},
+): BotIsolateMemberV1 {
   return {
-    specifier: "@bot/authored",
-    manifest: manifest(hooks),
-    artifact: {
-      contentHash: CONTENT_HASH,
-      size: 12,
-      mediaType: "application/javascript",
-      bundlerVersion: "0.2.3",
-    },
+    packageId: "bot-authored",
+    version: "0.0.1",
+    artifact: { contentHash: CONTENT_HASH },
+    descriptor: decodePluginDescriptorV1({
+      id: "bot-authored",
+      displayName: "Bot authored",
+      version: "0.0.1",
+      tools: overrides.tools ?? [
+        {
+          name: "reverse_text",
+          description: "Reverses text",
+          inputSchema: { type: "object" },
+        },
+      ],
+      actions: overrides.actions ?? [],
+      grants: overrides.grants ?? [],
+      ...(overrides.slots ? { slots: overrides.slots } : {}),
+      contextKeys: ["user", "bot", "session"],
+    }),
   };
 }
 
@@ -94,8 +90,10 @@ function fakeIsolate(
   };
 }
 
+type HealthTool = IsolateHealthV1["tools"][number];
+
 function healthy(
-  tools = [
+  tools: HealthTool[] = [
     {
       name: "reverse_text",
       description: "Reverses text",
@@ -123,7 +121,6 @@ function host(
   const loads: RecordedLoad[] = [];
   const registered: ToolDefinition[] = [];
   const namespaces: ToolNamespaceRegistration[] = [];
-  const ceilings: (readonly TurnTypeV1[] | undefined)[] = [];
   const { entrypoint, ...rest } = overrides;
   const options: BotIsolateHostOptions = {
     loader: fakeIsolate(
@@ -141,9 +138,8 @@ function host(
           if (index >= 0) namespaces.splice(index, 1);
         };
       },
-      register: (definition, registration) => {
+      register: (definition) => {
         registered.push(definition);
-        ceilings.push(registration?.admissionCeiling);
         return () => {
           const index = registered.indexOf(definition);
           if (index >= 0) registered.splice(index, 1);
@@ -169,7 +165,6 @@ function host(
     loads,
     registered,
     namespaces,
-    ceilings,
   };
 }
 
@@ -186,15 +181,17 @@ function executionContext(): ToolExecutionContext {
 }
 
 describe("Bot isolate contribution host", () => {
-  test("refuses a member with no artifact", async () => {
+  test("refuses a descriptor that is not this member's", async () => {
     const { host: subject } = host();
-    const { artifact: _artifact, ...firstParty } = descriptor();
-    expect(await subject.prepare(firstParty)).toBeUndefined();
+    const mismatched = member();
+    await expect(
+      subject.prepare({ ...mismatched, packageId: "someone-else" }),
+    ).rejects.toThrow(/descriptor does not match its Composition member/);
   });
 
   test("loads with egress disabled and exactly two modules", async () => {
     const { host: subject, loads } = host();
-    await subject.prepare(descriptor());
+    await subject.prepare(member());
     expect(loads).toHaveLength(1);
     const code = loads[0]!.code;
     expect(code.globalOutbound).toBeNull();
@@ -207,6 +204,18 @@ describe("Bot isolate contribution host", () => {
     expect(code.limits).toEqual({ cpuMs: 5_000, subRequests: 5 });
   });
 
+  test("bakes the User and the declared grants into IDENTITY", async () => {
+    const { host: subject, loads } = host();
+    await subject.prepare(member({ grants: ["ai", "workspace"] }));
+    expect(loads[0]!.code.env.IDENTITY).toEqual({
+      userId: "user-1",
+      botId: "bot-1",
+      generationId: "gen-1",
+      packageId: "bot-authored",
+      grants: ["ai", "workspace"],
+    });
+  });
+
   test("a caller that omits the binding digest does not compile", () => {
     // @ts-expect-error the binding digest is required: an isolate loaded with
     // no digest of its granted bindings would share a loader id across
@@ -217,18 +226,29 @@ describe("Bot isolate contribution host", () => {
 
   test("a different binding digest is a different loader id", async () => {
     const { host: subject, loads } = host();
-    await subject.prepare(descriptor());
+    await subject.prepare(member());
     const other = host({ bindingDigest: "d".repeat(64) });
-    await other.host.prepare(descriptor());
+    await other.host.prepare(member());
+    expect(loads[0]!.loaderId).not.toBe(other.loads[0]!.loaderId);
+  });
+
+  test("a different grant set is a different loader id", async () => {
+    // `env` is baked into a cached loader id, so a member whose grants changed
+    // must not be served the isolate built for the grants it used to hold.
+    const { host: subject, loads } = host();
+    await subject.prepare(member({ grants: ["ai"] }));
+    const other = host();
+    await other.host.prepare(member({ grants: ["ai", "workspace"] }));
     expect(loads[0]!.loaderId).not.toBe(other.loads[0]!.loaderId);
   });
 
   test("keys the loader id on the User and identity-bound module set", async () => {
     const { host: subject, loads } = host();
-    await subject.prepare(descriptor());
+    await subject.prepare(member({ grants: ["ai"] }));
     const expected = await botIsolateModuleSetHashV1(
       CONTENT_HASH,
       BINDING_DIGEST,
+      ["ai"],
     );
     expect(loads[0]!.loaderId).toBe(`bot-package:user-1:${expected}`);
   });
@@ -244,7 +264,7 @@ describe("Bot isolate contribution host", () => {
           ),
       },
     });
-    await expect(subject.prepare(descriptor())).rejects.toThrow(
+    await expect(subject.prepare(member())).rejects.toThrow(
       /failed to mount in its isolate.*package\.js:4/s,
     );
   });
@@ -255,7 +275,7 @@ describe("Bot isolate contribution host", () => {
         health: () => Promise.resolve({ ...healthy(), packageId: "other" }),
       },
     });
-    await expect(subject.prepare(descriptor())).rejects.toThrow(
+    await expect(subject.prepare(member())).rejects.toThrow(
       /different package id/,
     );
   });
@@ -264,10 +284,10 @@ describe("Bot isolate contribution host", () => {
     const { host: subject } = host({
       entrypoint: { health: () => Promise.resolve(healthy([])) },
     });
-    await expect(subject.prepare(descriptor())).rejects.toThrow(/unhealthy/);
+    await expect(subject.prepare(member())).rejects.toThrow(/unhealthy/);
   });
 
-  test("rejects isolate tool names that differ from the stored manifest", async () => {
+  test("rejects isolate tool names that differ from the descriptor", async () => {
     const { host: subject } = host({
       entrypoint: {
         health: () =>
@@ -275,7 +295,7 @@ describe("Bot isolate contribution host", () => {
             healthy([
               {
                 name: "undeclared_tool",
-                description: "Not in the manifest",
+                description: "Not in the descriptor",
                 inputSchema: { type: "object" },
                 idempotent: false,
               },
@@ -283,12 +303,12 @@ describe("Bot isolate contribution host", () => {
           ),
       },
     });
-    await expect(subject.prepare(descriptor())).rejects.toThrow(
-      /tools do not match its stored manifest/,
+    await expect(subject.prepare(member())).rejects.toThrow(
+      /tools do not match its descriptor/,
     );
   });
 
-  test("rejects isolate hooks that differ from the stored manifest", async () => {
+  test("rejects isolate hooks that differ from the declared actions", async () => {
     const { host: subject } = host({
       entrypoint: {
         health: () =>
@@ -300,11 +320,11 @@ describe("Bot isolate contribution host", () => {
       },
     });
     await expect(
-      subject.prepare(descriptor(["agent/tool-exposure"])),
-    ).rejects.toThrow(/hooks do not match its stored manifest/);
+      subject.prepare(member({ actions: ["tools.expose"] })),
+    ).rejects.toThrow(/hooks do not match its declared actions/);
   });
 
-  test("runs a declared hook after first-party policy with a snapshot", async () => {
+  test("runs a declared action after first-party policy with a snapshot", async () => {
     const hooks = new LoopHookListV1();
     const order: string[] = [];
     let seen: IsolateHookInvocationV1 | undefined;
@@ -340,8 +360,10 @@ describe("Bot isolate contribution host", () => {
         },
       },
     });
-    const prepared = await subject.prepare(descriptor(["agent/tool-exposure"]));
-    const active = await prepared!.commit();
+    const prepared = await subject.prepare(
+      member({ actions: ["tools.expose"] }),
+    );
+    const active = await prepared.commit();
     const original = [
       {
         name: "reverse_text",
@@ -400,16 +422,14 @@ describe("Bot isolate contribution host", () => {
     await active.dispose();
   });
 
-  test("bridges every declared isolate waterfall", async () => {
+  test("bridges every action in the vocabulary", async () => {
     const hooks = new LoopHookListV1();
     const seen: string[] = [];
     const replacement: Record<string, unknown> = {
-      "agent/pre-step": { kind: "reject", reason: "hook rejected" },
       "system-prompt/assemble": {
         text: "hook prompt",
         sections: [{ id: "hook", text: "hook prompt" }],
       },
-      "agent/message-window": [{ role: "user", content: "hook window" }],
       "agent/tool-exposure": [],
       "tools/pre-execute": {
         kind: "denied",
@@ -417,8 +437,13 @@ describe("Bot isolate contribution host", () => {
         result: { content: "hook denied", isError: true },
       },
       "tools/post-execute": { content: "hook result", isError: false },
-      "agent/step-continuation": { kind: "stop" },
     };
+    const actions: PluginActionV1[] = [
+      "context.assemble",
+      "tools.expose",
+      "tool.call",
+      "turn.terminate",
+    ];
     const { host: subject } = host({
       hooks,
       entrypoint: {
@@ -438,10 +463,8 @@ describe("Bot isolate contribution host", () => {
         },
       },
     });
-    const prepared = await subject.prepare(
-      descriptor([...BOT_ISOLATE_HOOK_EVENTS_V1]),
-    );
-    const active = await prepared!.commit();
+    const prepared = await subject.prepare(member({ actions }));
+    const active = await prepared.commit();
     const agent = {
       id: "bot-1",
       botId: "bot-1",
@@ -453,11 +476,6 @@ describe("Bot isolate contribution host", () => {
     const toolContext = executionContext();
 
     expect(
-      await hooks.preStep(agent, [], 1, 1, () =>
-        Promise.resolve({ kind: "enter", inputs: [] }),
-      ),
-    ).toMatchObject({ kind: "reject" });
-    expect(
       await hooks.assemblePrompt(
         {
           sessionId: "session-1",
@@ -468,11 +486,6 @@ describe("Bot isolate contribution host", () => {
         () => Promise.resolve({ text: "core", sections: [] }),
       ),
     ).toMatchObject({ text: "hook prompt" });
-    expect(
-      await hooks.messageWindow(agent, [], 1, 1, signal, () =>
-        Promise.resolve([]),
-      ),
-    ).toEqual([{ role: "user", content: "hook window" }]);
     expect(
       await hooks.toolExposure(agent, [], 1, 1, signal, () =>
         Promise.resolve([]),
@@ -491,17 +504,13 @@ describe("Bot isolate contribution host", () => {
         () => Promise.resolve({ content: "core", isError: false }),
       ),
     ).toMatchObject({ content: "hook result" });
-    expect(
-      await hooks.stepContinuation(
-        agent,
-        { kind: "continue" },
-        1,
-        1,
-        signal,
-        () => Promise.resolve({ kind: "continue" }),
-      ),
-    ).toEqual({ kind: "stop" });
+    await hooks.turnStopping(agent, 1);
+
+    // The four actions cover all five loop seams: `tool.call` is both halves.
     expect(seen.toSorted()).toEqual([...BOT_ISOLATE_HOOK_EVENTS_V1].toSorted());
+    expect(pluginHookEventsV1(actions).toSorted()).toEqual(
+      [...BOT_ISOLATE_HOOK_EVENTS_V1].toSorted(),
+    );
 
     await active.dispose();
   });
@@ -531,9 +540,9 @@ describe("Bot isolate contribution host", () => {
         },
       });
       const prepared = await subject.prepare(
-        descriptor(["agent/tool-exposure"]),
+        member({ actions: ["tools.expose"] }),
       );
-      await prepared!.commit();
+      await prepared.commit();
       const original = [
         {
           name: "reverse_text",
@@ -578,8 +587,8 @@ describe("Bot isolate contribution host", () => {
         },
       },
     });
-    const prepared = await subject.prepare(descriptor());
-    const active = await prepared!.commit();
+    const prepared = await subject.prepare(member());
+    const active = await prepared.commit();
     expect(registered).toHaveLength(1);
     expect(registered[0]!.name).toBe("reverse_text");
     expect(registered[0]!.namespace).toBe("bot-authored");
@@ -587,8 +596,7 @@ describe("Bot isolate contribution host", () => {
     // Not external: this is the deployment's own reviewed code reached over no
     // network, and the dispatch guard refuses an external call that carries no
     // `mcpDetails.description` — a field nothing ever told the model to send
-    // for an isolate-hosted Package. Registering these as external meant the
-    // Applets Package could not be called by chat at all.
+    // for an isolate-hosted Package.
     expect(namespaces).toEqual([
       {
         name: "bot-authored",
@@ -610,6 +618,29 @@ describe("Bot isolate contribution host", () => {
     expect(namespaces).toHaveLength(0);
   });
 
+  test("carries a tool's own turn admission from the health report", async () => {
+    const { host: subject, registered } = host({
+      entrypoint: {
+        health: () =>
+          Promise.resolve({
+            ...healthy([
+              {
+                name: "reverse_text",
+                description: "Reverses text",
+                inputSchema: { type: "object" },
+                idempotent: true,
+                admission: { turnTypes: ["automation"] },
+              },
+            ]),
+            contractVersion: 2 as const,
+          }),
+      },
+    });
+    const prepared = await subject.prepare(member());
+    await prepared.commit();
+    expect(registered[0]!.admission).toEqual({ turnTypes: ["automation"] });
+  });
+
   test("an undecodable isolate result is a tool error, not a throw", async () => {
     const { host: subject, registered } = host({
       entrypoint: {
@@ -617,8 +648,8 @@ describe("Bot isolate contribution host", () => {
         execute: () => Promise.resolve({ content: "ba" } as never),
       },
     });
-    const prepared = await subject.prepare(descriptor());
-    await prepared!.commit();
+    const prepared = await subject.prepare(member());
+    await prepared.commit();
     expect(await registered[0]!.execute({}, executionContext())).toMatchObject({
       isError: true,
     });
@@ -630,9 +661,32 @@ describe("Bot isolate contribution host", () => {
         loadPackageArtifact: () => Promise.reject(new Error("not found")),
       },
     });
-    await expect(subject.prepare(descriptor())).rejects.toThrow(
+    await expect(subject.prepare(member())).rejects.toThrow(
       new RegExp(`"bot-authored" artifact "${CONTENT_HASH}" is unavailable`),
     );
+  });
+});
+
+describe("the extension points this deployment has not opened", () => {
+  test("refuses a grant with no host behind it", async () => {
+    const { host: subject } = host();
+    await expect(
+      subject.prepare(member({ grants: ["storage", "ai"] })),
+    ).rejects.toThrow(/has not opened: storage/);
+  });
+
+  test("refuses the Memory actions until Memory is an app module", async () => {
+    const { host: subject } = host();
+    await expect(
+      subject.prepare(member({ actions: ["memory.read", "memory.write"] })),
+    ).rejects.toThrow(/no loop seam yet: memory\.read, memory\.write/);
+  });
+
+  test("refuses slots until the renderer lands", async () => {
+    const { host: subject } = host();
+    await expect(
+      subject.prepare(member({ slots: ["composer.toolbar"] })),
+    ).rejects.toThrow(/declares slots/);
   });
 });
 
@@ -672,97 +726,5 @@ describe("the Durable Object side of the deadline", () => {
     await expect(raceDeadline(() => Promise.resolve(1), 0)).rejects.toThrow(
       /out of range/,
     );
-  });
-});
-
-describe("the manifest bounds the turn types an isolate's tools reach", () => {
-  const bounded = (capabilities: unknown[]) =>
-    decodeFrockBotManifest({
-      schemaVersion: 4,
-      id: "bot-authored",
-      displayName: "Bot authored",
-      version: "0.0.1",
-      compatibility: { frockbot: "^0.0.1" },
-      dependencies: {},
-      contributions: {
-        runtime: { entry: "./package.js", host: "bot-isolate" },
-      },
-      tools: [
-        {
-          name: "reverse_text",
-          description: "Reverses text",
-          inputSchema: { type: "object" },
-        },
-      ],
-      permissions: [],
-      configuration: { capabilities },
-    });
-
-  test("reads the ceiling from the Capabilities that contribute tools", () => {
-    expect(botIsolateAdmissionCeilingV1(manifest())).toBeUndefined();
-    expect(
-      botIsolateAdmissionCeilingV1(
-        bounded([
-          {
-            id: "automation-only",
-            kind: "tool",
-            connectionTypes: [],
-            admission: { turnTypes: ["automation"] },
-          },
-        ]),
-      ),
-    ).toEqual(["automation"]);
-    // A model Capability says nothing about which turns a tool reaches.
-    expect(
-      botIsolateAdmissionCeilingV1(
-        bounded([{ id: "models", kind: "model", connectionTypes: [] }]),
-      ),
-    ).toBeUndefined();
-    // One unbounded tool Capability leaves the Package's tools unbounded.
-    expect(
-      botIsolateAdmissionCeilingV1(
-        bounded([
-          {
-            id: "automation-only",
-            kind: "tool",
-            connectionTypes: [],
-            admission: { turnTypes: ["automation"] },
-          },
-          { id: "work", kind: "tool", connectionTypes: [] },
-        ]),
-      ),
-    ).toBeUndefined();
-  });
-
-  test("passes the ceiling to the registry at registration", async () => {
-    const { host: subject, ceilings } = host({
-      entrypoint: { health: () => Promise.resolve(healthy()) },
-    });
-
-    const prepared = await subject.prepare({
-      ...descriptor(),
-      manifest: bounded([
-        {
-          id: "automation-only",
-          kind: "tool",
-          connectionTypes: [],
-          admission: { turnTypes: ["automation"] },
-        },
-      ]),
-    });
-    await prepared!.commit();
-
-    expect(ceilings).toEqual([["automation"]]);
-  });
-
-  test("registers with no ceiling when the manifest declares none", async () => {
-    const { host: subject, ceilings } = host({
-      entrypoint: { health: () => Promise.resolve(healthy()) },
-    });
-
-    const prepared = await subject.prepare(descriptor());
-    await prepared!.commit();
-
-    expect(ceilings).toEqual([undefined]);
   });
 });

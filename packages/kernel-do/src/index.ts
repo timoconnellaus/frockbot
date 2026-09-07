@@ -1,3 +1,5 @@
+export * from "./composition/activation.js";
+export * from "./composition/generation.js";
 export * from "./authority.js";
 export * from "./applets.js";
 export * from "./composition-failures.js";

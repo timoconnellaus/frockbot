@@ -1,12 +1,3 @@
-import {
-  compileApplicationDeclarations,
-  compileApplicationPlan,
-  type ApplicationDeclarationPlan,
-  type ApplicationPlan,
-  type ApplicationPackageSelection,
-  type ApplicationSource,
-} from "@frockbot/kernel-composition/compiler";
-import type { FrockBotManifest } from "@frockbot/kernel-composition";
 import type { CredentialLeaseV1 } from "@frockbot/connection-core";
 import type {
   BotExecutionPlanV1,
@@ -15,18 +6,12 @@ import type {
   PackageSettingValueV1,
   ResolvedModelBindingV1,
 } from "@frockbot/configuration-core";
-import auditManifest from "@frockbot/plugin-audit/manifest";
-import adminManifest from "@frockbot/plugin-admin/manifest";
-import authManifest from "@frockbot/plugin-auth/manifest";
-import botTemplateManifest from "@frockbot/plugin-bot-template/manifest";
 import {
   createBotTemplateFeature,
   type BotTemplateRuntimeHostV1,
 } from "@frockbot/plugin-bot-template/agent";
 export type { BotTemplateRuntimeHostV1 } from "@frockbot/plugin-bot-template/agent";
 import clockFeature from "@frockbot/plugin-clock/agent";
-// Every selected package manifest participates in the compiled application hash.
-import clockManifest from "@frockbot/plugin-clock/manifest";
 import type {
   AgentRuntimeV1,
   RuntimeFeatureV1,
@@ -34,7 +19,6 @@ import type {
 import type { CredentialLeaseRuntime } from "@frockbot/plugin-credentials/user";
 
 // pi-lens-ignore: ts:2307
-import computerManifest from "@frockbot/plugin-computer/manifest";
 import {
   createComputerAgentFeature,
   type ComputerAgentPluginConfig,
@@ -44,13 +28,10 @@ import {
   createSharedComputerProviderFeature,
   type SharedComputerHostClient,
 } from "@frockbot/plugin-computer/shared-provider";
-import credentialsManifest from "@frockbot/plugin-credentials/manifest";
 import { createCredentialsFeature } from "@frockbot/plugin-credentials/user";
-import customModelsManifest from "@frockbot/plugin-custom-models/manifest";
 // pi-lens-ignore: ts:2307
 // Runtime implementations are statically bound by the immutable application.
 import echoFeature from "@frockbot/plugin-echo/agent";
-import flySpriteManifest from "@frockbot/plugin-fly-sprite/manifest";
 import { createFlySpriteProviderFeature } from "@frockbot/plugin-fly-sprite/agent";
 import {
   ComputerHostClient,
@@ -61,39 +42,27 @@ import type {
   ComputerSyncHostV1,
 } from "@frockbot/computer-core";
 // Flock contributes lifecycle routes and durable User/Bot state.
-import flockManifest from "@frockbot/plugin-flock/manifest";
 import {
   createFlockRuntimeFeature,
   type FlockSelfRuntimeHostV1,
 } from "@frockbot/plugin-flock/agent";
 export type { FlockSelfRuntimeHostV1 } from "@frockbot/plugin-flock/agent";
-import echoManifest from "@frockbot/plugin-echo/manifest";
 import identityFeature from "@frockbot/plugin-identity/agent";
-import identityManifest from "@frockbot/plugin-identity/manifest";
-import memoryManifest from "@frockbot/plugin-memory/manifest";
-import foundationProviderManifest from "@frockbot/plugin-provider-foundation/manifest";
 import foundationProviderFeature, {
   FOUNDATION_MODEL,
   FOUNDATION_PROVIDER,
 } from "@frockbot/plugin-provider-foundation/runtime";
-import ollamaCloudManifest from "@frockbot/plugin-provider-ollama-cloud/manifest";
 import {
   createOllamaCloudFeature,
   ollamaChatBaseUrl,
 } from "@frockbot/plugin-provider-ollama-cloud/runtime";
-import frockAiManifest from "@frockbot/plugin-provider-frock-ai/manifest";
 import { createFrockAiFeature } from "@frockbot/plugin-provider-frock-ai/runtime";
-import anthropicManifest from "@frockbot/plugin-provider-anthropic/manifest";
 import { createAnthropicFeature } from "@frockbot/plugin-provider-anthropic/runtime";
-import routinesManifest from "@frockbot/plugin-routines/manifest";
 import {
   createRoutinesRuntimeFeature,
   type RoutinesRuntimeHostV1,
 } from "@frockbot/plugin-routines/agent";
 export type { RoutinesRuntimeHostV1 } from "@frockbot/plugin-routines/agent";
-import subagentsManifest from "@frockbot/plugin-subagents/manifest";
-import userMachineManifest from "@frockbot/plugin-user-machine/manifest";
-import machineMessagesManifest from "@frockbot/plugin-machine-messages/manifest";
 import { createMachineMessagesFeature } from "@frockbot/plugin-machine-messages/agent";
 import type { MachineMessagesRuntimeHostV1 } from "@frockbot/plugin-machine-messages/agent";
 export type { MachineMessagesRuntimeHostV1 } from "@frockbot/plugin-machine-messages/agent";
@@ -109,71 +78,35 @@ import {
   type SubagentsRuntimeHostV1,
 } from "@frockbot/plugin-subagents/agent";
 export type { SubagentsRuntimeHostV1 } from "@frockbot/plugin-subagents/agent";
-import searchManifest from "@frockbot/plugin-search/manifest";
 import { createConfiguredOllamaWebSearchRuntimeContribution } from "@frockbot/plugin-provider-ollama-cloud/web-search";
 // The Web Package contributes `web_fetch`: no Connection, no provider, and no
 // Computer — it works while the User's Computer is hibernated.
-import webManifest from "@frockbot/plugin-web/manifest";
 import { createConfiguredWebFetchRuntimeContribution } from "@frockbot/plugin-web/agent";
-import settingsManifest from "@frockbot/plugin-settings/manifest";
 import {
   createMemoryRuntimeFeature,
   type MemoryRuntimeHostV1,
 } from "@frockbot/plugin-memory/agent";
-import imageManifest from "@frockbot/plugin-image/manifest";
 import {
   createImageFeature,
   type ImageRuntimeHostV1,
 } from "@frockbot/plugin-image/agent";
 import shellAgentFeature from "@frockbot/plugin-shell/agent";
-import shellManifest from "@frockbot/plugin-shell/manifest";
-import skillsManifest from "@frockbot/plugin-skills/manifest";
 import {
   createSkillsRuntimeFeature,
   type SkillsRuntimeHostV1,
 } from "@frockbot/plugin-skills/agent";
-import uiThemeManifest from "@frockbot/plugin-ui-theme/manifest";
-import appletsManifest from "@frockbot/plugin-applets/manifest";
 import {
   createAppletsFeature,
   type AppletsRuntimeHostV1,
 } from "@frockbot/plugin-applets/feature";
 export type { AppletsRuntimeHostV1 } from "@frockbot/plugin-applets/feature";
-import applicationJson from "../frockbot.application.json" with { type: "json" };
 
 export { FOUNDATION_MODEL, FOUNDATION_PROVIDER };
-
-const manifests = new Map<string, unknown>([
-  ["@frockbot/plugin-ui-theme", uiThemeManifest],
-  ["@frockbot/plugin-auth", authManifest],
-  ["@frockbot/plugin-admin", adminManifest],
-  ["@frockbot/plugin-bot-template", botTemplateManifest],
-  ["@frockbot/plugin-identity", identityManifest],
-  ["@frockbot/plugin-provider-foundation", foundationProviderManifest],
-  ["@frockbot/plugin-credentials", credentialsManifest],
-  ["@frockbot/plugin-custom-models", customModelsManifest],
-  ["@frockbot/plugin-web", webManifest],
-  ["@frockbot/plugin-provider-ollama-cloud", ollamaCloudManifest],
-  ["@frockbot/plugin-provider-frock-ai", frockAiManifest],
-  ["@frockbot/plugin-provider-anthropic", anthropicManifest],
-  ["@frockbot/plugin-echo", echoManifest],
-  ["@frockbot/plugin-fly-sprite", flySpriteManifest],
-  ["@frockbot/plugin-flock", flockManifest],
-  ["@frockbot/plugin-memory", memoryManifest],
-  ["@frockbot/plugin-image", imageManifest],
-  ["@frockbot/plugin-clock", clockManifest],
-  ["@frockbot/plugin-computer", computerManifest],
-  ["@frockbot/plugin-shell", shellManifest],
-  ["@frockbot/plugin-skills", skillsManifest],
-  ["@frockbot/plugin-search", searchManifest],
-  ["@frockbot/plugin-audit", auditManifest],
-  ["@frockbot/plugin-settings", settingsManifest],
-  ["@frockbot/plugin-routines", routinesManifest],
-  ["@frockbot/plugin-subagents", subagentsManifest],
-  ["@frockbot/plugin-applets", appletsManifest],
-  ["@frockbot/plugin-user-machine", userMachineManifest],
-  ["@frockbot/plugin-machine-messages", machineMessagesManifest],
-]);
+export {
+  FOUNDATION_PACKAGES_V1,
+  FOUNDATION_PACKAGE_VERSION_V1,
+  foundationPackageV1,
+} from "./packages.js";
 
 /** Everything a feature may register into, for one Turn. */
 export interface FoundationRuntimeServicesV1 extends AgentRuntimeV1 {
@@ -258,7 +191,7 @@ const enabledRuntimeContributionFactories = new Map<
   EnabledRuntimeContributionFactory
 >([
   [
-    "@frockbot/plugin-web/agent",
+    "web",
     ({ capability, fetch: outbound }) =>
       createConfiguredWebFetchRuntimeContribution({
         capability,
@@ -266,7 +199,7 @@ const enabledRuntimeContributionFactories = new Map<
       }),
   ],
   [
-    "@frockbot/plugin-provider-ollama-cloud/runtime",
+    "provider-ollama-cloud",
     ({
       capability,
       userId,
@@ -342,7 +275,7 @@ const modelRuntimeContributionFactories = new Map<
   ModelRuntimeContributionFactory
 >([
   [
-    "@frockbot/plugin-provider-ollama-cloud/runtime",
+    "provider-ollama-cloud",
     {
       providerType: "ollama-cloud",
       create: ({
@@ -365,7 +298,7 @@ const modelRuntimeContributionFactories = new Map<
     },
   ],
   [
-    "@frockbot/plugin-provider-frock-ai/runtime",
+    "provider-flock-ai",
     {
       providerType: "flock-ai",
       create: ({
@@ -391,7 +324,7 @@ const modelRuntimeContributionFactories = new Map<
     },
   ],
   [
-    "@frockbot/plugin-provider-anthropic/runtime",
+    "provider-anthropic",
     {
       providerType: "anthropic",
       create: ({
@@ -417,124 +350,13 @@ const modelRuntimeContributionFactories = new Map<
   ],
 ]);
 
-/*
- * The application's own declaration, cast once at the JSON boundary.
- *
- * A JSON module infers `mediaType: string` where `ArtifactRefV1` wants the
- * literal, so the artifact-backed member's selection would not structurally
- * satisfy `ApplicationPackageSelection` without this. Nothing is trusted by the
- * cast: `compileApplicationDeclarations` runs every selection, artifact
- * included, through `decodeArtifactRefV1` before it reaches a plan.
- */
-const applicationSource: ApplicationSource = {
-  schemaVersion: 1,
-  packages: applicationJson.packages as ApplicationPackageSelection[],
-};
-
 /**
- * The client slot the authenticated application root is mounted into. The
- * Package that mounts it *is* the hosted product UI — every other client
- * Package mounts into a slot that one provides.
+ * Backend Contribution resolution lives in `./contributions.ts`. Re-exported
+ * here so every caller keeps its existing import.
  */
-export const APPLICATION_ROOT_SLOT_V1 = "authenticated-root";
-
-/**
- * Whether a Package is infrastructure the platform must keep available rather
- * than an enablement choice presented to the User.
- *
- * The predicate is entirely manifest-relative. The application root is the
- * hosted product UI; a Package with no User- or Bot-scoped setting, Connection
- * Type, or Capability has no enablement control to offer; and an ambient model
- * Connection is the platform's zero-configuration model path. None is a User
- * choice, even though each still has an installation row for composition.
- */
-export function isPlatformOwnedPackageV1(
-  manifest: Pick<FrockBotManifest, "contributions" | "configuration">,
-  installedByDefault: boolean,
-): boolean {
-  if (!installedByDefault) return false;
-  return !isUserInstallablePackageV1(manifest);
-}
-
-/** Whether the manifest declares an enablement choice the User can exercise. */
-export function isUserInstallablePackageV1(
-  manifest: Pick<FrockBotManifest, "contributions" | "configuration">,
-): boolean {
-  const client = manifest.contributions.client;
-  const clientMounts = client
-    ? "pages" in client
-      ? client.pages.flatMap((page) => page.mounts)
-      : client.mounts
-    : [];
-  const mountsApplicationRoot = clientMounts.some(
-    (mount) => mount.slot === APPLICATION_ROOT_SLOT_V1,
-  );
-  if (mountsApplicationRoot) return false;
-
-  const configuration = manifest.configuration;
-  const hasUserControl = Boolean(
-    configuration &&
-    (configuration.connectionTypes.length > 0 ||
-      configuration.capabilities.length > 0 ||
-      configuration.settings.some((setting) =>
-        setting.scopes.some((scope) => scope === "user" || scope === "bot"),
-      )),
-  );
-  if (!hasUserControl) return false;
-
-  const ambientConnectionTypes = new Set(
-    (configuration?.connectionTypes ?? [])
-      .filter(
-        (connection) => connection.authorization.kind === "ambient-native",
-      )
-      .map((connection) => connection.id),
-  );
-  const ownsAmbientModel = (configuration?.capabilities ?? []).some(
-    (capability) =>
-      capability.kind === "model" &&
-      capability.connectionTypes.some((connectionTypeId) =>
-        ambientConnectionTypes.has(connectionTypeId),
-      ),
-  );
-  return !ownsAmbientModel;
-}
-
-export async function compileFoundationApplication(): Promise<ApplicationPlan> {
-  return await compileApplicationPlan(
-    applicationSource,
-    (specifier) => {
-      const manifest = manifests.get(specifier);
-      if (!manifest)
-        return Promise.reject(new Error(`unknown package: ${specifier}`));
-      return Promise.resolve({ specifier, manifest });
-    },
-    { frockbotVersion: "0.0.1" },
-  );
-}
-
-export function compileFoundationApplicationDeclarations(): ApplicationDeclarationPlan {
-  return compileApplicationDeclarations(
-    applicationSource,
-    (specifier) => {
-      const manifest = manifests.get(specifier);
-      if (!manifest) throw new Error(`unknown package: ${specifier}`);
-      return { specifier, manifest };
-    },
-    { frockbotVersion: "0.0.1" },
-  );
-}
-
-/**
- * Backend Contribution resolution lives in `./contributions.ts`: the one
- * module that knows which first-party Package implements which specifier.
- * Re-exported here so every caller keeps its existing import, and so this
- * module never has to name a Package to mount one.
- */
-import { contributionSpecifierV1 as contributionSpecifier } from "./contributions.js";
 export {
+  backendDescriptorsV1,
   createFoundationBackendContributions,
-  foundationBackendContributions,
-  assertFoundationBackendContributionsResolvable,
 } from "./contributions.js";
 export type { MachineGatewayHostV1 } from "@frockbot/plugin-user-machine/backend";
 export type {
@@ -639,136 +461,133 @@ export interface ComputerHostBinding {
   hostToken: string;
 }
 
-export function createFoundationHostedRuntimePackages(
-  plan: ApplicationPlan,
-  host: {
-    userId: string;
-    readSecret(name: string): string | undefined;
-    /**
-     * The shared Computer host seam: a non-authoritative backend host that
-     * journals each identified Computer effect so a retried effect replays its
-     * recorded outcome instead of executing twice. Supplied, the
-     * `shared-computer` provider is registered beside the in-worker provider.
-     */
-    computerHost?: SharedComputerHostClient;
-    /**
-     * The shared Computer host: the service binding the Bot
-     * Durable Object reaches a Computer through, and the secret it presents.
-     * Absent, and the Fly provider registers unconfigured — this Worker holds
-     * no Sprites SDK and no way to reach a Computer without it.
-     */
-    computerHostBinding?: ComputerHostBinding;
-    /**
-     * The Skills seam, supplied by the Bot Durable Object for one admitted
-     * Turn. Absent outside a Turn, and outside one whose Workspace reads are
-     * available, and the Skills Package is then not mounted: a Turn with no
-     * readable instruction root loads no instructions rather than guessing.
-     */
-    skills?: SkillsRuntimeHostV1;
-    /**
-     * The Memory seam, supplied by the Bot Durable Object for one admitted
-     * Turn. Absent outside a Turn, and outside one whose Memory roots are
-     * reachable, and the Memory Package is then not mounted: a Turn with no
-     * readable Memory root injects no Memory rather than guessing.
-     */
-    memory?: MemoryRuntimeHostV1;
-    /**
-     * The image-generation seam, supplied by the Bot Durable Object for one
-     * admitted Turn. Absent outside a Turn, and outside one whose Workspace is
-     * reachable, and the Image Package is then not mounted: a Bot generates an
-     * image only inside a Turn whose Session and Turn the write can name, and
-     * only where the file it produces has somewhere durable to land.
-     */
-    image?: ImageRuntimeHostV1;
-    /**
-     * The Routines seam, supplied by the Bot Durable Object for one admitted
-     * Turn. Absent outside a Turn, and the Routines Package is then not
-     * mounted: a Bot writes a Routine only inside a Turn whose Session and Turn
-     * its provenance can name.
-     */
-    routines?: RoutinesRuntimeHostV1;
-    /**
-     * The Subagents seam, supplied by the parent Bot Durable Object
-     * for one admitted Turn. Absent outside a Turn, and outside a deployment
-     * that can address a Subagent Durable Object, and the Package is then not
-     * mounted at all: a Bot dispatches a subagent only inside a Turn whose run
-     * the task record can name.
-     */
-    subagents?: SubagentsRuntimeHostV1;
-    /**
-     * The Computer sync seam, supplied by the Bot Durable Object
-     * for one admitted Turn. Absent outside a Turn, and outside one whose
-     * durable roots are reachable in object storage — the Computer provider
-     * then offers no sync at all, and a Computer's durable roots live on the
-     * Computer alone rather than reconciling against a store no authority
-     * backs.
-     */
-    computerSync?: ComputerSyncHostV1;
-    /**
-     * The Session and Turn a Computer write records as its writer, supplied by
-     * the Bot Durable Object for one admitted Turn. Absent outside a Turn, and
-     * `computer_screenshot` is then not offered: a durable-root write with no
-     * Turn to name is a write with no writer.
-     */
-    computerWriter?: { sessionId: string; turnId: string; runId: string };
-    /**
-     * The Bot Durable Object storage a background process's record is written
-     * to, supplied for one admitted Turn. Absent, and `computer_exec` offers
-     * no `background` and the three process tools are not mounted: intent is
-     * recorded before an effect, and with nowhere to record it there is no
-     * honest way to launch a process that outlives its Turn.
-     */
-    computerProcesses?: ComputerProcessStorageV1;
-    /** Wake-free access to the Bot DO's durable human-control record. */
-    computerControlRecords?: NonNullable<
-      ComputerAgentPluginConfig["controlRecords"]
-    >;
-    /** Resident projection caches invalidated after a known Computer write. */
-    computerProjectionFiles?: NonNullable<
-      ComputerAgentPluginConfig["projectionFiles"]
-    >;
-    /** The `computerUse` task owner whose User-wide lease this child holds. */
-    computerAgentControlOwnerId?: string;
-    /**
-     * The Bot self-management seam, supplied by the Bot Durable Object for one
-     * admitted Turn. Absent outside a Turn, and the Flock runtime Contribution
-     * is then not mounted: a Bot changes its own identity, or adds a Bot to
-     * its User's flock, only inside a Turn whose Session and Turn the write
-     * can name.
-     */
-    botSelfManagement?: FlockSelfRuntimeHostV1;
-    /**
-     * The Bot Template seam, supplied by the Bot Durable Object for one
-     * admitted Turn. Absent outside a Turn, and the export tool is then not
-     * registered at all: staging a template runs through the User's own
-     * command path, and a Turn with no such path cannot reach it.
-     */
-    botTemplate?: BotTemplateRuntimeHostV1;
-    /**
-     * The registered machine seam, supplied by the Bot Durable Object for one
-     * admitted Turn. Absent outside a Turn, and the machine tools are then not
-     * mounted at all: an intent record with no Session and Turn is an effect
-     * nobody can trace back to a conversation.
-     */
-    machines?: MachineRuntimeHostV1;
-    /**
-     * Row 57g's seam, supplied only when all of its gate is open: the User
-     * setting is on, and at least one connected macOS machine reports the
-     * `messages` capability. Absent, and the seven Messages tools are not
-     * mounted at all — absent from the catalog rather than present and
-     * refusing, which is what a feature gate is for.
-     */
-    machineMessages?: MachineMessagesRuntimeHostV1;
-    /**
-     * The Applets seam, supplied by the Bot Durable Object for one admitted
-     * Turn. Absent outside a Turn, and outside a deployment that can reach the
-     * Applet Durable Object, its artifact bucket and the Workspace — and the
-     * Applets Package is then not mounted at all: a publish is a durable effect
-     * whose intent record has to name the Turn that asked for it.
-     */
-    applets?: AppletsRuntimeHostV1;
-  },
-): FoundationRuntimePackage[] {
+export function createFoundationHostedRuntimePackages(host: {
+  userId: string;
+  readSecret(name: string): string | undefined;
+  /**
+   * The shared Computer host seam: a non-authoritative backend host that
+   * journals each identified Computer effect so a retried effect replays its
+   * recorded outcome instead of executing twice. Supplied, the
+   * `shared-computer` provider is registered beside the in-worker provider.
+   */
+  computerHost?: SharedComputerHostClient;
+  /**
+   * The shared Computer host: the service binding the Bot
+   * Durable Object reaches a Computer through, and the secret it presents.
+   * Absent, and the Fly provider registers unconfigured — this Worker holds
+   * no Sprites SDK and no way to reach a Computer without it.
+   */
+  computerHostBinding?: ComputerHostBinding;
+  /**
+   * The Skills seam, supplied by the Bot Durable Object for one admitted
+   * Turn. Absent outside a Turn, and outside one whose Workspace reads are
+   * available, and the Skills Package is then not mounted: a Turn with no
+   * readable instruction root loads no instructions rather than guessing.
+   */
+  skills?: SkillsRuntimeHostV1;
+  /**
+   * The Memory seam, supplied by the Bot Durable Object for one admitted
+   * Turn. Absent outside a Turn, and outside one whose Memory roots are
+   * reachable, and the Memory Package is then not mounted: a Turn with no
+   * readable Memory root injects no Memory rather than guessing.
+   */
+  memory?: MemoryRuntimeHostV1;
+  /**
+   * The image-generation seam, supplied by the Bot Durable Object for one
+   * admitted Turn. Absent outside a Turn, and outside one whose Workspace is
+   * reachable, and the Image Package is then not mounted: a Bot generates an
+   * image only inside a Turn whose Session and Turn the write can name, and
+   * only where the file it produces has somewhere durable to land.
+   */
+  image?: ImageRuntimeHostV1;
+  /**
+   * The Routines seam, supplied by the Bot Durable Object for one admitted
+   * Turn. Absent outside a Turn, and the Routines Package is then not
+   * mounted: a Bot writes a Routine only inside a Turn whose Session and Turn
+   * its provenance can name.
+   */
+  routines?: RoutinesRuntimeHostV1;
+  /**
+   * The Subagents seam, supplied by the parent Bot Durable Object
+   * for one admitted Turn. Absent outside a Turn, and outside a deployment
+   * that can address a Subagent Durable Object, and the Package is then not
+   * mounted at all: a Bot dispatches a subagent only inside a Turn whose run
+   * the task record can name.
+   */
+  subagents?: SubagentsRuntimeHostV1;
+  /**
+   * The Computer sync seam, supplied by the Bot Durable Object
+   * for one admitted Turn. Absent outside a Turn, and outside one whose
+   * durable roots are reachable in object storage — the Computer provider
+   * then offers no sync at all, and a Computer's durable roots live on the
+   * Computer alone rather than reconciling against a store no authority
+   * backs.
+   */
+  computerSync?: ComputerSyncHostV1;
+  /**
+   * The Session and Turn a Computer write records as its writer, supplied by
+   * the Bot Durable Object for one admitted Turn. Absent outside a Turn, and
+   * `computer_screenshot` is then not offered: a durable-root write with no
+   * Turn to name is a write with no writer.
+   */
+  computerWriter?: { sessionId: string; turnId: string; runId: string };
+  /**
+   * The Bot Durable Object storage a background process's record is written
+   * to, supplied for one admitted Turn. Absent, and `computer_exec` offers
+   * no `background` and the three process tools are not mounted: intent is
+   * recorded before an effect, and with nowhere to record it there is no
+   * honest way to launch a process that outlives its Turn.
+   */
+  computerProcesses?: ComputerProcessStorageV1;
+  /** Wake-free access to the Bot DO's durable human-control record. */
+  computerControlRecords?: NonNullable<
+    ComputerAgentPluginConfig["controlRecords"]
+  >;
+  /** Resident projection caches invalidated after a known Computer write. */
+  computerProjectionFiles?: NonNullable<
+    ComputerAgentPluginConfig["projectionFiles"]
+  >;
+  /** The `computerUse` task owner whose User-wide lease this child holds. */
+  computerAgentControlOwnerId?: string;
+  /**
+   * The Bot self-management seam, supplied by the Bot Durable Object for one
+   * admitted Turn. Absent outside a Turn, and the Flock runtime Contribution
+   * is then not mounted: a Bot changes its own identity, or adds a Bot to
+   * its User's flock, only inside a Turn whose Session and Turn the write
+   * can name.
+   */
+  botSelfManagement?: FlockSelfRuntimeHostV1;
+  /**
+   * The Bot Template seam, supplied by the Bot Durable Object for one
+   * admitted Turn. Absent outside a Turn, and the export tool is then not
+   * registered at all: staging a template runs through the User's own
+   * command path, and a Turn with no such path cannot reach it.
+   */
+  botTemplate?: BotTemplateRuntimeHostV1;
+  /**
+   * The registered machine seam, supplied by the Bot Durable Object for one
+   * admitted Turn. Absent outside a Turn, and the machine tools are then not
+   * mounted at all: an intent record with no Session and Turn is an effect
+   * nobody can trace back to a conversation.
+   */
+  machines?: MachineRuntimeHostV1;
+  /**
+   * Row 57g's seam, supplied only when all of its gate is open: the User
+   * setting is on, and at least one connected macOS machine reports the
+   * `messages` capability. Absent, and the seven Messages tools are not
+   * mounted at all — absent from the catalog rather than present and
+   * refusing, which is what a feature gate is for.
+   */
+  machineMessages?: MachineMessagesRuntimeHostV1;
+  /**
+   * The Applets seam, supplied by the Bot Durable Object for one admitted
+   * Turn. Absent outside a Turn, and outside a deployment that can reach the
+   * Applet Durable Object, its artifact bucket and the Workspace — and the
+   * Applets Package is then not mounted at all: a publish is a durable effect
+   * whose intent record has to name the Turn that asked for it.
+   */
+  applets?: AppletsRuntimeHostV1;
+}): FoundationRuntimePackage[] {
   return [
     ...(host.botSelfManagement
       ? [
@@ -860,7 +679,6 @@ export function createFoundationHostedRuntimePackages(
 }
 
 export async function createFoundationEnabledRuntimePackages(
-  plan: ApplicationPlan,
   execution: BotExecutionPlanV1,
   host: {
     userId: string;
@@ -897,26 +715,21 @@ export async function createFoundationEnabledRuntimePackages(
   const result: FoundationRuntimePackage[] = [];
   const capabilityIndexes = new Map<string, number>();
   for (const capability of execution.capabilities) {
-    const pkg = plan.packages.find(
-      (candidate) => candidate.id === capability.packageId,
-    );
-    const runtime = pkg?.manifest.contributions.runtime;
-    if (!pkg || !runtime) continue;
-    const specifier = contributionSpecifier(pkg.specifier, runtime.entry);
-    const factory = enabledRuntimeContributionFactories.get(specifier);
+    const packageId = capability.packageId;
+    const factory = enabledRuntimeContributionFactories.get(packageId);
     if (!factory) continue;
     // A Capability with no Connection type is authorized by account-wide
     // Package enablement alone, so it never asks the host for a Connection.
     const connection = capability.connectionId
       ? await host.authorizeConnection(capability)
       : undefined;
-    const capabilityIndex = capabilityIndexes.get(pkg.id) ?? 0;
-    capabilityIndexes.set(pkg.id, capabilityIndex + 1);
+    const capabilityIndex = capabilityIndexes.get(packageId) ?? 0;
+    capabilityIndexes.set(packageId, capabilityIndex + 1);
     const plugin = await factory({
       capability,
       capabilityIndex,
       userId: host.userId,
-      packageSettings: host.packageSettings?.(pkg.id) ?? {},
+      packageSettings: host.packageSettings?.(packageId) ?? {},
       readSecret: host.readSecret,
       ...(host.pinToolCatalog ? { pinToolCatalog: host.pinToolCatalog } : {}),
       authorizeConnection: () => host.authorizeConnection(capability),
@@ -936,13 +749,12 @@ export async function createFoundationEnabledRuntimePackages(
         : {}),
     });
     if (!plugin) continue;
-    result.push({ id: pkg.id, feature: plugin });
+    result.push({ id: packageId, feature: plugin });
   }
   return result;
 }
 
 export function createFoundationModelRuntimePackage(
-  plan: ApplicationPlan,
   binding: ResolvedModelBindingV1,
   host: ModelRuntimeContributionConfig,
 ): FoundationRuntimePackage {
@@ -954,22 +766,14 @@ export function createFoundationModelRuntimePackage(
   ) {
     throw new Error(binding.failure ?? "Bot model Connection is unavailable");
   }
-  const pkg = plan.packages.find(
-    (candidate) => candidate.id === binding.packageId,
-  );
-  const runtime = pkg?.manifest.contributions.runtime;
-  if (!pkg || !runtime) {
-    throw new Error("Bot model Package runtime is unavailable");
-  }
-  const specifier = contributionSpecifier(pkg.specifier, runtime.entry);
-  const factory = modelRuntimeContributionFactories.get(specifier);
+  const factory = modelRuntimeContributionFactories.get(binding.packageId);
   if (!factory || factory.providerType !== binding.providerType) {
     throw new Error(
       `Bot model provider "${binding.providerType}" is unavailable`,
     );
   }
   return {
-    id: pkg.id,
+    id: binding.packageId,
     feature: factory.create({
       ...host,
       connectionId: binding.connection.connectionId,

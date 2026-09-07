@@ -9,7 +9,7 @@ import {
   type NormalizedModelRequest,
   type SessionEvent,
 } from "@frockbot/kernel-contracts";
-import type { CompositionGenerationV1 } from "@frockbot/kernel-composition/generation";
+import type { CompositionGenerationV1 } from "./composition/generation.js";
 import {
   DurableCompositionStore,
   decodeCompositionPinV1,

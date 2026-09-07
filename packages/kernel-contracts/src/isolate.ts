@@ -107,9 +107,16 @@ export interface IsolateHealthV1 {
 
 /** What `IDENTITY` carries into the isolate. Structured-clonable, never a stub. */
 export interface IsolateIdentityV1 {
+  userId: string;
   botId: string;
   generationId: string;
   packageId: string;
+  /**
+   * The grants this member declared and the host opened. The wrapper builds
+   * `ctx` from exactly these, so a plugin that never asked for the Workspace
+   * has no `ctx.workspace` to call rather than a call that refuses.
+   */
+  grants: readonly string[];
 }
 
 /**
@@ -143,12 +150,15 @@ export interface IsolateModelBindingV1 {
   catalogGeneration?: string;
 }
 
-/** The per-Bot authority every Package in one Composition sees identically. */
+/**
+ * The per-Bot authority every plugin in one Composition sees identically,
+ * named in the grant vocabulary: `http` is a Connection lease, `ai` the model
+ * binding. Calling the Bot's own tools is not a named grant and is not here.
+ */
 export interface IsolateCapabilityListV1 {
   status: "available";
   connections: IsolateConnectionV1[];
   model?: IsolateModelBindingV1;
-  tools: true;
   memory: boolean;
   workspace: boolean;
   schedule: true;
@@ -168,16 +178,6 @@ export interface IsolateConnectionLeaseV1 {
 
 export type IsolateConnectionOutcomeV1 =
   IsolateConnectionLeaseV1 | IsolateCapabilityFailureV1;
-
-export interface IsolateToolRequestV1 {
-  callId: string;
-  name: string;
-  input: unknown;
-}
-
-export type IsolateToolOutcomeV1 =
-  | { status: "completed"; content: string; isError: boolean }
-  | IsolateCapabilityFailureV1;
 
 export type IsolateMemoryScopeV1 = "bot" | "user" | "project";
 export type IsolateMemoryTierV1 = "profile" | "log" | "note";
@@ -225,7 +225,9 @@ export interface IsolateScheduleRequestV1 {
   callId: string;
   input: unknown;
 }
-export type IsolateScheduleOutcomeV1 = IsolateToolOutcomeV1;
+export type IsolateScheduleOutcomeV1 =
+  | { status: "completed"; content: string; isError: boolean }
+  | IsolateCapabilityFailureV1;
 
 /**
  * Model invocation through the Bot's configured model binding. Events cross the RPC
@@ -261,7 +263,6 @@ export interface BotIsolateEntrypoint {
 export interface BotCapabilitiesStub {
   list(): Promise<IsolateCapabilityListOutcomeV1>;
   invokeModel(request: NormalizedModelRequest): Promise<IsolateModelOutcomeV1>;
-  invokeTool(request: IsolateToolRequestV1): Promise<IsolateToolOutcomeV1>;
   memoryRead(
     request: IsolateMemoryReadRequestV1,
   ): Promise<IsolateMemoryOutcomeV1>;
@@ -301,34 +302,50 @@ export type BotPackageModelOutcomeV1 =
     }
   | IsolateCapabilityFailureV1;
 
-/**
- * The common exact `ctx` passed to a Bot-authored Package's tool and hook.
- * The model-facing declarations are generated from these interfaces, and the
- * wrapper's implementation is compile- and test-checked against the same
- * keys.
- */
-export interface BotPackageContextV1 {
-  readonly tool?: string;
-  readonly event?: BotIsolateHookEventNameV1;
+/** The three context keys a plugin sees. Nothing else identifies a caller. */
+export interface BotPackageUserContextV1 {
+  readonly userId: string;
+}
+
+export interface BotPackageBotContextV1 {
   readonly botId: string;
+}
+
+export interface BotPackageSessionContextV1 {
   readonly sessionId: string;
   readonly runId: string;
   readonly turnId: string;
   readonly generationId: string;
+}
+
+/**
+ * The common exact `ctx` passed to a plugin's tool and hook.
+ *
+ * Three context keys — `user`, `bot`, `session` — and one member per grant the
+ * member declared. A grant the plugin did not ask for is absent from `ctx`
+ * entirely, which is why every grant member is optional here: the type says
+ * what the wrapper actually builds. The model-facing declarations are
+ * generated from these interfaces, and the wrapper's implementation is
+ * compile- and test-checked against the same keys.
+ */
+export interface BotPackageContextV1 {
+  readonly tool?: string;
+  readonly event?: BotIsolateHookEventNameV1;
+  readonly user: BotPackageUserContextV1;
+  readonly bot: BotPackageBotContextV1;
+  readonly session: BotPackageSessionContextV1;
   readonly packageId: string;
   readonly deadlineMs: number;
   readonly bindings: string[];
   readonly capabilities: {
     list(): Promise<IsolateCapabilityListOutcomeV1>;
   };
-  readonly model: {
+  /** The `ai` grant. */
+  readonly model?: {
     invoke(request: NormalizedModelRequest): Promise<BotPackageModelOutcomeV1>;
   };
-  readonly tools: {
-    /** Runs through the trusted registry's active-Composition and deny guards. */
-    invoke(request: IsolateToolRequestV1): Promise<IsolateToolOutcomeV1>;
-  };
-  readonly memory: {
+  /** The `memory` grant. */
+  readonly memory?: {
     read(request: IsolateMemoryReadRequestV1): Promise<IsolateMemoryOutcomeV1>;
     write(
       request: IsolateMemoryWriteRequestV1,
@@ -337,7 +354,8 @@ export interface BotPackageContextV1 {
       request: IsolateMemoryWriteRequestV1,
     ): Promise<IsolateMemoryOutcomeV1>;
   };
-  readonly workspace: {
+  /** The `workspace` grant. */
+  readonly workspace?: {
     read(path: IsolateWorkspacePathV1): Promise<IsolateWorkspaceOutcomeV1>;
     list(
       request: IsolateWorkspaceListRequestV1,
@@ -350,10 +368,14 @@ export interface BotPackageContextV1 {
       request: IsolateWorkspaceDeleteRequestV1,
     ): Promise<IsolateWorkspaceOutcomeV1>;
   };
-  connection(connectionId: string): Promise<IsolateConnectionOutcomeV1>;
-  schedule(
+  /** The `http` grant: a named service, credential attached server-side. */
+  readonly connection?: (
+    connectionId: string,
+  ) => Promise<IsolateConnectionOutcomeV1>;
+  /** The `schedule` grant. */
+  readonly schedule?: (
     request: IsolateScheduleRequestV1,
-  ): Promise<IsolateScheduleOutcomeV1>;
+  ) => Promise<IsolateScheduleOutcomeV1>;
 }
 
 export interface BotPackageExecutionContextV1 extends BotPackageContextV1 {
@@ -813,8 +835,16 @@ export function decodeIsolateIdentityV1(
   label = "isolate identity",
 ): IsolateIdentityV1 {
   const value = record(input, label);
-  exactKeys(value, ["botId", "generationId", "packageId"], label);
+  exactKeys(
+    value,
+    ["userId", "botId", "generationId", "packageId", "grants"],
+    label,
+  );
+  if (!Array.isArray(value.grants) || value.grants.length > 16) {
+    throw new Error(`${label}.grants must be a bounded array`);
+  }
   return {
+    userId: boundedString(value.userId, `${label}.userId`, 256),
     botId: boundedString(value.botId, `${label}.botId`, 256),
     generationId: boundedString(
       value.generationId,
@@ -822,6 +852,9 @@ export function decodeIsolateIdentityV1(
       256,
     ),
     packageId: boundedString(value.packageId, `${label}.packageId`, 128),
+    grants: value.grants.map((grant, index) =>
+      boundedString(grant, `${label}.grants[${index}]`, 32),
+    ),
   };
 }
 
@@ -916,13 +949,12 @@ export function decodeIsolateCapabilityListV1(
   const value = record(input, label);
   exactKeys(
     value,
-    ["status", "connections", "tools", "memory", "workspace", "schedule"],
+    ["status", "connections", "memory", "workspace", "schedule"],
     label,
     ["model"],
   );
   if (
     value.status !== "available" ||
-    value.tools !== true ||
     value.schedule !== true ||
     typeof value.memory !== "boolean" ||
     typeof value.workspace !== "boolean" ||
@@ -939,24 +971,9 @@ export function decodeIsolateCapabilityListV1(
     ...(value.model === undefined
       ? {}
       : { model: decodeIsolateModelBindingV1(value.model, `${label}.model`) }),
-    tools: true,
     memory: value.memory,
     workspace: value.workspace,
     schedule: true,
-  };
-}
-
-export function decodeIsolateToolRequestV1(
-  input: unknown,
-  label = "isolate tool request",
-): IsolateToolRequestV1 {
-  const value = record(input, label);
-  exactKeys(value, ["callId", "name", "input"], label);
-  jsonValue(value.input, `${label}.input`);
-  return {
-    callId: boundedString(value.callId, `${label}.callId`, 256),
-    name: boundedString(value.name, `${label}.name`, 128),
-    input: value.input,
   };
 }
 

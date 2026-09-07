@@ -38,6 +38,7 @@
 //  - `bot_update` computes the durable result the patch would produce and
 //    commands nothing when it already holds, so a replay is a read. That also
 //    keeps a replayed rename from appending a second announcement.
+import { packageAdmissionCeilingV1 } from "@frockbot/kernel-contracts";
 import {
   applyBotProfilePatchV1,
   ConfigurationConflictError,
@@ -66,7 +67,7 @@ import {
   type CreateBotCommandV1,
   type FlockReceiptV1,
 } from "./shared.js";
-import manifest from "../frockbot.json" with { type: "json" };
+import { flockDefinitionV1 } from "./definition.js";
 export type {
   BotDirectoryViewV1,
   CreateBotCommandV1,
@@ -328,22 +329,7 @@ export function decodeBotMessageInputV1(input: unknown): BotMessageInputV1 {
 function flockAdmissionCeilingV1(
   capabilityId: string,
 ): readonly TurnTypeV1[] | undefined {
-  const capabilities = (
-    manifest as {
-      configuration?: {
-        capabilities?: Array<{
-          id: string;
-          admission?: { turnTypes: string[] };
-        }>;
-      };
-    }
-  ).configuration?.capabilities;
-  const turnTypes = capabilities?.find(
-    (candidate) => candidate.id === capabilityId,
-  )?.admission?.turnTypes;
-  return turnTypes?.map((value) =>
-    decodeTurnTypeV1(value, `flock capability "${capabilityId}" admission`),
-  );
+  return packageAdmissionCeilingV1(flockDefinitionV1, capabilityId);
 }
 
 function refusal(reason: string): ToolExecutionResult {

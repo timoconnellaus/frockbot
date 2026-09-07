@@ -23,7 +23,7 @@ import type {
   ConnectionCommandReceiptV1,
   ConnectionCommandV1,
 } from "@frockbot/connection-core";
-import { decodeFrockBotManifest } from "@frockbot/kernel-composition";
+import type { PackageDefinitionV1 } from "@frockbot/kernel-contracts";
 import {
   decodePackageIframeCatalogV1,
   packageIframeToolAllowedV1,
@@ -821,12 +821,7 @@ function hasExactFields(
 export function decodePluginCatalog(value: unknown): PluginCatalogItem[] {
   if (
     !isRecord(value) ||
-    !hasExactFields(value, [
-      "schemaVersion",
-      "deployment",
-      "applicationHash",
-      "packages",
-    ]) ||
+    !hasExactFields(value, ["schemaVersion", "deployment", "packages"]) ||
     value.schemaVersion !== 1 ||
     !isRecord(value.deployment) ||
     !hasExactFields(value.deployment, ["userId", "applicationHash"]) ||
@@ -836,13 +831,6 @@ export function decodePluginCatalog(value: unknown): PluginCatalogItem[] {
     typeof value.deployment.applicationHash !== "string" ||
     value.deployment.applicationHash.length === 0 ||
     value.deployment.applicationHash.length > 256 ||
-    typeof value.applicationHash !== "string" ||
-    value.applicationHash.length === 0 ||
-    value.applicationHash.length > 256 ||
-    // `deployment.applicationHash` names the artifact bytes the gateway
-    // loaded; `applicationHash` is the compiled plan's digest. They differ
-    // by construction, so each is checked on its own and never against
-    // the other.
     !Array.isArray(value.packages) ||
     value.packages.length > 256
   ) {
@@ -851,64 +839,42 @@ export function decodePluginCatalog(value: unknown): PluginCatalogItem[] {
   return value.packages.flatMap((candidate) => {
     if (
       !isRecord(candidate) ||
-      // A Package that declares no configuration is serialised without the
-      // key (JSON drops an undefined field), so the key is owned but optional.
+      // A Package that declares nothing is serialised without the optional
+      // keys — JSON drops an undefined field — so each is owned but optional.
       !hasExactFields(candidate, [
         "id",
         "displayName",
         "version",
-        "contributions",
-        ...(Object.hasOwn(candidate, "configuration") ? ["configuration"] : []),
         ...(Object.hasOwn(candidate, "platformOwned") ? ["platformOwned"] : []),
+        ...(Object.hasOwn(candidate, "settings") ? ["settings"] : []),
+        ...(Object.hasOwn(candidate, "capabilities") ? ["capabilities"] : []),
+        ...(Object.hasOwn(candidate, "connectionTypes")
+          ? ["connectionTypes"]
+          : []),
       ]) ||
       typeof candidate.id !== "string" ||
       typeof candidate.displayName !== "string" ||
       typeof candidate.version !== "string" ||
       (candidate.platformOwned !== undefined &&
-        typeof candidate.platformOwned !== "boolean") ||
-      !Array.isArray(candidate.contributions) ||
-      candidate.contributions.length > 5 ||
-      new Set(candidate.contributions).size !==
-        candidate.contributions.length ||
-      !candidate.contributions.every(
-        (kind) =>
-          kind === "backend" ||
-          kind === "runtime" ||
-          kind === "client" ||
-          kind === "desktop" ||
-          kind === "mobile",
-      )
+        typeof candidate.platformOwned !== "boolean")
     ) {
       throw new Error(
         "FrockBot couldn't load this deployment. Reload the page.",
       );
     }
-    const decoded = decodeFrockBotManifest({
-      // v4, so a Capability carrying an admission ceiling decodes here too.
-      // Admission is durable manifest state the Plugins surface does not
-      // render; refusing the manifest over it would hide the whole Package.
-      schemaVersion: 4,
-      id: candidate.id,
-      displayName: candidate.displayName,
-      version: candidate.version,
-      compatibility: { frockbot: "*" },
-      dependencies: {},
-      contributions: { runtime: { entry: "./manifest-validation.js" } },
-      permissions: [],
-      configuration: candidate.configuration,
-    });
-    const connectionTypes = decoded.configuration?.connectionTypes ?? [];
-    const decodedCapabilities = (decoded.configuration?.capabilities ?? []).map(
-      (capability) => ({
-        id: capability.id,
-        kind: capability.kind,
-        connectionTypes: capability.connectionTypes,
-      }),
-    );
+    const definition = candidate as unknown as PackageDefinitionV1 & {
+      version: string;
+    };
+    const connectionTypes = definition.connectionTypes ?? [];
+    const capabilities = (definition.capabilities ?? []).map((capability) => ({
+      id: capability.id,
+      kind: capability.kind,
+      connectionTypes: capability.connectionTypes,
+    }));
     // User- and Bot-scoped declarations are needed for generic effective
     // model resolution. Connection-scoped settings stay with their Connection
     // and never enter Package-level settings forms.
-    const settings = (decoded.configuration?.settings ?? []).filter((setting) =>
+    const settings = (definition.settings ?? []).filter((setting) =>
       setting.scopes.some((scope) => scope === "user" || scope === "bot"),
     );
     // A settings-only Package still contributes enablement: disabling it is
@@ -917,7 +883,7 @@ export function decodePluginCatalog(value: unknown): PluginCatalogItem[] {
     // all of the User's Bots.
     if (
       connectionTypes.length === 0 &&
-      decodedCapabilities.length === 0 &&
+      capabilities.length === 0 &&
       settings.length === 0
     ) {
       return [];
@@ -938,16 +904,13 @@ export function decodePluginCatalog(value: unknown): PluginCatalogItem[] {
     });
     return [
       {
-        packageId: candidate.id,
-        displayName:
-          typeof candidate.displayName === "string"
-            ? candidate.displayName
-            : candidate.id,
-        version: candidate.version,
-        ...(candidate.platformOwned === true ? { platformOwned: true } : {}),
-        capabilities: decodedCapabilities,
+        packageId: definition.id,
+        displayName: definition.displayName,
+        version: definition.version,
+        ...(definition.platformOwned === true ? { platformOwned: true } : {}),
+        capabilities,
         connectionTypes: decodedConnections,
-        settings,
+        settings: [...settings],
       },
     ];
   });

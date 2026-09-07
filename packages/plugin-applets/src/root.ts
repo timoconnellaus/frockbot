@@ -37,7 +37,7 @@ import {
   TemplateDecodeError,
 } from "@frockbot/template-core";
 
-/** The Package id the declared root belongs to. Matches `frockbot.json`. */
+/** The Package id the declared root belongs to. Matches `./definition.ts`. */
 export const APPLETS_PACKAGE_ID_V1 = "applets";
 /** The declared root Applet source is written under. */
 export const APPLETS_SOURCE_ROOT_ID_V1 = "source";

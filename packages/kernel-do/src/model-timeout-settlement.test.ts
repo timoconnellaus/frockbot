@@ -17,7 +17,7 @@ import { describe, expect, test } from "bun:test";
 import {
   bootstrapGeneration,
   type CompositionGenerationV1,
-} from "@frockbot/kernel-composition/generation";
+} from "./composition/generation.js";
 import {
   MODEL_FIRST_BYTE_DEADLINE_REASON_V1,
   type SessionEvent,
@@ -40,17 +40,7 @@ const identity = { userId: "user-1", botId: "primary" };
 const SESSION_ID = "user-1:primary";
 
 function bootstrap(): Promise<CompositionGenerationV1> {
-  return bootstrapGeneration(
-    [
-      {
-        packageId: "shell",
-        specifier: "@frockbot/plugin-shell",
-        version: "0.0.1",
-        manifest: { id: "shell", version: "0.0.1" },
-      },
-    ],
-    { createdAt: "2026-09-03T00:00:00.000Z" },
-  );
+  return bootstrapGeneration({ createdAt: "2026-09-03T00:00:00.000Z" });
 }
 
 function command(runId: string, text: string): OwnedBotTurnCommand {

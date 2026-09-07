@@ -4,14 +4,10 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./user": "./src/user.ts",
+    "./definition": "./src/definition.ts",
+    "./package.json": "./package.json",
     "./runtime": "./src/runtime.ts",
-    "./manifest": "./src/manifest.ts",
-    "./frockbot.json": "./frockbot.json",
-    "./package.json": "./package.json"
-  },
-  "frockbot": {
-    "manifest": "./frockbot.json"
+    "./user": "./src/user.ts"
   },
   "scripts": {
     "test": "bun test src",

@@ -158,7 +158,9 @@ describe("a Bot Package in a loaded Dynamic Worker", () => {
     expect(loaded[0]?.identityKeys).toEqual([
       "botId",
       "generationId",
+      "grants",
       "packageId",
+      "userId",
     ]);
     expect(loaded[0]?.limits.subRequests).toBeGreaterThan(0);
   });
@@ -307,7 +309,6 @@ describe("the isolate capability binding", () => {
       status: "available",
       connections: [connection],
       model,
-      tools: true,
       memory: true,
       workspace: true,
       schedule: true,

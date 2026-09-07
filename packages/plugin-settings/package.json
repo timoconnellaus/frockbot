@@ -7,13 +7,9 @@
     ".": "./src/index.ts",
     "./backend": "./src/backend.ts",
     "./client": "./src/client/index.ts",
-    "./user": "./src/user.ts",
-    "./manifest": "./src/manifest.ts",
-    "./frockbot.json": "./frockbot.json",
-    "./package.json": "./package.json"
-  },
-  "frockbot": {
-    "manifest": "./frockbot.json"
+    "./definition": "./src/definition.ts",
+    "./package.json": "./package.json",
+    "./user": "./src/user.ts"
   },
   "scripts": {
     "test": "bun test src",
@@ -25,7 +21,6 @@
     "@frockbot/client-ui": "workspace:*",
     "@frockbot/configuration-core": "workspace:*",
     "@frockbot/connection-core": "workspace:*",
-    "@frockbot/kernel-composition": "workspace:*",
     "@frockbot/kernel-contracts": "workspace:*",
     "@frockbot/plugin-auth": "workspace:*",
     "@frockbot/plugin-shell": "workspace:*",

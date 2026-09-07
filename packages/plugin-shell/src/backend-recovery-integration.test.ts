@@ -8,7 +8,6 @@ import {
   initializeBotSettingsV1,
   type UserSettingsViewV1,
 } from "@frockbot/configuration-core";
-import { compileFoundationApplication } from "@frockbot/application-foundation/runtime";
 import {
   SessionEventLog,
   sessionEventLogIndexKeyV1,
@@ -90,27 +89,6 @@ class MemoryStorage {
     this.alarmAt = undefined;
     return Promise.resolve();
   }
-}
-
-/*
- * The application as a host with no Worker Loader can mount it.
- *
- * This suite runs under `bun test`, where there is no `BOT_PACKAGES` binding
- * and no `BotCapabilities` loopback, so an artifact-backed member — the Applets
- * Package — has nowhere to load from and the Composition fails verification
- * closed, which is correct and is not what these tests are about. Dropping
- * those members is the honest way to say "this host cannot run isolate code";
- * it is not a switch over any Package's identity, and workerd's suites mount
- * the real thing.
- */
-async function compileWithoutIsolateMembers(): ReturnType<
-  typeof compileFoundationApplication
-> {
-  const application = await compileFoundationApplication();
-  return {
-    ...application,
-    packages: application.packages.filter((pkg) => pkg.artifact === undefined),
-  };
 }
 
 /**
@@ -309,7 +287,6 @@ describe("Bot recovery", () => {
           typeof createShellBotBackendContribution
         >[0]["env"],
         outboundFetch,
-        compileApplication: compileWithoutIsolateMembers,
       });
 
     const configured = host();

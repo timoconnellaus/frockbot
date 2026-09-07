@@ -39,7 +39,7 @@ A user message sent mid-turn taking the place of the running turn: the running t
 _Avoid_: Steer, interrupt, barge-in, queue
 
 **Package**:
-A versioned, installable FrockBot distribution containing a manifest and one or more Contributions.
+A swappable implementation chosen at build time, behind an interface: the Computer host, model providers, storage. First-party Packages ship with the deploy and describe themselves with a static `PackageDefinitionV1`; only untrusted code carries a descriptor, an artifact and a generation.
 _Avoid_: Plugin, extension
 
 **Connection Type**:
@@ -71,7 +71,7 @@ One environment-specific part of a package, such as desktop-host behavior, agent
 _Avoid_: Package
 
 **Plugin**:
-A live contribution mounted into an application context with owned lifecycle and cleanup.
+Code that runs at runtime and was not there at build time: Bot-authored extensions, Applets, third-party installs. It declares itself with a Frock Compose descriptor and reaches only the actions, grants, slots and context keys `AGENTS.md` names.
 _Avoid_: Package
 
 **Computer**:
@@ -139,7 +139,7 @@ The only non-Package code: Durable Object authority, the Agent loop, and Package
 _Avoid_: Core, host
 
 **Composition**:
-The durable, versioned set of Package generations a Bot mounts. Every admitted Turn records the Composition it ran under.
+The durable, versioned set of plugin generations a Bot mounts: Bot-authored Packages and the User's Applets, never first-party code. Every admitted Turn records the Composition it ran under.
 _Avoid_: Configuration, bundle, profile
 
 **Generation**:

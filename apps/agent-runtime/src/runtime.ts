@@ -1,5 +1,4 @@
 import {
-  compileFoundationApplication,
   foundationBaseRuntimeFeatures,
   FOUNDATION_MODEL,
   FOUNDATION_PROVIDER,
@@ -27,8 +26,7 @@ import type { CredentialLeaseRuntime } from "@frockbot/plugin-credentials/user";
 import {
   bootstrapGeneration,
   type CompositionGenerationV1,
-} from "@frockbot/kernel-composition/generation";
-import type { ApplicationPlan } from "@frockbot/kernel-composition/compiler";
+} from "@frockbot/kernel-do";
 import {
   createOpenAICompatibleFeature,
   type FetchLike,
@@ -109,25 +107,11 @@ export interface FoundationRuntimeOptions {
   subagentRole?: string;
 }
 
-/** The first-party generation a runtime with no durable Composition starts on. */
-export async function bootstrapRuntimeGeneration(
-  plan: ApplicationPlan,
-): Promise<CompositionGenerationV1> {
-  return bootstrapGeneration(
-    plan.packages.map((pkg) => ({
-      packageId: pkg.id,
-      specifier: pkg.specifier,
-      version: pkg.version,
-      manifest: pkg.manifest,
-    })),
-    { createdAt: new Date(0).toISOString() },
-  );
-}
-
+/** The generation a runtime with no durable Composition starts on: empty. */
 async function bootstrapCompositionPin(): Promise<CompositionPinV1> {
-  const generation = await bootstrapRuntimeGeneration(
-    await compileFoundationApplication(),
-  );
+  const generation = await bootstrapGeneration({
+    createdAt: new Date(0).toISOString(),
+  });
   return {
     generationId: generation.generationId,
     artifactSetHash: generation.artifactSetHash,

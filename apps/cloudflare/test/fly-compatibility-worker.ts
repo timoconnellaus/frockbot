@@ -52,13 +52,13 @@ import {
   bootstrapGeneration,
   type CompositionGenerationV1,
   type MountedComposition,
-} from "@frockbot/kernel-composition/generation";
+} from "@frockbot/kernel-do";
 import {
   activateCompositionV1,
   CompositionMountFailureError,
   type CompositionFailurePhaseV1,
   type CompositionFailureV1,
-} from "@frockbot/kernel-composition/activation";
+} from "@frockbot/kernel-do";
 import { BotState } from "../src/bot-state.ts";
 import { BOT_CONFIGURATION_KEY } from "@frockbot/plugin-shell/backend";
 import { ISOLATE_MODEL_REQUEST_PREFIX } from "@frockbot/plugin-shell/backend-isolate";
@@ -746,17 +746,7 @@ export { UserConfiguration };
 const PROBE_BOOTSTRAP_AT = "2026-08-31T00:00:00.000Z";
 
 function probeBootstrap(): Promise<CompositionGenerationV1> {
-  return bootstrapGeneration(
-    [
-      {
-        packageId: "shell",
-        specifier: "@frockbot/plugin-shell",
-        version: "0.0.1",
-        manifest: { id: "shell", version: "0.0.1" },
-      },
-    ],
-    { createdAt: PROBE_BOOTSTRAP_AT },
-  );
+  return bootstrapGeneration({ createdAt: PROBE_BOOTSTRAP_AT });
 }
 
 /**
@@ -948,7 +938,12 @@ export class CompositionProbe extends DurableObject {
       generationId,
       parentGenerationId: parent.generationId,
       createdAt,
-      origin: { kind: "user-install", userId: "user-1" },
+      origin: {
+        kind: "bot-authored",
+        runId: "run-1",
+        sessionId: "user-1:probe",
+        turnId: "turn-1",
+      },
       status: "pending",
     });
     return generationId;
