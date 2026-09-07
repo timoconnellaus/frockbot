@@ -1,12 +1,12 @@
 /**
  * Carried forward unchanged from the compatibility prototype this Worker
  * supersedes. It is the durable half of the older single-effect seam that
- * `@frockbot/plugin-computer/shared-provider` still speaks, and it keeps its
+ * `@frockbot/computer/shared-provider` still speaks, and it keeps its
  * class name, its `COMPUTER_EFFECTS` binding, its `shared-<n>` container
  * shards, and its recorded effect outcomes: superseding a Worker must not
  * delete a durable class or the effect records it holds.
  *
- * The v1 protocol in `@frockbot/computer-host-protocol` replaces this seam;
+ * The v1 protocol in `@frockbot/computer/host-protocol` replaces this seam;
  * repointing the provider at it is the next migration step, not this one.
  */
 import {
@@ -15,7 +15,7 @@ import {
   decodeComputerHostEffectRequestV1,
   decodeComputerHostEffectResponseV1,
   type ComputerHostEffectResponseV1,
-} from "@frockbot/computer-core/host-protocol";
+} from "@frockbot/computer/core/host-protocol";
 import {
   computerHostShardCountV1 as shardCount,
   legacyEffectShardV1,

@@ -27,7 +27,7 @@ import {
   type ComputerHostOpenFrameV1,
   type ComputerHostOperationV1,
   type ComputerHostRequestV1,
-} from "@frockbot/computer-host-protocol";
+} from "@frockbot/computer/host-protocol";
 import {
   BOTS_ROOT,
   BROWSER_SERVICE,
@@ -58,7 +58,7 @@ import {
   WATCHDOG_SCRIPT,
   WATCHDOG_SERVICE,
   WORKSPACE_SYNC_SERVICE,
-} from "@frockbot/computer-host-runtime";
+} from "@frockbot/computer/host-runtime";
 import {
   ComputerHost,
   COMPUTER_HOST_STATE_PATH,

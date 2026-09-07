@@ -12,14 +12,14 @@ import {
   backendDescriptorsV1,
   shellBotContribution,
 } from "@frockbot/application-foundation/contributions";
-import { ComputerRegistry } from "@frockbot/computer-core";
-import { createFlySpriteProviderFeature } from "@frockbot/plugin-fly-sprite/agent";
+import { ComputerRegistry } from "@frockbot/computer/core";
+import { createFlySpriteProviderFeature } from "@frockbot/computer/fly/agent";
 import { mountRuntimeFeaturesV1 } from "@frockbot/core/contracts";
-import { ComputerHostClient } from "@frockbot/plugin-fly-sprite/host-client";
+import { ComputerHostClient } from "@frockbot/computer/fly/host-client";
 import {
   computerHostEffectRequestWireV1,
   decodeComputerHostEffectResponseV1,
-} from "@frockbot/computer-core/host-protocol";
+} from "@frockbot/computer/core/host-protocol";
 import {
   decodeBotConfigurationExecuteRpcV1,
   decodeBotConfigurationReadRpcV1,
@@ -40,8 +40,8 @@ import type {
   ShellBotBackendContribution,
 } from "@frockbot/plugin-shell/backend";
 import type { FlockBotBackendContribution } from "@frockbot/plugin-flock/bot";
-import type { ComputerBotBackendContribution } from "@frockbot/plugin-computer/bot";
-import { decodeComputerCommandV1 } from "@frockbot/plugin-computer/protocol";
+import type { ComputerBotBackendContribution } from "@frockbot/computer/bot";
+import { decodeComputerCommandV1 } from "@frockbot/computer/protocol";
 import {
   decodeBotLifecycleCommandV1,
   decodeBotRegistrationV1,

@@ -29,6 +29,7 @@ interface Target {
 const manifestPaths = [
   "applets/package.json",
   "applets/sdk/package.json",
+  "computer/package.json",
   "core/package.json",
   "providers/package.json",
 ];

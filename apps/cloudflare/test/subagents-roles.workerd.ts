@@ -28,7 +28,7 @@ import type { TaskListViewV1 } from "@frockbot/plugin-subagents/shared";
 import {
   COMPUTER_HOST_TOKEN_HEADER,
   encodeComputerHostRequestV1,
-} from "@frockbot/computer-host-protocol";
+} from "@frockbot/computer/host-protocol";
 import { FAKE_COMPUTER_HOST_TOKEN } from "./computer-host-fake.ts";
 import { hydratedStoredRunsV1 } from "./session-log-probe.ts";
 

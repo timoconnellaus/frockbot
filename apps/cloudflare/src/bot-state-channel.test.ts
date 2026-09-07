@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   COMPUTER_CONNECT_START_DELAY_MS,
   createComputerBotBackendContribution,
-} from "@frockbot/plugin-computer/bot";
+} from "@frockbot/computer/bot";
 import { BotStateChannel } from "./bot-state-channel.js";
 
 class MemoryStorage {

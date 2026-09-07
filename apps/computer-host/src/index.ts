@@ -14,7 +14,7 @@
  */
 
 import { Container, ContainerProxy } from "@cloudflare/containers";
-import { decodeComputerHostEffectRequestV1 } from "@frockbot/computer-core/host-protocol";
+import { decodeComputerHostEffectRequestV1 } from "@frockbot/computer/core/host-protocol";
 import {
   ComputerEffectJournal,
   shardCount,

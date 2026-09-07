@@ -7,7 +7,7 @@ import {
   decodeComputerCommandReceiptV1,
   decodeComputerCommandResponse,
   decodeComputerProjectionV1,
-} from "@frockbot/plugin-computer/protocol";
+} from "@frockbot/computer/protocol";
 import { provisionBot } from "./provision-bot.ts";
 
 const HOST = "http://computer-host.internal";

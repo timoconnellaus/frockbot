@@ -39,8 +39,8 @@ export const SUBAGENT_ROLE_SUMMARIES_V1: Record<SubagentRoleV1, string> = {
  *
  * A Package writes the literal array in its own tool definition — these
  * constants are the record of what the first-party answers *are*, not a
- * runtime dependency: `plugin-computer` cannot import this Package, and should
- * not have to, for the kernel to enforce the ceiling.
+ * runtime dependency: `@frockbot/computer` cannot import this Package, and
+ * should not have to, for the kernel to enforce the ceiling.
  */
 export const SUBAGENT_TOOL_REACH_V1 = {
   /**

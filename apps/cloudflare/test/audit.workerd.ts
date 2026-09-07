@@ -24,7 +24,7 @@ import type { FakeExecScript } from "./computer-host-fake.ts";
 import { toolCallTriggerPrompt } from "./harness/miniflare.ts";
 import { provisionBot, provisionSiblingBot } from "./provision-bot.ts";
 
-/** `plugin-fly-sprite` reads the inner command's exit code off this marker. */
+/** `computer/fly` reads the inner command's exit code off this marker. */
 const EXEC_EXIT_MARKER = "__FROCKBOT_EXIT__";
 
 interface AuditRpc {

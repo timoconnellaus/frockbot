@@ -20,7 +20,7 @@ at the cited location. Items the re-orientation already removes are marked; see
 
 8. ~~**Admin is unreachable from the native app.**~~ **Fixed.** `gateway.ts` derives `isAdmin` from `session.user.email`, and `native-auth.ts` built a native session as `{user: {id}}` with no email, so a listed admin was ordinary on the phone while the same account was an admin in a browser. The native session now carries the email, looked up through the `profile` seam the same object already exposed — the lookup `canIssueSession` was already doing for the same user.
 
-9. ~~**The Electron desktop shell is not in the repository**, yet `electron()` is an enabled better-auth plugin and `com.frockbot.desktop:/` is a trusted origin.~~ **Fixed.** The better-auth plugin, the trusted origin, the `electronProxyClient`, the `window.frockbotDesktop` branches, the `frockbot://localhost` client origin, `plugin-auth`'s abstract `DesktopAuthCapability`, the `DesktopApiResponseV1` DTO and the Electron-only `agent-runtime` entry point are gone. Still there: the `"desktop"` client vocabulary the backends and Subagent roles carry, and the `desktop` contributions of `plugin-fly-sprite` and `plugin-user-machine`.
+9. ~~**The Electron desktop shell is not in the repository**, yet `electron()` is an enabled better-auth plugin and `com.frockbot.desktop:/` is a trusted origin.~~ **Fixed.** The better-auth plugin, the trusted origin, the `electronProxyClient`, the `window.frockbotDesktop` branches, the `frockbot://localhost` client origin, `plugin-auth`'s abstract `DesktopAuthCapability`, the `DesktopApiResponseV1` DTO and the Electron-only `agent-runtime` entry point are gone. Still there: the `"desktop"` client vocabulary the backends and Subagent roles carry, and the `desktop` contributions of `computer/fly` and `plugin-user-machine`.
 
 10. ~~**The Capacitor path is dead.**~~ **Fixed.** `FrockBotGoogleAuth`, the `AuthGate` id-token branch, the `@capacitor/core` dependency and the server's `verifyIdToken` are removed. Google sign-in is the OAuth redirect the web app and the Flutter app both use.
 
@@ -52,7 +52,7 @@ at the cited location. Items the re-orientation already removes are marked; see
 
 24. ~~**`computer_screenshot` captures the whole 5120×720 root window.**~~ **Fixed.** The capture was a bare `scrot` with no `-a` clip, so one Bot's screenshot contained its siblings' windows. It now clips to the Bot's slot, read from the same `bots/<key>/slot` file the VNC viewer clips by.
 
-25. **Bots of one User share a browser.** One profile, one process and one CDP port, so a login made by one Bot is available to all of them (`packages/computer-host-runtime/src/runtime.ts:1005-1008`).
+25. **Bots of one User share a browser.** One profile, one process and one CDP port, so a login made by one Bot is available to all of them (`computer/host-runtime/runtime.ts:1005-1008`).
 
 26. **`credentialRef` is decoded and length-limited but never read.** One account-wide `SPRITES_TOKEN` serves every User. The comment at `apps/computer-host/src/index.ts:101` stating that the container resolves the reference does not describe the code.
 

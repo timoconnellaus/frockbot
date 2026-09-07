@@ -1,15 +1,14 @@
 // `computer_doctor`'s one host operation, on the real wire.
 //
-// The unit suite in `packages/plugin-fly-sprite/src/doctor.test.ts` proves the
-// script the provider builds against a double, and
-// `packages/computer-host-runtime/src/runtime.test.ts` runs the real
-// `box-doctor.sh` and reads its log. What only exists here is the exec
-// travelling the v1 protocol over a workerd service binding, the report being
-// decoded at the provider seam, and both the run and the tenant it names
+// The unit suite in `computer/fly/doctor.test.ts` proves the script the
+// provider builds against a double, and `computer/host-runtime/runtime.test.ts`
+// runs the real `box-doctor.sh` and reads its log. What only exists here is the
+// exec travelling the v1 protocol over a workerd service binding, the report
+// being decoded at the provider seam, and both the run and the tenant it names
 // landing on one shard for one User.
 import { env } from "cloudflare:test";
 import { beforeAll, describe, expect, test } from "vitest";
-import { computerBotKey } from "@frockbot/plugin-fly-sprite";
+import { computerBotKey } from "@frockbot/computer/fly";
 import type {
   FakeComputerHostCall,
   FakeExecScript,

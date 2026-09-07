@@ -18,8 +18,7 @@ import { clientContribution as uiThemeClient } from "@frockbot/plugin-ui-theme/c
 import { clientContribution as authClient } from "@frockbot/plugin-auth/client";
 import { clientContribution as shellClient } from "@frockbot/plugin-shell/client";
 import { clientContribution as adminClient } from "@frockbot/plugin-admin/client";
-// The immutable application owns the concrete client contribution list.
-import { clientContribution as computerClient } from "../../../packages/plugin-computer/src/client/application.js";
+import { clientContribution as computerClient } from "@frockbot/computer/client";
 import { clientContribution as flockClient } from "@frockbot/plugin-flock/client";
 import { clientContribution as searchClient } from "@frockbot/plugin-search/client";
 import { clientContribution as settingsClient } from "@frockbot/plugin-settings/client";

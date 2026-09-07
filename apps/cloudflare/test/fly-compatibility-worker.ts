@@ -1,11 +1,11 @@
 import { DurableObject } from "cloudflare:workers";
 import { type SessionEvent } from "@frockbot/core/contracts";
-import { ComputerRegistry } from "@frockbot/computer-core";
+import { ComputerRegistry } from "@frockbot/computer/core";
 import {
   ComputerHostClient,
   createFlySpriteProviderFeature,
   FlySpriteComputer,
-} from "@frockbot/plugin-fly-sprite";
+} from "@frockbot/computer/fly";
 import {
   BotDurableAuthority,
   createStoredRunCodecV1,
@@ -47,7 +47,7 @@ import {
   type ComputerSyncRemovalV1,
   type ComputerSyncScanOutcomeV1,
   type ComputerSyncSurfaceV1,
-} from "@frockbot/plugin-fly-sprite/sync";
+} from "@frockbot/computer/fly/sync";
 import {
   bootstrapGeneration,
   type CompositionGenerationV1,

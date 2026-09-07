@@ -53,7 +53,7 @@ either project.
 ## The Computer host fake
 
 `test/computer-host-fake.ts` stands in for the `COMPUTER_HOST` service binding
-in both projects. It runs `@frockbot/computer-host-protocol` verbatim — the
+in both projects. It runs `@frockbot/computer/host-protocol` verbatim — the
 same decoder at the seam, the same `problem()` refusals, the same NDJSON exec
 framing, the same token check — and the real host Worker's own
 `computerHostShardV1`, so a test can prove that every Bot of one User routes to

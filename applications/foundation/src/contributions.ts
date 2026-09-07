@@ -31,7 +31,7 @@ import {
 import {
   backendContribution as computerGatewayContribution,
   type ComputerGatewayHost,
-} from "@frockbot/plugin-computer/backend";
+} from "@frockbot/computer/backend";
 import {
   backendContribution as flockGatewayContribution,
   type FlockGatewayHost,
@@ -105,7 +105,7 @@ import {
 import {
   botContribution as computerBotContribution,
   type ComputerBotApplicationHostV1,
-} from "@frockbot/plugin-computer/bot";
+} from "@frockbot/computer/bot";
 
 export {
   adminGatewayContribution,
