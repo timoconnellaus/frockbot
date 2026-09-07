@@ -77,7 +77,7 @@ TYPECHECK_CONCURRENCY=8 bun run typecheck # 0 means unbounded
 ```
 
 Every package checks with TypeScript 7. Most declare `typescript` at `^7.0.2`
-directly. The rest — the Vue packages, `packages/applet-sdk` and the workspace
+directly. The rest — the Vue packages, `applets/sdk` and the workspace
 root — depend on a tool that embeds the TypeScript compiler API, which
 TypeScript 7's package does not ship, so they alias `typescript` to the
 `typescript-native-bridge` build that keeps the TS 6 JavaScript API while
@@ -147,7 +147,7 @@ It touches only the packages npm is missing, which is usually one or two, and as
 The exception is a run that published a placeholder and then failed before trusting it. That leaves a package npm has and the workflow still cannot publish, which the default pass now skips. Name it to bootstrap it anyway — the failure says so when it happens:
 
 ```
-bun run bootstrap:npm-trust @frockbot/plugin-applets
+bun run bootstrap:npm-trust @frockbot/applet-sdk
 ```
 
 `scripts/bootstrap-npm-trust.sh` wraps `scripts/bootstrap-npm-trust.ts` with the two things that are easy to get wrong by hand. It provisions npm 11.15.0 or later into `node_modules/.cache` when the installed npm is older, because that is the version `npm trust` requires — the workflow itself needs only 11.5.1 and checks that before publishing. And it signs in, then leaves the terminal to npm for every call that changes the registry.
@@ -240,6 +240,8 @@ Register `https://bot.frockbot.com/api/auth/callback/google` as an authorized Go
 ## Structure
 
 ```text
+applets/          Applets: the seven applet_* tools, the source root, and the shell's pages
+  sdk/            Applet authoring SDK, component kit, linter, and `applet` CLI; published to npm
 apps/
   agent-runtime/    Transport-neutral backend Agent composition
   cloudflare/       User application loader, Dynamic Worker artifact, and bot state
@@ -266,7 +268,6 @@ core/
 packages/
   compose-core/     Framework-agnostic runtime extension surface for Compose
   compose-frockbot/ The plugin descriptor and the Bot isolate host that loads a member's artifact
-  applet-sdk/       Applet authoring SDK, component kit, linter, and `applet` CLI
   client-core/      Shared client runtime helpers and brand typography stylesheet
   client-ui/        Reusable Vue primitives and surface registry
   computer-core/    Provider registry and capability interfaces for Computers
@@ -276,7 +277,6 @@ packages/
   plugin-echo/      Minimal reference Package used by tests and examples
   plugin-testkit/   Shared test doubles and harnesses for Package authors
   plugin-admin/     Deployment policy administration surface
-  plugin-applets/   Applets: the seven applet_* tools, the source root, and the shell's pages
   plugin-audit/     Audited-effect projection and the User's rebuildable audit table
   plugin-auth/      Authenticated identity contributions for the hosted gateway
   plugin-bot-template/ Bot template export, share records, and guarded import

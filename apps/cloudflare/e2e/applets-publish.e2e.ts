@@ -47,7 +47,7 @@ async function recentToolResults(page: Page, userId: string): Promise<string> {
 }
 
 const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
-const sdkRoot = resolve(repoRoot, "packages/applet-sdk");
+const sdkRoot = resolve(repoRoot, "applets/sdk");
 const cli = resolve(sdkRoot, "dist/cli.mjs");
 const DESKTOP = { width: 1351, height: 831 } as const;
 const PHONE = { width: 390, height: 844 } as const;

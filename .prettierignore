@@ -15,7 +15,7 @@ bun.lock
 *.woff2
 
 # Applet scaffold: __APPLET_ID__ placeholders are not valid Markdown or TS
-packages/applet-sdk/template/
+applets/sdk/template/
 
 # Standalone Ajv bundle: reproducibility is checked by generate-typescript-protocol.
 core/protocol-schemas/validators.generated.js

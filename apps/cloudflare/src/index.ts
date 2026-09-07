@@ -13,7 +13,7 @@ import {
 } from "@frockbot/core/contracts";
 import type { ClientSkillCatalogV1 } from "@frockbot/plugin-shell/skill-protocol";
 import { createFoundationBackendContributions } from "@frockbot/application-foundation/runtime";
-import { FIRST_PARTY_PACKAGE_ARTIFACTS_V1 } from "@frockbot/plugin-applets/pages";
+import { FIRST_PARTY_PACKAGE_ARTIFACTS_V1 } from "@frockbot/applets/pages";
 import {
   decodeBotLifecycleDirectoryViewV1,
   decodeBotLifecycleReceiptV1,

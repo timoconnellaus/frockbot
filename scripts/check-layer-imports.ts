@@ -12,12 +12,20 @@ const failures: string[] = [];
 interface Module {
   dir: string;
   allowed: string[];
+  /** Subtrees of `dir` that belong to another workspace, relative to it. */
+  skip?: string[];
 }
 
 const coreAllowed = ["@frockbot/core/", "@frockbot/compose-"];
 
 const modules: Module[] = [
   { dir: "core", allowed: coreAllowed },
+  {
+    dir: "applets",
+    allowed: [...coreAllowed, "@frockbot/applets/", "@frockbot/applet-sdk/"],
+    // `applets/sdk` is its own published workspace, not part of this module.
+    skip: ["sdk/"],
+  },
   {
     dir: "providers",
     allowed: [
@@ -54,7 +62,11 @@ function exportMap(manifest: Record<string, unknown>): Record<string, string> {
 }
 
 const workspace = new Map<string, WorkspacePackage>();
-const manifestPaths = ["core/package.json", "providers/package.json"];
+const manifestPaths = [
+  "applets/package.json",
+  "core/package.json",
+  "providers/package.json",
+];
 for (const group of ["packages", "apps", "applications"]) {
   manifestPaths.push(
     ...new Bun.Glob(`${group}/*/package.json`).scanSync({
@@ -154,6 +166,8 @@ for (const module of modules) {
   })) {
     // Module tests mount concrete Packages on purpose; only shipped code is gated.
     if (entry.endsWith(".test.ts")) continue;
+    const within = relative(module.dir, entry);
+    if (module.skip?.some((prefix) => within.startsWith(prefix))) continue;
     queue.push({ file: join(repoRoot, entry), root: moduleRoot, via: [] });
   }
 

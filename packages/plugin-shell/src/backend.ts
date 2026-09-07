@@ -36,12 +36,12 @@ import type { ComputerRegistry } from "@frockbot/computer-core";
 import {
   appletSourceFilePathV1,
   appletsSourceRootV1,
-} from "@frockbot/plugin-applets/root";
+} from "@frockbot/applets/root";
 import type {
   AppletCapabilityHostV1,
   AppletsRuntimeHostV1,
-} from "@frockbot/plugin-applets/feature";
-import { firstPartyPackageToolAllowedV1 } from "@frockbot/plugin-applets/pages";
+} from "@frockbot/applets/feature";
+import { firstPartyPackageToolAllowedV1 } from "@frockbot/applets/pages";
 import { syncWorkspaceRootNowV1 } from "@frockbot/plugin-computer/agent";
 import {
   ACTIVE_RUN_KEY,

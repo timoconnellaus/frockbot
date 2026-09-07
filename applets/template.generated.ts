@@ -3,8 +3,8 @@
 // The Applets SDK's scaffold, as strings. `applet_create` writes these
 // through the Workspace, and a Worker has no filesystem to read them
 // from, so the template travels in the bundle rather than beside it.
-// Editing `packages/applet-sdk/template/` and rerunning the build is the
-// only way to change what a new Applet starts as.
+// Editing `applets/sdk/template/` and rerunning the build is the only
+// way to change what a new Applet starts as.
 //
 // The bodies are base64 because Applet source contains import specifiers
 // that a text scan over the compiled bundle would otherwise read as this

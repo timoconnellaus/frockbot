@@ -8,7 +8,7 @@
 // all the product ever needed to know about it.
 import type { PackageDefinitionV1 } from "@frockbot/core/contracts";
 import { adminDefinitionV1 } from "@frockbot/plugin-admin/definition";
-import { appletsDefinitionV1 } from "@frockbot/plugin-applets/definition";
+import { appletsDefinitionV1 } from "@frockbot/applets/definition";
 import { auditDefinitionV1 } from "@frockbot/plugin-audit/definition";
 import { authDefinitionV1 } from "@frockbot/plugin-auth/definition";
 import { botTemplateDefinitionV1 } from "@frockbot/plugin-bot-template/definition";
