@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { PackageIframeCompositionV1 } from "@frockbot/core/contracts";
-import { requirePackageUiToolDeclarationV1 } from "./backend.js";
-import { projectFirstPartyPackageIframeV1 } from "./composition-views.js";
+import { requirePackageUiToolDeclarationV1 } from "./bot.js";
+import { projectFirstPartyPackageIframeV1 } from "@frockbot/app/shell/composition-views";
 
 describe("Package iframe server admission", () => {
   const catalog: PackageIframeCompositionV1 = {

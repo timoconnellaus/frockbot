@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { FakeWorkspace } from "@frockbot/app/skills/testing";
-import { createBotSkillsHost } from "./backend-skills.ts";
+import { createBotSkillsHost } from "./bot.ts";
 
 const IDENTITY = { userId: "user-1", botId: "bot-1" };
 const TURN = { runId: "run-9", turnId: "turn-4", sessionId: "user-1:bot-1" };

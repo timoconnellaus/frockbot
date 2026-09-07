@@ -35,7 +35,7 @@ import {
 } from "@frockbot/app/memory/agent";
 import { memoryChunkIndexEntriesV1 } from "@frockbot/app/memory/chunk-index";
 import { createBotMemoryHost } from "@frockbot/app/shell/backend-memory";
-import { createBotSkillsReads } from "@frockbot/app/shell/backend-skills";
+import { createBotSkillsReads } from "@frockbot/app/skills/bot";
 import { loadFullSkillCatalogV1 } from "@frockbot/app/skills/catalog";
 import { createBotComputerSyncHost } from "@frockbot/app/shell/backend-computer";
 import {

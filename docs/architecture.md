@@ -84,7 +84,7 @@ Four classes in the app Worker, exported from `apps/cloudflare/src/index.ts:178-
 
 5. **Bot Durable Object.** `apps/cloudflare/src/bot-state.ts:1168` `run()` decodes the envelope, materializes the identity and calls `shell.run(...)`.
 
-6. **Shell.** `app/shell/backend.ts:257` `run()` yields any in-flight compaction, calls `followDeploymentComposition()` and `resolveAppletComposition()`, then delegates to `BotDurableAuthority.run` (`core/durable/authority.ts:293`): recover whatever the object holds, check for a settled replay, then `acceptRun`. An accepted run executes inline; otherwise it is durably queued — one user-lane slot, FIFO agent lane — and promoted by `runQueuedRun` (`:332`).
+6. **Shell.** `app/shell/turn.ts:88` `run()` yields any in-flight compaction, calls `followDeploymentComposition()` and `resolveAppletComposition()`, then delegates to `BotDurableAuthority.run` (`core/durable/authority.ts:293`): recover whatever the object holds, check for a settled replay, then `acceptRun`. An accepted run executes inline; otherwise it is durably queued — one user-lane slot, FIFO agent lane — and promoted by `runQueuedRun` (`:332`).
 
 7. **Mount.** `activateCompositionV1` reads the pin and builds the Turn's runtime through `createShellCompositionHost` (`app/shell/backend-composition.ts:274`).
 
@@ -179,7 +179,7 @@ Provider-reported token counts are used when present. Otherwise `estimateModelUs
 Composition is the untrusted layer and nothing else. First-party Packages are ordinary imports: `app/packages.ts` lists the 29 the deployment ships as `PackageDefinitionV1` records, and a Package that carries data (settings, Capabilities, Connection Types, durable roots, dependencies) exports its own definition from its own package. There is no manifest, no compiler and no application hash over a plan.
 
 1. On first use the Bot Durable Object receives an empty bootstrap generation (`app/shell/backend-composition.ts`; `core/durable/composition/generation.ts`). A Bot that has installed and authored nothing composes nothing, which is why a release no longer has to rewrite every Bot's generation to follow the deploy.
-2. At admission, `activateCompositionV1` (`app/shell/backend.ts`) reads the pin, mounts, verifies, commits and records last-known-good.
+2. At admission, `activateCompositionV1` (`app/shell/turn.ts:299`) reads the pin, mounts, verifies, commits and records last-known-good.
 3. Mounting builds one runtime per Turn (`backend-composition.ts`): the registries, a `LoopHookListV1`, and the features the host lists, mounted in that order by `mountRuntimeFeaturesV1`. Neither the Shell nor `app/agent-runtime.ts` imports an application: the Shell's Bot host carries the deployment's `PackageDefinitionV1` list, its one Package version, and four factories — `base`, `hosted`, `enabled`, `model` — that turn a Package id into a mounted feature (`app/shell/backend-runtime.ts`). `app/runtime.ts` fills them in as `foundationShellApplicationV1`, and `apps/cloudflare/src/bot-state.ts` spreads that into the host. The base Packages — identity, the built-in model, the two demo tools and the Shell's own voice — are appended last, so a provider an earlier Package registered is already there. Every member goes through `BotIsolateContributionHost`, whose hooks are appended to the same list after the app's. Applet members register as tools routed to `APPLET_STATES`.
 
 ### Generation shape
@@ -288,7 +288,7 @@ Stream events (`core/contracts/types.ts:158-166`): `text-delta`, `tool-call`, `u
 
 - `resolveEffectiveBotModelV1` (`core/configuration/index.ts:652-760`): a Bot-scoped Package setting with `role: "model"`, else a User-scoped one, else `user.platformModel`. Two enabled packages both declaring a model setting is a hard conflict. A broken choice falls back to the platform model and records `fallback.from`.
 - `resolveBotModelBindingV1` (`:588-621`) yields `ready`, `requires-resolution` or `unavailable`.
-- The Turn resolves the effective model, refuses if it changed mid-reply, and mounts the provider plugin itself as a runtime Package for that Turn (`app/shell/backend.ts:1252-1310`). The resulting `modelSelection` flows through `backend.ts:645` → `backend-composition.ts:297` → `app/agent-runtime.ts:557-583`, where it overrides the default provider and model and becomes `AgentOptions.modelBinding`.
+- The Turn resolves the effective model, refuses if it changed mid-reply, and mounts the provider plugin itself as a runtime Package for that Turn (`app/shell/runtime-mount.ts:476-530`). The resulting `modelSelection` flows through `app/shell/turn.ts:270` → `backend-composition.ts:297` → `app/agent-runtime.ts:557-583`, where it overrides the default provider and model and becomes `AgentOptions.modelBinding`.
 - Package-to-provider-type mapping is a two-entry map at `app/runtime.ts:369-419`: `@frockbot/providers/ollama-cloud/runtime` → `ollama-cloud`, `@frockbot/providers/frock-ai/runtime` → `flock-ai`. Anything else resolves to `Bot model provider "X" is unavailable` (`:1084-1089`).
 
 ### Packages
