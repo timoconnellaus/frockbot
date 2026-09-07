@@ -10,10 +10,9 @@ import {
   initializeBotSettingsV1,
   type UserSettingsViewV1,
 } from "@frockbot/core/configuration";
-import {
-  createShellBotBackendContribution,
-  type ShellBotBackendHost,
-} from "./backend.js";
+import { createShellBotBackendContribution } from "./backend.js";
+import type { ShellBotBackendHost } from "./backend-state.js";
+import { settleTask } from "@frockbot/app/subagents/bot";
 import {
   botTurnCommandFingerprintV1,
   type StoredRun,
@@ -339,7 +338,7 @@ describe("background work outlives the Turn that dispatched it", () => {
 
     // The parent Turn was superseded; nothing asked the child to stop, and its
     // settlement is written exactly as it would have been.
-    const settled = await contribution.settleTask(identity, "tk-1", {
+    const settled = await settleTask(contribution.state, identity, "tk-1", {
       status: "completed",
       settledAt: "2026-09-03T00:00:09.000Z",
       summary: "The notes mention two breaking changes.",

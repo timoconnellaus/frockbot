@@ -35,10 +35,20 @@ import {
   type StoredRunOriginV1,
 } from "@frockbot/core/durable";
 import type {
-  BotStateEnv,
   OwnedBotTurnCommand,
   ShellBotBackendContribution,
 } from "@frockbot/app/shell/backend";
+import type { BotStateEnv } from "@frockbot/app/shell/backend-state";
+import {
+  acceptSubagentTask,
+  claimTaskMessages,
+  listTasks,
+  readSubagentTaskContext,
+  readTask,
+  settleTask,
+  stopSubagentTask,
+  stopTaskForUser,
+} from "@frockbot/app/subagents/bot";
 import type { FlockBotBackendContribution } from "@frockbot/app/flock/bot";
 import type { ComputerBotBackendContribution } from "@frockbot/computer/bot";
 import { decodeComputerCommandV1 } from "@frockbot/computer/protocol";
@@ -126,7 +136,7 @@ import {
 import {
   decodeSubagentRunTaskRequestV1,
   type SubagentRunTaskRequestV1,
-} from "@frockbot/app/shell/backend-subagents";
+} from "@frockbot/app/subagents/durable-binding";
 import {
   decodeTaskOutcomeV1,
   type TaskOutcomeV1,
@@ -1592,7 +1602,7 @@ export class BotState extends DurableObject<BotStateEnv> {
     const identity = decodeBotIdentityRpcV1(input);
     const { shell } = await this.materialized(identity);
     await shell.validateIdentity(identity);
-    return shell.listTasks(identity);
+    return listTasks(shell.state, identity);
   }
 
   /** One task, by id. The parent object's answer; a child holds no list. */
@@ -1607,7 +1617,7 @@ export class BotState extends DurableObject<BotStateEnv> {
       botId: request.botId as string,
     };
     const { shell } = await this.materialized(identity);
-    return shell.readTask(identity, request.taskId as string);
+    return readTask(shell.state, identity, request.taskId as string);
   }
 
   /**
@@ -1627,7 +1637,7 @@ export class BotState extends DurableObject<BotStateEnv> {
       botId: request.botId as string,
     };
     const { shell } = await this.materialized(identity);
-    return shell.stopTaskForUser(identity, request.taskId as string);
+    return stopTaskForUser(shell.state, identity, request.taskId as string);
   }
 
   /** The Subagent Durable Object's cancellation door. */
@@ -1642,7 +1652,7 @@ export class BotState extends DurableObject<BotStateEnv> {
       botId: request.botId as string,
     };
     const { shell } = await this.materialized(identity);
-    return shell.stopSubagentTask(identity, request.taskId as string);
+    return stopSubagentTask(shell.state, identity, request.taskId as string);
   }
 
   /**
@@ -1663,7 +1673,8 @@ export class BotState extends DurableObject<BotStateEnv> {
       botId: request.botId as string,
     };
     const { shell } = await this.materialized(identity);
-    return shell.acceptSubagentTask(
+    return acceptSubagentTask(
+      shell.state,
       identity,
       request.request as SubagentRunTaskRequestV1,
     );
@@ -1681,7 +1692,7 @@ export class BotState extends DurableObject<BotStateEnv> {
       botId: request.botId as string,
     };
     const { shell } = await this.materialized(identity);
-    return shell.readSubagentTaskContext(request.taskId as string);
+    return readSubagentTaskContext(shell.state, request.taskId as string);
   }
 
   /**
@@ -1702,7 +1713,7 @@ export class BotState extends DurableObject<BotStateEnv> {
       botId: request.botId as string,
     };
     const { shell } = await this.materialized(identity);
-    return shell.claimTaskMessages(identity, request.taskId as string);
+    return claimTaskMessages(shell.state, identity, request.taskId as string);
   }
 
   /** One terminal task outcome, recorded on the parent. Idempotent per task. */
@@ -1718,7 +1729,8 @@ export class BotState extends DurableObject<BotStateEnv> {
       botId: request.botId as string,
     };
     const { shell } = await this.materialized(identity);
-    return shell.settleTask(
+    return settleTask(
+      shell.state,
       identity,
       request.taskId as string,
       request.outcome as TaskOutcomeV1,

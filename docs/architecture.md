@@ -84,7 +84,7 @@ Four classes in the app Worker, exported from `apps/cloudflare/src/index.ts:178-
 
 5. **Bot Durable Object.** `apps/cloudflare/src/bot-state.ts:1168` `run()` decodes the envelope, materializes the identity and calls `shell.run(...)`.
 
-6. **Shell.** `app/shell/backend.ts:1255` yields any in-flight compaction, calls `followDeploymentComposition()` and `resolveAppletComposition()`, then delegates to `BotDurableAuthority.run` (`core/durable/authority.ts:293`): recover whatever the object holds, check for a settled replay, then `acceptRun`. An accepted run executes inline; otherwise it is durably queued — one user-lane slot, FIFO agent lane — and promoted by `runQueuedRun` (`:332`).
+6. **Shell.** `app/shell/backend.ts:773` `run()` yields any in-flight compaction, calls `followDeploymentComposition()` and `resolveAppletComposition()`, then delegates to `BotDurableAuthority.run` (`core/durable/authority.ts:293`): recover whatever the object holds, check for a settled replay, then `acceptRun`. An accepted run executes inline; otherwise it is durably queued — one user-lane slot, FIFO agent lane — and promoted by `runQueuedRun` (`:332`).
 
 7. **Mount.** `activateCompositionV1` reads the pin and builds the Turn's runtime through `createShellCompositionHost` (`app/shell/backend-composition.ts:274`).
 

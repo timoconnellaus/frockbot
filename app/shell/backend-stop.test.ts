@@ -5,10 +5,8 @@ import {
   initializeBotSettingsV1,
   type UserSettingsViewV1,
 } from "@frockbot/core/configuration";
-import {
-  createShellBotBackendContribution,
-  type ShellBotBackendHost,
-} from "./backend.js";
+import { createShellBotBackendContribution } from "./backend.js";
+import type { ShellBotBackendHost } from "./backend-state.js";
 import {
   botTurnCommandFingerprintV1,
   type StoredRun,
