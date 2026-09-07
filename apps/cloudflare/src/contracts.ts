@@ -300,7 +300,7 @@ export interface UserBotStateBinding {
     botId: string;
     appletId: string;
   }): Promise<import("@frockbot/core/contracts").AppletSourceViewV1>;
-  /** The outcome last recorded for `applet check` or `applet build`. */
+  /** The outcome last recorded for `applet_check`. */
   readAppletBuildV1(input: {
     schemaVersion: 1;
     botId: string;
@@ -711,10 +711,10 @@ export interface GatewayDependencies {
   debug?: DebugGatewaySurface;
   /**
    * The Workspace seed door, present only in an environment that sets
-   * `WORKSPACE_SEED_TOKEN`: an end-to-end run has no Computer, and this is how
-   * it lands the bytes `applet build` would have written, as the User, through
-   * the same store and generation record the sync uses. Production sets no
-   * token and the route does not exist.
+   * `WORKSPACE_SEED_TOKEN`: it lands a durable-root file as the User, through
+   * the same store and generation record a write from a Turn uses, so an
+   * end-to-end run can arrange the files a spec starts from. Production sets
+   * no token and the route does not exist.
    */
   workspaceSeed?: {
     token: string;

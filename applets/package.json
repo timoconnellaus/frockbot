@@ -8,6 +8,7 @@
     "./definition": "./definition.ts",
     "./feature": "./feature.ts",
     "./pages": "./pages.ts",
+    "./preview": "./preview.ts",
     "./root": "./root.ts",
     "./package.json": "./package.json"
   },

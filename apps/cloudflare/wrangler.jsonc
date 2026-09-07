@@ -372,12 +372,14 @@
           "binding": "APPLETS",
         },
       ],
-      // Declared as production declares them. Neither the Computer host nor
-      // the Applet build service runs beside the harness, so both report "not
-      // connected"; no spec authors a Package, uses a Computer, or reaches the
-      // builder — `applets-publish.e2e.ts` seeds `dist/` itself — and a binding
-      // that is declared but unreachable is what production looks like when a
-      // dependency is down.
+      // Declared as production declares them. The Computer host does not run
+      // beside the harness, so `COMPUTER_HOST` reports "not connected" and no
+      // spec uses a Computer; a binding that is declared but unreachable is
+      // what production looks like when a dependency is down. The Applet build
+      // service does run beside it — `e2e/harness.ts` starts
+      // `apps/applet-build` under its own `wrangler dev` in the dev service
+      // registry — so `applets-publish.e2e.ts` compiles an Applet with the
+      // container production compiles it with.
       "services": [
         {
           "binding": "COMPUTER_HOST",

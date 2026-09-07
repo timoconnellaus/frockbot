@@ -266,6 +266,10 @@ describe("production setup", () => {
       // 503, which is what production did until the manifest was added.
       APPLET_VIEWER_SECRET:
         "1d6f7c2b9a3e4058c7d1e2f3a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7",
+      // Required since plan step 8 cut 2: a Turn's `applet_check` and
+      // `applet_publish` both call the build service with it.
+      APPLET_BUILD_TOKEN:
+        "8b7a6959483726150e9d8c7b6a5948372615f0e9d8c7b6a5948372615f0e9d8c",
     };
     const validConfiguration = Bun.spawnSync(
       ["bash", "-c", validation?.run ?? ""],

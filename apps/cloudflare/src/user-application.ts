@@ -1,4 +1,8 @@
 import {
+  appletPreviewUrlV1,
+  appletUiArtifactOriginV1,
+} from "@frockbot/applets/preview";
+import {
   FOUNDATION_PACKAGES_V1,
   FOUNDATION_PACKAGE_VERSION_V1,
 } from "@frockbot/app/runtime";
@@ -132,17 +136,6 @@ function appHtml(
   <script type="module" src="/app.js"></script>
 </body>
 </html>`;
-}
-
-function packageUiArtifactOrigin(requestUrl: URL): string {
-  const appHost = requestUrl.hostname;
-  const host =
-    appHost === "localhost" || appHost === "127.0.0.1"
-      ? "ui.localhost"
-      : appHost.startsWith("ui.")
-        ? appHost
-        : `ui.${appHost}`;
-  return `${requestUrl.protocol}//${host}${requestUrl.port ? `:${requestUrl.port}` : ""}`;
 }
 
 function withSecurityHeaders(
@@ -377,7 +370,7 @@ function createUserApplicationRoute() {
             headers: { "content-type": "text/html; charset=utf-8" },
           },
         ),
-        packageUiArtifactOrigin(url),
+        appletUiArtifactOriginV1(url),
         url,
       );
     }
@@ -389,7 +382,7 @@ function createUserApplicationRoute() {
             "cache-control": "no-cache",
           },
         }),
-        packageUiArtifactOrigin(url),
+        appletUiArtifactOriginV1(url),
         url,
       );
     }
@@ -401,7 +394,7 @@ function createUserApplicationRoute() {
             "cache-control": "no-cache",
           },
         }),
-        packageUiArtifactOrigin(url),
+        appletUiArtifactOriginV1(url),
         url,
       );
     }
@@ -415,7 +408,7 @@ function createUserApplicationRoute() {
             "cache-control": "no-cache",
           },
         }),
-        packageUiArtifactOrigin(url),
+        appletUiArtifactOriginV1(url),
         url,
       );
     }
@@ -491,7 +484,7 @@ function createUserApplicationRoute() {
             decodeAppletUiViewV1({
               // The anonymous artifact origin, exactly as a Package page is
               // served: the Applet's UI is immutable content addressed by hash.
-              uiUrl: `${packageUiArtifactOrigin(url)}/packages/${ui.contentHash}.html`,
+              uiUrl: appletPreviewUrlV1(url, ui.contentHash),
               ...(ui.generationId === undefined
                 ? {}
                 : { generationId: ui.generationId }),
@@ -808,7 +801,7 @@ function createUserApplicationRoute() {
         });
         return Response.json({
           ...composition,
-          artifactOrigin: packageUiArtifactOrigin(url),
+          artifactOrigin: appletUiArtifactOriginV1(url),
         } satisfies PackageIframeCatalogV1);
       } catch (error) {
         return botFailure(error, "Package UI catalog failed");

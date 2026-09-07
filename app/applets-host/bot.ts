@@ -11,10 +11,12 @@ import type {
   AppletsRuntimeHostV1,
 } from "@frockbot/applets/feature";
 import {
-  appletSourceFilePathV1,
-  appletsSourceRootV1,
-} from "@frockbot/applets/root";
-import { syncWorkspaceRootNowV1 } from "@frockbot/computer/agent";
+  APPLET_BUILD_ROUTE,
+  APPLET_BUILD_TOKEN_HEADER,
+  decodeAppletBuildProblemV1,
+  decodeAppletBuildResponseV1,
+  encodeAppletBuildRequestV1,
+} from "@frockbot/applets/build-contract";
 import {
   decodeAppletProvenanceV1,
   decodeAppletSummaryV1,
@@ -27,18 +29,59 @@ import {
   type FocusedAppletV1,
   type OwnedBotTurnCommand,
 } from "@frockbot/core/durable";
-import type {
-  ActiveTurnV1,
-  ShellBotStateV1,
-} from "@frockbot/app/shell/backend-state";
+import type { ShellBotStateV1 } from "@frockbot/app/shell/backend-state";
 import {
   createAppletCapabilityHostV1,
   createAppletInstanceBindingV1,
-  APPLET_DIST_FILES_V1,
   appletRpcSnapshotV1 as rpcJsonSnapshotV1,
   resolveAppletCompositionV1,
+  type AppletBuildServiceV1,
   type AppletUserDirectoryV1,
 } from "./records.js";
+
+/**
+ * The Applet build service over the `APPLET_BUILD` binding, or `undefined`
+ * when this deployment has no binding or no token.
+ *
+ * Both halves of the seam decode: the request is encoded by the contract the
+ * service decodes it with, and the answer is decoded before it is believed.
+ * The service is handed source and returns bytes; the R2 write and the hash
+ * verification stay here, so a compromised builder holds no authority.
+ */
+function appletBuildService(
+  state: ShellBotStateV1,
+): AppletBuildServiceV1 | undefined {
+  const fetcher = state.env.APPLET_BUILD;
+  const token = state.env.APPLET_BUILD_TOKEN?.trim();
+  if (!fetcher || !token) return undefined;
+  return {
+    async build(request) {
+      const response = await fetcher.fetch(
+        new Request(`https://applet-build.internal${APPLET_BUILD_ROUTE}`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            [APPLET_BUILD_TOKEN_HEADER]: token,
+          },
+          body: JSON.stringify(encodeAppletBuildRequestV1(request)),
+        }),
+      );
+      let body: unknown;
+      try {
+        body = await response.json();
+      } catch {
+        throw new Error(
+          `the Applet build service answered ${response.status} with no JSON body`,
+        );
+      }
+      if (!response.ok) {
+        const problem = decodeAppletBuildProblemV1(body);
+        throw new Error(`${problem.code}: ${problem.message}`);
+      }
+      return decodeAppletBuildResponseV1(body);
+    },
+  };
+}
 
 /**
  * `ctx.applets` for one Bot, or `undefined` when this host cannot reach
@@ -49,13 +92,13 @@ import {
 function appletCapabilityHost(
   state: ShellBotStateV1,
   identity: BotIdentity,
-  active?: ActiveTurnV1,
 ): AppletCapabilityHostV1 | undefined {
   const namespace = state.env.APPLET_STATES;
   const artifacts = state.env.APPLICATION_ARTIFACTS;
   const workspace = state.env.WORKSPACE_FILES;
   if (!namespace || !artifacts || !workspace) return undefined;
   const bucket = artifacts;
+  const buildService = appletBuildService(state);
   return createAppletCapabilityHostV1({
     userId: identity.userId,
     botId: identity.botId,
@@ -78,47 +121,12 @@ function appletCapabilityHost(
       },
     },
     workspace,
-    // A publish reads `dist/` from the store, and `applet build` wrote it on
-    // the Computer moments earlier in this very Turn — before the Turn's own
-    // `turn-end` push. So the one root is reconciled first, through the one
-    // sanctioned extra caller of the Computer's sync. It wakes nothing new: a
-    // User with no Computer assignment has no root to pull, and the Bot that
-    // just built on its Computer has it open already.
-    syncSourceRootNow: active
-      ? async (appletId) => {
-          const root = active.mounted.runtime.services;
-          const computerIdentity = { userId: identity.userId };
-          if (!root.computers.assignment(computerIdentity)) {
-            return { status: "skipped", detail: "" } as const;
-          }
-          const session = root.sessions.get(active.sessionId);
-          const started = session?.events.findLast(
-            (event) => event.type === "step/start",
-          );
-          const turn = started?.type === "step/start" ? started.turn : 0;
-          const computer = await root.computers.open(
-            computerIdentity,
-            { botId: identity.botId },
-            { signal: active.signal },
-          );
-          const summary = await syncWorkspaceRootNowV1({
-            computer,
-            sessions: root.sessions,
-            sessionId: active.sessionId,
-            turn,
-            root: appletsSourceRootV1(identity.userId),
-            requiredPaths: APPLET_DIST_FILES_V1.map(
-              (path) => `${appletId}/${path}`,
-            ),
-            signal: active.signal,
-          });
-          return {
-            status: summary.status,
-            detail: summary.detail,
-            ...(summary.required ? { required: summary.required } : {}),
-          };
-        }
-      : undefined,
+    ...(buildService ? { buildService } : {}),
+    // The deployment's own origin. A preview URL is `ui.<that host>`, the
+    // anonymous artifact origin the published page is already served from.
+    ...(state.env.BETTER_AUTH_URL
+      ? { appOrigin: state.env.BETTER_AUTH_URL }
+      : {}),
     composition: {
       current: () => state.authority.composition.current(),
       lastKnownGood: () => state.authority.composition.lastKnownGood(),
@@ -131,63 +139,15 @@ function appletCapabilityHost(
 /**
  * The Applets feature's seam for one admitted Turn, or `undefined` when this
  * host cannot reach Applets at all.
- *
- * The capability host is built per call rather than once: it closes over the
- * Turn's mounted runtime, which is what lets a publish pull the Applet's
- * `dist/` off the Computer, and that runtime does not exist yet when a Turn's
- * features are assembled.
  */
 export function appletsRuntimeHost(
   state: ShellBotStateV1,
   identity: BotIdentity,
   turn: { sessionId: string; runId: string; turnId: string },
 ): AppletsRuntimeHostV1 | undefined {
-  const files = state.env.WORKSPACE_FILES;
-  if (!state.env.APPLET_STATES || !state.env.APPLICATION_ARTIFACTS || !files) {
-    return undefined;
-  }
-  const capability = (): AppletCapabilityHostV1 => {
-    const host = appletCapabilityHost(state, identity, state.turn.current);
-    if (!host) throw new Error("Applets are unavailable");
-    return host;
-  };
-  return {
-    applets: {
-      list: () => capability().list(),
-      create: (input, scope) => capability().create(input, scope),
-      publish: (input, scope) => capability().publish(input, scope),
-      revert: (input, scope) => capability().revert(input, scope),
-      delete: (input) => capability().delete(input),
-      focus: (input) => capability().focus(input),
-      generations: (input) => capability().generations(input),
-      readFocused: () => capability().readFocused(),
-    },
-    turn,
-    writeSource: async (input) => {
-      const outcome = await files.write({
-        path: appletSourceFilePathV1(
-          identity.userId,
-          input.appletId,
-          input.path,
-        ),
-        bytes: input.bytes,
-        writer: {
-          kind: "bot",
-          botId: identity.botId,
-          sessionId: turn.sessionId,
-          turnId: turn.turnId,
-          runId: turn.runId,
-        },
-        expectedGenerationId: null,
-        mediaType: input.mediaType,
-      });
-      if (outcome.status !== "ok") {
-        throw new Error(
-          `the Applet was created but "${input.path}" could not be written: ${outcome.status}`,
-        );
-      }
-    },
-  };
+  const capability = appletCapabilityHost(state, identity);
+  if (!capability) return undefined;
+  return { applets: capability, turn };
 }
 
 /** The User Durable Object's Applet directory, decoded on arrival. */
