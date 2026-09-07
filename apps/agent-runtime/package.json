@@ -11,7 +11,6 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@frockbot/application-foundation": "workspace:*",
     "@frockbot/computer-core": "workspace:*",
     "@frockbot/kernel-agent-loop": "workspace:*",
     "@frockbot/kernel-contracts": "workspace:*",
@@ -19,10 +18,14 @@
     "@frockbot/plugin-credentials": "workspace:*",
     "@frockbot/plugin-models": "workspace:*",
     "@frockbot/plugin-prompt": "workspace:*",
+    "@frockbot/plugin-provider-foundation": "workspace:*",
     "@frockbot/plugin-tools": "workspace:*",
     "@frockbot/provider-openai-compatible": "workspace:*"
   },
   "devDependencies": {
+    "@frockbot/plugin-clock": "workspace:*",
+    "@frockbot/plugin-echo": "workspace:*",
+    "@frockbot/plugin-identity": "workspace:*",
     "@frockbot/plugin-memory": "workspace:*",
     "@types/bun": "1.4.0",
     "@types/node": "26.2.0",

@@ -4,7 +4,7 @@ import {
   createFoundationBackendContributions,
   createFoundationHostedRuntimePackages,
   createFoundationModelRuntimePackage,
-  foundationBaseRuntimeFeatures,
+  foundationBaseRuntimePackagesV1,
   FOUNDATION_PACKAGES_V1,
   foundationPackageV1,
 } from "./runtime.js";
@@ -163,7 +163,7 @@ describe("foundation application", () => {
   test("mounts five features on every Turn, whatever the host", () => {
     // Memory is absent: like Skills, it mounts only for a Turn whose Memory
     // roots the host can reach, so it is never a base feature.
-    expect(foundationBaseRuntimeFeatures()).toHaveLength(5);
+    expect(foundationBaseRuntimePackagesV1()).toHaveLength(5);
   });
 
   test("names the Packages the platform owns rather than the User", () => {

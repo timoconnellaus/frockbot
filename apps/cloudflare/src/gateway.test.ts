@@ -20,6 +20,7 @@ import type {
 import type { StoredRun } from "@frockbot/plugin-shell/backend-contracts";
 import type { DeploymentPolicyV1 } from "@frockbot/plugin-admin/shared";
 import { createFlockBackendContribution } from "@frockbot/plugin-flock/backend";
+import { foundationBaseRuntimePackagesV1 } from "@frockbot/application-foundation/runtime";
 import {
   bootstrapCompositionGeneration,
   createShellCompositionHost,
@@ -127,6 +128,9 @@ class MemoryBotState implements BotStateBinding {
         sessionId: command.sessionId,
         sessionEvents: previousEvents,
         admitEffect: () => Promise.resolve(true),
+        // The Bot Durable Object hands these over on a real Turn; this double
+        // stands in for it, so it hands over the same base Packages.
+        agentPackages: foundationBaseRuntimePackagesV1(),
       }).mount(generation, new AbortController().signal);
       const result = await executeBotTurn({
         command,

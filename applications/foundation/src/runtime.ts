@@ -33,10 +33,14 @@ import { createCredentialsFeature } from "@frockbot/plugin-credentials/user";
 // Runtime implementations are statically bound by the immutable application.
 import echoFeature from "@frockbot/plugin-echo/agent";
 import { createFlySpriteProviderFeature } from "@frockbot/plugin-fly-sprite/agent";
-import {
-  ComputerHostClient,
-  type ComputerHostFetcherV1,
-} from "@frockbot/plugin-fly-sprite/host-client";
+import { ComputerHostClient } from "@frockbot/plugin-fly-sprite/host-client";
+import type {
+  ShellApplicationV1,
+  ShellComputerHostBindingV1,
+  ShellEnabledRuntimeHostV1,
+  ShellHostedRuntimeHostV1,
+  ShellModelRuntimeHostV1,
+} from "@frockbot/plugin-shell/backend-runtime";
 import type {
   ComputerRegistry,
   ComputerSyncHostV1,
@@ -102,6 +106,10 @@ import {
 export type { AppletsRuntimeHostV1 } from "@frockbot/plugin-applets/feature";
 
 export { FOUNDATION_MODEL, FOUNDATION_PROVIDER };
+import {
+  FOUNDATION_PACKAGES_V1,
+  FOUNDATION_PACKAGE_VERSION_V1,
+} from "./packages.js";
 export {
   FOUNDATION_PACKAGES_V1,
   FOUNDATION_PACKAGE_VERSION_V1,
@@ -124,17 +132,17 @@ export interface FoundationRuntimePackage {
 }
 
 /**
- * The features every Turn mounts whatever its host: the Bot's identity, the
+ * The Packages every Turn mounts whatever its host: the Bot's identity, the
  * built-in model, the two demo tools and the Shell's own voice. The host's
- * features mount before these, so a provider they need is already registered.
+ * Packages mount before these, so a provider they need is already registered.
  */
-export function foundationBaseRuntimeFeatures(): FoundationFeature[] {
+export function foundationBaseRuntimePackagesV1(): FoundationRuntimePackage[] {
   return [
-    identityFeature,
-    foundationProviderFeature,
-    echoFeature,
-    clockFeature,
-    shellAgentFeature,
+    runtimePackage("identity", identityFeature),
+    runtimePackage("provider-foundation", foundationProviderFeature),
+    runtimePackage("echo", echoFeature),
+    runtimePackage("clock", clockFeature),
+    runtimePackage("shell", shellAgentFeature),
   ];
 }
 
@@ -395,7 +403,7 @@ function runtimePackage(
 function computerConfiguredV1(host: {
   readSecret(name: string): string | undefined;
   computerHost?: SharedComputerHostClient;
-  computerHostBinding?: ComputerHostBinding;
+  computerHostBinding?: ShellComputerHostBindingV1;
 }): boolean {
   if (host.computerHost) return true;
   return Boolean(
@@ -407,7 +415,7 @@ function computerProviderFeature(host: {
   readSecret(name: string): string | undefined;
   computerSync?: ComputerSyncHostV1;
   computerHost?: SharedComputerHostClient;
-  computerHostBinding?: ComputerHostBinding;
+  computerHostBinding?: ShellComputerHostBindingV1;
   computerAgentControlOwnerId?: string;
 }): FoundationFeature {
   // `SPRITES_TOKEN` is no longer a credential here — the Computer host holds
@@ -449,145 +457,9 @@ function computerProviderFeature(host: {
   };
 }
 
-/**
- * The `COMPUTER_HOST` service binding and the secret presented on it.
- *
- * Both or neither: a binding with no token reaches a host that refuses every
- * call, which would surface as a 401 on each Turn rather than as a Computer
- * that is not configured.
- */
-export interface ComputerHostBinding {
-  fetcher: ComputerHostFetcherV1;
-  hostToken: string;
-}
-
-export function createFoundationHostedRuntimePackages(host: {
-  userId: string;
-  readSecret(name: string): string | undefined;
-  /**
-   * The shared Computer host seam: a non-authoritative backend host that
-   * journals each identified Computer effect so a retried effect replays its
-   * recorded outcome instead of executing twice. Supplied, the
-   * `shared-computer` provider is registered beside the in-worker provider.
-   */
-  computerHost?: SharedComputerHostClient;
-  /**
-   * The shared Computer host: the service binding the Bot
-   * Durable Object reaches a Computer through, and the secret it presents.
-   * Absent, and the Fly provider registers unconfigured — this Worker holds
-   * no Sprites SDK and no way to reach a Computer without it.
-   */
-  computerHostBinding?: ComputerHostBinding;
-  /**
-   * The Skills seam, supplied by the Bot Durable Object for one admitted
-   * Turn. Absent outside a Turn, and outside one whose Workspace reads are
-   * available, and the Skills Package is then not mounted: a Turn with no
-   * readable instruction root loads no instructions rather than guessing.
-   */
-  skills?: SkillsRuntimeHostV1;
-  /**
-   * The Memory seam, supplied by the Bot Durable Object for one admitted
-   * Turn. Absent outside a Turn, and outside one whose Memory roots are
-   * reachable, and the Memory Package is then not mounted: a Turn with no
-   * readable Memory root injects no Memory rather than guessing.
-   */
-  memory?: MemoryRuntimeHostV1;
-  /**
-   * The image-generation seam, supplied by the Bot Durable Object for one
-   * admitted Turn. Absent outside a Turn, and outside one whose Workspace is
-   * reachable, and the Image Package is then not mounted: a Bot generates an
-   * image only inside a Turn whose Session and Turn the write can name, and
-   * only where the file it produces has somewhere durable to land.
-   */
-  image?: ImageRuntimeHostV1;
-  /**
-   * The Routines seam, supplied by the Bot Durable Object for one admitted
-   * Turn. Absent outside a Turn, and the Routines Package is then not
-   * mounted: a Bot writes a Routine only inside a Turn whose Session and Turn
-   * its provenance can name.
-   */
-  routines?: RoutinesRuntimeHostV1;
-  /**
-   * The Subagents seam, supplied by the parent Bot Durable Object
-   * for one admitted Turn. Absent outside a Turn, and outside a deployment
-   * that can address a Subagent Durable Object, and the Package is then not
-   * mounted at all: a Bot dispatches a subagent only inside a Turn whose run
-   * the task record can name.
-   */
-  subagents?: SubagentsRuntimeHostV1;
-  /**
-   * The Computer sync seam, supplied by the Bot Durable Object
-   * for one admitted Turn. Absent outside a Turn, and outside one whose
-   * durable roots are reachable in object storage — the Computer provider
-   * then offers no sync at all, and a Computer's durable roots live on the
-   * Computer alone rather than reconciling against a store no authority
-   * backs.
-   */
-  computerSync?: ComputerSyncHostV1;
-  /**
-   * The Session and Turn a Computer write records as its writer, supplied by
-   * the Bot Durable Object for one admitted Turn. Absent outside a Turn, and
-   * `computer_screenshot` is then not offered: a durable-root write with no
-   * Turn to name is a write with no writer.
-   */
-  computerWriter?: { sessionId: string; turnId: string; runId: string };
-  /**
-   * The Bot Durable Object storage a background process's record is written
-   * to, supplied for one admitted Turn. Absent, and `computer_exec` offers
-   * no `background` and the three process tools are not mounted: intent is
-   * recorded before an effect, and with nowhere to record it there is no
-   * honest way to launch a process that outlives its Turn.
-   */
-  computerProcesses?: ComputerProcessStorageV1;
-  /** Wake-free access to the Bot DO's durable human-control record. */
-  computerControlRecords?: NonNullable<
-    ComputerAgentPluginConfig["controlRecords"]
-  >;
-  /** Resident projection caches invalidated after a known Computer write. */
-  computerProjectionFiles?: NonNullable<
-    ComputerAgentPluginConfig["projectionFiles"]
-  >;
-  /** The `computerUse` task owner whose User-wide lease this child holds. */
-  computerAgentControlOwnerId?: string;
-  /**
-   * The Bot self-management seam, supplied by the Bot Durable Object for one
-   * admitted Turn. Absent outside a Turn, and the Flock runtime Contribution
-   * is then not mounted: a Bot changes its own identity, or adds a Bot to
-   * its User's flock, only inside a Turn whose Session and Turn the write
-   * can name.
-   */
-  botSelfManagement?: FlockSelfRuntimeHostV1;
-  /**
-   * The Bot Template seam, supplied by the Bot Durable Object for one
-   * admitted Turn. Absent outside a Turn, and the export tool is then not
-   * registered at all: staging a template runs through the User's own
-   * command path, and a Turn with no such path cannot reach it.
-   */
-  botTemplate?: BotTemplateRuntimeHostV1;
-  /**
-   * The registered machine seam, supplied by the Bot Durable Object for one
-   * admitted Turn. Absent outside a Turn, and the machine tools are then not
-   * mounted at all: an intent record with no Session and Turn is an effect
-   * nobody can trace back to a conversation.
-   */
-  machines?: MachineRuntimeHostV1;
-  /**
-   * Row 57g's seam, supplied only when all of its gate is open: the User
-   * setting is on, and at least one connected macOS machine reports the
-   * `messages` capability. Absent, and the seven Messages tools are not
-   * mounted at all — absent from the catalog rather than present and
-   * refusing, which is what a feature gate is for.
-   */
-  machineMessages?: MachineMessagesRuntimeHostV1;
-  /**
-   * The Applets seam, supplied by the Bot Durable Object for one admitted
-   * Turn. Absent outside a Turn, and outside a deployment that can reach the
-   * Applet Durable Object, its artifact bucket and the Workspace — and the
-   * Applets Package is then not mounted at all: a publish is a durable effect
-   * whose intent record has to name the Turn that asked for it.
-   */
-  applets?: AppletsRuntimeHostV1;
-}): FoundationRuntimePackage[] {
+export function createFoundationHostedRuntimePackages(
+  host: ShellHostedRuntimeHostV1,
+): FoundationRuntimePackage[] {
   return [
     ...(host.botSelfManagement
       ? [
@@ -680,37 +552,7 @@ export function createFoundationHostedRuntimePackages(host: {
 
 export async function createFoundationEnabledRuntimePackages(
   execution: BotExecutionPlanV1,
-  host: {
-    userId: string;
-    readSecret(name: string): string | undefined;
-    pinToolCatalog?(
-      connectionId: string,
-      read: () => Promise<unknown>,
-    ): Promise<unknown>;
-    authorizeConnection(
-      capability: EnabledCapabilityV1,
-    ): Promise<ConnectionView>;
-    /**
-     * One Package's durable User-level setting values. Supplied by the host
-     * that read the User's settings for this Turn; a host that supplies none
-     * leaves every Contribution on its Package defaults.
-     */
-    packageSettings?(
-      packageId: string,
-    ): Readonly<Record<string, PackageSettingValueV1>> | undefined;
-    /** The Package's own outbound seam, passed through to each Contribution. */
-    fetch?: typeof fetch;
-    /** The User's credential authority, for Contributions that hold a key. */
-    leaseCredential?(
-      capability: EnabledCapabilityV1,
-      effectId: string,
-      expectedGeneration?: string,
-    ): Promise<CredentialLeaseV1>;
-    settleCredential?(
-      capability: EnabledCapabilityV1,
-      effectId: string,
-    ): Promise<void>;
-  },
+  host: ShellEnabledRuntimeHostV1,
 ): Promise<FoundationRuntimePackage[]> {
   const result: FoundationRuntimePackage[] = [];
   const capabilityIndexes = new Map<string, number>();
@@ -756,7 +598,7 @@ export async function createFoundationEnabledRuntimePackages(
 
 export function createFoundationModelRuntimePackage(
   binding: ResolvedModelBindingV1,
-  host: ModelRuntimeContributionConfig,
+  host: ShellModelRuntimeHostV1,
 ): FoundationRuntimePackage {
   if (
     binding.state === "unavailable" ||
@@ -788,3 +630,19 @@ export function createFoundationModelRuntimePackage(
     }),
   };
 }
+
+/**
+ * What this application hands the Shell's Bot Contribution: its Packages, and
+ * the three factories that turn a Package id into a mounted feature. The Shell
+ * reads no part of this application directly.
+ */
+export const foundationShellApplicationV1: ShellApplicationV1 = {
+  packages: FOUNDATION_PACKAGES_V1,
+  packageVersion: FOUNDATION_PACKAGE_VERSION_V1,
+  runtime: {
+    base: foundationBaseRuntimePackagesV1,
+    hosted: createFoundationHostedRuntimePackages,
+    enabled: createFoundationEnabledRuntimePackages,
+    model: createFoundationModelRuntimePackage,
+  },
+};

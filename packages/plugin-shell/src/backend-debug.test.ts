@@ -1,3 +1,4 @@
+import { shellTestApplicationV1 } from "./backend-application.fixture.js";
 import { describe, expect, test } from "bun:test";
 import { initializeBotSettingsV1 } from "@frockbot/configuration-core";
 import { SessionEventLog, storedRunRecordV2 } from "@frockbot/kernel-do";
@@ -82,6 +83,7 @@ function storedRun(overrides: Partial<StoredRun> = {}): StoredRun {
 
 function contributionOver(storage: MemoryStorage) {
   return createShellBotBackendContribution({
+    ...shellTestApplicationV1(),
     state: { storage } as unknown as DurableObjectState,
     env: {} as never,
   });

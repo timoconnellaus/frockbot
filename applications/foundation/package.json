@@ -55,6 +55,7 @@
     "@frockbot/template-core": "workspace:*"
   },
   "devDependencies": {
+    "@frockbot/kernel-do": "workspace:*",
     "@types/bun": "1.4.0",
     "typescript": "^7.0.2"
   }

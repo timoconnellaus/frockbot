@@ -1,8 +1,7 @@
 import {
-  foundationBaseRuntimeFeatures,
   FOUNDATION_MODEL,
   FOUNDATION_PROVIDER,
-} from "@frockbot/application-foundation/runtime";
+} from "@frockbot/plugin-provider-foundation/runtime";
 import {
   type CompositionPinV1,
   LoopHookListV1,
@@ -163,10 +162,10 @@ export async function createFoundationRuntime(
       }),
     );
   }
-  // The host's features first — providers before the consumers that open
-  // their capabilities — then the application's own.
+  // Providers before the consumers that open their capabilities: the host
+  // hands them over in mount order, and this runtime composes no list of its
+  // own.
   for (const pkg of options.agentPackages ?? []) features.push(pkg.feature);
-  features.push(...foundationBaseRuntimeFeatures());
   const disposeFeatures = await mountRuntimeFeaturesV1(services, features);
 
   let loop: AgentLoop;

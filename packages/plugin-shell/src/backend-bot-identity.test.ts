@@ -1,3 +1,4 @@
+import { shellTestApplicationV1 } from "./backend-application.fixture.js";
 // Slice B, the durable half: the partial profile command, the provenance it
 // records, and the rename announcement it appends to the Bot's Session.
 import { describe, expect, test } from "bun:test";
@@ -60,6 +61,7 @@ const identity = { userId: "user-1", botId: "primary" };
 
 function contributionOn(storage: MemoryStorage) {
   return createShellBotBackendContribution({
+    ...shellTestApplicationV1(),
     state: { storage } as unknown as DurableObjectState,
     env: {} as never,
   });

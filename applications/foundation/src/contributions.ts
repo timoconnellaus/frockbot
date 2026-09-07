@@ -261,42 +261,31 @@ export function createFoundationMountedContributionsV1(): FoundationMountedContr
   };
 }
 
-/**
- * The descriptors, read on first use rather than at module evaluation.
- *
- * `plugin-shell/backend` imports this application's runtime, so the module
- * graph has a cycle. Building the *map* lazily was not enough: this array read
- * every imported binding while those modules were still initializing, and a
- * process that happened to enter the cycle from the shell side got
- * "Cannot access 'shellBotContribution' before initialization". Deferring the
- * read to the first call makes the cycle unobservable from either direction.
- */
-export function backendDescriptorsV1(): readonly AnyBackendDescriptor[] {
-  return [
-    adminGatewayContribution,
-    auditGatewayContribution,
-    botTemplateGatewayContribution,
-    computerGatewayContribution,
-    flockGatewayContribution,
-    routinesGatewayContribution,
-    searchGatewayContribution,
-    settingsGatewayContribution,
-    subagentsGatewayContribution,
-    machineGatewayContribution,
-    settingsUserContribution,
-    credentialsUserContribution,
-    ollamaCloudUserContribution,
-    frockAiUserContribution,
-    botTemplateUserContribution,
-    machineUserContribution,
-    searchUserContribution,
-    auditUserContribution,
-    flockUserContribution,
-    shellBotContribution,
-    flockBotContribution,
-    computerBotContribution,
-  ] as AnyBackendDescriptor[];
-}
+/** Every backend Contribution this application composes, in mount order. */
+export const backendDescriptorsV1: readonly AnyBackendDescriptor[] = [
+  adminGatewayContribution,
+  auditGatewayContribution,
+  botTemplateGatewayContribution,
+  computerGatewayContribution,
+  flockGatewayContribution,
+  routinesGatewayContribution,
+  searchGatewayContribution,
+  settingsGatewayContribution,
+  subagentsGatewayContribution,
+  machineGatewayContribution,
+  settingsUserContribution,
+  credentialsUserContribution,
+  ollamaCloudUserContribution,
+  frockAiUserContribution,
+  botTemplateUserContribution,
+  machineUserContribution,
+  searchUserContribution,
+  auditUserContribution,
+  flockUserContribution,
+  shellBotContribution,
+  flockBotContribution,
+  computerBotContribution,
+] as AnyBackendDescriptor[];
 
 /** Mount every backend Contribution for one host, in table order. */
 export async function createFoundationBackendContributions(
@@ -340,7 +329,7 @@ export async function createFoundationBackendContributions<T>(
     for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
   };
   try {
-    for (const descriptor of backendDescriptorsV1()) {
+    for (const descriptor of backendDescriptorsV1) {
       if (descriptor.host !== host.backendHost) continue;
       let cleanup: void | RuntimeCleanupV1;
       if ("resolve" in host) {

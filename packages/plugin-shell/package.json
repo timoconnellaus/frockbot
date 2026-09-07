@@ -18,6 +18,7 @@
     "./backend-memory": "./src/backend-memory.ts",
     "./backend-recovery": "./src/backend-recovery.ts",
     "./backend-runner": "./src/backend-runner.ts",
+    "./backend-runtime": "./src/backend-runtime.ts",
     "./backend-skills": "./src/backend-skills.ts",
     "./backend-subagents": "./src/backend-subagents.ts",
     "./client": "./src/client/index.ts",
@@ -45,7 +46,6 @@
   },
   "dependencies": {
     "@frockbot/agent-runtime": "workspace:*",
-    "@frockbot/application-foundation": "workspace:*",
     "@frockbot/client-core": "workspace:*",
     "@frockbot/client-ui": "workspace:*",
     "@frockbot/compose-frockbot": "workspace:*",
