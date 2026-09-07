@@ -78,20 +78,18 @@ at the cited location. Items the re-orientation already removes are marked; see
 
 37. **The `flock` to `frock` rename is partial.** Code reads `FROCK_AI_*` with `FLOCK_AI_*` fallbacks (`apps/cloudflare/src/index.ts:249-256`), while the Cloudflare resources (`FROCK_AI_GATEWAY_ID: "flock"`, `FROCK_AI_AUTO_ROUTE: "flock-auto"`), the package `@frockbot/plugin-flock` and every stored id remain `flock`.
 
-38. **`release.yml` publishes test fixtures to npm.** All of `packages/*` is published by flipping `private: false`, including `plugin-testkit`, `compose-cloudflare` and `compose-typescript`.
+38. **`release.yml` publishes test fixtures to npm.** All of `packages/*` is published by flipping `private: false`, including `plugin-testkit`.
 
-39. **Compatibility dates drift.** Every deployed Worker is `2026-08-27`; `packages/compose-cloudflare/wrangler.jsonc` and `packages/compose-typescript/wrangler.jsonc` are `2026-05-01`.
+39. **`APPLET_STATES` is typed inconsistently.** It is optional in `UserConfigurationEnv` (`apps/cloudflare/src/user-configuration.ts:210`, guarded at `:1826`) but non-optional and dereferenced unguarded in the gateway (`apps/cloudflare/src/index.ts:1060`, `:2339`).
 
-40. **`APPLET_STATES` is typed inconsistently.** It is optional in `UserConfigurationEnv` (`apps/cloudflare/src/user-configuration.ts:210`, guarded at `:1826`) but non-optional and dereferenced unguarded in the gateway (`apps/cloudflare/src/index.ts:1060`, `:2339`).
+40. ~~**Voice dictation is not eviction-safe.**~~ **Gone.** Voice is removed.
 
-41. ~~**Voice dictation is not eviction-safe.**~~ **Gone.** Voice is removed.
+41. **`packages/plugin-audit/src/store.ts:478-503` performs `DROP TABLE` and `ALTER TABLE ... RENAME` shadow-swaps** on the User Durable Object's SQL surface, which it shares with the FTS5 search index.
 
-42. **`packages/plugin-audit/src/store.ts:478-503` performs `DROP TABLE` and `ALTER TABLE ... RENAME` shadow-swaps** on the User Durable Object's SQL surface, which it shares with the FTS5 search index.
+42. ~~**Dangling directory references.**~~ **Fixed.** `apps/cloudflare/index.html` referenced `apps/mobile` and the computer-host README referenced `apps/fly-host-prototype`; both are removed.
 
-43. ~~**Dangling directory references.**~~ **Fixed.** `apps/cloudflare/index.html` referenced `apps/mobile` and the computer-host README referenced `apps/fly-host-prototype`; both are removed.
+43. **An auto-merged pull request never deploys to staging.** `ci.yml`'s `deploy-staging` is gated on `github.event_name == 'push' && github.ref == 'refs/heads/main'`, but `auto-merge.yml` merges with `GITHUB_TOKEN`, and GitHub does not trigger workflows from pushes made with it. So every auto-merged change reaches `main` without staging ever running it, and production is the first environment to see it. `workflow_dispatch` does not help: the job's `if` excludes it.
 
-44. **An auto-merged pull request never deploys to staging.** `ci.yml`'s `deploy-staging` is gated on `github.event_name == 'push' && github.ref == 'refs/heads/main'`, but `auto-merge.yml` merges with `GITHUB_TOKEN`, and GitHub does not trigger workflows from pushes made with it. So every auto-merged change reaches `main` without staging ever running it, and production is the first environment to see it. `workflow_dispatch` does not help: the job's `if` excludes it.
+44. ~~**The npm publish step fails every release for packages npm does not trust.**~~ **Fixed.** `release.yml` published every directory under `packages/`, so a package whose trusted publisher was not configured on npmjs.com failed the token exchange with an `E404` and reddened a release whose production deploy had already succeeded — the worst shape for a signal, because it trains you to ignore it. Publication is now opt-in through `frockbot.npm` in a package's own manifest, and exactly one package declares it: `@frockbot/applet-sdk`, which the Computer installs from npm. It has no `@frockbot` dependencies, so it publishes alone. Nothing else has a consumer off this repository.
 
-45. ~~**The npm publish step fails every release for packages npm does not trust.**~~ **Fixed.** `release.yml` published every directory under `packages/`, so a package whose trusted publisher was not configured on npmjs.com failed the token exchange with an `E404` and reddened a release whose production deploy had already succeeded — the worst shape for a signal, because it trains you to ignore it. Publication is now opt-in through `frockbot.npm` in a package's own manifest, and exactly one package declares it: `@frockbot/applet-sdk`, which the Computer installs from npm. It has no `@frockbot` dependencies, so it publishes alone. Nothing else has a consumer off this repository.
-
-46. **`chat.e2e.ts` "a send the server refuses for size keeps the draft and says why" is intermittently flaky.** It failed once in the full browser suite and passed immediately on its own, and passed in the four other full runs on 2026-09-06/07. The suite runs `fullyParallel: false` with one worker, so this is timing under load rather than interference. Not yet diagnosed; recorded so a red shard is not assumed to be a regression.
+45. **`chat.e2e.ts` "a send the server refuses for size keeps the draft and says why" is intermittently flaky.** It failed once in the full browser suite and passed immediately on its own, and passed in the four other full runs on 2026-09-06/07. The suite runs `fullyParallel: false` with one worker, so this is timing under load rather than interference. Not yet diagnosed; recorded so a red shard is not assumed to be a regression.
