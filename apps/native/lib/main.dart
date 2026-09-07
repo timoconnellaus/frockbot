@@ -1,30 +1,38 @@
+/// The app entry and the sign-in door.
+///
+/// Everything the person actually looks at is `lib/shell/`. This holds the
+/// three things that are true before any of it: the `MaterialApp`, the session
+/// — restoring one, completing one, ending one — and the deep link that names
+/// a Bot, which it hands to the shell rather than acting on itself.
+library;
+
 import 'dart:async';
 import 'dart:convert';
 
 import 'package:app_links/app_links.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart' hide ConnectionState;
-import 'package:flutter/services.dart';
 
-import 'client/auth.dart';
-import 'settings/page.dart';
-import 'activity/controller.dart';
-import 'activity/page.dart';
-import 'recovery/page.dart';
-import 'auth/sign_in_page.dart';
-import 'theme/frock_theme.dart';
-import 'theme/states.dart';
 import 'acceptance_metrics.dart';
+import 'activity/controller.dart';
+import 'auth/sign_in_page.dart';
+import 'client/auth.dart';
 import 'client/bot_sessions.dart';
-import 'client/chat_controller.dart';
 import 'client/plain_store.dart';
 import 'client/transport.dart';
-import 'extensions/fallback.dart';
-import 'view/sample_page.dart';
+import 'shell/app_shell.dart';
+import 'theme/frock_theme.dart';
 import 'protocol/client_wire.generated.dart' as wire;
 
 void main() {
-  WidgetsFlutterBinding.ensureInitialized();
+  final binding = WidgetsFlutterBinding.ensureInitialized();
+  // The browser draws to a canvas, so the accessibility tree is the only DOM
+  // there is: without it a screen reader sees an empty page and a browser test
+  // has nothing to select. The engine builds it lazily, behind a hidden
+  // "enable accessibility" button nobody should have to find, so the web build
+  // holds it open from the first frame. The phone's platform already asks for
+  // it when someone turns a screen reader on.
+  if (kIsWeb) binding.ensureSemantics();
   AcceptanceMetrics.instance.start();
   runApp(const FrockBotApp());
 }
@@ -36,32 +44,24 @@ class FrockBotApp extends StatefulWidget {
   State<FrockBotApp> createState() => _FrockBotAppState();
 }
 
-class _FrockBotAppState extends State<FrockBotApp> with WidgetsBindingObserver {
+class _FrockBotAppState extends State<FrockBotApp> {
   final navigatorKey = GlobalKey<NavigatorState>();
-  final scaffoldKey = GlobalKey<ScaffoldState>();
+  final botLinks = ValueNotifier<String?>(null);
   late final LocalStore store = widget.store ?? nativeStore();
   late final NativeApi api = NativeApi(store);
   late final SignIn auth = signInV1(api, store);
   late final BotSessions sessions = BotSessions(api: api, store: store);
   StreamSubscription<Uri>? links;
-  ActivityController? activity;
-  Timer? activityTimer;
-  String? pendingBot;
   String? userId;
   String? error;
   bool busy = true;
   bool awaitingBrowser = false;
-  List<wire.BotRegistration> bots = [];
-  wire.BotRegistration? selected;
+
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this);
-    final appLinks = AppLinks();
-    links = appLinks.uriLinkStream.listen(
-      (uri) {
-        unawaited(accept(uri));
-      },
+    links = AppLinks().uriLinkStream.listen(
+      (uri) => unawaited(accept(uri)),
       onError: (Object _) {
         if (mounted) {
           setState(() {
@@ -76,22 +76,14 @@ class _FrockBotAppState extends State<FrockBotApp> with WidgetsBindingObserver {
   Future<void> accept(Uri uri) async {
     final target = botLink(uri);
     if (target != null) {
-      pendingBot = target;
-      if (userId != null) await followBotLink();
+      botLinks.value = target;
       return;
     }
     try {
       if (await auth.accept(uri)) {
         navigatorKey.currentState?.popUntil((route) => route.isFirst);
         sessions.clear();
-        clearActivity();
-        if (mounted) {
-          setState(() {
-            userId = null;
-            selected = null;
-            bots = [];
-          });
-        }
+        if (mounted) setState(() => userId = null);
         await restore();
       }
     } catch (_) {
@@ -104,182 +96,42 @@ class _FrockBotAppState extends State<FrockBotApp> with WidgetsBindingObserver {
     }
   }
 
+  /// A stored session is adopted before the identity read, so the shell paints
+  /// its cached directory rather than the sign-in door on a cold start.
+  ///
+  /// The identity read happens either way. The phone carries its session as a
+  /// stored token; the browser carries it as an ambient cookie it cannot see,
+  /// so the only way to learn whether anyone is signed in there is to ask.
   Future<void> restore() async {
     try {
       final savedSession = await store.read('session');
-      if (savedSession == null) return;
-      final cachedSession = wire.AuthSessionView.fromJson(
-        jsonDecode(savedSession),
-      );
-      api.adoptSession(savedSession);
-      final cachedDirectory = await store.read(
-        'directory/${cachedSession.userId.value}',
-      );
-      if (cachedDirectory != null && userId == null) {
-        final cached = wire.BotDirectory.fromJson(jsonDecode(cachedDirectory));
-        final saved = await store.read(
-          'selection.${cachedSession.userId.value}',
-        );
-        if (mounted) {
-          setState(() {
-            userId = cachedSession.userId.value;
-            bots = cached.bots;
-            selected = bots
-                .where((bot) => bot.botId.value == saved)
-                .firstOrNull;
-            busy = false;
-          });
-        }
+      if (savedSession != null) {
+        api.adoptSession(savedSession);
+        final cached = wire.AuthSessionView.fromJson(jsonDecode(savedSession));
+        if (mounted) setState(() => userId = cached.userId.value);
       }
-
       final identity = wire.AuthIdentity.fromJson(
         await api.request('/api/identity'),
       );
-      final directory = wire.BotDirectory.fromJson(
-        await api.request('/api/bots'),
-      );
-      final lifecycle = wire.BotLifecycleDirectory.fromJson(
-        await api.request('/api/bots/lifecycles'),
-      );
-      final unavailable = lifecycle.lifecycles
-          .where((state) => state.status != 'active')
-          .map((state) => state.botId.value)
-          .toSet();
-      final activeBots = directory.bots
-          .where((bot) => !unavailable.contains(bot.botId.value))
-          .toList();
-      for (final prior in bots) {
-        if (!activeBots.any((bot) => bot.botId.value == prior.botId.value)) {
-          sessions.forget(identity.userId.value, prior.botId.value);
-        }
-      }
-      await store.write(
-        'directory/${identity.userId.value}',
-        jsonEncode({
-          ...directory.toJson() as Map,
-          'bots': [for (final bot in activeBots) bot.toJson()],
-        }),
-      );
-      final saved = await store.read('selection.${identity.userId.value}');
       if (mounted) {
         setState(() {
           userId = identity.userId.value;
-          bots = activeBots;
-          selected = bots.where((b) => b.botId.value == saved).firstOrNull;
           error = null;
         });
-        bindActivity(identity.userId.value);
-        if (pendingBot != null) unawaited(followBotLink());
-        unawaited(
-          sessions.prefetch(identity.userId.value, [
-            for (final bot in activeBots) bot.botId.value,
-          ], after: selected?.botId.value),
-        );
       }
-    } catch (failure) {
+    } on RequestFailure catch (failure) {
+      // Nobody is signed in yet, which is what the sign-in door is for. Saying
+      // so as an error is the first thing a new person would read.
+      final unauthenticated = failure.status == 401 && userId == null;
+      if (mounted && !unauthenticated) {
+        setState(() => error = failure.message);
+      }
+    } catch (_) {
       if (mounted) {
-        setState(() {
-          error = failure is RequestFailure
-              ? failure.message
-              : 'Couldn’t load your Bots. Please try again.';
-        });
+        setState(() => error = 'Couldn’t reach FrockBot. Please try again.');
       }
     } finally {
-      if (mounted) {
-        setState(() {
-          busy = false;
-        });
-      }
-    }
-  }
-
-  void activityChanged() {
-    if (mounted) setState(() {});
-  }
-
-  void clearActivity() {
-    activityTimer?.cancel();
-    activityTimer = null;
-    activity?.removeListener(activityChanged);
-    activity?.dispose();
-    activity = null;
-  }
-
-  void bindActivity(String owner) {
-    if (activity?.userId == owner) {
-      activity!.botNames = {
-        for (final bot in bots) bot.botId.value: bot.initialName,
-      };
-      return;
-    }
-    clearActivity();
-    activity = ActivityController(api, store, owner)
-      ..addListener(activityChanged);
-    activity!.botNames = {
-      for (final bot in bots) bot.botId.value: bot.initialName,
-    };
-    unawaited(activity!.load());
-    activityTimer = Timer.periodic(
-      const Duration(seconds: 10),
-      (_) => unawaited(activity?.load()),
-    );
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    activityTimer?.cancel();
-    activityTimer = null;
-    if (state == AppLifecycleState.resumed) {
-      unawaited(activity?.load());
-      activityTimer = Timer.periodic(
-        const Duration(seconds: 10),
-        (_) => unawaited(activity?.load()),
-      );
-    }
-  }
-
-  Future<void> openBot(String botId) async {
-    final owner = userId;
-    if (owner == null) return;
-    final directory = wire.BotDirectory.fromJson(
-      await api.request('/api/bots'),
-    );
-    if (!mounted || userId != owner) return;
-    final lifecycle = wire.BotLifecycleDirectory.fromJson(
-      await api.request('/api/bots/lifecycles'),
-    );
-    if (!mounted || userId != owner) return;
-    final unavailable = lifecycle.lifecycles
-        .where((state) => state.status != 'active')
-        .map((state) => state.botId.value)
-        .toSet();
-    final active = directory.bots
-        .where((bot) => !unavailable.contains(bot.botId.value))
-        .toList();
-    final bot = active.where((b) => b.botId.value == botId).firstOrNull;
-    if (bot == null) throw const FormatException('Unavailable Bot');
-    navigatorKey.currentState?.popUntil((route) => route.isFirst);
-    setState(() => bots = active);
-    select(bot);
-  }
-
-  Future<void> followBotLink() async {
-    final botId = pendingBot;
-    pendingBot = null;
-    if (botId == null) return;
-    try {
-      await openBot(botId);
-    } catch (_) {
-      final context = scaffoldKey.currentContext;
-      if (context != null && context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'That Bot isn’t available. Refresh your Bots and try again.',
-            ),
-          ),
-        );
-      }
+      if (mounted) setState(() => busy = false);
     }
   }
 
@@ -300,25 +152,22 @@ class _FrockBotAppState extends State<FrockBotApp> with WidgetsBindingObserver {
         });
       }
     } finally {
-      if (mounted) {
-        setState(() {
-          busy = false;
-        });
-      }
+      if (mounted) setState(() => busy = false);
     }
   }
 
-  void select(wire.BotRegistration bot) {
-    // The switch is the User's; remembering it is bookkeeping and never delays
-    // the pane behind a store write.
-    setState(() {
-      selected = bot;
-    });
-    unawaited(
-      store.write('selection.$userId', bot.botId.value).catchError((Object _) {
-        /* A selection that could not be remembered still switched. */
-      }),
-    );
+  Future<void> signOut() async {
+    try {
+      await auth.signOut();
+      sessions.clear();
+      if (mounted) setState(() => userId = null);
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          error = 'Couldn’t sign out. Please reconnect and try again.';
+        });
+      }
+    }
   }
 
   @override
@@ -329,610 +178,30 @@ class _FrockBotAppState extends State<FrockBotApp> with WidgetsBindingObserver {
     theme: FrockTheme.theme(Brightness.light),
     darkTheme: FrockTheme.theme(Brightness.dark),
     themeMode: ThemeMode.dark,
-    home: Builder(
-      builder: (context) {
-        if (userId == null) {
-          return SignInPage(
+    home: userId == null
+        ? SignInPage(
             busy: busy,
             awaitingBrowser: awaitingBrowser,
             error: error,
             onSignIn: signIn,
-          );
-        }
-
-        final directory = ListView(
-          children: [
-            const Padding(
-              padding: EdgeInsets.all(16),
-              child: Text(
-                'Your Bots',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-              ),
-            ),
-            for (final bot in bots)
-              ListTile(
-                key: ValueKey('bot-${bot.botId.value}'),
-                leading: const SheepAvatar(),
-                title: Text(bot.initialName),
-                subtitle: activity?.unread[bot.botId.value]?.lastMessage == null
-                    ? null
-                    : Text(
-                        (activity!.unread[bot.botId.value]!.lastMessage
-                                as Map)['text']
-                            as String,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                trailing: activity?.unread[bot.botId.value]?.unread == true
-                    ? Badge(
-                        label: Text(
-                          activity!.unread[bot.botId.value]!.count == 0
-                              ? '•'
-                              : '${activity!.unread[bot.botId.value]!.count}${activity!.unread[bot.botId.value]!.capped ? '+' : ''}',
-                        ),
-                      )
-                    : null,
-                selected: bot.botId.value == selected?.botId.value,
-                onTap: () {
-                  select(bot);
-                  if (MediaQuery.sizeOf(context).width < 800) {
-                    Navigator.pop(context);
-                  }
-                },
-              ),
-            if (activity != null)
-              ListTile(
-                leading: const Icon(Icons.inbox_outlined),
-                title: const Text('Inbox'),
-                onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) =>
-                        ActivityPage(controller: activity!, openBot: openBot),
-                  ),
-                ),
-              ),
-            ListTile(
-              leading: const Icon(Icons.manage_accounts_outlined),
-              title: const Text('Manage Bots'),
-              onTap: () => Navigator.of(context).push(
-                MaterialPageRoute<void>(
-                  builder: (_) => BotRecoveryPage(
-                    api: api,
-                    store: store,
-                    userId: userId!,
-                    changed: restore,
-                  ),
-                ),
-              ),
-            ),
-            ListTile(
-              leading: const Icon(Icons.refresh),
-              title: const Text('Refresh'),
-              onTap: restore,
-            ),
-            // A development build can look at the ViewNode renderer before a
-            // plugin produces a document; the shipped app has no such door.
-            if (developmentAuth)
-              ListTile(
-                leading: const Icon(Icons.dashboard_customize_outlined),
-                title: const Text('View sample'),
-                onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) =>
-                        ViewSamplePage(store: store, userId: userId!),
-                  ),
-                ),
-              ),
-            ListTile(
-              leading: const Icon(Icons.settings_outlined),
-              title: const Text('Settings'),
-              onTap: () => Navigator.of(context).push(
-                MaterialPageRoute<void>(
-                  builder: (_) =>
-                      SettingsPage(api: api, store: store, userId: userId!),
-                ),
-              ),
-            ),
-            ListTile(
-              leading: const Icon(Icons.logout),
-              title: const Text('Sign out'),
-              onTap: () async {
-                try {
-                  clearActivity();
-                  await auth.signOut();
-                  sessions.clear();
-                  if (mounted) {
-                    setState(() {
-                      userId = null;
-                      selected = null;
-                      bots = [];
-                    });
-                  }
-                } catch (_) {
-                  if (mounted) {
-                    setState(() {
-                      error =
-                          'Couldn’t sign out. Please reconnect and try again.';
-                    });
-                  }
-                }
-              },
-            ),
-          ],
-        );
-        final wide = MediaQuery.sizeOf(context).width >= 800;
-        return Scaffold(
-          key: scaffoldKey,
-          appBar: AppBar(
-            title: Text(selected?.initialName ?? 'FrockBot'),
-            actions: [
-              if (selected != null && activity != null)
-                PopupMenuButton<String>(
-                  tooltip: 'Conversation actions',
-                  enabled: !activity!.saving && !activity!.pending,
-                  onSelected: (value) => activity!.mark(
-                    selected!.botId.value,
-                    read: value == 'read',
-                  ),
-                  itemBuilder: (_) => [
-                    if (activity!
-                            .unread[selected!.botId.value]
-                            ?.lastActivityCursor !=
-                        null)
-                      const PopupMenuItem(
-                        value: 'read',
-                        child: Text('Mark as read'),
-                      ),
-                    const PopupMenuItem(
-                      value: 'unread',
-                      child: Text('Mark as unread'),
-                    ),
-                  ],
-                ),
-              // The Applet fallback is a WebView, which the browser has no
-              // implementation of; the web client reaches an Applet directly.
-              if (!kIsWeb)
-                IconButton(
-                  tooltip: 'Your Applets',
-                  icon: const Icon(Icons.widgets_outlined),
-                  onPressed: () => Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (_) =>
-                          AppletDirectoryPage(api: api, userId: userId!),
-                    ),
-                  ),
-                ),
-            ],
+          )
+        : AppShell(
+            key: ValueKey(userId),
+            api: api,
+            store: store,
+            sessions: sessions,
+            userId: userId!,
+            botLinks: botLinks,
+            onSignOut: signOut,
           ),
-          drawer: wide ? null : Drawer(child: SafeArea(child: directory)),
-          body: SafeArea(
-            child: Row(
-              children: [
-                if (wide) SizedBox(width: 260, child: directory),
-                Expanded(
-                  child: selected == null
-                      ? FrockEmptyState(
-                          title: bots.isEmpty
-                              ? 'No Bots yet'
-                              : 'Choose a Bot to begin',
-                          detail: bots.isEmpty
-                              ? 'Your Bots will appear here once they’re created.'
-                              : 'Pick a Bot from your list to catch up or start something new.',
-                          action: bots.isEmpty || wide
-                              ? 'Refresh Bots'
-                              : 'Your Bots',
-                          onAction: bots.isEmpty || wide
-                              ? restore
-                              : () => scaffoldKey.currentState?.openDrawer(),
-                        )
-                      : ConversationView(
-                          key: ValueKey('$userId:${selected!.botId.value}'),
-                          sessions: sessions,
-                          userId: userId!,
-                          botId: selected!.botId.value,
-                        ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    ),
   );
+
   @override
   void dispose() {
     unawaited(links?.cancel());
-    WidgetsBinding.instance.removeObserver(this);
-    clearActivity();
+    botLinks.dispose();
     sessions.clear();
     api.close();
-    super.dispose();
-  }
-}
-
-class ConversationView extends StatefulWidget {
-  final BotSessions sessions;
-  final String userId;
-  final String botId;
-  const ConversationView({
-    super.key,
-    required this.sessions,
-    required this.userId,
-    required this.botId,
-  });
-  @override
-  State<ConversationView> createState() => _ConversationViewState();
-}
-
-class _ConversationViewState extends State<ConversationView>
-    with WidgetsBindingObserver {
-  late final BotSession session = widget.sessions.open(
-    widget.userId,
-    widget.botId,
-  );
-  ChatController get controller => session.controller;
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addObserver(this);
-    controller.addListener(update);
-    unawaited(session.start());
-  }
-
-  void update() {
-    if (mounted) setState(() {});
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
-      widget.sessions.resume();
-    } else {
-      widget.sessions.pause();
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) => Column(
-    children: [
-      if (session.conversations.length > 1)
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: DropdownButton<String>(
-            isExpanded: true,
-            value: controller.conversationId,
-            hint: const Text('Current conversation'),
-            items: session.conversations
-                .map(
-                  (c) => DropdownMenuItem(
-                    value: c.conversationId,
-                    child: Text('Conversation ${c.ordinal}'),
-                  ),
-                )
-                .toList(),
-            onChanged: (id) async {
-              await controller.selectConversation(id);
-              if (mounted) setState(() {});
-            },
-          ),
-        ),
-      Expanded(
-        child: ChatPane(
-          controller: controller,
-          onReconnect: session.channel.connect,
-        ),
-      ),
-    ],
-  );
-  @override
-  void dispose() {
-    // The session outlives this view so that switching back to this Bot is a
-    // lookup rather than a reconnection.
-    WidgetsBinding.instance.removeObserver(this);
-    controller.removeListener(update);
-    super.dispose();
-  }
-}
-
-class ChatPane extends StatefulWidget {
-  final ChatController controller;
-  final Future<void> Function() onReconnect;
-  const ChatPane({
-    super.key,
-    required this.controller,
-    required this.onReconnect,
-  });
-  @override
-  State<ChatPane> createState() => _ChatPaneState();
-}
-
-class _ChatPaneState extends State<ChatPane> {
-  final editor = TextEditingController();
-  final focus = FocusNode();
-  @override
-  void initState() {
-    super.initState();
-    editor.text = widget.controller.draft;
-    widget.controller.addListener(update);
-  }
-
-  void update() {
-    if (!mounted) return;
-    if (editor.text != widget.controller.draft &&
-        !editor.value.composing.isValid) {
-      editor.text = widget.controller.draft;
-    }
-    setState(() {});
-    if (widget.controller.ready) AcceptanceMetrics.instance.editableShown();
-  }
-
-  Future<void> send() async {
-    if (editor.value.composing.isValid && !editor.value.composing.isCollapsed) {
-      return;
-    }
-    if (!widget.controller.canSend || editor.text.trim().isEmpty) return;
-    unawaited(HapticFeedback.lightImpact());
-    await widget.controller.send(editor.text);
-    if (mounted) focus.requestFocus();
-  }
-
-  Future<void> refreshHistory({bool older = false}) async {
-    try {
-      await widget.controller.refresh(older: older);
-    } catch (_) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Couldn’t refresh your messages. Check your connection and try again.',
-          ),
-        ),
-      );
-    }
-  }
-
-  List<Widget> messages(Map<String, dynamic> run) {
-    final widgets = <Widget>[
-      bubble(run['input'] as String, true, '${run['runId']}:input'),
-    ];
-    var index = 0;
-    for (final event in run['events'] as List) {
-      if (event['type'] != 'send/to-user') continue;
-      final payload = event['payload'];
-      final text = payload is Map
-          ? payload['text'] ?? payload['content']
-          : null;
-      widgets.add(
-        bubble(
-          text is String
-              ? text
-              : 'This message contains content that is not available here yet.',
-          false,
-          '${run['runId']}:send:${index++}',
-        ),
-      );
-    }
-    final status = run['status'];
-    if (status != 'completed') {
-      widgets.add(
-        Padding(
-          padding: const EdgeInsets.all(8),
-          child: Text(switch (status) {
-            'running' =>
-              run['stopRequestedAt'] != null
-                  ? 'Stopping…'
-                  : run['queued'] == true
-                  ? 'Waiting…'
-                  : 'Working…',
-            'cancelled' => 'Stopped',
-            'failed' => 'The reply couldn’t be completed.',
-            _ => 'This reply needs attention.',
-          }, style: Theme.of(context).textTheme.bodySmall),
-        ),
-      );
-    }
-    return widgets;
-  }
-
-  Widget bubble(String text, bool user, String id) =>
-      TweenAnimationBuilder<double>(
-        key: ValueKey(id),
-        tween: Tween(begin: 0, end: 1),
-        duration: FrockTheme.motion(context),
-        curve: Curves.easeOutCubic,
-        builder: (context, value, child) => Opacity(
-          opacity: 0.7 + value * 0.3,
-          child: Transform.translate(
-            offset: Offset(0, 6 * (1 - value)),
-            child: child,
-          ),
-        ),
-        child: Align(
-          alignment: user ? Alignment.centerRight : Alignment.centerLeft,
-          child: Container(
-            constraints: const BoxConstraints(maxWidth: 720),
-            margin: EdgeInsets.fromLTRB(user ? 56 : 16, 6, user ? 16 : 56, 6),
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: user
-                  ? Theme.of(context).colorScheme.primary
-                        .withValues(alpha: 0.16)
-                  : Theme.of(context).colorScheme.surfaceContainerHighest,
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: Semantics(
-              label: user ? 'You' : 'Bot',
-              child: SelectableText(
-                text,
-                style: Theme.of(context).textTheme.bodyLarge,
-              ),
-            ),
-          ),
-        ),
-      );
-  @override
-  Widget build(BuildContext context) {
-    final c = widget.controller;
-    return Column(
-      children: [
-        if (c.connection != ConnectionState.connected)
-          MaterialBanner(
-            content: Text(switch (c.connection) {
-              ConnectionState.connecting => 'Connecting…',
-              ConnectionState.paused => 'Conversation paused on this device.',
-              _ => 'You’re offline. Your Bot can keep working.',
-            }),
-            actions: [
-              TextButton(
-                key: const ValueKey('reconnect'),
-                onPressed: widget.onReconnect,
-                child: const Text('Reconnect'),
-              ),
-            ],
-          ),
-        Expanded(
-          child: SelectionArea(
-            child: RefreshIndicator(
-              onRefresh: refreshHistory,
-              child: ListView(
-                // Chat starts at the latest row. Earlier pages extend the far
-                // end, preserving the viewport as history is prepended.
-                reverse: true,
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                physics: const AlwaysScrollableScrollPhysics(),
-                keyboardDismissBehavior:
-                    ScrollViewKeyboardDismissBehavior.onDrag,
-                key: PageStorageKey('history-${c.botId}-${c.conversationId}'),
-                children: [
-                  if (c.before != null)
-                    TextButton(
-                      onPressed: c.loading
-                          ? null
-                          : () => refreshHistory(older: true),
-                      child: const Text('Earlier messages'),
-                    ),
-                  for (final run in c.runs) ...messages(run),
-                  if (c.pendingId != null)
-                    bubble(c.pendingText ?? '', true, 'pending-${c.pendingId}'),
-                  if (c.runs.isEmpty && c.pendingId == null)
-                    Padding(
-                      padding: const EdgeInsets.all(32),
-                      child: c.loading
-                          ? const Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                FrockSkeleton(width: 180, height: 20),
-                                SizedBox(height: 20),
-                                FrockSkeleton(height: 64),
-                                SizedBox(height: 16),
-                                FrockSkeleton(width: 220, height: 64),
-                              ],
-                            )
-                          : Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const SheepAvatar(size: 64),
-                                const SizedBox(height: 24),
-                                Text(
-                                  'What would you like to work on?',
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .headlineMedium,
-                                ),
-                                const SizedBox(height: 12),
-                                Text(
-                                  'Ask a question, make a plan, or give your Bot something to do.',
-                                  style: Theme.of(context).textTheme.bodyLarge
-                                      ?.copyWith(
-                                        color: Theme.of(context)
-                                            .colorScheme
-                                            .onSurfaceVariant,
-                                      ),
-                                ),
-                              ],
-                            ),
-                    ),
-                ].reversed.toList(),
-              ),
-            ),
-          ),
-        ),
-        if (c.error != null)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: Text(c.error!),
-          ),
-        if (c.pendingId != null && !c.sending)
-          TextButton(
-            key: const ValueKey('check-delivery'),
-            onPressed: c.checking ? null : c.checkDelivery,
-            child: const Text('Check message status'),
-          ),
-        Padding(
-          padding: const EdgeInsets.all(12),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Expanded(
-                child: CallbackShortcuts(
-                  bindings: {
-                    const SingleActivator(LogicalKeyboardKey.enter, meta: true):
-                        send,
-                    const SingleActivator(
-                      LogicalKeyboardKey.enter,
-                      control: true,
-                    ): send,
-                  },
-                  child: TextField(
-                    key: const ValueKey('composer'),
-                    controller: editor,
-                    focusNode: focus,
-                    minLines: 1,
-                    maxLines: 6,
-                    keyboardType: TextInputType.multiline,
-                    textInputAction: TextInputAction.newline,
-                    decoration: const InputDecoration(
-                      hintText: 'Message your Bot',
-                      labelText: 'Message',
-                    ),
-                    onChanged: (value) {
-                      AcceptanceMetrics.instance.inputChanged();
-                      unawaited(c.saveDraft(value));
-                    },
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              if (c.activeRunId != null)
-                IconButton.filledTonal(
-                  key: const ValueKey('stop'),
-                  tooltip: 'Stop',
-                  onPressed: c.stopping
-                      ? null
-                      : () {
-                          unawaited(HapticFeedback.mediumImpact());
-                          unawaited(c.stop());
-                        },
-                  icon: const Icon(Icons.stop_rounded),
-                ),
-              IconButton.filled(
-                key: const ValueKey('send'),
-                tooltip: 'Send',
-                onPressed: c.canSend ? send : null,
-                icon: const Icon(Icons.arrow_upward_rounded),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  @override
-  void dispose() {
-    widget.controller.removeListener(update);
-    editor.dispose();
-    focus.dispose();
     super.dispose();
   }
 }
