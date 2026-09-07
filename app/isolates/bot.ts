@@ -7,7 +7,6 @@
 // `capabilities.ts` beside this file is the isolate-side host; this is the
 // Bot-side authority that mints it.
 
-import type { AgentEffectAdmission } from "@frockbot/core/agent-loop/agent";
 import type {
   FoundationAgentPackage,
   RuntimeModelSelection,
@@ -45,6 +44,8 @@ import {
 import { createShellCompositionHost } from "@frockbot/app/shell/backend-composition";
 import type { ShellIsolateMountOptions } from "@frockbot/app/shell/backend-composition";
 import { createBotMemoryHost } from "@frockbot/app/shell/backend-memory";
+import { agentRuntime } from "@frockbot/app/shell/runtime-mount";
+import { admitRunEffect } from "@frockbot/app/shell/turn";
 import { notificationIdV1 } from "@frockbot/app/shell/notification-id";
 import {
   executionPackagesV1,
@@ -73,23 +74,6 @@ export interface IsolateCallScopeV1 {
   generationId: string;
   request: unknown;
 }
-
-/** The Composition this Bot's Turn runs on, resolved by the composing object. */
-export type IsolateAgentRuntimeV1 = (
-  identity: BotIdentity,
-  settings: BotSettingsViewV1,
-) => Promise<{
-  agentPackages: FoundationAgentPackage[];
-  modelSelection: RuntimeModelSelection;
-}>;
-
-/** Durable Stop, as the fence a member's tool effect is admitted through. */
-export type IsolateEffectFenceV1 = (
-  identity: BotIdentity,
-  runId: string,
-  sessionId: string,
-  effect: AgentEffectAdmission,
-) => Promise<boolean>;
 
 /**
  * Everything a Bot isolate member needs. Package identity is attribution only;
@@ -233,7 +217,6 @@ export async function isolateInvokeModel(
     generationId: string;
     request: NormalizedModelRequest;
   },
-  agentRuntime: IsolateAgentRuntimeV1,
 ): Promise<IsolateModelInvocationV1> {
   if (!activeIsolateTurn(state, input)) {
     return {
@@ -251,7 +234,7 @@ export async function isolateInvokeModel(
     | undefined;
   if (authority.model) {
     try {
-      runtime = await agentRuntime(identity, settings);
+      runtime = await agentRuntime(state, identity, settings);
     } catch {
       runtime = undefined;
     }
@@ -289,7 +272,6 @@ async function invokeBotToolForIsolateV1(
     generationId: string;
     request: { callId: string; name: string; input: unknown };
   },
-  admitEffect: IsolateEffectFenceV1,
 ): Promise<IsolateScheduleOutcomeV1> {
   const request = input.request;
   const active = activeIsolateTurn(state, input);
@@ -386,7 +368,8 @@ async function invokeBotToolForIsolateV1(
   if (preparation.kind === "denied") {
     result = preparation.result;
   } else {
-    const admitted = await admitEffect(
+    const admitted = await admitRunEffect(
+      state,
       { userId: input.userId, botId: input.botId },
       input.runId,
       input.sessionId,
@@ -632,21 +615,16 @@ export async function isolateConnection(
 export async function isolateSchedule(
   state: ShellBotStateV1,
   input: IsolateCallScopeV1,
-  admitEffect: IsolateEffectFenceV1,
 ): Promise<IsolateScheduleOutcomeV1> {
   const request = decodeIsolateScheduleRequestV1(input.request);
-  return invokeBotToolForIsolateV1(
-    state,
-    {
-      ...input,
-      request: {
-        callId: request.callId,
-        name: "routine_manage",
-        input: request.input,
-      },
+  return invokeBotToolForIsolateV1(state, {
+    ...input,
+    request: {
+      callId: request.callId,
+      name: "routine_manage",
+      input: request.input,
     },
-    admitEffect,
-  );
+  });
 }
 
 async function isolateMemoryHost(

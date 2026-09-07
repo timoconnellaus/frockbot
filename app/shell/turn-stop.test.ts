@@ -6,6 +6,7 @@ import {
   type UserSettingsViewV1,
 } from "@frockbot/core/configuration";
 import { createShellBotBackendContribution } from "./backend.js";
+import { stopRun } from "./turn.js";
 import type { ShellBotBackendHost } from "./backend-state.js";
 import {
   botTurnCommandFingerprintV1,
@@ -221,7 +222,7 @@ describe("durable Stop", () => {
     );
     await new SessionEventLog(storage).rewrite(turn.sessionId, streamed);
 
-    const receipt = await contribution.stopRun(identity, stopCommand());
+    const receipt = await stopRun(contribution.state, identity, stopCommand());
 
     expect(receipt.run.partialText).toBe("Sheep farming begins with");
   });
@@ -229,7 +230,7 @@ describe("durable Stop", () => {
   test("records durable intent and an idempotency receipt", async () => {
     const { storage, contribution } = await fixture();
 
-    const receipt = await contribution.stopRun(identity, stopCommand());
+    const receipt = await stopRun(contribution.state, identity, stopCommand());
 
     expect(receipt).toMatchObject({
       schemaVersion: 1,
@@ -251,14 +252,14 @@ describe("durable Stop", () => {
   test("replays an identical command and rejects an identifier collision", async () => {
     const { storage, contribution } = await fixture();
 
-    const first = await contribution.stopRun(identity, stopCommand());
-    const replay = await contribution.stopRun(identity, stopCommand());
+    const first = await stopRun(contribution.state, identity, stopCommand());
+    const replay = await stopRun(contribution.state, identity, stopCommand());
 
     expect(replay.run.stopRequestedAt).toBe(first.run.stopRequestedAt);
     expect(stopReceiptKeys(storage)).toEqual(["stop-receipt:stop-1"]);
 
     await expect(
-      contribution.stopRun(identity, stopCommand("stop-1", "run-other")),
+      stopRun(contribution.state, identity, stopCommand("stop-1", "run-other")),
     ).rejects.toThrow(
       'Stop idempotency key "stop-1" was reused for a different command',
     );
@@ -268,10 +269,13 @@ describe("durable Stop", () => {
     const { storage, contribution } = await fixture();
 
     await expect(
-      contribution.stopRun(identity, { schemaVersion: 1, action: "stop" }),
+      stopRun(contribution.state, identity, {
+        schemaVersion: 1,
+        action: "stop",
+      }),
     ).rejects.toThrow();
     await expect(
-      contribution.stopRun(identity, {
+      stopRun(contribution.state, identity, {
         schemaVersion: 1,
         action: "cancel",
         commandId: "stop-2",
@@ -279,7 +283,11 @@ describe("durable Stop", () => {
       }),
     ).rejects.toThrow();
     await expect(
-      contribution.stopRun(identity, stopCommand("stop-3", "missing-run")),
+      stopRun(
+        contribution.state,
+        identity,
+        stopCommand("stop-3", "missing-run"),
+      ),
     ).rejects.toThrow('run "missing-run" was not admitted');
 
     storage.values.set(
@@ -297,7 +305,7 @@ describe("durable Stop", () => {
       }),
     );
     await expect(
-      contribution.stopRun(identity, stopCommand("stop-4")),
+      stopRun(contribution.state, identity, stopCommand("stop-4")),
     ).rejects.toThrow(`run "${turn.runId}" is already terminal`);
 
     storage.values.set(
@@ -305,7 +313,7 @@ describe("durable Stop", () => {
       storedRun({ status: "completed", responseText: "already answered" }),
     );
     await expect(
-      contribution.stopRun(identity, stopCommand("stop-5")),
+      stopRun(contribution.state, identity, stopCommand("stop-5")),
     ).rejects.toThrow(`run "${turn.runId}" is already terminal`);
   });
 
@@ -313,7 +321,8 @@ describe("durable Stop", () => {
     const { contribution } = await fixture();
 
     await expect(
-      contribution.stopRun(
+      stopRun(
+        contribution.state,
         { userId: "user-2", botId: "primary" },
         stopCommand(),
       ),

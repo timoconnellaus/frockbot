@@ -262,8 +262,8 @@ app/              The product: `runtime.ts`, the Contribution tables, and one di
   routines/       Durable Routines, the alarm scheduler, and the webhook door
   search/         Per-User transcript index, search route, and overlay
   settings/       Bot, Package, and User settings surfaces
-  shell/          Hosted application geometry and surface presenter
-  skills/         Skill catalog, disclosure on demand, and managed Skills
+  shell/          The Bot Durable Object's state, its Turn, the Composition mount, and the hosted geometry
+  skills/         Skill catalog, disclosure on demand, managed Skills, and the Bot's Workspace seam
   subagents/      Subagent Tasks: the parent Bot's task authority, the Durable Object binding, and their records
   testkit/        Shared test doubles and harnesses
   ui-theme/       Global semantic tokens for hosted client Contributions

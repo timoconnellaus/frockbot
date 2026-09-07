@@ -11,6 +11,7 @@ import {
   type UserSettingsViewV1,
 } from "@frockbot/core/configuration";
 import { createShellBotBackendContribution } from "./backend.js";
+import { stopRun } from "./turn.js";
 import type { ShellBotBackendHost } from "./backend-state.js";
 import { settleTask } from "@frockbot/app/subagents/bot";
 import {
@@ -240,7 +241,7 @@ describe("Stop and supersede on the same Turn", () => {
       }),
     );
 
-    const receipt = await contribution.stopRun(identity, {
+    const receipt = await stopRun(contribution.state, identity, {
       schemaVersion: 1,
       action: "stop",
       commandId: "stop-1",
@@ -270,7 +271,7 @@ describe("Stop and supersede on the same Turn", () => {
     storage.values.set("run:run-2", structuredClone(queued));
     storage.values.set("pending-run", "run-2");
 
-    await contribution.stopRun(identity, {
+    await stopRun(contribution.state, identity, {
       schemaVersion: 1,
       action: "stop",
       commandId: "stop-1",

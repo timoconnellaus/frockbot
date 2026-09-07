@@ -68,6 +68,19 @@ import {
 } from "@frockbot/app/isolates/bot";
 import { deliverMachineResult } from "@frockbot/app/machine/bot";
 import {
+  listOwnSkillDocuments,
+  listPackageUi,
+  listSkills,
+  runPackageUiTool,
+  writeUserSkill,
+  writeUserWorkspaceFile,
+} from "@frockbot/app/skills/bot";
+import {
+  archiveEligible,
+  refreshScheduledWork,
+} from "@frockbot/app/shell/identity";
+import { stopRun } from "@frockbot/app/shell/turn";
+import {
   acknowledgeNotification,
   listNotifications,
 } from "@frockbot/app/notifications/bot";
@@ -571,8 +584,7 @@ export class BotState extends DurableObject<BotStateEnv> {
                 },
               );
             },
-            archiveEligible: (storage) =>
-              requireShell().archiveEligible(storage),
+            archiveEligible: (storage) => archiveEligible(storage),
             tearDown: (identity) => this.tearDown(identity),
           },
           computer: {
@@ -612,7 +624,7 @@ export class BotState extends DurableObject<BotStateEnv> {
         }
         const alarmOwner = shell;
         this.stateChannel.setAlarmRefresher((transaction) =>
-          alarmOwner.refreshScheduledWork(transaction),
+          refreshScheduledWork(alarmOwner.state, transaction),
         );
         return {
           shell,
@@ -1006,19 +1018,14 @@ export class BotState extends DurableObject<BotStateEnv> {
       botId: request.botId as string,
     };
     const shell = await this.contribution();
-    return isolateInvokeModel(
-      shell.state,
-      identity,
-      {
-        runId: request.runId as string,
-        sessionId: request.sessionId as string,
-        turnId: request.turnId as string,
-        packageId: request.packageId as string,
-        generationId: request.generationId as string,
-        request: request.request as NormalizedModelRequest,
-      },
-      (target, settings) => shell.agentRuntime(target, settings),
-    );
+    return isolateInvokeModel(shell.state, identity, {
+      runId: request.runId as string,
+      sessionId: request.sessionId as string,
+      turnId: request.turnId as string,
+      packageId: request.packageId as string,
+      generationId: request.generationId as string,
+      request: request.request as NormalizedModelRequest,
+    });
   }
 
   async isolateMemoryRead(input: unknown) {
@@ -1103,12 +1110,9 @@ export class BotState extends DurableObject<BotStateEnv> {
   }
 
   async isolateSchedule(input: unknown) {
-    const shell = await this.contribution();
     return isolateSchedule(
-      shell.state,
+      (await this.contribution()).state,
       decodeIsolateCallRpcV1(input, decodeIsolateScheduleRequestV1) as never,
-      (identity, runId, sessionId, effect) =>
-        shell.admitRunEffect(identity, runId, sessionId, effect),
     );
   }
 
@@ -1457,13 +1461,13 @@ export class BotState extends DurableObject<BotStateEnv> {
   async listSkills(input: unknown) {
     const identity = decodeBotIdentityRpcV1(input);
     const { shell } = await this.materialized(identity);
-    return shell.listSkills(identity);
+    return listSkills(shell.state, identity);
   }
 
   async listPackageUi(input: unknown) {
     const identity = decodeBotIdentityRpcV1(input);
     const { shell } = await this.materialized(identity);
-    return shell.listPackageUi(identity);
+    return listPackageUi(shell.state, identity);
   }
 
   async runPackageUiTool(input: unknown) {
@@ -1479,7 +1483,7 @@ export class BotState extends DurableObject<BotStateEnv> {
     const { shell } = await this.materialized(identity);
     const command =
       request.command as import("@frockbot/core/contracts").PackageIframeToolCommandV1;
-    const turn = await shell.runPackageUiTool(identity, command);
+    const turn = await runPackageUiTool(shell.state, identity, command);
     await this.projectSettledRun(shell, identity, command.commandId);
     await this.projectSettledAudit(shell, identity, command.commandId);
     return turn;
@@ -1516,7 +1520,7 @@ export class BotState extends DurableObject<BotStateEnv> {
       botId: request.botId as string,
     };
     const { shell } = await this.materialized(identity);
-    return shell.writeUserWorkspaceFile(identity, {
+    return writeUserWorkspaceFile(shell.state, identity, {
       root: request.root as WorkspaceRootV1,
       path: request.path as string,
       bytes: Uint8Array.from(atob(request.bytesBase64 as string), (character) =>
@@ -1540,7 +1544,7 @@ export class BotState extends DurableObject<BotStateEnv> {
       botId: request.botId as string,
     };
     const { shell } = await this.materialized(identity);
-    return shell.writeUserSkill(identity, {
+    return writeUserSkill(shell.state, identity, {
       slug: request.slug as string,
       name: request.name as string,
       description: request.description as string,
@@ -1558,7 +1562,7 @@ export class BotState extends DurableObject<BotStateEnv> {
   async listOwnSkillDocuments(input: unknown) {
     const identity = decodeBotIdentityRpcV1(input);
     const { shell } = await this.materialized(identity);
-    return shell.listOwnSkillDocuments(identity);
+    return listOwnSkillDocuments(shell.state, identity);
   }
 
   async stopRun(input: unknown) {
@@ -1572,7 +1576,11 @@ export class BotState extends DurableObject<BotStateEnv> {
       botId: request.botId as string,
     };
     const { shell } = await this.materialized(identity);
-    return shell.stopRun(identity, request.command as ClientRunStopCommandV1);
+    return stopRun(
+      shell.state,
+      identity,
+      request.command as ClientRunStopCommandV1,
+    );
   }
 
   /** The Bot's unread projection; the Bot Durable Object derives the count. */
