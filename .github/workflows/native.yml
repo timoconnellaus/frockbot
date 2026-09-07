@@ -55,3 +55,7 @@ jobs:
         if: steps.sdk.outputs.available == 'true'
         working-directory: apps/native
         run: flutter test --no-pub
+      - name: Build the web target
+        if: steps.sdk.outputs.available == 'true'
+        working-directory: apps/native
+        run: flutter build web --release --no-pub

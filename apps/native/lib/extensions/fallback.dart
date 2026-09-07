@@ -1,7 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 
+import 'package:flutter/foundation.dart'
+    show TargetPlatform, defaultTargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
@@ -210,7 +211,7 @@ class _AppletPageState extends State<AppletPage> with WidgetsBindingObserver {
       final lease = await _fetch(randomId());
       stage = 'webview-configuration';
       if (!mounted || epoch != _epoch) return;
-      final params = Platform.isMacOS
+      final params = defaultTargetPlatform == TargetPlatform.macOS
           ? WebKitWebViewControllerCreationParams(
               mediaTypesRequiringUserAction: {
                 PlaybackMediaTypes.audio,
