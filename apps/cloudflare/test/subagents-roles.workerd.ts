@@ -22,9 +22,9 @@ import { runInDurableObject } from "cloudflare:test";
 import { describe, expect, test } from "vitest";
 import { provisionBot, provisionSiblingBot } from "./provision-bot.ts";
 import { toolCallTriggerPrompt } from "./harness/miniflare.ts";
-import { subagentDurableObjectNameV1 } from "@frockbot/plugin-subagents/storage-keys";
-import { taskDesktopLeaseOwnerV1 } from "@frockbot/plugin-subagents/records";
-import type { TaskListViewV1 } from "@frockbot/plugin-subagents/shared";
+import { subagentDurableObjectNameV1 } from "@frockbot/app/subagents/storage-keys";
+import { taskDesktopLeaseOwnerV1 } from "@frockbot/app/subagents/records";
+import type { TaskListViewV1 } from "@frockbot/app/subagents/shared";
 import {
   COMPUTER_HOST_TOKEN_HEADER,
   encodeComputerHostRequestV1,

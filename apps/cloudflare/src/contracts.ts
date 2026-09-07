@@ -8,7 +8,7 @@ import {
   type BotIsolateEnv,
   type SessionEvent,
 } from "@frockbot/core/contracts";
-import type { MachineResultDeliveryV1 } from "@frockbot/plugin-user-machine/delivery";
+import type { MachineResultDeliveryV1 } from "@frockbot/app/machine/delivery";
 import type { DebugGatewaySurface } from "./debug.js";
 import type {
   BotConfigurationExecuteRpcV1,
@@ -32,7 +32,7 @@ import type {
   RevokeConnectionResult,
   StartConnectionResult,
 } from "@frockbot/core/connection";
-import type { MemoryVector, MemoryVectorMatch } from "@frockbot/plugin-memory";
+import type { MemoryVector, MemoryVectorMatch } from "@frockbot/app/memory";
 // Flock DTOs cross only the authenticated hosted/backend seam.
 import type {
   BotDirectoryViewV1,
@@ -45,20 +45,20 @@ import type {
   FlockReceiptV1,
   SheepIdentityViewV1,
   UpdateSheepCommandV1,
-} from "@frockbot/plugin-flock/shared";
+} from "@frockbot/app/flock/shared";
 import type {
   TemplateCommandV1,
   TemplateImportListViewV1,
   TemplateImportRecordV1,
   TemplateShareListViewV1,
   TemplateShareReceiptV1,
-} from "@frockbot/plugin-bot-template/shared";
+} from "@frockbot/app/bot-template/shared";
 import type { TemplateVisibilityV1 } from "@frockbot/core/template";
 import type {
   ApprovalDecisionCommandV1,
   ApprovalDecisionReceiptV1,
   ApprovalListViewV1,
-} from "@frockbot/plugin-shell/approvals";
+} from "@frockbot/app/shell/approvals";
 import type {
   RoutineCommandReceiptV1,
   RoutineCommandV1,
@@ -68,11 +68,11 @@ import type {
   RoutineListViewV1,
   RoutineRunDetailViewV1,
   RoutineRunListViewV1,
-} from "@frockbot/plugin-routines/shared";
+} from "@frockbot/app/routines/shared";
 import type {
   TaskListViewV1,
   TaskViewV1,
-} from "@frockbot/plugin-subagents/shared";
+} from "@frockbot/app/subagents/shared";
 import type {
   ClientConversationListV1,
   ClientConversationOutcomeV1,
@@ -83,9 +83,9 @@ import type {
   ClientRunStopCommandV1,
   ClientRunStopReceiptV1,
   ClientTurnV1,
-} from "@frockbot/plugin-shell/run-protocol";
-import type { ClientSkillCatalogV1 } from "@frockbot/plugin-shell/skill-protocol";
-import type { DeploymentPolicyV1 } from "@frockbot/plugin-admin/shared";
+} from "@frockbot/app/shell/run-protocol";
+import type { ClientSkillCatalogV1 } from "@frockbot/app/shell/skill-protocol";
+import type { DeploymentPolicyV1 } from "@frockbot/app/admin/shared";
 
 export interface BackendRouteContribution {
   packageId: string;

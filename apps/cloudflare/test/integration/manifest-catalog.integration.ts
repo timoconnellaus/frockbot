@@ -1,5 +1,5 @@
 // Seam S6: the `/app-manifest` producer in `src/user-application.ts` against
-// the client decoder in `packages/plugin-shell/src/client/index.ts`.
+// the client decoder in `app/shell/client/index.ts`.
 //
 // Both halves were tested, never against each other, and two incidents lived
 // in exactly that gap:
@@ -11,7 +11,7 @@
 // This test decodes the live body with the production decoder, imported, not
 // copied.
 import { describe, expect, it } from "vitest";
-import { decodePluginCatalog } from "@frockbot/plugin-shell/client";
+import { decodePluginCatalog } from "@frockbot/app/shell/client";
 import { asUser, freshUserId, useApplicationArtifact } from "./fixtures.ts";
 
 useApplicationArtifact();

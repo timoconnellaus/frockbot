@@ -3,7 +3,7 @@ import type {
   ClientPluginContext,
   ClientSlotRegistration,
 } from "@frockbot/client-core";
-import { frockBotWebDataKey } from "@frockbot/plugin-shell/shared";
+import { frockBotWebDataKey } from "@frockbot/app/shell/shared";
 import { nextTick, ref } from "vue";
 import { computerKey, type ComputerState } from "../shared.js";
 import {

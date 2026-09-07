@@ -3,12 +3,12 @@ import {
   createCredentialUserBackendContribution,
   type CredentialStorage,
   type CredentialTransaction,
-} from "@frockbot/plugin-credentials/user";
+} from "@frockbot/app/credentials/user";
 import {
   createUserSettingsBackendContribution,
   type UserSettingsStorage,
   type UserSettingsTransaction,
-} from "@frockbot/plugin-settings/user";
+} from "@frockbot/app/settings/user";
 import { OllamaCloudClient, type OllamaFetch } from "./client.js";
 import {
   catalogRetryDelayMsV1,

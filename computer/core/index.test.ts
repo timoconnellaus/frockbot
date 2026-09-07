@@ -95,10 +95,10 @@ describe("Workspace layout", () => {
       workspaceMountPathV1(LAYOUT, {
         kind: "package-declared",
         userId: "u",
-        packageId: "@frockbot/plugin-memory",
+        packageId: "@frockbot/app/memory",
         rootId: "notes",
       }),
-    ).toBe("/home/box/agent-data/user-packages/frockbot-plugin-memory/notes");
+    ).toBe("/home/box/agent-data/user-packages/frockbot-app-memory/notes");
     expect(() =>
       workspaceMountPathV1(LAYOUT, {
         kind: "bot-memory",

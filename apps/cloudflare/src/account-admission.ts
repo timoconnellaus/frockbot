@@ -1,4 +1,4 @@
-import { decodeDeploymentPolicyV1 } from "@frockbot/plugin-admin/shared";
+import { decodeDeploymentPolicyV1 } from "@frockbot/app/admin/shared";
 import type { GatewayDependencies } from "./contracts.js";
 
 /** Shared browser/native account policy, before any User materialization. */

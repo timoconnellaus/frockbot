@@ -2,7 +2,7 @@ import {
   decodeBotDebugQueryV1,
   isBotDebugQueryRefusalV1,
   type BotDebugQueryV1,
-} from "@frockbot/plugin-shell/debug-protocol";
+} from "@frockbot/app/shell/debug-protocol";
 import { decodeBotIdV1 } from "@frockbot/core/configuration";
 
 /**

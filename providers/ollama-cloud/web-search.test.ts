@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { createAgentRuntimeHarness } from "@frockbot/plugin-testkit";
+import { createAgentRuntimeHarness } from "@frockbot/app/testkit";
 import type { ToolExecutionContext } from "@frockbot/core/contracts";
-import type { CredentialLeaseRuntime } from "@frockbot/plugin-credentials/user";
+import type { CredentialLeaseRuntime } from "@frockbot/app/credentials/user";
 import type { CredentialLeaseV1 } from "@frockbot/core/connection";
 import {
   createConfiguredOllamaWebSearchRuntimeContribution,

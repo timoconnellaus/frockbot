@@ -8,7 +8,7 @@
 // anything a second time.
 //
 // Versioned, exact-field, and decoded at the seam it crosses, in the shape
-// `@frockbot/plugin-routines`'s records use. A previous stored shape must cross
+// `@frockbot/app/routines`'s records use. A previous stored shape must cross
 // an explicit forward migration before decoding; an unknown shape remains a
 // visible failure.
 

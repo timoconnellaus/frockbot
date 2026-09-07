@@ -3,7 +3,7 @@ import {
   type LlmStreamEvent,
   type NormalizedModelRequest,
 } from "@frockbot/core/contracts";
-import { createAgentRuntimeHarness } from "@frockbot/plugin-testkit";
+import { createAgentRuntimeHarness } from "@frockbot/app/testkit";
 import foundationProviderFeature, {
   classifyFoundationFailureV1,
   FOUNDATION_MODEL,

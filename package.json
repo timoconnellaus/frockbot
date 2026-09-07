@@ -4,9 +4,9 @@
   "private": true,
   "packageManager": "bun@1.3.6",
   "workspaces": [
+    "app",
     "applets",
     "applets/sdk",
-    "applications/*",
     "apps/*",
     "computer",
     "core",
@@ -19,7 +19,6 @@
     "uuid": "^11.1.1"
   },
   "scripts": {
-    "build:webui": "bun run --filter @frockbot/plugin-ui-theme build && bun run --filter @frockbot/plugin-shell build && bun run --filter @frockbot/plugin-settings build && bun run --filter @frockbot/plugin-custom-models build && bun run --filter @frockbot/plugin-routines build && bun run --filter @frockbot/plugin-bot-template build && bun run --filter @frockbot/plugin-flock build && bun run --filter @frockbot/computer build",
     "build:cloudflare": "bun scripts/build-applets-assets.ts && bun run --filter @frockbot/cloudflare build",
     "build:marketing": "bun run --filter @frockbot/marketing build",
     "bootstrap:npm-trust": "./scripts/bootstrap-npm-trust.sh",
@@ -28,8 +27,8 @@
     "smoke:native": "bun scripts/native-dev.ts smoke",
     "dogfood:stop": "./scripts/dogfood/dev-stack.sh stop",
     "dev:cloudflare": "bun run --filter @frockbot/cloudflare dev",
-    "dev": "bun run build:webui && bun run dev:cloudflare",
-    "build": "bun run build:webui && bun run build:cloudflare && bun run build:marketing",
+    "dev": "bun run dev:cloudflare",
+    "build": "bun run build:cloudflare && bun run build:marketing",
     "typecheck": "bun scripts/check-client-protocol.ts && bun scripts/check-layer-imports.ts && bun scripts/check-computer-host-imports.ts && bun scripts/generate-isolate-context-catalog.ts --check && bun scripts/build-applets-assets.ts --check && bun scripts/typecheck.ts",
     "lint:ui-styles": "bun scripts/check-ui-styles.ts",
     "lint:layer-imports": "bun scripts/check-layer-imports.ts",

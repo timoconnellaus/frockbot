@@ -7,11 +7,11 @@ import {
   parseCredentialKeyringV1,
   sealCredentialV1,
 } from "@frockbot/core/connection";
-import { CredentialLeaseRuntime } from "@frockbot/plugin-credentials/user";
+import { CredentialLeaseRuntime } from "@frockbot/app/credentials/user";
 import {
   type AgentRuntimeHarness,
   createAgentRuntimeHarness,
-} from "@frockbot/plugin-testkit";
+} from "@frockbot/app/testkit";
 import { anthropicPromptV1, createAnthropicFeature } from "./runtime.js";
 
 function serializedKeyring(): string {

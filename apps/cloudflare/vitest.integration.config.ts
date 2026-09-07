@@ -63,7 +63,7 @@ const computerHost = createComputerHostFake({ maximumHangMs: 3_000 });
 
 export default defineConfig({
   // `manifest-catalog.integration.ts` imports the production client decoder
-  // from `@frockbot/plugin-shell/client`, whose module graph reaches Vue single
+  // from `@frockbot/app/shell/client`, whose module graph reaches Vue single
   // file components and the Cordis client runtime. The same two settings
   // `vite.config.ts` uses to build the shipped client make that graph
   // resolvable here; nothing in it executes — only `decodePluginCatalog` runs.

@@ -240,16 +240,37 @@ Register `https://bot.frockbot.com/api/auth/callback/google` as an authorized Go
 ## Structure
 
 ```text
+app/              The product: `runtime.ts`, the Contribution tables, and one directory per feature
+  admin/          Deployment policy administration surface
+  audit/          Audited-effect projection and the User's rebuildable audit table
+  auth/           Authenticated identity contributions for the hosted gateway
+  bot-template/   Bot template export, share records, and guarded import
+  clock/          Reference feature with agent, host, and WebUI contributions
+  credentials/    Per-User Connection credential encryption and leases
+  custom-models/  Opt-in account and Bot model selection surfaces
+  echo/           Minimal reference feature used by tests and examples
+  flock/          Durable Bot directory and composable sheep identity
+  identity/       Sheep identity composition and rendering
+  image/          generate_image through Cloudflare's AI binding, fenced by the Workspace
+  machine/        Registered-machine enrollment and pairing
+  machine-messages/ Message delivery to and from a User's registered machines
+  memory/         Bot, User and Project Markdown memory over the Workspace store
+  routines/       Durable Routines, the alarm scheduler, and the webhook door
+  search/         Per-User transcript index, search route, and overlay
+  settings/       Bot, Package, and User settings surfaces
+  shell/          Hosted application geometry and surface presenter
+  skills/         Skill catalog, disclosure on demand, and managed Skills
+  subagents/      Subagent Tasks, their Durable Object hosts, and their records
+  testkit/        Shared test doubles and harnesses
+  ui-theme/       Global semantic tokens for hosted client Contributions
+  web/            web_search and a bounded, SSRF-classified web_fetch
 applets/          Applets: the seven applet_* tools, the source root, and the shell's pages
   sdk/            Applet authoring SDK, component kit, linter, and `applet` CLI; published to npm
 apps/
-  agent-runtime/    Transport-neutral backend Agent composition
   cloudflare/       User application loader, Dynamic Worker artifact, and bot state
   computer-host/    Shared Computer host Worker and its Node container
   marketing/        Public frockbot.com site and static-assets Worker
   native/           Flutter client for the hosted application
-applications/
-  foundation/       The composed application every deployment loads
 computer/          The Computer: tools, prompt, state, viewer UI, host seam, and the Fly provider
   core/            Provider registry and capability interfaces for Computers
   host-protocol/   Versioned v1 DTOs and decoders for the Computer host seam
@@ -275,29 +296,6 @@ packages/
   compose-frockbot/ The plugin descriptor and the Bot isolate host that loads a member's artifact
   client-core/      Shared client runtime helpers and brand typography stylesheet
   client-ui/        Reusable Vue primitives and surface registry
-  plugin-clock/     Reference package with agent, host, and WebUI contributions
-  plugin-echo/      Minimal reference Package used by tests and examples
-  plugin-testkit/   Shared test doubles and harnesses for Package authors
-  plugin-admin/     Deployment policy administration surface
-  plugin-audit/     Audited-effect projection and the User's rebuildable audit table
-  plugin-auth/      Authenticated identity contributions for the hosted gateway
-  plugin-bot-template/ Bot template export, share records, and guarded import
-  plugin-credentials/ Per-User Connection credential encryption and leases
-  plugin-custom-models/  Opt-in account and Bot model selection surfaces
-  plugin-flock/     Durable Bot directory and composable sheep identity Package
-  plugin-identity/  Sheep identity composition and rendering
-  plugin-image/     generate_image through Cloudflare's AI binding, fenced by the Workspace
-  plugin-machine-messages/ Message delivery to and from a User's registered machines
-  plugin-memory/    Bot, User and Project Markdown memory over the Workspace store
-  plugin-routines/  Durable Routines, the alarm scheduler, and the webhook door
-  plugin-search/    Per-User transcript index, search route, and overlay
-  plugin-settings/  Plugin-owned Bot, Package, and User settings surfaces
-  plugin-shell/     Hosted application geometry and surface presenter
-  plugin-skills/    Skill catalog, disclosure on demand, and managed Skills
-  plugin-subagents/ Subagent Tasks, their Durable Object hosts, and their records
-  plugin-ui-theme/  Global semantic tokens for hosted client Contributions
-  plugin-user-machine/ Registered-machine enrollment and pairing
-  plugin-web/       web_search and a bounded, SSRF-classified web_fetch
 providers/
   openai-compatible/ Shared model transport: request mapping, deadlines, AI SDK decoding
   frock-ai/         Built-in credential-free Frock AI model provider

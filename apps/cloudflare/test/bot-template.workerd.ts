@@ -21,7 +21,7 @@ import {
 import type {
   TemplateShareListViewV1,
   TemplateShareReceiptV1,
-} from "@frockbot/plugin-bot-template/shared";
+} from "@frockbot/app/bot-template/shared";
 import { provisionBot } from "./provision-bot.ts";
 
 interface TemplateRpc {

@@ -3,12 +3,12 @@ import { describe, expect, test } from "vitest";
 import {
   createAdminBackendContribution,
   type AdminGatewayHost,
-} from "@frockbot/plugin-admin/backend";
+} from "@frockbot/app/admin/backend";
 import {
   decodeDeploymentPolicyV1,
   type DeploymentPolicyV1,
   type SetSignupsCommandV1,
-} from "@frockbot/plugin-admin/shared";
+} from "@frockbot/app/admin/shared";
 import type {
   BotConfigurationBinding,
   GatewayAuth,

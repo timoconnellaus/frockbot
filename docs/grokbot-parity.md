@@ -1050,7 +1050,7 @@ than a silent absence. Row 44 is the only one.
   which is not in this document: no input schema, bound, or error shape was
   ever measured for any of the three. FrockBot's contracts are its own, defined
   from first principles — the web-search DTO and its `WebSearchV1` interface
-  live in `@frockbot/plugin-web/contract` so a second provider can satisfy them
+  live in `@frockbot/app/web/contract` so a second provider can satisfy them
   with no kernel diff, and `web_fetch`'s bounds (https only, ≤ 3 re-validated
   redirects, a content-type allow list, a 1 MiB streamed read and ≤ 32 KiB of
   extracted text) are FrockBot's outbound policy, not a copy of GrokBot's.
@@ -1065,7 +1065,7 @@ than a silent absence. Row 44 is the only one.
 
 - **52** — the transcript half is landed and the media half cannot be. A
   User's Durable Object holds a rebuildable index over every one of their Bots'
-  transcripts (`packages/plugin-search`), reached through a route and a search
+  transcripts (`app/search`), reached through a route and a search
   overlay, and the row's own parenthesis is matched: the agent gets no tool over
   it. `SearchRowKindV1` declares `"media"` beside `user`, `assistant` and
   `tool` and **nothing writes it**, deliberately — FrockBot has no attachment

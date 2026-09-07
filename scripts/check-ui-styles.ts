@@ -10,9 +10,9 @@ import {
 } from "css-tree";
 
 const failures: string[] = [];
-const themePackage = "packages/plugin-ui-theme/";
+const themePackage = "app/ui-theme/";
 const featureStyles = [
-  ...new Bun.Glob("packages/*/src/client/**/*.{css,vue}").scanSync({
+  ...new Bun.Glob("app/*/client/**/*.{css,vue}").scanSync({
     cwd: ".",
     onlyFiles: true,
   }),
@@ -174,7 +174,7 @@ function checkCss(path: string, ast: CssNode, lineOffset = 0): void {
   });
 }
 
-const themePath = `${themePackage}src/client/theme.css`;
+const themePath = `${themePackage}client/theme.css`;
 const themeAst = parseStylesheet(themePath, readFileSync(themePath, "utf8"), 0);
 if (themeAst) collectCustomProperties(themeAst);
 

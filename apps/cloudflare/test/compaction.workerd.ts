@@ -18,7 +18,7 @@
 //
 // Tool-output pruning is exercised where it can be asserted exactly — through
 // the same `turnScopedMessagesV1` this object calls, in
-// `packages/plugin-shell/src/compaction.test.ts`. Nothing this Worker can
+// `app/shell/compaction.test.ts`. Nothing this Worker can
 // reach produces a tool result large enough for the prune floor.
 import { env } from "cloudflare:workers";
 import { describe, expect, test } from "vitest";

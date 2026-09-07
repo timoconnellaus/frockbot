@@ -2,7 +2,7 @@
   "extends": "../tsconfig.json",
   "compilerOptions": {
     // `manifest-catalog.integration.ts` imports the production client decoder,
-    // whose module graph reaches browser code. `packages/plugin-shell` compiles
+    // whose module graph reaches browser code. `app/shell` compiles
     // under the same combination.
     "lib": ["ES2023", "DOM", "DOM.Iterable", "WebWorker"],
     "types": [

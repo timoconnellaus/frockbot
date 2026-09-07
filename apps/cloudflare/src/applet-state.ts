@@ -52,7 +52,7 @@ import {
   type AppletPointerV1,
   type AppletTrialV1,
 } from "@frockbot/core/durable";
-import { BOT_ISOLATE_COMPATIBILITY_DATE } from "@frockbot/plugin-shell/backend-isolate";
+import { BOT_ISOLATE_COMPATIBILITY_DATE } from "@frockbot/app/shell/backend-isolate";
 import {
   decodeRpcEnvelopeV1,
   rpcDecodedValue,

@@ -15,7 +15,7 @@ import {
   MACHINE_LIMITS_V1,
   machineRoutePathV1,
 } from "@frockbot/core/machine-protocol";
-import { MachineAgentDriverV1 } from "@frockbot/plugin-user-machine/testing";
+import { MachineAgentDriverV1 } from "@frockbot/app/machine/testing";
 import {
   asUser,
   expectOkJson,

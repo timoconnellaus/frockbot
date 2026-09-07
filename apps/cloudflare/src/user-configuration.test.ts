@@ -2,7 +2,7 @@ import { describe, expect, mock, test } from "bun:test";
 import {
   FOUNDATION_PACKAGES_V1,
   FOUNDATION_PACKAGE_VERSION_V1,
-} from "@frockbot/application-foundation/runtime";
+} from "@frockbot/app/runtime";
 import {
   decodeBotSettingsViewV1,
   migrateStoredBotSettingsV1,

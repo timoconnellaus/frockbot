@@ -19,7 +19,7 @@ import {
   type AuditEntryV1,
   type AuditProjectableRunV1,
   type AuditSinkV1,
-} from "@frockbot/plugin-audit";
+} from "@frockbot/app/audit";
 
 /** The User Durable Object's audit RPC surface, as the Bot object calls it. */
 export interface UserAuditRpc {

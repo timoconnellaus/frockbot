@@ -16,10 +16,7 @@
 import { env } from "cloudflare:workers";
 import { evictDurableObject } from "cloudflare:test";
 import { describe, expect, test } from "vitest";
-import type {
-  AuditEntryV1,
-  AuditRebuildReceiptV1,
-} from "@frockbot/plugin-audit";
+import type { AuditEntryV1, AuditRebuildReceiptV1 } from "@frockbot/app/audit";
 import type { FakeExecScript } from "./computer-host-fake.ts";
 import { toolCallTriggerPrompt } from "./harness/miniflare.ts";
 import { provisionBot, provisionSiblingBot } from "./provision-bot.ts";

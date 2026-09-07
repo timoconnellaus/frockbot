@@ -3,8 +3,8 @@ import { dirname, join, relative, resolve } from "node:path";
 
 // "a module imports nothing above it", enforced mechanically. Walks the import
 // graph of every non-test source file under each module root and fails on any
-// specifier that reaches a Package, an application, or an app the module's row
-// below does not allow.
+// specifier that reaches a Package or an app the module's row below does not
+// allow.
 
 const repoRoot = resolve(import.meta.dirname, "..");
 const failures: string[] = [];
@@ -31,12 +31,12 @@ const modules: Module[] = [
     allowed: [
       ...coreAllowed,
       "@frockbot/computer/",
-      // Temporary: the Vue client and the backend contribution reach the shell
-      // and the client libraries until steps 7 and 9 delete them.
-      // `plugin-subagents/shared` is reached only through the shell's own
-      // shared module, for one view type.
-      "@frockbot/plugin-shell/",
-      "@frockbot/plugin-subagents/shared",
+      // Temporary: the Vue client and the backend contribution reach the app
+      // and the client libraries until step 9 deletes them. `app/subagents/
+      // shared` is reached only through the shell's own shared module, for one
+      // view type.
+      "@frockbot/app/shell/",
+      "@frockbot/app/subagents/shared",
       "@frockbot/client-core",
       "@frockbot/client-ui",
     ],
@@ -46,10 +46,22 @@ const modules: Module[] = [
     allowed: [
       ...coreAllowed,
       "@frockbot/providers/",
-      // The three plugin seams the app cut moves into core.
-      "@frockbot/plugin-credentials/user",
-      "@frockbot/plugin-settings/user",
-      "@frockbot/plugin-web/contract",
+      // Temporary: the app cut's follow-up moves these three seams into core.
+      "@frockbot/app/credentials/user",
+      "@frockbot/app/settings/user",
+      "@frockbot/app/web/contract",
+    ],
+  },
+  {
+    dir: "app",
+    allowed: [
+      ...coreAllowed,
+      "@frockbot/app/",
+      "@frockbot/applets/",
+      "@frockbot/client-core",
+      "@frockbot/client-ui",
+      "@frockbot/computer/",
+      "@frockbot/providers/",
     ],
   },
 ];
@@ -78,12 +90,13 @@ function exportMap(manifest: Record<string, unknown>): Record<string, string> {
 
 const workspace = new Map<string, WorkspacePackage>();
 const manifestPaths = [
+  "app/package.json",
   "applets/package.json",
   "computer/package.json",
   "core/package.json",
   "providers/package.json",
 ];
-for (const group of ["packages", "apps", "applications"]) {
+for (const group of ["packages", "apps"]) {
   manifestPaths.push(
     ...new Bun.Glob(`${group}/*/package.json`).scanSync({
       cwd: repoRoot,
@@ -106,13 +119,8 @@ function isForbiddenSpecifier(
   module: Module,
   specifier: string,
 ): string | undefined {
-  if (
-    specifier.startsWith("apps/") ||
-    specifier.startsWith("applications/") ||
-    specifier.includes("/apps/") ||
-    specifier.includes("/applications/")
-  ) {
-    return "an app or application";
+  if (specifier.startsWith("apps/") || specifier.includes("/apps/")) {
+    return "an app";
   }
   if (!specifier.startsWith("@frockbot/")) return undefined;
   for (const allowed of module.allowed) {

@@ -19,7 +19,7 @@ import { describe, expect, test } from "vitest";
 import type {
   ClientSearchRebuildReceiptV1,
   SearchIndexResultsV1,
-} from "@frockbot/plugin-search";
+} from "@frockbot/app/search";
 import { provisionBot, provisionSiblingBot } from "./provision-bot.ts";
 
 interface SearchRpc {

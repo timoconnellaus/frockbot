@@ -17,7 +17,7 @@ import { SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { machineRoutePathV1 } from "@frockbot/core/machine-protocol";
 import type { MachineCommandV1 } from "@frockbot/core/machine-protocol";
-import { MachineAgentDriverV1 } from "@frockbot/plugin-user-machine/testing";
+import { MachineAgentDriverV1 } from "@frockbot/app/machine/testing";
 import { toolCallTriggerPrompt } from "../harness/miniflare.ts";
 import {
   asUser,

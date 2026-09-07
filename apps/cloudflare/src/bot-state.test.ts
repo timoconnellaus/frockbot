@@ -4,8 +4,8 @@ import {
   sealCredentialV1,
 } from "@frockbot/core/connection";
 import type { UserSettingsViewV1 } from "@frockbot/core/configuration";
-import type { StoredRun } from "@frockbot/plugin-shell/backend-contracts";
-import { randomSheepRecipeV1 } from "@frockbot/plugin-flock/shared";
+import type { StoredRun } from "@frockbot/app/shell/backend-contracts";
+import { randomSheepRecipeV1 } from "@frockbot/app/flock/shared";
 import type { BotStateEnv } from "./bot-state.js";
 import { hydrateStoredRunEventsV1 } from "../test/session-log-probe.js";
 

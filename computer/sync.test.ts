@@ -19,7 +19,7 @@ import type {
   SessionEvent,
   WorkspaceRootV1,
 } from "@frockbot/core/contracts";
-import { createAgentRuntimeHarness } from "@frockbot/plugin-testkit";
+import { createAgentRuntimeHarness } from "@frockbot/app/testkit";
 import { createComputerAgentFeature, syncWorkspaceRootNowV1 } from "./agent.js";
 
 const COMPOSITION = {

@@ -9,7 +9,7 @@ import {
   type NormalizedModelRequest,
 } from "@frockbot/core/contracts";
 import type { LoopAgentRuntimeV1 } from "@frockbot/core/contracts";
-import { createAgentRuntimeHarness } from "@frockbot/plugin-testkit";
+import { createAgentRuntimeHarness } from "@frockbot/app/testkit";
 import {
   FROCK_AI_CONNECTION_GENERATION,
   FROCK_AI_CONNECTION_ID,

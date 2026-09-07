@@ -1,6 +1,6 @@
 // The `WORKSPACE_FILES` seam, bound in production.
 //
-// `packages/plugin-shell/src/backend-skills.ts` reads one property off the Bot
+// `app/shell/backend-skills.ts` reads one property off the Bot
 // Durable Object's environment: a `WorkspaceFilesV1`. Until now nothing bound
 // it, so the Skills Package was never mounted and no deployed Turn could load
 // a Skill. This module is the binding: `WorkspaceFilesV1` over R2, with every

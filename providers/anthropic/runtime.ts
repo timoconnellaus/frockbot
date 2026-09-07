@@ -26,7 +26,7 @@ import {
   structuredOutputPlanV1,
   systemWithInstructionV1,
 } from "@frockbot/providers/openai-compatible";
-import type { CredentialLeaseRuntime } from "@frockbot/plugin-credentials/user";
+import type { CredentialLeaseRuntime } from "@frockbot/app/credentials/user";
 
 export const ANTHROPIC_PROVIDER = "anthropic";
 

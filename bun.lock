@@ -19,6 +19,30 @@
         "typescript": "npm:typescript-native-bridge@6.0.3-bridge.16.tsgo.7.0.2",
       },
     },
+    "app": {
+      "name": "@frockbot/app",
+      "version": "0.0.1",
+      "dependencies": {
+        "@frockbot/applets": "workspace:*",
+        "@frockbot/client-core": "workspace:*",
+        "@frockbot/client-ui": "workspace:*",
+        "@frockbot/compose-frockbot": "workspace:*",
+        "@frockbot/computer": "workspace:*",
+        "@frockbot/core": "workspace:*",
+        "@frockbot/providers": "workspace:*",
+        "better-auth": "1.7.2",
+        "croner": "10.0.1",
+        "vue": "3.5.41",
+      },
+      "devDependencies": {
+        "@cloudflare/workers-types": "latest",
+        "@types/bun": "1.4.0",
+        "@types/node": "26.2.0",
+        "css-tree": "2.3.1",
+        "typescript": "npm:typescript-native-bridge@6.0.3-bridge.16.tsgo.7.0.2",
+        "vue-tsc": "3.3.10",
+      },
+    },
     "applets": {
       "name": "@frockbot/applets",
       "version": "0.0.1",
@@ -55,87 +79,16 @@
         "@types/node": "26.2.0",
       },
     },
-    "applications/foundation": {
-      "name": "@frockbot/application-foundation",
-      "version": "0.0.1",
-      "dependencies": {
-        "@frockbot/applets": "workspace:*",
-        "@frockbot/client-core": "workspace:*",
-        "@frockbot/computer": "workspace:*",
-        "@frockbot/core": "workspace:*",
-        "@frockbot/plugin-admin": "workspace:*",
-        "@frockbot/plugin-audit": "workspace:*",
-        "@frockbot/plugin-auth": "workspace:*",
-        "@frockbot/plugin-bot-template": "workspace:*",
-        "@frockbot/plugin-clock": "workspace:*",
-        "@frockbot/plugin-credentials": "workspace:*",
-        "@frockbot/plugin-custom-models": "workspace:*",
-        "@frockbot/plugin-echo": "workspace:*",
-        "@frockbot/plugin-flock": "workspace:*",
-        "@frockbot/plugin-identity": "workspace:*",
-        "@frockbot/plugin-image": "workspace:*",
-        "@frockbot/plugin-machine-messages": "workspace:*",
-        "@frockbot/plugin-memory": "workspace:*",
-        "@frockbot/plugin-routines": "workspace:*",
-        "@frockbot/plugin-search": "workspace:*",
-        "@frockbot/plugin-settings": "workspace:*",
-        "@frockbot/plugin-shell": "workspace:*",
-        "@frockbot/plugin-skills": "workspace:*",
-        "@frockbot/plugin-subagents": "workspace:*",
-        "@frockbot/plugin-ui-theme": "workspace:*",
-        "@frockbot/plugin-user-machine": "workspace:*",
-        "@frockbot/plugin-web": "workspace:*",
-        "@frockbot/providers": "workspace:*",
-      },
-      "devDependencies": {
-        "@types/bun": "1.4.0",
-        "typescript": "^7.0.2",
-      },
-    },
-    "apps/agent-runtime": {
-      "name": "@frockbot/agent-runtime",
-      "version": "0.0.1",
-      "dependencies": {
-        "@frockbot/computer": "workspace:*",
-        "@frockbot/core": "workspace:*",
-        "@frockbot/plugin-credentials": "workspace:*",
-        "@frockbot/providers": "workspace:*",
-      },
-      "devDependencies": {
-        "@frockbot/plugin-clock": "workspace:*",
-        "@frockbot/plugin-echo": "workspace:*",
-        "@frockbot/plugin-identity": "workspace:*",
-        "@frockbot/plugin-memory": "workspace:*",
-        "@types/bun": "1.4.0",
-        "@types/node": "26.2.0",
-        "typescript": "^7.0.2",
-      },
-    },
     "apps/cloudflare": {
       "name": "@frockbot/cloudflare",
       "version": "0.0.1",
       "dependencies": {
-        "@frockbot/agent-runtime": "workspace:*",
+        "@frockbot/app": "workspace:*",
         "@frockbot/applets": "workspace:*",
-        "@frockbot/application-foundation": "workspace:*",
         "@frockbot/client-core": "workspace:*",
         "@frockbot/compose-frockbot": "workspace:*",
         "@frockbot/computer": "workspace:*",
         "@frockbot/core": "workspace:*",
-        "@frockbot/plugin-admin": "workspace:*",
-        "@frockbot/plugin-audit": "workspace:*",
-        "@frockbot/plugin-bot-template": "workspace:*",
-        "@frockbot/plugin-credentials": "workspace:*",
-        "@frockbot/plugin-flock": "workspace:*",
-        "@frockbot/plugin-image": "workspace:*",
-        "@frockbot/plugin-memory": "workspace:*",
-        "@frockbot/plugin-routines": "workspace:*",
-        "@frockbot/plugin-search": "workspace:*",
-        "@frockbot/plugin-settings": "workspace:*",
-        "@frockbot/plugin-shell": "workspace:*",
-        "@frockbot/plugin-skills": "workspace:*",
-        "@frockbot/plugin-subagents": "workspace:*",
-        "@frockbot/plugin-user-machine": "workspace:*",
         "@frockbot/providers": "workspace:*",
         "better-auth": "1.7.2",
         "vue": "3.5.41",
@@ -187,19 +140,17 @@
       "name": "@frockbot/computer",
       "version": "0.0.1",
       "dependencies": {
+        "@frockbot/app": "workspace:*",
         "@frockbot/client-core": "workspace:*",
         "@frockbot/client-ui": "workspace:*",
         "@frockbot/core": "workspace:*",
-        "@frockbot/plugin-shell": "workspace:*",
         "vue": "3.5.41",
       },
       "devDependencies": {
-        "@frockbot/plugin-testkit": "workspace:*",
+        "@frockbot/app": "workspace:*",
         "@types/bun": "1.4.0",
         "@types/node": "26.2.0",
-        "@vitejs/plugin-vue": "6.0.8",
         "typescript": "npm:typescript-native-bridge@6.0.3-bridge.16.tsgo.7.0.2",
-        "vite": "8.2.2",
         "vue-tsc": "3.3.10",
       },
     },
@@ -266,372 +217,6 @@
         "typescript": "^7.0.2",
       },
     },
-    "packages/plugin-admin": {
-      "name": "@frockbot/plugin-admin",
-      "version": "0.0.1",
-      "dependencies": {
-        "@frockbot/client-core": "workspace:*",
-        "@frockbot/client-ui": "workspace:*",
-        "@frockbot/core": "workspace:*",
-        "@frockbot/plugin-shell": "workspace:*",
-        "vue": "3.5.41",
-      },
-      "devDependencies": {
-        "@types/bun": "1.4.0",
-        "typescript": "npm:typescript-native-bridge@6.0.3-bridge.16.tsgo.7.0.2",
-        "vue-tsc": "3.3.10",
-      },
-    },
-    "packages/plugin-audit": {
-      "name": "@frockbot/plugin-audit",
-      "version": "0.0.1",
-      "dependencies": {
-        "@frockbot/client-core": "workspace:*",
-        "@frockbot/client-ui": "workspace:*",
-        "@frockbot/core": "workspace:*",
-        "@frockbot/plugin-shell": "workspace:*",
-        "vue": "3.5.41",
-      },
-      "devDependencies": {
-        "@types/bun": "1.4.0",
-        "@vitejs/plugin-vue": "6.0.8",
-        "typescript": "npm:typescript-native-bridge@6.0.3-bridge.16.tsgo.7.0.2",
-        "vite": "8.2.2",
-        "vue-tsc": "3.3.10",
-      },
-    },
-    "packages/plugin-auth": {
-      "name": "@frockbot/plugin-auth",
-      "version": "0.0.1",
-      "dependencies": {
-        "@frockbot/client-core": "workspace:*",
-        "@frockbot/core": "workspace:*",
-        "better-auth": "1.7.2",
-        "vue": "3.5.41",
-      },
-      "devDependencies": {
-        "@frockbot/plugin-testkit": "workspace:*",
-        "@types/bun": "1.4.0",
-        "@types/node": "26.2.0",
-        "typescript": "npm:typescript-native-bridge@6.0.3-bridge.16.tsgo.7.0.2",
-        "vite": "8.2.2",
-        "vue-tsc": "3.3.10",
-      },
-    },
-    "packages/plugin-bot-template": {
-      "name": "@frockbot/plugin-bot-template",
-      "version": "0.0.1",
-      "dependencies": {
-        "@frockbot/client-core": "workspace:*",
-        "@frockbot/client-ui": "workspace:*",
-        "@frockbot/core": "workspace:*",
-        "@frockbot/plugin-settings": "workspace:*",
-        "@frockbot/plugin-shell": "workspace:*",
-        "vue": "3.5.41",
-      },
-      "devDependencies": {
-        "@frockbot/plugin-testkit": "workspace:*",
-        "@types/bun": "1.4.0",
-        "@vitejs/plugin-vue": "6.0.8",
-        "typescript": "npm:typescript-native-bridge@6.0.3-bridge.16.tsgo.7.0.2",
-        "vite": "8.2.2",
-        "vue-tsc": "3.3.10",
-      },
-    },
-    "packages/plugin-clock": {
-      "name": "@frockbot/plugin-clock",
-      "version": "0.0.1",
-      "dependencies": {
-        "@frockbot/core": "workspace:*",
-      },
-      "devDependencies": {
-        "@types/node": "26.2.0",
-        "typescript": "^7.0.2",
-      },
-    },
-    "packages/plugin-credentials": {
-      "name": "@frockbot/plugin-credentials",
-      "version": "0.0.1",
-      "dependencies": {
-        "@frockbot/core": "workspace:*",
-      },
-      "devDependencies": {
-        "@types/bun": "1.3.6",
-        "typescript": "^7.0.2",
-      },
-    },
-    "packages/plugin-custom-models": {
-      "name": "@frockbot/plugin-custom-models",
-      "version": "0.0.1",
-      "dependencies": {
-        "@frockbot/client-core": "workspace:*",
-        "@frockbot/client-ui": "workspace:*",
-        "@frockbot/core": "workspace:*",
-        "@frockbot/plugin-settings": "workspace:*",
-        "@frockbot/plugin-shell": "workspace:*",
-        "vue": "3.5.41",
-      },
-      "devDependencies": {
-        "@frockbot/providers": "workspace:*",
-        "@types/bun": "1.4.0",
-        "@vitejs/plugin-vue": "6.0.8",
-        "typescript": "npm:typescript-native-bridge@6.0.3-bridge.16.tsgo.7.0.2",
-        "vite": "8.2.2",
-        "vue-tsc": "3.3.10",
-      },
-    },
-    "packages/plugin-echo": {
-      "name": "@frockbot/plugin-echo",
-      "version": "0.0.1",
-      "dependencies": {
-        "@frockbot/core": "workspace:*",
-      },
-      "devDependencies": {
-        "@frockbot/plugin-testkit": "workspace:*",
-        "@types/bun": "1.4.0",
-        "typescript": "^7.0.2",
-      },
-    },
-    "packages/plugin-flock": {
-      "name": "@frockbot/plugin-flock",
-      "version": "0.0.1",
-      "dependencies": {
-        "@frockbot/client-core": "workspace:*",
-        "@frockbot/client-ui": "workspace:*",
-        "@frockbot/core": "workspace:*",
-        "@frockbot/plugin-shell": "workspace:*",
-        "vue": "3.5.41",
-      },
-      "devDependencies": {
-        "@frockbot/plugin-testkit": "workspace:*",
-        "@types/bun": "1.4.0",
-        "@vitejs/plugin-vue": "6.0.8",
-        "css-tree": "2.3.1",
-        "typescript": "npm:typescript-native-bridge@6.0.3-bridge.16.tsgo.7.0.2",
-        "vite": "8.2.2",
-        "vue-tsc": "3.3.10",
-      },
-    },
-    "packages/plugin-identity": {
-      "name": "@frockbot/plugin-identity",
-      "version": "0.0.1",
-      "dependencies": {
-        "@frockbot/core": "workspace:*",
-      },
-      "devDependencies": {
-        "@frockbot/plugin-testkit": "workspace:*",
-        "@types/bun": "1.4.0",
-        "typescript": "^7.0.2",
-      },
-    },
-    "packages/plugin-image": {
-      "name": "@frockbot/plugin-image",
-      "version": "0.0.1",
-      "dependencies": {
-        "@frockbot/core": "workspace:*",
-      },
-      "devDependencies": {
-        "@frockbot/plugin-testkit": "workspace:*",
-        "@types/bun": "1.4.0",
-        "typescript": "^7.0.2",
-      },
-    },
-    "packages/plugin-machine-messages": {
-      "name": "@frockbot/plugin-machine-messages",
-      "version": "0.0.1",
-      "dependencies": {
-        "@frockbot/core": "workspace:*",
-        "@frockbot/plugin-user-machine": "workspace:*",
-      },
-      "devDependencies": {
-        "@frockbot/plugin-testkit": "workspace:*",
-        "@types/bun": "1.4.0",
-        "typescript": "^7.0.2",
-      },
-    },
-    "packages/plugin-memory": {
-      "name": "@frockbot/plugin-memory",
-      "version": "0.0.1",
-      "dependencies": {
-        "@frockbot/core": "workspace:*",
-      },
-      "devDependencies": {
-        "@types/bun": "1.4.0",
-        "typescript": "^7.0.2",
-      },
-    },
-    "packages/plugin-routines": {
-      "name": "@frockbot/plugin-routines",
-      "version": "0.0.1",
-      "dependencies": {
-        "@frockbot/client-core": "workspace:*",
-        "@frockbot/client-ui": "workspace:*",
-        "@frockbot/core": "workspace:*",
-        "@frockbot/plugin-shell": "workspace:*",
-        "croner": "10.0.1",
-        "vue": "3.5.41",
-      },
-      "devDependencies": {
-        "@types/bun": "1.4.0",
-        "@types/node": "26.2.0",
-        "@vitejs/plugin-vue": "6.0.8",
-        "typescript": "npm:typescript-native-bridge@6.0.3-bridge.16.tsgo.7.0.2",
-        "vite": "8.2.2",
-        "vue-tsc": "3.3.10",
-      },
-    },
-    "packages/plugin-search": {
-      "name": "@frockbot/plugin-search",
-      "version": "0.0.1",
-      "dependencies": {
-        "@frockbot/client-core": "workspace:*",
-        "@frockbot/client-ui": "workspace:*",
-        "@frockbot/core": "workspace:*",
-        "@frockbot/plugin-flock": "workspace:*",
-        "@frockbot/plugin-shell": "workspace:*",
-        "vue": "3.5.41",
-      },
-      "devDependencies": {
-        "@types/bun": "1.4.0",
-        "@vitejs/plugin-vue": "6.0.8",
-        "typescript": "npm:typescript-native-bridge@6.0.3-bridge.16.tsgo.7.0.2",
-        "vite": "8.2.2",
-        "vue-tsc": "3.3.10",
-      },
-    },
-    "packages/plugin-settings": {
-      "name": "@frockbot/plugin-settings",
-      "version": "0.0.1",
-      "dependencies": {
-        "@frockbot/client-core": "workspace:*",
-        "@frockbot/client-ui": "workspace:*",
-        "@frockbot/core": "workspace:*",
-        "@frockbot/plugin-auth": "workspace:*",
-        "@frockbot/plugin-shell": "workspace:*",
-        "vue": "3.5.41",
-      },
-      "devDependencies": {
-        "@types/bun": "1.4.0",
-        "@types/node": "26.2.0",
-        "@vitejs/plugin-vue": "6.0.8",
-        "typescript": "npm:typescript-native-bridge@6.0.3-bridge.16.tsgo.7.0.2",
-        "vite": "8.2.2",
-        "vue-tsc": "3.3.10",
-      },
-    },
-    "packages/plugin-shell": {
-      "name": "@frockbot/plugin-shell",
-      "version": "0.0.1",
-      "dependencies": {
-        "@frockbot/agent-runtime": "workspace:*",
-        "@frockbot/applets": "workspace:*",
-        "@frockbot/client-core": "workspace:*",
-        "@frockbot/client-ui": "workspace:*",
-        "@frockbot/compose-frockbot": "workspace:*",
-        "@frockbot/computer": "workspace:*",
-        "@frockbot/core": "workspace:*",
-        "@frockbot/plugin-bot-template": "workspace:*",
-        "@frockbot/plugin-flock": "workspace:*",
-        "@frockbot/plugin-image": "workspace:*",
-        "@frockbot/plugin-machine-messages": "workspace:*",
-        "@frockbot/plugin-memory": "workspace:*",
-        "@frockbot/plugin-routines": "workspace:*",
-        "@frockbot/plugin-skills": "workspace:*",
-        "@frockbot/plugin-subagents": "workspace:*",
-        "@frockbot/plugin-user-machine": "workspace:*",
-        "vue": "3.5.41",
-      },
-      "devDependencies": {
-        "@cloudflare/workers-types": "latest",
-        "@frockbot/plugin-testkit": "workspace:*",
-        "@types/bun": "1.3.6",
-        "@types/node": "26.2.0",
-        "@vitejs/plugin-vue": "6.0.8",
-        "typescript": "npm:typescript-native-bridge@6.0.3-bridge.16.tsgo.7.0.2",
-        "vite": "8.2.2",
-        "vue-tsc": "3.3.10",
-      },
-    },
-    "packages/plugin-skills": {
-      "name": "@frockbot/plugin-skills",
-      "version": "0.0.1",
-      "dependencies": {
-        "@frockbot/core": "workspace:*",
-      },
-      "devDependencies": {
-        "@types/bun": "1.4.0",
-        "typescript": "^7.0.2",
-      },
-    },
-    "packages/plugin-subagents": {
-      "name": "@frockbot/plugin-subagents",
-      "version": "0.0.1",
-      "dependencies": {
-        "@frockbot/core": "workspace:*",
-      },
-      "devDependencies": {
-        "@types/bun": "1.4.0",
-        "typescript": "^7.0.2",
-      },
-    },
-    "packages/plugin-testkit": {
-      "name": "@frockbot/plugin-testkit",
-      "version": "0.0.1",
-      "dependencies": {
-        "@frockbot/computer": "workspace:*",
-        "@frockbot/core": "workspace:*",
-        "@frockbot/plugin-credentials": "workspace:*",
-      },
-      "devDependencies": {
-        "@types/bun": "1.4.0",
-        "typescript": "^7.0.2",
-      },
-    },
-    "packages/plugin-ui-theme": {
-      "name": "@frockbot/plugin-ui-theme",
-      "version": "0.0.1",
-      "dependencies": {
-        "@frockbot/client-core": "workspace:*",
-        "@frockbot/core": "workspace:*",
-      },
-      "devDependencies": {
-        "@types/bun": "1.4.0",
-        "@types/node": "26.2.0",
-        "typescript": "^7.0.2",
-        "vite": "8.2.2",
-      },
-    },
-    "packages/plugin-user-machine": {
-      "name": "@frockbot/plugin-user-machine",
-      "version": "0.0.1",
-      "dependencies": {
-        "@frockbot/client-core": "workspace:*",
-        "@frockbot/client-ui": "workspace:*",
-        "@frockbot/core": "workspace:*",
-        "@frockbot/plugin-shell": "workspace:*",
-        "vue": "3.5.41",
-      },
-      "devDependencies": {
-        "@frockbot/plugin-testkit": "workspace:*",
-        "@types/bun": "1.4.0",
-        "@vitejs/plugin-vue": "6.0.8",
-        "typescript": "npm:typescript-native-bridge@6.0.3-bridge.16.tsgo.7.0.2",
-        "vite": "8.2.2",
-        "vue-tsc": "3.3.10",
-      },
-    },
-    "packages/plugin-web": {
-      "name": "@frockbot/plugin-web",
-      "version": "0.0.1",
-      "dependencies": {
-        "@frockbot/core": "workspace:*",
-      },
-      "devDependencies": {
-        "@frockbot/plugin-testkit": "workspace:*",
-        "@types/bun": "1.4.0",
-        "typescript": "^7.0.2",
-      },
-    },
     "providers": {
       "name": "@frockbot/providers",
       "version": "0.0.1",
@@ -640,13 +225,11 @@
         "@ai-sdk/openai-compatible": "3.0.44",
         "@ai-sdk/provider": "4.0.10",
         "@ai-sdk/provider-utils": "5.0.36",
+        "@frockbot/app": "workspace:*",
         "@frockbot/core": "workspace:*",
-        "@frockbot/plugin-credentials": "workspace:*",
-        "@frockbot/plugin-settings": "workspace:*",
-        "@frockbot/plugin-web": "workspace:*",
       },
       "devDependencies": {
-        "@frockbot/plugin-testkit": "workspace:*",
+        "@frockbot/app": "workspace:*",
         "@types/bun": "1.4.0",
         "@types/node": "26.2.0",
         "typescript": "^7.0.2",
@@ -785,13 +368,11 @@
 
     "@fly/sprites": ["@fly/sprites@0.1.0", "", {}, "sha512-08jnuPEFmImqy3/iwL+jQJ6IwrHuZlmR3w9dRSSUiZ3N4uMSqWMi5FLyL1UKiL/vtcAb9Cayj8gHsEtckDDfkQ=="],
 
-    "@frockbot/agent-runtime": ["@frockbot/agent-runtime@workspace:apps/agent-runtime"],
+    "@frockbot/app": ["@frockbot/app@workspace:app"],
 
     "@frockbot/applet-sdk": ["@frockbot/applet-sdk@workspace:applets/sdk"],
 
     "@frockbot/applets": ["@frockbot/applets@workspace:applets"],
-
-    "@frockbot/application-foundation": ["@frockbot/application-foundation@workspace:applications/foundation"],
 
     "@frockbot/client-core": ["@frockbot/client-core@workspace:packages/client-core"],
 
@@ -810,52 +391,6 @@
     "@frockbot/core": ["@frockbot/core@workspace:core"],
 
     "@frockbot/marketing": ["@frockbot/marketing@workspace:apps/marketing"],
-
-    "@frockbot/plugin-admin": ["@frockbot/plugin-admin@workspace:packages/plugin-admin"],
-
-    "@frockbot/plugin-audit": ["@frockbot/plugin-audit@workspace:packages/plugin-audit"],
-
-    "@frockbot/plugin-auth": ["@frockbot/plugin-auth@workspace:packages/plugin-auth"],
-
-    "@frockbot/plugin-bot-template": ["@frockbot/plugin-bot-template@workspace:packages/plugin-bot-template"],
-
-    "@frockbot/plugin-clock": ["@frockbot/plugin-clock@workspace:packages/plugin-clock"],
-
-    "@frockbot/plugin-credentials": ["@frockbot/plugin-credentials@workspace:packages/plugin-credentials"],
-
-    "@frockbot/plugin-custom-models": ["@frockbot/plugin-custom-models@workspace:packages/plugin-custom-models"],
-
-    "@frockbot/plugin-echo": ["@frockbot/plugin-echo@workspace:packages/plugin-echo"],
-
-    "@frockbot/plugin-flock": ["@frockbot/plugin-flock@workspace:packages/plugin-flock"],
-
-    "@frockbot/plugin-identity": ["@frockbot/plugin-identity@workspace:packages/plugin-identity"],
-
-    "@frockbot/plugin-image": ["@frockbot/plugin-image@workspace:packages/plugin-image"],
-
-    "@frockbot/plugin-machine-messages": ["@frockbot/plugin-machine-messages@workspace:packages/plugin-machine-messages"],
-
-    "@frockbot/plugin-memory": ["@frockbot/plugin-memory@workspace:packages/plugin-memory"],
-
-    "@frockbot/plugin-routines": ["@frockbot/plugin-routines@workspace:packages/plugin-routines"],
-
-    "@frockbot/plugin-search": ["@frockbot/plugin-search@workspace:packages/plugin-search"],
-
-    "@frockbot/plugin-settings": ["@frockbot/plugin-settings@workspace:packages/plugin-settings"],
-
-    "@frockbot/plugin-shell": ["@frockbot/plugin-shell@workspace:packages/plugin-shell"],
-
-    "@frockbot/plugin-skills": ["@frockbot/plugin-skills@workspace:packages/plugin-skills"],
-
-    "@frockbot/plugin-subagents": ["@frockbot/plugin-subagents@workspace:packages/plugin-subagents"],
-
-    "@frockbot/plugin-testkit": ["@frockbot/plugin-testkit@workspace:packages/plugin-testkit"],
-
-    "@frockbot/plugin-ui-theme": ["@frockbot/plugin-ui-theme@workspace:packages/plugin-ui-theme"],
-
-    "@frockbot/plugin-user-machine": ["@frockbot/plugin-user-machine@workspace:packages/plugin-user-machine"],
-
-    "@frockbot/plugin-web": ["@frockbot/plugin-web@workspace:packages/plugin-web"],
 
     "@frockbot/providers": ["@frockbot/providers@workspace:providers"],
 
@@ -1511,11 +1046,9 @@
 
     "@eslint-community/eslint-utils/eslint-visitor-keys": ["eslint-visitor-keys@3.4.3", "", {}, "sha512-wpc+LXeiyiisxPlEkUzU6svyS1frIO3Mgxj1fdy7Pm8Ygzguax2N3Fa/D/ag1WqbOprdI+uY6wMUl8/a2G+iag=="],
 
-    "@frockbot/agent-runtime/typescript": ["typescript@7.0.2", "", { "optionalDependencies": { "@typescript/typescript-aix-ppc64": "7.0.2", "@typescript/typescript-darwin-arm64": "7.0.2", "@typescript/typescript-darwin-x64": "7.0.2", "@typescript/typescript-freebsd-arm64": "7.0.2", "@typescript/typescript-freebsd-x64": "7.0.2", "@typescript/typescript-linux-arm": "7.0.2", "@typescript/typescript-linux-arm64": "7.0.2", "@typescript/typescript-linux-loong64": "7.0.2", "@typescript/typescript-linux-mips64el": "7.0.2", "@typescript/typescript-linux-ppc64": "7.0.2", "@typescript/typescript-linux-riscv64": "7.0.2", "@typescript/typescript-linux-s390x": "7.0.2", "@typescript/typescript-linux-x64": "7.0.2", "@typescript/typescript-netbsd-arm64": "7.0.2", "@typescript/typescript-netbsd-x64": "7.0.2", "@typescript/typescript-openbsd-arm64": "7.0.2", "@typescript/typescript-openbsd-x64": "7.0.2", "@typescript/typescript-sunos-x64": "7.0.2", "@typescript/typescript-win32-arm64": "7.0.2", "@typescript/typescript-win32-x64": "7.0.2" }, "bin": { "tsc": "bin/tsc" } }, "sha512-8FYau96o3NKOhbjKi/qNvG/W5jhzxkbdm5sj9AbZ/5T5sWqn3hJgLfGx27sRKZWTvyzCP8dLRBTf5tBTSRVUNA=="],
+    "@frockbot/app/css-tree": ["css-tree@2.3.1", "", { "dependencies": { "mdn-data": "2.0.30", "source-map-js": "^1.0.1" } }, "sha512-6Fv1DV/TYw//QF5IzQdqsNDjx/wc8TrMBZsqjL9eW01tWb7R7k/mq+/VXfJCl7SoD5emsJop9cOByJZfs8hYIw=="],
 
     "@frockbot/applets/typescript": ["typescript@7.0.2", "", { "optionalDependencies": { "@typescript/typescript-aix-ppc64": "7.0.2", "@typescript/typescript-darwin-arm64": "7.0.2", "@typescript/typescript-darwin-x64": "7.0.2", "@typescript/typescript-freebsd-arm64": "7.0.2", "@typescript/typescript-freebsd-x64": "7.0.2", "@typescript/typescript-linux-arm": "7.0.2", "@typescript/typescript-linux-arm64": "7.0.2", "@typescript/typescript-linux-loong64": "7.0.2", "@typescript/typescript-linux-mips64el": "7.0.2", "@typescript/typescript-linux-ppc64": "7.0.2", "@typescript/typescript-linux-riscv64": "7.0.2", "@typescript/typescript-linux-s390x": "7.0.2", "@typescript/typescript-linux-x64": "7.0.2", "@typescript/typescript-netbsd-arm64": "7.0.2", "@typescript/typescript-netbsd-x64": "7.0.2", "@typescript/typescript-openbsd-arm64": "7.0.2", "@typescript/typescript-openbsd-x64": "7.0.2", "@typescript/typescript-sunos-x64": "7.0.2", "@typescript/typescript-win32-arm64": "7.0.2", "@typescript/typescript-win32-x64": "7.0.2" }, "bin": { "tsc": "bin/tsc" } }, "sha512-8FYau96o3NKOhbjKi/qNvG/W5jhzxkbdm5sj9AbZ/5T5sWqn3hJgLfGx27sRKZWTvyzCP8dLRBTf5tBTSRVUNA=="],
-
-    "@frockbot/application-foundation/typescript": ["typescript@7.0.2", "", { "optionalDependencies": { "@typescript/typescript-aix-ppc64": "7.0.2", "@typescript/typescript-darwin-arm64": "7.0.2", "@typescript/typescript-darwin-x64": "7.0.2", "@typescript/typescript-freebsd-arm64": "7.0.2", "@typescript/typescript-freebsd-x64": "7.0.2", "@typescript/typescript-linux-arm": "7.0.2", "@typescript/typescript-linux-arm64": "7.0.2", "@typescript/typescript-linux-loong64": "7.0.2", "@typescript/typescript-linux-mips64el": "7.0.2", "@typescript/typescript-linux-ppc64": "7.0.2", "@typescript/typescript-linux-riscv64": "7.0.2", "@typescript/typescript-linux-s390x": "7.0.2", "@typescript/typescript-linux-x64": "7.0.2", "@typescript/typescript-netbsd-arm64": "7.0.2", "@typescript/typescript-netbsd-x64": "7.0.2", "@typescript/typescript-openbsd-arm64": "7.0.2", "@typescript/typescript-openbsd-x64": "7.0.2", "@typescript/typescript-sunos-x64": "7.0.2", "@typescript/typescript-win32-arm64": "7.0.2", "@typescript/typescript-win32-x64": "7.0.2" }, "bin": { "tsc": "bin/tsc" } }, "sha512-8FYau96o3NKOhbjKi/qNvG/W5jhzxkbdm5sj9AbZ/5T5sWqn3hJgLfGx27sRKZWTvyzCP8dLRBTf5tBTSRVUNA=="],
 
     "@frockbot/client-core/typescript": ["typescript@7.0.2", "", { "optionalDependencies": { "@typescript/typescript-aix-ppc64": "7.0.2", "@typescript/typescript-darwin-arm64": "7.0.2", "@typescript/typescript-darwin-x64": "7.0.2", "@typescript/typescript-freebsd-arm64": "7.0.2", "@typescript/typescript-freebsd-x64": "7.0.2", "@typescript/typescript-linux-arm": "7.0.2", "@typescript/typescript-linux-arm64": "7.0.2", "@typescript/typescript-linux-loong64": "7.0.2", "@typescript/typescript-linux-mips64el": "7.0.2", "@typescript/typescript-linux-ppc64": "7.0.2", "@typescript/typescript-linux-riscv64": "7.0.2", "@typescript/typescript-linux-s390x": "7.0.2", "@typescript/typescript-linux-x64": "7.0.2", "@typescript/typescript-netbsd-arm64": "7.0.2", "@typescript/typescript-netbsd-x64": "7.0.2", "@typescript/typescript-openbsd-arm64": "7.0.2", "@typescript/typescript-openbsd-x64": "7.0.2", "@typescript/typescript-sunos-x64": "7.0.2", "@typescript/typescript-win32-arm64": "7.0.2", "@typescript/typescript-win32-x64": "7.0.2" }, "bin": { "tsc": "bin/tsc" } }, "sha512-8FYau96o3NKOhbjKi/qNvG/W5jhzxkbdm5sj9AbZ/5T5sWqn3hJgLfGx27sRKZWTvyzCP8dLRBTf5tBTSRVUNA=="],
 
@@ -1532,36 +1065,6 @@
     "@frockbot/marketing/@cloudflare/workers-types": ["@cloudflare/workers-types@5.20260906.1", "", {}, "sha512-mRKC5n+9OP7tZiOu7vMv2MZ+Arh3tX4b9gVAt43WFns83LNzWchhfRs9o2IkFCnYKovHo4m4Af1P4zPQWdLx0g=="],
 
     "@frockbot/marketing/typescript": ["typescript@7.0.2", "", { "optionalDependencies": { "@typescript/typescript-aix-ppc64": "7.0.2", "@typescript/typescript-darwin-arm64": "7.0.2", "@typescript/typescript-darwin-x64": "7.0.2", "@typescript/typescript-freebsd-arm64": "7.0.2", "@typescript/typescript-freebsd-x64": "7.0.2", "@typescript/typescript-linux-arm": "7.0.2", "@typescript/typescript-linux-arm64": "7.0.2", "@typescript/typescript-linux-loong64": "7.0.2", "@typescript/typescript-linux-mips64el": "7.0.2", "@typescript/typescript-linux-ppc64": "7.0.2", "@typescript/typescript-linux-riscv64": "7.0.2", "@typescript/typescript-linux-s390x": "7.0.2", "@typescript/typescript-linux-x64": "7.0.2", "@typescript/typescript-netbsd-arm64": "7.0.2", "@typescript/typescript-netbsd-x64": "7.0.2", "@typescript/typescript-openbsd-arm64": "7.0.2", "@typescript/typescript-openbsd-x64": "7.0.2", "@typescript/typescript-sunos-x64": "7.0.2", "@typescript/typescript-win32-arm64": "7.0.2", "@typescript/typescript-win32-x64": "7.0.2" }, "bin": { "tsc": "bin/tsc" } }, "sha512-8FYau96o3NKOhbjKi/qNvG/W5jhzxkbdm5sj9AbZ/5T5sWqn3hJgLfGx27sRKZWTvyzCP8dLRBTf5tBTSRVUNA=="],
-
-    "@frockbot/plugin-clock/typescript": ["typescript@7.0.2", "", { "optionalDependencies": { "@typescript/typescript-aix-ppc64": "7.0.2", "@typescript/typescript-darwin-arm64": "7.0.2", "@typescript/typescript-darwin-x64": "7.0.2", "@typescript/typescript-freebsd-arm64": "7.0.2", "@typescript/typescript-freebsd-x64": "7.0.2", "@typescript/typescript-linux-arm": "7.0.2", "@typescript/typescript-linux-arm64": "7.0.2", "@typescript/typescript-linux-loong64": "7.0.2", "@typescript/typescript-linux-mips64el": "7.0.2", "@typescript/typescript-linux-ppc64": "7.0.2", "@typescript/typescript-linux-riscv64": "7.0.2", "@typescript/typescript-linux-s390x": "7.0.2", "@typescript/typescript-linux-x64": "7.0.2", "@typescript/typescript-netbsd-arm64": "7.0.2", "@typescript/typescript-netbsd-x64": "7.0.2", "@typescript/typescript-openbsd-arm64": "7.0.2", "@typescript/typescript-openbsd-x64": "7.0.2", "@typescript/typescript-sunos-x64": "7.0.2", "@typescript/typescript-win32-arm64": "7.0.2", "@typescript/typescript-win32-x64": "7.0.2" }, "bin": { "tsc": "bin/tsc" } }, "sha512-8FYau96o3NKOhbjKi/qNvG/W5jhzxkbdm5sj9AbZ/5T5sWqn3hJgLfGx27sRKZWTvyzCP8dLRBTf5tBTSRVUNA=="],
-
-    "@frockbot/plugin-credentials/@types/bun": ["@types/bun@1.3.6", "", { "dependencies": { "bun-types": "1.3.6" } }, "sha512-uWCv6FO/8LcpREhenN1d1b6fcspAB+cefwD7uti8C8VffIv0Um08TKMn98FynpTiU38+y2dUO55T11NgDt8VAA=="],
-
-    "@frockbot/plugin-credentials/typescript": ["typescript@7.0.2", "", { "optionalDependencies": { "@typescript/typescript-aix-ppc64": "7.0.2", "@typescript/typescript-darwin-arm64": "7.0.2", "@typescript/typescript-darwin-x64": "7.0.2", "@typescript/typescript-freebsd-arm64": "7.0.2", "@typescript/typescript-freebsd-x64": "7.0.2", "@typescript/typescript-linux-arm": "7.0.2", "@typescript/typescript-linux-arm64": "7.0.2", "@typescript/typescript-linux-loong64": "7.0.2", "@typescript/typescript-linux-mips64el": "7.0.2", "@typescript/typescript-linux-ppc64": "7.0.2", "@typescript/typescript-linux-riscv64": "7.0.2", "@typescript/typescript-linux-s390x": "7.0.2", "@typescript/typescript-linux-x64": "7.0.2", "@typescript/typescript-netbsd-arm64": "7.0.2", "@typescript/typescript-netbsd-x64": "7.0.2", "@typescript/typescript-openbsd-arm64": "7.0.2", "@typescript/typescript-openbsd-x64": "7.0.2", "@typescript/typescript-sunos-x64": "7.0.2", "@typescript/typescript-win32-arm64": "7.0.2", "@typescript/typescript-win32-x64": "7.0.2" }, "bin": { "tsc": "bin/tsc" } }, "sha512-8FYau96o3NKOhbjKi/qNvG/W5jhzxkbdm5sj9AbZ/5T5sWqn3hJgLfGx27sRKZWTvyzCP8dLRBTf5tBTSRVUNA=="],
-
-    "@frockbot/plugin-echo/typescript": ["typescript@7.0.2", "", { "optionalDependencies": { "@typescript/typescript-aix-ppc64": "7.0.2", "@typescript/typescript-darwin-arm64": "7.0.2", "@typescript/typescript-darwin-x64": "7.0.2", "@typescript/typescript-freebsd-arm64": "7.0.2", "@typescript/typescript-freebsd-x64": "7.0.2", "@typescript/typescript-linux-arm": "7.0.2", "@typescript/typescript-linux-arm64": "7.0.2", "@typescript/typescript-linux-loong64": "7.0.2", "@typescript/typescript-linux-mips64el": "7.0.2", "@typescript/typescript-linux-ppc64": "7.0.2", "@typescript/typescript-linux-riscv64": "7.0.2", "@typescript/typescript-linux-s390x": "7.0.2", "@typescript/typescript-linux-x64": "7.0.2", "@typescript/typescript-netbsd-arm64": "7.0.2", "@typescript/typescript-netbsd-x64": "7.0.2", "@typescript/typescript-openbsd-arm64": "7.0.2", "@typescript/typescript-openbsd-x64": "7.0.2", "@typescript/typescript-sunos-x64": "7.0.2", "@typescript/typescript-win32-arm64": "7.0.2", "@typescript/typescript-win32-x64": "7.0.2" }, "bin": { "tsc": "bin/tsc" } }, "sha512-8FYau96o3NKOhbjKi/qNvG/W5jhzxkbdm5sj9AbZ/5T5sWqn3hJgLfGx27sRKZWTvyzCP8dLRBTf5tBTSRVUNA=="],
-
-    "@frockbot/plugin-flock/css-tree": ["css-tree@2.3.1", "", { "dependencies": { "mdn-data": "2.0.30", "source-map-js": "^1.0.1" } }, "sha512-6Fv1DV/TYw//QF5IzQdqsNDjx/wc8TrMBZsqjL9eW01tWb7R7k/mq+/VXfJCl7SoD5emsJop9cOByJZfs8hYIw=="],
-
-    "@frockbot/plugin-identity/typescript": ["typescript@7.0.2", "", { "optionalDependencies": { "@typescript/typescript-aix-ppc64": "7.0.2", "@typescript/typescript-darwin-arm64": "7.0.2", "@typescript/typescript-darwin-x64": "7.0.2", "@typescript/typescript-freebsd-arm64": "7.0.2", "@typescript/typescript-freebsd-x64": "7.0.2", "@typescript/typescript-linux-arm": "7.0.2", "@typescript/typescript-linux-arm64": "7.0.2", "@typescript/typescript-linux-loong64": "7.0.2", "@typescript/typescript-linux-mips64el": "7.0.2", "@typescript/typescript-linux-ppc64": "7.0.2", "@typescript/typescript-linux-riscv64": "7.0.2", "@typescript/typescript-linux-s390x": "7.0.2", "@typescript/typescript-linux-x64": "7.0.2", "@typescript/typescript-netbsd-arm64": "7.0.2", "@typescript/typescript-netbsd-x64": "7.0.2", "@typescript/typescript-openbsd-arm64": "7.0.2", "@typescript/typescript-openbsd-x64": "7.0.2", "@typescript/typescript-sunos-x64": "7.0.2", "@typescript/typescript-win32-arm64": "7.0.2", "@typescript/typescript-win32-x64": "7.0.2" }, "bin": { "tsc": "bin/tsc" } }, "sha512-8FYau96o3NKOhbjKi/qNvG/W5jhzxkbdm5sj9AbZ/5T5sWqn3hJgLfGx27sRKZWTvyzCP8dLRBTf5tBTSRVUNA=="],
-
-    "@frockbot/plugin-image/typescript": ["typescript@7.0.2", "", { "optionalDependencies": { "@typescript/typescript-aix-ppc64": "7.0.2", "@typescript/typescript-darwin-arm64": "7.0.2", "@typescript/typescript-darwin-x64": "7.0.2", "@typescript/typescript-freebsd-arm64": "7.0.2", "@typescript/typescript-freebsd-x64": "7.0.2", "@typescript/typescript-linux-arm": "7.0.2", "@typescript/typescript-linux-arm64": "7.0.2", "@typescript/typescript-linux-loong64": "7.0.2", "@typescript/typescript-linux-mips64el": "7.0.2", "@typescript/typescript-linux-ppc64": "7.0.2", "@typescript/typescript-linux-riscv64": "7.0.2", "@typescript/typescript-linux-s390x": "7.0.2", "@typescript/typescript-linux-x64": "7.0.2", "@typescript/typescript-netbsd-arm64": "7.0.2", "@typescript/typescript-netbsd-x64": "7.0.2", "@typescript/typescript-openbsd-arm64": "7.0.2", "@typescript/typescript-openbsd-x64": "7.0.2", "@typescript/typescript-sunos-x64": "7.0.2", "@typescript/typescript-win32-arm64": "7.0.2", "@typescript/typescript-win32-x64": "7.0.2" }, "bin": { "tsc": "bin/tsc" } }, "sha512-8FYau96o3NKOhbjKi/qNvG/W5jhzxkbdm5sj9AbZ/5T5sWqn3hJgLfGx27sRKZWTvyzCP8dLRBTf5tBTSRVUNA=="],
-
-    "@frockbot/plugin-machine-messages/typescript": ["typescript@7.0.2", "", { "optionalDependencies": { "@typescript/typescript-aix-ppc64": "7.0.2", "@typescript/typescript-darwin-arm64": "7.0.2", "@typescript/typescript-darwin-x64": "7.0.2", "@typescript/typescript-freebsd-arm64": "7.0.2", "@typescript/typescript-freebsd-x64": "7.0.2", "@typescript/typescript-linux-arm": "7.0.2", "@typescript/typescript-linux-arm64": "7.0.2", "@typescript/typescript-linux-loong64": "7.0.2", "@typescript/typescript-linux-mips64el": "7.0.2", "@typescript/typescript-linux-ppc64": "7.0.2", "@typescript/typescript-linux-riscv64": "7.0.2", "@typescript/typescript-linux-s390x": "7.0.2", "@typescript/typescript-linux-x64": "7.0.2", "@typescript/typescript-netbsd-arm64": "7.0.2", "@typescript/typescript-netbsd-x64": "7.0.2", "@typescript/typescript-openbsd-arm64": "7.0.2", "@typescript/typescript-openbsd-x64": "7.0.2", "@typescript/typescript-sunos-x64": "7.0.2", "@typescript/typescript-win32-arm64": "7.0.2", "@typescript/typescript-win32-x64": "7.0.2" }, "bin": { "tsc": "bin/tsc" } }, "sha512-8FYau96o3NKOhbjKi/qNvG/W5jhzxkbdm5sj9AbZ/5T5sWqn3hJgLfGx27sRKZWTvyzCP8dLRBTf5tBTSRVUNA=="],
-
-    "@frockbot/plugin-memory/typescript": ["typescript@7.0.2", "", { "optionalDependencies": { "@typescript/typescript-aix-ppc64": "7.0.2", "@typescript/typescript-darwin-arm64": "7.0.2", "@typescript/typescript-darwin-x64": "7.0.2", "@typescript/typescript-freebsd-arm64": "7.0.2", "@typescript/typescript-freebsd-x64": "7.0.2", "@typescript/typescript-linux-arm": "7.0.2", "@typescript/typescript-linux-arm64": "7.0.2", "@typescript/typescript-linux-loong64": "7.0.2", "@typescript/typescript-linux-mips64el": "7.0.2", "@typescript/typescript-linux-ppc64": "7.0.2", "@typescript/typescript-linux-riscv64": "7.0.2", "@typescript/typescript-linux-s390x": "7.0.2", "@typescript/typescript-linux-x64": "7.0.2", "@typescript/typescript-netbsd-arm64": "7.0.2", "@typescript/typescript-netbsd-x64": "7.0.2", "@typescript/typescript-openbsd-arm64": "7.0.2", "@typescript/typescript-openbsd-x64": "7.0.2", "@typescript/typescript-sunos-x64": "7.0.2", "@typescript/typescript-win32-arm64": "7.0.2", "@typescript/typescript-win32-x64": "7.0.2" }, "bin": { "tsc": "bin/tsc" } }, "sha512-8FYau96o3NKOhbjKi/qNvG/W5jhzxkbdm5sj9AbZ/5T5sWqn3hJgLfGx27sRKZWTvyzCP8dLRBTf5tBTSRVUNA=="],
-
-    "@frockbot/plugin-shell/@types/bun": ["@types/bun@1.3.6", "", { "dependencies": { "bun-types": "1.3.6" } }, "sha512-uWCv6FO/8LcpREhenN1d1b6fcspAB+cefwD7uti8C8VffIv0Um08TKMn98FynpTiU38+y2dUO55T11NgDt8VAA=="],
-
-    "@frockbot/plugin-skills/typescript": ["typescript@7.0.2", "", { "optionalDependencies": { "@typescript/typescript-aix-ppc64": "7.0.2", "@typescript/typescript-darwin-arm64": "7.0.2", "@typescript/typescript-darwin-x64": "7.0.2", "@typescript/typescript-freebsd-arm64": "7.0.2", "@typescript/typescript-freebsd-x64": "7.0.2", "@typescript/typescript-linux-arm": "7.0.2", "@typescript/typescript-linux-arm64": "7.0.2", "@typescript/typescript-linux-loong64": "7.0.2", "@typescript/typescript-linux-mips64el": "7.0.2", "@typescript/typescript-linux-ppc64": "7.0.2", "@typescript/typescript-linux-riscv64": "7.0.2", "@typescript/typescript-linux-s390x": "7.0.2", "@typescript/typescript-linux-x64": "7.0.2", "@typescript/typescript-netbsd-arm64": "7.0.2", "@typescript/typescript-netbsd-x64": "7.0.2", "@typescript/typescript-openbsd-arm64": "7.0.2", "@typescript/typescript-openbsd-x64": "7.0.2", "@typescript/typescript-sunos-x64": "7.0.2", "@typescript/typescript-win32-arm64": "7.0.2", "@typescript/typescript-win32-x64": "7.0.2" }, "bin": { "tsc": "bin/tsc" } }, "sha512-8FYau96o3NKOhbjKi/qNvG/W5jhzxkbdm5sj9AbZ/5T5sWqn3hJgLfGx27sRKZWTvyzCP8dLRBTf5tBTSRVUNA=="],
-
-    "@frockbot/plugin-subagents/typescript": ["typescript@7.0.2", "", { "optionalDependencies": { "@typescript/typescript-aix-ppc64": "7.0.2", "@typescript/typescript-darwin-arm64": "7.0.2", "@typescript/typescript-darwin-x64": "7.0.2", "@typescript/typescript-freebsd-arm64": "7.0.2", "@typescript/typescript-freebsd-x64": "7.0.2", "@typescript/typescript-linux-arm": "7.0.2", "@typescript/typescript-linux-arm64": "7.0.2", "@typescript/typescript-linux-loong64": "7.0.2", "@typescript/typescript-linux-mips64el": "7.0.2", "@typescript/typescript-linux-ppc64": "7.0.2", "@typescript/typescript-linux-riscv64": "7.0.2", "@typescript/typescript-linux-s390x": "7.0.2", "@typescript/typescript-linux-x64": "7.0.2", "@typescript/typescript-netbsd-arm64": "7.0.2", "@typescript/typescript-netbsd-x64": "7.0.2", "@typescript/typescript-openbsd-arm64": "7.0.2", "@typescript/typescript-openbsd-x64": "7.0.2", "@typescript/typescript-sunos-x64": "7.0.2", "@typescript/typescript-win32-arm64": "7.0.2", "@typescript/typescript-win32-x64": "7.0.2" }, "bin": { "tsc": "bin/tsc" } }, "sha512-8FYau96o3NKOhbjKi/qNvG/W5jhzxkbdm5sj9AbZ/5T5sWqn3hJgLfGx27sRKZWTvyzCP8dLRBTf5tBTSRVUNA=="],
-
-    "@frockbot/plugin-testkit/typescript": ["typescript@7.0.2", "", { "optionalDependencies": { "@typescript/typescript-aix-ppc64": "7.0.2", "@typescript/typescript-darwin-arm64": "7.0.2", "@typescript/typescript-darwin-x64": "7.0.2", "@typescript/typescript-freebsd-arm64": "7.0.2", "@typescript/typescript-freebsd-x64": "7.0.2", "@typescript/typescript-linux-arm": "7.0.2", "@typescript/typescript-linux-arm64": "7.0.2", "@typescript/typescript-linux-loong64": "7.0.2", "@typescript/typescript-linux-mips64el": "7.0.2", "@typescript/typescript-linux-ppc64": "7.0.2", "@typescript/typescript-linux-riscv64": "7.0.2", "@typescript/typescript-linux-s390x": "7.0.2", "@typescript/typescript-linux-x64": "7.0.2", "@typescript/typescript-netbsd-arm64": "7.0.2", "@typescript/typescript-netbsd-x64": "7.0.2", "@typescript/typescript-openbsd-arm64": "7.0.2", "@typescript/typescript-openbsd-x64": "7.0.2", "@typescript/typescript-sunos-x64": "7.0.2", "@typescript/typescript-win32-arm64": "7.0.2", "@typescript/typescript-win32-x64": "7.0.2" }, "bin": { "tsc": "bin/tsc" } }, "sha512-8FYau96o3NKOhbjKi/qNvG/W5jhzxkbdm5sj9AbZ/5T5sWqn3hJgLfGx27sRKZWTvyzCP8dLRBTf5tBTSRVUNA=="],
-
-    "@frockbot/plugin-ui-theme/typescript": ["typescript@7.0.2", "", { "optionalDependencies": { "@typescript/typescript-aix-ppc64": "7.0.2", "@typescript/typescript-darwin-arm64": "7.0.2", "@typescript/typescript-darwin-x64": "7.0.2", "@typescript/typescript-freebsd-arm64": "7.0.2", "@typescript/typescript-freebsd-x64": "7.0.2", "@typescript/typescript-linux-arm": "7.0.2", "@typescript/typescript-linux-arm64": "7.0.2", "@typescript/typescript-linux-loong64": "7.0.2", "@typescript/typescript-linux-mips64el": "7.0.2", "@typescript/typescript-linux-ppc64": "7.0.2", "@typescript/typescript-linux-riscv64": "7.0.2", "@typescript/typescript-linux-s390x": "7.0.2", "@typescript/typescript-linux-x64": "7.0.2", "@typescript/typescript-netbsd-arm64": "7.0.2", "@typescript/typescript-netbsd-x64": "7.0.2", "@typescript/typescript-openbsd-arm64": "7.0.2", "@typescript/typescript-openbsd-x64": "7.0.2", "@typescript/typescript-sunos-x64": "7.0.2", "@typescript/typescript-win32-arm64": "7.0.2", "@typescript/typescript-win32-x64": "7.0.2" }, "bin": { "tsc": "bin/tsc" } }, "sha512-8FYau96o3NKOhbjKi/qNvG/W5jhzxkbdm5sj9AbZ/5T5sWqn3hJgLfGx27sRKZWTvyzCP8dLRBTf5tBTSRVUNA=="],
-
-    "@frockbot/plugin-web/typescript": ["typescript@7.0.2", "", { "optionalDependencies": { "@typescript/typescript-aix-ppc64": "7.0.2", "@typescript/typescript-darwin-arm64": "7.0.2", "@typescript/typescript-darwin-x64": "7.0.2", "@typescript/typescript-freebsd-arm64": "7.0.2", "@typescript/typescript-freebsd-x64": "7.0.2", "@typescript/typescript-linux-arm": "7.0.2", "@typescript/typescript-linux-arm64": "7.0.2", "@typescript/typescript-linux-loong64": "7.0.2", "@typescript/typescript-linux-mips64el": "7.0.2", "@typescript/typescript-linux-ppc64": "7.0.2", "@typescript/typescript-linux-riscv64": "7.0.2", "@typescript/typescript-linux-s390x": "7.0.2", "@typescript/typescript-linux-x64": "7.0.2", "@typescript/typescript-netbsd-arm64": "7.0.2", "@typescript/typescript-netbsd-x64": "7.0.2", "@typescript/typescript-openbsd-arm64": "7.0.2", "@typescript/typescript-openbsd-x64": "7.0.2", "@typescript/typescript-sunos-x64": "7.0.2", "@typescript/typescript-win32-arm64": "7.0.2", "@typescript/typescript-win32-x64": "7.0.2" }, "bin": { "tsc": "bin/tsc" } }, "sha512-8FYau96o3NKOhbjKi/qNvG/W5jhzxkbdm5sj9AbZ/5T5sWqn3hJgLfGx27sRKZWTvyzCP8dLRBTf5tBTSRVUNA=="],
 
     "@frockbot/providers/typescript": ["typescript@7.0.2", "", { "optionalDependencies": { "@typescript/typescript-aix-ppc64": "7.0.2", "@typescript/typescript-darwin-arm64": "7.0.2", "@typescript/typescript-darwin-x64": "7.0.2", "@typescript/typescript-freebsd-arm64": "7.0.2", "@typescript/typescript-freebsd-x64": "7.0.2", "@typescript/typescript-linux-arm": "7.0.2", "@typescript/typescript-linux-arm64": "7.0.2", "@typescript/typescript-linux-loong64": "7.0.2", "@typescript/typescript-linux-mips64el": "7.0.2", "@typescript/typescript-linux-ppc64": "7.0.2", "@typescript/typescript-linux-riscv64": "7.0.2", "@typescript/typescript-linux-s390x": "7.0.2", "@typescript/typescript-linux-x64": "7.0.2", "@typescript/typescript-netbsd-arm64": "7.0.2", "@typescript/typescript-netbsd-x64": "7.0.2", "@typescript/typescript-openbsd-arm64": "7.0.2", "@typescript/typescript-openbsd-x64": "7.0.2", "@typescript/typescript-sunos-x64": "7.0.2", "@typescript/typescript-win32-arm64": "7.0.2", "@typescript/typescript-win32-x64": "7.0.2" }, "bin": { "tsc": "bin/tsc" } }, "sha512-8FYau96o3NKOhbjKi/qNvG/W5jhzxkbdm5sj9AbZ/5T5sWqn3hJgLfGx27sRKZWTvyzCP8dLRBTf5tBTSRVUNA=="],
 
@@ -1645,11 +1148,7 @@
 
     "@cloudflare/vitest-plugin/wrangler/fsevents": ["fsevents@2.3.3", "", { "os": "darwin" }, "sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw=="],
 
-    "@frockbot/plugin-credentials/@types/bun/bun-types": ["bun-types@1.3.6", "", { "dependencies": { "@types/node": "*" } }, "sha512-OlFwHcnNV99r//9v5IIOgQ9Uk37gZqrNMCcqEaExdkVq3Avwqok1bJFmvGMCkCE0FqzdY8VMOZpfpR3lwI+CsQ=="],
-
-    "@frockbot/plugin-flock/css-tree/mdn-data": ["mdn-data@2.0.30", "", {}, "sha512-GaqWWShW4kv/G9IEucWScBx9G1/vsFZZJUO+tD26M8J8z3Kw5RDQjaoZe03YAClgeS/SWPOcb4nkFBTEi5DUEA=="],
-
-    "@frockbot/plugin-shell/@types/bun/bun-types": ["bun-types@1.3.6", "", { "dependencies": { "@types/node": "*" } }, "sha512-OlFwHcnNV99r//9v5IIOgQ9Uk37gZqrNMCcqEaExdkVq3Avwqok1bJFmvGMCkCE0FqzdY8VMOZpfpR3lwI+CsQ=="],
+    "@frockbot/app/css-tree/mdn-data": ["mdn-data@2.0.30", "", {}, "sha512-GaqWWShW4kv/G9IEucWScBx9G1/vsFZZJUO+tD26M8J8z3Kw5RDQjaoZe03YAClgeS/SWPOcb4nkFBTEi5DUEA=="],
 
     "eslint/ajv/json-schema-traverse": ["json-schema-traverse@0.4.1", "", {}, "sha512-xbbCH5dCYU5T8LcEhhuh7HJ88HXuW3qsI3Y0zOZFKfZEHcpWiHU/Jxzk629Brsab/mMiHQti9wMP+845RPe3Vg=="],
 
@@ -1716,9 +1215,5 @@
     "wrangler/workerd/@cloudflare/workerd-linux-arm64": ["@cloudflare/workerd-linux-arm64@1.20260903.1", "", { "os": "linux", "cpu": "arm64" }, "sha512-OWhihGC6KoTXF4u2C1AonfpgXeM4/7p/1IXuALqXESmFUpLLP5gZhRzjSk/gWW+mrCZDfSrvnjifl+lRqselbA=="],
 
     "wrangler/workerd/@cloudflare/workerd-windows-64": ["@cloudflare/workerd-windows-64@1.20260903.1", "", { "os": "win32", "cpu": "x64" }, "sha512-soPMF9/aMHlHKK7M0vq5HrRRicPbnZO1F6ZZ7JWN8EltxWJU5L7CEq7CxjO878DzyPx7gYvqBFy3SVgdZKZjMQ=="],
-
-    "@frockbot/plugin-credentials/@types/bun/bun-types/@types/node": ["@types/node@26.4.0", "", { "dependencies": { "undici-types": "~8.3.0" } }, "sha512-faiGnoIrLH/V8cibOMEAZ8pMw6oXqSukl29ra4mN8GdaB2ZewzeaLj+INpV5N+Z1eKWzY+IzaIZH2EIR6YZRNQ=="],
-
-    "@frockbot/plugin-shell/@types/bun/bun-types/@types/node": ["@types/node@26.4.0", "", { "dependencies": { "undici-types": "~8.3.0" } }, "sha512-faiGnoIrLH/V8cibOMEAZ8pMw6oXqSukl29ra4mN8GdaB2ZewzeaLj+INpV5N+Z1eKWzY+IzaIZH2EIR6YZRNQ=="],
   }
 }

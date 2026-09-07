@@ -17,8 +17,8 @@ import { evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { describe, expect, test } from "vitest";
 import { provisionBot } from "./provision-bot.ts";
 import { toolCallTriggerPrompt } from "./harness/miniflare.ts";
-import { subagentDurableObjectNameV1 } from "@frockbot/plugin-subagents/storage-keys";
-import type { TaskListViewV1 } from "@frockbot/plugin-subagents/shared";
+import { subagentDurableObjectNameV1 } from "@frockbot/app/subagents/storage-keys";
+import type { TaskListViewV1 } from "@frockbot/app/subagents/shared";
 
 interface Identity {
   userId: string;

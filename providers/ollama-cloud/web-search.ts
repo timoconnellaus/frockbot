@@ -7,7 +7,7 @@
 // Object refuses any other. Putting the search transport anywhere else would
 // mean either a second credential for the same account or a Package opening a
 // Connection it does not own. The tool's *contract* is not
-// provider-specific: it lives in `@frockbot/plugin-web/contract`, and a second
+// provider-specific: it lives in `@frockbot/app/web/contract`, and a second
 // provider satisfies it with no change here and none in the kernel.
 //
 // AUTHORITY. `web_search` needs the enabled
@@ -25,13 +25,13 @@ import {
   type WebSearchRequestV1,
   type WebSearchResponseV1,
   type WebSearchV1,
-} from "@frockbot/plugin-web/contract";
+} from "@frockbot/app/web/contract";
 import type { CredentialLeaseV1 } from "@frockbot/core/connection";
 import type {
   AgentRuntimeV1,
   RuntimeFeatureV1,
 } from "@frockbot/core/contracts";
-import type { CredentialLeaseRuntime } from "@frockbot/plugin-credentials/user";
+import type { CredentialLeaseRuntime } from "@frockbot/app/credentials/user";
 import {
   DEFAULT_OLLAMA_API_BASE_URL,
   decodeOllamaApiBaseUrl,

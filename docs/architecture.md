@@ -23,8 +23,6 @@ Named environments on the app Worker (`apps/cloudflare/wrangler.jsonc`):
 
 Not deployed, though it carries a wrangler config: `apps/cloudflare/e2e/frock-ai-fake.wrangler.jsonc` (bound as a service by the `e2e` env, run from the local wrangler dev registry).
 
-`apps/agent-runtime` is a library consumed by `apps/cloudflare/src/bot-state.ts` and `packages/plugin-shell`. It is not a deployable.
-
 No Fly configuration exists in the repository. Fly Sprites are rented at runtime over the Sprites HTTP API.
 
 Deploy paths:
@@ -50,7 +48,7 @@ Four classes in the app Worker, exported from `apps/cloudflare/src/index.ts:178-
 ### `UserConfiguration` — `apps/cloudflare/src/user-configuration.ts:221`
 
 - Binding `USER_CONFIGURATIONS`; id `idFromName(userId)`.
-- The only class that uses SQLite, and it does not own the tables. `ctx.storage.sql` is handed to two plugin stores: transcript search FTS5 (`packages/plugin-search/src/index-store.ts:143-177`) and audit (`packages/plugin-audit/src/store.ts:166-175`). All other state is key-value.
+- The only class that uses SQLite, and it does not own the tables. `ctx.storage.sql` is handed to two plugin stores: transcript search FTS5 (`app/search/index-store.ts:143-177`) and audit (`app/audit/store.ts:166-175`). All other state is key-value.
 - One `alarm()` at `:1739` serving credential leases, publisher and template recovery, flock sagas and archived-Bot sweeps.
 - No `fetch()`, no WebSockets.
 
@@ -76,7 +74,7 @@ Four classes in the app Worker, exported from `apps/cloudflare/src/index.ts:178-
 
 ## 3. Request path: one user message
 
-1. **Client.** `packages/plugin-shell/src/client/FrockBotApp.vue` posts `{schemaVersion, commandId, text}` to `POST /api/bots/{botId}/turns`.
+1. **Client.** `app/shell/client/FrockBotApp.vue` posts `{schemaVersion, commandId, text}` to `POST /api/bots/{botId}/turns`.
 
 2. **Gateway.** `apps/cloudflare/src/gateway.ts`, the Worker's `fetch`. Order of dispatch in `createGateway` (`:706`): client-compatibility refusal, native-auth routes, `/api/auth/*` to better-auth, the Applet socket, the workspace seed, `/sign-out`, the debug route, public Package routes, then identity resolution — native bearer token, development identity, or a better-auth session — then the signup admission check (`:801-830`), then authenticated Package backend contributions.
 
@@ -86,11 +84,11 @@ Four classes in the app Worker, exported from `apps/cloudflare/src/index.ts:178-
 
 5. **Bot Durable Object.** `apps/cloudflare/src/bot-state.ts:1168` `run()` decodes the envelope, materializes the identity and calls `shell.run(...)`.
 
-6. **Shell.** `packages/plugin-shell/src/backend.ts:1255` yields any in-flight compaction, calls `followDeploymentComposition()` and `resolveAppletComposition()`, then delegates to `BotDurableAuthority.run` (`core/durable/authority.ts:293`): recover whatever the object holds, check for a settled replay, then `acceptRun`. An accepted run executes inline; otherwise it is durably queued — one user-lane slot, FIFO agent lane — and promoted by `runQueuedRun` (`:332`).
+6. **Shell.** `app/shell/backend.ts:1255` yields any in-flight compaction, calls `followDeploymentComposition()` and `resolveAppletComposition()`, then delegates to `BotDurableAuthority.run` (`core/durable/authority.ts:293`): recover whatever the object holds, check for a settled replay, then `acceptRun`. An accepted run executes inline; otherwise it is durably queued — one user-lane slot, FIFO agent lane — and promoted by `runQueuedRun` (`:332`).
 
-7. **Mount.** `activateCompositionV1` reads the pin and builds the Turn's runtime through `createShellCompositionHost` (`packages/plugin-shell/src/backend-composition.ts:274`).
+7. **Mount.** `activateCompositionV1` reads the pin and builds the Turn's runtime through `createShellCompositionHost` (`app/shell/backend-composition.ts:274`).
 
-8. **Loop.** `executeResidentBotTurn` (`packages/plugin-shell/src/backend-runner.ts:431`) calls `runtime.execute(...)`, then `agent.send({text, skills})` and awaits `whenIdle()`.
+8. **Loop.** `executeResidentBotTurn` (`app/shell/backend-runner.ts:431`) calls `runtime.execute(...)`, then `agent.send({text, skills})` and awaits `whenIdle()`.
 
 9. **Model.** Inside the loop, `ctx.llm.stream(request, signal)` dispatches to a provider, which issues the HTTP request (§7).
 
@@ -178,11 +176,11 @@ Provider-reported token counts are used when present. Otherwise `estimateModelUs
 
 ### Resolution and mounting
 
-Composition is the untrusted layer and nothing else. First-party Packages are ordinary imports: `applications/foundation/src/packages.ts` lists the 29 the deployment ships as `PackageDefinitionV1` records, and a Package that carries data (settings, Capabilities, Connection Types, durable roots, dependencies) exports its own definition from its own package. There is no manifest, no compiler and no application hash over a plan.
+Composition is the untrusted layer and nothing else. First-party Packages are ordinary imports: `app/packages.ts` lists the 29 the deployment ships as `PackageDefinitionV1` records, and a Package that carries data (settings, Capabilities, Connection Types, durable roots, dependencies) exports its own definition from its own package. There is no manifest, no compiler and no application hash over a plan.
 
-1. On first use the Bot Durable Object receives an empty bootstrap generation (`packages/plugin-shell/src/backend-composition.ts`; `core/durable/composition/generation.ts`). A Bot that has installed and authored nothing composes nothing, which is why a release no longer has to rewrite every Bot's generation to follow the deploy.
-2. At admission, `activateCompositionV1` (`packages/plugin-shell/src/backend.ts`) reads the pin, mounts, verifies, commits and records last-known-good.
-3. Mounting builds one runtime per Turn (`backend-composition.ts`): the registries, a `LoopHookListV1`, and the features the host lists, mounted in that order by `mountRuntimeFeaturesV1`. Neither the Shell nor `apps/agent-runtime` imports an application: the Shell's Bot host carries the deployment's `PackageDefinitionV1` list, its one Package version, and four factories — `base`, `hosted`, `enabled`, `model` — that turn a Package id into a mounted feature (`packages/plugin-shell/src/backend-runtime.ts`). `applications/foundation` fills them in as `foundationShellApplicationV1`, and `apps/cloudflare/src/bot-state.ts` spreads that into the host. The base Packages — identity, the built-in model, the two demo tools and the Shell's own voice — are appended last, so a provider an earlier Package registered is already there. Every member goes through `BotIsolateContributionHost`, whose hooks are appended to the same list after the app's. Applet members register as tools routed to `APPLET_STATES`.
+1. On first use the Bot Durable Object receives an empty bootstrap generation (`app/shell/backend-composition.ts`; `core/durable/composition/generation.ts`). A Bot that has installed and authored nothing composes nothing, which is why a release no longer has to rewrite every Bot's generation to follow the deploy.
+2. At admission, `activateCompositionV1` (`app/shell/backend.ts`) reads the pin, mounts, verifies, commits and records last-known-good.
+3. Mounting builds one runtime per Turn (`backend-composition.ts`): the registries, a `LoopHookListV1`, and the features the host lists, mounted in that order by `mountRuntimeFeaturesV1`. Neither the Shell nor `app/agent-runtime.ts` imports an application: the Shell's Bot host carries the deployment's `PackageDefinitionV1` list, its one Package version, and four factories — `base`, `hosted`, `enabled`, `model` — that turn a Package id into a mounted feature (`app/shell/backend-runtime.ts`). `app/runtime.ts` fills them in as `foundationShellApplicationV1`, and `apps/cloudflare/src/bot-state.ts` spreads that into the host. The base Packages — identity, the built-in model, the two demo tools and the Shell's own voice — are appended last, so a provider an earlier Package registered is already there. Every member goes through `BotIsolateContributionHost`, whose hooks are appended to the same list after the app's. Applet members register as tools routed to `APPLET_STATES`.
 
 ### Generation shape
 
@@ -215,13 +213,13 @@ Failure phases are `resolve | bundle | mount | health`, declared with the host t
 - Loading uses the `BOT_PACKAGES` Worker Loader binding, typed structurally as `BotIsolateLoader` (`:72`). There is no dynamic `import()`.
 - `loader.get(loaderId, () => ({compatibilityDate, mainModule, modules, globalOutbound: null, env: {IDENTITY, CAPABILITIES}, limits: {cpuMs: 5000, subRequests: 5}}))` (`:434-455`).
 - The loader id is `isolateLoaderIdV1({userId, artifactSetHash: botIsolateModuleSetHashV1(artifactContentHash, bindingDigest, grants)})`. The module-set hash covers wrapper version, wrapper source hash, package hash, binding digest and the member's declared grants, because a loader id is served from cache with the `env` it was first loaded with.
-- Artifacts come from `createR2PackageArtifactStore` (`packages/plugin-shell/src/backend-isolate.ts`): R2 key `packages/<contentHash>.mjs`, sha-256 verified before load.
+- Artifacts come from `createR2PackageArtifactStore` (`app/shell/backend-isolate.ts`): R2 key `packages/<contentHash>.mjs`, sha-256 verified before load.
 - `BotIsolateContributionHost.prepare` first refuses a descriptor naming a grant, action or slot this deployment has not opened, then loads the artifact, mounts and calls `entrypoint.health()` as one guarded phase, requiring `health.ok`, non-empty tools, a matching `packageId`, and tool and hook names equal to the descriptor's. Per-tool turn admission comes from the isolate's own health report.
-- `BotCapabilities` (`apps/cloudflare/src/bot-capabilities.ts:68`), a `WorkerEntrypoint`, is the loopback through which an isolate reaches the kernel. It is minted per Turn at `packages/plugin-shell/src/backend.ts:2069-2125`.
+- `BotCapabilities` (`apps/cloudflare/src/bot-capabilities.ts:68`), a `WorkerEntrypoint`, is the loopback through which an isolate reaches the kernel. It is minted per Turn at `app/shell/backend.ts:2069-2125`.
 
 ### Built-in versus dynamic
 
-First-party code is never a Composition member: it is imported, and `applications/foundation/src/packages.ts` is the list that says it exists. A member is untrusted by definition and always carries an artifact and a descriptor.
+First-party code is never a Composition member: it is imported, and `app/packages.ts` is the list that says it exists. A member is untrusted by definition and always carries an artifact and a descriptor.
 
 Nothing produces a member today. The isolate host, the `BOT_PACKAGES` loader and the capability contract are all still here and still exercised by the Applet instance path and the isolate probe; a _Package_ artifact returns with the step 8 build service (`plan.md`).
 
@@ -231,7 +229,7 @@ Nothing produces a member today. The isolate host, the `BOT_PACKAGES` loader and
 
 ### Web client
 
-The shipping client is Vue 3. Comments in `applications/foundation/src/client-contributions.ts:7` and elsewhere refer to React; they do not describe the code.
+The shipping client is Vue 3. Comments in `apps/cloudflare/src/client/client-contributions.ts:7` and elsewhere refer to React; they do not describe the code.
 
 - Entry `apps/cloudflare/src/client/index.ts:394` constructs one `ClientApplication` transport object, installs plugins and calls `application.mount("#app")`.
 - Vue 3.5.41; Vite 8.2.2 with `@vitejs/plugin-vue` (`apps/cloudflare/vite.config.ts`). Build options set `cssCodeSplit: false` and `assetsInlineLimit: Infinity`, producing one JS and one CSS payload.
@@ -240,12 +238,12 @@ The shipping client is Vue 3. Comments in `applications/foundation/src/client-co
 
 Plugin UI mounts two ways.
 
-1. **In-bundle Vue components, through slots and the surface registry.** `ClientApplication` (`packages/client-core/src/index.ts:585`) requires exactly one `root` slot and registers a global `<k-slot name="...">` outlet (`:624-643`). `packages/plugin-auth/src/client/index.ts:13` fills `root` with `AuthGate.vue`, which renders `<k-slot name="authenticated-root">` (`AuthGate.vue:157`); `packages/plugin-shell/src/client/index.ts:3374-3378` fills that with `FrockBotApp.vue`. The contribution table is `applications/foundation/src/client-contributions.ts:36-63` — 17 entries, mounted in order.
-2. **Sandboxed iframes, for Bot-authored and user-installed package UI.** `packages/plugin-shell/src/client/index.ts` reads iframe entries from the Bot's first-party page registry (`applets/pages.ts`) and registers a sidebar trigger plus a surface per entry. Frames load from `ui.bot.frockbot.com/packages/<sha256>.html` (`apps/cloudflare/src/gateway.ts:1275`) and communicate through a versioned postMessage bridge (`packages/plugin-shell/src/client/PackageIframeHost.vue`). Package-supplied code does not execute in the app origin.
+1. **In-bundle Vue components, through slots and the surface registry.** `ClientApplication` (`packages/client-core/src/index.ts:585`) requires exactly one `root` slot and registers a global `<k-slot name="...">` outlet (`:624-643`). `app/auth/client/index.ts:13` fills `root` with `AuthGate.vue`, which renders `<k-slot name="authenticated-root">` (`AuthGate.vue:157`); `app/shell/client/index.ts:3374-3378` fills that with `FrockBotApp.vue`. The contribution table is `apps/cloudflare/src/client/client-contributions.ts:36-63` — 17 entries, mounted in order.
+2. **Sandboxed iframes, for Bot-authored and user-installed package UI.** `app/shell/client/index.ts` reads iframe entries from the Bot's first-party page registry (`applets/pages.ts`) and registers a sidebar trigger plus a surface per entry. Frames load from `ui.bot.frockbot.com/packages/<sha256>.html` (`apps/cloudflare/src/gateway.ts:1275`) and communicate through a versioned postMessage bridge (`app/shell/client/PackageIframeHost.vue`). Package-supplied code does not execute in the app origin.
 
-The chat view lives in `packages/plugin-shell/src/client/FrockBotApp.vue` (2108 lines). The transcript is a `v-for` at `:1520`; assistant text renders through `UiMarkdown` at `:1551`. Turn merge logic is `replaceTurnMessages()` (`packages/plugin-shell/src/client/index.ts:3405`). Data arrives over REST, with invalidation over the state channel (`apps/cloudflare/src/client/bot-state-channel.ts:147-170`).
+The chat view lives in `app/shell/client/FrockBotApp.vue` (2108 lines). The transcript is a `v-for` at `:1520`; assistant text renders through `UiMarkdown` at `:1551`. Turn merge logic is `replaceTurnMessages()` (`app/shell/client/index.ts:3405`). Data arrives over REST, with invalidation over the state channel (`apps/cloudflare/src/client/bot-state-channel.ts:147-170`).
 
-`packages/plugin-settings/src/client/index.ts` registers five surfaces (`bot-settings`, `plugins`, `models`, `connections`, `user-settings`) and three slot fillers; other plugins mount into slots that settings declares.
+`app/settings/client/index.ts` registers five surfaces (`bot-settings`, `plugins`, `models`, `connections`, `user-settings`) and three slot fillers; other plugins mount into slots that settings declares.
 
 ### Flutter app
 
@@ -290,8 +288,8 @@ Stream events (`core/contracts/types.ts:158-166`): `text-delta`, `tool-call`, `u
 
 - `resolveEffectiveBotModelV1` (`core/configuration/index.ts:652-760`): a Bot-scoped Package setting with `role: "model"`, else a User-scoped one, else `user.platformModel`. Two enabled packages both declaring a model setting is a hard conflict. A broken choice falls back to the platform model and records `fallback.from`.
 - `resolveBotModelBindingV1` (`:588-621`) yields `ready`, `requires-resolution` or `unavailable`.
-- The Turn resolves the effective model, refuses if it changed mid-reply, and mounts the provider plugin itself as a runtime Package for that Turn (`packages/plugin-shell/src/backend.ts:4965-5090`). The resulting `modelSelection` flows through `backend.ts:1792` → `backend-composition.ts:297` → `apps/agent-runtime/src/runtime.ts:557-583`, where it overrides the default provider and model and becomes `AgentOptions.modelBinding`.
-- Package-to-provider-type mapping is a two-entry map at `applications/foundation/src/runtime.ts:369-419`: `@frockbot/providers/ollama-cloud/runtime` → `ollama-cloud`, `@frockbot/providers/frock-ai/runtime` → `flock-ai`. Anything else resolves to `Bot model provider "X" is unavailable` (`:1084-1089`).
+- The Turn resolves the effective model, refuses if it changed mid-reply, and mounts the provider plugin itself as a runtime Package for that Turn (`app/shell/backend.ts:4965-5090`). The resulting `modelSelection` flows through `backend.ts:1792` → `backend-composition.ts:297` → `app/agent-runtime.ts:557-583`, where it overrides the default provider and model and becomes `AgentOptions.modelBinding`.
+- Package-to-provider-type mapping is a two-entry map at `app/runtime.ts:369-419`: `@frockbot/providers/ollama-cloud/runtime` → `ollama-cloud`, `@frockbot/providers/frock-ai/runtime` → `flock-ai`. Anything else resolves to `Bot model provider "X" is unavailable` (`:1084-1089`).
 
 ### Packages
 
@@ -299,15 +297,15 @@ Stream events (`core/contracts/types.ts:158-166`): `text-delta`, `tool-call`, `u
 
 **`providers/frock-ai`** — package id `provider-flock-ai`, provider type `flock-ai`. Calls Cloudflare AI Gateway through one of two transports, chosen at `apps/cloudflare/src/frock-ai.ts:132`: with an account id and token, a raw fetch to `https://gateway.ai.cloudflare.com/v1/<account>/<gateway>/compat/chat/completions` with `cf-aig-authorization` (`:55-58`, `:163-180`); otherwise the `AI` binding's `gateway(id).run({provider: "compat", endpoint: "chat/completions"})` (`:195-207`). Only the compat transport accepts a `dynamic/<route>` model. Model ids are `@frock/*` with legacy `@flock/*` normalized (`catalog.ts:30-38`); `@frock/auto` maps to the `dynamic/flock-auto` route, a concrete id to `workers-ai/@cf/...`, and a structured-output request on Auto is pinned to `workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast` (`:21-22`, `:92-101`). The static catalog has two entries: `@frock/auto` and `@frock/deepseek-ai/deepseek-v4-flash-0731` (`:49-56`, `:104-124`). `user.ts:192-275` bootstraps an ambient `flock-ai-ambient` Connection and sets it as `platformModel` for every User, which is what lets a new Bot answer with no configuration. `runtime.ts:224-255` tags the Agent on a permanent failure and rewrites the next request to `@frock/auto`. `reconciliation.retrieve` returns `not-retrievable` (`:133-140`). Stored ids are `flock-*`; display strings are `Frock` (`catalog.ts:3-8`).
 
-**`providers/ollama-cloud`** — provider id `ollama-cloud`, `defaultEnablement: "disabled"`. Takes an API-key Connection and acquires a per-request credential lease against the User Durable Object before any bytes are sent (`runtime.ts:133-190`), settling it afterwards; a lease that does not match `connectionId` and `connectionGeneration` is a permanent failure. Base URL comes from the Connection setting `api-base-url`, default `https://ollama.com`, with `/v1` appended (`:74-77`). It delegates to `OpenAICompatibleProvider` (`:229-241`). Behavior forks on hostname: a non-`ollama.com` host uses native `/api/chat` with `format` for JSON Schema, while `ollama.com` reports `structuredOutput: "none"` (`:130-132`, `:278-289`). It also contributes an `ollama-cloud-web-search` tool Capability, so it is the one Package that mounts twice per Turn — handled by `mergeFoundationRuntimePackagesV1` (`applications/foundation/src/runtime.ts:1106-1145`).
+**`providers/ollama-cloud`** — provider id `ollama-cloud`, `defaultEnablement: "disabled"`. Takes an API-key Connection and acquires a per-request credential lease against the User Durable Object before any bytes are sent (`runtime.ts:133-190`), settling it afterwards; a lease that does not match `connectionId` and `connectionGeneration` is a permanent failure. Base URL comes from the Connection setting `api-base-url`, default `https://ollama.com`, with `/v1` appended (`:74-77`). It delegates to `OpenAICompatibleProvider` (`:229-241`). Behavior forks on hostname: a non-`ollama.com` host uses native `/api/chat` with `format` for JSON Schema, while `ollama.com` reports `structuredOutput: "none"` (`:130-132`, `:278-289`). It also contributes an `ollama-cloud-web-search` tool Capability, so it is the one Package that mounts twice per Turn — handled by `mergeFoundationRuntimePackagesV1` (`app/runtime.ts:1106-1145`).
 
 **`providers/foundation`** — provider id `foundation`, model `deterministic-v1` (`runtime.ts:8-9`). It echoes the last user message prefixed `"Built-in model: "`, or echoes tool output, and reports `structuredOutput: "none"`. It is the default in `createFoundationRuntime` and is overridden by `modelSelection`.
 
 **`core/models`** — the registry service. Also implements `structured<T>()` by streaming with a `json_schema` response format and validating the accumulated text.
 
-**`packages/plugin-custom-models`** — client-only, `defaultEnablement: "disabled"`. Contributes a Vue `BotModelSection` into slot `frockbot.bot-settings-sections` and declares the Bot-scoped `role: "model"` setting. It has no runtime and no provider; it is the model picker.
+**`app/custom-models`** — client-only, `defaultEnablement: "disabled"`. Contributes a Vue `BotModelSection` into slot `frockbot.bot-settings-sections` and declares the Bot-scoped `role: "model"` setting. It has no runtime and no provider; it is the model picker.
 
-Adjacent, outside the loop: image generation uses Workers AI ids directly (`packages/plugin-image/src/model.ts:40-52`, default `@cf/black-forest-labs/flux-1-schnell`).
+Adjacent, outside the loop: image generation uses Workers AI ids directly (`app/image/model.ts:40-52`, default `@cf/black-forest-labs/flux-1-schnell`).
 
 ---
 
@@ -315,7 +313,7 @@ Adjacent, outside the loop: image generation uses Workers AI ids directly (`pack
 
 ### Authoring
 
-The Bot writes Applet code on the Computer with ordinary file tools. `applets/` exposes seven tools — `applet_list`, `applet_create`, `applet_publish`, `applet_revert`, `applet_delete`, `applet_focus`, `applet_generations` — as an ordinary first-party runtime feature, `createAppletsFeature` (`applets/feature.ts`), mounted for one admitted Turn beside Memory and Skills (`applications/foundation/src/runtime.ts`). Its host is `createAppletCapabilityHostV1` (`packages/plugin-shell/src/backend-applets.ts`), built per call because a publish needs the Turn's mounted Computer. `applet_create` scaffolds from templates into the durable root `applets/source/<appletId>/` (`applets/root.ts`), mounted on the Sprite at `/home/box/agent-data/user-packages/applets/source`. Guidance ships at `applets/skills/applets.md`.
+The Bot writes Applet code on the Computer with ordinary file tools. `applets/` exposes seven tools — `applet_list`, `applet_create`, `applet_publish`, `applet_revert`, `applet_delete`, `applet_focus`, `applet_generations` — as an ordinary first-party runtime feature, `createAppletsFeature` (`applets/feature.ts`), mounted for one admitted Turn beside Memory and Skills (`app/runtime.ts`). Its host is `createAppletCapabilityHostV1` (`app/shell/backend-applets.ts`), built per call because a publish needs the Turn's mounted Computer. `applet_create` scaffolds from templates into the durable root `applets/source/<appletId>/` (`applets/root.ts`), mounted on the Sprite at `/home/box/agent-data/user-packages/applets/source`. Guidance ships at `applets/skills/applets.md`.
 
 The Applets Package declares that durable root in its definition (`applets/definition.ts`), which the Computer's durable-root sync reads (`declaredPackageRootsV1`).
 
@@ -325,7 +323,7 @@ esbuild, run by the SDK CLI on the Computer — `applets/sdk/src/cli/build.ts:46
 
 ### Storage
 
-R2 `APPLICATION_ARTIFACTS`, content-addressed as `packages/<sha256>.mjs` and `.html`, written at `packages/plugin-shell/src/backend.ts:2506-2515` and hash-verified on read (`apps/cloudflare/src/applet-state.ts:276-290`). Generations, pointers and failures live in `AppletState`; the account directory lives in `UserConfiguration`.
+R2 `APPLICATION_ARTIFACTS`, content-addressed as `packages/<sha256>.mjs` and `.html`, written at `app/shell/backend.ts:2506-2515` and hash-verified on read (`apps/cloudflare/src/applet-state.ts:276-290`). Generations, pointers and failures live in `AppletState`; the account directory lives in `UserConfiguration`.
 
 ### Execution
 
@@ -334,7 +332,7 @@ R2 `APPLICATION_ARTIFACTS`, content-addressed as `packages/<sha256>.mjs` and `.h
 
 ### First-party pages
 
-`list.html` and `canvas.html` (`applets/pages/`) are declared by a static registry, `FIRST_PARTY_PACKAGE_UI_V1` (`applets/pages.ts`): page id, digest, html, the tool names that page may call, and where it mounts. `projectFirstPartyPackageIframeV1` (`packages/plugin-shell/src/composition-views.ts`) reshapes it for the client and `requirePackageUiToolDeclarationV1` authorizes a page's tool command against it. There is no Composition generation in either: a first-party page ships in the deployment, so there is nothing for a generation to fence. The bridge protocol (`PACKAGE_IFRAME_HELPER_JS_V1`) is unchanged — it is the page contract a Bot-authored page will reuse.
+`list.html` and `canvas.html` (`applets/pages/`) are declared by a static registry, `FIRST_PARTY_PACKAGE_UI_V1` (`applets/pages.ts`): page id, digest, html, the tool names that page may call, and where it mounts. `projectFirstPartyPackageIframeV1` (`app/shell/composition-views.ts`) reshapes it for the client and `requirePackageUiToolDeclarationV1` authorizes a page's tool command against it. There is no Composition generation in either: a first-party page ships in the deployment, so there is nothing for a generation to fence. The bridge protocol (`PACKAGE_IFRAME_HELPER_JS_V1`) is unchanged — it is the page contract a Bot-authored page will reuse.
 
 ### SDK
 
@@ -393,7 +391,7 @@ Bindings are declared in `apps/cloudflare/wrangler.jsonc`.
 | Binding                                                                   | Kind               | Contents                                                                                                                                              |
 | ------------------------------------------------------------------------- | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `USER_APPLICATIONS` (:20)                                                 | Worker Loader      | The per-user foundation application artifact (`apps/cloudflare/src/index.ts:2229`, `src/user-configuration.ts:201`, `src/package-publication.ts:120`) |
-| `BOT_PACKAGES` (:26)                                                      | Worker Loader      | Bot Package isolates, loaded with `globalOutbound` disabled (`packages/plugin-shell/src/backend.ts:2069`)                                             |
+| `BOT_PACKAGES` (:26)                                                      | Worker Loader      | Bot Package isolates, loaded with `globalOutbound` disabled (`app/shell/backend.ts:2069`)                                                             |
 | `APPLETS` (:33)                                                           | Worker Loader      | Applet server artifacts, mounted as facets (`apps/cloudflare/src/applet-state.ts:94`, `:249`)                                                         |
 | `COMPUTER_HOST` (:47)                                                     | Service            | `frockbot-computer-host` (`apps/cloudflare/src/bot-state.ts:465-474`)                                                                                 |
 | `APPLICATION_ARTIFACTS` (:53)                                             | R2                 | Application, Package and Applet artifacts, content-addressed                                                                                          |
@@ -469,7 +467,7 @@ Triggers: push to `main`, all pull requests, `workflow_dispatch`.
 Trigger: push of a tag matching `v*.*.*`.
 
 - `verify` (:16) — validates strict SemVer, then `typecheck`, `bun test`, `bun run build`.
-- `publish-npm` (:84) — `build:webui`, rewrites every `packages/*/package.json` to the tag version and sets `private: false`, resolves `workspace:` ranges to literals, requires npm ≥ 11.5.1, then publishes all of `packages/*` concurrently with `npm publish --access public` (`--tag next` for prereleases) through OIDC trusted publishing. `EPUBLISHCONFLICT` is treated as success.
+- `publish-npm` (:84) — rewrites every `packages/*/package.json` to the tag version and sets `private: false`, resolves `workspace:` ranges to literals, requires npm ≥ 11.5.1, then publishes all of `packages/*` concurrently with `npm publish --access public` (`--tag next` for prereleases) through OIDC trusted publishing. `EPUBLISHCONFLICT` is treated as success.
 - `github-release` (:233) — `gh release create --generate-notes --verify-tag`.
 - `deploy-marketing` (:255).
 - `deploy-backend` (:307, environment `production`) — rewrites the production D1 id and artifact hash into `wrangler.jsonc`, applies D1 migrations remotely, uploads the artifact, deploys the bundler and then the computer host with its own secrets file, runs `scripts/check-production-secrets.ts check --live` and `write-secrets-file`, then `wrangler deploy --secrets-file`.
