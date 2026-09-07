@@ -13,8 +13,9 @@ import 'transport_io.dart' if (dart.library.js_interop) 'transport_web.dart';
 export 'store.dart';
 
 /// The gateway this build talks to. A development build is pointed at the
-/// local stack — `http://10.0.2.2:8787` from the emulator — with
-/// `--dart-define=FROCKBOT_ORIGIN=…`; every other build talks to production.
+/// local stack with `--dart-define=FROCKBOT_ORIGIN=…` (`bun run dev:native`
+/// lends the host's loopback to the emulator); every other build talks to
+/// production.
 const hostedOrigin = String.fromEnvironment(
   'FROCKBOT_ORIGIN',
   defaultValue: 'https://bot.frockbot.com',
@@ -198,7 +199,14 @@ class BackendChatTransport implements ChatTransport {
       queryParameters: {'before': ?before, 'conversationId': ?conversationId},
     ).query;
     return wire.ConversationProjection.fromJson(
-          await api.request('${path(botId)}${query.isEmpty ? '' : '?$query'}'),
+          await api.request(
+            '${path(botId)}${query.isEmpty ? '' : '?$query'}',
+            // The server cuts a page at 512,000 wire bytes but always admits
+            // the newest finished Turn past that line, so a Bot with history
+            // answers with a page the default limit refuses — and the chat
+            // could never restore (Bob and Test, 2026-09-07).
+            limit: 2000000,
+          ),
         ).toJson()
         as Map<String, dynamic>;
   }
