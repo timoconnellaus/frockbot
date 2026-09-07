@@ -189,13 +189,14 @@ Register `https://staging-bot.frockbot.com/api/auth/callback/google` as an autho
 
 ## Production deployment
 
-After a version tag's packages are published, `release.yml` deploys four Cloudflare Workers through the GitHub `production` environment. Merging to `main` deploys nothing — a tag is the only thing that reaches production, so code can be integrated freely and released deliberately:
+After a version tag's packages are published, `release.yml` deploys four Cloudflare Workers — marketing, the Applet build service, the Computer host and the app — through the GitHub `production` environment. Merging to `main` deploys nothing — a tag is the only thing that reaches production, so code can be integrated freely and released deliberately:
 
 - `apps/marketing` serves the public marketing site at `https://frockbot.com` and redirects `www.frockbot.com` to the apex domain;
+- `apps/applet-build` is the Applet build service: an internal Worker with no public route and a Cloudflare Container that type-checks, lints, bundles and boots an Applet's source. It deploys before the app because that binding must resolve. Dark for now — nothing calls it;
 - `apps/computer-host` is the shared Computer host: an internal Worker with no public route, a bounded pool of Cloudflare Containers, and the only place `SPRITES_TOKEN` is used. It deploys before the app because that binding must resolve, and because a stale host would be serving a current app;
 - `apps/cloudflare` serves the authenticated application and API at `https://bot.frockbot.com`.
 
-The Computer host runs Containers, which require the **Workers Paid plan**; its deploy step builds and pushes the container image, so the runner needs Docker (`ubuntu-latest` has it).
+The Computer host and the Applet build service both run Containers, which require the **Workers Paid plan**; each deploy step builds and pushes its container image, so the runner needs Docker (`ubuntu-latest` has it).
 
 The app deployment applies remote D1 migrations, uploads the immutable application artifact to R2 under its SHA-256 digest, sets `DEFAULT_APPLICATION_HASH` to that digest, and then deploys the Worker, so each build is content-addressed and never overwrites a previously deployed artifact. Both Wrangler configurations declare their custom domains, so Cloudflare creates and maintains the required proxied DNS records when the Workers are first deployed.
 
@@ -271,6 +272,7 @@ app/              The product: `runtime.ts`, the Contribution tables, and one di
 applets/          Applets: the seven applet_* tools, the source root, and the shell's pages
   sdk/            Applet authoring SDK, component kit, linter, and `applet` CLI; published to npm
 apps/
+  applet-build/     Applet build service Worker and its Node container
   cloudflare/       User application loader, Dynamic Worker artifact, and bot state
   computer-host/    Shared Computer host Worker and its Node container
   marketing/        Public frockbot.com site and static-assets Worker

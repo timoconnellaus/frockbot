@@ -64,7 +64,12 @@ The seam that retrieved a lost response from the provider is deleted outright: `
 
 The shell backend is now a state object and feature modules: `ShellBotStateV1` is what every feature function takes as its first argument, and each group — Subagents, isolate grants, the Applets host, settings, notifications, routines, approvals, the machine seam, run reads, debug, Skills, the Turn and its Composition mount — is an ordinary exported function the Bot Durable Object calls directly. `app/shell/backend.ts` went from 6,111 lines to 204: the state construction, a hook table of one-line lambdas, and the forwards the recovery tests still drive.
 
-**8. Applets off the Computer.** A build service takes source, type-checks, lints, bundles and returns a content-addressed artifact with a preview URL. The durable-root sync leaves the Applet path.
+**8. Applets off the Computer.** _In progress, in four cuts that each leave `main` shippable._ A build service takes source, type-checks, lints, bundles and returns a content-addressed artifact with a preview URL. The durable-root sync leaves the Applet path.
+
+- _8a, done._ The build service, dark. `apps/applet-build` is a fifth deployable: no routes, an `APPLET_BUILD` service binding, a `node:24-slim` container with no egress that runs the SDK's own pipeline, and a shared token both the Worker and the container check. `applets/build-contract.ts` is the wire protocol; the reusable bodies of `applet check` and `applet build` moved to `applets/sdk/src/build/`, so the CLI and the service run one implementation and a test asserts they hash alike. That test found a real defect on the way: esbuild writes each module's path into the unminified server bundle, so identical source built in two directories produced two content hashes — every publish of unchanged code would have written a new R2 object. The paths are now stable labels. Nothing in the app calls the binding: `applet_publish` still reads `dist/` off the Computer.
+- _8b._ Source off the Computer: publish reads the source prefix and calls the service, and the Bot gets `applet_write_file`, `applet_read_file` and `applet_check` in place of the four shell steps.
+- _8c._ The durable-root sync leaves the Applet path.
+- _8d._ The dead code out: the Sprite's `applets` provisioning phase, the `applet` shim, the two doctor checks, and the CLI reduced to a front end.
 
 **9. Flutter to parity, Vue out.** The long pole. One Flutter client, on the phone and on the web — `bot.frockbot.com` is an app behind sign-in, so Flutter Web's first-load cost buys one codebase instead of two. Each surface ported, then its Vue original deleted in the same change. Includes the ViewNode renderer — six node types — which replaces A2UI as the way a plugin renders.
 

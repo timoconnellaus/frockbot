@@ -3,7 +3,7 @@
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { SDK_ROOT } from "./paths.js";
+import { SDK_ROOT } from "../build/paths.js";
 
 const TEMPLATE_ROOT = join(SDK_ROOT, "template");
 

@@ -188,10 +188,10 @@ start_stack() {
       "export CLOUDFLARE_API_TOKEN=... (Workers AI + AI Gateway read) first." >&2
   fi
 
-  # `COMPUTER_HOST` is a service binding with no local Worker to resolve to, so
-  # it reads `[not connected]`. See docs/dogfood/dev-stack.md for what a live
-  # Computer would additionally need; it is blocked on a secret, not on this
-  # script.
+  # `COMPUTER_HOST` and `APPLET_BUILD` are service bindings with no local Worker
+  # to resolve to, so both read `[not connected]`. See docs/dogfood/dev-stack.md
+  # for what a live Computer would additionally need; it is blocked on a secret,
+  # not on this script. `bun run dev:native` is the stack that starts both.
   if ! grep -q '^COMPUTER_HOST_TOKEN=' "$cloudflare_root/.dev.vars"; then
     printf '\033[1;33m[dogfood]\033[0m %s\n' \
       "note: no COMPUTER_HOST_TOKEN in apps/cloudflare/.dev.vars, so the Computer" >&2

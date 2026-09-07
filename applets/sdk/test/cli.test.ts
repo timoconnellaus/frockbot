@@ -4,10 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { buildApplet } from "../src/cli/build.js";
-import { checkApplet } from "../src/cli/check.js";
+import { checkApplet } from "../src/build/check.js";
 import { startAppletDev } from "../src/cli/dev.js";
 import { appletIdFrom, newApplet } from "../src/cli/new.js";
-import { decodeDescriptor } from "../src/cli/manifest.js";
+import { decodeDescriptor } from "../src/build/manifest.js";
 import { formatDiagnostic } from "../src/lint/index.js";
 import {
   decodeServerFrame,

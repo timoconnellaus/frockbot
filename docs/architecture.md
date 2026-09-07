@@ -6,20 +6,21 @@ Paths are relative to the repository root.
 
 ## 1. Deployables
 
-Four Workers, one container image, one Flutter app.
+Five Workers, two container images, one Flutter app.
 
-| Deployable           | Worker name              | Config                              | Serves                                                                                                                                                                                                            |
-| -------------------- | ------------------------ | ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `apps/cloudflare`    | `frockbot-cloudflare`    | `apps/cloudflare/wrangler.jsonc`    | The product. Custom domains `bot.frockbot.com` and `ui.bot.frockbot.com`. `main: src/index.ts`, compatibility date `2026-08-27`, flag `nodejs_compat`.                                                            |
-| `apps/computer-host` | `frockbot-computer-host` | `apps/computer-host/wrangler.jsonc` | No routes; reached only through the app's `COMPUTER_HOST` service binding. Fronts a Cloudflare Container built from `apps/computer-host/Dockerfile` (`node:24-slim`, `instance_type: basic`, `max_instances: 3`). |
-| `apps/marketing`     | `frockbot-marketing`     | `apps/marketing/wrangler.jsonc`     | `frockbot.com` and `www.frockbot.com`. Static `ASSETS` from `./public` with `run_worker_first: true`; the Worker is a canonical-host redirect plus security headers (`apps/marketing/src/index.ts:1-31`).         |
-| `apps/native`        | `frockbot_native`        | `apps/native/pubspec.yaml`          | Flutter, Android and macOS. Not deployed by CI.                                                                                                                                                                   |
+| Deployable           | Worker name              | Config                              | Serves                                                                                                                                                                                                                                                                                                                                           |
+| -------------------- | ------------------------ | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `apps/cloudflare`    | `frockbot-cloudflare`    | `apps/cloudflare/wrangler.jsonc`    | The product. Custom domains `bot.frockbot.com` and `ui.bot.frockbot.com`. `main: src/index.ts`, compatibility date `2026-08-27`, flag `nodejs_compat`.                                                                                                                                                                                           |
+| `apps/computer-host` | `frockbot-computer-host` | `apps/computer-host/wrangler.jsonc` | No routes; reached only through the app's `COMPUTER_HOST` service binding. Fronts a Cloudflare Container built from `apps/computer-host/Dockerfile` (`node:24-slim`, `instance_type: basic`, `max_instances: 3`).                                                                                                                                |
+| `apps/applet-build`  | `frockbot-applet-build`  | `apps/applet-build/wrangler.jsonc`  | No routes; reached only through the app's `APPLET_BUILD` service binding. Fronts a Cloudflare Container built from `apps/applet-build/Dockerfile` (`node:24-slim`, `instance_type: standard`, `max_instances: 3`, no egress) that runs the Applets SDK's build pipeline. Dark as of plan step 8 cut 1: declared and deployed, called by nothing. |
+| `apps/marketing`     | `frockbot-marketing`     | `apps/marketing/wrangler.jsonc`     | `frockbot.com` and `www.frockbot.com`. Static `ASSETS` from `./public` with `run_worker_first: true`; the Worker is a canonical-host redirect plus security headers (`apps/marketing/src/index.ts:1-31`).                                                                                                                                        |
+| `apps/native`        | `frockbot_native`        | `apps/native/pubspec.yaml`          | Flutter, Android and macOS. Not deployed by CI.                                                                                                                                                                                                                                                                                                  |
 
 Named environments on the app Worker (`apps/cloudflare/wrangler.jsonc`):
 
-- `development` (:159)
-- `staging` (:269) — `frockbot-cloudflare-staging`, routes `staging-bot.frockbot.com` and `ui.staging-bot.frockbot.com`
-- `e2e` (:386) — `"routes": []`, never deployed
+- `development` (:148)
+- `staging` (:251) — `frockbot-cloudflare-staging`, routes `staging-bot.frockbot.com` and `ui.staging-bot.frockbot.com`
+- `e2e` (:359) — `"routes": []`, never deployed
 
 Not deployed, though it carries a wrangler config: `apps/cloudflare/e2e/frock-ai-fake.wrangler.jsonc` (bound as a service by the `e2e` env, run from the local wrangler dev registry).
 
@@ -28,7 +29,7 @@ No Fly configuration exists in the repository. Fly Sprites are rented at runtime
 Deploy paths:
 
 - `.github/workflows/ci.yml:367` `deploy-staging` — on push to `main`, deploys the app Worker to `staging`.
-- `.github/workflows/release.yml` — on tag `v*.*.*`, deploys marketing (:255), the bundler (:469), the computer host (:478) and the app Worker (:307).
+- `.github/workflows/release.yml` — on tag `v*.*.*`, deploys marketing (:272), the computer host (:451), the Applet build service (:479) and the app Worker (:505).
 
 ---
 
@@ -319,7 +320,11 @@ The Applets Package declares that durable root in its definition (`applets/defin
 
 ### Build
 
-esbuild, run by the SDK CLI on the Computer — `applets/sdk/src/cli/build.ts:46-183`. The server bundle is ESM, `platform: neutral`, with `cloudflare:workers` external. The UI bundle is IIFE, minified and inlined into one self-contained HTML page. The tool declaration is derived by booting the built Durable Object in Miniflare 5 and calling `/health` and `/describe` (`:104-131`). `apps/cloudflare-bundler` is not involved; that service bundles Bot Packages.
+One pipeline, `applets/sdk/src/build/`, in five named stages: `descriptor`, `typecheck`, `lint`, `bundle`, `describe` (`pipeline.ts`). The server bundle is ESM, `platform: neutral`, with `cloudflare:workers` external. The UI bundle is IIFE, minified and inlined into one self-contained HTML page. The tool declaration is derived by booting the built Durable Object in Miniflare 5 and calling `/health` and `/describe` (`artifacts.ts`) — never by reading the source, because the kernel admits a generation by comparing the manifest to the mounted facet's own `health()`. esbuild's module path comments are rewritten to labels relative to the Applet root and the SDK root (`stableModulePaths`), so the same source hashes the same wherever it is built.
+
+Two entry points run it. `applet check` and `applet build` (`applets/sdk/src/cli/`) run it on the Computer and write `dist/`. `apps/applet-build` runs it in the cloud: a Worker with no routes, reached through the app's `APPLET_BUILD` service binding, fronting a Cloudflare Container with no egress. Its contract is `applets/build-contract.ts` — `POST /build` taking `{version, effectId, appletId, mode, files}` and answering `{status: "built", manifest, server, ui}` or `{status: "failed", stage, diagnostics}`, with the artifact ceilings enforced in the service as diagnostics. The container holds no storage and no credential; the app Worker keeps the R2 write and the hash verification. `container/build.test.ts` asserts the two entry points agree hash for hash.
+
+As of plan step 8 cut 1 the service is dark: deployed, bound, and called by nothing. `applet_publish` still reads `dist/` off the Computer.
 
 ### Storage
 

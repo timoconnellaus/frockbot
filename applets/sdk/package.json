@@ -11,6 +11,7 @@
     "./kit": "./src/kit/index.tsx",
     "./lint": "./src/lint/index.ts",
     "./protocol": "./src/protocol/index.ts",
+    "./build": "./src/build/pipeline.ts",
     "./package.json": "./package.json"
   },
   "bin": {

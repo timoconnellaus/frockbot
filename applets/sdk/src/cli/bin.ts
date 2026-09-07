@@ -20,7 +20,7 @@ import { resolve } from "node:path";
 
 import { formatDiagnostic } from "../lint/index.js";
 import { buildApplet } from "./build.js";
-import { checkApplet } from "./check.js";
+import { checkApplet } from "../build/check.js";
 import { startAppletDev } from "./dev.js";
 import { newApplet } from "./new.js";
 

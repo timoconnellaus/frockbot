@@ -115,6 +115,12 @@ export const OPTIONAL_PRODUCTION_SECRETS_V1: readonly OptionalProductionSecretV1
         "nobody can administer the signup policy, though signups stay closed and existing Users keep signing in",
     },
     {
+      name: "APPLET_BUILD_TOKEN",
+      why: "Presented on every call to the Applet build service.",
+      degraded:
+        "no Applet can be built in the cloud, though nothing calls the service yet",
+    },
+    {
       name: "DEBUG_TOKEN",
       why: "Authorizes the read-only `/api/debug` operator surface.",
       degraded: "the operator debug routes 404",
