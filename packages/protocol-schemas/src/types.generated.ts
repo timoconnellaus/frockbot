@@ -4,6 +4,8 @@ export type BotId = string;
 export type Digest = string;
 export type Instant = string;
 export type HttpsUrl = string;
+export type NativeReturnUri = HttpsUrl | "frockbot-dev://native/return/android";
+export type AuthorizationUrl = HttpsUrl | string;
 export type Json =
   | null
   | boolean
@@ -43,11 +45,11 @@ export type AuthStartCommand = {
   codeChallenge: string;
   codeChallengeMethod: "S256";
   state: string;
-  returnUri: HttpsUrl;
+  returnUri: NativeReturnUri;
 };
 export type AuthStartView = {
   schemaVersion: 1;
-  authorizationUrl: HttpsUrl;
+  authorizationUrl: AuthorizationUrl;
   expiresAt: Instant;
 };
 export type AuthExchangeCommand = {
@@ -56,7 +58,7 @@ export type AuthExchangeCommand = {
   code: string;
   codeVerifier: string;
   state: string;
-  returnUri: HttpsUrl;
+  returnUri: NativeReturnUri;
 };
 export type AuthSessionView = {
   schemaVersion: 1;
@@ -745,6 +747,8 @@ export interface ProtocolTypes {
   Digest: Digest;
   Instant: Instant;
   HttpsUrl: HttpsUrl;
+  NativeReturnUri: NativeReturnUri;
+  AuthorizationUrl: AuthorizationUrl;
   Json: Json;
   CatalogRef: CatalogRef;
   ClientHello: ClientHello;

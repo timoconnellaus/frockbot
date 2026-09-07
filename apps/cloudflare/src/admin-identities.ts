@@ -1,3 +1,6 @@
+/** The one identity a development stack signs in as; an admin there. */
+export const DEVELOPMENT_USER_ID = "development";
+
 export interface GatewayIdentityV1 {
   id: string;
   email?: string;
@@ -17,7 +20,7 @@ export function isDeploymentAdminV1(
   identity: GatewayIdentityV1,
   configuredEmails: string | undefined,
 ): boolean {
-  if (identity.mode === "development" && identity.id === "development") {
+  if (identity.mode === "development" && identity.id === DEVELOPMENT_USER_ID) {
     return true;
   }
   const emails = adminEmailsV1(configuredEmails);

@@ -34,6 +34,29 @@
       "maxLength": 2048,
       "pattern": "^https://[^\\s/@?#:]+(?::[0-9]+)?(?:/[^\\s#]*)?$"
     },
+    "NativeReturnUri": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/HttpsUrl"
+        },
+        {
+          "const": "frockbot-dev://native/return/android"
+        }
+      ]
+    },
+    "AuthorizationUrl": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/HttpsUrl"
+        },
+        {
+          "type": "string",
+          "minLength": 12,
+          "maxLength": 2048,
+          "pattern": "^http://(?:127\\.0\\.0\\.1|10\\.0\\.2\\.2|localhost)(?::[0-9]+)?/[^\\s#]*$"
+        }
+      ]
+    },
     "Json": {
       "oneOf": [
         {
@@ -210,7 +233,7 @@
           "pattern": "^[A-Za-z0-9_-]+$"
         },
         "returnUri": {
-          "$ref": "#/$defs/HttpsUrl"
+          "$ref": "#/$defs/NativeReturnUri"
         }
       },
       "required": [
@@ -230,7 +253,7 @@
           "const": 1
         },
         "authorizationUrl": {
-          "$ref": "#/$defs/HttpsUrl"
+          "$ref": "#/$defs/AuthorizationUrl"
         },
         "expiresAt": {
           "$ref": "#/$defs/Instant"
@@ -266,7 +289,7 @@
           "pattern": "^[A-Za-z0-9_-]+$"
         },
         "returnUri": {
-          "$ref": "#/$defs/HttpsUrl"
+          "$ref": "#/$defs/NativeReturnUri"
         }
       },
       "required": [

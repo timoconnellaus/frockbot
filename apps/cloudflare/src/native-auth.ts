@@ -16,6 +16,12 @@ import type {
 export const NATIVE_ORIGIN = "https://bot.frockbot.com";
 export const NATIVE_RETURN_ANDROID = `${NATIVE_ORIGIN}/native/return/android`;
 export const NATIVE_RETURN_MACOS = `${NATIVE_ORIGIN}/native/return/macos`;
+/**
+ * Where a development build of the app receives its sign-in. A custom scheme,
+ * because a plain-HTTP loopback origin can never be an App Link; only a Worker
+ * running with `ALLOW_DEVELOPMENT_AUTH` ever lists it.
+ */
+export const NATIVE_RETURN_DEVELOPMENT = "frockbot-dev://native/return/android";
 const PREFIX = "frockbot-native.";
 const encoder = new TextEncoder();
 const NO_STORE = {
@@ -89,6 +95,14 @@ export interface NativeAuthOptions {
     operation: NativeSessionOperation,
   ): Promise<NativeSessionRecord | null>;
   now?: () => number;
+  /** The origin the app talks to. Production's unless a development stack. */
+  origin?: string;
+  /**
+   * The development sign-in door: with this set, `/native/authorize` issues
+   * the code for this User when the browser holds no session, in place of
+   * Google. Set only from `ALLOW_DEVELOPMENT_AUTH`, which production refuses.
+   */
+  developmentUserId?: string;
 }
 
 export interface NativeAuth {
@@ -165,6 +179,7 @@ export async function readNativeJsonBody(
 }
 
 export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
+  const origin = options.origin ?? NATIVE_ORIGIN;
   const now = options.now ?? Date.now;
   const key = () =>
     crypto.subtle.importKey(
@@ -295,11 +310,11 @@ export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
     callbackURL: string,
   ): Promise<Response> {
     const response = await options.auth.handler(
-      new Request(`${NATIVE_ORIGIN}/api/auth/sign-in/social`, {
+      new Request(`${origin}/api/auth/sign-in/social`, {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          origin: NATIVE_ORIGIN,
+          origin: origin,
           cookie: request.headers.get("cookie") ?? "",
         },
         body: JSON.stringify({
@@ -332,7 +347,7 @@ export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
       if (!bearer?.startsWith(`Bearer ${PREFIX}`)) return undefined;
       const refusal = clientCompatibilityResponse(
         request,
-        new URL(`${NATIVE_ORIGIN}/api/native/session`),
+        new URL(`${origin}/api/native/session`),
       );
       if (refusal) return { session: null, refusal };
       try {
@@ -373,7 +388,7 @@ export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
       // The signed application's callback origin is not configurable by input.
       // Google's asset-links fetcher asks for the fully qualified host
       // ("bot.frockbot.com."); that trailing dot names the same origin.
-      if (requestOrigin(url) !== NATIVE_ORIGIN) return error(403);
+      if (requestOrigin(url) !== origin) return error(403);
       const association =
         url.pathname === "/.well-known/assetlinks.json" ||
         url.pathname === "/.well-known/apple-app-site-association";
@@ -446,7 +461,7 @@ export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
           return Response.json(
             {
               schemaVersion: 1,
-              authorizationUrl: `${NATIVE_ORIGIN}/native/settings?request=${token}`,
+              authorizationUrl: `${origin}/native/settings?request=${token}`,
               expiresAt: new Date(expires).toISOString(),
             },
             { headers: NO_STORE },
@@ -461,7 +476,7 @@ export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
           if (!session)
             return browserSignIn(
               request,
-              `${NATIVE_ORIGIN}/native/settings?request=${token}`,
+              `${origin}/native/settings?request=${token}`,
             );
           if (session.user.id !== claims.userId)
             return new Response(
@@ -475,7 +490,7 @@ export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
               },
             );
           return redirect(
-            `${NATIVE_ORIGIN}/?settings=${claims.home}${claims.home === "models" ? "#user-model-providers" : ""}`,
+            `${origin}/?settings=${claims.home}${claims.home === "models" ? "#user-model-providers" : ""}`,
           );
         }
         if (
@@ -500,7 +515,7 @@ export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
           return Response.json(
             {
               schemaVersion: 1,
-              authorizationUrl: `${NATIVE_ORIGIN}/native/authorize?request=${token}`,
+              authorizationUrl: `${origin}/native/authorize?request=${token}`,
               expiresAt: new Date(expires).toISOString(),
             },
             { headers: NO_STORE },
@@ -515,18 +530,15 @@ export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
           const claims = await verify(token, "start");
           if (claims.kind !== "start") return error();
           const session = await browserIdentity(request);
-          if (!session) {
+          const userId = session?.user.id ?? options.developmentUserId;
+          if (!userId) {
             if (url.pathname === "/native/complete") return error(401);
             return browserSignIn(
               request,
-              `${NATIVE_ORIGIN}/native/complete?request=${token}`,
+              `${origin}/native/complete?request=${token}`,
             );
           }
-          const code = await sign({
-            ...claims,
-            kind: "exchange",
-            userId: session.user.id,
-          });
+          const code = await sign({ ...claims, kind: "exchange", userId });
           const destination = new URL(claims.start.returnUri);
           destination.searchParams.set("code", code);
           destination.searchParams.set("state", claims.start.state);

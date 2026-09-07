@@ -5,6 +5,7 @@ import {
   readNativeJsonBody,
   NATIVE_ORIGIN,
   NATIVE_RETURN_ANDROID,
+  NATIVE_RETURN_DEVELOPMENT,
   NATIVE_RETURN_MACOS,
   nativeReturnUris,
   type NativeAuthOptions,
@@ -211,6 +212,61 @@ describe("native system browser exchange", () => {
       ).toBe(200);
     },
   );
+  test("the development door signs in without a browser session, on its own origin and scheme", async () => {
+    const origin = "http://10.0.2.2:8787";
+    const f = fixture({
+      origin,
+      returnUris: [NATIVE_RETURN_DEVELOPMENT],
+      developmentUserId: "development",
+    });
+    // Everything arrives on the development origin; production's is refused.
+    const request = (path: string, data: unknown) =>
+      new Request(`${origin}${path}`, {
+        method: "POST",
+        headers: { "x-frockbot-client": JSON.stringify(hello) },
+        body: JSON.stringify(data),
+      });
+    const start = { ...f.start, returnUri: NATIVE_RETURN_DEVELOPMENT };
+    expect(
+      (await f.auth.route(f.request("/api/auth/native/start", start)))?.status,
+    ).toBe(403);
+    const response = await f.auth.route(
+      request("/api/auth/native/start", start),
+    );
+    expect(response?.status).toBe(200);
+    const view = decodeProtocol("AuthStartView", await response!.json());
+    expect(
+      view.authorizationUrl.startsWith(`${origin}/native/authorize?`),
+    ).toBe(true);
+    // No cookie: production would bounce to Google here.
+    const returned = await f.auth.route(new Request(view.authorizationUrl));
+    expect(returned?.status).toBe(302);
+    const destination = new URL(returned!.headers.get("location")!);
+    expect(
+      `${destination.protocol}//${destination.host}${destination.pathname}`,
+    ).toBe(NATIVE_RETURN_DEVELOPMENT);
+    const exchanged = await f.auth.route(
+      request("/api/auth/native/exchange", {
+        schemaVersion: 1,
+        commandId: "exchange-1",
+        code: destination.searchParams.get("code"),
+        state,
+        returnUri: NATIVE_RETURN_DEVELOPMENT,
+        codeVerifier: verifier,
+      }),
+    );
+    expect(exchanged?.status).toBe(200);
+    expect(
+      decodeProtocol("AuthSessionView", await exchanged!.json()).userId,
+    ).toBe("development");
+    // Production never lists the development scheme.
+    expect(nativeReturnUris("android")).not.toContain(
+      NATIVE_RETURN_DEVELOPMENT,
+    );
+    expect(nativeReturnUris("android,macos")).not.toContain(
+      NATIVE_RETURN_DEVELOPMENT,
+    );
+  });
   test("Google redirect retains Better Auth state cookie and callback needs browser identity", async () => {
     const f = fixture();
     const response = await f.auth.route(

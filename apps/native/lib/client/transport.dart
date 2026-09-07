@@ -7,7 +7,13 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../protocol/client_wire.generated.dart' as wire;
 
-const hostedOrigin = 'https://bot.frockbot.com';
+/// The gateway this build talks to. A development build is pointed at the
+/// local stack — `http://10.0.2.2:8787` from the emulator — with
+/// `--dart-define=FROCKBOT_ORIGIN=…`; every other build talks to production.
+const hostedOrigin = String.fromEnvironment(
+  'FROCKBOT_ORIGIN',
+  defaultValue: 'https://bot.frockbot.com',
+);
 const clientHello = <String, Object>{
   'schemaVersion': 1,
   'protocolVersion': 1,
@@ -227,8 +233,10 @@ class NativeApi {
   }
 
   Future<WebSocket> socket(String botId, String? cursor) async {
-    final uri = Uri.parse(hostedOrigin).replace(
-      scheme: 'wss',
+    final origin = Uri.parse(hostedOrigin);
+    final uri = origin.replace(
+      // Plain HTTP only ever names the local stack.
+      scheme: origin.scheme == 'http' ? 'ws' : 'wss',
       path: '/api/bots/$botId/state-channel',
       queryParameters: {'version': '1', 'cursor': ?cursor},
     );
