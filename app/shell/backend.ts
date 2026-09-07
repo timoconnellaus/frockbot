@@ -12,13 +12,11 @@ import {
   decodeSendToUserPayloadV1,
   decodeWorkspacePathV1,
   decodeWorkspaceRootV1,
-  decodeSessionEvent,
   type IsolateConnectionOutcomeV1,
   type IsolateConnectionV1,
   type IsolateMemoryOutcomeV1,
   type IsolateScheduleOutcomeV1,
   type IsolateWorkspaceOutcomeV1,
-  type PersistSessionEvents,
   type SessionEvent,
   type WorkspacePathV1,
   type WorkspaceRootV1,
@@ -31,8 +29,6 @@ import {
   type TurnTypeV1,
   type WorkspaceFilesV1,
 } from "@frockbot/core/contracts";
-import { canonicalJson, sha256 } from "@frockbot/core/contracts";
-import type { ComputerRegistry } from "@frockbot/computer/core";
 import {
   appletSourceFilePathV1,
   appletsSourceRootV1,
@@ -45,22 +41,13 @@ import { firstPartyPackageToolAllowedV1 } from "@frockbot/applets/pages";
 import { syncWorkspaceRootNowV1 } from "@frockbot/computer/agent";
 import {
   ACTIVE_RUN_KEY,
-  BotDurableAuthority,
   IDENTITY_KEY,
-  NOTIFICATION_PREFIX,
-  RECOVERY_ALARM_DELAY_MS,
-  RUN_ADMISSION_FENCE_PREFIX,
-  RUN_INDEX_PREFIX,
   RUN_PREFIX,
   SessionEventLog,
   storedRunRecordV2,
-  CONVERSATION_BUSY_MESSAGE_V1,
-  isConversationBusyV1,
   type BotIdentity,
-  type BotDurableAuthorityOptions,
   type BotTurnExecutionInput,
   type OwnedBotTurnCommand,
-  type StoredRunOriginV1,
 } from "@frockbot/core/durable";
 import type {
   FoundationAgentPackage,
@@ -70,7 +57,6 @@ import {
   decodeCredentialLeaseV1,
   type CredentialLeaseV1,
 } from "@frockbot/core/connection";
-import type { ShellApplicationV1 } from "./backend-runtime.js";
 import {
   applyBotProfilePatchV1,
   configurationCommandFingerprintV1,
@@ -103,17 +89,7 @@ import {
   resolveEffectiveBotModelV1,
   type UserSettingsViewV1,
 } from "@frockbot/core/configuration";
-import {
-  cancelStoredRun,
-  completeStoredRun,
-  failStoredRun,
-} from "./backend-completion.js";
-import {
-  eventsForFailedRun,
-  latestModelRequestJournalState,
-  planBotRunRecovery,
-} from "./backend-recovery.js";
-import { COMPOSITION_CURRENT_KEY } from "@frockbot/core/durable";
+import { latestModelRequestJournalState } from "./backend-recovery.js";
 import {
   bootstrapCompositionGeneration,
   createShellCompositionHost,
@@ -127,7 +103,6 @@ import {
   APPLET_DIST_FILES_V1,
   appletRpcSnapshotV1 as rpcJsonSnapshotV1,
   resolveAppletCompositionV1,
-  type AppletInstanceNamespaceV1,
   type AppletUserDirectoryV1,
 } from "./backend-applets.js";
 import {
@@ -165,7 +140,7 @@ import {
   type TemplateShareReceiptV1,
 } from "@frockbot/app/bot-template/shared";
 import { createBotMemoryHost } from "./backend-memory.js";
-import { createBotImageHost, type NativeAiBindingV1 } from "./backend-image.js";
+import { createBotImageHost } from "./backend-image.js";
 import { createBotSkillsHost, createBotSkillsReads } from "./backend-skills.js";
 import {
   loadFullSkillCatalogV1,
@@ -179,8 +154,6 @@ import {
   type ClientSkillCatalogV1,
 } from "./skill-protocol.js";
 import {
-  createBotRoutineHookMinter,
-  createBotRoutines,
   createBotRoutinesHost,
   routineFireOutcomeV1,
   routineInboxEntryViewV1,
@@ -188,7 +161,6 @@ import {
   routineTurnCommandV1,
   settledRoutineOriginV1,
 } from "./backend-routines.js";
-import { RoutineInboxStore } from "@frockbot/app/routines/inbox-store";
 import {
   ROUTINE_INBOX_LIMIT,
   ROUTINE_INBOX_PREFIX,
@@ -196,70 +168,22 @@ import {
 import {
   decodeRoutineInboxEntryV1,
   routineFailureSentenceV1,
-  subagentAttributionV1,
-  ROUTINE_INBOX_TEXT_MAX,
-  ROUTINE_WAKE_TITLE_MAX,
-  type RoutinePendingWakeV1,
 } from "@frockbot/app/routines/inbox";
-import { TaskStore, type TaskStorageV1 } from "@frockbot/app/subagents/store";
 import {
   taskDesktopLeaseOwnerV1,
-  TASK_DESKTOP_LEASE_MAX_AGE_SECONDS_V1,
-  taskPromptDigestV1,
-  TASK_BLOCKING_POLL_MS_V1,
-  TASK_BLOCKING_TIMEOUT_MS_V1,
-  isTerminalTaskStatusV1,
-  type TaskOutcomeV1,
   type TaskRecordV1,
 } from "@frockbot/app/subagents/records";
 import {
-  taskAnchorIdV1,
-  taskContextKeyV1,
   taskKeyV1,
   TASK_ACTIVE_PREFIX,
   TASK_CONTEXT_PREFIX,
 } from "@frockbot/app/subagents/storage-keys";
-import {
-  decodeSubagentSlotReceiptV1,
-  type SubagentSlotBinding,
-} from "@frockbot/app/subagents/quota";
 import { decodeAgentTurnSlotReceiptV1 } from "@frockbot/app/flock/quota";
 import {
   subagentModelCatalogV1,
   type SubagentModelOptionV1,
 } from "@frockbot/app/subagents/models";
-import type {
-  SubagentCheckOutcomeV1,
-  SubagentDispatchOutcomeV1,
-  SubagentDispatchRequestV1,
-  SubagentMessageOutcomeV1,
-  SubagentResumeRequestV1,
-  SubagentStopOutcomeV1,
-  SubagentsRuntimeHostV1,
-} from "@frockbot/app/subagents/agent";
-import {
-  COMPUTER_HOST_PROTOCOL_VERSION,
-  COMPUTER_HOST_ROUTES,
-  COMPUTER_HOST_TOKEN_HEADER,
-  decodeComputerHostControlResultV1,
-  decodeComputerHostProblemV1,
-  encodeComputerHostRequestV1,
-} from "@frockbot/computer/host-protocol";
-import {
-  taskViewV1,
-  type TaskListViewV1,
-  type TaskViewV1,
-} from "@frockbot/app/subagents/shared";
-import {
-  createBotSubagentDurableBindingV1,
-  decodeSubagentTaskContextV1,
-  subagentOutcomeForRunV1,
-  subagentTaskContextV1,
-  subagentTaskIdV1,
-  type SubagentDurableBindingV1,
-  type SubagentRunTaskRequestV1,
-  type SubagentTaskContextV1,
-} from "./backend-subagents.js";
+import { decodeSubagentTaskContextV1 } from "@frockbot/app/subagents/durable-binding";
 import {
   approvalKeyV1,
   approvalNotificationBodyV1,
@@ -285,10 +209,7 @@ import {
 } from "./backend-machine.js";
 import { settleMachineIntentV1 } from "@frockbot/app/machine/approval";
 import type { MachineIntentRecordV1 } from "@frockbot/app/machine/intent";
-import {
-  decodeMachineResultDeliveryV1,
-  type MachineResultDeliveryV1,
-} from "@frockbot/app/machine/delivery";
+import { type MachineResultDeliveryV1 } from "@frockbot/app/machine/delivery";
 import {
   decodeMachineListViewV1,
   decodeMachineCommandResultV1,
@@ -305,18 +226,10 @@ import {
 import {
   pendingBotInputPreambleV1,
   routineHandoffTextV1,
-  type PendingBotInputV1,
-  type RoutineInboxEntryV1,
 } from "@frockbot/app/routines/inbox";
-import type {
-  RoutineFireOutcomeV1,
-  RoutineScheduler,
-} from "@frockbot/app/routines/scheduler";
+import type { RoutineFireOutcomeV1 } from "@frockbot/app/routines/scheduler";
 import type { RoutineFireV1 } from "@frockbot/app/routines/firing";
-import {
-  RoutineNotFoundError,
-  type RoutineStore,
-} from "@frockbot/app/routines/store";
+import { RoutineNotFoundError } from "@frockbot/app/routines/store";
 import type {
   RoutineCommandReceiptV1,
   RoutineCommandV1,
@@ -336,14 +249,9 @@ import {
   type IsolateCapabilityHost,
   type IsolateModelBindingV1,
   type IsolateModelPath,
-  type IsolateModelRequestRecordV1,
 } from "./backend-isolate.js";
 import { memoryScopeRootV1 } from "@frockbot/app/memory/roots";
-import type { BotIsolateLoader } from "@frockbot/compose-frockbot";
-import type {
-  CompositionGenerationV1,
-  CompositionMemberV1,
-} from "@frockbot/core/durable";
+import type { CompositionGenerationV1 } from "@frockbot/core/durable";
 import {
   projectCompositionGenerationV1,
   projectFirstPartyPackageIframeV1,
@@ -355,46 +263,26 @@ import {
   supersededTurnRecordsV1,
 } from "./terminal-records.js";
 import {
-  CLIENT_RUN_LIST_MAX_BYTES,
-  CLIENT_RUN_PAGE_LIMIT,
-  CLIENT_RUN_SCAN_LIMIT,
-  clientRunListWireBytes,
-  createClientRunListV1,
   createClientRunStopReceiptV1,
   decodeClientRunLookupQueryV1,
-  decodeClientRunListQueryV1,
   decodeClientRunStopCommandV1,
   decodeClientTurnV1,
-  isVisibleRunV1,
   projectClientRunLookupV1,
   projectClientRunV1,
-  projectClientRunOrDegradedV1,
-  projectClientAnnouncementsV1,
   projectClientTurnV1,
   type ClientRunLookupV1,
   type ClientConversationListV1,
   type ClientConversationOutcomeV1,
   type ClientRunListV1,
   type ClientRunStopReceiptV1,
-  type ClientRunV1,
   type ClientTurnV1,
 } from "./run-protocol.js";
 import { notificationIdV1 } from "./notification-id.js";
 import { runFailureCopyV1 } from "./run-failure-copy.js";
-import {
-  BOT_DEBUG_DEFAULT_RUN_LIMIT_V1,
-  BOT_DEBUG_EVENT_BYTES_V1,
-  BOT_DEBUG_GENERATION_LIMIT_V1,
-  boundDebugEventsV1,
-  decodeBotDebugQueryV1,
-  type BotDebugRunV1,
-  type BotDebugSnapshotV1,
-} from "./debug-protocol.js";
+import { type BotDebugSnapshotV1 } from "./debug-protocol.js";
 import {
   botStopCommandFingerprintV1,
-  botTurnCommandFingerprintV1,
   requireStoredRunV1,
-  storedRunCodecV1,
   type BotNotificationIntent,
   type BotTurnCompletion,
   type StoredRun,
@@ -421,22 +309,37 @@ import {
   type SidebarPreviewRunV1,
 } from "./unread.js";
 import { defineBotBackendContribution } from "@frockbot/core/contracts/contributions";
+import { debugSnapshot } from "./debug.js";
+import {
+  BOT_CONFIGURATION_KEY,
+  readBotSettingsV1,
+} from "@frockbot/app/settings/bot";
+import {
+  reconcileOverdueTasks,
+  runOwedSubagentTurns,
+  subagentsRuntimeHost,
+} from "@frockbot/app/subagents/bot";
+import {
+  announcementsFromSession,
+  appendAnnouncement,
+  type BotAnnouncementTransaction,
+  BOT_ANNOUNCEMENT_RETENTION,
+  listConversations,
+  listRunEventPage,
+  listRuns,
+  lookupRun,
+  runWorkingV1,
+  startConversation,
+} from "./reads.js";
+import {
+  executionPackagesV1,
+  ShellBotStateV1,
+  type ActiveTurnV1,
+  type ShellBotBackendHost,
+} from "./backend-state.js";
 
-export const BOT_CONFIGURATION_KEY = "bot-configuration";
 const CONFIGURATION_RECEIPT_PREFIX = "configuration-receipt:";
 const STOP_RECEIPT_PREFIX = "stop-receipt:";
-/**
- * The Bot's durable announcement log: Session events that happen outside any
- * Turn, such as a rename.
- */
-const BOT_ANNOUNCEMENT_PREFIX = "bot-announcement:";
-const BOT_ANNOUNCEMENT_SEQUENCE_KEY = "bot-announcement-sequence";
-/** How many announcements the Session keeps. */
-export const BOT_ANNOUNCEMENT_RETENTION = 32;
-
-function botAnnouncementKey(seq: number): string {
-  return `${BOT_ANNOUNCEMENT_PREFIX}${String(seq).padStart(12, "0")}`;
-}
 /** Idempotency records for Composition commands this Package admits. */
 const COMPOSITION_COMMAND_PREFIX = "composition-command:";
 
@@ -494,109 +397,6 @@ function requireMatchingConfigurationReceipt(
 
 export type { BotIdentity, OwnedBotTurnCommand };
 
-export interface BotStateEnv {
-  MEMORY_FILES: R2Bucket;
-  /** Object-storage file surfaces constructed by the Cloudflare adapter. */
-  WORKSPACE_FILES?: WorkspaceFilesV1;
-  MEMORY_WORKSPACE_FILES?: WorkspaceFilesV1;
-  /**
-   * The Bot Package Worker Loader (plan Step 4). Optional so a host without
-   * Bot-authored Packages — tests, the Electron shell — still compiles; a
-   * generation with an isolate member fails verification without it.
-   */
-  BOT_PACKAGES?: BotIsolateLoader;
-  /** Immutable, content-addressed Package artifacts, read hash-verified. */
-  APPLICATION_ARTIFACTS?: R2Bucket;
-  /**
-   * One Applet Durable Object per Applet instance. Optional so a host without
-   * Applets still compiles; a Composition generation carrying an Applet member
-   * then fails verification, exactly as an isolate member does without a
-   * loader.
-   */
-  APPLET_STATES?: AppletInstanceNamespaceV1;
-  /**
-   * The Package bundler service (plan Step 3/D4). Optional so a host without
-   * Bot authoring still compiles; `package_author` then refuses visibly.
-   */
-  /** Optional in local and workerd hosts, which have no Vectorize simulator. */
-  MEMORY_INDEX?: VectorizeIndex;
-  /** The native AI binding consumed through the image Package adapter. */
-  AI?: NativeAiBindingV1;
-  /** The Frock AI Gateway adapter constructed by the Cloudflare host. */
-  FROCK_AI?: {
-    autoRoute: string;
-    runChatCompletion(
-      gatewayModel: string,
-      body: Record<string, unknown>,
-    ): Promise<ReadableStream<Uint8Array>>;
-  };
-  USER_CONFIGURATIONS: DurableObjectNamespace;
-  /**
-   * The Bot Durable Object namespace, as the Subagent Durable Object namespace:
-   * the same class, named `<userId>:<botId>#task:<taskId>`. Optional so a host
-   * without it still compiles — `Task` is then not offered at all, rather than
-   * offered and unable to dispatch.
-   */
-  BOT_STATES?: DurableObjectNamespace;
-  COMPUTER_HOST?: Fetcher;
-  /**
-   * The shared secret the app Worker presents to the Computer host. Absent,
-   * and no Computer host call is made: an unauthenticated call would be
-   * refused at the host anyway, and a missing secret is a deployment fault
-   * that should be visible as "no Computer" rather than as a 401 per Turn.
-   */
-  COMPUTER_HOST_TOKEN?: string;
-  SPRITES_TOKEN?: string;
-  CREDENTIAL_KEYRING?: string;
-  /**
-   * The HMAC secret every Routine webhook key is signed with. Absent in a
-   * deployment that has not set it, and a webhook Routine is then refused a key
-   * with that reason rather than given an unverifiable one.
-   */
-  ROUTINE_HOOK_SECRET?: string;
-}
-
-/** Constructs the kernel Bot Durable Object authority this Package runs under. */
-export type CreateBotDurableAuthority = <Snapshot>(
-  options: BotDurableAuthorityOptions<Snapshot>,
-) => BotDurableAuthority<Snapshot>;
-
-export interface ShellBotBackendHost extends ShellApplicationV1 {
-  state: DurableObjectState;
-  env: BotStateEnv;
-  assertLifecycleActive?(
-    storage: DurableObjectTransaction,
-    botId: string,
-  ): Promise<void>;
-  outboundFetch?: typeof fetch;
-  /** Supplied by the Durable Object; defaults to the kernel implementation. */
-  createAuthority?: CreateBotDurableAuthority;
-  /**
-   * Durable Object addressing for subagent dispatch. Absent, and `Task` is not
-   * offered at all: a Package that cannot reach a Subagent Durable Object has
-   * no honest way to dispatch one.
-   */
-  subagents?: SubagentDurableBindingV1;
-  invalidateComputerProjectionFile?(
-    userId: string,
-    botId: string,
-    kind: "screenshots" | "doctor",
-  ): void;
-  /** Package deadlines composed into the Bot authority's one durable alarm. */
-  scheduledDeadlines?(transaction: DurableObjectTransaction): Promise<number[]>;
-  scheduledWorkInFlight?(): boolean;
-  deferScheduledWork?(transaction: DurableObjectTransaction): Promise<void>;
-  settleScheduledWork?(): Promise<void>;
-}
-
-/** The narrow storage seam the Bot's announcement log is written through. */
-interface BotAnnouncementTransaction {
-  get<T>(key: string): Promise<T | undefined>;
-  put(entries: Record<string, unknown>): Promise<void>;
-  list<T>(options: { prefix: string }): Promise<Map<string, T>>;
-  delete(keys: string[]): Promise<number>;
-}
-
 function optionalStoredRun(input: unknown): StoredRun | undefined {
   return input === undefined ? undefined : requireStoredRunV1(input);
 }
@@ -617,139 +417,34 @@ export function requirePackageUiToolDeclarationV1(
   return contribution;
 }
 
-/** The application's Packages in the shape the configuration resolvers read. */
-function executionPackagesV1(application: ShellApplicationV1) {
-  return application.packages.map((pkg) => ({
-    packageId: pkg.id,
-    version: application.packageVersion,
-    settings: [...(pkg.settings ?? [])],
-    capabilities: [...(pkg.capabilities ?? [])],
-    connectionTypes: [...(pkg.connectionTypes ?? [])],
-  }));
-}
-
 export class ShellBotBackendContribution {
-  readonly ctx: DurableObjectState;
-  readonly env: BotStateEnv;
-  private readonly application: ShellApplicationV1;
-  private readonly lifecycleAdmission?: ShellBotBackendHost["assertLifecycleActive"];
-  private readonly outboundFetch?: typeof fetch;
+  readonly state: ShellBotStateV1;
   private readonly configurationActivities = new Map<
     string,
     ConfigurationActivity
   >();
-  /** The Turn currently executing on this object, for durable Stop. */
-  private activeTurn:
-    | {
-        runId: string;
-        sessionId: string;
-        turnId: string;
-        generationId: string;
-        turnType: TurnTypeV1;
-        subagentRole?: string;
-        mounted: ShellMountedComposition;
-        signal: AbortSignal;
-        /** `detail` is recorded on the Turn's `turn/end`, never interpreted. */
-        cancel(detail?: string): void;
-      }
-    | undefined;
-  /**
-   * Admission, the event log, the cursor, idempotency, cancellation, and
-   * durable scheduling are kernel authority; this Package supplies only the
-   * configuration, Composition, and notification policy it needs.
-   */
-  private readonly authority: BotDurableAuthority<BotSettingsViewV1>;
-  /**
-   * The Routines authority for this Bot. One store per object, over the same
-   * Durable Object storage every other durable record lives in.
-   */
-  private readonly routines: RoutineStore;
-  /**
-   * The Routine scheduler, composed into the object's one alarm. It owns no
-   * alarm of its own: `scheduledDeadlines`, `deferScheduledWork` and
-   * `settleScheduledWork` are the whole of its access to the clock.
-   */
-  private readonly routineScheduler: RoutineScheduler;
-  /**
-   * The completion inbox and the pending-input queue. An automation Turn cannot
-   * speak to its User, so this is where its outcome lands, written in the same
-   * transaction that settles the Turn.
-   */
-  private readonly routineInbox: RoutineInboxStore;
-  /**
-   * The subagent task authority. In a parent Bot Durable Object it holds the
-   * Bot's tasks; in a Subagent Durable Object it holds nothing, because a child
-   * never dispatches one.
-   */
-  private readonly tasks: TaskStore;
-  private readonly subagentBinding: SubagentDurableBindingV1 | undefined;
-  private readonly invalidateComputerProjectionFile?: ShellBotBackendHost["invalidateComputerProjectionFile"];
-  private readonly hostScheduledDeadlines?: ShellBotBackendHost["scheduledDeadlines"];
-  private readonly hostScheduledWorkInFlight?: ShellBotBackendHost["scheduledWorkInFlight"];
-  private readonly hostDeferScheduledWork?: ShellBotBackendHost["deferScheduledWork"];
-  private readonly hostSettleScheduledWork?: ShellBotBackendHost["settleScheduledWork"];
 
   constructor(host: ShellBotBackendHost) {
-    this.ctx = host.state;
-    this.env = host.env;
-    this.application = {
-      packages: host.packages,
-      packageVersion: host.packageVersion,
-      runtime: host.runtime,
-    };
-    this.lifecycleAdmission = host.assertLifecycleActive;
-    this.outboundFetch = host.outboundFetch;
-    this.invalidateComputerProjectionFile =
-      host.invalidateComputerProjectionFile;
-    this.hostScheduledDeadlines = host.scheduledDeadlines;
-    this.hostScheduledWorkInFlight = host.scheduledWorkInFlight;
-    this.hostDeferScheduledWork = host.deferScheduledWork;
-    this.hostSettleScheduledWork = host.settleScheduledWork;
-    const routines = createBotRoutines(
-      host.state.storage,
-      createBotRoutineHookMinter(
-        () => this.authority.readDurableIdentity(),
-        host.env.ROUTINE_HOOK_SECRET,
-      ),
-    );
-    this.routines = routines.store;
-    this.routineScheduler = routines.scheduler;
-    this.routineInbox = new RoutineInboxStore(host.state.storage);
-    this.tasks = new TaskStore(host.state.storage as unknown as TaskStorageV1);
-    this.subagentBinding =
-      host.subagents ??
-      (host.env.BOT_STATES
-        ? createBotSubagentDurableBindingV1(host.env.BOT_STATES)
-        : undefined);
-    const createAuthority: CreateBotDurableAuthority =
-      host.createAuthority ?? ((options) => new BotDurableAuthority(options));
-    this.authority = createAuthority<BotSettingsViewV1>({
-      state: host.state,
-      codec: storedRunCodecV1,
-      hooks: {
-        resolveAdmissionSnapshot: (command) =>
-          this.resolveAdmissionSnapshot(command),
-        bootstrapComposition: () => this.bootstrapComposition(),
-        admittedSnapshot: (transaction, resolved) =>
-          this.admittedSnapshot(transaction, resolved),
-        executeTurn: (input) => this.executeTurn(input),
-        notification: (snapshot, result) =>
-          this.createNotification(snapshot, result),
-        failureNotification: (snapshot, failed) =>
-          this.createFailureNotification(snapshot, failed),
-        terminalRecords: (input) => this.terminalPackageRecords(input),
-        supersededRecords: (input) => this.supersededPackageRecords(input),
-        interruptTurn: (runId, reason) =>
-          this.interruptActiveTurn(runId, reason),
-        scheduledDeadlines: (transaction) =>
-          this.scheduledDeadlines(transaction),
-        scheduledWorkInFlight: () =>
-          this.hostScheduledWorkInFlight?.() ?? false,
-        deferScheduledWork: (transaction) =>
-          this.deferScheduledWork(transaction),
-        settleScheduledWork: () => this.settleScheduledWork(),
-      },
-    });
+    this.state = new ShellBotStateV1(host, () => ({
+      resolveAdmissionSnapshot: (command) =>
+        this.resolveAdmissionSnapshot(command),
+      bootstrapComposition: () => this.bootstrapComposition(),
+      admittedSnapshot: (transaction, resolved) =>
+        this.admittedSnapshot(transaction, resolved),
+      executeTurn: (input) => this.executeTurn(input),
+      notification: (snapshot, result) =>
+        this.createNotification(snapshot, result),
+      failureNotification: (snapshot, failed) =>
+        this.createFailureNotification(snapshot, failed),
+      terminalRecords: (input) => this.terminalPackageRecords(input),
+      supersededRecords: (input) => this.supersededPackageRecords(input),
+      interruptTurn: (runId, reason) => this.interruptActiveTurn(runId, reason),
+      scheduledDeadlines: (transaction) => this.scheduledDeadlines(transaction),
+      scheduledWorkInFlight: () =>
+        this.state.hostScheduled.inFlight?.() ?? false,
+      deferScheduledWork: (transaction) => this.deferScheduledWork(transaction),
+      settleScheduledWork: () => this.settleScheduledWork(),
+    }));
   }
 
   async materializeSettings(
@@ -760,7 +455,7 @@ export class ShellBotBackendContribution {
       description?: string;
     },
   ): Promise<BotSettingsViewV1> {
-    return this.ctx.storage.transaction(async (transaction) => {
+    return this.state.ctx.storage.transaction(async (transaction) => {
       const durableIdentity = await transaction.get<BotIdentity>(IDENTITY_KEY);
       if (
         durableIdentity &&
@@ -791,7 +486,7 @@ export class ShellBotBackendContribution {
   }
 
   async getSettings(identity: BotIdentity): Promise<BotSettingsViewV1> {
-    return this.ensureBotSettings(identity);
+    return readBotSettingsV1(this.state, identity);
   }
 
   async readConfiguration(input: unknown): Promise<BotSettingsViewV1> {
@@ -847,10 +542,10 @@ export class ShellBotBackendContribution {
     command: Extract<ConfigurationCommandV1, { botId: string }>,
     commandFingerprint: string,
   ): Promise<OperationReceiptV1> {
-    const settings = await this.ensureBotSettings(identity);
+    const settings = await readBotSettingsV1(this.state, identity);
     const receiptKey = `${CONFIGURATION_RECEIPT_PREFIX}${command.commandId}`;
     const existing =
-      await this.ctx.storage.get<StoredConfigurationReceipt>(receiptKey);
+      await this.state.ctx.storage.get<StoredConfigurationReceipt>(receiptKey);
     if (existing) {
       return requireMatchingConfigurationReceipt(
         existing,
@@ -868,7 +563,7 @@ export class ShellBotBackendContribution {
         schemaVersion: 1,
         userId: identity.userId,
       });
-      const packages = executionPackagesV1(this.application);
+      const packages = executionPackagesV1(this.state.application);
       if (command.values) {
         packageValues = decodeInstalledPackageSettingsPatchV1({
           packageId: command.packageId,
@@ -913,8 +608,8 @@ export class ShellBotBackendContribution {
     packageValues?: Record<string, unknown>,
     packageUnset: readonly string[] = [],
   ): Promise<OperationReceiptV1> {
-    return this.ctx.storage.transaction(async (transaction) => {
-      await this.lifecycleAdmission?.(transaction, identity.botId);
+    return this.state.ctx.storage.transaction(async (transaction) => {
+      await this.state.lifecycleAdmission?.(transaction, identity.botId);
       const receiptKey = `${CONFIGURATION_RECEIPT_PREFIX}${command.commandId}`;
       const existing =
         await transaction.get<StoredConfigurationReceipt>(receiptKey);
@@ -1015,7 +710,7 @@ export class ShellBotBackendContribution {
       writer?: BotSelfWriterV1;
     },
   ): Promise<void> {
-    await this.appendAnnouncement(transaction, (seq) => ({
+    await appendAnnouncement(transaction, (seq) => ({
       type: "bot/renamed",
       seq,
       timestamp: new Date().toISOString(),
@@ -1026,90 +721,18 @@ export class ShellBotBackendContribution {
     }));
   }
 
-  /**
-   * Appends one durable Session event that belongs to no Turn.
-   *
-   * A rename is one; so is a task settling, because a background subagent
-   * settles after the Turn that dispatched it is over and there is no live
-   * Session left to append to. The log is append-only and bounded — an
-   * announcement is conversational history, not authority.
-   */
-  private async appendAnnouncement(
-    transaction: BotAnnouncementTransaction,
-    build: (seq: number) => SessionEvent,
-  ): Promise<void> {
-    const seq =
-      ((await transaction.get<number>(BOT_ANNOUNCEMENT_SEQUENCE_KEY)) ?? -1) +
-      1;
-    const event = build(seq);
-    await transaction.put({
-      [botAnnouncementKey(seq)]: event,
-      [BOT_ANNOUNCEMENT_SEQUENCE_KEY]: seq,
-    });
-    const stored = await transaction.list<unknown>({
-      prefix: BOT_ANNOUNCEMENT_PREFIX,
-    });
-    const expired = [...stored.keys()]
-      .sort()
-      .slice(0, Math.max(0, stored.size - BOT_ANNOUNCEMENT_RETENTION));
-    if (expired.length > 0) await transaction.delete(expired);
-  }
-
-  /**
-   * The announcements the Session shows, oldest first.
-   *
-   * Two sources, and deliberately so. A rename or a settled task has no live
-   * Session to be appended to, so it lives in this object's own bounded
-   * announcement log. A compaction is already a durable event on the
-   * conversation's session log — appending a second copy of it here would be
-   * two records of one fact — so it is read back from there instead.
-   * The transcript injects that log after reading it once, because marker
-   * collection and marker placement consume the same events.
-   */
-  private async announcementsFromSession(
-    conversationEvents: readonly SessionEvent[],
-  ): Promise<SessionEvent[]> {
-    const stored = await this.ctx.storage.list<unknown>({
-      prefix: BOT_ANNOUNCEMENT_PREFIX,
-    });
-    const announcements = [...stored.entries()]
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([, value]) => decodeSessionEvent(value));
-    for (const event of conversationEvents) {
-      if (event.type === "conversation/compacted") announcements.push(event);
-    }
-    return announcements
-      .sort((left, right) => left.timestamp.localeCompare(right.timestamp))
-      .slice(-BOT_ANNOUNCEMENT_RETENTION);
-  }
-
   async listAnnouncements(): Promise<SessionEvent[]> {
-    const sessionId = await this.authority.readConversationSessionId();
+    const sessionId = await this.state.authority.readConversationSessionId();
     const session = sessionId
-      ? await this.authority.readSessionEvents(sessionId)
+      ? await this.state.authority.readSessionEvents(sessionId)
       : [];
-    return this.announcementsFromSession(session);
-  }
-
-  /**
-   * The announcements as the transcript reads them, each already carrying the
-   * timestamp of the place it belongs rather than the moment it was written.
-   */
-  private async projectAnnouncementPage() {
-    const sessionId = await this.authority.readConversationSessionId();
-    const session = sessionId
-      ? await this.authority.readSessionEvents(sessionId)
-      : [];
-    return projectClientAnnouncementsV1(
-      await this.announcementsFromSession(session),
-      session,
-    );
+    return announcementsFromSession(this.state, session);
   }
 
   private async refreshRecoveryAlarm(
     transaction: DurableObjectTransaction,
   ): Promise<void> {
-    await this.authority.refreshRecoveryAlarm(transaction);
+    await this.state.authority.refreshRecoveryAlarm(transaction);
   }
 
   async resolveConfiguration(
@@ -1128,7 +751,7 @@ export class ShellBotBackendContribution {
       { userId: command.userId, botId: command.botId },
       command,
     );
-    return projectClientTurnV1(await this.authority.run(command));
+    return projectClientTurnV1(await this.state.authority.run(command));
   }
 
   async runPackageUiTool(
@@ -1139,7 +762,7 @@ export class ShellBotBackendContribution {
     const catalog = await this.listPackageUi(identity);
     const contribution = requirePackageUiToolDeclarationV1(catalog, command);
     return projectClientTurnV1(
-      await this.authority.run({
+      await this.state.authority.run({
         ...identity,
         runId: command.commandId,
         sessionId: `${identity.userId}:${identity.botId}`,
@@ -1168,7 +791,7 @@ export class ShellBotBackendContribution {
    */
   async listSkills(identity: BotIdentity): Promise<ClientSkillCatalogV1> {
     await this.validateIdentity(identity);
-    const reads = createBotSkillsReads(this.env);
+    const reads = createBotSkillsReads(this.state.env);
     if (!reads) return { schemaVersion: 1, skills: [] };
     const catalog = await loadFullSkillCatalogV1(reads, {
       userId: identity.userId,
@@ -1235,7 +858,7 @@ export class ShellBotBackendContribution {
     | { status: "refused"; reason: string }
   > {
     await this.validateIdentity(identity);
-    const files = (this.env as { WORKSPACE_FILES?: WorkspaceFilesV1 })
+    const files = (this.state.env as { WORKSPACE_FILES?: WorkspaceFilesV1 })
       .WORKSPACE_FILES;
     if (!files) {
       return { status: "refused", reason: "this Bot has no Workspace store" };
@@ -1274,7 +897,7 @@ export class ShellBotBackendContribution {
     await this.validateIdentity(identity);
     // The same binding `createBotSkillsHost` hands the Skills Package for a
     // Turn. Absent, and there is no writable instruction root to import into.
-    const files = (this.env as { WORKSPACE_FILES?: WorkspaceFilesV1 })
+    const files = (this.state.env as { WORKSPACE_FILES?: WorkspaceFilesV1 })
       .WORKSPACE_FILES;
     if (!files) {
       return {
@@ -1319,7 +942,7 @@ export class ShellBotBackendContribution {
     }[]
   > {
     await this.validateIdentity(identity);
-    const reads = createBotSkillsReads(this.env);
+    const reads = createBotSkillsReads(this.state.env);
     if (!reads) return [];
     const catalog = await loadSkillCatalogV1(reads, {
       userId: identity.userId,
@@ -1358,50 +981,53 @@ export class ShellBotBackendContribution {
     });
     const key = `${RUN_PREFIX}${command.runId}`;
     const receiptKey = `${STOP_RECEIPT_PREFIX}${command.commandId}`;
-    const admitted = await this.ctx.storage.transaction(async (transaction) => {
-      const durableIdentity = await transaction.get<BotIdentity>(IDENTITY_KEY);
-      if (
-        durableIdentity &&
-        (durableIdentity.userId !== identity.userId ||
-          durableIdentity.botId !== identity.botId)
-      ) {
-        throw new Error("Bot authority does not match its durable identity");
-      }
-      const existing = await transaction.get<StoredStopReceipt>(receiptKey);
-      if (existing && existing.commandFingerprint !== commandFingerprint) {
-        throw new Error(
-          `Stop idempotency key "${command.commandId}" was reused for a different command`,
-        );
-      }
-      const run = optionalStoredRun(await transaction.get<unknown>(key));
-      if (!run) throw new Error(`run "${command.runId}" was not admitted`);
-      if (existing) return run;
-      if (
-        isTerminalStoredRunStatus(run.status) ||
-        run.events.some((event) => event.type === "turn/end")
-      ) {
-        throw new Error(`run "${command.runId}" is already terminal`);
-      }
-      const stopRequestedAt = run.stopRequestedAt ?? new Date().toISOString();
-      const stopped = requireStoredRunV1({
-        ...run,
-        stopRequestedAt,
-      } satisfies StoredRun);
-      await transaction.put({
-        [key]: structuredClone(stopped),
-        [receiptKey]: {
-          schemaVersion: 1,
-          commandFingerprint,
-          commandId: command.commandId,
-          runId: command.runId,
+    const admitted = await this.state.ctx.storage.transaction(
+      async (transaction) => {
+        const durableIdentity =
+          await transaction.get<BotIdentity>(IDENTITY_KEY);
+        if (
+          durableIdentity &&
+          (durableIdentity.userId !== identity.userId ||
+            durableIdentity.botId !== identity.botId)
+        ) {
+          throw new Error("Bot authority does not match its durable identity");
+        }
+        const existing = await transaction.get<StoredStopReceipt>(receiptKey);
+        if (existing && existing.commandFingerprint !== commandFingerprint) {
+          throw new Error(
+            `Stop idempotency key "${command.commandId}" was reused for a different command`,
+          );
+        }
+        const run = optionalStoredRun(await transaction.get<unknown>(key));
+        if (!run) throw new Error(`run "${command.runId}" was not admitted`);
+        if (existing) return run;
+        if (
+          isTerminalStoredRunStatus(run.status) ||
+          run.events.some((event) => event.type === "turn/end")
+        ) {
+          throw new Error(`run "${command.runId}" is already terminal`);
+        }
+        const stopRequestedAt = run.stopRequestedAt ?? new Date().toISOString();
+        const stopped = requireStoredRunV1({
+          ...run,
           stopRequestedAt,
-        } satisfies StoredStopReceipt,
-      });
-      await this.refreshRecoveryAlarm(transaction);
-      return stopped;
-    });
+        } satisfies StoredRun);
+        await transaction.put({
+          [key]: structuredClone(stopped),
+          [receiptKey]: {
+            schemaVersion: 1,
+            commandFingerprint,
+            commandId: command.commandId,
+            runId: command.runId,
+            stopRequestedAt,
+          } satisfies StoredStopReceipt,
+        });
+        await this.refreshRecoveryAlarm(transaction);
+        return stopped;
+      },
+    );
     // The Agent signal is advisory and always follows the durable intent.
-    this.cancelActiveTurn({
+    this.state.turn.cancel({
       sessionId: admitted.sessionId,
       runId: command.runId,
     });
@@ -1412,7 +1038,8 @@ export class ShellBotBackendContribution {
     // so that erased the words the person had just watched arrive and left
     // "You stopped this." standing alone over an empty bubble.
     const current =
-      (await this.authority.readStoredRunForDisplay(command.runId)) ?? admitted;
+      (await this.state.authority.readStoredRunForDisplay(command.runId)) ??
+      admitted;
     return createClientRunStopReceiptV1(command, projectClientRunV1(current));
   }
 
@@ -1475,9 +1102,9 @@ export class ShellBotBackendContribution {
     // Applet tools route to the Applet Durable Object, which forwards to the
     // facet. The instance binding is minted once per Turn; the facet stub
     // itself never leaves that object.
-    const appletInstances = this.env.APPLET_STATES
+    const appletInstances = this.state.env.APPLET_STATES
       ? createAppletInstanceBindingV1(
-          this.env.APPLET_STATES,
+          this.state.env.APPLET_STATES,
           input.identity.userId,
         )
       : undefined;
@@ -1532,14 +1159,15 @@ export class ShellBotBackendContribution {
     const activation = await activateCompositionV1({
       generationId: input.compositionGenerationId,
       store: {
-        read: (generationId) => this.authority.composition.read(generationId),
-        lastKnownGood: () => this.authority.composition.lastKnownGood(),
+        read: (generationId) =>
+          this.state.authority.composition.read(generationId),
+        lastKnownGood: () => this.state.authority.composition.lastKnownGood(),
         commit: (generationId) =>
-          this.authority.composition.commit(generationId),
+          this.state.authority.composition.commit(generationId),
         fail: (generationId, options) =>
-          this.authority.composition.fail(generationId, options),
+          this.state.authority.composition.fail(generationId, options),
       },
-      failures: this.authority.compositionFailures,
+      failures: this.state.authority.compositionFailures,
       host,
       signal: controller.signal,
       onFailure: (failure, fallback) =>
@@ -1552,7 +1180,7 @@ export class ShellBotBackendContribution {
     });
     if (activation.status === "failed-closed") {
       // The durable record names what the Turn actually ran under.
-      await this.authority.repinRun(
+      await this.state.authority.repinRun(
         input.command.runId,
         activation.fallback.generationId,
       );
@@ -1575,7 +1203,7 @@ export class ShellBotBackendContribution {
         activation.mounted.runtime.agent.agent.cancel("user", detail);
       },
     };
-    this.activeTurn = active;
+    this.state.turn.set(active);
     try {
       const directTool = input.command.directTool;
       if (directTool) {
@@ -1625,7 +1253,7 @@ export class ShellBotBackendContribution {
         resume: input.resume,
       });
     } finally {
-      if (this.activeTurn === active) this.activeTurn = undefined;
+      this.state.turn.clear(active);
     }
   }
 
@@ -1648,7 +1276,7 @@ export class ShellBotBackendContribution {
     turnType?: TurnTypeV1;
   }): Promise<string> {
     if ((command.turnType ?? "chat") !== "chat") return command.text;
-    const drained = await this.routineInbox.drainInto(command.runId);
+    const drained = await this.state.routineInbox.drainInto(command.runId);
     const preamble = pendingBotInputPreambleV1(drained);
     return preamble.length === 0
       ? command.text
@@ -1659,22 +1287,6 @@ export class ShellBotBackendContribution {
    * Cancels the Agent of one exact admitted run. A late Stop that names a run
    * this object is not executing changes nothing.
    */
-  private cancelActiveTurn(cancellation: {
-    sessionId: string;
-    runId: string;
-    detail?: string;
-  }): boolean {
-    const active = this.activeTurn;
-    if (
-      !active ||
-      active.runId !== cancellation.runId ||
-      active.sessionId !== cancellation.sessionId
-    ) {
-      return false;
-    }
-    active.cancel(cancellation.detail);
-    return true;
-  }
 
   /**
    * The kernel's advisory interrupt, bound to this object's resident Agent.
@@ -1685,9 +1297,7 @@ export class ShellBotBackendContribution {
    * is the same outcome by a slower road.
    */
   private interruptActiveTurn(runId: string, reason: string): void {
-    const active = this.activeTurn;
-    if (!active || active.runId !== runId) return;
-    active.cancel(reason);
+    this.state.turn.interrupt(runId, reason);
   }
 
   /** The visible half of failing closed, through the Bot's notifications. */
@@ -1697,7 +1307,7 @@ export class ShellBotBackendContribution {
     failure: CompositionFailureV1,
     fallback: CompositionGenerationV1,
   ): Promise<void> {
-    await this.authority.recordNotification({
+    await this.state.authority.recordNotification({
       notificationId: notificationIdV1(
         "composition-failure",
         failure.generationId,
@@ -1727,10 +1337,10 @@ export class ShellBotBackendContribution {
       settings: BotSettingsViewV1;
     },
   ): Promise<ShellIsolateMountOptions | undefined> {
-    const loader = this.env.BOT_PACKAGES;
-    const artifacts = this.env.APPLICATION_ARTIFACTS;
+    const loader = this.state.env.BOT_PACKAGES;
+    const artifacts = this.state.env.APPLICATION_ARTIFACTS;
     const exports = (
-      this.ctx as unknown as {
+      this.state.ctx as unknown as {
         exports?: {
           BotCapabilities?: (options: {
             props: BotCapabilitiesPropsV1;
@@ -1810,7 +1420,7 @@ export class ShellBotBackendContribution {
     const effective = resolveEffectiveBotModelV1({
       bot: settings,
       user,
-      packages: executionPackagesV1(this.application),
+      packages: executionPackagesV1(this.state.application),
     });
     const binding = effective.binding;
     const model =
@@ -1835,8 +1445,8 @@ export class ShellBotBackendContribution {
     return {
       connections,
       ...(model ? { model } : {}),
-      memory: Boolean(this.env.MEMORY_WORKSPACE_FILES),
-      workspace: Boolean(this.env.WORKSPACE_FILES),
+      memory: Boolean(this.state.env.MEMORY_WORKSPACE_FILES),
+      workspace: Boolean(this.state.env.WORKSPACE_FILES),
     };
   }
 
@@ -1857,7 +1467,7 @@ export class ShellBotBackendContribution {
         reason: "the Package is not running in this Bot's active Composition",
       };
     }
-    const settings = await this.ensureBotSettings(identity);
+    const settings = await readBotSettingsV1(this.state, identity);
     const authority = await this.isolateAuthoritySnapshot(identity, settings);
     let runtime:
       | {
@@ -2134,19 +1744,19 @@ export class ShellBotBackendContribution {
    */
   private appletCapabilityHost(
     identity: BotIdentity,
-    active?: NonNullable<ShellBotBackendContribution["activeTurn"]>,
+    active?: ActiveTurnV1,
   ): AppletCapabilityHostV1 | undefined {
-    const namespace = this.env.APPLET_STATES;
-    const artifacts = this.env.APPLICATION_ARTIFACTS;
-    const workspace = this.env.WORKSPACE_FILES;
+    const namespace = this.state.env.APPLET_STATES;
+    const artifacts = this.state.env.APPLICATION_ARTIFACTS;
+    const workspace = this.state.env.WORKSPACE_FILES;
     if (!namespace || !artifacts || !workspace) return undefined;
     const bucket = artifacts;
     return createAppletCapabilityHostV1({
       userId: identity.userId,
       botId: identity.botId,
       storage: {
-        get: (key) => this.ctx.storage.get(key),
-        put: (entries) => this.ctx.storage.put(entries),
+        get: (key) => this.state.ctx.storage.get(key),
+        put: (entries) => this.state.ctx.storage.put(entries),
       },
       directory: this.appletUserDirectory(identity),
       instanceFor: createAppletInstanceBindingV1(namespace, identity.userId),
@@ -2205,10 +1815,10 @@ export class ShellBotBackendContribution {
           }
         : undefined,
       composition: {
-        current: () => this.authority.composition.current(),
-        lastKnownGood: () => this.authority.composition.lastKnownGood(),
+        current: () => this.state.authority.composition.current(),
+        lastKnownGood: () => this.state.authority.composition.lastKnownGood(),
         propose: (generation, options) =>
-          this.authority.composition.propose(generation, options),
+          this.state.authority.composition.propose(generation, options),
       },
     });
   }
@@ -2226,12 +1836,16 @@ export class ShellBotBackendContribution {
     identity: BotIdentity,
     turn: { sessionId: string; runId: string; turnId: string },
   ): AppletsRuntimeHostV1 | undefined {
-    const files = this.env.WORKSPACE_FILES;
-    if (!this.env.APPLET_STATES || !this.env.APPLICATION_ARTIFACTS || !files) {
+    const files = this.state.env.WORKSPACE_FILES;
+    if (
+      !this.state.env.APPLET_STATES ||
+      !this.state.env.APPLICATION_ARTIFACTS ||
+      !files
+    ) {
       return undefined;
     }
     const capability = (): AppletCapabilityHostV1 => {
-      const host = this.appletCapabilityHost(identity, this.activeTurn);
+      const host = this.appletCapabilityHost(identity, this.state.turn.current);
       if (!host) throw new Error("Applets are unavailable");
       return host;
     };
@@ -2276,10 +1890,10 @@ export class ShellBotBackendContribution {
 
   /** The User Durable Object's Applet directory, decoded on arrival. */
   private appletUserDirectory(identity: BotIdentity): AppletUserDirectoryV1 {
-    const id = this.env.USER_CONFIGURATIONS.idFromName(identity.userId);
+    const id = this.state.env.USER_CONFIGURATIONS.idFromName(identity.userId);
     // SAFETY: this namespace is bound to UserConfiguration; generated Worker
     // types do not expose its Applet directory RPC surface.
-    const rpc = this.env.USER_CONFIGURATIONS.get(id) as unknown as {
+    const rpc = this.state.env.USER_CONFIGURATIONS.get(id) as unknown as {
       listApplets(input: unknown): Promise<unknown>;
       readAppletCompositionInput(input: unknown): Promise<unknown>;
       createApplet(input: unknown): Promise<unknown>;
@@ -2362,7 +1976,8 @@ export class ShellBotBackendContribution {
   /** The Session's focused Applet, as the shell and its route read it. */
   async readFocusedApplet(identity: BotIdentity): Promise<FocusedAppletV1> {
     await this.validateIdentity(identity);
-    const stored = await this.ctx.storage.get<unknown>(APPLET_FOCUSED_KEY);
+    const stored =
+      await this.state.ctx.storage.get<unknown>(APPLET_FOCUSED_KEY);
     return stored === undefined
       ? {
           schemaVersion: 1,
@@ -2382,7 +1997,7 @@ export class ShellBotBackendContribution {
       appletId,
       changedAt: new Date().toISOString(),
     });
-    await this.ctx.storage.put({ [APPLET_FOCUSED_KEY]: focused });
+    await this.state.ctx.storage.put({ [APPLET_FOCUSED_KEY]: focused });
     return focused;
   }
 
@@ -2401,18 +2016,18 @@ export class ShellBotBackendContribution {
     identity: BotIdentity,
     command: OwnedBotTurnCommand,
   ): Promise<void> {
-    if (!this.env.APPLET_STATES) return;
+    if (!this.state.env.APPLET_STATES) return;
     try {
       await resolveAppletCompositionV1({
         directory: this.appletUserDirectory(identity),
         composition: {
-          current: () => this.authority.composition.current(),
+          current: () => this.state.authority.composition.current(),
           propose: (generation, options) =>
-            this.authority.composition.propose(generation, options),
+            this.state.authority.composition.propose(generation, options),
         },
         storage: {
-          get: (key) => this.ctx.storage.get(key),
-          put: (entries) => this.ctx.storage.put(entries),
+          get: (key) => this.state.ctx.storage.get(key),
+          put: (entries) => this.state.ctx.storage.put(entries),
         },
         origin: {
           kind: "bot-authored",
@@ -2430,7 +2045,7 @@ export class ShellBotBackendContribution {
     input: IsolateCallScopeV1,
   ): Promise<IsolateWorkspaceOutcomeV1> {
     const active = this.activeIsolateTurn(input);
-    const files = this.env.WORKSPACE_FILES;
+    const files = this.state.env.WORKSPACE_FILES;
     if (!active || !files) {
       return { status: "unavailable", reason: "Workspace is unavailable" };
     }
@@ -2445,7 +2060,7 @@ export class ShellBotBackendContribution {
     input: IsolateCallScopeV1,
   ): Promise<IsolateWorkspaceOutcomeV1> {
     const active = this.activeIsolateTurn(input);
-    const files = this.env.WORKSPACE_FILES;
+    const files = this.state.env.WORKSPACE_FILES;
     if (!active || !files) {
       return { status: "unavailable", reason: "Workspace is unavailable" };
     }
@@ -2466,7 +2081,7 @@ export class ShellBotBackendContribution {
     input: IsolateCallScopeV1,
   ): Promise<IsolateWorkspaceOutcomeV1> {
     const active = this.activeIsolateTurn(input);
-    const files = this.env.WORKSPACE_FILES;
+    const files = this.state.env.WORKSPACE_FILES;
     if (!active || !files) {
       return { status: "unavailable", reason: "Workspace is unavailable" };
     }
@@ -2481,7 +2096,7 @@ export class ShellBotBackendContribution {
     input: IsolateCallScopeV1,
   ): Promise<IsolateWorkspaceOutcomeV1> {
     const active = this.activeIsolateTurn(input);
-    const files = this.env.WORKSPACE_FILES;
+    const files = this.state.env.WORKSPACE_FILES;
     if (!active || !files) {
       return { status: "unavailable", reason: "Workspace is unavailable" };
     }
@@ -2502,7 +2117,7 @@ export class ShellBotBackendContribution {
     input: IsolateCallScopeV1,
   ): Promise<IsolateWorkspaceOutcomeV1> {
     const active = this.activeIsolateTurn(input);
-    const files = this.env.WORKSPACE_FILES;
+    const files = this.state.env.WORKSPACE_FILES;
     if (!active || !files) {
       return { status: "unavailable", reason: "Workspace is unavailable" };
     }
@@ -2535,7 +2150,7 @@ export class ShellBotBackendContribution {
         candidate.generation,
     );
     if (!connection?.generation) {
-      await this.authority.recordNotification({
+      await this.state.authority.recordNotification({
         notificationId: notificationIdV1(
           "package-connection-unavailable",
           input.runId,
@@ -2587,7 +2202,7 @@ export class ShellBotBackendContribution {
         sessionId: input.sessionId,
         turnId: input.turnId,
       },
-      this.env,
+      this.state.env,
     );
     if (!host) return undefined;
     if (request.scope === "project") {
@@ -2609,7 +2224,7 @@ export class ShellBotBackendContribution {
     packageId: string;
     generationId: string;
   }) {
-    const active = this.activeTurn;
+    const active = this.state.turn.current;
     if (
       !active ||
       active.runId !== input.runId ||
@@ -2693,8 +2308,8 @@ export class ShellBotBackendContribution {
   ): IsolateCapabilityHost {
     return createIsolateCapabilityHost({
       storage: {
-        put: (key, value) => this.ctx.storage.put(key, value),
-        list: (options) => this.ctx.storage.list(options),
+        put: (key, value) => this.state.ctx.storage.put(key, value),
+        list: (options) => this.state.ctx.storage.list(options),
       },
       botId: scope.botId,
       packageId: scope.packageId,
@@ -2720,11 +2335,10 @@ export class ShellBotBackendContribution {
     },
     generationId: string,
   ): IsolateModelPath {
-    const contribution = this;
+    const state = this.state;
     return {
       async *stream(request, signal) {
-        const generation =
-          await contribution.authority.composition.read(generationId);
+        const generation = await state.authority.composition.read(generationId);
         if (!generation) {
           throw new Error(
             `isolate model invocation pins unknown Composition generation "${generationId}"`,
@@ -2783,15 +2397,15 @@ export class ShellBotBackendContribution {
       expiries.push(Date.parse(approval.expiresAt));
     }
     return [
-      ...(await this.routineScheduler.deadlines(transaction)),
+      ...(await this.state.routineScheduler.deadlines(transaction)),
       ...expiries.filter((at) => Number.isFinite(at)),
       // A dispatched task's 30-minute lifetime, and a child's own owed Turn,
       // both ride the one alarm this object already has: the parent reconciles
       // a child that never reported, and the child runs the Turn it was handed
       // on its next alarm rather than on a floating promise.
       ...(await this.subagentDeadlines(transaction)),
-      ...(this.hostScheduledDeadlines
-        ? await this.hostScheduledDeadlines(transaction)
+      ...(this.state.hostScheduled.deadlines
+        ? await this.state.hostScheduled.deadlines(transaction)
         : []),
     ];
   }
@@ -2835,8 +2449,8 @@ export class ShellBotBackendContribution {
   ): Promise<void> {
     // A Routine's deadline is a debt, so the scheduler holds it rather than
     // moving it while other durable work remains in flight.
-    await this.routineScheduler.defer(transaction);
-    await this.hostDeferScheduledWork?.(transaction);
+    await this.state.routineScheduler.defer(transaction);
+    await this.state.hostScheduled.defer?.(transaction);
   }
 
   private async settleScheduledWork(): Promise<void> {
@@ -2848,14 +2462,14 @@ export class ShellBotBackendContribution {
     // cost that producer its pass, never the clock.
     try {
       await this.settleRoutineFirings();
-      await this.runOwedSubagentTurns();
-      await this.reconcileOverdueTasks();
+      await runOwedSubagentTurns(this.state);
+      await reconcileOverdueTasks(this.state);
       await this.expireDueApprovals();
       await this.replayPendingWakeNotifications();
-      await this.hostSettleScheduledWork?.();
+      await this.state.hostScheduled.settle?.();
     } finally {
-      await this.ctx.storage.transaction((transaction) =>
-        this.authority.refreshRecoveryAlarm(transaction),
+      await this.state.ctx.storage.transaction((transaction) =>
+        this.state.authority.refreshRecoveryAlarm(transaction),
       );
     }
   }
@@ -2871,7 +2485,7 @@ export class ShellBotBackendContribution {
    * running the Routine a second time.
    */
   private async settleRoutineFirings(): Promise<void> {
-    const identity = await this.authority.readDurableIdentity();
+    const identity = await this.state.authority.readDurableIdentity();
     if (!identity) return;
     // A run already occupies the object. `alarm()` defers before it reaches
     // here whenever the Turn is executing in this isolate, but a durable active
@@ -2883,13 +2497,13 @@ export class ShellBotBackendContribution {
     // this same bail-out — which is how a Routine racing a long chat Turn
     // failed once a minute for ever. The hold is what turns the bail-out into
     // a deferral: `dueAt` does not move, so the firing still lands.
-    if (await this.authority.readActiveRunId()) {
-      await this.ctx.storage.transaction((transaction) =>
-        this.routineScheduler.defer(transaction),
+    if (await this.state.authority.readActiveRunId()) {
+      await this.state.ctx.storage.transaction((transaction) =>
+        this.state.routineScheduler.defer(transaction),
       );
       return;
     }
-    await this.routineScheduler.settle(async (fire) => {
+    await this.state.routineScheduler.settle(async (fire) => {
       const outcome = await this.runOneFiring(identity, fire);
       await this.notifyFailedFiring(identity, fire, outcome);
       return outcome;
@@ -2901,17 +2515,17 @@ export class ShellBotBackendContribution {
     fire: RoutineFireV1,
   ): Promise<RoutineFireOutcomeV1> {
     try {
-      await this.authority.run(
+      await this.state.authority.run(
         routineTurnCommandV1(identity, fire, new Date().toISOString()),
       );
     } catch (error) {
       return routineFireOutcomeV1(
-        await this.authority.readStoredRun(fire.fireId),
+        await this.state.authority.readStoredRun(fire.fireId),
         error,
       );
     }
     return routineFireOutcomeV1(
-      await this.authority.readStoredRun(fire.fireId),
+      await this.state.authority.readStoredRun(fire.fireId),
     );
   }
 
@@ -2933,7 +2547,7 @@ export class ShellBotBackendContribution {
     if (outcome.status === "ok") return;
     const settings = await this.getSettings(identity);
     if (!settings.notifications.enabled) return;
-    await this.authority.recordNotification({
+    await this.state.authority.recordNotification({
       // The same id shape the completion path uses, so one firing is one
       // intent however many times the alarm retries it.
       notificationId: notificationIdV1("routine-failed", fire.fireId),
@@ -2951,28 +2565,10 @@ export class ShellBotBackendContribution {
   // Durable Object is an execution host with no authority of its own.
   // -------------------------------------------------------------------------
 
-  /** The narrow User Durable Object RPC that bounds concurrent subagents per User. */
-  private subagentSlots(identity: BotIdentity): SubagentSlotBinding {
-    const id = this.env.USER_CONFIGURATIONS.idFromName(identity.userId);
-    // SAFETY: this namespace is bound to UserConfiguration; generated Worker
-    // types do not expose its RPC surface.
-    const rpc = this.env.USER_CONFIGURATIONS.get(id) as unknown as {
-      reserveSubagentSlot(input: unknown): Promise<unknown>;
-      releaseSubagentSlot(input: unknown): Promise<unknown>;
-    };
-    return {
-      reserve: async (request) =>
-        decodeSubagentSlotReceiptV1(await rpc.reserveSubagentSlot(request)),
-      release: async (request) => {
-        await rpc.releaseSubagentSlot(request);
-      },
-    };
-  }
-
   /** Narrow RPC for the User-wide agent-lane concurrency lease. */
   private agentTurnSlots(identity: BotIdentity) {
-    const id = this.env.USER_CONFIGURATIONS.idFromName(identity.userId);
-    const rpc = this.env.USER_CONFIGURATIONS.get(id) as unknown as {
+    const id = this.state.env.USER_CONFIGURATIONS.idFromName(identity.userId);
+    const rpc = this.state.env.USER_CONFIGURATIONS.get(id) as unknown as {
       reserveAgentTurnSlot(input: unknown): Promise<unknown>;
       releaseAgentTurnSlot(input: unknown): Promise<unknown>;
     };
@@ -2982,996 +2578,6 @@ export class ShellBotBackendContribution {
       release: async (request: unknown) => {
         await rpc.releaseAgentTurnSlot(request);
       },
-    };
-  }
-
-  /**
-   * The User-wide `desktop-gui` lease, held at the Computer host.
-   *
-   * The Bot Durable Object cannot serialize across a User's Bots — they are
-   * separate objects — and the User Durable Object owns the Computer
-   * allocation but not the desktop. The host's `control` op is already the
-   * single writer that serializes human takeover, so it is where a second
-   * opinion cannot exist (plan decision 3): the Bot records the intent, the
-   * host grants or refuses, and the refusal names the holder.
-   *
-   * Absent when this deployment has no Computer host — a Bot with no Computer
-   * has no desktop to serialize, and a `computerUse` task is then bounded only
-   * by this Bot's own lease record.
-   */
-  /**
-   * The origin the Computer host service binding is addressed on. A service
-   * binding routes by binding, not by name, so the origin is only a syntactic
-   * requirement of `Request`.
-   */
-  private static readonly COMPUTER_HOST_ORIGIN_V1 =
-    "http://computer-host.internal";
-
-  private async desktopLease(
-    identity: BotIdentity,
-    action: "acquire" | "release",
-    ownerId: string,
-  ): Promise<
-    | { status: "granted"; expiresAt?: string }
-    | { status: "refused"; reason: string }
-    | { status: "unavailable" }
-  > {
-    const fetcher = this.env.COMPUTER_HOST;
-    const hostToken = this.env.COMPUTER_HOST_TOKEN;
-    if (!fetcher || !hostToken) return { status: "unavailable" };
-    const body = JSON.stringify(
-      encodeComputerHostRequestV1({
-        version: COMPUTER_HOST_PROTOCOL_VERSION,
-        effectId: `${action}:${ownerId}`,
-        identity: { userId: identity.userId },
-        tenant: { botId: identity.botId },
-        credentialRef: `sprites:user:${identity.userId}`,
-        operation: {
-          kind: "control",
-          action,
-          ownerId,
-          maxAgeSeconds: TASK_DESKTOP_LEASE_MAX_AGE_SECONDS_V1,
-          scope: "desktop-gui",
-        },
-      }),
-    );
-    let response: Response;
-    try {
-      response = await fetcher.fetch(
-        new Request(
-          `${ShellBotBackendContribution.COMPUTER_HOST_ORIGIN_V1}${COMPUTER_HOST_ROUTES.control}`,
-          {
-            method: "POST",
-            headers: {
-              "content-type": "application/json",
-              [COMPUTER_HOST_TOKEN_HEADER]: hostToken,
-            },
-            body,
-          },
-        ),
-      );
-    } catch {
-      // A host that cannot be reached has granted nothing and holds nothing.
-      return { status: "unavailable" };
-    }
-    if (!response.ok) {
-      // 409 is the host's "somebody else holds this", and its message names
-      // the holder — which is the whole point of leasing under an owner derived
-      // from the Bot and the task.
-      let message = "";
-      try {
-        message = decodeComputerHostProblemV1(await response.json()).message;
-      } catch {
-        message = "";
-      }
-      if (response.status === 409) {
-        return {
-          status: "refused",
-          reason: message || "the desktop is held by another subagent",
-        };
-      }
-      return { status: "unavailable" };
-    }
-    try {
-      const result = decodeComputerHostControlResultV1(await response.json());
-      return {
-        status: "granted",
-        ...(result.expiresAt === undefined
-          ? {}
-          : { expiresAt: result.expiresAt }),
-      };
-    } catch {
-      return { status: "granted" };
-    }
-  }
-
-  /**
-   * Takes the desktop for one `computerUse` task, in the constitution's order:
-   * the intent is already durable (`admit` wrote `task-lease:desktop`), the
-   * host is asked, and only a granted lease is recorded back onto the intent.
-   */
-  private async acquireDesktopForTask(
-    identity: BotIdentity,
-    taskId: string,
-  ): Promise<{ status: "held" } | { status: "refused"; reason: string }> {
-    const outcome = await this.desktopLease(
-      identity,
-      "acquire",
-      taskDesktopLeaseOwnerV1(identity.botId, taskId),
-    );
-    if (outcome.status === "refused") {
-      return { status: "refused", reason: outcome.reason };
-    }
-    // `unavailable` is a deployment with no Computer host. The Bot's own lease
-    // record still holds — one `computerUse` task per Bot — and there is no
-    // desktop to contend for.
-    await this.tasks.recordDesktopLease(
-      identity.botId,
-      taskId,
-      outcome.status === "granted" ? outcome.expiresAt : undefined,
-    );
-    return { status: "held" };
-  }
-
-  /**
-   * Releases the desktop this task held, if it held it. Called on every path
-   * that settles a task — completion, failure, `task_stop`, and the deadline
-   * reconciliation — so the screen is never held by something that has ended.
-   */
-  private async releaseDesktopForTask(
-    identity: BotIdentity,
-    taskId: string,
-  ): Promise<void> {
-    const released = await this.tasks.releaseDesktopLease(taskId);
-    if (!released) return;
-    try {
-      await this.desktopLease(
-        identity,
-        "release",
-        released.ownerId ?? taskDesktopLeaseOwnerV1(identity.botId, taskId),
-      );
-    } catch {
-      // The host lease lapses on its own. A release that could not be
-      // delivered delays the next `computerUse` task by at most the lease's
-      // own age; it never leaves the record claiming a desktop this Bot holds.
-    }
-  }
-
-  /** The Bot's task list, as the gateway route reads it. */
-  async listTasks(identity: BotIdentity): Promise<TaskListViewV1> {
-    await this.validateIdentity(identity);
-    return this.tasks.list(identity.botId);
-  }
-
-  /**
-   * One dispatch, in the order the constitution requires.
-   *
-   * Intent before effect: the task record, the active key and the index row are
-   * durable — and the per-Bot and per-User bounds have both answered — before
-   * any Subagent Durable Object is addressed. A dispatch that dies between the
-   * two leaves a task the parent can see, ask about, and settle; it never
-   * leaves a child running with nothing to answer for it.
-   */
-  private async dispatchSubagentTask(
-    identity: BotIdentity,
-    turn: { runId: string; turnId: string; sessionId: string },
-    compositionGenerationId: string,
-    request: SubagentDispatchRequestV1,
-    /** Present only on a resume: which task this continues, and in whose child. */
-    resume?: { resumedFrom: string; anchorTaskId: string },
-  ): Promise<SubagentDispatchOutcomeV1> {
-    const binding = this.subagentBinding;
-    if (!binding) {
-      return {
-        status: "refused",
-        reason:
-          "this deployment cannot address a Subagent Durable Object, so no subagent can be dispatched",
-      };
-    }
-    const taskId = subagentTaskIdV1(request.effectId);
-    const admission = await this.tasks.admit({
-      taskId,
-      type: request.type,
-      description: request.description,
-      promptDigest: await taskPromptDigestV1(request.prompt),
-      model: request.model,
-      compositionGenerationId,
-      background: request.background,
-      attachments: request.attachments,
-      // The dispatching Turn, and only the three fields that identify it: the
-      // `turn` the runtime host carries also holds the pin and the turn type,
-      // and neither belongs on the record's provenance.
-      dispatch: {
-        runId: turn.runId,
-        turnId: turn.turnId,
-        sessionId: turn.sessionId,
-      },
-      ...(resume
-        ? {
-            resumedFrom: resume.resumedFrom,
-            anchorTaskId: resume.anchorTaskId,
-          }
-        : {}),
-      now: new Date(),
-    });
-    if (admission.status === "refused") {
-      return { status: "refused", reason: admission.reason };
-    }
-    if (admission.status === "replayed") {
-      // The same tool call, reconciled or retried: the task it already
-      // dispatched is the answer, never a second child. A foreground call
-      // still waits for it — the caller asked for the result, and returning
-      // "dispatched" the instant a replay is recognised is what made a
-      // `background:false` Task look like it completed with no output.
-      const replayed = admission.record;
-      const settled =
-        replayed.outcome ??
-        (request.background
-          ? undefined
-          : await this.awaitBlockingTask(
-              identity,
-              taskAnchorIdV1(replayed.childSessionId),
-              replayed.taskId,
-            ));
-      if (settled) {
-        return {
-          status: "settled",
-          taskId: replayed.taskId,
-          model: replayed.model.slug,
-          taskStatus: settled.status,
-          ...(settled.summary === undefined
-            ? {}
-            : { summary: settled.summary }),
-          ...(settled.failure === undefined
-            ? {}
-            : { failure: settled.failure }),
-        };
-      }
-      return {
-        status: "dispatched",
-        taskId: replayed.taskId,
-        model: replayed.model.slug,
-      };
-    }
-    const reservation = await this.subagentSlots(identity).reserve({
-      schemaVersion: 1,
-      userId: identity.userId,
-      botId: identity.botId,
-      taskId,
-      reservedAt: admission.record.createdAt,
-    });
-    if (reservation.status === "refused") {
-      await this.tasks.settle(taskId, {
-        status: "failed",
-        settledAt: new Date().toISOString(),
-        failure: reservation.reason,
-      });
-      return { status: "refused", reason: reservation.reason };
-    }
-    // The desktop, for a `computerUse` task only, and after the intent this
-    // Bot already recorded: intent → acquire → dispatch. A refusal here is a
-    // refusal of the dispatch, and it names the holder.
-    if (admission.record.type === "computerUse") {
-      const desktop = await this.acquireDesktopForTask(identity, taskId);
-      if (desktop.status === "refused") {
-        await this.settleTask(identity, taskId, {
-          status: "failed",
-          settledAt: new Date().toISOString(),
-          failure: desktop.reason,
-        });
-        return { status: "refused", reason: desktop.reason };
-      }
-    }
-    const anchorTaskId = taskAnchorIdV1(admission.record.childSessionId);
-    const runTask: SubagentRunTaskRequestV1 = {
-      taskId,
-      type: admission.record.type,
-      parent: {
-        userId: identity.userId,
-        botId: identity.botId,
-        runId: turn.runId,
-        turnId: turn.turnId,
-        sessionId: turn.sessionId,
-      },
-      compositionGenerationId,
-      model: admission.record.model,
-      prompt: request.prompt,
-      ...(anchorTaskId === taskId
-        ? {}
-        : { sessionId: admission.record.childSessionId }),
-    };
-    try {
-      await binding.accept(identity, anchorTaskId, runTask);
-    } catch (error) {
-      const failure =
-        error instanceof Error ? error.message : "the subagent could not start";
-      await this.settleTask(identity, taskId, {
-        status: "failed",
-        settledAt: new Date().toISOString(),
-        failure,
-      });
-      return { status: "refused", reason: failure };
-    }
-    await this.tasks.markRunning(taskId);
-    if (!request.background) {
-      const settled = await this.awaitBlockingTask(
-        identity,
-        anchorTaskId,
-        taskId,
-      );
-      if (settled) {
-        return {
-          status: "settled",
-          taskId,
-          model: admission.record.model.slug,
-          taskStatus: settled.status,
-          ...(settled.summary === undefined
-            ? {}
-            : { summary: settled.summary }),
-          ...(settled.failure === undefined
-            ? {}
-            : { failure: settled.failure }),
-        };
-      }
-    }
-    return {
-      status: "dispatched",
-      taskId,
-      model: admission.record.model.slug,
-    };
-  }
-
-  /**
-   * Waits, boundedly, for a `background:false` task — and degrades to
-   * background rather than holding a Turn open.
-   *
-   * It *polls durable state*: the parent's own task record first, then the
-   * child's context by RPC. It never awaits the child's settle callback, which
-   * is an RPC back into this very object while this very Turn is still
-   * executing — the reentrancy hazard G1 named. Both reads are ordinary I/O the
-   * Durable Object already does inside a Turn, and the outbound probe is the
-   * same call reconciliation makes.
-   */
-  protected async awaitBlockingTask(
-    identity: BotIdentity,
-    anchorTaskId: string,
-    taskId: string,
-  ): Promise<TaskOutcomeV1 | undefined> {
-    const binding = this.subagentBinding;
-    const deadline = Date.now() + TASK_BLOCKING_TIMEOUT_MS_V1;
-    // A read that fails once is transient storage contention, not an answer:
-    // abandoning the wait on the first one returned "still running" for a
-    // child that was about to settle, and taught the model to poll. Only a
-    // record that stays unreadable ends the wait early.
-    const readFailureLimit = 3;
-    let readFailures = 0;
-    for (;;) {
-      try {
-        const record = await this.tasks.read(taskId);
-        readFailures = 0;
-        if (record.outcome) return record.outcome;
-      } catch {
-        readFailures += 1;
-        if (readFailures >= readFailureLimit) return undefined;
-      }
-      if (binding) {
-        try {
-          const context = await binding.probe(identity, anchorTaskId, taskId);
-          if (context?.outcome) {
-            // The child finished but its callback has not landed. Settling
-            // here is the same idempotent write the callback performs.
-            await this.settleTask(identity, taskId, context.outcome);
-            return context.outcome;
-          }
-        } catch {
-          // A child that cannot be probed is simply not finished yet.
-        }
-      }
-      if (Date.now() >= deadline) return undefined;
-      await this.sleep(
-        Math.min(TASK_BLOCKING_POLL_MS_V1, Math.max(0, deadline - Date.now())),
-      );
-    }
-  }
-
-  /** The one wait in this class, named so a test can shorten it. */
-  protected sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-  }
-
-  /**
-   * Records one terminal outcome for a task and gives back what it held.
-   *
-   * The single settle point. The child calls it when its Turn ends; the
-   * parent's own alarm calls it for a child that never reported. It is
-   * idempotent on the task id, so both landing is one outcome, not two.
-   */
-  async settleTask(
-    identity: BotIdentity,
-    taskId: string,
-    outcome: TaskOutcomeV1,
-  ): Promise<{ status: "settled" | "replayed" }> {
-    await this.authority.assertIdentity(identity);
-    // The desktop goes back *before* the record settles, because the record is
-    // what says this task holds it: settling first would drop the lease record
-    // and leave the host lease held by a task that has ended. A task that held
-    // nothing releases nothing, so this is a no-op on every other path and on
-    // a replayed settle.
-    await this.releaseDesktopForTask(identity, taskId);
-    const settled = await this.tasks.settle(taskId, outcome);
-    if (settled.status === "settled") {
-      try {
-        await this.subagentSlots(identity).release({
-          schemaVersion: 1,
-          userId: identity.userId,
-          botId: identity.botId,
-          taskId,
-        });
-      } catch {
-        // The User's slot is a reservation, not the record. A release that
-        // could not be delivered is retried the next time this task settles or
-        // this object reconciles; it never makes a settled task look unsettled.
-      }
-      await this.recordTaskCompletion(identity, settled.record);
-    }
-    await this.ctx.storage.transaction((transaction) =>
-      this.authority.refreshRecoveryAlarm(transaction),
-    );
-    return { status: settled.status };
-  }
-
-  /**
-   * What a settled task leaves behind on the parent (l.352: a background
-   * completion "also posts a user-visible summary on the parent").
-   *
-   * Three records, and they are the *same* three a completed Routine firing
-   * leaves — slice E's seams, reused rather than paralleled:
-   *
-   *  * the `task/settled` Session line, on the Bot's announcement log, because
-   *    a background task settles when the Turn that dispatched it is over and
-   *    there is no live Session to append to;
-   *  * a completion-inbox entry and a pending wake, so the summary — never the
-   *    child's transcript, which the parent has no door onto — is delivered to
-   *    the Bot's next conversational Turn as durable input;
-   *  * a notification intent, so a person hears about it too.
-   *
-   * The inbox half is skipped while the dispatching run is still active: a
-   * blocking dispatch is answered by its own tool result, and telling the same
-   * Turn the same thing twice is not delivery, it is duplication.
-   *
-   * Every write is idempotent on the task id, so a settle that races its own
-   * reconciliation leaves one of each.
-   */
-  private async recordTaskCompletion(
-    identity: BotIdentity,
-    task: TaskRecordV1,
-  ): Promise<void> {
-    const outcome = task.outcome;
-    if (!outcome) return;
-    const at = outcome.settledAt;
-    await this.ctx.storage.transaction((transaction) =>
-      this.appendAnnouncement(transaction, (seq) => ({
-        type: "task/settled",
-        seq,
-        timestamp: at,
-        taskId: task.taskId,
-        status: outcome.status,
-        ...(outcome.summary === undefined
-          ? {}
-          : { summary: outcome.summary.slice(0, ROUTINE_INBOX_TEXT_MAX) }),
-      })),
-    );
-    // The dispatching Turn is still running: it is waiting on this task and
-    // will read the outcome as its own tool result.
-    if ((await this.authority.readActiveRunId()) === task.dispatch.runId) {
-      return;
-    }
-    const text = this.taskCompletionTextV1(task, outcome);
-    const attribution = subagentAttributionV1(task.description);
-    const wakeId = `tw-${task.taskId}`;
-    const entry: RoutineInboxEntryV1 = {
-      schemaVersion: 1,
-      entryId: `ti-${task.taskId}`,
-      // The child's run id *is* the task id, so the entry names the run that
-      // produced it exactly as a firing's entry does.
-      runId: task.taskId,
-      routineId: task.taskId,
-      text,
-      attribution,
-      createdAt: at,
-      acknowledged: false,
-      wakeId,
-      source: "subagent",
-    };
-    await this.routineInbox.append(entry);
-    const wake: RoutinePendingWakeV1 = {
-      schemaVersion: 1,
-      kind: "wake",
-      wakeId,
-      runId: task.taskId,
-      routineId: task.taskId,
-      title: attribution.slice(0, ROUTINE_WAKE_TITLE_MAX),
-      text,
-      createdAt: at,
-      quiet: { automation: true },
-      source: "subagent",
-    };
-    await this.routineInbox.enqueue(wake);
-    let settings: BotSettingsViewV1;
-    try {
-      settings = await this.getSettings(identity);
-    } catch {
-      return;
-    }
-    if (!settings.notifications.enabled) return;
-    await this.authority.recordNotification({
-      notificationId: notificationIdV1("task-settled", task.taskId),
-      runId: task.taskId,
-      createdAt: at,
-      title: `${settings.profile.name} finished a subagent task`,
-      body: text.slice(0, 240),
-    });
-  }
-
-  /** The one line a settled task says to its parent. Never a transcript. */
-  private taskCompletionTextV1(
-    task: TaskRecordV1,
-    outcome: TaskOutcomeV1,
-  ): string {
-    const head = `${task.type} subagent "${task.description}" ${outcome.status}.`;
-    const body =
-      outcome.status === "completed"
-        ? (outcome.summary ?? "It left no summary.")
-        : (outcome.failure ??
-          (outcome.status === "stopped"
-            ? "It was stopped."
-            : "No reason was recorded."));
-    return `${head} ${body}`.slice(0, ROUTINE_INBOX_TEXT_MAX);
-  }
-
-  /** One task, as the gateway detail route reads it. */
-  async readTask(identity: BotIdentity, taskId: string): Promise<TaskViewV1> {
-    await this.validateIdentity(identity);
-    return taskViewV1(await this.tasks.read(taskId));
-  }
-
-  /** What `task_check` answers: status, last summary, and nothing to poll on. */
-  private async checkTask(taskId: string): Promise<SubagentCheckOutcomeV1> {
-    let record: TaskRecordV1;
-    try {
-      record = await this.tasks.read(taskId);
-    } catch (error) {
-      return {
-        status: "refused",
-        reason: error instanceof Error ? error.message : String(error),
-      };
-    }
-    return {
-      status: "known",
-      taskId: record.taskId,
-      taskType: record.type,
-      description: record.description,
-      taskStatus: record.status,
-      model: record.model.slug,
-      ...(record.outcome?.summary === undefined
-        ? {}
-        : { summary: record.outcome.summary }),
-      ...(record.outcome?.failure === undefined
-        ? {}
-        : { failure: record.outcome.failure }),
-      // What is *waiting*, not what was ever sent: a message the child has
-      // already read is not something the Bot is still waiting on.
-      queuedMessages: (await this.tasks.pendingMessages(taskId)).length,
-    };
-  }
-
-  /** What `task_message` does: append to the bounded queue, or refuse. */
-  private async messageTask(
-    taskId: string,
-    message: string,
-  ): Promise<SubagentMessageOutcomeV1> {
-    const queued = await this.tasks.appendMessage(taskId, message, new Date());
-    if (queued.status === "refused") {
-      return { status: "refused", reason: queued.reason };
-    }
-    return { status: "queued", taskId, depth: queued.depth };
-  }
-
-  /**
-   * Explicit, authenticated cancellation of one task. Durable and terminal.
-   *
-   * The order is the constitution's: the intent is recorded, the child is
-   * asked to stop, and only then is the outcome written — so a stop that dies
-   * between the two is read back rather than repeated, and a child that cannot
-   * be reached does not leave a task the User was told was cancelled still
-   * live. The settle is the one idempotent settle every other path uses.
-   */
-  async stopTask(
-    identity: BotIdentity,
-    taskId: string,
-    requestedBy: "bot" | "user",
-  ): Promise<
-    | { status: "stopped"; record: TaskRecordV1 }
-    | { status: "refused"; reason: string }
-  > {
-    await this.authority.assertIdentity(identity);
-    const requested = await this.tasks.requestStop(
-      taskId,
-      new Date(),
-      requestedBy,
-    );
-    if (requested.status === "refused") {
-      // A task that is already terminal answers with what it already is: a
-      // second Stop on a stopped task is not a failure.
-      let record: TaskRecordV1 | undefined;
-      try {
-        record = await this.tasks.read(taskId);
-      } catch {
-        record = undefined;
-      }
-      if (record && record.status === "stopped") {
-        return { status: "stopped", record };
-      }
-      return { status: "refused", reason: requested.reason };
-    }
-    await this.ctx.storage.transaction((transaction) =>
-      this.appendAnnouncement(transaction, (seq) => ({
-        type: "task/stopped",
-        seq,
-        timestamp: new Date().toISOString(),
-        taskId,
-        requestedBy,
-      })),
-    );
-    const binding = this.subagentBinding;
-    if (binding) {
-      try {
-        await binding.stop(
-          identity,
-          taskAnchorIdV1(requested.record.childSessionId),
-          taskId,
-        );
-      } catch {
-        // The child is an execution host, not the authority. One that cannot
-        // be reached reads its own cancelled context back on its next alarm;
-        // the terminal state is recorded here either way.
-      }
-    }
-    await this.settleTask(identity, taskId, {
-      status: "stopped",
-      settledAt: new Date().toISOString(),
-      failure: `Stopped by ${requestedBy === "user" ? "your user" : "the Bot"}.`,
-    });
-    return { status: "stopped", record: await this.tasks.read(taskId) };
-  }
-
-  /** The gateway's cancellation door. Same act, second authenticated caller. */
-  async stopTaskForUser(
-    identity: BotIdentity,
-    taskId: string,
-  ): Promise<TaskViewV1> {
-    await this.validateIdentity(identity);
-    const stopped = await this.stopTask(identity, taskId, "user");
-    if (stopped.status === "refused") {
-      throw new Error(stopped.reason);
-    }
-    return taskViewV1(stopped.record);
-  }
-
-  /**
-   * A new run in a finished task's own child Durable Object and Session.
-   *
-   * The model is *not* re-resolved: the resumed run keeps the binding the
-   * first one pinned, because the transcript it continues was produced by it.
-   * `resumedFrom` records which task this continues.
-   */
-  private async resumeTask(
-    identity: BotIdentity,
-    turn: { runId: string; turnId: string; sessionId: string },
-    compositionGenerationId: string,
-    request: SubagentResumeRequestV1,
-  ): Promise<SubagentDispatchOutcomeV1> {
-    const resumable = await this.tasks.resumable(request.resume);
-    if (resumable.status === "refused") {
-      return { status: "refused", reason: resumable.reason };
-    }
-    if (await this.tasks.stopRequested(request.resume)) {
-      return {
-        status: "refused",
-        reason: `task "${request.resume}" was stopped; a stopped subagent is not resumed`,
-      };
-    }
-    return this.dispatchSubagentTask(
-      identity,
-      turn,
-      compositionGenerationId,
-      {
-        description: request.description ?? resumable.record.description,
-        prompt: request.prompt,
-        type: resumable.record.type,
-        background: request.background,
-        model: resumable.record.model,
-        attachments: [],
-        effectId: request.effectId,
-      },
-      { resumedFrom: request.resume, anchorTaskId: resumable.anchorTaskId },
-    );
-  }
-
-  /**
-   * The child's door. It records the task and arms its own alarm, and it does
-   * not run the Turn: the RPC returns to a parent that is still inside the
-   * Turn that dispatched, so anything longer than a write would block it.
-   */
-  async acceptSubagentTask(
-    identity: BotIdentity,
-    request: SubagentRunTaskRequestV1,
-  ): Promise<{ childSessionId: string }> {
-    await this.authority.assertIdentity(identity);
-    const key = taskContextKeyV1(request.taskId);
-    const existing = await this.ctx.storage.get<unknown>(key);
-    if (existing !== undefined) {
-      // A retried dispatch reaches the child it already reached.
-      return {
-        childSessionId: decodeSubagentTaskContextV1(existing).sessionId,
-      };
-    }
-    const context = subagentTaskContextV1(request, new Date().toISOString());
-    await this.ctx.storage.put(key, context);
-    await this.ctx.storage.transaction((transaction) =>
-      this.authority.refreshRecoveryAlarm(transaction),
-    );
-    return { childSessionId: context.sessionId };
-  }
-
-  /**
-   * The child's cancellation door.
-   *
-   * Durable first: the context is marked settled so a child that is evicted
-   * before its Agent notices — or that has not started its Turn yet — cannot
-   * come back and run the task anyway. The Agent signal follows, and is
-   * advisory, exactly as an authenticated Stop's is.
-   */
-  async stopSubagentTask(
-    identity: BotIdentity,
-    taskId: string,
-  ): Promise<{ status: "stopped" | "unknown" }> {
-    await this.authority.assertIdentity(identity);
-    const key = taskContextKeyV1(taskId);
-    const stored = await this.ctx.storage.get<unknown>(key);
-    if (stored === undefined) return { status: "unknown" };
-    const context = decodeSubagentTaskContextV1(stored);
-    if (context.status !== "settled") {
-      await this.ctx.storage.put(key, {
-        ...context,
-        status: "settled",
-        outcome: {
-          status: "stopped",
-          settledAt: new Date().toISOString(),
-          failure: "Stopped by an authenticated cancellation.",
-        },
-      });
-    }
-    this.cancelActiveTurn({ sessionId: context.sessionId, runId: taskId });
-    return { status: "stopped" };
-  }
-
-  /**
-   * The parent's half of message delivery: hand the child everything queued
-   * for one task and mark it delivered, in one transaction.
-   *
-   * Authenticated as every other task RPC is. The claim is idempotent by
-   * construction — a second claim reads the marks back and answers nothing —
-   * so a child that retries a step after an eviction does not read the same
-   * instruction twice.
-   */
-  async claimTaskMessages(
-    identity: BotIdentity,
-    taskId: string,
-  ): Promise<{ messages: { seq: number; message: string }[] }> {
-    await this.authority.assertIdentity(identity);
-    const claimed = await this.tasks.claimMessages(taskId, new Date());
-    return {
-      messages: claimed.map((entry) => ({
-        seq: entry.seq,
-        message: entry.message,
-      })),
-    };
-  }
-
-  /**
-   * The child's half: ask the parent for what it has queued, using the parent
-   * this child was handed when it accepted the task.
-   *
-   * A parent that cannot be reached answers nothing; the messages are still
-   * queued, still undelivered, and the next step claims them.
-   */
-  private async claimParentTaskMessages(
-    taskId: string,
-  ): Promise<readonly { seq: number; message: string }[]> {
-    const binding = this.subagentBinding;
-    if (!binding) return [];
-    const context = await this.readSubagentTaskContext(taskId);
-    if (!context) return [];
-    return binding.claimMessagesOnParent(context.parent, taskId);
-  }
-
-  /** What a child holds for one task, for the parent's reconciliation. */
-  async readSubagentTaskContext(
-    taskId: string,
-  ): Promise<SubagentTaskContextV1 | undefined> {
-    const stored = await this.ctx.storage.get<unknown>(
-      taskContextKeyV1(taskId),
-    );
-    return stored === undefined
-      ? undefined
-      : decodeSubagentTaskContextV1(stored);
-  }
-
-  /**
-   * The child half of the alarm: run the one Turn this object was handed.
-   *
-   * A `subagent` Turn, on this object's own Session, admitted with the
-   * `{kind:"subagent"}` origin so the durable run says whose task it was. The
-   * task id *is* the run id, so a retried alarm is refused by the kernel's own
-   * idempotency rather than running the child twice.
-   */
-  private async runOwedSubagentTurns(): Promise<void> {
-    const identity = await this.authority.readDurableIdentity();
-    if (!identity) return;
-    const stored = await this.ctx.storage.list<unknown>({
-      prefix: TASK_CONTEXT_PREFIX,
-    });
-    for (const [key, value] of stored) {
-      let context: SubagentTaskContextV1;
-      try {
-        context = decodeSubagentTaskContextV1(value);
-      } catch {
-        continue;
-      }
-      if (context.status !== "queued") continue;
-      // A run already occupies this object; the alarm defers rather than
-      // burning the task on an error it did not have to take.
-      if (await this.authority.readActiveRunId()) return;
-      await this.ctx.storage.put(key, { ...context, status: "running" });
-      let outcome: TaskOutcomeV1;
-      try {
-        await this.authority.run({
-          ...identity,
-          runId: context.taskId,
-          sessionId: context.sessionId,
-          acceptedAt: new Date().toISOString(),
-          text: context.prompt,
-          turnType: "subagent",
-          // The role is the task's type. It is the second ceiling on the
-          // child's catalog: a `browserUse` child is never offered
-          // `computer_exec`, and the durable run records the role so a
-          // recovered child re-mounts the same catalog.
-          subagentRole: context.type,
-          origin: {
-            kind: "subagent",
-            taskId: context.taskId,
-            parentRunId: context.parent.runId,
-          },
-        });
-        outcome = subagentOutcomeForRunV1(
-          await this.authority.readStoredRun(context.taskId),
-          new Date().toISOString(),
-        );
-      } catch (error) {
-        outcome = subagentOutcomeForRunV1(
-          await this.authority.readStoredRun(context.taskId),
-          new Date().toISOString(),
-          error,
-        );
-      }
-      await this.ctx.storage.put(key, {
-        ...context,
-        status: "settled",
-        outcome,
-      });
-      if (this.subagentBinding) {
-        try {
-          await this.subagentBinding.settleOnParent(
-            context.parent,
-            context.taskId,
-            outcome,
-          );
-        } catch {
-          // The outcome is durable here. A parent that could not be reached is
-          // asked again when its own deadline comes due — the child is never
-          // re-dispatched, only re-read.
-        }
-      }
-    }
-  }
-
-  /**
-   * The parent half of the alarm: settle a task whose child never reported.
-   *
-   * The child is *asked*, never re-dispatched. A child that finished but could
-   * not deliver its outcome is adopted as it stands; a child that has nothing
-   * to say by its deadline is failed, because every admitted Turn must reach a
-   * durable terminal state.
-   */
-  private async reconcileOverdueTasks(): Promise<void> {
-    const identity = await this.authority.readDurableIdentity();
-    if (!identity) return;
-    const binding = this.subagentBinding;
-    const now = Date.now();
-    for (const task of await this.tasks.active()) {
-      if (Date.parse(task.deadlineAt) > now) continue;
-      let outcome: TaskOutcomeV1 | undefined;
-      if (binding) {
-        try {
-          outcome = (
-            await binding.probe(
-              identity,
-              taskAnchorIdV1(task.childSessionId),
-              task.taskId,
-            )
-          )?.outcome;
-        } catch {
-          outcome = undefined;
-        }
-      }
-      await this.settleTask(
-        identity,
-        task.taskId,
-        outcome ?? {
-          status: "failed",
-          settledAt: new Date().toISOString(),
-          failure: `the subagent did not report before its deadline of ${task.deadlineAt}`,
-        },
-      );
-    }
-  }
-
-  /**
-   * The Subagents seam one admitted Turn runs under. `models` is read lazily,
-   * because the Turn's model binding is resolved after the runtime Packages
-   * are built and the catalog is only ever read from inside the Turn.
-   */
-  private subagentsRuntimeHost(
-    identity: BotIdentity,
-    turn: { runId: string; turnId: string; sessionId: string },
-    compositionGenerationId: string,
-    turnType: TurnTypeV1,
-    models: () => readonly SubagentModelOptionV1[],
-    /** Present only in a child: the task this Turn is running. */
-    childTaskId?: string,
-  ): SubagentsRuntimeHostV1 {
-    return {
-      botId: identity.botId,
-      writer: turn,
-      turnType,
-      models,
-      ...(childTaskId
-        ? {
-            taskId: childTaskId,
-            // The seam that makes `task_message` delivery rather than
-            // queueing: the child claims what its parent queued on its way
-            // into each step, and the parent marks the claim durably.
-            drainMessages: () => this.claimParentTaskMessages(childTaskId),
-          }
-        : {}),
-      dispatch: (request) =>
-        this.dispatchSubagentTask(
-          identity,
-          turn,
-          compositionGenerationId,
-          request,
-        ),
-      check: (taskId) => this.checkTask(taskId),
-      message: (taskId, message) => this.messageTask(taskId, message),
-      stop: async (taskId): Promise<SubagentStopOutcomeV1> => {
-        const stopped = await this.stopTask(identity, taskId, "bot");
-        return stopped.status === "stopped"
-          ? { status: "stopped", taskId }
-          : { status: "refused", reason: stopped.reason };
-      },
-      resume: (request) =>
-        this.resumeTask(identity, turn, compositionGenerationId, request),
     };
   }
 
@@ -4007,7 +2613,7 @@ export class ShellBotBackendContribution {
       schemaVersion: 1,
       userId: identity.userId,
     });
-    const packageDefinitions = executionPackagesV1(this.application);
+    const packageDefinitions = executionPackagesV1(this.state.application);
     const plan = resolveBotExecutionPlanV1({
       bot: settings,
       user,
@@ -4018,11 +2624,13 @@ export class ShellBotBackendContribution {
     // Computer sync below; nothing else reads it.
     const packageRoots = declaredPackageRootsV1({
       installations: user.packages,
-      packages: this.application.packages,
+      packages: this.state.application.packages,
     });
     const readSecret = (name: string) => {
       // SAFETY: Worker secrets are dynamic string bindings not enumerable in Env.
-      const value = (this.env as unknown as Record<string, unknown>)[name];
+      const value = (this.state.env as unknown as Record<string, unknown>)[
+        name
+      ];
       return typeof value === "string" ? value : undefined;
     };
     const authorizeEnabledConnection = (
@@ -4058,7 +2666,7 @@ export class ShellBotBackendContribution {
       const installation = user.packages.find(
         (candidate) => candidate.packageId === packageId,
       );
-      const declared = this.application.packages.find(
+      const declared = this.state.application.packages.find(
         (definition) => definition.id === packageId,
       );
       return resolvePackageSettingValuesV1(
@@ -4093,16 +2701,16 @@ export class ShellBotBackendContribution {
     // and the prompt section both read it lazily, from inside the Turn.
     const subagentModels: SubagentModelOptionV1[] = [];
     const resolvedAgentPackages: FoundationAgentPackage[] = [
-      ...this.application.runtime.hosted({
+      ...this.state.application.runtime.hosted({
         userId: identity.userId,
         readSecret,
         ...(turn
           ? {
-              skills: createBotSkillsHost(identity, turn, this.env),
+              skills: createBotSkillsHost(identity, turn, this.state.env),
             }
           : {}),
         ...(turn
-          ? { memory: createBotMemoryHost(identity, turn, this.env) }
+          ? { memory: createBotMemoryHost(identity, turn, this.state.env) }
           : {}),
         // A Bot generates an image only inside an admitted Turn, whose Session
         // and Turn the Workspace write names as its writer.
@@ -4111,7 +2719,7 @@ export class ShellBotBackendContribution {
               image: createBotImageHost(
                 identity,
                 turn,
-                this.env,
+                this.state.env,
                 typeof configuredImageModel === "string"
                   ? configuredImageModel
                   : undefined,
@@ -4144,13 +2752,13 @@ export class ShellBotBackendContribution {
                 releaseAgentTurn: (request) =>
                   this.agentTurnSlots(identity).release(request),
                 runAgent: async (request) => {
-                  if (!this.env.BOT_STATES) {
+                  if (!this.state.env.BOT_STATES) {
                     throw new Error("Bot-to-Bot messaging is unavailable");
                   }
-                  const id = this.env.BOT_STATES.idFromName(
+                  const id = this.state.env.BOT_STATES.idFromName(
                     `${request.userId}:${request.botId}`,
                   );
-                  const rpc = this.env.BOT_STATES.get(id) as unknown as {
+                  const rpc = this.state.env.BOT_STATES.get(id) as unknown as {
                     runAgent(input: unknown): Promise<unknown>;
                   };
                   const completed = decodeClientTurnV1(
@@ -4203,7 +2811,7 @@ export class ShellBotBackendContribution {
         ...(turn
           ? {
               routines: {
-                ...createBotRoutinesHost(identity, turn, this.routines),
+                ...createBotRoutinesHost(identity, turn, this.state.routines),
                 list: () => this.listRoutines(identity),
                 execute: (command, writer) =>
                   this.executeRoutineCommand(identity, command, writer),
@@ -4213,9 +2821,10 @@ export class ShellBotBackendContribution {
         // A Bot dispatches a subagent only inside an admitted Turn, whose run
         // the task record names, and only where a Subagent Durable Object can
         // actually be addressed.
-        ...(turn && turn.compositionGenerationId && this.subagentBinding
+        ...(turn && turn.compositionGenerationId && this.state.subagentBinding
           ? {
-              subagents: this.subagentsRuntimeHost(
+              subagents: subagentsRuntimeHost(
+                this.state,
                 identity,
                 turn,
                 turn.compositionGenerationId,
@@ -4234,7 +2843,7 @@ export class ShellBotBackendContribution {
               machines: createBotMachineHost(
                 identity,
                 turn,
-                this.ctx.storage,
+                this.state.ctx.storage,
                 this.machineSeam(identity),
               ),
             }
@@ -4248,7 +2857,7 @@ export class ShellBotBackendContribution {
                   ...createBotMachineHost(
                     identity,
                     turn,
-                    this.ctx.storage,
+                    this.state.ctx.storage,
                     machineSeam,
                   ),
                   writer: {
@@ -4266,7 +2875,10 @@ export class ShellBotBackendContribution {
         // object storage with an unattributed writer.
         ...(turn
           ? {
-              computerSync: createBotComputerSyncHost(this.env, packageRoots),
+              computerSync: createBotComputerSyncHost(
+                this.state.env,
+                packageRoots,
+              ),
               // The same Turn, as the writer a durable Computer write records.
               computerWriter: {
                 sessionId: turn.sessionId,
@@ -4275,18 +2887,18 @@ export class ShellBotBackendContribution {
               },
               // A background process is Bot-scoped durable state, so its
               // record lives in this Bot's own Durable Object storage.
-              computerProcesses: this.ctx.storage,
+              computerProcesses: this.state.ctx.storage,
               // Prompt assembly reads the Bot DO's Step 1 lease record
               // directly; passing storage wakes no Computer.
-              computerControlRecords: this.ctx.storage,
-              ...(this.invalidateComputerProjectionFile
+              computerControlRecords: this.state.ctx.storage,
+              ...(this.state.invalidateComputerProjectionFile
                 ? {
                     computerProjectionFiles: {
                       invalidate: (
                         botId: string,
                         kind: "screenshots" | "doctor",
                       ) =>
-                        this.invalidateComputerProjectionFile?.(
+                        this.state.invalidateComputerProjectionFile?.(
                           identity.userId,
                           botId,
                           kind,
@@ -4309,29 +2921,34 @@ export class ShellBotBackendContribution {
           : {}),
         // The Computer host, when this deployment has one. Both halves or
         // neither: a binding with no token reaches a host that refuses.
-        ...(this.env.COMPUTER_HOST && this.env.COMPUTER_HOST_TOKEN
+        ...(this.state.env.COMPUTER_HOST && this.state.env.COMPUTER_HOST_TOKEN
           ? {
               computerHostBinding: {
-                fetcher: this.env.COMPUTER_HOST,
-                hostToken: this.env.COMPUTER_HOST_TOKEN,
+                fetcher: this.state.env.COMPUTER_HOST,
+                hostToken: this.state.env.COMPUTER_HOST_TOKEN,
               },
             }
           : {}),
       }),
-      ...(await this.application.runtime.enabled(plan, {
+      ...(await this.state.application.runtime.enabled(plan, {
         userId: identity.userId,
         readSecret,
         authorizeConnection: authorizeEnabledConnection,
         ...(turn
           ? {
-              pinToolCatalog: turnToolCatalogPin(this.ctx.storage, turn.turnId),
+              pinToolCatalog: turnToolCatalogPin(
+                this.state.ctx.storage,
+                turn.turnId,
+              ),
             }
           : {}),
         packageSettings,
         // Enabled Contributions reach the network through the same
         // outbound seam the model provider uses, so a deployment that stubs
         // it stubs every one of them.
-        ...(this.outboundFetch ? { fetch: this.outboundFetch } : {}),
+        ...(this.state.outboundFetch
+          ? { fetch: this.state.outboundFetch }
+          : {}),
         leaseCredential: async (
           capability: EnabledCapabilityV1,
           effectId: string,
@@ -4408,7 +3025,7 @@ export class ShellBotBackendContribution {
     }
     const bindingPackageId = binding.packageId;
     agentPackages.push(
-      this.application.runtime.model(binding, {
+      this.state.application.runtime.model(binding, {
         accountId: identity.userId,
         connectionId: binding.connection.connectionId,
         leaseCredential: (
@@ -4435,14 +3052,14 @@ export class ShellBotBackendContribution {
             bindingPackageId,
             effectId,
           ),
-        ...(this.env.FROCK_AI
+        ...(this.state.env.FROCK_AI
           ? {
-              frockAiAutoRoute: this.env.FROCK_AI.autoRoute,
+              frockAiAutoRoute: this.state.env.FROCK_AI.autoRoute,
               runFrockAiChatCompletion: (gatewayModel, body) =>
-                this.env.FROCK_AI!.runChatCompletion(gatewayModel, body),
+                this.state.env.FROCK_AI!.runChatCompletion(gatewayModel, body),
             }
           : {}),
-        fetch: this.outboundFetch,
+        fetch: this.state.outboundFetch,
       }),
     );
     // The slugs `<available_subagent_models>` renders, and the only ones a
@@ -4473,7 +3090,7 @@ export class ShellBotBackendContribution {
       );
     }
     // Last, so every provider an earlier Package registered is already there.
-    agentPackages.push(...this.application.runtime.base());
+    agentPackages.push(...this.state.application.runtime.base());
     return {
       agentPackages,
       capabilities: structuredClone(plan.capabilities),
@@ -4497,33 +3114,33 @@ export class ShellBotBackendContribution {
   }
 
   async readDurableIdentity(): Promise<BotIdentity | undefined> {
-    return this.authority.readDurableIdentity();
+    return this.state.authority.readDurableIdentity();
   }
 
   async validateIdentity(identity: BotIdentity): Promise<void> {
-    return this.authority.validateIdentity(identity);
+    return this.state.authority.validateIdentity(identity);
   }
 
   /** Recompute the Bot authority's one alarm inside a Package write transaction. */
   async refreshScheduledWork(
     transaction: DurableObjectTransaction,
   ): Promise<void> {
-    await this.authority.refreshRecoveryAlarm(transaction);
+    await this.state.authority.refreshRecoveryAlarm(transaction);
   }
 
   async listNotifications(): Promise<BotNotificationIntent[]> {
-    return this.authority.listNotifications();
+    return this.state.authority.listNotifications();
   }
 
   async acknowledgeNotification(notificationId: string): Promise<void> {
-    return this.authority.acknowledgeNotification(notificationId);
+    return this.state.authority.acknowledgeNotification(notificationId);
   }
 
   /** Every Routine this Bot holds. Bot-scoped: the caller proved membership. */
   async listRoutines(identity: BotIdentity): Promise<RoutineListViewV1> {
-    return this.routines.list(
+    return this.state.routines.list(
       identity.botId,
-      await this.routineScheduler.nextRuns(),
+      await this.state.routineScheduler.nextRuns(),
     );
   }
 
@@ -4540,12 +3157,12 @@ export class ShellBotBackendContribution {
     if (command.botId !== identity.botId) {
       throw new RoutineNotFoundError(command.routineId ?? command.botId);
     }
-    const receipt = await this.routines.execute(command, writer);
+    const receipt = await this.state.routines.execute(command, writer);
     // A created, re-timed, resumed or manually fired Routine changes what the
     // object is owed next, so the alarm is re-armed in the same call that wrote
     // the record rather than waiting for the next one to happen by.
-    await this.ctx.storage.transaction((transaction) =>
-      this.authority.refreshRecoveryAlarm(transaction),
+    await this.state.ctx.storage.transaction((transaction) =>
+      this.state.authority.refreshRecoveryAlarm(transaction),
     );
     return receipt;
   }
@@ -4566,9 +3183,9 @@ export class ShellBotBackendContribution {
     body: string;
     contentType?: string | null;
   }): Promise<{ status: "accepted" | "duplicate"; fireId: string }> {
-    const accepted = await this.routines.deliverHook(input);
-    await this.ctx.storage.transaction((transaction) =>
-      this.authority.refreshRecoveryAlarm(transaction),
+    const accepted = await this.state.routines.deliverHook(input);
+    await this.state.ctx.storage.transaction((transaction) =>
+      this.state.authority.refreshRecoveryAlarm(transaction),
     );
     return accepted;
   }
@@ -4606,7 +3223,7 @@ export class ShellBotBackendContribution {
   async deliverMachineResult(
     delivery: MachineResultDeliveryV1,
   ): Promise<{ status: "accepted" }> {
-    await this.ctx.storage.transaction(async (transaction) => {
+    await this.state.ctx.storage.transaction(async (transaction) => {
       await enqueuePendingBotInputV1(transaction, {
         schemaVersion: 1,
         kind: "machine-result",
@@ -4617,8 +3234,8 @@ export class ShellBotBackendContribution {
         createdAt: delivery.finishedAt,
       });
     });
-    await this.ctx.storage.transaction((transaction) =>
-      this.authority.refreshRecoveryAlarm(transaction),
+    await this.state.ctx.storage.transaction((transaction) =>
+      this.state.authority.refreshRecoveryAlarm(transaction),
     );
     return { status: "accepted" };
   }
@@ -4634,14 +3251,14 @@ export class ShellBotBackendContribution {
    * on every alarm forever.
    */
   private async replayPendingWakeNotifications(): Promise<void> {
-    const pending = await this.routineInbox.pending();
+    const pending = await this.state.routineInbox.pending();
     if (pending.length === 0) return;
-    const identity = await this.authority.readDurableIdentity();
+    const identity = await this.state.authority.readDurableIdentity();
     if (!identity) return;
     const settings = await this.getSettings(identity);
     if (!settings.notifications.enabled) return;
     const unread = new Map(
-      (await this.routineInbox.list())
+      (await this.state.routineInbox.list())
         .filter((entry) => !entry.acknowledged)
         .map((entry) => [entry.runId, entry] as const),
     );
@@ -4652,7 +3269,7 @@ export class ShellBotBackendContribution {
       // The same notification id the settle recorded, per source: a replay is
       // a second delivery of one intent, never a second intent.
       const subagent = input.source === "subagent";
-      await this.authority.recordNotification({
+      await this.state.authority.recordNotification({
         notificationId: subagent
           ? `task-settled:${input.runId}`
           : `routine-wake:${input.runId}`,
@@ -4663,7 +3280,7 @@ export class ShellBotBackendContribution {
         }`,
         body: entry.text.slice(0, 240),
       });
-      await this.routineInbox.markRenotified(key);
+      await this.state.routineInbox.markRenotified(key);
     }
   }
 
@@ -4678,7 +3295,7 @@ export class ShellBotBackendContribution {
    * the decision, so the Bot always learns the outcome.
    */
   private async expireDueApprovals(): Promise<void> {
-    const stored = await this.ctx.storage.list<unknown>({
+    const stored = await this.state.ctx.storage.list<unknown>({
       prefix: APPROVAL_PREFIX,
     });
     const now = Date.now();
@@ -4711,7 +3328,7 @@ export class ShellBotBackendContribution {
   }> {
     const key = approvalKeyV1(approvalId);
     const at = new Date().toISOString();
-    return this.ctx.storage.transaction(async (transaction) => {
+    return this.state.ctx.storage.transaction(async (transaction) => {
       const stored = await transaction.get<unknown>(key);
       if (stored === undefined) {
         throw new ApprovalDecodeError(`approval "${approvalId}" was not found`);
@@ -4764,14 +3381,14 @@ export class ShellBotBackendContribution {
    */
   async listApprovals(identity: BotIdentity): Promise<ApprovalListViewV1> {
     await this.validateIdentity(identity);
-    const stored = await this.ctx.storage.list<unknown>({
+    const stored = await this.state.ctx.storage.list<unknown>({
       prefix: APPROVAL_PREFIX,
     });
     // Retention is enforced on read rather than in the settling transaction,
     // which cannot list. Trimming loses a row and never a fact: the send is
     // still on the durable log of the Turn that made it.
     for (const key of trimmableApprovalKeysV1([...stored.keys()])) {
-      await this.ctx.storage.delete(key);
+      await this.state.ctx.storage.delete(key);
       stored.delete(key);
     }
     const approvals = [...stored.values()]
@@ -4810,7 +3427,7 @@ export class ShellBotBackendContribution {
       settled.machineIntent?.decision === "approved"
     ) {
       await dispatchApprovedMachineIntentV1(
-        this.ctx.storage,
+        this.state.ctx.storage,
         settled.machineIntent,
         this.machineSeam(identity),
       );
@@ -4825,7 +3442,7 @@ export class ShellBotBackendContribution {
   /** The completion inbox, newest first, with the badge count beside it. */
   async listRoutineInbox(identity: BotIdentity): Promise<RoutineInboxViewV1> {
     await this.validateIdentity(identity);
-    const entries = await this.routineInbox.list();
+    const entries = await this.state.routineInbox.list();
     return {
       schemaVersion: 1,
       botId: identity.botId,
@@ -4837,7 +3454,7 @@ export class ShellBotBackendContribution {
   /** Count inputs waiting for the next conversational Turn without draining them. */
   async pendingInputCount(identity: BotIdentity): Promise<number> {
     await this.validateIdentity(identity);
-    return (await this.routineInbox.pending()).length;
+    return (await this.state.routineInbox.pending()).length;
   }
 
   /**
@@ -4852,7 +3469,7 @@ export class ShellBotBackendContribution {
       throw new RoutineNotFoundError(command.botId);
     }
     await this.validateIdentity(identity);
-    await this.routineInbox.acknowledge(command.entryIds);
+    await this.state.routineInbox.acknowledge(command.entryIds);
     return {
       schemaVersion: 1,
       commandId: command.commandId,
@@ -4874,7 +3491,7 @@ export class ShellBotBackendContribution {
     runId: string,
   ): Promise<RoutineRunDetailViewV1> {
     await this.validateIdentity(identity);
-    const run = await this.authority.readStoredRun(runId);
+    const run = await this.state.authority.readStoredRun(runId);
     const origin = run ? settledRoutineOriginV1(run) : undefined;
     if (!run || origin?.routineId !== routineId) {
       throw new RoutineNotFoundError(runId);
@@ -4887,7 +3504,7 @@ export class ShellBotBackendContribution {
     identity: BotIdentity,
     routineId: string,
   ): Promise<RoutineRunListViewV1> {
-    return this.routines.listRuns(identity.botId, routineId);
+    return this.state.routines.listRuns(identity.botId, routineId);
   }
   /**
    * The Bot's durable Composition generations, newest first. Bot-scoped: the
@@ -4897,8 +3514,8 @@ export class ShellBotBackendContribution {
     identity: BotIdentity,
     query: { limit: number; cursor?: string },
   ): Promise<CompositionGenerationListViewV1> {
-    const current = await this.authority.composition.current();
-    const page = await this.authority.composition.list({
+    const current = await this.state.authority.composition.current();
+    const page = await this.state.authority.composition.list({
       limit: Math.min(query.limit, MAX_COMPOSITION_GENERATION_PAGE_V1),
       ...(query.cursor === undefined ? {} : { cursor: query.cursor }),
     });
@@ -4912,7 +3529,7 @@ export class ShellBotBackendContribution {
             botId: identity.botId,
             generation,
             currentGenerationId: current.generationId,
-            failures: await this.authority.compositionFailures.list(
+            failures: await this.state.authority.compositionFailures.list(
               generation.generationId,
             ),
             ...(await this.compositionQuarantineView(generation.generationId)),
@@ -4928,14 +3545,16 @@ export class ShellBotBackendContribution {
     identity: BotIdentity,
     generationId: string,
   ): Promise<CompositionGenerationViewV1 | undefined> {
-    const generation = await this.authority.composition.read(generationId);
+    const generation =
+      await this.state.authority.composition.read(generationId);
     if (!generation) return undefined;
-    const current = await this.authority.composition.current();
+    const current = await this.state.authority.composition.current();
     return projectCompositionGenerationV1({
       botId: identity.botId,
       generation,
       currentGenerationId: current.generationId,
-      failures: await this.authority.compositionFailures.list(generationId),
+      failures:
+        await this.state.authority.compositionFailures.list(generationId),
       ...(await this.compositionQuarantineView(generationId)),
     });
   }
@@ -4945,7 +3564,7 @@ export class ShellBotBackendContribution {
     generationId: string,
   ): Promise<{ quarantine?: CompositionQuarantineV1 }> {
     const quarantine =
-      await this.authority.compositionFailures.quarantine(generationId);
+      await this.state.authority.compositionFailures.quarantine(generationId);
     return quarantine === undefined ? {} : { quarantine };
   }
 
@@ -4965,9 +3584,9 @@ export class ShellBotBackendContribution {
     }
     const receiptKey = `${COMPOSITION_COMMAND_PREFIX}${command.commandId}`;
     const recorded =
-      await this.ctx.storage.get<CompositionCommandReceiptV1>(receiptKey);
+      await this.state.ctx.storage.get<CompositionCommandReceiptV1>(receiptKey);
     if (recorded) return decodeCompositionCommandReceiptV1(recorded);
-    const current = await this.authority.composition.current();
+    const current = await this.state.authority.composition.current();
     const reject = async (
       failure: string,
     ): Promise<CompositionCommandReceiptV1> => {
@@ -4978,7 +3597,7 @@ export class ShellBotBackendContribution {
         failure,
         currentGenerationId: current.generationId,
       });
-      await this.ctx.storage.put(receiptKey, receipt);
+      await this.state.ctx.storage.put(receiptKey, receipt);
       return receipt;
     };
     if (current.generationId !== command.expectedGenerationId) {
@@ -4986,7 +3605,7 @@ export class ShellBotBackendContribution {
     }
     let generationId: string;
     try {
-      const reverted = await this.authority.composition.revert(
+      const reverted = await this.state.authority.composition.revert(
         command.toGenerationId,
         {
           kind: "revert",
@@ -5007,7 +3626,7 @@ export class ShellBotBackendContribution {
       generationId,
       currentGenerationId: current.generationId,
     });
-    await this.ctx.storage.put(receiptKey, receipt);
+    await this.state.ctx.storage.put(receiptKey, receipt);
     return receipt;
   }
 
@@ -5016,16 +3635,16 @@ export class ShellBotBackendContribution {
    * on every read, one page longer than the cap so "99+" is exact.
    */
   async readUnread(identity: BotIdentity): Promise<BotUnreadViewV1> {
-    await this.authority.validateIdentity(identity);
-    const [storedState, storedPreview] = await this.ctx.storage.transaction(
-      (transaction) =>
+    await this.state.authority.validateIdentity(identity);
+    const [storedState, storedPreview] =
+      await this.state.ctx.storage.transaction((transaction) =>
         Promise.all([
           transaction.get<unknown>(UNREAD_STATE_KEY),
           transaction.get<unknown>(SIDEBAR_PREVIEW_KEY),
         ]),
-    );
+      );
     const state = optionalUnreadStateV1(storedState);
-    const index = await this.authority.listRunIndex({
+    const index = await this.state.authority.listRunIndex({
       limit: UNREAD_COUNT_CAP + 1,
     });
     // Counted straight off the keys rather than through `RoutineInboxStore`:
@@ -5033,7 +3652,7 @@ export class ShellBotBackendContribution {
     // sidebar poll makes for every Bot — it must not write, least of all into
     // an object that is running a Turn. An undecodable row is skipped, because
     // a badge is never worth failing a read for.
-    const stored = await this.ctx.storage.list<unknown>({
+    const stored = await this.state.ctx.storage.list<unknown>({
       prefix: ROUTINE_INBOX_PREFIX,
       limit: ROUTINE_INBOX_LIMIT,
     });
@@ -5072,11 +3691,7 @@ export class ShellBotBackendContribution {
    * claims to be running, which is why this read is also the repair.
    */
   private async isWorking(runId: string | undefined): Promise<boolean> {
-    try {
-      return await this.authority.resolveRunWorking(runId);
-    } catch {
-      return false;
-    }
+    return runWorkingV1(this.state, runId);
   }
 
   /**
@@ -5104,7 +3719,7 @@ export class ShellBotBackendContribution {
       0,
       ShellBotBackendContribution.SIDEBAR_PREVIEW_BACKFILL_RUNS_V1,
     )) {
-      const run = await this.authority.readRun(entry.runId);
+      const run = await this.state.authority.readRun(entry.runId);
       if (run) runs.push(run);
     }
     return sidebarMessagePreviewFromRunsV1(runs);
@@ -5122,50 +3737,52 @@ export class ShellBotBackendContribution {
     if (command.botId !== identity.botId) {
       throw new Error("unread command does not match its Bot");
     }
-    await this.authority.validateIdentity(identity);
+    await this.state.authority.validateIdentity(identity);
     const fingerprint = botUnreadCommandFingerprintV1(command);
     const receiptKey = unreadReceiptKeyV1(command.commandId);
-    const stored = await this.ctx.storage.transaction(async (transaction) => {
-      const existing = await transaction.get<{
-        commandFingerprint: string;
-        state: unknown;
-      }>(receiptKey);
-      if (existing) {
-        if (existing.commandFingerprint !== fingerprint) {
-          throw new Error(
-            `unread command id "${command.commandId}" was reused for a different command`,
-          );
+    const stored = await this.state.ctx.storage.transaction(
+      async (transaction) => {
+        const existing = await transaction.get<{
+          commandFingerprint: string;
+          state: unknown;
+        }>(receiptKey);
+        if (existing) {
+          if (existing.commandFingerprint !== fingerprint) {
+            throw new Error(
+              `unread command id "${command.commandId}" was reused for a different command`,
+            );
+          }
+          return {
+            state: optionalUnreadStateV1(existing.state),
+            preview: await transaction.get<unknown>(SIDEBAR_PREVIEW_KEY),
+          };
         }
+        const current = optionalUnreadStateV1(
+          await transaction.get<unknown>(UNREAD_STATE_KEY),
+        );
+        let next = current;
+        if (command.type === "bot/mark-read") {
+          if (!command.upToCursor) {
+            throw new Error("bot/mark-read requires upToCursor");
+          }
+          next = markUnreadReadV1(current, {
+            upToCursor: command.upToCursor,
+            at: new Date().toISOString(),
+          });
+        } else {
+          next = markUnreadV1(current);
+        }
+        await transaction.put({
+          [UNREAD_STATE_KEY]: next,
+          [receiptKey]: { commandFingerprint: fingerprint, state: next },
+        });
         return {
-          state: optionalUnreadStateV1(existing.state),
+          state: next,
           preview: await transaction.get<unknown>(SIDEBAR_PREVIEW_KEY),
         };
-      }
-      const current = optionalUnreadStateV1(
-        await transaction.get<unknown>(UNREAD_STATE_KEY),
-      );
-      let next = current;
-      if (command.type === "bot/mark-read") {
-        if (!command.upToCursor) {
-          throw new Error("bot/mark-read requires upToCursor");
-        }
-        next = markUnreadReadV1(current, {
-          upToCursor: command.upToCursor,
-          at: new Date().toISOString(),
-        });
-      } else {
-        next = markUnreadV1(current);
-      }
-      await transaction.put({
-        [UNREAD_STATE_KEY]: next,
-        [receiptKey]: { commandFingerprint: fingerprint, state: next },
-      });
-      return {
-        state: next,
-        preview: await transaction.get<unknown>(SIDEBAR_PREVIEW_KEY),
-      };
-    });
-    const index = await this.authority.listRunIndex({
+      },
+    );
+    const index = await this.state.authority.listRunIndex({
       limit: UNREAD_COUNT_CAP + 1,
     });
     return {
@@ -5324,416 +3941,42 @@ export class ShellBotBackendContribution {
     // scheduled work, and recovers the active run. Recovery re-issues whatever
     // the interrupted Turn had dispatched, under the keys the log already
     // carries.
-    await this.authority.alarm();
+    await this.state.authority.alarm();
   }
   async listRuns(
     input: unknown = { schemaVersion: 1 },
   ): Promise<ClientRunListV1> {
-    const query = decodeClientRunListQueryV1(input);
-    await this.authority.recoverActiveRun();
-    // The transcript is one conversation, not every Turn the Bot has ever
-    // run. Absent means the conversation the Bot is on; naming an earlier one
-    // reads it exactly as it was left. A Bot whose object has not learned its
-    // identity yet has no conversation to filter by and shows what it has.
-    const conversationId =
-      query.conversationId ??
-      (await this.authority.readConversationSessionId());
-    // A record nobody can decode has no trustworthy session id, and a
-    // transcript that hid it would be back to silently losing the Turn. An
-    // unknown session belongs to the conversation being read.
-    const inConversation = (run: { sessionId?: string }) =>
-      conversationId === undefined ||
-      run.sessionId === undefined ||
-      run.sessionId === conversationId;
-    const activeRunId = query.before
-      ? undefined
-      : await this.authority.readActiveRunId();
-    const candidates = await this.authority.listRunIndex({
-      limit: CLIENT_RUN_PAGE_LIMIT + 1,
-      ...(query.before ? { before: query.before } : {}),
-    });
-    // The open chat draws its own activity ring from whichever run this page
-    // projects as `running`, so it owes the same liveness rule the sidebar row
-    // does — and from the same helper, or the two surfaces disagree about the
-    // same Bot. Only the newest run and the active marker are asked: a Turn
-    // further back cannot be the one anybody is waiting on, and a transcript
-    // read is not the place to walk a Bot's whole history looking for
-    // leftovers.
-    if (!query.before) {
-      await this.isWorking(activeRunId ?? candidates[0]?.runId);
-    }
-
-    const selected = new Map<string, { cursor?: string; run: ClientRunV1 }>();
-    if (activeRunId) {
-      const active =
-        await this.authority.readStoredRunForDisplayOrDegraded(activeRunId);
-      // An automation firing occupies the object like any other run, and is
-      // still not part of the conversation: the visible transcript never
-      // shows one, running or settled.
-      if (active && isVisibleRunV1(active.run) && inConversation(active.run))
-        selected.set(active.run.runId, {
-          run: projectClientRunOrDegradedV1(active.run),
-        });
-    }
-    // The run index is global and the transcript is one conversation, so a
-    // page of candidates is not a page of answers: 33 Turns of another
-    // conversation, or of automation, used to come back as an empty,
-    // *untruncated* page that told the client there was nothing older. The
-    // scan cursor now advances over every candidate this call consumed,
-    // whether or not it was kept, so a filtered-out page still says where to
-    // resume; and the scan keeps reading batches, up to a budget, so the
-    // common case answers in one request rather than making the client walk
-    // the history a page at a time. Filtering reads run records only —
-    // hydrating a Turn's journal is what selection costs, not what the scan
-    // costs.
-    let stoppedEarly = false;
-    let exhausted = false;
-    let scanCursor: string | undefined;
-    let scanned = 0;
-    let batch = candidates;
-    for (;;) {
-      const available = batch.slice(0, CLIENT_RUN_PAGE_LIMIT);
-      const hasMore = batch.length > CLIENT_RUN_PAGE_LIMIT;
-      for (const candidate of available) {
-        if (selected.has(candidate.runId)) {
-          const current = selected.get(candidate.runId)!;
-          selected.set(candidate.runId, {
-            ...current,
-            cursor: candidate.cursor,
-          });
-          scanCursor = candidate.cursor;
-          continue;
-        }
-        // Display-only reads: strictness here would throw the whole page away
-        // over one bad row, which is exactly the transcript that vanished.
-        const header = await this.authority.readRunHeaderForDisplay(
-          candidate.runId,
-        );
-        if (
-          !header ||
-          !isVisibleRunV1(header.run) ||
-          !inConversation(header.run)
-        ) {
-          scanCursor = candidate.cursor;
-          continue;
-        }
-        const stored = await this.authority.hydrateRunForDisplay(header);
-        const projected = projectClientRunOrDegradedV1(stored.run);
-        const tentative = [
-          ...selected.values(),
-          { cursor: candidate.cursor, run: projected },
-        ];
-        const ordered = tentative
-          .map((entry) => entry.run)
-          .sort(
-            (left, right) =>
-              left.admittedAt.localeCompare(right.admittedAt) ||
-              left.runId.localeCompare(right.runId),
-          );
-        const tentativePage = createClientRunListV1(ordered, {
-          truncated: true,
-          nextCursor: candidate.cursor,
-        });
-        const isNewestTerminal =
-          ![...selected.values()].some(
-            (entry) =>
-              entry.run.status === "completed" || entry.run.status === "failed",
-          ) &&
-          (projected.status === "completed" || projected.status === "failed");
-        if (
-          selected.size >= CLIENT_RUN_PAGE_LIMIT ||
-          (!isNewestTerminal &&
-            clientRunListWireBytes(tentativePage) > CLIENT_RUN_LIST_MAX_BYTES)
-        ) {
-          stoppedEarly = true;
-          break;
-        }
-        selected.set(stored.run.runId, {
-          cursor: candidate.cursor,
-          run: projected,
-        });
-        scanCursor = candidate.cursor;
-      }
-      scanned += available.length;
-      if (stoppedEarly) break;
-      if (!hasMore) {
-        exhausted = true;
-        break;
-      }
-      if (selected.size >= CLIENT_RUN_PAGE_LIMIT) break;
-      if (scanned >= CLIENT_RUN_SCAN_LIMIT || scanCursor === undefined) break;
-      batch = await this.authority.listRunIndex({
-        limit: CLIENT_RUN_PAGE_LIMIT + 1,
-        before: scanCursor,
-      });
-      if (batch.length === 0) {
-        exhausted = true;
-        break;
-      }
-    }
-    const orderedEntries = [...selected.values()].sort(
-      (left, right) =>
-        left.run.admittedAt.localeCompare(right.run.admittedAt) ||
-        left.run.runId.localeCompare(right.run.runId),
-    );
-    const truncated = !exhausted;
-    const page = createClientRunListV1(
-      orderedEntries.map((entry) => entry.run),
-      truncated && scanCursor
-        ? { truncated: true, nextCursor: scanCursor }
-        : { truncated: false },
-      // Announcements belong to the Session, not to a page of Turns, so only
-      // the newest page carries them.
-      query.before ? [] : await this.projectAnnouncementPage(),
-    );
-    if (clientRunListWireBytes(page) > CLIENT_RUN_LIST_MAX_BYTES) {
-      throw new Error("required run projections exceed the wire byte limit");
-    }
-    return page;
+    return listRuns(this.state, input);
   }
-  /** The conversations this Bot has had, newest first. */
   async listConversations(): Promise<ClientConversationListV1> {
-    return {
-      schemaVersion: 1,
-      conversations: (await this.authority.listConversations()).map(
-        (conversation) => ({
-          schemaVersion: 1 as const,
-          conversationId: conversation.sessionId,
-          ordinal: conversation.ordinal,
-          startedAt: conversation.startedAt,
-          ...(conversation.endedAt ? { endedAt: conversation.endedAt } : {}),
-        }),
-      ),
-    };
+    return listConversations(this.state);
   }
 
-  /**
-   * Puts this conversation down and starts the next one.
-   *
-   * Memory is untouched: it is not conversation history, and the point of a
-   * new conversation is to prove that it is not.
-   */
   async startConversation(
     identity: BotIdentity,
   ): Promise<ClientConversationOutcomeV1> {
-    await this.validateIdentity(identity);
-    try {
-      await this.authority.startConversation(identity);
-    } catch (error) {
-      // The one refusal this can give travels as data. Everything else is a
-      // genuine failure and still throws, so the boundary above answers 500.
-      if (isConversationBusyV1(error)) {
-        return {
-          status: "refused",
-          schemaVersion: 1,
-          reason:
-            error instanceof Error
-              ? error.message
-              : CONVERSATION_BUSY_MESSAGE_V1,
-        };
-      }
-      throw error;
-    }
-    return { status: "started", ...(await this.listConversations()) };
+    return startConversation(this.state, identity);
   }
 
   async lookupRun(input: unknown): Promise<ClientRunLookupV1> {
-    const query = decodeClientRunLookupQueryV1(input);
-    return projectClientRunLookupV1(await this.authority.readRun(query.runId));
+    return lookupRun(this.state, input);
   }
 
-  /**
-   * One page of settled runs as their durable session events, newest first.
-   *
-   * The client projection is not enough for every reader: it drops
-   * `call.input`, so a projection that has to identify *what* a tool was asked
-   * to do — an audit digest, say — cannot be built from it. This is the same
-   * runs, unprojected, offered as the narrow shape such a reader needs and
-   * nothing wider: the events, the run id, its admission time, its status. No
-   * Composition snapshot, no fingerprint, no configuration.
-   *
-   * Settled runs only. An in-flight run's events can still change, and a
-   * projection built from them would not be reproducible.
-   */
-  async listRunEventPage(cursor?: string): Promise<{
-    schemaVersion: 1;
-    runs: Array<{
-      runId: string;
-      acceptedAt: string;
-      status: StoredRunStatus;
-      events: SessionEvent[];
-    }>;
-    nextCursor?: string;
-  }> {
-    const candidates = await this.authority.listRunIndex({
-      limit: CLIENT_RUN_PAGE_LIMIT + 1,
-      ...(cursor ? { before: cursor } : {}),
-    });
-    const available = candidates.slice(0, CLIENT_RUN_PAGE_LIMIT);
-    const runs: Array<{
-      runId: string;
-      acceptedAt: string;
-      status: StoredRunStatus;
-      events: SessionEvent[];
-    }> = [];
-    for (const candidate of available) {
-      const stored = await this.authority.readStoredRun(candidate.runId);
-      if (!stored) continue;
-      runs.push({
-        runId: stored.runId,
-        acceptedAt: stored.acceptedAt,
-        status: stored.status,
-        events: stored.events,
-      });
-    }
-    const oldest = available.at(-1)?.cursor;
-    return {
-      schemaVersion: 1,
-      runs,
-      ...(candidates.length > CLIENT_RUN_PAGE_LIMIT && oldest
-        ? { nextCursor: oldest }
-        : {}),
-    };
+  async listRunEventPage(cursor?: string): ReturnType<typeof listRunEventPage> {
+    return listRunEventPage(this.state, cursor);
   }
 
-  /**
-   * The operator's snapshot: durable runs unprojected, the Composition
-   * generations they pinned, and the failures recorded against those
-   * generations. See `debug-protocol.ts` for why this is not `listRuns`.
-   *
-   * Read-only on purpose — no `recoverActiveRun`, no reconciliation. Looking
-   * at a wedged Bot must not be what unwedges it, or the next look tells you
-   * nothing about what it was doing.
-   */
+  /** @see debugSnapshot in `debug.ts`. */
   async debugSnapshot(
     identity: BotIdentity,
     input: unknown = { schemaVersion: 1 },
   ): Promise<BotDebugSnapshotV1> {
-    const query = decodeBotDebugQueryV1(input);
-    const [activeRunId, current, notifications] = await Promise.all([
-      this.authority.readActiveRunId(),
-      this.authority.composition.current(),
-      this.listNotifications(),
-    ]);
-    let lastKnownGoodGenerationId: string | undefined;
-    try {
-      lastKnownGoodGenerationId = (
-        await this.authority.composition.lastKnownGood()
-      ).generationId;
-    } catch {
-      // A Bot whose first generation never mounted has no last known good;
-      // that absence is itself a finding, not an error to propagate.
-      lastKnownGoodGenerationId = undefined;
-    }
-    const generationPage = await this.authority.composition.list({
-      limit: BOT_DEBUG_GENERATION_LIMIT_V1,
-    });
-    const generations = await Promise.all(
-      generationPage.generations.map(async (generation) => ({
-        generationId: generation.generationId,
-        createdAt: generation.createdAt,
-        status: generation.status,
-        origin: generation.origin.kind,
-        artifactSetHash: generation.artifactSetHash,
-        ...(generation.parentGenerationId === undefined
-          ? {}
-          : { parentGenerationId: generation.parentGenerationId }),
-        memberCount: generation.members.length,
-        failures: await this.authority.compositionFailures.list(
-          generation.generationId,
-        ),
-        quarantined:
-          (await this.authority.compositionFailures.quarantine(
-            generation.generationId,
-          )) !== undefined,
-      })),
+    return debugSnapshot(
+      this.state,
+      identity,
+      () => this.getSettings(identity),
+      input,
     );
-
-    let candidates: Array<{ cursor?: string; runId: string }>;
-    let nextCursor: string | undefined;
-    if (query.runId) {
-      candidates = [{ runId: query.runId }];
-    } else {
-      const limit = query.limit ?? BOT_DEBUG_DEFAULT_RUN_LIMIT_V1;
-      const page = await this.authority.listRunIndex({
-        limit: limit + 1,
-        ...(query.before ? { before: query.before } : {}),
-      });
-      candidates = page.slice(0, limit);
-      // The active run is not necessarily the newest admitted one; a wedged
-      // run older than the page would otherwise be invisible here.
-      if (
-        activeRunId &&
-        !query.before &&
-        !candidates.some((candidate) => candidate.runId === activeRunId)
-      ) {
-        candidates.unshift({ runId: activeRunId });
-      }
-      if (page.length > limit) nextCursor = candidates.at(-1)?.cursor;
-    }
-    const includeEvents = query.runId !== undefined || query.events === true;
-    let budget = BOT_DEBUG_EVENT_BYTES_V1;
-    const runs: BotDebugRunV1[] = [];
-    for (const candidate of candidates) {
-      const projected = await this.authority.readRunEventProjections(
-        candidate.runId,
-      );
-      if (!projected) continue;
-      const { run: stored } = projected;
-      const bounded = includeEvents
-        ? boundDebugEventsV1(projected.events, budget)
-        : undefined;
-      if (bounded) budget = Math.max(0, budget - bounded.spent);
-      runs.push({
-        runId: stored.runId,
-        sessionId: stored.sessionId,
-        acceptedAt: stored.acceptedAt,
-        status: stored.status,
-        phase: stored.phase,
-        input: stored.input,
-        commandFingerprint: stored.commandFingerprint,
-        compositionGenerationId: stored.compositionGenerationId,
-        previousEventCount: stored.previousEventCount,
-        eventCount: projected.eventCount,
-        ...(stored.responseText === undefined
-          ? {}
-          : { responseText: stored.responseText }),
-        ...(stored.failure === undefined ? {} : { failure: stored.failure }),
-        ...(bounded
-          ? {
-              events: bounded.events,
-              ...(bounded.omittedEvents > 0
-                ? { omittedEvents: bounded.omittedEvents }
-                : {}),
-            }
-          : {}),
-      });
-    }
-
-    let configuration: BotSettingsViewV1 | undefined;
-    try {
-      configuration = await this.getSettings(identity);
-    } catch {
-      // Settings that will not resolve are a live cause of a Bot that never
-      // runs a turn, so the snapshot reports the rest rather than failing.
-      configuration = undefined;
-    }
-    return {
-      schemaVersion: 1,
-      botId: identity.botId,
-      capturedAt: new Date().toISOString(),
-      ...(activeRunId ? { activeRunId } : {}),
-      composition: {
-        currentGenerationId: current.generationId,
-        currentStatus: current.status,
-        ...(lastKnownGoodGenerationId ? { lastKnownGoodGenerationId } : {}),
-        generations,
-      },
-      ...(configuration ? { configuration } : {}),
-      notifications,
-      runs,
-      ...(nextCursor ? { nextCursor } : {}),
-    };
   }
 
   async fenceRunAdmission(
@@ -5742,7 +3985,7 @@ export class ShellBotBackendContribution {
   ): Promise<ClientRunLookupV1> {
     const query = decodeClientRunLookupQueryV1(input);
     return projectClientRunLookupV1(
-      await this.authority.fenceRunAdmission(identity, query.runId),
+      await this.state.authority.fenceRunAdmission(identity, query.runId),
     );
   }
   private initialBotSettings(botId: string): BotSettingsViewV1 {
@@ -5804,9 +4047,9 @@ export class ShellBotBackendContribution {
       commandId: string,
     ): Promise<MachineCommandResultV1 | undefined>;
   } {
-    const id = this.env.USER_CONFIGURATIONS.idFromName(identity.userId);
+    const id = this.state.env.USER_CONFIGURATIONS.idFromName(identity.userId);
     // SAFETY: this namespace is bound to UserConfiguration; generated Worker types do not expose its RPC surface.
-    const rpc = this.env.USER_CONFIGURATIONS.get(id) as unknown as {
+    const rpc = this.state.env.USER_CONFIGURATIONS.get(id) as unknown as {
       readConfiguration(input: unknown): Promise<UserSettingsViewV1>;
       executeConfiguration(input: unknown): Promise<unknown>;
       leaseModelCredential(input: unknown): Promise<unknown>;
@@ -5930,22 +4173,12 @@ export class ShellBotBackendContribution {
     };
   }
 
-  private async ensureBotSettings(
-    identity: BotIdentity,
-  ): Promise<BotSettingsViewV1> {
-    await this.validateIdentity(identity);
-    const stored = await this.ctx.storage.get<unknown>(BOT_CONFIGURATION_KEY);
-    if (stored === undefined)
-      throw new Error(`Bot "${identity.botId}" is not materialized`);
-    return decodeBotSettingsViewV1(migrateStoredBotSettingsV1(stored));
-  }
-
   private async resolveExecutionContext(identity: BotIdentity): Promise<{
     settings: BotSettingsViewV1;
     user: UserSettingsViewV1;
     plan: BotExecutionPlanV1;
   }> {
-    const settings = await this.ensureBotSettings(identity);
+    const settings = await readBotSettingsV1(this.state, identity);
     const user = await this.userConfiguration(identity).readConfiguration({
       schemaVersion: 1,
       userId: identity.userId,
@@ -5953,7 +4186,7 @@ export class ShellBotBackendContribution {
     const plan = resolveBotExecutionPlanV1({
       bot: settings,
       user,
-      packages: executionPackagesV1(this.application),
+      packages: executionPackagesV1(this.state.application),
     });
     return { settings, user, plan };
   }
@@ -5965,21 +4198,10 @@ export class ShellBotBackendContribution {
   }
 
   async assertLifecycleActive(botId: string): Promise<void> {
-    if (!this.lifecycleAdmission) return;
-    await this.ctx.storage.transaction((transaction) =>
-      this.lifecycleAdmission!(transaction, botId),
+    if (!this.state.lifecycleAdmission) return;
+    await this.state.ctx.storage.transaction((transaction) =>
+      this.state.lifecycleAdmission!(transaction, botId),
     );
-  }
-
-  private async assertIdentity(identity: BotIdentity): Promise<void> {
-    const existing = await this.ctx.storage.get<BotIdentity>(IDENTITY_KEY);
-    if (
-      existing &&
-      (existing.userId !== identity.userId || existing.botId !== identity.botId)
-    ) {
-      throw new Error("Bot authority does not match its durable identity");
-    }
-    if (!existing) await this.ctx.storage.put(IDENTITY_KEY, identity);
   }
 
   /**
@@ -5993,7 +4215,7 @@ export class ShellBotBackendContribution {
     sessionId: string,
     effect: AgentEffectAdmission,
   ): Promise<boolean> {
-    return this.ctx.storage.transaction(async (transaction) => {
+    return this.state.ctx.storage.transaction(async (transaction) => {
       const [activeRunId, durableIdentity, candidate] = await Promise.all([
         transaction.get<string>(ACTIVE_RUN_KEY),
         transaction.get<BotIdentity>(IDENTITY_KEY),

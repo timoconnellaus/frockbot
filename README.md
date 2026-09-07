@@ -260,7 +260,7 @@ app/              The product: `runtime.ts`, the Contribution tables, and one di
   settings/       Bot, Package, and User settings surfaces
   shell/          Hosted application geometry and surface presenter
   skills/         Skill catalog, disclosure on demand, and managed Skills
-  subagents/      Subagent Tasks, their Durable Object hosts, and their records
+  subagents/      Subagent Tasks: the parent Bot's task authority, the Durable Object binding, and their records
   testkit/        Shared test doubles and harnesses
   ui-theme/       Global semantic tokens for hosted client Contributions
   web/            web_search and a bounded, SSRF-classified web_fetch

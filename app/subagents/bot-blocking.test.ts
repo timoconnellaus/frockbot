@@ -1,4 +1,4 @@
-import { shellTestApplicationV1 } from "./backend-application.fixture.js";
+import { shellTestApplicationV1 } from "@frockbot/app/shell/backend-application.fixture";
 // The foreground `Task` wait (memory-v2 F4).
 //
 // A `Task {background:false}` that answered "dispatched" the instant anything
@@ -13,10 +13,9 @@ import type {
   TaskRecordV1,
 } from "@frockbot/app/subagents/records";
 import { taskKeyV1 } from "@frockbot/app/subagents/storage-keys";
-import {
-  ShellBotBackendContribution,
-  type ShellBotBackendHost,
-} from "./backend.js";
+import { createShellBotBackendContribution } from "@frockbot/app/shell/backend";
+import type { ShellBotBackendHost } from "@frockbot/app/shell/backend-state";
+import { awaitBlockingTask } from "./bot.js";
 
 const identity = { userId: "user-1", botId: "primary" };
 const TASK_ID = "task-1";
@@ -83,8 +82,17 @@ const user: UserSettingsViewV1 = {
   connections: [],
 };
 
-function host(storage: MemoryStorage): ShellBotBackendHost {
-  return {
+/** The wait with its sleep removed, which is the whole point of the seam. */
+function waiting(storage: MemoryStorage): {
+  sleeps: number;
+  materializeSettings(
+    identity: { userId: string; botId: string },
+    profile: { name: string },
+  ): Promise<unknown>;
+  wait(taskId: string): Promise<TaskOutcomeV1 | undefined>;
+} {
+  const counted = { sleeps: 0 };
+  const host: ShellBotBackendHost = {
     ...shellTestApplicationV1(),
     state: { storage } as unknown as DurableObjectState,
     env: {
@@ -93,32 +101,21 @@ function host(storage: MemoryStorage): ShellBotBackendHost {
         get: () => ({ readConfiguration: () => Promise.resolve(user) }),
       },
     } as unknown as ShellBotBackendHost["env"],
-  };
-}
-
-interface Waiting {
-  sleeps: number;
-  materializeSettings(
-    identity: { userId: string; botId: string },
-    profile: { name: string },
-  ): Promise<unknown>;
-  wait(taskId: string): Promise<TaskOutcomeV1 | undefined>;
-}
-
-/** Exposes the wait and removes its sleep, which is the whole point of it. */
-function waiting(host: ShellBotBackendHost): Waiting {
-  return new (class extends ShellBotBackendContribution {
-    sleeps = 0;
-
-    protected override sleep(): Promise<void> {
-      this.sleeps += 1;
+    sleep: () => {
+      counted.sleeps += 1;
       return Promise.resolve();
-    }
-
-    wait(taskId: string): Promise<TaskOutcomeV1 | undefined> {
-      return this.awaitBlockingTask(identity, taskId, taskId);
-    }
-  })(host) as unknown as Waiting;
+    },
+  };
+  const contribution = createShellBotBackendContribution(host);
+  return {
+    get sleeps() {
+      return counted.sleeps;
+    },
+    materializeSettings: (id, profile) =>
+      contribution.materializeSettings(id, profile),
+    wait: (taskId) =>
+      awaitBlockingTask(contribution.state, identity, taskId, taskId),
+  };
 }
 
 function record(overrides: Partial<TaskRecordV1> = {}): TaskRecordV1 {
@@ -155,11 +152,12 @@ function record(overrides: Partial<TaskRecordV1> = {}): TaskRecordV1 {
   };
 }
 
-async function fixture(
-  stored: TaskRecordV1,
-): Promise<{ storage: MemoryStorage; contribution: Waiting }> {
+async function fixture(stored: TaskRecordV1): Promise<{
+  storage: MemoryStorage;
+  contribution: ReturnType<typeof waiting>;
+}> {
   const storage = new MemoryStorage();
-  const contribution = waiting(host(storage));
+  const contribution = waiting(storage);
   await contribution.materializeSettings(identity, { name: "Primary" });
   storage.values.set(taskKeyV1(stored.taskId), structuredClone(stored));
   return { storage, contribution };

@@ -4,7 +4,7 @@ import { shellTestApplicationV1 } from "./backend-application.fixture.js";
 import { describe, expect, test } from "bun:test";
 import type { BotSettingsViewV1 } from "@frockbot/core/configuration";
 import { createShellBotBackendContribution } from "./backend.js";
-import { BOT_ANNOUNCEMENT_RETENTION } from "./backend.js";
+import { BOT_ANNOUNCEMENT_RETENTION } from "./reads.js";
 
 class MemoryStorage {
   readonly values = new Map<string, unknown>();

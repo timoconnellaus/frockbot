@@ -60,7 +60,7 @@ import {
   type CompositionFailureV1,
 } from "@frockbot/core/durable";
 import { BotState } from "../src/bot-state.ts";
-import { BOT_CONFIGURATION_KEY } from "@frockbot/app/shell/backend";
+import { BOT_CONFIGURATION_KEY } from "@frockbot/app/settings/bot";
 import { ISOLATE_MODEL_REQUEST_PREFIX } from "@frockbot/app/shell/backend-isolate";
 import { notificationIdV1 } from "@frockbot/app/shell/notification-id";
 import type { BotSettingsViewV1 } from "@frockbot/core/configuration";

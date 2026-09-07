@@ -7,6 +7,7 @@ import type {
 } from "@frockbot/core/configuration";
 import { SessionEventLog } from "@frockbot/core/durable";
 import { createShellBotBackendContribution } from "@frockbot/app/shell/backend";
+import type { ActiveTurnV1 } from "@frockbot/app/shell/backend-state";
 import { createIsolateCapabilityHost } from "@frockbot/app/shell/backend-isolate";
 import { notificationIdV1 } from "@frockbot/app/shell/notification-id";
 
@@ -502,11 +503,7 @@ describe("generic per-Turn model resolution", () => {
     const contribution = host(storage, () => user);
     const identity = { userId: "user-1", botId: "primary" };
     await contribution.materializeSettings(identity, { name: "Primary" });
-    (
-      contribution as unknown as {
-        activeTurn: unknown;
-      }
-    ).activeTurn = {
+    contribution.state.turn.set({
       runId: "run-1",
       sessionId: "session-1",
       turnId: "turn-1",
@@ -518,7 +515,7 @@ describe("generic per-Turn model resolution", () => {
           ],
         },
       },
-    };
+    } as unknown as ActiveTurnV1);
     user.connections[0] = { ...user.connections[0]!, state: "disabled" };
 
     await expect(
