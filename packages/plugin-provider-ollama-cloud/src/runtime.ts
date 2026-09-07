@@ -1,10 +1,12 @@
 import {
+  type AgentRuntimeV1,
   type LlmProvider,
   type LlmStreamEvent,
   ModelProviderFailureError,
   type NormalizedModelRequest,
+  type RuntimeFeatureV1,
 } from "@frockbot/kernel-contracts";
-import { type Agent } from "@frockbot/kernel-agent-loop/agent";
+import type { CredentialLeaseRuntime } from "@frockbot/plugin-credentials/user";
 import type { CredentialLeaseV1 } from "@frockbot/connection-core";
 import {
   type ModelRequestDeadlineOptionsV1,
@@ -13,13 +15,13 @@ import {
   planOpenAICompatibleRequestV1,
   streamWithModelRequestDeadlinesV1,
 } from "@frockbot/provider-openai-compatible";
-import type { Plugin } from "cordis";
 import {
   DEFAULT_OLLAMA_API_BASE_URL,
   decodeOllamaApiBaseUrl,
   type OllamaFetch,
 } from "./client.js";
 
+/** What a provider needs of the credential runtime: one lease, opened. */
 interface CredentialLeaseOpener {
   open(input: {
     accountId: string;
@@ -27,19 +29,6 @@ interface CredentialLeaseOpener {
     packageId: string;
     lease: CredentialLeaseV1;
   }): Promise<string>;
-}
-
-declare module "cordis" {
-  interface Context {
-    credentialLease: CredentialLeaseOpener;
-  }
-
-  interface Events {
-    "agent/model-outcome-committed": (
-      agent: Agent,
-      requestId: string,
-    ) => Promise<void>;
-  }
 }
 
 export const OLLAMA_CLOUD_PROVIDER = "ollama-cloud";
@@ -331,23 +320,24 @@ async function boundedOllamaModelResponseV1(
   return new TextDecoder().decode(combined);
 }
 
-export function createOllamaCloudRuntimePlugin(
+export function createOllamaCloudFeature(
   config: OllamaCloudRuntimeConfig,
-): Plugin.Function {
-  const plugin: Plugin.Function = (ctx) => {
-    const provider = new OllamaCloudProvider(config, ctx.credentialLease);
-    const disposeProvider = ctx.llm.register(provider);
-    const disposeSettlement = ctx.on(
-      "agent/model-outcome-committed",
-      async (_agent, requestId) => provider.settle(requestId),
-    );
+): RuntimeFeatureV1<AgentRuntimeV1 & { credentials?: CredentialLeaseRuntime }> {
+  return (runtime) => {
+    if (!runtime.credentials) {
+      throw new Error("Credential Store Contribution is not configured");
+    }
+    const provider = new OllamaCloudProvider(config, runtime.credentials);
+    const disposeProvider = runtime.llm.register(provider);
+    const disposeSettlement = runtime.hooks.add({
+      modelOutcomeCommitted: async (_agent, requestId) =>
+        provider.settle(requestId),
+    });
     return () => {
       disposeSettlement();
       disposeProvider();
     };
   };
-  plugin.inject = ["llm", "credentialLease"];
-  return plugin;
 }
 
-export default createOllamaCloudRuntimePlugin;
+export default createOllamaCloudFeature;

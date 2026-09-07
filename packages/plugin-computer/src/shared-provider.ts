@@ -5,13 +5,14 @@ import {
   type ComputerOperationOptions,
   type ComputerIdentityV1,
   type ComputerProvider,
+  type ComputerRegistry,
   type ComputerTenantV1,
 } from "@frockbot/computer-core";
 import type {
   ComputerHostEffectRequestV1,
   ComputerHostEffectResponseV1,
 } from "@frockbot/computer-core/host-protocol";
-import type { Plugin } from "cordis";
+import type { RuntimeFeatureV1 } from "@frockbot/kernel-contracts";
 
 export const SHARED_COMPUTER_PROVIDER_ID = "shared-computer";
 
@@ -111,11 +112,9 @@ class SharedComputerProvider implements ComputerProvider {
   }
 }
 
-export function createSharedComputerProviderPlugin(
+export function createSharedComputerProviderFeature(
   host: SharedComputerHostClient,
-): Plugin.Function {
-  const plugin: Plugin.Function = (ctx) =>
-    ctx.computers.register(new SharedComputerProvider(host));
-  plugin.inject = ["computers"];
-  return plugin;
+): RuntimeFeatureV1<{ computers: ComputerRegistry }> {
+  return (runtime) =>
+    runtime.computers.register(new SharedComputerProvider(host));
 }

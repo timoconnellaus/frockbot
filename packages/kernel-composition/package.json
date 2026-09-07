@@ -6,7 +6,6 @@
   "exports": {
     ".": "./src/index.ts",
     "./activation": "./src/activation.ts",
-    "./runtime": "./src/runtime.ts",
     "./compiler": "./src/compiler.ts",
     "./generation": "./src/generation.ts",
     "./package.json": "./package.json",
@@ -18,7 +17,6 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "cordis": "4.0.0-rc.8",
     "semver": "7.8.5",
     "@frockbot/kernel-contracts": "workspace:*"
   },

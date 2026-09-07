@@ -41,7 +41,6 @@ import type {
   IsolateModelBindingV1,
 } from "@frockbot/kernel-contracts";
 import type { FoundationAgentPackage } from "@frockbot/agent-runtime/runtime";
-import type { Plugin } from "cordis";
 import type { BotCapabilities } from "../src/bot-capabilities.ts";
 import type { WorkerdBotState } from "./fly-compatibility-worker.ts";
 import { dynamicToolCallV1, twoTierStepV1 } from "./dynamic-tools.ts";
@@ -228,22 +227,9 @@ function scriptedProviderPackage(
       yield { type: "finish", reason: "tool-calls" };
     },
   };
-  const plugin: Plugin.Function = (ctx) => ctx.llm.register(provider);
-  plugin.inject = ["llm"];
   return {
-    specifier: "@frockbot/test-scripted-provider",
-    contributionSpecifier: "@frockbot/test-scripted-provider/runtime.js",
-    manifest: {
-      schemaVersion: 3,
-      id: "test-scripted-provider",
-      displayName: "Scripted provider",
-      version: "0.0.1",
-      compatibility: { frockbot: "^0.0.1" },
-      dependencies: {},
-      contributions: { runtime: { entry: "./runtime.js" } },
-      permissions: [],
-    },
-    plugin,
+    id: "test-scripted-provider",
+    feature: ({ llm }) => llm.register(provider),
   };
 }
 
@@ -489,26 +475,32 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
           ? {}
           : { description: `The probe called ${input.tool}.` }),
       });
-      const preparation = await composition.root.tools.prepare(call, {
-        botId: input.botId,
-        agentId: input.botId,
-        sessionId: `${input.userId}:${input.botId}`,
-        compositionGenerationId: generation.generationId,
-        turnType: "chat" as const,
-        effectId: "tool:1:1:0",
-        toolCall: call,
-        signal: new AbortController().signal,
-      });
+      const preparation = await composition.runtime.services.tools.prepare(
+        call,
+        {
+          botId: input.botId,
+          agentId: input.botId,
+          sessionId: `${input.userId}:${input.botId}`,
+          compositionGenerationId: generation.generationId,
+          turnType: "chat" as const,
+          effectId: "tool:1:1:0",
+          toolCall: call,
+          signal: new AbortController().signal,
+        },
+      );
       if (preparation.kind !== "ready") return preparation.result;
-      return await composition.root.tools.executePrepared(preparation, {
-        botId: input.botId,
-        agentId: input.botId,
-        sessionId: `${input.userId}:${input.botId}`,
-        compositionGenerationId: generation.generationId,
-        turnType: "chat" as const,
-        effectId: "tool:1:1:0",
-        signal: new AbortController().signal,
-      });
+      return await composition.runtime.services.tools.executePrepared(
+        preparation,
+        {
+          botId: input.botId,
+          agentId: input.botId,
+          sessionId: `${input.userId}:${input.botId}`,
+          compositionGenerationId: generation.generationId,
+          turnType: "chat" as const,
+          effectId: "tool:1:1:0",
+          signal: new AbortController().signal,
+        },
+      );
     } finally {
       await composition.dispose();
     }

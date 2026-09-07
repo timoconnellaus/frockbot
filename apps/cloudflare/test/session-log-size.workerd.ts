@@ -44,7 +44,7 @@ function bootstrap(): Promise<CompositionGenerationV1> {
 }
 
 function legacyEvents(): SessionEvent[] {
-  const session = new Session(SESSION_ID, () => {});
+  const session = new Session(SESSION_ID);
   session.appendBatch([
     { type: "turn/start", turn: 1 },
     { type: "step/start", turn: 1, step: 1 },

@@ -19,7 +19,6 @@ import {
   type ConnectionCommandReceiptV1,
   type ConnectionCommandV1,
 } from "@frockbot/connection-core";
-import type { Plugin } from "cordis";
 import { defineGatewayContribution } from "@frockbot/kernel-contracts/contributions";
 
 export interface SettingsConnectionGatewayHost {
@@ -253,15 +252,6 @@ export function createSettingsBackendContribution(
   };
 }
 
-export namespace createSettingsBackendContribution {
-  export function plugin(
-    host: SettingsGatewayHost,
-    lifecycle: { mount(value: SettingsBackendRouteContribution): () => void },
-  ): Plugin {
-    return () => lifecycle.mount(createSettingsBackendContribution(host));
-  }
-}
-
 /**
  * The manifest's gateway `backend` entry, resolved by specifier. The
  * application looks this descriptor up in its Contribution table; it never
@@ -272,5 +262,6 @@ export const backendContribution = defineGatewayContribution<
   SettingsBackendRouteContribution
 >({
   specifier: "@frockbot/plugin-settings/backend",
-  create: createSettingsBackendContribution.plugin,
+  mount: (host, lifecycle) =>
+    lifecycle.mount(createSettingsBackendContribution(host)),
 });

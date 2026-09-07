@@ -1,7 +1,6 @@
 // The authenticated Computer presence routes. The gateway owns no Computer
 // state: it decodes one exact DTO, proves User-to-Bot membership through its
 // host, and forwards to the Bot Durable Object that owns the records.
-import type { Plugin } from "cordis";
 import {
   ComputerProtocolDecodeError,
   decodeComputerCommandResponse,
@@ -156,13 +155,6 @@ export function createComputerBackendContribution(
   };
 }
 
-export function createComputerBackendPlugin(
-  host: ComputerGatewayHost,
-  lifecycle: { mount(value: ComputerBackendRouteContribution): () => void },
-): Plugin {
-  return () => lifecycle.mount(createComputerBackendContribution(host));
-}
-
 /**
  * The manifest's gateway `backend` entry, resolved by specifier. The
  * application looks this descriptor up in its Contribution table; it never
@@ -173,5 +165,6 @@ export const backendContribution = defineGatewayContribution<
   ComputerBackendRouteContribution
 >({
   specifier: "@frockbot/plugin-computer/backend",
-  create: createComputerBackendPlugin,
+  mount: (host, lifecycle) =>
+    lifecycle.mount(createComputerBackendContribution(host)),
 });

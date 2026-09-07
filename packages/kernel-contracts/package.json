@@ -12,9 +12,7 @@
     "test": "bun test src",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
-  "dependencies": {
-    "cordis": "4.0.0-rc.8"
-  },
+  "dependencies": {},
   "devDependencies": {
     "@types/bun": "1.4.0",
     "@types/node": "26.2.0",

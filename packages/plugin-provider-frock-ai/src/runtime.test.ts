@@ -8,9 +8,8 @@ import {
   ModelProviderFailureError,
   type NormalizedModelRequest,
 } from "@frockbot/kernel-contracts";
-import { LlmRegistry } from "@frockbot/plugin-models";
-import type { Agent } from "@frockbot/kernel-agent-loop/agent";
-import { Context } from "cordis";
+import type { LoopAgentRuntimeV1 } from "@frockbot/kernel-contracts";
+import { createAgentRuntimeHarness } from "@frockbot/plugin-testkit";
 import {
   FROCK_AI_CONNECTION_GENERATION,
   FROCK_AI_CONNECTION_ID,
@@ -18,7 +17,7 @@ import {
 } from "./catalog.js";
 import {
   classifyFrockAiFailureV1,
-  createFrockAiRuntimePlugin,
+  createFrockAiFeature,
   FrockAiTransportErrorV1,
 } from "./runtime.js";
 
@@ -49,9 +48,9 @@ function sse(text: string): ReadableStream<Uint8Array> {
 
 function runtimeConfig(
   runChatCompletion: Parameters<
-    typeof createFrockAiRuntimePlugin
+    typeof createFrockAiFeature
   >[0]["runChatCompletion"],
-  deadlines?: Parameters<typeof createFrockAiRuntimePlugin>[0]["deadlines"],
+  deadlines?: Parameters<typeof createFrockAiFeature>[0]["deadlines"],
 ) {
   return {
     connectionId: FROCK_AI_CONNECTION_ID,
@@ -133,10 +132,9 @@ describe("Frock AI runtime Contribution", () => {
 
   test("falls from a permanently rejected manual model to Auto immediately", async () => {
     const calls: string[] = [];
-    const root = new Context();
-    await root.plugin(LlmRegistry);
-    await root.plugin(
-      createFrockAiRuntimePlugin(
+    const root = createAgentRuntimeHarness();
+    await root.mount(
+      createFrockAiFeature(
         runtimeConfig((gatewayModel) => {
           calls.push(gatewayModel);
           return gatewayModel.startsWith("workers-ai/")
@@ -149,7 +147,7 @@ describe("Frock AI runtime Contribution", () => {
         }),
       ),
     );
-    const agent = {} as Agent;
+    const agent = {} as LoopAgentRuntimeV1;
     const manual = {
       ...request,
       model: "@frock/deepseek-ai/deepseek-v4-flash-0731",
@@ -166,16 +164,14 @@ describe("Frock AI runtime Contribution", () => {
       failure = error;
     }
 
-    const action = await root.waterfall(
-      "agent/request-error",
+    const action = await root.hooks.requestError(
       agent,
       failure,
       new AbortController().signal,
       () => Promise.resolve({ kind: "fail" as const }),
     );
     expect(action).toEqual({ kind: "fallback" });
-    const fallback = await root.waterfall(
-      "agent/request",
+    const fallback = await root.hooks.request(
       agent,
       manual,
       new AbortController().signal,
@@ -192,20 +188,19 @@ describe("Frock AI runtime Contribution", () => {
       "workers-ai/@cf/deepseek-ai/deepseek-v4-flash-0731",
       "dynamic/configured-auto",
     ]);
-    await root.fiber.dispose();
+    await root.dispose();
   });
 
   test("leaves a transient manual-model failure on the retry path", async () => {
-    const root = new Context();
-    await root.plugin(LlmRegistry);
-    await root.plugin(
-      createFrockAiRuntimePlugin(
+    const root = createAgentRuntimeHarness();
+    await root.mount(
+      createFrockAiFeature(
         runtimeConfig(() =>
           Promise.reject(new FrockAiTransportErrorV1("busy", 503)),
         ),
       ),
     );
-    const agent = {} as Agent;
+    const agent = {} as LoopAgentRuntimeV1;
     const manual = {
       ...request,
       model: "@frock/deepseek-ai/deepseek-v4-flash-0731",
@@ -221,23 +216,21 @@ describe("Frock AI runtime Contribution", () => {
     } catch (error) {
       failure = error;
     }
-    const action = await root.waterfall(
-      "agent/request-error",
+    const action = await root.hooks.requestError(
       agent,
       failure,
       new AbortController().signal,
       () => Promise.resolve({ kind: "retry" as const }),
     );
     expect(action).toEqual({ kind: "retry" });
-    const retried = await root.waterfall(
-      "agent/request",
+    const retried = await root.hooks.request(
       agent,
       manual,
       new AbortController().signal,
       () => Promise.resolve(manual),
     );
     expect(retried.model).toBe(manual.model);
-    await root.fiber.dispose();
+    await root.dispose();
   });
   test.each([
     [FROCK_AI_DEFAULT_MODEL, "dynamic/configured-auto"],
@@ -250,10 +243,9 @@ describe("Frock AI runtime Contribution", () => {
       gatewayModel: string;
       body: Record<string, unknown>;
     }> = [];
-    const root = new Context();
-    await root.plugin(LlmRegistry);
-    await root.plugin(
-      createFrockAiRuntimePlugin(
+    const root = createAgentRuntimeHarness();
+    await root.mount(
+      createFrockAiFeature(
         runtimeConfig((gatewayModel, body) => {
           calls.push({ gatewayModel, body });
           return Promise.resolve(
@@ -276,7 +268,7 @@ describe("Frock AI runtime Contribution", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]?.gatewayModel).toBe(expectedGatewayModel);
     expect(calls[0]?.body).not.toHaveProperty("model");
-    await root.fiber.dispose();
+    await root.dispose();
   });
 
   test("normalizes gateway text and tool-call deltas", async () => {
@@ -284,10 +276,9 @@ describe("Frock AI runtime Contribution", () => {
       gatewayModel: string;
       body: Record<string, unknown>;
     }> = [];
-    const root = new Context();
-    await root.plugin(LlmRegistry);
-    await root.plugin(
-      createFrockAiRuntimePlugin(
+    const root = createAgentRuntimeHarness();
+    await root.mount(
+      createFrockAiFeature(
         runtimeConfig((gatewayModel, body) => {
           calls.push({ gatewayModel, body });
           return Promise.resolve(
@@ -354,16 +345,15 @@ describe("Frock AI runtime Contribution", () => {
       },
       { type: "finish", reason: "tool-calls" },
     ]);
-    await root.fiber.dispose();
+    await root.dispose();
   });
 
   test("sends Auto schemas in Workers AI's direct non-stream shape", async () => {
     let call:
       { gatewayModel: string; body: Record<string, unknown> } | undefined;
-    const root = new Context();
-    await root.plugin(LlmRegistry);
-    await root.plugin(
-      createFrockAiRuntimePlugin(
+    const root = createAgentRuntimeHarness();
+    await root.mount(
+      createFrockAiFeature(
         runtimeConfig((gatewayModel, body) => {
           call = { gatewayModel, body };
           return Promise.resolve(
@@ -415,15 +405,14 @@ describe("Frock AI runtime Contribution", () => {
       { type: "text-delta", text: '{"answer":"yes"}' },
       { type: "finish", reason: "completed" },
     ]);
-    await root.fiber.dispose();
+    await root.dispose();
   });
 
   test("refuses a request outside its pinned Connection generation", async () => {
     let calls = 0;
-    const root = new Context();
-    await root.plugin(LlmRegistry);
-    await root.plugin(
-      createFrockAiRuntimePlugin(
+    const root = createAgentRuntimeHarness();
+    await root.mount(
+      createFrockAiFeature(
         runtimeConfig(() => {
           calls += 1;
           return Promise.resolve(sse(""));
@@ -449,14 +438,13 @@ describe("Frock AI runtime Contribution", () => {
       })(),
     ).rejects.toBeInstanceOf(ModelProviderFailureError);
     expect(calls).toBe(0);
-    await root.fiber.dispose();
+    await root.dispose();
   });
 
   test("reports a rejected gateway call as a definitive no-effect", async () => {
-    const root = new Context();
-    await root.plugin(LlmRegistry);
-    await root.plugin(
-      createFrockAiRuntimePlugin(
+    const root = createAgentRuntimeHarness();
+    await root.mount(
+      createFrockAiFeature(
         runtimeConfig(() =>
           Promise.reject(
             new Error("AI Gateway rejected the request (429): slow down"),
@@ -483,15 +471,14 @@ describe("Frock AI runtime Contribution", () => {
     expect((failure as Error).message).toBe(
       "AI Gateway rejected the request (429): slow down",
     );
-    await root.fiber.dispose();
+    await root.dispose();
   });
 
   test("cancels the gateway response stream when the Turn is aborted", async () => {
     let cancelled = false;
-    const root = new Context();
-    await root.plugin(LlmRegistry);
-    await root.plugin(
-      createFrockAiRuntimePlugin(
+    const root = createAgentRuntimeHarness();
+    await root.mount(
+      createFrockAiFeature(
         runtimeConfig(() =>
           Promise.resolve(
             new ReadableStream({
@@ -514,7 +501,7 @@ describe("Frock AI runtime Contribution", () => {
     controller.abort(new Error("Turn cancelled"));
     await expect(consume).rejects.toThrow("Turn cancelled");
     expect(cancelled).toBe(true);
-    await root.fiber.dispose();
+    await root.dispose();
   });
 });
 
@@ -525,10 +512,9 @@ describe("Frock AI runtime Contribution", () => {
 describe("Frock AI request isolation", () => {
   test("leaves the next request working after one is cancelled", async () => {
     const bodies: Array<ReadableStream<Uint8Array>> = [];
-    const root = new Context();
-    await root.plugin(LlmRegistry);
-    await root.plugin(
-      createFrockAiRuntimePlugin(
+    const root = createAgentRuntimeHarness();
+    await root.mount(
+      createFrockAiFeature(
         runtimeConfig(() => {
           const body =
             bodies.length === 0
@@ -568,7 +554,7 @@ describe("Frock AI request isolation", () => {
       { type: "text-delta", text: "second" },
       { type: "finish", reason: "completed" },
     ]);
-    await root.fiber.dispose();
+    await root.dispose();
   });
 });
 

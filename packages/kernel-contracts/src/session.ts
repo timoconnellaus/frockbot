@@ -1,4 +1,3 @@
-import { type Context, Service } from "cordis";
 import type {
   LlmMessage,
   SessionEvent,
@@ -183,16 +182,6 @@ export function validateSettledToolOccurrenceJournal(
   return journal;
 }
 
-declare module "cordis" {
-  interface Context {
-    sessions: SessionStore;
-  }
-
-  interface Events {
-    "session/event": (envelope: SessionEventEnvelope) => void;
-  }
-}
-
 export type PersistSessionEvents = (
   sessionId: string,
   events: readonly SessionEvent[],
@@ -207,7 +196,6 @@ export class Session {
   readonly id: string;
   #events: SessionEvent[] = [];
   #disposed = false;
-  #emit: (envelope: SessionEventEnvelope) => void;
   #persist?: PersistSessionEvents;
   #pendingPersistence: Promise<void> = Promise.resolve();
   /** The first durable write that failed. Every later `flush` reports it. */
@@ -229,12 +217,10 @@ export class Session {
 
   constructor(
     id: string,
-    emit: (envelope: SessionEventEnvelope) => void,
     initialEvents: readonly SessionEvent[] = [],
     persist?: PersistSessionEvents,
   ) {
     this.id = id;
-    this.#emit = emit;
     this.#persist = persist;
     if (initialEvents.length > 0) {
       for (const [index, event] of initialEvents.entries()) {
@@ -272,7 +258,6 @@ export class Session {
       timestamp,
     })) as SessionEvent[];
     this.#events.push(...events);
-    for (const event of events) this.#emit({ sessionId: this.id, event });
     if (this.#persist && events.length > 0) {
       const durableEvents = structuredClone(events);
       // A chain that has already rejected must still attempt this write.
@@ -462,7 +447,7 @@ export interface SessionStoreConfig {
   persistEvents?: PersistSessionEvents;
 }
 
-export class SessionStore extends Service {
+export class SessionStore {
   private sessions = new Map<string, Session>();
   private initialSessions: Readonly<Record<string, readonly SessionEvent[]>>;
   private persistEvents?: PersistSessionEvents;
@@ -474,8 +459,7 @@ export class SessionStore extends Service {
     }
   >();
 
-  constructor(ctx: Context, config: SessionStoreConfig = {}) {
-    super(ctx, "sessions");
+  constructor(config: SessionStoreConfig = {}) {
     this.initialSessions = config.initialSessions ?? {};
     this.persistEvents = config.persistEvents;
   }
@@ -506,9 +490,6 @@ export class SessionStore extends Service {
     this.preparedSessions.delete(sessionId);
     const session = new Session(
       sessionId,
-      (envelope) => {
-        this.ctx.emit("session/event", envelope);
-      },
       prepared?.initialEvents ?? this.initialSessions[sessionId],
       prepared?.persistEvents ?? this.persistEvents,
     );
@@ -531,11 +512,9 @@ export class SessionStore extends Service {
     this.sessions.delete(sessionId);
   }
 
-  [Service.init](): () => void {
-    return () => {
-      for (const session of this.sessions.values()) session.dispose();
-      this.sessions.clear();
-      this.preparedSessions.clear();
-    };
+  dispose(): void {
+    for (const session of this.sessions.values()) session.dispose();
+    this.sessions.clear();
+    this.preparedSessions.clear();
   }
 }

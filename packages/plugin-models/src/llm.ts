@@ -1,6 +1,6 @@
-import { type Context, Service } from "cordis";
 import {
   LlmEffectNotStartedError,
+  type LoopHookListV1,
   type LlmProvider,
   type LlmStreamEvent,
   type ModelInvocation,
@@ -11,12 +11,10 @@ import {
   validateStructuredOutputV1,
 } from "@frockbot/kernel-contracts";
 
-export class LlmRegistry extends Service implements ModelInvocation {
+export class LlmRegistry implements ModelInvocation {
   private providers = new Map<string, LlmProvider>();
 
-  constructor(ctx: Context) {
-    super(ctx, "llm");
-  }
+  constructor(private readonly hooks: LoopHookListV1) {}
 
   register(provider: LlmProvider): () => void {
     if (this.providers.has(provider.id)) {
@@ -47,7 +45,7 @@ export class LlmRegistry extends Service implements ModelInvocation {
       throw new LlmEffectNotStartedError(
         `LLM provider "${request.provider}" is unavailable`,
       );
-    const events = this.ctx.waterfall("llm/stream", request, signal, () =>
+    const events = this.hooks.modelStream(request, signal, () =>
       provider.stream(request, signal),
     );
     return this.validatedStream(request, events);

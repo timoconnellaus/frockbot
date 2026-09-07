@@ -42,10 +42,7 @@ const KEYS = {
  * what the Agent loop leaves behind when it unwinds on an abort.
  */
 function interruptedJournal(): SessionEvent[] {
-  const events: SessionEvent[] = [];
-  const session = new Session(SESSION_ID, (envelope) => {
-    events.push(envelope.event);
-  });
+  const session = new Session(SESSION_ID);
   session.appendBatch([
     { type: "turn/start", turn: 1 },
     { type: "step/start", turn: 1, step: 1 },
@@ -70,7 +67,7 @@ function interruptedJournal(): SessionEvent[] {
       },
     },
   ]);
-  return events;
+  return [...session.events];
 }
 
 function storedRun(
@@ -116,7 +113,7 @@ async function settled(
 
 /** What the next Turn does: start turn 2 on the log the settlement left. */
 function admitNextTurn(latest: SessionEvent[]): void {
-  const session = new Session(SESSION_ID, () => {}, latest);
+  const session = new Session(SESSION_ID, latest);
   session.append({ type: "turn/start", turn: 2 });
   validateToolOccurrenceJournal(session.events);
 }
@@ -173,16 +170,14 @@ describe("settling a Turn interrupted mid-answer", () => {
 
   test("a Turn that closed itself is not closed twice", async () => {
     const storage = new MemoryStorage();
-    const events: SessionEvent[] = [];
-    const session = new Session(SESSION_ID, (envelope) => {
-      events.push(envelope.event);
-    });
+    const session = new Session(SESSION_ID);
     session.appendBatch([
       { type: "turn/start", turn: 1 },
       { type: "step/start", turn: 1, step: 1 },
       { type: "step/end", turn: 1, step: 1, outcome: "cancelled" },
       { type: "turn/end", turn: 1, outcome: "cancelled" },
     ]);
+    const events = [...session.events];
     await storage.put({
       [KEYS.activeRun]: "run-1",
       [KEYS.run]: storedRun(events, {

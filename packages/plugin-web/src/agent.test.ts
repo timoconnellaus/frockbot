@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { Context } from "cordis";
-import { ToolRegistry } from "@frockbot/plugin-tools/agent";
 import type { ToolExecutionContext } from "@frockbot/kernel-contracts";
+import { createAgentRuntimeHarness } from "@frockbot/plugin-testkit";
 import {
   createConfiguredWebFetchRuntimeContribution,
   createWebFetchToolDefinitionV1,
@@ -240,23 +239,22 @@ describe("the web-fetch Capability enablement", () => {
   });
 
   test("offers web_fetch on every turn type its manifest admits", async () => {
-    const root = new Context();
-    await root.plugin(ToolRegistry);
-    const plugin = createConfiguredWebFetchRuntimeContribution({
+    const runtime = createAgentRuntimeHarness();
+    const feature = createConfiguredWebFetchRuntimeContribution({
       capability: ENABLED_CAPABILITY,
     });
-    expect(plugin).toBeDefined();
-    await root.plugin(plugin!);
+    expect(feature).toBeDefined();
+    await runtime.mount(feature!);
 
     for (const turnType of ["chat", "automation", "subagent"] as const) {
       expect({
         turnType,
-        names: root.tools.schemas({ turnType }).map((schema) => schema.name),
+        names: runtime.tools.schemas({ turnType }).map((schema) => schema.name),
       }).toEqual({
         turnType,
         names: ["web_fetch", "get_dynamic_tools", "call_dynamic_tool"],
       });
     }
-    await root.fiber.dispose();
+    await runtime.dispose();
   });
 });

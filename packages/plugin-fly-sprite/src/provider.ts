@@ -14,6 +14,7 @@ import {
   type ComputerOperationOptions,
   type ComputerRootSyncOptionsV1,
   type ComputerProvider,
+  type ComputerRegistry,
   type ComputerSyncHostV1,
   type ComputerSyncReasonV1,
   type ComputerSyncSummaryV1,
@@ -25,7 +26,7 @@ import {
   workspaceRootKeyV1,
   type WorkspaceRootV1,
 } from "@frockbot/kernel-contracts";
-import type { Plugin } from "cordis";
+import type { RuntimeFeatureV1 } from "@frockbot/kernel-contracts";
 import {
   computerBotKey,
   type BrowserAction,
@@ -663,16 +664,16 @@ export class FlySpriteComputerProvider implements ComputerProvider {
   }
 }
 
-export function createFlySpriteProviderPlugin(
+export function createFlySpriteProviderFeature(
   computer?: FlySpriteComputer,
   options?: {
     host?: ComputerHostFactoryV1;
     sync?: ComputerSyncHostV1;
     agentControlOwnerId?: string;
   },
-): Plugin.Function {
-  const plugin: Plugin.Function = (ctx) =>
-    ctx.computers.register(
+): RuntimeFeatureV1<{ computers: ComputerRegistry }> {
+  return (runtime) =>
+    runtime.computers.register(
       new FlySpriteComputerProvider(
         computer,
         options?.host,
@@ -680,9 +681,7 @@ export function createFlySpriteProviderPlugin(
         options?.agentControlOwnerId,
       ),
     );
-  plugin.inject = ["computers"];
-  return plugin;
 }
 
-export const flySpriteProviderPlugin = createFlySpriteProviderPlugin();
-export default flySpriteProviderPlugin;
+export const flySpriteProviderFeature = createFlySpriteProviderFeature();
+export default flySpriteProviderFeature;

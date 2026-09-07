@@ -22,9 +22,10 @@ import type {
   ToolExecutionResult,
   TurnTypeV1,
 } from "@frockbot/kernel-contracts";
-// Merges the Agent loop's event declarations into the cordis Context type.
-import type {} from "@frockbot/kernel-agent-loop/agent";
-import type { Plugin } from "cordis";
+import type {
+  AgentRuntimeV1,
+  RuntimeFeatureV1,
+} from "@frockbot/kernel-contracts";
 import manifest from "../frockbot.json" with { type: "json" };
 import {
   renderAvailableSubagentModelsPromptV1,
@@ -998,40 +999,42 @@ export function createSubagentModelsPromptSectionV1(
  * because a dispatch with no Turn to attribute it to is a dispatch with no
  * writer.
  */
-export function createSubagentsRuntimePlugin(
+export function createSubagentsRuntimeFeature(
   host: SubagentsRuntimeHostV1,
-): Plugin.Function {
-  const plugin: Plugin.Function = (ctx) => {
+): RuntimeFeatureV1<AgentRuntimeV1> {
+  return (runtime) => {
     // The Turn ordinal and step a task event is recorded under. The Agent loop
     // announces them; a tool context does not carry them, so they are caught
     // where the loop already says so — the `plugin-computer` pattern.
     let currentTurn = 1;
     let currentStep = 1;
     const disposers: Array<() => void> = [
-      ctx.systemPrompt.register(createSubagentModelsPromptSectionV1(host)),
-      ctx.on("agent/pre-step", async (_agent, _inputs, turn, step, next) => {
-        currentTurn = turn;
-        currentStep = step;
-        const decision = await next();
-        // Delivery, not merely queueing. The claim is durable and marks what
-        // it took, so a step that is retried after the claim reads the marks
-        // back and does not hand the model the same instruction twice; the
-        // loop records each folded input as a `user/message` on the child's
-        // own Session, which is where "exactly once" is finally visible.
-        if (decision.kind !== "enter" || !host.drainMessages) return decision;
-        let pending: readonly PendingTaskMessageV1[];
-        try {
-          pending = await host.drainMessages();
-        } catch {
-          // A parent that cannot be reached has not lost the message: it is
-          // still queued, undelivered, and the next step claims it.
-          return decision;
-        }
-        return foldPendingTaskMessagesV1(
-          decision,
-          pending,
-          host.taskId ?? "task",
-        );
+      runtime.systemPrompt.register(createSubagentModelsPromptSectionV1(host)),
+      runtime.hooks.add({
+        preStep: async (_agent, _inputs, turn, step, next) => {
+          currentTurn = turn;
+          currentStep = step;
+          const decision = await next();
+          // Delivery, not merely queueing. The claim is durable and marks what
+          // it took, so a step that is retried after the claim reads the marks
+          // back and does not hand the model the same instruction twice; the
+          // loop records each folded input as a `user/message` on the child's
+          // own Session, which is where "exactly once" is finally visible.
+          if (decision.kind !== "enter" || !host.drainMessages) return decision;
+          let pending: readonly PendingTaskMessageV1[];
+          try {
+            pending = await host.drainMessages();
+          } catch {
+            // A parent that cannot be reached has not lost the message: it is
+            // still queued, undelivered, and the next step claims it.
+            return decision;
+          }
+          return foldPendingTaskMessagesV1(
+            decision,
+            pending,
+            host.taskId ?? "task",
+          );
+        },
       }),
     ];
     const writer = host.writer;
@@ -1043,7 +1046,7 @@ export function createSubagentsRuntimePlugin(
         TASK_LIFECYCLE_CAPABILITY_V1,
       );
       const append = (event: Record<string, unknown> & { type: string }) => {
-        const session = ctx.sessions.get(writer.sessionId);
+        const session = runtime.sessions.get(writer.sessionId);
         if (!session || session.disposed) return;
         session.append({
           turn: Math.max(1, currentTurn),
@@ -1056,7 +1059,7 @@ export function createSubagentsRuntimePlugin(
         messaged: (event) => append({ type: "task/message", ...event }),
       };
       disposers.push(
-        ctx.tools.register(
+        runtime.tools.register(
           createTaskTool({ ...host, writer }, record),
           dispatchCeiling ? { admissionCeiling: dispatchCeiling } : undefined,
         ),
@@ -1070,13 +1073,11 @@ export function createSubagentsRuntimePlugin(
         createTaskStopTool(host),
         createTaskResumeTool({ ...host, writer }, record),
       ]) {
-        disposers.push(ctx.tools.register(tool, lifecycleOptions));
+        disposers.push(runtime.tools.register(tool, lifecycleOptions));
       }
     }
     return () => {
       for (const dispose of disposers.toReversed()) dispose();
     };
   };
-  plugin.inject = ["tools", "systemPrompt", "sessions"];
-  return plugin;
 }

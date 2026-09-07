@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import { SessionStore, type Session } from "@frockbot/kernel-contracts";
-import { Context } from "cordis";
 import {
   createSkillLoadTool,
   createSkillWriteTool,
@@ -30,17 +29,16 @@ async function openSession(): Promise<{
   sessions: { get(id: string): Session | undefined };
   dispose(): Promise<void>;
 }> {
-  const root = new Context();
-  await root.plugin(SessionStore);
-  const session = root.sessions.create("user-1:bot-1");
+  const sessions = new SessionStore();
+  const session = sessions.create("user-1:bot-1");
   session.appendBatch([
     { type: "turn/start", turn: 4 },
     { type: "step/start", turn: 4, step: 2 },
   ]);
   return {
     session,
-    sessions: root.sessions,
-    dispose: () => root.fiber.dispose(),
+    sessions,
+    dispose: async () => {},
   };
 }
 
@@ -384,9 +382,7 @@ describe("the skill_write tool", () => {
 
 describe("the recorded step", () => {
   test("refuses to record against a closed step", async () => {
-    const root = new Context();
-    await root.plugin(SessionStore);
-    const session = root.sessions.create("closed");
+    const session = new SessionStore().create("closed");
     session.appendBatch([
       { type: "turn/start", turn: 1 },
       { type: "step/start", turn: 1, step: 1 },
@@ -395,6 +391,5 @@ describe("the recorded step", () => {
     expect(() => openSkillTurnPositionV1(session)).toThrow(
       "no open step to record against",
     );
-    await root.fiber.dispose();
   });
 });

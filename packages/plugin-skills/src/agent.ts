@@ -31,9 +31,10 @@ import type {
   WorkspaceWriteRequestV1,
 } from "@frockbot/kernel-contracts";
 import { formatSkillRefV1, parseSkillRefV1 } from "@frockbot/kernel-contracts";
-// Merges the Agent loop's event declarations into the cordis Context type.
-import type {} from "@frockbot/kernel-agent-loop/agent";
-import type { Plugin } from "cordis";
+import type {
+  AgentRuntimeV1,
+  RuntimeFeatureV1,
+} from "@frockbot/kernel-contracts";
 import {
   botInstructionRootV1,
   countSkillDocumentsV1,
@@ -647,14 +648,14 @@ export function createSkillWriteTool(
  * only when the host supplies a writable Workspace and Bot provenance —
  * `skill_write`.
  */
-export function createSkillsRuntimePlugin(
+export function createSkillsRuntimeFeature(
   host: SkillsRuntimeHostV1,
-): Plugin.Function {
-  const plugin: Plugin.Function = (ctx) => {
+): RuntimeFeatureV1<AgentRuntimeV1> {
+  return (runtime) => {
     const catalog = new SkillCatalog(host.owner, host.reads, host.pluginSkills);
     const disposers: Array<() => void> = [];
     disposers.push(
-      ctx.systemPrompt.register({
+      runtime.systemPrompt.register({
         id: "skills",
         order: 90,
         render: () =>
@@ -666,35 +667,37 @@ export function createSkillsRuntimePlugin(
             .join("\n\n"),
       }),
     );
-    disposers.push(ctx.tools.register(createSkillLoadTool(catalog)));
+    disposers.push(runtime.tools.register(createSkillLoadTool(catalog)));
     if (host.files && host.writer) {
       disposers.push(
-        ctx.tools.register(
+        runtime.tools.register(
           createSkillWriteTool(
             { ...host, files: host.files },
             host.writer,
-            ctx.sessions,
+            runtime.sessions,
           ),
         ),
       );
     }
     disposers.push(
-      ctx.on("agent/pre-step", async (agent, inputs, turn, step, next) => {
-        // Once per Turn, at its first step: "an edit is visible to the Bot on
-        // its next admitted Turn", so a Skill written mid-Turn does not change
-        // the instructions the Turn is already running under.
-        if (step === 1 || catalog.loadedTurn() !== turn) {
-          await catalog.refresh(turn, agent.session);
-        }
-        catalog.enterStep(turn, step);
-        if (step === 1) {
-          const refs = inputs.flatMap((input) => input.skills ?? []);
-          const outcome = await catalog.invoke(turn, agent.session, refs);
-          if (outcome.status === "unresolved") {
-            return { kind: "reject", reason: outcome.reason };
+      runtime.hooks.add({
+        preStep: async (agent, inputs, turn, step, next) => {
+          // Once per Turn, at its first step: "an edit is visible to the Bot
+          // on its next admitted Turn", so a Skill written mid-Turn does not
+          // change the instructions the Turn is already running under.
+          if (step === 1 || catalog.loadedTurn() !== turn) {
+            await catalog.refresh(turn, agent.session);
           }
-        }
-        return next();
+          catalog.enterStep(turn, step);
+          if (step === 1) {
+            const refs = inputs.flatMap((input) => input.skills ?? []);
+            const outcome = await catalog.invoke(turn, agent.session, refs);
+            if (outcome.status === "unresolved") {
+              return { kind: "reject", reason: outcome.reason };
+            }
+          }
+          return next();
+        },
       }),
     );
     return () => {
@@ -702,6 +705,4 @@ export function createSkillsRuntimePlugin(
       catalog.invalidate();
     };
   };
-  plugin.inject = ["tools", "systemPrompt", "sessions"];
-  return plugin;
 }

@@ -13,8 +13,7 @@
   },
   "dependencies": {
     "@frockbot/kernel-composition": "workspace:*",
-    "@frockbot/kernel-contracts": "workspace:*",
-    "cordis": "4.0.0-rc.8"
+    "@frockbot/kernel-contracts": "workspace:*"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "latest",

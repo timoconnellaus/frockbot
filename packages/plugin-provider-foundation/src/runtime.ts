@@ -1,9 +1,10 @@
 import {
+  type AgentRuntimeV1,
   type LlmProvider,
   type LlmStreamEvent,
   ModelProviderFailureError,
+  type RuntimeFeatureV1,
 } from "@frockbot/kernel-contracts";
-import type { Plugin } from "cordis";
 
 export const FOUNDATION_PROVIDER = "foundation";
 export const FOUNDATION_MODEL = "deterministic-v1";
@@ -56,7 +57,7 @@ async function* foundationStream(
   }
   const user = request.messages.findLast((message) => message.role === "user");
   const text = user?.role === "user" ? user.content : "";
-  yield { type: "text-delta", text: "Cordis runtime: " };
+  yield { type: "text-delta", text: "Built-in model: " };
   await Promise.resolve();
   signal.throwIfAborted();
   yield { type: "text-delta", text };
@@ -111,8 +112,8 @@ export const foundationProvider: LlmProvider = {
   stream: classifiedFoundationStream,
 };
 
-export const foundationProviderPlugin: Plugin.Function = (ctx) =>
-  ctx.llm.register(foundationProvider);
-foundationProviderPlugin.inject = ["llm"];
+export const foundationProviderFeature: RuntimeFeatureV1<AgentRuntimeV1> = (
+  runtime,
+) => runtime.llm.register(foundationProvider);
 
-export default foundationProviderPlugin;
+export default foundationProviderFeature;

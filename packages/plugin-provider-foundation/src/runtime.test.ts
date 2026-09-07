@@ -3,14 +3,13 @@ import {
   type LlmStreamEvent,
   type NormalizedModelRequest,
 } from "@frockbot/kernel-contracts";
-import { LlmRegistry } from "@frockbot/plugin-models";
 import {
-  createPluginHarness,
+  createAgentRuntimeHarness,
   verifyPluginPackage,
 } from "@frockbot/plugin-testkit";
 import manifest from "../frockbot.json" with { type: "json" };
 import packageJson from "../package.json" with { type: "json" };
-import foundationProviderPlugin, {
+import foundationProviderFeature, {
   classifyFoundationFailureV1,
   FOUNDATION_MODEL,
   FOUNDATION_PROVIDER,
@@ -33,35 +32,32 @@ async function collect(
   return events;
 }
 
-describe("foundation provider plugin", () => {
+describe("foundation provider feature", () => {
   test("classifies its only pre-stream failure shape as unknown", () => {
     const failure = classifyFoundationFailureV1(new Error("local failure"));
     expect(failure.classification).toBe("unknown");
     expect(failure.providerReason).toBe("local failure");
   });
-  test("registers deterministic provider behavior for its fiber lifetime", async () => {
-    const harness = await createPluginHarness([LlmRegistry]);
-    const fiber = await harness.mount(foundationProviderPlugin);
+  test("registers deterministic provider behavior for its mounted lifetime", async () => {
+    const runtime = createAgentRuntimeHarness();
+    await runtime.mount(foundationProviderFeature);
 
     expect(
-      await collect(
-        harness.root.llm.stream(request, new AbortController().signal),
-      ),
+      await collect(runtime.llm.stream(request, new AbortController().signal)),
     ).toEqual([
-      { type: "text-delta", text: "Cordis runtime: " },
+      { type: "text-delta", text: "Built-in model: " },
       { type: "text-delta", text: "hello" },
       { type: "finish", reason: "completed" },
     ]);
 
-    await fiber.dispose();
+    await runtime.dispose();
     let failure: unknown;
     try {
-      harness.root.llm.stream(request, new AbortController().signal);
+      runtime.llm.stream(request, new AbortController().signal);
     } catch (error) {
       failure = error;
     }
     expect(failure).toBeInstanceOf(Error);
-    await harness.dispose();
   });
 
   test("satisfies plugin package conventions", () => {

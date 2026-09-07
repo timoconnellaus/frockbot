@@ -21,15 +21,14 @@
 // second one.
 import {
   decodeTurnTypeV1,
+  type AgentRuntimeV1,
+  type RuntimeFeatureV1,
   type Session,
   type ToolDefinition,
   type ToolExecutionContext,
   type ToolExecutionResult,
   type TurnTypeV1,
 } from "@frockbot/kernel-contracts";
-// Merges the Agent loop's event declarations into the cordis Context type.
-import type {} from "@frockbot/kernel-agent-loop/agent";
-import type { Plugin } from "cordis";
 import manifest from "../frockbot.json" with { type: "json" };
 import { describeTemplateSummaryV1 } from "./scrub.js";
 import type { TemplateShareReceiptV1 } from "./shared.js";
@@ -208,21 +207,18 @@ export function createBotExportTemplateTool(
  * and registered only when the host seam exists — a Turn with no User authority
  * to stage through is a Turn where the tool is simply absent.
  */
-export function createBotTemplateRuntimePlugin(
+export function createBotTemplateFeature(
   host: BotTemplateRuntimeHostV1,
-): Plugin.Function {
-  const plugin: Plugin.Function = (ctx) => {
+): RuntimeFeatureV1<AgentRuntimeV1> {
+  return (runtime) => {
     const ceiling = botTemplateAdmissionCeilingV1(
       BOT_TEMPLATE_EXPORT_CAPABILITY_V1,
     );
-    const dispose = ctx.tools.register(
-      createBotExportTemplateTool(host, ctx.sessions),
+    return runtime.tools.register(
+      createBotExportTemplateTool(host, runtime.sessions),
       ceiling ? { admissionCeiling: ceiling } : undefined,
     );
-    return () => dispose();
   };
-  plugin.inject = ["tools", "sessions"];
-  return plugin;
 }
 
-export default createBotTemplateRuntimePlugin;
+export default createBotTemplateFeature;

@@ -6,18 +6,17 @@
 // as their writer, the root is bounded, and the model gets a reference it can
 // resolve rather than a picture of a path.
 import { describe, expect, test } from "bun:test";
-import { SystemPromptRegistry } from "@frockbot/plugin-prompt";
-import { ToolRegistry } from "@frockbot/plugin-tools";
 import {
   ComputerError,
-  ComputerRegistry,
   computerBotPathKeyV1,
   type ComputerHandle,
   type ComputerProvider,
 } from "@frockbot/computer-core";
-import { createPluginHarness } from "@frockbot/plugin-testkit";
-import { SessionStore } from "@frockbot/kernel-contracts";
-import { createComputerAgentPlugin, pngDimensionsV1 } from "./agent.js";
+import {
+  type AgentRuntimeHarness,
+  createAgentRuntimeHarness,
+} from "@frockbot/plugin-testkit";
+import { createComputerAgentFeature, pngDimensionsV1 } from "./agent.js";
 import { FakeWorkspace } from "./workspace-fixture.js";
 
 /** A 4x3 PNG: a real signature and a real IHDR, and nothing after it. */
@@ -69,15 +68,10 @@ async function mount(
     invalidate(botId: string, kind: "screenshots" | "doctor"): void;
   },
 ) {
-  const harness = await createPluginHarness([
-    ComputerRegistry,
-    ToolRegistry,
-    SystemPromptRegistry,
-    SessionStore,
-  ]);
-  harness.root.computers.register(provider);
+  const harness = createAgentRuntimeHarness();
+  harness.computers.register(provider);
   await harness.mount(
-    createComputerAgentPlugin({
+    createComputerAgentFeature({
       userId: "user-1",
       defaultProviderId: "fixture",
       ...(writer
@@ -96,7 +90,7 @@ async function mount(
 }
 
 async function executeTool(
-  harness: Awaited<ReturnType<typeof createPluginHarness>>,
+  harness: AgentRuntimeHarness,
   name: string,
   input: unknown,
 ) {
@@ -109,15 +103,15 @@ async function executeTool(
     effectId: "tool:1:1:0",
     signal: new AbortController().signal,
   };
-  const prepared = await harness.root.tools.prepare(
+  const prepared = await harness.tools.prepare(
     { id: crypto.randomUUID(), name, input },
     context,
   );
   if (prepared.kind !== "ready") throw new Error(prepared.result.content);
-  return harness.root.tools.executePrepared(prepared, context);
+  return harness.tools.executePrepared(prepared, context);
 }
 
-function capture(harness: Awaited<ReturnType<typeof createPluginHarness>>) {
+function capture(harness: AgentRuntimeHarness) {
   return executeTool(harness, "computer_screenshot", {});
 }
 
@@ -256,9 +250,7 @@ describe("computer_screenshot", () => {
     );
 
     expect(
-      harness.root.tools
-        .schemas({ turnType: "chat" })
-        .map((schema) => schema.name),
+      harness.tools.schemas({ turnType: "chat" }).map((schema) => schema.name),
     ).not.toContain("computer_screenshot");
     await harness.dispose();
   });
@@ -280,19 +272,14 @@ describe("computer_screenshot", () => {
         invalidate: (botId, kind) => invalidations.push(`${botId}:${kind}`),
       },
     );
-    const session = harness.root.sessions.create("session-1");
+    const session = harness.sessions.create("session-1");
     const agent = { botId: "bot-1", session };
-    await harness.root.waterfall(
-      "agent/pre-step",
-      agent as never,
-      [],
-      1,
-      1,
-      () => Promise.resolve({ kind: "enter" as const, inputs: [] }),
+    await harness.hooks.preStep(agent as never, [], 1, 1, () =>
+      Promise.resolve({ kind: "enter" as const, inputs: [] }),
     );
     await executeTool(harness, "computer_exec", { command: "pwd" });
 
-    await harness.root.serial("agent/turn-stopping", agent as never, 1);
+    await harness.hooks.turnStopping(agent as never, 1);
 
     // One capture for the action the Bot just took, so the card can show it
     // working, and one final frame at Turn end.
@@ -323,15 +310,10 @@ describe("computer_screenshot", () => {
       ),
       true,
     );
-    const session = harness.root.sessions.create("session-1");
+    const session = harness.sessions.create("session-1");
     const agent = { botId: "bot-1", session };
-    await harness.root.waterfall(
-      "agent/pre-step",
-      agent as never,
-      [],
-      1,
-      1,
-      () => Promise.resolve({ kind: "enter" as const, inputs: [] }),
+    await harness.hooks.preStep(agent as never, [], 1, 1, () =>
+      Promise.resolve({ kind: "enter" as const, inputs: [] }),
     );
     for (let call = 0; call < 5; call += 1) {
       await executeTool(harness, "computer_exec", { command: "pwd" });
@@ -353,20 +335,15 @@ describe("computer_screenshot", () => {
         );
       }),
     );
-    const session = harness.root.sessions.create("session-1");
+    const session = harness.sessions.create("session-1");
     const agent = { botId: "bot-1", session };
-    await harness.root.waterfall(
-      "agent/pre-step",
-      agent as never,
-      [],
-      1,
-      1,
-      () => Promise.resolve({ kind: "enter" as const, inputs: [] }),
+    await harness.hooks.preStep(agent as never, [], 1, 1, () =>
+      Promise.resolve({ kind: "enter" as const, inputs: [] }),
     );
     await executeTool(harness, "computer_exec", { command: "pwd" });
 
     await expect(
-      harness.root.serial("agent/turn-stopping", agent as never, 1),
+      harness.hooks.turnStopping(agent as never, 1),
     ).resolves.toBeUndefined();
     // Both the progress capture and the final frame are refused, and neither
     // refusal reaches the Bot's answer or the Turn's outcome.

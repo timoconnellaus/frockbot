@@ -1,4 +1,3 @@
-import type { Plugin } from "cordis";
 import {
   FlockConflictError,
   FlockDecodeError,
@@ -380,13 +379,6 @@ export function createFlockBotBackendContribution(
   return new FlockBotBackendContribution(host);
 }
 
-export function createFlockBotBackendPlugin(
-  host: FlockBotBackendHost,
-  lifecycle: { mount(value: FlockBotBackendContribution): () => void },
-): Plugin {
-  return () => lifecycle.mount(createFlockBotBackendContribution(host));
-}
-
 /**
  * What an application hands this Contribution: the Bot's own lifecycle state, under the
  * Package's own key so one wide host object can satisfy every Package's slice
@@ -406,6 +398,6 @@ export const botContribution = defineBotBackendContribution<
   FlockBotBackendContribution
 >({
   specifier: "@frockbot/plugin-flock/bot",
-  create: (host, lifecycle) =>
-    createFlockBotBackendPlugin(host.flock, lifecycle),
+  mount: (host, lifecycle) =>
+    lifecycle.mount(createFlockBotBackendContribution(host.flock)),
 });

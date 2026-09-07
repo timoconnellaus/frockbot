@@ -5,14 +5,12 @@
 // nothing, so the decisions are all provable in CI.
 
 import { describe, expect, test } from "bun:test";
-import type {
-  DesktopMachineExecResult,
-  DesktopMachineFileResult,
-} from "@frockbot/desktop-core";
 import type { MachineCommandV1, MachineOpV1 } from "@frockbot/machine-protocol";
 import {
   createMachineDeviceRunnerV1,
   machineRefusalV1,
+  type DesktopMachineExecResult,
+  type DesktopMachineFileResult,
   type MachineDeviceHostV1,
 } from "./device-runner.js";
 

@@ -1,5 +1,3 @@
-// Importing the augmented module is what merges these declarations into cordis.
-import type {} from "cordis";
 import type { TurnTypeV1 } from "./types.js";
 
 export interface PromptAssemblyContext {
@@ -53,17 +51,4 @@ export interface PromptAssemblyService {
 /** Contributing Packages register prompt sections through this surface. */
 export interface PromptSectionRegistration {
   register(section: PromptSection): () => void;
-}
-
-declare module "cordis" {
-  interface Context {
-    systemPrompt: PromptAssemblyService & PromptSectionRegistration;
-  }
-
-  interface Events {
-    "system-prompt/assemble": (
-      context: PromptAssemblyContext,
-      next: () => Promise<PromptAssembly>,
-    ) => Promise<PromptAssembly>;
-  }
 }

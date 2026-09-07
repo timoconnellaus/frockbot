@@ -1,6 +1,6 @@
 // The User backend Contribution: the machine registry's authority.
 //
-// It is mounted into the User Durable Object's Cordis root beside Settings,
+// It is mounted in the User Durable Object beside Settings,
 // Credentials, Flock and the rest, and it owns four things and no more — the
 // registry rows, the pairing offers, the command queue with its leases, and
 // the results. "The User's Durable Object is the authority for everything
@@ -41,7 +41,6 @@ import {
   type MachineResultReceiptV1,
   type MachineTokenClaimsV1,
 } from "@frockbot/machine-protocol";
-import type { Plugin } from "cordis";
 import {
   machinePairingCodeDigestV1,
   machinePairingNonceV1,
@@ -435,13 +434,6 @@ export class MachineUserBackendContribution {
   }
 }
 
-export function createMachineUserBackendPlugin(
-  host: MachineUserBackendHost,
-  lifecycle: { mount(value: MachineUserBackendContribution): () => void },
-): Plugin {
-  return () => lifecycle.mount(new MachineUserBackendContribution(host));
-}
-
 /**
  * What an application hands this Contribution: the User's registered machines, under the
  * Package's own key so one wide host object can satisfy every Package's slice
@@ -461,6 +453,6 @@ export const userContribution = defineUserBackendContribution<
   MachineUserBackendContribution
 >({
   specifier: "@frockbot/plugin-user-machine/user",
-  create: (host, lifecycle) =>
-    createMachineUserBackendPlugin(host.machines, lifecycle),
+  mount: (host, lifecycle) =>
+    lifecycle.mount(new MachineUserBackendContribution(host.machines)),
 });

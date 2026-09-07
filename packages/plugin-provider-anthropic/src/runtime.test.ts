@@ -4,14 +4,15 @@ import {
   type NormalizedModelRequest,
 } from "@frockbot/kernel-contracts";
 import {
-  openCredentialV1,
   parseCredentialKeyringV1,
   sealCredentialV1,
-  type CredentialLeaseV1,
 } from "@frockbot/connection-core";
-import { LlmRegistry } from "@frockbot/plugin-models";
-import { Context, Service } from "cordis";
-import { anthropicPromptV1, createAnthropicRuntimePlugin } from "./runtime.js";
+import { CredentialLeaseRuntime } from "@frockbot/plugin-credentials/user";
+import {
+  type AgentRuntimeHarness,
+  createAgentRuntimeHarness,
+} from "@frockbot/plugin-testkit";
+import { anthropicPromptV1, createAnthropicFeature } from "./runtime.js";
 
 function serializedKeyring(): string {
   const bytes = Uint8Array.from({ length: 32 }, (_, index) => index + 11);
@@ -26,33 +27,6 @@ function serializedKeyring(): string {
     currentKeyId: "primary",
     keys: { primary: key },
   });
-}
-
-class TestCredentialLeaseRuntime extends Service {
-  private readonly keyring;
-
-  constructor(ctx: Context, keyringText: string) {
-    super(ctx, "credentialLease");
-    this.keyring = parseCredentialKeyringV1(keyringText);
-  }
-
-  open(input: {
-    accountId: string;
-    connectionId: string;
-    packageId: string;
-    lease: CredentialLeaseV1;
-  }): Promise<string> {
-    return openCredentialV1({
-      keyring: this.keyring,
-      context: {
-        accountId: input.accountId,
-        connectionId: input.connectionId,
-        packageId: input.packageId,
-        credentialGeneration: input.lease.credentialGeneration,
-      },
-      envelope: input.lease.envelope,
-    });
-  }
 }
 
 const request: NormalizedModelRequest = {
@@ -177,7 +151,7 @@ const toolAnswer = anthropicSse([
 async function mountedProvider(
   respond: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>,
   seen: { authorization?: string; body?: unknown } = {},
-): Promise<Context> {
+): Promise<AgentRuntimeHarness> {
   const keyringText = serializedKeyring();
   const envelope = await sealCredentialV1({
     keyring: parseCredentialKeyringV1(keyringText),
@@ -189,18 +163,17 @@ async function mountedProvider(
     },
     plaintext: "anthropic-secret",
   });
-  const root = new Context();
-  await root.plugin(LlmRegistry);
-  await root.plugin((ctx) => {
-    new TestCredentialLeaseRuntime(ctx, keyringText);
+  const root = createAgentRuntimeHarness();
+  root.credentials = new CredentialLeaseRuntime({
+    readSecret: () => keyringText,
   });
-  await root.plugin(
-    createAnthropicRuntimePlugin({
+  await root.mount(
+    createAnthropicFeature({
       accountId: "account-1",
       connectionId: "connection-1",
       packageId: "provider-anthropic",
       now: () => Date.parse("2026-09-06T00:00:00.000Z"),
-      leaseCredential: (effectId) =>
+      leaseCredential: (effectId: string) =>
         Promise.resolve({
           schemaVersion: 1,
           leaseId: "lease-1",
@@ -222,7 +195,10 @@ async function mountedProvider(
   return root;
 }
 
-async function collect(root: Context, input = request): Promise<unknown[]> {
+async function collect(
+  root: AgentRuntimeHarness,
+  input = request,
+): Promise<unknown[]> {
   const events: unknown[] = [];
   for await (const event of root.llm.stream(
     input,
@@ -255,7 +231,7 @@ describe("Anthropic runtime Contribution", () => {
       { type: "usage", usage: { inputTokens: 11, outputTokens: 4 } },
       { type: "finish", reason: "completed" },
     ]);
-    await root.fiber.dispose();
+    await root.dispose();
   });
 
   test("emits a tool call only after the stream terminates", async () => {
@@ -275,7 +251,7 @@ describe("Anthropic runtime Contribution", () => {
       call: { id: "call-1", name: "current_time", input: { zone: "UTC" } },
     });
     expect(events.at(-1)).toEqual({ type: "finish", reason: "tool-calls" });
-    await root.fiber.dispose();
+    await root.dispose();
   });
 
   test("says so when a schema becomes prompt guidance", async () => {
@@ -307,7 +283,7 @@ describe("Anthropic runtime Contribution", () => {
     expect(
       JSON.stringify((seen.body as { system?: unknown }).system),
     ).toContain("Return only JSON matching this schema");
-    await root.fiber.dispose();
+    await root.dispose();
   });
 
   test("classifies a rate limit as transient and carries its Retry-After", async () => {
@@ -333,7 +309,7 @@ describe("Anthropic runtime Contribution", () => {
       "transient",
     );
     expect((failure as ModelProviderFailureError).retryAfterMs).toBe(3_000);
-    await root.fiber.dispose();
+    await root.dispose();
   });
 
   test("refuses a request carrying another Connection's authority", async () => {
@@ -356,7 +332,7 @@ describe("Anthropic runtime Contribution", () => {
     expect((failure as ModelProviderFailureError).classification).toBe(
       "permanent",
     );
-    await root.fiber.dispose();
+    await root.dispose();
   });
 });
 

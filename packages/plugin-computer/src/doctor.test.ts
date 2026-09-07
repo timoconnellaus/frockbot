@@ -7,18 +7,17 @@
 // a `chromium …` command is refused with the sentence that names the tool to
 // use instead.
 import { describe, expect, test } from "bun:test";
-import { SystemPromptRegistry } from "@frockbot/plugin-prompt";
-import { ToolRegistry } from "@frockbot/plugin-tools";
 import {
-  ComputerRegistry,
   computerBotPathKeyV1,
   type ComputerDoctorReportV1,
   type ComputerHandle,
   type ComputerProvider,
 } from "@frockbot/computer-core";
-import { createPluginHarness } from "@frockbot/plugin-testkit";
-import { SessionStore } from "@frockbot/kernel-contracts";
-import { createComputerAgentPlugin } from "./agent.js";
+import {
+  type AgentRuntimeHarness,
+  createAgentRuntimeHarness,
+} from "@frockbot/plugin-testkit";
+import { createComputerAgentFeature } from "./agent.js";
 import { FakeWorkspace } from "./workspace-fixture.js";
 
 const REPORT: ComputerDoctorReportV1 = {
@@ -82,15 +81,10 @@ function fixture(workspace: FakeWorkspace): Fixture {
 }
 
 async function mount(provider: ComputerProvider) {
-  const harness = await createPluginHarness([
-    ComputerRegistry,
-    ToolRegistry,
-    SystemPromptRegistry,
-    SessionStore,
-  ]);
-  harness.root.computers.register(provider);
+  const harness = createAgentRuntimeHarness();
+  harness.computers.register(provider);
   await harness.mount(
-    createComputerAgentPlugin({
+    createComputerAgentFeature({
       userId: "user-1",
       defaultProviderId: "fixture",
       writer: { sessionId: "session-1", turnId: "run-9", runId: "run-9" },
@@ -112,18 +106,18 @@ function context(effectId = "tool:1:1:0") {
 }
 
 async function call(
-  harness: Awaited<ReturnType<typeof createPluginHarness>>,
+  harness: AgentRuntimeHarness,
   name: string,
   input: unknown,
   effectId?: string,
 ) {
   const execution = context(effectId);
-  const prepared = await harness.root.tools.prepare(
+  const prepared = await harness.tools.prepare(
     { id: crypto.randomUUID(), name, input },
     execution,
   );
   if (prepared.kind !== "ready") return prepared.result;
-  return harness.root.tools.executePrepared(prepared, execution);
+  return harness.tools.executePrepared(prepared, execution);
 }
 
 describe("computer_doctor", () => {
@@ -177,7 +171,7 @@ describe("computer_doctor", () => {
     const harness = await mount(state.provider);
 
     for (const turnType of ["chat", "automation", "subagent"] as const) {
-      const names = harness.root.tools
+      const names = harness.tools
         .schemas({ turnType })
         .map((schema) => schema.name);
       expect(names, turnType).toContain("computer_doctor");
@@ -236,7 +230,7 @@ describe("the GUI is never driven from the shell", () => {
   test("says where the shared scratch is, and that it is not durable", async () => {
     const state = fixture(new FakeWorkspace());
     const harness = await mount(state.provider);
-    const description = harness.root.tools
+    const description = harness.tools
       .schemas({ turnType: "chat" })
       .find((schema) => schema.name === "computer_exec")?.description;
 

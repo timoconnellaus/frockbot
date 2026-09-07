@@ -8,7 +8,6 @@
     "./client": "./src/client.ts",
     "./client-contributions": "./src/client-contributions.ts",
     "./contributions": "./src/contributions.ts",
-    "./desktop-runtime": "./src/desktop-runtime.ts",
     "./frockbot.application.json": "./frockbot.application.json",
     "./generated/applets-artifact": "./generated/applets-artifact.ts",
     "./package.json": "./package.json",
@@ -55,8 +54,7 @@
     "@frockbot/plugin-ui-theme": "workspace:*",
     "@frockbot/plugin-user-machine": "workspace:*",
     "@frockbot/plugin-web": "workspace:*",
-    "@frockbot/template-core": "workspace:*",
-    "cordis": "4.0.0-rc.8"
+    "@frockbot/template-core": "workspace:*"
   },
   "devDependencies": {
     "@types/bun": "1.4.0",

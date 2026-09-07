@@ -23,7 +23,6 @@ import {
   turnEndReason,
   validateToolOccurrenceJournal,
 } from "@frockbot/kernel-contracts";
-import { type Context, Service } from "cordis";
 import {
   EffectAdmissionFencedError,
   modelFailureMessage,
@@ -36,6 +35,7 @@ import { planResumptionV1 } from "./resume.js";
 import type {
   EffectAdmittingAgentOptions,
   LoopRuntime,
+  LoopServices,
   ModelResponse,
   TurnCursor,
   TurnSettlement,
@@ -54,15 +54,6 @@ export {
 } from "./errors.js";
 export { estimateModelUsageV1 } from "./model-request.js";
 
-declare module "cordis" {
-  interface Events {
-    "agent/model-outcome-committed": (
-      agent: Agent,
-      requestId: string,
-    ) => Promise<void>;
-  }
-}
-
 export interface AgentLoopConfig {
   maxSteps?: number;
   /**
@@ -74,12 +65,6 @@ export interface AgentLoopConfig {
   retry?: Partial<ModelRetryPolicyRuntimeV1>;
   /** The Composition generation this mounted root was pinned to at admission. */
   composition: CompositionPinV1;
-}
-
-declare module "cordis" {
-  interface Context {
-    agentLoop: AgentLoop;
-  }
 }
 
 /**
@@ -96,7 +81,7 @@ class LoopAgent implements Agent, LoopRuntime {
   readonly id: string;
   readonly botId: string;
   readonly session: Session;
-  readonly ctx: Context;
+  readonly services: LoopServices;
   readonly options: EffectAdmittingAgentOptions;
   readonly maxSteps: number;
   readonly composition: CompositionPinV1;
@@ -131,7 +116,7 @@ class LoopAgent implements Agent, LoopRuntime {
   #turnDeadlineAt = 0;
 
   constructor(
-    ctx: Context,
+    services: LoopServices,
     session: Session,
     options: EffectAdmittingAgentOptions,
     maxSteps: number,
@@ -139,7 +124,7 @@ class LoopAgent implements Agent, LoopRuntime {
     turnDeadlineMs: number,
     retry: ModelRetryPolicyRuntimeV1,
   ) {
-    this.ctx = ctx;
+    this.services = services;
     this.composition = composition;
     this.session = session;
     this.botId = options.botId;
@@ -187,7 +172,6 @@ class LoopAgent implements Agent, LoopRuntime {
     };
     this.session.append({ type: "input/queued", ...input });
     this.#inbox.push(input);
-    this.ctx.emit("agent/inbox/inserted", this, input);
     this.#wake();
     return input.messageId;
   }
@@ -209,7 +193,6 @@ class LoopAgent implements Agent, LoopRuntime {
   cancel(reason: "user" | "shutdown" = "user", detail?: string): void {
     if (this.#status === "disposed") return;
     this.#cancelDetail = turnEndReason(detail);
-    this.ctx.emit("agent/cancel-requested", this, reason);
     const queued = this.#inbox.splice(0);
     if (queued.length > 0) {
       this.session.appendBatch(
@@ -262,9 +245,7 @@ class LoopAgent implements Agent, LoopRuntime {
   }
 
   #setStatus(status: AgentStatus): void {
-    if (status === this.#status) return;
     this.#status = status;
-    this.ctx.emit("agent/status", this, status);
   }
 
   #wake(): void {
@@ -332,10 +313,9 @@ class LoopAgent implements Agent, LoopRuntime {
     } catch (error) {
       if (this.#turnDeadlineReached) {
         turnOutcome = "interrupted";
-        turnReason = this.#deadlineTurnReason(error);
+        turnReason = this.#deadlineTurnReason();
       } else if (error instanceof ModelOutcomeSettlementRequiredError) {
         settlementPending = true;
-        this.ctx.emit("agent/error", this, error);
       } else if (
         error instanceof EffectAdmissionFencedError ||
         signal.aborted
@@ -349,7 +329,6 @@ class LoopAgent implements Agent, LoopRuntime {
       } else {
         turnOutcome = "model-error";
         turnReason = turnEndReason(modelFailureMessage(error));
-        this.ctx.emit("agent/error", this, error);
       }
     } finally {
       this.#disarmTurnDeadline();
@@ -386,7 +365,7 @@ class LoopAgent implements Agent, LoopRuntime {
         });
       }
       await this.session.flush();
-      await this.ctx.serial("agent/turn-stopping", this, turn);
+      await this.services.hooks.turnStopping(this, turn);
     }
   }
 
@@ -409,11 +388,6 @@ class LoopAgent implements Agent, LoopRuntime {
             // The call answered; what it said was unusable. Re-issuing it
             // would only produce the same durable failure.
             await this.notifyModelOutcome(plan.responseFailure.requestId);
-            this.ctx.emit(
-              "agent/error",
-              this,
-              new StructuredOutputValidationError(plan.responseFailure.failure),
-            );
             return {
               kind: "settled",
               outcome: "model-error",
@@ -509,7 +483,6 @@ class LoopAgent implements Agent, LoopRuntime {
     // failed first flush handed it straight back to `#wake`.
     this.#inbox.shift();
     await this.session.flush();
-    this.ctx.emit("agent/inbox/claimed", this, [input], turn);
 
     await this.#driveTurn(
       turn,
@@ -517,8 +490,7 @@ class LoopAgent implements Agent, LoopRuntime {
         let inputs = [input];
         for (let step = 1; step <= this.maxSteps; step += 1) {
           signal.throwIfAborted();
-          const decision = await this.ctx.waterfall(
-            "agent/pre-step",
+          const decision = await this.services.hooks.preStep(
             this,
             inputs,
             turn,
@@ -642,7 +614,7 @@ class LoopAgent implements Agent, LoopRuntime {
    */
   async notifyModelOutcome(requestId: string): Promise<void> {
     try {
-      await this.ctx.serial("agent/model-outcome-committed", this, requestId);
+      await this.services.hooks.modelOutcomeCommitted(this, requestId);
     } catch (error) {
       throw new ModelOutcomeSettlementRequiredError(error);
     }
@@ -666,7 +638,7 @@ class LoopAgent implements Agent, LoopRuntime {
   ): Promise<void> {
     if (response.toolCalls.length === 0) return;
     if (response.text.trim().length === 0) return;
-    await this.ctx.serial("agent/assistant-text", this, response.text, {
+    await this.services.hooks.assistantText(this, response.text, {
       turn,
       step,
       requestId: response.request.requestId,
@@ -680,8 +652,7 @@ class LoopAgent implements Agent, LoopRuntime {
     proposed: LoopStepContinuationV1,
     signal: AbortSignal,
   ): Promise<boolean> {
-    const decision = await this.ctx.waterfall(
-      "agent/step-continuation",
+    const decision = await this.services.hooks.stepContinuation(
       this,
       proposed,
       turn,
@@ -705,8 +676,7 @@ class LoopAgent implements Agent, LoopRuntime {
    * occurrences are closed as `interrupted`, then `step/end` and `turn/end`,
    * exactly as `kernel-do`'s `settledEventsV1` settles a Stop or a supersede.
    */
-  #deadlineTurnReason(error: unknown): string | undefined {
-    this.ctx.emit("agent/error", this, error);
+  #deadlineTurnReason(): string | undefined {
     return turnEndReason(TURN_DEADLINE_REASON_V1);
   }
 
@@ -759,16 +729,17 @@ class LoopAgent implements Agent, LoopRuntime {
   }
 }
 
-export class AgentLoop extends Service implements AgentFactory {
-  static inject = ["sessions", "systemPrompt", "llm", "tools", "agents"];
-  private maxSteps: number;
-  private turnDeadlineMs: number;
-  private composition: CompositionPinV1;
-  private retry: ModelRetryPolicyRuntimeV1;
-  private handles = new Set<AgentHandle>();
+export class AgentLoop implements AgentFactory {
+  private readonly services: LoopServices;
+  private readonly maxSteps: number;
+  private readonly turnDeadlineMs: number;
+  private readonly composition: CompositionPinV1;
+  private readonly retry: ModelRetryPolicyRuntimeV1;
+  private readonly agents = new Map<string, Agent>();
+  private readonly handles = new Set<AgentHandle>();
 
-  constructor(ctx: Context, config: AgentLoopConfig) {
-    super(ctx, "agentLoop");
+  constructor(services: LoopServices, config: AgentLoopConfig) {
+    this.services = services;
     this.composition = config.composition;
     this.maxSteps = config.maxSteps ?? 20;
     this.turnDeadlineMs = config.turnDeadlineMs ?? TURN_DEADLINE_MS_V1;
@@ -786,9 +757,9 @@ export class AgentLoop extends Service implements AgentFactory {
   }
 
   async create(options: AgentOptions): Promise<AgentHandle> {
-    const session = this.ctx.sessions.create(options.sessionId);
+    const session = this.services.sessions.create(options.sessionId);
     const agent = new LoopAgent(
-      this.ctx,
+      this.services,
       session,
       options as EffectAdmittingAgentOptions,
       this.maxSteps,
@@ -796,7 +767,10 @@ export class AgentLoop extends Service implements AgentFactory {
       this.turnDeadlineMs,
       this.retry,
     );
-    const unregister = this.ctx.agents.register(agent);
+    if (this.agents.has(agent.id)) {
+      throw new Error(`agent "${agent.id}" already exists`);
+    }
+    this.agents.set(agent.id, agent);
     let disposed = false;
     let handle: AgentHandle;
     handle = {
@@ -805,8 +779,8 @@ export class AgentLoop extends Service implements AgentFactory {
         if (disposed) return;
         disposed = true;
         await agent.dispose();
-        unregister();
-        this.ctx.sessions.disposeSession(options.sessionId);
+        if (this.agents.get(agent.id) === agent) this.agents.delete(agent.id);
+        this.services.sessions.disposeSession(options.sessionId);
         this.handles.delete(handle);
       },
     };
@@ -814,11 +788,22 @@ export class AgentLoop extends Service implements AgentFactory {
     return handle;
   }
 
-  [Service.init](): () => Promise<void> {
-    const unsetFactory = this.ctx.agents.setFactory(this);
-    return async () => {
-      await Promise.all([...this.handles].map((handle) => handle.dispose()));
-      unsetFactory();
-    };
+  get(agentId: string): Agent | undefined {
+    return this.agents.get(agentId);
   }
+
+  list(): Agent[] {
+    return [...this.agents.values()];
+  }
+
+  async dispose(): Promise<void> {
+    await Promise.all([...this.handles].map((handle) => handle.dispose()));
+  }
+}
+
+export function createAgentLoop(
+  services: LoopServices,
+  config: AgentLoopConfig,
+): AgentLoop {
+  return new AgentLoop(services, config);
 }

@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { Context } from "cordis";
 import {
   ComputerError,
   ComputerRegistry,
@@ -119,38 +118,35 @@ describe("Workspace layout", () => {
 
 describe("ComputerRegistry", () => {
   test("opens a Bot's selected provider without exposing provider selection to consumers", async () => {
-    const root = new Context();
-    await root.plugin(ComputerRegistry);
+    const computers = new ComputerRegistry();
     const opened: string[] = [];
-    root.computers.register(provider("sprites", opened));
-    const assignment = root.computers.assign({ userId: "user-1" }, "sprites");
+    computers.register(provider("sprites", opened));
+    const assignment = computers.assign({ userId: "user-1" }, "sprites");
 
-    const computer = await root.computers.open(
+    const computer = await computers.open(
       { userId: "user-1" },
       { botId: "bot-1" },
     );
 
     expect(computer.assignment).toEqual(assignment);
     expect(opened).toEqual(["user-1:bot-1:1"]);
-    await root.fiber.dispose();
   });
 
   // One Computer serves all of a User's Bots. Two Bots of one User must
   // resolve to one assignment and one generation, not two.
   test("keys the Computer assignment per User, so a User's Bots share one Computer", async () => {
-    const root = new Context();
-    await root.plugin(ComputerRegistry);
+    const computers = new ComputerRegistry();
     const opened: string[] = [];
-    root.computers.register(provider("sprites", opened));
+    computers.register(provider("sprites", opened));
 
-    const assignment = root.computers.assign({ userId: "user-1" }, "sprites");
+    const assignment = computers.assign({ userId: "user-1" }, "sprites");
 
-    expect(root.computers.assignment({ userId: "user-1" })).toEqual(assignment);
-    const first = await root.computers.open(
+    expect(computers.assignment({ userId: "user-1" })).toEqual(assignment);
+    const first = await computers.open(
       { userId: "user-1" },
       { botId: "bot-1" },
     );
-    const second = await root.computers.open(
+    const second = await computers.open(
       { userId: "user-1" },
       { botId: "bot-2" },
     );
@@ -162,41 +158,35 @@ describe("ComputerRegistry", () => {
     // directory and desktop on the one Computer.
     expect(first.tenant.directory).not.toBe(second.tenant.directory);
     expect(first.tenant.display).not.toBe(second.tenant.display);
-    await root.fiber.dispose();
   });
 
   test("a second User gets a separate Computer assignment", async () => {
-    const root = new Context();
-    await root.plugin(ComputerRegistry);
-    root.computers.register(provider("sprites", []));
+    const computers = new ComputerRegistry();
+    computers.register(provider("sprites", []));
 
-    root.computers.assign({ userId: "user-1" }, "sprites");
+    computers.assign({ userId: "user-1" }, "sprites");
 
-    expect(root.computers.assignment({ userId: "user-2" })).toBeUndefined();
+    expect(computers.assignment({ userId: "user-2" })).toBeUndefined();
     expect(computerIdentityKeyV1({ userId: "user-1" })).not.toBe(
       computerIdentityKeyV1({ userId: "user-2" }),
     );
-    await root.fiber.dispose();
   });
 
   test("increments the generation when a User changes provider", async () => {
-    const root = new Context();
-    await root.plugin(ComputerRegistry);
-    root.computers.register(provider("sprites", []));
-    root.computers.register(provider("local", []));
+    const computers = new ComputerRegistry();
+    computers.register(provider("sprites", []));
+    computers.register(provider("local", []));
     const identity = { userId: "user-1" };
 
-    expect(root.computers.assign(identity, "sprites").generation).toBe(1);
-    expect(root.computers.assign(identity, "local")).toMatchObject({
+    expect(computers.assign(identity, "sprites").generation).toBe(1);
+    expect(computers.assign(identity, "local")).toMatchObject({
       providerId: "local",
       generation: 2,
     });
-    await root.fiber.dispose();
   });
 
   test("rejects operations through a stale handle after provider reassignment", async () => {
-    const root = new Context();
-    await root.plugin(ComputerRegistry);
+    const computers = new ComputerRegistry();
     const executable = (id: string): ComputerProvider => ({
       id,
       open: async (identity, tenant, assignment) => ({
@@ -214,20 +204,19 @@ describe("ComputerRegistry", () => {
         close: () => Promise.resolve(),
       }),
     });
-    root.computers.register(executable("sprites"));
-    root.computers.register(executable("local"));
+    computers.register(executable("sprites"));
+    computers.register(executable("local"));
     const identity = { userId: "user-1" };
-    root.computers.assign(identity, "sprites");
-    const oldComputer = await root.computers.open(identity, {
+    computers.assign(identity, "sprites");
+    const oldComputer = await computers.open(identity, {
       botId: "bot-1",
     });
 
-    root.computers.assign(identity, "local");
+    computers.assign(identity, "local");
 
     await expect(
       oldComputer.exec?.execute({ executable: "true" }),
     ).rejects.toMatchObject({ code: "stale-assignment" });
-    await root.fiber.dispose();
   });
 
   test("keeps a provider's single-root reconciliation on the guarded handle", async () => {
@@ -235,8 +224,7 @@ describe("ComputerRegistry", () => {
     // the guarded handle dropped that method, and the publish that needed
     // `dist/` pulled explicitly was refused as "cannot reconcile a single
     // durable root" while ordinary sync no longer carried build output.
-    const root = new Context();
-    await root.plugin(ComputerRegistry);
+    const computers = new ComputerRegistry();
     const calls: string[] = [];
     const syncing: ComputerProvider = {
       id: "sprites",
@@ -260,10 +248,10 @@ describe("ComputerRegistry", () => {
         close: () => Promise.resolve(),
       }),
     };
-    root.computers.register(syncing);
+    computers.register(syncing);
     const identity = { userId: "user-1" };
-    root.computers.assign(identity, "sprites");
-    const computer = await root.computers.open(identity, { botId: "bot-1" });
+    computers.assign(identity, "sprites");
+    const computer = await computers.open(identity, { botId: "bot-1" });
 
     expect(computer.sync?.reconcileRoot).toBeDefined();
     await computer.sync?.reconcileRoot?.(
@@ -279,8 +267,8 @@ describe("ComputerRegistry", () => {
     expect(calls).toEqual(["root:publish:package-declared:a.b/dist/server.js"]);
 
     // Still guarded: a stale handle refuses it like every other operation.
-    root.computers.register({ ...syncing, id: "local" });
-    root.computers.assign(identity, "local");
+    computers.register({ ...syncing, id: "local" });
+    computers.assign(identity, "local");
     await expect(
       computer.sync?.reconcileRoot?.(
         {
@@ -292,34 +280,29 @@ describe("ComputerRegistry", () => {
         "publish",
       ),
     ).rejects.toMatchObject({ code: "stale-assignment" });
-    await root.fiber.dispose();
   });
 
   test("fails clearly when a User has no Computer assignment", async () => {
-    const root = new Context();
-    await root.plugin(ComputerRegistry);
+    const computers = new ComputerRegistry();
 
     await expect(
-      root.computers.open({ userId: "user-1" }, { botId: "bot-1" }),
+      computers.open({ userId: "user-1" }, { botId: "bot-1" }),
     ).rejects.toMatchObject({
       code: "not-assigned",
     } satisfies Partial<ComputerError>);
-    await root.fiber.dispose();
   });
 
   test("refuses an empty User or Bot identifier", async () => {
-    const root = new Context();
-    await root.plugin(ComputerRegistry);
-    root.computers.register(provider("sprites", []));
-    root.computers.assign({ userId: "user-1" }, "sprites");
+    const computers = new ComputerRegistry();
+    computers.register(provider("sprites", []));
+    computers.assign({ userId: "user-1" }, "sprites");
 
     expect(() => computerIdentityKeyV1({ userId: "  " })).toThrow(
       ComputerError,
     );
     await expect(
-      root.computers.open({ userId: "user-1" }, { botId: " " }),
+      computers.open({ userId: "user-1" }, { botId: " " }),
     ).rejects.toMatchObject({ code: "invalid-request" });
-    await root.fiber.dispose();
   });
 });
 

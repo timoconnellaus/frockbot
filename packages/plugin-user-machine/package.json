@@ -11,7 +11,6 @@
     "./client": "./src/client/index.ts",
     "./client/state": "./src/client/state.ts",
     "./delivery": "./src/delivery.ts",
-    "./desktop": "./src/desktop.ts",
     "./device": "./src/device.ts",
     "./device-runner": "./src/device-runner.ts",
     "./frockbot.json": "./frockbot.json",
@@ -35,16 +34,13 @@
   "dependencies": {
     "@frockbot/client-core": "workspace:*",
     "@frockbot/client-ui": "workspace:*",
-    "@frockbot/desktop-core": "workspace:*",
-    "@frockbot/kernel-agent-loop": "workspace:*",
     "@frockbot/kernel-contracts": "workspace:*",
     "@frockbot/machine-protocol": "workspace:*",
     "@frockbot/plugin-shell": "workspace:*",
-    "cordis": "4.0.0-rc.8",
     "vue": "3.5.41"
   },
   "devDependencies": {
-    "@frockbot/plugin-tools": "workspace:*",
+    "@frockbot/plugin-testkit": "workspace:*",
     "@types/bun": "1.4.0",
     "@vitejs/plugin-vue": "6.0.8",
     "typescript": "npm:typescript-native-bridge@6.0.3-bridge.16.tsgo.7.0.2",

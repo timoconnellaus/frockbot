@@ -6,19 +6,20 @@ import {
   MODEL_IDLE_DEADLINE_MS_V1,
   MODEL_IDLE_DEADLINE_REASON_V1,
   ModelRequestDeadlineError,
+  type LoopAgentRuntimeV1,
   type NormalizedModelRequest,
 } from "@frockbot/kernel-contracts";
-import { type Agent } from "@frockbot/kernel-agent-loop/agent";
-import { LlmRegistry } from "@frockbot/plugin-models";
 import {
-  openCredentialV1,
   parseCredentialKeyringV1,
   sealCredentialV1,
-  type CredentialLeaseV1,
 } from "@frockbot/connection-core";
-import { Context, Service } from "cordis";
+import { CredentialLeaseRuntime } from "@frockbot/plugin-credentials/user";
 import {
-  createOllamaCloudRuntimePlugin,
+  type AgentRuntimeHarness,
+  createAgentRuntimeHarness,
+} from "@frockbot/plugin-testkit";
+import {
+  createOllamaCloudFeature,
   ollamaChatBaseUrl,
   ollamaNativeChatBodyV1,
 } from "./runtime.js";
@@ -38,46 +39,19 @@ function serializedKeyring(): string {
   });
 }
 
-class TestCredentialLeaseRuntime extends Service {
-  private readonly keyring;
-
-  constructor(
-    ctx: Context,
-    serializedKeyring: string,
-    private readonly onOpen: () => void = () => undefined,
-  ) {
-    super(ctx, "credentialLease");
-    this.keyring = parseCredentialKeyringV1(serializedKeyring);
-  }
-
-  open(input: {
-    accountId: string;
-    connectionId: string;
-    packageId: string;
-    lease: CredentialLeaseV1;
-  }): Promise<string> {
-    this.onOpen();
-    return openCredentialV1({
-      keyring: this.keyring,
-      context: {
-        accountId: input.accountId,
-        connectionId: input.connectionId,
-        packageId: input.packageId,
-        credentialGeneration: input.lease.credentialGeneration,
-      },
-      envelope: input.lease.envelope,
-    });
-  }
-}
-
-async function mountCredentialRuntime(
-  root: Context,
+/** The real credential runtime, with a probe on each open. */
+function mountCredentialRuntime(
+  root: AgentRuntimeHarness,
   keyring = serializedKeyring(),
   onOpen?: () => void,
-): Promise<void> {
-  await root.plugin((ctx) => {
-    new TestCredentialLeaseRuntime(ctx, keyring, onOpen);
-  });
+): void {
+  const credentials = new CredentialLeaseRuntime({ readSecret: () => keyring });
+  const open = credentials.open.bind(credentials);
+  credentials.open = (input) => {
+    onOpen?.();
+    return open(input);
+  };
+  root.credentials = credentials;
 }
 
 const request: NormalizedModelRequest = {
@@ -133,11 +107,10 @@ describe("Ollama Cloud runtime Contribution", () => {
     const authorizations: string[] = [];
     const leasedGenerations: Array<string | undefined> = [];
     const settled: string[] = [];
-    const root = new Context();
-    await root.plugin(LlmRegistry);
-    await mountCredentialRuntime(root, keyringText);
-    await root.plugin(
-      createOllamaCloudRuntimePlugin({
+    const root = createAgentRuntimeHarness();
+    mountCredentialRuntime(root, keyringText);
+    await root.mount(
+      createOllamaCloudFeature({
         accountId: "account-1",
         connectionId: "connection-1",
         packageId: "provider-ollama-cloud",
@@ -178,9 +151,8 @@ describe("Ollama Cloud runtime Contribution", () => {
     );
 
     const signal = new AbortController().signal;
-    const authorizedRequest = await root.waterfall(
-      "agent/request",
-      {} as Agent,
+    const authorizedRequest = await root.hooks.request(
+      {} as LoopAgentRuntimeV1,
       request,
       signal,
       () => Promise.resolve(request),
@@ -203,9 +175,8 @@ describe("Ollama Cloud runtime Contribution", () => {
     expect(leasedGenerations).toEqual(["generation-1"]);
     expect(settled).toEqual([]);
     await expect(
-      root.serial(
-        "agent/model-outcome-committed",
-        {} as Agent,
+      root.hooks.modelOutcomeCommitted(
+        {} as LoopAgentRuntimeV1,
         request.requestId,
       ),
     ).rejects.toThrow("settlement unavailable");
@@ -214,7 +185,7 @@ describe("Ollama Cloud runtime Contribution", () => {
       void event;
     }
     expect(leasedGenerations).toEqual(["generation-1", "generation-1"]);
-    await root.fiber.dispose();
+    await root.dispose();
   });
 
   test.each([
@@ -236,13 +207,12 @@ describe("Ollama Cloud runtime Contribution", () => {
       });
       let openCount = 0;
       const settled: string[] = [];
-      const root = new Context();
-      await root.plugin(LlmRegistry);
-      await mountCredentialRuntime(root, keyringText, () => {
+      const root = createAgentRuntimeHarness();
+      mountCredentialRuntime(root, keyringText, () => {
         openCount += 1;
       });
-      await root.plugin(
-        createOllamaCloudRuntimePlugin({
+      await root.mount(
+        createOllamaCloudFeature({
           accountId: "account-1",
           connectionId: "connection-1",
           packageId: "provider-ollama-cloud",
@@ -279,7 +249,7 @@ describe("Ollama Cloud runtime Contribution", () => {
       expect(failure).toBeInstanceOf(ModelProviderFailureError);
       expect(openCount).toBe(0);
       expect(settled).toEqual(["effect-1"]);
-      await root.fiber.dispose();
+      await root.dispose();
     },
   );
 
@@ -302,11 +272,10 @@ describe("Ollama Cloud runtime Contribution", () => {
       ["http://127.0.0.1:11434", "http://127.0.0.1:11434/v1/chat/completions"],
     ] as const) {
       const urls: string[] = [];
-      const root = new Context();
-      await root.plugin(LlmRegistry);
-      await mountCredentialRuntime(root, keyringText);
-      await root.plugin(
-        createOllamaCloudRuntimePlugin({
+      const root = createAgentRuntimeHarness();
+      mountCredentialRuntime(root, keyringText);
+      await root.mount(
+        createOllamaCloudFeature({
           accountId: "account-1",
           connectionId: "connection-1",
           packageId: "provider-ollama-cloud",
@@ -355,11 +324,10 @@ describe("Ollama Cloud runtime Contribution", () => {
 
   test("rejects a request bound to another Connection before leasing", async () => {
     let leaseCount = 0;
-    const root = new Context();
-    await root.plugin(LlmRegistry);
-    await mountCredentialRuntime(root);
-    await root.plugin(
-      createOllamaCloudRuntimePlugin({
+    const root = createAgentRuntimeHarness();
+    mountCredentialRuntime(root);
+    await root.mount(
+      createOllamaCloudFeature({
         accountId: "account-1",
         connectionId: "connection-1",
         packageId: "provider-ollama-cloud",
@@ -392,16 +360,15 @@ describe("Ollama Cloud runtime Contribution", () => {
 
     expect(failure).toBeInstanceOf(ModelProviderFailureError);
     expect(leaseCount).toBe(0);
-    await root.fiber.dispose();
+    await root.dispose();
   });
 
   test("settles a durable outcome after provider reconstruction", async () => {
     const settled: string[] = [];
-    const root = new Context();
-    await root.plugin(LlmRegistry);
-    await mountCredentialRuntime(root);
-    await root.plugin(
-      createOllamaCloudRuntimePlugin({
+    const root = createAgentRuntimeHarness();
+    mountCredentialRuntime(root);
+    await root.mount(
+      createOllamaCloudFeature({
         accountId: "account-1",
         connectionId: "connection-1",
         packageId: "provider-ollama-cloud",
@@ -413,14 +380,13 @@ describe("Ollama Cloud runtime Contribution", () => {
       }),
     );
 
-    await root.serial(
-      "agent/model-outcome-committed",
-      {} as Agent,
+    await root.hooks.modelOutcomeCommitted(
+      {} as LoopAgentRuntimeV1,
       "durable-effect",
     );
 
     expect(settled).toEqual(["durable-effect"]);
-    await root.fiber.dispose();
+    await root.dispose();
   });
 
   test.each([401, 403, 404])(
@@ -438,11 +404,10 @@ describe("Ollama Cloud runtime Contribution", () => {
         plaintext: "account-secret",
       });
       const settled: string[] = [];
-      const root = new Context();
-      await root.plugin(LlmRegistry);
-      await mountCredentialRuntime(root, keyringText);
-      await root.plugin(
-        createOllamaCloudRuntimePlugin({
+      const root = createAgentRuntimeHarness();
+      mountCredentialRuntime(root, keyringText);
+      await root.mount(
+        createOllamaCloudFeature({
           accountId: "account-1",
           connectionId: "connection-1",
           packageId: "provider-ollama-cloud",
@@ -482,13 +447,12 @@ describe("Ollama Cloud runtime Contribution", () => {
         "permanent",
       );
       expect(settled).toEqual([]);
-      await root.serial(
-        "agent/model-outcome-committed",
-        {} as Agent,
+      await root.hooks.modelOutcomeCommitted(
+        {} as LoopAgentRuntimeV1,
         request.requestId,
       );
       expect(settled).toEqual(["effect-1"]);
-      await root.fiber.dispose();
+      await root.dispose();
     },
   );
 
@@ -507,11 +471,10 @@ describe("Ollama Cloud runtime Contribution", () => {
         plaintext: "account-secret",
       });
       const settled: string[] = [];
-      const root = new Context();
-      await root.plugin(LlmRegistry);
-      await mountCredentialRuntime(root, keyringText);
-      await root.plugin(
-        createOllamaCloudRuntimePlugin({
+      const root = createAgentRuntimeHarness();
+      mountCredentialRuntime(root, keyringText);
+      await root.mount(
+        createOllamaCloudFeature({
           accountId: "account-1",
           connectionId: "connection-1",
           packageId: "provider-ollama-cloud",
@@ -551,7 +514,7 @@ describe("Ollama Cloud runtime Contribution", () => {
         "transient",
       );
       expect(settled).toEqual([]);
-      await root.fiber.dispose();
+      await root.dispose();
     },
   );
 });
@@ -605,7 +568,7 @@ function pushableSse(): {
 
 /** Mount the Package against `fetch`, with its deadlines on a manual clock. */
 async function mountWithClock(
-  root: Context,
+  root: AgentRuntimeHarness,
   clock: ReturnType<typeof manualClock>,
   fetch: (
     input: string | URL | Request,
@@ -623,10 +586,9 @@ async function mountWithClock(
     },
     plaintext: "account-secret",
   });
-  await root.plugin(LlmRegistry);
-  await mountCredentialRuntime(root, keyringText);
-  await root.plugin(
-    createOllamaCloudRuntimePlugin({
+  mountCredentialRuntime(root, keyringText);
+  await root.mount(
+    createOllamaCloudFeature({
       accountId: "account-1",
       connectionId: "connection-1",
       packageId: "provider-ollama-cloud",
@@ -657,7 +619,7 @@ describe("Ollama Cloud request isolation", () => {
     const clock = manualClock();
     const { body } = pushableSse();
     let calls = 0;
-    const root = new Context();
+    const root = createAgentRuntimeHarness();
     await mountWithClock(root, clock, () => {
       calls += 1;
       return Promise.resolve(
@@ -696,7 +658,7 @@ describe("Ollama Cloud request isolation", () => {
       { type: "text-delta", text: "second" },
       { type: "finish", reason: "completed" },
     ]);
-    await root.fiber.dispose();
+    await root.dispose();
   });
 });
 
@@ -706,7 +668,7 @@ describe("Ollama Cloud request isolation", () => {
 describe("Ollama Cloud deadlines", () => {
   test("fails the step when the endpoint produces no first byte", async () => {
     const clock = manualClock();
-    const root = new Context();
+    const root = createAgentRuntimeHarness();
     await mountWithClock(
       root,
       clock,
@@ -742,13 +704,13 @@ describe("Ollama Cloud deadlines", () => {
     expect((failure as Error).message).toBe(
       MODEL_FIRST_BYTE_DEADLINE_REASON_V1,
     );
-    await root.fiber.dispose();
+    await root.dispose();
   });
 
   test("fails the step when the endpoint starts an answer and then stalls", async () => {
     const clock = manualClock();
     const { body, push } = pushableSse();
-    const root = new Context();
+    const root = createAgentRuntimeHarness();
     await mountWithClock(root, clock, () =>
       Promise.resolve(new Response(body, { status: 200 })),
     );
@@ -778,13 +740,13 @@ describe("Ollama Cloud deadlines", () => {
     expect((failure as ModelRequestDeadlineError).phase).toBe("idle");
     expect((failure as Error).message).toBe(MODEL_IDLE_DEADLINE_REASON_V1);
     expect(events).toEqual([{ type: "text-delta", text: "Half a " }]);
-    await root.fiber.dispose();
+    await root.dispose();
   });
 
   test("lets a stream that keeps producing chunks finish, leaving no timer armed", async () => {
     const clock = manualClock();
     const { body, push } = pushableSse();
-    const root = new Context();
+    const root = createAgentRuntimeHarness();
     await mountWithClock(root, clock, () =>
       Promise.resolve(new Response(body, { status: 200 })),
     );
@@ -821,6 +783,6 @@ describe("Ollama Cloud deadlines", () => {
     // A live timer in a Worker isolate holds the request open long after
     // anybody is listening for it.
     expect(clock.armed).toBe(0);
-    await root.fiber.dispose();
+    await root.dispose();
   });
 });

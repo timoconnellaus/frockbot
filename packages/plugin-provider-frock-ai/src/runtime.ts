@@ -1,11 +1,14 @@
 import {
+  type AgentRuntimeV1,
   boundedModelProviderReasonV1,
   type LlmProvider,
   type LlmStreamEvent,
   ModelProviderFailureError,
   type ModelProviderFailureClassV1,
   ModelRequestDeadlineError,
+  type LoopAgentRuntimeV1,
   type NormalizedModelRequest,
+  type RuntimeFeatureV1,
 } from "@frockbot/kernel-contracts";
 import {
   classifyOpenAICompatibleFailureV1,
@@ -13,8 +16,6 @@ import {
   planOpenAICompatibleRequestV1,
   streamWithModelRequestDeadlinesV1,
 } from "@frockbot/provider-openai-compatible";
-import type { Agent } from "@frockbot/kernel-agent-loop/agent";
-import type { Plugin } from "cordis";
 import {
   FROCK_AI_DEFAULT_MODEL,
   FROCK_AI_PROVIDER_TYPE,
@@ -206,16 +207,15 @@ class FrockAiProvider implements LlmProvider {
   }
 }
 
-export function createFrockAiRuntimePlugin(
+export function createFrockAiFeature(
   config: FrockAiRuntimeConfig,
-): Plugin.Function {
-  const plugin: Plugin.Function = (ctx) => {
+): RuntimeFeatureV1<AgentRuntimeV1> {
+  return (runtime) => {
     const provider = new FrockAiProvider(config);
-    const fallbackAgents = new WeakSet<Agent>();
-    const disposeProvider = ctx.llm.register(provider);
-    const disposeFailure = ctx.on(
-      "agent/request-error",
-      async (agent, error, _signal, next) => {
+    const fallbackAgents = new WeakSet<LoopAgentRuntimeV1>();
+    const disposeProvider = runtime.llm.register(provider);
+    const disposeHooks = runtime.hooks.add({
+      requestError: async (agent, error, _signal, next) => {
         if (
           !(error instanceof ModelProviderFailureError) ||
           !provider.autoFallbackFailures.has(error)
@@ -225,28 +225,21 @@ export function createFrockAiRuntimePlugin(
         fallbackAgents.add(agent);
         return { kind: "fallback" } as const;
       },
-    );
-    const disposeRequest = ctx.on(
-      "agent/request",
-      async (agent, _request, _signal, next) => {
+      request: async (agent, _request, _signal, next) => {
         const request = await next();
         return fallbackAgents.has(agent)
           ? { ...request, model: FROCK_AI_DEFAULT_MODEL }
           : request;
       },
-    );
-    const disposeTurn = ctx.on("agent/turn-stopping", async (agent) => {
-      fallbackAgents.delete(agent);
+      turnStopping: async (agent) => {
+        fallbackAgents.delete(agent);
+      },
     });
     return () => {
-      disposeTurn();
-      disposeRequest();
-      disposeFailure();
+      disposeHooks();
       disposeProvider();
     };
   };
-  plugin.inject = ["llm"];
-  return plugin;
 }
 
-export default createFrockAiRuntimePlugin;
+export default createFrockAiFeature;

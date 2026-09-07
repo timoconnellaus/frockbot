@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import { SessionStore, type Session } from "@frockbot/kernel-contracts";
-import { Context } from "cordis";
 import {
   createSkillLoadTool,
   createSkillWriteTool,
@@ -61,17 +60,16 @@ async function openSession(): Promise<{
   sessions: { get(id: string): Session | undefined };
   dispose: () => Promise<void>;
 }> {
-  const root = new Context();
-  await root.plugin(SessionStore);
-  const session = root.sessions.create("user-1:bot-1");
+  const sessions = new SessionStore();
+  const session = sessions.create("user-1:bot-1");
   session.appendBatch([
     { type: "turn/start", turn: 1 },
     { type: "step/start", turn: 1, step: 1 },
   ]);
   return {
     session,
-    sessions: root.sessions,
-    dispose: () => root.fiber.dispose(),
+    sessions,
+    dispose: async () => {},
   };
 }
 

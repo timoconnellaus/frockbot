@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { Context } from "cordis";
+import {
+  type AgentRuntimeHarness,
+  createAgentRuntimeHarness,
+} from "@frockbot/plugin-testkit";
 import {
   decodeSessionEvent,
-  SessionStore,
   type LlmMessage,
   type SessionEvent,
   type SessionEventInput,
@@ -441,17 +443,16 @@ describe("reading the summariser's answer", () => {
 });
 
 describe("running a compaction", () => {
-  const roots: Context[] = [];
+  const roots: AgentRuntimeHarness[] = [];
   afterEach(() => {
-    for (const root of roots.splice(0)) void root.fiber.dispose();
+    for (const root of roots.splice(0)) void root.dispose();
   });
 
-  async function sessionFrom(inputs: SessionEventInput[]) {
-    const root = new Context();
-    roots.push(root);
-    await root.plugin(SessionStore, {
-      initialSessions: { [SESSION_ID]: log(inputs) },
+  function sessionFrom(inputs: SessionEventInput[]) {
+    const root = createAgentRuntimeHarness({
+      sessions: { initialSessions: { [SESSION_ID]: log(inputs) } },
     });
+    roots.push(root);
     return root.sessions.create(SESSION_ID);
   }
 

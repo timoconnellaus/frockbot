@@ -6,7 +6,6 @@ import {
 import {
   compileFoundationApplication,
   createFoundationHostedRuntimePackages,
-  createFoundationRuntimeApplication,
 } from "@frockbot/application-foundation/runtime";
 import {
   computerBotContribution,
@@ -17,13 +16,9 @@ import {
   shellBotContribution,
 } from "@frockbot/application-foundation/contributions";
 import { FIRST_PARTY_PACKAGE_ARTIFACTS_V1 } from "@frockbot/application-foundation/generated/applets-artifact";
-import {
-  createFoundationResidentRuntime,
-  type FoundationResidentRuntime,
-} from "@frockbot/agent-runtime/runtime";
-import { Context } from "cordis";
 import { ComputerRegistry } from "@frockbot/computer-core";
-import { createFlySpriteProviderPlugin } from "@frockbot/plugin-fly-sprite/agent";
+import { createFlySpriteProviderFeature } from "@frockbot/plugin-fly-sprite/agent";
+import { mountRuntimeFeaturesV1 } from "@frockbot/kernel-contracts";
 import { ComputerHostClient } from "@frockbot/plugin-fly-sprite/host-client";
 import {
   computerHostEffectRequestWireV1,
@@ -48,11 +43,6 @@ import type {
   OwnedBotTurnCommand,
   ShellBotBackendContribution,
 } from "@frockbot/plugin-shell/backend";
-import type {
-  BotResidentExecution,
-  BotResidentProjection,
-} from "@frockbot/plugin-shell/backend-execution";
-import { executeResidentBotTurn } from "@frockbot/plugin-shell/backend-runner";
 import type { FlockBotBackendContribution } from "@frockbot/plugin-flock/bot";
 import type { ComputerBotBackendContribution } from "@frockbot/plugin-computer/bot";
 import { decodeComputerCommandV1 } from "@frockbot/plugin-computer/protocol";
@@ -438,14 +428,13 @@ export class BotState extends DurableObject<BotStateEnv> {
   }> {
     if (!this.mounted) {
       const pending = this.compileApplication().then(async (plan) => {
-        const root = new Context();
-        await root.plugin(ComputerRegistry);
+        const computers = new ComputerRegistry();
         const computerConfigured = Boolean(
           this.backendEnv.COMPUTER_HOST &&
           this.backendEnv.COMPUTER_HOST_TOKEN?.trim(),
         );
-        await root.plugin(
-          createFlySpriteProviderPlugin(undefined, {
+        const disposeComputers = await mountRuntimeFeaturesV1({ computers }, [
+          createFlySpriteProviderFeature(undefined, {
             ...(computerConfigured
               ? {
                   host: (identity, tenant) =>
@@ -458,7 +447,7 @@ export class BotState extends DurableObject<BotStateEnv> {
                 }
               : {}),
           }),
-        );
+        ]);
         // Where each descriptor's mounted value lands as the mount runs. The
         // Shell and Flock Contributions need each other, and each reaches the
         // other by naming the table entry it imported.
@@ -472,107 +461,103 @@ export class BotState extends DurableObject<BotStateEnv> {
           | ShellBotBackendContribution
           | FlockBotBackendContribution
           | ComputerBotBackendContribution
-        >(
-          plan,
-          {
-            backendHost: "bot",
-            mountedContributions,
-            shell: {
-              state: this.ctx,
-              env: this.backendEnv,
-              outboundFetch: this.outboundFetch,
-              // One application, compiled once: the Contributions mounted here
-              // and the Composition the Shell bootstraps have to be the same
-              // plan, or a member could be in one and not the other.
-              compileApplication: this.compileApplication,
-              // The immutable bytes of every first-party artifact-backed
-              // member the application ships. The store reads object storage
-              // first and falls back to these, so a deploy needs no seeding
-              // step for a Package that is already in this bundle.
-              bundledPackageArtifacts: FIRST_PARTY_PACKAGE_ARTIFACTS_V1,
-              // The Durable Object owns the kernel authority; the Shell
-              // Package supplies only its configuration and Composition
-              // hooks.
-              // The authority writes through the channel's storage facade, so
-              // every committed run write pushes a `runs` invalidation to
-              // attached browsers. The kernel is unaware it is observed.
-              createAuthority: (options) =>
-                new BotDurableAuthority({
-                  ...options,
-                  state: this.stateChannel.observeRuns(options.state),
-                }),
-              // The Computer Contribution's projection cache and its share of
-              // the authority's one durable alarm, reached through the table
-              // once it has mounted.
-              invalidateComputerProjectionFile: (userId, botId, kind) => {
-                mountedContributions
-                  .get(computerBotContribution)
-                  ?.invalidateProjectionFile(userId, botId, kind);
-                // Dropping the resident cache only makes the next read
-                // honest. The notice is what makes an attached browser take
-                // that read, so a capture filed mid-Turn reaches the card in
-                // about a second instead of at the next projection poll.
-                this.stateChannel.noticeComputer();
-              },
-              scheduledDeadlines: (transaction) =>
-                mountedContributions
-                  .get(computerBotContribution)
-                  ?.scheduledDeadlines(transaction) ?? Promise.resolve([]),
-              scheduledWorkInFlight: () =>
-                mountedContributions
-                  .get(computerBotContribution)
-                  ?.scheduledWorkInFlight() ?? false,
-              deferScheduledWork: (transaction) =>
-                mountedContributions
-                  .get(computerBotContribution)
-                  ?.deferScheduledWork(transaction) ?? Promise.resolve(),
-              settleScheduledWork: () =>
-                mountedContributions
-                  .get(computerBotContribution)
-                  ?.settleScheduledWork() ?? Promise.resolve(),
-              // An archived Bot admits no configuration command; the Flock
-              // Contribution owns that durable lifecycle state.
-              assertLifecycleActive: (storage, botId) => {
-                const flock = mountedContributions.get(flockBotContribution);
-                if (!flock) {
-                  throw new Error("Flock Bot Contribution is unavailable");
-                }
-                return flock.assertActive(storage, botId);
-              },
+        >(plan, {
+          backendHost: "bot",
+          mountedContributions,
+          shell: {
+            state: this.ctx,
+            env: this.backendEnv,
+            outboundFetch: this.outboundFetch,
+            // One application, compiled once: the Contributions mounted here
+            // and the Composition the Shell bootstraps have to be the same
+            // plan, or a member could be in one and not the other.
+            compileApplication: this.compileApplication,
+            // The immutable bytes of every first-party artifact-backed
+            // member the application ships. The store reads object storage
+            // first and falls back to these, so a deploy needs no seeding
+            // step for a Package that is already in this bundle.
+            bundledPackageArtifacts: FIRST_PARTY_PACKAGE_ARTIFACTS_V1,
+            // The Durable Object owns the kernel authority; the Shell
+            // Package supplies only its configuration and Composition
+            // hooks.
+            // The authority writes through the channel's storage facade, so
+            // every committed run write pushes a `runs` invalidation to
+            // attached browsers. The kernel is unaware it is observed.
+            createAuthority: (options) =>
+              new BotDurableAuthority({
+                ...options,
+                state: this.stateChannel.observeRuns(options.state),
+              }),
+            // The Computer Contribution's projection cache and its share of
+            // the authority's one durable alarm, reached through the table
+            // once it has mounted.
+            invalidateComputerProjectionFile: (userId, botId, kind) => {
+              mountedContributions
+                .get(computerBotContribution)
+                ?.invalidateProjectionFile(userId, botId, kind);
+              // Dropping the resident cache only makes the next read
+              // honest. The notice is what makes an attached browser take
+              // that read, so a capture filed mid-Turn reaches the card in
+              // about a second instead of at the next projection poll.
+              this.stateChannel.noticeComputer();
             },
-            flock: {
-              storage: this.ctx.storage,
-              materializeSettings: async (registration, userId) => {
-                await requireShell().materializeSettings(
-                  { userId, botId: registration.botId },
-                  {
-                    name: registration.initialName,
-                    ...(registration.initialDescription === undefined
-                      ? {}
-                      : { description: registration.initialDescription }),
-                  },
-                );
-              },
-              archiveEligible: (storage) =>
-                requireShell().archiveEligible(storage),
-              tearDown: (identity) => this.tearDown(identity),
-            },
-            computer: {
-              storage: this.stateChannel.computerStorage,
-              workspace: this.backendEnv.WORKSPACE_FILES,
-              providerLabel: "Computer",
-              configured: computerConfigured,
-              openComputer: (userId, botId, effectId) => {
-                const identity = { userId };
-                if (!root.computers.assignment(identity)) {
-                  root.computers.assign(identity, "fly-sprite");
-                }
-                return root.computers.open(identity, { botId }, { effectId });
-              },
+            scheduledDeadlines: (transaction) =>
+              mountedContributions
+                .get(computerBotContribution)
+                ?.scheduledDeadlines(transaction) ?? Promise.resolve([]),
+            scheduledWorkInFlight: () =>
+              mountedContributions
+                .get(computerBotContribution)
+                ?.scheduledWorkInFlight() ?? false,
+            deferScheduledWork: (transaction) =>
+              mountedContributions
+                .get(computerBotContribution)
+                ?.deferScheduledWork(transaction) ?? Promise.resolve(),
+            settleScheduledWork: () =>
+              mountedContributions
+                .get(computerBotContribution)
+                ?.settleScheduledWork() ?? Promise.resolve(),
+            // An archived Bot admits no configuration command; the Flock
+            // Contribution owns that durable lifecycle state.
+            assertLifecycleActive: (storage, botId) => {
+              const flock = mountedContributions.get(flockBotContribution);
+              if (!flock) {
+                throw new Error("Flock Bot Contribution is unavailable");
+              }
+              return flock.assertActive(storage, botId);
             },
           },
-          root,
-        );
+          flock: {
+            storage: this.ctx.storage,
+            materializeSettings: async (registration, userId) => {
+              await requireShell().materializeSettings(
+                { userId, botId: registration.botId },
+                {
+                  name: registration.initialName,
+                  ...(registration.initialDescription === undefined
+                    ? {}
+                    : { description: registration.initialDescription }),
+                },
+              );
+            },
+            archiveEligible: (storage) =>
+              requireShell().archiveEligible(storage),
+            tearDown: (identity) => this.tearDown(identity),
+          },
+          computer: {
+            storage: this.stateChannel.computerStorage,
+            workspace: this.backendEnv.WORKSPACE_FILES,
+            providerLabel: "Computer",
+            configured: computerConfigured,
+            openComputer: (userId, botId, effectId) => {
+              const identity = { userId };
+              if (!computers.assignment(identity)) {
+                computers.assign(identity, "fly-sprite");
+              }
+              return computers.open(identity, { botId }, { effectId });
+            },
+          },
+        });
         // The kernel-declared required core set for a Bot, expressed against
         // the plan's own Contributions: every Bot-host Contribution the plan
         // declares must have mounted, and each of the three the Bot Durable
@@ -591,7 +576,7 @@ export class BotState extends DurableObject<BotStateEnv> {
             ).length
         ) {
           await mounted.dispose();
-          await root.fiber.dispose();
+          await disposeComputers();
           throw new Error(
             "Foundation requires Shell, Flock and Computer Bot backend Contributions",
           );
@@ -606,7 +591,7 @@ export class BotState extends DurableObject<BotStateEnv> {
           computer,
           async dispose() {
             await mounted.dispose();
-            await root.fiber.dispose();
+            await disposeComputers();
           },
         };
       });

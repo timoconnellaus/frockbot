@@ -33,7 +33,6 @@
 // belonging to the Memory Package, which owns what may be written into a
 // Memory root; the kernel's file contract carries bytes and cannot classify
 // them.
-import type {} from "cordis";
 
 /** Longest relative path accepted inside a durable root, in UTF-16 units. */
 export const WORKSPACE_MAX_PATH_LENGTH = 1024;

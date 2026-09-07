@@ -1,17 +1,15 @@
 // The Bot's own export tool: what it admits, what it stages, and what it says.
 import { describe, expect, it } from "bun:test";
 import {
-  SessionStore,
   type Session,
   type ToolCall,
   type ToolExecutionContext,
   type TurnTypeV1,
 } from "@frockbot/kernel-contracts";
-import { ToolRegistry } from "@frockbot/plugin-tools";
-import { Context } from "cordis";
+import { createAgentRuntimeHarness } from "@frockbot/plugin-testkit";
 import {
   BOT_EXPORT_TEMPLATE_TOOL_V1,
-  createBotTemplateRuntimePlugin,
+  createBotTemplateFeature,
   stageCommandIdV1,
 } from "./agent.ts";
 import type { TemplateShareReceiptV1 } from "./shared.ts";
@@ -50,21 +48,19 @@ async function mount(
   }) => Promise<TemplateShareReceiptV1> = (input) =>
     Promise.resolve(receipt(input.commandId)),
 ) {
-  const root = new Context();
-  await root.plugin(SessionStore);
-  await root.plugin(ToolRegistry);
-  const session: Session = root.sessions.create(SESSION_ID);
+  const runtime = createAgentRuntimeHarness();
+  const session: Session = runtime.sessions.create(SESSION_ID);
   session.appendBatch([
     { type: "turn/start", turn: 1 },
     { type: "step/start", turn: 1, step: 0 },
   ]);
-  await root.plugin(
-    createBotTemplateRuntimePlugin({
+  await runtime.mount(
+    createBotTemplateFeature({
       owner: { userId: "user-1", botId: "budget" },
       stageTemplate: stage,
     }),
   );
-  return { root, session, dispose: () => root.fiber.dispose() };
+  return { runtime, session, dispose: () => runtime.dispose() };
 }
 
 function contextFor(turnType: TurnTypeV1): ToolExecutionContext {
@@ -96,9 +92,9 @@ async function invoke(
   turnType: TurnTypeV1,
 ) {
   const context = contextFor(turnType);
-  const preparation = await mounted.root.tools.prepare(call, context);
+  const preparation = await mounted.runtime.tools.prepare(call, context);
   if (preparation.kind === "denied") return preparation.result;
-  return mounted.root.tools.executePrepared(preparation, context);
+  return mounted.runtime.tools.executePrepared(preparation, context);
 }
 
 describe("bot_export_template", () => {
@@ -117,13 +113,14 @@ describe("bot_export_template", () => {
           name: "get_dynamic_tools",
           input: { pattern: "template" },
         };
-        const preparation = await mounted.root.tools.prepare(
+        const preparation = await mounted.runtime.tools.prepare(
           discovery,
           context,
         );
         if (preparation.kind === "denied") return preparation.result.content;
-        return (await mounted.root.tools.executePrepared(preparation, context))
-          .content;
+        return (
+          await mounted.runtime.tools.executePrepared(preparation, context)
+        ).content;
       };
       expect(await discovered("chat")).toContain(BOT_EXPORT_TEMPLATE_TOOL_V1);
       for (const turnType of ["automation", "subagent"] as const) {
@@ -133,7 +130,7 @@ describe("bot_export_template", () => {
       }
       // And it is not offered as a top-level schema, because it is namespaced.
       expect(
-        mounted.root.tools.schemas({ turnType: "chat" }).map((t) => t.name),
+        mounted.runtime.tools.schemas({ turnType: "chat" }).map((t) => t.name),
       ).not.toContain(BOT_EXPORT_TEMPLATE_TOOL_V1);
     } finally {
       await mounted.dispose();
@@ -143,7 +140,7 @@ describe("bot_export_template", () => {
   it("declares itself idempotent", async () => {
     const mounted = await mount();
     try {
-      const preparation = await mounted.root.tools.prepare(
+      const preparation = await mounted.runtime.tools.prepare(
         call,
         contextFor("chat"),
       );

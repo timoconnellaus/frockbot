@@ -7,12 +7,8 @@ import {
   parseCredentialKeyringV1,
   sealCredentialV1,
 } from "@frockbot/connection-core";
-import type { Plugin } from "cordis";
 import { defineUserBackendContribution } from "@frockbot/kernel-contracts/contributions";
-export {
-  createCredentialRuntimePlugin,
-  CredentialLeaseRuntime,
-} from "./runtime.js";
+export { createCredentialsFeature, CredentialLeaseRuntime } from "./runtime.js";
 
 const CREDENTIAL_PREFIX = "credential:";
 const ACTIVE_PREFIX = "credential-active:";
@@ -1135,13 +1131,6 @@ export function createCredentialUserBackendContribution(
   return new CredentialUserBackendContribution(host);
 }
 
-export function createCredentialUserBackendPlugin(
-  host: CredentialUserBackendHost,
-  lifecycle: { mount(value: CredentialUserBackendContribution): () => void },
-): Plugin {
-  return () => lifecycle.mount(createCredentialUserBackendContribution(host));
-}
-
 /**
  * What an application hands this Contribution: the User's encrypted credential store, under the
  * Package's own key so one wide host object can satisfy every Package's slice
@@ -1161,6 +1150,6 @@ export const userContribution = defineUserBackendContribution<
   CredentialUserBackendContribution
 >({
   specifier: "@frockbot/plugin-credentials/user",
-  create: (host, lifecycle) =>
-    createCredentialUserBackendPlugin(host.credentials, lifecycle),
+  mount: (host, lifecycle) =>
+    lifecycle.mount(createCredentialUserBackendContribution(host.credentials)),
 });

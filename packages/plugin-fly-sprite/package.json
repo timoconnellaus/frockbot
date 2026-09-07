@@ -8,7 +8,6 @@
     "./agent": "./src/agent.ts",
     "./computer": "./src/computer.ts",
     "./frockbot.json": "./frockbot.json",
-    "./host": "./src/host.ts",
     "./host-client": "./src/host-client.ts",
     "./manifest": "./src/manifest.ts",
     "./package.json": "./package.json",
@@ -24,13 +23,11 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@cordisjs/plugin-webui": "0.8.2",
     "@frockbot/computer-core": "workspace:*",
     "@frockbot/computer-host-protocol": "workspace:*",
     "@frockbot/computer-host-runtime": "workspace:*",
     "@frockbot/kernel-contracts": "workspace:*",
-    "@frockbot/plugin-computer": "workspace:*",
-    "cordis": "4.0.0-rc.8"
+    "@frockbot/plugin-computer": "workspace:*"
   },
   "devDependencies": {
     "@frockbot/plugin-testkit": "workspace:*",

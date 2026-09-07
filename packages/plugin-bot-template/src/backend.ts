@@ -14,7 +14,6 @@
 // The gateway owns no state here. It carries each request to the User Durable
 // Object that is the authority for that User's shares, and the share id names
 // which one that is.
-import type { Plugin } from "cordis";
 import {
   decodeTemplateContentHashV1,
   parseTemplateShareIdV1,
@@ -251,17 +250,6 @@ export function createBotTemplateBackendContribution(
   };
 }
 
-export namespace createBotTemplateBackendContribution {
-  export function plugin(
-    host: BotTemplateGatewayHostV1,
-    lifecycle: {
-      mount(value: BotTemplateBackendRouteContribution): () => void;
-    },
-  ): Plugin {
-    return () => lifecycle.mount(createBotTemplateBackendContribution(host));
-  }
-}
-
 /**
  * The manifest's gateway `backend` entry, resolved by specifier. The
  * application looks this descriptor up in its Contribution table; it never
@@ -272,5 +260,6 @@ export const backendContribution = defineGatewayContribution<
   BotTemplateBackendRouteContribution
 >({
   specifier: "@frockbot/plugin-bot-template/backend",
-  create: createBotTemplateBackendContribution.plugin,
+  mount: (host, lifecycle) =>
+    lifecycle.mount(createBotTemplateBackendContribution(host)),
 });

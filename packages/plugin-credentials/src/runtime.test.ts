@@ -3,11 +3,7 @@ import {
   parseCredentialKeyringV1,
   sealCredentialV1,
 } from "@frockbot/connection-core";
-import { Context } from "cordis";
-import {
-  createCredentialRuntimePlugin,
-  type CredentialLeaseRuntime,
-} from "./runtime.js";
+import { CredentialLeaseRuntime } from "./runtime.js";
 
 const serializedKeyring =
   '{"schemaVersion":1,"currentKeyId":"primary","keys":{"primary":"MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY"}}';
@@ -33,16 +29,9 @@ describe("Credential runtime Contribution", () => {
       expiresAt: "2099-01-01T00:00:00.000Z",
       envelope,
     };
-    const root = new Context();
-    await root.plugin(
-      createCredentialRuntimePlugin({
-        readSecret: () => serializedKeyring,
-      }),
-    );
-
-    const credentialLease = (
-      root as Context & { credentialLease: CredentialLeaseRuntime }
-    ).credentialLease;
+    const credentialLease = new CredentialLeaseRuntime({
+      readSecret: () => serializedKeyring,
+    });
     await expect(
       credentialLease.open({
         accountId: "account-1",
@@ -59,6 +48,5 @@ describe("Credential runtime Contribution", () => {
         lease,
       }),
     ).rejects.toThrow();
-    await root.fiber.dispose();
   });
 });

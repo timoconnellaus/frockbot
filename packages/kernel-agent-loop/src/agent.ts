@@ -1,9 +1,8 @@
-import { type Context, Service } from "cordis";
 import type {
   ModelBindingSnapshot,
   LoopAgentInputV1,
   LoopAgentRuntimeV1,
-  NormalizedModelRequest,
+  LoopRequestErrorDecisionV1,
   Session,
   SkillRefV1,
   TurnTypeV1,
@@ -61,8 +60,7 @@ export interface AgentSendV1 {
 export type PreStepDecision =
   { kind: "enter"; inputs: AgentInput[] } | { kind: "reject"; reason: string };
 
-export type RequestErrorAction =
-  { kind: "retry" } | { kind: "fallback" } | { kind: "fail" };
+export type RequestErrorAction = LoopRequestErrorDecisionV1;
 
 export interface Agent extends LoopAgentRuntimeV1 {
   readonly id: string;
@@ -82,102 +80,4 @@ export interface AgentHandle {
 
 export interface AgentFactory {
   create(options: AgentOptions): Promise<AgentHandle>;
-}
-
-declare module "cordis" {
-  interface Context {
-    agents: AgentRegistry;
-  }
-
-  interface Events {
-    "agent/request": (
-      agent: Agent,
-      request: NormalizedModelRequest,
-      signal: AbortSignal,
-      next: () => Promise<NormalizedModelRequest>,
-    ) => Promise<NormalizedModelRequest>;
-    "agent/request-error": (
-      agent: Agent,
-      error: unknown,
-      signal: AbortSignal,
-      next: () => Promise<RequestErrorAction>,
-    ) => Promise<RequestErrorAction>;
-    "agent/model-outcome-committed": (
-      agent: Agent,
-      requestId: string,
-    ) => Promise<void>;
-    "agent/turn-stopping": (agent: Agent, turn: number) => Promise<void>;
-    /**
-     * A step where the model wrote something *and* called tools, raised the
-     * moment the assistant message is journaled and before any tool runs.
-     *
-     * The kernel has no opinion about what that text is for — a Package that
-     * gives the Bot a voice does. In the Shell, the only thing a person sees
-     * is a `send_to_user` call, so a model that writes "On it — building the
-     * countdown applet now." and then goes on to call three tools has said it
-     * to nobody: the client draws one bubble per send, and there was no send.
-     * The prompt asks for the call, and this is what catches the model that
-     * narrates its acknowledgement in text anyway.
-     *
-     * Serial, and before the tools, so the promoted line lands ahead of the
-     * first tool result rather than after the work it was announcing.
-     */
-    "agent/assistant-text": (
-      agent: Agent,
-      text: string,
-      position: {
-        turn: number;
-        step: number;
-        requestId: string;
-        /**
-         * The tools the same step is about to call, by name, so a listener
-         * can tell an acknowledgement the model *only* narrated from one it
-         * is also delivering through its own send tool.
-         */
-        toolNames?: readonly string[];
-      },
-    ) => Promise<void>;
-  }
-}
-
-export class AgentRegistry extends Service {
-  private agents = new Map<string, Agent>();
-  private factory: AgentFactory | undefined;
-
-  constructor(ctx: Context) {
-    super(ctx, "agents");
-  }
-
-  setFactory(factory: AgentFactory): () => void {
-    if (this.factory) throw new Error("an agent factory is already registered");
-    this.factory = factory;
-    return () => {
-      if (this.factory === factory) this.factory = undefined;
-    };
-  }
-
-  create(options: AgentOptions): Promise<AgentHandle> {
-    if (!this.factory) throw new Error("no agent factory is registered");
-    return this.factory.create(options);
-  }
-
-  register(agent: Agent): () => void {
-    if (this.agents.has(agent.id))
-      throw new Error(`agent "${agent.id}" already exists`);
-    this.agents.set(agent.id, agent);
-    this.ctx.emit("agent/created", agent);
-    return () => {
-      if (this.agents.get(agent.id) !== agent) return;
-      this.agents.delete(agent.id);
-      this.ctx.emit("agent/disposed", agent);
-    };
-  }
-
-  get(agentId: string): Agent | undefined {
-    return this.agents.get(agentId);
-  }
-
-  list(): Agent[] {
-    return [...this.agents.values()];
-  }
 }

@@ -1,18 +1,16 @@
 import { describe, expect, test } from "bun:test";
-import { ComputerRegistry } from "@frockbot/computer-core";
-import { Context } from "cordis";
+import { createAgentRuntimeHarness } from "@frockbot/plugin-testkit";
 import {
-  createSharedComputerProviderPlugin,
+  createSharedComputerProviderFeature,
   SHARED_COMPUTER_PROVIDER_ID,
 } from "./shared-provider.js";
 
 describe("shared Computer provider", () => {
   test("forwards stable effect identity through the provider-neutral host", async () => {
     const requests: unknown[] = [];
-    const root = new Context();
-    await root.plugin(ComputerRegistry);
-    await root.plugin(
-      createSharedComputerProviderPlugin({
+    const runtime = createAgentRuntimeHarness();
+    await runtime.mount(
+      createSharedComputerProviderFeature({
         effect: (request) => {
           requests.push(request);
           return Promise.resolve({
@@ -34,8 +32,8 @@ describe("shared Computer provider", () => {
     );
     const identity = { userId: "user-1" };
     const tenant = { botId: "bot-1" };
-    root.computers.assign(identity, SHARED_COMPUTER_PROVIDER_ID);
-    const computer = await root.computers.open(identity, tenant);
+    runtime.computers.assign(identity, SHARED_COMPUTER_PROVIDER_ID);
+    const computer = await runtime.computers.open(identity, tenant);
     const result = await computer.exec?.execute(
       { executable: "/bin/true" },
       { effectId: "tool:1:1:0" },
@@ -51,6 +49,6 @@ describe("shared Computer provider", () => {
         operation: { type: "exec", request: { executable: "/bin/true" } },
       },
     ]);
-    await root.fiber.dispose();
+    await runtime.dispose();
   });
 });

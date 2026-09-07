@@ -54,15 +54,14 @@ import {
 import type { MachineTargetViewV1 } from "@frockbot/plugin-user-machine/target";
 import {
   decodeTurnTypeV1,
+  type AgentRuntimeV1,
+  type RuntimeFeatureV1,
   type Session,
   type ToolDefinition,
   type ToolExecutionContext,
   type ToolExecutionResult,
   type TurnTypeV1,
 } from "@frockbot/kernel-contracts";
-// Merges the Agent loop's event declarations into the cordis Context type.
-import type {} from "@frockbot/kernel-agent-loop/agent";
-import type { Plugin } from "cordis";
 import manifest from "../frockbot.json" with { type: "json" };
 
 export const MESSAGES_CHECK_PERMISSIONS_TOOL_V1 =
@@ -523,26 +522,24 @@ export function createMachineMessagesSendTool(
  * "off ⇒ the tools are absent from the catalog rather than refusing" means in
  * practice: this function is never called at all.
  */
-export function createMachineMessagesRuntimePlugin(
+export function createMachineMessagesFeature(
   host: MachineMessagesRuntimeHostV1,
-): Plugin.Function {
-  const plugin: Plugin.Function = (ctx) => {
+): RuntimeFeatureV1<AgentRuntimeV1> {
+  return (runtime) => {
     const ceiling = machineMessagesAdmissionCeilingV1();
     const register = (tool: ToolDefinition): (() => void) =>
-      ctx.tools.register(
+      runtime.tools.register(
         tool,
         ceiling ? { admissionCeiling: ceiling } : undefined,
       );
     const disposers = [
       ...createMachineMessagesReadTools(host).map(register),
-      register(createMachineMessagesSendTool(host, ctx.sessions)),
+      register(createMachineMessagesSendTool(host, runtime.sessions)),
     ];
     return () => {
       for (const dispose of disposers.toReversed()) dispose();
     };
   };
-  plugin.inject = ["tools", "sessions"];
-  return plugin;
 }
 
-export default createMachineMessagesRuntimePlugin;
+export default createMachineMessagesFeature;

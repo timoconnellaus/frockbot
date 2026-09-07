@@ -1,5 +1,3 @@
-// Importing the augmented module is what merges these declarations into cordis.
-import type {} from "cordis";
 import {
   TURN_TYPES_V1,
   type ToolAttachmentV1,
@@ -221,29 +219,3 @@ export type ToolGuard = (
   call: ToolCall,
   context: ToolExecutionContext,
 ) => ToolGuardDenial | undefined | Promise<ToolGuardDenial | undefined>;
-
-declare module "cordis" {
-  interface Context {
-    tools: ToolExecution & ToolRegistration;
-  }
-
-  interface Events {
-    "tools/pre-execute": (
-      call: ToolCall,
-      context: ToolExecutionContext,
-      next: () => Promise<ToolPreparation>,
-    ) => Promise<ToolPreparation>;
-    "tools/execute": (
-      call: ToolCall,
-      context: ToolExecutionContext,
-      next: () => Promise<ToolExecutionResult>,
-    ) => Promise<ToolExecutionResult>;
-    "tools/post-execute": (
-      call: ToolCall,
-      result: ToolExecutionResult,
-      context: ToolExecutionContext,
-      next: () => Promise<ToolExecutionResult>,
-    ) => Promise<ToolExecutionResult>;
-    "tools/result": (call: ToolCall, result: ToolExecutionResult) => void;
-  }
-}

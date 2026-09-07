@@ -1,4 +1,4 @@
-import type { Plugin } from "cordis";
+import type { RuntimeCleanupV1 } from "./runtime-feature.js";
 
 /**
  * How a first-party Contribution names the code that implements it.
@@ -30,7 +30,7 @@ export interface ContributionLifecycleV1<Contribution> {
 
 /**
  * A first-party backend Contribution: the specifier its manifest declares, the
- * host it belongs in, and the factory that mounts it into a Cordis fiber.
+ * host it belongs in, and the function that mounts it.
  *
  * `Host` is contravariant, so a descriptor written against the narrow host
  * interface its own Package declares is usable by an application whose wide
@@ -40,7 +40,10 @@ export interface BackendContributionDescriptorV1<Host, Contribution> {
   readonly kind: "backend";
   readonly specifier: string;
   readonly host: BackendContributionHostV1;
-  create(host: Host, lifecycle: ContributionLifecycleV1<Contribution>): Plugin;
+  mount(
+    host: Host,
+    lifecycle: ContributionLifecycleV1<Contribution>,
+  ): void | RuntimeCleanupV1 | Promise<void | RuntimeCleanupV1>;
 }
 
 /**

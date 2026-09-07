@@ -40,7 +40,6 @@ import {
   type FrockBotManifest,
 } from "@frockbot/kernel-composition";
 import { canonicalJson, sha256 } from "@frockbot/kernel-composition/compiler";
-import type { Plugin } from "cordis";
 import type { ComputerRegistry } from "@frockbot/computer-core";
 import { appletsSourceRootV1 } from "@frockbot/plugin-applets/root";
 import { syncWorkspaceRootNowV1 } from "@frockbot/plugin-computer/agent";
@@ -109,9 +108,7 @@ import {
 } from "@frockbot/configuration-core";
 import {
   createFoundationEnabledRuntimePackages,
-  mergeFoundationRuntimePackages,
   createFoundationHostedRuntimePackages,
-  mergeFoundationRuntimePackagesV1,
 } from "@frockbot/application-foundation/runtime";
 import {
   cancelStoredRun,
@@ -2050,7 +2047,9 @@ export class ShellBotBackendContribution {
         reason: "the Package is not running in this Bot's active Composition",
       };
     }
-    const session = active.mounted.runtime.root.sessions.get(input.sessionId);
+    const session = active.mounted.runtime.services.sessions.get(
+      input.sessionId,
+    );
     if (!session) {
       return {
         status: "unavailable",
@@ -2132,7 +2131,7 @@ export class ShellBotBackendContribution {
       ...(active.subagentRole ? { subagentRole: active.subagentRole } : {}),
       signal: active.signal,
     };
-    const preparation = await active.mounted.runtime.root.tools.prepare(
+    const preparation = await active.mounted.runtime.services.tools.prepare(
       call,
       context,
     );
@@ -2154,7 +2153,7 @@ export class ShellBotBackendContribution {
       } else {
         // A call the object had already started is dispatched again under the
         // same effect id rather than investigated.
-        result = await active.mounted.runtime.root.tools.executePrepared(
+        result = await active.mounted.runtime.services.tools.executePrepared(
           preparation,
           context,
         );
@@ -2307,12 +2306,9 @@ export class ShellBotBackendContribution {
       // just built on its Computer has it open already.
       syncSourceRootNow: active
         ? async (appletId) => {
-            const root = active.mounted.runtime.root as unknown as {
-              computers?: ComputerRegistry;
-              sessions: typeof active.mounted.runtime.root.sessions;
-            };
+            const root = active.mounted.runtime.services;
             const computerIdentity = { userId: identity.userId };
-            if (!root.computers?.assignment(computerIdentity)) {
+            if (!root.computers.assignment(computerIdentity)) {
               return { status: "skipped", detail: "" } as const;
             }
             const session = root.sessions.get(active.sessionId);
@@ -2958,7 +2954,7 @@ export class ShellBotBackendContribution {
           admitEffect: () => Promise.resolve(true),
         }).mount(generation, signal);
         try {
-          yield* composition.root.llm.stream(request, signal);
+          yield* composition.runtime.services.llm.stream(request, signal);
         } finally {
           await composition.dispose();
         }
@@ -4596,8 +4592,7 @@ export class ShellBotBackendContribution {
         },
       })),
     ];
-    const agentPackages: FoundationAgentPackage[] =
-      mergeFoundationRuntimePackages(resolvedAgentPackages);
+    const agentPackages: FoundationAgentPackage[] = resolvedAgentPackages;
     // One generic resolver owns precedence: enabled Bot-scoped Package value,
     // enabled User-scoped Package value, then the platform model. The kernel
     // names no Package (AGENTS.md Configuration shape).
@@ -4710,10 +4705,7 @@ export class ShellBotBackendContribution {
       );
     }
     return {
-      // One Package can reach a Turn as more than one Contribution — Ollama
-      // Cloud is both the model provider and the `web_search` Capability — and
-      // the runtime resolves one Plugin per Contribution specifier.
-      agentPackages: mergeFoundationRuntimePackagesV1(agentPackages),
+      agentPackages,
       capabilities: structuredClone(plan.capabilities),
       modelSelection: {
         provider: binding.providerType,
@@ -6332,13 +6324,6 @@ export function createShellBotBackendContribution(
   return new ShellBotBackendContribution(host);
 }
 
-export function createShellBotBackendPlugin(
-  host: ShellBotBackendHost,
-  lifecycle: { mount(value: ShellBotBackendContribution): () => void },
-): Plugin {
-  return () => lifecycle.mount(createShellBotBackendContribution(host));
-}
-
 /**
  * What an application hands this Contribution: the conversation surface and the Bot's Composition, under the
  * Package's own key so one wide host object can satisfy every Package's slice
@@ -6358,6 +6343,6 @@ export const backendContribution = defineBotBackendContribution<
   ShellBotBackendContribution
 >({
   specifier: "@frockbot/plugin-shell/backend",
-  create: (host, lifecycle) =>
-    createShellBotBackendPlugin(host.shell, lifecycle),
+  mount: (host, lifecycle) =>
+    lifecycle.mount(createShellBotBackendContribution(host.shell)),
 });

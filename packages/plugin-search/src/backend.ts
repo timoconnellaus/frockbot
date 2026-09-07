@@ -9,7 +9,6 @@
 // joins the live Bot directory, and answers. Archived Bots are excluded unless
 // asked for, and hidden Bots are returned labelled rather than dropped: the
 // sidebar hides them, which is not the same as them not existing.
-import type { Plugin } from "cordis";
 import type {
   BotIdentityDirectoryViewV1,
   BotLifecycleDirectoryViewV1,
@@ -207,15 +206,6 @@ export function createSearchBackendContribution(
   };
 }
 
-export namespace createSearchBackendContribution {
-  export function plugin(
-    host: SearchGatewayHost,
-    lifecycle: { mount(value: SearchBackendRouteContribution): () => void },
-  ): Plugin {
-    return () => lifecycle.mount(createSearchBackendContribution(host));
-  }
-}
-
 /**
  * The manifest's gateway `backend` entry, resolved by specifier. The
  * application looks this descriptor up in its Contribution table; it never
@@ -226,5 +216,6 @@ export const backendContribution = defineGatewayContribution<
   SearchBackendRouteContribution
 >({
   specifier: "@frockbot/plugin-search/backend",
-  create: createSearchBackendContribution.plugin,
+  mount: (host, lifecycle) =>
+    lifecycle.mount(createSearchBackendContribution(host)),
 });

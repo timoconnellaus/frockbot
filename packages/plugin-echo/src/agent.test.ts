@@ -3,15 +3,13 @@ import {
   type LlmStreamEvent,
   type NormalizedModelRequest,
 } from "@frockbot/kernel-contracts";
-import { LlmRegistry } from "@frockbot/plugin-models";
-import { ToolRegistry } from "@frockbot/plugin-tools";
 import {
-  createPluginHarness,
+  createAgentRuntimeHarness,
   verifyPluginPackage,
 } from "@frockbot/plugin-testkit";
 import manifest from "../frockbot.json" with { type: "json" };
 import packageJson from "../package.json" with { type: "json" };
-import echoAgentPlugin, { ECHO_TOOL_NAME } from "./agent.js";
+import echoFeature, { ECHO_TOOL_NAME } from "./agent.js";
 
 function request(content: string): NormalizedModelRequest {
   return {
@@ -32,24 +30,21 @@ async function collect(
   return events;
 }
 
-describe("echo plugin", () => {
+describe("echo feature", () => {
   test("registers its tool and handles the reference echo command", async () => {
-    const harness = await createPluginHarness([LlmRegistry, ToolRegistry]);
-    harness.root.llm.register({
+    const runtime = createAgentRuntimeHarness();
+    runtime.llm.register({
       id: "fixture",
       async *stream() {
         yield* [] as LlmStreamEvent[];
-        throw new Error("echo middleware delegated unexpectedly");
+        throw new Error("echo stream hook delegated unexpectedly");
       },
     });
-    const fiber = await harness.mount(echoAgentPlugin);
+    await runtime.mount(echoFeature);
     const controller = new AbortController();
 
     const events = await collect(
-      harness.root.llm.stream(
-        request("/echo hello plugins"),
-        controller.signal,
-      ),
+      runtime.llm.stream(request("/echo hello plugins"), controller.signal),
     );
     expect(events).toHaveLength(2);
     expect(events[0]).toMatchObject({
@@ -65,7 +60,7 @@ describe("echo plugin", () => {
     });
     const first = events[0];
     if (first?.type !== "tool-call") throw new Error("expected a tool call");
-    const preparation = await harness.root.tools.prepare(first.call, {
+    const preparation = await runtime.tools.prepare(first.call, {
       botId: "echo-bot",
       agentId: "echo-agent",
       compositionGenerationId: "bootstrap",
@@ -76,7 +71,7 @@ describe("echo plugin", () => {
     });
     if (preparation.kind !== "ready") throw new Error("echo tool was denied");
     expect(
-      await harness.root.tools.executePrepared(preparation, {
+      await runtime.tools.executePrepared(preparation, {
         botId: "echo-bot",
         agentId: "echo-agent",
         compositionGenerationId: "bootstrap",
@@ -87,11 +82,10 @@ describe("echo plugin", () => {
       }),
     ).toEqual({ content: "hello plugins", isError: false });
 
-    await fiber.dispose();
+    await runtime.dispose();
     expect(
-      harness.root.tools.schemas({ turnType: "chat" }).map((tool) => tool.name),
+      runtime.tools.schemas({ turnType: "chat" }).map((tool) => tool.name),
     ).toEqual(["get_dynamic_tools", "call_dynamic_tool"]);
-    await harness.dispose();
   });
 
   test("satisfies plugin package conventions", () => {

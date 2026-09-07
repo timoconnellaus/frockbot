@@ -15,12 +15,11 @@
 // exactly one run at a time, so the firing is durable immediately and lands the
 // moment the calling Turn settles. "Queue, never drop, never parallel."
 import type {
+  AgentRuntimeV1,
+  RuntimeFeatureV1,
   ToolDefinition,
   ToolExecutionContext,
 } from "@frockbot/kernel-contracts";
-// Merges the Agent loop's event declarations into the cordis Context type.
-import type {} from "@frockbot/kernel-agent-loop/agent";
-import type { Plugin } from "cordis";
 import {
   ROUTINE_NAME_MAX_LENGTH,
   ROUTINE_PROMPT_MAX_LENGTH,
@@ -390,17 +389,15 @@ export function createRoutineManageTool(
  * offered on every turn type its Capability's manifest ceiling allows — it is a
  * work tool, and the Capability names all four turn types.
  */
-export function createRoutinesRuntimePlugin(
+export function createRoutinesRuntimeFeature(
   host: RoutinesRuntimeHostV1,
-): Plugin.Function {
-  const plugin: Plugin.Function = (ctx) => {
+): RuntimeFeatureV1<AgentRuntimeV1> {
+  return (runtime) => {
     const writer = host.writer;
     if (!writer) return () => {};
-    const dispose = ctx.tools.register(
+    const dispose = runtime.tools.register(
       createRoutineManageTool({ ...host, writer }),
     );
     return () => dispose();
   };
-  plugin.inject = ["tools"];
-  return plugin;
 }

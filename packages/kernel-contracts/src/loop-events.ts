@@ -1,9 +1,8 @@
 // The Agent loop's public event vocabulary.
 //
 // This is the single inventory Packages use to discover loop extension
-// points. In-process first-party listeners receive the richer Cordis call
-// signatures declared beside the services that dispatch them; a Bot isolate
-// receives only the structured-clonable payload DTO named here. In
+// points. First-party features take the richer signatures in `loop-hooks.ts`;
+// a Bot isolate receives only the structured-clonable payload DTO named here. In
 // particular, no payload contains a live Agent, Session, Context, AbortSignal,
 // storage handle, credential, or service binding.
 //
@@ -11,7 +10,7 @@
 // only after the first-party application has mounted. First-party policy
 // therefore observes the original dispatch before Bot-authored policy, and a
 // first-party listener may short-circuit without entering an isolate. A hook
-// is registered only on the mounted Bot's Cordis root and is additionally
+// is added only to the mounted Bot's hook list and is additionally
 // fenced by botId and Composition generation, so it cannot reach another Bot
 // or an in-flight Turn pinned to another generation.
 import type {
@@ -47,7 +46,7 @@ export interface LoopAgentSnapshotV1 {
   status: LoopAgentStatusV1;
 }
 
-/** The live in-process projection used only by first-party Cordis listeners. */
+/** The live in-process projection first-party hooks receive. */
 export interface LoopAgentRuntimeV1 {
   readonly id: string;
   readonly botId: string;
@@ -653,59 +652,3 @@ export const LOOP_EVENTS_V1 = {
     isolateHook: false,
   },
 } as const satisfies Record<LoopEventNameV1, LoopEventDefinitionV1>;
-
-declare module "cordis" {
-  interface Events {
-    "agent/created": (agent: LoopAgentRuntimeV1) => void;
-    "agent/disposed": (agent: LoopAgentRuntimeV1) => void;
-    "agent/status": (
-      agent: LoopAgentRuntimeV1,
-      status: LoopAgentStatusV1,
-    ) => void;
-    "agent/inbox/inserted": (
-      agent: LoopAgentRuntimeV1,
-      input: LoopAgentInputV1,
-    ) => void;
-    "agent/inbox/claimed": (
-      agent: LoopAgentRuntimeV1,
-      inputs: LoopAgentInputV1[],
-      turn: number,
-    ) => void;
-    "agent/pre-step": (
-      agent: LoopAgentRuntimeV1,
-      inputs: LoopAgentInputV1[],
-      turn: number,
-      step: number,
-      next: () => Promise<LoopPreStepDecisionV1>,
-    ) => Promise<LoopPreStepDecisionV1>;
-    "agent/message-window": (
-      agent: LoopAgentRuntimeV1,
-      messages: LlmMessage[],
-      turn: number,
-      step: number,
-      signal: AbortSignal,
-      next: () => Promise<LlmMessage[]>,
-    ) => Promise<LlmMessage[]>;
-    "agent/tool-exposure": (
-      agent: LoopAgentRuntimeV1,
-      tools: ToolSchema[],
-      turn: number,
-      step: number,
-      signal: AbortSignal,
-      next: () => Promise<ToolSchema[]>,
-    ) => Promise<ToolSchema[]>;
-    "agent/step-continuation": (
-      agent: LoopAgentRuntimeV1,
-      decision: LoopStepContinuationV1,
-      turn: number,
-      step: number,
-      signal: AbortSignal,
-      next: () => Promise<LoopStepContinuationV1>,
-    ) => Promise<LoopStepContinuationV1>;
-    "agent/cancel-requested": (
-      agent: LoopAgentRuntimeV1,
-      reason: "user" | "shutdown",
-    ) => void;
-    "agent/error": (agent: LoopAgentRuntimeV1, error: unknown) => void;
-  }
-}

@@ -58,7 +58,6 @@ import {
   type MachineResultReceiptV1,
   type MachineTokenClaimsV1,
 } from "@frockbot/machine-protocol";
-import type { Plugin } from "cordis";
 import { verifyMachinePairingCodeV1 } from "./pairing.js";
 import { defineGatewayContribution } from "@frockbot/kernel-contracts/contributions";
 
@@ -361,15 +360,6 @@ export function createMachineBackendContribution(
   return contribution;
 }
 
-export namespace createMachineBackendContribution {
-  export function plugin(
-    host: MachineGatewayHostV1,
-    lifecycle: { mount(value: MachineBackendRouteContribution): () => void },
-  ): Plugin {
-    return () => lifecycle.mount(createMachineBackendContribution(host));
-  }
-}
-
 /**
  * The manifest's gateway `backend` entry, resolved by specifier. The
  * application looks this descriptor up in its Contribution table; it never
@@ -380,5 +370,6 @@ export const backendContribution = defineGatewayContribution<
   MachineBackendRouteContribution
 >({
   specifier: "@frockbot/plugin-user-machine/backend",
-  create: createMachineBackendContribution.plugin,
+  mount: (host, lifecycle) =>
+    lifecycle.mount(createMachineBackendContribution(host)),
 });

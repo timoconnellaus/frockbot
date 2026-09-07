@@ -8,25 +8,19 @@
 // and a sync that cannot run is a recorded outcome rather than a failed Turn.
 import { describe, expect, test } from "bun:test";
 import {
-  ComputerRegistry,
   computerSyncSummaryV1,
   type ComputerHandle,
   type ComputerProvider,
   type ComputerSyncSummaryV1,
 } from "@frockbot/computer-core";
-import { AgentRegistry } from "@frockbot/kernel-agent-loop/agent";
-import { AgentLoop } from "@frockbot/kernel-agent-loop";
-import {
-  SessionStore,
-  type LlmProvider,
-  type SessionEvent,
-  type WorkspaceRootV1,
+import { createAgentLoop } from "@frockbot/kernel-agent-loop";
+import type {
+  LlmProvider,
+  SessionEvent,
+  WorkspaceRootV1,
 } from "@frockbot/kernel-contracts";
-import { LlmRegistry } from "@frockbot/plugin-models";
-import { SystemPromptRegistry } from "@frockbot/plugin-prompt";
-import { ToolRegistry } from "@frockbot/plugin-tools";
-import { Context, type Plugin } from "cordis";
-import { createComputerAgentPlugin, syncWorkspaceRootNowV1 } from "./agent.js";
+import { createAgentRuntimeHarness } from "@frockbot/plugin-testkit";
+import { createComputerAgentFeature, syncWorkspaceRootNowV1 } from "./agent.js";
 
 const COMPOSITION = {
   generationId: "1970-01-01T00:00:00.000Z:0123456789abcdef",
@@ -122,32 +116,21 @@ async function runTurn(
   provider: ComputerProvider,
   model: LlmProvider,
 ): Promise<SessionEvent[]> {
-  const root = new Context();
-  await root.plugin(SessionStore, {});
-  await root.plugin(SystemPromptRegistry);
-  await root.plugin(LlmRegistry);
-  await root.plugin(ToolRegistry);
-  await root.plugin(ComputerRegistry);
-  await root.plugin(AgentRegistry);
-  const providerPlugin: Plugin.Function = (ctx) => {
-    const disposeModel = ctx.llm.register(model);
-    const disposeComputer = ctx.computers.register(provider);
-    return () => {
-      disposeComputer();
-      disposeModel();
-    };
-  };
-  providerPlugin.inject = ["llm", "computers"];
-  await root.plugin(providerPlugin);
-  await root.plugin(
-    createComputerAgentPlugin({
+  const runtime = createAgentRuntimeHarness();
+  runtime.llm.register(model);
+  runtime.computers.register(provider);
+  await runtime.mount(
+    createComputerAgentFeature({
       userId: "user-1",
       defaultProviderId: "recording",
     }),
   );
-  await root.plugin(AgentLoop, { maxSteps: 4, composition: COMPOSITION });
+  const loop = createAgentLoop(runtime, {
+    maxSteps: 4,
+    composition: COMPOSITION,
+  });
 
-  const handle = await root.agents.create({
+  const handle = await loop.create({
     botId: "bot-1",
     sessionId: "session-1",
     provider: model.id,
@@ -157,7 +140,8 @@ async function runTurn(
   handle.agent.send("use the Computer");
   await handle.agent.whenIdle();
   const events = [...handle.agent.session.events];
-  await root.fiber.dispose();
+  await loop.dispose();
+  await runtime.dispose();
   return events;
 }
 
@@ -299,13 +283,12 @@ describe("syncWorkspaceRootNowV1", () => {
   };
 
   async function sessionHarness() {
-    const context = new Context();
-    await context.plugin(SessionStore, {});
-    const session = context.sessions.create("session-1");
+    const runtime = createAgentRuntimeHarness();
+    const session = runtime.sessions.create("session-1");
     return {
-      sessions: context.sessions,
+      sessions: runtime.sessions,
       session,
-      dispose: () => context.fiber.dispose(),
+      dispose: () => runtime.dispose(),
     };
   }
 

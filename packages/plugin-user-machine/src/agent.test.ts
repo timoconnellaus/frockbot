@@ -2,21 +2,22 @@
 // never do — run anything.
 import { describe, expect, test } from "bun:test";
 import {
-  SessionStore,
   type Session,
   type ToolCall,
   type ToolExecutionContext,
   type TurnTypeV1,
 } from "@frockbot/kernel-contracts";
-import { ToolRegistry } from "@frockbot/plugin-tools";
-import { Context } from "cordis";
+import {
+  createAgentRuntimeHarness,
+  type AgentRuntimeHarness,
+} from "@frockbot/plugin-testkit";
 import type {
   MachineCommandResultV1,
   MachineListEntryV1,
   MachineListViewV1,
 } from "@frockbot/machine-protocol";
 import {
-  createMachineRuntimePlugin,
+  createMachineRuntimeFeature,
   machineAdmissionCeilingV1,
   MACHINE_COMMAND_CHECK_TOOL_V1,
   MACHINE_CONTROL_CAPABILITY_V1,
@@ -57,7 +58,7 @@ function entry(
 }
 
 interface Harness {
-  root: Context;
+  runtime: AgentRuntimeHarness;
   session: Session;
   storage: Map<string, unknown>;
   target: MachineTargetViewV1;
@@ -73,10 +74,8 @@ async function mount(
     writer?: boolean;
   } = {},
 ): Promise<Harness> {
-  const root = new Context();
-  await root.plugin(SessionStore);
-  await root.plugin(ToolRegistry);
-  const session = root.sessions.create(SESSION_ID);
+  const runtime = createAgentRuntimeHarness();
+  const session = runtime.sessions.create(SESSION_ID);
   session.appendBatch([
     { type: "turn/start", turn: 4 },
     { type: "step/start", turn: 4, step: 2 },
@@ -117,14 +116,14 @@ async function mount(
     describeTarget: async () => target,
     readResult: async () => options.result,
   };
-  await root.plugin(createMachineRuntimePlugin(host));
+  await runtime.mount(createMachineRuntimeFeature(host));
   return {
-    root,
+    runtime,
     session,
     storage: store,
     target,
     ...(options.result === undefined ? {} : { result: options.result }),
-    dispose: () => root.fiber.dispose(),
+    dispose: () => runtime.dispose(),
   };
 }
 
@@ -148,9 +147,9 @@ async function invoke(
 ) {
   const call: ToolCall = { id: "call-1", name, input };
   const context = contextFor(turnType);
-  const preparation = await harness.root.tools.prepare(call, context);
+  const preparation = await harness.runtime.tools.prepare(call, context);
   if (preparation.kind === "denied") return preparation.result;
-  return harness.root.tools.executePrepared(preparation, context);
+  return harness.runtime.tools.executePrepared(preparation, context);
 }
 
 const CONTROL_TOOLS = [
@@ -165,7 +164,7 @@ describe("machine tool admission", () => {
     const harness = await mount();
     try {
       const names = (turnType: TurnTypeV1) =>
-        harness.root.tools.schemas({ turnType }).map((tool) => tool.name);
+        harness.runtime.tools.schemas({ turnType }).map((tool) => tool.name);
       for (const turnType of ["chat", "automation", "subagent"] as const) {
         expect(names(turnType)).toContain(MACHINE_LIST_TOOL_V1);
         expect(names(turnType)).toContain(MACHINE_COMMAND_CHECK_TOOL_V1);
@@ -197,7 +196,7 @@ describe("machine tool admission", () => {
   test("a Turn with no writer gets the registry and nothing that reaches a laptop", async () => {
     const harness = await mount({ writer: false });
     try {
-      const names = harness.root.tools
+      const names = harness.runtime.tools
         .schemas({ turnType: "chat" })
         .map((tool) => tool.name);
       expect(names).toEqual([

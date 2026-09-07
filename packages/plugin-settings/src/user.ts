@@ -46,7 +46,6 @@ import type {
   PackageSettingDefinition,
   ConnectionTypeDefinition,
 } from "@frockbot/kernel-composition";
-import type { Plugin } from "cordis";
 import { defineUserBackendContribution } from "@frockbot/kernel-contracts/contributions";
 
 const STATE_KEY = "user-configuration";
@@ -1533,13 +1532,6 @@ export function createUserSettingsBackendContribution(
   return new UserSettingsBackendContribution(host);
 }
 
-export function createUserSettingsBackendPlugin(
-  host: UserSettingsBackendHost,
-  lifecycle: { mount(value: UserSettingsBackendContribution): () => void },
-): Plugin {
-  return () => lifecycle.mount(createUserSettingsBackendContribution(host));
-}
-
 /**
  * What an application hands this Contribution: User settings, Package installation, and Connection commands, under the
  * Package's own key so one wide host object can satisfy every Package's slice
@@ -1559,6 +1551,6 @@ export const userContribution = defineUserBackendContribution<
   UserSettingsBackendContribution
 >({
   specifier: "@frockbot/plugin-settings/user",
-  create: (host, lifecycle) =>
-    createUserSettingsBackendPlugin(host.settings, lifecycle),
+  mount: (host, lifecycle) =>
+    lifecycle.mount(createUserSettingsBackendContribution(host.settings)),
 });

@@ -175,7 +175,7 @@ export function repairOrphanedOpenTurnV1(
 ): SessionEvent[] {
   if (!hasOrphanedOpenTurnV1(latest)) return [];
   try {
-    return new Session(sessionId, () => {}, latest).reconcileInterrupted();
+    return new Session(sessionId, latest).reconcileInterrupted();
   } catch {
     return [];
   }
@@ -235,7 +235,7 @@ export function repairedSessionLogV1(
   const closeOpenTurn = (): boolean => {
     if (repaired.length === 0 || !hasOrphanedOpenTurnV1(repaired)) return true;
     try {
-      const session = new Session(sessionId, () => {}, repaired);
+      const session = new Session(sessionId, repaired);
       session.reconcileInterrupted();
       repaired = [...session.events];
     } catch {

@@ -22,11 +22,10 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@frockbot/kernel-agent-loop": "workspace:*",
-    "@frockbot/kernel-contracts": "workspace:*",
-    "cordis": "4.0.0-rc.8"
+    "@frockbot/kernel-contracts": "workspace:*"
   },
   "devDependencies": {
+    "@frockbot/plugin-testkit": "workspace:*",
     "@types/bun": "1.4.0",
     "typescript": "^7.0.2"
   },

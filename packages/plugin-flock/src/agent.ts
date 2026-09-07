@@ -49,14 +49,15 @@ import {
   type OperationReceiptV1,
 } from "@frockbot/configuration-core";
 import type {
+  AgentRuntimeV1,
   PromptSection,
+  RuntimeFeatureV1,
   ToolDefinition,
   ToolExecutionContext,
   ToolExecutionResult,
   TurnTypeV1,
 } from "@frockbot/kernel-contracts";
 import { decodeTurnTypeV1 } from "@frockbot/kernel-contracts";
-import type { Plugin } from "cordis";
 import {
   FlockConflictError,
   isFlockIdentifier,
@@ -725,19 +726,19 @@ export function createInboundAgentPromptSectionV1(
  * on every turn type. `bot_message` is separately bounded to chat by the
  * manifest so an inbound agent Turn cannot recursively fan out.
  */
-export function createFlockRuntimePlugin(
+export function createFlockRuntimeFeature(
   host: FlockSelfRuntimeHostV1,
-): Plugin.Function {
-  const plugin: Plugin.Function = (ctx) => {
+): RuntimeFeatureV1<AgentRuntimeV1> {
+  return (runtime) => {
     const messagingCeiling = flockAdmissionCeilingV1(
       BOT_MESSAGING_CAPABILITY_V1,
     );
     const disposers = [
-      ctx.systemPrompt.register(createTeammatesPromptSectionV1(host)),
-      ctx.systemPrompt.register(createInboundAgentPromptSectionV1(host)),
-      ctx.tools.register(createBotUpdateTool(host)),
-      ctx.tools.register(createBotCreateTool(host)),
-      ctx.tools.register(
+      runtime.systemPrompt.register(createTeammatesPromptSectionV1(host)),
+      runtime.systemPrompt.register(createInboundAgentPromptSectionV1(host)),
+      runtime.tools.register(createBotUpdateTool(host)),
+      runtime.tools.register(createBotCreateTool(host)),
+      runtime.tools.register(
         createBotMessageTool(host),
         messagingCeiling ? { admissionCeiling: messagingCeiling } : undefined,
       ),
@@ -746,8 +747,6 @@ export function createFlockRuntimePlugin(
       for (const dispose of disposers.toReversed()) dispose();
     };
   };
-  plugin.inject = ["tools", "systemPrompt"];
-  return plugin;
 }
 
-export default createFlockRuntimePlugin;
+export default createFlockRuntimeFeature;

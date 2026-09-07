@@ -20,7 +20,6 @@
 // Durable Object, which proves directory membership before it answers — so a
 // Bot that is not this User's is a 404 here for the same reason it is one on
 // `/api/bots/:id/settings`, and never because this module checked.
-import type { Plugin } from "cordis";
 import {
   RoutineHookError,
   ROUTINE_HOOK_BODY_MAX_BYTES,
@@ -371,15 +370,6 @@ export function createRoutinesBackendContribution(
   return contribution;
 }
 
-export namespace createRoutinesBackendContribution {
-  export function plugin(
-    host: RoutinesGatewayHost,
-    lifecycle: { mount(value: RoutinesBackendRouteContribution): () => void },
-  ): Plugin {
-    return () => lifecycle.mount(createRoutinesBackendContribution(host));
-  }
-}
-
 /**
  * The manifest's gateway `backend` entry, resolved by specifier. The
  * application looks this descriptor up in its Contribution table; it never
@@ -390,5 +380,6 @@ export const backendContribution = defineGatewayContribution<
   RoutinesBackendRouteContribution
 >({
   specifier: "@frockbot/plugin-routines/backend",
-  create: createRoutinesBackendContribution.plugin,
+  mount: (host, lifecycle) =>
+    lifecycle.mount(createRoutinesBackendContribution(host)),
 });

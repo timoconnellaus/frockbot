@@ -26,10 +26,9 @@ import type {
   WorkspaceMemoryRootV1,
   WorkspaceWriterV1,
   MemoryScopeNameV1,
+  AgentRuntimeV1,
+  RuntimeFeatureV1,
 } from "@frockbot/kernel-contracts";
-// Merges the Agent loop's event declarations into the cordis Context type.
-import type {} from "@frockbot/kernel-agent-loop/agent";
-import type { Plugin } from "cordis";
 import { createMemoryEmbedder } from "./embeddings.js";
 import {
   readAllMemoryDocumentsV1,
@@ -1188,80 +1187,82 @@ export async function readProjectDocumentV1(
  * The runtime Contribution. Registers the Memory prompt section, the read
  * tools, and — only when the host supplies Bot provenance — the write tools.
  */
-export function createMemoryRuntimePlugin(
+export function createMemoryRuntimeFeature(
   host: MemoryRuntimeHostV1,
-): Plugin.Function {
-  const plugin: Plugin.Function = (ctx) => {
+): RuntimeFeatureV1<AgentRuntimeV1> {
+  return (runtime) => {
     const projection = new MemoryProjection(host);
     const disposers: Array<() => void> = [];
     disposers.push(
-      ctx.systemPrompt.register({
+      runtime.systemPrompt.register({
         id: "memory",
         order: 100,
         render: () => projection.current().text,
       }),
     );
     disposers.push(
-      ctx.tools.register(createMemorySearchTool(host, projection)),
+      runtime.tools.register(createMemorySearchTool(host, projection)),
     );
     disposers.push(
-      ctx.tools.register(createMemoryRebuildIndexTool(projection)),
+      runtime.tools.register(createMemoryRebuildIndexTool(projection)),
     );
     if (host.writer) {
       const writing = { ...host, writer: host.writer };
       disposers.push(
-        ctx.tools.register(
-          createMemoryWriteTool(writing, ctx.sessions, projection),
+        runtime.tools.register(
+          createMemoryWriteTool(writing, runtime.sessions, projection),
         ),
       );
       disposers.push(
-        ctx.tools.register(
-          createMemoryForgetTool(writing, ctx.sessions, projection),
+        runtime.tools.register(
+          createMemoryForgetTool(writing, runtime.sessions, projection),
         ),
       );
       if (host.projects) {
         for (const tool of createProjectTools(
           { ...writing, projects: host.projects },
-          ctx.sessions,
+          runtime.sessions,
           projection,
         )) {
-          disposers.push(ctx.tools.register(tool));
+          disposers.push(runtime.tools.register(tool));
         }
       }
     }
     disposers.push(
-      ctx.on("agent/pre-step", async (agent, _inputs, turn, step, next) => {
-        // Once per Turn, at its first step. Memory a Turn writes reaches its
-        // own prompt on the next Turn, which is what makes the injected block
-        // and the `memory/injected` record describe the same thing.
-        if (step === 1 || projection.loadedTurn() !== turn) {
-          try {
-            await projection.refresh(turn, agent.session);
-          } catch (error) {
-            // Memory is remote, and a remote read that throws used to fail
-            // the whole Turn as `model-error`. A Turn with no Memory is a
-            // worse Turn; a Turn that does not happen is no Turn at all. The
-            // gap is recorded so it is visible in durable state rather than
-            // being a silent change in the Bot's behaviour.
-            agent.session.append({
-              type: "memory/injected",
-              turn,
-              sources: [],
-              facts: [],
-              omissions: [
-                {
-                  scope: "bot",
-                  reason:
-                    error instanceof Error
-                      ? error.message
-                      : "Memory could not be read for this Turn",
-                },
-              ],
-            });
-            await agent.session.flush();
+      runtime.hooks.add({
+        preStep: async (agent, _inputs, turn, step, next) => {
+          // Once per Turn, at its first step. Memory a Turn writes reaches its
+          // own prompt on the next Turn, which is what makes the injected
+          // block and the `memory/injected` record describe the same thing.
+          if (step === 1 || projection.loadedTurn() !== turn) {
+            try {
+              await projection.refresh(turn, agent.session);
+            } catch (error) {
+              // Memory is remote, and a remote read that throws used to fail
+              // the whole Turn as `model-error`. A Turn with no Memory is a
+              // worse Turn; a Turn that does not happen is no Turn at all. The
+              // gap is recorded so it is visible in durable state rather than
+              // being a silent change in the Bot's behaviour.
+              agent.session.append({
+                type: "memory/injected",
+                turn,
+                sources: [],
+                facts: [],
+                omissions: [
+                  {
+                    scope: "bot",
+                    reason:
+                      error instanceof Error
+                        ? error.message
+                        : "Memory could not be read for this Turn",
+                  },
+                ],
+              });
+              await agent.session.flush();
+            }
           }
-        }
-        return next();
+          return next();
+        },
       }),
     );
     return () => {
@@ -1269,8 +1270,6 @@ export function createMemoryRuntimePlugin(
       projection.invalidate();
     };
   };
-  plugin.inject = ["tools", "systemPrompt", "sessions"];
-  return plugin;
 }
 
-export default createMemoryRuntimePlugin;
+export default createMemoryRuntimeFeature;

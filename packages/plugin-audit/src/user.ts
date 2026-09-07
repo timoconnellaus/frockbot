@@ -1,6 +1,6 @@
 // The User backend Contribution: the one place a User's audit table lives.
 //
-// It is mounted into the User Durable Object's Cordis root beside Settings,
+// It is mounted in the User Durable Object beside Settings,
 // Credentials, Flock and the transcript index, and it owns exactly one thing —
 // an `AuditStoreV1` over that object's own SQL storage.
 //
@@ -13,7 +13,6 @@
 //    holds elsewhere — and resolving `remote:<slug>` to `remote:<host>` here,
 //    on the one path both projection and rebuild take, is what stops the two
 //    disagreeing about what a row says.
-import type { Plugin } from "cordis";
 import {
   AUDIT_MAX_ENTRY_PAGE_V1,
   AuditDecodeError,
@@ -227,13 +226,6 @@ export class AuditUserBackendContribution {
   }
 }
 
-export function createAuditUserBackendPlugin(
-  host: AuditUserBackendHost,
-  lifecycle: { mount(value: AuditUserBackendContribution): () => void },
-): Plugin {
-  return () => lifecycle.mount(new AuditUserBackendContribution(host));
-}
-
 /**
  * What an application hands this Contribution: the User's audit table, under the
  * Package's own key so one wide host object can satisfy every Package's slice
@@ -253,6 +245,6 @@ export const userContribution = defineUserBackendContribution<
   AuditUserBackendContribution
 >({
   specifier: "@frockbot/plugin-audit/user",
-  create: (host, lifecycle) =>
-    createAuditUserBackendPlugin(host.audit, lifecycle),
+  mount: (host, lifecycle) =>
+    lifecycle.mount(new AuditUserBackendContribution(host.audit)),
 });

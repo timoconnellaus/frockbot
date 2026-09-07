@@ -1,14 +1,27 @@
 import type { Agent, AgentOptions } from "./agent.js";
 import type {
   CompositionPinV1,
+  LoopHookListV1,
+  ModelInvocation,
   NormalizedModelRequest,
+  PromptAssemblyService,
   Session,
+  SessionStore,
   StepOutcome,
   ToolCall,
+  ToolExecution,
   TurnTypeV1,
 } from "@frockbot/kernel-contracts";
-import type { Context } from "cordis";
 import type { ModelRetryPolicyRuntimeV1 } from "./retry-policy.js";
+
+/** What the loop is built on: the registries a Turn reads, and its hooks. */
+export interface LoopServices {
+  readonly sessions: SessionStore;
+  readonly systemPrompt: PromptAssemblyService;
+  readonly llm: ModelInvocation;
+  readonly tools: ToolExecution;
+  readonly hooks: LoopHookListV1;
+}
 
 export type EffectAdmittingAgentOptions = AgentOptions & {
   admitEffect(effect: {
@@ -47,7 +60,7 @@ export type TurnSettlement =
  */
 export interface LoopRuntime {
   readonly agent: Agent;
-  readonly ctx: Context;
+  readonly services: LoopServices;
   readonly session: Session;
   readonly options: EffectAdmittingAgentOptions;
   readonly composition: CompositionPinV1;

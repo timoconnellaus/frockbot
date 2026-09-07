@@ -17,7 +17,6 @@ import type {
   WorkspaceFilesV1,
   WorkspaceRootV1,
 } from "@frockbot/kernel-contracts";
-import type { Plugin } from "cordis";
 import {
   COMPUTER_DOCTOR_ROOT_ID,
   COMPUTER_SCREENSHOTS_ROOT_ID,
@@ -1417,13 +1416,6 @@ export function createComputerBotBackendContribution(
   return new ComputerBotBackendContribution(host);
 }
 
-export function createComputerBotBackendPlugin(
-  host: ComputerBotBackendHost,
-  lifecycle: { mount(value: ComputerBotBackendContribution): () => void },
-): Plugin {
-  return () => lifecycle.mount(createComputerBotBackendContribution(host));
-}
-
 /**
  * What an application hands this Contribution: the Bot's view of its User's Computer, under the
  * Package's own key so one wide host object can satisfy every Package's slice
@@ -1443,6 +1435,6 @@ export const botContribution = defineBotBackendContribution<
   ComputerBotBackendContribution
 >({
   specifier: "@frockbot/plugin-computer/bot",
-  create: (host, lifecycle) =>
-    createComputerBotBackendPlugin(host.computer, lifecycle),
+  mount: (host, lifecycle) =>
+    lifecycle.mount(createComputerBotBackendContribution(host.computer)),
 });

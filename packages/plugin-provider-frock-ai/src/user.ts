@@ -10,7 +10,6 @@ import {
   type ConnectionCommandReceiptV1,
   type ConnectionCommandV1,
 } from "@frockbot/connection-core";
-import type { Plugin } from "cordis";
 import {
   FROCK_AI_CONNECTION_GENERATION,
   FROCK_AI_CONNECTION_ID,
@@ -361,22 +360,6 @@ export function createFrockAiUserBackendContribution(
   return new FrockAiUserBackendContribution(host);
 }
 
-export function createFrockAiUserBackendPlugin(
-  host: FrockAiUserBackendHost,
-  lifecycle: { mount(value: FrockAiUserBackendContribution): () => void },
-): Plugin {
-  return () => {
-    const contribution = createFrockAiUserBackendContribution(host);
-    const unregister =
-      host.settings.registerConfigurationReadBootstrap(contribution);
-    const dispose = lifecycle.mount(contribution);
-    return () => {
-      unregister();
-      dispose();
-    };
-  };
-}
-
 /**
  * What an application hands this Contribution: the ambient Frock AI Connection, under the
  * Package's own key so one wide host object can satisfy every Package's slice
@@ -396,6 +379,14 @@ export const userContribution = defineUserBackendContribution<
   FrockAiUserBackendContribution
 >({
   specifier: "@frockbot/plugin-provider-frock-ai/user",
-  create: (host, lifecycle) =>
-    createFrockAiUserBackendPlugin(host.frockAi, lifecycle),
+  mount: (host, lifecycle) => {
+    const contribution = createFrockAiUserBackendContribution(host.frockAi);
+    const unregister =
+      host.frockAi.settings.registerConfigurationReadBootstrap(contribution);
+    const dispose = lifecycle.mount(contribution);
+    return () => {
+      unregister();
+      dispose();
+    };
+  },
 });

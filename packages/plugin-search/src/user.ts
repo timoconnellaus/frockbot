@@ -1,7 +1,7 @@
 // The User backend Contribution: the one place a User's transcript index lives.
 //
-// It is mounted into the User Durable Object's Cordis root beside Settings,
-// Credentials, Flock, and the Package Publisher, and it owns exactly one thing
+// It is mounted in the User Durable Object beside Settings, Credentials and
+// Flock, and it owns exactly one thing
 // — a `SearchIndexV1` over that object's own SQL storage.
 //
 // Two seams it does not own, and takes as host functions instead:
@@ -12,7 +12,6 @@
 //  * the row source, because the rows are projections of runs the *Bot*
 //    Durable Object holds, and a rebuild must read them from that authority
 //    rather than from anything this object remembers.
-import type { Plugin } from "cordis";
 import {
   SEARCH_REBUILD_PAGE_V1,
   SearchIndexV1,
@@ -109,13 +108,6 @@ export class SearchUserBackendContribution {
   }
 }
 
-export function createSearchUserBackendPlugin(
-  host: SearchUserBackendHost,
-  lifecycle: { mount(value: SearchUserBackendContribution): () => void },
-): Plugin {
-  return () => lifecycle.mount(new SearchUserBackendContribution(host));
-}
-
 /**
  * What an application hands this Contribution: the User's transcript index, under the
  * Package's own key so one wide host object can satisfy every Package's slice
@@ -135,6 +127,6 @@ export const userContribution = defineUserBackendContribution<
   SearchUserBackendContribution
 >({
   specifier: "@frockbot/plugin-search/user",
-  create: (host, lifecycle) =>
-    createSearchUserBackendPlugin(host.search, lifecycle),
+  mount: (host, lifecycle) =>
+    lifecycle.mount(new SearchUserBackendContribution(host.search)),
 });

@@ -12,7 +12,6 @@
 // something quietly ignored: a client that means something the route does not
 // implement finds out, instead of being handed a page it will misread as
 // filtered.
-import type { Plugin } from "cordis";
 import {
   AUDIT_KINDS_V1,
   AUDIT_MAX_CURSOR_LENGTH_V1,
@@ -139,15 +138,6 @@ export function createAuditBackendContribution(
   };
 }
 
-export namespace createAuditBackendContribution {
-  export function plugin(
-    host: AuditGatewayHost,
-    lifecycle: { mount(value: AuditBackendRouteContribution): () => void },
-  ): Plugin {
-    return () => lifecycle.mount(createAuditBackendContribution(host));
-  }
-}
-
 /**
  * The manifest's gateway `backend` entry, resolved by specifier. The
  * application looks this descriptor up in its Contribution table; it never
@@ -158,5 +148,6 @@ export const backendContribution = defineGatewayContribution<
   AuditBackendRouteContribution
 >({
   specifier: "@frockbot/plugin-audit/backend",
-  create: createAuditBackendContribution.plugin,
+  mount: (host, lifecycle) =>
+    lifecycle.mount(createAuditBackendContribution(host)),
 });

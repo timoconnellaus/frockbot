@@ -48,10 +48,9 @@ import {
   type ToolExecutionContext,
   type ToolExecutionResult,
   type TurnTypeV1,
+  type AgentRuntimeV1,
+  type RuntimeFeatureV1,
 } from "@frockbot/kernel-contracts";
-// Merges the Agent loop's event declarations into the cordis Context type.
-import type {} from "@frockbot/kernel-agent-loop/agent";
-import type { Plugin } from "cordis";
 import manifest from "../frockbot.json" with { type: "json" };
 import {
   machineApprovalActionV1,
@@ -697,15 +696,15 @@ export function createMachineReadTools(
  * chat-only ceiling. A Turn with no writer gets the registry and nothing that
  * could reach a laptop.
  */
-export function createMachineRuntimePlugin(
+export function createMachineRuntimeFeature(
   host: MachineRuntimeHostV1,
-): Plugin.Function {
-  const plugin: Plugin.Function = (ctx) => {
+): RuntimeFeatureV1<AgentRuntimeV1> {
+  return (runtime) => {
     const registry = machineAdmissionCeilingV1(MACHINE_REGISTRY_CAPABILITY_V1);
     const control = machineAdmissionCeilingV1(MACHINE_CONTROL_CAPABILITY_V1);
     const disposers = [
       ...createMachineReadTools(host).map((tool) =>
-        ctx.tools.register(
+        runtime.tools.register(
           tool,
           registry ? { admissionCeiling: registry } : undefined,
         ),
@@ -713,9 +712,9 @@ export function createMachineRuntimePlugin(
       ...(host.writer
         ? createMachineControlTools(
             { ...host, writer: host.writer },
-            ctx.sessions,
+            runtime.sessions,
           ).map((tool) =>
-            ctx.tools.register(
+            runtime.tools.register(
               tool,
               control ? { admissionCeiling: control } : undefined,
             ),
@@ -726,8 +725,6 @@ export function createMachineRuntimePlugin(
       for (const dispose of disposers.toReversed()) dispose();
     };
   };
-  plugin.inject = ["tools", "sessions"];
-  return plugin;
 }
 
-export default createMachineRuntimePlugin;
+export default createMachineRuntimeFeature;
