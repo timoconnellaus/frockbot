@@ -32,6 +32,7 @@ async function stablePort(name: string): Promise<number> {
 const port = await stablePort("FROCKBOT_E2E_PORT");
 const ollamaPort = await stablePort("FROCKBOT_E2E_OLLAMA_PORT");
 const frockAiPort = await stablePort("FROCKBOT_E2E_FROCK_AI_PORT");
+const appletBuildPort = await stablePort("FROCKBOT_E2E_APPLET_BUILD_PORT");
 const baseURL = `http://127.0.0.1:${port}`;
 
 export default defineConfig<E2EOptions>({
@@ -104,7 +105,10 @@ export default defineConfig<E2EOptions>({
     // seeded into R2 and loaded. The harness additionally waits for
     // `/app-manifest` under a real identity before it reports ready.
     url: `${baseURL}/app.js`,
-    timeout: 180_000,
+    // The Applet build service is a container app, and `wrangler dev` builds
+    // its image on start. That is minutes on a cold Docker cache and seconds
+    // afterwards, and it happens before the app Worker is up.
+    timeout: 900_000,
     reuseExistingServer: false,
     // Playwright's default is an immediate SIGKILL of the server's process
     // group, which cannot reach `wrangler dev` — the harness deliberately puts
@@ -119,6 +123,7 @@ export default defineConfig<E2EOptions>({
       FROCKBOT_E2E_PORT: String(port),
       FROCKBOT_E2E_OLLAMA_PORT: String(ollamaPort),
       FROCKBOT_E2E_FROCK_AI_PORT: String(frockAiPort),
+      FROCKBOT_E2E_APPLET_BUILD_PORT: String(appletBuildPort),
     },
   },
 });

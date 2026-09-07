@@ -314,9 +314,11 @@ Adjacent, outside the loop: image generation uses Workers AI ids directly (`app/
 
 ### Authoring
 
-The Bot writes Applet code on the Computer with ordinary file tools. `applets/` exposes seven tools — `applet_list`, `applet_create`, `applet_publish`, `applet_revert`, `applet_delete`, `applet_focus`, `applet_generations` — as an ordinary first-party runtime feature, `createAppletsFeature` (`applets/feature.ts`), mounted for one admitted Turn beside Memory and Skills (`app/runtime.ts`). Its host is `createAppletCapabilityHostV1` (`app/applets-host/records.ts`), wired for one Bot by `app/applets-host/bot.ts`, built per call because a publish needs the Turn's mounted Computer. `applet_create` scaffolds from templates into the durable root `applets/source/<appletId>/` (`applets/root.ts`), mounted on the Sprite at `/home/box/agent-data/user-packages/applets/source`. Guidance ships at `applets/skills/applets.md`.
+The Bot writes Applet code with the Applets tools; no Computer is in the path. `applets/` exposes eleven tools — `applet_list`, `applet_create`, `applet_files`, `applet_read_file`, `applet_write_file`, `applet_check`, `applet_publish`, `applet_revert`, `applet_delete`, `applet_focus`, `applet_generations` — as an ordinary first-party runtime feature, `createAppletsFeature` (`applets/feature.ts`), mounted for one admitted Turn beside Memory and Skills (`app/runtime.ts`). Its host is `createAppletCapabilityHostV1` (`app/applets-host/records.ts`), wired for one Bot by `app/applets-host/bot.ts`. Source lives in the durable root `applets/source/<appletId>/` (`applets/root.ts`): `applet_create` scaffolds the SDK template into it, `applet_write_file` supersedes one file's generation, and both read and write through the one Workspace surface the Bot Durable Object holds. Guidance ships at `applets/skills/applets.md`.
 
-The Applets Package declares that durable root in its definition (`applets/definition.ts`), which the Computer's durable-root sync reads (`declaredPackageRootsV1`).
+The loop is `applet_write_file` → `applet_check` → `applet_publish`. A check builds and stores the artifacts without recording a generation, and answers with the tools the built code declares and a preview URL — `https://ui.<host>/packages/<uiHash>.html`, the same anonymous artifact route a published page is served from, so the hash is the whole of the capability and the page reaches no data. A failure at either verb is the build's own diagnostics, `path:line:col message`, returned as the tool result.
+
+The Applets Package still declares that durable root in its definition (`applets/definition.ts`), which the Computer's durable-root sync reads (`declaredPackageRootsV1`); the mirror leaves in cut 3.
 
 ### Build
 
@@ -324,11 +326,11 @@ One pipeline, `applets/sdk/src/build/`, in five named stages: `descriptor`, `typ
 
 Two entry points run it. `applet check` and `applet build` (`applets/sdk/src/cli/`) run it on the Computer and write `dist/`. `apps/applet-build` runs it in the cloud: a Worker with no routes, reached through the app's `APPLET_BUILD` service binding, fronting a Cloudflare Container with no egress. Its contract is `applets/build-contract.ts` — `POST /build` taking `{version, effectId, appletId, mode, files}` and answering `{status: "built", manifest, server, ui}` or `{status: "failed", stage, diagnostics}`, with the artifact ceilings enforced in the service as diagnostics. The container holds no storage and no credential; the app Worker keeps the R2 write and the hash verification. `container/build.test.ts` asserts the two entry points agree hash for hash.
 
-As of plan step 8 cut 1 the service is dark: deployed, bound, and called by nothing. `applet_publish` still reads `dist/` off the Computer.
+`applet_check` and `applet_publish` both call it in `mode: "build"`: the host lists the Applet's source prefix, reads each file, posts them with the Turn's effect id as the idempotency key, and hash-verifies the artifacts that come back against the manifest the service derived by running them. `APPLET_BUILD_TOKEN` is a required production secret.
 
 ### Storage
 
-R2 `APPLICATION_ARTIFACTS`, content-addressed as `packages/<sha256>.mjs` and `.html`, written at `app/applets-host/bot.ts:69-78` and hash-verified on read (`apps/cloudflare/src/applet-state.ts:276-290`). Generations, pointers and failures live in `AppletState`; the account directory lives in `UserConfiguration`.
+Source is the durable root, in R2 through the Workspace store, keyed by `workspaceObjectKeyV1` (`core/workspace-store/keys.ts`). Artifacts are R2 `APPLICATION_ARTIFACTS`, content-addressed as `packages/<sha256>.mjs` and `.html`, written by the app Worker (`app/applets-host/bot.ts`) and hash-verified on read (`apps/cloudflare/src/applet-state.ts`). A content-addressed put is idempotent by its own key, so a check followed by a publish of unchanged source stores one pair of objects. Generations, pointers and failures live in `AppletState`; the account directory lives in `UserConfiguration`.
 
 ### Execution
 

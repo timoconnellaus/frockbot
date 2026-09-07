@@ -95,6 +95,10 @@ export const REQUIRED_PRODUCTION_SECRETS_V1: readonly ProductionSecretV1[] = [
     why: "Signs machine tokens and pairing codes. Absent, no machine can pair.",
   },
   {
+    name: "APPLET_BUILD_TOKEN",
+    why: "Presented on every call to the Applet build service. Absent, no Applet can be checked or published.",
+  },
+  {
     name: "APPLET_VIEWER_SECRET",
     why: "Signs the viewer token an open Applet's page presents. Absent, every published Applet answers 503.",
   },
@@ -113,12 +117,6 @@ export const OPTIONAL_PRODUCTION_SECRETS_V1: readonly OptionalProductionSecretV1
       why: "The identities allowed to open Admin.",
       degraded:
         "nobody can administer the signup policy, though signups stay closed and existing Users keep signing in",
-    },
-    {
-      name: "APPLET_BUILD_TOKEN",
-      why: "Presented on every call to the Applet build service.",
-      degraded:
-        "no Applet can be built in the cloud, though nothing calls the service yet",
     },
     {
       name: "DEBUG_TOKEN",

@@ -361,6 +361,7 @@ jobs:
           ROUTINE_HOOK_SECRET: ${{ secrets.ROUTINE_HOOK_SECRET }}
           MACHINE_TOKEN_SECRET: ${{ secrets.MACHINE_TOKEN_SECRET }}
           APPLET_VIEWER_SECRET: ${{ secrets.APPLET_VIEWER_SECRET }}
+          APPLET_BUILD_TOKEN: ${{ secrets.APPLET_BUILD_TOKEN }}
           DEBUG_TOKEN: ${{ secrets.DEBUG_TOKEN }}
           FROCK_AI_GATEWAY_TOKEN: ${{ secrets.FROCK_AI_GATEWAY_TOKEN || secrets.FLOCK_AI_GATEWAY_TOKEN }}
         shell: bash
@@ -522,10 +523,9 @@ jobs:
           # production did, unnoticed, from the day the Applet authority
           # shipped until 2026-09-05.
           APPLET_VIEWER_SECRET: ${{ secrets.APPLET_VIEWER_SECRET }}
-          # Optional while the build service is dark: the same shared secret
-          # the Applet build Worker and its container check. Nothing in the app
-          # calls the binding yet, so its absence closes a door nobody knocks
-          # on; it becomes required with the publish path.
+          # Required: the same shared secret the Applet build Worker and its
+          # container check. A Turn's applet_check and applet_publish both call
+          # the service, so without it no Applet can be built or published.
           APPLET_BUILD_TOKEN: ${{ secrets.APPLET_BUILD_TOKEN }}
           # Optional: authorizes the read-only /api/debug operator surface.
           # Absent and the deployed Worker simply 404s those routes.

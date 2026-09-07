@@ -10,14 +10,17 @@
 // kernel's Applet Durable Object.
 //
 // `publish` is a durable effect, and it is written in the order the
-// constitution's rule requires: record intent, then read, then verify, then the
-// immutable artifact, then the durable records, then the mount, then the
-// Composition proposal. A crash anywhere resumes from the recorded intent
-// rather than repeating a side effect.
+// constitution's rule requires: record intent, then read the source, then
+// build, then verify, then the immutable artifact, then the durable records,
+// then the mount, then the Composition proposal. A crash anywhere resumes from
+// the recorded intent rather than repeating a side effect.
+//
+// The bytes a publish stores come from the build service, never from a
+// Computer: the source prefix is listed and read out of the Workspace store,
+// posted to `APPLET_BUILD`, and the artifacts that come back are hash-verified
+// against the manifest the service derived by running them.
 import {
   appletGenerationIdV1,
-  APPLETS_PACKAGE_ID_V1,
-  APPLETS_SOURCE_ROOT_ID_V1,
   APPLET_CONTRACT_V1,
   APPLET_FOCUSED_KEY,
   decodeFocusedAppletV1,
@@ -26,7 +29,24 @@ import {
 import type {
   AppletCapabilityCallScopeV1,
   AppletCapabilityHostV1,
+  AppletCheckResultV1,
+  AppletSourceFileV1,
 } from "@frockbot/applets/feature";
+import {
+  APPLET_BUILD_LIMITS,
+  APPLET_BUILD_PROTOCOL_VERSION,
+  type AppletBuildDiagnosticV1,
+  type AppletBuildManifestV1,
+  type AppletBuildRequestV1,
+  type AppletBuildResponseV1,
+  type AppletBuildSourceFileV1,
+} from "@frockbot/applets/build-contract";
+import {
+  appletSourceFilePathV1,
+  appletSourcePathV1,
+  appletsSourceRootV1,
+} from "@frockbot/applets/root";
+import { appletPreviewUrlV1 } from "@frockbot/applets/preview";
 import {
   decodeAppletGenerationV1,
   decodeAppletSummaryV1,
@@ -37,10 +57,7 @@ import {
   type AppletSummaryV1,
   type AppletToolDeclarationV1,
 } from "@frockbot/core/contracts";
-import type {
-  WorkspacePathV1,
-  WorkspaceReadsV1,
-} from "@frockbot/core/contracts";
+import type { WorkspaceFilesV1 } from "@frockbot/core/contracts";
 import {
   compositionArtifactSetHashV1,
   compositionGenerationIdV1,
@@ -61,52 +78,6 @@ export const APPLET_PUBLISH_EFFECT_PREFIX = "applets:publish-effect:";
  * of the fan-out signal.
  */
 export const APPLET_DIRECTORY_REVISION_SEEN_KEY = "applets:directory-revision";
-
-/**
- * How the pre-publish pull of the Applet's source root went.
- *
- * `ok` and `skipped` mean the store now holds what the Computer holds. Anything
- * else means the two may differ, and a `dist/` file the publish cannot find is
- * then far more likely to be one the sync could not carry than one `applet
- * build` never wrote.
- */
-export interface AppletSourceSyncOutcomeV1 {
-  status: "ok" | "degraded" | "unavailable" | "refused" | "skipped";
-  /** What the sync said went wrong, empty when it had nothing to say. */
-  detail: string;
-  /**
-   * What the sync saw for each `dist/` file the publish named required: the
-   * hash of the bytes on the Computer, and whether the store ended up holding
-   * them. It is the evidence behind the publish's own failure sentence — a
-   * build output that demonstrably exists is never answered with "run `applet
-   * build` first" (production, 2026-09-04).
-   */
-  required?: readonly {
-    /** The source-root-relative path, `<appletId>/dist/…`. */
-    path: string;
-    contentHash?: string;
-    durable: boolean;
-  }[];
-}
-
-/** The three files `applet build` writes, read from the durable root. */
-export const APPLET_DIST_FILES_V1 = [
-  "dist/server.js",
-  "dist/ui.html",
-  "dist/manifest.json",
-] as const;
-
-/**
- * Ceilings on what a publish will read and store.
- *
- * The UI bound is the Applet one, not the Package-page one: a Package page is
- * hand-written inline HTML and 256 KB is generous, while an Applet's page is
- * `applet build`'s single self-contained file carrying React, TanStack DB, and
- * the kit — roughly half a megabyte before the Applet's own code.
- */
-export const APPLET_MAX_SERVER_BYTES_V1 = 2 * 1024 * 1024;
-export const APPLET_MAX_UI_BYTES_V1 = 4 * 1024 * 1024;
-export const APPLET_MAX_MANIFEST_BYTES_V1 = 64 * 1024;
 
 export interface AppletPublishIntentV1 {
   schemaVersion: 1;
@@ -321,26 +292,33 @@ export interface AppletCapabilityHostOptionsV1 {
   directory: AppletUserDirectoryV1;
   instanceFor(appletId: string): AppletInstanceBindingV1;
   artifacts: AppletArtifactSinkV1;
-  /** Reads the built Applet under the Applets Package's declared root. */
-  workspace: WorkspaceReadsV1;
+  /** Applet source, under the Applets Package's declared root. */
+  workspace: WorkspaceFilesV1;
   /**
-   * Forces a pull of the `applets/source` root before it is read, so a publish
-   * sees what the Bot just wrote on the Computer rather than the last synced
-   * copy.
-   *
-   * The Bot Durable Object supplies it over the Computer Package's
-   * `syncWorkspaceRootNowV1` when the User has a Computer. Absent means the
-   * store is read as it stands — correct but possibly stale — and the Bot is
-   * told so in the failure when the files are missing, rather than the publish
-   * silently using old bytes.
-   *
-   * What it answers is how that pull went. A build that is on the Computer but
-   * did not reach the store is a different failure from a build that was never
-   * run, and the publish can only say which when it is told.
+   * The build service, or absent when this deployment has no binding or no
+   * token for it. Absent is an ordinary refusal — "the build service is
+   * unavailable" — never a thrown error inside a Turn.
    */
-  syncSourceRootNow?(appletId: string): Promise<AppletSourceSyncOutcomeV1>;
+  buildService?: AppletBuildServiceV1;
+  /**
+   * The app's own origin, from which the anonymous artifact origin a preview
+   * URL points at is derived. Absent leaves a successful check without one:
+   * the tools and the diagnostics are the answer either way.
+   */
+  appOrigin?: string;
   composition: Pick<CompositionStore, "current" | "lastKnownGood" | "propose">;
   now?(): Date;
+}
+
+/**
+ * The Applet build service, as this host calls it.
+ *
+ * The seam is the contract's own request and response, so the Bot Durable
+ * Object's wiring is a `fetch` and two decoders and a test's fake is a
+ * function.
+ */
+export interface AppletBuildServiceV1 {
+  build(request: AppletBuildRequestV1): Promise<AppletBuildResponseV1>;
 }
 
 const TEXT = new TextDecoder();
@@ -371,71 +349,18 @@ async function sha256Hex(value: string): Promise<string> {
     .join("");
 }
 
-/** The declared-root path one of an Applet's built files lives at. */
-export function appletDistPathV1(
-  userId: string,
-  appletId: string,
-  file: string,
-): WorkspacePathV1 {
-  return {
-    root: {
-      kind: "package-declared",
-      userId,
-      packageId: APPLETS_PACKAGE_ID_V1,
-      rootId: APPLETS_SOURCE_ROOT_ID_V1,
-    },
-    path: `${appletId}/${file}`,
-  };
+/** The media type Applet source of one path is stored under. */
+function sourceMediaType(path: string): string {
+  return path.endsWith(".json")
+    ? "application/json"
+    : "text/plain; charset=utf-8";
 }
 
-/**
- * `dist/manifest.json` as `applet build` writes it. Verified against the bytes
- * actually read, so a manifest cannot name code it does not describe.
- */
-export interface AppletBuildManifestV1 {
-  contract: 1;
-  tools: AppletToolDeclarationV1[];
-  hashes: { server: string; ui: string };
-}
-
-export function decodeAppletBuildManifestV1(
-  input: unknown,
-  label = "Applet build manifest",
-): AppletBuildManifestV1 {
-  if (!input || typeof input !== "object" || Array.isArray(input)) {
-    throw new Error(`${label} must be an object`);
-  }
-  const value = input as Record<string, unknown>;
-  const keys = ["contract", "tools", "hashes"] as const;
-  const allowed = new Set<string>(keys);
-  if (
-    !Object.keys(value).every((key) => allowed.has(key)) ||
-    !keys.every((key) => Object.hasOwn(value, key))
-  ) {
-    throw new Error(`${label} has invalid fields`);
-  }
-  if (value.contract !== 1) throw new Error(`${label}.contract is unsupported`);
-  if (!Array.isArray(value.tools) || value.tools.length > 64) {
-    throw new Error(`${label}.tools must be a bounded array`);
-  }
-  const tools = value.tools.map((tool, index) =>
-    decodeAppletToolDeclarationV1(tool, `${label}.tools[${index}]`),
-  );
-  if (new Set(tools.map((tool) => tool.name)).size !== tools.length) {
-    throw new Error(`${label}.tools contains duplicate names`);
-  }
-  const hashes = value.hashes;
-  if (!hashes || typeof hashes !== "object" || Array.isArray(hashes)) {
-    throw new Error(`${label}.hashes must be an object`);
-  }
-  const { server, ui } = hashes as Record<string, unknown>;
-  if (typeof server !== "string" || !/^[0-9a-f]{64}$/.test(server)) {
-    throw new Error(`${label}.hashes.server must be a sha-256 hex digest`);
-  }
-  if (typeof ui !== "string" || !/^[0-9a-f]{64}$/.test(ui)) {
-    throw new Error(`${label}.hashes.ui must be a sha-256 hex digest`);
-  }
-  return { contract: 1, tools, hashes: { server, ui } };
+/** One diagnostic, as the Bot reads it: `path:line:col message`. */
+export function appletDiagnosticTextV1(
+  diagnostic: AppletBuildDiagnosticV1,
+): string {
+  return `${diagnostic.file}:${diagnostic.line}:${diagnostic.column} ${diagnostic.message}`;
 }
 
 /**
@@ -614,50 +539,245 @@ function failed(
   };
 }
 
+/**
+ * The relative paths one Applet's source occupies, listed out of the store.
+ *
+ * The list prefix is the Applet id without its trailing slash: the store
+ * validates a prefix as a relative path, and a path may not end in one. The
+ * entries are then narrowed to the directory itself, so a listing can never
+ * pick up a neighbour whose id merely starts the same way.
+ */
+async function listAppletSourceV1(
+  workspace: WorkspaceFilesV1,
+  userId: string,
+  appletId: string,
+): Promise<
+  { entries: { path: string; size: number }[] } | { failure: string }
+> {
+  const prefix = appletSourcePathV1(appletId);
+  const listed = await workspace.list({
+    root: appletsSourceRootV1(userId),
+    prefix: prefix.slice(0, -1),
+    limit: APPLET_BUILD_LIMITS.files + 1,
+  });
+  if (listed.status !== "ok") {
+    return {
+      failure: `the Applet's source could not be listed: ${listed.status}${
+        listed.reason ? ` — ${listed.reason}` : ""
+      }`,
+    };
+  }
+  const entries = listed.entries
+    .filter((entry) => entry.path.path.startsWith(prefix))
+    .map((entry) => ({
+      path: entry.path.path.slice(prefix.length),
+      size: entry.generation.size,
+    }))
+    .filter((entry) => entry.path.length > 0)
+    .sort((left, right) => left.path.localeCompare(right.path));
+  return { entries };
+}
+
 /** `ctx.applets` over the Bot Durable Object's authority. */
 export function createAppletCapabilityHostV1(
   options: AppletCapabilityHostOptionsV1,
 ): AppletCapabilityHostV1 {
   const now = options.now ?? (() => new Date());
 
-  async function readFile(
+  /**
+   * One Applet's whole source, as the build service is posted it.
+   *
+   * The store is the home of Applet source, so this is a listing and a read
+   * per file — no Computer, no `dist/`, and nothing to reconcile first. The
+   * bounds are the contract's, refused here rather than after the bytes have
+   * crossed the wire.
+   */
+  async function readSource(
     appletId: string,
-    file: string,
-    maximum: number,
-    synced?: AppletSourceSyncOutcomeV1,
-  ): Promise<{ text: string } | { failure: string }> {
-    const outcome = await options.workspace.read(
-      appletDistPathV1(options.userId, appletId, file),
+  ): Promise<{ files: AppletBuildSourceFileV1[] } | { failure: string }> {
+    const listed = await listAppletSourceV1(
+      options.workspace,
+      options.userId,
+      appletId,
     );
-    if (outcome.status !== "ok") {
-      // Verify before reporting. The sync was asked for these exact paths, so
-      // it can say whether the Computer held the file and whether the store
-      // took it. A build output that is on disk is never answered with "run
-      // `applet build` first": that sends a Bot round a loop that cannot end.
-      const seen = synced?.required?.find(
-        (entry) => entry.path === `${appletId}/${file}`,
-      );
-      if (seen?.contentHash !== undefined) {
-        return {
-          failure: `"${file}" is on the Computer (sha256 ${seen.contentHash.slice(0, 12)}) but the Workspace answered ${outcome.status}: the publish sync reported ${synced?.status ?? "nothing"} and did not carry it${synced?.detail ? ` — ${synced.detail}` : ""}`,
-        };
-      }
-      // A pull that did not finish is the likelier explanation than an
-      // unbuilt Applet, and telling the Bot to build again would send it
-      // round a loop that cannot end.
-      if (synced && synced.status !== "ok" && synced.status !== "skipped") {
-        return {
-          failure: `"${file}" is on the Computer but did not reach the Workspace: ${synced.detail || "the sync could not carry it"}`,
-        };
-      }
+    if ("failure" in listed) return listed;
+    const paths = listed.entries.map((entry) => entry.path);
+    if (paths.length === 0) {
       return {
-        failure: `"${file}" is ${outcome.status}: run \`applet build\` in applets/${appletId} on the Computer first`,
+        failure: `${appletId} has no source. Call applet_create, or write server.ts, ui.tsx and applet.json with applet_write_file.`,
       };
     }
-    if (outcome.file.bytes.byteLength > maximum) {
-      return { failure: `"${file}" exceeds its ${maximum}-byte bound` };
+    if (paths.length > APPLET_BUILD_LIMITS.files) {
+      return {
+        failure: `${appletId} has more than ${APPLET_BUILD_LIMITS.files} source files; the build service takes no more.`,
+      };
     }
-    return { text: TEXT.decode(outcome.file.bytes) };
+    const files: AppletBuildSourceFileV1[] = [];
+    let total = 0;
+    for (const path of paths) {
+      const outcome = await options.workspace.read(
+        appletSourceFilePathV1(options.userId, appletId, path),
+      );
+      if (outcome.status !== "ok") {
+        return { failure: `"${path}" is ${outcome.status}` };
+      }
+      const text = TEXT.decode(outcome.file.bytes);
+      total += text.length;
+      if (
+        text.length > APPLET_BUILD_LIMITS.fileText ||
+        total > APPLET_BUILD_LIMITS.sourceBytes
+      ) {
+        return {
+          failure: `${appletId}'s source is over the ${APPLET_BUILD_LIMITS.sourceBytes}-byte ceiling the build service accepts.`,
+        };
+      }
+      files.push({ path, text });
+    }
+    return { files };
+  }
+
+  /**
+   * Read the source, build it, and verify what came back.
+   *
+   * The service is handed bytes and returns bytes; the hashes it declares are
+   * checked against the artifacts here, in the authority that stores them, so a
+   * builder that lied about what it compiled is refused before anything points
+   * at it.
+   */
+  async function build(
+    appletId: string,
+    effectId: string,
+  ): Promise<
+    | { built: { manifest: AppletBuildManifestV1; server: string; ui: string } }
+    | { failure: string; diagnostics?: string[] }
+  > {
+    const service = options.buildService;
+    if (!service) {
+      return {
+        failure:
+          "the Applet build service is unavailable in this deployment, so nothing can be built or published",
+      };
+    }
+    const source = await readSource(appletId);
+    if ("failure" in source) return { failure: source.failure };
+    const request: AppletBuildRequestV1 = {
+      version: APPLET_BUILD_PROTOCOL_VERSION,
+      effectId,
+      appletId,
+      mode: "build",
+      files: source.files,
+    };
+    let response: AppletBuildResponseV1;
+    try {
+      response = await service.build(request);
+    } catch (error) {
+      return {
+        failure: `the Applet build service could not be reached: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      };
+    }
+    if (response.status === "failed") {
+      return {
+        failure: `the build failed at the ${response.stage} stage`,
+        diagnostics: response.diagnostics.map(appletDiagnosticTextV1),
+      };
+    }
+    if (
+      !response.manifest ||
+      response.server === undefined ||
+      response.ui === undefined
+    ) {
+      return { failure: "the build returned no artifacts" };
+    }
+    const serverHash = await sha256Hex(response.server);
+    const uiHash = await sha256Hex(response.ui);
+    if (
+      response.manifest.hashes.server !== serverHash ||
+      response.manifest.hashes.ui !== uiHash
+    ) {
+      return {
+        failure:
+          "the build service returned artifacts its manifest does not describe",
+        diagnostics: [
+          `server declared:${response.manifest.hashes.server} actual:${serverHash}`,
+          `ui declared:${response.manifest.hashes.ui} actual:${uiHash}`,
+        ],
+      };
+    }
+    return {
+      built: {
+        manifest: response.manifest,
+        server: response.server,
+        ui: response.ui,
+      },
+    };
+  }
+
+  /**
+   * The artifacts, content-addressed. Immutable and written before anything
+   * points at them, and idempotent by their own key: the same source stores
+   * the same two objects however many times it is built.
+   */
+  async function storeArtifacts(built: {
+    manifest: AppletBuildManifestV1;
+    server: string;
+    ui: string;
+  }): Promise<void> {
+    await options.artifacts.putPackageArtifact(
+      built.manifest.hashes.server,
+      built.server,
+    );
+    await options.artifacts.putPackageUiArtifact(
+      built.manifest.hashes.ui,
+      built.ui,
+    );
+  }
+
+  /** The manifest's tools, as the directory and a generation record them. */
+  function declaredTools(
+    manifest: AppletBuildManifestV1,
+  ): AppletToolDeclarationV1[] {
+    return manifest.tools.map((tool, index) =>
+      decodeAppletToolDeclarationV1(tool, `Applet tool declaration[${index}]`),
+    );
+  }
+
+  /**
+   * A tool name another Applet already owns, refused here rather than at the
+   * mount. Every Applet's tools share one Bot tool catalog, and the registry
+   * refuses a duplicate at mount — which would fail the whole Composition
+   * closed for a name clash. At publish the Bot can rename it and try again.
+   */
+  async function toolNameClashes(
+    appletId: string,
+    tools: readonly AppletToolDeclarationV1[],
+  ): Promise<string[]> {
+    const others = (await options.directory.list()).applets.filter(
+      (applet) => applet.appletId !== appletId && applet.status !== "deleted",
+    );
+    const taken = new Map<string, string>();
+    for (const other of others) {
+      for (const name of other.tools) taken.set(name, other.displayName);
+    }
+    return tools
+      .filter((tool) => taken.has(tool.name))
+      .map(
+        (tool) =>
+          `"${tool.name}" is already a tool of "${taken.get(tool.name)}"`,
+      );
+  }
+
+  /** The page a built UI artifact is served at, when an origin is configured. */
+  function previewUrl(uiHash: string): { previewUrl?: string } {
+    if (!options.appOrigin) return {};
+    try {
+      return {
+        previewUrl: appletPreviewUrlV1(new URL(options.appOrigin), uiHash),
+      };
+    } catch {
+      return {};
+    }
   }
 
   async function setFocus(appletId: string | null): Promise<FocusedAppletV1> {
@@ -755,6 +875,82 @@ export function createAppletCapabilityHostV1(
       return created;
     },
 
+    async files(input) {
+      const listed = await listAppletSourceV1(
+        options.workspace,
+        options.userId,
+        input.appletId,
+      );
+      if ("failure" in listed) throw new Error(listed.failure);
+      return listed.entries satisfies AppletSourceFileV1[];
+    },
+
+    async readFile(input) {
+      const outcome = await options.workspace.read(
+        appletSourceFilePathV1(options.userId, input.appletId, input.path),
+      );
+      if (outcome.status !== "ok") {
+        throw new Error(`"${input.path}" is ${outcome.status}`);
+      }
+      return TEXT.decode(outcome.file.bytes);
+    },
+
+    async writeFile(input, scope) {
+      const path = appletSourceFilePathV1(
+        options.userId,
+        input.appletId,
+        input.path,
+      );
+      // The generation the write supersedes, read immediately before it. A
+      // `null` assertion means "this file does not exist", so an overwrite
+      // that passed it would lose to the file it means to replace.
+      const existing = await options.workspace.stat(path);
+      const outcome = await options.workspace.write({
+        path,
+        bytes: new TextEncoder().encode(input.text),
+        writer: {
+          kind: "bot",
+          botId: options.botId,
+          sessionId: scope.sessionId,
+          turnId: scope.turnId,
+          runId: scope.runId,
+        },
+        expectedGenerationId:
+          existing.status === "ok"
+            ? existing.entry.generation.generationId
+            : null,
+        mediaType: sourceMediaType(input.path),
+      });
+      if (outcome.status !== "ok") {
+        throw new Error(
+          `"${input.path}" could not be written: ${outcome.status}${
+            outcome.reason ? ` — ${outcome.reason}` : ""
+          }`,
+        );
+      }
+    },
+
+    async check(input, scope) {
+      const outcome = await build(input.appletId, scope.effectId);
+      if ("failure" in outcome) {
+        return {
+          status: "failed",
+          reason: outcome.failure,
+          diagnostics: outcome.diagnostics ?? [],
+        };
+      }
+      // The artifacts are stored even though nothing is published: that is
+      // what makes the preview URL resolve, and a content-addressed put of
+      // bytes the app already hash-verified points at nothing until a
+      // generation names it.
+      await storeArtifacts(outcome.built);
+      return {
+        status: "checked",
+        tools: outcome.built.manifest.tools.map((tool) => tool.name),
+        ...previewUrl(outcome.built.manifest.hashes.ui),
+      };
+    },
+
     async publish(input, scope) {
       const key = publishEffectKey(scope.effectId);
       const recorded = await options.storage.get<AppletPublishIntentV1>(key);
@@ -780,102 +976,32 @@ export function createAppletCapabilityHostV1(
         return outcome;
       };
 
-      // Force a pull of the source root so the publish sees what the Bot just
-      // built, not the last synced copy. See the seam note on the option.
-      const synced = await options.syncSourceRootNow?.(input.appletId);
-
-      const server = await readFile(
-        input.appletId,
-        "dist/server.js",
-        APPLET_MAX_SERVER_BYTES_V1,
-        synced,
-      );
-      if ("failure" in server) {
-        return settle(failed(input.appletId, "unbuilt", server.failure));
-      }
-      const ui = await readFile(
-        input.appletId,
-        "dist/ui.html",
-        APPLET_MAX_UI_BYTES_V1,
-        synced,
-      );
-      if ("failure" in ui) {
-        return settle(failed(input.appletId, "unbuilt", ui.failure));
-      }
-      const manifestFile = await readFile(
-        input.appletId,
-        "dist/manifest.json",
-        APPLET_MAX_MANIFEST_BYTES_V1,
-        synced,
-      );
-      if ("failure" in manifestFile) {
-        return settle(failed(input.appletId, "unbuilt", manifestFile.failure));
-      }
-      let manifest: AppletBuildManifestV1;
-      try {
-        manifest = decodeAppletBuildManifestV1(JSON.parse(manifestFile.text));
-      } catch (error) {
+      const outcome = await build(input.appletId, scope.effectId);
+      if ("failure" in outcome) {
         return settle(
           failed(
             input.appletId,
             "unbuilt",
-            `dist/manifest.json is invalid: ${
-              error instanceof Error ? error.message : String(error)
-            }`,
+            outcome.failure,
+            outcome.diagnostics ?? [],
           ),
         );
       }
-      // Every Applet's tools share one Bot tool catalog, and the registry
-      // refuses a duplicate name at mount — which would fail the whole
-      // Composition closed for a name clash. So the clash is refused here, at
-      // publish, where the Bot can rename the tool and try again.
-      const others = (await options.directory.list()).applets.filter(
-        (applet) =>
-          applet.appletId !== input.appletId && applet.status !== "deleted",
-      );
-      const taken = new Map<string, string>();
-      for (const other of others) {
-        for (const name of other.tools) taken.set(name, other.displayName);
-      }
-      const clashes = manifest.tools
-        .filter((tool) => taken.has(tool.name))
-        .map(
-          (tool) =>
-            `"${tool.name}" is already a tool of "${taken.get(tool.name)}"`,
-        );
+      const tools = declaredTools(outcome.built.manifest);
+      const clashes = await toolNameClashes(input.appletId, tools);
       if (clashes.length > 0) {
         return settle(
           failed(
             input.appletId,
             "unbuilt",
-            "an Applet tool name is already taken by another Applet; rename it and run `applet build` again",
+            "an Applet tool name is already taken by another Applet; rename it and publish again",
             clashes,
           ),
         );
       }
-
-      const serverHash = await sha256Hex(server.text);
-      const uiHash = await sha256Hex(ui.text);
-      if (
-        manifest.hashes.server !== serverHash ||
-        manifest.hashes.ui !== uiHash
-      ) {
-        return settle(
-          failed(
-            input.appletId,
-            "unbuilt",
-            "dist/manifest.json does not match the built files; run `applet build` again",
-            [
-              `server declared:${manifest.hashes.server} actual:${serverHash}`,
-              `ui declared:${manifest.hashes.ui} actual:${uiHash}`,
-            ],
-          ),
-        );
-      }
-
-      // Immutable, content-addressed, and written before anything points at it.
-      await options.artifacts.putPackageArtifact(serverHash, server.text);
-      await options.artifacts.putPackageUiArtifact(uiHash, ui.text);
+      await storeArtifacts(outcome.built);
+      const serverHash = outcome.built.manifest.hashes.server;
+      const uiHash = outcome.built.manifest.hashes.ui;
 
       const createdAt = now().toISOString();
       const existing = await options
@@ -889,17 +1015,17 @@ export function createAppletCapabilityHostV1(
           : {}),
         server: {
           contentHash: serverHash,
-          size: server.text.length,
+          size: outcome.built.server.length,
           mediaType: "application/javascript",
-          bundlerVersion: `applet-cli-contract-${APPLET_CONTRACT_V1}`,
+          bundlerVersion: `applet-build-contract-${APPLET_CONTRACT_V1}`,
         },
         ui: {
           contentHash: uiHash,
-          size: ui.text.length,
+          size: outcome.built.ui.length,
           mediaType: "text/html",
-          bundlerVersion: `applet-cli-contract-${APPLET_CONTRACT_V1}`,
+          bundlerVersion: `applet-build-contract-${APPLET_CONTRACT_V1}`,
         },
-        tools: manifest.tools,
+        tools,
         contract: 1,
         origin: "publish",
         provenance: {
@@ -911,13 +1037,13 @@ export function createAppletCapabilityHostV1(
         createdAt,
         status: "pending",
       });
-      const outcome = await activate(
-        { appletId: input.appletId, generation, tools: manifest.tools },
+      const published = await activate(
+        { appletId: input.appletId, generation, tools },
         scope,
         "publish",
       );
-      if (outcome.status === "published") await setFocus(input.appletId);
-      return settle(outcome);
+      if (published.status === "published") await setFocus(input.appletId);
+      return settle(published);
     },
 
     async revert(input, scope) {

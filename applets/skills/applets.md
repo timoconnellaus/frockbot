@@ -1,15 +1,16 @@
 ---
 name: Build an Applet
-description: Use this whenever you are creating or changing an Applet — a small real-time app with its own data, its own page beside the conversation, and tools you can call. It is the reference for the Applets SDK, the file layout, the CLI, and every rule the linter enforces.
+description: Use this whenever you are creating or changing an Applet — a small real-time app with its own data, its own page beside the conversation, and tools you can call. It is the reference for the Applets SDK, the file layout, the authoring tools, and every rule the linter enforces.
 ---
 
 # Build an Applet
 
 An Applet is a real application. It has its own SQLite storage that survives
 every code change, a React page the User opens beside this conversation, and
-tools every Bot of this User can call. You write it in TypeScript on the
-Computer, check it, build it, and publish it; the published code runs in the
-kernel's loader, never on the Computer.
+tools every Bot of this User can call. You write it in TypeScript with the
+`applet_*` tools, check it, and publish it. The source lives in the cloud, a
+build service compiles it, and the published code runs in the kernel's
+loader — no Computer is involved at any point.
 
 Two files are yours: `server.ts` (the tables and the tools) and `ui.tsx` (the
 page). Nothing else.
@@ -17,26 +18,27 @@ page). Nothing else.
 ## The loop
 
 1. **`applet_create`** with a display name. It makes the Applet, scaffolds a
-   working todo list into
-   `/home/box/agent-data/user-packages/applets/source/<appletId>/`, and puts it
-   in the panel beside the conversation. Do not create a second Applet for a
-   change to an existing one — `applet_list` first.
-2. **Edit** `server.ts` and `ui.tsx` in that directory with the ordinary file
-   tools. The scaffold already builds; change it rather than starting empty.
-3. **`applet check`** in that directory. It type-checks and lints, and prints
-   every problem as `path:line:col message`. Fix all of them. Do not publish
-   over a failing check — the publish will be refused and you will have spent a
-   Turn learning what `applet check` would have told you.
-4. **`applet build`** in that directory. It writes `dist/server.js`,
-   `dist/ui.html`, and `dist/manifest.json`. The tool list in the manifest is
-   derived by _running_ your server, so a tool that does not boot is a build
-   failure, not a surprise later.
-5. **`applet dev`** if you want to look at it. It prints a local URL and opens
-   nothing; open that URL in the Computer's browser and screenshot it. Models
-   are unavailable in `applet dev`.
-6. **`applet_publish`** with the Applet's id. It reads what `applet build`
-   wrote, records an immutable generation, mounts it, and offers its tools to
+   working todo list, and puts it in the panel beside the conversation. Do not
+   create a second Applet for a change to an existing one — `applet_list`
+   first.
+2. **`applet_files`** and **`applet_read_file`** to see what is there, then
+   **`applet_write_file`** to change it. A write replaces the whole file, so
+   read before you write. Two files are yours: `server.ts` and `ui.tsx`. The
+   scaffold already builds; change it rather than starting empty.
+3. **`applet_check`** with the Applet's id. It type-checks, lints, bundles and
+   boots your server, and answers either with every problem as
+   `path:line:col message` or with the tools it declares and a URL for its
+   page. Fix every diagnostic. Do not publish over a failing check — the
+   publish is refused and returns the same lines.
+4. **`applet_publish`** with the Applet's id. It builds the current source
+   again, records an immutable generation, mounts it, and offers its tools to
    every Bot of this User from your next Turn — not this one.
+
+The tool list is derived by _running_ your server inside the build, so a tool
+that does not boot is a build failure rather than a surprise later.
+
+`applet_check`'s page URL is the built UI with no data behind it: it proves
+the page renders, not that the Applet works. Publishing is what makes it real.
 
 `applet_generations` lists the history; `applet_revert` moves back to an
 earlier generation and is itself recorded. Reverting code never touches the
@@ -157,7 +159,7 @@ The kit reads the nine tokens the host injects: `surface`, `surface-raised`,
 
 ## The rules the linter enforces
 
-Every one of these is an error from `applet check`, not a warning.
+Every one of these is an error from `applet_check`, not a warning.
 
 - **`applet/no-raw-colors`** — no `#hex`, `rgb()`, `rgba()`, `hsl()`, `hsla()`,
   `color-mix()`, or a CSS colour name, in `.ts`, `.tsx`, or `.css`. Use the
@@ -174,13 +176,15 @@ Every one of these is an error from `applet check`, not a warning.
 
 ## When it goes wrong
 
-| What you see                                        | What it means                                                                          |
-| --------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| `"dist/server.js" is …: run \`applet build\` …`     | you published without building, or built in the wrong directory                        |
-| `dist/manifest.json does not match the built files` | you edited a file after building; run `applet build` again                             |
-| `applet check: N error(s)`                          | fix every line it printed before doing anything else                                   |
-| a publish reports `failed` with diagnostics         | the generation did not mount; the previous one is still live and its data is untouched |
-| the tools do not appear                             | a published generation activates on your **next** Turn, not the one that published it  |
+| What you see                                | What it means                                                                          |
+| ------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `the build failed at the typecheck stage`   | fix every `path:line:col` line it returned before doing anything else                  |
+| `the build failed at the lint stage`        | a rule below was broken; the message names which                                       |
+| `the build failed at the describe stage`    | your server threw while booting, so its tools could not be read                        |
+| `<appletId> has no source`                  | you are publishing an Applet you never scaffolded; call `applet_create`                |
+| `the build service is unavailable`          | nothing you did; say so to the User rather than retrying in a loop                     |
+| a publish reports `failed` with diagnostics | the generation did not mount; the previous one is still live and its data is untouched |
+| the tools do not appear                     | a published generation activates on your **next** Turn, not the one that published it  |
 
 Report a publish failure to the User with the diagnostics as they were
 printed. Never claim an Applet is working because the build passed: publishing

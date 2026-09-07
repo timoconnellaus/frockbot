@@ -1408,10 +1408,9 @@ export class BotState extends DurableObject<BotStateEnv> {
     for (const entry of listing.entries) {
       const relative = entry.path.path.slice(appletId.length + 1);
       if (!relative) continue;
-      // Machine output is not source: `dist/` is what `applet build` wrote,
-      // `.wrangler/` is a toolchain cache, `node_modules/` is a dependency
-      // tree. The canvas shows what the Bot wrote, and the publish reads the
-      // build.
+      // Machine output is not source: `dist/`, `.wrangler/` and
+      // `node_modules/` are build leftovers a Bot may have written, and the
+      // canvas shows the files it authors.
       if (appletSourceArtefactPathV1(relative)) continue;
       if (bytes + entry.generation.size > APPLET_SOURCE_MAX_BYTES_V1) {
         truncated = true;
@@ -1439,7 +1438,7 @@ export class BotState extends DurableObject<BotStateEnv> {
   }
 
   /**
-   * The outcome the Bot last recorded for `applet check` or `applet build`.
+   * The outcome the Bot last recorded for `applet_check`.
    * Until the Applet authority records one, this is honestly `unknown` rather
    * than a green tick nobody earned.
    */

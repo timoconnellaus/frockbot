@@ -90,11 +90,13 @@ describe("the Applets feature inside a real Bot", () => {
     const createdResult = toolResult(created as never);
     expect(createdResult.isError).toBe(false);
     expect(createdResult.content).toContain("Weekly Todos");
-    expect(createdResult.content).toContain(
-      "/home/box/agent-data/user-packages/applets/source/",
-    );
-    expect(createdResult.content).toContain("applet check");
+    // The scaffold is named by the files it wrote and the loop that follows,
+    // with no Computer path and no shell step anywhere in it.
+    expect(createdResult.content).toContain("server.ts");
+    expect(createdResult.content).toContain("applet_write_file");
+    expect(createdResult.content).toContain("applet_check");
     expect(createdResult.content).toContain("applet_publish");
+    expect(createdResult.content).not.toContain("/home/box");
 
     // And it is in the list now, which is the directory answering, not the
     // feature remembering.

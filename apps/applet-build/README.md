@@ -29,6 +29,8 @@ One route, `POST /build`, defined in [`@frockbot/applets/build-contract`](../../
 
 `effectId` is carried, not journalled: a build is pure, so a retry under the same key re-derives the same bytes and the caller's own record is the only one that has to exist. The container holds no storage and no credential — the app Worker keeps the R2 write and the hash verification, so a compromised builder can only return bytes the app then refuses.
 
+Two Turn verbs call it, both in `mode: "build"` and both through the `buildService` seam on the Applets host (`app/applets-host/bot.ts`): `applet_check`, which stores the artifacts so its preview URL resolves but records no generation, and `applet_publish`, which goes on to record one. `check` mode carries no artifacts, so neither verb asks for it — a check that answered without a bundle could not offer a page to look at, and would leave the publish to discover a `describe` failure on its own.
+
 ## The rule the hashes keep
 
 The service and `applet build` run **one** implementation, `applets/sdk/src/build/`. That is what `container/build.test.ts` asserts: the same source, built both ways, produces the same manifest hashes. A second derivation of the bundle — or of `this.tool(...)` by static analysis — is exactly the thing that would pass its own tests and fail a publish, because the kernel admits a generation by comparing the manifest to the mounted facet's own `health()`.

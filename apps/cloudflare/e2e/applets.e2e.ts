@@ -9,12 +9,10 @@
 // scaffold is written into, the focus the create sets, the surface page served
 // from the anonymous artifact origin, and the canvas reading the source back.
 //
-// What is not here, and why: publishing. A publish reads `dist/` from the
-// Applets Package's durable root, which `applet build` writes on the Computer,
-// and an end-to-end run has no Computer and no seam that writes into the
-// Workspace store from outside a Turn. The published half of the canvas is
-// covered by `applets-shell.e2e.ts` on the shell side and by
-// `test/applets.workerd.ts` on the authority side.
+// What is not here, and why: publishing. `applets-publish.e2e.ts` is the whole
+// of that half — write, check, publish, and the live Applet — and it pays for a
+// real container build to get it. Running the same build twice in one suite
+// buys nothing this spec does not already prove.
 import type { Page, TestInfo } from "@playwright/test";
 import { test, expect, provisionThroughUi, sendMessage } from "./fixtures.ts";
 import { E2E_OLLAMA_GOOD_API_KEY, e2eToolCallPrompt } from "./harness.ts";

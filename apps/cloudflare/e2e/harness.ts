@@ -13,6 +13,13 @@
 // `wrangler dev`), lifted here so the test layer runs the developer's own
 // path rather than a second one.
 //
+// The Applet build service is real too: `apps/applet-build` runs under its own
+// `wrangler dev` in the same dev service registry, so the app's `APPLET_BUILD`
+// binding resolves and an Applet is compiled by the container production
+// compiles it with. That needs Docker; `appletBuildAvailableV1` says whether
+// this machine has it, and the one spec that builds an Applet fails with that
+// sentence rather than passing without having built anything.
+//
 // The providers are the only things that are not real. `wrangler dev` has no
 // `outboundService` knob, so the Worker's outbound `fetch` is the machine's,
 // and a test must not depend on https://ollama.com. Instead this harness runs
@@ -22,7 +29,7 @@
 // test-only branch. Frock AI is an auxiliary local Wrangler process,
 // discovered through Wrangler's dev service registry and bound under `AI` at
 // the Gateway and native-image seams.
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createServer as createHttpServer, type Server } from "node:http";
 import { createWriteStream, mkdirSync, type WriteStream } from "node:fs";
 import { mkdir, readFile, rm } from "node:fs/promises";
@@ -431,6 +438,24 @@ export function e2ePersistDirectory(port: number): string {
 /** The bearer token the Workspace seed door accepts in an end-to-end run. */
 export const E2E_WORKSPACE_SEED_TOKEN = "e2e-workspace-seed-token";
 
+/** The shared secret the app Worker and the build service present each other. */
+export const E2E_APPLET_BUILD_TOKEN = "e2e-applet-build-token";
+
+/**
+ * Whether this machine can run the Applet build service.
+ *
+ * `wrangler dev` builds and runs the container's image, which needs a running
+ * Docker daemon. A spec calls this to say so out loud: an Applet build that
+ * cannot happen is a spec that fails with the reason, never one that quietly
+ * proves nothing.
+ */
+export function appletBuildAvailableV1(): boolean {
+  return (
+    spawnSync("docker", ["info"], { stdio: "ignore", timeout: 30_000 })
+      .status === 0
+  );
+}
+
 /**
  * Land one file in one of the User's durable roots while the Worker is up.
  *
@@ -490,6 +515,8 @@ export interface HarnessOptions {
   ollamaPort: number;
   /** The port the auxiliary Frock AI RPC Worker listens on. */
   frockAiPort: number;
+  /** The port the Applet build service listens on, when Docker can run it. */
+  appletBuildPort: number;
 }
 
 export interface RunningHarness {
@@ -498,6 +525,8 @@ export interface RunningHarness {
   frockAiUrl: string;
   /** The file both `wrangler dev` processes are teed into. */
   logFile: string;
+  /** Absent when Docker is not running and the build service was not started. */
+  appletBuildUrl?: string;
   /** How many times each supervised server has had to be restarted. */
   restarts(): { worker: number; frockAi: number };
   stop(): Promise<void>;
@@ -584,16 +613,22 @@ export async function startHarness(
     options.port,
     options.ollamaPort,
     options.frockAiPort,
+    options.appletBuildPort,
   ]);
   const workerInspectorPort = await reserveFreePort({ taken: reservedHere });
   const frockAiInspectorPort = await reserveFreePort({ taken: reservedHere });
+  const appletBuildInspectorPort = await reserveFreePort({
+    taken: reservedHere,
+  });
 
   let ollama: Awaited<ReturnType<typeof startFakeOllama>> | undefined;
   let frockAi: SupervisedProcess | undefined;
+  let appletBuild: SupervisedProcess | undefined;
   let worker: SupervisedProcess | undefined;
 
   const stop = async (): Promise<void> => {
     if (worker) await worker.stop();
+    if (appletBuild) await appletBuild.stop();
     if (frockAi) await frockAi.stop();
     if (ollama) await ollama.close();
     await new Promise<void>((closed) => log.end(closed));
@@ -631,6 +666,34 @@ export async function startHarness(
       ],
       {
         cwd: cloudflareRoot,
+        stdio: ["ignore", "pipe", "pipe"],
+        detached: true,
+        env: childEnvironment,
+      },
+    );
+
+  const spawnAppletBuild = (): ChildProcess =>
+    spawn(
+      "bunx",
+      [
+        "wrangler",
+        "dev",
+        "--ip",
+        "127.0.0.1",
+        "--port",
+        String(options.appletBuildPort),
+        "--inspector-port",
+        String(appletBuildInspectorPort),
+        // The same secret the app Worker presents, and the container re-checks.
+        "--var",
+        `APPLET_BUILD_TOKEN:${E2E_APPLET_BUILD_TOKEN}`,
+        "--persist-to",
+        persistDirectory,
+        "--log-level",
+        "warn",
+      ],
+      {
+        cwd: resolve(cloudflareRoot, "../applet-build"),
         stdio: ["ignore", "pipe", "pipe"],
         detached: true,
         env: childEnvironment,
@@ -681,6 +744,12 @@ export async function startHarness(
         // the Computer would have written. See `seedWorkspaceFile`.
         "--var",
         `WORKSPACE_SEED_TOKEN:${E2E_WORKSPACE_SEED_TOKEN}`,
+        // The Applet build service, when this machine has Docker. The binding
+        // is declared either way; without the token the app refuses a publish
+        // with "the build service is unavailable" rather than calling a
+        // service that is not there.
+        "--var",
+        `APPLET_BUILD_TOKEN:${E2E_APPLET_BUILD_TOKEN}`,
         "--persist-to",
         persistDirectory,
         // As above: the per-request log is the flood, not the signal.
@@ -731,6 +800,29 @@ export async function startHarness(
     frockAi = supervisedFrockAi;
     await supervisedFrockAi.start();
 
+    // Before the app Worker, so the dev service registry already has the
+    // service its APPLET_BUILD binding names.
+    const appletBuildUrl = `http://127.0.0.1:${options.appletBuildPort}`;
+    if (appletBuildAvailableV1()) {
+      const supervisedAppletBuild = superviseProcess({
+        label: "Applet build wrangler dev",
+        spawnChild: spawnAppletBuild,
+        // `/healthz` is the Worker's own route: it answers without starting a
+        // container, so this waits for the Worker and the image build, not for
+        // a cold container start.
+        waitUntilReady: () => waitForHttpServer(`${appletBuildUrl}/healthz`),
+        stopChild: stopProcessTree,
+        forwardOutput,
+        report: note,
+      });
+      appletBuild = supervisedAppletBuild;
+      await supervisedAppletBuild.start();
+    } else {
+      note(
+        "Docker is not running, so the Applet build service was not started and APPLET_BUILD reads [not connected].",
+      );
+    }
+
     const baseUrl = `http://127.0.0.1:${options.port}`;
     const supervisedWorker = superviseProcess({
       label: "FrockBot wrangler dev",
@@ -747,6 +839,7 @@ export async function startHarness(
       baseUrl,
       ollamaUrl: ollama.url,
       frockAiUrl,
+      ...(appletBuild ? { appletBuildUrl } : {}),
       logFile,
       restarts: () => ({
         worker: supervisedWorker.restarts(),
