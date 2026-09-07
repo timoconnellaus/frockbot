@@ -1,0 +1,45 @@
+{
+  "name": "@frockbot/providers",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./openai-compatible": "./openai-compatible/index.ts",
+    "./frock-ai": "./frock-ai/index.ts",
+    "./frock-ai/catalog": "./frock-ai/catalog.ts",
+    "./frock-ai/definition": "./frock-ai/definition.ts",
+    "./frock-ai/runtime": "./frock-ai/runtime.ts",
+    "./frock-ai/user": "./frock-ai/user.ts",
+    "./ollama-cloud": "./ollama-cloud/index.ts",
+    "./ollama-cloud/definition": "./ollama-cloud/definition.ts",
+    "./ollama-cloud/runtime": "./ollama-cloud/runtime.ts",
+    "./ollama-cloud/user": "./ollama-cloud/user.ts",
+    "./ollama-cloud/web-search": "./ollama-cloud/web-search.ts",
+    "./anthropic": "./anthropic/index.ts",
+    "./anthropic/definition": "./anthropic/definition.ts",
+    "./anthropic/runtime": "./anthropic/runtime.ts",
+    "./foundation": "./foundation/index.ts",
+    "./foundation/runtime": "./foundation/runtime.ts",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "4.0.49",
+    "@ai-sdk/openai-compatible": "3.0.44",
+    "@ai-sdk/provider": "4.0.10",
+    "@ai-sdk/provider-utils": "5.0.36",
+    "@frockbot/core": "workspace:*",
+    "@frockbot/plugin-credentials": "workspace:*",
+    "@frockbot/plugin-settings": "workspace:*",
+    "@frockbot/plugin-web": "workspace:*"
+  },
+  "devDependencies": {
+    "@frockbot/plugin-testkit": "workspace:*",
+    "@types/bun": "1.4.0",
+    "@types/node": "26.2.0",
+    "typescript": "^7.0.2"
+  }
+}

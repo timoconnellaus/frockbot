@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { customModelsDefinitionV1 } from "./definition.js";
-import { providerOllamaCloudDefinitionV1 } from "@frockbot/plugin-provider-ollama-cloud/definition";
+import { providerOllamaCloudDefinitionV1 } from "@frockbot/providers/ollama-cloud/definition";
 
 describe("the Custom models definition", () => {
   test("is default-disabled and declares only the Bot model override setting", () => {

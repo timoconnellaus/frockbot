@@ -1,4 +1,4 @@
-# @frockbot/plugin-provider-ollama-cloud
+# @frockbot/providers/ollama-cloud
 
 The Ollama model provider Package. It contributes:
 

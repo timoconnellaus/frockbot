@@ -14,7 +14,7 @@ import {
   OpenAICompatibleProvider,
   planOpenAICompatibleRequestV1,
   streamWithModelRequestDeadlinesV1,
-} from "@frockbot/provider-openai-compatible";
+} from "@frockbot/providers/openai-compatible";
 import {
   DEFAULT_OLLAMA_API_BASE_URL,
   decodeOllamaApiBaseUrl,

@@ -39,9 +39,9 @@ FROCKBOT_LLM_BASE_URL="https://api.example.com/v1" \
 
 The left sidebar lists the authenticated User's active Bots and switches the workspace. **Add sheep** creates a Bot with a random sheep identity; selecting the active sheep opens an editor where its background, headwear, facewear, and neckwear can be changed independently or rerolled together. **Manage** shows archived Bots and provides archive and restore controls without deleting their history or settings. Bot settings remain behind the selected workspace's header gear. The sidebar's **Connectors** button authorizes external accounts and MCP servers for every Bot the User owns. **Profile → Plugins** installs, uninstalls, enables, and disables Packages account-wide, while **Profile → Settings** owns remaining declared application settings. Models renders Package contributions; enabling the default-disabled Custom models Package adds the account model picker and a Package-scoped model override to Bot settings. Without it, every Bot follows the platform's Frock AI model. During an active Turn, **Stop** records cancellation intent; closing or switching clients does not stop backend work.
 
-`@frockbot/plugin-provider-ollama-cloud` lets each User create multiple named Ollama Cloud Connections with their own write-only API keys. It is disabled by default and depends on the Custom models Package. The backend validates and encrypts each credential and discovers that Connection's model catalog; connecting it does not change the platform model. Rotation affects subsequent model effects while already-admitted effects retain their credential lease, and disconnect prevents new leases without cancelling admitted Turns.
+`@frockbot/providers/ollama-cloud` lets each User create multiple named Ollama Cloud Connections with their own write-only API keys. It is disabled by default and depends on the Custom models Package. The backend validates and encrypts each credential and discovers that Connection's model catalog; connecting it does not change the platform model. Rotation affects subsequent model effects while already-admitted effects retain their credential lease, and disconnect prevents new leases without cancelling admitted Turns.
 
-`@frockbot/plugin-provider-frock-ai` is the built-in credential-free model path. On a User's first configuration read its User Contribution idempotently installs and enables the Package, creates the ready ambient `flock-ai-account` Connection, and records `@frock/auto` as the platform model. The runtime sends Auto through Cloudflare AI Gateway as `dynamic/<FROCK_AI_AUTO_ROUTE>` and manual `@frock/...` ids as `workers-ai/@cf/...`, behind one narrow streaming adapter. No User secret enters FrockBot state; the Gateway credentials below are deployment configuration, held by the Worker and never by a User.
+`@frockbot/providers/frock-ai` is the built-in credential-free model path. On a User's first configuration read its User Contribution idempotently installs and enables the Package, creates the ready ambient `flock-ai-account` Connection, and records `@frock/auto` as the platform model. The runtime sends Auto through Cloudflare AI Gateway as `dynamic/<FROCK_AI_AUTO_ROUTE>` and manual `@frock/...` ids as `workers-ai/@cf/...`, behind one narrow streaming adapter. No User secret enters FrockBot state; the Gateway credentials below are deployment configuration, held by the Worker and never by a User.
 
 To attach the built-in Fly Sprites Computer provider Package, provide a Sprites token. The provider sits behind the provider-neutral Computer interface used by generic tools and memory. It provisions **one persistent Sprite per User**, shared by every Bot that User owns: each Bot receives its own directories and an on-demand Chromium/noVNC desktop slot, and every Bot on the Computer shares the one browser profile at `/home/box/chrome-profile`, so logins are a User-level asset. There is no separate User storage Sprite. `FROCKBOT_SPRITE_NAME` optionally selects the base name the User's Sprite name is derived from for standalone development; the hosted backend supplies durable User identity. `FROCKBOT_COMPUTER_PROVIDER` selects an installed provider and currently defaults to `fly-sprite`. In the hosted deployment the Sprites SDK and `SPRITES_TOKEN` live in `apps/computer-host`, which the Bot Durable Object reaches over the `COMPUTER_HOST` service binding; the app Worker keeps `SPRITES_TOKEN` only as the answer to "has this deployment a Computer at all".
 
@@ -289,10 +289,6 @@ packages/
   plugin-image/     generate_image through Cloudflare's AI binding, fenced by the Workspace
   plugin-machine-messages/ Message delivery to and from a User's registered machines
   plugin-memory/    Bot, User and Project Markdown memory over the Workspace store
-  plugin-provider-foundation/ Deterministic credential-free development provider
-  plugin-provider-anthropic/  Optional Anthropic (Claude) model provider
-  plugin-provider-frock-ai/  Built-in credential-free Frock AI model provider
-  plugin-provider-ollama-cloud/  Optional Ollama Cloud model provider
   plugin-routines/  Durable Routines, the alarm scheduler, and the webhook door
   plugin-search/    Per-User transcript index, search route, and overlay
   plugin-settings/  Plugin-owned Bot, Package, and User settings surfaces
@@ -302,7 +298,12 @@ packages/
   plugin-ui-theme/  Global semantic tokens for hosted client Contributions
   plugin-user-machine/ Registered-machine enrollment and pairing
   plugin-web/       web_search and a bounded, SSRF-classified web_fetch
-  provider-openai-compatible/  Shared model transport: request mapping, deadlines, AI SDK decoding
+providers/
+  openai-compatible/ Shared model transport: request mapping, deadlines, AI SDK decoding
+  frock-ai/         Built-in credential-free Frock AI model provider
+  ollama-cloud/     Optional Ollama Cloud model provider
+  anthropic/        Optional Anthropic (Claude) model provider
+  foundation/       Deterministic credential-free development provider
 docs/
   architecture.md   Current system shape
   grokbot-parity.md The GrokBot capabilities FrockBot must match

@@ -14,8 +14,7 @@
     "@frockbot/computer-core": "workspace:*",
     "@frockbot/core": "workspace:*",
     "@frockbot/plugin-credentials": "workspace:*",
-    "@frockbot/plugin-provider-foundation": "workspace:*",
-    "@frockbot/provider-openai-compatible": "workspace:*"
+    "@frockbot/providers": "workspace:*"
   },
   "devDependencies": {
     "@frockbot/plugin-clock": "workspace:*",

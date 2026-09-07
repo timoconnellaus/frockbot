@@ -1,13 +1,35 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 
-// "core imports nothing above it", enforced mechanically. Walks the import graph
-// of every non-test source file under core/ and fails on any specifier that
-// reaches a Package, an application, or an app.
+// "a module imports nothing above it", enforced mechanically. Walks the import
+// graph of every non-test source file under each module root and fails on any
+// specifier that reaches a Package, an application, or an app the module's row
+// below does not allow.
 
 const repoRoot = resolve(import.meta.dirname, "..");
-const coreRoot = join(repoRoot, "core");
 const failures: string[] = [];
+
+interface Module {
+  dir: string;
+  allowed: string[];
+}
+
+const coreAllowed = ["@frockbot/core/", "@frockbot/compose-"];
+
+const modules: Module[] = [
+  { dir: "core", allowed: coreAllowed },
+  {
+    dir: "providers",
+    allowed: [
+      ...coreAllowed,
+      "@frockbot/providers/",
+      // The three plugin seams the app cut moves into core.
+      "@frockbot/plugin-credentials/user",
+      "@frockbot/plugin-settings/user",
+      "@frockbot/plugin-web/contract",
+    ],
+  },
+];
 
 interface WorkspacePackage {
   name: string;
@@ -32,7 +54,7 @@ function exportMap(manifest: Record<string, unknown>): Record<string, string> {
 }
 
 const workspace = new Map<string, WorkspacePackage>();
-const manifestPaths = ["core/package.json"];
+const manifestPaths = ["core/package.json", "providers/package.json"];
 for (const group of ["packages", "apps", "applications"]) {
   manifestPaths.push(
     ...new Bun.Glob(`${group}/*/package.json`).scanSync({
@@ -52,7 +74,10 @@ for (const manifestPath of manifestPaths) {
   });
 }
 
-function isForbiddenSpecifier(specifier: string): string | undefined {
+function isForbiddenSpecifier(
+  module: Module,
+  specifier: string,
+): string | undefined {
   if (
     specifier.startsWith("apps/") ||
     specifier.startsWith("applications/") ||
@@ -62,12 +87,9 @@ function isForbiddenSpecifier(specifier: string): string | undefined {
     return "an app or application";
   }
   if (!specifier.startsWith("@frockbot/")) return undefined;
-  if (
-    specifier === "@frockbot/core" ||
-    specifier.startsWith("@frockbot/core/") ||
-    specifier.startsWith("@frockbot/compose-")
-  ) {
-    return undefined;
+  for (const allowed of module.allowed) {
+    const bare = allowed.replace(/\/$/, "");
+    if (specifier === bare || specifier.startsWith(allowed)) return undefined;
   }
   return "a Package";
 }
@@ -122,43 +144,52 @@ interface Visit {
 }
 
 const seen = new Set<string>();
-const queue: Visit[] = [];
 
-for (const entry of new Bun.Glob("core/**/*.ts").scanSync({
-  cwd: repoRoot,
-  onlyFiles: true,
-})) {
-  // Core tests mount concrete Packages on purpose; only shipped code is gated.
-  if (entry.endsWith(".test.ts")) continue;
-  queue.push({ file: join(repoRoot, entry), root: coreRoot, via: [] });
-}
+for (const module of modules) {
+  const moduleRoot = join(repoRoot, module.dir);
+  const queue: Visit[] = [];
+  for (const entry of new Bun.Glob(`${module.dir}/**/*.ts`).scanSync({
+    cwd: repoRoot,
+    onlyFiles: true,
+  })) {
+    // Module tests mount concrete Packages on purpose; only shipped code is gated.
+    if (entry.endsWith(".test.ts")) continue;
+    queue.push({ file: join(repoRoot, entry), root: moduleRoot, via: [] });
+  }
 
-while (queue.length > 0) {
-  const { file, root, via } = queue.pop()!;
-  if (seen.has(file)) continue;
-  seen.add(file);
-  const trail = [...via, relative(repoRoot, file)];
-  for (const specifier of specifiersOf(file)) {
-    const reason = isForbiddenSpecifier(specifier);
-    if (reason) {
-      failures.push(`${trail.join(" -> ")}: imports ${reason}: "${specifier}"`);
-      continue;
-    }
-    if (specifier.startsWith(".")) {
-      const resolved = resolveFile(resolve(dirname(file), specifier));
-      if (!resolved) continue;
-      if (relative(root, resolved).startsWith("..")) {
+  while (queue.length > 0) {
+    const { file, root, via } = queue.pop()!;
+    if (seen.has(file)) continue;
+    seen.add(file);
+    const trail = [...via, relative(repoRoot, file)];
+    for (const specifier of specifiersOf(file)) {
+      const reason = isForbiddenSpecifier(module, specifier);
+      if (reason) {
         failures.push(
-          `${trail.join(" -> ")}: leaves ${relative(repoRoot, root)}: "${specifier}"`,
+          `${trail.join(" -> ")}: imports ${reason}: "${specifier}"`,
         );
         continue;
       }
-      queue.push({ file: resolved, root, via: trail });
-      continue;
-    }
-    const entry = resolveWorkspaceEntry(specifier);
-    if (entry) {
-      queue.push({ file: entry, root: packageOf(specifier)!.dir, via: trail });
+      if (specifier.startsWith(".")) {
+        const resolved = resolveFile(resolve(dirname(file), specifier));
+        if (!resolved) continue;
+        if (relative(root, resolved).startsWith("..")) {
+          failures.push(
+            `${trail.join(" -> ")}: leaves ${relative(repoRoot, root)}: "${specifier}"`,
+          );
+          continue;
+        }
+        queue.push({ file: resolved, root, via: trail });
+        continue;
+      }
+      const entry = resolveWorkspaceEntry(specifier);
+      if (entry) {
+        queue.push({
+          file: entry,
+          root: packageOf(specifier)!.dir,
+          via: trail,
+        });
+      }
     }
   }
 }
@@ -169,5 +200,5 @@ if (failures.length > 0) {
 }
 
 process.stdout.write(
-  `Core import contract passed (${seen.size} files checked)\n`,
+  `Layer import contract passed (${seen.size} files checked)\n`,
 );

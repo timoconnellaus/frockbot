@@ -2512,7 +2512,7 @@ export const userContribution = defineUserBackendContribution<
   OllamaCloudUserApplicationHostV1,
   OllamaCloudUserBackendContribution
 >({
-  specifier: "@frockbot/plugin-provider-ollama-cloud/user",
+  specifier: "@frockbot/providers/ollama-cloud/user",
   mount: (host, lifecycle) =>
     lifecycle.mount(createOllamaCloudUserBackendContribution(host.ollamaCloud)),
 });

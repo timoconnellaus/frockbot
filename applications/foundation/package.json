@@ -37,10 +37,6 @@
     "@frockbot/plugin-image": "workspace:*",
     "@frockbot/plugin-machine-messages": "workspace:*",
     "@frockbot/plugin-memory": "workspace:*",
-    "@frockbot/plugin-provider-anthropic": "workspace:*",
-    "@frockbot/plugin-provider-foundation": "workspace:*",
-    "@frockbot/plugin-provider-frock-ai": "workspace:*",
-    "@frockbot/plugin-provider-ollama-cloud": "workspace:*",
     "@frockbot/plugin-routines": "workspace:*",
     "@frockbot/plugin-search": "workspace:*",
     "@frockbot/plugin-settings": "workspace:*",
@@ -49,7 +45,8 @@
     "@frockbot/plugin-subagents": "workspace:*",
     "@frockbot/plugin-ui-theme": "workspace:*",
     "@frockbot/plugin-user-machine": "workspace:*",
-    "@frockbot/plugin-web": "workspace:*"
+    "@frockbot/plugin-web": "workspace:*",
+    "@frockbot/providers": "workspace:*"
   },
   "devDependencies": {
     "@types/bun": "1.4.0",

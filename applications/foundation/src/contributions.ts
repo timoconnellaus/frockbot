@@ -68,11 +68,11 @@ import {
 import {
   userContribution as ollamaCloudUserContribution,
   type OllamaCloudUserApplicationHostV1,
-} from "@frockbot/plugin-provider-ollama-cloud/user";
+} from "@frockbot/providers/ollama-cloud/user";
 import {
   userContribution as frockAiUserContribution,
   type FrockAiUserApplicationHostV1,
-} from "@frockbot/plugin-provider-frock-ai/user";
+} from "@frockbot/providers/frock-ai/user";
 import {
   userContribution as botTemplateUserContribution,
   type BotTemplateUserApplicationHostV1,

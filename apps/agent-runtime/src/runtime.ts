@@ -1,7 +1,7 @@
 import {
   FOUNDATION_MODEL,
   FOUNDATION_PROVIDER,
-} from "@frockbot/plugin-provider-foundation/runtime";
+} from "@frockbot/providers/foundation/runtime";
 import {
   type CompositionPinV1,
   LoopHookListV1,
@@ -29,7 +29,7 @@ import {
 import {
   createOpenAICompatibleFeature,
   type FetchLike,
-} from "@frockbot/provider-openai-compatible";
+} from "@frockbot/providers/openai-compatible";
 
 /**
  * Steps (model calls) one Turn may take before the loop gives up. Tool-heavy

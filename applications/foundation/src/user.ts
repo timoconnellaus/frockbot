@@ -28,8 +28,8 @@ import {
   type SearchUserBackendContribution,
   type SearchUserBackendHost,
 } from "@frockbot/plugin-search/user";
-import { type OllamaCloudUserBackendContribution } from "@frockbot/plugin-provider-ollama-cloud/user";
-import { type FrockAiUserBackendContribution } from "@frockbot/plugin-provider-frock-ai/user";
+import { type OllamaCloudUserBackendContribution } from "@frockbot/providers/ollama-cloud/user";
+import { type FrockAiUserBackendContribution } from "@frockbot/providers/frock-ai/user";
 import {
   type UserSettingsBackendContribution,
   type UserSettingsStorage,

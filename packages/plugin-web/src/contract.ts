@@ -7,7 +7,7 @@
 // provider can satisfy it unchanged — the two-provider check the constitution
 // applies to the model interface.
 //
-// This module holds no transport. `plugin-provider-ollama-cloud` implements
+// This module holds no transport. `providers/ollama-cloud` implements
 // {@link WebSearchV1} over `POST {apiBaseUrl}/api/web_search`; this Package
 // never imports it.
 import type { ToolDefinition, ToolSchema } from "@frockbot/core/contracts";
