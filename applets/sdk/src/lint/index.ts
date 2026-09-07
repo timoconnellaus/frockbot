@@ -1,6 +1,6 @@
 /**
  * `@frockbot/applet-sdk/lint` — the flat config, the rules, and the one call
- * `applet check` makes.
+ * the check stage makes.
  *
  * A diagnostic is the SDK's whole answer to "what did I do wrong": the CLI
  * prints `path:line:col message` and nothing else, so what a Bot must remember

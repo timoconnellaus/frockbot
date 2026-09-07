@@ -214,58 +214,6 @@ export async function listPackageUi(
  * and its provenance says who put it there. The write goes through the same
  * `writeSkillDocumentV1` the Bot's own `skill_write` uses, quota included.
  */
-/**
- * One file written into one of the User's durable roots, as the User.
- *
- * This is the stand-in for the Computer's sync in an environment that has
- * no Computer: an end-to-end run lands the bytes `applet build` would have
- * written, at the path the sync would have mirrored them to, through the
- * same store and with the same generation record. The writer is the User —
- * the authority the sync's `unattributed` mirror is *narrower* than — so
- * nothing here is a write the User could not have made from their own
- * Computer. A root belonging to another User is refused by the store.
- */
-export async function writeUserWorkspaceFile(
-  state: ShellBotStateV1,
-  identity: BotIdentity,
-  request: {
-    root: WorkspaceRootV1;
-    path: string;
-    bytes: Uint8Array;
-    mediaType?: string;
-  },
-): Promise<
-  | { status: "written"; generationId: string }
-  | { status: "refused"; reason: string }
-> {
-  await state.authority.validateIdentity(identity);
-  const files = (state.env as { WORKSPACE_FILES?: WorkspaceFilesV1 })
-    .WORKSPACE_FILES;
-  if (!files) {
-    return { status: "refused", reason: "this Bot has no Workspace store" };
-  }
-  if (request.root.userId !== identity.userId) {
-    return { status: "refused", reason: "the root belongs to another User" };
-  }
-  const path = { root: request.root, path: request.path };
-  const existing = await files.stat(path);
-  const outcome = await files.write({
-    path,
-    bytes: request.bytes,
-    writer: { kind: "user", userId: identity.userId },
-    expectedGenerationId:
-      existing.status === "ok" ? existing.entry.generation.generationId : null,
-    ...(request.mediaType ? { mediaType: request.mediaType } : {}),
-  });
-  if (outcome.status === "ok") {
-    return {
-      status: "written",
-      generationId: outcome.generation.generationId,
-    };
-  }
-  return { status: "refused", reason: outcome.reason };
-}
-
 export async function writeUserSkill(
   state: ShellBotStateV1,
   identity: BotIdentity,

@@ -461,8 +461,8 @@ export class FlyWorkspaceFiles implements WorkspaceFilesV1 {
       // The size and the digest come back before any bytes do, so the rest of
       // the file can be asked for one bounded chunk at a time and the pieces
       // proven to be one file. A whole file as one base64 answer stopped
-      // working long before a file got large: half a megabyte of built Applet
-      // page is two thirds of a megabyte of answer, which the storage surface
+      // working long before a file got large: half a megabyte of built page
+      // is two thirds of a megabyte of answer, which the storage surface
       // refuses outright rather than truncating.
       withBytes
         ? `head -c ${WORKSPACE_CHUNK_BYTES_V1} "$TARGET" | base64 -w0; echo`

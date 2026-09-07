@@ -2,7 +2,7 @@
 
 The cloud build for Applets: a Worker that authorizes and shards, fronting a Cloudflare Container that runs the Applets SDK's own pipeline.
 
-An Applet used to be built on the User's Computer — the SDK npm-installed on a Sprite, `applet check` and `applet build` run over a mirrored source root, `dist/` pulled back before a publish. That put a Linux VM, an unpinned `latest` install and a file sync on the critical path of "publish my Applet". This service replaces all of it: source in, artifacts out.
+An Applet used to be built on the User's Computer — the SDK npm-installed on a Sprite, `applet check` and `applet build` run over a mirrored source root, `dist/` pulled back before a publish. That put a Linux VM, an unpinned `latest` install and a file sync on the critical path of "publish my Applet". This service replaced all of it, and the Computer half is now deleted: source in, artifacts out.
 
 ```
 frockbot-cloudflare (app Worker)
@@ -33,7 +33,9 @@ Two Turn verbs call it, both in `mode: "build"` and both through the `buildServi
 
 ## The rule the hashes keep
 
-The service and `applet build` run **one** implementation, `applets/sdk/src/build/`. That is what `container/build.test.ts` asserts: the same source, built both ways, produces the same manifest hashes. A second derivation of the bundle — or of `this.tool(...)` by static analysis — is exactly the thing that would pass its own tests and fail a publish, because the kernel admits a generation by comparing the manifest to the mounted facet's own `health()`.
+There is **one** implementation of the pipeline, `applets/sdk/src/build/`, and no second entry point onto it. A second derivation of the bundle — or of `this.tool(...)` by static analysis — is exactly the thing that would pass its own tests and fail a publish, because the kernel admits a generation by comparing the manifest to the mounted facet's own `health()`.
+
+What `container/build.test.ts` asserts is the property that makes one implementation enough: the same source posted to the service and built beside it produces the same manifest hashes.
 
 For that to hold anywhere, the artifact has to be independent of where it was built. esbuild writes each bundled module's path into the unminified output as a comment, so identical source built in two directories used to hash differently — a new R2 object on every publish of unchanged code. `stableModulePaths` in `applets/sdk/src/build/artifacts.ts` rewrites those comments to labels relative to the Applet root and the SDK root.
 
@@ -46,7 +48,7 @@ For that to hold anywhere, the artifact has to be independent of where it was bu
 | `container/build.ts`                                                  | One build: posted files into a temp directory, the SDK pipeline over it, the artifact ceilings as diagnostics. |
 | `container/server.ts`                                                 | Node HTTP glue. Owns the second token check and the one-at-a-time queue.                                       |
 | [`@frockbot/applets/build-contract`](../../applets/build-contract.ts) | The v1 DTOs and decoders both sides import.                                                                    |
-| [`@frockbot/applet-sdk/build`](../../applets/sdk/src/build)           | The pipeline, shared with the `applet` CLI.                                                                    |
+| [`@frockbot/applet-sdk/build`](../../applets/sdk/src/build)           | The pipeline: five named stages over one directory. Nothing else runs it.                                      |
 
 ## Checks
 

@@ -3,8 +3,8 @@
  *
  * Miniflare gives the built `dist/server.js` the one thing no fake can: a
  * SQLite-backed Durable Object with hibernating WebSockets, which is exactly
- * what the loader gives it in production. `applet dev` serves the page from
- * it, and `applet build` uses the same runtime to ask the mounted class what
+ * what the loader gives it in production. The build uses it to ask the
+ * mounted class what
  * tools it declares rather than guessing from the source.
  */
 

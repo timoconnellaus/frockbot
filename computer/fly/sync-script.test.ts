@@ -24,15 +24,15 @@ import { FLY_WORKSPACE_LAYOUT } from "./provider.ts";
 import { FlySpriteSyncSurface } from "./sync.ts";
 
 const USER = "owner";
-// The Applet id from the production failure: a dot in the middle, which is
-// exactly the shape a careless path normalization would mangle.
-const APPLET = "vgpqfaCcwnPlz.e1f813c4b3398e3ee947b323b9996491";
+// The directory name from the production failure: a dot in the middle, which
+// is exactly the shape a careless path normalization would mangle.
+const DIRECTORY = "vgpqfaCcwnPlz.e1f813c4b3398e3ee947b323b9996491";
 
-const appletSourceRoot: WorkspaceRootV1 = {
+const declaredRoot: WorkspaceRootV1 = {
   kind: "package-declared",
   userId: USER,
-  packageId: "applets",
-  rootId: "source",
+  packageId: "image",
+  rootId: "generated",
 };
 
 /**
@@ -88,7 +88,7 @@ async function emitted(requiredPaths: readonly string[]): Promise<string> {
     userId: USER,
     botDirectoryKey: computerBotKey,
   });
-  await surface.scan(appletSourceRoot, requiredPaths);
+  await surface.scan(declaredRoot, requiredPaths);
   if (!script) throw new Error("the scan emitted no manifest script");
   return script;
 }
@@ -155,19 +155,19 @@ describe("the scan manifest, under a real shell", () => {
     return;
   }
 
-  // Production, 2026-09-04 and 2026-09-05: `applet build` wrote all three
-  // files, the publish sync reported `ok` and moved nothing, and the publish
-  // said `"dist/manifest.json" is not-found: run applet build first`. On the
-  // Computer the two other files had generation sidecars and the manifest had
-  // none — the signature of a manifest row that was never emitted at all.
+  // Production, 2026-09-04 and 2026-09-05: a build wrote all three files, the
+  // sync reported `ok` and moved nothing, and the caller read
+  // `dist/manifest.json` as not-found. On the Computer the two other files had
+  // generation sidecars and the manifest had none — the signature of a
+  // manifest row that was never emitted at all.
   test("emits a row for every required path, including the last one", async () => {
     const required = [
-      `${APPLET}/dist/server.js`,
-      `${APPLET}/dist/ui.html`,
-      `${APPLET}/dist/manifest.json`,
+      `${DIRECTORY}/dist/server.js`,
+      `${DIRECTORY}/dist/ui.html`,
+      `${DIRECTORY}/dist/manifest.json`,
     ];
     const root = mkdtempSync(join(tmpdir(), "frockbot-scan-"));
-    write(root, required[0]!, "export class Applet {}");
+    write(root, required[0]!, "export const value = 1;");
     write(root, required[1]!, "<h1>hi</h1>");
     write(root, required[2]!, '{"contract":1,"tools":[]}');
     // The state the Computer was actually in: sidecars for the two files
@@ -187,7 +187,7 @@ describe("the scan manifest, under a real shell", () => {
   });
 
   test("emits the one row of a single-path required list", async () => {
-    const required = [`${APPLET}/dist/manifest.json`];
+    const required = [`${DIRECTORY}/dist/manifest.json`];
     const root = mkdtempSync(join(tmpdir(), "frockbot-scan-"));
     write(root, required[0]!, "{}");
 
@@ -199,7 +199,7 @@ describe("the scan manifest, under a real shell", () => {
   });
 
   test("emits nothing for a required path the Computer does not hold", async () => {
-    const required = [`${APPLET}/dist/manifest.json`];
+    const required = [`${DIRECTORY}/dist/manifest.json`];
     const root = mkdtempSync(join(tmpdir(), "frockbot-scan-"));
     mkdirSync(root, { recursive: true });
 
@@ -213,18 +213,18 @@ describe("the scan manifest, under a real shell", () => {
   // the ordinary walk, so a required path is the only way its bytes are seen,
   // and the walk must still prune everything it always pruned.
   test("still prunes reproducible trees while carrying the required paths", async () => {
-    const required = [`${APPLET}/dist/manifest.json`];
+    const required = [`${DIRECTORY}/dist/manifest.json`];
     const root = mkdtempSync(join(tmpdir(), "frockbot-scan-"));
     write(root, required[0]!, "{}");
-    write(root, `${APPLET}/dist/ui.html`, "<h1>not required</h1>");
-    write(root, `${APPLET}/src/index.ts`, "export const x = 1;");
-    write(root, `${APPLET}/node_modules/dep/package.json`, "{}");
+    write(root, `${DIRECTORY}/dist/ui.html`, "<h1>not required</h1>");
+    write(root, `${DIRECTORY}/src/index.ts`, "export const x = 1;");
+    write(root, `${DIRECTORY}/node_modules/dep/package.json`, "{}");
 
     const rows = await run(shell, await emitted(required), root);
 
     expect(
       rows.filter((row) => row.tag === "F").map((row) => row.path),
-    ).toEqual([required[0]!, `${APPLET}/src/index.ts`]);
+    ).toEqual([required[0]!, `${DIRECTORY}/src/index.ts`]);
     // One pruned directory: `node_modules`. `dist` is not counted, because a
     // required path made it a directory the caller asked to see into.
     expect(rows.at(-1)).toMatchObject({ tag: "X", path: "1", meta: "0" });

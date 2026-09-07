@@ -413,20 +413,18 @@ describe("Fly Workspace layout", () => {
     });
   });
 
-  // Applet source lives at `applets/<appletId>/` under a `package-declared`
-  // root of the Applets Package. The ids are `APPLETS_PACKAGE_ID_V1` and
-  // `APPLETS_SOURCE_ROOT_ID_V1` in `@frockbot/applets/root`, written
-  // out here rather than imported so this provider Package keeps knowing
-  // nothing about Applets.
-  test("mounts the Applets source root with no layout change of its own", () => {
+  // The Image Package's generated root, `image/generated`. The ids are
+  // written out here rather than imported so this provider Package keeps
+  // knowing nothing about the Packages that declare roots.
+  test("mounts a Package-declared root with no layout change of its own", () => {
     expect(
       workspaceMountPathV1(FLY_WORKSPACE_LAYOUT, {
         kind: "package-declared",
         userId: USER,
-        packageId: "applets",
-        rootId: "source",
+        packageId: "image",
+        rootId: "generated",
       }),
-    ).toBe("/home/box/agent-data/user-packages/applets/source");
+    ).toBe("/home/box/agent-data/user-packages/image/generated");
     // Read-write, unlike Memory: writing source with a shell is the point.
     expect(
       FLY_WORKSPACE_LAYOUT.roots.find(
@@ -1044,9 +1042,9 @@ describe("the Computer's sidecar is a hint; the Durable Object is the authority"
  * commands that carry it never is.
  *
  * A Bot's file tools read and write through this surface, and both directions
- * used to be one command carrying the whole file as base64: a 470 KB built
- * Applet page is 627 KB of base64, past what a storage command may answer, so
- * a Bot could not read a file it had just built. These prove the transport is
+ * used to be one command carrying the whole file as base64: a 470 KB page is
+ * 627 KB of base64, past what a storage command may answer, so a Bot could not
+ * read a file it had just written. These prove the transport is
  * no longer the constraint, in both directions, at sizes the Workspace admits.
  */
 describe("Fly Workspace files past one storage command", () => {

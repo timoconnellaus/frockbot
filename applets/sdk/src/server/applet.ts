@@ -61,7 +61,7 @@ export interface AppletHealthV1 {
   schemaRevision: number;
 }
 
-/** The build-time description `applet build` writes into `dist/manifest.json`. */
+/** The build-time description the build writes into the manifest. */
 export interface AppletDescriptionV1 {
   contract: 1;
   tools: AppletToolDeclarationV1[];
@@ -250,7 +250,7 @@ export abstract class Applet<
     };
   }
 
-  /** The tool declarations, for `applet build` to write into the manifest. */
+  /** The tool declarations, for the build to write into the manifest. */
   describe(): AppletDescriptionV1 {
     return {
       contract: APPLET_CONTRACT_VERSION,

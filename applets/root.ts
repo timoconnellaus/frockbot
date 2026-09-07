@@ -3,10 +3,17 @@
 // Applet source lives under a `package-declared` durable root of the Applets
 // Package, `applets/<appletId>/`. An Applet is *written* with the `applet_*`
 // tools and *run* in the loader, so its source has to survive hibernation,
-// cold start, host migration and an image rebuild, and has to be listable and
-// readable by anything with the Workspace surface. That is the definition of a
-// durable root, and `package-declared` is the only kind a Package declares for
-// itself (`core/contracts/workspace.ts`).
+// cold start and eviction, and has to be listable and readable by anything
+// with the Workspace surface. That is the definition of a durable root, and
+// `package-declared` is the only kind a Package declares for itself
+// (`core/contracts/workspace.ts`).
+//
+// The root is object storage and nothing else. Applets declares no root to the
+// Computer, so nothing here is mirrored onto a Sprite: the Bot reads and
+// writes source with `applet_files`, `applet_read_file` and
+// `applet_write_file`, and a publish reads the prefix, posts it to the build
+// service and stores the artifacts it returns under their content hashes. No
+// build output is written back here.
 //
 // The root is User-scoped, like every `package-declared` root: Applets are
 // account-wide, so one User's Bots share the root and an Applet a Bot wrote is
@@ -14,10 +21,6 @@
 // unlike Memory and the User instruction root, whose single writer is a
 // Package — because writing source is exactly what the Bot is meant to do
 // here.
-//
-// Source is all this root holds. A publish reads the prefix, posts it to the
-// build service and stores the artifacts it returns under their content
-// hashes; no build output is written back here.
 import {
   normalizeWorkspaceRelativePathV1,
   type WorkspacePathV1,
@@ -39,14 +42,7 @@ export const APPLETS_PACKAGE_ID_V1 = "applets";
 /** The declared root Applet source is written under. */
 export const APPLETS_SOURCE_ROOT_ID_V1 = "source";
 
-/**
- * The Package-declared Workspace root Applet source lives in.
- *
- * On a Fly Sprite this resolves to
- * `/home/box/agent-data/user-packages/applets/source` — the layout's one
- * `package-declared` template with `{package}` and `{root}` substituted, so no
- * Computer Package learns that Applets exist.
- */
+/** The Package-declared Workspace root Applet source lives in. */
 export function appletsSourceRootV1(userId: string): WorkspaceRootV1 {
   return {
     kind: "package-declared",
@@ -59,10 +55,10 @@ export function appletsSourceRootV1(userId: string): WorkspaceRootV1 {
 /**
  * The Applet id in an id-shaped string, or a thrown error.
  *
- * An Applet id is a path segment on a real filesystem and a directory the sync
- * reconciles, so it is validated rather than folded: an id that is not the
- * shape the kernel mints is a caller's bug, and quietly rewriting it into a
- * different directory would make two Applets share one source tree.
+ * An Applet id is a path segment and the prefix a build reads, so it is
+ * validated rather than folded: an id that is not the shape the kernel mints
+ * is a caller's bug, and quietly rewriting it into a different directory would
+ * make two Applets share one source tree.
  */
 export function assertAppletIdV1(appletId: unknown): string {
   try {

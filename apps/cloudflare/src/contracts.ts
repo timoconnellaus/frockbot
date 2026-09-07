@@ -709,26 +709,6 @@ export interface GatewayDependencies {
   ): Promise<Response>;
   /** Absent, or with no token, when the deployment publishes no `/api/debug`. */
   debug?: DebugGatewaySurface;
-  /**
-   * The Workspace seed door, present only in an environment that sets
-   * `WORKSPACE_SEED_TOKEN`: it lands a durable-root file as the User, through
-   * the same store and generation record a write from a Turn uses, so an
-   * end-to-end run can arrange the files a spec starts from. Production sets
-   * no token and the route does not exist.
-   */
-  workspaceSeed?: {
-    token: string;
-    write(
-      userId: string,
-      botId: string,
-      request: {
-        root: unknown;
-        path: string;
-        bytesBase64: string;
-        mediaType?: string;
-      },
-    ): Promise<unknown>;
-  };
   backendContributions?: readonly BackendRouteContribution[];
   /** Webview origins allowed to call `/api/*` cross-origin. */
   allowedClientOrigins?: string[];

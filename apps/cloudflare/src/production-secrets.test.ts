@@ -216,6 +216,6 @@ describe("the production secrets report", () => {
       NON_SECRET_WORKER_SETTINGS_V1.filter(
         (setting) => setting.forbiddenLive !== undefined,
       ).map((setting) => setting.name),
-    ).toEqual(["ALLOW_DEVELOPMENT_AUTH", "WORKSPACE_SEED_TOKEN"]);
+    ).toEqual(["ALLOW_DEVELOPMENT_AUTH"]);
   });
 });

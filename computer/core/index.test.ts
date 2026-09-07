@@ -258,8 +258,8 @@ describe("ComputerRegistry", () => {
       {
         kind: "package-declared",
         userId: "user-1",
-        packageId: "applets",
-        rootId: "source",
+        packageId: "image",
+        rootId: "generated",
       },
       "publish",
       { requiredPaths: ["a.b/dist/server.js"] },
@@ -274,8 +274,8 @@ describe("ComputerRegistry", () => {
         {
           kind: "package-declared",
           userId: "user-1",
-          packageId: "applets",
-          rootId: "source",
+          packageId: "image",
+          rootId: "generated",
         },
         "publish",
       ),
