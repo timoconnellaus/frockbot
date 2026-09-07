@@ -15,7 +15,7 @@ import type {
   NormalizedModelRequest,
 } from "@frockbot/core/contracts";
 import { encodeIsolateModelEventLineV1 } from "@frockbot/core/contracts";
-import type { BotIsolateArtifactStore } from "@frockbot/compose-frockbot";
+import type { BotIsolateArtifactStore } from "@frockbot/frock-compose";
 
 export type { IsolateModelBindingV1 } from "@frockbot/core/contracts";
 

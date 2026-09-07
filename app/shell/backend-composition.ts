@@ -25,7 +25,7 @@ import {
   type BotIsolateArtifactStore,
   type BotIsolateLimits,
   type BotIsolateLoader,
-} from "@frockbot/compose-frockbot";
+} from "@frockbot/frock-compose";
 import {
   type BotCapabilitiesStub,
   type PersistSessionEvents,

@@ -3,12 +3,14 @@
     "target": "ES2023",
     "module": "ESNext",
     "moduleResolution": "Bundler",
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
     "strict": true,
     "noEmit": true,
-    "allowImportingTsExtensions": true,
     "skipLibCheck": true,
     "lib": ["ES2023"],
     "types": ["bun"]
   },
-  "include": ["src/**/*.ts", "tests/**/*.ts"]
+  "include": ["**/*.ts"],
+  "exclude": ["node_modules"]
 }

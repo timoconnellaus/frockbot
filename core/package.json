@@ -7,6 +7,7 @@
     "./contracts": "./contracts/index.ts",
     "./contracts/contributions": "./contracts/contributions.ts",
     "./durable": "./durable/index.ts",
+    "./durable/composition-failure": "./durable/composition/failure.ts",
     "./agent-loop": "./agent-loop/index.ts",
     "./agent-loop/agent": "./agent-loop/agent.ts",
     "./configuration": "./configuration/index.ts",
@@ -36,9 +37,6 @@
   "scripts": {
     "test": "bun test",
     "typecheck": "tsc --noEmit -p tsconfig.json"
-  },
-  "dependencies": {
-    "@frockbot/compose-frockbot": "workspace:*"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "latest",

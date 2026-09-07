@@ -297,9 +297,8 @@ core/
   models/           Model role bindings and the provider-neutral model registry
   prompt/           System prompt assembly from Package contributions
   tools/            The trusted tool registry and its guards
+frock-compose/     Frock Compose: the Bot isolate host that loads an untrusted member's artifact
 packages/
-  compose-core/     Framework-agnostic runtime extension surface for Compose
-  compose-frockbot/ The plugin descriptor and the Bot isolate host that loads a member's artifact
   client-core/      Shared client runtime helpers and brand typography stylesheet
   client-ui/        Reusable Vue primitives and surface registry
 providers/

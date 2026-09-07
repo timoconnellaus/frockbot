@@ -7,11 +7,12 @@
 // This module declares the record and its exact v1 codec. The Durable Object
 // owns the storage (`../composition-store.ts`) and the Package that mounts it
 // owns the host.
-import { canonicalJson, sha256 } from "@frockbot/core/contracts";
 import {
+  canonicalJson,
   decodePluginDescriptorV1,
+  sha256,
   type PluginDescriptorV1,
-} from "@frockbot/compose-frockbot/descriptor";
+} from "@frockbot/core/contracts";
 
 export type PackageProvenanceV1 =
   | {

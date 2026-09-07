@@ -8,6 +8,7 @@
 // `BOT_ISOLATE_WRAPPER_SOURCE`, `BotCapabilities`), and only the Turn's
 // surrounding configuration is fixture.
 import { DurableObject } from "cloudflare:workers";
+import { decodePluginDescriptorV1 } from "@frockbot/core/contracts";
 import type {
   LlmProvider,
   LlmStreamEvent,
@@ -22,11 +23,10 @@ import {
   type CompositionGenerationV1,
   type CompositionMemberV1,
 } from "@frockbot/core/durable";
-import { decodePluginDescriptorV1 } from "@frockbot/compose-frockbot";
 import type {
   BotIsolateLoader,
   BotIsolateWorkerCode,
-} from "@frockbot/compose-frockbot";
+} from "@frockbot/frock-compose";
 import {
   createShellCompositionHost,
   type ShellMountedComposition,

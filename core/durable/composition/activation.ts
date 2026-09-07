@@ -4,16 +4,16 @@
 // activate three consecutive times is quarantined until a User acts.
 //
 // This module owns the ordering and the record shapes. The Durable Object owns
-// the storage (`../composition-failures.ts`) and the Package owns the host that
-// mounts, so this is the only place the sequence lives. The failure phases
-// themselves belong to the host that raises them, in `@frockbot/compose-frockbot`.
+// the storage (`../composition-failures.ts`) and the app supplies the host that
+// mounts, so this is the only place the sequence lives. The failure phases the
+// host raises are the seam's vocabulary and live beside it, in `./failure.ts`.
 import {
   COMPOSITION_FAILURE_PHASES_V1,
   CompositionMountFailureError,
   MAX_COMPOSITION_DIAGNOSTICS_V1,
   MAX_COMPOSITION_DIAGNOSTIC_LENGTH_V1,
   type CompositionFailurePhaseV1,
-} from "@frockbot/compose-frockbot/failure";
+} from "./failure.js";
 import type {
   CompositionGenerationV1,
   MountedComposition,

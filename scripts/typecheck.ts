@@ -32,6 +32,7 @@ const manifestPaths = [
   "applets/sdk/package.json",
   "computer/package.json",
   "core/package.json",
+  "frock-compose/package.json",
   "providers/package.json",
 ];
 for (const group of ["packages", "apps"]) {

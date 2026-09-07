@@ -10,6 +10,7 @@
     "apps/*",
     "computer",
     "core",
+    "frock-compose",
     "packages/*",
     "providers"
   ],

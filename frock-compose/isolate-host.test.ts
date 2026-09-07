@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   BOT_ISOLATE_HOOK_EVENTS_V1,
+  decodePluginDescriptorV1,
   LoopHookListV1,
 } from "@frockbot/core/contracts";
 import type {
@@ -12,6 +13,8 @@ import type {
   ToolDefinition,
   ToolExecutionContext,
   ToolNamespaceRegistration,
+  PluginActionV1,
+  PluginGrantV1,
 } from "@frockbot/core/contracts";
 import {
   BotIsolateContributionHost,
@@ -22,12 +25,7 @@ import {
   type BotIsolateLoadedWorker,
   type BotIsolateMemberV1,
   type BotIsolateWorkerCode,
-} from "../src/isolate-host.ts";
-import {
-  decodePluginDescriptorV1,
-  type PluginActionV1,
-  type PluginGrantV1,
-} from "../src/descriptor.ts";
+} from "./isolate-host.ts";
 
 const CONTENT_HASH = "a".repeat(64);
 
