@@ -5,10 +5,9 @@
 // card honest: the User is shown exactly the steps the apply will take, and the
 // apply takes exactly those steps.
 //
-// THE PINNED GENERATION IS THE ONLY INDEX CONSULTED. A `catalogId` absent from
-// the generation this User is pinned to is a **missing** line, never an install
-// off a moved index: "Composition consumes immutable, content-addressed
-// artifacts", and an install validated against anything else is not that.
+// THIS DEPLOYMENT'S PACKAGES ARE THE ONLY INDEX CONSULTED. A `packageId` this
+// deployment does not compile in is a **missing** line, never an install of
+// something the application cannot execute.
 //
 // WHAT IMPORT NEVER CREATES. No Connection or credential. An enabled Package
 // is available account-wide, while Connections remain the importing User's
@@ -27,7 +26,6 @@ export type TemplateImportPackageStatusV1 =
   "will-install" | "already-installed" | "missing";
 
 export interface TemplateImportPackageLineV1 {
-  catalogId: string;
   packageId: string;
   displayName: string;
   version: string;
@@ -45,7 +43,7 @@ export interface TemplateImportStepV1 {
   /** Stable across replays: it is what a receipt is filed under. */
   key: string;
   kind: TemplateImportStepKindV1;
-  /** The `catalogId`, Skill slug or Routine slug this step acts on. */
+  /** The `packageId`, Skill slug or Routine slug this step acts on. */
   subject?: string;
 }
 
@@ -61,8 +59,6 @@ export interface TemplateImportPlanV1 {
   skills: TemplateSkillV1[];
   routines: TemplateRoutineV1[];
   packages: TemplateImportPackageLineV1[];
-  /** The generation the plan was diffed against; absent when unpinned. */
-  catalogGeneration?: string;
   steps: TemplateImportStepV1[];
 }
 
@@ -70,7 +66,6 @@ export interface TemplateImportPlanV1 {
 export interface ImportingInstallationV1 {
   packageId: string;
   state: "installed" | "disabled" | "failed";
-  catalogId?: string;
 }
 
 export interface TemplateImportPlanInputV1 {
@@ -80,10 +75,8 @@ export interface TemplateImportPlanInputV1 {
   botId: string;
   template: BotTemplateV1;
   installedPackages: readonly ImportingInstallationV1[];
-  /** The importing User's own pin. Absent leaves every Package `missing`. */
-  catalogGeneration?: string;
-  /** Every `catalogId` the pinned generation's index holds. */
-  availableCatalogIds: readonly string[];
+  /** Every `packageId` this deployment's compiled application offers. */
+  availablePackageIds: readonly string[];
 }
 
 function packageLines(
@@ -91,21 +84,20 @@ function packageLines(
 ): TemplateImportPackageLineV1[] {
   const installed = new Set(
     input.installedPackages
-      .filter((entry) => entry.state !== "failed" && entry.catalogId)
-      .map((entry) => entry.catalogId as string),
+      .filter((entry) => entry.state !== "failed")
+      .map((entry) => entry.packageId),
   );
-  const available = new Set(input.availableCatalogIds);
+  const available = new Set(input.availablePackageIds);
   return input.template.packages.map((entry) => ({
-    catalogId: entry.catalogId,
     packageId: entry.packageId,
     displayName: entry.displayName,
     version: entry.version,
-    status: installed.has(entry.catalogId)
+    status: installed.has(entry.packageId)
       ? ("already-installed" as const)
-      : input.catalogGeneration && available.has(entry.catalogId)
+      : available.has(entry.packageId)
         ? ("will-install" as const)
-        : // Not in the generation this User is pinned to. It is reported as a
-          // gap the User can close, never installed off an index that moved.
+        : // Not a Package this deployment compiles in. It is reported as a gap
+          // the User can see, never installed.
           ("missing" as const),
   }));
 }
@@ -129,9 +121,9 @@ function importSteps(
     ...packages
       .filter((entry) => entry.status === "will-install")
       .map((entry) => ({
-        key: `install:${entry.catalogId}`,
+        key: `install:${entry.packageId}`,
         kind: "user/install-package" as const,
-        subject: entry.catalogId,
+        subject: entry.packageId,
       })),
     ...plan.skills.map((skill) => ({
       key: `skill:${skill.slug}`,
@@ -180,9 +172,6 @@ export function planBotTemplateImportV1(
     skills: input.template.skills,
     routines: input.template.routines,
     packages,
-    ...(input.catalogGeneration === undefined
-      ? {}
-      : { catalogGeneration: input.catalogGeneration }),
   };
   return { ...base, steps: importSteps(base, packages) };
 }
@@ -236,7 +225,7 @@ export function describeImportPlanV1(plan: TemplateImportPlanV1): string {
     `Will create the Bot "${plan.profile.name}" with ${plan.skills.length} Skill(s) and ${plan.routines.length} Routine(s).`,
     installing > 0 ? `Will install ${installing} Package(s).` : "",
     missing > 0
-      ? `${missing} Package(s) are missing from your catalog and will be skipped.`
+      ? `${missing} Package(s) are not available in this deployment and will be skipped.`
       : "",
     "No Connection or credential is created by an import.",
   ]

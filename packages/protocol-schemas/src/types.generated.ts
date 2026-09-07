@@ -124,9 +124,11 @@ export type BotLifecycleReceipt = {
   lifecycle: BotLifecycle;
   failure?: string;
 };
-export type SkillRef =
-  | { schemaVersion: 1; source: "bot" | "user" | "managed"; slug: string }
-  | { schemaVersion: 1; source: "plugin"; slug: string; packageId: string };
+export type SkillRef = {
+  schemaVersion: 1;
+  source: "bot" | "user" | "managed";
+  slug: string;
+};
 export type TurnCommand = {
   schemaVersion: 1;
   commandId: Identifier;

@@ -447,8 +447,7 @@ jobs:
         run: |
           for bucket in \
             frockbot-application-artifacts-staging \
-            frockbot-memory-files-staging \
-            frockbot-package-catalog-staging; do
+            frockbot-memory-files-staging; do
             if bunx wrangler r2 bucket info "$bucket" >/dev/null 2>&1; then
               echo "R2 bucket $bucket already exists"
             else
@@ -555,29 +554,6 @@ jobs:
           frockbot-application-artifacts-staging/applications/${{ steps.artifact.outputs.hash }}.mjs
           --file dist/artifacts/foundation-v1.mjs
           --remote
-
-      - name: Publish Package Catalog
-        # As production publishes it, into staging's own bucket: every
-        # generation object first, then the one mutable pointer that names it.
-        working-directory: apps/cloudflare
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        shell: bash
-        run: |
-          bucket=frockbot-package-catalog-staging
-          catalog_dir="$RUNNER_TEMP/frockbot-catalog-staging"
-          rm -rf "$catalog_dir"
-          bun ../../scripts/publish-catalog.ts --out "$catalog_dir"
-          while IFS= read -r file; do
-            key="${file#"$catalog_dir"/}"
-            if [[ "$key" == "catalog/current" ]]; then continue; fi
-            bunx wrangler r2 object put "$bucket/$key" \
-              --file "$file" --content-type application/json --remote
-          done < <(find "$catalog_dir" -type f | sort)
-          bunx wrangler r2 object put "$bucket/catalog/current" \
-            --file "$catalog_dir/catalog/current" \
-            --content-type application/json --remote
 
       - name: Deploy Worker
         working-directory: apps/cloudflare

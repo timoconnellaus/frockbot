@@ -803,12 +803,6 @@
           "schemaVersion": 1,
           "source": "user",
           "slug": "style"
-        },
-        {
-          "schemaVersion": 1,
-          "source": "plugin",
-          "slug": "test",
-          "packageId": "example"
         }
       ]
     }

@@ -43,7 +43,6 @@ function template(overrides: Partial<BotTemplateV1> = {}): BotTemplateV1 {
     packages: [
       {
         packageId: "mcp",
-        catalogId: "example-connector",
         version: "0.0.1",
         displayName: "Example",
       },
@@ -62,50 +61,38 @@ function input(
     botId: "budget-abc123456789",
     template: template(),
     installedPackages: [],
-    catalogGeneration: "gen-7",
-    availableCatalogIds: ["example-connector"],
+    availablePackageIds: ["mcp"],
     ...overrides,
   };
 }
 
-describe("diffing against the importing User's pinned generation", () => {
-  it("marks a Package present in the pinned index as will-install", () => {
+describe("diffing against this deployment's Packages", () => {
+  it("marks a Package this deployment offers as will-install", () => {
     const plan = planBotTemplateImportV1(input());
     expect(plan.packages).toEqual([
       {
-        catalogId: "example-connector",
         packageId: "mcp",
         displayName: "Example",
         version: "0.0.1",
         status: "will-install",
       },
     ]);
-    expect(plan.steps.map((step) => step.key)).toContain(
-      "install:example-connector",
-    );
+    expect(plan.steps.map((step) => step.key)).toContain("install:mcp");
   });
 
   it("marks a Package the User already has as already-installed", () => {
     const plan = planBotTemplateImportV1(
       input({
-        installedPackages: [
-          {
-            packageId: "mcp",
-            state: "installed",
-            catalogId: "example-connector",
-          },
-        ],
+        installedPackages: [{ packageId: "mcp", state: "installed" }],
       }),
     );
     expect(plan.packages[0]!.status).toBe("already-installed");
-    expect(plan.steps.map((step) => step.key)).not.toContain(
-      "install:example-connector",
-    );
+    expect(plan.steps.map((step) => step.key)).not.toContain("install:mcp");
   });
 
-  it("marks a Package absent from the pinned generation as missing", () => {
+  it("marks a Package this deployment does not compile in as missing", () => {
     const plan = planBotTemplateImportV1(
-      input({ availableCatalogIds: ["something-else"] }),
+      input({ availablePackageIds: ["something-else"] }),
     );
     expect(plan.packages[0]!.status).toBe("missing");
     expect(
@@ -113,24 +100,9 @@ describe("diffing against the importing User's pinned generation", () => {
     ).toBe(false);
   });
 
-  it("marks every Package missing when the User is not pinned at all", () => {
-    const plan = planBotTemplateImportV1(
-      input({
-        catalogGeneration: undefined,
-        availableCatalogIds: ["example-connector"],
-      }),
-    );
-    expect(plan.packages[0]!.status).toBe("missing");
-    expect(plan.catalogGeneration).toBeUndefined();
-  });
-
   it("does not treat a failed installation as already installed", () => {
     const plan = planBotTemplateImportV1(
-      input({
-        installedPackages: [
-          { packageId: "mcp", state: "failed", catalogId: "example-connector" },
-        ],
-      }),
+      input({ installedPackages: [{ packageId: "mcp", state: "failed" }] }),
     );
     expect(plan.packages[0]!.status).toBe("will-install");
   });
@@ -217,12 +189,10 @@ describe("derived identity", () => {
 
 describe("the card's prose", () => {
   it("says what will be created, installed and skipped", () => {
-    const plan = planBotTemplateImportV1(
-      input({ availableCatalogIds: [], catalogGeneration: "gen-7" }),
-    );
+    const plan = planBotTemplateImportV1(input({ availablePackageIds: [] }));
     const described = describeImportPlanV1(plan);
     expect(described).toContain('Will create the Bot "Budget"');
-    expect(described).toContain("missing from your catalog");
+    expect(described).toContain("not available in this deployment");
     expect(described).toContain("No Connection or credential");
   });
 });

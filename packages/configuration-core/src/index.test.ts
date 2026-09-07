@@ -268,35 +268,6 @@ describe("stored configuration migrations", () => {
       ]),
     ).toBe(versionMismatch);
 
-    const remoteCatalogInstall = {
-      ...versionMismatch,
-      packages: [
-        {
-          packageId: "remote-provider",
-          version: "1.2.3",
-          state: "installed" as const,
-          provenance: "catalog" as const,
-          catalogId: "remote-provider",
-          catalogGeneration: "generation-1",
-        },
-      ],
-      connections: [
-        {
-          connectionId: "remote-connection",
-          packageId: "remote-provider",
-          connectionTypeId: "remote-account",
-          displayName: "Remote",
-          state: "ready" as const,
-          safeMetadata: {},
-        },
-      ],
-    };
-    expect(
-      migrateStoredUserSettingsV1(remoteCatalogInstall, [
-        { packageId: "provider", version: "0.0.2" },
-      ]),
-    ).toBe(remoteCatalogInstall);
-
     const malformedPlatform = {
       ...versionMismatch,
       platformModel: {
@@ -1861,29 +1832,7 @@ describe("Catalog installs and uninstall", () => {
     expectedRevision: 0,
   };
 
-  test("decodes a Catalog install with its generation and values", () => {
-    expect(
-      decodeConfigurationCommandV1({
-        ...meta,
-        type: "user/install-package",
-        packageId: "mcp-weather",
-        version: "0.0.1",
-        catalogId: "mcp-weather",
-        catalogGeneration: "gen-one",
-        values: { region: "au" },
-      }),
-    ).toEqual({
-      ...meta,
-      type: "user/install-package",
-      packageId: "mcp-weather",
-      version: "0.0.1",
-      catalogId: "mcp-weather",
-      catalogGeneration: "gen-one",
-      values: { region: "au" },
-    });
-  });
-
-  test("keeps the compiled-in install exactly as it was", () => {
+  test("decodes the compiled-in install", () => {
     expect(
       decodeConfigurationCommandV1({
         ...meta,
@@ -1920,16 +1869,7 @@ describe("Catalog installs and uninstall", () => {
     ).toThrow("enabled is invalid");
   });
 
-  test("refuses half a Catalog install", () => {
-    expect(() =>
-      decodeConfigurationCommandV1({
-        ...meta,
-        type: "user/install-package",
-        packageId: "mcp-weather",
-        version: "0.0.1",
-        catalogId: "mcp-weather",
-      }),
-    ).toThrow("requires both catalogId and catalogGeneration");
+  test("refuses an install that names anything beyond the Package", () => {
     expect(() =>
       decodeConfigurationCommandV1({
         ...meta,
@@ -1938,21 +1878,7 @@ describe("Catalog installs and uninstall", () => {
         version: "0.0.1",
         values: { region: "au" },
       }),
-    ).toThrow("install values require a Catalog entry");
-  });
-
-  test("refuses install values that are not bounded JSON", () => {
-    expect(() =>
-      decodeConfigurationCommandV1({
-        ...meta,
-        type: "user/install-package",
-        packageId: "mcp-weather",
-        version: "0.0.1",
-        catalogId: "mcp-weather",
-        catalogGeneration: "gen-one",
-        values: { region: "x".repeat(20_000) },
-      }),
-    ).toThrow("values is too large");
+    ).toThrow(ConfigurationDecodeError);
   });
 
   test("decodes uninstall and refuses an unknown field on it", () => {
@@ -1980,38 +1906,12 @@ describe("Catalog installs and uninstall", () => {
     ).toThrow(ConfigurationDecodeError);
   });
 
-  test("the User settings view accepts an absent Catalog pin and a whole one", () => {
-    const base = {
-      schemaVersion: 1 as const,
-      revision: 3,
-      profile: { name: "Tim" },
-      packages: [],
-      connections: [],
-    };
-    expect(decodeUserSettingsViewV1(base)).not.toHaveProperty(
-      "catalogGeneration",
-    );
-    expect(
-      decodeUserSettingsViewV1({
-        ...base,
-        catalogGeneration: "gen-one",
-        catalogIndexHash: "a".repeat(64),
-      }),
-    ).toMatchObject({ catalogGeneration: "gen-one" });
-    // Half a pin is corrupt durable state, not a pin.
-    expect(() =>
-      decodeUserSettingsViewV1({ ...base, catalogGeneration: "gen-one" }),
-    ).toThrow(ConfigurationDecodeError);
-  });
-
-  test("an installation carries its Catalog provenance through the codec", () => {
+  test("an installation carries its provenance and values through the codec", () => {
     const installation = {
       packageId: "mcp-weather",
       version: "0.0.1",
       state: "installed" as const,
-      catalogId: "mcp-weather",
-      catalogGeneration: "gen-one",
-      provenance: "catalog" as const,
+      provenance: "first-party" as const,
       values: { region: "au" },
     };
     expect(

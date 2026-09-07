@@ -15,7 +15,6 @@ import BotSettingsTrigger from "./BotSettingsTrigger.vue";
 import ConnectionsSurface from "./ConnectionsSurface.vue";
 import ModelsSurface from "./ModelsSurface.vue";
 import PluginsSurface from "./PluginsSurface.vue";
-import PackageCatalogSurface from "./PackageCatalogSurface.vue";
 import UserProfileTrigger from "./UserProfileTrigger.vue";
 import UserSettingsSurface from "./UserSettingsSurface.vue";
 import { defineClientContribution } from "@frockbot/kernel-contracts/contributions";
@@ -60,11 +59,6 @@ export const settingsClientPlugin: ClientPlugin = (ctx) => {
       id: "connections",
       title: "Connectors",
       component: ConnectionsSurface,
-    }),
-    surfaces.register({
-      id: "package-catalog",
-      title: "All plugins",
-      component: PackageCatalogSurface,
     }),
     surfaces.register({
       id: "user-settings",

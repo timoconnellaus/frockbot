@@ -31,7 +31,6 @@ import {
 import { type OllamaCloudUserBackendContribution } from "@frockbot/plugin-provider-ollama-cloud/user";
 import { type FrockAiUserBackendContribution } from "@frockbot/plugin-provider-frock-ai/user";
 import {
-  type UserPackageCatalogHost,
   type UserSettingsBackendContribution,
   type UserSettingsStorage,
 } from "@frockbot/plugin-settings/user";
@@ -187,22 +186,12 @@ export async function createFoundationUserBackendContributions(
     commandBotLifecycle: FlockUserBackendHost["commandBotLifecycle"];
     readBotLifecycle: FlockUserBackendHost["readBotLifecycle"];
     /**
-     * The remote Package Catalog. Absent when the deployment publishes none,
-     * which leaves Package availability exactly as it was: the compiled-in
-     * plan.
-     */
-    catalog?: UserPackageCatalogHost;
-    /**
      * The Bot Template seams the adapter owns: the Bot Durable Object reads one
      * export needs, and the immutable blob store the recipe is published into.
      */
     botTemplate: {
       bots: TemplateBotReaderV1;
       blobs: TemplateBlobStoreV1;
-      readCatalogDisplayName?(
-        generation: string,
-        catalogId: string,
-      ): Promise<string | undefined>;
       /**
        * The import half. The writer carries the importing User's own commands
        * and nothing wider — there is no method on it for a Connection or
@@ -214,7 +203,6 @@ export async function createFoundationUserBackendContributions(
       readPublishedShare?(
         shareId: string,
       ): Promise<{ hash: string; document: string } | undefined>;
-      readCatalogIds?(generation: string): Promise<readonly string[]>;
     };
     /**
      * The transcript-index seams the adapter owns: this object's own SQL
@@ -288,7 +276,6 @@ export async function createFoundationUserBackendContributions(
           settings: pkg.manifest.configuration?.settings ?? [],
           installByDefault: defaultPackageIds.has(pkg.id),
         })),
-        ...(host.catalog ? { catalog: host.catalog } : {}),
       };
     },
     get credentials() {
@@ -331,14 +318,14 @@ export async function createFoundationUserBackendContributions(
         ...(host.botTemplate.readPublishedShare
           ? { readPublishedShare: host.botTemplate.readPublishedShare }
           : {}),
-        ...(host.botTemplate.readCatalogIds
-          ? { readCatalogIds: host.botTemplate.readCatalogIds }
-          : {}),
-        ...(host.botTemplate.readCatalogDisplayName
-          ? {
-              readCatalogDisplayName: host.botTemplate.readCatalogDisplayName,
-            }
-          : {}),
+        // Existence and display name for a template's Package lines both come
+        // from the compiled plan; there is no second index to consult.
+        availablePackages: plan.packages.map((pkg) => ({
+          packageId: pkg.id,
+          ...(pkg.manifest.displayName
+            ? { displayName: pkg.manifest.displayName }
+            : {}),
+        })),
       };
     },
     get machines() {

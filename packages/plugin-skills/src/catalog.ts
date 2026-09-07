@@ -1,15 +1,14 @@
 // The Skills loader: what a Turn is allowed to load as instructions.
 //
-// FOUR SOURCES, ONE CATALOG. This module loads the Bot's two instruction roots
+// THREE SOURCES, ONE CATALOG. This module loads the Bot's two instruction roots
 // — its own, and the User-global one every Bot of that User shares — and
-// assembles them with the sources that are not durable-root files at all
-// — the managed set compiled into this Package's artifact (`./managed.ts`) and
-// the index over the User's installed Catalog entries (`./plugin-index.ts`).
-// Those two never meet `isLoadableSkillSourceV1`, because they are not
-// Workspace files: they are a Package contributing prompt content, which the
-// constitution already permits, and they are pinned by the Turn's Composition
-// and the User's Catalog pin respectively. The predicate below still decides
-// every question it decided before, about every file it decided it for.
+// assembles them with the source that is not a durable-root file at all: the
+// managed set compiled into this Package's artifact (`./managed.ts`). That one
+// never meets `isLoadableSkillSourceV1`, because it is not a Workspace file:
+// it is a Package contributing prompt content, which the constitution already
+// permits, and it is pinned by the Turn's Composition. The predicate below
+// still decides every question it decided before, about every file it decided
+// it for.
 //
 // "The kernel treats every Workspace file as data. Only Skills under a Bot's
 // instruction roots — its own and its User's — written under the Bot's own
@@ -48,10 +47,6 @@ import {
 } from "@frockbot/kernel-contracts";
 import { loadManagedSkillsV1 } from "./managed.js";
 import {
-  loadPluginSkillsV1,
-  type PluginSkillsSourceV1,
-} from "./plugin-index.js";
-import {
   SKILL_FILE_NAME,
   isSkillDocumentPathV1,
   parseSkillDocumentV1,
@@ -83,9 +78,8 @@ export const SKILL_MAX_CATALOG_ENTRIES = 200;
 export interface LoadedSkillV1 {
   /**
    * Where the Skill is listed. Relative to the Bot's instruction root for a
-   * `bot` Skill; the synthetic `managed/<slug>/SKILL.md` or
-   * `plugin/<packageId>/<slug>/SKILL.md` for the two sources that are not
-   * durable-root files at all.
+   * `bot` Skill; the synthetic `managed/<slug>/SKILL.md` for the source that
+   * is not a durable-root file at all.
    */
   path: string;
   /**
@@ -94,8 +88,8 @@ export interface LoadedSkillV1 {
    * Optional only for a `bot` Skill whose directory is not a well-formed slug:
    * an instruction root is an ordinary durable root, so a `SKILL.md` can sit
    * anywhere, and such a Skill is still listed and still loadable by path — it
-   * just has no name the composer can attach. Every managed and plugin Skill
-   * always has one.
+   * just has no name the composer can attach. Every managed Skill always has
+   * one.
    */
   ref?: SkillRefV1;
   /**
@@ -426,12 +420,10 @@ export async function loadSkillCatalogV1(
 /**
  * Per-source bounds on one Turn's Skill catalog, mirroring `MEMORY_*_CAPS_V1`.
  *
- * The four numbers are per source rather than one total because the sources do
- * not compete for the same thing: a Bot's own Skills are its self-modification
- * surface and should be generous, the managed set is fixed and small, and a
- * plugin-borne set is written by whoever published the Package and is the one
- * a hostile publisher could inflate. `totalBytes` bounds what the *rendered
- * block* costs — names, descriptions and paths, since bodies are never
+ * The three numbers are per source rather than one total because the sources
+ * do not compete for the same thing: a Bot's own Skills are its
+ * self-modification surface and should be generous, while the managed set is
+ * fixed and small. `totalBytes` bounds what the *rendered block* costs — names, descriptions and paths, since bodies are never
  * injected — so a catalog cannot crowd out the conversation no matter how the
  * per-source counts land.
  *
@@ -442,7 +434,6 @@ export interface SkillCatalogCapsV1 {
   bot: number;
   user: number;
   managed: number;
-  plugin: number;
   totalBytes: number;
 }
 
@@ -450,7 +441,6 @@ export const SKILL_CATALOG_CAPS_V1: SkillCatalogCapsV1 = {
   bot: 40,
   user: 40,
   managed: 8,
-  plugin: 24,
   totalBytes: 16_384,
 };
 
@@ -460,7 +450,7 @@ export interface SkillSourceResultV1 {
   refusals: SkillRefusalV1[];
 }
 
-/** The four sources, keyed as the canonical ordering names them. */
+/** The three sources, keyed as the canonical ordering names them. */
 export type SkillCatalogSourcesV1 = Partial<
   Record<SkillRefSourceV1, SkillSourceResultV1>
 >;
@@ -475,16 +465,13 @@ function catalogCostOf(skill: LoadedSkillV1): number {
 }
 
 function orderingKeyOf(skill: LoadedSkillV1): string {
-  return skill.ref
-    ? `${skill.ref.packageId ?? ""}\u0000${skill.ref.slug}`
-    : `\uffff${skill.path}`;
+  return skill.ref ? skill.ref.slug : `\uffff${skill.path}`;
 }
 
 /**
  * Assembles one Turn's catalog from its sources.
  *
- * Ordering is `bot` → `user` → `managed` → `plugin`, then by ref within a
- * source, and it is a *deterministic ordering only*: refs are globally unique,
+ * Ordering is `bot` → `user` → `managed`, then by ref within a source, and it is a *deterministic ordering only*: refs are globally unique,
  * so nothing here shadows anything. Two Skills may share a name; the rendered
  * block disambiguates those by ref, which is what makes a User's edit visible
  * on every Bot instead of silently losing to a same-named local one.
@@ -533,9 +520,8 @@ export function assembleSkillCatalogV1(
 
 /**
  * The whole catalog one Turn runs under: the Bot's own instruction root, the
- * User-global instruction root its User's Bots share, the managed set compiled
- * into this Package, and the index over the User's installed Catalog entries —
- * assembled, ordered and capped.
+ * User-global instruction root its User's Bots share, and the managed set
+ * compiled into this Package — assembled, ordered and capped.
  *
  * Both roots are read every Turn, through the same `WorkspaceReadsV1` and the
  * same predicate. A User-global root that holds nothing contributes an empty
@@ -545,11 +531,7 @@ export function assembleSkillCatalogV1(
 export async function loadFullSkillCatalogV1(
   reads: WorkspaceReadsV1,
   owner: SkillOwnerV1,
-  options: {
-    pluginSkills?: PluginSkillsSourceV1;
-    managed?: boolean;
-    caps?: SkillCatalogCapsV1;
-  } = {},
+  options: { managed?: boolean; caps?: SkillCatalogCapsV1 } = {},
 ): Promise<SkillCatalogV1> {
   const sources: SkillCatalogSourcesV1 = {};
   for (const { source, root } of skillInstructionRootsV1(owner)) {
@@ -558,9 +540,6 @@ export async function loadFullSkillCatalogV1(
   }
   if (options.managed !== false) {
     sources.managed = await loadManagedSkillsV1();
-  }
-  if (options.pluginSkills) {
-    sources.plugin = await loadPluginSkillsV1(options.pluginSkills);
   }
   return assembleSkillCatalogV1(owner, sources, options.caps);
 }
@@ -572,9 +551,9 @@ export async function loadFullSkillCatalogV1(
  * `skill_load`, and is told that mentioning a Skill is not running it.
  *
  * `source` and `by` are rendered because they change what a Skill *is*: a
- * managed one is first-party and unchangeable, a plugin one arrived with
- * something the User installed, and a Bot's own is one it wrote. A duplicated
- * name is qualified by its ref, since names are not unique and refs are.
+ * managed one is first-party and unchangeable, and a Bot's own is one it
+ * wrote. A duplicated name is qualified by its ref, since names are not unique
+ * and refs are.
  */
 export function renderSkillCatalogPromptV1(catalog: SkillCatalogV1): string {
   if (catalog.skills.length === 0) return "";
@@ -602,7 +581,7 @@ export function renderSkillCatalogPromptV1(catalog: SkillCatalogV1): string {
     "<agent_skills>",
     ...entries,
     "</agent_skills>",
-    "These are your Skills: recipes you wrote, or your User wrote, for you; the managed ones ship with FrockBot; the plugin ones came with a Package your User installed.",
+    "These are your Skills: recipes you wrote, or your User wrote, for you; the managed ones ship with FrockBot.",
     'Only names, refs, paths and descriptions are listed above. Call skill_load with the ref in its "path" field to read a Skill\'s full instructions before you follow it.',
     "Mentioning a Skill is not running it.",
   ].join("\n");
@@ -629,9 +608,9 @@ export function skillSlugFromDocumentPathV1(path: string): string | undefined {
  * The ref that names a loaded Skill, or `undefined` when it has none.
  *
  * The loader that produced the Skill already decided this — a managed Skill's
- * ref is its slug, a plugin Skill's is qualified by its Package, and a Bot's
- * own comes from its directory — so this reads the recorded ref rather than
- * re-deriving one from a path that no longer determines the source.
+ * ref is its slug, and a Bot's own comes from its directory — so this reads
+ * the recorded ref rather than re-deriving one from a path that no longer
+ * determines the source.
  */
 export function skillRefForLoadedSkillV1(
   skill: LoadedSkillV1,

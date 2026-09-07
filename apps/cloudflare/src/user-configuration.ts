@@ -25,7 +25,6 @@ import {
   MAX_TEMPLATE_BYTES_V1,
   parseTemplateShareIdV1,
 } from "@frockbot/template-core";
-import { parseCatalogIndexDocumentV1 } from "@frockbot/catalog-core";
 import {
   decodeRoutineCommandReceiptV1,
   decodeRoutineListViewV1,
@@ -97,7 +96,6 @@ import {
 } from "@frockbot/plugin-audit";
 import type { BotAuditRpc } from "./audit.js";
 import type { WorkerLoader } from "./contracts.js";
-import { R2PackageCatalog } from "./package-catalog.js";
 import {
   decodeRpcEnvelopeV1,
   rpcBotId,
@@ -145,13 +143,6 @@ interface UserConfigurationEnv {
   APPLICATION_ARTIFACTS: R2Bucket;
   /** The loader that health-checks a candidate artifact before activation. */
   USER_APPLICATIONS: WorkerLoader;
-  /**
-   * The remote Package Catalog, read-only. The User Durable Object pins one
-   * generation from it and validates every Catalog install against that pin.
-   * Optional: a deployment without a Catalog installs compiled-in Packages
-   * exactly as before.
-   */
-  PACKAGE_CATALOG?: R2Bucket;
   /**
    * One Applet Durable Object per Applet instance. The User object owns the
    * directory and calls `delete()` on the instance; it never reads an
@@ -212,45 +203,17 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
               : name === "BETTER_AUTH_URL"
                 ? this.env.BETTER_AUTH_URL
                 : this.env.CREDENTIAL_KEYRING,
-          ...(this.env.PACKAGE_CATALOG
-            ? { catalog: new R2PackageCatalog(this.env.PACKAGE_CATALOG) }
-            : {}),
-          // The Bot Template seams. The blob store is the same bucket the
-          // Catalog's own immutable generations live in, written through the
-          // same collision-checking rule; the Bot reader is three read-only
-          // RPCs to the Bot Durable Object that already owns that state.
+          // The Bot Template seams. The blob store is the artifact bucket,
+          // written through the same collision-checking rule immutable
+          // application artifacts already use; the Bot reader is three
+          // read-only RPCs to the Bot Durable Object that already owns that
+          // state.
           botTemplate: {
             bots: this.templateBotReader(),
             blobs: this.templateBlobStore(),
             importer: this.templateImportWriter(),
             readPublishedShare: (shareId: string) =>
               this.readPublishedShare(shareId),
-            ...(this.env.PACKAGE_CATALOG
-              ? {
-                  readCatalogIds: async (generation: string) => {
-                    const found = await new R2PackageCatalog(
-                      this.env.PACKAGE_CATALOG!,
-                    ).readIndexDocument(generation);
-                    if (!found) return [];
-                    return parseCatalogIndexDocumentV1(
-                      found.document,
-                    ).entries.map((entry) => entry.catalogId);
-                  },
-                }
-              : {}),
-            ...(this.env.PACKAGE_CATALOG
-              ? {
-                  readCatalogDisplayName: async (
-                    generation: string,
-                    catalogId: string,
-                  ) =>
-                    (
-                      await new R2PackageCatalog(
-                        this.env.PACKAGE_CATALOG!,
-                      ).readEntry(generation, catalogId)
-                    )?.displayName,
-                }
-              : {}),
           },
           // The transcript index (parity register row 52). It lives on this
           // object's own SQL storage because "The User's Durable Object is the
@@ -1521,8 +1484,6 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
             ).revision,
             packageId: install.packageId,
             version: install.version,
-            catalogId: install.catalogId,
-            catalogGeneration: install.catalogGeneration,
           },
         });
         return receipt.status === "rejected"
@@ -1609,7 +1570,8 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
   }
 
   /**
-   * The immutable template blob store, over the Catalog bucket.
+   * The immutable template blob store, over the artifact bucket under the
+   * `templates/` prefix.
    *
    * The collision check is the whole write rule, and it is the one
    * `apps/cloudflare/src/package-publication.ts` already applies to a published
@@ -1617,12 +1579,9 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
    * different bytes are a collision rather than an overwrite.
    */
   private templateBlobStore(): TemplateBlobStoreV1 {
-    const bucket = this.env.PACKAGE_CATALOG;
+    const bucket = this.env.APPLICATION_ARTIFACTS;
     return {
       putImmutable: async (key, document) => {
-        if (!bucket) {
-          throw new Error("the template store is not configured");
-        }
         const existing = await bucket.get(key);
         if (existing) {
           if ((await existing.text()) !== document) {
@@ -1635,7 +1594,6 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
         });
       },
       read: async (key) => {
-        if (!bucket) return undefined;
         const object = await bucket.get(key);
         if (!object) return undefined;
         if (object.size > MAX_TEMPLATE_BYTES_V1) {

@@ -162,7 +162,7 @@ Staging follows the branch as production follows the tag. Every push to `main` t
 
 Staging isolates everything that holds state or identity — its own D1 database `frockbot-auth-staging`, its own R2 buckets, its own Vectorize index, its own secrets, and its own Durable Object namespaces, which come free because a namespace belongs to the Worker that declares it. It shares the stateless `frockbot-computer-host` Worker, which owns only the Sprites credential, so staging exercises the same host production does instead of paying for a second container deployment. The consequence is production's ordering constraint — a change to the host's contract ships with a tag, so staging sees it only once that tag lands.
 
-Unlike production, the staging deploy provisions its own resources. Each step is create-if-absent, so the first deploy creates the D1 database, the three R2 buckets, and the Vectorize index, and every later deploy finds them and moves on. The D1 identifier is resolved at deploy time and written into the staging `database_id`, so no variable records it.
+Unlike production, the staging deploy provisions its own resources. Each step is create-if-absent, so the first deploy creates the D1 database, the two R2 buckets, and the Vectorize index, and every later deploy finds them and moves on. The D1 identifier is resolved at deploy time and written into the staging `database_id`, so no variable records it.
 
 **Staging admits exactly one identity.** Signups default to closed and nothing in the deploy opens them, so the only way in is the admin allowlist: `FROCKBOT_ADMIN_EMAILS` is a **required** staging secret, and the deploy fails without it rather than publishing a deployment nobody can sign in to. Anyone else who completes Google sign-in is refused at the gateway — the signup gate turns on whether a User has been provisioned, not on whether Better Auth has a row — so no Durable Object is ever created for them.
 
@@ -197,12 +197,12 @@ After a version tag's packages are published, `release.yml` deploys four Cloudfl
 
 The Computer host runs Containers, which require the **Workers Paid plan**; its deploy step builds and pushes the container image, so the runner needs Docker (`ubuntu-latest` has it).
 
-The app deployment applies remote D1 migrations, uploads the immutable application artifact to R2 under its SHA-256 digest, sets `DEFAULT_APPLICATION_HASH` to that digest, publishes one Package Catalog generation, and then deploys the Worker, so each build is content-addressed and never overwrites a previously deployed artifact. The Catalog step runs `scripts/publish-catalog.ts` and writes into the `frockbot-package-catalog` bucket: the generation's entry documents and index are written first and are immutable, and the mutable pointer `catalog/current` is written last, so a reader either sees the previous generation whole or the new one whole. Both Wrangler configurations declare their custom domains, so Cloudflare creates and maintains the required proxied DNS records when the Workers are first deployed.
+The app deployment applies remote D1 migrations, uploads the immutable application artifact to R2 under its SHA-256 digest, sets `DEFAULT_APPLICATION_HASH` to that digest, and then deploys the Worker, so each build is content-addressed and never overwrites a previously deployed artifact. Both Wrangler configurations declare their custom domains, so Cloudflare creates and maintains the required proxied DNS records when the Workers are first deployed.
 
 Create the resources named in `apps/cloudflare/wrangler.jsonc` before the first app deployment:
 
 - D1 database `frockbot-auth`;
-- R2 buckets `frockbot-application-artifacts`, `frockbot-memory-files`, and `frockbot-package-catalog`;
+- R2 buckets `frockbot-application-artifacts` and `frockbot-memory-files`;
 - Vectorize index `frockbot-memory` with 768 cosine dimensions (`bunx wrangler vectorize create frockbot-memory --preset @cf/baai/bge-base-en-v1.5`).
 
 The same Wrangler file declares Cloudflare's `AI` binding for production and development. `generate_image` uses its native image inference, and the Cloudflare account must have billing for the configured Gateway routes and native models. Frock AI reaches the Gateway over HTTP rather than through the binding: the binding's `gateway(...).run()` targets the _universal_ endpoint, whose request-shape translation rejects a `dynamic/<route>` model before inference runs ([cloudflare/ai#617](https://github.com/cloudflare/ai/issues/617)), so Auto is only accepted on the Gateway's `compat/chat/completions` endpoint. Reaching it needs the `FROCK_AI_ACCOUNT_ID` var and the `FROCK_AI_GATEWAY_TOKEN` secret, which is the `cf-aig-authorization` bearer for an authenticated Gateway. Both absent, Frock AI falls back to the binding, which still serves manual `@frock/...` ids but fails Auto. The browser e2e environment binds `AI` to a local RPC fake and sets no token, so CI takes that fallback, neither authenticating to Cloudflare nor incurring model usage.
@@ -267,7 +267,6 @@ packages/
   computer-host-runtime/   The Computer's on-Sprite layout, scripts, and Sprite naming
   configuration-core/ Versioned durable User/Bot settings contracts
   connection-core/  Provider-neutral Connection transport result contracts
-  catalog-core/     Remote Package Catalog generations, index, and entry decoding
   workspace-store/  Object-storage durable-root store and its generation ledger
   template-core/    Bot template recipe document and its decoder
   machine-protocol/ Contracts for registered User machines and their tokens
@@ -383,5 +382,5 @@ The runtime's features and registries provide composition and lifecycle ownershi
 - Fly uses one Sprite per User and separation between that User's Bots is organizational; the User's Computer is the trust boundary, and live isolation depends on Fly's VM and network enforcement rather than on directory naming;
 - the local derived memory vector index is process-local and rebuilt through canonical-file fallback; cloud Vectorize remains durable;
 - the Computer interface has exactly one runtime behind it — Fly Sprites, driven from the Cloudflare Container host. A Kubernetes or Container-native Computer can be added as a provider Package, but no second adapter is implemented;
-- the remote Package Catalog serves pinned, content-addressed generations, but its entries are the first-party Packages compiled into the application; no third-party or Bot-published entry is indexed, and a Bot has no tool over the Catalog;
+- there is no Package catalog: the Packages a User can install are the ones compiled into the deployment, and nothing installs a third-party or Bot-published Package;
 - packaged applications are not code signed.

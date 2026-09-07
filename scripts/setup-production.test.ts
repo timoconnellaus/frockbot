@@ -60,8 +60,6 @@ fi
 `,
   );
   await Bun.write(open, "#!/usr/bin/env bash\nexit 0\n");
-  // The Catalog bucket stage shells out to wrangler; the stub records the
-  // call and reports the bucket as absent so the create path is exercised.
   const bunx = join(bin, "bunx");
   await Bun.write(
     bunx,
@@ -113,7 +111,7 @@ describe("production setup", () => {
       "Checking environment secrets in timoconnellaus/frockbot…",
     );
     expect(stdout).toContain(
-      "Stage 7/7 · GitHub: verify production configuration",
+      "Stage 6/6 · GitHub: verify production configuration",
     );
     // The AI Gateway token is optional: skipping it has to leave the run
     // green and say what stops working, not write an empty secret that a
@@ -134,21 +132,6 @@ describe("production setup", () => {
     expect(
       calls.some((call) => call.startsWith("secret-value:CREDENTIAL_KEYRING:")),
     ).toBe(true);
-  });
-
-  test("provisions the Package Catalog bucket when it is absent", async () => {
-    const { exitCode, stdout, calls } = await runProductionSetup(
-      "\ncloudflare-token\n\ngoogle-client\ngoogle-secret\nsprites-production\n\n",
-    );
-
-    expect(exitCode).toBe(0);
-    expect(calls).toContain(
-      "wrangler r2 bucket info frockbot-package-catalog --config apps/cloudflare/wrangler.jsonc",
-    );
-    expect(calls).toContain(
-      "wrangler r2 bucket create frockbot-package-catalog --config apps/cloudflare/wrangler.jsonc",
-    );
-    expect(stdout).toContain("created");
   });
 
   test("aborts when the production keyring cannot be inspected", async () => {
@@ -180,90 +163,6 @@ describe("production setup", () => {
       "secret set CREDENTIAL_KEYRING --repo timoconnellaus/frockbot --env production",
     );
     expect(stdout).not.toContain("Setup complete");
-  });
-
-  test("publishes the Package Catalog after the artifact, pointer last", async () => {
-    const source = await Bun.file(
-      new URL("../.github/workflows/release.yml", import.meta.url),
-    ).text();
-    const workflow = Bun.YAML.parse(source) as {
-      jobs: {
-        "deploy-backend": {
-          steps: Array<{ name?: string; run?: string }>;
-        };
-      };
-    };
-    const steps = workflow.jobs["deploy-backend"].steps;
-    const artifactStep = steps.findIndex(
-      (step) => step.name === "Upload application artifact",
-    );
-    const publishStep = steps.findIndex(
-      (step) => step.name === "Publish Package Catalog",
-    );
-    expect(artifactStep).toBeGreaterThanOrEqual(0);
-    // The Catalog indexes the Packages of the artifact that was just uploaded,
-    // so it is published after it and before the Worker that serves it.
-    expect(publishStep).toBeGreaterThan(artifactStep);
-    expect(
-      steps.findIndex((step) => step.name === "Deploy Worker"),
-    ).toBeGreaterThan(publishStep);
-
-    // The step is run for real against a stubbed wrangler: the publisher and
-    // the upload order are the two things a broken generation would break.
-    const directory = await temporaryDirectory("frockbot-catalog-");
-    const bin = join(directory, "bin");
-    const uploadLog = join(directory, "uploads.log");
-    await mkdir(bin);
-    const bunx = join(bin, "bunx");
-    await Bun.write(
-      bunx,
-      `#!/usr/bin/env bash
-set -euo pipefail
-printf '%s\\n' "$*" >> "$UPLOAD_LOG"
-if [[ "$3 $4" == "bucket info" ]]; then exit 1; fi
-exit 0
-`,
-    );
-    await chmod(bunx, 0o755);
-    const execution = Bun.spawnSync(
-      ["bash", "-c", steps[publishStep]?.run ?? ""],
-      {
-        cwd: fileURLToPath(new URL("../apps/cloudflare", import.meta.url)),
-        env: {
-          ...process.env,
-          PATH: `${bin}:${process.env.PATH ?? ""}`,
-          RUNNER_TEMP: directory,
-          UPLOAD_LOG: uploadLog,
-        },
-        stdout: "pipe",
-        stderr: "pipe",
-      },
-    );
-    expect({
-      code: execution.exitCode,
-      stderr: execution.stderr.toString(),
-    }).toMatchObject({ code: 0 });
-
-    const calls = (await Bun.file(uploadLog).text()).trim().split("\n");
-    expect(calls[0]).toBe("wrangler r2 bucket info frockbot-package-catalog");
-    expect(calls[1]).toBe("wrangler r2 bucket create frockbot-package-catalog");
-    const puts = calls.filter((call) =>
-      call.startsWith("wrangler r2 object put"),
-    );
-    expect(puts.length).toBeGreaterThan(2);
-    // Nothing may name a generation before every object in it exists, so the
-    // one mutable object in the whole Catalog is written last.
-    expect(puts.at(-1)).toContain("frockbot-package-catalog/catalog/current");
-    expect(
-      puts.slice(0, -1).every((call) => !call.includes("catalog/current")),
-    ).toBe(true);
-    expect(
-      puts.some((call) =>
-        /frockbot-package-catalog\/catalog\/g[0-9a-f]{32}\/index\.json/.test(
-          call,
-        ),
-      ),
-    ).toBe(true);
   });
 
   test("forwards active secrets to the deploy", async () => {

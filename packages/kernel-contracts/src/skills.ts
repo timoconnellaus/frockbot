@@ -8,55 +8,41 @@
 // kernel event. What a ref *resolves to* is Package policy and stays in
 // `plugin-skills`: the kernel holds the name and no opinion about the file.
 //
-// All four sources are declared at once even though only `bot` has a producer
-// today. The value is durable — it is recorded in `input/queued` and in
-// `skill/invoked` — so admitting a new source later would be a wire change in
-// every decoder between the composer and the event log. Declaring them now
-// means the Skills reach that adds User-global, managed and plugin-borne
-// Skills adds no codec change at all.
-
-/** Where a Skill comes from. Only `bot` has a producer today. */
-export type SkillRefSourceV1 = "bot" | "user" | "managed" | "plugin";
+/** Where a Skill comes from. */
+export type SkillRefSourceV1 = "bot" | "user" | "managed";
 
 /** The declared sources, in the catalog's canonical ordering. */
 export const SKILL_REF_SOURCES_V1: readonly SkillRefSourceV1[] = [
   "bot",
   "user",
   "managed",
-  "plugin",
 ];
 
 /**
  * One Skill named for invocation.
  *
- * `packageId` is present exactly when `source` is `plugin`: a plugin-borne
- * Skill is only unique within the Package that ships it, and every other
- * source is unique on its slug alone. Refs are therefore globally unique and
+ * Every source is unique on its slug alone, so refs are globally unique and
  * there is no shadowing rule.
  */
 export interface SkillRefV1 {
   schemaVersion: 1;
   source: SkillRefSourceV1;
   slug: string;
-  packageId?: string;
 }
 
 /** Most Skills one Turn may invoke. */
 export const MAX_INVOKED_SKILLS_V1 = 3;
 
 const SKILL_SLUG_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
-const SKILL_PACKAGE_ID_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 
 /** True when a slug is well formed. Total; never throws. */
 export function isSkillRefSlugV1(value: unknown): value is string {
   return typeof value === "string" && SKILL_SLUG_PATTERN.test(value);
 }
 
-/** The canonical string form: `bot/<slug>`, `plugin/<packageId>/<slug>`. */
+/** The canonical string form: `bot/<slug>`. */
 export function formatSkillRefV1(ref: SkillRefV1): string {
-  return ref.source === "plugin"
-    ? `plugin/${ref.packageId}/${ref.slug}`
-    : `${ref.source}/${ref.slug}`;
+  return `${ref.source}/${ref.slug}`;
 }
 
 /**
@@ -70,14 +56,6 @@ export function parseSkillRefV1(value: unknown): SkillRefV1 | undefined {
     (candidate) => candidate === segments[0],
   );
   if (!source) return undefined;
-  if (source === "plugin") {
-    if (segments.length !== 3) return undefined;
-    const packageId = segments[1] ?? "";
-    const slug = segments[2] ?? "";
-    if (!SKILL_PACKAGE_ID_PATTERN.test(packageId)) return undefined;
-    if (!SKILL_SLUG_PATTERN.test(slug)) return undefined;
-    return { schemaVersion: 1, source, slug, packageId };
-  }
   if (segments.length !== 2) return undefined;
   const slug = segments[1] ?? "";
   if (!SKILL_SLUG_PATTERN.test(slug)) return undefined;
@@ -96,7 +74,7 @@ export function decodeSkillRefV1(
     throw new Error(`${label} must be an object`);
   }
   const candidate = value as Record<string, unknown>;
-  const allowed = new Set(["schemaVersion", "source", "slug", "packageId"]);
+  const allowed = new Set(["schemaVersion", "source", "slug"]);
   for (const key of Reflect.ownKeys(candidate)) {
     if (typeof key !== "string" || !allowed.has(key)) {
       throw new Error(`${label} has unknown fields`);
@@ -111,25 +89,6 @@ export function decodeSkillRefV1(
   if (!source) throw new Error(`${label}.source is invalid`);
   if (!isSkillRefSlugV1(candidate.slug)) {
     throw new Error(`${label}.slug is invalid`);
-  }
-  if (source === "plugin") {
-    if (
-      typeof candidate.packageId !== "string" ||
-      !SKILL_PACKAGE_ID_PATTERN.test(candidate.packageId)
-    ) {
-      throw new Error(`${label}.packageId is invalid`);
-    }
-    return {
-      schemaVersion: 1,
-      source,
-      slug: candidate.slug,
-      packageId: candidate.packageId,
-    };
-  }
-  if (candidate.packageId !== undefined) {
-    // A packageId on a non-plugin ref would name a Package that has nothing to
-    // do with the Skill, so it is a refusal rather than an ignored field.
-    throw new Error(`${label}.packageId is only valid on a plugin Skill`);
   }
   return { schemaVersion: 1, source, slug: candidate.slug };
 }

@@ -11,10 +11,10 @@
  * files, scrubbing lives only in the pack arguments, managed and plugin Skills
  * are always excluded, and the payload is bounded at ~100 000 characters. Three
  * FrockBot readings depart from it: a marketplace `pluginId` becomes
- * `packageId` + `catalogId` + `version`, publication is a User act rather than
- * a tool argument, and Memory is not exported at all.
+ * `packageId` + `version`, publication is a User act rather than a tool
+ * argument, and Memory is not exported at all.
  *
- * This module mirrors `catalog-core`'s role exactly: DTOs, strict exact-key
+ * This module holds DTOs, strict exact-key
  * decoders, bounds, the object-key layout and the content hash — no I/O, no
  * runtime dependency, importable by the gateway, the User Durable Object, the
  * Bot's runtime Contribution and the browser alike.
@@ -29,8 +29,8 @@ export class TemplateDecodeError extends Error {
 
 /**
  * Bounds every template document. `MAX_TEMPLATE_BYTES_V1` is the register's own
- * ~100 000-character payload bound (line 329); the rest mirror `MAX_CATALOG_*`
- * so a hostile blob cannot exhaust a Durable Object that decodes one.
+ * ~100 000-character payload bound (line 329); the rest bound the document so
+ * a hostile blob cannot exhaust a Durable Object that decodes one.
  */
 export const MAX_TEMPLATE_BYTES_V1 = 100_000;
 export const MAX_TEMPLATE_SKILLS_V1 = 200;
@@ -89,14 +89,12 @@ export interface TemplateRoutineV1 {
 }
 
 /**
- * One installable Package, by Catalog identity. There is no numeric
- * marketplace id in FrockBot, and an install must validate against an
- * immutable generation, so a template names what the importer looks up in
- * *their own* pinned generation rather than a version this one happened to see.
+ * One installable Package, by Package id. There is no numeric marketplace id
+ * in FrockBot, so a template names the Package the importer looks up in
+ * *their own* deployment rather than a version this one happened to see.
  */
 export interface TemplatePackageV1 {
   packageId: string;
-  catalogId: string;
   version: string;
   displayName: string;
 }
@@ -117,8 +115,6 @@ export interface BotTemplateV1 {
   skills: TemplateSkillV1[];
   routines: TemplateRoutineV1[];
   packages: TemplatePackageV1[];
-  /** The Catalog generation the *source* User was pinned to, for provenance. */
-  sourceCatalogGeneration?: string;
 }
 
 /**
@@ -151,8 +147,6 @@ export interface TemplateShareRecordV1 {
 const HASH_PATTERN = /^[0-9a-f]{64}$/;
 const SLUG_PATTERN = /^[a-z0-9][a-z0-9-]{0,127}$/;
 const PACKAGE_ID_PATTERN = /^[a-z][a-z0-9-]*$/;
-const CATALOG_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
-const GENERATION_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const SHARE_SECRET_PATTERN = /^[0-9a-f]{32}$/;
 const SHARE_OWNER_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,95}$/;
 
@@ -386,7 +380,6 @@ function decodeTemplateRoutineV1(value: unknown): TemplateRoutineV1 {
 function decodeTemplatePackageV1(value: unknown): TemplatePackageV1 {
   const entry = exactRecord(value, "template package", [
     "packageId",
-    "catalogId",
     "version",
     "displayName",
   ]);
@@ -397,24 +390,19 @@ function decodeTemplatePackageV1(value: unknown): TemplatePackageV1 {
       PACKAGE_ID_PATTERN,
       64,
     ),
-    catalogId: pattern(
-      entry.catalogId,
-      "template catalogId",
-      CATALOG_ID_PATTERN,
-      64,
-    ),
     version: text(entry.version, "template package version", 100),
     displayName: text(entry.displayName, "template package displayName", 100),
   };
 }
 
 export function decodeBotTemplateV1(input: unknown): BotTemplateV1 {
-  const value = exactRecord(
-    input,
-    "bot template",
-    ["schemaVersion", "profile", "skills", "routines", "packages"],
-    ["sourceCatalogGeneration"],
-  );
+  const value = exactRecord(input, "bot template", [
+    "schemaVersion",
+    "profile",
+    "skills",
+    "routines",
+    "packages",
+  ]);
   if (value.schemaVersion !== 1) {
     throw new TemplateDecodeError("bot template schema version is unsupported");
   }
@@ -440,28 +428,16 @@ export function decodeBotTemplateV1(input: unknown): BotTemplateV1 {
     MAX_TEMPLATE_PACKAGES_V1,
   ).map(decodeTemplatePackageV1);
   if (
-    new Set(packages.map((entry) => entry.catalogId)).size !== packages.length
+    new Set(packages.map((entry) => entry.packageId)).size !== packages.length
   ) {
-    throw new TemplateDecodeError("bot template repeats a catalogId");
+    throw new TemplateDecodeError("bot template repeats a packageId");
   }
-  const sourceCatalogGeneration =
-    value.sourceCatalogGeneration === undefined
-      ? undefined
-      : pattern(
-          value.sourceCatalogGeneration,
-          "template sourceCatalogGeneration",
-          GENERATION_PATTERN,
-          64,
-        );
   return {
     schemaVersion: 1,
     profile: decodeTemplateProfileV1(value.profile),
     skills,
     routines,
     packages,
-    ...(sourceCatalogGeneration === undefined
-      ? {}
-      : { sourceCatalogGeneration }),
   };
 }
 
@@ -519,13 +495,9 @@ export function canonicalBotTemplateDocumentV1(
     })),
     packages: decoded.packages.map((entry) => ({
       packageId: entry.packageId,
-      catalogId: entry.catalogId,
       version: entry.version,
       displayName: entry.displayName,
     })),
-    ...(decoded.sourceCatalogGeneration === undefined
-      ? {}
-      : { sourceCatalogGeneration: decoded.sourceCatalogGeneration }),
   });
   assertTemplateDocumentSizeV1(document);
   return document;
@@ -544,9 +516,8 @@ export function assertTemplateDocumentSizeV1(document: string): void {
 }
 
 /**
- * SHA-256 over the exact bytes the bucket holds, hex-encoded. Identical to
- * `catalogContentHashV1` in shape and in reason: a pinned hash must mean
- * "these bytes", not "something that re-serializes to this".
+ * SHA-256 over the exact bytes the bucket holds, hex-encoded. A pinned hash
+ * must mean "these bytes", not "something that re-serializes to this".
  */
 export async function templateContentHashV1(document: string): Promise<string> {
   const digest = await crypto.subtle.digest(

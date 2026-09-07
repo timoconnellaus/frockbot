@@ -18,10 +18,6 @@ import {
   userInstructionRootV1,
 } from "./catalog.ts";
 import { loadManagedSkillsV1, MANAGED_SKILL_DOCUMENTS_V1 } from "./managed.ts";
-import {
-  loadPluginSkillsV1,
-  type PluginSkillsSourceV1,
-} from "./plugin-index.ts";
 import { FakeWorkspace, skillMarkdown } from "./testing.ts";
 
 const OWNER = { userId: "user-1", botId: "bot-1" };
@@ -43,17 +39,6 @@ const CONTEXT = {
   effectId: "tool:1:1:0",
   signal: new AbortController().signal,
 };
-
-function pluginSource(
-  packages: {
-    packageId: string;
-    catalogId: string;
-    generation: string;
-    skills: { name: string; description?: string; body?: string }[];
-  }[],
-): PluginSkillsSourceV1 {
-  return { read: () => Promise.resolve({ status: "ok", packages }) };
-}
 
 async function openSession(): Promise<{
   session: Session;
@@ -129,9 +114,6 @@ describe("the managed Skill source", () => {
     expect(skillWriteScopeRefusalV1("managed")).toBe(
       "managed skills are not editable this way",
     );
-    expect(skillWriteScopeRefusalV1("plugin")).toBe(
-      "managed skills are not editable this way",
-    );
     // The User-global root is writable, so `user` is no longer a refusal.
     expect(skillWriteScopeRefusalV1("user")).toBeUndefined();
   });
@@ -163,122 +145,13 @@ describe("the managed Skill source", () => {
   });
 });
 
-describe("the plugin-borne Skill index", () => {
-  test("indexes an installed entry's Skills at its pinned generation", async () => {
-    const loaded = await loadPluginSkillsV1(
-      pluginSource([
-        {
-          packageId: "composio",
-          catalogId: "composio",
-          generation: "gen-7",
-          skills: [
-            {
-              name: "Compose email",
-              description: "Use this when drafting mail.",
-              body: "PLUGIN-BODY",
-            },
-          ],
-        },
-      ]),
-    );
-
-    expect(loaded.refusals).toEqual([]);
-    expect(loaded.skills).toHaveLength(1);
-    expect(loaded.skills[0]?.ref).toEqual({
-      schemaVersion: 1,
-      source: "plugin",
-      slug: "compose-email",
-      packageId: "composio",
-    });
-    expect(loaded.skills[0]?.path).toBe(
-      "plugin/composio/compose-email/SKILL.md",
-    );
-    expect(loaded.skills[0]?.by).toBe('Package "composio"');
-    expect(loaded.skills[0]?.generationId).toBe("catalog:gen-7");
-    expect(loaded.skills[0]?.body).toBe("PLUGIN-BODY");
-  });
-
-  test("refuses a declaration with nothing to say, and keeps the rest", async () => {
-    const loaded = await loadPluginSkillsV1(
-      pluginSource([
-        {
-          packageId: "composio",
-          catalogId: "composio",
-          generation: "gen-7",
-          skills: [
-            { name: "No body", description: "Use this when nothing." },
-            { name: "No description", body: "Body." },
-            { name: "!!!", description: "Use this when unnamed.", body: "B." },
-            { name: "Kept", description: "Use this when keeping.", body: "B." },
-            {
-              name: "kept",
-              description: "Use this when colliding.",
-              body: "B.",
-            },
-          ],
-        },
-      ]),
-    );
-
-    expect(loaded.skills.map((skill) => skill.ref?.slug)).toEqual(["kept"]);
-    expect(loaded.refusals.map((refusal) => refusal.reason)).toEqual([
-      "the Catalog entry lists this Skill without a body",
-      "the Catalog entry lists this Skill without a description",
-      'the Skill name "!!!" yields no usable slug',
-      'Package "composio" declares "kept" more than once',
-    ]);
-  });
-
-  test("records an unreadable Catalog as a refusal rather than failing the Turn", async () => {
-    const loaded = await loadPluginSkillsV1({
-      read: () =>
-        Promise.resolve({ status: "unavailable", reason: "R2 is down" }),
-    });
-
-    expect(loaded.skills).toEqual([]);
-    expect(loaded.refusals[0]).toMatchObject({
-      path: "plugin",
-      kind: "unreadable",
-    });
-    expect(loaded.refusals[0]?.reason).toContain("R2 is down");
-  });
-
-  test("an uninstalled Package contributes nothing on the next Turn", async () => {
-    const installed = await loadPluginSkillsV1(
-      pluginSource([
-        {
-          packageId: "composio",
-          catalogId: "composio",
-          generation: "gen-7",
-          skills: [
-            { name: "Kept", description: "Use this when keeping.", body: "B." },
-          ],
-        },
-      ]),
-    );
-    expect(installed.skills).toHaveLength(1);
-
-    // Uninstalling removes the installation row, so the next Turn's index has
-    // nothing to read. Nothing was ever copied into a root, so nothing lingers.
-    const uninstalled = await loadPluginSkillsV1(pluginSource([]));
-    expect(uninstalled.skills).toEqual([]);
-    expect(uninstalled.refusals).toEqual([]);
-  });
-});
-
 function fakeSkill(
-  source: "bot" | "user" | "managed" | "plugin",
+  source: "bot" | "user" | "managed",
   slug: string,
-  packageId?: string,
 ): LoadedSkillV1 {
   return {
     path: `${source}/${slug}/SKILL.md`,
-    ref: {
-      schemaVersion: 1,
-      source,
-      slug,
-      ...(packageId ? { packageId } : {}),
-    },
+    ref: { schemaVersion: 1, source, slug },
     name: slug,
     description: "Use this when testing.",
     body: "Body.",
@@ -288,15 +161,8 @@ function fakeSkill(
 }
 
 describe("assembling the catalog", () => {
-  test("orders bot, then user, then managed, then plugin", () => {
+  test("orders bot, then user, then managed", () => {
     const catalog = assembleSkillCatalogV1(OWNER, {
-      plugin: {
-        skills: [
-          fakeSkill("plugin", "p", "zed"),
-          fakeSkill("plugin", "a", "abc"),
-        ],
-        refusals: [],
-      },
       managed: { skills: [fakeSkill("managed", "m")], refusals: [] },
       user: { skills: [fakeSkill("user", "u")], refusals: [] },
       bot: { skills: [fakeSkill("bot", "b")], refusals: [] },
@@ -306,26 +172,16 @@ describe("assembling the catalog", () => {
       "bot/b/SKILL.md",
       "user/u/SKILL.md",
       "managed/m/SKILL.md",
-      "plugin/a/SKILL.md",
-      "plugin/p/SKILL.md",
     ]);
   });
 
   test("records every drop over a source cap as a refusal", () => {
-    const caps: SkillCatalogCapsV1 = {
-      ...SKILL_CATALOG_CAPS_V1,
-      managed: 1,
-      plugin: 0,
-    };
+    const caps: SkillCatalogCapsV1 = { ...SKILL_CATALOG_CAPS_V1, managed: 1 };
     const catalog = assembleSkillCatalogV1(
       OWNER,
       {
         managed: {
           skills: [fakeSkill("managed", "a"), fakeSkill("managed", "b")],
-          refusals: [],
-        },
-        plugin: {
-          skills: [fakeSkill("plugin", "c", "pkg")],
           refusals: [],
         },
       },
@@ -339,12 +195,6 @@ describe("assembling the catalog", () => {
         kind: "over-source-cap",
         reason:
           "the managed Skill source is bounded at 1 entries in one catalog",
-      },
-      {
-        path: "plugin/c/SKILL.md",
-        kind: "over-source-cap",
-        reason:
-          "the plugin Skill source is bounded at 0 entries in one catalog",
       },
     ]);
   });
@@ -385,22 +235,17 @@ describe("the rendered catalog block", () => {
     const rendered = renderSkillCatalogPromptV1(
       assembleSkillCatalogV1(OWNER, {
         managed: { skills: [fakeSkill("managed", "teach")], refusals: [] },
-        plugin: {
-          skills: [
-            {
-              ...fakeSkill("plugin", "compose", "composio"),
-              by: 'Package "composio"',
-            },
-          ],
+        user: {
+          skills: [{ ...fakeSkill("user", "compose"), by: "your User" }],
           refusals: [],
         },
       }),
     );
 
     expect(rendered).toContain('source="managed" ref="managed/teach"');
-    expect(rendered).toContain('source="plugin" ref="plugin/composio/compose"');
-    expect(rendered).toContain('by="Package &quot;composio&quot;"');
-    // Progressive disclosure survives the new sources.
+    expect(rendered).toContain('source="user" ref="user/compose"');
+    expect(rendered).toContain('by="your User"');
+    // Progressive disclosure survives the shared sources.
     expect(rendered).not.toContain("Body.");
   });
 
@@ -408,26 +253,20 @@ describe("the rendered catalog block", () => {
     const rendered = renderSkillCatalogPromptV1(
       assembleSkillCatalogV1(OWNER, {
         bot: { skills: [fakeSkill("bot", "standup")], refusals: [] },
-        plugin: {
-          skills: [fakeSkill("plugin", "standup", "composio")],
-          refusals: [],
-        },
+        user: { skills: [fakeSkill("user", "standup")], refusals: [] },
       }),
     );
 
     expect(rendered).toContain('name="standup (bot/standup)"');
-    expect(rendered).toContain('name="standup (plugin/composio/standup)"');
+    expect(rendered).toContain('name="standup (user/standup)"');
   });
 });
 
 describe("resolving a ref against a Turn's catalog", () => {
-  test("resolves managed and plugin refs, and refuses an unknown one", () => {
+  test("resolves managed and user refs, and refuses an unknown one", () => {
     const catalog = assembleSkillCatalogV1(OWNER, {
       managed: { skills: [fakeSkill("managed", "teach")], refusals: [] },
-      plugin: {
-        skills: [fakeSkill("plugin", "compose", "composio")],
-        refusals: [],
-      },
+      user: { skills: [fakeSkill("user", "compose")], refusals: [] },
     });
 
     expect(
@@ -440,18 +279,16 @@ describe("resolving a ref against a Turn's catalog", () => {
     expect(
       resolveSkillRefV1(catalog, {
         schemaVersion: 1,
-        source: "plugin",
+        source: "user",
         slug: "compose",
-        packageId: "composio",
       })?.path,
-    ).toBe("plugin/compose/SKILL.md");
-    // The same slug under another Package is another Skill, not this one.
+    ).toBe("user/compose/SKILL.md");
+    // The same slug under another source is another Skill, not this one.
     expect(
       resolveSkillRefV1(catalog, {
         schemaVersion: 1,
-        source: "plugin",
+        source: "bot",
         slug: "compose",
-        packageId: "other",
       }),
     ).toBeUndefined();
     expect(
@@ -465,7 +302,7 @@ describe("resolving a ref against a Turn's catalog", () => {
 });
 
 describe("a Turn's whole catalog", () => {
-  test("assembles all three live sources and loads a body by ref", async () => {
+  test("assembles the live sources and loads a body by ref", async () => {
     const workspace = await FakeWorkspace.seeded([
       {
         root: OWN_ROOT,
@@ -475,24 +312,7 @@ describe("a Turn's whole catalog", () => {
       },
     ]);
     const { session, dispose } = await openSession();
-    const catalog = new SkillCatalog(
-      OWNER,
-      workspace,
-      pluginSource([
-        {
-          packageId: "composio",
-          catalogId: "composio",
-          generation: "gen-7",
-          skills: [
-            {
-              name: "Compose email",
-              description: "Use this when drafting mail.",
-              body: "PLUGIN-BODY",
-            },
-          ],
-        },
-      ]),
-    );
+    const catalog = new SkillCatalog(OWNER, workspace);
 
     await catalog.refresh(1, session);
 
@@ -503,7 +323,6 @@ describe("a Turn's whole catalog", () => {
       "managed",
       "managed",
       "managed",
-      "plugin",
     ]);
 
     const tool = createSkillLoadTool(catalog);
@@ -513,13 +332,6 @@ describe("a Turn's whole catalog", () => {
     );
     expect(managed.isError).toBe(false);
     expect(managed.content).toContain("Ref: managed/add-connector");
-
-    const plugin = await tool.execute(
-      { path: "plugin/composio/compose-email" },
-      CONTEXT,
-    );
-    expect(plugin.isError).toBe(false);
-    expect(plugin.content).toContain("PLUGIN-BODY");
 
     // The path form still works, for one release.
     const byPath = await tool.execute(

@@ -560,52 +560,23 @@
       "additionalProperties": false
     },
     "SkillRef": {
-      "oneOf": [
-        {
-          "type": "object",
-          "properties": {
-            "schemaVersion": {
-              "const": 1
-            },
-            "source": {
-              "enum": ["bot", "user", "managed"]
-            },
-            "slug": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 64,
-              "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
-            }
-          },
-          "required": ["schemaVersion", "source", "slug"],
-          "additionalProperties": false
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "const": 1
         },
-        {
-          "type": "object",
-          "properties": {
-            "schemaVersion": {
-              "const": 1
-            },
-            "source": {
-              "const": "plugin"
-            },
-            "slug": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 64,
-              "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
-            },
-            "packageId": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 64,
-              "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
-            }
-          },
-          "required": ["schemaVersion", "source", "slug", "packageId"],
-          "additionalProperties": false
+        "source": {
+          "enum": ["bot", "user", "managed"]
+        },
+        "slug": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
         }
-      ]
+      },
+      "required": ["schemaVersion", "source", "slug"],
+      "additionalProperties": false
     },
     "TurnCommand": {
       "type": "object",

@@ -55,9 +55,9 @@ tell them precisely what to do.
 
 1. Name the gap. Say which tool you looked for and did not find, so the User
    knows what installing this changes about what you can do.
-2. Look in the Package Catalog for an entry that covers it. An entry that is
-   already installed shows in your prompt as the Package it contributes; one
-   that is not will not be there at all.
+2. Look in Settings → Connectors for a connector that covers it. A connector
+   that is already set up shows in your prompt as the Package it contributes;
+   one that is not will not be there at all.
 3. Report to the User with \`send_to_user\`: the entry's display name, what it
    would let you do, and the single sentence "Install it and switch it on
    under Settings → Plugins."

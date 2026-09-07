@@ -91,7 +91,7 @@ export default defineConfig({
           AI_PROBE: FROCK_AI_FAKE_SERVICE,
         },
         workers: [createFrockAiFakeWorker("2026-08-27")],
-        r2Buckets: ["APPLICATION_ARTIFACTS", "MEMORY_FILES", "PACKAGE_CATALOG"],
+        r2Buckets: ["APPLICATION_ARTIFACTS", "MEMORY_FILES"],
         d1Databases: ["AUTH_DB"],
         durableObjects: {
           // Production classes, not probes.

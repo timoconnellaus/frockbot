@@ -1,12 +1,8 @@
 /**
  * `wrangler r2 object put` addresses a bucket by *name*, and the dogfood stack
- * seeds three things a fresh User needs before the Worker starts. A name that
- * drifts from the `development` environment in `apps/cloudflare/wrangler.jsonc`
- * seeds a bucket the Worker never opens, and nothing fails loudly: the Catalog
- * was seeded into `frockbot-package-catalog` while `development` read
- * `frockbot-package-catalog-development`, so `catalog/current` was never there
- * to pin, every fresh User went unpinned, and `package_search` refused on its
- * first call (finding F4).
+ * seeds what a fresh User needs before the Worker starts. A name that drifts
+ * from the `development` environment in `apps/cloudflare/wrangler.jsonc` seeds
+ * a bucket the Worker never opens, and nothing fails loudly.
  */
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
@@ -62,19 +58,17 @@ describe("the dogfood dev stack", () => {
     ]),
   );
 
-  test.each([
-    ["catalog_bucket", "PACKAGE_CATALOG"],
-    ["artifact_bucket", "APPLICATION_ARTIFACTS"],
-  ])("seeds %s into the bucket %s binds", (variable, binding) => {
-    expect(shellAssignment(variable)).toBe(buckets.get(binding)!);
-  });
+  test.each([["artifact_bucket", "APPLICATION_ARTIFACTS"]])(
+    "seeds %s into the bucket %s binds",
+    (variable, binding) => {
+      expect(shellAssignment(variable)).toBe(buckets.get(binding)!);
+    },
+  );
 
-  test("names no R2 bucket literally outside those two assignments", () => {
+  test("names no R2 bucket literally outside that assignment", () => {
     const literals = commands
       .filter((line) => !/^[a-z_]+_bucket="/.test(line))
-      .filter((line) =>
-        /frockbot-(package-catalog|application-artifacts)/.test(line),
-      );
+      .filter((line) => /frockbot-application-artifacts/.test(line));
     expect(literals).toEqual([]);
   });
 

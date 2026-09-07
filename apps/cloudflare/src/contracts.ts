@@ -385,28 +385,6 @@ export interface ApplicationArtifactStore {
   loadPackageUiArtifact?(contentHash: string): Promise<string | undefined>;
 }
 
-/** One verified Catalog object, as `/catalog/v1/*` serves it. */
-export interface CatalogGatewayDocument {
-  generation: string;
-  hash: string;
-  document: string;
-}
-
-/**
- * The read-only Catalog seam the gateway holds. Only the two documents the
- * routes serve: the gateway publishes the Catalog, it does not own it, and it
- * never writes to the bucket.
- */
-export interface CatalogGatewayStore {
-  readIndexDocument(
-    generation?: string,
-  ): Promise<CatalogGatewayDocument | undefined>;
-  readEntryDocument(
-    catalogId: string,
-    generation?: string,
-  ): Promise<CatalogGatewayDocument | undefined>;
-}
-
 /**
  * Bot-authored Package artifacts. Content-addressed and immutable, stored at
  * `packages/<contentHash>.mjs` in the same `APPLICATION_ARTIFACTS` bucket.
@@ -729,8 +707,6 @@ export interface GatewayDependencies {
     request: Request,
     context: { isAdmin: boolean; authMode: string },
   ): Promise<Response>;
-  /** Absent when the deployment publishes no Catalog; `/catalog/v1/*` then 503s. */
-  catalog?: CatalogGatewayStore;
   /** Absent, or with no token, when the deployment publishes no `/api/debug`. */
   debug?: DebugGatewaySurface;
   /**

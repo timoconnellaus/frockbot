@@ -1,5 +1,5 @@
 // Staging and sharing a Bot template inside a real User Durable Object, over
-// the real `PACKAGE_CATALOG` bucket.
+// the real `APPLICATION_ARTIFACTS` bucket.
 //
 // Three claims the unit suite cannot make, because each depends on real
 // object storage or real durable state surviving an eviction:
@@ -76,7 +76,9 @@ async function setVisibility(
 }
 
 async function objectKeys(): Promise<string[]> {
-  const listing = await env.PACKAGE_CATALOG.list({ prefix: "templates/" });
+  const listing = await env.APPLICATION_ARTIFACTS.list({
+    prefix: "templates/",
+  });
   return listing.objects.map((object) => object.key).sort();
 }
 
@@ -92,7 +94,7 @@ describe("staging a Bot template in workerd", () => {
     expect(parseTemplateShareIdV1(first.share.shareId).ownerId).toBe(userId);
 
     const key = templateObjectKeyV1(first.share.hash);
-    const stored = await env.PACKAGE_CATALOG.get(key);
+    const stored = await env.APPLICATION_ARTIFACTS.get(key);
     expect(stored).not.toBeNull();
     const document = await stored!.text();
     const template = parseBotTemplateDocumentV1(document);

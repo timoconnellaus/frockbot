@@ -127,7 +127,7 @@ async function plan(): Promise<void> {
       <section v-if="willInstall.length > 0" class="review__section">
         <h4>Will install</h4>
         <ul>
-          <li v-for="entry in willInstall" :key="entry.catalogId">
+          <li v-for="entry in willInstall" :key="entry.packageId">
             {{ entry.displayName }} ({{ entry.version }})
           </li>
         </ul>
@@ -136,18 +136,18 @@ async function plan(): Promise<void> {
       <section v-if="alreadyInstalled.length > 0" class="review__section">
         <h4>Already installed</h4>
         <ul>
-          <li v-for="entry in alreadyInstalled" :key="entry.catalogId">
+          <li v-for="entry in alreadyInstalled" :key="entry.packageId">
             {{ entry.displayName }}
           </li>
         </ul>
       </section>
 
       <section v-if="missing.length > 0" class="review__section">
-        <h4>Missing from your catalog</h4>
+        <h4>Not available here</h4>
         <ul>
-          <li v-for="entry in missing" :key="entry.catalogId">
-            {{ entry.displayName }} — not available in your catalog, so it will
-            be skipped.
+          <li v-for="entry in missing" :key="entry.packageId">
+            {{ entry.displayName }} — not available in this deployment, so it
+            will be skipped.
           </li>
         </ul>
       </section>

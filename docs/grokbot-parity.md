@@ -570,8 +570,8 @@ primary-source evidence, the Package proposed to own it, and status against `doc
 | 38  | Subagents start blank; background by default; check, message, stop, resume by id; the model set varies by turn type                                                                           | `Check`/`Message`/`StopSubagent`, `resume=<id>`; `available_subagent_models` = `sand-automation` only on automation turns                                          | §2.15, §3.12       | `plugin-subagents` `task_check`/`task_message`/`task_stop`/`task_resume`                                                                                                                                                                                                                   | landed                                              |
 | 39  | Only one desktop-GUI subagent at a time, because the screen is shared                                                                                                                         | `computerUse` serialization                                                                                                                                        | §2.15              | Computer host `control` uses the same User-wide `desktop-gui` lease as human takeover, so a human and a `computerUse` subagent contend for the shared screen                                                                                                                               | landed                                              |
 | 40  | Child → parent handoff that ends the child's turn                                                                                                                                             | `WakeParent{message}`; parent = the same Bot's visible conversation                                                                                                | §2.13              | `plugin-shell` + kernel Turn admission                                                                                                                                                                                                                                                     | partial                                             |
-| 41  | **Connectors / MCP** — plugin = marketplace bundle of MCP connectors ± skills, stable numeric id                                                                                              | `plugins/cache/…/.cursor-plugin/plugin.json`                                                                                                                       | §2.10              | `catalog-core` + `plugin-settings` + `plugin-mcp`                                                                                                                                                                                                                                          | partial                                             |
-| 42  | Plugin discovery, fetch, install state and uninstall over a 296-plugin catalog; plugins are user-scoped                                                                                       | `SearchPlugins`/`GetPlugin`/`UninstallPlugin`; `installed=yes (user)`                                                                                              | §2.10              | `catalog-core` + `plugin-settings`                                                                                                                                                                                                                                                         | partial                                             |
+| 41  | **Connectors / MCP** — plugin = marketplace bundle of MCP connectors ± skills, stable numeric id                                                                                              | `plugins/cache/…/.cursor-plugin/plugin.json`                                                                                                                       | §2.10              | `plugin-settings` + `plugin-mcp` (no catalog: the Packages a User can install are the ones compiled in)                                                                                                                                                                                    | regressed                                           |
+| 42  | Plugin discovery, fetch, install state and uninstall over a 296-plugin catalog; plugins are user-scoped                                                                                       | `SearchPlugins`/`GetPlugin`/`UninstallPlugin`; `installed=yes (user)`                                                                                              | §2.10              | `plugin-settings` (no catalog: nothing to search, fetch or discover)                                                                                                                                                                                                                       | regressed                                           |
 | 43  | Multi-account connectors with per-account labels; MCP lifecycle (status, restart, rename, instructions)                                                                                       | Gmail/Calendar/Drive ×5; `GetMcpServerStatus`, `SetMcpInstructions`                                                                                                | §16, §17           | `connection-core` + `plugin-mcp` (servers, tools, status, restart, instructions, rename, `mcp-remote-oauth` grant driver)                                                                                                                                                                  | partial                                             |
 | 44  | Custom (non-marketplace) stdio MCP servers, which cannot ship in a template                                                                                                                   | `user-beeper`, `user-beeper-desktop`                                                                                                                               | §2.10              | `plugin-mcp` (stdio deferred: refused durably as `unsupported-transport`)                                                                                                                                                                                                                  | deferred                                            |
 | 45  | Per-Bot connector credential store                                                                                                                                                            | `connector-secrets/<agent-uuid>/`                                                                                                                                  | §10                | `plugin-credentials`                                                                                                                                                                                                                                                                       | partial                                             |
@@ -584,7 +584,7 @@ primary-source evidence, the Package proposed to own it, and status against `doc
 | 52  | Search across every Bot's transcript and media (the agent gets no tool over it)                                                                                                               | `search-index.db` `messages` / `media`                                                                                                                             | §2.4               | new `plugin-search`                                                                                                                                                                                                                                                                        | partial                                             |
 | 53  | Approval cards for the Bot's own risky actions (Auto-review)                                                                                                                                  | harness "when your own action needs approval"                                                                                                                      | §2.17              | `plugin-shell` (card, record, decision, expiry) + WebUI                                                                                                                                                                                                                                    | partial                                             |
 | 54  | **Learn from demonstration** — a screen recording becomes a user-global skill, then the video is deleted                                                                                      | `learn-from-demonstration`: teach queue → `session.json` → `watchVideo` → `update_state skill write`                                                               | §3.9               | `plugin-skills` + capture UI                                                                                                                                                                                                                                                               | not started                                         |
-| 55  | Guided connector install: catalog → setup fields → confirm widget → host-authored connect card → raw-MCP fallback                                                                             | `add-connector`: `SearchPlugins`/`GetPlugin`/`InstallPlugin{values}`/`AddMcpServer`/`SetMcpInstructions`                                                           | §3.10              | `catalog-core` + `plugin-settings` + `plugin-mcp` (setup fields → install values → host-authored connect card; no confirm widget)                                                                                                                                                          | partial                                             |
+| 55  | Guided connector install: catalog → setup fields → confirm widget → host-authored connect card → raw-MCP fallback                                                                             | `add-connector`: `SearchPlugins`/`GetPlugin`/`InstallPlugin{values}`/`AddMcpServer`/`SetMcpInstructions`                                                           | §3.10              | `plugin-settings` + `plugin-mcp` (no catalog step: the Skill points at the Connectors surface)                                                                                                                                                                                             | regressed                                           |
 | 56  | Per-Bot unread and notification state, so a silent completion still surfaces to the user                                                                                                      | `kv.unreadState` (`lastActivityAt`/`lastViewedAt`/`unreadCount`/`isManuallyUnread`); `notifyOnAgentUpdates`                                                        | §3.2               | `plugin-shell` + `plugin-flock` + WebUI                                                                                                                                                                                                                                                    | landed                                              |
 | 57  | The tool catalog is trimmed per turn type; user-facing tools exist only on chat turns, work tools on both                                                                                     | `buildTurnTools` + `isParentMediatedAutomationSubagent`/`isSubagentRunner`; per-tool `gates.*` feature flags                                                       | §3.11, §4.2        | kernel Turn admission                                                                                                                                                                                                                                                                      | partial                                             |
 | 57a | Progressive tool disclosure: native tools plus discovery/invocation meta-tools and a name-only prompt catalog                                                                                 | `GetDynamicTools`, `CallDynamicTool`, `<dynamic_tool_catalog>`; full schemas returned only by discovery                                                            | §6                 | `@frockbot/plugin-tools`                                                                                                                                                                                                                                                                   | landed                                              |
@@ -699,8 +699,8 @@ the rows whose status the code moved:
   there is no scrub that makes a User's remembered facts safe, so
   `decodeBotTemplateV1` refuses a document carrying `memory` and the export
   path never reads a Memory root. A marketplace `pluginId` becomes
-  `packageId` + `catalogId` + `version` resolved against the importing User's
-  own pinned Catalog generation, and visibility is a User click on a revocable
+  `packageId` + `version` resolved against the importing deployment's own
+  compiled-in Packages, and visibility is a User click on a revocable
   share record rather than a tool argument, because publication beyond the
   authoring User is a User act. Export is `bot_export_template` staging at
   `visibility: "private"` and reporting an `agent-card`; import is a review
@@ -824,15 +824,14 @@ the rows whose status the code moved:
   `export-bot-template`, `import-bot-template` and `learn-from-demonstration`;
   they are read-only in the strongest sense — there is no write path to an
   artifact at all, so `skill_write{scope:"managed"}` is refused with GrokBot's
-  own wording, "managed skills are not editable this way". **Plugin-borne**
-  Skills are an _index_ over the Catalog entries the User has installed
-  (`plugin-skills/src/plugin-index.ts`), read at the generation each install
-  pinned and never copied into any root, so an uninstall removes them on the
-  next Turn with nothing to delete. Both are Package-contributed prompt
-  content, not Workspace files, which is why the constitution's rule about
-  instruction roots is untouched: the catalog is ordered `bot` → `user` →
-  `managed` → `plugin` under `SKILL_CATALOG_CAPS_V1`, every drop recorded as an
-  `over-source-cap` refusal in `skill/injected`. The **user-global** root
+  own wording, "managed skills are not editable this way". They are
+  Package-contributed prompt content, not Workspace files, which is why the
+  constitution's rule about instruction roots is untouched: the catalog is
+  ordered `bot` → `user` → `managed` under `SKILL_CATALOG_CAPS_V1`, every drop
+  recorded as an `over-source-cap` refusal in `skill/injected`.
+  **Plugin-borne** Skills regressed with the Package Catalog on 2026-09-07:
+  there is no Catalog to index, so the `plugin` rank is gone entirely. The
+  **user-global** root
   landed with ADR 0016 and the matching amendment to the constitution's
   instruction-root sentence: `{ kind: "user-instructions", userId }` is a
   durable root at `users/<id>/skills/`, mounted on the Computer at GrokBot's
@@ -854,8 +853,8 @@ the rows whose status the code moved:
   rather than pasting text. An invoked ref resolves against the Turn's catalog
   at its exact generation, is recorded as `skill/invoked`, and its body is
   expanded into step 1's `model/request`; an unresolvable ref blocks the Turn
-  with a reason. `bot`, `user`, `managed` and `plugin` refs all resolve, the
-  last of them since row 21's User-global root landed.
+  with a reason. `bot`, `user` and `managed` refs all resolve; there is no
+  `plugin` rank any more.
 - **23** — one Computer per User with per-Bot durable roots is landed and
   checked (`computer-core/src/index.test.ts`,
   `plugin-fly-sprite/src/computer.test.ts`); the shared scratch is not.
@@ -988,29 +987,19 @@ the rows whose status the code moved:
 - **36** — **removed — owner decision 2026-09-01, not needed yet.** External channel connectors and the Telegram Package were removed from FrockBot.
 - **57f** — **partially reinstated 2026-09-04 for issue #151.** Direct same-User `bot_message` calls now run a visible `agent` Turn and return the target Bot's first `send_to_user` text to the asking Turn. The teammate directory is a prompt section. Channels, group directories, emoji tapbacks, image attachments, and priority delivery remain removed or deferred.
 
-- **41** — the Catalog half is landed and the MCP half is not. A remote,
-  versioned Catalog exists (`packages/catalog-core`, the `PACKAGE_CATALOG`
-  bucket, the gateway's `/catalog/v1/*` routes), and a Catalog entry already
-  carries the fields a connector bundle needs — `servers[]`, `setupFields`,
-  `skills[]` — but nothing yet reads them. `plugin-mcp` exists and a server can
-  be added by URL, but no Catalog entry installs one: the guided install that
-  turns `servers[]` and `setupFields` into a Connection is the missing half.
-  `catalogId` is the stable opaque marketplace identity GrokBot's
-  numeric `plugin_id` plays, split from the composition identity `packageId`.
-  Bundled skills are carried in the entry and not indexed (plan decision 4).
-- **42** — discovery, fetch, install state and uninstall are landed over a
-  first-party seed catalog whose entries are the compiled-in Packages
-  (`scripts/publish-catalog.ts`), and installs are User-scoped as GrokBot's
-  are. The User Durable Object now records every compiled-in Package that
-  declares a Connection Type or Capability as an installed first-party row on
-  its first configuration read, behind a durable one-time marker, so a later
-  uninstall sticks. The Plugins surface projects those rows as Added or their
-  real Connection state; the remote Package Catalog has its own linked surface.
-  What is missing is scale and provenance breadth: 22 first-party entries
-  against GrokBot's 296, no third-party or Bot-published entry in the index yet
-  (ADR 0008 publication writes artifacts, not Catalog rows), and no agent-side
-  `SearchPlugins`/`GetPlugin` tools — the Catalog is reachable from the hosted
-  UI only.
+- **41** — **regressed 2026-09-07: the remote Package Catalog was deleted.**
+  There is no marketplace bundle and no `catalogId`; a Package is one of the
+  deployment's own compiled-in Packages, named by `packageId`. `plugin-mcp`
+  exists and a server can still be added by URL, so the MCP half is where it
+  was; the bundle half no longer exists to land.
+- **42** — **regressed 2026-09-07: the remote Package Catalog was deleted.**
+  There is nothing to search, fetch or discover — install state and uninstall
+  remain, over the compiled-in Packages, and are still User-scoped as
+  GrokBot's are. The User Durable Object records every compiled-in Package
+  that declares a Connection Type or Capability as an installed first-party
+  row on its first configuration read, behind a durable one-time marker, so a
+  later uninstall sticks, and the Plugins surface projects those rows as Added
+  or their real Connection state.
 - **43** — the MCP half of the lifecycle is landed and the multi-account half
   is not. A server is a Connection with a durable `McpServerRecordV1` beside it
   (`plugin-mcp/src/records.ts`), and GrokBot's whole lifecycle set has a

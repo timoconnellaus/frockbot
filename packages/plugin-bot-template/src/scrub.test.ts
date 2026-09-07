@@ -103,24 +103,6 @@ describe("skills", () => {
     expect(omitted(summary, "managed-skill")).toBe(1);
   });
 
-  it("omits a plugin-borne Skill", () => {
-    const { template, summary } = buildBotTemplateV1(
-      source({
-        skills: [
-          {
-            source: "plugin",
-            slug: "plugin-one",
-            name: "Plugin",
-            body: "body",
-            writer: { kind: "first-party" },
-          },
-        ],
-      }),
-    );
-    expect(template.skills).toEqual([]);
-    expect(omitted(summary, "plugin-skill")).toBe(1);
-  });
-
   it("omits an own-root Skill with no recorded writer", () => {
     const { template, summary } = buildBotTemplateV1(
       source({
@@ -271,7 +253,7 @@ describe("routines", () => {
 });
 
 describe("packages", () => {
-  it("carries an installed Catalog Package by its Catalog identity", () => {
+  it("carries an installed Package by its Package id", () => {
     const { template } = buildBotTemplateV1(
       source({
         packages: [
@@ -279,9 +261,6 @@ describe("packages", () => {
             packageId: "mcp",
             version: "0.0.2",
             state: "installed",
-            catalogId: "example-connector",
-            catalogGeneration: "gen-7",
-            provenance: "catalog",
             displayName: "Example connector",
           },
         ],
@@ -290,32 +269,13 @@ describe("packages", () => {
     expect(template.packages).toEqual([
       {
         packageId: "mcp",
-        catalogId: "example-connector",
         version: "0.0.2",
         displayName: "Example connector",
       },
     ]);
   });
 
-  it("omits a first-party Package and counts it as built in", () => {
-    const { template, summary } = buildBotTemplateV1(
-      source({
-        packages: [
-          {
-            packageId: "clock",
-            version: "0.0.1",
-            state: "installed",
-            provenance: "first-party",
-          },
-          { packageId: "echo", version: "0.0.1", state: "installed" },
-        ],
-      }),
-    );
-    expect(template.packages).toEqual([]);
-    expect(omitted(summary, "first-party-package")).toBe(2);
-  });
-
-  it("omits setup values entirely and records that it did", () => {
+  it("omits setting values entirely and records that it did", () => {
     const { template, summary } = buildBotTemplateV1(
       source({
         packages: [
@@ -323,8 +283,6 @@ describe("packages", () => {
             packageId: "mcp",
             version: "0.0.1",
             state: "installed",
-            catalogId: "example-connector",
-            provenance: "catalog",
             values: { apiKey: "sk-live-do-not-share" },
           },
         ],
@@ -333,7 +291,6 @@ describe("packages", () => {
     expect(JSON.stringify(template)).not.toContain("sk-live");
     expect(Object.keys(template.packages[0]!)).toEqual([
       "packageId",
-      "catalogId",
       "version",
       "displayName",
     ]);
@@ -343,15 +300,7 @@ describe("packages", () => {
   it("does not carry a Package that is disabled or failed", () => {
     const { template } = buildBotTemplateV1(
       source({
-        packages: [
-          {
-            packageId: "mcp",
-            version: "0.0.1",
-            state: "disabled",
-            catalogId: "example-connector",
-            provenance: "catalog",
-          },
-        ],
+        packages: [{ packageId: "mcp", version: "0.0.1", state: "disabled" }],
       }),
     );
     expect(template.packages).toEqual([]);

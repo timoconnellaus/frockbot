@@ -177,12 +177,7 @@ import {
 } from "@frockbot/plugin-bot-template/shared";
 import { createBotMemoryHost } from "./backend-memory.js";
 import { createBotImageHost, type NativeAiBindingV1 } from "./backend-image.js";
-import {
-  createBotPluginSkillsSource,
-  createBotSkillCatalogReader,
-  createBotSkillsHost,
-  createBotSkillsReads,
-} from "./backend-skills.js";
+import { createBotSkillsHost, createBotSkillsReads } from "./backend-skills.js";
 import {
   loadFullSkillCatalogV1,
   loadSkillCatalogV1,
@@ -533,13 +528,6 @@ export interface BotStateEnv {
    * loader.
    */
   APPLET_STATES?: AppletInstanceNamespaceV1;
-  /**
-   * The remote Package Catalog bucket. Read here only to index the Skills that
-   * arrived with the User's installed entries, at the generation each install
-   * pinned. Optional so a deployment without a Catalog still compiles: a Turn
-   * then carries no plugin-borne Skills, which is the true answer.
-   */
-  PACKAGE_CATALOG?: R2Bucket;
   /**
    * The Package bundler service (plan Step 3/D4). Optional so a host without
    * Bot authoring still compiles; `package_author` then refuses visibly.
@@ -1209,19 +1197,10 @@ export class ShellBotBackendContribution {
     await this.validateIdentity(identity);
     const reads = createBotSkillsReads(this.env);
     if (!reads) return { schemaVersion: 1, skills: [] };
-    const user = await this.userConfiguration(identity).readConfiguration({
-      schemaVersion: 1,
+    const catalog = await loadFullSkillCatalogV1(reads, {
       userId: identity.userId,
+      botId: identity.botId,
     });
-    const pluginSkills = createBotPluginSkillsSource(
-      user.packages,
-      createBotSkillCatalogReader(this.env),
-    );
-    const catalog = await loadFullSkillCatalogV1(
-      reads,
-      { userId: identity.userId, botId: identity.botId },
-      { ...(pluginSkills ? { pluginSkills } : {}) },
-    );
     const entries: ClientSkillCatalogEntryV1[] = [];
     for (const skill of catalog.skills) {
       const ref = skillRefForLoadedSkillV1(skill);
@@ -4327,19 +4306,7 @@ export class ShellBotBackendContribution {
         readSecret,
         ...(turn
           ? {
-              skills: createBotSkillsHost(
-                identity,
-                turn,
-                this.env,
-                // The plugin-borne index is built from the same User settings
-                // this Turn already read, so an uninstall is visible on the
-                // next Turn without a second source of truth about what is
-                // installed.
-                createBotPluginSkillsSource(
-                  user.packages,
-                  createBotSkillCatalogReader(this.env),
-                ),
-              ),
+              skills: createBotSkillsHost(identity, turn, this.env),
             }
           : {}),
         ...(turn
