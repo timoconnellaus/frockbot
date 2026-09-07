@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:app_links/app_links.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart' hide ConnectionState;
 import 'package:flutter/services.dart';
 
@@ -40,7 +41,7 @@ class _FrockBotAppState extends State<FrockBotApp> with WidgetsBindingObserver {
   final scaffoldKey = GlobalKey<ScaffoldState>();
   late final LocalStore store = widget.store ?? nativeStore();
   late final NativeApi api = NativeApi(store);
-  late final NativeSignIn auth = NativeSignIn(api, store);
+  late final SignIn auth = signInV1(api, store);
   late final BotSessions sessions = BotSessions(api: api, store: store);
   StreamSubscription<Uri>? links;
   ActivityController? activity;
@@ -475,16 +476,19 @@ class _FrockBotAppState extends State<FrockBotApp> with WidgetsBindingObserver {
                     ),
                   ],
                 ),
-              IconButton(
-                tooltip: 'Your Applets',
-                icon: const Icon(Icons.widgets_outlined),
-                onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) =>
-                        AppletDirectoryPage(api: api, userId: userId!),
+              // The Applet fallback is a WebView, which the browser has no
+              // implementation of; the web client reaches an Applet directly.
+              if (!kIsWeb)
+                IconButton(
+                  tooltip: 'Your Applets',
+                  icon: const Icon(Icons.widgets_outlined),
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) =>
+                          AppletDirectoryPage(api: api, userId: userId!),
+                    ),
                   ),
                 ),
-              ),
               if (const bool.fromEnvironment('NATIVE_ACCEPTANCE'))
                 IconButton(
                   tooltip: 'Form preview',

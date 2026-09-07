@@ -94,7 +94,7 @@ class SignInPage extends StatelessWidget {
                                             ? 'Try sign-in again'
                                             : awaitingBrowser
                                             ? 'Open sign-in again'
-                                            : NativeSignIn.development
+                                            : developmentAuth
                                             ? 'Continue as local developer'
                                             : 'Continue with Google',
                                       ),
