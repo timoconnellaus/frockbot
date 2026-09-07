@@ -14,11 +14,17 @@ class ViewScope extends InheritedWidget {
   final ViewController controller;
   final Map<String, Map<String, Object?>> actions;
   final Map<String, ViewFrameBuilder> frames;
+
+  /// The host's own editors, keyed by the `choiceSource` a field names. A
+  /// field whose choices are a paged catalog rather than a fixed list is drawn
+  /// by the surface that owns the catalog, never by the plugin.
+  final Map<String, ViewFieldBuilder> fields;
   const ViewScope({
     super.key,
     required this.controller,
     required this.actions,
     required this.frames,
+    this.fields = const {},
     required super.child,
   });
 
@@ -29,7 +35,8 @@ class ViewScope extends InheritedWidget {
   bool updateShouldNotify(ViewScope old) =>
       controller != old.controller ||
       actions != old.actions ||
-      frames != old.frames;
+      frames != old.frames ||
+      fields != old.fields;
 }
 
 /// A plugin-described view, rendered by the host.
@@ -41,10 +48,12 @@ class ViewDocumentView extends StatefulWidget {
   final wire.ViewDocument document;
   final ViewController controller;
   final Map<String, ViewFrameBuilder> frames;
+  final Map<String, ViewFieldBuilder> fields;
   ViewDocumentView({
     super.key,
     required this.document,
     required this.controller,
+    this.fields = const {},
     Map<String, ViewFrameBuilder>? frames,
   }) : frames = frames ?? hostViewFramesV1;
 
@@ -109,6 +118,7 @@ class _ViewDocumentViewState extends State<ViewDocumentView> {
         controller: widget.controller,
         actions: actions,
         frames: widget.frames,
+        fields: widget.fields,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           mainAxisSize: MainAxisSize.min,

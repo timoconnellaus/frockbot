@@ -293,7 +293,12 @@ Screens (no router; `MaterialApp(home:)` plus `Navigator.push`):
   tool; it offers one control that opens this.
 - `ActivityPage` — `lib/activity/page.dart:9`
 - `BotRecoveryPage` — `lib/recovery/page.dart:11`, detail with three tabs at `:202`
-- `SettingsPage` — `lib/settings/page.dart:14`, `ModelPicker` at `lib/settings/model_picker.dart:10`
+- `SettingsPage` — `lib/settings/page.dart`: a host over `ViewDocumentView`,
+  not a renderer of its own. `ModelPicker` at `lib/settings/model_picker.dart`
+  is the host editor for the one field whose choices are a paged catalog.
+- `BotSettingsView` — `lib/settings/bot_settings.dart`: one Bot's identity,
+  notifications and model, in the `right-panel` slot at wide widths and a
+  page on the phone
 - `ConnectionsPage` — `lib/connections/page.dart:12`
 - `AppletDirectoryPage` → `AppletPage` — `lib/extensions/fallback.dart:77`, `:157`
 - `ViewSamplePage` — `lib/view/sample_page.dart:117`, reachable only from a `--dart-define=FROCKBOT_DEV_AUTH=true` build
@@ -313,11 +318,31 @@ Auth is PKCE in the system browser (`lib/client/auth.dart:17`), returning over a
 
 WebView is used in one place, `AppletPage` (`lib/extensions/fallback.dart:157-465`), loading the anonymous bootstrap at `ui.bot.frockbot.com/native-fallback` (server side `apps/cloudflare/src/native-fallback.ts:34`). It never receives the native session.
 
-**Capability gap.** Present in web, absent in native: Bot creation, starting a conversation, in-app connector authorize and revoke, model configuration, admin, flock and avatar editing, routines, Bot templates, registered machines, the Computer overlay, and package iframe entries. Native settings are a generic server-described form renderer rather than plugin surfaces. Native search reads the Bot list this client already holds rather than the backend search route.
+**Capability gap.** Present in web, absent in native: Bot creation, starting a conversation, in-app connector authorize and revoke, admin, sheep recipe editing, routines, Bot templates, registered machines, the Computer overlay, and package iframe entries. Native search reads the Bot list this client already holds rather than the backend search route.
 
 Present in native, absent in web: a durable offline store of directory, transcripts and drafts; inbox as a first-class screen; Bot archive, restore and delete UI with composition-generation and audit detail; deep-link-to-Bot; PKCE system-browser sign-in; tool receipts on a Work view rather than inside the thread.
 
 Both speak the same REST API and the same state-channel WebSocket. Native validates every payload against the shared schema; the web client uses hand-written decoders.
+
+**Settings, through the renderer.** The server describes settings as a
+`SettingsFrame` and projects that frame as a `ViewDocument`
+(`app/settings/settings-document.ts`), which the two settings routes return
+when the request asks for `?as=document`. The frame is unchanged and still the
+authority; the projection is a read of it. Two conventions carry the frame's
+extra meaning through a vocabulary that has no room for it: a projected field
+id is `f<section>.<id>`, or `j<section>.<id>` when the value travels
+JSON-encoded, and an action's declared `input` names the section it saves and,
+for a section action, its kind. `apps/native/lib/settings/document.dart` reads
+both back, turning the action the renderer assembled into the
+`SettingsChangeCommand` the route already takes — which is how
+`ViewController.dispatch` reaches a real route. The projection stops at the
+renderer's budgets rather than emitting a document the host would refuse: a
+section past the 32-action cap renders read-only and says so.
+
+A field whose `choiceSource` names a paged catalog is drawn by the host, not by
+the document: `ViewScope.fields` maps a `choiceSource` to a host editor the way
+`ViewScope.frames` maps an `embed` name to a host region, and the settings
+surface is what supplies the model picker.
 
 ### ViewNode — how a plugin renders
 

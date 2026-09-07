@@ -20,6 +20,7 @@ import '../client/transport.dart';
 import '../connections/page.dart';
 import '../extensions/fallback.dart';
 import '../recovery/page.dart';
+import '../settings/bot_settings.dart';
 import '../settings/page.dart';
 import '../theme/states.dart';
 import '../view/sample_page.dart';
@@ -69,6 +70,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   Set<String> archived = {};
   wire.BotRegistration? selected;
   String? workingRunId;
+  BotSettingsController? botSettings;
   String? error;
   bool loaded = false;
   bool navOpen = false;
@@ -179,9 +181,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                 .firstOrNull;
       error = null;
     });
-    activity.botNames = {
-      for (final bot in bots) bot.botId.value: _name(bot),
-    };
+    activity.botNames = {for (final bot in bots) bot.botId.value: _name(bot)};
     unawaited(_restoreSelection());
   }
 
@@ -190,7 +190,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     final saved = await widget.store.read('selection.${widget.userId}');
     if (!mounted || saved == null) return;
     final bot = bots.where((bot) => bot.botId.value == saved).firstOrNull;
-    if (bot != null) setState(() => selected = bot);
+    if (bot == null) return;
+    setState(() => selected = bot);
+    _adoptBotSettings(bot.botId.value);
   }
 
   /// A deployment with no identity directory leaves the sidebar one plain
@@ -206,9 +208,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
               entry['botId'] as String: SidebarProfile.decode(entry)!,
         };
       });
-      activity.botNames = {
-        for (final bot in bots) bot.botId.value: _name(bot),
-      };
+      activity.botNames = {for (final bot in bots) bot.botId.value: _name(bot)};
     } catch (_) {
       // The registration seed is still a name; nothing is lost but the label.
     }
@@ -248,6 +248,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       openRun = null;
       panelOpen = false;
     });
+    _adoptBotSettings(botId);
     unawaited(
       widget.store
           .write('selection.${widget.userId}', botId)
@@ -255,11 +256,28 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     );
   }
 
+  /// The Bot's own settings are a feature in the `right-panel` region, which is
+  /// how the Vue shell mounts them too: the shell draws the region and never
+  /// imports the panel's contents.
+  void _adoptBotSettings(String botId) {
+    botSettings?.dispose();
+    final controller = BotSettingsController(widget.api, botId);
+    botSettings = controller;
+    slots.register(
+      ShellSlot.rightPanel,
+      'bot-settings',
+      (context) => BotSettingsView(
+        controller: controller,
+        onClose: () => setState(() => panelOpen = false),
+        onSaved: load,
+      ),
+    );
+    unawaited(controller.load());
+  }
+
   void _push(Widget page) {
     setState(() => navOpen = false);
-    Navigator.of(
-      context,
-    ).push(MaterialPageRoute<void>(builder: (_) => page));
+    Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => page));
   }
 
   void _openRun(TranscriptLine line) {
@@ -286,7 +304,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       );
     }
     return slots.filled(ShellSlot.rightPanel)
-        ? const Padding(
+        ? const SingleChildScrollView(
             padding: EdgeInsets.all(16),
             child: SlotRegion(ShellSlot.rightPanel),
           )
@@ -313,7 +331,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
               : null,
           title: Text(bot == null ? 'FrockBot' : _name(bot)),
           actions: [
-            const SlotRegion(ShellSlot.headerActions, direction: Axis.horizontal),
+            const SlotRegion(
+              ShellSlot.headerActions,
+              direction: Axis.horizontal,
+            ),
             if (bot != null)
               PopupMenuButton<String>(
                 tooltip: 'Conversation actions',
@@ -347,11 +368,17 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
               identified(
                 ShellIds.botPanelToggle,
                 IconButton(
-                  tooltip: 'Work',
+                  tooltip: openRun == null ? 'Bot settings' : 'Work',
                   onPressed: _rightPanel() == null
                       ? null
+                      : tier == ShellTier.single && openRun == null
+                      ? _pushBotSettings
                       : () => setState(() => panelOpen = !panelOpen),
-                  icon: const Icon(Icons.view_sidebar_outlined),
+                  icon: Icon(
+                    openRun == null
+                        ? Icons.settings_outlined
+                        : Icons.view_sidebar_outlined,
+                  ),
                 ),
               ),
           ],
@@ -444,70 +471,154 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     if (mounted) _select(botId);
   }
 
+  /// On the phone the panel is a page: a drawer over a full-width conversation
+  /// is the same thing with less room and a scrim in the way.
+  void _pushBotSettings() {
+    final controller = botSettings;
+    if (controller == null) return;
+    _push(
+      Scaffold(
+        appBar: AppBar(title: const Text('Bot settings')),
+        body: SafeArea(
+          top: false,
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+            child: BotSettingsView(controller: controller, onSaved: load),
+          ),
+        ),
+      ),
+    );
+  }
+
   void _openSettings() => _push(
     SettingsPage(api: widget.api, store: widget.store, userId: widget.userId),
   );
 
+  /// The profile sheet: who is signed in, and the account surfaces reachable
+  /// from where the User already is. The Vue trigger's menu, on the phone's
+  /// terms — the account's own settings are one entry, not five.
   void _openProfile() {
     setState(() => navOpen = false);
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
-      builder: (sheet) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.settings_outlined),
-              title: const Text('Settings'),
-              onTap: () {
-                Navigator.of(sheet).pop();
-                _openSettings();
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.link_outlined),
-              title: const Text('Connections'),
-              onTap: () {
-                Navigator.of(sheet).pop();
-                _push(
-                  ConnectionsPage(api: widget.api, userId: widget.userId),
-                );
-              },
-            ),
-            // A development build can look at the ViewNode renderer before a
-            // plugin produces a document; the shipped app has no such door.
-            if (developmentAuth)
+      builder: (sheet) => identified(
+        SettingsIds.profileMenu,
+        SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              identified(
+                SettingsIds.profileName,
+                ListTile(
+                  leading: const CircleAvatar(
+                    child: Icon(Icons.person_outline),
+                  ),
+                  title: FutureBuilder<String>(
+                    future: _displayName(),
+                    builder: (context, answer) =>
+                        Text(answer.data ?? widget.userId),
+                  ),
+                  subtitle: const Text('Signed in'),
+                ),
+              ),
+              const Divider(height: 1),
+              identified(
+                SettingsIds.profileSettings,
+                ListTile(
+                  leading: const Icon(Icons.settings_outlined),
+                  title: const Text('Settings'),
+                  onTap: () {
+                    Navigator.of(sheet).pop();
+                    _openSettings();
+                  },
+                ),
+              ),
+              identified(
+                SettingsIds.profileModels,
+                ListTile(
+                  leading: const Icon(Icons.auto_awesome_rounded),
+                  title: const Text('Models'),
+                  onTap: () {
+                    Navigator.of(sheet).pop();
+                    _push(
+                      SettingsPage(
+                        api: widget.api,
+                        store: widget.store,
+                        userId: widget.userId,
+                        home: 'models',
+                      ),
+                    );
+                  },
+                ),
+              ),
+              identified(
+                SettingsIds.profileConnections,
+                ListTile(
+                  leading: const Icon(Icons.link_outlined),
+                  title: const Text('Connectors'),
+                  onTap: () {
+                    Navigator.of(sheet).pop();
+                    _push(
+                      ConnectionsPage(api: widget.api, userId: widget.userId),
+                    );
+                  },
+                ),
+              ),
+              // A development build can look at the ViewNode renderer before a
+              // plugin produces a document; the shipped app has no such door.
+              if (developmentAuth)
+                ListTile(
+                  leading: const Icon(Icons.dashboard_customize_outlined),
+                  title: const Text('View sample'),
+                  onTap: () {
+                    Navigator.of(sheet).pop();
+                    _push(
+                      ViewSamplePage(
+                        store: widget.store,
+                        userId: widget.userId,
+                      ),
+                    );
+                  },
+                ),
               ListTile(
-                leading: const Icon(Icons.dashboard_customize_outlined),
-                title: const Text('View sample'),
+                leading: const Icon(Icons.refresh),
+                title: const Text('Refresh'),
                 onTap: () {
                   Navigator.of(sheet).pop();
-                  _push(
-                    ViewSamplePage(store: widget.store, userId: widget.userId),
-                  );
+                  unawaited(load());
                 },
               ),
-            ListTile(
-              leading: const Icon(Icons.refresh),
-              title: const Text('Refresh'),
-              onTap: () {
-                Navigator.of(sheet).pop();
-                unawaited(load());
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.logout),
-              title: const Text('Sign out'),
-              onTap: () {
-                Navigator.of(sheet).pop();
-                unawaited(widget.onSignOut());
-              },
-            ),
-          ],
+              identified(
+                SettingsIds.profileSignOut,
+                ListTile(
+                  leading: const Icon(Icons.logout),
+                  title: const Text('Sign out'),
+                  onTap: () {
+                    Navigator.of(sheet).pop();
+                    unawaited(widget.onSignOut());
+                  },
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
+  }
+
+  /// The saved profile name, falling back to the account this session holds.
+  /// A name is a courtesy: a read that fails leaves the sheet usable.
+  Future<String> _displayName() async {
+    try {
+      final settings =
+          (await widget.api.request('/api/settings?view=2'))! as Map;
+      final name = (settings['profile'] as Map?)?['name'];
+      if (name is String && name.trim().isNotEmpty) return name.trim();
+    } catch (_) {
+      // Nothing is lost but the name.
+    }
+    return widget.userId;
   }
 
   @override
@@ -517,6 +628,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     _activityTimer?.cancel();
     activity.removeListener(_repaint);
     activity.dispose();
+    botSettings?.dispose();
     slots.dispose();
     super.dispose();
   }

@@ -134,6 +134,7 @@
     "./settings/bot": "./settings/bot.ts",
     "./settings/client": "./settings/client/index.ts",
     "./settings/definition": "./settings/definition.ts",
+    "./settings/document": "./settings/settings-document.ts",
     "./settings/user": "./settings/user.ts",
     "./shell": "./shell/index.ts",
     "./shell/agent": "./shell/agent.ts",

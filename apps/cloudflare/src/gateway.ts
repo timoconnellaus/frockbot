@@ -1,4 +1,5 @@
 import { decodeProtocol } from "@frockbot/core/protocol-schemas";
+import { settingsDocumentV1 } from "@frockbot/app/settings/document";
 import { nativeFallbackResponse } from "./native-fallback.js";
 import { accountIsAdmitted } from "./account-admission.js";
 import { isNativeAuthPath, readNativeJsonBody } from "./native-auth.js";
@@ -830,21 +831,28 @@ export function createGateway(dependencies: GatewayDependencies) {
               : development.userId
                 ? { name: "Local developer" }
                 : await dependencies.auth.profile?.(userId).catch(() => null);
+          const frame = decodeProtocol(
+            "SettingsFrame",
+            await owner.readSettingsFrame({
+              schemaVersion: 1,
+              userId,
+              home,
+              ...(identity?.name?.trim()
+                ? { identityName: identity.name.trim().slice(0, 100) }
+                : {}),
+              ...(identity?.email?.trim()
+                ? { identityEmail: identity.email.trim().slice(0, 320) }
+                : {}),
+            }),
+          );
+          // The frame is what this route produces; `as=document` asks for the
+          // same settings in the vocabulary the host renders every plugin
+          // view in. Nothing else about the route changes, so the client that
+          // wants a frame keeps getting one.
           return Response.json(
-            decodeProtocol(
-              "SettingsFrame",
-              await owner.readSettingsFrame({
-                schemaVersion: 1,
-                userId,
-                home,
-                ...(identity?.name?.trim()
-                  ? { identityName: identity.name.trim().slice(0, 100) }
-                  : {}),
-                ...(identity?.email?.trim()
-                  ? { identityEmail: identity.email.trim().slice(0, 320) }
-                  : {}),
-              }),
-            ),
+            url.searchParams.get("as") === "document"
+              ? settingsDocumentV1(frame)
+              : frame,
             { headers: { "cache-control": "no-store" } },
           );
         }

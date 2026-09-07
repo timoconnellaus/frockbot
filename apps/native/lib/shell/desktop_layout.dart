@@ -56,8 +56,8 @@ ShellTier shellTierForWidth(double width) => width <= shellSinglePaneWidth
 ///
 /// [navOpen] and [panelOpen] are the drawers' state and belong to the caller,
 /// which is what lets a feature open the right panel from a message. At a tier
-/// where a region is a column, its open flag only decides whether the column
-/// is drawn at all.
+/// where a region is a column, the flag is ignored: the column is drawn
+/// whenever a feature has filled it.
 class ShellLayout extends StatelessWidget {
   final Widget sidebar;
   final Widget conversation;
@@ -83,7 +83,10 @@ class ShellLayout extends StatelessWidget {
       final tier = shellTierForWidth(constraints.maxWidth);
       final panel = rightPanel;
       final inlineSidebar = tier != ShellTier.single;
-      final inlinePanel = tier == ShellTier.triple && panel != null && panelOpen;
+      // At the widest tier the panel is a column, and a column a feature has
+      // filled is simply there — the way the Vue shell's Bot panel is. The
+      // open flag is a drawer's, and only the narrower tiers have one.
+      final inlinePanel = tier == ShellTier.triple && panel != null;
       // A drawer is only ever asked to open at a tier where it is a drawer.
       final drawnNav = navOpen && !inlineSidebar;
       final drawnPanel = panelOpen && panel != null && !inlinePanel;
@@ -101,9 +104,7 @@ class ShellLayout extends StatelessWidget {
                   border: Border(right: BorderSide(color: divider)),
                   child: identified(ShellIds.sidebar, sidebar),
                 ),
-              Expanded(
-                child: identified(ShellIds.conversation, conversation),
-              ),
+              Expanded(child: identified(ShellIds.conversation, conversation)),
               if (inlinePanel)
                 _Column(
                   width: shellRightPanelWidth,
@@ -187,7 +188,10 @@ class _Drawer extends StatelessWidget {
             child: Material(
               color: Theme.of(context).colorScheme.surface,
               elevation: open ? 8 : 0,
-              child: SizedBox(width: width, child: SafeArea(child: child)),
+              child: SizedBox(
+                width: width,
+                child: SafeArea(child: child),
+              ),
             ),
           ),
         ),

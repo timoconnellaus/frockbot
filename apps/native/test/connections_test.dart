@@ -4,7 +4,7 @@ import 'package:frockbot_native/connections/page.dart';
 import 'package:frockbot_native/client/transport.dart';
 import 'package:frockbot_native/theme/frock_theme.dart';
 
-import 'settings_test.dart' show SettingsApi, profile;
+import 'settings_test.dart' show SettingsApi, document;
 
 import 'package:frockbot_native/settings/page.dart';
 
@@ -15,8 +15,8 @@ void main() {
     final store = MemoryStore();
     final api = SettingsApi(
       store,
-      (path, _) async => path.endsWith('/application')
-          ? profile()
+      (path, _) async => path.startsWith('/api/settings/application')
+          ? document()
           : {
               'schemaVersion': 1,
               'ownerId': 'tim',

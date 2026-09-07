@@ -404,6 +404,67 @@ void main() {
     );
   });
 
+  test('a field that was never answered does not travel as a null', () {
+    const schema = {
+      'type': 'object',
+      'properties': {
+        'region': {'type': 'string', 'maxLength': 20},
+        'quota': {'type': 'number', 'minimum': 0, 'maximum': 10},
+      },
+      'required': <String>[],
+      'additionalProperties': false,
+    };
+    expect(
+      viewActionInputV1(const {}, schema, const {
+        'region': 'syd',
+        'quota': null,
+      }),
+      {'region': 'syd'},
+    );
+  });
+
+  testWidgets('a host field builder owns the field its choiceSource names', (
+    tester,
+  ) async {
+    final harness = Harness();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: FrockTheme.theme(Brightness.dark),
+        home: Scaffold(
+          body: ViewDocumentView(
+            document: wire.ViewDocument.fromJson(
+              document({
+                'type': 'field',
+                'field': {
+                  'id': 'model',
+                  'label': 'Model',
+                  'kind': 'select',
+                  'value': 'null',
+                  'editable': true,
+                  'choiceSource': 'account-models',
+                },
+              }),
+            ),
+            controller: harness.controller,
+            fields: {
+              'account-models': (context, field, id, value, onChanged) =>
+                  TextButton(
+                    onPressed: onChanged == null
+                        ? null
+                        : () => onChanged('"picked"'),
+                    child: Text('host:$id:$value'),
+                  ),
+            },
+          ),
+        ),
+      ),
+    );
+    expect(find.text('host:model:null'), findsOneWidget);
+    await tester.tap(find.byType(TextButton));
+    await tester.pumpAndSettle();
+    expect(harness.controller.values['model'], '"picked"');
+  });
+
   testWidgets('the sample document renders every node type', (tester) async {
     tester.view.physicalSize = const Size(1000, 2400);
     tester.view.devicePixelRatio = 1;

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../protocol/client_wire.generated.dart' as wire;
+
 /// The host regions a plugin may name. The plugin names a region; the host
 /// decides what goes in it, which is what keeps `embed` from becoming an
 /// escape hatch back into plugin-drawn chrome.
@@ -7,6 +9,19 @@ const appletViewerFrameV1 = 'applet-viewer';
 const computerViewerFrameV1 = 'computer-viewer';
 
 typedef ViewFrameBuilder = Widget Function(BuildContext context, String label);
+
+/// A host-owned editor for one `field` node: the field as the document
+/// described it, the value it holds now, and the sink the person's answer goes
+/// to. The host supplies these; a plugin only names one by `choiceSource`.
+typedef ViewFieldBuilder = Widget Function(
+  BuildContext context,
+  wire.SettingField field,
+  String id,
+  Object? value,
+
+  /// Null when the field is not editable, or while a command is in flight.
+  void Function(Object? value)? onChanged,
+);
 
 /// Both names exist now; their widgets arrive with the surfaces that own them.
 /// Until then they draw the reserved region, and a name the host does not know
