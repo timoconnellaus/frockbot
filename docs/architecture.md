@@ -241,7 +241,7 @@ The shipping client is Vue 3. Comments in `applications/foundation/src/client-co
 Plugin UI mounts two ways.
 
 1. **In-bundle Vue components, through slots and the surface registry.** `ClientApplication` (`packages/client-core/src/index.ts:585`) requires exactly one `root` slot and registers a global `<k-slot name="...">` outlet (`:624-643`). `packages/plugin-auth/src/client/index.ts:13` fills `root` with `AuthGate.vue`, which renders `<k-slot name="authenticated-root">` (`AuthGate.vue:157`); `packages/plugin-shell/src/client/index.ts:3374-3378` fills that with `FrockBotApp.vue`. The contribution table is `applications/foundation/src/client-contributions.ts:36-63` — 17 entries, mounted in order.
-2. **Sandboxed iframes, for Bot-authored and user-installed package UI.** `packages/plugin-shell/src/client/index.ts` reads iframe entries from the Bot's first-party page registry (`packages/plugin-applets/src/pages.ts`) and registers a sidebar trigger plus a surface per entry. Frames load from `ui.bot.frockbot.com/packages/<sha256>.html` (`apps/cloudflare/src/gateway.ts:1275`) and communicate through a versioned postMessage bridge (`packages/plugin-shell/src/client/PackageIframeHost.vue`). Package-supplied code does not execute in the app origin.
+2. **Sandboxed iframes, for Bot-authored and user-installed package UI.** `packages/plugin-shell/src/client/index.ts` reads iframe entries from the Bot's first-party page registry (`applets/pages.ts`) and registers a sidebar trigger plus a surface per entry. Frames load from `ui.bot.frockbot.com/packages/<sha256>.html` (`apps/cloudflare/src/gateway.ts:1275`) and communicate through a versioned postMessage bridge (`packages/plugin-shell/src/client/PackageIframeHost.vue`). Package-supplied code does not execute in the app origin.
 
 The chat view lives in `packages/plugin-shell/src/client/FrockBotApp.vue` (2108 lines). The transcript is a `v-for` at `:1520`; assistant text renders through `UiMarkdown` at `:1551`. Turn merge logic is `replaceTurnMessages()` (`packages/plugin-shell/src/client/index.ts:3405`). Data arrives over REST, with invalidation over the state channel (`apps/cloudflare/src/client/bot-state-channel.ts:147-170`).
 
@@ -315,13 +315,13 @@ Adjacent, outside the loop: image generation uses Workers AI ids directly (`pack
 
 ### Authoring
 
-The Bot writes Applet code on the Computer with ordinary file tools. `packages/plugin-applets` exposes seven tools — `applet_list`, `applet_create`, `applet_publish`, `applet_revert`, `applet_delete`, `applet_focus`, `applet_generations` — as an ordinary first-party runtime feature, `createAppletsFeature` (`packages/plugin-applets/src/feature.ts`), mounted for one admitted Turn beside Memory and Skills (`applications/foundation/src/runtime.ts`). Its host is `createAppletCapabilityHostV1` (`packages/plugin-shell/src/backend-applets.ts`), built per call because a publish needs the Turn's mounted Computer. `applet_create` scaffolds from templates into the durable root `applets/source/<appletId>/` (`src/root.ts`), mounted on the Sprite at `/home/box/agent-data/user-packages/applets/source`. Guidance ships at `packages/plugin-applets/skills/applets.md`.
+The Bot writes Applet code on the Computer with ordinary file tools. `applets/` exposes seven tools — `applet_list`, `applet_create`, `applet_publish`, `applet_revert`, `applet_delete`, `applet_focus`, `applet_generations` — as an ordinary first-party runtime feature, `createAppletsFeature` (`applets/feature.ts`), mounted for one admitted Turn beside Memory and Skills (`applications/foundation/src/runtime.ts`). Its host is `createAppletCapabilityHostV1` (`packages/plugin-shell/src/backend-applets.ts`), built per call because a publish needs the Turn's mounted Computer. `applet_create` scaffolds from templates into the durable root `applets/source/<appletId>/` (`applets/root.ts`), mounted on the Sprite at `/home/box/agent-data/user-packages/applets/source`. Guidance ships at `applets/skills/applets.md`.
 
-The Applets Package declares that durable root in its definition (`packages/plugin-applets/src/definition.ts`), which the Computer's durable-root sync reads (`declaredPackageRootsV1`).
+The Applets Package declares that durable root in its definition (`applets/definition.ts`), which the Computer's durable-root sync reads (`declaredPackageRootsV1`).
 
 ### Build
 
-esbuild, run by the SDK CLI on the Computer — `packages/applet-sdk/src/cli/build.ts:46-183`. The server bundle is ESM, `platform: neutral`, with `cloudflare:workers` external. The UI bundle is IIFE, minified and inlined into one self-contained HTML page. The tool declaration is derived by booting the built Durable Object in Miniflare 5 and calling `/health` and `/describe` (`:104-131`). `apps/cloudflare-bundler` is not involved; that service bundles Bot Packages.
+esbuild, run by the SDK CLI on the Computer — `applets/sdk/src/cli/build.ts:46-183`. The server bundle is ESM, `platform: neutral`, with `cloudflare:workers` external. The UI bundle is IIFE, minified and inlined into one self-contained HTML page. The tool declaration is derived by booting the built Durable Object in Miniflare 5 and calling `/health` and `/describe` (`:104-131`). `apps/cloudflare-bundler` is not involved; that service bundles Bot Packages.
 
 ### Storage
 
@@ -334,7 +334,7 @@ R2 `APPLICATION_ARTIFACTS`, content-addressed as `packages/<sha256>.mjs` and `.h
 
 ### First-party pages
 
-`list.html` and `canvas.html` (`packages/plugin-applets/src/pages/`) are declared by a static registry, `FIRST_PARTY_PACKAGE_UI_V1` (`packages/plugin-applets/src/pages.ts`): page id, digest, html, the tool names that page may call, and where it mounts. `projectFirstPartyPackageIframeV1` (`packages/plugin-shell/src/composition-views.ts`) reshapes it for the client and `requirePackageUiToolDeclarationV1` authorizes a page's tool command against it. There is no Composition generation in either: a first-party page ships in the deployment, so there is nothing for a generation to fence. The bridge protocol (`PACKAGE_IFRAME_HELPER_JS_V1`) is unchanged — it is the page contract a Bot-authored page will reuse.
+`list.html` and `canvas.html` (`applets/pages/`) are declared by a static registry, `FIRST_PARTY_PACKAGE_UI_V1` (`applets/pages.ts`): page id, digest, html, the tool names that page may call, and where it mounts. `projectFirstPartyPackageIframeV1` (`packages/plugin-shell/src/composition-views.ts`) reshapes it for the client and `requirePackageUiToolDeclarationV1` authorizes a page's tool command against it. There is no Composition generation in either: a first-party page ships in the deployment, so there is nothing for a generation to fence. The bridge protocol (`PACKAGE_IFRAME_HELPER_JS_V1`) is unchanged — it is the page contract a Bot-authored page will reuse.
 
 ### SDK
 
@@ -342,7 +342,7 @@ R2 `APPLICATION_ARTIFACTS`, content-addressed as `packages/<sha256>.mjs` and `.h
 
 ### Persistence
 
-The facet's own SQLite inside the per-`<userId>:<appletId>` Durable Object, with additive `ALTER TABLE` migration and a 2000-row `_applet_changes` log (`packages/applet-sdk/src/server/store.ts:32-80`). Data is account-wide and shared across viewers, survives publish and revert, and is destroyed only by `applet_delete`.
+The facet's own SQLite inside the per-`<userId>:<appletId>` Durable Object, with additive `ALTER TABLE` migration and a 2000-row `_applet_changes` log (`applets/sdk/src/server/store.ts:32-80`). Data is account-wide and shared across viewers, survives publish and revert, and is destroyed only by `applet_delete`.
 
 ---
 

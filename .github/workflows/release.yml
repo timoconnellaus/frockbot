@@ -114,11 +114,13 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Build publishable packages
-        # No package declares `files`, so whatever sits in a package directory
-        # at pack time ships in its tarball — `dist/` included. Only the webui
-        # build writes into `packages/`; the app builds the verify job runs
-        # write into `apps/`, so this is the whole of `bun run build` that can
-        # change a published tarball.
+        # A webui package declares no `files`, so whatever sits in its
+        # directory at pack time ships in its tarball — `dist/` included. Only
+        # the webui build writes into `packages/`; the app builds the verify
+        # job runs write into `apps/`, so this is the whole of `bun run build`
+        # that can change a published tarball. `applets/sdk` is the exception
+        # and needs nothing here: it names its `files` and builds its own
+        # `dist/` from `prepublishOnly`.
         run: bun run build:webui
 
       - name: Set package versions
@@ -129,9 +131,15 @@ jobs:
           const fs = require('node:fs');
           const path = require('node:path');
 
-          for (const entry of fs.readdirSync('packages', { withFileTypes: true })) {
-            if (!entry.isDirectory()) continue;
-            const file = path.join('packages', entry.name, 'package.json');
+          const directories = fs
+            .readdirSync('packages', { withFileTypes: true })
+            .filter((entry) => entry.isDirectory())
+            .map((entry) => path.join('packages', entry.name));
+          // The Applets SDK sits beside the module it authors for.
+          directories.push(path.join('applets', 'sdk'));
+
+          for (const directory of directories) {
+            const file = path.join(directory, 'package.json');
             if (!fs.existsSync(file)) continue;
             const manifest = JSON.parse(fs.readFileSync(file, 'utf8'));
             if (manifest.frockbot?.npm !== true) continue;
@@ -234,7 +242,7 @@ jobs:
           # npm had no trusted publisher for one, while the deploy that
           # actually matters had already succeeded.
           published=()
-          for package_dir in packages/*/; do
+          for package_dir in packages/*/ applets/sdk/; do
             if node -e "process.exit(require('./${package_dir}package.json').frockbot?.npm === true ? 0 : 1)" 2>/dev/null; then
               published+=("$package_dir")
             fi

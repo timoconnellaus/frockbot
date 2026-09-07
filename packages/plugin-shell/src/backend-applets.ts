@@ -26,7 +26,7 @@ import {
 import type {
   AppletCapabilityCallScopeV1,
   AppletCapabilityHostV1,
-} from "@frockbot/plugin-applets/feature";
+} from "@frockbot/applets/feature";
 import {
   decodeAppletGenerationV1,
   decodeAppletSummaryV1,

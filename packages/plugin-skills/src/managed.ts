@@ -171,7 +171,7 @@ export const MANAGED_SKILL_DOCUMENTS_V1: readonly ManagedSkillDocumentV1[] = [
   { slug: "import-bot-template", text: IMPORT_BOT_TEMPLATE },
   { slug: "learn-from-demonstration", text: LEARN_FROM_DEMONSTRATION },
   // The Applets SDK reference. It is authored in
-  // `packages/plugin-applets/skills/applets.md`, beside the Package it
+  // `applets/skills/applets.md`, beside the Package it
   // documents, and copied here by `scripts/build-applets-assets.ts`: the
   // Applets Package has no in-process code to carry it, and the managed set is
   // the mechanism a first-party Skill already ships through.

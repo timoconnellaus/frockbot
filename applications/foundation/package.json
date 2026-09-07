@@ -18,11 +18,11 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@frockbot/applets": "workspace:*",
     "@frockbot/client-core": "workspace:*",
     "@frockbot/computer-core": "workspace:*",
     "@frockbot/core": "workspace:*",
     "@frockbot/plugin-admin": "workspace:*",
-    "@frockbot/plugin-applets": "workspace:*",
     "@frockbot/plugin-audit": "workspace:*",
     "@frockbot/plugin-auth": "workspace:*",
     "@frockbot/plugin-bot-template": "workspace:*",

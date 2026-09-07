@@ -94,7 +94,7 @@ describe("the first-party page registry", () => {
       }
     }
     const { FIRST_PARTY_PACKAGE_ARTIFACTS_V1 } =
-      await import("@frockbot/plugin-applets/pages");
+      await import("@frockbot/applets/pages");
     for (const contribution of projected.contributions) {
       for (const page of contribution.pages) {
         const html = FIRST_PARTY_PACKAGE_ARTIFACTS_V1.get(

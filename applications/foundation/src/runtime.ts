@@ -102,8 +102,8 @@ import {
 import {
   createAppletsFeature,
   type AppletsRuntimeHostV1,
-} from "@frockbot/plugin-applets/feature";
-export type { AppletsRuntimeHostV1 } from "@frockbot/plugin-applets/feature";
+} from "@frockbot/applets/feature";
+export type { AppletsRuntimeHostV1 } from "@frockbot/applets/feature";
 
 export { FOUNDATION_MODEL, FOUNDATION_PROVIDER };
 import {

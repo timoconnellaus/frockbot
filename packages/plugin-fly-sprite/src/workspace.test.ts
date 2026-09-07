@@ -415,7 +415,7 @@ describe("Fly Workspace layout", () => {
 
   // Applet source lives at `applets/<appletId>/` under a `package-declared`
   // root of the Applets Package. The ids are `APPLETS_PACKAGE_ID_V1` and
-  // `APPLETS_SOURCE_ROOT_ID_V1` in `@frockbot/plugin-applets/root`, written
+  // `APPLETS_SOURCE_ROOT_ID_V1` in `@frockbot/applets/root`, written
   // out here rather than imported so this provider Package keeps knowing
   // nothing about Applets.
   test("mounts the Applets source root with no layout change of its own", () => {

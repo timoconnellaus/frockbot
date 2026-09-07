@@ -104,7 +104,7 @@ export const APPLET_MAX_PER_USER_V1 = 64;
  * built `dist/` live on the Computer.
  *
  * TODO(lane C1): import `APPLETS_PACKAGE_ID_V1` / `APPLETS_SOURCE_ROOT_ID_V1`
- * from `@frockbot/plugin-applets/root` once that lane lands. They are declared
+ * from `@frockbot/applets/root` once that lane lands. They are declared
  * here for now because core imports no Package — the constants are two
  * strings the manifest also declares, and the architecture check that the
  * kernel names no Package keeps them from becoming an import.

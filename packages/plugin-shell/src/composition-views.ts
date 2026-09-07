@@ -10,7 +10,7 @@ import {
   type CompositionProvenanceViewV1,
 } from "@frockbot/core/configuration";
 import type { PackageIframeCompositionV1 } from "@frockbot/core/contracts";
-import { FIRST_PARTY_PACKAGE_UI_V1 } from "@frockbot/plugin-applets/pages";
+import { FIRST_PARTY_PACKAGE_UI_V1 } from "@frockbot/applets/pages";
 import type {
   CompositionFailureV1,
   CompositionQuarantineV1,
@@ -39,7 +39,7 @@ const FIRST_PARTY_PAGE_BUNDLER_V1 = "frockbot-inline-html@1";
  *
  * A page is not a Composition member. It ships in this bundle, so there is no
  * manifest to read, no artifact to fetch and no generation to fence: the
- * registry in `@frockbot/plugin-applets/pages` is the declaration, and this
+ * registry in `@frockbot/applets/pages` is the declaration, and this
  * only reshapes it for the client. `declaredTools` is the union of what the
  * Package's pages may call, because the command a page sends names a Package
  * and a tool and never a page.

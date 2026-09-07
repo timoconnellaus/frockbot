@@ -26,7 +26,12 @@ interface Target {
   dir: string;
 }
 
-const manifestPaths = ["core/package.json", "providers/package.json"];
+const manifestPaths = [
+  "applets/package.json",
+  "applets/sdk/package.json",
+  "core/package.json",
+  "providers/package.json",
+];
 for (const group of ["packages", "apps", "applications"]) {
   manifestPaths.push(
     ...new Bun.Glob(`${group}/*/package.json`).scanSync({

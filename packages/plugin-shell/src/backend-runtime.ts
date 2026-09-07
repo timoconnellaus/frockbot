@@ -14,7 +14,7 @@ import type {
   ComputerProcessStorageV1,
 } from "@frockbot/plugin-computer/agent";
 import type { SharedComputerHostClient } from "@frockbot/plugin-computer/shared-provider";
-import type { AppletsRuntimeHostV1 } from "@frockbot/plugin-applets/feature";
+import type { AppletsRuntimeHostV1 } from "@frockbot/applets/feature";
 import type { BotTemplateRuntimeHostV1 } from "@frockbot/plugin-bot-template/agent";
 import type { FlockSelfRuntimeHostV1 } from "@frockbot/plugin-flock/agent";
 import type { ImageRuntimeHostV1 } from "@frockbot/plugin-image/agent";
