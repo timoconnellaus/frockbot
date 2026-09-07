@@ -201,26 +201,25 @@ describe("Composition generation v1", () => {
     ).toThrow("mediaType is invalid");
   });
 
-  test("decodes a Catalog isolate member and its plain-language generation summary", async () => {
+  test("decodes a User-installed isolate member and its plain-language generation summary", async () => {
     const generation = await bootstrap();
     const member = {
       packageId: "parcel-tracking",
-      specifier: "catalog:parcel-tracking",
+      specifier: "user:parcel-tracking",
       version: "0.0.1",
       manifestHash: "c".repeat(64),
       provenance: {
-        kind: "catalog" as const,
+        kind: "user" as const,
         packageId: "parcel-tracking",
         version: "0.0.1",
-        catalogId: "parcel-tracking",
-        catalogGeneration: "catalog-1",
-        contentHash: "d".repeat(64),
+        userId: "user-1",
+        authoredAt: "2026-09-01T00:00:00.000Z",
       },
       artifact: {
         contentHash: "d".repeat(64),
         size: 512,
         mediaType: "application/javascript" as const,
-        bundlerVersion: "catalog-test@1",
+        bundlerVersion: "user-test@1",
       },
     };
     const decoded = decodeCompositionGenerationV1({
@@ -228,11 +227,7 @@ describe("Composition generation v1", () => {
       members: [member],
       artifactSetHash: await compositionArtifactSetHashV1([member]),
       origin: {
-        kind: "bot-catalog",
-        action: "install",
-        packageId: "parcel-tracking",
-        catalogId: "parcel-tracking",
-        botId: "primary",
+        kind: "bot-authored",
         runId: "run-1",
         sessionId: "user-1:primary",
         turnId: "turn-1",
@@ -241,13 +236,7 @@ describe("Composition generation v1", () => {
     });
 
     expect(decoded.summary).toBe("Added parcel tracking");
-    expect(decoded.members[0]?.provenance.kind).toBe("catalog");
-    expect(() =>
-      decodeCompositionGenerationV1({
-        ...decoded,
-        members: [{ ...member, artifact: undefined }],
-      }),
-    ).toThrow("must match its Bot-isolate artifact");
+    expect(decoded.members[0]?.provenance.kind).toBe("user");
     expect(() =>
       decodeCompositionGenerationV1({
         ...decoded,

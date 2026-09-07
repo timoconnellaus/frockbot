@@ -165,20 +165,25 @@ export const PACKAGE_IFRAME_PROVENANCES_V1: readonly PackageIframeProvenanceV1[]
 export interface PackageIframeContributionViewV1 {
   packageId: string;
   displayName: string;
-  /** How the shell attributes the page. `FrockBot` is a first-party
-   * artifact-backed member: shipped by FrockBot, loaded through the same path
-   * as a Bot-authored Package. */
+  /** How the shell attributes the page. `FrockBot` is first-party: it ships in
+   * the deployment rather than as a Composition member. */
   provenance: PackageIframeProvenanceV1;
-  /** Manifest v5: 1..8 pages. A v3/v4 single-page record migrates to one. */
+  /** 1..8 pages. */
   pages: PackageIframePageViewV1[];
   entries: PackageIframeEntryViewV1[];
   declaredTools: string[];
 }
 
+/**
+ * The pages a Bot may show, and what each Package's pages may call.
+ *
+ * There is no Composition generation here. A first-party page is not a
+ * Composition member: it ships in the deployment, so it can never be stale
+ * against one, and there is nothing for a generation to fence.
+ */
 export interface PackageIframeCompositionV1 {
   schemaVersion: 1;
   botId: string;
-  generationId: string;
   contributions: PackageIframeContributionViewV1[];
 }
 
@@ -190,7 +195,6 @@ export interface PackageIframeCatalogV1 extends PackageIframeCompositionV1 {
 export interface PackageIframeToolCommandV1 {
   schemaVersion: 1;
   commandId: string;
-  generationId: string;
   packageId: string;
   name: string;
   input: unknown;
@@ -389,14 +393,7 @@ export function decodePackageIframeToolCommandV1(
   boundedJsonWire(input, "Package iframe tool command");
   exact(
     value,
-    [
-      "schemaVersion",
-      "commandId",
-      "generationId",
-      "packageId",
-      "name",
-      "input",
-    ],
+    ["schemaVersion", "commandId", "packageId", "name", "input"],
     "Package iframe tool command",
   );
   if (value.schemaVersion !== 1)
@@ -414,10 +411,6 @@ export function decodePackageIframeToolCommandV1(
     commandId: boundedString(
       value.commandId,
       "Package iframe tool command.commandId",
-    ),
-    generationId: boundedString(
-      value.generationId,
-      "Package iframe tool command.generationId",
     ),
     packageId: boundedString(
       value.packageId,
@@ -442,13 +435,7 @@ export function decodePackageIframeCatalogV1(
   const value = record(input, "Package iframe catalog");
   exact(
     value,
-    [
-      "schemaVersion",
-      "botId",
-      "generationId",
-      "artifactOrigin",
-      "contributions",
-    ],
+    ["schemaVersion", "botId", "artifactOrigin", "contributions"],
     "Package iframe catalog",
   );
   if (value.schemaVersion !== 1)
@@ -681,10 +668,6 @@ export function decodePackageIframeCatalogV1(
   return {
     schemaVersion: 1,
     botId: boundedString(value.botId, "Package iframe botId"),
-    generationId: boundedString(
-      value.generationId,
-      "Package iframe generationId",
-    ),
     artifactOrigin,
     contributions,
   };

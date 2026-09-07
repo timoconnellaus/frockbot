@@ -3540,30 +3540,6 @@
                           "type": "object",
                           "properties": {
                             "kind": {
-                              "enum": ["catalog"]
-                            },
-                            "catalogId": {
-                              "type": "string",
-                              "minLength": 1,
-                              "maxLength": 256
-                            },
-                            "catalogGeneration": {
-                              "type": "string",
-                              "minLength": 1,
-                              "maxLength": 256
-                            }
-                          },
-                          "required": [
-                            "kind",
-                            "catalogId",
-                            "catalogGeneration"
-                          ],
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "object",
-                          "properties": {
-                            "kind": {
                               "enum": ["user"]
                             },
                             "userId": {

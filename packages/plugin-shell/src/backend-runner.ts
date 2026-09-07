@@ -151,17 +151,13 @@ export async function executeDirectToolTurn(
 ): Promise<BotTurnCompletion> {
   const { command, composition, previousEvents, admitEffect, signal } = options;
   const session = composition.runtime.agent.agent.session;
+  // The tool the page names is a registered first-party tool, called by its
+  // own name: the same registry, the same guards and the same durable
+  // occurrence a model-selected call goes through.
   const call = {
     id: command.runId,
-    name: "call_dynamic_tool",
-    input: {
-      namespace: command.directTool.packageId,
-      toolName: command.directTool.name,
-      arguments: command.directTool.input,
-      mcpDetails: {
-        description: `The User invoked ${command.directTool.name} from the Package UI.`,
-      },
-    },
+    name: command.directTool.name,
+    input: command.directTool.input,
   };
   try {
     let turnStart = [...session.events].findLast(

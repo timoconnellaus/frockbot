@@ -26,7 +26,7 @@ import { canonicalJson } from "@frockbot/kernel-composition/compiler";
 import type {
   BotIsolateLoader,
   BotIsolateWorkerCode,
-} from "@frockbot/kernel-composition/isolate";
+} from "@frockbot/compose-frockbot";
 import {
   createShellCompositionHost,
   type ShellMountedComposition,

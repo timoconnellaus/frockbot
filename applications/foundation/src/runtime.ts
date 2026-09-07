@@ -134,11 +134,12 @@ import {
 } from "@frockbot/plugin-skills/agent";
 import uiThemeManifest from "@frockbot/plugin-ui-theme/manifest";
 import appletsManifest from "@frockbot/plugin-applets/manifest";
+import {
+  createAppletsFeature,
+  type AppletsRuntimeHostV1,
+} from "@frockbot/plugin-applets/feature";
+export type { AppletsRuntimeHostV1 } from "@frockbot/plugin-applets/feature";
 import applicationJson from "../frockbot.application.json" with { type: "json" };
-// The Applets Package has no runtime plugin to import: it is artifact-backed,
-// so the application declares only its manifest here and its artifact in
-// `frockbot.application.json`, and the isolate host mounts it like a
-// Bot-authored Package.
 
 export { FOUNDATION_MODEL, FOUNDATION_PROVIDER };
 
@@ -758,6 +759,14 @@ export function createFoundationHostedRuntimePackages(
      * refusing, which is what a feature gate is for.
      */
     machineMessages?: MachineMessagesRuntimeHostV1;
+    /**
+     * The Applets seam, supplied by the Bot Durable Object for one admitted
+     * Turn. Absent outside a Turn, and outside a deployment that can reach the
+     * Applet Durable Object, its artifact bucket and the Workspace — and the
+     * Applets Package is then not mounted at all: a publish is a durable effect
+     * whose intent record has to name the Turn that asked for it.
+     */
+    applets?: AppletsRuntimeHostV1;
   },
 ): FoundationRuntimePackage[] {
   return [
@@ -817,6 +826,9 @@ export function createFoundationHostedRuntimePackages(
             createMachineMessagesFeature(host.machineMessages),
           ),
         ]
+      : []),
+    ...(host.applets
+      ? [runtimePackage("applets", createAppletsFeature(host.applets))]
       : []),
     runtimePackage(
       "credentials",

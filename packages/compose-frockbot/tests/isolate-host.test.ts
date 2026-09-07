@@ -14,7 +14,7 @@ import type {
   ToolExecutionContext,
   ToolNamespaceRegistration,
 } from "@frockbot/kernel-contracts";
-import type { PackageDescriptor } from "./index.ts";
+import type { PackageDescriptor } from "@frockbot/kernel-composition";
 import {
   botIsolateAdmissionCeilingV1,
   BotIsolateContributionHost,
@@ -23,8 +23,8 @@ import {
   type BotIsolateHostOptions,
   type BotIsolateLoadedWorker,
   type BotIsolateWorkerCode,
-} from "./isolate-host.ts";
-import { decodeFrockBotManifest } from "./manifest.ts";
+} from "../src/isolate-host.ts";
+import { decodeFrockBotManifest } from "@frockbot/kernel-composition";
 
 const CONTENT_HASH = "a".repeat(64);
 

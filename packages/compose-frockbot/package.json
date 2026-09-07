@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Pure projections from FrockBot manifests and kernel contracts to the FrockBot Compose vocabulary.",
+  "description": "The FrockBot Bot isolate host: loads a Composition member's artifact as a Dynamic Worker.",
   "license": "MIT",
   "exports": {
     ".": "./src/index.ts",

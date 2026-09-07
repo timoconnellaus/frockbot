@@ -151,7 +151,6 @@ export interface IsolateCapabilityListV1 {
   tools: true;
   memory: boolean;
   workspace: boolean;
-  notify: true;
   schedule: true;
 }
 
@@ -221,33 +220,6 @@ export interface IsolateWorkspaceDeleteRequestV1 {
 export type IsolateWorkspaceOutcomeV1 =
   { status: "available"; value: unknown } | IsolateCapabilityFailureV1;
 
-export interface IsolateNotificationRequestV1 {
-  notificationId: string;
-  title: string;
-  body: string;
-}
-export type IsolateNotificationOutcomeV1 =
-  { status: "recorded" } | IsolateCapabilityFailureV1;
-
-/**
- * The Applet capability a Bot isolate calls.
- *
- * One tagged request rather than seven methods on the stub: the operations
- * share a scope, an authority, and an outcome shape, and the wrapper narrows
- * them back into the seven-verb `ctx.applets` a Bot author writes against.
- */
-export type IsolateAppletsRequestV1 =
-  | { op: "list" }
-  | { op: "create"; displayName: string }
-  | { op: "publish"; appletId: string }
-  | { op: "revert"; appletId: string; generationId: string }
-  | { op: "delete"; appletId: string }
-  | { op: "focus"; appletId: string | null }
-  | { op: "generations"; appletId: string };
-
-export type IsolateAppletsOutcomeV1 =
-  { status: "available"; value: unknown } | IsolateCapabilityFailureV1;
-
 /** A durable Routine operation attributed to one Package call. */
 export interface IsolateScheduleRequestV1 {
   callId: string;
@@ -315,13 +287,9 @@ export interface BotCapabilitiesStub {
     request: IsolateWorkspaceDeleteRequestV1,
   ): Promise<IsolateWorkspaceOutcomeV1>;
   connection(connectionId: string): Promise<IsolateConnectionOutcomeV1>;
-  notify(
-    request: IsolateNotificationRequestV1,
-  ): Promise<IsolateNotificationOutcomeV1>;
   schedule(
     request: IsolateScheduleRequestV1,
   ): Promise<IsolateScheduleOutcomeV1>;
-  applets(request: IsolateAppletsRequestV1): Promise<IsolateAppletsOutcomeV1>;
 }
 
 /** The model outcome Bot-authored `package.js` receives after wrapper narrowing. */
@@ -382,29 +350,7 @@ export interface BotPackageContextV1 {
       request: IsolateWorkspaceDeleteRequestV1,
     ): Promise<IsolateWorkspaceOutcomeV1>;
   };
-  /**
-   * The User's Applets. Account-wide: every Bot of this User sees every
-   * Applet. `publish` is a durable effect — it reads the built Applet from the
-   * Applets Package's durable root, verifies its manifest against the bytes,
-   * writes immutable artifacts, records the generation, mounts it, and proposes
-   * a new Composition generation for this Bot.
-   */
-  readonly applets: {
-    list(): Promise<IsolateAppletsOutcomeV1>;
-    create(input: { displayName: string }): Promise<IsolateAppletsOutcomeV1>;
-    publish(input: { appletId: string }): Promise<IsolateAppletsOutcomeV1>;
-    revert(input: {
-      appletId: string;
-      generationId: string;
-    }): Promise<IsolateAppletsOutcomeV1>;
-    delete(input: { appletId: string }): Promise<IsolateAppletsOutcomeV1>;
-    focus(input: { appletId: string | null }): Promise<IsolateAppletsOutcomeV1>;
-    generations(input: { appletId: string }): Promise<IsolateAppletsOutcomeV1>;
-  };
   connection(connectionId: string): Promise<IsolateConnectionOutcomeV1>;
-  notify(
-    request: IsolateNotificationRequestV1,
-  ): Promise<IsolateNotificationOutcomeV1>;
   schedule(
     request: IsolateScheduleRequestV1,
   ): Promise<IsolateScheduleOutcomeV1>;
@@ -970,22 +916,13 @@ export function decodeIsolateCapabilityListV1(
   const value = record(input, label);
   exactKeys(
     value,
-    [
-      "status",
-      "connections",
-      "tools",
-      "memory",
-      "workspace",
-      "notify",
-      "schedule",
-    ],
+    ["status", "connections", "tools", "memory", "workspace", "schedule"],
     label,
     ["model"],
   );
   if (
     value.status !== "available" ||
     value.tools !== true ||
-    value.notify !== true ||
     value.schedule !== true ||
     typeof value.memory !== "boolean" ||
     typeof value.workspace !== "boolean" ||
@@ -1005,7 +942,6 @@ export function decodeIsolateCapabilityListV1(
     tools: true,
     memory: value.memory,
     workspace: value.workspace,
-    notify: true,
     schedule: true,
   };
 }
@@ -1035,67 +971,6 @@ export function decodeIsolateScheduleRequestV1(
     callId: boundedString(value.callId, `${label}.callId`, 256),
     input: value.input,
   };
-}
-
-// Same shape as `APPLET_ID_V1`: a mixed-case User id, then the random half.
-const APPLET_CAPABILITY_ID =
-  /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,95}\.[a-z0-9-]{1,64}$/;
-
-export function decodeIsolateAppletsRequestV1(
-  input: unknown,
-  label = "isolate Applets request",
-): IsolateAppletsRequestV1 {
-  const value = record(input, label);
-  const appletId = (): string => {
-    const id = boundedString(value.appletId, `${label}.appletId`, 129);
-    if (!APPLET_CAPABILITY_ID.test(id)) {
-      throw new Error(`${label}.appletId is invalid`);
-    }
-    return id;
-  };
-  switch (value.op) {
-    case "list":
-      exactKeys(value, ["op"], label);
-      return { op: "list" };
-    case "create":
-      exactKeys(value, ["op", "displayName"], label);
-      return {
-        op: "create",
-        displayName: boundedString(
-          value.displayName,
-          `${label}.displayName`,
-          128,
-        ),
-      };
-    case "publish":
-      exactKeys(value, ["op", "appletId"], label);
-      return { op: "publish", appletId: appletId() };
-    case "revert":
-      exactKeys(value, ["op", "appletId", "generationId"], label);
-      return {
-        op: "revert",
-        appletId: appletId(),
-        generationId: boundedString(
-          value.generationId,
-          `${label}.generationId`,
-          128,
-        ),
-      };
-    case "delete":
-      exactKeys(value, ["op", "appletId"], label);
-      return { op: "delete", appletId: appletId() };
-    case "focus":
-      exactKeys(value, ["op", "appletId"], label);
-      return {
-        op: "focus",
-        appletId: value.appletId === null ? null : appletId(),
-      };
-    case "generations":
-      exactKeys(value, ["op", "appletId"], label);
-      return { op: "generations", appletId: appletId() };
-    default:
-      throw new Error(`${label}.op is invalid`);
-  }
 }
 
 const MEMORY_SCOPES = ["bot", "user", "project"] as const;
@@ -1261,23 +1136,6 @@ export function decodeIsolateWorkspaceDeleteRequestV1(
       `${label}.expectedGenerationId`,
       256,
     ),
-  };
-}
-
-export function decodeIsolateNotificationRequestV1(
-  input: unknown,
-  label = "isolate notification request",
-): IsolateNotificationRequestV1 {
-  const value = record(input, label);
-  exactKeys(value, ["notificationId", "title", "body"], label);
-  return {
-    notificationId: boundedString(
-      value.notificationId,
-      `${label}.notificationId`,
-      256,
-    ),
-    title: boundedString(value.title, `${label}.title`, 160),
-    body: boundedString(value.body, `${label}.body`, 500),
   };
 }
 

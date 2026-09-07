@@ -23,6 +23,10 @@ import {
   decodeFocusedAppletV1,
   type FocusedAppletV1,
 } from "@frockbot/kernel-do";
+import type {
+  AppletCapabilityCallScopeV1,
+  AppletCapabilityHostV1,
+} from "@frockbot/plugin-applets/feature";
 import {
   decodeAppletGenerationV1,
   decodeAppletSummaryV1,
@@ -338,37 +342,6 @@ export interface AppletCapabilityHostOptionsV1 {
   syncSourceRootNow?(appletId: string): Promise<AppletSourceSyncOutcomeV1>;
   composition: Pick<CompositionStore, "current" | "lastKnownGood" | "propose">;
   now?(): Date;
-}
-
-export interface AppletCapabilityCallScopeV1 {
-  sessionId: string;
-  runId: string;
-  turnId: string;
-  effectId: string;
-}
-
-/** `ctx.applets`, as the Bot Durable Object implements it. */
-export interface AppletCapabilityHostV1 {
-  list(): Promise<AppletSummaryV1[]>;
-  create(
-    input: { displayName: string },
-    scope: AppletCapabilityCallScopeV1,
-  ): Promise<AppletSummaryV1>;
-  publish(
-    input: { appletId: string },
-    scope: AppletCapabilityCallScopeV1,
-  ): Promise<AppletPublishResultV1>;
-  revert(
-    input: { appletId: string; generationId: string },
-    scope: AppletCapabilityCallScopeV1,
-  ): Promise<AppletPublishResultV1>;
-  delete(input: { appletId: string }): Promise<{ status: "deleted" }>;
-  focus(input: { appletId: string | null }): Promise<FocusedAppletV1>;
-  generations(input: {
-    appletId: string;
-  }): Promise<AppletGenerationSummaryV1[]>;
-  /** What the shell reads for the canvas, and what a route projects. */
-  readFocused(): Promise<FocusedAppletV1>;
 }
 
 const TEXT = new TextDecoder();

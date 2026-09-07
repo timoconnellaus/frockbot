@@ -8,9 +8,7 @@
     "./activation": "./src/activation.ts",
     "./compiler": "./src/compiler.ts",
     "./generation": "./src/generation.ts",
-    "./package.json": "./package.json",
-    "./isolate": "./src/isolate-host.ts",
-    "./isolate-wrapper": "./src/isolate-wrapper.ts"
+    "./package.json": "./package.json"
   },
   "scripts": {
     "test": "bun test src",

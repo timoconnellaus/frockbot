@@ -68,7 +68,6 @@ async function installPackageRoutes(
         toolCommands.push(command);
         expect(command).toMatchObject({
           schemaVersion: 1,
-          generationId: "generation-ui",
           packageId: PACKAGE_ID,
           name: TOOL_NAME,
           input: { city: "Sydney" },
@@ -89,7 +88,6 @@ async function installPackageRoutes(
         body: JSON.stringify({
           schemaVersion: 1,
           botId,
-          generationId: "generation-ui",
           artifactOrigin,
           contributions: [
             {

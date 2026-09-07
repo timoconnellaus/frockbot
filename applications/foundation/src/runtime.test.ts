@@ -93,7 +93,6 @@ describe("foundation application", () => {
         "ui-theme",
         "shell",
         "admin",
-        "applets",
         "flock",
         "audit",
         "auth",

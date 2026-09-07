@@ -234,7 +234,6 @@ describe("user application Bot seam", () => {
       Promise.resolve({
         schemaVersion: 1,
         botId,
-        generationId: "generation-ui",
         contributions: [],
       });
     binding.runPackageUiTool = (request) => {
@@ -255,7 +254,6 @@ describe("user application Bot seam", () => {
     expect((await catalogResponse.json()) as Record<string, unknown>).toEqual({
       schemaVersion: 1,
       botId: "primary",
-      generationId: "generation-ui",
       artifactOrigin: "https://ui.app.example",
       contributions: [],
     });
@@ -263,7 +261,6 @@ describe("user application Bot seam", () => {
     const command = {
       schemaVersion: 1 as const,
       commandId: "command-1",
-      generationId: "generation-ui",
       packageId: "weather-page",
       name: "weather_lookup",
       input: { city: "Sydney" },

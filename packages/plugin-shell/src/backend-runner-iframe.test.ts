@@ -8,14 +8,8 @@ describe("Package iframe direct tool Turn", () => {
     const runtime = createAgentRuntimeHarness();
     const session = runtime.sessions.create("user:bot");
     let calls = 0;
-    runtime.tools.registerNamespace({
-      name: "weather-page",
-      external: true,
-      status: "ready",
-    });
     runtime.tools.register({
       name: "weather_lookup",
-      namespace: "weather-page",
       description: "Weather",
       inputSchema: {},
       idempotent: true,
@@ -52,7 +46,6 @@ describe("Package iframe direct tool Turn", () => {
         acceptedAt: "2026-09-02T00:00:00.000Z",
         text: "Weather · weather_lookup",
         directTool: {
-          generationId: "generation-1",
           packageId: "weather-page",
           name: "weather_lookup",
           input: { city: "Sydney" },
@@ -71,7 +64,7 @@ describe("Package iframe direct tool Turn", () => {
     expect(
       result.events.find((event) => event.type === "tool/result"),
     ).toMatchObject({
-      name: "call_dynamic_tool",
+      name: "weather_lookup",
       content: '{"temperature":21}',
     });
   });

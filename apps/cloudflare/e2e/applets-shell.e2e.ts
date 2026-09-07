@@ -83,13 +83,12 @@ async function installAppletRoutes(
       body: JSON.stringify({
         schemaVersion: 1,
         botId,
-        generationId: "generation-ui",
         artifactOrigin,
         contributions: [
           {
             packageId: PACKAGE_ID,
             displayName: "Applets",
-            provenance: "Bot-authored",
+            provenance: "FrockBot",
             pages: [
               {
                 id: "list",
@@ -274,11 +273,13 @@ test("a Package entry opens its surface and a focused Applet fills the canvas", 
   await canvas.getByRole("button", { name: "server.ts" }).click();
   await expect(canvas.getByText("export class TodoApplet")).toBeVisible();
 
-  // The entry's surface hosts the Package's list page, attributed to it, and
-  // the page is fed the Applets state over bridge v2.
+  // The entry's surface hosts the Package's list page, and the page is fed the
+  // Applets state over bridge v2. Applets ships with the product, so the frame
+  // says nothing about where the page came from: an attribution line is for a
+  // page somebody else wrote.
   await entry.click();
   const surface = page.getByRole("region", { name: "Applets" });
-  await expect(surface.getByText("Built by this Bot")).toBeVisible();
+  await expect(surface.getByText("Built by this Bot")).toHaveCount(0);
   /*
    * The two ways out a User reaches for before finding the ✕.
    *

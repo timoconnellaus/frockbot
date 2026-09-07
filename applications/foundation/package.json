@@ -9,7 +9,6 @@
     "./client-contributions": "./src/client-contributions.ts",
     "./contributions": "./src/contributions.ts",
     "./frockbot.application.json": "./frockbot.application.json",
-    "./generated/applets-artifact": "./generated/applets-artifact.ts",
     "./package.json": "./package.json",
     "./runtime": "./src/runtime.ts",
     "./user": "./src/user.ts"

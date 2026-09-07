@@ -150,7 +150,6 @@ describe("Package iframe bridge v2", () => {
     const command = {
       schemaVersion: 1 as const,
       commandId: "command-1",
-      generationId: "generation-1",
       packageId: "weather-lookup",
       name: "weather_lookup",
       input: { city: "Sydney" },
@@ -171,7 +170,6 @@ describe("Package iframe bridge v2", () => {
   const catalog = () => ({
     schemaVersion: 1,
     botId: "bot",
-    generationId: "generation-1",
     artifactOrigin: "https://ui.bot.frockbot.com",
     contributions: [
       {

@@ -16,7 +16,7 @@ import {
   compileFoundationApplication,
   createFoundationBackendContributions,
 } from "@frockbot/application-foundation/runtime";
-import { FIRST_PARTY_PACKAGE_ARTIFACTS_V1 } from "@frockbot/application-foundation/generated/applets-artifact";
+import { FIRST_PARTY_PACKAGE_ARTIFACTS_V1 } from "@frockbot/plugin-applets/pages";
 import {
   decodeBotLifecycleDirectoryViewV1,
   decodeBotLifecycleReceiptV1,
@@ -1258,13 +1258,10 @@ class R2ApplicationArtifacts
   async loadPackageArtifact(contentHash: string): Promise<string> {
     const key = packageArtifactKey(contentHash);
     const object = await this.bucket.get(key);
-    const bundled = object
-      ? undefined
-      : FIRST_PARTY_PACKAGE_ARTIFACTS_V1.get(key);
-    if (!object && bundled === undefined) {
+    if (!object) {
       throw new Error(`package artifact "${contentHash}" was not found`);
     }
-    const module = object ? await object.text() : bundled!;
+    const module = await object.text();
     if ((await sha256Hex(module)) !== contentHash) {
       throw new Error(
         `package artifact "${contentHash}" failed hash verification`,

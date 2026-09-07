@@ -720,7 +720,6 @@ export type SetupHistory = {
       version: string;
       provenance:
         | { kind: "first-party" }
-        | { kind: "catalog"; catalogId: string; catalogGeneration: string }
         | { kind: "user"; userId: Identifier; authoredAt: Instant }
         | {
             kind: "bot";

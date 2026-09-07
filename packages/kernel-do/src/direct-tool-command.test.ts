@@ -7,7 +7,6 @@ import { planBotRunRecovery } from "./run-recovery.js";
 
 describe("durable direct tool commands", () => {
   const directTool = {
-    generationId: "generation-1",
     packageId: "weather-page",
     name: "weather_lookup",
     input: { city: "Sydney" },

@@ -133,7 +133,6 @@ describe("per-Bot isolate authority", () => {
       tools: true,
       memory: true,
       workspace: true,
-      notify: true,
       schedule: true,
     });
   });

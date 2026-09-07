@@ -15,7 +15,6 @@ import {
   plannedFoundationBackendContributions,
   shellBotContribution,
 } from "@frockbot/application-foundation/contributions";
-import { FIRST_PARTY_PACKAGE_ARTIFACTS_V1 } from "@frockbot/application-foundation/generated/applets-artifact";
 import { ComputerRegistry } from "@frockbot/computer-core";
 import { createFlySpriteProviderFeature } from "@frockbot/plugin-fly-sprite/agent";
 import { mountRuntimeFeaturesV1 } from "@frockbot/kernel-contracts";
@@ -74,9 +73,7 @@ import {
   decodePackageIframeToolCommandV1,
   decodeIsolateMemoryReadRequestV1,
   decodeIsolateMemoryWriteRequestV1,
-  decodeIsolateNotificationRequestV1,
   decodeIsolateScheduleRequestV1,
-  decodeIsolateAppletsRequestV1,
   decodeIsolateToolRequestV1,
   decodeIsolateWorkspaceDeleteRequestV1,
   decodeIsolateWorkspaceListRequestV1,
@@ -469,11 +466,6 @@ export class BotState extends DurableObject<BotStateEnv> {
             // and the Composition the Shell bootstraps have to be the same
             // plan, or a member could be in one and not the other.
             compileApplication: this.compileApplication,
-            // The immutable bytes of every first-party artifact-backed
-            // member the application ships. The store reads object storage
-            // first and falls back to these, so a deploy needs no seeding
-            // step for a Package that is already in this bundle.
-            bundledPackageArtifacts: FIRST_PARTY_PACKAGE_ARTIFACTS_V1,
             // The Durable Object owns the kernel authority; the Shell
             // Package supplies only its configuration and Composition
             // hooks.
@@ -1062,24 +1054,9 @@ export class BotState extends DurableObject<BotStateEnv> {
     );
   }
 
-  async isolateNotify(input: unknown) {
-    return (await this.contribution()).isolateNotify(
-      decodeIsolateCallRpcV1(
-        input,
-        decodeIsolateNotificationRequestV1,
-      ) as never,
-    );
-  }
-
   async isolateSchedule(input: unknown) {
     return (await this.contribution()).isolateSchedule(
       decodeIsolateCallRpcV1(input, decodeIsolateScheduleRequestV1) as never,
-    );
-  }
-
-  async isolateApplets(input: unknown) {
-    return (await this.contribution()).isolateApplets(
-      decodeIsolateCallRpcV1(input, decodeIsolateAppletsRequestV1) as never,
     );
   }
 

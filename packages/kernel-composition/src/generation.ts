@@ -7,14 +7,6 @@ import { canonicalJson, sha256 } from "./compiler.ts";
 export type PackageProvenanceV1 =
   | { kind: "first-party"; packageId: string; version: string }
   | {
-      kind: "catalog";
-      packageId: string;
-      version: string;
-      catalogId: string;
-      catalogGeneration: string;
-      contentHash: string;
-    }
-  | {
       kind: "user";
       packageId: string;
       version: string;
@@ -348,17 +340,6 @@ function decodePackageProvenanceV1(
   if (kind === "first-party") {
     exactKeys(value, common, [], label);
     identity();
-  } else if (kind === "catalog") {
-    exactKeys(
-      value,
-      [...common, "catalogId", "catalogGeneration", "contentHash"],
-      [],
-      label,
-    );
-    identity();
-    boundedString(value.catalogId, `${label}.catalogId`, 64);
-    boundedString(value.catalogGeneration, `${label}.catalogGeneration`, 64);
-    hashString(value.contentHash, `${label}.contentHash`);
   } else if (kind === "user") {
     exactKeys(value, [...common, "userId", "authoredAt"], [], label);
     identity();
@@ -422,14 +403,6 @@ function decodeCompositionMemberV1(
     value.artifact === undefined
       ? undefined
       : decodeArtifactRefV1(value.artifact, `${label}.artifact`);
-  if (
-    provenance.kind === "catalog" &&
-    (!artifact || artifact.contentHash !== provenance.contentHash)
-  ) {
-    throw new Error(
-      `${label}.catalog provenance must match its Bot-isolate artifact`,
-    );
-  }
   return {
     packageId,
     specifier,

@@ -52,6 +52,7 @@
     "@frockbot/application-foundation": "workspace:*",
     "@frockbot/client-core": "workspace:*",
     "@frockbot/client-ui": "workspace:*",
+    "@frockbot/compose-frockbot": "workspace:*",
     "@frockbot/computer-core": "workspace:*",
     "@frockbot/computer-host-protocol": "workspace:*",
     "@frockbot/configuration-core": "workspace:*",
