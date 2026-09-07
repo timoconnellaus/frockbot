@@ -124,6 +124,27 @@ export type BotLifecycleReceipt = {
   lifecycle: BotLifecycle;
   failure?: string;
 };
+export type SheepIdentity = {
+  schemaVersion: 1;
+  botId: BotId;
+  revision: number;
+  sheep: SheepRecipe;
+};
+export type BotSheepCommand = {
+  schemaVersion: 1;
+  type: "bot/update-sheep";
+  commandId: Identifier;
+  expectedRevision: number;
+  botId: BotId;
+  sheep: SheepRecipe;
+};
+export type FlockReceipt = {
+  schemaVersion: 1;
+  commandId: Identifier;
+  status: "applied" | "rejected";
+  revision: number;
+  failure?: string;
+};
 export type SkillRef = {
   schemaVersion: 1;
   source: "bot" | "user" | "managed";
@@ -804,6 +825,9 @@ export interface ProtocolTypes {
   BotLifecycleCommand: BotLifecycleCommand;
   BotCreateCommand: BotCreateCommand;
   BotLifecycleReceipt: BotLifecycleReceipt;
+  SheepIdentity: SheepIdentity;
+  BotSheepCommand: BotSheepCommand;
+  FlockReceipt: FlockReceipt;
   SkillRef: SkillRef;
   TurnCommand: TurnCommand;
   StopCommand: StopCommand;

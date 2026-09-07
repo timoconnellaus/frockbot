@@ -314,6 +314,12 @@ Screens (no router; `MaterialApp(home:)` plus `Navigator.push`):
 - `SearchOverlay` — `lib/search/overlay.dart` over `lib/search/controller.dart`:
   the backend index across every Bot, debounced, with each of its four states
   named
+- `CreateBotSheet` — `lib/flock/create.dart`: a sheep, a name and the first
+  thing to say to the Bot, opened from the sidebar's own create gesture
+- `MachinesPage` — `lib/machines/page.dart`: a host over `ViewDocumentView` for
+  the computers a Bot may reach, plus the pairing code the host holds
+- `TemplatesPage` — `lib/templates/page.dart`: the same host twice, a tab
+  apiece — what this Bot is packed into, and what this account has imported
 - `AppletDirectoryPage` → `AppletPage` — `lib/extensions/fallback.dart:77`, `:157`
 - `ViewSamplePage` — `lib/view/sample_page.dart:117`, reachable only from a `--dart-define=FROCKBOT_DEV_AUTH=true` build
 
@@ -451,6 +457,75 @@ route already carried them (`projectClientAnnouncementsV1`) and no Flutter
 client read them. `orderTranscript` already seated a system line by its own
 timestamp, which is why a compaction marker lands between the Turns it covers
 and the first verbatim one.
+
+**PR 9: the Flock, and three more projections.**
+
+`lib/flock/` is what a Bot looks like and what may be done to one.
+`sheep.dart` draws the avatar from two bundled layers — a background and the
+canonical sheep, the seven WebPs `apps/native/assets/sheep/` carries — and the
+same sheep is drawn wherever a Bot is: the sidebar row, its pinned tile, the
+thread, the working row and Bot settings, each from the `sheep.background` the
+directory already returns. Wearables are deferred, so the background is the
+whole of the choice a person makes and `defaultSheepRecipeV1` pins the other
+three bands to the catalogue's neutral roots — a Bot this app creates is still
+one the wardrobe can dress when they return.
+
+`create.dart` is the sidebar's create gesture, which no longer hands off to
+Manage Bots, and `SheepColourSheet` beside it is the Vue wardrobe's edit half —
+the one thing left of it under the single-default-avatar rule — reached by
+pressing the avatar in Bot settings and fenced on the sheep revision the read
+just reported rather than one held since the sheet opened. The command is written to the durable store before it is sent and
+cleared only once the authority has answered it, so a lost reply finishes the
+Bot that was asked for rather than making a second one; a 409 is not a failure
+but a re-fence on the revision it reported, under the same `commandId`. The
+first message, when there is one, goes through the same `BotSession` the
+conversation uses, so a new Bot's first Turn is admitted exactly as every other
+one is.
+
+`lifecycle.dart` is one retained `BotLifecycleCommand` per account, whichever
+surface issued it — `BotDangerZone` inside Bot settings' Advanced, or Manage
+Bots, which now shares it rather than keeping a second copy. The zone is
+contributed by the Flock rather than rebuilt inside the settings surface,
+because the directory a delete changes is the Flock's; that is the seam
+`FlockDangerZone.vue` draws too. The route answers `pending` for a saga that
+has not settled, which is why the zone locks rather than offering a second
+command.
+
+Three more projections in the settings-document family:
+
+- `app/machine/machines-document.ts` over the registry
+  (`GET /api/machines?as=document`). Two kinds: registering a machine, and
+  revoking one. A revoked machine says so rather than that it is connected —
+  its next poll is a 401 — and is not counted among the registered.
+- `app/bot-template/templates-document.ts`, two documents rather than one,
+  because they are two surfaces: what this Bot is packed into is per-Bot and
+  what this account has imported is not. Which Bot a pack is of is never in a
+  document — the host is showing one and names it when it turns the press into
+  a command, the same way the Routines host does. Import stays two-phase: a
+  plan is a pure read whose `commandId` becomes the `importId` the apply names.
+- The Routines document grows an editor. One form, seeded by the read — a new
+  Routine, or the one `?edit=` names — because a form per Routine would be a
+  second copy of every prompt in the document and would spend one of the
+  thirty-two declared actions on each of them. Which form is open is
+  navigation, so it is asked for on the read and written nowhere, and naming a
+  different Routine moves the revision so the host adopts a controller whose
+  field values are answers to the form now on screen. A webhook Routine also
+  gets its two key controls, and only a webhook one: the route refuses a key
+  for a scheduled Routine, so the control is absent rather than offered.
+
+**A secret the authority minted once is never in a document.** A webhook key
+and a pairing code are each signed once, stored only as a digest and answered
+on a receipt; a document can be read twice, so neither can be in one.
+`ViewSurfacePage` gained one seam for exactly this — a `banner` the host draws
+above the document — and the two surfaces hold their secret there for as long
+as the person is looking at it and nowhere else. It is the same reasoning
+`SettingField.secret` already carried, from the other direction.
+
+Creating a Bot and its danger zone are host chrome rather than projections, and
+deliberately: the sheep is bundled art rather than an `embed`'s https image,
+the create command fences on a directory revision `ViewController` has no way
+to express, and the lifecycle receipt has a third state — `pending` — that a
+view action's two do not.
 
 ### ViewNode — how a plugin renders
 

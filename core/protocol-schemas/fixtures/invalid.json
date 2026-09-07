@@ -393,6 +393,43 @@
     "value": null
   },
   {
+    "name": "FlockReceipt unknown status",
+    "schema": "FlockReceipt",
+    "value": {
+      "schemaVersion": 1,
+      "commandId": "command-1",
+      "status": "pending",
+      "revision": 3
+    }
+  },
+  {
+    "name": "SheepIdentity without a sheep",
+    "schema": "SheepIdentity",
+    "value": {
+      "schemaVersion": 1,
+      "botId": "default",
+      "revision": 2
+    }
+  },
+  {
+    "name": "BotSheepCommand with the wrong type",
+    "schema": "BotSheepCommand",
+    "value": {
+      "schemaVersion": 1,
+      "type": "bot/create",
+      "commandId": "command-1",
+      "expectedRevision": 2,
+      "botId": "default",
+      "sheep": {
+        "schemaVersion": 1,
+        "background": "hot-pink",
+        "upper": "upper-neutral",
+        "middle": "middle-neutral",
+        "lower": "lower-neutral"
+      }
+    }
+  },
+  {
     "name": "SkillRef wrong shape",
     "schema": "SkillRef",
     "value": null

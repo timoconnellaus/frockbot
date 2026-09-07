@@ -45,6 +45,9 @@ class ChatPane extends StatefulWidget {
   final void Function(TranscriptLine line)? onOpenRun;
   final VoidCallback? onOpenSettings;
   final void Function(String? runId)? onWorkingChanged;
+
+  /// The Bot's sheep background, so its avatar is the same one everywhere.
+  final String? background;
   const ChatPane({
     super.key,
     required this.controller,
@@ -57,6 +60,7 @@ class ChatPane extends StatefulWidget {
     this.onOpenRun,
     this.onOpenSettings,
     this.onWorkingChanged,
+    this.background,
   });
 
   @override
@@ -234,6 +238,7 @@ class _ChatPaneState extends State<ChatPane> {
         ),
         Expanded(
           child: TranscriptView(
+            background: widget.background,
             lines: [
               ...projectRuns(c.runs),
               ...projectAnnouncements(c.announcements),
@@ -304,6 +309,7 @@ class ConversationView extends StatefulWidget {
   final void Function(TranscriptLine line) onOpenRun;
   final VoidCallback? onOpenSettings;
   final void Function(String? runId)? onWorkingChanged;
+  final String? background;
   const ConversationView({
     super.key,
     required this.sessions,
@@ -314,6 +320,7 @@ class ConversationView extends StatefulWidget {
     required this.onOpenRun,
     this.onOpenSettings,
     this.onWorkingChanged,
+    this.background,
   });
 
   @override
@@ -362,6 +369,7 @@ class _ConversationViewState extends State<ConversationView>
 
   @override
   Widget build(BuildContext context) => ChatPane(
+    background: widget.background,
     controller: session.controller,
     onReconnect: session.channel.connect,
     approvals: approvals,

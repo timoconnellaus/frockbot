@@ -10,6 +10,7 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../flock/sheep.dart';
 import '../protocol/client_wire.generated.dart' as wire;
 import '../theme/frock_theme.dart';
 import 'semantics.dart';
@@ -279,6 +280,7 @@ class ShellSidebar extends StatelessWidget {
                             ShellIds.sidebarPinned(_id(bot)),
                             _PinnedTile(
                               name: _name(bot),
+                              background: bot.sheep.background,
                               active: _id(bot) == activeBotId,
                               unread: unread[_id(bot)]?.unread == true,
                               working: _working(bot),
@@ -365,7 +367,11 @@ class ShellSidebar extends StatelessWidget {
         key: ValueKey('bot-$botId'),
         selected: botId == activeBotId,
         enabled: !isArchived,
-        leading: SheepAvatar(size: 34, working: _working(bot)),
+        leading: SheepAvatar(
+          size: 34,
+          background: bot.sheep.background,
+          working: _working(bot),
+        ),
         title: Row(
           children: [
             Expanded(
@@ -505,12 +511,14 @@ class _Footer extends StatelessWidget {
 
 class _PinnedTile extends StatelessWidget {
   final String name;
+  final String background;
   final bool active;
   final bool unread;
   final bool working;
   final VoidCallback onTap;
   const _PinnedTile({
     required this.name,
+    required this.background,
     required this.active,
     required this.unread,
     required this.working,
@@ -537,7 +545,11 @@ class _PinnedTile extends StatelessWidget {
           children: [
             Stack(
               children: [
-                SheepAvatar(size: 40, working: working),
+                SheepAvatar(
+                  size: 40,
+                  background: background,
+                  working: working,
+                ),
                 if (unread)
                   Positioned(
                     right: 0,

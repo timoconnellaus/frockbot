@@ -42,6 +42,9 @@ declare const validators: {
   isBotLifecycleReceipt(
     value: unknown,
   ): value is ProtocolTypes["BotLifecycleReceipt"];
+  isSheepIdentity(value: unknown): value is ProtocolTypes["SheepIdentity"];
+  isBotSheepCommand(value: unknown): value is ProtocolTypes["BotSheepCommand"];
+  isFlockReceipt(value: unknown): value is ProtocolTypes["FlockReceipt"];
   isSkillRef(value: unknown): value is ProtocolTypes["SkillRef"];
   isTurnCommand(value: unknown): value is ProtocolTypes["TurnCommand"];
   isStopCommand(value: unknown): value is ProtocolTypes["StopCommand"];

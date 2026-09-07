@@ -4,9 +4,9 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 
 import '../client/transport.dart';
+import '../flock/sheep.dart';
 import '../protocol/client_wire.generated.dart' as wire;
 import '../shell/semantics.dart';
-import '../theme/frock_theme.dart';
 import '../theme/states.dart';
 import 'model_picker.dart';
 
@@ -202,11 +202,26 @@ class BotSettingsView extends StatefulWidget {
   final BotSettingsController controller;
   final VoidCallback? onClose;
   final Future<void> Function()? onSaved;
+
+  /// This Bot's sheep, so the avatar here is the one the sidebar draws.
+  final String? background;
+
+  /// Opens the colour sheet. The Flock owns what a Bot looks like, so the
+  /// settings surface offers the gesture and nothing else.
+  final VoidCallback? onEditAvatar;
+
+  /// Archiving, restoring and deleting belong to the Flock, whose directory
+  /// they change, so the zone is handed in rather than rebuilt here. This is
+  /// the seam `FlockDangerZone.vue` draws too.
+  final Widget? dangerZone;
   const BotSettingsView({
     super.key,
     required this.controller,
     this.onClose,
     this.onSaved,
+    this.background,
+    this.onEditAvatar,
+    this.dangerZone,
   });
 
   @override
@@ -328,15 +343,24 @@ class _BotSettingsViewState extends State<BotSettingsView> {
               ],
               identified(
                 SettingsIds.botAvatar,
-                Column(
-                  children: [
-                    const SheepAvatar(size: 72),
-                    const SizedBox(height: 8),
-                    Text(
-                      '${state.name.isEmpty ? 'This Bot' : state.name} avatar',
-                      style: type.bodySmall,
+                InkWell(
+                  onTap: widget.onEditAvatar,
+                  borderRadius: BorderRadius.circular(16),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    child: Column(
+                      children: [
+                        SheepAvatar(size: 72, background: widget.background),
+                        const SizedBox(height: 8),
+                        Text(
+                          widget.onEditAvatar == null
+                              ? '${state.name.isEmpty ? 'This Bot' : state.name} avatar'
+                              : 'Change colour',
+                          style: type.bodySmall,
+                        ),
+                      ],
                     ),
-                  ],
+                  ),
                 ),
               ),
               const SizedBox(height: 16),
@@ -430,6 +454,7 @@ class _BotSettingsViewState extends State<BotSettingsView> {
                         ),
                       ),
                     ),
+                    if (widget.dangerZone case final Widget zone) zone,
                   ],
                 ),
               ),

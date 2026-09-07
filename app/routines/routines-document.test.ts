@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import type { ViewNode } from "@frockbot/core/protocol-schemas";
 import {
+  ROUTINE_EDITOR_FIELDS_V1,
   routineMomentV1,
   routinesDocumentV1,
   routinesRevisionV1,
@@ -72,6 +73,8 @@ test("every control names the command it means", () => {
   expect(
     actions.map((node) => (node.type === "action" ? node.input?.kind : "")),
   ).toEqual([
+    "save-routine",
+    "edit-routine",
     "set-routine-enabled",
     "run-routine",
     "open-runs",
@@ -81,9 +84,14 @@ test("every control names the command it means", () => {
   ]);
   expect(document.actions.map((action) => action.id).sort()).toEqual([
     "acknowledge-inbox",
+    "cancel-edit",
     "delete-routine",
+    "edit-routine",
     "open-runs",
+    "revoke-key",
+    "rotate-key",
     "run-routine",
+    "save-routine",
     "set-routine-enabled",
   ]);
 });
@@ -169,4 +177,128 @@ test("more Routines than the renderer's budget stop, and the document says so", 
       (node) => node.type === "text" && node.text.includes("need a newer app"),
     ),
   ).toBe(true);
+});
+
+test("the editor is one collapsed form until a Routine is named", () => {
+  const empty = walk(routinesDocumentV1(frame()).root).find(
+    (node) => node.type === "group" && node.title === "New Routine",
+  );
+  expect(empty?.type === "group" && empty.collapsed).toBe(true);
+  const fields = walk(empty!).filter((node) => node.type === "field");
+  expect(
+    fields.map((node) => (node.type === "field" ? node.field.id : "")),
+  ).toEqual([
+    ROUTINE_EDITOR_FIELDS_V1.name,
+    ROUTINE_EDITOR_FIELDS_V1.prompt,
+    ROUTINE_EDITOR_FIELDS_V1.timing,
+    ROUTINE_EDITOR_FIELDS_V1.schedule,
+    ROUTINE_EDITOR_FIELDS_V1.timezone,
+  ]);
+  // A new Routine inherits the zone this Bot's Routines already use: the app
+  // has no IANA zone of its own to send.
+  const zone = fields.at(-1);
+  expect(zone?.type === "field" && zone.field.value).toBe("Australia/Sydney");
+});
+
+test("naming a Routine opens the editor on its own values and moves the revision", () => {
+  const closed = routinesDocumentV1(frame());
+  const open = routinesDocumentV1(frame({ editing: morning }));
+  expect(open.revision).not.toBe(closed.revision);
+  const editor = walk(open.root).find(
+    (node) => node.type === "group" && node.title === "Edit Morning brief",
+  );
+  expect(editor?.type === "group" && editor.collapsed).toBe(false);
+  const values = walk(editor!)
+    .filter((node) => node.type === "field")
+    .map((node) => (node.type === "field" ? node.field.value : null));
+  expect(values).toEqual([
+    "Morning brief",
+    "Summarise overnight email.",
+    "schedule",
+    "0 9 * * *",
+    "Australia/Sydney",
+  ]);
+  // Editing offers a way back out; creating has nothing to cancel.
+  expect(
+    walk(open.root).some(
+      (node) => node.type === "action" && node.actionId === "cancel-edit",
+    ),
+  ).toBe(true);
+  expect(
+    walk(closed.root).some(
+      (node) => node.type === "action" && node.actionId === "cancel-edit",
+    ),
+  ).toBe(false);
+});
+
+test("only a webhook Routine is offered a key, and only a keyed one a revoke", () => {
+  const scheduled = walk(routinesDocumentV1(frame()).root)
+    .filter((node) => node.type === "action")
+    .map((node) => (node.type === "action" ? node.actionId : ""));
+  expect(scheduled).not.toContain("rotate-key");
+  expect(scheduled).not.toContain("revoke-key");
+
+  const fresh: RoutineViewV1 = {
+    ...morning,
+    schedule: undefined,
+    trigger: { kind: "webhook" },
+    nextRunAt: undefined,
+  };
+  const minting = walk(routinesDocumentV1(frame({ routines: [fresh] })).root);
+  const mint = minting.find(
+    (node) => node.type === "action" && node.actionId === "rotate-key",
+  );
+  expect(mint?.type === "action" && mint.label).toBe("Mint key");
+  expect(
+    minting.some(
+      (node) => node.type === "action" && node.actionId === "revoke-key",
+    ),
+  ).toBe(false);
+
+  const keyed = walk(
+    routinesDocumentV1(frame({ routines: [{ ...fresh, hookKeyVersion: 2 }] }))
+      .root,
+  );
+  const rotate = keyed.find(
+    (node) => node.type === "action" && node.actionId === "rotate-key",
+  );
+  expect(rotate?.type === "action" && rotate.label).toBe("Rotate key");
+  expect(
+    keyed.some(
+      (node) => node.type === "action" && node.actionId === "revoke-key",
+    ),
+  ).toBe(true);
+});
+
+test("a minted key is never in the document", () => {
+  const document = routinesDocumentV1(
+    frame({
+      routines: [
+        {
+          ...morning,
+          schedule: undefined,
+          trigger: { kind: "webhook" },
+          hookKeyVersion: 1,
+        },
+      ],
+    }),
+  );
+  // The projection is handed a view that has never carried key material; this
+  // asserts the shape stays that way as the editor grows.
+  expect(JSON.stringify(document)).not.toContain("token");
+  expect(JSON.stringify(document)).not.toContain("hookKey");
+});
+
+test("a key rotation moves the revision, so the host reads the document again", () => {
+  const webhook: RoutineViewV1 = {
+    ...morning,
+    schedule: undefined,
+    trigger: { kind: "webhook" },
+    hookKeyVersion: 1,
+  };
+  expect(routinesRevisionV1(frame({ routines: [webhook] }))).not.toBe(
+    routinesRevisionV1(
+      frame({ routines: [{ ...webhook, hookKeyVersion: 2 }] }),
+    ),
+  );
 });

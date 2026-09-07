@@ -139,7 +139,7 @@ void main() {
             : {'schemaVersion': 1, 'revision': 0, 'bots': []};
       }
       final command = body as Map;
-      expect(jsonDecode(store.values['bot-recovery.tim']!), command);
+      expect(jsonDecode(store.values['bot-lifecycle.tim']!), command);
       calls.add(command);
       if (lost) {
         lost = false;

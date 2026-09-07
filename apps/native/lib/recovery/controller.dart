@@ -1,30 +1,41 @@
-import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 
 import '../client/transport.dart';
+import '../flock/lifecycle.dart';
 import '../protocol/client_wire.generated.dart' as wire;
 
 class BotRecoveryController extends ChangeNotifier {
   final NativeApi api;
   final LocalStore store;
   final String userId;
-  BotRecoveryController(this.api, this.store, this.userId);
+
+  /// Archiving, restoring and deleting are the Flock's, and there is one
+  /// retained command for the account however it was issued — from here, or
+  /// from the danger zone in Bot settings.
+  final BotLifecycleCommands lifecycle;
+  BotRecoveryController(this.api, this.store, this.userId)
+    : lifecycle = BotLifecycleCommands(api, store, userId) {
+    lifecycle.addListener(_notify);
+  }
   List<wire.BotRegistration> bots = [];
   Map<String, wire.BotLifecycle> lifecycles = {};
   Map<String, dynamic>? history;
   List<Map<String, dynamic>> audit = [];
   String? auditCursor;
   String auditState = 'ready';
-  String? error;
+  String? _error;
   String? detailError;
-  String? message;
-  bool loading = false, loaded = false, saving = false, detailsLoading = false;
+  bool loading = false, loaded = false, detailsLoading = false;
   bool _disposed = false;
-  Map<String, dynamic>? _pending;
-  bool get pending => _pending != null;
-  String? get pendingBot => _pending?['botId'] as String?;
-  String get _key => 'bot-recovery.$userId';
+
+  /// A refused change outranks a stale read failure: it is the thing the
+  /// person just did and is waiting to hear about.
+  String? get error => lifecycle.error ?? _error;
+  String? get message => lifecycle.message;
+  bool get saving => lifecycle.saving;
+  bool get pending => lifecycle.pending;
+  String? get pendingBot => lifecycle.pendingBot;
   List<wire.BotRegistration> get active => bots
       .where((b) => lifecycles[b.botId.value]?.status != 'archived')
       .toList();
@@ -40,12 +51,7 @@ class BotRecoveryController extends ChangeNotifier {
     loading = true;
     _notify();
     try {
-      final saved = await store.read(_key);
-      if (saved != null) {
-        final value = jsonDecode(saved) as Map<String, dynamic>;
-        wire.BotLifecycleCommand.fromJson(value);
-        _pending = value;
-      }
+      await lifecycle.restore();
       final directory = wire.BotDirectory.fromJson(
         await api.request('/api/bots'),
       );
@@ -58,9 +64,9 @@ class BotRecoveryController extends ChangeNotifier {
         for (final state in states.lifecycles) state.botId.value: state,
       };
       loaded = true;
-      error = null;
+      _error = null;
     } catch (_) {
-      error = 'Couldn’t reach FrockBot. Check your connection and try again.';
+      _error = 'Couldn’t reach FrockBot. Check your connection and try again.';
     } finally {
       loading = false;
       _notify();
@@ -68,67 +74,13 @@ class BotRecoveryController extends ChangeNotifier {
   }
 
   Future<void> change(String botId, String type) async {
-    if (_disposed || saving || pending) return;
-    final command = wire.BotLifecycleCommand.fromJson({
-      'schemaVersion': 1,
-      'type': type,
-      'commandId': randomId(),
-      'botId': botId,
-    });
-    _pending = Map<String, dynamic>.from(command.toJson() as Map);
-    await retry();
+    if (_disposed) return;
+    if (await lifecycle.change(botId, type) && !_disposed) await load();
   }
 
   Future<void> retry() async {
-    if (_disposed || saving || _pending == null) return;
-    saving = true;
-    message = null;
-    _notify();
-    final command = _pending!;
-    final botId = command['botId'] as String;
-    var applied = false;
-    try {
-      await store.write(_key, jsonEncode(command));
-      if (_disposed) return;
-      final raw = await api.request(
-        '/api/bots/${Uri.encodeComponent(botId)}/lifecycle',
-        body: command,
-      );
-      final receipt = Map<String, dynamic>.from(
-        wire.BotLifecycleReceipt.fromJson(raw).toJson() as Map,
-      );
-      if (receipt['commandId'] != command['commandId'] ||
-          (receipt['botId'] != botId ||
-              (receipt['lifecycle'] as Map)['botId'] != botId)) {
-        throw const FormatException('Mismatched receipt');
-      }
-      if (receipt['status'] == 'pending') {
-        message = 'This change is still finishing. Check its status shortly.';
-        return;
-      }
-      await store.delete(_key);
-      _pending = null;
-      if (receipt['status'] == 'rejected') {
-        error = 'That change couldn’t be completed. Refresh your Bots and try again.';
-        return;
-      }
-      applied = true;
-      error = null;
-      message = switch (command['type']) {
-        'bot/archive' => 'Bot archived. You can restore it from Archived Bots.',
-        'bot/restore' => 'Bot restored.',
-        'bot/delete' => 'Bot deleted.',
-        _ => 'Change recorded.',
-      };
-    } catch (_) {
-      error = 'Couldn’t confirm that change. Check its status before trying another action.';
-    } finally {
-      saving = false;
-      _notify();
-    }
-    if (applied && !_disposed) {
-      await load();
-    }
+    if (_disposed) return;
+    if (await lifecycle.retry() && !_disposed) await load();
   }
 
   Future<void> loadDetails(
@@ -207,6 +159,8 @@ class BotRecoveryController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    lifecycle.removeListener(_notify);
+    lifecycle.dispose();
     super.dispose();
   }
 }

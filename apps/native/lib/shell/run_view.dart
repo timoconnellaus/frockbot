@@ -19,7 +19,7 @@ import 'package:flutter/scheduler.dart' show Ticker;
 
 import 'package:flutter/material.dart';
 
-import '../theme/frock_theme.dart';
+import '../flock/sheep.dart';
 import 'semantics.dart';
 import 'transcript_model.dart';
 
@@ -188,7 +188,16 @@ ActivityTrailMemory activityTrailBegin(
 class WorkingIndicator extends StatefulWidget {
   final TranscriptLine line;
   final String? label;
-  const WorkingIndicator({super.key, required this.line, this.label});
+
+  /// The Bot's sheep, so the working row wears the same one the thread and the
+  /// sidebar do.
+  final String? background;
+  const WorkingIndicator({
+    super.key,
+    required this.line,
+    this.label,
+    this.background,
+  });
 
   @override
   State<WorkingIndicator> createState() => _WorkingIndicatorState();
@@ -283,7 +292,7 @@ class _WorkingIndicatorState extends State<WorkingIndicator>
         label: widget.label ?? 'Working',
         child: Row(
           children: [
-            const SheepAvatar(size: 28),
+            SheepAvatar(size: 28, background: widget.background),
             SizedBox(
               width: 96,
               height: 28,

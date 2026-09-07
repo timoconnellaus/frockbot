@@ -155,6 +155,7 @@
     "./shell/backend-runner": "./shell/backend-runner.ts",
     "./shell/backend-runtime": "./shell/backend-runtime.ts",
     "./shell/backend-state": "./shell/backend-state.ts",
+    "./shell/moment": "./shell/moment.ts",
     "./shell/client": "./shell/client/index.ts",
     "./shell/client/FrockBotApp.vue": "./shell/client/FrockBotApp.vue",
     "./shell/client/deployment": "./shell/client/deployment.ts",

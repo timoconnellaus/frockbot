@@ -559,6 +559,87 @@
       ],
       "additionalProperties": false
     },
+    "SheepIdentity": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "botId": {
+          "$ref": "#/$defs/BotId"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "sheep": {
+          "$ref": "#/$defs/SheepRecipe"
+        }
+      },
+      "required": ["schemaVersion", "botId", "revision", "sheep"],
+      "additionalProperties": false
+    },
+    "BotSheepCommand": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "type": {
+          "const": "bot/update-sheep"
+        },
+        "commandId": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "botId": {
+          "$ref": "#/$defs/BotId"
+        },
+        "sheep": {
+          "$ref": "#/$defs/SheepRecipe"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "type",
+        "commandId",
+        "expectedRevision",
+        "botId",
+        "sheep"
+      ],
+      "additionalProperties": false
+    },
+    "FlockReceipt": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "commandId": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "status": {
+          "enum": ["applied", "rejected"]
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "failure": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8000
+        }
+      },
+      "required": ["schemaVersion", "commandId", "status", "revision"],
+      "additionalProperties": false
+    },
     "SkillRef": {
       "type": "object",
       "properties": {

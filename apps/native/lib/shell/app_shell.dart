@@ -21,12 +21,16 @@ import '../client/bot_sessions.dart';
 import '../client/transport.dart';
 import '../connections/page.dart';
 import '../extensions/fallback.dart';
+import '../flock/create.dart';
+import '../flock/lifecycle.dart';
+import '../machines/page.dart';
 import '../plugins/page.dart';
 import '../recovery/page.dart';
 import '../routines/page.dart';
 import '../search/overlay.dart';
 import '../settings/bot_settings.dart';
 import '../settings/page.dart';
+import '../templates/page.dart';
 import '../view/sample_page.dart';
 import '../protocol/client_wire.generated.dart' as wire;
 import 'chat_pane.dart';
@@ -63,6 +67,14 @@ class AppShell extends StatefulWidget {
 
 class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   final ShellSlots slots = ShellSlots();
+
+  /// One retained lifecycle command for the account, whichever surface issued
+  /// it: the danger zone in Bot settings, or Manage Bots.
+  late final BotLifecycleCommands lifecycle = BotLifecycleCommands(
+    widget.api,
+    widget.store,
+    widget.userId,
+  );
   late final ActivityController activity = ActivityController(
     widget.api,
     widget.store,
@@ -95,6 +107,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     activity.addListener(_repaint);
     widget.botLinks.addListener(_followBotLink);
+    // A lifecycle command nobody has an answer for is adopted here rather than
+    // when the danger zone happens to be opened: it is the account's, and it
+    // is what locks the zone until it is accounted for.
+    unawaited(lifecycle.restore());
     unawaited(load());
     _startPolling();
   }
@@ -302,7 +318,13 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       'bot-settings',
       (context) => SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
-        child: BotSettingsView(controller: controller, onSaved: load),
+        child: BotSettingsView(
+          controller: controller,
+          onSaved: load,
+          background: _background(botId),
+          onEditAvatar: () => unawaited(_editAvatar(botId, name)),
+          dangerZone: _dangerZone(botId, name),
+        ),
       ),
       label: 'Settings',
     );
@@ -456,11 +478,73 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           top: false,
           child: SingleChildScrollView(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
-            child: BotSettingsView(controller: controller, onSaved: load),
+            child: BotSettingsView(
+              controller: controller,
+              onSaved: load,
+              background: _background(bot.botId.value),
+              onEditAvatar: () =>
+                  unawaited(_editAvatar(bot.botId.value, _name(bot))),
+              dangerZone: _dangerZone(bot.botId.value, _name(bot)),
+            ),
           ),
         ),
       ),
     );
+  }
+
+  /// The sheep a Bot wears, from the registration the directory carries.
+  String? _background(String botId) => bots
+      .where((bot) => bot.botId.value == botId)
+      .map((bot) => bot.sheep.background)
+      .firstOrNull;
+
+  /// The Bot's colour, which the Flock owns and the directory carries — so a
+  /// change is read back with everything else rather than patched in here.
+  Future<void> _editAvatar(String botId, String botName) async {
+    final chosen = await SheepColourSheet.show(
+      context,
+      api: widget.api,
+      botId: botId,
+      botName: botName,
+    );
+    if (chosen != null) await load();
+  }
+
+  Widget _dangerZone(String botId, String botName) => BotDangerZone(
+    lifecycle: lifecycle,
+    botId: botId,
+    botName: botName,
+    archived: archived.contains(botId),
+    onChanged: load,
+    // The Bot this panel is about no longer exists, so the panel closes and
+    // the shell falls back to whatever the reload leaves selected.
+    onDeleted: () => setState(() {
+      panelOpen = false;
+      selected = null;
+    }),
+  );
+
+  /// Adding a Bot: the sheet, then the Bot, then the first thing said to it.
+  ///
+  /// The message is sent through the same session the conversation uses, so a
+  /// new Bot's first Turn is admitted exactly as every other one is.
+  Future<void> _createBot() async {
+    setState(() => navOpen = false);
+    final controller = CreateBotController(
+      widget.api,
+      widget.store,
+      widget.userId,
+    );
+    final made = await CreateBotSheet.show(context, controller);
+    controller.dispose();
+    if (made == null || !mounted) return;
+    await load();
+    if (!mounted) return;
+    _select(made.botId);
+    if (made.firstMessage.isEmpty) return;
+    final session = widget.sessions.open(widget.userId, made.botId);
+    await session.start();
+    await session.controller.send(made.firstMessage);
   }
 
   @override
@@ -556,14 +640,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
               showHidden: showHidden,
               inboxCount: activity.notices.length,
               onSelect: _select,
-              onCreateBot: () => _push(
-                BotRecoveryPage(
-                  api: widget.api,
-                  store: widget.store,
-                  userId: widget.userId,
-                  changed: load,
-                ),
-              ),
+              onCreateBot: () => unawaited(_createBot()),
               onSearch: _openSearch,
               onProfile: _openProfile,
               onInbox: () => _push(
@@ -599,6 +676,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                     botId: bot.botId.value,
                     onOpenRun: _openRun,
                     onOpenSettings: _openSettings,
+                    background: _background(bot.botId.value),
                     onWorkingChanged: (runId) {
                       if (runId != workingRunId && mounted) {
                         setState(() => workingRunId = runId);
@@ -740,6 +818,48 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                   ),
                 ),
                 identified(
+                  TemplateIds.profileEntry,
+                  ListTile(
+                    leading: const Icon(Icons.inventory_2_outlined),
+                    title: const Text('Bot templates'),
+                    subtitle: const Text(
+                      'Pack a Bot up, or unpack one someone sent you',
+                    ),
+                    onTap: () {
+                      Navigator.of(sheet).pop();
+                      _push(
+                        TemplatesPage(
+                          api: widget.api,
+                          store: widget.store,
+                          userId: widget.userId,
+                          botId: selected?.botId.value,
+                          botName: selected == null ? null : _name(selected!),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                identified(
+                  MachineIds.profileEntry,
+                  ListTile(
+                    leading: const Icon(Icons.computer_outlined),
+                    title: const Text('Registered machines'),
+                    subtitle: const Text(
+                      'Computers a Bot may reach, with your approval',
+                    ),
+                    onTap: () {
+                      Navigator.of(sheet).pop();
+                      _push(
+                        MachinesPage(
+                          api: widget.api,
+                          store: widget.store,
+                          userId: widget.userId,
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                identified(
                   PluginIds.profileEntry,
                   ListTile(
                     leading: const Icon(Icons.extension_outlined),
@@ -835,6 +955,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     _activityTimer?.cancel();
     activity.removeListener(_repaint);
     activity.dispose();
+    lifecycle.dispose();
     botSettings?.dispose();
     routineInbox?.dispose();
     slots.dispose();
