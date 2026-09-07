@@ -22,8 +22,14 @@ export class MemoryStorage {
     return Promise.resolve();
   }
 
-  delete(key: string): Promise<boolean> {
-    return Promise.resolve(this.values.delete(key));
+  delete(key: string): Promise<boolean>;
+  delete(keys: string[]): Promise<number>;
+  delete(key: string | string[]): Promise<boolean | number> {
+    if (typeof key === "string")
+      return Promise.resolve(this.values.delete(key));
+    return Promise.resolve(
+      key.filter((entry) => this.values.delete(entry)).length,
+    );
   }
 
   list<T>(options: {

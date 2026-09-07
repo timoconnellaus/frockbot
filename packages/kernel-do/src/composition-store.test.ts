@@ -136,6 +136,51 @@ describe("Bot Durable Object Composition records", () => {
     ]);
   });
 
+  test("records that no longer decode are cleared and the Bot starts over on bootstrap", async () => {
+    const storage = new MemoryStorage();
+    const stale = {
+      generationId: "stale",
+      artifactSetHash: "0".repeat(64),
+    };
+    await storage.put({
+      "composition:current": stale,
+      "composition:generation:stale": {
+        schemaVersion: 1,
+        generationId: "stale",
+        artifactSetHash: stale.artifactSetHash,
+        createdAt: "2026-08-01T00:00:00.000Z",
+        origin: { kind: "bootstrap" },
+        status: "active",
+        members: [
+          {
+            packageId: "shell",
+            specifier: "@frockbot/plugin-shell",
+            version: "0.0.1",
+            manifestHash: "1".repeat(64),
+            provenance: { kind: "first-party" },
+          },
+        ],
+      },
+      "composition:index:2026-08-01T00:00:00.000Z:stale": "stale",
+      "composition:last-known-good": "stale",
+      "composition:failure-count:stale": 2,
+    });
+    const store = createStore(storage);
+
+    const current = await store.current();
+
+    expect(current.origin).toEqual({ kind: "bootstrap" });
+    expect(current.members).toEqual([]);
+    expect(await store.read("stale")).toBeUndefined();
+    expect([...storage.values.keys()].sort()).toEqual([
+      "composition:current",
+      `composition:generation:${current.generationId}`,
+      `composition:index:2026-08-31T00:00:00.000Z:${current.generationId}`,
+      "composition:last-known-good",
+    ]);
+    expect(await createStore(storage).current()).toEqual(current);
+  });
+
   test("committing a proposal supersedes the generation it replaces", async () => {
     const storage = new MemoryStorage();
     const store = createStore(storage);
