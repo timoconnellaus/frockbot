@@ -253,11 +253,7 @@ packages/
   kernel-agent-loop/ Concrete event-sourced durable agent loop and Agent registry
   kernel-do/        Bot Durable Object admission, log, cursor, scheduling, and Composition generations
   compose-core/     Framework-agnostic runtime extension surface for Compose
-  compose-agent/    Framework-neutral agent primitives built on Compose
-  compose-cloudflare/ Dynamic Worker and Durable Object facet hosts for Compose
   compose-frockbot/ The plugin descriptor and the Bot isolate host that loads a member's artifact
-  compose-tools/    Framework-neutral composer tool definitions over a Compose client
-  compose-typescript/ Type-check and transpile Compose plugin source against its stubs
   applet-sdk/       Applet authoring SDK, component kit, linter, and `applet` CLI
   client-core/      Shared client runtime helpers and brand typography stylesheet
   client-ui/        Reusable Vue primitives and surface registry

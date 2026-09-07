@@ -21,7 +21,7 @@ Named environments on the app Worker (`apps/cloudflare/wrangler.jsonc`):
 - `staging` (:269) — `frockbot-cloudflare-staging`, routes `staging-bot.frockbot.com` and `ui.staging-bot.frockbot.com`
 - `e2e` (:386) — `"routes": []`, never deployed
 
-Not deployed, though they carry wrangler configs: `packages/compose-cloudflare/wrangler.jsonc` and `packages/compose-typescript/wrangler.jsonc` (test fixtures, compatibility date `2026-05-01`), and `apps/cloudflare/e2e/frock-ai-fake.wrangler.jsonc` (bound as a service by the `e2e` env, run from the local wrangler dev registry).
+Not deployed, though it carries a wrangler config: `apps/cloudflare/e2e/frock-ai-fake.wrangler.jsonc` (bound as a service by the `e2e` env, run from the local wrangler dev registry).
 
 `apps/agent-runtime` is a library consumed by `apps/cloudflare/src/bot-state.ts` and `packages/plugin-shell`. It is not a deployable.
 
