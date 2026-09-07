@@ -718,7 +718,12 @@ class _ChatPaneState extends State<ChatPane> {
                   ? 'Waiting…'
                   : 'Working…',
             'cancelled' => 'Stopped',
-            'failed' => 'The reply couldn’t be completed.',
+            // The server writes the sentence a person should read; the
+            // generic line is only for a record that carries none.
+            'failed' =>
+              ((run['outcome'] as Map<String, dynamic>?)?['message']
+                      as String?) ??
+                  'The reply couldn’t be completed.',
             _ => 'This reply needs attention.',
           }, style: Theme.of(context).textTheme.bodySmall),
         ),
