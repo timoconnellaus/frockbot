@@ -311,7 +311,11 @@ class _SettingsPageState extends State<SettingsPage>
           onTap: () => Navigator.of(context).push(
             MaterialPageRoute<void>(
               builder: (_) =>
-                  ConnectionsPage(api: widget.api, userId: widget.userId),
+                  ConnectionsPage(
+                    api: widget.api,
+                    store: widget.store,
+                    userId: widget.userId,
+                  ),
             ),
           ),
         ),

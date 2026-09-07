@@ -409,7 +409,7 @@ export type MarkReadCommand =
 export type SettingField = {
   id: Identifier;
   label: string;
-  kind: "text" | "boolean" | "number" | "select";
+  kind: "text" | "boolean" | "number" | "select" | "secret";
   value: Json;
   options?: Array<string>;
   editable: boolean;
@@ -643,6 +643,36 @@ export type ConnectionsFrame = {
       | "revoking"
       | "reconciliation-required"
       | "failed";
+    packageId: Identifier;
+    kind: "model" | "connector";
+    authorization: "none" | "api-key" | "ambient-native" | "grant";
+    detail?: string;
+    failure?: string;
+  }>;
+  providers: Array<{
+    packageId: Identifier;
+    connectionTypeId: Identifier;
+    displayName: string;
+    kind: "model" | "connector";
+    authorization: "none" | "api-key" | "ambient-native" | "grant";
+    connected: number;
+    mayConnect: boolean;
+    settings?: Array<SettingField>;
+  }>;
+  modelInUse?: string;
+};
+export type PluginsFrame = {
+  schemaVersion: 1;
+  ownerId: Identifier;
+  revision: number;
+  plugins: Array<{
+    packageId: Identifier;
+    version: string;
+    displayName: string;
+    summary: string;
+    state: "not-installed" | "installed" | "disabled" | "failed";
+    home: "models" | "connections" | "user-settings" | "none";
+    failure?: string;
   }>;
 };
 export type NotificationDirectory = {
@@ -829,6 +859,7 @@ export interface ProtocolTypes {
   SettingsOptionsQuery: SettingsOptionsQuery;
   SettingsOptionsPage: SettingsOptionsPage;
   ConnectionsFrame: ConnectionsFrame;
+  PluginsFrame: PluginsFrame;
   NotificationDirectory: NotificationDirectory;
   MarkReadReceipt: MarkReadReceipt;
   BotLifecycleDirectory: BotLifecycleDirectory;

@@ -423,6 +423,42 @@ void main() {
     );
   });
 
+  testWidgets('a select whose value is not one of its choices says so', (
+    tester,
+  ) async {
+    final harness = Harness();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: FrockTheme.theme(Brightness.dark),
+        home: Scaffold(
+          body: ViewDocumentView(
+            document: wire.ViewDocument.fromJson(
+              document({
+                'type': 'field',
+                'field': {
+                  'id': 'format',
+                  'label': 'Format',
+                  // What an unset projected setting carries: the JSON `null`,
+                  // encoded, which is no choice's value.
+                  'kind': 'select',
+                  'value': 'null',
+                  'editable': true,
+                  'choices': [
+                    {'label': 'WebP', 'value': '"webp"'},
+                    {'label': 'PNG', 'value': '"png"'},
+                  ],
+                },
+              }),
+            ),
+            controller: harness.controller,
+          ),
+        ),
+      ),
+    );
+    expect(tester.takeException(), isNull);
+    expect(find.text('Not set'), findsOneWidget);
+  });
+
   testWidgets('a host field builder owns the field its choiceSource names', (
     tester,
   ) async {

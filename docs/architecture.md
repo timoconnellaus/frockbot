@@ -299,7 +299,12 @@ Screens (no router; `MaterialApp(home:)` plus `Navigator.push`):
 - `BotSettingsView` — `lib/settings/bot_settings.dart`: one Bot's identity,
   notifications and model, in the `right-panel` slot at wide widths and a
   page on the phone
-- `ConnectionsPage` — `lib/connections/page.dart:12`
+- `ConnectionsPage` — `lib/connections/page.dart`: a host over
+  `ViewDocumentView` for the accounts a User authorizes once for every Bot
+- `PluginsPage` — `lib/plugins/page.dart`: the same host over the Plugins
+  document, plus the controller that carries enablement to the settings route
+- `AdminPage` — `lib/admin/page.dart`: the deployment's signups switch, over
+  `/api/admin/policy`
 - `AppletDirectoryPage` → `AppletPage` — `lib/extensions/fallback.dart:77`, `:157`
 - `ViewSamplePage` — `lib/view/sample_page.dart:117`, reachable only from a `--dart-define=FROCKBOT_DEV_AUTH=true` build
 
@@ -318,7 +323,7 @@ Auth is PKCE in the system browser (`lib/client/auth.dart:17`), returning over a
 
 WebView is used in one place, `AppletPage` (`lib/extensions/fallback.dart:157-465`), loading the anonymous bootstrap at `ui.bot.frockbot.com/native-fallback` (server side `apps/cloudflare/src/native-fallback.ts:34`). It never receives the native session.
 
-**Capability gap.** Present in web, absent in native: Bot creation, starting a conversation, in-app connector authorize and revoke, admin, sheep recipe editing, routines, Bot templates, registered machines, the Computer overlay, and package iframe entries. Native search reads the Bot list this client already holds rather than the backend search route.
+**Capability gap.** Present in web, absent in native: Bot creation, starting a conversation, sheep recipe editing, routines, Bot templates, registered machines, the Computer overlay, and package iframe entries. Native search reads the Bot list this client already holds rather than the backend search route. Present in native, absent in web: a connector's accounts and a model provider's on one surface rather than two.
 
 Present in native, absent in web: a durable offline store of directory, transcripts and drafts; inbox as a first-class screen; Bot archive, restore and delete UI with composition-generation and audit detail; deep-link-to-Bot; PKCE system-browser sign-in; tool receipts on a Work view rather than inside the thread.
 
@@ -343,6 +348,45 @@ A field whose `choiceSource` names a paged catalog is drawn by the host, not by
 the document: `ViewScope.fields` maps a `choiceSource` to a host editor the way
 `ViewScope.frames` maps an `embed` name to a host region, and the settings
 surface is what supplies the model picker.
+
+**Connectors and Plugins, the same way.** Two more projections in that family,
+both reached with `?as=document`:
+
+- `app/settings/connections-document.ts` over `ConnectionsFrame`
+  (`/api/settings/connections`). The frame carries what the web surfaces
+  assembled client-side from the catalog and the User's settings: a provider
+  row per Connection Type — its authorization kind, whether another account may
+  be connected, and the settings the type declares beside its credential — the
+  accounts themselves with the line that says what their state means, and the
+  "Model in use" line, written by `modelRuntimeLabel` where the settings live
+  rather than in a client. A model provider's accounts and a connector
+  Package's are one document, because the surface a person opens to connect
+  something is one surface; `packageConfigurationHomeV1` still decides which,
+  and travels as the row's `kind`.
+- `app/settings/plugins-document.ts` over `PluginsFrame`
+  (`/api/settings/plugins`), which is enablement and nothing else: a row says
+  what a Package offers, whether it is on, and which surface configures it.
+
+Every action on both declares a `kind` from a closed vocabulary, because an
+action id is opaque to the renderer and the command a press means is not
+derivable from its label. `apps/native/lib/connections/document.dart` and
+`lib/plugins/document.dart` read those back; Connectors is the one surface
+whose actions do not all land on one route — a Connection command goes to
+`/api/connections`, a revocation to the Package's own route, and a hosted grant
+is a `connection/start` whose answer is a URL the app opens after checking it.
+
+`lib/view/surface.dart` is what both pages are: `ViewSurfaceController` is the
+read and the dispatch, `ViewSurfacePage` is the chrome, the empty state, the
+pull to refresh and the one `ViewController` per revision. A page is a
+controller and a title.
+
+**Secrets, through the renderer.** `SettingField` has a `secret` kind. The
+document seeds it null, so a required key refuses by name before anything is
+dispatched; the widget is `obscureText` and has no initial value, so it starts
+empty however often it rebuilds; and the typed characters travel only on the
+action input that carries them to the credential route, after which
+`ViewController` drops them. Nothing about a credential is ever in a document
+the server sent.
 
 ### ViewNode — how a plugin renders
 

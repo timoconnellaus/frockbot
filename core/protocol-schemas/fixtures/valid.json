@@ -1149,7 +1149,51 @@
           "id": "calendar-work",
           "label": "Work calendar",
           "service": "Calendar",
-          "state": "ready"
+          "state": "ready",
+          "packageId": "connector-calendar",
+          "kind": "connector",
+          "authorization": "grant",
+          "detail": "Available to every Bot"
+        }
+      ],
+      "providers": [
+        {
+          "packageId": "provider-ollama-cloud",
+          "connectionTypeId": "ollama-cloud-account",
+          "displayName": "Ollama Cloud",
+          "kind": "model",
+          "authorization": "api-key",
+          "connected": 0,
+          "mayConnect": true,
+          "settings": [
+            {
+              "id": "api-base-url",
+              "label": "API base URL",
+              "kind": "text",
+              "value": "https://ollama.com",
+              "editable": true
+            }
+          ]
+        }
+      ],
+      "modelInUse": "Auto · Frock AI"
+    }
+  },
+  {
+    "name": "PluginsFrame valid",
+    "schema": "PluginsFrame",
+    "value": {
+      "schemaVersion": 1,
+      "ownerId": "tim",
+      "revision": 3,
+      "plugins": [
+        {
+          "packageId": "provider-ollama-cloud",
+          "version": "1.0.0",
+          "displayName": "Ollama Cloud",
+          "summary": "Models",
+          "state": "installed",
+          "home": "models"
         }
       ]
     }

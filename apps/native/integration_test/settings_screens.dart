@@ -133,7 +133,11 @@ Future<void> main() async {
               openBot: (_) async {},
             )
           : home == 'connections'
-          ? ConnectionsPage(api: api, userId: 'native-settings-local')
+          ? ConnectionsPage(
+              api: api,
+              store: store,
+              userId: 'native-settings-local',
+            )
           : SettingsPage(
               api: api,
               store: store,

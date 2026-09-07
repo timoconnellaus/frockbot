@@ -2141,7 +2141,7 @@
           "maxLength": 200
         },
         "kind": {
-          "enum": ["text", "boolean", "number", "select"]
+          "enum": ["text", "boolean", "number", "select", "secret"]
         },
         "value": {
           "$ref": "#/$defs/Json"
@@ -3115,14 +3115,169 @@
                   "reconciliation-required",
                   "failed"
                 ]
+              },
+              "packageId": {
+                "$ref": "#/$defs/Identifier"
+              },
+              "kind": {
+                "enum": ["model", "connector"]
+              },
+              "authorization": {
+                "enum": ["none", "api-key", "ambient-native", "grant"]
+              },
+              "detail": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "failure": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2000
               }
             },
-            "required": ["id", "label", "service", "state"],
+            "required": [
+              "id",
+              "label",
+              "service",
+              "state",
+              "packageId",
+              "kind",
+              "authorization"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "providers": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "properties": {
+              "packageId": {
+                "$ref": "#/$defs/Identifier"
+              },
+              "connectionTypeId": {
+                "$ref": "#/$defs/Identifier"
+              },
+              "displayName": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "kind": {
+                "enum": ["model", "connector"]
+              },
+              "authorization": {
+                "enum": ["none", "api-key", "ambient-native", "grant"]
+              },
+              "connected": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 100
+              },
+              "mayConnect": {
+                "type": "boolean"
+              },
+              "settings": {
+                "type": "array",
+                "minItems": 0,
+                "maxItems": 8,
+                "items": {
+                  "$ref": "#/$defs/SettingField"
+                }
+              }
+            },
+            "required": [
+              "packageId",
+              "connectionTypeId",
+              "displayName",
+              "kind",
+              "authorization",
+              "connected",
+              "mayConnect"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "modelInUse": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "ownerId",
+        "revision",
+        "accounts",
+        "providers"
+      ],
+      "additionalProperties": false
+    },
+    "PluginsFrame": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "ownerId": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "plugins": {
+          "type": "array",
+          "maxItems": 200,
+          "items": {
+            "type": "object",
+            "properties": {
+              "packageId": {
+                "$ref": "#/$defs/Identifier"
+              },
+              "version": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "displayName": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "summary": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "state": {
+                "enum": ["not-installed", "installed", "disabled", "failed"]
+              },
+              "home": {
+                "enum": ["models", "connections", "user-settings", "none"]
+              },
+              "failure": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2000
+              }
+            },
+            "required": [
+              "packageId",
+              "version",
+              "displayName",
+              "summary",
+              "state",
+              "home"
+            ],
             "additionalProperties": false
           }
         }
       },
-      "required": ["schemaVersion", "ownerId", "revision", "accounts"],
+      "required": ["schemaVersion", "ownerId", "revision", "plugins"],
       "additionalProperties": false
     },
     "NotificationDirectory": {

@@ -39,7 +39,7 @@ import {
   supersedeDrainLabelV1,
   supersedeDrainStateV1,
 } from "./supersede-drain.js";
-import { topbarModelLabelV1 } from "./model-presentation.js";
+import { topbarModelLabelV1 } from "@frockbot/core/configuration";
 import { orderTranscriptV1 } from "./transcript-order.js";
 import {
   TURN_TEXT_MAX_CHARACTERS_V1,

@@ -105,7 +105,7 @@ import {
   appletCanvasFailureV1,
   appletCanvasRetryDelayMsV1,
 } from "./applet-canvas-failure.js";
-import { modelRuntimeLabel } from "./model-presentation.js";
+import { modelRuntimeLabel } from "@frockbot/core/configuration";
 import { showClientNotificationV1 } from "./notify.js";
 import "@frockbot/client-core/fonts.css";
 import "./styles.css";

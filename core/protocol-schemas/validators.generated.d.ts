@@ -129,6 +129,7 @@ declare const validators: {
   isConnectionsFrame(
     value: unknown,
   ): value is ProtocolTypes["ConnectionsFrame"];
+  isPluginsFrame(value: unknown): value is ProtocolTypes["PluginsFrame"];
   isNotificationDirectory(
     value: unknown,
   ): value is ProtocolTypes["NotificationDirectory"];

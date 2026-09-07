@@ -14,11 +14,13 @@ import 'package:flutter/material.dart';
 
 import '../activity/controller.dart';
 import '../activity/page.dart';
+import '../admin/page.dart';
 import '../client/auth.dart' show developmentAuth;
 import '../client/bot_sessions.dart';
 import '../client/transport.dart';
 import '../connections/page.dart';
 import '../extensions/fallback.dart';
+import '../plugins/page.dart';
 import '../recovery/page.dart';
 import '../settings/bot_settings.dart';
 import '../settings/page.dart';
@@ -76,6 +78,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   bool navOpen = false;
   bool panelOpen = false;
   bool showHidden = false;
+  bool isAdmin = false;
   TranscriptLine? openRun;
 
   @override
@@ -110,7 +113,23 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     }
   }
 
+  /// Whether this account administers the deployment. The gateway is the
+  /// authority; this only decides whether the door is offered at all.
+  Future<void> _readIdentity() async {
+    try {
+      final identity = wire.AuthIdentity.fromJson(
+        await widget.api.request('/api/identity'),
+      );
+      if (mounted && identity.isAdmin != isAdmin) {
+        setState(() => isAdmin = identity.isAdmin);
+      }
+    } catch (_) {
+      // Nothing is lost but the Admin entry.
+    }
+  }
+
   Future<void> load() async {
+    unawaited(_readIdentity());
     try {
       final cached = await widget.store.read('directory/${widget.userId}');
       if (cached != null && bots.isEmpty) {
@@ -560,11 +579,47 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                   onTap: () {
                     Navigator.of(sheet).pop();
                     _push(
-                      ConnectionsPage(api: widget.api, userId: widget.userId),
+                      ConnectionsPage(
+                        api: widget.api,
+                        store: widget.store,
+                        userId: widget.userId,
+                      ),
                     );
                   },
                 ),
               ),
+              identified(
+                PluginIds.profileEntry,
+                ListTile(
+                  leading: const Icon(Icons.extension_outlined),
+                  title: const Text('Plugins'),
+                  onTap: () {
+                    Navigator.of(sheet).pop();
+                    _push(
+                      PluginsPage(
+                        api: widget.api,
+                        store: widget.store,
+                        userId: widget.userId,
+                      ),
+                    );
+                  },
+                ),
+              ),
+              // Admin belongs to the deployment, not to the account, so the
+              // entry is here only for someone the gateway already answers it
+              // for. A non-admin is not offered a door that refuses them.
+              if (isAdmin)
+                identified(
+                  AdminIds.profileEntry,
+                  ListTile(
+                    leading: const Icon(Icons.shield_outlined),
+                    title: const Text('Admin'),
+                    onTap: () {
+                      Navigator.of(sheet).pop();
+                      _push(AdminPage(api: widget.api));
+                    },
+                  ),
+                ),
               // A development build can look at the ViewNode renderer before a
               // plugin produces a document; the shipped app has no such door.
               if (developmentAuth)

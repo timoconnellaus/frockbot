@@ -471,6 +471,9 @@ class MemoryConfiguration
   async readConnectionsFrame(): Promise<never> {
     throw new Error("Connections frame not configured in this fixture");
   }
+  async readPluginsFrame(): Promise<never> {
+    throw new Error("Plugins frame not configured in this fixture");
+  }
 
   async readSettingsFrame(): Promise<never> {
     throw new Error("Settings frame not configured in this fixture");
