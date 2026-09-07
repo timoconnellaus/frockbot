@@ -11,7 +11,7 @@
 // than trusted from the page: `tools` is the closed set of tool names a page of
 // this Package may call across the iframe bridge. The bridge protocol itself is
 // unchanged — it is the page contract a Bot-authored page will reuse.
-import type { PackageIframeEntryViewV1 } from "@frockbot/kernel-contracts";
+import type { PackageIframeEntryViewV1 } from "@frockbot/core/contracts";
 import { APPLETS_PAGE_SOURCES_V1 } from "./pages.generated.js";
 
 export interface FirstPartyPackagePageV1 {

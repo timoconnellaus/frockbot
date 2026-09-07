@@ -388,7 +388,7 @@ jobs:
           bun scripts/check-production-secrets.ts check || exit 1
 
           bun -e '
-            import { parseCredentialKeyringV1 } from "./packages/connection-core/src/index.ts";
+            import { parseCredentialKeyringV1 } from "./core/connection/index.ts";
             parseCredentialKeyringV1(process.env.CREDENTIAL_KEYRING ?? "");
           '
       - name: Configure production D1 database

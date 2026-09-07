@@ -10,7 +10,7 @@ import {
   type ComputerCommandV1,
   type ComputerProjectionV1,
 } from "./protocol.js";
-import { defineGatewayContribution } from "@frockbot/kernel-contracts/contributions";
+import { defineGatewayContribution } from "@frockbot/core/contracts/contributions";
 
 export interface ComputerGatewayHost {
   readComputer(userId: string, botId: string): Promise<ComputerProjectionV1>;

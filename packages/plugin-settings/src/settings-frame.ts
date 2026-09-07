@@ -8,7 +8,7 @@ import {
   MAX_PACKAGE_SETTING_TEXT_V1,
   type UserConfigurationCommandV1,
   type UserSettingsViewV1,
-} from "@frockbot/configuration-core";
+} from "@frockbot/core/configuration";
 import {
   decodeProtocol,
   type SettingField,
@@ -16,8 +16,8 @@ import {
   type ConnectionsFrame,
   type SettingChoice,
   type SettingsOptionsPage,
-} from "@frockbot/protocol-schemas";
-import type { PackageSettingDefinition } from "@frockbot/kernel-contracts";
+} from "@frockbot/core/protocol-schemas";
+import type { PackageSettingDefinition } from "@frockbot/core/contracts";
 import type { AvailableUserPackage } from "./user.js";
 
 function field(

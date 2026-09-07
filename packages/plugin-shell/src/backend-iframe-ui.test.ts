@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { PackageIframeCompositionV1 } from "@frockbot/kernel-contracts";
+import type { PackageIframeCompositionV1 } from "@frockbot/core/contracts";
 import { requirePackageUiToolDeclarationV1 } from "./backend.js";
 import { projectFirstPartyPackageIframeV1 } from "./composition-views.js";
 

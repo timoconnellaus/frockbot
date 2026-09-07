@@ -7,7 +7,7 @@ import {
   type ToolExecutionContext,
   type TurnTypeV1,
   TURN_DEADLINE_MS_V1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import {
   type AgentRuntimeHarness,
   createAgentRuntimeHarness,

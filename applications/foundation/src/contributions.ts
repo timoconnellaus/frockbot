@@ -13,8 +13,8 @@
 import type {
   BackendContributionDescriptorV1,
   ContributionLifecycleV1,
-} from "@frockbot/kernel-contracts/contributions";
-import type { RuntimeCleanupV1 } from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts/contributions";
+import type { RuntimeCleanupV1 } from "@frockbot/core/contracts";
 
 import {
   backendContribution as adminGatewayContribution,

@@ -2,7 +2,7 @@ import {
   type AgentRuntimeV1,
   type PromptSection,
   type RuntimeFeatureV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 
 // This contribution is runtime-neutral and can mount in Node or Workers.
 export const DEFAULT_IDENTITY_SECTION = "identity";

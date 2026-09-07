@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   parseCredentialKeyringV1,
   sealCredentialV1,
-} from "@frockbot/connection-core";
+} from "@frockbot/core/connection";
 import { CredentialLeaseRuntime } from "./runtime.js";
 
 const serializedKeyring =

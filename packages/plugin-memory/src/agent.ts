@@ -28,7 +28,7 @@ import type {
   MemoryScopeNameV1,
   AgentRuntimeV1,
   RuntimeFeatureV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import { createMemoryEmbedder } from "./embeddings.js";
 import {
   readAllMemoryDocumentsV1,

@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type {
   WorkspaceReadsV1,
   WorkspaceRootV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import {
   botInstructionRootV1,
   countSkillDocumentsV1,

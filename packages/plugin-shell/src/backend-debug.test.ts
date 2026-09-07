@@ -1,7 +1,7 @@
 import { shellTestApplicationV1 } from "./backend-application.fixture.js";
 import { describe, expect, test } from "bun:test";
-import { initializeBotSettingsV1 } from "@frockbot/configuration-core";
-import { SessionEventLog, storedRunRecordV2 } from "@frockbot/kernel-do";
+import { initializeBotSettingsV1 } from "@frockbot/core/configuration";
+import { SessionEventLog, storedRunRecordV2 } from "@frockbot/core/durable";
 import { createShellBotBackendContribution } from "./backend.js";
 import type { StoredRun } from "./backend-contracts.js";
 

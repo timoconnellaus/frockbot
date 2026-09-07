@@ -7,7 +7,7 @@ import {
   createCustomModelsClientState,
   customModelsClientStateKey,
 } from "./state.js";
-import { defineClientContribution } from "@frockbot/kernel-contracts/contributions";
+import { defineClientContribution } from "@frockbot/core/contracts/contributions";
 
 export const customModelsClientPlugin: ClientPlugin = (ctx) => {
   const web = ctx.inject(frockBotWebDataKey);

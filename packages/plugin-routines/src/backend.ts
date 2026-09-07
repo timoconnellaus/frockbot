@@ -45,7 +45,7 @@ import {
   type RoutineRunDetailViewV1,
   type RoutineRunListViewV1,
 } from "./shared.js";
-import { defineGatewayContribution } from "@frockbot/kernel-contracts/contributions";
+import { defineGatewayContribution } from "@frockbot/core/contracts/contributions";
 
 /** One delivery, as the Bot Durable Object answers it. */
 export interface RoutineHookDeliveryReceiptV1 {

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { ToolExecutionContext } from "@frockbot/kernel-contracts";
+import type { ToolExecutionContext } from "@frockbot/core/contracts";
 import { createAgentRuntimeHarness } from "@frockbot/plugin-testkit";
 import {
   createConfiguredWebFetchRuntimeContribution,

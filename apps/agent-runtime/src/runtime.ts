@@ -11,21 +11,21 @@ import {
   type SessionEvent,
   SessionStore,
   type TurnTypeV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import type {
   AgentHandle,
   AgentOptions,
-} from "@frockbot/kernel-agent-loop/agent";
-import { LlmRegistry } from "@frockbot/plugin-models";
-import { SystemPromptRegistry } from "@frockbot/plugin-prompt";
-import { ToolRegistry } from "@frockbot/plugin-tools";
-import { AgentLoop, createAgentLoop } from "@frockbot/kernel-agent-loop";
+} from "@frockbot/core/agent-loop/agent";
+import { LlmRegistry } from "@frockbot/core/models";
+import { SystemPromptRegistry } from "@frockbot/core/prompt";
+import { ToolRegistry } from "@frockbot/core/tools";
+import { AgentLoop, createAgentLoop } from "@frockbot/core/agent-loop";
 import { ComputerRegistry } from "@frockbot/computer-core";
 import type { CredentialLeaseRuntime } from "@frockbot/plugin-credentials/user";
 import {
   bootstrapGeneration,
   type CompositionGenerationV1,
-} from "@frockbot/kernel-do";
+} from "@frockbot/core/durable";
 import {
   createOpenAICompatibleFeature,
   type FetchLike,

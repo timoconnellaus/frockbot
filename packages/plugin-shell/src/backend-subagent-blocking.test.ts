@@ -7,7 +7,7 @@ import { shellTestApplicationV1 } from "./backend-application.fixture.js";
 // hold until the child settles, and give up only when the record is really
 // unreadable.
 import { describe, expect, test } from "bun:test";
-import type { UserSettingsViewV1 } from "@frockbot/configuration-core";
+import type { UserSettingsViewV1 } from "@frockbot/core/configuration";
 import type {
   TaskOutcomeV1,
   TaskRecordV1,

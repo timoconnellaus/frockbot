@@ -4,8 +4,8 @@
 import {
   decodeSessionEvent,
   type SessionEvent,
-} from "@frockbot/kernel-contracts";
-import { SessionEventLog } from "@frockbot/kernel-do";
+} from "@frockbot/core/contracts";
+import { SessionEventLog } from "@frockbot/core/durable";
 
 interface EventRangedRunV1 {
   sessionId: string;

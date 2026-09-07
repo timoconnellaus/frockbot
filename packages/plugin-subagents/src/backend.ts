@@ -23,7 +23,7 @@ import {
   type TaskListViewV1,
   type TaskViewV1,
 } from "./shared.js";
-import { defineGatewayContribution } from "@frockbot/kernel-contracts/contributions";
+import { defineGatewayContribution } from "@frockbot/core/contracts/contributions";
 
 export interface SubagentsGatewayHost {
   listTasks(userId: string, botId: string): Promise<TaskListViewV1>;

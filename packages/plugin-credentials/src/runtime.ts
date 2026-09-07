@@ -3,8 +3,8 @@ import {
   type CredentialLeaseV1,
   openCredentialV1,
   parseCredentialKeyringV1,
-} from "@frockbot/connection-core";
-import type { RuntimeFeatureV1 } from "@frockbot/kernel-contracts";
+} from "@frockbot/core/connection";
+import type { RuntimeFeatureV1 } from "@frockbot/core/contracts";
 
 export interface CredentialLeaseOpenRequest {
   accountId: string;

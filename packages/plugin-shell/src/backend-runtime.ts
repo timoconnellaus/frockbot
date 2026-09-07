@@ -1,12 +1,12 @@
-import type { PackageDefinitionV1 } from "@frockbot/kernel-contracts";
-import type { CredentialLeaseV1 } from "@frockbot/connection-core";
+import type { PackageDefinitionV1 } from "@frockbot/core/contracts";
+import type { CredentialLeaseV1 } from "@frockbot/core/connection";
 import type {
   BotExecutionPlanV1,
   ConnectionView,
   EnabledCapabilityV1,
   PackageSettingValueV1,
   ResolvedModelBindingV1,
-} from "@frockbot/configuration-core";
+} from "@frockbot/core/configuration";
 import type { FoundationAgentPackage } from "@frockbot/agent-runtime/runtime";
 import type { ComputerSyncHostV1 } from "@frockbot/computer-core";
 import type {

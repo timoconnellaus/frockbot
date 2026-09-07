@@ -1,4 +1,4 @@
-import { decodeProtocol } from "@frockbot/protocol-schemas";
+import { decodeProtocol } from "@frockbot/core/protocol-schemas";
 import {
   applicationSettingsFrame,
   connectionsFrame,
@@ -33,13 +33,13 @@ import {
   type StoredUserSettingsPackageV1,
   type UserConfigurationCommandV1,
   type UserSettingsViewV1,
-} from "@frockbot/configuration-core";
-import type { ConnectionCommandV1 } from "@frockbot/connection-core";
+} from "@frockbot/core/configuration";
+import type { ConnectionCommandV1 } from "@frockbot/core/connection";
 import type {
   PackageSettingDefinition,
   ConnectionTypeDefinition,
-} from "@frockbot/kernel-contracts";
-import { defineUserBackendContribution } from "@frockbot/kernel-contracts/contributions";
+} from "@frockbot/core/contracts";
+import { defineUserBackendContribution } from "@frockbot/core/contracts/contributions";
 
 const STATE_KEY = "user-configuration";
 const ACCOUNT_MODEL_KEY = "user-account-model:v1";

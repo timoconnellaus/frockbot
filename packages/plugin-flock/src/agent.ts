@@ -38,7 +38,7 @@
 //  - `bot_update` computes the durable result the patch would produce and
 //    commands nothing when it already holds, so a replay is a read. That also
 //    keeps a replayed rename from appending a second announcement.
-import { packageAdmissionCeilingV1 } from "@frockbot/kernel-contracts";
+import { packageAdmissionCeilingV1 } from "@frockbot/core/contracts";
 import {
   applyBotProfilePatchV1,
   ConfigurationConflictError,
@@ -48,7 +48,7 @@ import {
   type BotSettingsViewV1,
   type ConfigurationCommandV1,
   type OperationReceiptV1,
-} from "@frockbot/configuration-core";
+} from "@frockbot/core/configuration";
 import type {
   AgentRuntimeV1,
   PromptSection,
@@ -57,8 +57,8 @@ import type {
   ToolExecutionContext,
   ToolExecutionResult,
   TurnTypeV1,
-} from "@frockbot/kernel-contracts";
-import { decodeTurnTypeV1 } from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
+import { decodeTurnTypeV1 } from "@frockbot/core/contracts";
 import {
   FlockConflictError,
   isFlockIdentifier,
@@ -73,7 +73,7 @@ export type {
   CreateBotCommandV1,
   FlockReceiptV1,
 } from "./shared.js";
-export type { BotSelfWriterV1 } from "@frockbot/configuration-core";
+export type { BotSelfWriterV1 } from "@frockbot/core/configuration";
 
 /** The User and Bot one admitted Turn's self-management runs as. */
 export interface FlockSelfOwnerV1 {

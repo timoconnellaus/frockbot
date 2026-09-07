@@ -60,7 +60,7 @@ import {
   type WorkspaceWriteOutcomeV1,
   type WorkspaceWriteRequestV1,
   type WorkspaceWriterV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import type { FlySpriteAgentComputer } from "./computer.js";
 
 /** Where a root records the generation of each file beneath it. */

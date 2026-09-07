@@ -1,6 +1,6 @@
 // The two gates that decide whether the Messages tools exist at all.
 import { describe, expect, test } from "bun:test";
-import type { MachineListEntryV1 } from "@frockbot/machine-protocol";
+import type { MachineListEntryV1 } from "@frockbot/core/machine-protocol";
 import {
   MACHINE_MESSAGES_SETTING_V1,
   machineMessagesEnabledV1,

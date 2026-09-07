@@ -1,4 +1,4 @@
-import { decodeProtocol } from "@frockbot/protocol-schemas";
+import { decodeProtocol } from "@frockbot/core/protocol-schemas";
 import { describe, expect, test } from "bun:test";
 import {
   createNativeAuth,

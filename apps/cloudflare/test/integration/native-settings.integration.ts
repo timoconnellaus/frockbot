@@ -1,6 +1,6 @@
 import { env, evictDurableObject, SELF } from "cloudflare:test";
 import { expect, test } from "vitest";
-import { decodeProtocol } from "@frockbot/protocol-schemas";
+import { decodeProtocol } from "@frockbot/core/protocol-schemas";
 import { nativeHeaders } from "../native-session-fixture.ts";
 import {
   asUser,

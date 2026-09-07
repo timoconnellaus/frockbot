@@ -1,5 +1,5 @@
 import { env } from "cloudflare:test";
-import { decodeProtocol } from "@frockbot/protocol-schemas";
+import { decodeProtocol } from "@frockbot/core/protocol-schemas";
 import { createNativeAuth, NATIVE_RETURN_ANDROID } from "../src/native-auth.ts";
 
 export async function nativeHeaders(userId: string) {

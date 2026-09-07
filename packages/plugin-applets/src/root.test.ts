@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   decodeWorkspaceRootV1,
   workspaceRootKeyV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import {
   APPLETS_PACKAGE_ID_V1,
   APPLETS_SOURCE_ROOT_ID_V1,

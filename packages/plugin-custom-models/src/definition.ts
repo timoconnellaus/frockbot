@@ -1,4 +1,4 @@
-import type { PackageDefinitionV1 } from "@frockbot/kernel-contracts";
+import type { PackageDefinitionV1 } from "@frockbot/core/contracts";
 
 export const customModelsDefinitionV1: PackageDefinitionV1 = {
   id: "custom-models",

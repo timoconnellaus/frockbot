@@ -4,7 +4,7 @@ import {
   type AgentRuntimeHarness,
   createAgentRuntimeHarness,
 } from "@frockbot/plugin-testkit";
-import { SessionStore } from "@frockbot/kernel-contracts";
+import { SessionStore } from "@frockbot/core/contracts";
 import {
   COMPUTER_OVERLOADED_TOOL_MESSAGE_V1,
   createComputerAgentFeature,
@@ -436,7 +436,7 @@ describe("computer agent contribution", () => {
 describe("the computer/sync event", () => {
   test("records a publish sync without the per-path answers the caller asked for", async () => {
     const { recordComputerSyncV1 } = await import("./agent.js");
-    const { decodeSessionEvent } = await import("@frockbot/kernel-contracts");
+    const { decodeSessionEvent } = await import("@frockbot/core/contracts");
     const appended: unknown[] = [];
     const sessions = {
       get: () => ({

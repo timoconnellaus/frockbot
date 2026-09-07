@@ -1,7 +1,7 @@
 // The Bot Durable Object storage keys the Subagents Package owns.
 //
-// They live here rather than in `@frockbot/kernel-do` because the kernel
-// imports no Package and holds no product policy; the Durable Object hands this
+// They live here rather than in `@frockbot/core/durable` because core imports
+// no Package and holds no product policy; the Durable Object hands this
 // Package a storage seam and this module decides what it writes under.
 //
 // Every key below is *parent* state: the parent Bot Durable Object is the

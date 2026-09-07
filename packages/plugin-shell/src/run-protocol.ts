@@ -4,11 +4,11 @@ import {
   type SendToUserPayloadV1,
   type SessionEvent,
   type SkillRefV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import {
   isPublicIdentifier,
   isRpcIdentifier,
-} from "@frockbot/configuration-core";
+} from "@frockbot/core/configuration";
 import { decodeRunCursorV1, RUN_CURSOR_PATTERN } from "./run-cursor.js";
 export { decodeRunCursorV1, RUN_CURSOR_PATTERN };
 import type {

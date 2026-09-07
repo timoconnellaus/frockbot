@@ -16,7 +16,7 @@
 import { env } from "cloudflare:workers";
 import { evictDurableObject } from "cloudflare:test";
 import { describe, expect, test } from "vitest";
-import type { WorkspaceRootV1 } from "@frockbot/kernel-contracts";
+import type { WorkspaceRootV1 } from "@frockbot/core/contracts";
 import { provisionBot, provisionSiblingBot } from "./provision-bot.ts";
 
 function bot(name: string) {

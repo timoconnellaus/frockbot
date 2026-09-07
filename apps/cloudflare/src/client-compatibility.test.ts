@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { CLIENT_COMPATIBILITY } from "@frockbot/protocol-schemas";
+import { CLIENT_COMPATIBILITY } from "@frockbot/core/protocol-schemas";
 import {
   CLIENT_HELLO_HEADER,
   UPDATE_APP_MESSAGE,

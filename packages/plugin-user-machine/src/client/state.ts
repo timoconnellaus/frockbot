@@ -1,7 +1,7 @@
 import type {
   MachineListViewV1,
   MachinePairingOfferV1,
-} from "@frockbot/machine-protocol";
+} from "@frockbot/core/machine-protocol";
 import type { InjectionKey, Ref } from "vue";
 import type { MachineDeviceAgentStatusV1 } from "../device.js";
 

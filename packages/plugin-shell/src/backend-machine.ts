@@ -18,7 +18,7 @@ import type {
   MachineCommandResultV1,
   MachineCommandV1,
   MachineListViewV1,
-} from "@frockbot/machine-protocol";
+} from "@frockbot/core/machine-protocol";
 import type { MachineMessagesRuntimeHostV1 } from "@frockbot/plugin-machine-messages/agent";
 import {
   machineMessagesEnabledV1,

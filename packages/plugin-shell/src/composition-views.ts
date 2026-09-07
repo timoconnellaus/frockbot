@@ -8,17 +8,17 @@ import {
   type CompositionGenerationViewV1,
   type CompositionMemberViewV1,
   type CompositionProvenanceViewV1,
-} from "@frockbot/configuration-core";
-import type { PackageIframeCompositionV1 } from "@frockbot/kernel-contracts";
+} from "@frockbot/core/configuration";
+import type { PackageIframeCompositionV1 } from "@frockbot/core/contracts";
 import { FIRST_PARTY_PACKAGE_UI_V1 } from "@frockbot/plugin-applets/pages";
 import type {
   CompositionFailureV1,
   CompositionQuarantineV1,
-} from "@frockbot/kernel-do";
+} from "@frockbot/core/durable";
 import type {
   CompositionGenerationV1,
   CompositionMemberV1,
-} from "@frockbot/kernel-do";
+} from "@frockbot/core/durable";
 
 /**
  * SEAM — plan Step 5 (authoring). Once the Bot object holds

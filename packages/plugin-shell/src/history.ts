@@ -23,7 +23,7 @@ import {
   type LlmMessage,
   type SessionEvent,
   type TurnTypeV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import {
   compactionMessageV1,
   compactionStateV1,

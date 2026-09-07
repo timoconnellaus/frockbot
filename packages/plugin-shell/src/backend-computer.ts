@@ -31,9 +31,9 @@ import type {
   WorkspaceFilesV1,
   WorkspaceGenerationsV1,
   WorkspaceSyncEffectsV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import type { ComputerSyncHostV1 } from "@frockbot/computer-core";
-import type { PackageDefinitionV1 } from "@frockbot/kernel-contracts";
+import type { PackageDefinitionV1 } from "@frockbot/core/contracts";
 
 /**
  * One installed Package, as the durable-root supplier needs to see it: what

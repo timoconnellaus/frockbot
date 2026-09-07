@@ -5,11 +5,11 @@ import { shellTestApplicationV1 } from "./backend-application.fixture.js";
  * it, and what a Stop arriving afterwards is allowed to touch.
  */
 import { describe, expect, test } from "bun:test";
-import type { SessionEvent } from "@frockbot/kernel-contracts";
+import type { SessionEvent } from "@frockbot/core/contracts";
 import {
   initializeBotSettingsV1,
   type UserSettingsViewV1,
-} from "@frockbot/configuration-core";
+} from "@frockbot/core/configuration";
 import {
   createShellBotBackendContribution,
   type ShellBotBackendHost,

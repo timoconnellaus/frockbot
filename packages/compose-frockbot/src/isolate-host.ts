@@ -36,8 +36,8 @@ import {
   type ToolExecutionResult,
   type ToolRegistration,
   type TurnTypeV1,
-} from "@frockbot/kernel-contracts";
-import { canonicalJson, sha256 } from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
+import { canonicalJson, sha256 } from "@frockbot/core/contracts";
 import { CompositionMountFailureError } from "./failure.ts";
 import {
   PLUGIN_ACTIONS_V1,

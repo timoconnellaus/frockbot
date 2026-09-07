@@ -19,7 +19,7 @@ import {
   parseTemplateShareIdV1,
   TemplateDecodeError,
   type TemplateVisibilityV1,
-} from "@frockbot/template-core";
+} from "@frockbot/core/template";
 import {
   decodeTemplateCommandV1,
   decodeTemplateImportListViewV1,
@@ -32,7 +32,7 @@ import {
   type TemplateShareListViewV1,
   type TemplateShareReceiptV1,
 } from "./shared.js";
-import { defineGatewayContribution } from "@frockbot/kernel-contracts/contributions";
+import { defineGatewayContribution } from "@frockbot/core/contracts/contributions";
 
 export interface PublishedTemplateV1 {
   hash: string;

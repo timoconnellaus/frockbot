@@ -17,8 +17,7 @@
   "dependencies": {
     "@frockbot/client-core": "workspace:*",
     "@frockbot/client-ui": "workspace:*",
-    "@frockbot/configuration-core": "workspace:*",
-    "@frockbot/kernel-contracts": "workspace:*",
+    "@frockbot/core": "workspace:*",
     "@frockbot/plugin-settings": "workspace:*",
     "@frockbot/plugin-shell": "workspace:*",
     "vue": "3.5.41"

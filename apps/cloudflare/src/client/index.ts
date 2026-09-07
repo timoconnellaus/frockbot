@@ -1,5 +1,5 @@
 /// <reference path="./env.d.ts" />
-import { decodeProtocol } from "@frockbot/protocol-schemas";
+import { decodeProtocol } from "@frockbot/core/protocol-schemas";
 
 import { foundationClientPlugins } from "@frockbot/application-foundation/client";
 import {
@@ -11,11 +11,11 @@ import {
   type ConfigurationQueryV1,
   type RevokeConnectionCommandV1,
   type StartConnectionCommandV1,
-} from "@frockbot/configuration-core";
+} from "@frockbot/core/configuration";
 import {
   decodeConnectionCommandReceiptV1,
   type ConnectionCommandV1,
-} from "@frockbot/connection-core";
+} from "@frockbot/core/connection";
 import {
   ClientApplication,
   decodeAcknowledgement,
@@ -35,8 +35,8 @@ import {
   ClientTurnRefusedErrorV1,
 } from "@frockbot/plugin-shell/run-protocol";
 import { decodeClientSkillCatalogV1 } from "@frockbot/plugin-shell/skill-protocol";
-import type { SkillRefV1 } from "@frockbot/kernel-contracts";
-import { DEPLOYMENT_HEADER_V1 } from "@frockbot/protocol";
+import type { SkillRefV1 } from "@frockbot/core/contracts";
+import { DEPLOYMENT_HEADER_V1 } from "@frockbot/core/protocol";
 import { BrowserBotStateChannel } from "./bot-state-channel.js";
 
 /**

@@ -6,7 +6,7 @@ import {
   type LanguageModelV4StreamPart,
   type LanguageModelV4Usage,
 } from "@ai-sdk/provider";
-import type { CredentialLeaseV1 } from "@frockbot/connection-core";
+import type { CredentialLeaseV1 } from "@frockbot/core/connection";
 import {
   type AgentRuntimeV1,
   boundedModelProviderReasonV1,
@@ -17,7 +17,7 @@ import {
   ModelRequestDeadlineError,
   type NormalizedModelRequest,
   type RuntimeFeatureV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import {
   classifyOpenAICompatibleFailureV1,
   type ModelRequestDeadlineOptionsV1,

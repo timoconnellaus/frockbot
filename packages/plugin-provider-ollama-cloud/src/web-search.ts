@@ -26,11 +26,11 @@ import {
   type WebSearchResponseV1,
   type WebSearchV1,
 } from "@frockbot/plugin-web/contract";
-import type { CredentialLeaseV1 } from "@frockbot/connection-core";
+import type { CredentialLeaseV1 } from "@frockbot/core/connection";
 import type {
   AgentRuntimeV1,
   RuntimeFeatureV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import type { CredentialLeaseRuntime } from "@frockbot/plugin-credentials/user";
 import {
   DEFAULT_OLLAMA_API_BASE_URL,

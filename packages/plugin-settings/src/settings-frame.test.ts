@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import type { UserSettingsViewV1 } from "@frockbot/configuration-core";
+import type { UserSettingsViewV1 } from "@frockbot/core/configuration";
 import {
   applicationSettingsFrame,
   applicationSettingsCommand,
@@ -200,7 +200,7 @@ test("the released model reader retains the account fallback without the removed
   const { resolveReleasedModelPolicy } =
     await import("./fixtures/model-policy-v0.3.39.js");
   const { resolveEffectiveBotModelV1 } =
-    await import("@frockbot/configuration-core");
+    await import("@frockbot/core/configuration");
   const values = new Map<string, unknown>();
   const storage: UserSettingsStorage = {
     get: async <T>(key: string) => values.get(key) as T | undefined,

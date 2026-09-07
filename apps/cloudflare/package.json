@@ -21,11 +21,7 @@
     "@frockbot/client-core": "workspace:*",
     "@frockbot/compose-frockbot": "workspace:*",
     "@frockbot/computer-core": "workspace:*",
-    "@frockbot/configuration-core": "workspace:*",
-    "@frockbot/connection-core": "workspace:*",
-    "@frockbot/kernel-contracts": "workspace:*",
-    "@frockbot/kernel-do": "workspace:*",
-    "@frockbot/machine-protocol": "workspace:*",
+    "@frockbot/core": "workspace:*",
     "@frockbot/plugin-admin": "workspace:*",
     "@frockbot/plugin-applets": "workspace:*",
     "@frockbot/plugin-audit": "workspace:*",
@@ -43,14 +39,9 @@
     "@frockbot/plugin-shell": "workspace:*",
     "@frockbot/plugin-skills": "workspace:*",
     "@frockbot/plugin-subagents": "workspace:*",
-    "@frockbot/plugin-tools": "workspace:*",
     "@frockbot/plugin-user-machine": "workspace:*",
-    "@frockbot/protocol": "workspace:*",
-    "@frockbot/template-core": "workspace:*",
-    "@frockbot/workspace-store": "workspace:*",
     "better-auth": "1.7.2",
-    "vue": "3.5.41",
-    "@frockbot/protocol-schemas": "workspace:*"
+    "vue": "3.5.41"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "^1.1.1",

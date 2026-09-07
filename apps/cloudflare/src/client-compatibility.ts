@@ -4,7 +4,7 @@ import {
   SUPPORTED_PROTOCOL_MAX,
   SUPPORTED_PROTOCOL_MIN,
   isProtocolValue,
-} from "@frockbot/protocol-schemas";
+} from "@frockbot/core/protocol-schemas";
 
 export const CLIENT_HELLO_HEADER = "x-frockbot-client";
 export const UPDATE_APP_MESSAGE = "Update the app to continue using FrockBot.";

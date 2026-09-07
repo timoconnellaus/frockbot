@@ -12,11 +12,8 @@
   },
   "dependencies": {
     "@frockbot/computer-core": "workspace:*",
-    "@frockbot/kernel-contracts": "workspace:*",
-    "@frockbot/plugin-credentials": "workspace:*",
-    "@frockbot/plugin-models": "workspace:*",
-    "@frockbot/plugin-prompt": "workspace:*",
-    "@frockbot/plugin-tools": "workspace:*"
+    "@frockbot/core": "workspace:*",
+    "@frockbot/plugin-credentials": "workspace:*"
   },
   "devDependencies": {
     "@types/bun": "1.4.0",

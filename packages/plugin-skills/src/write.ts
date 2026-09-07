@@ -17,7 +17,7 @@
 import type {
   WorkspaceFilesV1,
   WorkspaceWriteRequestV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import {
   botInstructionRootV1,
   countSkillDocumentsV1,

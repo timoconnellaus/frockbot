@@ -16,7 +16,7 @@ import {
 import type {
   WorkspaceFilesV1,
   WorkspaceRootV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import {
   COMPUTER_DOCTOR_ROOT_ID,
   COMPUTER_SCREENSHOTS_ROOT_ID,
@@ -49,7 +49,7 @@ import {
   isStoredComputerControlFreshV1,
   type StoredComputerControlV1,
 } from "./control-record.js";
-import { defineBotBackendContribution } from "@frockbot/kernel-contracts/contributions";
+import { defineBotBackendContribution } from "@frockbot/core/contracts/contributions";
 
 export { COMPUTER_CONTROL_RECORD_KEY } from "./control-record.js";
 

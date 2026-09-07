@@ -9,13 +9,13 @@ import {
   type WorkspaceGenerationsV1,
   type WorkspaceRootV1,
   type WorkspaceWriterV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import { workspaceMountPathV1 } from "@frockbot/computer-core";
-import { createObjectWorkspaceFilesV1 } from "@frockbot/workspace-store";
+import { createObjectWorkspaceFilesV1 } from "@frockbot/core/workspace-store";
 import {
   createInMemoryObjectBucketV1,
   createInMemoryWorkspaceGenerationsV1,
-} from "@frockbot/workspace-store/testing";
+} from "@frockbot/core/workspace-store/testing";
 import {
   computerBotKey,
   type ComputerHostFactoryV1,

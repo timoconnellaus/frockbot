@@ -7,7 +7,7 @@
 //
 // A `RoutineViewV1` never carries a webhook key or its digest. The key is minted
 // once and shown once (D3); a listing is not a place to re-read a secret from.
-import { canonicalCommandFingerprintV1 } from "@frockbot/configuration-core";
+import { canonicalCommandFingerprintV1 } from "@frockbot/core/configuration";
 import {
   decodeRoutineTriggerV1,
   isRoutineIdV1,

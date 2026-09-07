@@ -39,7 +39,7 @@ import {
   type MachineCommandResultV1,
   type MachineCommandV1,
   type MachinePlatformV1,
-} from "@frockbot/machine-protocol";
+} from "@frockbot/core/machine-protocol";
 
 // ---------------------------------------------------------------------------
 // What the agent remembers between runs

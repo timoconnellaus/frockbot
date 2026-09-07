@@ -1,4 +1,4 @@
-import { isProtocolValue } from "@frockbot/protocol-schemas";
+import { isProtocolValue } from "@frockbot/core/protocol-schemas";
 import type { NativeSessionStorage } from "./native-sessions.js";
 
 /** A deterministic qualification fixture, never an enabled production Package. */

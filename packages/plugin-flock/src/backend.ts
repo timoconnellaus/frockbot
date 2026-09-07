@@ -24,7 +24,7 @@ import {
   type BotUnreadDirectoryViewV1,
   type BotUnreadReceiptV1,
 } from "@frockbot/plugin-shell/unread";
-import { defineGatewayContribution } from "@frockbot/kernel-contracts/contributions";
+import { defineGatewayContribution } from "@frockbot/core/contracts/contributions";
 
 export interface FlockGatewayHost {
   listBots(userId: string): Promise<BotDirectoryViewV1>;

@@ -14,7 +14,7 @@ import {
 } from "@frockbot/application-foundation/contributions";
 import { ComputerRegistry } from "@frockbot/computer-core";
 import { createFlySpriteProviderFeature } from "@frockbot/plugin-fly-sprite/agent";
-import { mountRuntimeFeaturesV1 } from "@frockbot/kernel-contracts";
+import { mountRuntimeFeaturesV1 } from "@frockbot/core/contracts";
 import { ComputerHostClient } from "@frockbot/plugin-fly-sprite/host-client";
 import {
   computerHostEffectRequestWireV1,
@@ -27,13 +27,13 @@ import {
   decodeRevertCompositionCommandV1,
   MAX_COMPOSITION_GENERATION_PAGE_V1,
   type RevertCompositionCommandV1,
-} from "@frockbot/configuration-core";
+} from "@frockbot/core/configuration";
 import {
   BotDurableAuthority,
   IDENTITY_KEY,
   type BotIdentity,
   type StoredRunOriginV1,
-} from "@frockbot/kernel-do";
+} from "@frockbot/core/durable";
 import type {
   BotStateEnv,
   OwnedBotTurnCommand,
@@ -78,7 +78,7 @@ import {
   decodeNormalizedModelRequestV1,
   decodeWorkspaceRootV1,
   appletSourceArtefactPathV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import type {
   AppletBuildViewV1,
   AppletSourceViewV1,
@@ -89,13 +89,13 @@ import type {
   WorkspacePathV1,
   WorkspaceRootV1,
   WorkspaceSyncEffectsV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import {
   APPLET_ID_V1,
   APPLET_SOURCE_MAX_BYTES_V1,
   APPLET_SOURCE_MAX_FILES_V1,
   decodeWorkspacePathV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 
 /*
  * Where an Applet's source lives.
@@ -143,7 +143,7 @@ import type { ClientWorkspaceFileV1 } from "./contracts.js";
 import {
   DurableWorkspaceGenerations,
   DurableWorkspaceSyncEffects,
-} from "@frockbot/kernel-do";
+} from "@frockbot/core/durable";
 import type { MemoryProjectsV1 } from "@frockbot/plugin-memory/agent";
 import {
   decodeMemoryChunkIndexEntryV1,
@@ -1406,7 +1406,7 @@ export class BotState extends DurableObject<BotStateEnv> {
     };
     const { shell } = await this.materialized(identity);
     const command =
-      request.command as import("@frockbot/kernel-contracts").PackageIframeToolCommandV1;
+      request.command as import("@frockbot/core/contracts").PackageIframeToolCommandV1;
     const turn = await shell.runPackageUiTool(identity, command);
     await this.projectSettledRun(shell, identity, command.commandId);
     await this.projectSettledAudit(shell, identity, command.commandId);

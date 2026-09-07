@@ -27,7 +27,7 @@ import {
   type SearchIndexStateV1,
   type SearchRowV1,
 } from "./shared.js";
-import { defineUserBackendContribution } from "@frockbot/kernel-contracts/contributions";
+import { defineUserBackendContribution } from "@frockbot/core/contracts/contributions";
 
 export interface SearchUserBackendHost {
   /** The User Durable Object's own SQL storage. */

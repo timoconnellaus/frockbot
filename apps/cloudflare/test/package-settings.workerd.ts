@@ -15,7 +15,7 @@ import { describe, expect, test } from "vitest";
 import type {
   OperationReceiptV1,
   UserSettingsViewV1,
-} from "@frockbot/configuration-core";
+} from "@frockbot/core/configuration";
 
 const PACKAGE_ID = "provider-ollama-cloud";
 const SETTING_ID = "web-search-max-results";

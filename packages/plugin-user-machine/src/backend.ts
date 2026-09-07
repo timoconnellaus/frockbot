@@ -57,9 +57,9 @@ import {
   type MachinePollResultV1,
   type MachineResultReceiptV1,
   type MachineTokenClaimsV1,
-} from "@frockbot/machine-protocol";
+} from "@frockbot/core/machine-protocol";
 import { verifyMachinePairingCodeV1 } from "./pairing.js";
-import { defineGatewayContribution } from "@frockbot/kernel-contracts/contributions";
+import { defineGatewayContribution } from "@frockbot/core/contracts/contributions";
 
 /** What one machine call carries into the User Durable Object. */
 export interface MachineCallV1 {

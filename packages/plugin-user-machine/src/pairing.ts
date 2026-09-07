@@ -24,7 +24,7 @@ import {
   constantTimeEqualsV1,
   MACHINE_LIMITS_V1,
   MachineTokenError,
-} from "@frockbot/machine-protocol";
+} from "@frockbot/core/machine-protocol";
 
 /** What a verified pairing code names. */
 export interface MachinePairingClaimsV1 {

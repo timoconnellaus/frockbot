@@ -1,6 +1,6 @@
 // The intent record and the settlement that reads it.
 import { describe, expect, test } from "bun:test";
-import type { MachineCommandV1 } from "@frockbot/machine-protocol";
+import type { MachineCommandV1 } from "@frockbot/core/machine-protocol";
 import {
   decodeMachineIntentRecordV1,
   dispatchedMachineIntentV1,

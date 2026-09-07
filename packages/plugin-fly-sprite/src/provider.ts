@@ -25,8 +25,8 @@ import {
 import {
   workspaceRootKeyV1,
   type WorkspaceRootV1,
-} from "@frockbot/kernel-contracts";
-import type { RuntimeFeatureV1 } from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
+import type { RuntimeFeatureV1 } from "@frockbot/core/contracts";
 import {
   computerBotKey,
   type BrowserAction,

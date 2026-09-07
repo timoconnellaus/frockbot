@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { MACHINE_LIMITS_V1 } from "@frockbot/machine-protocol";
+import { MACHINE_LIMITS_V1 } from "@frockbot/core/machine-protocol";
 import {
   machinePairingCodeDigestV1,
   machinePairingNonceV1,

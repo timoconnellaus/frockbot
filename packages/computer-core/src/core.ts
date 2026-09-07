@@ -5,7 +5,7 @@ import {
   type WorkspaceGenerationsV1,
   type WorkspaceRootV1,
   type WorkspaceSyncEffectsV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import { createHash } from "node:crypto";
 
 /**

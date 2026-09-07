@@ -3,7 +3,7 @@
 // index built incrementally over a sequence of writes equals one rebuilt from
 // the files in one pass.
 import { describe, expect, test } from "bun:test";
-import type { WorkspaceWriterV1 } from "@frockbot/kernel-contracts";
+import type { WorkspaceWriterV1 } from "@frockbot/core/contracts";
 import {
   listAllMemoryDocumentsV1,
   readMemoryDocumentsV1,

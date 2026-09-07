@@ -20,7 +20,7 @@ import {
   TASK_PROMPT_MAX_BYTES_V1,
   type TaskModelBindingV1,
 } from "./records.js";
-import type { ToolExecutionContext } from "@frockbot/kernel-contracts";
+import type { ToolExecutionContext } from "@frockbot/core/contracts";
 
 const BINDING: TaskModelBindingV1 = {
   packageId: "provider-ollama-cloud",

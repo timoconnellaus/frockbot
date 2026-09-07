@@ -24,7 +24,7 @@ import {
   type WorkspacePathV1,
   type WorkspaceReadsV1,
   type WorkspaceWriterV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import {
   memoryDayV1,
   memoryFactBodyV1,

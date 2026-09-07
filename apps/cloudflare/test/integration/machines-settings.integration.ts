@@ -18,7 +18,7 @@ import type {
   ClientSlotRegistration,
 } from "@frockbot/client-core";
 import { clientSurfaceRegistryKey } from "@frockbot/client-core";
-import { MACHINE_LIMITS_V1 } from "@frockbot/machine-protocol";
+import { MACHINE_LIMITS_V1 } from "@frockbot/core/machine-protocol";
 import { userMachineClientPlugin } from "@frockbot/plugin-user-machine/client";
 import {
   machinesStateKey,

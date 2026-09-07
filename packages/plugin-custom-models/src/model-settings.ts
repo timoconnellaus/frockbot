@@ -1,7 +1,7 @@
 import {
   decodeModelBindingV1,
   type ModelBindingV1,
-} from "@frockbot/configuration-core";
+} from "@frockbot/core/configuration";
 
 export const BOT_MODEL_SETTING_ID_V1 = "model";
 

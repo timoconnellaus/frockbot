@@ -10,7 +10,7 @@
 // This module holds no transport. `plugin-provider-ollama-cloud` implements
 // {@link WebSearchV1} over `POST {apiBaseUrl}/api/web_search`; this Package
 // never imports it.
-import type { ToolDefinition, ToolSchema } from "@frockbot/kernel-contracts";
+import type { ToolDefinition, ToolSchema } from "@frockbot/core/contracts";
 
 export const WEB_SEARCH_TOOL_NAME_V1 = "web_search";
 
@@ -146,7 +146,7 @@ export function decodeWebSearchResponseV1(
 
 /**
  * The durable `tool/result` body. The kernel event carries `content: string`
- * (`kernel-contracts/src/types.ts`), so every tool emits stable JSON rather
+ * (`core/contracts/types.ts`), so every tool emits stable JSON rather
  * than prose: a later reader parses it instead of re-reading a sentence.
  */
 export function encodeWebSearchResultV1(response: WebSearchResponseV1): string {

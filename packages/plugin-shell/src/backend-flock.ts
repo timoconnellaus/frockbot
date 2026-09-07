@@ -20,7 +20,7 @@ import type {
   BotSettingsViewV1,
   ConfigurationCommandV1,
   OperationReceiptV1,
-} from "@frockbot/configuration-core";
+} from "@frockbot/core/configuration";
 import type {
   BotDirectoryViewV1,
   CreateBotCommandV1,

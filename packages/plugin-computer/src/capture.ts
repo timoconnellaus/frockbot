@@ -9,7 +9,7 @@ import type {
   WorkspacePathV1,
   WorkspaceRootV1,
   WorkspaceWriterV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import { COMPUTER_SCREENSHOT_RETENTION } from "./roots.js";
 
 export type ComputerProjectionFileKindV1 = "screenshots" | "doctor";

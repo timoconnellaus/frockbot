@@ -13,7 +13,7 @@ import {
   formatSkillRefV1,
   MAX_INVOKED_SKILLS_V1,
   type SkillRefV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import type { ClientSkillCatalogEntryV1 } from "../skill-protocol.js";
 
 /** The characters that open the popover, in GrokBot's shape. */

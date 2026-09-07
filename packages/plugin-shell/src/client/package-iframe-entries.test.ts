@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type {
   PackageIframeCatalogV1,
   PackageIframeContributionViewV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import {
   packageIframeEntriesV1,
   packageIframePagesForSlotV1,

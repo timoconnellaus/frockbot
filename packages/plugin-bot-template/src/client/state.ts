@@ -2,7 +2,7 @@ import type { InjectionKey, Ref } from "vue";
 import type {
   TemplateShareRecordV1,
   TemplateVisibilityV1,
-} from "@frockbot/template-core";
+} from "@frockbot/core/template";
 import type {
   TemplateExportSummaryV1,
   TemplateImportRecordV1,

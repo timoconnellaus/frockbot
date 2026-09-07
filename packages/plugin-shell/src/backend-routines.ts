@@ -47,7 +47,7 @@ import {
   type RoutineRunDetailViewV1,
 } from "@frockbot/plugin-routines/shared";
 import type { RoutineInboxEntryV1 } from "@frockbot/plugin-routines/inbox";
-import type { SessionEvent } from "@frockbot/kernel-contracts";
+import type { SessionEvent } from "@frockbot/core/contracts";
 
 /** The Bot and User whose Routines a caller may reach. */
 export interface BotRoutinesIdentity {

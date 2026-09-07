@@ -8,7 +8,7 @@
 // the token; a lost claim does not run the command).
 
 import { describe, expect, test } from "bun:test";
-import type { MachineCommandV1 } from "@frockbot/machine-protocol";
+import type { MachineCommandV1 } from "@frockbot/core/machine-protocol";
 import {
   MACHINE_AGENT_BACKOFF_V1,
   MachineDeviceAgentV1,

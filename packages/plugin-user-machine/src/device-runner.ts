@@ -22,7 +22,7 @@ import {
   type MachineCommandV1,
   type MachineMessagesCallV1,
   machineOpCapabilityV1,
-} from "@frockbot/machine-protocol";
+} from "@frockbot/core/machine-protocol";
 import type {
   MachineCommandReportV1,
   MachineCommandRunnerV1,

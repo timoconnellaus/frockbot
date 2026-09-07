@@ -18,14 +18,14 @@
 //  2. `credentialRef` is never projected, for the same reason and by the same
 //     mechanism.
 //  3. Whatever survives runs through the shared credential-shape table
-//     (`@frockbot/secret-shapes`), matched substrings replaced with
+//     (`@frockbot/core/secret-shapes`), matched substrings replaced with
 //     `[redacted:<id>]`.
 //
 // HONEST BOUND, stated as `plugin-memory/src/secrets.ts` states it: step 3 is
 // a shape matcher, not a secret scanner, and a determined encoding gets
 // through it. Steps 1 and 2 are not — they are structural, and they are what
 // the rule actually rests on.
-import { redactSecretShapesV1 } from "@frockbot/secret-shapes";
+import { redactSecretShapesV1 } from "@frockbot/core/secret-shapes";
 import { AUDIT_MAX_PREVIEW_LENGTH_V1, type AuditKindV1 } from "./shared.js";
 
 function isObject(value: unknown): value is Record<string, unknown> {

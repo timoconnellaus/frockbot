@@ -8,7 +8,7 @@ import {
   MACHINE_LIMITS_V1,
   machineRoutePathV1,
   mintMachineTokenV1,
-} from "@frockbot/machine-protocol";
+} from "@frockbot/core/machine-protocol";
 import {
   createMachineBackendContribution,
   type MachineBackendRouteContribution,

@@ -5,7 +5,10 @@
 // nothing, so the decisions are all provable in CI.
 
 import { describe, expect, test } from "bun:test";
-import type { MachineCommandV1, MachineOpV1 } from "@frockbot/machine-protocol";
+import type {
+  MachineCommandV1,
+  MachineOpV1,
+} from "@frockbot/core/machine-protocol";
 import {
   createMachineDeviceRunnerV1,
   machineRefusalV1,

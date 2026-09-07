@@ -13,7 +13,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@frockbot/kernel-contracts": "workspace:*"
+    "@frockbot/core": "workspace:*"
   },
   "devDependencies": {
     "@frockbot/plugin-testkit": "workspace:*",

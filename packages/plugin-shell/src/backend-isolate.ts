@@ -13,11 +13,11 @@ import type {
   IsolateModelInvocationV1,
   LlmStreamEvent,
   NormalizedModelRequest,
-} from "@frockbot/kernel-contracts";
-import { encodeIsolateModelEventLineV1 } from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
+import { encodeIsolateModelEventLineV1 } from "@frockbot/core/contracts";
 import type { BotIsolateArtifactStore } from "@frockbot/compose-frockbot";
 
-export type { IsolateModelBindingV1 } from "@frockbot/kernel-contracts";
+export type { IsolateModelBindingV1 } from "@frockbot/core/contracts";
 
 export const BOT_ISOLATE_COMPATIBILITY_DATE = "2026-08-27";
 

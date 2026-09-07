@@ -1,18 +1,18 @@
 import { shellTestApplicationV1 } from "./backend-application.fixture.js";
 import { describe, expect, test } from "bun:test";
-import { type SessionEvent } from "@frockbot/kernel-contracts";
+import { type SessionEvent } from "@frockbot/core/contracts";
 import {
   parseCredentialKeyringV1,
   sealCredentialV1,
-} from "@frockbot/connection-core";
+} from "@frockbot/core/connection";
 import {
   initializeBotSettingsV1,
   type UserSettingsViewV1,
-} from "@frockbot/configuration-core";
+} from "@frockbot/core/configuration";
 import {
   SessionEventLog,
   sessionEventLogIndexKeyV1,
-} from "@frockbot/kernel-do";
+} from "@frockbot/core/durable";
 import { createShellBotBackendContribution } from "./backend.js";
 import {
   botTurnCommandFingerprintV1,

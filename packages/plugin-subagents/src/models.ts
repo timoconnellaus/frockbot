@@ -11,7 +11,7 @@
 // provider: resolution runs against the User's enabled model Capabilities, so a
 // slug the Bot invents resolves to nothing and the dispatch is refused.
 
-import type { TurnTypeV1 } from "@frockbot/kernel-contracts";
+import type { TurnTypeV1 } from "@frockbot/core/contracts";
 import {
   decodeTaskModelBindingV1,
   SubagentDecodeError,

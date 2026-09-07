@@ -16,7 +16,7 @@ import {
   type WorkspaceStatOutcomeV1,
   type WorkspaceWriteOutcomeV1,
   type WorkspaceWriteRequestV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import { sha256HexV1 } from "./bytes.js";
 import type { ImageModelInputV1, ImageModelV1 } from "./model.js";
 

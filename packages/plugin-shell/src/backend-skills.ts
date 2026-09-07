@@ -23,7 +23,7 @@
 import type {
   WorkspaceFilesV1,
   WorkspaceReadsV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import type { SkillsRuntimeHostV1 } from "@frockbot/plugin-skills/agent";
 
 /** The Bot and User whose Skills a Turn may load. */

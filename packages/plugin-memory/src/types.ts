@@ -4,7 +4,7 @@
 // written through `WorkspaceFilesV1`. Embeddings are derived state over those
 // files, so their bindings are optional throughout — a Bot with no Workers AI
 // binding indexes and searches its Memory lexically.
-import type { MemoryScopeNameV1 } from "@frockbot/kernel-contracts";
+import type { MemoryScopeNameV1 } from "@frockbot/core/contracts";
 
 export const EMBEDDING_MODEL = "@cf/baai/bge-base-en-v1.5";
 export const EMBEDDING_DIMENSIONS = 768;

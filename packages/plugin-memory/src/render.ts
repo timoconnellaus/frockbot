@@ -19,7 +19,7 @@
 // (§3.6). Rendering fresh every Turn costs one listing and gives an injection
 // that matches the files; the constitution's requirement is that what was
 // injected is *recorded*, which `memory/injected` does, not that it is cached.
-import type { MemoryScopeNameV1 } from "@frockbot/kernel-contracts";
+import type { MemoryScopeNameV1 } from "@frockbot/core/contracts";
 import {
   memoryFactKeyV1,
   parseMemoryMarkerV1,

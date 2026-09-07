@@ -4,7 +4,7 @@ import type { ClientRun } from "@frockbot/client-core";
 import {
   initializeBotSettingsV1,
   type UserSettingsViewV1,
-} from "@frockbot/configuration-core";
+} from "@frockbot/core/configuration";
 
 // Bun has no single-file-component loader, so every Vue module the client
 // graph reaches stands in as an empty component; these tests exercise the

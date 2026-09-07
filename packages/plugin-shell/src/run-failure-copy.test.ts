@@ -1,7 +1,7 @@
-import { STEP_LIMIT_REASON_V1 } from "@frockbot/kernel-agent-loop";
+import { STEP_LIMIT_REASON_V1 } from "@frockbot/core/agent-loop";
 import { describe, expect, test } from "bun:test";
-import type { SessionEvent } from "@frockbot/kernel-contracts";
-import { MODEL_FIRST_BYTE_DEADLINE_REASON_V1 } from "@frockbot/kernel-contracts";
+import type { SessionEvent } from "@frockbot/core/contracts";
+import { MODEL_FIRST_BYTE_DEADLINE_REASON_V1 } from "@frockbot/core/contracts";
 import {
   CLIENT_VERSION_DEGRADED_MESSAGE_V1,
   failureNoticeV1,
@@ -12,7 +12,7 @@ import {
   runFailureCopyV1,
   USER_FACING_FAILURE_REASONS_V1,
 } from "./run-failure-copy.js";
-import { initializeBotSettingsV1 } from "@frockbot/configuration-core";
+import { initializeBotSettingsV1 } from "@frockbot/core/configuration";
 import type { StoredRun } from "./backend-contracts.js";
 import { projectClientRunV1 } from "./run-protocol.js";
 
@@ -159,7 +159,7 @@ describe("runFailureCopyV1", () => {
 });
 
 test("a reply that ran out of steps says so in plain words", () => {
-  // `kernel-do` wraps the loop's reason; the sentence survives the wrapper.
+  // `core/durable` wraps the loop's reason; the sentence survives the wrapper.
   expect(
     runFailureCopyV1({
       failure: `Bot turn ended with outcome interrupted: ${STEP_LIMIT_REASON_V1}`,

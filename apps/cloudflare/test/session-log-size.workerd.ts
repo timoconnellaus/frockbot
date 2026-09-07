@@ -6,8 +6,8 @@ import { runInDurableObject } from "cloudflare:test";
 import {
   bootstrapGeneration,
   type CompositionGenerationV1,
-} from "@frockbot/kernel-do";
-import { Session, type SessionEvent } from "@frockbot/kernel-contracts";
+} from "@frockbot/core/durable";
+import { Session, type SessionEvent } from "@frockbot/core/contracts";
 import {
   BotDurableAuthority,
   SESSION_EVENT_PAGE_BYTES_V1,
@@ -17,7 +17,7 @@ import {
   sessionEventPayloadPrefixV1,
   type BotDurableAuthorityHooks,
   type StoredRunV1,
-} from "@frockbot/kernel-do";
+} from "@frockbot/core/durable";
 import { describe, expect, test } from "vitest";
 
 const SESSION_ID = "session-log-size-user:session-log-size-bot";

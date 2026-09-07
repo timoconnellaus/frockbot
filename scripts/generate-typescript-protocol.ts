@@ -27,11 +27,11 @@ const bundled = await build({
 // The generated module is a default-exported table of standalone predicates;
 // no schema compiler, eval, network or runtime dependency reaches a Worker.
 await output(
-  "packages/protocol-schemas/src/validators.generated.js",
+  "core/protocol-schemas/validators.generated.js",
   banner + bundled.outputFiles[0]!.text,
 );
 await output(
-  "packages/protocol-schemas/src/types.generated.ts",
+  "core/protocol-schemas/types.generated.ts",
   banner +
     names
       .map((name) => `export type ${name} = ${tsType(source.$defs[name]!)};`)
@@ -40,13 +40,13 @@ await output(
   "typescript",
 );
 await output(
-  "packages/protocol-schemas/src/validators.generated.d.ts",
+  "core/protocol-schemas/validators.generated.d.ts",
   banner +
     `import type { ProtocolTypes } from './types.generated.js';\ndeclare const validators: { ${names.map((n) => `is${n}(value: unknown): value is ProtocolTypes[${JSON.stringify(n)}];`).join("\n")} };\nexport default validators;\n`,
   "typescript",
 );
 await output(
-  "packages/protocol-schemas/src/compatibility.generated.ts",
+  "core/protocol-schemas/compatibility.generated.ts",
   banner +
     `export const CLIENT_COMPATIBILITY = ${JSON.stringify({ schemaVersion: 1, ...source["x-frockbot-compatibility"] })} as const;\nexport const SUPPORTED_PROTOCOL_MIN = CLIENT_COMPATIBILITY.protocolMin;\nexport const SUPPORTED_PROTOCOL_MAX = CLIENT_COMPATIBILITY.protocolMax;\nexport const MINIMUM_NATIVE_VERSION = CLIENT_COMPATIBILITY.minimumNativeVersion;\n`,
   "typescript",

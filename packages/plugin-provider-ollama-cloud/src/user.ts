@@ -9,8 +9,8 @@ import {
   type ConnectionModelV1,
   type ConnectionSettingsV1,
   type CredentialLeaseV1,
-} from "@frockbot/connection-core";
-import type { ConnectionView } from "@frockbot/configuration-core";
+} from "@frockbot/core/connection";
+import type { ConnectionView } from "@frockbot/core/configuration";
 import type {
   CredentialStorage,
   CredentialTransaction,
@@ -27,7 +27,7 @@ import {
   type OllamaCloudClientConfig,
 } from "./client.js";
 import { OLLAMA_CLOUD_PROVIDER } from "./runtime.js";
-import { defineUserBackendContribution } from "@frockbot/kernel-contracts/contributions";
+import { defineUserBackendContribution } from "@frockbot/core/contracts/contributions";
 
 const PACKAGE_ID = "provider-ollama-cloud";
 const CONNECTION_TYPE_ID = "ollama-cloud-account";

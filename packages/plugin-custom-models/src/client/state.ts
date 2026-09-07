@@ -2,7 +2,7 @@ import type { ClientPluginContext } from "@frockbot/client-core";
 import type {
   BotSettingsViewV1,
   ModelBindingV1,
-} from "@frockbot/configuration-core";
+} from "@frockbot/core/configuration";
 import type { FrockBotWebData } from "@frockbot/plugin-shell/shared";
 import type { InjectionKey, Ref } from "vue";
 import { BOT_MODEL_SETTING_ID_V1 } from "../model-settings.js";

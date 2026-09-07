@@ -14,7 +14,7 @@ import {
 } from "../shared.js";
 import AuditSection from "./AuditSection.vue";
 import { auditStateKey, type AuditClientState } from "./state.js";
-import { defineClientContribution } from "@frockbot/kernel-contracts/contributions";
+import { defineClientContribution } from "@frockbot/core/contracts/contributions";
 
 function message(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;

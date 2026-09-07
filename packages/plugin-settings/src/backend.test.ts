@@ -3,11 +3,11 @@ import type {
   CompositionCommandReceiptV1,
   CompositionGenerationViewV1,
   RevertCompositionCommandV1,
-} from "@frockbot/configuration-core";
+} from "@frockbot/core/configuration";
 import type {
   ConnectionCommandReceiptV1,
   ConnectionCommandV1,
-} from "@frockbot/connection-core";
+} from "@frockbot/core/connection";
 import { createSettingsBackendContribution } from "./backend.js";
 
 const BOOTSTRAP_GENERATION = "2026-08-31T00:00:00.000Z:0123456789abcdef";

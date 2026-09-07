@@ -50,7 +50,7 @@ import {
 import { flockWebDataKey, type FlockWebData } from "./state.js";
 import "../../assets/layers.css";
 import "./styles.css";
-import { defineClientContribution } from "@frockbot/kernel-contracts/contributions";
+import { defineClientContribution } from "@frockbot/core/contracts/contributions";
 import {
   clientFailureDetailV1,
   presentClientFailureV1,

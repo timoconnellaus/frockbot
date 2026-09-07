@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   openCredentialV1,
   parseCredentialKeyringV1,
-} from "@frockbot/connection-core";
+} from "@frockbot/core/connection";
 import {
   createCredentialUserBackendContribution,
   type CredentialStorage,

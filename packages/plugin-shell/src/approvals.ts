@@ -25,7 +25,7 @@
  *    Durable Object's own alarm expires it, and expiry queues the same pending
  *    input a human decision does, so the Bot always learns the outcome.
  */
-import type { SendToUserApprovalRiskV1 } from "@frockbot/kernel-contracts";
+import type { SendToUserApprovalRiskV1 } from "@frockbot/core/contracts";
 
 /** One `ApprovalRecordV1`, keyed by the Bot's own approval id. */
 export const APPROVAL_PREFIX = "shell:approval:";

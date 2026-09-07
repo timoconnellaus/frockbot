@@ -23,7 +23,7 @@ import {
   type AuditRebuildReceiptV1,
   type ClientAuditPageV1,
 } from "./shared.js";
-import { defineGatewayContribution } from "@frockbot/kernel-contracts/contributions";
+import { defineGatewayContribution } from "@frockbot/core/contracts/contributions";
 
 export interface AuditGatewayHost {
   readAudit(userId: string, query: AuditQueryV1): Promise<ClientAuditPageV1>;

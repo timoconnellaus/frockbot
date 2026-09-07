@@ -6,7 +6,7 @@
 // exports that data from its own package as a `PackageDefinitionV1`. A
 // Package with none of it appears here as an id and a display name, which is
 // all the product ever needed to know about it.
-import type { PackageDefinitionV1 } from "@frockbot/kernel-contracts";
+import type { PackageDefinitionV1 } from "@frockbot/core/contracts";
 import { adminDefinitionV1 } from "@frockbot/plugin-admin/definition";
 import { appletsDefinitionV1 } from "@frockbot/plugin-applets/definition";
 import { auditDefinitionV1 } from "@frockbot/plugin-audit/definition";

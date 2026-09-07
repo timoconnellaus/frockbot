@@ -4,7 +4,7 @@
 // they confirm, and the step list is derived from the same function, so the
 // two cannot drift.
 import { describe, expect, it } from "bun:test";
-import type { BotTemplateV1 } from "@frockbot/template-core";
+import type { BotTemplateV1 } from "@frockbot/core/template";
 import {
   describeImportPlanV1,
   importedBotIdV1,

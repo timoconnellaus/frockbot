@@ -1,4 +1,4 @@
-import { decodeConnectorCatalogV1 } from "@frockbot/connection-core";
+import { decodeConnectorCatalogV1 } from "@frockbot/core/connection";
 /// <reference path="../env.d.ts" />
 
 import {
@@ -22,14 +22,14 @@ import { readViewerFocusV1, shouldNotifyForBotV1 } from "../focus.js";
 import type {
   ConnectionCommandReceiptV1,
   ConnectionCommandV1,
-} from "@frockbot/connection-core";
-import type { PackageDefinitionV1 } from "@frockbot/kernel-contracts";
+} from "@frockbot/core/connection";
+import type { PackageDefinitionV1 } from "@frockbot/core/contracts";
 import {
   decodePackageIframeCatalogV1,
   packageIframeToolAllowedV1,
   decodeSendToUserPayloadV1,
   type PackageIframeContributionViewV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import { createClientSurfaceRegistry } from "@frockbot/client-ui";
 import type {
   BotNameProvenanceV1,
@@ -40,10 +40,10 @@ import type {
   JsonValue,
   PackageSettingValueV1,
   UserSettingsViewV1,
-} from "@frockbot/configuration-core";
-import { resolveEffectiveBotModelV1 } from "@frockbot/configuration-core";
-import type { SkillRefV1 } from "@frockbot/kernel-contracts";
-import { decodeStartConnectionResultV1 } from "@frockbot/connection-core";
+} from "@frockbot/core/configuration";
+import { resolveEffectiveBotModelV1 } from "@frockbot/core/configuration";
+import type { SkillRefV1 } from "@frockbot/core/contracts";
+import { decodeStartConnectionResultV1 } from "@frockbot/core/connection";
 import { decodeClientSkillCatalogV1 } from "../skill-protocol.js";
 import { failureNoticeV1, knownFailureCopyV1 } from "../run-failure-copy.js";
 import {
@@ -109,7 +109,7 @@ import { modelRuntimeLabel } from "./model-presentation.js";
 import { showClientNotificationV1 } from "./notify.js";
 import "@frockbot/client-core/fonts.css";
 import "./styles.css";
-import { defineClientContribution } from "@frockbot/kernel-contracts/contributions";
+import { defineClientContribution } from "@frockbot/core/contracts/contributions";
 
 function presentedToolCall(call: NonNullable<ClientTurnEvent["call"]>): {
   name: string;

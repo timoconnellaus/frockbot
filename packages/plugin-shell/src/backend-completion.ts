@@ -1,19 +1,25 @@
 // Kernel run-terminal transitions, bound to the Shell Package's run codec.
-import { type SessionEvent } from "@frockbot/kernel-contracts";
+import { type SessionEvent } from "@frockbot/core/contracts";
 import {
   cancelStoredRun as cancelKernelStoredRun,
   completeStoredRun as completeKernelStoredRun,
   failStoredRun as failKernelStoredRun,
   type TerminalPackageRecords,
-} from "@frockbot/kernel-do";
+} from "@frockbot/core/durable";
 import {
   storedRunCodecV1,
   type BotTurnCompletion,
 } from "./backend-contracts.js";
-import type { BotSettingsViewV1 } from "@frockbot/configuration-core";
+import type { BotSettingsViewV1 } from "@frockbot/core/configuration";
 
-export type { RunTerminalKeys, RunTerminalStorage } from "@frockbot/kernel-do";
-import type { RunTerminalKeys, RunTerminalStorage } from "@frockbot/kernel-do";
+export type {
+  RunTerminalKeys,
+  RunTerminalStorage,
+} from "@frockbot/core/durable";
+import type {
+  RunTerminalKeys,
+  RunTerminalStorage,
+} from "@frockbot/core/durable";
 
 export function completeStoredRun(
   storage: RunTerminalStorage,

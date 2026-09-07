@@ -4,7 +4,7 @@ import { describe, expect, test } from "bun:test";
 import type {
   WorkspaceFilesV1,
   WorkspaceWriterV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import { renderInjectedFactLineV1 } from "./facts.ts";
 import {
   botMemoryRootV1,

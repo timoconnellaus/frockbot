@@ -14,7 +14,7 @@ import {
   decodeSkillRefV1,
   formatSkillRefV1,
   type SkillRefV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 
 const MAX_CATALOG_ENTRIES = 200;
 const MAX_NAME_LENGTH = 64;

@@ -1,0 +1,49 @@
+{
+  "name": "@frockbot/core",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./contracts": "./contracts/index.ts",
+    "./contracts/contributions": "./contracts/contributions.ts",
+    "./durable": "./durable/index.ts",
+    "./agent-loop": "./agent-loop/index.ts",
+    "./agent-loop/agent": "./agent-loop/agent.ts",
+    "./configuration": "./configuration/index.ts",
+    "./configuration/bot-id": "./configuration/bot-id.ts",
+    "./connection": "./connection/index.ts",
+    "./workspace-store": "./workspace-store/index.ts",
+    "./workspace-store/bucket": "./workspace-store/bucket.ts",
+    "./workspace-store/keys": "./workspace-store/keys.ts",
+    "./workspace-store/testing": "./workspace-store/testing.ts",
+    "./secret-shapes": "./secret-shapes/index.ts",
+    "./template": "./template/index.ts",
+    "./protocol": "./protocol/index.ts",
+    "./protocol-schemas": "./protocol-schemas/index.ts",
+    "./machine-protocol": "./machine-protocol/index.ts",
+    "./machine-protocol/protocol": "./machine-protocol/protocol.ts",
+    "./machine-protocol/quota": "./machine-protocol/quota.ts",
+    "./machine-protocol/routes": "./machine-protocol/routes.ts",
+    "./machine-protocol/token": "./machine-protocol/token.ts",
+    "./models": "./models/index.ts",
+    "./models/agent": "./models/llm.ts",
+    "./prompt": "./prompt/index.ts",
+    "./prompt/agent": "./prompt/system-prompt.ts",
+    "./tools": "./tools/index.ts",
+    "./tools/agent": "./tools/tools.ts",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@frockbot/compose-frockbot": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "latest",
+    "@types/bun": "1.4.0",
+    "@types/node": "26.2.0",
+    "typescript": "^7.0.2"
+  }
+}

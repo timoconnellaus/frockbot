@@ -1,4 +1,4 @@
-import { decodeProtocol } from "@frockbot/protocol-schemas";
+import { decodeProtocol } from "@frockbot/core/protocol-schemas";
 import { nativeFallbackResponse } from "./native-fallback.js";
 import { accountIsAdmitted } from "./account-admission.js";
 import { isNativeAuthPath, readNativeJsonBody } from "./native-auth.js";
@@ -14,12 +14,12 @@ import {
   decodeUserSettingsViewV1,
   isApplicationDeploymentHash,
   isPublicIdentifier,
-} from "@frockbot/configuration-core";
-import { DEPLOYMENT_HEADER_V1 } from "@frockbot/protocol";
+} from "@frockbot/core/configuration";
+import { DEPLOYMENT_HEADER_V1 } from "@frockbot/core/protocol";
 import {
   AppletViewerTokenError,
   verifyAppletViewerTokenV1,
-} from "@frockbot/kernel-do";
+} from "@frockbot/core/durable";
 import {
   DEVELOPMENT_USER_ID,
   isDeploymentAdminV1,

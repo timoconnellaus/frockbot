@@ -16,7 +16,7 @@
   },
   "dependencies": {
     "@frockbot/client-core": "workspace:*",
-    "@frockbot/kernel-contracts": "workspace:*",
+    "@frockbot/core": "workspace:*",
     "better-auth": "1.7.2",
     "vue": "3.5.41"
   },

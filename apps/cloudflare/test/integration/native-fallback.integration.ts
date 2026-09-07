@@ -1,10 +1,10 @@
-import { decodeProtocol } from "@frockbot/protocol-schemas";
+import { decodeProtocol } from "@frockbot/core/protocol-schemas";
 import { env, runInDurableObject, SELF } from "cloudflare:test";
 import { expect, test } from "vitest";
 import {
   appletStateNameV1,
   verifyAppletViewerTokenV1,
-} from "@frockbot/kernel-do";
+} from "@frockbot/core/durable";
 import { nativeHeaders } from "../native-session-fixture.ts";
 import { freshUserId, useApplicationArtifact } from "./fixtures.ts";
 

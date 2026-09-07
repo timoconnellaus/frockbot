@@ -2,8 +2,8 @@ import { describe, expect, mock, test } from "bun:test";
 import {
   parseCredentialKeyringV1,
   sealCredentialV1,
-} from "@frockbot/connection-core";
-import type { UserSettingsViewV1 } from "@frockbot/configuration-core";
+} from "@frockbot/core/connection";
+import type { UserSettingsViewV1 } from "@frockbot/core/configuration";
 import type { StoredRun } from "@frockbot/plugin-shell/backend-contracts";
 import { randomSheepRecipeV1 } from "@frockbot/plugin-flock/shared";
 import type { BotStateEnv } from "./bot-state.js";

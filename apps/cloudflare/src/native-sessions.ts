@@ -1,4 +1,7 @@
-import { isProtocolValue, type ClientHello } from "@frockbot/protocol-schemas";
+import {
+  isProtocolValue,
+  type ClientHello,
+} from "@frockbot/core/protocol-schemas";
 
 export interface NativeSessionRecord {
   schemaVersion: 1;

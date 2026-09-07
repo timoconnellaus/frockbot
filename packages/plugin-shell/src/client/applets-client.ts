@@ -20,7 +20,7 @@ import {
   type AppletSummaryV1,
   type AppletUiViewV1,
   type AppletViewerTokenV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 
 /** Exactly what the shell's hosted transport offers, and nothing more. */
 export type AppletsHostedRequest = (

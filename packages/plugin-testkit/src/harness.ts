@@ -7,11 +7,11 @@ import {
   type RuntimeFeatureV1,
   SessionStore,
   type SessionStoreConfig,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import type { CredentialLeaseRuntime } from "@frockbot/plugin-credentials/user";
-import { LlmRegistry } from "@frockbot/plugin-models";
-import { SystemPromptRegistry } from "@frockbot/plugin-prompt";
-import { ToolRegistry } from "@frockbot/plugin-tools";
+import { LlmRegistry } from "@frockbot/core/models";
+import { SystemPromptRegistry } from "@frockbot/core/prompt";
+import { ToolRegistry } from "@frockbot/core/tools";
 
 export interface AgentRuntimeHarness extends AgentRuntimeV1 {
   readonly systemPrompt: SystemPromptRegistry;

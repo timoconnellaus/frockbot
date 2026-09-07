@@ -9,7 +9,7 @@
 // component sees it: "The hosted client renders backend state and submits
 // commands. It does not become an alternate authority."
 import type { ClientPlugin } from "@frockbot/client-core";
-import type { TemplateVisibilityV1 } from "@frockbot/template-core";
+import type { TemplateVisibilityV1 } from "@frockbot/core/template";
 import { ref } from "vue";
 import {
   decodeTemplateImportListViewV1,
@@ -20,7 +20,7 @@ import {
 import BotTemplateImportSection from "./BotTemplateImportSection.vue";
 import BotTemplateSection from "./BotTemplateSection.vue";
 import { botTemplateStateKey, type BotTemplateClientState } from "./state.js";
-import { defineClientContribution } from "@frockbot/kernel-contracts/contributions";
+import { defineClientContribution } from "@frockbot/core/contracts/contributions";
 
 const SHARES_PATH = "/api/bot-templates";
 const IMPORTS_PATH = "/api/bot-template-imports";

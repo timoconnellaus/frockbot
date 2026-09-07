@@ -30,7 +30,7 @@ import {
   type MachinePairingOfferV1,
   type MachinePlatformV1,
   type MachineResultReceiptV1,
-} from "@frockbot/machine-protocol";
+} from "@frockbot/core/machine-protocol";
 import type { MachineStorageV1, MachineStorageWritesV1 } from "./store.js";
 
 // ---------------------------------------------------------------------------

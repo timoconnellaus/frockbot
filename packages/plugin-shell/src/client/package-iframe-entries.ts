@@ -12,7 +12,7 @@ import type {
   PackageIframeContributionViewV1,
   PackageIframeEntryViewV1,
   PackageIframePageViewV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 
 export interface PackageIframeEntryV1 {
   contribution: PackageIframeContributionViewV1;

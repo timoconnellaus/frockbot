@@ -3,7 +3,7 @@
 import { describe, expect, test } from "bun:test";
 import { MachineUserBackendContribution } from "./user.ts";
 import { createMemoryMachineStorageV1 } from "./testing.ts";
-import { machineTokenDigestV1 } from "@frockbot/machine-protocol";
+import { machineTokenDigestV1 } from "@frockbot/core/machine-protocol";
 
 const SECRET = "machine-user-secret-0123456789abcdef";
 const T0 = Date.parse("2026-09-01T00:00:00.000Z");

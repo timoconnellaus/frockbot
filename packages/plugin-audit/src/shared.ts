@@ -253,7 +253,7 @@ function integer(
  *
  * The whole design rests on this being decodable: turn, step and ordinal are
  * already in the durable event as one string
- * (`kernel-contracts/src/types.ts`, `toolOccurrenceId`), so audit needs no new
+ * (`core/contracts/types.ts`, `toolOccurrenceId`), so audit needs no new
  * coordinate and no new authority to place an effect in a conversation.
  */
 export function decodeAuditOccurrenceIdV1(value: unknown): {

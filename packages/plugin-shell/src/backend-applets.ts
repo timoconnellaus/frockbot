@@ -22,7 +22,7 @@ import {
   APPLET_FOCUSED_KEY,
   decodeFocusedAppletV1,
   type FocusedAppletV1,
-} from "@frockbot/kernel-do";
+} from "@frockbot/core/durable";
 import type {
   AppletCapabilityCallScopeV1,
   AppletCapabilityHostV1,
@@ -37,11 +37,11 @@ import {
   type AppletPublishResultV1,
   type AppletSummaryV1,
   type AppletToolDeclarationV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import type {
   WorkspacePathV1,
   WorkspaceReadsV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import {
   compositionArtifactSetHashV1,
   compositionGenerationIdV1,
@@ -52,7 +52,7 @@ import {
   type CompositionGenerationV1,
   type CompositionStore,
   type PackageProvenanceV1,
-} from "@frockbot/kernel-do";
+} from "@frockbot/core/durable";
 
 /** The durable key one publish intent is recorded under, by effect id. */
 export const APPLET_PUBLISH_EFFECT_PREFIX = "applets:publish-effect:";

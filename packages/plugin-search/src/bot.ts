@@ -1,6 +1,6 @@
 // The Bot half of the Search Package: the projection, and the sink it writes to.
 //
-// The kernel imports no Package, so nothing here is called from `kernel-do`.
+// Core imports no Package, so nothing here is called from `core/durable`.
 // The Bot Durable Object projects a *settled* run — one that has already
 // reached a durable terminal state — through the narrow `SearchSinkV1` binding
 // its host constructs, exactly as the Memory Package reaches the User Durable

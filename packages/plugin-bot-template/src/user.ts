@@ -18,7 +18,7 @@
 import type {
   BotSettingsViewV1,
   UserSettingsViewV1,
-} from "@frockbot/configuration-core";
+} from "@frockbot/core/configuration";
 import type {
   UserSettingsBackendContribution,
   UserSettingsStorage,
@@ -36,7 +36,7 @@ import {
   TemplateDecodeError,
   type TemplateShareRecordV1,
   type TemplateSheepRecipeV1,
-} from "@frockbot/template-core";
+} from "@frockbot/core/template";
 import {
   buildBotTemplateV1,
   type TemplateRoutineCandidateV1,
@@ -63,7 +63,7 @@ import {
   type TemplateShareListViewV1,
   type TemplateShareReceiptV1,
 } from "./shared.js";
-import { defineUserBackendContribution } from "@frockbot/kernel-contracts/contributions";
+import { defineUserBackendContribution } from "@frockbot/core/contracts/contributions";
 
 export const BOT_TEMPLATE_PACKAGE_ID = "bot-template";
 

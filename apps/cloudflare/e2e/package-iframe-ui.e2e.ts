@@ -3,7 +3,7 @@
 // Package projection and immutable object are intercepted because this suite's
 // bundler is intentionally absent; everything that hosts and talks to the page
 // is the production client bundle.
-import { PACKAGE_IFRAME_HELPER_JS_V1 } from "@frockbot/kernel-contracts";
+import { PACKAGE_IFRAME_HELPER_JS_V1 } from "@frockbot/core/contracts";
 import type { Page, TestInfo } from "@playwright/test";
 import { test, expect, provisionThroughUi, sendMessage } from "./fixtures.ts";
 import { E2E_OLLAMA_GOOD_API_KEY } from "./harness.ts";

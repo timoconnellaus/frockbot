@@ -3,10 +3,10 @@ import type {
   ApprovalListViewV1,
 } from "@frockbot/plugin-shell/approvals";
 import { describe, expect, test } from "bun:test";
-import { type SessionEvent } from "@frockbot/kernel-contracts";
-import type { ConnectionCommandReceiptV1 } from "@frockbot/connection-core";
+import { type SessionEvent } from "@frockbot/core/contracts";
+import type { ConnectionCommandReceiptV1 } from "@frockbot/core/connection";
 import { createSettingsBackendContribution } from "@frockbot/plugin-settings/backend";
-import { applyBotProfilePatchV1 } from "@frockbot/configuration-core";
+import { applyBotProfilePatchV1 } from "@frockbot/core/configuration";
 import type {
   BotConfigurationReadRpcV1,
   BotSettingsViewV1,
@@ -16,7 +16,7 @@ import type {
   OperationReceiptV1,
   UserConfigurationReadRpcV1,
   UserSettingsViewV1,
-} from "@frockbot/configuration-core";
+} from "@frockbot/core/configuration";
 import type { StoredRun } from "@frockbot/plugin-shell/backend-contracts";
 import type { DeploymentPolicyV1 } from "@frockbot/plugin-admin/shared";
 import { createFlockBackendContribution } from "@frockbot/plugin-flock/backend";
@@ -67,7 +67,7 @@ import {
   createGateway,
   deploymentAnsweredV1,
 } from "./gateway.js";
-import { DEPLOYMENT_HEADER_V1 } from "@frockbot/protocol";
+import { DEPLOYMENT_HEADER_V1 } from "@frockbot/core/protocol";
 import { createUserApplication } from "./user-application.js";
 
 class MemoryBotState implements BotStateBinding {

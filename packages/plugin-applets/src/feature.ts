@@ -17,8 +17,8 @@ import type {
   RuntimeFeatureV1,
   ToolDefinition,
   ToolRegistration,
-} from "@frockbot/kernel-contracts";
-import type { FocusedAppletV1 } from "@frockbot/kernel-do";
+} from "@frockbot/core/contracts";
+import type { FocusedAppletV1 } from "@frockbot/core/durable";
 import { APPLET_TEMPLATE_FILES_V1 } from "./template.generated.js";
 
 /** Where the durable root is mounted on a Fly Sprite. */

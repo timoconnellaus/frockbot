@@ -2,8 +2,8 @@ import {
   APPLET_ID_V1,
   decodeSkillRefsV1,
   type SkillRefV1,
-} from "@frockbot/kernel-contracts";
-import { decodeBotIdV1, isRpcIdentifier } from "@frockbot/configuration-core";
+} from "@frockbot/core/contracts";
+import { decodeBotIdV1, isRpcIdentifier } from "@frockbot/core/configuration";
 import { decodeRunIdV1 } from "@frockbot/plugin-shell/backend-contracts";
 
 type RpcValueDecoder = (value: unknown, label: string) => unknown;

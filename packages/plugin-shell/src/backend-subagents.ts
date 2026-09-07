@@ -29,7 +29,7 @@ import {
   subagentDurableObjectNameV1,
   taskSessionIdV1,
 } from "@frockbot/plugin-subagents/storage-keys";
-import type { BotIdentity } from "@frockbot/kernel-do";
+import type { BotIdentity } from "@frockbot/core/durable";
 
 /** The parent Turn that dispatched a task, as the child records it. */
 export interface SubagentParentV1 {

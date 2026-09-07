@@ -24,7 +24,7 @@
 //
 // This file holds the first two, which decide whether the tools exist at all.
 // It is pure so the gate is asserted rather than inferred from a running app.
-import type { MachineListEntryV1 } from "@frockbot/machine-protocol";
+import type { MachineListEntryV1 } from "@frockbot/core/machine-protocol";
 
 /** The Package setting id, as the manifest declares it. */
 export const MACHINE_MESSAGES_SETTING_V1 = "messages-enabled";

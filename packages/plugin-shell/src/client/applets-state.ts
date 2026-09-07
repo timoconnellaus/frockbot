@@ -11,7 +11,7 @@ import {
   type PackageIframeAppletsStateV2,
   type PackageIframeCatalogV1,
   type AppletSummaryV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import type { FrockBotWebData } from "../shared.js";
 
 /**

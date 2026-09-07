@@ -23,7 +23,7 @@ import {
   MachineDecodeError,
   decodeMachineCommandV1,
   type MachineCommandV1,
-} from "@frockbot/machine-protocol";
+} from "@frockbot/core/machine-protocol";
 import type { MachineIntentStorageV1 } from "./agent.js";
 import {
   decodeMachineIntentRecordV1,

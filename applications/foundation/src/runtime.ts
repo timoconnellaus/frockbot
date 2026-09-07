@@ -1,11 +1,11 @@
-import type { CredentialLeaseV1 } from "@frockbot/connection-core";
+import type { CredentialLeaseV1 } from "@frockbot/core/connection";
 import type {
   BotExecutionPlanV1,
   ConnectionView,
   EnabledCapabilityV1,
   PackageSettingValueV1,
   ResolvedModelBindingV1,
-} from "@frockbot/configuration-core";
+} from "@frockbot/core/configuration";
 import {
   createBotTemplateFeature,
   type BotTemplateRuntimeHostV1,
@@ -15,7 +15,7 @@ import clockFeature from "@frockbot/plugin-clock/agent";
 import type {
   AgentRuntimeV1,
   RuntimeFeatureV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import type { CredentialLeaseRuntime } from "@frockbot/plugin-credentials/user";
 
 // pi-lens-ignore: ts:2307

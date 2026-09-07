@@ -51,11 +51,11 @@ describe("npm trusted publishing bootstrap", () => {
   });
 
   test("the trusted publisher names this workflow and claims no environment", () => {
-    const args = trustArguments("@frockbot/kernel-contracts");
+    const args = trustArguments("@frockbot/core/contracts");
     expect(args).toEqual([
       "trust",
       "github",
-      "@frockbot/kernel-contracts",
+      "@frockbot/core/contracts",
       "--file",
       WORKFLOW_FILE,
       "--repo",
