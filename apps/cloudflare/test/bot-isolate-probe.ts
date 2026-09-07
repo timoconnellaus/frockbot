@@ -35,7 +35,7 @@ import {
   BOT_ISOLATE_COMPATIBILITY_DATE,
   isolateBindingDigestV1,
   type BotCapabilitiesPropsV1,
-} from "@frockbot/app/shell/backend-isolate";
+} from "@frockbot/app/isolates/capabilities";
 import type {
   IsolateConnectionV1,
   IsolateModelBindingV1,

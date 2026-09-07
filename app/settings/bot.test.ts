@@ -1,4 +1,4 @@
-import { foundationShellApplicationV1 } from "./runtime.js";
+import { foundationShellApplicationV1 } from "../runtime.js";
 import { describe, expect, test } from "bun:test";
 import type {
   BotConfigurationCommandV1,
@@ -8,7 +8,17 @@ import type {
 import { SessionEventLog } from "@frockbot/core/durable";
 import { createShellBotBackendContribution } from "@frockbot/app/shell/backend";
 import type { ActiveTurnV1 } from "@frockbot/app/shell/backend-state";
-import { createIsolateCapabilityHost } from "@frockbot/app/shell/backend-isolate";
+import { createIsolateCapabilityHost } from "@frockbot/app/isolates/capabilities";
+import {
+  isolateAuthoritySnapshot,
+  isolateConnection,
+} from "@frockbot/app/isolates/bot";
+import { listNotifications } from "@frockbot/app/notifications/bot";
+import {
+  executeConfiguration,
+  readConfiguration,
+  resolveConfiguration,
+} from "@frockbot/app/settings/bot";
 import { notificationIdV1 } from "@frockbot/app/shell/notification-id";
 
 class MemoryStorage {
@@ -188,7 +198,8 @@ describe("Bot configuration admission", () => {
     });
     expect(await storage.get<unknown>("bot-configuration")).toEqual(historical);
 
-    await contribution.executeConfiguration(
+    await executeConfiguration(
+      contribution.state,
       request({
         schemaVersion: 1,
         type: "bot/update-profile",
@@ -215,7 +226,7 @@ describe("Bot configuration admission", () => {
     const contribution = host(storage, configuredUser);
 
     await expect(
-      contribution.readConfiguration({
+      readConfiguration(contribution.state, {
         schemaVersion: 1,
         userId: "user-1",
         botId: "unknown",
@@ -242,7 +253,8 @@ describe("Bot configuration admission", () => {
     archived = true;
 
     await expect(
-      contribution.executeConfiguration(
+      executeConfiguration(
+        contribution.state,
         request({
           schemaVersion: 1,
           type: "bot/update-profile",
@@ -279,7 +291,8 @@ describe("Bot configuration admission", () => {
     );
 
     await expect(
-      contribution.executeConfiguration(
+      executeConfiguration(
+        contribution.state,
         request({
           schemaVersion: 1,
           type: "bot/update-profile",
@@ -380,9 +393,9 @@ describe("Bot configuration admission", () => {
       { name: "Primary" },
     );
 
-    const first = contribution.executeConfiguration(request(original));
+    const first = executeConfiguration(contribution.state, request(original));
     await expect(
-      contribution.executeConfiguration(request(collision)),
+      executeConfiguration(contribution.state, request(collision)),
     ).rejects.toThrow(
       'Configuration command idempotency key "profile-command" was reused for a different command',
     );
@@ -390,15 +403,15 @@ describe("Bot configuration admission", () => {
 
     const redeployed = createShellBotBackendContribution(backendHost);
     await expect(
-      redeployed.executeConfiguration(request(original)),
+      executeConfiguration(redeployed.state, request(original)),
     ).resolves.toEqual(receipt);
     await expect(
-      redeployed.executeConfiguration(request(collision)),
+      executeConfiguration(redeployed.state, request(collision)),
     ).rejects.toThrow(
       'Configuration command idempotency key "profile-command" was reused for a different command',
     );
     await expect(
-      redeployed.readConfiguration({
+      readConfiguration(redeployed.state, {
         schemaVersion: 1,
         userId: "user-1",
         botId: "primary",
@@ -418,33 +431,11 @@ describe("generic per-Turn model resolution", () => {
     const settings = await contribution.materializeSettings(identity, {
       name: "Primary",
     });
-    const snapshot = await (
-      contribution as unknown as {
-        isolateAuthoritySnapshot(
-          identity: { userId: string; botId: string },
-          settings: BotSettingsViewV1,
-        ): Promise<{
-          connections: Array<{
-            connectionId: string;
-            packageId: string;
-            connectionTypeId: string;
-            displayName: string;
-            generation: string;
-            safeMetadata: Record<string, unknown>;
-          }>;
-          model?: {
-            connectionId: string;
-            packageId: string;
-            provider: string;
-            providerModelId: string;
-            connectionGeneration: string;
-            catalogGeneration?: string;
-          };
-          memory: boolean;
-          workspace: boolean;
-        }>;
-      }
-    ).isolateAuthoritySnapshot(identity, settings);
+    const snapshot = await isolateAuthoritySnapshot(
+      contribution.state,
+      identity,
+      settings,
+    );
     const listed = await createIsolateCapabilityHost({
       storage: {
         put: () => Promise.resolve(),
@@ -519,7 +510,7 @@ describe("generic per-Turn model resolution", () => {
     user.connections[0] = { ...user.connections[0]!, state: "disabled" };
 
     await expect(
-      contribution.isolateConnection({
+      isolateConnection(contribution.state, {
         ...identity,
         runId: "run-1",
         sessionId: "session-1",
@@ -532,7 +523,7 @@ describe("generic per-Turn model resolution", () => {
       status: "unavailable",
       reason: "the Connection is unavailable",
     });
-    await expect(contribution.listNotifications()).resolves.toEqual([
+    await expect(listNotifications(contribution.state)).resolves.toEqual([
       expect.objectContaining({
         // Colons would fail the acknowledge decoder, so the mint replaces
         // them and folds in a digest of the raw parts; a notification nobody
@@ -559,7 +550,8 @@ describe("generic per-Turn model resolution", () => {
     const contribution = host(storage, () => user);
     const identity = { userId: "user-1", botId: "primary" };
     await contribution.materializeSettings(identity, { name: "Primary" });
-    await contribution.executeConfiguration(
+    await executeConfiguration(
+      contribution.state,
       request({
         schemaVersion: 1,
         type: "bot/set-package-settings",
@@ -571,7 +563,9 @@ describe("generic per-Turn model resolution", () => {
       }),
     );
 
-    expect(await contribution.resolveConfiguration(identity)).toMatchObject({
+    expect(
+      await resolveConfiguration(contribution.state, identity),
+    ).toMatchObject({
       model: model("flock-ai-ambient", "bot-model"),
     });
 
@@ -583,7 +577,9 @@ describe("generic per-Turn model resolution", () => {
           : pkg,
       ),
     };
-    expect(await contribution.resolveConfiguration(identity)).toMatchObject({
+    expect(
+      await resolveConfiguration(contribution.state, identity),
+    ).toMatchObject({
       model: model("flock-ai-ambient", "@frock/auto"),
     });
     expect(await contribution.getSettings(identity)).toMatchObject({
@@ -602,7 +598,9 @@ describe("generic per-Turn model resolution", () => {
           : pkg,
       ),
     };
-    expect(await contribution.resolveConfiguration(identity)).toMatchObject({
+    expect(
+      await resolveConfiguration(contribution.state, identity),
+    ).toMatchObject({
       model: model("flock-ai-ambient", "bot-model"),
     });
   });
@@ -683,7 +681,8 @@ describe("Bot Package setting commands", () => {
     await contribution.materializeSettings(identity, { name: "Primary" });
 
     await expect(
-      contribution.executeConfiguration(
+      executeConfiguration(
+        contribution.state,
         request({
           schemaVersion: 1,
           type: "bot/set-package-settings",
@@ -706,9 +705,12 @@ describe("Bot Package setting commands", () => {
       packageId: "custom-models",
       values: { model: model("flock-ai-ambient", "bot-model") },
     };
-    const receipt = await contribution.executeConfiguration(request(first));
+    const receipt = await executeConfiguration(
+      contribution.state,
+      request(first),
+    );
     await expect(
-      contribution.executeConfiguration(request(first)),
+      executeConfiguration(contribution.state, request(first)),
     ).resolves.toEqual(receipt);
     expect(await contribution.getSettings(identity)).toMatchObject({
       revision: 1,
@@ -717,7 +719,8 @@ describe("Bot Package setting commands", () => {
       },
     });
 
-    await contribution.executeConfiguration(
+    await executeConfiguration(
+      contribution.state,
       request({
         ...first,
         commandId: "update-model-only",
@@ -732,7 +735,8 @@ describe("Bot Package setting commands", () => {
       },
     });
 
-    await contribution.executeConfiguration(
+    await executeConfiguration(
+      contribution.state,
       request({
         ...first,
         commandId: "unset-bot-model",
@@ -748,7 +752,8 @@ describe("Bot Package setting commands", () => {
     });
 
     await expect(
-      contribution.executeConfiguration(
+      executeConfiguration(
+        contribution.state,
         request({
           ...first,
           commandId: "unset-unknown",
@@ -760,7 +765,8 @@ describe("Bot Package setting commands", () => {
     ).rejects.toThrow(/not declared by this Package/);
 
     await expect(
-      contribution.executeConfiguration(
+      executeConfiguration(
+        contribution.state,
         request({
           ...first,
           commandId: "stale-revision",
@@ -769,7 +775,8 @@ describe("Bot Package setting commands", () => {
       ),
     ).rejects.toThrow("configuration revision is 3");
     await expect(
-      contribution.executeConfiguration(
+      executeConfiguration(
+        contribution.state,
         request({
           ...first,
           values: { model: model("flock-ai-ambient", "different") },

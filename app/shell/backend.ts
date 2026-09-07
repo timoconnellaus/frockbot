@@ -1,45 +1,24 @@
-import type { RoutineWriterV1 } from "@frockbot/app/routines/records";
-import { turnToolCatalogPin } from "./tool-catalog-pin.js";
+// The Shell's Bot Durable Object contribution: the state every feature module
+// takes, the authority hook table that wires them into the kernel, Turn
+// execution and its Composition mount, and the Skill and Workspace writes a
+// User makes as themselves.
+
 import type { AgentEffectAdmission } from "@frockbot/core/agent-loop/agent";
+import { firstPartyPackageToolAllowedV1 } from "@frockbot/applets/pages";
 import {
-  decodeIsolateMemoryReadRequestV1,
-  decodeIsolateMemoryWriteRequestV1,
-  decodeIsolateScheduleRequestV1,
-  decodeIsolateWorkspaceDeleteRequestV1,
-  decodeIsolateWorkspaceListRequestV1,
-  decodeIsolateWorkspacePathV1,
-  decodeIsolateWorkspaceWriteRequestV1,
   decodeSendToUserPayloadV1,
-  decodeWorkspacePathV1,
-  decodeWorkspaceRootV1,
-  type IsolateConnectionOutcomeV1,
-  type IsolateConnectionV1,
-  type IsolateMemoryOutcomeV1,
-  type IsolateScheduleOutcomeV1,
-  type IsolateWorkspaceOutcomeV1,
-  type SessionEvent,
-  type WorkspacePathV1,
-  type WorkspaceRootV1,
   validateToolOccurrenceJournal,
-  type BotCapabilitiesStub,
-  type IsolateModelInvocationV1,
   type NormalizedModelRequest,
   type PackageIframeCompositionV1,
   type PackageIframeToolCommandV1,
+  type SessionEvent,
   type TurnTypeV1,
   type WorkspaceFilesV1,
+  type WorkspaceRootV1,
 } from "@frockbot/core/contracts";
+import { defineBotBackendContribution } from "@frockbot/core/contracts/contributions";
 import {
-  appletSourceFilePathV1,
-  appletsSourceRootV1,
-} from "@frockbot/applets/root";
-import type {
-  AppletCapabilityHostV1,
-  AppletsRuntimeHostV1,
-} from "@frockbot/applets/feature";
-import { firstPartyPackageToolAllowedV1 } from "@frockbot/applets/pages";
-import { syncWorkspaceRootNowV1 } from "@frockbot/computer/agent";
-import {
+  activateCompositionV1,
   ACTIVE_RUN_KEY,
   IDENTITY_KEY,
   RUN_PREFIX,
@@ -47,101 +26,65 @@ import {
   storedRunRecordV2,
   type BotIdentity,
   type BotTurnExecutionInput,
+  type CompositionFailureV1,
+  type CompositionGenerationV1,
+  type CompositionMountHost,
   type OwnedBotTurnCommand,
 } from "@frockbot/core/durable";
+import type { CredentialLeaseV1 } from "@frockbot/core/connection";
+import {
+  resolveBotExecutionPlanV1,
+  resolveEffectiveBotModelV1,
+  resolvePackageSettingValuesV1,
+  type BotSettingsViewV1,
+  type ConnectionView,
+  type EnabledCapabilityV1,
+  type PackageSettingValueV1,
+  type ResolvedModelBindingV1,
+} from "@frockbot/core/configuration";
 import type {
   FoundationAgentPackage,
   RuntimeModelSelection,
 } from "@frockbot/app/agent-runtime";
 import {
-  decodeCredentialLeaseV1,
-  type CredentialLeaseV1,
-} from "@frockbot/core/connection";
+  appletsRuntimeHost,
+  resolveAppletComposition,
+} from "@frockbot/app/applets-host/bot";
+import { createAppletInstanceBindingV1 } from "@frockbot/app/applets-host/records";
+import { isolateMountOptions } from "@frockbot/app/isolates/bot";
 import {
-  applyBotProfilePatchV1,
-  configurationCommandFingerprintV1,
-  ConfigurationConflictError,
-  decodeBotConfigurationExecuteRpcV1,
-  decodeBotConfigurationReadRpcV1,
-  decodeBotSettingsViewV1,
-  decodeCompositionCommandReceiptV1,
-  decodeOperationReceiptV1,
-  decodeInstalledPackageSettingIdsV1,
-  decodeInstalledPackageSettingsPatchV1,
-  MAX_COMPOSITION_GENERATION_PAGE_V1,
-  type CompositionCommandReceiptV1,
-  type CompositionGenerationListViewV1,
-  type CompositionGenerationViewV1,
-  type RevertCompositionCommandV1,
-  type BotExecutionPlanV1,
-  type BotSelfWriterV1,
-  type BotSettingsViewV1,
-  type EnabledCapabilityV1,
-  type ConnectionView,
-  type ConfigurationCommandV1,
-  type OperationReceiptV1,
-  type PackageSettingValueV1,
-  type ResolvedModelBindingV1,
-  initializeBotSettingsV1,
-  migrateStoredBotSettingsV1,
-  resolvePackageSettingValuesV1,
-  resolveBotExecutionPlanV1,
-  resolveEffectiveBotModelV1,
-  type UserSettingsViewV1,
-} from "@frockbot/core/configuration";
-import { latestModelRequestJournalState } from "./backend-recovery.js";
+  createBotMachineHost,
+  createBotMachineMessagesHost,
+  machineSeam,
+  resolveBotMachineMessagesGateV1,
+} from "@frockbot/app/machine/bot";
 import {
-  bootstrapCompositionGeneration,
-  createShellCompositionHost,
-  type ShellAppletMountOptions,
-  type ShellIsolateMountOptions,
-  type ShellMountedComposition,
-} from "./backend-composition.js";
+  acknowledgeNotification,
+  createFailureNotification,
+  createNotification,
+  listNotifications,
+  supersededPackageRecords,
+  terminalPackageRecords,
+} from "@frockbot/app/notifications/bot";
 import {
-  createAppletCapabilityHostV1,
-  createAppletInstanceBindingV1,
-  APPLET_DIST_FILES_V1,
-  appletRpcSnapshotV1 as rpcJsonSnapshotV1,
-  resolveAppletCompositionV1,
-  type AppletUserDirectoryV1,
-} from "./backend-applets.js";
+  createBotRoutinesHost,
+  deferScheduledWork,
+  executeRoutineCommand,
+  listRoutines,
+  scheduledDeadlines,
+  settleScheduledWork,
+} from "@frockbot/app/routines/bot";
+import { pendingBotInputPreambleV1 } from "@frockbot/app/routines/inbox";
+import { decodeAgentTurnSlotReceiptV1 } from "@frockbot/app/flock/quota";
 import {
-  APPLET_FOCUSED_KEY,
-  decodeFocusedAppletV1,
-  type FocusedAppletV1,
-} from "@frockbot/core/durable";
-import {
-  decodeAppletProvenanceV1,
-  decodeAppletSummaryV1,
-  decodeAppletToolDeclarationV1,
-} from "@frockbot/core/contracts";
-import { compositionFailureTurnTextV1 } from "./backend-composition-input.js";
-import {
-  activateCompositionV1,
-  type CompositionFailureV1,
-  type CompositionMountHost,
-  type CompositionQuarantineV1,
-} from "@frockbot/core/durable";
-import {
-  createBotComputerSyncHost,
-  declaredPackageRootsV1,
-} from "./backend-computer.js";
-import {
-  decodeDirectoryViewV1,
-  decodeFlockReceiptV1,
-  type BotDirectoryViewV1,
-  type CreateBotCommandV1,
-  type FlockReceiptV1,
-} from "@frockbot/app/flock/shared";
-import { createBotSelfManagementHost } from "./backend-flock.js";
-import {
-  decodeTemplateShareReceiptV1,
-  type TemplateCommandV1,
-  type TemplateShareReceiptV1,
-} from "@frockbot/app/bot-template/shared";
-import { createBotMemoryHost } from "./backend-memory.js";
-import { createBotImageHost } from "./backend-image.js";
-import { createBotSkillsHost, createBotSkillsReads } from "./backend-skills.js";
+  admittedBotSettingsV1,
+  assertLifecycleActiveV1,
+  executeConfigurationCommand,
+  materializeBotSettingsV1,
+  readBotSettingsV1,
+  resolveExecutionContextV1,
+  userConfigurationV1,
+} from "@frockbot/app/settings/bot";
 import {
   loadFullSkillCatalogV1,
   loadSkillCatalogV1,
@@ -149,137 +92,22 @@ import {
 } from "@frockbot/app/skills/catalog";
 import { writeSkillDocumentV1 } from "@frockbot/app/skills/write";
 import {
-  clientSkillCatalogEntryV1,
-  type ClientSkillCatalogEntryV1,
-  type ClientSkillCatalogV1,
-} from "./skill-protocol.js";
-import {
-  createBotRoutinesHost,
-  routineFireOutcomeV1,
-  routineInboxEntryViewV1,
-  routineRunDetailViewV1,
-  routineTurnCommandV1,
-  settledRoutineOriginV1,
-} from "./backend-routines.js";
-import {
-  ROUTINE_INBOX_LIMIT,
-  ROUTINE_INBOX_PREFIX,
-} from "@frockbot/app/routines/storage-keys";
-import {
-  decodeRoutineInboxEntryV1,
-  routineFailureSentenceV1,
-} from "@frockbot/app/routines/inbox";
-import {
-  taskDesktopLeaseOwnerV1,
-  type TaskRecordV1,
-} from "@frockbot/app/subagents/records";
-import {
-  taskKeyV1,
-  TASK_ACTIVE_PREFIX,
-  TASK_CONTEXT_PREFIX,
-} from "@frockbot/app/subagents/storage-keys";
-import { decodeAgentTurnSlotReceiptV1 } from "@frockbot/app/flock/quota";
-import {
   subagentModelCatalogV1,
   type SubagentModelOptionV1,
 } from "@frockbot/app/subagents/models";
-import { decodeSubagentTaskContextV1 } from "@frockbot/app/subagents/durable-binding";
+import { taskDesktopLeaseOwnerV1 } from "@frockbot/app/subagents/records";
+import { subagentsRuntimeHost } from "@frockbot/app/subagents/bot";
 import {
-  approvalKeyV1,
-  approvalNotificationBodyV1,
-  approvalNotificationIdV1,
-  approvalSendsV1,
-  decodeApprovalRecordV1,
-  projectApprovalCardV1,
-  trimmableApprovalKeysV1,
-  APPROVAL_PREFIX,
-  ApprovalDecodeError,
-  type ApprovalDecisionCommandV1,
-  type ApprovalDecisionReceiptV1,
-  type ApprovalListViewV1,
-  type ApprovalRecordV1,
-} from "./approvals.js";
-import { enqueuePendingBotInputV1 } from "@frockbot/app/routines/inbox-store";
+  bootstrapCompositionGeneration,
+  createShellCompositionHost,
+  type ShellAppletMountOptions,
+  type ShellMountedComposition,
+} from "./backend-composition.js";
+import { compositionFailureTurnTextV1 } from "./backend-composition-input.js";
 import {
-  createBotMachineHost,
-  createBotMachineMessagesHost,
-  dispatchApprovedMachineIntentV1,
-  resolveBotMachineMessagesGateV1,
-  type BotMachineSeamV1,
-} from "./backend-machine.js";
-import { settleMachineIntentV1 } from "@frockbot/app/machine/approval";
-import type { MachineIntentRecordV1 } from "@frockbot/app/machine/intent";
-import { type MachineResultDeliveryV1 } from "@frockbot/app/machine/delivery";
-import {
-  decodeMachineListViewV1,
-  decodeMachineCommandResultV1,
-  type MachineCommandResultV1,
-  type MachineCommandV1,
-  type MachineListViewV1,
-} from "@frockbot/core/machine-protocol";
-import { decodeMachineTargetViewV1 } from "@frockbot/app/machine/target";
-import type { MachineTargetViewV1 } from "@frockbot/app/machine/target";
-import {
-  decodeMachineDispatchAnswerV1,
-  type MachineDispatchAnswerV1,
-} from "@frockbot/app/machine/approval";
-import {
-  pendingBotInputPreambleV1,
-  routineHandoffTextV1,
-} from "@frockbot/app/routines/inbox";
-import type { RoutineFireOutcomeV1 } from "@frockbot/app/routines/scheduler";
-import type { RoutineFireV1 } from "@frockbot/app/routines/firing";
-import { RoutineNotFoundError } from "@frockbot/app/routines/store";
-import type {
-  RoutineCommandReceiptV1,
-  RoutineCommandV1,
-  RoutineInboxCommandV1,
-  RoutineInboxReceiptV1,
-  RoutineInboxViewV1,
-  RoutineListViewV1,
-  RoutineRunDetailViewV1,
-  RoutineRunListViewV1,
-} from "@frockbot/app/routines/shared";
-import {
-  BOT_ISOLATE_COMPATIBILITY_DATE,
-  createIsolateCapabilityHost,
-  createR2PackageArtifactStore,
-  isolateBindingDigestV1,
-  type BotCapabilitiesPropsV1,
-  type IsolateCapabilityHost,
-  type IsolateModelBindingV1,
-  type IsolateModelPath,
-} from "./backend-isolate.js";
-import { memoryScopeRootV1 } from "@frockbot/app/memory/roots";
-import type { CompositionGenerationV1 } from "@frockbot/core/durable";
-import {
-  projectCompositionGenerationV1,
-  projectFirstPartyPackageIframeV1,
-} from "./composition-views.js";
-import { executeBotTurn, executeDirectToolTurn } from "./backend-runner.js";
-import { yieldCompactionWorkV1 } from "./compaction-scheduler.js";
-import {
-  shellTerminalRecordsV1,
-  supersededTurnRecordsV1,
-} from "./terminal-records.js";
-import {
-  createClientRunStopReceiptV1,
-  decodeClientRunLookupQueryV1,
-  decodeClientRunStopCommandV1,
-  decodeClientTurnV1,
-  projectClientRunLookupV1,
-  projectClientRunV1,
-  projectClientTurnV1,
-  type ClientRunLookupV1,
-  type ClientConversationListV1,
-  type ClientConversationOutcomeV1,
-  type ClientRunListV1,
-  type ClientRunStopReceiptV1,
-  type ClientTurnV1,
-} from "./run-protocol.js";
-import { notificationIdV1 } from "./notification-id.js";
-import { runFailureCopyV1 } from "./run-failure-copy.js";
-import { type BotDebugSnapshotV1 } from "./debug-protocol.js";
+  createBotComputerSyncHost,
+  declaredPackageRootsV1,
+} from "./backend-computer.js";
 import {
   botStopCommandFingerprintV1,
   requireStoredRunV1,
@@ -288,66 +116,53 @@ import {
   type StoredRun,
   type StoredRunStatus,
 } from "./backend-contracts.js";
-
-/** The Bot Durable Object key holding this Bot's durable configuration. */
+import { createBotSelfManagementHost } from "./backend-flock.js";
+import { createBotImageHost } from "./backend-image.js";
+import { createBotMemoryHost } from "./backend-memory.js";
+import { latestModelRequestJournalState } from "./backend-recovery.js";
+import { executeBotTurn, executeDirectToolTurn } from "./backend-runner.js";
+import { createBotSkillsHost, createBotSkillsReads } from "./backend-skills.js";
 import {
-  botUnreadCommandFingerprintV1,
-  markUnreadReadV1,
-  markUnreadV1,
-  optionalSidebarMessagePreviewV1,
-  optionalUnreadStateV1,
-  projectBotUnreadViewV1,
-  sidebarMessagePreviewFromRunsV1,
-  SIDEBAR_PREVIEW_KEY,
-  unreadReceiptKeyV1,
-  UNREAD_COUNT_CAP,
-  UNREAD_STATE_KEY,
-  type BotUnreadCommandV1,
-  type BotUnreadReceiptV1,
-  type BotUnreadViewV1,
-  type SidebarMessagePreviewV1,
-  type SidebarPreviewRunV1,
-} from "./unread.js";
-import { defineBotBackendContribution } from "@frockbot/core/contracts/contributions";
+  executionPackagesV1,
+  ShellBotStateV1,
+  type ShellBotBackendHost,
+} from "./backend-state.js";
+import { yieldCompactionWorkV1 } from "./compaction-scheduler.js";
+import { projectFirstPartyPackageIframeV1 } from "./composition-views.js";
 import { debugSnapshot } from "./debug.js";
-import {
-  BOT_CONFIGURATION_KEY,
-  readBotSettingsV1,
-} from "@frockbot/app/settings/bot";
-import {
-  reconcileOverdueTasks,
-  runOwedSubagentTurns,
-  subagentsRuntimeHost,
-} from "@frockbot/app/subagents/bot";
+import { type BotDebugSnapshotV1 } from "./debug-protocol.js";
+import { notificationIdV1 } from "./notification-id.js";
 import {
   announcementsFromSession,
-  appendAnnouncement,
-  type BotAnnouncementTransaction,
-  BOT_ANNOUNCEMENT_RETENTION,
   listConversations,
   listRunEventPage,
   listRuns,
   lookupRun,
-  runWorkingV1,
   startConversation,
 } from "./reads.js";
 import {
-  executionPackagesV1,
-  ShellBotStateV1,
-  type ActiveTurnV1,
-  type ShellBotBackendHost,
-} from "./backend-state.js";
+  createClientRunStopReceiptV1,
+  decodeClientRunLookupQueryV1,
+  decodeClientRunStopCommandV1,
+  decodeClientTurnV1,
+  projectClientRunLookupV1,
+  projectClientRunV1,
+  projectClientTurnV1,
+  type ClientConversationListV1,
+  type ClientConversationOutcomeV1,
+  type ClientRunListV1,
+  type ClientRunLookupV1,
+  type ClientRunStopReceiptV1,
+  type ClientTurnV1,
+} from "./run-protocol.js";
+import {
+  clientSkillCatalogEntryV1,
+  type ClientSkillCatalogEntryV1,
+  type ClientSkillCatalogV1,
+} from "./skill-protocol.js";
+import { turnToolCatalogPin } from "./tool-catalog-pin.js";
 
-const CONFIGURATION_RECEIPT_PREFIX = "configuration-receipt:";
 const STOP_RECEIPT_PREFIX = "stop-receipt:";
-/** Idempotency records for Composition commands this Package admits. */
-const COMPOSITION_COMMAND_PREFIX = "composition-command:";
-
-interface StoredConfigurationReceipt {
-  commandFingerprint: string;
-  receipt: OperationReceiptV1;
-}
-
 /** Durable idempotency receipt for one exact Stop command. */
 interface StoredStopReceipt {
   schemaVersion: 1;
@@ -364,35 +179,6 @@ function isTerminalStoredRunStatus(status: StoredRunStatus): boolean {
     status === "cancelled" ||
     status === "superseded"
   );
-}
-
-interface ConfigurationActivity {
-  commandFingerprint: string;
-  promise: Promise<OperationReceiptV1>;
-}
-
-interface IsolateCallScopeV1 {
-  userId: string;
-  botId: string;
-  runId: string;
-  sessionId: string;
-  turnId: string;
-  packageId: string;
-  generationId: string;
-  request: unknown;
-}
-
-function requireMatchingConfigurationReceipt(
-  stored: StoredConfigurationReceipt,
-  commandFingerprint: string,
-  commandId: string,
-): OperationReceiptV1 {
-  if (stored.commandFingerprint !== commandFingerprint) {
-    throw new Error(
-      `Configuration command idempotency key "${commandId}" was reused for a different command`,
-    );
-  }
-  return stored.receipt;
 }
 
 export type { BotIdentity, OwnedBotTurnCommand };
@@ -419,306 +205,45 @@ export function requirePackageUiToolDeclarationV1(
 
 export class ShellBotBackendContribution {
   readonly state: ShellBotStateV1;
-  private readonly configurationActivities = new Map<
-    string,
-    ConfigurationActivity
-  >();
 
   constructor(host: ShellBotBackendHost) {
-    this.state = new ShellBotStateV1(host, () => ({
+    // The hook table is the wiring: each entry forwards to the feature module
+    // that owns the answer, with this object's state as its first argument.
+    this.state = new ShellBotStateV1(host, (state) => ({
       resolveAdmissionSnapshot: (command) =>
         this.resolveAdmissionSnapshot(command),
-      bootstrapComposition: () => this.bootstrapComposition(),
+      bootstrapComposition: () =>
+        Promise.resolve(
+          bootstrapCompositionGeneration(new Date().toISOString()),
+        ),
       admittedSnapshot: (transaction, resolved) =>
-        this.admittedSnapshot(transaction, resolved),
+        admittedBotSettingsV1(transaction, resolved),
       executeTurn: (input) => this.executeTurn(input),
-      notification: (snapshot, result) =>
-        this.createNotification(snapshot, result),
+      notification: (snapshot, result) => createNotification(snapshot, result),
       failureNotification: (snapshot, failed) =>
-        this.createFailureNotification(snapshot, failed),
-      terminalRecords: (input) => this.terminalPackageRecords(input),
-      supersededRecords: (input) => this.supersededPackageRecords(input),
-      interruptTurn: (runId, reason) => this.interruptActiveTurn(runId, reason),
-      scheduledDeadlines: (transaction) => this.scheduledDeadlines(transaction),
-      scheduledWorkInFlight: () =>
-        this.state.hostScheduled.inFlight?.() ?? false,
-      deferScheduledWork: (transaction) => this.deferScheduledWork(transaction),
-      settleScheduledWork: () => this.settleScheduledWork(),
+        createFailureNotification(snapshot, failed),
+      terminalRecords: (input) => terminalPackageRecords(input),
+      supersededRecords: (input) => supersededPackageRecords(input),
+      interruptTurn: (runId, reason) => state.turn.interrupt(runId, reason),
+      scheduledDeadlines: (transaction) =>
+        scheduledDeadlines(state, transaction),
+      scheduledWorkInFlight: () => state.hostScheduled.inFlight?.() ?? false,
+      deferScheduledWork: (transaction) =>
+        deferScheduledWork(state, transaction),
+      settleScheduledWork: () => settleScheduledWork(state),
     }));
   }
 
+  /** @see materializeBotSettingsV1 — the Flock host mounts this Bot through it. */
   async materializeSettings(
     identity: BotIdentity,
-    initial: {
-      name: string;
-      /** The persona the Bot's profile is seeded with, when its creator gave one. */
-      description?: string;
-    },
+    initial: { name: string; description?: string },
   ): Promise<BotSettingsViewV1> {
-    return this.state.ctx.storage.transaction(async (transaction) => {
-      const durableIdentity = await transaction.get<BotIdentity>(IDENTITY_KEY);
-      if (
-        durableIdentity &&
-        (durableIdentity.userId !== identity.userId ||
-          durableIdentity.botId !== identity.botId)
-      ) {
-        throw new Error("Bot authority does not match its durable identity");
-      }
-      const stored = await transaction.get<unknown>(BOT_CONFIGURATION_KEY);
-      if (stored !== undefined) {
-        return decodeBotSettingsViewV1(migrateStoredBotSettingsV1(stored));
-      }
-      const settings = {
-        ...this.initialBotSettings(identity.botId),
-        profile: {
-          name: initial.name,
-          ...(initial.description === undefined
-            ? {}
-            : { description: initial.description }),
-        },
-      } satisfies BotSettingsViewV1;
-      await transaction.put({
-        [IDENTITY_KEY]: durableIdentity ?? identity,
-        [BOT_CONFIGURATION_KEY]: settings,
-      });
-      return settings;
-    });
+    return materializeBotSettingsV1(this.state, identity, initial);
   }
 
   async getSettings(identity: BotIdentity): Promise<BotSettingsViewV1> {
     return readBotSettingsV1(this.state, identity);
-  }
-
-  async readConfiguration(input: unknown): Promise<BotSettingsViewV1> {
-    const request = decodeBotConfigurationReadRpcV1(input);
-    return this.getSettings({ userId: request.userId, botId: request.botId });
-  }
-
-  async executeConfiguration(input: unknown): Promise<OperationReceiptV1> {
-    const request = decodeBotConfigurationExecuteRpcV1(input);
-    await this.assertLifecycleActive(request.botId);
-    return this.executeConfigurationCommand(
-      { userId: request.userId, botId: request.botId },
-      request.command,
-    );
-  }
-
-  private async executeConfigurationCommand(
-    identity: BotIdentity,
-    command: Extract<ConfigurationCommandV1, { botId: string }>,
-  ): Promise<OperationReceiptV1> {
-    const commandFingerprint = configurationCommandFingerprintV1(command);
-    const active = this.configurationActivities.get(command.commandId);
-    if (active) {
-      if (active.commandFingerprint !== commandFingerprint) {
-        throw new Error(
-          `Configuration command idempotency key "${command.commandId}" was reused for a different command`,
-        );
-      }
-      return active.promise;
-    }
-    const activity: Promise<OperationReceiptV1> =
-      this.executeConfigurationDurably(
-        identity,
-        command,
-        commandFingerprint,
-      ).finally(() => {
-        if (
-          this.configurationActivities.get(command.commandId)?.promise ===
-          activity
-        ) {
-          this.configurationActivities.delete(command.commandId);
-        }
-      });
-    this.configurationActivities.set(command.commandId, {
-      commandFingerprint,
-      promise: activity,
-    });
-    return activity;
-  }
-
-  private async executeConfigurationDurably(
-    identity: BotIdentity,
-    command: Extract<ConfigurationCommandV1, { botId: string }>,
-    commandFingerprint: string,
-  ): Promise<OperationReceiptV1> {
-    const settings = await readBotSettingsV1(this.state, identity);
-    const receiptKey = `${CONFIGURATION_RECEIPT_PREFIX}${command.commandId}`;
-    const existing =
-      await this.state.ctx.storage.get<StoredConfigurationReceipt>(receiptKey);
-    if (existing) {
-      return requireMatchingConfigurationReceipt(
-        existing,
-        commandFingerprint,
-        command.commandId,
-      );
-    }
-    if (command.expectedRevision !== settings.revision) {
-      throw new ConfigurationConflictError(settings.revision);
-    }
-    let packageValues: Record<string, unknown> | undefined;
-    let packageUnset: string[] | undefined;
-    if (command.type === "bot/set-package-settings") {
-      const user = await this.userConfiguration(identity).readConfiguration({
-        schemaVersion: 1,
-        userId: identity.userId,
-      });
-      const packages = executionPackagesV1(this.state.application);
-      if (command.values) {
-        packageValues = decodeInstalledPackageSettingsPatchV1({
-          packageId: command.packageId,
-          values: command.values,
-          scope: "bot",
-          installations: user.packages,
-          packages,
-        });
-      }
-      if (command.unset) {
-        packageUnset = decodeInstalledPackageSettingIdsV1({
-          packageId: command.packageId,
-          unset: command.unset,
-          scope: "bot",
-          installations: user.packages,
-          packages,
-        });
-      }
-    }
-    return this.applySimpleConfigurationCommand(
-      identity,
-      command,
-      commandFingerprint,
-      packageValues,
-      packageUnset,
-    );
-  }
-
-  private async applySimpleConfigurationCommand(
-    identity: BotIdentity,
-    command: Extract<
-      ConfigurationCommandV1,
-      {
-        type:
-          | "bot/update-profile"
-          | "bot/set-profile"
-          | "bot/update-notifications"
-          | "bot/set-package-settings";
-      }
-    >,
-    commandFingerprint: string,
-    packageValues?: Record<string, unknown>,
-    packageUnset: readonly string[] = [],
-  ): Promise<OperationReceiptV1> {
-    return this.state.ctx.storage.transaction(async (transaction) => {
-      await this.state.lifecycleAdmission?.(transaction, identity.botId);
-      const receiptKey = `${CONFIGURATION_RECEIPT_PREFIX}${command.commandId}`;
-      const existing =
-        await transaction.get<StoredConfigurationReceipt>(receiptKey);
-      if (existing) {
-        return requireMatchingConfigurationReceipt(
-          existing,
-          commandFingerprint,
-          command.commandId,
-        );
-      }
-      const stored = await transaction.get<unknown>(BOT_CONFIGURATION_KEY);
-      const current =
-        stored === undefined
-          ? this.initialBotSettings(identity.botId)
-          : decodeBotSettingsViewV1(migrateStoredBotSettingsV1(stored));
-      if (command.expectedRevision !== current.revision) {
-        throw new ConfigurationConflictError(current.revision);
-      }
-      const revision = current.revision + 1;
-      const next: BotSettingsViewV1 =
-        command.type === "bot/update-profile"
-          ? { ...current, revision, profile: command.profile }
-          : command.type === "bot/set-profile"
-            ? {
-                ...current,
-                revision,
-                profile: applyBotProfilePatchV1(
-                  current.profile,
-                  command.profile,
-                  command.namedBy ?? "user",
-                ),
-              }
-            : command.type === "bot/update-notifications"
-              ? { ...current, revision, notifications: command.notifications }
-              : (() => {
-                  const values = {
-                    ...(current.packageValues[command.packageId] ?? {}),
-                    ...structuredClone(packageValues ?? {}),
-                  };
-                  for (const settingId of packageUnset)
-                    delete values[settingId];
-                  const nextPackageValues = { ...current.packageValues };
-                  if (Object.keys(values).length > 0) {
-                    nextPackageValues[command.packageId] = values;
-                  } else {
-                    delete nextPackageValues[command.packageId];
-                  }
-                  return {
-                    ...current,
-                    revision,
-                    packageValues: nextPackageValues,
-                  };
-                })();
-      const receipt: OperationReceiptV1 = {
-        schemaVersion: 1,
-        commandId: command.commandId,
-        revision,
-        status: "applied",
-      };
-      await transaction.put({
-        [BOT_CONFIGURATION_KEY]: next,
-        [receiptKey]: { commandFingerprint, receipt },
-      });
-      // A rename is durable history, not a settings side effect: the Session
-      // records it so the conversation shows who renamed the Bot and when.
-      if (next.profile.name !== current.profile.name) {
-        const namedBy = next.profile.namedBy ?? "user";
-        await this.appendRenameAnnouncement(transaction, {
-          from: current.profile.name,
-          to: next.profile.name,
-          namedBy,
-          // The writer travels only with a Bot's own rename: a User edit is
-          // already attributed to the authenticated principal that made it.
-          ...(namedBy === "bot" &&
-          command.type === "bot/set-profile" &&
-          command.writer
-            ? { writer: command.writer }
-            : {}),
-        });
-      }
-      await this.refreshRecoveryAlarm(transaction);
-      return receipt;
-    });
-  }
-
-  /**
-   * Appends a rename announcement to the Bot's durable announcement log, in
-   * the same transaction that wrote the name. The log is append-only and
-   * bounded: the oldest entries beyond {@link BOT_ANNOUNCEMENT_RETENTION} are
-   * dropped, because an announcement is conversational history, not authority.
-   */
-  private async appendRenameAnnouncement(
-    transaction: BotAnnouncementTransaction,
-    rename: {
-      from: string;
-      to: string;
-      namedBy: "user" | "bot";
-      writer?: BotSelfWriterV1;
-    },
-  ): Promise<void> {
-    await appendAnnouncement(transaction, (seq) => ({
-      type: "bot/renamed",
-      seq,
-      timestamp: new Date().toISOString(),
-      from: rename.from,
-      to: rename.to,
-      namedBy: rename.namedBy,
-      ...(rename.writer ? { writer: rename.writer } : {}),
-    }));
   }
 
   async listAnnouncements(): Promise<SessionEvent[]> {
@@ -729,25 +254,14 @@ export class ShellBotBackendContribution {
     return announcementsFromSession(this.state, session);
   }
 
-  private async refreshRecoveryAlarm(
-    transaction: DurableObjectTransaction,
-  ): Promise<void> {
-    await this.state.authority.refreshRecoveryAlarm(transaction);
-  }
-
-  async resolveConfiguration(
-    identity: BotIdentity,
-  ): Promise<BotExecutionPlanV1> {
-    return (await this.resolveExecutionContext(identity)).plan;
-  }
-
   async run(command: OwnedBotTurnCommand): Promise<ClientTurnV1> {
     // Before the authority reads the session log, so a compaction detached
     // from the previous Turn has already handed the log back.
     await yieldCompactionWorkV1(command.sessionId);
     // Before admission, so the pin this Turn takes already carries whatever
     // the User's Applet directory says now.
-    await this.resolveAppletComposition(
+    await resolveAppletComposition(
+      this.state,
       { userId: command.userId, botId: command.botId },
       command,
     );
@@ -1022,7 +536,7 @@ export class ShellBotBackendContribution {
             stopRequestedAt,
           } satisfies StoredStopReceipt,
         });
-        await this.refreshRecoveryAlarm(transaction);
+        await this.state.authority.refreshRecoveryAlarm(transaction);
         return stopped;
       },
     );
@@ -1116,7 +630,7 @@ export class ShellBotBackendContribution {
       : undefined;
     const host: CompositionMountHost<ShellMountedComposition> = {
       mount: async (mounting, signal) => {
-        const isolate = await this.isolateMountOptions(input.identity, {
+        const isolate = await isolateMountOptions(this.state, input.identity, {
           runId: input.command.runId,
           sessionId: input.command.sessionId,
           generationId: mounting.generationId,
@@ -1283,23 +797,6 @@ export class ShellBotBackendContribution {
       : `${preamble}\n${command.text}`;
   }
 
-  /**
-   * Cancels the Agent of one exact admitted run. A late Stop that names a run
-   * this object is not executing changes nothing.
-   */
-
-  /**
-   * The kernel's advisory interrupt, bound to this object's resident Agent.
-   *
-   * It runs only after the durable intent that justifies it is written, and it
-   * changes nothing durable itself: a Turn whose Agent is no longer resident
-   * is stopped by the effect fence on its next external effect instead, which
-   * is the same outcome by a slower road.
-   */
-  private interruptActiveTurn(runId: string, reason: string): void {
-    this.state.turn.interrupt(runId, reason);
-  }
-
   /** The visible half of failing closed, through the Bot's notifications. */
   private async recordCompositionFailureNotification(
     settings: BotSettingsViewV1,
@@ -1323,1247 +820,11 @@ export class ShellBotBackendContribution {
     });
   }
 
-  /**
-   * Everything a Bot isolate member needs. Package identity is attribution
-   * only; Connections and model are resolved once for the Bot and every member
-   * receives the same list.
-   */
-  private async isolateMountOptions(
-    identity: BotIdentity,
-    turn: {
-      runId: string;
-      sessionId: string;
-      generationId: string;
-      settings: BotSettingsViewV1;
-    },
-  ): Promise<ShellIsolateMountOptions | undefined> {
-    const loader = this.state.env.BOT_PACKAGES;
-    const artifacts = this.state.env.APPLICATION_ARTIFACTS;
-    const exports = (
-      this.state.ctx as unknown as {
-        exports?: {
-          BotCapabilities?: (options: {
-            props: BotCapabilitiesPropsV1;
-          }) => BotCapabilitiesStub;
-        };
-      }
-    ).exports;
-    if (!loader || !artifacts || !exports?.BotCapabilities) return undefined;
-    const authority = await this.isolateAuthoritySnapshot(
-      identity,
-      turn.settings,
-    );
-    const mintCapabilities = exports.BotCapabilities;
-    return {
-      userId: identity.userId,
-      runId: turn.runId,
-      turnId: turn.runId,
-      loader,
-      artifacts: createR2PackageArtifactStore(artifacts),
-      capabilitiesFor: (member) =>
-        mintCapabilities({
-          props: {
-            userId: identity.userId,
-            botId: identity.botId,
-            runId: turn.runId,
-            sessionId: turn.sessionId,
-            turnId: turn.runId,
-            generationId: turn.generationId,
-            packageId: member.packageId,
-            connections: structuredClone(authority.connections),
-            ...(authority.model
-              ? { model: structuredClone(authority.model) }
-              : {}),
-            memory: authority.memory,
-            workspace: authority.workspace,
-          },
-        }),
-      bindingDigest: await isolateBindingDigestV1({
-        userId: identity.userId,
-        botId: identity.botId,
-        runId: turn.runId,
-        connections: authority.connections,
-        ...(authority.model ? { model: authority.model } : {}),
-        compositionGenerationId: turn.generationId,
-      }),
-      compatibilityDate: BOT_ISOLATE_COMPATIBILITY_DATE,
-    };
-  }
-
-  private async isolateAuthoritySnapshot(
-    identity: BotIdentity,
-    settings: BotSettingsViewV1,
-  ): Promise<{
-    connections: IsolateConnectionV1[];
-    model?: IsolateModelBindingV1;
-    memory: boolean;
-    workspace: boolean;
-  }> {
-    const user = await this.userConfiguration(identity).readConfiguration({
-      schemaVersion: 1,
-      userId: identity.userId,
-    });
-    const connections = user.connections.flatMap((connection) =>
-      connection.state === "ready" && connection.generation
-        ? [
-            {
-              connectionId: connection.connectionId,
-              packageId: connection.packageId,
-              connectionTypeId: connection.connectionTypeId,
-              displayName: connection.displayName,
-              generation: connection.generation,
-              safeMetadata: structuredClone(connection.safeMetadata),
-            } satisfies IsolateConnectionV1,
-          ]
-        : [],
-    );
-    const effective = resolveEffectiveBotModelV1({
-      bot: settings,
-      user,
-      packages: executionPackagesV1(this.state.application),
-    });
-    const binding = effective.binding;
-    const model =
-      effective.model &&
-      binding?.state === "ready" &&
-      binding.connection?.generation &&
-      binding.packageId &&
-      binding.providerType
-        ? {
-            connectionId: binding.connection.connectionId,
-            packageId: binding.packageId,
-            provider: binding.providerType,
-            providerModelId: effective.model.providerModelId,
-            connectionGeneration: binding.connection.generation,
-            ...(binding.connection.modelCatalog?.generation
-              ? {
-                  catalogGeneration: binding.connection.modelCatalog.generation,
-                }
-              : {}),
-          }
-        : undefined;
-    return {
-      connections,
-      ...(model ? { model } : {}),
-      memory: Boolean(this.state.env.MEMORY_WORKSPACE_FILES),
-      workspace: Boolean(this.state.env.WORKSPACE_FILES),
-    };
-  }
-
-  async isolateInvokeModel(
-    identity: BotIdentity,
-    input: {
-      runId: string;
-      sessionId: string;
-      turnId: string;
-      packageId: string;
-      generationId: string;
-      request: NormalizedModelRequest;
-    },
-  ): Promise<IsolateModelInvocationV1> {
-    if (!this.activeIsolateTurn(input)) {
-      return {
-        status: "unavailable",
-        reason: "the Package is not running in this Bot's active Composition",
-      };
-    }
-    const settings = await readBotSettingsV1(this.state, identity);
-    const authority = await this.isolateAuthoritySnapshot(identity, settings);
-    let runtime:
-      | {
-          agentPackages: FoundationAgentPackage[];
-          modelSelection: RuntimeModelSelection;
-        }
-      | undefined;
-    if (authority.model) {
-      try {
-        runtime = await this.agentRuntime(identity, settings);
-      } catch {
-        runtime = undefined;
-      }
-    }
-    return this.isolateCapabilities(
-      {
-        botId: identity.botId,
-        packageId: input.packageId,
-        generationId: input.generationId,
-      },
-      authority,
-      runtime && authority.model
-        ? {
-            path: this.isolateModelPath(identity, runtime, input.generationId),
-          }
-        : undefined,
-    ).invokeModel(input.request);
-  }
-
-  /**
-   * The Bot's own tool dispatch, reached only by the `schedule` grant.
-   *
-   * Calling the Bot's tools is not a grant a plugin may name, so this is
-   * private: `routine_manage` is the one tool a granted plugin reaches, and it
-   * reaches it through `isolateSchedule`.
-   */
-  private async invokeBotToolForIsolateV1(input: {
-    userId: string;
-    botId: string;
-    runId: string;
-    sessionId: string;
-    turnId: string;
-    packageId: string;
-    generationId: string;
-    request: { callId: string; name: string; input: unknown };
-  }): Promise<IsolateScheduleOutcomeV1> {
-    const request = input.request;
-    const active = this.activeIsolateTurn(input);
-    if (!active) {
-      return {
-        status: "unavailable",
-        reason: "the Package is not running in this Bot's active Composition",
-      };
-    }
-    const session = active.mounted.runtime.services.sessions.get(
-      input.sessionId,
-    );
-    if (!session) {
-      return {
-        status: "unavailable",
-        reason: "the active Session is unavailable",
-      };
-    }
-    const started = session.events.findLast(
-      (event) => event.type === "step/start",
-    );
-    const ended = session.events.findLast((event) => event.type === "step/end");
-    if (
-      started?.type !== "step/start" ||
-      (ended?.type === "step/end" &&
-        ended.turn === started.turn &&
-        ended.step === started.step)
-    ) {
-      return {
-        status: "unavailable",
-        reason: "the active step is unavailable",
-      };
-    }
-    const effectId = await this.isolateToolEffectId(
-      input.packageId,
-      request.callId,
-    );
-    const priorCall = session.events.find(
-      (event) =>
-        event.type === "package/tool-call" && event.effectId === effectId,
-    );
-    const priorResult = session.events.find(
-      (event) =>
-        event.type === "package/tool-result" && event.effectId === effectId,
-    );
-    if (priorResult?.type === "package/tool-result") {
-      return {
-        status: "completed",
-        content: priorResult.content,
-        isError: priorResult.isError,
-      };
-    }
-    if (
-      priorCall?.type === "package/tool-call" &&
-      (priorCall.packageId !== input.packageId ||
-        priorCall.callId !== request.callId ||
-        priorCall.name !== request.name ||
-        JSON.stringify(priorCall.input) !== JSON.stringify(request.input))
-    ) {
-      return {
-        status: "unavailable",
-        reason: "the Package tool idempotency key was reused",
-      };
-    }
-    if (!priorCall) {
-      session.append({
-        type: "package/tool-call",
-        turn: started.turn,
-        step: started.step,
-        effectId,
-        packageId: input.packageId,
-        callId: request.callId,
-        name: request.name,
-        input: request.input,
-      });
-      await session.flush();
-    }
-    const call = {
-      id: request.callId,
-      name: request.name,
-      input: request.input,
-    };
-    const context = {
-      botId: input.botId,
-      agentId: input.botId,
-      sessionId: input.sessionId,
-      compositionGenerationId: input.generationId,
-      effectId,
-      toolCall: call,
-      turnType: active.turnType,
-      ...(active.subagentRole ? { subagentRole: active.subagentRole } : {}),
-      signal: active.signal,
-    };
-    const preparation = await active.mounted.runtime.services.tools.prepare(
-      call,
-      context,
-    );
-    let result: { content: string; isError: boolean };
-    if (preparation.kind === "denied") {
-      result = preparation.result;
-    } else {
-      const admitted = await this.admitRunEffect(
-        { userId: input.userId, botId: input.botId },
-        input.runId,
-        input.sessionId,
-        { kind: "tool", effectId },
-      );
-      if (!admitted) {
-        result = {
-          content: "The tool effect was stopped before it started.",
-          isError: true,
-        };
-      } else {
-        // A call the object had already started is dispatched again under the
-        // same effect id rather than investigated.
-        result = await active.mounted.runtime.services.tools.executePrepared(
-          preparation,
-          context,
-        );
-      }
-    }
-    session.append({
-      type: "package/tool-result",
-      turn: started.turn,
-      step: started.step,
-      effectId,
-      packageId: input.packageId,
-      callId: request.callId,
-      name: request.name,
-      content: result.content,
-      isError: result.isError,
-    });
-    await session.flush();
-    return {
-      status: "completed",
-      content: result.content,
-      isError: result.isError,
-    };
-  }
-
-  async isolateMemoryRead(input: {
-    userId: string;
-    botId: string;
-    runId: string;
-    sessionId: string;
-    turnId: string;
-    packageId: string;
-    generationId: string;
-    request: unknown;
-  }): Promise<IsolateMemoryOutcomeV1> {
-    const request = decodeIsolateMemoryReadRequestV1(input.request);
-    const memory = await this.isolateMemoryHost(input, request);
-    if (!memory)
-      return { status: "unavailable", reason: "Memory is unavailable" };
-    return {
-      status: "available",
-      value: await memory.store.read(
-        memoryScopeRootV1(request.scope, memory.owner, request.projectId),
-      ),
-    };
-  }
-
-  async isolateMemoryWrite(input: {
-    userId: string;
-    botId: string;
-    runId: string;
-    sessionId: string;
-    turnId: string;
-    packageId: string;
-    generationId: string;
-    request: unknown;
-  }): Promise<IsolateMemoryOutcomeV1> {
-    const request = decodeIsolateMemoryWriteRequestV1(input.request);
-    const memory = await this.isolateMemoryHost(input, request);
-    if (!memory?.writer) {
-      return { status: "unavailable", reason: "Memory is unavailable" };
-    }
-    return {
-      status: "available",
-      value: await memory.store.write({
-        root: memoryScopeRootV1(request.scope, memory.owner, request.projectId),
-        tier: request.tier ?? "log",
-        fact: request.fact,
-        writer: {
-          kind: "bot",
-          botId: input.botId,
-          ...memory.writer,
-        },
-      }),
-    };
-  }
-
-  async isolateMemoryForget(input: {
-    userId: string;
-    botId: string;
-    runId: string;
-    sessionId: string;
-    turnId: string;
-    packageId: string;
-    generationId: string;
-    request: unknown;
-  }): Promise<IsolateMemoryOutcomeV1> {
-    const request = decodeIsolateMemoryWriteRequestV1(input.request);
-    const memory = await this.isolateMemoryHost(input, request);
-    if (!memory?.writer) {
-      return { status: "unavailable", reason: "Memory is unavailable" };
-    }
-    return {
-      status: "available",
-      value: await memory.store.forget({
-        root: memoryScopeRootV1(request.scope, memory.owner, request.projectId),
-        fact: request.fact,
-        writer: {
-          kind: "bot",
-          botId: input.botId,
-          ...memory.writer,
-        },
-      }),
-    };
-  }
-
-  // --- Applets -------------------------------------------------------------
-
-  /**
-   * `ctx.applets` for one Bot, or `undefined` when this host cannot reach
-   * Applets at all — no instance namespace, no artifact bucket, or no
-   * Workspace. An absent capability is an `unavailable` outcome at the isolate
-   * boundary, never a thrown error inside Bot code.
-   */
-  private appletCapabilityHost(
-    identity: BotIdentity,
-    active?: ActiveTurnV1,
-  ): AppletCapabilityHostV1 | undefined {
-    const namespace = this.state.env.APPLET_STATES;
-    const artifacts = this.state.env.APPLICATION_ARTIFACTS;
-    const workspace = this.state.env.WORKSPACE_FILES;
-    if (!namespace || !artifacts || !workspace) return undefined;
-    const bucket = artifacts;
-    return createAppletCapabilityHostV1({
-      userId: identity.userId,
-      botId: identity.botId,
-      storage: {
-        get: (key) => this.state.ctx.storage.get(key),
-        put: (entries) => this.state.ctx.storage.put(entries),
-      },
-      directory: this.appletUserDirectory(identity),
-      instanceFor: createAppletInstanceBindingV1(namespace, identity.userId),
-      artifacts: {
-        putPackageArtifact: async (contentHash, module) => {
-          await bucket.put(`packages/${contentHash}.mjs`, module, {
-            httpMetadata: { contentType: "application/javascript" },
-          });
-        },
-        putPackageUiArtifact: async (contentHash, html) => {
-          await bucket.put(`packages/${contentHash}.html`, html, {
-            httpMetadata: { contentType: "text/html; charset=utf-8" },
-          });
-        },
-      },
-      workspace,
-      // A publish reads `dist/` from the store, and `applet build` wrote it on
-      // the Computer moments earlier in this very Turn — before the Turn's own
-      // `turn-end` push. So the one root is reconciled first, through the one
-      // sanctioned extra caller of the Computer's sync. It wakes nothing new: a
-      // User with no Computer assignment has no root to pull, and the Bot that
-      // just built on its Computer has it open already.
-      syncSourceRootNow: active
-        ? async (appletId) => {
-            const root = active.mounted.runtime.services;
-            const computerIdentity = { userId: identity.userId };
-            if (!root.computers.assignment(computerIdentity)) {
-              return { status: "skipped", detail: "" } as const;
-            }
-            const session = root.sessions.get(active.sessionId);
-            const started = session?.events.findLast(
-              (event) => event.type === "step/start",
-            );
-            const turn = started?.type === "step/start" ? started.turn : 0;
-            const computer = await root.computers.open(
-              computerIdentity,
-              { botId: identity.botId },
-              { signal: active.signal },
-            );
-            const summary = await syncWorkspaceRootNowV1({
-              computer,
-              sessions: root.sessions,
-              sessionId: active.sessionId,
-              turn,
-              root: appletsSourceRootV1(identity.userId),
-              requiredPaths: APPLET_DIST_FILES_V1.map(
-                (path) => `${appletId}/${path}`,
-              ),
-              signal: active.signal,
-            });
-            return {
-              status: summary.status,
-              detail: summary.detail,
-              ...(summary.required ? { required: summary.required } : {}),
-            };
-          }
-        : undefined,
-      composition: {
-        current: () => this.state.authority.composition.current(),
-        lastKnownGood: () => this.state.authority.composition.lastKnownGood(),
-        propose: (generation, options) =>
-          this.state.authority.composition.propose(generation, options),
-      },
-    });
-  }
-
-  /**
-   * The Applets feature's seam for one admitted Turn, or `undefined` when this
-   * host cannot reach Applets at all.
-   *
-   * The capability host is built per call rather than once: it closes over the
-   * Turn's mounted runtime, which is what lets a publish pull the Applet's
-   * `dist/` off the Computer, and that runtime does not exist yet when a Turn's
-   * features are assembled.
-   */
-  private appletsRuntimeHost(
-    identity: BotIdentity,
-    turn: { sessionId: string; runId: string; turnId: string },
-  ): AppletsRuntimeHostV1 | undefined {
-    const files = this.state.env.WORKSPACE_FILES;
-    if (
-      !this.state.env.APPLET_STATES ||
-      !this.state.env.APPLICATION_ARTIFACTS ||
-      !files
-    ) {
-      return undefined;
-    }
-    const capability = (): AppletCapabilityHostV1 => {
-      const host = this.appletCapabilityHost(identity, this.state.turn.current);
-      if (!host) throw new Error("Applets are unavailable");
-      return host;
-    };
-    return {
-      applets: {
-        list: () => capability().list(),
-        create: (input, scope) => capability().create(input, scope),
-        publish: (input, scope) => capability().publish(input, scope),
-        revert: (input, scope) => capability().revert(input, scope),
-        delete: (input) => capability().delete(input),
-        focus: (input) => capability().focus(input),
-        generations: (input) => capability().generations(input),
-        readFocused: () => capability().readFocused(),
-      },
-      turn,
-      writeSource: async (input) => {
-        const outcome = await files.write({
-          path: appletSourceFilePathV1(
-            identity.userId,
-            input.appletId,
-            input.path,
-          ),
-          bytes: input.bytes,
-          writer: {
-            kind: "bot",
-            botId: identity.botId,
-            sessionId: turn.sessionId,
-            turnId: turn.turnId,
-            runId: turn.runId,
-          },
-          expectedGenerationId: null,
-          mediaType: input.mediaType,
-        });
-        if (outcome.status !== "ok") {
-          throw new Error(
-            `the Applet was created but "${input.path}" could not be written: ${outcome.status}`,
-          );
-        }
-      },
-    };
-  }
-
-  /** The User Durable Object's Applet directory, decoded on arrival. */
-  private appletUserDirectory(identity: BotIdentity): AppletUserDirectoryV1 {
-    const id = this.state.env.USER_CONFIGURATIONS.idFromName(identity.userId);
-    // SAFETY: this namespace is bound to UserConfiguration; generated Worker
-    // types do not expose its Applet directory RPC surface.
-    const rpc = this.state.env.USER_CONFIGURATIONS.get(id) as unknown as {
-      listApplets(input: unknown): Promise<unknown>;
-      readAppletCompositionInput(input: unknown): Promise<unknown>;
-      createApplet(input: unknown): Promise<unknown>;
-      recordAppletGeneration(input: unknown): Promise<unknown>;
-      deleteApplet(input: unknown): Promise<unknown>;
-    };
-    const userId = identity.userId;
-    return {
-      async list() {
-        const answer = rpcJsonSnapshotV1(
-          await rpc.listApplets({ schemaVersion: 1, userId }),
-        ) as { revision?: unknown; applets?: unknown };
-        return {
-          revision: Number(answer.revision ?? 0),
-          applets: Array.isArray(answer.applets)
-            ? answer.applets.map((applet) => decodeAppletSummaryV1(applet))
-            : [],
-        };
-      },
-      async compositionInput() {
-        const answer = rpcJsonSnapshotV1(
-          await rpc.readAppletCompositionInput({ schemaVersion: 1, userId }),
-        ) as { revision?: unknown; applets?: unknown };
-        return {
-          revision: Number(answer.revision ?? 0),
-          applets: (Array.isArray(answer.applets) ? answer.applets : []).map(
-            (applet) => {
-              const entry = applet as Record<string, unknown>;
-              return {
-                appletId: String(entry.appletId),
-                generationId: String(entry.generationId),
-                tools: (Array.isArray(entry.tools) ? entry.tools : []).map(
-                  (tool, index) =>
-                    decodeAppletToolDeclarationV1(
-                      tool,
-                      `Applet tool declaration[${index}]`,
-                    ),
-                ),
-                provenance: decodeAppletProvenanceV1(entry.provenance),
-              };
-            },
-          ),
-        };
-      },
-      async create(input) {
-        return decodeAppletSummaryV1(
-          rpcJsonSnapshotV1(
-            await rpc.createApplet({
-              schemaVersion: 1,
-              userId,
-              displayName: input.displayName,
-              provenance: input.provenance,
-            }),
-          ),
-        );
-      },
-      async recordGeneration(input) {
-        return decodeAppletSummaryV1(
-          rpcJsonSnapshotV1(
-            await rpc.recordAppletGeneration({
-              schemaVersion: 1,
-              userId,
-              appletId: input.appletId,
-              generationId: input.generationId,
-              tools: input.tools,
-            }),
-          ),
-        );
-      },
-      async delete(appletId) {
-        return decodeAppletSummaryV1(
-          rpcJsonSnapshotV1(
-            await rpc.deleteApplet({ schemaVersion: 1, userId, appletId }),
-          ),
-        );
-      },
-    };
-  }
-
-  /** The Session's focused Applet, as the shell and its route read it. */
-  async readFocusedApplet(identity: BotIdentity): Promise<FocusedAppletV1> {
-    await this.validateIdentity(identity);
-    const stored =
-      await this.state.ctx.storage.get<unknown>(APPLET_FOCUSED_KEY);
-    return stored === undefined
-      ? {
-          schemaVersion: 1,
-          appletId: null,
-          changedAt: new Date(0).toISOString(),
-        }
-      : decodeFocusedAppletV1(stored);
-  }
-
-  async setFocusedApplet(
-    identity: BotIdentity,
-    appletId: string | null,
-  ): Promise<FocusedAppletV1> {
-    await this.validateIdentity(identity);
-    const focused = decodeFocusedAppletV1({
-      schemaVersion: 1,
-      appletId,
-      changedAt: new Date().toISOString(),
-    });
-    await this.state.ctx.storage.put({ [APPLET_FOCUSED_KEY]: focused });
-    return focused;
-  }
-
-  /**
-   * Resolve the User's Applet directory into this Bot's next Composition
-   * generation, before a Turn is admitted.
-   *
-   * Outside the admission transaction on purpose: the pin is taken in one
-   * storage transaction, which cannot make a cross-object call. A publish or a
-   * delete therefore activates at the *next* admitted Turn, and an in-flight
-   * Turn keeps the set it pinned. A directory that cannot be read leaves the
-   * Bot on the generation it has; an Applet change is never a reason a Turn
-   * cannot start.
-   */
-  private async resolveAppletComposition(
-    identity: BotIdentity,
-    command: OwnedBotTurnCommand,
-  ): Promise<void> {
-    if (!this.state.env.APPLET_STATES) return;
-    try {
-      await resolveAppletCompositionV1({
-        directory: this.appletUserDirectory(identity),
-        composition: {
-          current: () => this.state.authority.composition.current(),
-          propose: (generation, options) =>
-            this.state.authority.composition.propose(generation, options),
-        },
-        storage: {
-          get: (key) => this.state.ctx.storage.get(key),
-          put: (entries) => this.state.ctx.storage.put(entries),
-        },
-        origin: {
-          kind: "bot-authored",
-          runId: command.runId,
-          sessionId: command.sessionId,
-          turnId: command.runId,
-        },
-      });
-    } catch {
-      // Visible through the Applet's own failure records; never a wedged Turn.
-    }
-  }
-
-  async isolateWorkspaceRead(
-    input: IsolateCallScopeV1,
-  ): Promise<IsolateWorkspaceOutcomeV1> {
-    const active = this.activeIsolateTurn(input);
-    const files = this.state.env.WORKSPACE_FILES;
-    if (!active || !files) {
-      return { status: "unavailable", reason: "Workspace is unavailable" };
-    }
-    const path = this.isolateWorkspacePath(
-      input.userId,
-      decodeIsolateWorkspacePathV1(input.request),
-    );
-    return { status: "available", value: await files.read(path) };
-  }
-
-  async isolateWorkspaceList(
-    input: IsolateCallScopeV1,
-  ): Promise<IsolateWorkspaceOutcomeV1> {
-    const active = this.activeIsolateTurn(input);
-    const files = this.state.env.WORKSPACE_FILES;
-    if (!active || !files) {
-      return { status: "unavailable", reason: "Workspace is unavailable" };
-    }
-    const request = decodeIsolateWorkspaceListRequestV1(input.request);
-    const root = this.isolateWorkspaceRoot(input.userId, request.root);
-    return {
-      status: "available",
-      value: await files.list({
-        root,
-        ...(request.prefix === undefined ? {} : { prefix: request.prefix }),
-        ...(request.cursor === undefined ? {} : { cursor: request.cursor }),
-        ...(request.limit === undefined ? {} : { limit: request.limit }),
-      }),
-    };
-  }
-
-  async isolateWorkspaceStat(
-    input: IsolateCallScopeV1,
-  ): Promise<IsolateWorkspaceOutcomeV1> {
-    const active = this.activeIsolateTurn(input);
-    const files = this.state.env.WORKSPACE_FILES;
-    if (!active || !files) {
-      return { status: "unavailable", reason: "Workspace is unavailable" };
-    }
-    const path = this.isolateWorkspacePath(
-      input.userId,
-      decodeIsolateWorkspacePathV1(input.request),
-    );
-    return { status: "available", value: await files.stat(path) };
-  }
-
-  async isolateWorkspaceWrite(
-    input: IsolateCallScopeV1,
-  ): Promise<IsolateWorkspaceOutcomeV1> {
-    const active = this.activeIsolateTurn(input);
-    const files = this.state.env.WORKSPACE_FILES;
-    if (!active || !files) {
-      return { status: "unavailable", reason: "Workspace is unavailable" };
-    }
-    const request = decodeIsolateWorkspaceWriteRequestV1(input.request);
-    return {
-      status: "available",
-      value: await files.write({
-        path: this.isolateWorkspacePath(input.userId, request.path),
-        bytes: request.bytes,
-        writer: this.isolateWorkspaceWriter(input),
-        expectedGenerationId: request.expectedGenerationId,
-        ...(request.mediaType ? { mediaType: request.mediaType } : {}),
-      }),
-    };
-  }
-
-  async isolateWorkspaceDelete(
-    input: IsolateCallScopeV1,
-  ): Promise<IsolateWorkspaceOutcomeV1> {
-    const active = this.activeIsolateTurn(input);
-    const files = this.state.env.WORKSPACE_FILES;
-    if (!active || !files) {
-      return { status: "unavailable", reason: "Workspace is unavailable" };
-    }
-    const request = decodeIsolateWorkspaceDeleteRequestV1(input.request);
-    return {
-      status: "available",
-      value: await files.delete({
-        path: this.isolateWorkspacePath(input.userId, request.path),
-        writer: this.isolateWorkspaceWriter(input),
-        expectedGenerationId: request.expectedGenerationId,
-      }),
-    };
-  }
-
-  async isolateConnection(
-    input: IsolateCallScopeV1,
-  ): Promise<IsolateConnectionOutcomeV1> {
-    if (!this.activeIsolateTurn(input) || typeof input.request !== "string") {
-      return { status: "unavailable", reason: "the Connection is unavailable" };
-    }
-    const identity = { userId: input.userId, botId: input.botId };
-    const user = await this.userConfiguration(identity).readConfiguration({
-      schemaVersion: 1,
-      userId: input.userId,
-    });
-    const connection = user.connections.find(
-      (candidate) =>
-        candidate.connectionId === input.request &&
-        candidate.state === "ready" &&
-        candidate.generation,
-    );
-    if (!connection?.generation) {
-      await this.state.authority.recordNotification({
-        notificationId: notificationIdV1(
-          "package-connection-unavailable",
-          input.runId,
-          input.packageId,
-          input.request,
-        ),
-        runId: input.runId,
-        createdAt: new Date().toISOString(),
-        title: "Connection unavailable",
-        body: `Package "${input.packageId}" could not use Connection "${input.request}". The User can enable or repair it on Connections.`.slice(
-          0,
-          240,
-        ),
-      });
-      return { status: "unavailable", reason: "the Connection is unavailable" };
-    }
-    return {
-      status: "available",
-      leaseId: crypto.randomUUID(),
-      connectionId: connection.connectionId,
-      generation: connection.generation,
-      expiresAt: new Date(Date.now() + 5 * 60_000).toISOString(),
-    };
-  }
-
-  async isolateSchedule(
-    input: IsolateCallScopeV1,
-  ): Promise<IsolateScheduleOutcomeV1> {
-    const request = decodeIsolateScheduleRequestV1(input.request);
-    return this.invokeBotToolForIsolateV1({
-      ...input,
-      request: {
-        callId: request.callId,
-        name: "routine_manage",
-        input: request.input,
-      },
-    });
-  }
-
-  private async isolateMemoryHost(
-    input: IsolateCallScopeV1,
-    request: { scope: "bot" | "user" | "project"; projectId?: string },
-  ) {
-    if (!this.activeIsolateTurn(input)) return undefined;
-    const host = createBotMemoryHost(
-      { userId: input.userId, botId: input.botId },
-      {
-        runId: input.runId,
-        sessionId: input.sessionId,
-        turnId: input.turnId,
-      },
-      this.state.env,
-    );
-    if (!host) return undefined;
-    if (request.scope === "project") {
-      const projects = await host.projects?.joined();
-      if (
-        !request.projectId ||
-        !projects?.some((project) => project.projectId === request.projectId)
-      ) {
-        return undefined;
-      }
-    }
-    return host;
-  }
-
-  private activeIsolateTurn(input: {
-    runId: string;
-    sessionId: string;
-    turnId: string;
-    packageId: string;
-    generationId: string;
-  }) {
-    const active = this.state.turn.current;
-    if (
-      !active ||
-      active.runId !== input.runId ||
-      active.sessionId !== input.sessionId ||
-      active.turnId !== input.turnId ||
-      active.generationId !== input.generationId ||
-      !active.mounted.generation.members.some(
-        (member) => member.packageId === input.packageId && member.artifact,
-      )
-    ) {
-      return undefined;
-    }
-    return active;
-  }
-
-  private async isolateToolEffectId(
-    packageId: string,
-    callId: string,
-  ): Promise<string> {
-    const digest = await crypto.subtle.digest(
-      "SHA-256",
-      new TextEncoder().encode(`${packageId}\0${callId}`),
-    );
-    const hex = [...new Uint8Array(digest)]
-      .map((byte) => byte.toString(16).padStart(2, "0"))
-      .join("");
-    return `package-tool:${hex}`;
-  }
-
-  private isolateWorkspaceRoot(
-    userId: string,
-    root: ReturnType<typeof decodeIsolateWorkspacePathV1>["root"],
-  ) {
-    return decodeWorkspaceRootV1(
-      root.kind === "user-instructions"
-        ? { kind: root.kind, userId }
-        : root.kind === "bot-instructions"
-          ? { kind: root.kind, userId, botId: root.botId }
-          : {
-              kind: root.kind,
-              userId,
-              packageId: root.packageId,
-              rootId: root.rootId,
-            },
-    );
-  }
-
-  private isolateWorkspacePath(
-    userId: string,
-    path: ReturnType<typeof decodeIsolateWorkspacePathV1>,
-  ): WorkspacePathV1 {
-    return decodeWorkspacePathV1({
-      root: this.isolateWorkspaceRoot(userId, path.root),
-      path: path.path,
-    });
-  }
-
-  private isolateWorkspaceWriter(input: IsolateCallScopeV1) {
-    return {
-      kind: "bot" as const,
-      botId: input.botId,
-      sessionId: input.sessionId,
-      turnId: input.turnId,
-      runId: input.runId,
-    };
-  }
-
-  private isolateCapabilities(
-    scope: {
-      botId: string;
-      packageId: string;
-      generationId: string;
-    },
-    authority: {
-      connections: readonly IsolateConnectionV1[];
-      model?: IsolateModelBindingV1;
-      memory: boolean;
-      workspace: boolean;
-    },
-    model?: { path: IsolateModelPath },
-  ): IsolateCapabilityHost {
-    return createIsolateCapabilityHost({
-      storage: {
-        put: (key, value) => this.state.ctx.storage.put(key, value),
-        list: (options) => this.state.ctx.storage.list(options),
-      },
-      botId: scope.botId,
-      packageId: scope.packageId,
-      generationId: scope.generationId,
-      connections: authority.connections,
-      ...(authority.model ? { modelBinding: authority.model } : {}),
-      ...(model ? { modelPath: model.path } : {}),
-      memory: authority.memory,
-      workspace: authority.workspace,
-    });
-  }
-
-  /**
-   * Streams through the pinned Composition's mounted `ctx.llm` — the same
-   * provider path a Turn uses, so whichever provider Plugin serves the request
-   * is the one that takes the credential lease.
-   */
-  private isolateModelPath(
-    identity: BotIdentity,
-    runtime: {
-      agentPackages: FoundationAgentPackage[];
-      modelSelection: RuntimeModelSelection;
-    },
-    generationId: string,
-  ): IsolateModelPath {
-    const state = this.state;
-    return {
-      async *stream(request, signal) {
-        const generation = await state.authority.composition.read(generationId);
-        if (!generation) {
-          throw new Error(
-            `isolate model invocation pins unknown Composition generation "${generationId}"`,
-          );
-        }
-        const composition = await createShellCompositionHost({
-          botId: identity.botId,
-          sessionId: `isolate-model:${request.requestId}`,
-          sessionEvents: [],
-          agentPackages: runtime.agentPackages,
-          modelSelection: runtime.modelSelection,
-          admitEffect: () => Promise.resolve(true),
-        }).mount(generation, signal);
-        try {
-          yield* composition.runtime.services.llm.stream(request, signal);
-        } finally {
-          await composition.dispose();
-        }
-      },
-    };
-  }
-
-  /** The generation this Bot starts on: empty until it installs or authors. */
-  private async bootstrapComposition() {
-    return bootstrapCompositionGeneration(new Date().toISOString());
-  }
-
   private async resolveAdmissionSnapshot(
     command: OwnedBotTurnCommand,
   ): Promise<BotSettingsViewV1> {
-    return (await this.resolveExecutionContext(command)).settings;
+    return (await resolveExecutionContextV1(this.state, command)).settings;
   }
-
-  private async admittedSnapshot(
-    transaction: DurableObjectTransaction,
-    resolved: BotSettingsViewV1,
-  ): Promise<BotSettingsViewV1> {
-    const stored = await transaction.get<unknown>(BOT_CONFIGURATION_KEY);
-    return stored === undefined
-      ? resolved
-      : decodeBotSettingsViewV1(migrateStoredBotSettingsV1(stored));
-  }
-
-  private async scheduledDeadlines(
-    transaction: DurableObjectTransaction,
-  ): Promise<number[]> {
-    // A pending approval is a deadline like any other: the object already owns
-    // one alarm, and expiry rides it rather than inventing a second clock.
-    const approvals = await transaction.list<unknown>({
-      prefix: APPROVAL_PREFIX,
-    });
-    const expiries: number[] = [];
-    for (const stored of approvals.values()) {
-      const approval = decodeApprovalRecordV1(stored);
-      if (approval.decision !== "pending") continue;
-      expiries.push(Date.parse(approval.expiresAt));
-    }
-    return [
-      ...(await this.state.routineScheduler.deadlines(transaction)),
-      ...expiries.filter((at) => Number.isFinite(at)),
-      // A dispatched task's 30-minute lifetime, and a child's own owed Turn,
-      // both ride the one alarm this object already has: the parent reconciles
-      // a child that never reported, and the child runs the Turn it was handed
-      // on its next alarm rather than on a floating promise.
-      ...(await this.subagentDeadlines(transaction)),
-      ...(this.state.hostScheduled.deadlines
-        ? await this.state.hostScheduled.deadlines(transaction)
-        : []),
-    ];
-  }
-
-  /**
-   * The deadlines subagent work contributes to this object's one alarm.
-   *
-   * Two kinds, and which one an object has says which side of the dispatch it
-   * is on. A *parent* has task records whose `deadlineAt` is when it must go
-   * and ask what became of a child. A *child* has one task context, and while
-   * that context is `queued` its deadline is *now*: accepting a task arms the
-   * alarm, and the alarm is what runs the Turn.
-   */
-  private async subagentDeadlines(
-    transaction: DurableObjectTransaction,
-  ): Promise<number[]> {
-    const deadlines: number[] = [];
-    const active = await transaction.list<unknown>({
-      prefix: TASK_ACTIVE_PREFIX,
-    });
-    for (const key of active.keys()) {
-      const stored = await transaction.get<unknown>(
-        taskKeyV1(key.slice(TASK_ACTIVE_PREFIX.length)),
-      );
-      if (stored === undefined) continue;
-      const at = Date.parse((stored as TaskRecordV1).deadlineAt);
-      if (Number.isFinite(at)) deadlines.push(at);
-    }
-    const contexts = await transaction.list<unknown>({
-      prefix: TASK_CONTEXT_PREFIX,
-    });
-    for (const stored of contexts.values()) {
-      const context = decodeSubagentTaskContextV1(stored);
-      if (context.status === "queued") deadlines.push(Date.now());
-    }
-    return deadlines;
-  }
-
-  private async deferScheduledWork(
-    transaction: DurableObjectTransaction,
-  ): Promise<void> {
-    // A Routine's deadline is a debt, so the scheduler holds it rather than
-    // moving it while other durable work remains in flight.
-    await this.state.routineScheduler.defer(transaction);
-    await this.state.hostScheduled.defer?.(transaction);
-  }
-
-  private async settleScheduledWork(): Promise<void> {
-    // The re-arm is in a `finally` because it is the object's only way back.
-    // The alarm that woke this object has already been consumed by the
-    // platform; a throw in any one settler used to skip the re-arm, and then
-    // nothing — no Routine, no approval expiry, no owed subagent Turn — ever
-    // woke this Bot again except by a caller's luck. One producer failing must
-    // cost that producer its pass, never the clock.
-    try {
-      await this.settleRoutineFirings();
-      await runOwedSubagentTurns(this.state);
-      await reconcileOverdueTasks(this.state);
-      await this.expireDueApprovals();
-      await this.replayPendingWakeNotifications();
-      await this.state.hostScheduled.settle?.();
-    } finally {
-      await this.state.ctx.storage.transaction((transaction) =>
-        this.state.authority.refreshRecoveryAlarm(transaction),
-      );
-    }
-  }
-
-  /**
-   * Drain the Routines that are owed a firing.
-   *
-   * The scheduler mints the durable firing; this closure is the only thing that
-   * admits a Turn for it, and it does so with `authority.run` — a direct call
-   * inside the Durable Object. `turnType: "automation"` and the recorded origin
-   * come from `routineTurnCommandV1`, and the fire id *is* the run id, so a
-   * retry after eviction is refused by the kernel's own idempotency rather than
-   * running the Routine a second time.
-   */
-  private async settleRoutineFirings(): Promise<void> {
-    const identity = await this.state.authority.readDurableIdentity();
-    if (!identity) return;
-    // A run already occupies the object. `alarm()` defers before it reaches
-    // here whenever the Turn is executing in this isolate, but a durable active
-    // run outlives an eviction, and admitting a firing against one would burn
-    // the occurrence on an error instead of holding the debt.
-    //
-    // Returning was not enough: the debt stayed past-due, so `deadlines()`
-    // re-armed on a moment already gone and the alarm spun straight back into
-    // this same bail-out — which is how a Routine racing a long chat Turn
-    // failed once a minute for ever. The hold is what turns the bail-out into
-    // a deferral: `dueAt` does not move, so the firing still lands.
-    if (await this.state.authority.readActiveRunId()) {
-      await this.state.ctx.storage.transaction((transaction) =>
-        this.state.routineScheduler.defer(transaction),
-      );
-      return;
-    }
-    await this.state.routineScheduler.settle(async (fire) => {
-      const outcome = await this.runOneFiring(identity, fire);
-      await this.notifyFailedFiring(identity, fire, outcome);
-      return outcome;
-    });
-  }
-
-  private async runOneFiring(
-    identity: BotIdentity,
-    fire: RoutineFireV1,
-  ): Promise<RoutineFireOutcomeV1> {
-    try {
-      await this.state.authority.run(
-        routineTurnCommandV1(identity, fire, new Date().toISOString()),
-      );
-    } catch (error) {
-      return routineFireOutcomeV1(
-        await this.state.authority.readStoredRun(fire.fireId),
-        error,
-      );
-    }
-    return routineFireOutcomeV1(
-      await this.state.authority.readStoredRun(fire.fireId),
-    );
-  }
-
-  /**
-   * Tell the person that a firing did not work.
-   *
-   * The scheduler has already written the durable completion-inbox entry in
-   * the transaction that settled the firing; this is the delivery half — the
-   * same seam a hand-off uses, so a Routine that breaks reaches the same place
-   * a Routine that finishes does instead of only a `failed` row nobody opens.
-   * `notifications.enabled` is honoured: it is the mute on updates, and a
-   * broken Routine is an update, not a decision the Bot is waiting on.
-   */
-  private async notifyFailedFiring(
-    identity: BotIdentity,
-    fire: RoutineFireV1,
-    outcome: RoutineFireOutcomeV1,
-  ): Promise<void> {
-    if (outcome.status === "ok") return;
-    const settings = await this.getSettings(identity);
-    if (!settings.notifications.enabled) return;
-    await this.state.authority.recordNotification({
-      // The same id shape the completion path uses, so one firing is one
-      // intent however many times the alarm retries it.
-      notificationId: notificationIdV1("routine-failed", fire.fireId),
-      runId: fire.fireId,
-      createdAt: new Date().toISOString(),
-      title: `${settings.profile.name} could not run a Routine`,
-      // The same sentence the inbox entry carries. A notification is the one
-      // surface a person reads without asking for it, so it is the last place
-      // a kernel invariant belongs.
-      body: routineFailureSentenceV1(outcome.summary).slice(0, 240),
-    });
-  }
-  // -------------------------------------------------------------------------
-  // Subagents. The parent Bot Durable Object is the authority; the Subagent
-  // Durable Object is an execution host with no authority of its own.
-  // -------------------------------------------------------------------------
 
   /** Narrow RPC for the User-wide agent-lane concurrency lease. */
   private agentTurnSlots(identity: BotIdentity) {
@@ -2581,7 +842,11 @@ export class ShellBotBackendContribution {
     };
   }
 
-  private async agentRuntime(
+  /**
+   * Public because an isolate's `ai` grant streams through the same mounted
+   * Composition a Turn does; `app/isolates/bot.ts` is handed this resolver.
+   */
+  async agentRuntime(
     identity: BotIdentity,
     settings: BotSettingsViewV1,
     admittedRequest?: NormalizedModelRequest,
@@ -2608,7 +873,7 @@ export class ShellBotBackendContribution {
     capabilities: EnabledCapabilityV1[];
     modelSelection: RuntimeModelSelection;
   }> {
-    const userConfiguration = this.userConfiguration(identity);
+    const userConfiguration = userConfigurationV1(this.state, identity);
     const user = await userConfiguration.readConfiguration({
       schemaVersion: 1,
       userId: identity.userId,
@@ -2690,11 +955,11 @@ export class ShellBotBackendContribution {
     // decides whether a Package is mounted at all: a feature gate that let the
     // tools exist and refuse would still have told the model they were there.
     // The registry is read only when the setting is on.
-    const machineSeam = turn ? this.machineSeam(identity) : undefined;
-    const messagesGate = machineSeam
+    const machines = turn ? machineSeam(this.state, identity) : undefined;
+    const messagesGate = machines
       ? await resolveBotMachineMessagesGateV1(
           primitivePackageSettings("machine-messages"),
-          () => machineSeam.list(),
+          () => machines.list(),
         )
       : ({ status: "off" } as const);
     // Filled in once this Turn's model binding is resolved, below. The tool
@@ -2731,7 +996,7 @@ export class ShellBotBackendContribution {
         // that asked for it, and the scaffold write names the same writer.
         ...(turn
           ? (() => {
-              const applets = this.appletsRuntimeHost(identity, turn);
+              const applets = appletsRuntimeHost(this.state, identity, turn);
               return applets ? { applets } : {};
             })()
           : {}),
@@ -2740,13 +1005,16 @@ export class ShellBotBackendContribution {
         ...(turn
           ? {
               botSelfManagement: createBotSelfManagementHost(identity, turn, {
-                readSettings: (target) => this.getSettings(target),
+                readSettings: (target) => readBotSettingsV1(this.state, target),
                 executeConfiguration: (target, command) =>
-                  this.executeConfigurationCommand(target, command),
+                  executeConfigurationCommand(this.state, target, command),
                 listBots: (userId) =>
-                  this.userConfiguration(identity).listBots(userId),
+                  userConfigurationV1(this.state, identity).listBots(userId),
                 createBot: (userId, command) =>
-                  this.userConfiguration(identity).createBot(userId, command),
+                  userConfigurationV1(this.state, identity).createBot(
+                    userId,
+                    command,
+                  ),
                 reserveAgentTurn: (request) =>
                   this.agentTurnSlots(identity).reserve(request),
                 releaseAgentTurn: (request) =>
@@ -2794,15 +1062,15 @@ export class ShellBotBackendContribution {
                   botId: identity.botId,
                 },
                 stageTemplate: (input: { commandId: string; botId: string }) =>
-                  this.userConfiguration(identity).executeTemplateCommand(
-                    identity.userId,
-                    {
-                      schemaVersion: 1,
-                      type: "template/stage",
-                      commandId: input.commandId,
-                      botId: input.botId,
-                    },
-                  ),
+                  userConfigurationV1(
+                    this.state,
+                    identity,
+                  ).executeTemplateCommand(identity.userId, {
+                    schemaVersion: 1,
+                    type: "template/stage",
+                    commandId: input.commandId,
+                    botId: input.botId,
+                  }),
               },
             }
           : {}),
@@ -2812,9 +1080,9 @@ export class ShellBotBackendContribution {
           ? {
               routines: {
                 ...createBotRoutinesHost(identity, turn, this.state.routines),
-                list: () => this.listRoutines(identity),
+                list: () => listRoutines(this.state, identity),
                 execute: (command, writer) =>
-                  this.executeRoutineCommand(identity, command, writer),
+                  executeRoutineCommand(this.state, identity, command, writer),
               },
             }
           : {}),
@@ -2844,13 +1112,13 @@ export class ShellBotBackendContribution {
                 identity,
                 turn,
                 this.state.ctx.storage,
-                this.machineSeam(identity),
+                machineSeam(this.state, identity),
               ),
             }
           : {}),
         // Row 57g, mounted only behind its whole gate: the User setting on, and
         // a connected macOS machine that reports the `messages` capability.
-        ...(turn && machineSeam && messagesGate.status === "ready"
+        ...(turn && machines && messagesGate.status === "ready"
           ? {
               machineMessages: createBotMachineMessagesHost(
                 {
@@ -2858,7 +1126,7 @@ export class ShellBotBackendContribution {
                     identity,
                     turn,
                     this.state.ctx.storage,
-                    machineSeam,
+                    machines,
                   ),
                   writer: {
                     sessionId: turn.sessionId,
@@ -2866,7 +1134,7 @@ export class ShellBotBackendContribution {
                     runId: turn.runId,
                   },
                 },
-                machineSeam,
+                machines,
               ),
             }
           : {}),
@@ -3113,6 +1381,15 @@ export class ShellBotBackendContribution {
     };
   }
 
+  /** @see listNotifications — the recovery integration test reads it here. */
+  async listNotifications(): Promise<BotNotificationIntent[]> {
+    return listNotifications(this.state);
+  }
+
+  async acknowledgeNotification(notificationId: string): Promise<void> {
+    return acknowledgeNotification(this.state, notificationId);
+  }
+
   async readDurableIdentity(): Promise<BotIdentity | undefined> {
     return this.state.authority.readDurableIdentity();
   }
@@ -3126,814 +1403,6 @@ export class ShellBotBackendContribution {
     transaction: DurableObjectTransaction,
   ): Promise<void> {
     await this.state.authority.refreshRecoveryAlarm(transaction);
-  }
-
-  async listNotifications(): Promise<BotNotificationIntent[]> {
-    return this.state.authority.listNotifications();
-  }
-
-  async acknowledgeNotification(notificationId: string): Promise<void> {
-    return this.state.authority.acknowledgeNotification(notificationId);
-  }
-
-  /** Every Routine this Bot holds. Bot-scoped: the caller proved membership. */
-  async listRoutines(identity: BotIdentity): Promise<RoutineListViewV1> {
-    return this.state.routines.list(
-      identity.botId,
-      await this.state.routineScheduler.nextRuns(),
-    );
-  }
-
-  /**
-   * One Routine command, applied by the Bot Durable Object. The writer is a
-   * User here; the `routine_manage` tool calls the same store with a Bot
-   * writer, so the two paths cannot drift.
-   */
-  async executeRoutineCommand(
-    identity: BotIdentity,
-    command: RoutineCommandV1,
-    writer: RoutineWriterV1 = { kind: "user" },
-  ): Promise<RoutineCommandReceiptV1> {
-    if (command.botId !== identity.botId) {
-      throw new RoutineNotFoundError(command.routineId ?? command.botId);
-    }
-    const receipt = await this.state.routines.execute(command, writer);
-    // A created, re-timed, resumed or manually fired Routine changes what the
-    // object is owed next, so the alarm is re-armed in the same call that wrote
-    // the record rather than waiting for the next one to happen by.
-    await this.state.ctx.storage.transaction((transaction) =>
-      this.state.authority.refreshRecoveryAlarm(transaction),
-    );
-    return receipt;
-  }
-
-  /**
-   * One webhook delivery, after the edge proved the key was minted here.
-   *
-   * The Bot re-checks the key against its own durable record, because the edge
-   * knows only that the signature is this deployment's — not whether the key is
-   * still this Routine's. The delivery is enqueued, never run inline: an HTTP
-   * caller must not be able to hold a Turn open.
-   */
-  async deliverRoutineHook(input: {
-    routineId: string;
-    keyVersion: number;
-    digest: string;
-    deliveryId: string;
-    body: string;
-    contentType?: string | null;
-  }): Promise<{ status: "accepted" | "duplicate"; fireId: string }> {
-    const accepted = await this.state.routines.deliverHook(input);
-    await this.state.ctx.storage.transaction((transaction) =>
-      this.state.authority.refreshRecoveryAlarm(transaction),
-    );
-    return accepted;
-  }
-
-  /**
-   * The User's machines, as this Bot may see them.
-   *
-   * Four calls and no more: list them, resolve one, queue an approved command,
-   * and read a finished command's result. There is no register, no revoke and
-   * no token here — a Bot cannot enrol or revoke a machine, and "self
-   * modification never widens authority" is why.
-   */
-  private machineSeam(identity: BotIdentity): BotMachineSeamV1 {
-    const userConfiguration = this.userConfiguration(identity);
-    return {
-      list: () => userConfiguration.listMachines(identity.userId),
-      describeTarget: (machineId) =>
-        userConfiguration.describeMachineTarget(identity.userId, machineId),
-      readResult: (commandId) =>
-        userConfiguration.readMachineResult(identity.userId, commandId),
-      dispatch: (command) =>
-        userConfiguration.dispatchMachineCommand(identity.userId, command),
-    };
-  }
-
-  /**
-   * One finished machine command, handed over by the User Durable Object.
-   *
-   * The machine answers the backend, never the Bot, so this is how the Bot
-   * learns without being asked: the same durable input queue a Routine hand-off
-   * and an approval decision ride, idempotent on the command id, drained as a
-   * preamble line on the Bot's next conversational Turn. The line carries a
-   * preview; `machine_command_check` reads the whole result.
-   */
-  async deliverMachineResult(
-    delivery: MachineResultDeliveryV1,
-  ): Promise<{ status: "accepted" }> {
-    await this.state.ctx.storage.transaction(async (transaction) => {
-      await enqueuePendingBotInputV1(transaction, {
-        schemaVersion: 1,
-        kind: "machine-result",
-        commandId: delivery.commandId,
-        machineId: delivery.machineId,
-        outcome: delivery.outcome,
-        preview: delivery.preview,
-        createdAt: delivery.finishedAt,
-      });
-    });
-    await this.state.ctx.storage.transaction((transaction) =>
-      this.state.authority.refreshRecoveryAlarm(transaction),
-    );
-    return { status: "accepted" };
-  }
-
-  /**
-   * The second of the two points a pending wake is heard at.
-   *
-   * The first is the Bot's next conversational Turn. This one is the User's:
-   * an intent recorded in the settling transaction cannot be lost, but a
-   * client that was not connected when it landed can miss the delivery, so the
-   * alarm re-emits it once for a wake whose inbox entry is still unread. Once
-   * per wake, recorded on the wake, so a Bot nobody talks to is not notified
-   * on every alarm forever.
-   */
-  private async replayPendingWakeNotifications(): Promise<void> {
-    const pending = await this.state.routineInbox.pending();
-    if (pending.length === 0) return;
-    const identity = await this.state.authority.readDurableIdentity();
-    if (!identity) return;
-    const settings = await this.getSettings(identity);
-    if (!settings.notifications.enabled) return;
-    const unread = new Map(
-      (await this.state.routineInbox.list())
-        .filter((entry) => !entry.acknowledged)
-        .map((entry) => [entry.runId, entry] as const),
-    );
-    for (const { key, input } of pending) {
-      if (input.kind !== "wake" || input.renotifiedAt !== undefined) continue;
-      const entry = unread.get(input.runId);
-      if (!entry) continue;
-      // The same notification id the settle recorded, per source: a replay is
-      // a second delivery of one intent, never a second intent.
-      const subagent = input.source === "subagent";
-      await this.state.authority.recordNotification({
-        notificationId: subagent
-          ? `task-settled:${input.runId}`
-          : `routine-wake:${input.runId}`,
-        runId: input.runId,
-        createdAt: new Date().toISOString(),
-        title: `${settings.profile.name} finished ${
-          subagent ? "a subagent task" : "a Routine"
-        }`,
-        body: entry.text.slice(0, 240),
-      });
-      await this.state.routineInbox.markRenotified(key);
-    }
-  }
-
-  /**
-   * Every pending approval this Bot's alarm now owes an expiry, expired in one
-   * pass.
-   *
-   * Exactly once per approval: the write is conditional on the record still
-   * being `pending`, so an alarm that fires twice — or fires while a person is
-   * clicking Approve — settles on whichever answer got there first and the
-   * other is a no-op. The queued input is written in the same transaction as
-   * the decision, so the Bot always learns the outcome.
-   */
-  private async expireDueApprovals(): Promise<void> {
-    const stored = await this.state.ctx.storage.list<unknown>({
-      prefix: APPROVAL_PREFIX,
-    });
-    const now = Date.now();
-    for (const value of stored.values()) {
-      const approval = decodeApprovalRecordV1(value);
-      if (approval.decision !== "pending") continue;
-      if (Date.parse(approval.expiresAt) > now) continue;
-      await this.settleApproval(approval.approvalId, "expired", "expiry");
-    }
-  }
-
-  /**
-   * Record one decision, and queue the input it owes the Bot, in one
-   * transaction.
-   *
-   * First write wins. A record that is no longer `pending` is returned exactly
-   * as stored, which is what makes the route idempotent: a replayed `POST`, a
-   * second click, and an alarm racing a person all answer with the one
-   * decision that was actually recorded.
-   */
-  private async settleApproval(
-    approvalId: string,
-    decision: "approved" | "denied" | "expired",
-    decidedBy: "user" | "expiry",
-  ): Promise<{
-    approval: ApprovalRecordV1;
-    status: "recorded" | "replayed";
-    /** Present when the card was a machine command's. */
-    machineIntent?: MachineIntentRecordV1;
-  }> {
-    const key = approvalKeyV1(approvalId);
-    const at = new Date().toISOString();
-    return this.state.ctx.storage.transaction(async (transaction) => {
-      const stored = await transaction.get<unknown>(key);
-      if (stored === undefined) {
-        throw new ApprovalDecodeError(`approval "${approvalId}" was not found`);
-      }
-      const approval = decodeApprovalRecordV1(stored);
-      if (approval.decision !== "pending") {
-        return { approval, status: "replayed" as const };
-      }
-      const decided: ApprovalRecordV1 = {
-        ...approval,
-        decision,
-        decidedAt: at,
-        decidedBy,
-      };
-      await transaction.put(key, decided);
-      // The Bot is owed the outcome whether a person gave it or the clock did:
-      // "its outcome is delivered to the Bot's next conversational Turn as
-      // durable input", and never an unbounded wait.
-      await enqueuePendingBotInputV1(transaction, {
-        schemaVersion: 1,
-        kind: "approval",
-        approvalId,
-        decision,
-        createdAt: at,
-      });
-      // Row 49: an approval this Bot asked for may be a command waiting for a
-      // machine of the User's. The decision and what it authorized become
-      // durable together, so a person can never have approved something whose
-      // intent record still says nobody answered. Nothing is dispatched here:
-      // a cross-Durable-Object call inside this transaction would make its
-      // atomicity a lie.
-      const machineIntent = await settleMachineIntentV1(
-        transaction,
-        approvalId,
-        decision,
-        at,
-      );
-      return {
-        approval: decided,
-        status: "recorded" as const,
-        ...(machineIntent === undefined ? {} : { machineIntent }),
-      };
-    });
-  }
-
-  /**
-   * The Bot's approvals, newest first. Decided cards are carried beside the
-   * pending ones so the card in the transcript can say what was decided rather
-   * than going quiet the moment somebody answers it.
-   */
-  async listApprovals(identity: BotIdentity): Promise<ApprovalListViewV1> {
-    await this.validateIdentity(identity);
-    const stored = await this.state.ctx.storage.list<unknown>({
-      prefix: APPROVAL_PREFIX,
-    });
-    // Retention is enforced on read rather than in the settling transaction,
-    // which cannot list. Trimming loses a row and never a fact: the send is
-    // still on the durable log of the Turn that made it.
-    for (const key of trimmableApprovalKeysV1([...stored.keys()])) {
-      await this.state.ctx.storage.delete(key);
-      stored.delete(key);
-    }
-    const approvals = [...stored.values()]
-      .map((value) => decodeApprovalRecordV1(value))
-      .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
-    return {
-      schemaVersion: 1,
-      botId: identity.botId,
-      approvals: approvals.map((approval) => projectApprovalCardV1(approval)),
-      pending: approvals.filter((approval) => approval.decision === "pending")
-        .length,
-    };
-  }
-
-  /**
-   * One decision, from a person. The durable write happens before this
-   * answers, so the 200 is a statement about state and not about intent.
-   */
-  async decideApproval(
-    identity: BotIdentity,
-    approvalId: string,
-    command: ApprovalDecisionCommandV1,
-  ): Promise<ApprovalDecisionReceiptV1> {
-    await this.validateIdentity(identity);
-    const settled = await this.settleApproval(
-      approvalId,
-      command.decision,
-      "user",
-    );
-    // Only the write that decided it dispatches — a second click answers
-    // `replayed` and reaches no laptop — and only `approved` does. An expiry
-    // never gets here at all: it settles through the alarm, which dispatches
-    // nothing by construction.
-    if (
-      settled.status === "recorded" &&
-      settled.machineIntent?.decision === "approved"
-    ) {
-      await dispatchApprovedMachineIntentV1(
-        this.state.ctx.storage,
-        settled.machineIntent,
-        this.machineSeam(identity),
-      );
-    }
-    return {
-      schemaVersion: 1,
-      approval: projectApprovalCardV1(settled.approval),
-      status: settled.status,
-    };
-  }
-
-  /** The completion inbox, newest first, with the badge count beside it. */
-  async listRoutineInbox(identity: BotIdentity): Promise<RoutineInboxViewV1> {
-    await this.validateIdentity(identity);
-    const entries = await this.state.routineInbox.list();
-    return {
-      schemaVersion: 1,
-      botId: identity.botId,
-      entries: entries.map((entry) => routineInboxEntryViewV1(entry)),
-      unacknowledged: entries.filter((entry) => !entry.acknowledged).length,
-    };
-  }
-
-  /** Count inputs waiting for the next conversational Turn without draining them. */
-  async pendingInputCount(identity: BotIdentity): Promise<number> {
-    await this.validateIdentity(identity);
-    return (await this.state.routineInbox.pending()).length;
-  }
-
-  /**
-   * Acknowledge inbox entries. An explicit command, never a side effect of
-   * reading: a background poll must not clear the badge.
-   */
-  async executeRoutineInboxCommand(
-    identity: BotIdentity,
-    command: RoutineInboxCommandV1,
-  ): Promise<RoutineInboxReceiptV1> {
-    if (command.botId !== identity.botId) {
-      throw new RoutineNotFoundError(command.botId);
-    }
-    await this.validateIdentity(identity);
-    await this.state.routineInbox.acknowledge(command.entryIds);
-    return {
-      schemaVersion: 1,
-      commandId: command.commandId,
-      status: "applied",
-      inbox: await this.listRoutineInbox(identity),
-    };
-  }
-
-  /**
-   * One automation run, read-only.
-   *
-   * An automation Turn is absent from `listRuns` by construction, so this is
-   * the only read of one, and it is reached through the Routine's own run log:
-   * a run whose recorded origin names a different Routine is a 404 here.
-   */
-  async readRoutineRun(
-    identity: BotIdentity,
-    routineId: string,
-    runId: string,
-  ): Promise<RoutineRunDetailViewV1> {
-    await this.validateIdentity(identity);
-    const run = await this.state.authority.readStoredRun(runId);
-    const origin = run ? settledRoutineOriginV1(run) : undefined;
-    if (!run || origin?.routineId !== routineId) {
-      throw new RoutineNotFoundError(runId);
-    }
-    return routineRunDetailViewV1(identity.botId, routineId, run);
-  }
-
-  /** One Routine's bounded run log, newest first. */
-  async listRoutineRuns(
-    identity: BotIdentity,
-    routineId: string,
-  ): Promise<RoutineRunListViewV1> {
-    return this.state.routines.listRuns(identity.botId, routineId);
-  }
-  /**
-   * The Bot's durable Composition generations, newest first. Bot-scoped: the
-   * caller proves directory membership before this runs.
-   */
-  async listCompositionGenerations(
-    identity: BotIdentity,
-    query: { limit: number; cursor?: string },
-  ): Promise<CompositionGenerationListViewV1> {
-    const current = await this.state.authority.composition.current();
-    const page = await this.state.authority.composition.list({
-      limit: Math.min(query.limit, MAX_COMPOSITION_GENERATION_PAGE_V1),
-      ...(query.cursor === undefined ? {} : { cursor: query.cursor }),
-    });
-    return {
-      schemaVersion: 1,
-      botId: identity.botId,
-      currentGenerationId: current.generationId,
-      generations: await Promise.all(
-        page.generations.map(async (generation) =>
-          projectCompositionGenerationV1({
-            botId: identity.botId,
-            generation,
-            currentGenerationId: current.generationId,
-            failures: await this.state.authority.compositionFailures.list(
-              generation.generationId,
-            ),
-            ...(await this.compositionQuarantineView(generation.generationId)),
-          }),
-        ),
-      ),
-      ...(page.cursor === undefined ? {} : { cursor: page.cursor }),
-    };
-  }
-
-  /** One generation, with the recorded source of each isolate member. */
-  async getCompositionGeneration(
-    identity: BotIdentity,
-    generationId: string,
-  ): Promise<CompositionGenerationViewV1 | undefined> {
-    const generation =
-      await this.state.authority.composition.read(generationId);
-    if (!generation) return undefined;
-    const current = await this.state.authority.composition.current();
-    return projectCompositionGenerationV1({
-      botId: identity.botId,
-      generation,
-      currentGenerationId: current.generationId,
-      failures:
-        await this.state.authority.compositionFailures.list(generationId),
-      ...(await this.compositionQuarantineView(generationId)),
-    });
-  }
-
-  /** Spread into a projection: absent unless the generation is quarantined. */
-  private async compositionQuarantineView(
-    generationId: string,
-  ): Promise<{ quarantine?: CompositionQuarantineV1 }> {
-    const quarantine =
-      await this.state.authority.compositionFailures.quarantine(generationId);
-    return quarantine === undefined ? {} : { quarantine };
-  }
-
-  /**
-   * Reverting is a recorded generation, not a mutation: it proposes a new
-   * pending generation carrying the target's members, which the next admitted
-   * Turn activates. The command is idempotent on its `commandId`, and its
-   * `expectedGenerationId` is the optimistic check that the User acted on the
-   * Composition they were looking at.
-   */
-  async revertComposition(
-    identity: BotIdentity,
-    command: RevertCompositionCommandV1,
-  ): Promise<CompositionCommandReceiptV1> {
-    if (command.botId !== identity.botId) {
-      throw new Error("Composition revert command does not match its Bot");
-    }
-    const receiptKey = `${COMPOSITION_COMMAND_PREFIX}${command.commandId}`;
-    const recorded =
-      await this.state.ctx.storage.get<CompositionCommandReceiptV1>(receiptKey);
-    if (recorded) return decodeCompositionCommandReceiptV1(recorded);
-    const current = await this.state.authority.composition.current();
-    const reject = async (
-      failure: string,
-    ): Promise<CompositionCommandReceiptV1> => {
-      const receipt = decodeCompositionCommandReceiptV1({
-        schemaVersion: 1,
-        commandId: command.commandId,
-        status: "rejected",
-        failure,
-        currentGenerationId: current.generationId,
-      });
-      await this.state.ctx.storage.put(receiptKey, receipt);
-      return receipt;
-    };
-    if (current.generationId !== command.expectedGenerationId) {
-      return reject(`composition generation is ${current.generationId}`);
-    }
-    let generationId: string;
-    try {
-      const reverted = await this.state.authority.composition.revert(
-        command.toGenerationId,
-        {
-          kind: "revert",
-          revertsTo: command.toGenerationId,
-          userId: identity.userId,
-        },
-      );
-      generationId = reverted.generationId;
-    } catch (error) {
-      return reject(
-        error instanceof Error ? error.message : "Composition revert failed",
-      );
-    }
-    const receipt = decodeCompositionCommandReceiptV1({
-      schemaVersion: 1,
-      commandId: command.commandId,
-      status: "applied",
-      generationId,
-      currentGenerationId: current.generationId,
-    });
-    await this.state.ctx.storage.put(receiptKey, receipt);
-    return receipt;
-  }
-
-  /**
-   * The Bot's unread projection. The count is derived from the admission index
-   * on every read, one page longer than the cap so "99+" is exact.
-   */
-  async readUnread(identity: BotIdentity): Promise<BotUnreadViewV1> {
-    await this.state.authority.validateIdentity(identity);
-    const [storedState, storedPreview] =
-      await this.state.ctx.storage.transaction((transaction) =>
-        Promise.all([
-          transaction.get<unknown>(UNREAD_STATE_KEY),
-          transaction.get<unknown>(SIDEBAR_PREVIEW_KEY),
-        ]),
-      );
-    const state = optionalUnreadStateV1(storedState);
-    const index = await this.state.authority.listRunIndex({
-      limit: UNREAD_COUNT_CAP + 1,
-    });
-    // Counted straight off the keys rather than through `RoutineInboxStore`:
-    // its `list()` trims the inbox, and the unread fan-out is a read every
-    // sidebar poll makes for every Bot — it must not write, least of all into
-    // an object that is running a Turn. An undecodable row is skipped, because
-    // a badge is never worth failing a read for.
-    const stored = await this.state.ctx.storage.list<unknown>({
-      prefix: ROUTINE_INBOX_PREFIX,
-      limit: ROUTINE_INBOX_LIMIT,
-    });
-    let failures = 0;
-    for (const value of stored.values()) {
-      try {
-        const entry = decodeRoutineInboxEntryV1(value);
-        if (entry.failure === true && !entry.acknowledged) failures += 1;
-      } catch {
-        continue;
-      }
-    }
-    return projectBotUnreadViewV1(
-      identity.botId,
-      state,
-      index.map((entry) => entry.cursor),
-      await this.sidebarPreview(storedPreview, index),
-      failures,
-      await this.isWorking(index[0]?.runId),
-    );
-  }
-
-  /**
-   * Whether the Bot's newest admitted run is still going.
-   *
-   * The sidebar draws this as an activity ring, so somebody in another
-   * conversation can see a Bot working rather than reading a quiet row as a
-   * stalled one. It is the newest run only: a Bot admits one Turn at a time,
-   * so an older run that is somehow still marked running is a reconciliation
-   * problem and not something a ring should report. A read that fails is no
-   * ring — liveness is never worth failing a sidebar poll for.
-   *
-   * The record's `status` is not the test and never was. `resolveRunWorking`
-   * holds the rule — running, inside the Turn deadline, and a Turn the log has
-   * not already closed — and settles the record when it finds one that only
-   * claims to be running, which is why this read is also the repair.
-   */
-  private async isWorking(runId: string | undefined): Promise<boolean> {
-    return runWorkingV1(this.state, runId);
-  }
-
-  /**
-   * How many stored runs a read will open to recover a missing preview. The
-   * newest settled chat Turn is almost always the first entry; the bound is
-   * what keeps a Bot whose recent Turns are all automations from turning one
-   * sidebar read into a scan of its whole history.
-   */
-  private static readonly SIDEBAR_PREVIEW_BACKFILL_RUNS_V1 = 5;
-
-  /**
-   * The preview record, or the same line derived from the runs when there is
-   * none. A Bot whose Turns settled before the preview projection existed has
-   * a full transcript and no record, and the row read "No messages yet" over
-   * it. A read never writes what it derives: the next settlement stores it.
-   */
-  private async sidebarPreview(
-    storedPreview: unknown,
-    index: readonly { runId: string }[],
-  ): Promise<SidebarMessagePreviewV1 | undefined> {
-    const stored = optionalSidebarMessagePreviewV1(storedPreview);
-    if (stored) return stored;
-    const runs: SidebarPreviewRunV1[] = [];
-    for (const entry of index.slice(
-      0,
-      ShellBotBackendContribution.SIDEBAR_PREVIEW_BACKFILL_RUNS_V1,
-    )) {
-      const run = await this.state.authority.readRun(entry.runId);
-      if (run) runs.push(run);
-    }
-    return sidebarMessagePreviewFromRunsV1(runs);
-  }
-
-  /**
-   * `bot/mark-read` and `bot/mark-unread`. Idempotent on the command id and
-   * monotonic in the cursor, so a replay or an out-of-order delivery can only
-   * ever produce the same durable record.
-   */
-  async executeUnreadCommand(
-    identity: BotIdentity,
-    command: BotUnreadCommandV1,
-  ): Promise<BotUnreadReceiptV1> {
-    if (command.botId !== identity.botId) {
-      throw new Error("unread command does not match its Bot");
-    }
-    await this.state.authority.validateIdentity(identity);
-    const fingerprint = botUnreadCommandFingerprintV1(command);
-    const receiptKey = unreadReceiptKeyV1(command.commandId);
-    const stored = await this.state.ctx.storage.transaction(
-      async (transaction) => {
-        const existing = await transaction.get<{
-          commandFingerprint: string;
-          state: unknown;
-        }>(receiptKey);
-        if (existing) {
-          if (existing.commandFingerprint !== fingerprint) {
-            throw new Error(
-              `unread command id "${command.commandId}" was reused for a different command`,
-            );
-          }
-          return {
-            state: optionalUnreadStateV1(existing.state),
-            preview: await transaction.get<unknown>(SIDEBAR_PREVIEW_KEY),
-          };
-        }
-        const current = optionalUnreadStateV1(
-          await transaction.get<unknown>(UNREAD_STATE_KEY),
-        );
-        let next = current;
-        if (command.type === "bot/mark-read") {
-          if (!command.upToCursor) {
-            throw new Error("bot/mark-read requires upToCursor");
-          }
-          next = markUnreadReadV1(current, {
-            upToCursor: command.upToCursor,
-            at: new Date().toISOString(),
-          });
-        } else {
-          next = markUnreadV1(current);
-        }
-        await transaction.put({
-          [UNREAD_STATE_KEY]: next,
-          [receiptKey]: { commandFingerprint: fingerprint, state: next },
-        });
-        return {
-          state: next,
-          preview: await transaction.get<unknown>(SIDEBAR_PREVIEW_KEY),
-        };
-      },
-    );
-    const index = await this.state.authority.listRunIndex({
-      limit: UNREAD_COUNT_CAP + 1,
-    });
-    return {
-      schemaVersion: 1,
-      commandId: command.commandId,
-      status: "applied",
-      unread: projectBotUnreadViewV1(
-        identity.botId,
-        stored.state,
-        index.map((entry) => entry.cursor),
-        // The open Bot is the one that gets marked read, so this receipt is
-        // the sidebar row it renders from: it owes the same derived preview
-        // the fan-out gives every other Bot.
-        await this.sidebarPreview(stored.preview, index),
-      ),
-    };
-  }
-
-  private createNotification(
-    settings: BotSettingsViewV1,
-    result: BotTurnCompletion,
-  ): BotNotificationIntent | undefined {
-    // An approval is not an update, and `notifications.enabled` is the mute on
-    // updates. A question that has stopped the Bot outranks it: the intent is
-    // recorded at `critical` whatever the Bot's notification policy says,
-    // exactly as a secret request would be. Muting silences chatter, not a
-    // decision the Bot is waiting on.
-    const [asked] = approvalSendsV1(result.events);
-    if (asked) {
-      return {
-        notificationId: approvalNotificationIdV1(asked.approvalId),
-        runId: result.runId,
-        createdAt: new Date().toISOString(),
-        title: `${settings.profile.name} needs your approval`,
-        body: approvalNotificationBodyV1(asked),
-        urgency: "critical",
-      };
-    }
-    if (!settings.notifications.enabled) return undefined;
-    const automation = result.events.some(
-      (event) => event.type === "turn/admission" && event.turnType !== "chat",
-    );
-    if (automation) {
-      const handoff = routineHandoffTextV1(result.events);
-      // A firing that handed off is the only automation Turn that says
-      // anything to a person here. A silent completion lands in the inbox and
-      // notifies nobody: "persisted silently, arriving later as an
-      // `automation_completion_inbox` row".
-      if (handoff === undefined) return undefined;
-      return {
-        notificationId: notificationIdV1("routine-wake", result.runId),
-        runId: result.runId,
-        createdAt: new Date().toISOString(),
-        title: `${settings.profile.name} finished a Routine`,
-        body: handoff.slice(0, 240),
-      };
-    }
-    return {
-      notificationId: result.runId,
-      runId: result.runId,
-      createdAt: new Date().toISOString(),
-      title: `${settings.profile.name} replied`,
-      body: result.text.slice(0, 240),
-    };
-  }
-
-  /**
-   * What a Turn that did not finish tells the person who was waiting on it.
-   *
-   * A completed Turn notifies ("Bob replied", with what it said); a failed one
-   * used to notify nobody, so a deadline, a provider outage, a restart or a
-   * Composition that would not mount was visible only to whoever happened to
-   * still be looking at that conversation. This is the same intent for the
-   * other outcome, written in the transaction that settles the run, once per
-   * failed run.
-   *
-   * The body is the product's own sentence for the failure — `runFailureCopyV1`
-   * is the one place a stored diagnostic becomes something a person reads —
-   * and never the diagnostic itself, which stays on the debug surface.
-   */
-  private createFailureNotification(
-    settings: BotSettingsViewV1,
-    failed: {
-      runId: string;
-      failure: string;
-      events: readonly SessionEvent[];
-    },
-  ): BotNotificationIntent | undefined {
-    // The mute on updates covers this one: a failure is an update about a Turn
-    // that ended, not a decision the Bot is waiting on.
-    if (!settings.notifications.enabled) return undefined;
-    // An automation Turn does not speak to its User here. A Routine firing that
-    // fails already records its own `routine-failed` notification, and a
-    // subagent task its own; a second intent for the same failure would be two
-    // rows for one event.
-    const automation = failed.events.some(
-      (event) => event.type === "turn/admission" && event.turnType !== "chat",
-    );
-    if (automation) return undefined;
-    return {
-      notificationId: notificationIdV1("run-failed", failed.runId),
-      runId: failed.runId,
-      createdAt: new Date().toISOString(),
-      title: `${settings.profile.name} couldn't finish`,
-      body: runFailureCopyV1({
-        failure: failed.failure,
-        events: failed.events,
-      }).slice(0, 240),
-    };
-  }
-
-  /**
-   * Everything the Shell writes in the transaction that settles a Turn.
-   *
-   * The composition itself lives in `terminal-records.ts`, where "each
-   * producer exactly once, and no producer silently overwrites another" is a
-   * checked property rather than the shape of three spreads.
-   */
-  private async terminalPackageRecords(input: {
-    snapshot: BotSettingsViewV1;
-    run: StoredRun;
-    cursor: string;
-    read<T>(key: string): Promise<T | undefined>;
-  }): Promise<Record<string, unknown>> {
-    return shellTerminalRecordsV1({
-      run: input.run,
-      cursor: input.cursor,
-      now: new Date().toISOString(),
-      read: input.read,
-    });
-  }
-
-  /**
-   * What a superseded Turn leaves for the Turn that replaced it.
-   *
-   * One durable input, drained once by the next conversational Turn. The
-   * session log already carries what the Turn sent and what its tools
-   * returned; this is the part that is not in the log — that it was cut off,
-   * that nothing in flight completed, and that a subagent it dispatched is
-   * still working. "A firing's outcome is delivered to the Bot's next
-   * conversational Turn as durable input" and a superseded Turn's is too.
-   */
-  private supersededPackageRecords(input: {
-    run: StoredRun;
-    read<T>(key: string): Promise<T | undefined>;
-  }): Promise<Record<string, unknown>> {
-    return supersededTurnRecordsV1({
-      run: input.run,
-      now: new Date().toISOString(),
-      read: input.read,
-    });
   }
 
   async alarm(): Promise<void> {
@@ -3974,7 +1443,7 @@ export class ShellBotBackendContribution {
     return debugSnapshot(
       this.state,
       identity,
-      () => this.getSettings(identity),
+      () => readBotSettingsV1(this.state, identity),
       input,
     );
   }
@@ -3988,209 +1457,6 @@ export class ShellBotBackendContribution {
       await this.state.authority.fenceRunAdmission(identity, query.runId),
     );
   }
-  private initialBotSettings(botId: string): BotSettingsViewV1 {
-    return initializeBotSettingsV1(botId);
-  }
-
-  private userConfiguration(identity: BotIdentity): {
-    readConfiguration(input: {
-      schemaVersion: 1;
-      userId: string;
-    }): Promise<UserSettingsViewV1>;
-    executeConfiguration(
-      input: Extract<ConfigurationCommandV1, { type: `user/${string}` }>,
-    ): Promise<OperationReceiptV1>;
-    leaseModelCredential(
-      userId: string,
-      connectionId: string,
-      providerModelId: string,
-      effectId: string,
-      connectionGeneration: string,
-    ): Promise<CredentialLeaseV1>;
-    leaseToolCredential(
-      userId: string,
-      connectionId: string,
-      effectId: string,
-      connectionGeneration: string,
-    ): Promise<CredentialLeaseV1>;
-    settleToolCredential(
-      userId: string,
-      connectionId: string,
-      effectId: string,
-    ): Promise<void>;
-    settleModelCredential(
-      userId: string,
-      connectionId: string,
-      packageId: string,
-      effectId: string,
-    ): Promise<void>;
-    listBots(userId: string): Promise<BotDirectoryViewV1>;
-    createBot(
-      userId: string,
-      command: CreateBotCommandV1,
-    ): Promise<FlockReceiptV1>;
-    executeTemplateCommand(
-      userId: string,
-      command: TemplateCommandV1,
-    ): Promise<TemplateShareReceiptV1>;
-    listMachines(userId: string): Promise<MachineListViewV1>;
-    describeMachineTarget(
-      userId: string,
-      machineId: string,
-    ): Promise<MachineTargetViewV1>;
-    dispatchMachineCommand(
-      userId: string,
-      command: MachineCommandV1,
-    ): Promise<MachineDispatchAnswerV1>;
-    readMachineResult(
-      userId: string,
-      commandId: string,
-    ): Promise<MachineCommandResultV1 | undefined>;
-  } {
-    const id = this.state.env.USER_CONFIGURATIONS.idFromName(identity.userId);
-    // SAFETY: this namespace is bound to UserConfiguration; generated Worker types do not expose its RPC surface.
-    const rpc = this.state.env.USER_CONFIGURATIONS.get(id) as unknown as {
-      readConfiguration(input: unknown): Promise<UserSettingsViewV1>;
-      executeConfiguration(input: unknown): Promise<unknown>;
-      leaseModelCredential(input: unknown): Promise<unknown>;
-      settleModelCredential(input: unknown): Promise<void>;
-      leaseToolCredential(input: unknown): Promise<unknown>;
-      settleToolCredential(input: unknown): Promise<void>;
-      listBots(input: unknown): Promise<unknown>;
-      createBot(input: unknown): Promise<unknown>;
-      executeTemplateCommand(input: unknown): Promise<TemplateShareReceiptV1>;
-      listMachines(input: unknown): Promise<unknown>;
-      describeMachineTarget(input: unknown): Promise<unknown>;
-      dispatchMachineCommand(input: unknown): Promise<unknown>;
-      readMachineResult(input: unknown): Promise<unknown>;
-    };
-    return {
-      readConfiguration: (input) =>
-        rpc.readConfiguration({ ...input, view: 2 }),
-      executeConfiguration: async (command) =>
-        decodeOperationReceiptV1(
-          await rpc.executeConfiguration({
-            schemaVersion: 1,
-            userId: identity.userId,
-            command,
-          }),
-        ),
-      // A machine is a User asset, so every one of these crosses the seam and
-      // is decoded on arrival rather than trusted in the shape RPC returned.
-      listMachines: async (userId) =>
-        decodeMachineListViewV1(
-          await rpc.listMachines({ schemaVersion: 1, userId }),
-        ),
-      describeMachineTarget: async (userId, machineId) =>
-        decodeMachineTargetViewV1(
-          await rpc.describeMachineTarget({
-            schemaVersion: 1,
-            userId,
-            machineId,
-          }),
-        ),
-      dispatchMachineCommand: async (userId, command) =>
-        decodeMachineDispatchAnswerV1(
-          await rpc.dispatchMachineCommand({
-            schemaVersion: 1,
-            userId,
-            command,
-          }),
-        ),
-      readMachineResult: async (userId, commandId) => {
-        const stored = await rpc.readMachineResult({
-          schemaVersion: 1,
-          userId,
-          commandId,
-        });
-        return stored === undefined || stored === null
-          ? undefined
-          : decodeMachineCommandResultV1(stored, "machine command result");
-      },
-      // Flock state crosses a Durable Object seam, so it decodes on arrival
-      // rather than being trusted in the shape RPC happened to return.
-      listBots: async (userId) =>
-        decodeDirectoryViewV1(await rpc.listBots({ schemaVersion: 1, userId })),
-      createBot: async (userId, command) =>
-        decodeFlockReceiptV1(
-          await rpc.createBot({ schemaVersion: 1, userId, command }),
-        ),
-      executeTemplateCommand: async (userId, command) =>
-        decodeTemplateShareReceiptV1(
-          await rpc.executeTemplateCommand({
-            schemaVersion: 1,
-            userId,
-            command,
-          }),
-        ),
-      leaseModelCredential: async (
-        userId,
-        connectionId,
-        providerModelId,
-        effectId,
-        connectionGeneration,
-      ) =>
-        decodeCredentialLeaseV1(
-          await rpc.leaseModelCredential({
-            schemaVersion: 1,
-            userId,
-            connectionId,
-            providerModelId,
-            effectId,
-            connectionGeneration,
-          }),
-        ),
-      leaseToolCredential: async (
-        userId,
-        connectionId,
-        effectId,
-        connectionGeneration,
-      ) =>
-        decodeCredentialLeaseV1(
-          await rpc.leaseToolCredential({
-            schemaVersion: 1,
-            userId,
-            connectionId,
-            effectId,
-            connectionGeneration,
-          }),
-        ),
-      settleToolCredential: (userId, connectionId, effectId) =>
-        rpc.settleToolCredential({
-          schemaVersion: 1,
-          userId,
-          connectionId,
-          effectId,
-        }),
-      settleModelCredential: (userId, connectionId, packageId, effectId) =>
-        rpc.settleModelCredential({
-          schemaVersion: 1,
-          userId,
-          connectionId,
-          packageId,
-          effectId,
-        }),
-    };
-  }
-
-  private async resolveExecutionContext(identity: BotIdentity): Promise<{
-    settings: BotSettingsViewV1;
-    user: UserSettingsViewV1;
-    plan: BotExecutionPlanV1;
-  }> {
-    const settings = await readBotSettingsV1(this.state, identity);
-    const user = await this.userConfiguration(identity).readConfiguration({
-      schemaVersion: 1,
-      userId: identity.userId,
-    });
-    const plan = resolveBotExecutionPlanV1({
-      bot: settings,
-      user,
-      packages: executionPackagesV1(this.state.application),
-    });
-    return { settings, user, plan };
-  }
-
   async archiveEligible(storage: {
     get<T>(key: string): Promise<T | undefined>;
   }): Promise<boolean> {
@@ -4198,18 +1464,18 @@ export class ShellBotBackendContribution {
   }
 
   async assertLifecycleActive(botId: string): Promise<void> {
-    if (!this.state.lifecycleAdmission) return;
-    await this.state.ctx.storage.transaction((transaction) =>
-      this.state.lifecycleAdmission!(transaction, botId),
-    );
+    return assertLifecycleActiveV1(this.state, botId);
   }
 
   /**
    * Linearizes one new external effect against durable Stop. The Agent has
    * already journaled intent; this transaction atomically persists the exact
    * admitted/fenced outcome used before the provider/tool invocation.
+   *
+   * Public because the `schedule` grant reaches the Bot's own tools through
+   * `app/isolates/bot.ts`, which is handed this fence rather than the object.
    */
-  private async admitRunEffect(
+  async admitRunEffect(
     identity: BotIdentity,
     runId: string,
     sessionId: string,

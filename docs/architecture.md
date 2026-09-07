@@ -84,7 +84,7 @@ Four classes in the app Worker, exported from `apps/cloudflare/src/index.ts:178-
 
 5. **Bot Durable Object.** `apps/cloudflare/src/bot-state.ts:1168` `run()` decodes the envelope, materializes the identity and calls `shell.run(...)`.
 
-6. **Shell.** `app/shell/backend.ts:773` `run()` yields any in-flight compaction, calls `followDeploymentComposition()` and `resolveAppletComposition()`, then delegates to `BotDurableAuthority.run` (`core/durable/authority.ts:293`): recover whatever the object holds, check for a settled replay, then `acceptRun`. An accepted run executes inline; otherwise it is durably queued — one user-lane slot, FIFO agent lane — and promoted by `runQueuedRun` (`:332`).
+6. **Shell.** `app/shell/backend.ts:257` `run()` yields any in-flight compaction, calls `followDeploymentComposition()` and `resolveAppletComposition()`, then delegates to `BotDurableAuthority.run` (`core/durable/authority.ts:293`): recover whatever the object holds, check for a settled replay, then `acceptRun`. An accepted run executes inline; otherwise it is durably queued — one user-lane slot, FIFO agent lane — and promoted by `runQueuedRun` (`:332`).
 
 7. **Mount.** `activateCompositionV1` reads the pin and builds the Turn's runtime through `createShellCompositionHost` (`app/shell/backend-composition.ts:274`).
 
@@ -213,9 +213,9 @@ Failure phases are `resolve | bundle | mount | health`, declared with the host t
 - Loading uses the `BOT_PACKAGES` Worker Loader binding, typed structurally as `BotIsolateLoader` (`:72`). There is no dynamic `import()`.
 - `loader.get(loaderId, () => ({compatibilityDate, mainModule, modules, globalOutbound: null, env: {IDENTITY, CAPABILITIES}, limits: {cpuMs: 5000, subRequests: 5}}))` (`:434-455`).
 - The loader id is `isolateLoaderIdV1({userId, artifactSetHash: botIsolateModuleSetHashV1(artifactContentHash, bindingDigest, grants)})`. The module-set hash covers wrapper version, wrapper source hash, package hash, binding digest and the member's declared grants, because a loader id is served from cache with the `env` it was first loaded with.
-- Artifacts come from `createR2PackageArtifactStore` (`app/shell/backend-isolate.ts`): R2 key `packages/<contentHash>.mjs`, sha-256 verified before load.
+- Artifacts come from `createR2PackageArtifactStore` (`app/isolates/capabilities.ts`): R2 key `packages/<contentHash>.mjs`, sha-256 verified before load.
 - `BotIsolateContributionHost.prepare` first refuses a descriptor naming a grant, action or slot this deployment has not opened, then loads the artifact, mounts and calls `entrypoint.health()` as one guarded phase, requiring `health.ok`, non-empty tools, a matching `packageId`, and tool and hook names equal to the descriptor's. Per-tool turn admission comes from the isolate's own health report.
-- `BotCapabilities` (`apps/cloudflare/src/bot-capabilities.ts:68`), a `WorkerEntrypoint`, is the loopback through which an isolate reaches the kernel. It is minted per Turn at `app/shell/backend.ts:2069-2125`.
+- `BotCapabilities` (`apps/cloudflare/src/bot-capabilities.ts:68`), a `WorkerEntrypoint`, is the loopback through which an isolate reaches the kernel. It is minted per Turn by `isolateMountOptions` (`app/isolates/bot.ts:99`).
 
 ### Built-in versus dynamic
 
@@ -288,7 +288,7 @@ Stream events (`core/contracts/types.ts:158-166`): `text-delta`, `tool-call`, `u
 
 - `resolveEffectiveBotModelV1` (`core/configuration/index.ts:652-760`): a Bot-scoped Package setting with `role: "model"`, else a User-scoped one, else `user.platformModel`. Two enabled packages both declaring a model setting is a hard conflict. A broken choice falls back to the platform model and records `fallback.from`.
 - `resolveBotModelBindingV1` (`:588-621`) yields `ready`, `requires-resolution` or `unavailable`.
-- The Turn resolves the effective model, refuses if it changed mid-reply, and mounts the provider plugin itself as a runtime Package for that Turn (`app/shell/backend.ts:4965-5090`). The resulting `modelSelection` flows through `backend.ts:1792` → `backend-composition.ts:297` → `app/agent-runtime.ts:557-583`, where it overrides the default provider and model and becomes `AgentOptions.modelBinding`.
+- The Turn resolves the effective model, refuses if it changed mid-reply, and mounts the provider plugin itself as a runtime Package for that Turn (`app/shell/backend.ts:1252-1310`). The resulting `modelSelection` flows through `backend.ts:645` → `backend-composition.ts:297` → `app/agent-runtime.ts:557-583`, where it overrides the default provider and model and becomes `AgentOptions.modelBinding`.
 - Package-to-provider-type mapping is a two-entry map at `app/runtime.ts:369-419`: `@frockbot/providers/ollama-cloud/runtime` → `ollama-cloud`, `@frockbot/providers/frock-ai/runtime` → `flock-ai`. Anything else resolves to `Bot model provider "X" is unavailable` (`:1084-1089`).
 
 ### Packages
@@ -313,7 +313,7 @@ Adjacent, outside the loop: image generation uses Workers AI ids directly (`app/
 
 ### Authoring
 
-The Bot writes Applet code on the Computer with ordinary file tools. `applets/` exposes seven tools — `applet_list`, `applet_create`, `applet_publish`, `applet_revert`, `applet_delete`, `applet_focus`, `applet_generations` — as an ordinary first-party runtime feature, `createAppletsFeature` (`applets/feature.ts`), mounted for one admitted Turn beside Memory and Skills (`app/runtime.ts`). Its host is `createAppletCapabilityHostV1` (`app/shell/backend-applets.ts`), built per call because a publish needs the Turn's mounted Computer. `applet_create` scaffolds from templates into the durable root `applets/source/<appletId>/` (`applets/root.ts`), mounted on the Sprite at `/home/box/agent-data/user-packages/applets/source`. Guidance ships at `applets/skills/applets.md`.
+The Bot writes Applet code on the Computer with ordinary file tools. `applets/` exposes seven tools — `applet_list`, `applet_create`, `applet_publish`, `applet_revert`, `applet_delete`, `applet_focus`, `applet_generations` — as an ordinary first-party runtime feature, `createAppletsFeature` (`applets/feature.ts`), mounted for one admitted Turn beside Memory and Skills (`app/runtime.ts`). Its host is `createAppletCapabilityHostV1` (`app/applets-host/records.ts`), wired for one Bot by `app/applets-host/bot.ts`, built per call because a publish needs the Turn's mounted Computer. `applet_create` scaffolds from templates into the durable root `applets/source/<appletId>/` (`applets/root.ts`), mounted on the Sprite at `/home/box/agent-data/user-packages/applets/source`. Guidance ships at `applets/skills/applets.md`.
 
 The Applets Package declares that durable root in its definition (`applets/definition.ts`), which the Computer's durable-root sync reads (`declaredPackageRootsV1`).
 
@@ -323,7 +323,7 @@ esbuild, run by the SDK CLI on the Computer — `applets/sdk/src/cli/build.ts:46
 
 ### Storage
 
-R2 `APPLICATION_ARTIFACTS`, content-addressed as `packages/<sha256>.mjs` and `.html`, written at `app/shell/backend.ts:2506-2515` and hash-verified on read (`apps/cloudflare/src/applet-state.ts:276-290`). Generations, pointers and failures live in `AppletState`; the account directory lives in `UserConfiguration`.
+R2 `APPLICATION_ARTIFACTS`, content-addressed as `packages/<sha256>.mjs` and `.html`, written at `app/applets-host/bot.ts:69-78` and hash-verified on read (`apps/cloudflare/src/applet-state.ts:276-290`). Generations, pointers and failures live in `AppletState`; the account directory lives in `UserConfiguration`.
 
 ### Execution
 
@@ -391,7 +391,7 @@ Bindings are declared in `apps/cloudflare/wrangler.jsonc`.
 | Binding                                                                   | Kind               | Contents                                                                                                                                              |
 | ------------------------------------------------------------------------- | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `USER_APPLICATIONS` (:20)                                                 | Worker Loader      | The per-user foundation application artifact (`apps/cloudflare/src/index.ts:2229`, `src/user-configuration.ts:201`, `src/package-publication.ts:120`) |
-| `BOT_PACKAGES` (:26)                                                      | Worker Loader      | Bot Package isolates, loaded with `globalOutbound` disabled (`app/shell/backend.ts:2069`)                                                             |
+| `BOT_PACKAGES` (:26)                                                      | Worker Loader      | Bot Package isolates, loaded with `globalOutbound` disabled (`app/isolates/bot.ts:99`)                                                                |
 | `APPLETS` (:33)                                                           | Worker Loader      | Applet server artifacts, mounted as facets (`apps/cloudflare/src/applet-state.ts:94`, `:249`)                                                         |
 | `COMPUTER_HOST` (:47)                                                     | Service            | `frockbot-computer-host` (`apps/cloudflare/src/bot-state.ts:465-474`)                                                                                 |
 | `APPLICATION_ARTIFACTS` (:53)                                             | R2                 | Application, Package and Applet artifacts, content-addressed                                                                                          |

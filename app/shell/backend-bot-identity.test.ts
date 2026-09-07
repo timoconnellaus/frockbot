@@ -5,6 +5,7 @@ import { describe, expect, test } from "bun:test";
 import type { BotSettingsViewV1 } from "@frockbot/core/configuration";
 import { createShellBotBackendContribution } from "./backend.js";
 import { BOT_ANNOUNCEMENT_RETENTION } from "./reads.js";
+import { executeConfiguration } from "@frockbot/app/settings/bot";
 
 class MemoryStorage {
   readonly values = new Map<string, unknown>();
@@ -75,7 +76,7 @@ async function setProfile(
   namedBy?: "user" | "bot",
   writer?: Record<string, unknown>,
 ): Promise<void> {
-  await contribution.executeConfiguration({
+  await executeConfiguration(contribution.state, {
     schemaVersion: 1,
     userId: identity.userId,
     botId: identity.botId,

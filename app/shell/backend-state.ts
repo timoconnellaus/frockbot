@@ -13,14 +13,15 @@ import {
   createBotSubagentDurableBindingV1,
   type SubagentDurableBindingV1,
 } from "@frockbot/app/subagents/durable-binding";
-import type { AppletInstanceNamespaceV1 } from "./backend-applets.js";
+import type { AppletInstanceNamespaceV1 } from "@frockbot/app/applets-host/records";
 import type { ShellMountedComposition } from "./backend-composition.js";
 import { storedRunCodecV1 } from "./backend-contracts.js";
 import type { NativeAiBindingV1 } from "./backend-image.js";
 import {
   createBotRoutineHookMinter,
   createBotRoutines,
-} from "./backend-routines.js";
+} from "@frockbot/app/routines/bot";
+import type { ConfigurationActivityV1 } from "@frockbot/app/settings/bot";
 import type { ShellApplicationV1 } from "./backend-runtime.js";
 
 export interface BotStateEnv {
@@ -224,6 +225,11 @@ export class ShellBotStateV1 {
    * never dispatches one.
    */
   readonly tasks: TaskStore;
+  /**
+   * Configuration commands in flight on this object, so a retried command
+   * joins the write already running rather than starting a second one.
+   */
+  readonly configurationActivities = new Map<string, ConfigurationActivityV1>();
   readonly subagentBinding: SubagentDurableBindingV1 | undefined;
   readonly outboundFetch: typeof fetch | undefined;
   readonly lifecycleAdmission: ShellBotBackendHost["assertLifecycleActive"];

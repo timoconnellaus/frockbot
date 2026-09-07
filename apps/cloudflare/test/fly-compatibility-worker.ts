@@ -61,7 +61,7 @@ import {
 } from "@frockbot/core/durable";
 import { BotState } from "../src/bot-state.ts";
 import { BOT_CONFIGURATION_KEY } from "@frockbot/app/settings/bot";
-import { ISOLATE_MODEL_REQUEST_PREFIX } from "@frockbot/app/shell/backend-isolate";
+import { ISOLATE_MODEL_REQUEST_PREFIX } from "@frockbot/app/isolates/capabilities";
 import { notificationIdV1 } from "@frockbot/app/shell/notification-id";
 import type { BotSettingsViewV1 } from "@frockbot/core/configuration";
 import { UserConfiguration } from "../src/user-configuration.ts";

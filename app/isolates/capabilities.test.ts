@@ -14,7 +14,7 @@ import {
   matchingModelBindingV1,
   type IsolateModelBindingV1,
   type IsolateModelRequestRecordV1,
-} from "./backend-isolate.ts";
+} from "./capabilities.ts";
 
 const CONNECTIONS: IsolateConnectionV1[] = [
   {

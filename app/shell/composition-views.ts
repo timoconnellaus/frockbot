@@ -3,12 +3,19 @@
 // it is Shell Package policy, so the projection lives here and never lets
 // artifact bytes, manifest hashes, or loader identities cross the seam.
 import {
+  decodeCompositionCommandReceiptV1,
   decodeCompositionGenerationViewV1,
   MAX_COMPOSITION_FAILURE_PAGE_V1,
+  MAX_COMPOSITION_GENERATION_PAGE_V1,
+  type CompositionCommandReceiptV1,
+  type CompositionGenerationListViewV1,
   type CompositionGenerationViewV1,
   type CompositionMemberViewV1,
   type CompositionProvenanceViewV1,
+  type RevertCompositionCommandV1,
 } from "@frockbot/core/configuration";
+import type { BotIdentity } from "@frockbot/core/durable";
+import type { ShellBotStateV1 } from "./backend-state.js";
 import type { PackageIframeCompositionV1 } from "@frockbot/core/contracts";
 import { FIRST_PARTY_PACKAGE_UI_V1 } from "@frockbot/applets/pages";
 import type {
@@ -163,4 +170,133 @@ export async function projectCompositionGenerationV1(
       ? {}
       : { parentGenerationId: input.generation.parentGenerationId }),
   });
+}
+
+/** Idempotency records for Composition commands this Package admits. */
+const COMPOSITION_COMMAND_PREFIX = "composition-command:";
+
+/**
+ * The Bot's durable Composition generations, newest first. Bot-scoped: the
+ * caller proves directory membership before this runs.
+ */
+export async function listCompositionGenerations(
+  state: ShellBotStateV1,
+  identity: BotIdentity,
+  query: { limit: number; cursor?: string },
+): Promise<CompositionGenerationListViewV1> {
+  const current = await state.authority.composition.current();
+  const page = await state.authority.composition.list({
+    limit: Math.min(query.limit, MAX_COMPOSITION_GENERATION_PAGE_V1),
+    ...(query.cursor === undefined ? {} : { cursor: query.cursor }),
+  });
+  return {
+    schemaVersion: 1,
+    botId: identity.botId,
+    currentGenerationId: current.generationId,
+    generations: await Promise.all(
+      page.generations.map(async (generation) =>
+        projectCompositionGenerationV1({
+          botId: identity.botId,
+          generation,
+          currentGenerationId: current.generationId,
+          failures: await state.authority.compositionFailures.list(
+            generation.generationId,
+          ),
+          ...(await compositionQuarantineView(state, generation.generationId)),
+        }),
+      ),
+    ),
+    ...(page.cursor === undefined ? {} : { cursor: page.cursor }),
+  };
+}
+
+/** One generation, with the recorded source of each isolate member. */
+export async function getCompositionGeneration(
+  state: ShellBotStateV1,
+  identity: BotIdentity,
+  generationId: string,
+): Promise<CompositionGenerationViewV1 | undefined> {
+  const generation = await state.authority.composition.read(generationId);
+  if (!generation) return undefined;
+  const current = await state.authority.composition.current();
+  return projectCompositionGenerationV1({
+    botId: identity.botId,
+    generation,
+    currentGenerationId: current.generationId,
+    failures: await state.authority.compositionFailures.list(generationId),
+    ...(await compositionQuarantineView(state, generationId)),
+  });
+}
+
+/** Spread into a projection: absent unless the generation is quarantined. */
+async function compositionQuarantineView(
+  state: ShellBotStateV1,
+  generationId: string,
+): Promise<{ quarantine?: CompositionQuarantineV1 }> {
+  const quarantine =
+    await state.authority.compositionFailures.quarantine(generationId);
+  return quarantine === undefined ? {} : { quarantine };
+}
+
+/**
+ * Reverting is a recorded generation, not a mutation: it proposes a new
+ * pending generation carrying the target's members, which the next admitted
+ * Turn activates. The command is idempotent on its `commandId`, and its
+ * `expectedGenerationId` is the optimistic check that the User acted on the
+ * Composition they were looking at.
+ */
+export async function revertComposition(
+  state: ShellBotStateV1,
+  identity: BotIdentity,
+  command: RevertCompositionCommandV1,
+): Promise<CompositionCommandReceiptV1> {
+  if (command.botId !== identity.botId) {
+    throw new Error("Composition revert command does not match its Bot");
+  }
+  const receiptKey = `${COMPOSITION_COMMAND_PREFIX}${command.commandId}`;
+  const recorded =
+    await state.ctx.storage.get<CompositionCommandReceiptV1>(receiptKey);
+  if (recorded) return decodeCompositionCommandReceiptV1(recorded);
+  const current = await state.authority.composition.current();
+  const reject = async (
+    failure: string,
+  ): Promise<CompositionCommandReceiptV1> => {
+    const receipt = decodeCompositionCommandReceiptV1({
+      schemaVersion: 1,
+      commandId: command.commandId,
+      status: "rejected",
+      failure,
+      currentGenerationId: current.generationId,
+    });
+    await state.ctx.storage.put(receiptKey, receipt);
+    return receipt;
+  };
+  if (current.generationId !== command.expectedGenerationId) {
+    return reject(`composition generation is ${current.generationId}`);
+  }
+  let generationId: string;
+  try {
+    const reverted = await state.authority.composition.revert(
+      command.toGenerationId,
+      {
+        kind: "revert",
+        revertsTo: command.toGenerationId,
+        userId: identity.userId,
+      },
+    );
+    generationId = reverted.generationId;
+  } catch (error) {
+    return reject(
+      error instanceof Error ? error.message : "Composition revert failed",
+    );
+  }
+  const receipt = decodeCompositionCommandReceiptV1({
+    schemaVersion: 1,
+    commandId: command.commandId,
+    status: "applied",
+    generationId,
+    currentGenerationId: current.generationId,
+  });
+  await state.ctx.storage.put(receiptKey, receipt);
+  return receipt;
 }

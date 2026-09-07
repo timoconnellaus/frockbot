@@ -10,15 +10,22 @@
 //    into the User object;
 //  * the dispatch the approval settlement performs once a person has said yes.
 //
-// The Shell owns this file for the same reason it owns `backend-routines.ts`:
-// it is the object that holds the approval record, the alarm that expires it,
-// and the route a person answers on, so the hand-off from "decided" to "queued"
-// has nowhere else it could honestly live.
+// The Bot Durable Object holds the approval record, the alarm that expires it,
+// and the route a person answers on, so the hand-off from "decided" to
+// "queued" — and the delivery of the result back into the conversation — have
+// nowhere else they could honestly live.
+import type { BotIdentity } from "@frockbot/core/durable";
 import type {
   MachineCommandResultV1,
   MachineCommandV1,
   MachineListViewV1,
 } from "@frockbot/core/machine-protocol";
+import { enqueuePendingBotInputV1 } from "@frockbot/app/routines/inbox-store";
+import {
+  readBotSettingsV1,
+  userConfigurationV1,
+} from "@frockbot/app/settings/bot";
+import type { ShellBotStateV1 } from "@frockbot/app/shell/backend-state";
 import type { MachineMessagesRuntimeHostV1 } from "@frockbot/app/machine-messages/agent";
 import {
   machineMessagesEnabledV1,
@@ -35,6 +42,7 @@ import {
   type MachineDispatchAnswerV1,
 } from "@frockbot/app/machine/approval";
 import type { MachineIntentRecordV1 } from "@frockbot/app/machine/intent";
+import type { MachineResultDeliveryV1 } from "@frockbot/app/machine/delivery";
 import type { MachineTargetViewV1 } from "@frockbot/app/machine/target";
 
 /** The User Durable Object, as this Bot is allowed to see its machines. */
@@ -141,4 +149,103 @@ export function createBotMachineMessagesHost(
     machines,
     dispatch: (command) => seam.dispatch(command),
   };
+}
+
+/**
+ * The User's machines, as this Bot may see them.
+ *
+ * Four calls and no more: list them, resolve one, queue an approved command,
+ * and read a finished command's result. There is no register, no revoke and no
+ * token here — a Bot cannot enrol or revoke a machine, and "self modification
+ * never widens authority" is why.
+ */
+export function machineSeam(
+  state: ShellBotStateV1,
+  identity: BotIdentity,
+): BotMachineSeamV1 {
+  const userConfiguration = userConfigurationV1(state, identity);
+  return {
+    list: () => userConfiguration.listMachines(identity.userId),
+    describeTarget: (machineId) =>
+      userConfiguration.describeMachineTarget(identity.userId, machineId),
+    readResult: (commandId) =>
+      userConfiguration.readMachineResult(identity.userId, commandId),
+    dispatch: (command) =>
+      userConfiguration.dispatchMachineCommand(identity.userId, command),
+  };
+}
+
+/**
+ * One finished machine command, handed over by the User Durable Object.
+ *
+ * The machine answers the backend, never the Bot, so this is how the Bot
+ * learns without being asked: the same durable input queue a Routine hand-off
+ * and an approval decision ride, idempotent on the command id, drained as a
+ * preamble line on the Bot's next conversational Turn. The line carries a
+ * preview; `machine_command_check` reads the whole result.
+ */
+export async function deliverMachineResult(
+  state: ShellBotStateV1,
+  delivery: MachineResultDeliveryV1,
+): Promise<{ status: "accepted" }> {
+  await state.ctx.storage.transaction(async (transaction) => {
+    await enqueuePendingBotInputV1(transaction, {
+      schemaVersion: 1,
+      kind: "machine-result",
+      commandId: delivery.commandId,
+      machineId: delivery.machineId,
+      outcome: delivery.outcome,
+      preview: delivery.preview,
+      createdAt: delivery.finishedAt,
+    });
+  });
+  await state.ctx.storage.transaction((transaction) =>
+    state.authority.refreshRecoveryAlarm(transaction),
+  );
+  return { status: "accepted" };
+}
+
+/**
+ * The second of the two points a pending wake is heard at.
+ *
+ * The first is the Bot's next conversational Turn. This one is the User's: an
+ * intent recorded in the settling transaction cannot be lost, but a client that
+ * was not connected when it landed can miss the delivery, so the alarm re-emits
+ * it once for a wake whose inbox entry is still unread. Once per wake, recorded
+ * on the wake, so a Bot nobody talks to is not notified on every alarm forever.
+ */
+export async function replayPendingWakeNotifications(
+  state: ShellBotStateV1,
+): Promise<void> {
+  const pending = await state.routineInbox.pending();
+  if (pending.length === 0) return;
+  const identity = await state.authority.readDurableIdentity();
+  if (!identity) return;
+  const settings = await readBotSettingsV1(state, identity);
+  if (!settings.notifications.enabled) return;
+  const unread = new Map(
+    (await state.routineInbox.list())
+      .filter((entry) => !entry.acknowledged)
+      .map((entry) => [entry.runId, entry] as const),
+  );
+  for (const { key, input } of pending) {
+    if (input.kind !== "wake" || input.renotifiedAt !== undefined) continue;
+    const entry = unread.get(input.runId);
+    if (!entry) continue;
+    // The same notification id the settle recorded, per source: a replay is a
+    // second delivery of one intent, never a second intent.
+    const subagent = input.source === "subagent";
+    await state.authority.recordNotification({
+      notificationId: subagent
+        ? `task-settled:${input.runId}`
+        : `routine-wake:${input.runId}`,
+      runId: input.runId,
+      createdAt: new Date().toISOString(),
+      title: `${settings.profile.name} finished ${
+        subagent ? "a subagent task" : "a Routine"
+      }`,
+      body: entry.text.slice(0, 240),
+    });
+    await state.routineInbox.markRenotified(key);
+  }
 }

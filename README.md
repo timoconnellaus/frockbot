@@ -242,6 +242,8 @@ Register `https://bot.frockbot.com/api/auth/callback/google` as an authorized Go
 ```text
 app/              The product: `runtime.ts`, the Contribution tables, and one directory per feature
   admin/          Deployment policy administration surface
+  applets-host/   The app's side of Applets: the capability host, records, and the Bot's focus
+  approvals/      Recording one approval decision inside the Bot Durable Object
   audit/          Audited-effect projection and the User's rebuildable audit table
   auth/           Authenticated identity contributions for the hosted gateway
   bot-template/   Bot template export, share records, and guarded import
@@ -252,9 +254,11 @@ app/              The product: `runtime.ts`, the Contribution tables, and one di
   flock/          Durable Bot directory and composable sheep identity
   identity/       Sheep identity composition and rendering
   image/          generate_image through Cloudflare's AI binding, fenced by the Workspace
+  isolates/       The authority a Bot isolate member is mounted with, and its grants
   machine/        Registered-machine enrollment and pairing
   machine-messages/ Message delivery to and from a User's registered machines
   memory/         Bot, User and Project Markdown memory over the Workspace store
+  notifications/  What a settled Turn tells the person who was not watching it
   routines/       Durable Routines, the alarm scheduler, and the webhook door
   search/         Per-User transcript index, search route, and overlay
   settings/       Bot, Package, and User settings surfaces

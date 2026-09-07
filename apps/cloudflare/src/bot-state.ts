@@ -49,6 +49,49 @@ import {
   stopSubagentTask,
   stopTaskForUser,
 } from "@frockbot/app/subagents/bot";
+import {
+  readFocusedApplet,
+  setFocusedApplet,
+} from "@frockbot/app/applets-host/bot";
+import {
+  isolateConnection,
+  isolateInvokeModel,
+  isolateMemoryForget,
+  isolateMemoryRead,
+  isolateMemoryWrite,
+  isolateSchedule,
+  isolateWorkspaceDelete,
+  isolateWorkspaceList,
+  isolateWorkspaceRead,
+  isolateWorkspaceStat,
+  isolateWorkspaceWrite,
+} from "@frockbot/app/isolates/bot";
+import { deliverMachineResult } from "@frockbot/app/machine/bot";
+import {
+  acknowledgeNotification,
+  listNotifications,
+} from "@frockbot/app/notifications/bot";
+import {
+  deliverRoutineHook,
+  executeRoutineCommand,
+  executeRoutineInboxCommand,
+  listRoutineInbox,
+  listRoutineRuns,
+  listRoutines,
+  readRoutineRun,
+} from "@frockbot/app/routines/bot";
+import {
+  executeConfiguration,
+  readConfiguration,
+  resolveConfiguration,
+} from "@frockbot/app/settings/bot";
+import { decideApproval, listApprovals } from "@frockbot/app/approvals/bot";
+import {
+  getCompositionGeneration,
+  listCompositionGenerations,
+  revertComposition,
+} from "@frockbot/app/shell/composition-views";
+import { executeUnreadCommand, readUnread } from "@frockbot/app/shell/unread";
 import type { FlockBotBackendContribution } from "@frockbot/app/flock/bot";
 import type { ComputerBotBackendContribution } from "@frockbot/computer/bot";
 import { decodeComputerCommandV1 } from "@frockbot/computer/protocol";
@@ -857,7 +900,7 @@ export class BotState extends DurableObject<BotStateEnv> {
       userId: request.userId,
       botId: request.botId,
     });
-    return shell.readConfiguration(request);
+    return readConfiguration(shell.state, request);
   }
 
   async executeConfiguration(input: unknown) {
@@ -866,7 +909,7 @@ export class BotState extends DurableObject<BotStateEnv> {
       userId: request.userId,
       botId: request.botId,
     });
-    return shell.executeConfiguration(request);
+    return executeConfiguration(shell.state, request);
   }
 
   /** A non-waking projection of this Bot's durable Computer presence. */
@@ -963,42 +1006,52 @@ export class BotState extends DurableObject<BotStateEnv> {
       botId: request.botId as string,
     };
     const shell = await this.contribution();
-    return shell.isolateInvokeModel(identity, {
-      runId: request.runId as string,
-      sessionId: request.sessionId as string,
-      turnId: request.turnId as string,
-      packageId: request.packageId as string,
-      generationId: request.generationId as string,
-      request: request.request as NormalizedModelRequest,
-    });
+    return isolateInvokeModel(
+      shell.state,
+      identity,
+      {
+        runId: request.runId as string,
+        sessionId: request.sessionId as string,
+        turnId: request.turnId as string,
+        packageId: request.packageId as string,
+        generationId: request.generationId as string,
+        request: request.request as NormalizedModelRequest,
+      },
+      (target, settings) => shell.agentRuntime(target, settings),
+    );
   }
 
   async isolateMemoryRead(input: unknown) {
-    return (await this.contribution()).isolateMemoryRead(
+    return isolateMemoryRead(
+      (await this.contribution()).state,
       decodeIsolateCallRpcV1(input, decodeIsolateMemoryReadRequestV1) as never,
     );
   }
 
   async isolateMemoryWrite(input: unknown) {
-    return (await this.contribution()).isolateMemoryWrite(
+    return isolateMemoryWrite(
+      (await this.contribution()).state,
       decodeIsolateCallRpcV1(input, decodeIsolateMemoryWriteRequestV1) as never,
     );
   }
 
   async isolateMemoryForget(input: unknown) {
-    return (await this.contribution()).isolateMemoryForget(
+    return isolateMemoryForget(
+      (await this.contribution()).state,
       decodeIsolateCallRpcV1(input, decodeIsolateMemoryWriteRequestV1) as never,
     );
   }
 
   async isolateWorkspaceRead(input: unknown) {
-    return (await this.contribution()).isolateWorkspaceRead(
+    return isolateWorkspaceRead(
+      (await this.contribution()).state,
       decodeIsolateCallRpcV1(input, decodeIsolateWorkspacePathV1) as never,
     );
   }
 
   async isolateWorkspaceList(input: unknown) {
-    return (await this.contribution()).isolateWorkspaceList(
+    return isolateWorkspaceList(
+      (await this.contribution()).state,
       decodeIsolateCallRpcV1(
         input,
         decodeIsolateWorkspaceListRequestV1,
@@ -1007,13 +1060,15 @@ export class BotState extends DurableObject<BotStateEnv> {
   }
 
   async isolateWorkspaceStat(input: unknown) {
-    return (await this.contribution()).isolateWorkspaceStat(
+    return isolateWorkspaceStat(
+      (await this.contribution()).state,
       decodeIsolateCallRpcV1(input, decodeIsolateWorkspacePathV1) as never,
     );
   }
 
   async isolateWorkspaceWrite(input: unknown) {
-    return (await this.contribution()).isolateWorkspaceWrite(
+    return isolateWorkspaceWrite(
+      (await this.contribution()).state,
       decodeIsolateCallRpcV1(
         input,
         decodeIsolateWorkspaceWriteRequestV1,
@@ -1022,7 +1077,8 @@ export class BotState extends DurableObject<BotStateEnv> {
   }
 
   async isolateWorkspaceDelete(input: unknown) {
-    return (await this.contribution()).isolateWorkspaceDelete(
+    return isolateWorkspaceDelete(
+      (await this.contribution()).state,
       decodeIsolateCallRpcV1(
         input,
         decodeIsolateWorkspaceDeleteRequestV1,
@@ -1031,7 +1087,8 @@ export class BotState extends DurableObject<BotStateEnv> {
   }
 
   async isolateConnection(input: unknown) {
-    return (await this.contribution()).isolateConnection(
+    return isolateConnection(
+      (await this.contribution()).state,
       decodeIsolateCallRpcV1(input, (value) => {
         if (
           typeof value !== "string" ||
@@ -1046,15 +1103,19 @@ export class BotState extends DurableObject<BotStateEnv> {
   }
 
   async isolateSchedule(input: unknown) {
-    return (await this.contribution()).isolateSchedule(
+    const shell = await this.contribution();
+    return isolateSchedule(
+      shell.state,
       decodeIsolateCallRpcV1(input, decodeIsolateScheduleRequestV1) as never,
+      (identity, runId, sessionId, effect) =>
+        shell.admitRunEffect(identity, runId, sessionId, effect),
     );
   }
 
   /** The Session's focused Applet (plan §6). One per Session by decision D10. */
   async readFocusedApplet(input: unknown) {
     const identity = decodeBotIdentityRpcV1(input);
-    return (await this.contribution()).readFocusedApplet(identity);
+    return readFocusedApplet((await this.contribution()).state, identity);
   }
 
   async setFocusedApplet(input: unknown) {
@@ -1063,7 +1124,8 @@ export class BotState extends DurableObject<BotStateEnv> {
       botId: rpcBotId,
       appletId: rpcAppletIdOrNull,
     });
-    return (await this.contribution()).setFocusedApplet(
+    return setFocusedApplet(
+      (await this.contribution()).state,
       {
         userId: request.userId as string,
         botId: request.botId as string,
@@ -1075,7 +1137,7 @@ export class BotState extends DurableObject<BotStateEnv> {
   async resolveConfiguration(input: unknown) {
     const identity = decodeBotIdentityRpcV1(input);
     const { shell } = await this.materialized(identity);
-    return shell.resolveConfiguration(identity);
+    return resolveConfiguration(shell.state, identity);
   }
 
   async run(input: unknown) {
@@ -1517,7 +1579,7 @@ export class BotState extends DurableObject<BotStateEnv> {
   async readUnread(input: unknown) {
     const identity = decodeBotIdentityRpcV1(input);
     const { shell } = await this.materialized(identity);
-    return shell.readUnread(identity);
+    return readUnread(shell.state, identity);
   }
 
   /** `bot/mark-read` / `bot/mark-unread`, idempotent on the command id. */
@@ -1532,7 +1594,8 @@ export class BotState extends DurableObject<BotStateEnv> {
       botId: request.botId as string,
     };
     const { shell } = await this.materialized(identity);
-    return shell.executeUnreadCommand(
+    return executeUnreadCommand(
+      shell.state,
       identity,
       request.command as BotUnreadCommandV1,
     );
@@ -1542,7 +1605,7 @@ export class BotState extends DurableObject<BotStateEnv> {
   async listApprovals(input: unknown) {
     const identity = decodeBotIdentityRpcV1(input);
     const { shell } = await this.materialized(identity);
-    return shell.listApprovals(identity);
+    return listApprovals(shell.state, identity);
   }
 
   /**
@@ -1561,7 +1624,8 @@ export class BotState extends DurableObject<BotStateEnv> {
       botId: request.botId as string,
     };
     const { shell } = await this.materialized(identity);
-    return shell.decideApproval(
+    return decideApproval(
+      shell.state,
       identity,
       request.approvalId as string,
       request.command as ApprovalDecisionCommandV1,
@@ -1572,7 +1636,7 @@ export class BotState extends DurableObject<BotStateEnv> {
     const identity = decodeBotIdentityRpcV1(input);
     const { shell } = await this.materialized(identity);
     await shell.validateIdentity(identity);
-    return shell.listNotifications();
+    return listNotifications(shell.state);
   }
 
   async acknowledgeNotification(input: unknown) {
@@ -1587,7 +1651,10 @@ export class BotState extends DurableObject<BotStateEnv> {
     };
     const { shell } = await this.materialized(identity);
     await shell.validateIdentity(identity);
-    return shell.acknowledgeNotification(request.notificationId as string);
+    return acknowledgeNotification(
+      shell.state,
+      request.notificationId as string,
+    );
   }
 
   /**
@@ -1752,7 +1819,7 @@ export class BotState extends DurableObject<BotStateEnv> {
     };
     const { shell } = await this.materialized(identity);
     await shell.validateIdentity(identity);
-    return shell.listRoutines(identity);
+    return listRoutines(shell.state, identity);
   }
 
   /** One Routine command, applied durably with the User recorded as writer. */
@@ -1768,7 +1835,8 @@ export class BotState extends DurableObject<BotStateEnv> {
     };
     const { shell } = await this.materialized(identity);
     await shell.validateIdentity(identity);
-    return shell.executeRoutineCommand(
+    return executeRoutineCommand(
+      shell.state,
       identity,
       request.command as RoutineCommandV1,
     );
@@ -1795,7 +1863,10 @@ export class BotState extends DurableObject<BotStateEnv> {
       botId: request.botId as string,
     };
     const { shell } = await this.materialized(identity);
-    return shell.deliverRoutineHook(request.delivery as RoutineHookDeliveryV1);
+    return deliverRoutineHook(
+      shell.state,
+      request.delivery as RoutineHookDeliveryV1,
+    );
   }
 
   /**
@@ -1817,7 +1888,8 @@ export class BotState extends DurableObject<BotStateEnv> {
       botId: request.botId as string,
     };
     const { shell } = await this.materialized(identity);
-    return shell.deliverMachineResult(
+    return deliverMachineResult(
+      shell.state,
       request.delivery as MachineResultDeliveryV1,
     );
   }
@@ -1835,7 +1907,7 @@ export class BotState extends DurableObject<BotStateEnv> {
     };
     const { shell } = await this.materialized(identity);
     await shell.validateIdentity(identity);
-    return shell.listRoutineRuns(identity, request.routineId as string);
+    return listRoutineRuns(shell.state, identity, request.routineId as string);
   }
 
   /**
@@ -1855,7 +1927,8 @@ export class BotState extends DurableObject<BotStateEnv> {
     };
     const { shell } = await this.materialized(identity);
     await shell.validateIdentity(identity);
-    return shell.readRoutineRun(
+    return readRoutineRun(
+      shell.state,
       identity,
       request.routineId as string,
       request.runId as string,
@@ -1874,7 +1947,7 @@ export class BotState extends DurableObject<BotStateEnv> {
     };
     const { shell } = await this.materialized(identity);
     await shell.validateIdentity(identity);
-    return shell.listRoutineInbox(identity);
+    return listRoutineInbox(shell.state, identity);
   }
 
   /** Acknowledging inbox entries; an explicit command, never a read. */
@@ -1890,7 +1963,8 @@ export class BotState extends DurableObject<BotStateEnv> {
     };
     const { shell } = await this.materialized(identity);
     await shell.validateIdentity(identity);
-    return shell.executeRoutineInboxCommand(
+    return executeRoutineInboxCommand(
+      shell.state,
       identity,
       request.command as RoutineInboxCommandV1,
     );
@@ -1920,7 +1994,8 @@ export class BotState extends DurableObject<BotStateEnv> {
     };
     const { shell } = await this.materialized(identity);
     await shell.validateIdentity(identity);
-    return shell.listCompositionGenerations(
+    return listCompositionGenerations(
+      shell.state,
       identity,
       request.query as { limit: number; cursor?: string },
     );
@@ -1942,7 +2017,8 @@ export class BotState extends DurableObject<BotStateEnv> {
     };
     const { shell } = await this.materialized(identity);
     await shell.validateIdentity(identity);
-    return shell.getCompositionGeneration(
+    return getCompositionGeneration(
+      shell.state,
       identity,
       request.generationId as string,
     );
@@ -1965,7 +2041,7 @@ export class BotState extends DurableObject<BotStateEnv> {
     }
     const { shell } = await this.materialized(identity);
     await shell.validateIdentity(identity);
-    return shell.revertComposition(identity, command);
+    return revertComposition(shell.state, identity, command);
   }
 
   async listConversations(input: unknown) {
