@@ -33,7 +33,7 @@ import {
 import { enqueuePendingBotInputV1 } from "@frockbot/app/routines/inbox-store";
 import type { PendingBotInputV1 } from "@frockbot/app/routines/inbox";
 import { approvalTerminalRecordsV1 } from "./approvals.js";
-import { routineTerminalRecordsForRunV1 } from "./backend-routines.js";
+import { routineTerminalRecordsForRunV1 } from "@frockbot/app/routines/bot";
 
 /** The settled run a terminal record set is computed from. */
 export interface ShellTerminalRunV1 {

@@ -31,7 +31,6 @@ import {
   decodeAppletGenerationV1,
   decodeAppletSummaryV1,
   decodeAppletToolDeclarationV1,
-  type AppletGenerationSummaryV1,
   type AppletGenerationV1,
   type AppletProvenanceV1,
   type AppletPublishResultV1,

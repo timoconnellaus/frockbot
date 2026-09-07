@@ -10,7 +10,7 @@ import {
   type AppletInstanceBindingV1,
   type AppletSourceSyncOutcomeV1,
   type AppletUserDirectoryV1,
-} from "./backend-applets.js";
+} from "./records.js";
 import {
   compositionArtifactSetHashV1,
   type CompositionMemberV1,

@@ -26,7 +26,7 @@ import {
 import {
   matchesAdmittedConnectionV1,
   type BotCapabilitiesPropsV1,
-} from "@frockbot/app/shell/backend-isolate";
+} from "@frockbot/app/isolates/capabilities";
 import type { BotState } from "./bot-state.js";
 
 function unavailable(reason: string): {

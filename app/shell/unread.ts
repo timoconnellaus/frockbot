@@ -18,6 +18,14 @@ import {
   canonicalCommandFingerprintV1,
   isPublicIdentifier,
 } from "@frockbot/core/configuration";
+import type { BotIdentity } from "@frockbot/core/durable";
+import { decodeRoutineInboxEntryV1 } from "@frockbot/app/routines/inbox";
+import {
+  ROUTINE_INBOX_LIMIT,
+  ROUTINE_INBOX_PREFIX,
+} from "@frockbot/app/routines/storage-keys";
+import type { ShellBotStateV1 } from "./backend-state.js";
+import { runWorkingV1 } from "./reads.js";
 import { decodeRunCursorV1 } from "./run-cursor.js";
 
 /** The single durable key the whole record lives under. */
@@ -742,6 +750,158 @@ function decodeBotPendingNotificationV1(
       MAX_NOTIFICATION_BODY_LENGTH,
       "pending notification body",
       true,
+    ),
+  };
+}
+
+/**
+ * The Bot's unread projection. The count is derived from the admission index
+ * on every read, one page longer than the cap so "99+" is exact.
+ */
+export async function readUnread(
+  state: ShellBotStateV1,
+  identity: BotIdentity,
+): Promise<BotUnreadViewV1> {
+  await state.authority.validateIdentity(identity);
+  const [storedState, storedPreview] = await state.ctx.storage.transaction(
+    (transaction) =>
+      Promise.all([
+        transaction.get<unknown>(UNREAD_STATE_KEY),
+        transaction.get<unknown>(SIDEBAR_PREVIEW_KEY),
+      ]),
+  );
+  const unreadState = optionalUnreadStateV1(storedState);
+  const index = await state.authority.listRunIndex({
+    limit: UNREAD_COUNT_CAP + 1,
+  });
+  // Counted straight off the keys rather than through `RoutineInboxStore`:
+  // its `list()` trims the inbox, and the unread fan-out is a read every
+  // sidebar poll makes for every Bot — it must not write, least of all into
+  // an object that is running a Turn. An undecodable row is skipped, because
+  // a badge is never worth failing a read for.
+  const stored = await state.ctx.storage.list<unknown>({
+    prefix: ROUTINE_INBOX_PREFIX,
+    limit: ROUTINE_INBOX_LIMIT,
+  });
+  let failures = 0;
+  for (const value of stored.values()) {
+    try {
+      const entry = decodeRoutineInboxEntryV1(value);
+      if (entry.failure === true && !entry.acknowledged) failures += 1;
+    } catch {
+      continue;
+    }
+  }
+  return projectBotUnreadViewV1(
+    identity.botId,
+    unreadState,
+    index.map((entry) => entry.cursor),
+    await sidebarPreview(state, storedPreview, index),
+    failures,
+    await runWorkingV1(state, index[0]?.runId),
+  );
+}
+
+/**
+ * How many stored runs a read will open to recover a missing preview. The
+ * newest settled chat Turn is almost always the first entry; the bound is what
+ * keeps a Bot whose recent Turns are all automations from turning one sidebar
+ * read into a scan of its whole history.
+ */
+const SIDEBAR_PREVIEW_BACKFILL_RUNS_V1 = 5;
+
+/**
+ * The preview record, or the same line derived from the runs when there is
+ * none. A Bot whose Turns settled before the preview projection existed has a
+ * full transcript and no record, and the row read "No messages yet" over it. A
+ * read never writes what it derives: the next settlement stores it.
+ */
+async function sidebarPreview(
+  state: ShellBotStateV1,
+  storedPreview: unknown,
+  index: readonly { runId: string }[],
+): Promise<SidebarMessagePreviewV1 | undefined> {
+  const stored = optionalSidebarMessagePreviewV1(storedPreview);
+  if (stored) return stored;
+  const runs: SidebarPreviewRunV1[] = [];
+  for (const entry of index.slice(0, SIDEBAR_PREVIEW_BACKFILL_RUNS_V1)) {
+    const run = await state.authority.readRun(entry.runId);
+    if (run) runs.push(run);
+  }
+  return sidebarMessagePreviewFromRunsV1(runs);
+}
+
+/**
+ * `bot/mark-read` and `bot/mark-unread`. Idempotent on the command id and
+ * monotonic in the cursor, so a replay or an out-of-order delivery can only
+ * ever produce the same durable record.
+ */
+export async function executeUnreadCommand(
+  state: ShellBotStateV1,
+  identity: BotIdentity,
+  command: BotUnreadCommandV1,
+): Promise<BotUnreadReceiptV1> {
+  if (command.botId !== identity.botId) {
+    throw new Error("unread command does not match its Bot");
+  }
+  await state.authority.validateIdentity(identity);
+  const fingerprint = botUnreadCommandFingerprintV1(command);
+  const receiptKey = unreadReceiptKeyV1(command.commandId);
+  const stored = await state.ctx.storage.transaction(async (transaction) => {
+    const existing = await transaction.get<{
+      commandFingerprint: string;
+      state: unknown;
+    }>(receiptKey);
+    if (existing) {
+      if (existing.commandFingerprint !== fingerprint) {
+        throw new Error(
+          `unread command id "${command.commandId}" was reused for a different command`,
+        );
+      }
+      return {
+        state: optionalUnreadStateV1(existing.state),
+        preview: await transaction.get<unknown>(SIDEBAR_PREVIEW_KEY),
+      };
+    }
+    const current = optionalUnreadStateV1(
+      await transaction.get<unknown>(UNREAD_STATE_KEY),
+    );
+    let next = current;
+    if (command.type === "bot/mark-read") {
+      if (!command.upToCursor) {
+        throw new Error("bot/mark-read requires upToCursor");
+      }
+      next = markUnreadReadV1(current, {
+        upToCursor: command.upToCursor,
+        at: new Date().toISOString(),
+      });
+    } else {
+      next = markUnreadV1(current);
+    }
+    await transaction.put({
+      [UNREAD_STATE_KEY]: next,
+      [receiptKey]: { commandFingerprint: fingerprint, state: next },
+    });
+    return {
+      state: next,
+      preview: await transaction.get<unknown>(SIDEBAR_PREVIEW_KEY),
+    };
+  });
+  const index = await state.authority.listRunIndex({
+    limit: UNREAD_COUNT_CAP + 1,
+  });
+  return {
+    schemaVersion: 1,
+    commandId: command.commandId,
+    status: "applied",
+    unread: projectBotUnreadViewV1(
+      identity.botId,
+      stored.state,
+      index.map((entry) => entry.cursor),
+      // The open Bot is the one that gets marked read, so this receipt is the
+      // sidebar row it renders from: it owes the same derived preview the
+      // fan-out gives every other Bot.
+      await sidebarPreview(state, stored.preview, index),
     ),
   };
 }
