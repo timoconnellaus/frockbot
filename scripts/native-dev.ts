@@ -19,6 +19,9 @@
  *   - With `SPRITES_TOKEN`, the Computer host — real Sprites — under its own
  *     `wrangler dev`, because a service binding resolves only through the dev
  *     registry.
+ *   - With Docker running, the Applet build service the same way. Both are
+ *     Cloudflare Containers, so `wrangler dev` builds and runs their images
+ *     locally; without Docker the binding reads `[not connected]`.
  *   - The emulator borrows the host's loopback through `adb reverse`. The app
  *     is a debug build pointed at it with `--dart-define`, and it signs in
  *     through the Worker's development door instead of Google: the one
@@ -44,6 +47,7 @@ import { resolve } from "node:path";
 const root = resolve(import.meta.dirname, "..");
 const cloudflareRoot = resolve(root, "apps/cloudflare");
 const computerHostRoot = resolve(root, "apps/computer-host");
+const appletBuildRoot = resolve(root, "apps/applet-build");
 const nativeRoot = resolve(root, "apps/native");
 const stateDir = resolve(root, ".native-dev");
 const persistDir = resolve(stateDir, "wrangler-state");
@@ -57,6 +61,7 @@ const mainCheckout =
 // Off the dogfood stack's ports, so both can run.
 const workerPort = process.env.FROCKBOT_NATIVE_WORKER_PORT ?? "8797";
 const computerHostPort = process.env.FROCKBOT_NATIVE_COMPUTER_PORT ?? "8799";
+const appletBuildPort = process.env.FROCKBOT_NATIVE_APPLET_BUILD_PORT ?? "8801";
 // One origin for everyone: `adb reverse` lends the emulator the host's
 // loopback, so the app, the Worker and `BETTER_AUTH_URL` all name this — and
 // `wrangler dev` rewrites every request URL to its bound address anyway, so
@@ -168,7 +173,28 @@ function ensureDevVars(): Map<string, string> {
       say("wrote apps/computer-host/.dev.vars");
     }
   }
+
+  // The Applet build service shares one token with the app Worker the same
+  // way. It has no upstream credential of its own, so unlike the Computer host
+  // there is nothing to gate it on: it is minted whenever the stack starts.
+  let buildToken = vars.get("APPLET_BUILD_TOKEN");
+  if (!buildToken) {
+    buildToken = randomBytes(32).toString("hex");
+    appendFileSync(target, `\nAPPLET_BUILD_TOKEN=${buildToken}\n`);
+    vars.set("APPLET_BUILD_TOKEN", buildToken);
+    say("minted APPLET_BUILD_TOKEN into apps/cloudflare/.dev.vars");
+  }
+  const buildVars = resolve(appletBuildRoot, ".dev.vars");
+  if (readVars(buildVars).get("APPLET_BUILD_TOKEN") !== buildToken) {
+    writeFileSync(buildVars, `APPLET_BUILD_TOKEN=${buildToken}\n`);
+    say("wrote apps/applet-build/.dev.vars");
+  }
   return vars;
+}
+
+/** `wrangler dev` runs a container app's image locally, which needs Docker. */
+function dockerAvailable(): boolean {
+  return run(["docker", "info"], { quiet: true, check: false }).code === 0;
 }
 
 // ------------------------------------------------------------- processes
@@ -214,7 +240,7 @@ function startBackground(name: string, command: string[], cwd: string): void {
 }
 
 function down(): void {
-  for (const name of ["worker", "computer-host"]) {
+  for (const name of ["worker", "computer-host", "applet-build"]) {
     const file = pidFile(name);
     if (!existsSync(file)) continue;
     const pid = Number(readFileSync(file, "utf8").trim());
@@ -222,7 +248,7 @@ function down(): void {
     rmSync(file, { force: true });
   }
   // Backstop for a lost pid file: whoever holds this stack's own ports.
-  for (const port of [workerPort, computerHostPort]) {
+  for (const port of [workerPort, computerHostPort, appletBuildPort]) {
     const holders = run(["lsof", "-ti", `tcp:${port}`, "-sTCP:LISTEN"], {
       quiet: true,
       check: false,
@@ -300,7 +326,34 @@ function cloudflareAuthenticated(): boolean {
 
 async function serve(
   vars: Map<string, string>,
-): Promise<{ model: string; computer: string }> {
+): Promise<{ model: string; computer: string; build: string }> {
+  // Both container apps are reached through a service binding, which resolves
+  // only through the dev registry — so each runs under its own `wrangler dev`.
+  const docker = dockerAvailable();
+  let build = "off — Docker is not running, so the container cannot start";
+  if (docker) {
+    startBackground(
+      "applet-build",
+      [
+        "bunx",
+        "wrangler",
+        "dev",
+        "--ip",
+        "127.0.0.1",
+        "--port",
+        appletBuildPort,
+        "--inspector-port",
+        inspectorPort(appletBuildPort),
+        "--persist-to",
+        persistDir,
+      ],
+      appletBuildRoot,
+    );
+    build = `the Applet build service on :${appletBuildPort}`;
+  } else {
+    warn("Docker is not running, so APPLET_BUILD reads [not connected]");
+  }
+
   let computer = "off — no SPRITES_TOKEN in apps/cloudflare/.dev.vars";
   if (vars.get("SPRITES_TOKEN")) {
     startBackground(
@@ -376,7 +429,16 @@ async function serve(
       600_000,
     );
   }
-  return { model, computer };
+  if (docker) {
+    // The first start builds the container image; later ones are seconds.
+    await waitFor(
+      `the Applet build service on :${appletBuildPort}`,
+      async () =>
+        (await fetch(`http://127.0.0.1:${appletBuildPort}/healthz`)).status > 0,
+      600_000,
+    );
+  }
+  return { model, computer, build };
 }
 
 // ----------------------------------------------------------------- seed
@@ -848,7 +910,9 @@ async function smoke(): Promise<void> {
 
 // --------------------------------------------------------------- status
 
-function status(extra: { model?: string; computer?: string } = {}): void {
+function status(
+  extra: { model?: string; computer?: string; build?: string } = {},
+): void {
   const pid = (name: string) =>
     existsSync(pidFile(name))
       ? readFileSync(pidFile(name), "utf8").trim()
@@ -861,11 +925,15 @@ function status(extra: { model?: string; computer?: string } = {}): void {
   console.log(
     `  Computer host  http://127.0.0.1:${computerHostPort}   (pid ${pid("computer-host")})`,
   );
+  console.log(
+    `  Applet build   http://127.0.0.1:${appletBuildPort}   (pid ${pid("applet-build")})`,
+  );
   console.log(`  Emulator       ${emulatorSerial() ?? "not running"}`);
   console.log(`  State          ${stateDir}`);
   console.log(`  Logs           ${logDir}`);
   if (extra.model) console.log(`  Model          ${extra.model}`);
   if (extra.computer) console.log(`  Computer       ${extra.computer}`);
+  if (extra.build) console.log(`  Applet builds  ${extra.build}`);
   console.log();
   say("the app is signed in as the `development` User, an admin here.");
   console.log(`  Web:   open ${hostOrigin}/?as_user=${DEVELOPMENT_USER}`);
@@ -888,7 +956,7 @@ async function up(): Promise<void> {
   const serial = await ensureEmulator();
   installApp(serial);
   adb(serial, "shell", "am", "start", "-n", `${APP}/.MainActivity`);
-  status({ model, computer: served.computer });
+  status({ model, computer: served.computer, build: served.build });
 }
 
 switch (process.argv[2] ?? "up") {

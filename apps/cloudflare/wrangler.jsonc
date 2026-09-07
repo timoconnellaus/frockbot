@@ -40,6 +40,14 @@
       "binding": "COMPUTER_HOST",
       "service": "frockbot-computer-host",
     },
+    // The Applet build service (plan step 8). It type-checks, lints, bundles
+    // and boots an Applet's source and returns the artifacts; it holds no
+    // storage, so this Worker stays the only thing that writes R2 and the only
+    // thing that hash-verifies what came back.
+    {
+      "binding": "APPLET_BUILD",
+      "service": "frockbot-applet-build",
+    },
   ],
   "r2_buckets": [
     {
@@ -158,6 +166,10 @@
           "binding": "COMPUTER_HOST",
           "service": "frockbot-computer-host",
         },
+        {
+          "binding": "APPLET_BUILD",
+          "service": "frockbot-applet-build",
+        },
       ],
       "r2_buckets": [
         {
@@ -264,6 +276,10 @@
           "binding": "COMPUTER_HOST",
           "service": "frockbot-computer-host",
         },
+        {
+          "binding": "APPLET_BUILD",
+          "service": "frockbot-applet-build",
+        },
       ],
       "r2_buckets": [
         {
@@ -356,14 +372,20 @@
           "binding": "APPLETS",
         },
       ],
-      // Declared as production declares them. Neither Worker runs beside the
-      // harness, so both report "not connected"; no spec authors a Package or
-      // uses a Computer, and a binding that is declared but unreachable is what
-      // production looks like when a dependency is down.
+      // Declared as production declares them. Neither the Computer host nor
+      // the Applet build service runs beside the harness, so both report "not
+      // connected"; no spec authors a Package, uses a Computer, or reaches the
+      // builder — `applets-publish.e2e.ts` seeds `dist/` itself — and a binding
+      // that is declared but unreachable is what production looks like when a
+      // dependency is down.
       "services": [
         {
           "binding": "COMPUTER_HOST",
           "service": "frockbot-computer-host",
+        },
+        {
+          "binding": "APPLET_BUILD",
+          "service": "frockbot-applet-build",
         },
         {
           "binding": "AI",

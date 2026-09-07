@@ -17,11 +17,12 @@ const require = createRequire(import.meta.url);
  * Found by walking up to this package's own `package.json`, not by counting
  * directories.
  *
- * The same module runs from two depths: `src/cli/paths.ts` under Bun, and the
- * bundled `dist/cli.mjs` under Node on the Computer, which has no Bun. A fixed
- * `../../` is right for one and silently wrong for the other — it would resolve
- * the SDK's entries to a directory that does not exist and every Applet import
- * would fail to type-check with no explanation.
+ * The same module runs from three depths: `src/build/paths.ts` under Bun, the
+ * bundled `dist/cli.mjs` under Node, and the build service's own bundle, which
+ * is emitted into `dist/` for exactly this reason. A fixed `../../` is right
+ * for one and silently wrong for the others — it would resolve the SDK's
+ * entries to a directory that does not exist and every Applet import would
+ * fail to type-check with no explanation.
  */
 function findSdkRoot(): string {
   let directory = dirname(fileURLToPath(import.meta.url));

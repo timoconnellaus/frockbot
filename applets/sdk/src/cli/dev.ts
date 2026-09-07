@@ -7,8 +7,8 @@ import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { readDescriptor } from "./manifest.js";
-import { startAppletRuntime, type AppletRuntime } from "./runtime.js";
+import { readDescriptor } from "../build/manifest.js";
+import { startAppletRuntime, type AppletRuntime } from "../build/runtime.js";
 
 /**
  * In production the shell nests the Applet page and sends it `init`. There is

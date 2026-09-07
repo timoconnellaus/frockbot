@@ -229,6 +229,14 @@ interface Env {
   COMPUTER_HOST: Fetcher;
   /** Shared secret presented on every Computer host call. */
   COMPUTER_HOST_TOKEN?: string;
+  /**
+   * The Applet build service. It is handed source and returns artifacts; this
+   * Worker keeps the R2 write and the hash verification, so the builder holds
+   * no authority of its own.
+   */
+  APPLET_BUILD: Fetcher;
+  /** Shared secret presented on every Applet build call. */
+  APPLET_BUILD_TOKEN?: string;
   AUTH_DB: D1Database;
   DEFAULT_APPLICATION_HASH: string;
   BETTER_AUTH_SECRET?: string;

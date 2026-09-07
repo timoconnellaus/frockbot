@@ -162,6 +162,17 @@ jobs:
       - name: Test Computer host runtime
         run: bun run --filter @frockbot/computer-host test:workerd
 
+      # No Docker: the contract's decoders, the shard function, and the build
+      # pipeline run in-process against the SDK's own template. The container
+      # image is the opt-in Docker build documented in the app's README.
+      - name: Test Applet build service
+        run: bun run --filter @frockbot/applet-build test
+
+      # The front Worker in workerd — the token check and the forward — against
+      # a Worker impersonating the container at the binding it already uses.
+      - name: Test Applet build service runtime
+        run: bun run --filter @frockbot/applet-build test:workerd
+
       - name: Build
         run: bun run build
 

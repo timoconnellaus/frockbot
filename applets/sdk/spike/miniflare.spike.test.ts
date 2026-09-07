@@ -12,7 +12,7 @@
  *    (`{ modules, durableObjects, serviceBindings, … }`) is rejected: v5's
  *    schema is the wrangler config (`{ workers: [{ config: { … } }] }`).
  *    `convertV4MiniflareOptions()` is exported for exactly this and is what
- *    `src/cli/runtime.ts` uses, so the SDK keeps speaking the documented shape.
+ *    `src/build/runtime.ts` uses, so the SDK keeps speaking the documented shape.
  * 3. `useSQLite: true` on the DO binding is required; without it
  *    `ctx.storage.sql` is absent.
  * 4. Function `serviceBindings` work as documented — `async (request) =>
@@ -30,7 +30,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { randomUUID } from "node:crypto";
 
-import { startAppletRuntime } from "../src/cli/runtime.js";
+import { startAppletRuntime } from "../src/build/runtime.js";
 
 /** A hand-written Applet, so the spike does not depend on the bundler. */
 const SERVER = `
