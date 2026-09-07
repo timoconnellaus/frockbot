@@ -11,7 +11,7 @@
 // Three refusals, in order of how badly they would fail:
 //
 //  1. `env` is never projected. The Computer host's exec op carries an `env`
-//     map (`computer-host-protocol/src/protocol.ts`), which is exactly where a
+//     map (`computer/host-protocol/protocol.ts`), which is exactly where a
 //     leased credential would be; the preview is built from a per-kind
 //     allowlist of fields, so `env` is absent because it was never reachable,
 //     not because a filter removed it.

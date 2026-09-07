@@ -23,17 +23,17 @@ import {
   createComputerAgentFeature,
   type ComputerAgentPluginConfig,
   type ComputerProcessStorageV1,
-} from "@frockbot/plugin-computer/agent";
+} from "@frockbot/computer/agent";
 import {
   createSharedComputerProviderFeature,
   type SharedComputerHostClient,
-} from "@frockbot/plugin-computer/shared-provider";
+} from "@frockbot/computer/shared-provider";
 import { createCredentialsFeature } from "@frockbot/plugin-credentials/user";
 // pi-lens-ignore: ts:2307
 // Runtime implementations are statically bound by the immutable application.
 import echoFeature from "@frockbot/plugin-echo/agent";
-import { createFlySpriteProviderFeature } from "@frockbot/plugin-fly-sprite/agent";
-import { ComputerHostClient } from "@frockbot/plugin-fly-sprite/host-client";
+import { createFlySpriteProviderFeature } from "@frockbot/computer/fly/agent";
+import { ComputerHostClient } from "@frockbot/computer/fly/host-client";
 import type {
   ShellApplicationV1,
   ShellComputerHostBindingV1,
@@ -44,7 +44,7 @@ import type {
 import type {
   ComputerRegistry,
   ComputerSyncHostV1,
-} from "@frockbot/computer-core";
+} from "@frockbot/computer/core";
 // Flock contributes lifecycle routes and durable User/Bot state.
 import {
   createFlockRuntimeFeature,

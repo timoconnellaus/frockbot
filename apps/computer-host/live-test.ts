@@ -33,7 +33,7 @@ import {
   decodeComputerHostOpenResultV1,
   type ComputerHostExecFrameV1,
   type ComputerHostOperationV1,
-} from "@frockbot/computer-host-protocol";
+} from "@frockbot/computer/host-protocol";
 import {
   computerSpriteNameSourceV1,
   computerSpriteNameV1,
@@ -48,7 +48,7 @@ import {
   RUNTIME_ROOT,
   runtimeDocumentDigestV1,
   SCRATCH_ROOT,
-} from "@frockbot/computer-host-runtime";
+} from "@frockbot/computer/host-runtime";
 
 Object.defineProperty(globalThis, "WebSocket", { value: WebSocket });
 

@@ -21,7 +21,7 @@ import {
 
 useApplicationArtifact();
 
-/** `plugin-fly-sprite` reads the inner command's exit code off this marker. */
+/** `computer/fly` reads the inner command's exit code off this marker. */
 const EXEC_EXIT_MARKER = "__FROCKBOT_EXIT__";
 
 interface TurnView {

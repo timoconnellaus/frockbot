@@ -69,7 +69,7 @@ import {
   WINDOW_LIVE_MARKER,
   WORKSPACE_SYNC_SERVICE,
   WORKSPACES_ROOT,
-} from "@frockbot/computer-host-runtime";
+} from "@frockbot/computer/host-runtime";
 import {
   COMPUTER_HOST_STREAM_MEDIA_TYPE,
   computerHostProblemV1,
@@ -86,7 +86,7 @@ import {
   type ComputerHostOpenResultV1,
   type ComputerHostProvisioningV1,
   type ComputerHostRequestV1,
-} from "@frockbot/computer-host-protocol";
+} from "@frockbot/computer/host-protocol";
 
 // --- the narrow view this module takes of the Sprites SDK ------------------
 
@@ -2580,7 +2580,7 @@ function direntKind(dirent: SpriteDirentHandle): ComputerHostFileKindV1 {
 
 /**
  * The tenant's directory key on the shared Computer. It matches
- * `computerBotKey` in `@frockbot/plugin-fly-sprite` exactly, because the two
+ * `computerBotKey` in `@frockbot/computer/fly` exactly, because the two
  * must name the same directories on the same box.
  */
 export function computerBotKeyV1(

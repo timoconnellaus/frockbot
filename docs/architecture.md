@@ -354,7 +354,7 @@ A persistent Linux desktop virtual machine per User, rented from Fly Sprites (`a
 
 ### Provisioning
 
-`getSprite`, and on a miss `createSprite`, named `frockbot-<sha256(["user", userId])[0..12]>` (`packages/computer-host-runtime/src/runtime.ts:2718-2739`). The host then adopts an existing machine via a marker file, or provisions through a detached, resumable six-phase shell run — `layout`, `packages`, `runtime`, `browser`, `applets`, `reference` — bounded at 10 minutes, at most 8 relaunches, polled every 3 seconds. Egress is restricted to one host: `enableInternet: false, allowedHosts: ["api.sprites.dev"], interceptHttps: true` (`apps/computer-host/src/egress.ts:23-27`), with a WebSocket bridge for upgrades.
+`getSprite`, and on a miss `createSprite`, named `frockbot-<sha256(["user", userId])[0..12]>` (`computer/host-runtime/runtime.ts:2718-2739`). The host then adopts an existing machine via a marker file, or provisions through a detached, resumable six-phase shell run — `layout`, `packages`, `runtime`, `browser`, `applets`, `reference` — bounded at 10 minutes, at most 8 relaunches, polled every 3 seconds. Egress is restricted to one host: `enableInternet: false, allowedHosts: ["api.sprites.dev"], interceptHttps: true` (`apps/computer-host/src/egress.ts:23-27`), with a WebSocket bridge for upgrades.
 
 ### Inside the Sprite
 
@@ -364,17 +364,17 @@ One Sprite, one browser and one screen per User; one slot — window plus clippe
 
 ### Protocol
 
-`packages/computer-host-protocol/src/protocol.ts` — HTTP POST per operation with optional NDJSON streaming; not a WebSocket. The envelope is `{version: 1, effectId, identity: {userId}, tenant: {botId}, credentialRef}`. Eleven operation kinds: `open`, `exec`, `file/read`, `file/write`, `file/list`, `file/stat`, `file/delete`, `control`, `viewer`, `service`, `cancel`. Frames: `open` yields `progress | result | error`; `exec` yields `stdout | stderr | exit | error`. Requests shard to `computer-host-<fnv1a(userId) % 2>` (`apps/computer-host/src/router.ts:38-48`) and carry `x-frockbot-host-token`, checked in both the Worker and the container.
+`computer/host-protocol/protocol.ts` — HTTP POST per operation with optional NDJSON streaming; not a WebSocket. The envelope is `{version: 1, effectId, identity: {userId}, tenant: {botId}, credentialRef}`. Eleven operation kinds: `open`, `exec`, `file/read`, `file/write`, `file/list`, `file/stat`, `file/delete`, `control`, `viewer`, `service`, `cancel`. Frames: `open` yields `progress | result | error`; `exec` yields `stdout | stderr | exit | error`. Requests shard to `computer-host-<fnv1a(userId) % 2>` (`apps/computer-host/src/router.ts:38-48`) and carry `x-frockbot-host-token`, checked in both the Worker and the container.
 
 ### Screenshots and live view
 
-A screenshot is a guarded `exec` running `scrot`, clipped to the Bot's slot of the shared screen, followed by a `file/read` (`packages/plugin-fly-sprite/src/computer.ts:732-797`); the bytes are filed into the durable `screenshots` root and attached to the model turn. The live view is noVNC iframed directly at `https://<sprite>.sprites.app/...`, with no Worker proxy; CSP allows `frame-src https://*.sprites.app` (`apps/cloudflare/src/user-application.ts:178`). FrockBot ships its own viewer page because stock noVNC fixes `view_only` at construction.
+A screenshot is a guarded `exec` running `scrot`, clipped to the Bot's slot of the shared screen, followed by a `file/read` (`computer/fly/computer.ts:732-797`); the bytes are filed into the durable `screenshots` root and attached to the model turn. The live view is noVNC iframed directly at `https://<sprite>.sprites.app/...`, with no Worker proxy; CSP allows `frame-src https://*.sprites.app` (`apps/cloudflare/src/user-application.ts:178`). FrockBot ships its own viewer page because stock noVNC fixes `view_only` at construction.
 
 ### Tools
 
-All from `packages/plugin-computer`; `packages/plugin-fly-sprite` registers none.
+All from `computer/`; `computer/fly` registers none.
 
-- `computer_exec` — `src/agent.ts:794`
+- `computer_exec` — `agent.ts:794`
 - `computer_screenshot` — `:1309`
 - `computer_doctor` — `:1507`
 - `computer_process_check` / `computer_process_logs` / `computer_process_stop` — `:1579`, `:1609`, `:1648`

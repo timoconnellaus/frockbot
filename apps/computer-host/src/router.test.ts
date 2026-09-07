@@ -3,7 +3,7 @@ import {
   COMPUTER_HOST_ROUTES,
   COMPUTER_HOST_TOKEN_HEADER,
   decodeComputerHostProblemV1,
-} from "@frockbot/computer-host-protocol";
+} from "@frockbot/computer/host-protocol";
 import {
   computerHostShardCountV1,
   computerHostShardV1,

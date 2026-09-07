@@ -1,0 +1,412 @@
+// When the Computer Package runs the durable-root sync, and when it refuses
+// to.
+//
+// The provider here records every call the provider-neutral Computer interface
+// receives, in order, so the claims are about ordering and about absence:
+// the pull lands before the Bot's first Computer tool call, the push lands
+// after the Turn, a Turn that never touches the Computer syncs nothing at all,
+// and a sync that cannot run is a recorded outcome rather than a failed Turn.
+import { describe, expect, test } from "bun:test";
+import {
+  computerSyncSummaryV1,
+  type ComputerHandle,
+  type ComputerProvider,
+  type ComputerSyncSummaryV1,
+} from "@frockbot/computer/core";
+import { createAgentLoop } from "@frockbot/core/agent-loop";
+import type {
+  LlmProvider,
+  SessionEvent,
+  WorkspaceRootV1,
+} from "@frockbot/core/contracts";
+import { createAgentRuntimeHarness } from "@frockbot/plugin-testkit";
+import { createComputerAgentFeature, syncWorkspaceRootNowV1 } from "./agent.js";
+
+const COMPOSITION = {
+  generationId: "1970-01-01T00:00:00.000Z:0123456789abcdef",
+  artifactSetHash: "a".repeat(64),
+};
+
+interface SyncFixture {
+  calls: string[];
+  provider: ComputerProvider;
+  /** The change signal the on-Computer watcher reports; move it to force a sync. */
+  signal: { value: string | undefined };
+  /** What every `reconcile` answers. */
+  answer: (reason: string) => ComputerSyncSummaryV1 | Promise<never>;
+}
+
+function fixture(
+  answer: SyncFixture["answer"] = () => computerSyncSummaryV1("ok"),
+): SyncFixture {
+  const calls: string[] = [];
+  const signal = { value: "signal-1" as string | undefined };
+  const provider: ComputerProvider = {
+    id: "recording",
+    open: (identity, tenant, assignment) => {
+      calls.push(`open:${tenant.botId}`);
+      return Promise.resolve({
+        assignment,
+        identity,
+        tenant,
+        sync: {
+          reconcile: async (reason) => {
+            calls.push(`sync:${reason}`);
+            return await answer(reason);
+          },
+          signal: () => {
+            calls.push("signal");
+            return Promise.resolve(signal.value);
+          },
+        },
+        exec: {
+          execute: () => {
+            calls.push("exec");
+            return Promise.resolve({
+              exitCode: 0,
+              stdout: new TextEncoder().encode("done"),
+              stderr: new Uint8Array(),
+              outputTruncated: false,
+            });
+          },
+        },
+        close: () => Promise.resolve(),
+      });
+    },
+  };
+  return { calls, provider, signal, answer };
+}
+
+/**
+ * A model that runs the Computer tool once per listed command and then stops.
+ * `[]` is a Turn that never touches the Computer.
+ */
+function modelRunning(
+  commands: readonly string[],
+  beforeStep?: (step: number) => void,
+): LlmProvider {
+  let issued = 0;
+  let step = 0;
+  return {
+    id: "scripted",
+    async *stream() {
+      step += 1;
+      beforeStep?.(step);
+      const command = commands[issued];
+      if (command !== undefined) {
+        issued += 1;
+        yield {
+          type: "tool-call",
+          call: {
+            id: `call-${issued}`,
+            name: "computer_exec",
+            input: { command },
+          },
+        };
+        yield { type: "finish", reason: "tool-calls" };
+        return;
+      }
+      yield { type: "text-delta", text: "done" };
+      yield { type: "finish", reason: "completed" };
+    },
+  };
+}
+
+async function runTurn(
+  provider: ComputerProvider,
+  model: LlmProvider,
+): Promise<SessionEvent[]> {
+  const runtime = createAgentRuntimeHarness();
+  runtime.llm.register(model);
+  runtime.computers.register(provider);
+  await runtime.mount(
+    createComputerAgentFeature({
+      userId: "user-1",
+      defaultProviderId: "recording",
+    }),
+  );
+  const loop = createAgentLoop(runtime, {
+    maxSteps: 4,
+    composition: COMPOSITION,
+  });
+
+  const handle = await loop.create({
+    botId: "bot-1",
+    sessionId: "session-1",
+    provider: model.id,
+    model: "test-model",
+    admitEffect: () => Promise.resolve(true),
+  });
+  handle.agent.send("use the Computer");
+  await handle.agent.whenIdle();
+  const events = [...handle.agent.session.events];
+  await loop.dispose();
+  await runtime.dispose();
+  return events;
+}
+
+function syncEvents(events: readonly SessionEvent[]) {
+  return events.filter(
+    (event): event is Extract<SessionEvent, { type: "computer/sync" }> =>
+      event.type === "computer/sync",
+  );
+}
+
+describe("the Computer Package as the sync's caller", () => {
+  test("pulls before the Turn's first Computer tool call and pushes after the Turn", async () => {
+    const { calls, provider } = fixture();
+
+    const events = await runTurn(provider, modelRunning(["pwd"]));
+
+    // The pull is between opening the Computer and the Bot's first look at it,
+    // so the Workspace the command sees is the one object storage holds.
+    expect(calls.slice(0, 4)).toEqual([
+      "open:bot-1",
+      "sync:open",
+      // The baseline the watcher's signal is compared against next time.
+      "signal",
+      "exec",
+    ]);
+    expect(calls.at(-1)).toBe("sync:turn-end");
+    // Both runs are visible in durable state, on the Turn that caused them.
+    expect(
+      syncEvents(events).map((event) => [
+        event.turn,
+        event.reason,
+        event.status,
+      ]),
+    ).toEqual([
+      [1, "open", "ok"],
+      [1, "turn-end", "ok"],
+    ]);
+  });
+
+  test("a Turn that never uses the Computer never syncs, so nothing wakes", async () => {
+    const { calls, provider } = fixture();
+
+    const events = await runTurn(provider, modelRunning([]));
+
+    expect(calls).toEqual([]);
+    expect(syncEvents(events)).toEqual([]);
+  });
+
+  test("syncs again inside a Turn only when the watcher's change signal moved", async () => {
+    const { calls, provider, signal } = fixture();
+    // The watcher reports a change before the third step's tool call, and
+    // reports nothing new before the second: only one extra sync may follow.
+    const model = modelRunning(["first", "second", "third"], (step) => {
+      if (step === 3) signal.value = "signal-2";
+    });
+
+    const events = await runTurn(provider, model);
+
+    expect(calls.filter((call) => call.startsWith("sync:"))).toEqual([
+      "sync:open",
+      "sync:signal",
+      "sync:turn-end",
+    ]);
+    expect(syncEvents(events).map((event) => event.reason)).toEqual([
+      "open",
+      "signal",
+      "turn-end",
+    ]);
+  });
+
+  test("an unavailable sync is recorded on the Turn and never fails it", async () => {
+    const { provider } = fixture((reason) => {
+      if (reason === "open") {
+        return Promise.reject(
+          new Error("the Computer is paused"),
+        ) as Promise<never>;
+      }
+      return computerSyncSummaryV1("unavailable", "the Computer is paused");
+    });
+
+    const events = await runTurn(provider, modelRunning(["pwd"]));
+
+    // The Turn completed: the tool ran and the Turn closed normally.
+    expect(
+      events.some(
+        (event) => event.type === "turn/end" && event.outcome === "completed",
+      ),
+    ).toBe(true);
+    expect(
+      syncEvents(events).map((event) => [event.reason, event.status]),
+    ).toEqual([
+      ["open", "unavailable"],
+      ["turn-end", "unavailable"],
+    ]);
+    expect(syncEvents(events)[0]?.detail).toContain("paused");
+  });
+
+  test("records every incomplete sync operation in one Turn", async () => {
+    const { provider, signal } = fixture(() => ({
+      ...computerSyncSummaryV1(
+        "degraded",
+        "Excluded 1 reproducible Workspace item from sync.",
+      ),
+      ignored: 1,
+    }));
+    const model = modelRunning(["first", "second"], (step) => {
+      if (step === 2) signal.value = "signal-2";
+    });
+
+    const events = await runTurn(provider, model);
+
+    expect(
+      syncEvents(events).map((event) => ({
+        reason: event.reason,
+        status: event.status,
+        ignored: event.ignored,
+        omitted: event.omitted,
+      })),
+    ).toEqual([
+      { reason: "open", status: "degraded", ignored: 1, omitted: 0 },
+      { reason: "signal", status: "degraded", ignored: 1, omitted: 0 },
+      { reason: "turn-end", status: "degraded", ignored: 1, omitted: 0 },
+    ]);
+  });
+});
+
+/**
+ * The one sanctioned caller outside the Turn's own sync policy. `applet
+ * build` writes `dist/` on the Computer with a shell, and an Applet publish
+ * reads those bytes from the *store*; without a push in between it would
+ * publish the previous build, or nothing.
+ */
+describe("syncWorkspaceRootNowV1", () => {
+  const appletsRoot: WorkspaceRootV1 = {
+    kind: "package-declared",
+    userId: "user-1",
+    packageId: "applets",
+    rootId: "source",
+  };
+
+  async function sessionHarness() {
+    const runtime = createAgentRuntimeHarness();
+    const session = runtime.sessions.create("session-1");
+    return {
+      sessions: runtime.sessions,
+      session,
+      dispose: () => runtime.dispose(),
+    };
+  }
+
+  function handleWith(sync: ComputerHandle["sync"]): ComputerHandle {
+    return {
+      assignment: { providerId: "recording", generation: 1 },
+      identity: { userId: "user-1" },
+      tenant: { botId: "bot-1" },
+      ...(sync ? { sync } : {}),
+      close: () => Promise.resolve(),
+    };
+  }
+
+  test("reconciles one root and records the outcome as `publish`", async () => {
+    const calls: string[] = [];
+    const computer = handleWith({
+      reconcile: () => {
+        calls.push("reconcile");
+        return Promise.resolve(computerSyncSummaryV1("ok"));
+      },
+      reconcileRoot: (asked, reason, options) => {
+        calls.push(`reconcileRoot:${reason}:${asked.kind}`);
+        calls.push(`required:${options?.requiredPaths?.join(",") ?? ""}`);
+        return Promise.resolve({ ...computerSyncSummaryV1("ok"), pushed: 1 });
+      },
+      signal: () => Promise.resolve(undefined),
+    });
+    const harness = await sessionHarness();
+
+    const summary = await syncWorkspaceRootNowV1({
+      computer,
+      sessions: harness.sessions,
+      sessionId: "session-1",
+      turn: 3,
+      root: appletsRoot,
+      requiredPaths: ["todo/dist/server.js", "todo/dist/ui.html"],
+    });
+
+    expect(summary.status).toBe("ok");
+    // One root, never the whole Workspace: the Turn's own policy still owns
+    // `open`, `signal`, and `turn-end`, and this borrows none of them.
+    expect(calls).toEqual([
+      "reconcileRoot:publish:package-declared",
+      "required:todo/dist/server.js,todo/dist/ui.html",
+    ]);
+    const recorded = syncEvents([...harness.session.events]);
+    expect(recorded).toHaveLength(1);
+    expect(recorded[0]).toMatchObject({
+      turn: 3,
+      reason: "publish",
+      status: "ok",
+      pushed: 1,
+    });
+    await harness.dispose();
+  });
+
+  test("a provider that cannot sync one root refuses, and never syncs all of them", async () => {
+    const calls: string[] = [];
+    const computer = handleWith({
+      reconcile: () => {
+        calls.push("reconcile");
+        return Promise.resolve(computerSyncSummaryV1("ok"));
+      },
+      signal: () => Promise.resolve(undefined),
+    });
+    const harness = await sessionHarness();
+
+    const summary = await syncWorkspaceRootNowV1({
+      computer,
+      sessions: harness.sessions,
+      sessionId: "session-1",
+      turn: 1,
+      root: appletsRoot,
+    });
+
+    expect(summary.status).toBe("refused");
+    expect(calls).toEqual([]);
+    expect(syncEvents([...harness.session.events])[0]?.reason).toBe("publish");
+    await harness.dispose();
+  });
+
+  test("a provider that throws is a recorded outcome, never an exception", async () => {
+    const computer = handleWith({
+      reconcile: () => Promise.resolve(computerSyncSummaryV1("ok")),
+      reconcileRoot: () =>
+        Promise.reject(new Error("the Computer is paused")) as Promise<never>,
+      signal: () => Promise.resolve(undefined),
+    });
+    const harness = await sessionHarness();
+
+    const summary = await syncWorkspaceRootNowV1({
+      computer,
+      sessions: harness.sessions,
+      sessionId: "session-1",
+      turn: 1,
+      root: appletsRoot,
+    });
+
+    expect(summary.status).toBe("unavailable");
+    expect(summary.detail).toContain("paused");
+    expect(syncEvents([...harness.session.events])).toHaveLength(1);
+    await harness.dispose();
+  });
+
+  test("a Computer with no sync records the refusal rather than nothing", async () => {
+    const computer = handleWith(undefined);
+    const harness = await sessionHarness();
+
+    const summary = await syncWorkspaceRootNowV1({
+      computer,
+      sessions: harness.sessions,
+      sessionId: "session-1",
+      turn: 1,
+      root: appletsRoot,
+    });
+
+    expect(summary.status).toBe("refused");
+    expect(syncEvents([...harness.session.events])).toHaveLength(1);
+    await harness.dispose();
+  });
+});

@@ -28,7 +28,7 @@ import {
   decodeComputerHostControlResultV1,
   decodeComputerHostProblemV1,
   type ComputerHostControlScopeV1,
-} from "@frockbot/computer-host-protocol";
+} from "@frockbot/computer/host-protocol";
 
 const SKIP_MESSAGE =
   "SPRITES_TOKEN is not set: skipping the live desktop-lease check.";

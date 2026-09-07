@@ -992,7 +992,7 @@ export function createSubagentsRuntimeFeature(
   return (runtime) => {
     // The Turn ordinal and step a task event is recorded under. The Agent loop
     // announces them; a tool context does not carry them, so they are caught
-    // where the loop already says so — the `plugin-computer` pattern.
+    // where the loop already says so — the `@frockbot/computer` pattern.
     let currentTurn = 1;
     let currentStep = 1;
     const disposers: Array<() => void> = [

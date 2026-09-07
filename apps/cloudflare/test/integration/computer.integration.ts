@@ -36,7 +36,7 @@ useApplicationArtifact();
 const HOST = "http://computer-host.internal";
 
 /**
- * `plugin-fly-sprite` wraps the Bot's command in a guard and reads the inner
+ * `computer/fly` wraps the Bot's command in a guard and reads the inner
  * command's exit code back off this marker, so a scripted answer that omits it
  * is a command with no exit code — which the Computer Package reports as a
  * failure. Kept as a literal rather than imported: the fake is standing in for

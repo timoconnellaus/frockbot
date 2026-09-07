@@ -32,7 +32,7 @@ import {
   type WorkspaceFilesV1,
 } from "@frockbot/core/contracts";
 import { canonicalJson, sha256 } from "@frockbot/core/contracts";
-import type { ComputerRegistry } from "@frockbot/computer-core";
+import type { ComputerRegistry } from "@frockbot/computer/core";
 import {
   appletSourceFilePathV1,
   appletsSourceRootV1,
@@ -42,7 +42,7 @@ import type {
   AppletsRuntimeHostV1,
 } from "@frockbot/applets/feature";
 import { firstPartyPackageToolAllowedV1 } from "@frockbot/applets/pages";
-import { syncWorkspaceRootNowV1 } from "@frockbot/plugin-computer/agent";
+import { syncWorkspaceRootNowV1 } from "@frockbot/computer/agent";
 import {
   ACTIVE_RUN_KEY,
   BotDurableAuthority,
@@ -247,7 +247,7 @@ import {
   decodeComputerHostControlResultV1,
   decodeComputerHostProblemV1,
   encodeComputerHostRequestV1,
-} from "@frockbot/computer-host-protocol";
+} from "@frockbot/computer/host-protocol";
 import {
   taskViewV1,
   type TaskListViewV1,

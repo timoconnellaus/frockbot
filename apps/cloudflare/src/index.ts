@@ -78,8 +78,8 @@ import {
   decodeComputerCommandResponse,
   decodeComputerProjectionV1,
   type ComputerCommandV1,
-} from "@frockbot/plugin-computer/protocol";
-import { ComputerBotNotFoundError } from "@frockbot/plugin-computer/backend";
+} from "@frockbot/computer/protocol";
+import { ComputerBotNotFoundError } from "@frockbot/computer/backend";
 import {
   decodeTaskListViewV1,
   decodeTaskViewV1,

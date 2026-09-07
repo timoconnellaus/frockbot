@@ -7,7 +7,7 @@
 // checking it reads an outcome rather than launching anything a second time.
 import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
-import { computerBotKey } from "@frockbot/plugin-fly-sprite";
+import { computerBotKey } from "@frockbot/computer/fly";
 import type {
   FakeComputerHostCall,
   FakeExecScript,

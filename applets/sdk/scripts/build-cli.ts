@@ -1,7 +1,7 @@
 // Bundles the `applet` CLI into one file plain Node can run.
 //
-// The Computer image has Node and no Bun (`packages/computer-host-runtime`),
-// and this package's sources are TypeScript that resolve siblings through
+// The Computer image has Node and no Bun (`computer/host-runtime`), and this
+// package's sources are TypeScript that resolve siblings through
 // `.js` specifiers — a convention Bun and esbuild honour and Node's ESM
 // resolver does not. So the published `bin` is a bundle, not a source file.
 //

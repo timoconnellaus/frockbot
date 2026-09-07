@@ -23,7 +23,7 @@ import {
   COMPUTER_HOST_TOKEN_HEADER,
   decodeComputerHostHttpRequestV1,
   problem,
-} from "@frockbot/computer-host-protocol";
+} from "@frockbot/computer/host-protocol";
 import { ComputerHost, type SpritesClientHandle } from "./computer.ts";
 
 /** The SDK reaches the Sprite over a WebSocket; Node needs one supplied. */

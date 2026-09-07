@@ -27,6 +27,21 @@ const modules: Module[] = [
     skip: ["sdk/"],
   },
   {
+    dir: "computer",
+    allowed: [
+      ...coreAllowed,
+      "@frockbot/computer/",
+      // Temporary: the Vue client and the backend contribution reach the shell
+      // and the client libraries until steps 7 and 9 delete them.
+      // `plugin-subagents/shared` is reached only through the shell's own
+      // shared module, for one view type.
+      "@frockbot/plugin-shell/",
+      "@frockbot/plugin-subagents/shared",
+      "@frockbot/client-core",
+      "@frockbot/client-ui",
+    ],
+  },
+  {
     dir: "providers",
     allowed: [
       ...coreAllowed,
@@ -64,6 +79,7 @@ function exportMap(manifest: Record<string, unknown>): Record<string, string> {
 const workspace = new Map<string, WorkspacePackage>();
 const manifestPaths = [
   "applets/package.json",
+  "computer/package.json",
   "core/package.json",
   "providers/package.json",
 ];

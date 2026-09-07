@@ -30,9 +30,7 @@
   "dependencies": {
     "@cloudflare/containers": "0.3.7",
     "@fly/sprites": "0.1.0",
-    "@frockbot/computer-core": "workspace:*",
-    "@frockbot/computer-host-protocol": "workspace:*",
-    "@frockbot/computer-host-runtime": "workspace:*",
+    "@frockbot/computer": "workspace:*",
     "ws": "8.21.3"
   },
   "devDependencies": {

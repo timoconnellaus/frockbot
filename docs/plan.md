@@ -66,7 +66,7 @@ The seam that retrieved a lost response from the provider is deleted outright: `
 
 **9. Flutter to parity, Vue out.** The long pole. One Flutter client, on the phone and on the web — `bot.frockbot.com` is an app behind sign-in, so Flutter Web's first-load cost buys one codebase instead of two. Each surface ported, then its Vue original deleted in the same change. Includes the ViewNode renderer — six node types — which replaces A2UI as the way a plugin renders.
 
-**10. Narrow the Computer.** Extract Fly from `plugin-computer`, `plugin-fly-sprite` and `apps/computer-host` behind the `ComputerHost` interface, so a k8s host is an implementation rather than a rewrite.
+**10. Narrow the Computer.** Extract Fly from `computer/` and `apps/computer-host` behind the `ComputerHost` interface, so a k8s host is an implementation rather than a rewrite.
 
 ## Not now
 

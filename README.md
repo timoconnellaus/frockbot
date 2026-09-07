@@ -51,7 +51,7 @@ SPRITES_TOKEN="..." \
   bun run dev
 ```
 
-The hosted shell does expose Computer viewer and human-takeover controls: `plugin-computer`'s Computer card renders a live noVNC viewer, **Take control** and **Release control**, and a full-window overlay, and the same card is a section of the per-Bot info pane. The backend's token-routed noVNC gateway serves each Bot desktop through the User Sprite's public HTTPS URL, and its Bot-scoped takeover lease blocks new process and browser actions while leaving durable Package file operations available. Shells start in `/workspaces/<bot-key>` with `HOME=/home/box`. Canonical Memory Markdown does **not** live on the Computer: the Memory Package is its single writer and writes object storage directly, and the Computer sees Memory roots read-only, so a Turn can read and write Memory with the Computer hibernated.
+The hosted shell does expose Computer viewer and human-takeover controls: `computer/`'s Computer card renders a live noVNC viewer, **Take control** and **Release control**, and a full-window overlay, and the same card is a section of the per-Bot info pane. The backend's token-routed noVNC gateway serves each Bot desktop through the User Sprite's public HTTPS URL, and its Bot-scoped takeover lease blocks new process and browser actions while leaving durable Package file operations available. Shells start in `/workspaces/<bot-key>` with `HOME=/home/box`. Canonical Memory Markdown does **not** live on the Computer: the Memory Package is its single writer and writes object storage directly, and the Computer sees Memory roots read-only, so a Turn can read and write Memory with the Computer hibernated.
 
 ## Checks
 
@@ -250,6 +250,11 @@ apps/
   native/           Flutter client for the hosted application
 applications/
   foundation/       The composed application every deployment loads
+computer/          The Computer: tools, prompt, state, viewer UI, host seam, and the Fly provider
+  core/            Provider registry and capability interfaces for Computers
+  host-protocol/   Versioned v1 DTOs and decoders for the Computer host seam
+  host-runtime/    The Computer's on-Sprite layout, scripts, and Sprite naming
+  fly/             Fly Sprites Computer provider and takeover adapter
 core/
   contracts/        Session, LLM, prompt, and tool execution contracts
   durable/          Bot Durable Object admission, log, cursor, scheduling, and Composition generations
@@ -270,9 +275,6 @@ packages/
   compose-frockbot/ The plugin descriptor and the Bot isolate host that loads a member's artifact
   client-core/      Shared client runtime helpers and brand typography stylesheet
   client-ui/        Reusable Vue primitives and surface registry
-  computer-core/    Provider registry and capability interfaces for Computers
-  computer-host-protocol/  Versioned v1 DTOs and decoders for the Computer host seam
-  computer-host-runtime/   The Computer's on-Sprite layout, scripts, and Sprite naming
   plugin-clock/     Reference package with agent, host, and WebUI contributions
   plugin-echo/      Minimal reference Package used by tests and examples
   plugin-testkit/   Shared test doubles and harnesses for Package authors
@@ -280,11 +282,9 @@ packages/
   plugin-audit/     Audited-effect projection and the User's rebuildable audit table
   plugin-auth/      Authenticated identity contributions for the hosted gateway
   plugin-bot-template/ Bot template export, share records, and guarded import
-  plugin-computer/  Generic Computer tools, prompt, state, and viewer UI
   plugin-credentials/ Per-User Connection credential encryption and leases
   plugin-custom-models/  Opt-in account and Bot model selection surfaces
   plugin-flock/     Durable Bot directory and composable sheep identity Package
-  plugin-fly-sprite/ Fly Sprites Computer provider and takeover adapter
   plugin-identity/  Sheep identity composition and rendering
   plugin-image/     generate_image through Cloudflare's AI binding, fenced by the Workspace
   plugin-machine-messages/ Message delivery to and from a User's registered machines

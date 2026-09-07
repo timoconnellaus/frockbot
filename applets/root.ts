@@ -18,9 +18,9 @@
 // The published artifact is *not* what runs. `applet build` writes
 // `<appletId>/dist/` inside this root, the sync pushes it to object storage,
 // and publish reads the built bytes back through the Workspace file surface
-// (`syncWorkspaceRootNowV1` in `@frockbot/plugin-computer/agent` is the one
-// sanctioned way to make that push happen outside the Turn's own policy). No
-// credential ever reaches the Computer for the publish.
+// (`syncWorkspaceRootNowV1` in `@frockbot/computer/agent` is the one sanctioned
+// way to make that push happen outside the Turn's own policy). No credential
+// ever reaches the Computer for the publish.
 import {
   normalizeWorkspaceRelativePathV1,
   type WorkspacePathV1,

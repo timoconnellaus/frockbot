@@ -8,12 +8,12 @@ import type {
   ResolvedModelBindingV1,
 } from "@frockbot/core/configuration";
 import type { FoundationAgentPackage } from "@frockbot/agent-runtime/runtime";
-import type { ComputerSyncHostV1 } from "@frockbot/computer-core";
+import type { ComputerSyncHostV1 } from "@frockbot/computer/core";
 import type {
   ComputerAgentPluginConfig,
   ComputerProcessStorageV1,
-} from "@frockbot/plugin-computer/agent";
-import type { SharedComputerHostClient } from "@frockbot/plugin-computer/shared-provider";
+} from "@frockbot/computer/agent";
+import type { SharedComputerHostClient } from "@frockbot/computer/shared-provider";
 import type { AppletsRuntimeHostV1 } from "@frockbot/applets/feature";
 import type { BotTemplateRuntimeHostV1 } from "@frockbot/plugin-bot-template/agent";
 import type { FlockSelfRuntimeHostV1 } from "@frockbot/plugin-flock/agent";

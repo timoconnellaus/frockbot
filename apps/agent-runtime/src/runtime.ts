@@ -20,7 +20,7 @@ import { LlmRegistry } from "@frockbot/core/models";
 import { SystemPromptRegistry } from "@frockbot/core/prompt";
 import { ToolRegistry } from "@frockbot/core/tools";
 import { AgentLoop, createAgentLoop } from "@frockbot/core/agent-loop";
-import { ComputerRegistry } from "@frockbot/computer-core";
+import { ComputerRegistry } from "@frockbot/computer/core";
 import type { CredentialLeaseRuntime } from "@frockbot/plugin-credentials/user";
 import {
   bootstrapGeneration,

@@ -3,7 +3,7 @@ import {
   computerHostOperationKindV1,
   decodeComputerHostHttpRequestV1,
   problem,
-} from "@frockbot/computer-host-protocol";
+} from "@frockbot/computer/host-protocol";
 
 export interface ComputerHostRouteConfiguration {
   /** The shared secret the app Worker presents and the container re-checks. */

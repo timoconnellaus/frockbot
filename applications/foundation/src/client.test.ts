@@ -11,8 +11,13 @@ describe("foundation client composition", () => {
   });
 
   test("every client Contribution belongs to a Package this deployment ships", () => {
+    // A first-party Package is `@frockbot/plugin-<id>` until its module cut
+    // lands, and `@frockbot/<id>` after.
     const specifiers = new Set(
-      FOUNDATION_PACKAGES_V1.map((pkg) => `@frockbot/plugin-${pkg.id}`),
+      FOUNDATION_PACKAGES_V1.flatMap((pkg) => [
+        `@frockbot/plugin-${pkg.id}`,
+        `@frockbot/${pkg.id}`,
+      ]),
     );
     for (const contribution of foundationClientContributions) {
       // `@frockbot/plugin-shell/client` names the Package before its entry.

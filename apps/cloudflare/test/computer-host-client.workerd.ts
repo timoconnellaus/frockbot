@@ -1,9 +1,9 @@
 // `ComputerHostClient` in real workerd, from inside a real Durable Object,
 // against the fake Computer host on a real service binding.
 //
-// The unit tests in `packages/plugin-fly-sprite/src/host-client.test.ts` prove
-// the client's logic against a hand-written fetcher. They cannot prove the two
-// things that only exist here: that a workerd `Fetcher` behaves the way the
+// The unit tests in `computer/fly/host-client.test.ts` prove the client's logic
+// against a hand-written fetcher. They cannot prove the two things that only
+// exist here: that a workerd `Fetcher` behaves the way the
 // client assumes when a body streams and when a request aborts, and that a
 // Computer effect leaves a durable record a recovery could read. Both are
 // asserted through `ComputerHostClientProbe`, whose storage is real Durable

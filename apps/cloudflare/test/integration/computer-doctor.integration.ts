@@ -8,7 +8,7 @@
 // refused before it ever reaches a shell.
 import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
-import { computerBotKey } from "@frockbot/plugin-fly-sprite";
+import { computerBotKey } from "@frockbot/computer/fly";
 import type { FakeExecScript } from "../computer-host-fake.ts";
 import { TOOL_CALL_TRIGGER } from "../harness/miniflare.ts";
 import {

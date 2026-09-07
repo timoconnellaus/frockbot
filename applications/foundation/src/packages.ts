@@ -12,7 +12,7 @@ import { appletsDefinitionV1 } from "@frockbot/applets/definition";
 import { auditDefinitionV1 } from "@frockbot/plugin-audit/definition";
 import { authDefinitionV1 } from "@frockbot/plugin-auth/definition";
 import { botTemplateDefinitionV1 } from "@frockbot/plugin-bot-template/definition";
-import { computerDefinitionV1 } from "@frockbot/plugin-computer/definition";
+import { computerDefinitionV1 } from "@frockbot/computer/definition";
 import { credentialsDefinitionV1 } from "@frockbot/plugin-credentials/definition";
 import { customModelsDefinitionV1 } from "@frockbot/plugin-custom-models/definition";
 import { flockDefinitionV1 } from "@frockbot/plugin-flock/definition";
