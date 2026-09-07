@@ -22,11 +22,6 @@ import {
   type FlockUserBackendContribution,
   type FlockUserBackendHost,
 } from "@frockbot/plugin-flock/user";
-import {
-  type PackagePublisherUserContribution,
-  type PackagePublisherUserHost,
-} from "@frockbot/plugin-package-publisher/user";
-export type { PackagePublisherUserHost } from "@frockbot/plugin-package-publisher/user";
 import { type MachineUserBackendContribution } from "@frockbot/plugin-user-machine/user";
 import type { MachineStorageV1 } from "@frockbot/plugin-user-machine/store";
 import {
@@ -51,7 +46,6 @@ import {
   flockUserContribution,
   machineUserContribution,
   ollamaCloudUserContribution,
-  packagePublisherUserContribution,
   searchUserContribution,
   settingsUserContribution,
   type FoundationUserBackendHostV1,
@@ -122,7 +116,6 @@ export interface MountedFoundationUserBackend {
   flock: FlockUserBackendContribution;
   /** The Bot Template share ledger, and the staging command that writes it. */
   botTemplate: BotTemplateUserBackendContribution;
-  publisher: PackagePublisherUserContribution;
   /**
    * The User's transcript index. It is User-scoped state like every other
    * Contribution here, and it is the only one that is a *projection*: the rows
@@ -186,11 +179,6 @@ export async function createFoundationUserBackendContributions(
     readSecret(
       name: "CREDENTIAL_KEYRING" | "MACHINE_TOKEN_SECRET" | "BETTER_AUTH_URL",
     ): string | undefined;
-    /**
-     * The publication seam: the User Durable Object's own object storage and
-     * Worker Loader, which the adapter owns and this application never names.
-     */
-    packagePublisher: PackagePublisherUserHost;
     /**
      * The Bot lifecycle seam. Archive and restore are Bot authority, so the
      * User coordinator carries each command to the Bot Durable Object rather
@@ -353,9 +341,6 @@ export async function createFoundationUserBackendContributions(
           : {}),
       };
     },
-    get packagePublisher() {
-      return host.packagePublisher;
-    },
     get machines() {
       return {
         storage: host.storage,
@@ -409,7 +394,6 @@ export async function createFoundationUserBackendContributions(
     | FrockAiUserBackendContribution
     | FlockUserBackendContribution
     | BotTemplateUserBackendContribution
-    | PackagePublisherUserContribution
     | SearchUserBackendContribution
     | AuditUserBackendContribution
     | MachineUserBackendContribution
@@ -421,7 +405,6 @@ export async function createFoundationUserBackendContributions(
   const frockAi = mounted.get(frockAiUserContribution);
   const flock = mounted.get(flockUserContribution);
   const botTemplate = mounted.get(botTemplateUserContribution);
-  const publisher = mounted.get(packagePublisherUserContribution);
   const search = mounted.get(searchUserContribution);
   const audit = mounted.get(auditUserContribution);
   const machines = mounted.get(machineUserContribution);
@@ -432,14 +415,13 @@ export async function createFoundationUserBackendContributions(
     !frockAi ||
     !flock ||
     !botTemplate ||
-    !publisher ||
     !search ||
     !audit ||
     !machines
   ) {
     await mounted.dispose();
     throw new Error(
-      "Foundation requires Settings, Credentials, Ollama, Frock AI, Flock, Bot Templates, Search, Audit, Machines, and Package Publisher User Contributions",
+      "Foundation requires Settings, Credentials, Ollama, Frock AI, Flock, Bot Templates, Search, Audit, and Machines User Contributions",
     );
   }
 
@@ -465,7 +447,6 @@ export async function createFoundationUserBackendContributions(
     connections,
     flock,
     botTemplate,
-    publisher,
     search,
     audit,
     machines,

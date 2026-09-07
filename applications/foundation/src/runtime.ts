@@ -28,16 +28,6 @@ import {
   type BotTemplateRuntimeHostV1,
 } from "@frockbot/plugin-bot-template/agent";
 export type { BotTemplateRuntimeHostV1 } from "@frockbot/plugin-bot-template/agent";
-import authoringManifest from "@frockbot/plugin-authoring/manifest";
-import {
-  createAuthoringRuntimePlugin,
-  type PackageAuthoringHost,
-} from "@frockbot/plugin-authoring/agent";
-import packageCatalogManifest from "@frockbot/plugin-package-catalog/manifest";
-import {
-  createPackageCatalogRuntimePlugin,
-  type PackageCatalogHost,
-} from "@frockbot/plugin-package-catalog/agent";
 import clockRuntimePlugin from "@frockbot/plugin-clock/agent";
 // Every selected package manifest participates in the compiled application hash.
 import clockManifest from "@frockbot/plugin-clock/manifest";
@@ -78,12 +68,6 @@ import echoManifest from "@frockbot/plugin-echo/manifest";
 import identityRuntimePlugin from "@frockbot/plugin-identity/agent";
 import identityManifest from "@frockbot/plugin-identity/manifest";
 import memoryManifest from "@frockbot/plugin-memory/manifest";
-import packagePublisherManifest from "@frockbot/plugin-package-publisher/manifest";
-import {
-  createPackagePublisherAgentPlugin,
-  type PackagePublisherAgentHost,
-} from "@frockbot/plugin-package-publisher/agent";
-export type { PackagePublisherAgentHost } from "@frockbot/plugin-package-publisher/agent";
 import foundationProviderManifest from "@frockbot/plugin-provider-foundation/manifest";
 import foundationProviderPlugin, {
   FOUNDATION_MODEL,
@@ -160,8 +144,6 @@ const manifests = new Map<string, unknown>([
   ["@frockbot/plugin-auth", authManifest],
   ["@frockbot/plugin-admin", adminManifest],
   ["@frockbot/plugin-bot-template", botTemplateManifest],
-  ["@frockbot/plugin-authoring", authoringManifest],
-  ["@frockbot/plugin-package-catalog", packageCatalogManifest],
   ["@frockbot/plugin-identity", identityManifest],
   ["@frockbot/plugin-provider-foundation", foundationProviderManifest],
   ["@frockbot/plugin-credentials", credentialsManifest],
@@ -175,7 +157,6 @@ const manifests = new Map<string, unknown>([
   ["@frockbot/plugin-flock", flockManifest],
   ["@frockbot/plugin-memory", memoryManifest],
   ["@frockbot/plugin-image", imageManifest],
-  ["@frockbot/plugin-package-publisher", packagePublisherManifest],
   ["@frockbot/plugin-clock", clockManifest],
   ["@frockbot/plugin-computer", computerManifest],
   ["@frockbot/plugin-shell", shellManifest],
@@ -674,15 +655,6 @@ export function createFoundationHostedRuntimePackages(
      */
     computerHostBinding?: ComputerHostBinding;
     /**
-     * The Package authoring seam, supplied by the Bot Durable Object for one
-     * admitted Turn. Absent outside a Turn, and the Authoring Package is then
-     * not mounted at all: a Bot cannot author a Package except inside a Turn
-     * whose run and session its provenance can name.
-     */
-    authoring?: PackageAuthoringHost;
-    /** Catalog tools exist only for a Turn whose Bot/User authorities are bound. */
-    packageCatalog?: PackageCatalogHost;
-    /**
      * The Skills seam, supplied by the Bot Durable Object for one admitted
      * Turn. Absent outside a Turn, and outside one whose Workspace reads are
      * available, and the Skills Package is then not mounted: a Turn with no
@@ -783,7 +755,6 @@ export function createFoundationHostedRuntimePackages(
      * refusing, which is what a feature gate is for.
      */
     machineMessages?: MachineMessagesRuntimeHostV1;
-    packagePublisher: PackagePublisherAgentHost;
   },
 ): FoundationRuntimePackage[] {
   return [
@@ -850,39 +821,10 @@ export function createFoundationHostedRuntimePackages(
           ),
         ]
       : []),
-    ...(host.authoring
-      ? [
-          runtimePackage(
-            plan,
-            "authoring",
-            createAuthoringRuntimePlugin(host.authoring),
-          ),
-        ]
-      : []),
-    ...(host.packageCatalog
-      ? [
-          runtimePackage(
-            plan,
-            "package-catalog",
-            createPackageCatalogRuntimePlugin(host.packageCatalog),
-          ),
-        ]
-      : []),
     runtimePackage(
       plan,
       "credentials",
       createCredentialRuntimePlugin({ readSecret: host.readSecret }),
-    ),
-    runtimePackage(
-      plan,
-      "package-publisher",
-      createPackagePublisherAgentPlugin(host.packagePublisher, {
-        userId: host.userId,
-        defaultProviderId: "fly-sprite",
-        // Read from the same place the Computer plugin reads it, so no
-        // section of the prompt promises a Computer this host does not have.
-        configured: computerConfiguredV1(host),
-      }),
     ),
     runtimePackage(plan, "fly-sprite", computerProviderPlugin(host)),
     runtimePackage(
@@ -1124,10 +1066,6 @@ export async function createFoundationRuntimeApplication(): Promise<FoundationRu
   const plan = await compileFoundationApplication();
   const runtimeIds = new Set(plan.contributions.runtime);
   // Computer providers require host authority and are added only by a capable runtime.
-  // Authoring mounts only for an admitted Turn, which supplies its host.
-  runtimeIds.delete("authoring");
-  // Catalog changes likewise require the Bot and User durable authorities.
-  runtimeIds.delete("package-catalog");
   // Skills mount only for a Turn whose instruction root the host can read.
   runtimeIds.delete("skills");
   // Memory mounts only for a Turn whose Memory roots the host can reach.
@@ -1160,8 +1098,6 @@ export async function createFoundationRuntimeApplication(): Promise<FoundationRu
   runtimeIds.delete("computer");
   runtimeIds.delete("credentials");
   runtimeIds.delete("fly-sprite");
-  // Package publication is mounted with the current User's durable host.
-  runtimeIds.delete("package-publisher");
   runtimeIds.delete("provider-ollama-cloud");
   runtimeIds.delete("provider-flock-ai");
   runtimeIds.delete("provider-anthropic");

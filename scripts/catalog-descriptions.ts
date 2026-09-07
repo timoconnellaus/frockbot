@@ -14,8 +14,6 @@ export const CATALOG_DESCRIPTIONS: Readonly<Record<string, string>> = {
   audit:
     "Review a record of every command, browser step, and outside call the Bot made.",
   auth: "Sign in and stay signed in across the web app and your desktop.",
-  authoring:
-    "Let the Bot write and revise its own tools when no existing tool does the job.",
   "bot-template":
     "Export a Bot as a shareable template so someone else can start from your setup.",
   clock:
@@ -46,10 +44,6 @@ export const CATALOG_DESCRIPTIONS: Readonly<Record<string, string>> = {
   "mobile-clipboard": "Let the Bot read and write the clipboard on your phone.",
   "mobile-notifications":
     "Get a push notification on your phone when the Bot needs you or finishes a job.",
-  "package-catalog":
-    "Search for plugins and install, update, or remove them, so the Bot picks up new tools.",
-  "package-publisher":
-    "Publish a plugin you built, so other people can find and install it.",
   "provider-anthropic":
     "Use Anthropic's Claude models, on your own Anthropic account, to power the Bot's replies.",
   "provider-flock-ai": "Use Frock AI models to power the Bot's replies.",

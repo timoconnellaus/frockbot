@@ -16,9 +16,9 @@
  *   - The app Worker under `wrangler dev --env development` — the same workerd
  *     as production, local R2/D1/Durable Objects under `.native-dev/`, and the
  *     remote AI, Vectorize and memory bindings when wrangler is signed in.
- *   - The Package bundler and, with `SPRITES_TOKEN`, the Computer host — real
- *     Sprites — each under their own `wrangler dev`, because a service binding
- *     resolves only through the dev registry.
+ *   - With `SPRITES_TOKEN`, the Computer host — real Sprites — under its own
+ *     `wrangler dev`, because a service binding resolves only through the dev
+ *     registry.
  *   - The emulator borrows the host's loopback through `adb reverse`. The app
  *     is a debug build pointed at it with `--dart-define`, and it signs in
  *     through the Worker's development door instead of Google: the one
@@ -44,7 +44,6 @@ import { resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "..");
 const cloudflareRoot = resolve(root, "apps/cloudflare");
-const bundlerRoot = resolve(root, "apps/cloudflare-bundler");
 const computerHostRoot = resolve(root, "apps/computer-host");
 const nativeRoot = resolve(root, "apps/native");
 const stateDir = resolve(root, ".native-dev");
@@ -58,7 +57,6 @@ const mainCheckout =
 
 // Off the dogfood stack's ports, so both can run.
 const workerPort = process.env.FROCKBOT_NATIVE_WORKER_PORT ?? "8797";
-const bundlerPort = process.env.FROCKBOT_NATIVE_BUNDLER_PORT ?? "8798";
 const computerHostPort = process.env.FROCKBOT_NATIVE_COMPUTER_PORT ?? "8799";
 // One origin for everyone: `adb reverse` lends the emulator the host's
 // loopback, so the app, the Worker and `BETTER_AUTH_URL` all name this — and
@@ -218,7 +216,7 @@ function startBackground(name: string, command: string[], cwd: string): void {
 }
 
 function down(): void {
-  for (const name of ["worker", "bundler", "computer-host"]) {
+  for (const name of ["worker", "computer-host"]) {
     const file = pidFile(name);
     if (!existsSync(file)) continue;
     const pid = Number(readFileSync(file, "utf8").trim());
@@ -226,7 +224,7 @@ function down(): void {
     rmSync(file, { force: true });
   }
   // Backstop for a lost pid file: whoever holds this stack's own ports.
-  for (const port of [workerPort, bundlerPort, computerHostPort]) {
+  for (const port of [workerPort, computerHostPort]) {
     const holders = run(["lsof", "-ti", `tcp:${port}`, "-sTCP:LISTEN"], {
       quiet: true,
       check: false,
@@ -345,25 +343,6 @@ function cloudflareAuthenticated(): boolean {
 async function serve(
   vars: Map<string, string>,
 ): Promise<{ model: string; computer: string }> {
-  startBackground(
-    "bundler",
-    [
-      "bunx",
-      "wrangler",
-      "dev",
-      "--ip",
-      "127.0.0.1",
-      "--port",
-      bundlerPort,
-      "--local",
-      "--inspector-port",
-      inspectorPort(bundlerPort),
-      "--persist-to",
-      persistDir,
-    ],
-    bundlerRoot,
-  );
-
   let computer = "off — no SPRITES_TOKEN in apps/cloudflare/.dev.vars";
   if (vars.get("SPRITES_TOKEN")) {
     startBackground(
@@ -419,18 +398,6 @@ async function serve(
     cloudflareRoot,
   );
 
-  await waitFor(
-    `the bundler on :${bundlerPort}`,
-    async () =>
-      (
-        await fetch(`http://127.0.0.1:${bundlerPort}/`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: "{}",
-        })
-      ).status > 0,
-    120_000,
-  );
   await waitFor(
     `the Worker on :${workerPort}`,
     async () =>
@@ -932,9 +899,6 @@ function status(extra: { model?: string; computer?: string } = {}): void {
   say("stack");
   console.log(
     `  Worker         ${hostOrigin}   (pid ${pid("worker")}) — the emulator reaches it there too, via adb reverse`,
-  );
-  console.log(
-    `  Bundler        http://127.0.0.1:${bundlerPort}   (pid ${pid("bundler")})`,
   );
   console.log(
     `  Computer host  http://127.0.0.1:${computerHostPort}   (pid ${pid("computer-host")})`,

@@ -23,16 +23,6 @@
       "grants": []
     },
     {
-      "specifier": "@frockbot/plugin-authoring",
-      "version": "0.0.1",
-      "grants": ["packages:author"]
-    },
-    {
-      "specifier": "@frockbot/plugin-package-catalog",
-      "version": "0.0.1",
-      "grants": ["packages:install"]
-    },
-    {
       "specifier": "@frockbot/plugin-skills",
       "version": "0.0.1",
       "grants": ["skills:author"]
@@ -87,11 +77,6 @@
       "specifier": "@frockbot/plugin-provider-anthropic",
       "version": "0.0.1",
       "grants": ["connections:manage", "models:invoke", "network:anthropic"]
-    },
-    {
-      "specifier": "@frockbot/plugin-package-publisher",
-      "version": "0.0.1",
-      "grants": ["package:publish"]
     },
     {
       "specifier": "@frockbot/plugin-flock",

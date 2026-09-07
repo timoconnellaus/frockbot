@@ -8,13 +8,12 @@ Paths are relative to the repository root.
 
 Four Workers, one container image, one Flutter app.
 
-| Deployable                | Worker name                   | Config                                   | Serves                                                                                                                                                                                                            |
-| ------------------------- | ----------------------------- | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `apps/cloudflare`         | `frockbot-cloudflare`         | `apps/cloudflare/wrangler.jsonc`         | The product. Custom domains `bot.frockbot.com` and `ui.bot.frockbot.com`. `main: src/index.ts`, compatibility date `2026-08-27`, flag `nodejs_compat`.                                                            |
-| `apps/cloudflare-bundler` | `frockbot-cloudflare-bundler` | `apps/cloudflare-bundler/wrangler.jsonc` | One RPC method, `PackageBundler.bundle()` (`apps/cloudflare-bundler/src/index.ts:13`). No bindings, no routes.                                                                                                    |
-| `apps/computer-host`      | `frockbot-computer-host`      | `apps/computer-host/wrangler.jsonc`      | No routes; reached only through the app's `COMPUTER_HOST` service binding. Fronts a Cloudflare Container built from `apps/computer-host/Dockerfile` (`node:24-slim`, `instance_type: basic`, `max_instances: 3`). |
-| `apps/marketing`          | `frockbot-marketing`          | `apps/marketing/wrangler.jsonc`          | `frockbot.com` and `www.frockbot.com`. Static `ASSETS` from `./public` with `run_worker_first: true`; the Worker is a canonical-host redirect plus security headers (`apps/marketing/src/index.ts:1-31`).         |
-| `apps/native`             | `frockbot_native`             | `apps/native/pubspec.yaml`               | Flutter, Android and macOS. Not deployed by CI.                                                                                                                                                                   |
+| Deployable           | Worker name              | Config                              | Serves                                                                                                                                                                                                            |
+| -------------------- | ------------------------ | ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/cloudflare`    | `frockbot-cloudflare`    | `apps/cloudflare/wrangler.jsonc`    | The product. Custom domains `bot.frockbot.com` and `ui.bot.frockbot.com`. `main: src/index.ts`, compatibility date `2026-08-27`, flag `nodejs_compat`.                                                            |
+| `apps/computer-host` | `frockbot-computer-host` | `apps/computer-host/wrangler.jsonc` | No routes; reached only through the app's `COMPUTER_HOST` service binding. Fronts a Cloudflare Container built from `apps/computer-host/Dockerfile` (`node:24-slim`, `instance_type: basic`, `max_instances: 3`). |
+| `apps/marketing`     | `frockbot-marketing`     | `apps/marketing/wrangler.jsonc`     | `frockbot.com` and `www.frockbot.com`. Static `ASSETS` from `./public` with `run_worker_first: true`; the Worker is a canonical-host redirect plus security headers (`apps/marketing/src/index.ts:1-31`).         |
+| `apps/native`        | `frockbot_native`        | `apps/native/pubspec.yaml`          | Flutter, Android and macOS. Not deployed by CI.                                                                                                                                                                   |
 
 Named environments on the app Worker (`apps/cloudflare/wrangler.jsonc`):
 
@@ -221,17 +220,13 @@ Failure phases are `resolve | bundle | mount | health` (`:22`). `activateComposi
 - `BotIsolateContributionHost.prepare` (`:266`) loads the artifact, mounts and calls `entrypoint.health()` as one guarded phase, then requires `health.ok`, non-empty tools, a matching `packageId`, and tool and hook names equal to the stored manifest's (`:305-345`). It also enforces the manifest's admission ceiling (`:162`).
 - `BotCapabilities` (`apps/cloudflare/src/bot-capabilities.ts:68`), a `WorkerEntrypoint`, is the loopback through which an isolate reaches the kernel. It is minted per Turn at `packages/plugin-shell/src/backend.ts:2069-2125`.
 
-### Bundling
-
-Authoring calls the `PACKAGE_BUNDLER` service binding (`packages/plugin-shell/src/backend-authoring.ts:778`) → `apps/cloudflare-bundler/src/index.ts:12` → `bundle.ts` using `@cloudflare/worker-bundler@0.2.3`. The bundler Worker is stateless and holds no bindings; the Bot Durable Object writes the resulting R2 object and records the durable intent.
-
 ### Built-in versus dynamic
 
 34 of the 35 members carry no `artifact` and resolve from the compiled contribution tables. `createFoundationRuntimeApplication` (`applications/foundation/src/runtime.ts:1152`) filters the runtime table to `pkg.artifact === undefined`, then removes 19 runtime ids that mount only inside an admitted Turn.
 
 Exactly one member carries an `artifact`: `@frockbot/plugin-applets` (`frockbot.application.json:167`). Its bytes are checked in at `applications/foundation/generated/applets-artifact.ts` as `FIRST_PARTY_PACKAGE_ARTIFACTS_V1` and wired into the Durable Object at `apps/cloudflare/src/bot-state.ts:514`.
 
-Bot-authored packages (`packages/plugin-authoring/src/agent.ts:156`) and catalog installs (`packages/plugin-shell/src/backend-package-catalog.ts:874`) both produce artifact-bearing members.
+Nothing else produces an artifact-bearing member today: Bot authoring returns with the step 8 build service (`plan.md`).
 
 ---
 
@@ -280,7 +275,7 @@ Auth is PKCE in the system browser (`lib/client/auth.dart:17`), returning over a
 
 WebView is used in one place, `AppletPage` (`lib/extensions/fallback.dart:157-465`), loading the anonymous bootstrap at `ui.bot.frockbot.com/native-fallback` (server side `apps/cloudflare/src/native-fallback.ts:34`). It never receives the native session.
 
-**Capability gap.** Present in web, absent in native: Bot creation, starting a conversation, the package catalog, in-app connector authorize and revoke, model configuration, admin, search, flock and avatar editing, routines, Bot templates, the package publisher, registered machines, the Computer overlay, and package iframe entries. Native settings are a generic server-described form renderer rather than plugin surfaces.
+**Capability gap.** Present in web, absent in native: Bot creation, starting a conversation, the package catalog, in-app connector authorize and revoke, model configuration, admin, search, flock and avatar editing, routines, Bot templates, registered machines, the Computer overlay, and package iframe entries. Native settings are a generic server-described form renderer rather than plugin surfaces.
 
 Present in native, absent in web: a durable offline store of directory, transcripts and drafts; inbox as a first-class screen; Bot archive, restore and delete UI with composition-generation and audit detail; deep-link-to-Bot; PKCE system-browser sign-in.
 
@@ -397,7 +392,6 @@ Bindings are declared in `apps/cloudflare/wrangler.jsonc`.
 | `USER_APPLICATIONS` (:20)                                                 | Worker Loader      | The per-user foundation application artifact (`apps/cloudflare/src/index.ts:2229`, `src/user-configuration.ts:201`, `src/package-publication.ts:120`) |
 | `BOT_PACKAGES` (:26)                                                      | Worker Loader      | Bot Package isolates, loaded with `globalOutbound` disabled (`packages/plugin-shell/src/backend.ts:2069`)                                             |
 | `APPLETS` (:33)                                                           | Worker Loader      | Applet server artifacts, mounted as facets (`apps/cloudflare/src/applet-state.ts:94`, `:249`)                                                         |
-| `PACKAGE_BUNDLER` (:42)                                                   | Service            | `frockbot-cloudflare-bundler`                                                                                                                         |
 | `COMPUTER_HOST` (:47)                                                     | Service            | `frockbot-computer-host` (`apps/cloudflare/src/bot-state.ts:465-474`)                                                                                 |
 | `APPLICATION_ARTIFACTS` (:53)                                             | R2                 | Application, Package and Applet artifacts, content-addressed                                                                                          |
 | `MEMORY_FILES` (:57)                                                      | R2                 | Memory and workspace file bodies (`apps/cloudflare/src/workspace.ts:126`, `:157`)                                                                     |
@@ -451,11 +445,10 @@ Admin is membership of the comma-separated `FROCKBOT_ADMIN_EMAILS` secret (`apps
 1. **Bun unit** — root `bun test` (`package.json`), matching `*.test.ts` and `*.spec.ts` across every workspace. No `bunfig.toml`.
 2. **Workerd, hermetic** — `apps/cloudflare/vitest.config.ts`, `test/**/*.workerd.ts`, entry `./test/fly-compatibility-worker.ts`, with Miniflare fakes for the Computer host, Frock AI and Vectorize. `fileParallelism: false`.
 3. **Workerd, integration** — `apps/cloudflare/vitest.integration.config.ts`, `test/integration/**/*.integration.ts`, entry `./src/index.ts`, with the real gateway, the built artifact and D1 migrations via `readD1Migrations`.
-4. **Bundler workerd** — `apps/cloudflare-bundler/vitest.config.ts`.
-5. **Computer host** — `apps/computer-host/vitest.config.ts` plus `bun test src container`. Opt-in live suites `test:live` and `test:live:desktop` are not run by CI.
-6. **Playwright** — `apps/cloudflare/e2e/playwright.config.ts`, `**/*.e2e.ts`, `fullyParallel: false`, `workers: 1`, 240 s timeout, 4-way CI sharding through `balanced-shard-reporter.ts`, `webServer` of `bun e2e/serve.ts`. Roughly 28 spec files.
-7. **Flutter** — `apps/native/test/*.dart` (14 files) plus `integration_test/settings_screens.dart`, which is a screenshot runner.
-8. **Gate scripts** — run under `typecheck`: `scripts/check-client-protocol.ts`, `scripts/check-kernel-imports.ts`, `scripts/check-computer-host-imports.ts`, `scripts/generate-isolate-context-catalog.ts --check`, `scripts/build-applets-package.ts --check`, then `scripts/typecheck.ts`. Plus `lint:ui-styles` (`scripts/check-ui-styles.ts`).
+4. **Computer host** — `apps/computer-host/vitest.config.ts` plus `bun test src container`. Opt-in live suites `test:live` and `test:live:desktop` are not run by CI.
+5. **Playwright** — `apps/cloudflare/e2e/playwright.config.ts`, `**/*.e2e.ts`, `fullyParallel: false`, `workers: 1`, 240 s timeout, 4-way CI sharding through `balanced-shard-reporter.ts`, `webServer` of `bun e2e/serve.ts`. Roughly 28 spec files.
+6. **Flutter** — `apps/native/test/*.dart` (14 files) plus `integration_test/settings_screens.dart`, which is a screenshot runner.
+7. **Gate scripts** — run under `typecheck`: `scripts/check-client-protocol.ts`, `scripts/check-kernel-imports.ts`, `scripts/check-computer-host-imports.ts`, `scripts/generate-isolate-context-catalog.ts --check`, `scripts/build-applets-package.ts --check`, then `scripts/typecheck.ts`. Plus `lint:ui-styles` (`scripts/check-ui-styles.ts`).
 
 ### `.github/workflows/ci.yml`
 

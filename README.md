@@ -160,7 +160,7 @@ A failure in the publish step reporting a 404 from the token exchange means the 
 
 Staging follows the branch as production follows the tag. Every push to `main` that passes `validate` and the browser end-to-end job runs `ci.yml`'s `deploy-staging`, which deploys `apps/cloudflare` to `https://staging-bot.frockbot.com` through the GitHub `staging` environment. It is the same Worker code production runs, in Wrangler's `staging` environment, with none of production's data.
 
-Staging isolates everything that holds state or identity — its own D1 database `frockbot-auth-staging`, its own R2 buckets, its own Vectorize index, its own secrets, and its own Durable Object namespaces, which come free because a namespace belongs to the Worker that declares it. It shares the two stateless service Workers, `frockbot-cloudflare-bundler` and `frockbot-computer-host`: the bundler has no bindings at all and the Computer host owns only the Sprites credential, so staging exercises the same host production does instead of paying for a second container deployment. The consequence is production's ordering constraint — a change to either Worker's contract ships with a tag, so staging sees it only once that tag lands.
+Staging isolates everything that holds state or identity — its own D1 database `frockbot-auth-staging`, its own R2 buckets, its own Vectorize index, its own secrets, and its own Durable Object namespaces, which come free because a namespace belongs to the Worker that declares it. It shares the stateless `frockbot-computer-host` Worker, which owns only the Sprites credential, so staging exercises the same host production does instead of paying for a second container deployment. The consequence is production's ordering constraint — a change to the host's contract ships with a tag, so staging sees it only once that tag lands.
 
 Unlike production, the staging deploy provisions its own resources. Each step is create-if-absent, so the first deploy creates the D1 database, the three R2 buckets, and the Vectorize index, and every later deploy finds them and moves on. The D1 identifier is resolved at deploy time and written into the staging `database_id`, so no variable records it.
 
@@ -192,8 +192,7 @@ Register `https://staging-bot.frockbot.com/api/auth/callback/google` as an autho
 After a version tag's packages are published, `release.yml` deploys four Cloudflare Workers through the GitHub `production` environment. Merging to `main` deploys nothing — a tag is the only thing that reaches production, so code can be integrated freely and released deliberately:
 
 - `apps/marketing` serves the public marketing site at `https://frockbot.com` and redirects `www.frockbot.com` to the apex domain;
-- `apps/cloudflare-bundler` is the binding-less Package bundler the app reaches through its `PACKAGE_BUNDLER` service binding; it deploys before the app because that binding must resolve;
-- `apps/computer-host` is the shared Computer host: an internal Worker with no public route, a bounded pool of Cloudflare Containers, and the only place `SPRITES_TOKEN` is used. It deploys before the app for the same reason the bundler does, and because a stale host would be serving a current app;
+- `apps/computer-host` is the shared Computer host: an internal Worker with no public route, a bounded pool of Cloudflare Containers, and the only place `SPRITES_TOKEN` is used. It deploys before the app because that binding must resolve, and because a stale host would be serving a current app;
 - `apps/cloudflare` serves the authenticated application and API at `https://bot.frockbot.com`.
 
 The Computer host runs Containers, which require the **Workers Paid plan**; its deploy step builds and pushes the container image, so the runner needs Docker (`ubuntu-latest` has it).
@@ -244,7 +243,6 @@ Register `https://bot.frockbot.com/api/auth/callback/google` as an authorized Go
 apps/
   agent-runtime/    Transport-neutral backend Agent composition
   cloudflare/       User application loader, Dynamic Worker artifact, and bot state
-  cloudflare-bundler/ Binding-less Package bundler behind the PACKAGE_BUNDLER binding
   computer-host/    Shared Computer host Worker and its Node container
   marketing/        Public frockbot.com site and static-assets Worker
   native/           Flutter client for the hosted application
@@ -284,7 +282,6 @@ packages/
   plugin-applets/   Bot-authored Applets: source root, build, and publication
   plugin-audit/     Audited-effect projection and the User's rebuildable audit table
   plugin-auth/      Authenticated identity contributions for the hosted gateway
-  plugin-authoring/ Bot-authored Package authoring, undo, and self-inspection
   plugin-bot-template/ Bot template export, share records, and guarded import
   plugin-computer/  Generic Computer tools, prompt, state, and viewer UI
   plugin-credentials/ Per-User Connection credential encryption and leases
@@ -296,8 +293,6 @@ packages/
   plugin-machine-messages/ Message delivery to and from a User's registered machines
   plugin-memory/    Bot, User and Project Markdown memory over the Workspace store
   plugin-models/    Model role bindings and the provider-neutral model registry
-  plugin-package-catalog/ The remote Catalog surface and its install path
-  plugin-package-publisher/ Durable User application publication and rollback
   plugin-prompt/    System prompt assembly from Package contributions
   plugin-provider-foundation/ Deterministic credential-free development provider
   plugin-provider-anthropic/  Optional Anthropic (Claude) model provider
@@ -322,9 +317,7 @@ docs/
 
 ## Cloudflare vertical slice
 
-The Cloudflare application builds an immutable Dynamic Worker artifact containing the user-facing UI and gateway routes. The gateway loads the User's active `userId:applicationHash`; the Dynamic Worker forwards authoritative Bot execution through a user-scoped capability backed by one Durable Object per Bot. Bots can publish content-hashed application artifacts through the Package Publisher Contribution, and the User Durable Object retains durable revision and rollback state.
-
-Every Bot has `list_setup_revisions`, `publish_setup`, and `rollback_setup` tools. The editable setup is the Git repository at `/home/box/setup` in its Sprite. After the Bot commits and tests a change, `publish_setup` archives Git `HEAD`, reads `dist/application.mjs`, and submits the check results; failed checks block publication, and the backend independently loads and health-checks the exact module before activation. File editing and choice of Sprite editor remain outside this Contribution. The hosted **Revisions** surface lists history and can roll every Bot back to an earlier shared application revision.
+The Cloudflare application builds an immutable Dynamic Worker artifact containing the user-facing UI and gateway routes. The gateway loads the User's active `userId:applicationHash`; the Dynamic Worker forwards authoritative Bot execution through a user-scoped capability backed by one Durable Object per Bot.
 
 ```bash
 bun run --filter @frockbot/cloudflare test

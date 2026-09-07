@@ -1,4 +1,3 @@
-import type { AuthoringProbe } from "./authoring-probe.ts";
 import type { BotIsolateProbe } from "./bot-isolate-probe.ts";
 import type { ComputerHostClientProbe } from "./computer-host-probe.ts";
 import type {
@@ -12,7 +11,6 @@ import type { DeploymentPolicy } from "../src/deployment-policy.ts";
 
 interface FlyTestEnv {
   APPLICATION_ARTIFACTS: R2Bucket;
-  AUTHORING: DurableObjectNamespace<AuthoringProbe>;
   AI: Ai;
   BOT_ISOLATES: DurableObjectNamespace<BotIsolateProbe>;
   BOT_STATES: DurableObjectNamespace<WorkerdBotState>;

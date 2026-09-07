@@ -54,7 +54,11 @@ Forensic reconciliation is gone. Every external effect that matters carries an i
 
 The seam that retrieved a lost response from the provider is deleted outright: `LlmReconciliationCapability`, `ctx.llm.reconcile`, and all four provider implementations. It was declared, implemented everywhere and called by nobody.
 
-**6. Frock Compose replaces cordis.** _The provenance framing is already stripped._ Wire the extension points named in `AGENTS.md`, and delete `kernel-composition`, the manifest system, `plugin-authoring`, `plugin-package-catalog` and `plugin-package-publisher`.
+**6. Frock Compose replaces cordis.** _In progress, in three cuts that each leave `main` shippable._ Wire the extension points named in `AGENTS.md` — and only those — and delete `kernel-composition`, the manifest system, `plugin-authoring`, `plugin-package-catalog` and `plugin-package-publisher`.
+
+- _6a, done._ The three packages, with the seams that existed only for them: the Bot authoring quota and artifact store, the Catalog install path, the publisher's User revisions, and `apps/cloudflare-bundler`, whose one caller was authoring. 14,900 lines. Authoring returns with the step 8 build service; nothing else produces an artifact-bearing member now, so the only isolate member is the Applets Package.
+- _6b._ cordis leaves the trusted runtime. The registries become plain classes built by ordinary imports; the loop takes one explicit hooks object the app composes in a fixed order, replacing the waterfall and emit bus; first-party code stops having manifests and stops appearing in Composition generations, which deletes the required-core machinery with it.
+- _6c._ Frock Compose hosts the untrusted layer only — Bot-authored code and Applets through the Worker Loader host — with the six named actions, the slots, the grant list and the three context keys. `kernel-composition` goes.
 
 **7. Collapse the plugins into the app.** The 21 first-party plugins become directories. The 6,096-line `ShellBotBackendContribution` becomes ordinary feature modules. `applications/foundation` goes.
 
