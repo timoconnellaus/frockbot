@@ -15,7 +15,7 @@ import {
   type ModelRequestDeadlineOptionsV1,
   planOpenAICompatibleRequestV1,
   streamWithModelRequestDeadlinesV1,
-} from "@frockbot/provider-openai-compatible";
+} from "@frockbot/providers/openai-compatible";
 import {
   FROCK_AI_DEFAULT_MODEL,
   FROCK_AI_PROVIDER_TYPE,

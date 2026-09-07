@@ -338,17 +338,15 @@ describe("foundation application", () => {
     expect(
       userSpecifiers.indexOf("@frockbot/plugin-settings/user"),
     ).toBeLessThan(
-      userSpecifiers.indexOf("@frockbot/plugin-provider-ollama-cloud/user"),
+      userSpecifiers.indexOf("@frockbot/providers/ollama-cloud/user"),
     );
     expect(
       userSpecifiers.indexOf("@frockbot/plugin-settings/user"),
-    ).toBeLessThan(
-      userSpecifiers.indexOf("@frockbot/plugin-provider-frock-ai/user"),
-    );
+    ).toBeLessThan(userSpecifiers.indexOf("@frockbot/providers/frock-ai/user"));
     expect(
       userSpecifiers.indexOf("@frockbot/plugin-credentials/user"),
     ).toBeLessThan(
-      userSpecifiers.indexOf("@frockbot/plugin-provider-ollama-cloud/user"),
+      userSpecifiers.indexOf("@frockbot/providers/ollama-cloud/user"),
     );
     expect(typeof botBackend.contributions[0]?.executeConfiguration).toBe(
       "function",

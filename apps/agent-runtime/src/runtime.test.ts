@@ -8,7 +8,7 @@ import {
 import clockFeature from "@frockbot/plugin-clock/agent";
 import echoFeature from "@frockbot/plugin-echo/agent";
 import identityFeature from "@frockbot/plugin-identity/agent";
-import foundationProviderFeature from "@frockbot/plugin-provider-foundation/runtime";
+import foundationProviderFeature from "@frockbot/providers/foundation/runtime";
 import type { FoundationAgentPackage, FoundationRuntime } from "./runtime.js";
 import { createFoundationRuntime } from "./runtime.js";
 

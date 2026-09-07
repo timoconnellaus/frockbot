@@ -18,9 +18,9 @@ import { customModelsDefinitionV1 } from "@frockbot/plugin-custom-models/definit
 import { flockDefinitionV1 } from "@frockbot/plugin-flock/definition";
 import { imageDefinitionV1 } from "@frockbot/plugin-image/definition";
 import { machineMessagesDefinitionV1 } from "@frockbot/plugin-machine-messages/definition";
-import { providerAnthropicDefinitionV1 } from "@frockbot/plugin-provider-anthropic/definition";
-import { providerFlockAiDefinitionV1 } from "@frockbot/plugin-provider-frock-ai/definition";
-import { providerOllamaCloudDefinitionV1 } from "@frockbot/plugin-provider-ollama-cloud/definition";
+import { providerAnthropicDefinitionV1 } from "@frockbot/providers/anthropic/definition";
+import { providerFlockAiDefinitionV1 } from "@frockbot/providers/frock-ai/definition";
+import { providerOllamaCloudDefinitionV1 } from "@frockbot/providers/ollama-cloud/definition";
 import { routinesDefinitionV1 } from "@frockbot/plugin-routines/definition";
 import { searchDefinitionV1 } from "@frockbot/plugin-search/definition";
 import { settingsDefinitionV1 } from "@frockbot/plugin-settings/definition";

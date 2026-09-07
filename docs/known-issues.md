@@ -66,15 +66,15 @@ at the cited location. Items the re-orientation already removes are marked; see
 
 31. **The GUI-shell refusal is a regex plus a PATH shim**, defeatable with one `export`. It is a policy control, not a security boundary.
 
-32. ~~**The provider set is closed.**~~ **Fixed.** It was a two-entry map. A third provider (`plugin-provider-anthropic`) now ships, built on `@ai-sdk/anthropic`, which demonstrates the registration path takes an arbitrary provider. It has no `user` backend contribution yet, so its Connection cannot be created through the UI.
+32. ~~**The provider set is closed.**~~ **Fixed.** It was a two-entry map. A third provider (`providers/anthropic`) now ships, built on `@ai-sdk/anthropic`, which demonstrates the registration path takes an arbitrary provider. It has no `user` backend contribution yet, so its Connection cannot be created through the UI.
 
 33. **The default provider is an echo stub.** Any path that fails to apply `modelSelection` answers `"Built-in model: <message>"` rather than raising an error. Still true, and now more visible: with three providers registered, a selection that silently falls through is harder to spot than when there were two.
 
-34. **Frock AI's catalog is one model plus Auto** (`packages/plugin-provider-frock-ai/src/catalog.ts:49-56`).
+34. **Frock AI's catalog is one model plus Auto** (`providers/frock-ai/catalog.ts:49-56`).
 
-35. **Tool calls never stream incrementally** (`packages/provider-openai-compatible/src/index.ts:696-708`), so a long tool-argument generation displays nothing until `finish`.
+35. **Tool calls never stream incrementally** (`providers/openai-compatible/index.ts:696-708`), so a long tool-argument generation displays nothing until `finish`.
 
-36. **Manifest schema versions are inconsistent**: `core/models` and `plugin-provider-foundation` declare `schemaVersion: 2`; the other providers declare `4`.
+36. **Manifest schema versions are inconsistent**: `core/models` and `providers/foundation` declare `schemaVersion: 2`; the other providers declare `4`.
 
 37. **The `flock` to `frock` rename is partial.** Code reads `FROCK_AI_*` with `FLOCK_AI_*` fallbacks (`apps/cloudflare/src/index.ts:249-256`), while the Cloudflare resources (`FROCK_AI_GATEWAY_ID: "flock"`, `FROCK_AI_AUTO_ROUTE: "flock-auto"`), the package `@frockbot/plugin-flock` and every stored id remain `flock`.
 

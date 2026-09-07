@@ -25,7 +25,7 @@ import {
   streamEventsWithModelRequestDeadlinesV1,
   structuredOutputPlanV1,
   systemWithInstructionV1,
-} from "@frockbot/provider-openai-compatible";
+} from "@frockbot/providers/openai-compatible";
 import type { CredentialLeaseRuntime } from "@frockbot/plugin-credentials/user";
 
 export const ANTHROPIC_PROVIDER = "anthropic";

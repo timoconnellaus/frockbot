@@ -68,6 +68,6 @@ than papered over.
 
 The `web_search` tool definition, its bounds, its DTO and its decoder live here
 so that a provider Package contributes the tool by supplying transport alone.
-`@frockbot/plugin-provider-ollama-cloud` is the first implementation
+`@frockbot/providers/ollama-cloud` is the first implementation
 (`POST {apiBaseUrl}/api/web_search`); this Package holds no transport and
 depends on no provider.

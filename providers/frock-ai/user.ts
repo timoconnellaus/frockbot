@@ -378,7 +378,7 @@ export const userContribution = defineUserBackendContribution<
   FrockAiUserApplicationHostV1,
   FrockAiUserBackendContribution
 >({
-  specifier: "@frockbot/plugin-provider-frock-ai/user",
+  specifier: "@frockbot/providers/frock-ai/user",
   mount: (host, lifecycle) => {
     const contribution = createFrockAiUserBackendContribution(host.frockAi);
     const unregister =

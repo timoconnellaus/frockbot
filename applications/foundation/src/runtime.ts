@@ -55,13 +55,13 @@ import identityFeature from "@frockbot/plugin-identity/agent";
 import foundationProviderFeature, {
   FOUNDATION_MODEL,
   FOUNDATION_PROVIDER,
-} from "@frockbot/plugin-provider-foundation/runtime";
+} from "@frockbot/providers/foundation/runtime";
 import {
   createOllamaCloudFeature,
   ollamaChatBaseUrl,
-} from "@frockbot/plugin-provider-ollama-cloud/runtime";
-import { createFrockAiFeature } from "@frockbot/plugin-provider-frock-ai/runtime";
-import { createAnthropicFeature } from "@frockbot/plugin-provider-anthropic/runtime";
+} from "@frockbot/providers/ollama-cloud/runtime";
+import { createFrockAiFeature } from "@frockbot/providers/frock-ai/runtime";
+import { createAnthropicFeature } from "@frockbot/providers/anthropic/runtime";
 import {
   createRoutinesRuntimeFeature,
   type RoutinesRuntimeHostV1,
@@ -82,7 +82,7 @@ import {
   type SubagentsRuntimeHostV1,
 } from "@frockbot/plugin-subagents/agent";
 export type { SubagentsRuntimeHostV1 } from "@frockbot/plugin-subagents/agent";
-import { createConfiguredOllamaWebSearchRuntimeContribution } from "@frockbot/plugin-provider-ollama-cloud/web-search";
+import { createConfiguredOllamaWebSearchRuntimeContribution } from "@frockbot/providers/ollama-cloud/web-search";
 // The Web Package contributes `web_fetch`: no Connection, no provider, and no
 // Computer — it works while the User's Computer is hibernated.
 import { createConfiguredWebFetchRuntimeContribution } from "@frockbot/plugin-web/agent";

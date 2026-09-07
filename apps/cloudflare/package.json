@@ -31,8 +31,6 @@
     "@frockbot/plugin-flock": "workspace:*",
     "@frockbot/plugin-image": "workspace:*",
     "@frockbot/plugin-memory": "workspace:*",
-    "@frockbot/plugin-provider-frock-ai": "workspace:*",
-    "@frockbot/plugin-provider-ollama-cloud": "workspace:*",
     "@frockbot/plugin-routines": "workspace:*",
     "@frockbot/plugin-search": "workspace:*",
     "@frockbot/plugin-settings": "workspace:*",
@@ -40,6 +38,7 @@
     "@frockbot/plugin-skills": "workspace:*",
     "@frockbot/plugin-subagents": "workspace:*",
     "@frockbot/plugin-user-machine": "workspace:*",
+    "@frockbot/providers": "workspace:*",
     "better-auth": "1.7.2",
     "vue": "3.5.41"
   },

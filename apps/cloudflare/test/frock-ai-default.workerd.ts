@@ -3,7 +3,7 @@ import { describe, expect, test } from "vitest";
 import {
   FROCK_AI_CONNECTION_ID,
   FROCK_AI_DEFAULT_MODEL,
-} from "@frockbot/plugin-provider-frock-ai/catalog";
+} from "@frockbot/providers/frock-ai/catalog";
 
 interface FreshUserRpc {
   readConfiguration(input: unknown): Promise<{
