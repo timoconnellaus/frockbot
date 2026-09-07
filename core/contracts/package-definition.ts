@@ -8,8 +8,8 @@
 // and the Packages it needs enabled beside it. That is this file.
 //
 // Untrusted code declares itself with a Frock Compose descriptor instead
-// (`@frockbot/compose-frockbot/descriptor`), which names only the extension
-// points `AGENTS.md` opens.
+// (`./plugin-descriptor.ts`), which names only the extension points
+// `AGENTS.md` opens.
 import type { TurnTypeV1 } from "./types.js";
 
 /**

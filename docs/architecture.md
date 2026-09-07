@@ -207,9 +207,9 @@ An in-flight Turn keeps the generation it pinned. Activation takes effect at the
 
 ### Activation and failure — `core/durable/composition/activation.ts`
 
-Failure phases are `resolve | bundle | mount | health`, declared with the host that raises them (`packages/compose-frockbot/src/failure.ts`). `activateCompositionV1` reads the pin, mounts and verifies, then commits and clears failures. On failure it records the attempt, marks the generation `failed` or `quarantined`, mounts last-known-good, notifies, and admits the Turn on the fallback. The quarantine threshold is three attempts; a quarantined generation is never retried. If last-known-good is itself the failing generation, the error is rethrown.
+Failure phases are `resolve | bundle | mount | health`, declared beside the activation that records them (`core/durable/composition/failure.ts`) and raised by the host the app supplies. `activateCompositionV1` reads the pin, mounts and verifies, then commits and clears failures. On failure it records the attempt, marks the generation `failed` or `quarantined`, mounts last-known-good, notifies, and admits the Turn on the fallback. The quarantine threshold is three attempts; a quarantined generation is never retried. If last-known-good is itself the failing generation, the error is rethrown.
 
-### Isolate loading — `packages/compose-frockbot/src/isolate-host.ts`
+### Isolate loading — `frock-compose/isolate-host.ts`
 
 - Loading uses the `BOT_PACKAGES` Worker Loader binding, typed structurally as `BotIsolateLoader` (`:72`). There is no dynamic `import()`.
 - `loader.get(loaderId, () => ({compatibilityDate, mainModule, modules, globalOutbound: null, env: {IDENTITY, CAPABILITIES}, limits: {cpuMs: 5000, subRequests: 5}}))` (`:434-455`).

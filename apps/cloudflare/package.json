@@ -19,7 +19,7 @@
     "@frockbot/app": "workspace:*",
     "@frockbot/applets": "workspace:*",
     "@frockbot/client-core": "workspace:*",
-    "@frockbot/compose-frockbot": "workspace:*",
+    "@frockbot/frock-compose": "workspace:*",
     "@frockbot/computer": "workspace:*",
     "@frockbot/core": "workspace:*",
     "@frockbot/providers": "workspace:*",

@@ -4,7 +4,7 @@ import {
   BotDurableAuthority,
   type BotDurableAuthorityOptions,
 } from "@frockbot/core/durable";
-import type { BotIsolateLoader } from "@frockbot/compose-frockbot";
+import type { BotIsolateLoader } from "@frockbot/frock-compose";
 import { RoutineInboxStore } from "@frockbot/app/routines/inbox-store";
 import type { RoutineScheduler } from "@frockbot/app/routines/scheduler";
 import type { RoutineStore } from "@frockbot/app/routines/store";

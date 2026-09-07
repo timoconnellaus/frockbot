@@ -16,10 +16,14 @@ interface Module {
   skip?: string[];
 }
 
-const coreAllowed = ["@frockbot/core/", "@frockbot/compose-"];
+const coreAllowed = ["@frockbot/core/"];
 
 const modules: Module[] = [
   { dir: "core", allowed: coreAllowed },
+  {
+    dir: "frock-compose",
+    allowed: [...coreAllowed, "@frockbot/frock-compose/"],
+  },
   {
     dir: "applets",
     allowed: [...coreAllowed, "@frockbot/applets/", "@frockbot/applet-sdk/"],
@@ -61,6 +65,7 @@ const modules: Module[] = [
       "@frockbot/client-core",
       "@frockbot/client-ui",
       "@frockbot/computer/",
+      "@frockbot/frock-compose/",
       "@frockbot/providers/",
     ],
   },
@@ -94,6 +99,7 @@ const manifestPaths = [
   "applets/package.json",
   "computer/package.json",
   "core/package.json",
+  "frock-compose/package.json",
   "providers/package.json",
 ];
 for (const group of ["packages", "apps"]) {

@@ -37,14 +37,15 @@ import {
   type ToolRegistration,
   type TurnTypeV1,
 } from "@frockbot/core/contracts";
-import { canonicalJson, sha256 } from "@frockbot/core/contracts";
-import { CompositionMountFailureError } from "./failure.ts";
 import {
+  canonicalJson,
+  sha256,
   PLUGIN_ACTIONS_V1,
   type PluginActionV1,
   type PluginDescriptorV1,
   type PluginGrantV1,
-} from "./descriptor.ts";
+} from "@frockbot/core/contracts";
+import { CompositionMountFailureError } from "@frockbot/core/durable/composition-failure";
 import {
   BOT_ISOLATE_MAIN_MODULE,
   BOT_ISOLATE_WRAPPER_SOURCE,
