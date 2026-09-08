@@ -415,7 +415,6 @@ export type SettingField = {
   label: string;
   kind: "text" | "boolean" | "number" | "select" | "secret";
   value: Json;
-  options?: Array<string>;
   editable: boolean;
   hint?: string;
   minimum?: number;
@@ -432,10 +431,8 @@ export type SettingsFrame = {
   home: "models" | "connections" | "application" | "bot";
   revision: number;
   ownerId: Identifier;
-  title: string;
   sections: Array<{
     id: string;
-    packageId?: Identifier;
     label: string;
     fields: Array<SettingField>;
     credentialStatus?: "not-required" | "missing" | "connected" | "revoked";
@@ -443,7 +440,6 @@ export type SettingsFrame = {
     actions?: Array<{
       kind: "choose-provider" | "manage-provider";
       label: string;
-      packageId: Identifier;
     }>;
   }>;
 };
@@ -628,7 +624,6 @@ export type ConnectionsFrame = {
   accounts: Array<{
     id: Identifier;
     label: string;
-    service: string;
     state:
       | "authorizing"
       | "ready"

@@ -6,8 +6,8 @@
 /// whole point — a pasted body is a message the person could edit into
 /// something the Skill never said, while a ref is a name the Bot resolves.
 ///
-/// The ranking, the keyboard model and the three-chip bound are the Vue
-/// module's, kept free of any widget so they are testable without a frame.
+/// The ranking, the keyboard model and the three-chip bound are kept free of
+/// any widget, so they are testable without a frame.
 library;
 
 import 'package:flutter/material.dart';
@@ -69,6 +69,13 @@ class SkillCandidate {
 
 const int _noMatch = 1 << 30;
 
+final RegExp _whitespace = RegExp(r'\s');
+
+/// How far back a trigger may be from the caret. A Skill's name is a word, so
+/// nothing further back than a long one can be the query being typed — and the
+/// scan runs on every edit of a draft that may be the length of a whole Turn.
+const int _skillTriggerReach = 128;
+
 int _matchScore(SkillCatalogEntry entry, String query) {
   // 0 is "no query": everything matches and the catalog's own order stands.
   if (query.isEmpty) return 0;
@@ -114,12 +121,18 @@ List<SkillCandidate> rankSkillCandidates(
 /// Skill picker, and any whitespace after the trigger closes it again.
 SkillPopover? skillPopoverFor(String text, int caret) {
   final position = caret.clamp(0, text.length);
-  for (var index = position - 1; index >= 0; index -= 1) {
+  // A trigger is a word away at most, so a run of anything longer than a word
+  // is not one — and this is read on every edit, including a draft the length
+  // of the whole Turn limit.
+  final floor = position - _skillTriggerReach < 0
+      ? 0
+      : position - _skillTriggerReach;
+  for (var index = position - 1; index >= floor; index -= 1) {
     final character = text[index];
-    if (RegExp(r'\s').hasMatch(character)) return null;
+    if (_whitespace.hasMatch(character)) return null;
     if (character == '/' || character == '@') {
       final before = index == 0 ? '' : text[index - 1];
-      if (before.isNotEmpty && !RegExp(r'\s').hasMatch(before)) return null;
+      if (before.isNotEmpty && !_whitespace.hasMatch(before)) return null;
       return SkillPopover(
         character,
         index,
@@ -148,7 +161,10 @@ SkillPopover? skillPopoverFor(String text, int caret) {
 /// Carried by ref rather than by index: the Skill under it keeps its place for
 /// as long as the query still offers it, and only a Skill that has dropped out
 /// of the list hands the highlight back to the first row.
-int keptSkillHighlight(String? highlightedRef, List<SkillCandidate> candidates) {
+int keptSkillHighlight(
+  String? highlightedRef,
+  List<SkillCandidate> candidates,
+) {
   if (candidates.isEmpty) return 0;
   final index = candidates.indexWhere(
     (candidate) => candidate.entry.ref == highlightedRef,
@@ -241,6 +257,12 @@ class SkillMenuController extends ChangeNotifier {
     }
   }
 
+  /// Re-reads the trigger out of the composer's text.
+  ///
+  /// Silent when nothing about the popover changed. This is called on every
+  /// edit of the draft, and a listener that fired anyway would rebuild the
+  /// composer a second time for every keystroke that has nothing to do with a
+  /// Skill — which is most of them.
   void readFrom(String text, int caret) {
     final next = skillPopoverFor(text, caret < 0 ? text.length : caret);
     popover = next;
@@ -325,33 +347,39 @@ class SkillMenu extends StatelessWidget {
           border: Border.all(color: theme.colorScheme.outlineVariant),
           borderRadius: BorderRadius.circular(12),
         ),
-        child: ListView.builder(
-          shrinkWrap: true,
-          padding: const EdgeInsets.symmetric(vertical: 4),
-          itemCount: controller.candidates.length,
-          itemBuilder: (context, index) {
-            final candidate = controller.candidates[index];
-            return identified(
-              ShellIds.skillOption(candidate.entry.ref),
-              ListTile(
-                dense: true,
-                selected: index == controller.highlighted,
-                title: Text(candidate.entry.name),
-                subtitle: candidate.entry.description.isEmpty
-                    ? null
-                    : Text(
-                        candidate.entry.description,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                trailing: Text(
-                  candidate.entry.ref,
-                  style: theme.textTheme.bodySmall,
+        // The rows are `ListTile`s, which paint their selection and their ink
+        // on the nearest Material: without one of their own that is the
+        // surface behind the popover, and the box's own colour hides both.
+        child: Material(
+          type: MaterialType.transparency,
+          child: ListView.builder(
+            shrinkWrap: true,
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            itemCount: controller.candidates.length,
+            itemBuilder: (context, index) {
+              final candidate = controller.candidates[index];
+              return identified(
+                ShellIds.skillOption(candidate.entry.ref),
+                ListTile(
+                  dense: true,
+                  selected: index == controller.highlighted,
+                  title: Text(candidate.entry.name),
+                  subtitle: candidate.entry.description.isEmpty
+                      ? null
+                      : Text(
+                          candidate.entry.description,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                  trailing: Text(
+                    candidate.entry.ref,
+                    style: theme.textTheme.bodySmall,
+                  ),
+                  onTap: () => onChoose(candidate),
                 ),
-                onTap: () => onChoose(candidate),
-              ),
-            );
-          },
+              );
+            },
+          ),
         ),
       ),
     );

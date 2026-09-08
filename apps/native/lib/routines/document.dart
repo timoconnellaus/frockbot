@@ -196,10 +196,7 @@ Map<String, Object?> _saveCommandV1(
     'routineId': ?routineId,
     'name': name,
     'prompt': prompt,
-    if (webhook)
-      'trigger': {'kind': 'webhook'}
-    else
-      'schedule': schedule,
+    if (webhook) 'trigger': {'kind': 'webhook'} else 'schedule': schedule,
     if (timezone.isNotEmpty) 'timezone': timezone,
   };
 }

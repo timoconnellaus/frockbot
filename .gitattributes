@@ -13,7 +13,6 @@
 # byte out of the tree in the first place.
 *.ts text diff
 *.tsx text diff
-*.vue text diff
 *.css text diff
 *.md text diff
 *.json text diff

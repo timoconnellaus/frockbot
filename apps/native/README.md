@@ -1,6 +1,6 @@
-# FrockBot native qualification prototype
+# FrockBot client
 
-Flutter Android/macOS renderer over the existing cloud commands. The Vue application remains the production client. This prototype does not claim Slice 2 acceptance: see [the evidence and remaining gates](../../docs/plans/native-acceptance-2026-09-05.md).
+The one FrockBot client, over the existing cloud commands. Its web build is what `bot.frockbot.com` serves, staged into the app Worker's static assets by `apps/cloudflare/build-flutter-web.ts`. The Android and macOS builds are unqualified: they do not claim Slice 2 acceptance, and [the evidence and remaining gates](../../docs/plans/native-acceptance-2026-09-05.md) say what is missing.
 
 Use Flutter **3.47.0 / Dart 3.13.0**, framework `4cf24164269a5ebf0c16a028a00727d0e77bbb05`, from `/Users/tim/repos/flutter/bin/flutter`. Do not upgrade it. `pubspec.lock` pins WebView **4.14.1**, Android WebView adapter **4.14.1**, WebKit adapter **3.26.1**, and secure storage **11.0.0**.
 
@@ -26,7 +26,7 @@ Build with `flutter build macos --release`. The app is configured for Apple team
 
 ## Web
 
-`flutter build web --release` is a supported target and the advisory workflow builds it. Nothing serves it yet: `bot.frockbot.com` still ships the Vue bundle, and the Worker route that replaces it is the next change. To look at it now, build and serve `build/web` with any static server.
+`bun run --filter @frockbot/cloudflare client:build` is what a deploy runs: it builds this target and stages the payload under `apps/cloudflare/dist/web/_flutter/<buildHash>/`, which is the app Worker's `assets` directory. `bun run dev` from the repository root does the same and serves it. To point a build at another stack:
 
 ```sh
 flutter build web --release \
@@ -36,7 +36,7 @@ flutter build web --release \
 
 `dart:io` is confined to `lib/**/*_io.dart`, which a test enforces. Four seams choose an implementation by conditional import: the HTTP client and the state-channel socket (`client/transport_io.dart`, `client/transport_web.dart`), the credential (`client/credential_*.dart`), the sign-in door (`client/auth_*.dart`) and the durable store (`client/plain_store_*.dart`).
 
-The phone holds a PKCE bearer token in the platform keystore and sends it as a header. The browser holds nothing: `withCredentials` carries the ambient better-auth cookie, sign-in navigates to better-auth's Google door, and everything that is not a secret lives in `localStorage`. Bootstrapping from that cookie is not wired up yet, so a browser reaches the sign-in screen and stops there. The Applet fallback WebView has no web implementation and is hidden on the web.
+The phone holds a PKCE bearer token in the platform keystore and sends it as a header. The browser holds nothing: `withCredentials` carries the ambient better-auth cookie, sign-in navigates to better-auth's Google door, and everything that is not a secret lives in `localStorage`. A cookie is invisible to script, so the account is read off the `<body>` attributes the Worker stamped on the document (`lib/client/identity_web.dart`) and the shell paints before `/api/identity` confirms it.
 
 ## Backend and auth
 

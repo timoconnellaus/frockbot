@@ -321,9 +321,7 @@ class WebhookKeyCard extends StatelessWidget {
                       RoutineIds.webhookCopy,
                       FilledButton.tonal(
                         onPressed: () async {
-                          await Clipboard.setData(
-                            ClipboardData(text: token),
-                          );
+                          await Clipboard.setData(ClipboardData(text: token));
                           if (context.mounted) {
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(content: Text('Key copied.')),

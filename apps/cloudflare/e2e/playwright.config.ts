@@ -35,17 +35,27 @@ const frockAiPort = await stablePort("FROCKBOT_E2E_FROCK_AI_PORT");
 const appletBuildPort = await stablePort("FROCKBOT_E2E_APPLET_BUILD_PORT");
 const baseURL = `http://127.0.0.1:${port}`;
 
-export default defineConfig<E2EOptions>({
+export default defineConfig<object, E2EOptions>({
   testDir: ".",
   // Not `*.spec.ts`: root `bun test` — and therefore the pre-commit hook —
   // matches `*.spec.ts` as well as `*.test.ts`, and a Playwright spec loaded by
   // Bun's runner throws. `*.e2e.ts` keeps this layer out by construction, the
   // way `*.integration.ts` and `*.workerd.ts` already do.
   testMatch: "**/*.e2e.ts",
-  // The specs share one Worker and one fake provider whose chat mode a spec can
-  // change, so they must not overlap.
+  // A file is one indivisible group: the specs inside a file share a page and
+  // an account where they say so, and Playwright would otherwise hand two of
+  // them to different workers.
   fullyParallel: false,
-  workers: 1,
+  // Files, on the other hand, no longer share anything a run can see. Every
+  // test takes a fresh `?as_user=` identity, and the fake provider's chat mode
+  // is keyed by the endpoint the test's own Connection points at
+  // (`e2eOllamaEndpointV1`), so one spec's `unauthorized` is invisible to the
+  // rest. What is left in common is the app Worker and the browser, which
+  // several files can use at once.
+  //
+  // A CI runner has two cores and is already sharded across four of them, so
+  // the parallelism there is between runners; locally it is between workers.
+  workers: process.env.CI ? 1 : 4,
   forbidOnly: !!process.env.CI,
   // Retries in CI distinguish a real regression from a flaky start-up;
   // locally a failure should stay failed. Two rather than one because
@@ -78,7 +88,7 @@ export default defineConfig<E2EOptions>({
   use: {
     ...devices["Desktop Chrome"],
     baseURL,
-    ollamaBaseUrl: `http://127.0.0.1:${ollamaPort}`,
+    ollamaServerUrl: `http://127.0.0.1:${ollamaPort}`,
     // Dictation needs a microphone, and a headless browser has none. Chromium
     // synthesises one: a generated tone on a fake capture device, and a
     // permission prompt that answers itself. The transcript is the fake
@@ -99,12 +109,12 @@ export default defineConfig<E2EOptions>({
   webServer: {
     command: "bun e2e/serve.ts",
     cwd: cloudflareRoot,
-    // `/app.js` is one of the gateway's public asset paths, so it needs no
+    // `/favicon.ico` is one of the gateway's public asset paths, so it needs no
     // identity header — which `webServer.url` cannot send. It is served by the
     // loaded artifact, so a 200 here already proves the artifact was built,
     // seeded into R2 and loaded. The harness additionally waits for
     // `/app-manifest` under a real identity before it reports ready.
-    url: `${baseURL}/app.js`,
+    url: `${baseURL}/favicon.ico`,
     // The Applet build service is a container app, and `wrangler dev` builds
     // its image on start. That is minutes on a cold Docker cache and seconds
     // afterwards, and it happens before the app Worker is up.

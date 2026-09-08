@@ -26,36 +26,33 @@ jobs:
           persist-credentials: false
       - name: Verify committed qualification pins
         run: python3 scripts/check-native-pins.py
-      - name: Locate the exact qualified SDK
-        id: sdk
+      # The SDK is installed rather than probed for. It used to be neither: the
+      # job looked for a `flutter` the runner image does not ship, printed a
+      # `::notice::` and skipped every step below it, so these checks had never
+      # actually run in CI. `ci.yml` now installs the same pin to build the web
+      # client, which makes a job that still skips indefensible.
+      - name: Set up Flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          flutter-version: 3.47.0
+          channel: stable
+          cache: true
+      - name: Confirm the runner holds the qualified SDK
+        working-directory: apps/native
         shell: bash
         run: |
           set -euo pipefail
-          if ! command -v flutter >/dev/null 2>&1; then
-            echo "available=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::Flutter is absent; advisory native checks were not run. Local qualification is still required."
-            exit 0
-          fi
           flutter --version --machine > "$RUNNER_TEMP/flutter-version.json"
-          if ! python3 -c 'import json,sys; v=json.load(open(sys.argv[1])); sys.exit(v["frameworkRevision"] != "4cf24164269a5ebf0c16a028a00727d0e77bbb05")' "$RUNNER_TEMP/flutter-version.json"; then
-            echo "available=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::Runner Flutter differs from the pinned SDK; no upgrade or substitute was attempted."
-            exit 0
-          fi
-          echo "available=true" >> "$GITHUB_OUTPUT"
+          python3 -c 'import json,sys; v=json.load(open(sys.argv[1])); sys.exit(0 if v["frameworkRevision"] == "4cf24164269a5ebf0c16a028a00727d0e77bbb05" else 1)' "$RUNNER_TEMP/flutter-version.json"
       - name: Resolve pinned packages
-        if: steps.sdk.outputs.available == 'true'
         working-directory: apps/native
         run: flutter pub get --enforce-lockfile
       - name: Analyze Dart
-        if: steps.sdk.outputs.available == 'true'
         working-directory: apps/native
         run: flutter analyze --no-pub
       - name: Test shared fixtures and native state machines
-        if: steps.sdk.outputs.available == 'true'
         working-directory: apps/native
         run: flutter test --no-pub
       - name: Build the web target
-        if: steps.sdk.outputs.available == 'true'
         working-directory: apps/native
         run: flutter build web --release --no-pub

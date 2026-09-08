@@ -1,8 +1,8 @@
 /// The Computer card, and the full-window viewer it opens.
 ///
-/// A port of `ComputerCard.vue` and `ComputerViewerOverlay.vue`. The card
-/// draws the Bot's own screen region as it changes, in the same view-only
-/// frame the viewer uses and on the same minted session — no second token, no
+/// The card draws the Bot's own screen region as it changes, in the same
+/// view-only frame the viewer uses and on the same minted session — no second
+/// token, no
 /// takeover lease, and no input reaching the desktop. Drawing it wakes
 /// nothing: with no session minted the card stays on the stored capture, which
 /// the Bot files after every Computer action.
@@ -158,7 +158,13 @@ class _ComputerCardState extends State<ComputerCard> {
     if (!controller.available) return const SizedBox.shrink();
     final state = controller.state;
     final opening = state.phase == 'provisioning' || state.phase == 'updating';
-    final unconfigured = state.phase == 'unconfigured';
+    // A read that failed leaves the last projection standing, which for a card
+    // that has never had one is `unknown` — and `unknown` is not the answer
+    // "this Bot has no Computer". So a failure is a Computer the card cannot
+    // speak for, not one it can say is absent: it opens, and the window says
+    // what refused.
+    final unconfigured =
+        state.phase == 'unconfigured' && controller.failure == null;
     final screenshot = state.screenshots.firstOrNull;
     final status = computerScreenStatusLabelV1(
       streaming: _streaming,
@@ -266,13 +272,16 @@ class _ComputerCardState extends State<ComputerCard> {
                   const Icon(Icons.desktop_windows_outlined),
                   const SizedBox(height: 8),
                   Text(switch (state.phase) {
-                    'unconfigured' => 'No computer',
+                    'unconfigured' when controller.failure == null =>
+                      'No computer',
                     'disconnected' => 'Viewer disconnected',
                     _ => 'Computer',
                   }, style: Theme.of(context).textTheme.titleSmall),
                   const SizedBox(height: 4),
                   Text(
-                    state.message,
+                    // What refused, where something did: a projection nobody
+                    // could read is not a Computer that said anything.
+                    controller.failure ?? state.message,
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
@@ -356,6 +365,9 @@ class _ComputerViewerPageState extends State<ComputerViewerPage> {
   @override
   Widget build(BuildContext context) {
     final state = controller.state;
+    // The one sentence this window has: what the Computer said, or what
+    // refused to say it.
+    final said = controller.failure ?? state.message;
     final human = controller.takingControl || state.phase == 'human-control';
     final opening = state.phase == 'provisioning' || state.phase == 'updating';
     final url = state.viewerUrl;
@@ -410,7 +422,7 @@ class _ComputerViewerPageState extends State<ComputerViewerPage> {
               child: identified(
                 ComputerIds.phase,
                 Text(
-                  state.message,
+                  said,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.bodySmall,
@@ -437,7 +449,7 @@ class _ComputerViewerPageState extends State<ComputerViewerPage> {
                     : FrockEmptyState(
                         icon: Icons.desktop_windows_outlined,
                         title: 'No computer',
-                        detail: state.message,
+                        detail: said,
                         action: 'Try again',
                         onAction: () => unawaited(controller.read()),
                       )

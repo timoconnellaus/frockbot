@@ -4,8 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "client:build": "vite build",
-    "client:dev": "vite",
+    "client:build": "bun run build-flutter-web.ts",
     "artifact:build": "bun run client:build && bun run build-artifact.ts",
     "build": "bun run artifact:build && wrangler deploy --dry-run --env=\"\" --outdir dist/gateway",
     "dev": "bun run dev.ts",
@@ -13,29 +12,24 @@
     "test:workerd": "vitest run --config vitest.config.ts",
     "test:integration": "bun run artifact:build && vitest run --config vitest.integration.config.ts",
     "test:e2e": "playwright test -c e2e/playwright.config.ts",
-    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p test/tsconfig.json && tsc --noEmit -p e2e/tsconfig.json && vue-tsc --noEmit -p tsconfig.client.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p test/tsconfig.json && tsc --noEmit -p e2e/tsconfig.json"
   },
   "dependencies": {
     "@frockbot/app": "workspace:*",
     "@frockbot/applets": "workspace:*",
-    "@frockbot/client-core": "workspace:*",
     "@frockbot/frock-compose": "workspace:*",
     "@frockbot/computer": "workspace:*",
     "@frockbot/core": "workspace:*",
     "@frockbot/providers": "workspace:*",
-    "better-auth": "1.7.2",
-    "vue": "3.5.41"
+    "better-auth": "1.7.2"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "^1.1.1",
     "@cloudflare/workers-types": "5.20260907.1",
     "@playwright/test": "1.62.1",
     "@types/bun": "1.4.0",
-    "@vitejs/plugin-vue": "6.0.8",
     "typescript": "npm:typescript-native-bridge@6.0.3-bridge.16.tsgo.7.0.2",
-    "vite": "8.2.2",
     "vitest": "^4.1.0",
-    "vue-tsc": "3.3.10",
     "wrangler": "4.129.0"
   }
 }

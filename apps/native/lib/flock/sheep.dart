@@ -1,6 +1,6 @@
 /// What a Bot looks like: the Flock's sheep, drawn by the host.
 ///
-/// The Vue avatar is a stack of CSS layers over `app/flock/assets/` — a
+/// The avatar is a stack of layers over `app/flock/assets/` — a
 /// background, the canonical sheep, and the wearables a recipe names. Wearables
 /// are deferred (`docs/plan.md`, "a single default avatar for now"), so the two
 /// layers that survive are the ones this draws, and the seven WebPs beside them
@@ -9,12 +9,12 @@
 /// The recipe's other three bands still travel on the wire and are still what
 /// the server validates; nothing here writes them, and `defaultSheepRecipeV1`
 /// pins them to the catalogue's own neutral roots so a Bot this app creates is
-/// a Bot the Vue wardrobe can still dress later.
+/// a Bot a full wardrobe can still dress later.
 library;
 
 import 'package:flutter/material.dart';
 
-/// The backgrounds the Vue overlay offers, in its order. Ids are the recipe
+/// The backgrounds the create sheet offers, in its order. Ids are the recipe
 /// values; the labels are the catalogue's own.
 const sheepBackgroundsV1 = <String, String>{
   'hot-pink': 'Hot pink',

@@ -36,22 +36,30 @@ Map<String, dynamic> running() => {
 class FakeTransport implements ChatTransport {
   final MemoryStore store;
   final calls = <String>[];
+  final superseded = <String?>[];
   final completion = Completer<void>();
   Map<String, dynamic>? observed;
   bool loseReply = false;
   FakeTransport(this.store);
   @override
-  Future<Map<String, dynamic>> page(
-    String botId, {
-    String? before,
-  }) async => {
+  Future<Map<String, dynamic>> page(String botId, {String? before}) async => {
     'runs': observed == null ? <Object>[] : [observed],
     'page': {'truncated': false},
   };
   @override
-  Future<void> send(String botId, String id, String text) async {
-    expect(jsonDecode(store.values['chat/user-1/bot-1']!)['pendingId'], id);
+  Future<void> send(
+    String botId,
+    String id,
+    String text, {
+    String? supersedes,
+  }) async {
+    expect(
+      (jsonDecode(store.values['chat/user-1/bot-1']!)['pending'] as List)
+          .last['id'],
+      id,
+    );
     calls.add('send:$id');
+    superseded.add(supersedes);
     await completion.future;
     if (loseReply) throw const RequestFailure('lost');
   }
@@ -92,10 +100,7 @@ class PagedTransport extends FakeTransport {
     'events': <Object>[],
   };
   @override
-  Future<Map<String, dynamic>> page(
-    String botId, {
-    String? before,
-  }) async => {
+  Future<Map<String, dynamic>> page(String botId, {String? before}) async => {
     'runs': List.generate(
       20,
       (index) => row(index + (before == null ? 20 : 0)),
@@ -182,8 +187,9 @@ void main() {
             : ConnectionState.connected;
         controller.loading = state == 'loading';
         if (state == 'uncertain') {
-          controller.pendingId = 'pending-1';
-          controller.pendingText = 'Keep my draft';
+          controller.pending = const [
+            PendingSend('pending-1', 'Keep my draft'),
+          ];
           controller.draft = 'Keep my draft';
           controller.error =
               'Couldn’t confirm your message. Reconnect or check again.';
@@ -287,7 +293,8 @@ void main() {
     final composer = find.byKey(const ValueKey('composer'));
     String draft() => tester.widget<TextField>(composer).controller!.text;
     Finder bubbles() => find.byWidgetPredicate(
-      (widget) => (widget is SelectableText && widget.data == 'Hello') ||
+      (widget) =>
+          (widget is SelectableText && widget.data == 'Hello') ||
           (widget is Text && widget.data == 'Hello'),
     );
     await tester.enterText(composer, 'Hello');
@@ -297,7 +304,11 @@ void main() {
     expect(draft(), isEmpty);
     expect(bubbles(), findsOneWidget);
     expect(jsonDecode(store.values[controller.key]!)['draft'], '');
-    expect(jsonDecode(store.values[controller.key]!)['pendingText'], 'Hello');
+    expect(
+      (jsonDecode(store.values[controller.key]!)['pending'] as List)
+          .last['text'],
+      'Hello',
+    );
 
     // Identical text from another Turn must not hide this submission.
     transport.observed = {...running(), 'runId': 'other'};
@@ -321,8 +332,52 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
     expect(draft(), 'Hello');
-    expect(controller.pendingId, isNull);
+    expect(controller.pending, isEmpty);
     await tester.pumpWidget(const SizedBox());
+    controller.dispose();
+  });
+
+  /// The composer never closes over a running Turn.
+  ///
+  /// "Do this instead" is a thing a person means, and the send route admits it
+  /// on explicit supersede intent. The gate this replaces — no send while a
+  /// submission was unconfirmed — kept the composer shut for the whole of a
+  /// Turn, because the POST does not answer until the Turn settles. That made
+  /// the one path with the intent unreachable from the one surface that has it.
+  test('a second message may be sent while the first Turn runs', () async {
+    final store = MemoryStore();
+    final transport = FakeTransport(store)..observed = running();
+    var next = 0;
+    final controller = ChatController(
+      transport: transport,
+      store: store,
+      userId: 'user-1',
+      botId: 'bot-1',
+      nextId: () => 'send-${next += 1}',
+    );
+    await controller.initialize();
+    expect(controller.runningRunId, 'send-1');
+
+    final first = controller.send('first');
+    await Future<void>.delayed(Duration.zero);
+    // Still open: a submission in flight is not a closed composer.
+    expect(controller.sending, isTrue);
+    expect(controller.canSend, isTrue);
+
+    final second = controller.send('second');
+    await Future<void>.delayed(Duration.zero);
+    expect(
+      [for (final entry in controller.pending) entry.text],
+      ['first', 'second'],
+    );
+    // Both carry the run this client had observed, which is what makes the
+    // Bot replace what it was doing rather than refuse.
+    expect(transport.superseded, ['send-1', 'send-1']);
+
+    transport.completion.complete();
+    await first;
+    await second;
+    expect(controller.sending, isFalse);
     controller.dispose();
   });
 
@@ -349,7 +404,7 @@ void main() {
         jsonDecode(store.values[controller.key]!)['draft'],
         controller.draft,
       );
-      expect(controller.pendingId, isNull);
+      expect(controller.pending, isEmpty);
       controller.dispose();
     },
   );
@@ -408,7 +463,7 @@ void main() {
       t.completion.complete();
       await c.send('Hello');
       expect(t.calls, ['send:send-1', 'lookup:send-1', 'fence:send-1']);
-      expect(c.pendingId, isNull);
+      expect(c.pending, isEmpty);
       expect(c.draft, 'Hello');
       c.dispose();
     },

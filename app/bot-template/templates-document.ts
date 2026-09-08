@@ -246,7 +246,7 @@ export function templateSharesDocumentV1(
   });
 }
 
-/** What a planned import would create, in the four groups the Vue drew. */
+/** What a planned import would create, in its four groups. */
 function importNode(record: TemplateImportRecordV1): ViewNode {
   const willInstall = record.packages.filter(
     (entry) => entry.status === "will-install",

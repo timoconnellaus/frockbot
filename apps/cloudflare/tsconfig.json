@@ -11,6 +11,5 @@
     "lib": ["ES2023", "WebWorker"],
     "types": ["bun", "@cloudflare/workers-types"]
   },
-  "include": ["build-artifact.ts", "src/**/*.ts"],
-  "exclude": ["src/client"]
+  "include": ["build-artifact.ts", "build-flutter-web.ts", "src/**/*.ts"]
 }

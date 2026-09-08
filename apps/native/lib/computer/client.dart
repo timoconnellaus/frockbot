@@ -293,10 +293,20 @@ class ComputerController extends ChangeNotifier {
       failure = null;
     } on RequestFailure catch (error) {
       // A deployment without the Computer answers 404, which is silence rather
-      // than a failure: the card is simply not there.
-      if (error.status == 404) available = false;
-      failure = available ? error.message : null;
+      // than a failure: the card is simply not there. Every other answer is a
+      // Computer that is there and could not be read — a host that is down
+      // answers exactly this — so the card stays, says what refused, and keeps
+      // asking. Hiding it would turn a dependency being down into a Bot that
+      // never had a Computer.
+      if (error.status == 404) {
+        available = false;
+        failure = null;
+      } else {
+        available = true;
+        failure = error.message;
+      }
     } catch (_) {
+      available = true;
       failure = 'Couldn’t read the computer.';
     }
     _schedule();

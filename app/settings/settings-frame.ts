@@ -127,7 +127,6 @@ export function applicationSettingsFrame(
     }
     const section = {
       id: `package.${item.packageId}`,
-      packageId: item.packageId,
       label: item.displayName ?? item.packageId,
     };
     try {
@@ -142,7 +141,6 @@ export function applicationSettingsFrame(
         home: "application",
         ownerId: userId,
         revision: settings.revision,
-        title: "Settings",
         sections: [{ ...section, fields }],
       });
       sections.push(valid.sections[0]!);
@@ -160,7 +158,6 @@ export function applicationSettingsFrame(
     home: "application",
     ownerId: userId,
     revision: settings.revision,
-    title: "Settings",
     sections,
   });
 }
@@ -372,7 +369,6 @@ export function modelsSettingsFrame(
     }
     sections.push({
       id: `provider.${provider.packageId}`,
-      packageId: provider.packageId,
       label: provider.displayName ?? provider.packageId,
       fields: providerFields,
       ...(fieldFailure ? { failure: fieldFailure } : {}),
@@ -394,7 +390,6 @@ export function modelsSettingsFrame(
                   installed?.state === "installed"
                     ? "Manage account"
                     : "Choose provider",
-                packageId: provider.packageId,
               },
             ],
           }),
@@ -405,7 +400,6 @@ export function modelsSettingsFrame(
     home: "models",
     ownerId: userId,
     revision: settings.revision,
-    title: "Models",
     sections,
   });
 }
@@ -596,15 +590,10 @@ export function connectionsFrame(
       (type) => type.id === connection.connectionTypeId,
     );
     if (!declared) continue;
-    const name = connection.safeMetadata.connectorName;
     const failure = connection.failure ?? connection.modelCatalog?.failure;
     accounts.push({
       id: connection.connectionId,
       label: connection.displayName.slice(0, 200),
-      service: (typeof name === "string" && name.trim()
-        ? name
-        : (item?.displayName ?? declared.displayName)
-      ).slice(0, 200),
       state: connection.state,
       packageId: connection.packageId,
       kind,

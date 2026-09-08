@@ -15,6 +15,20 @@
       "custom_domain": true,
     },
   ],
+  // The Flutter client, staged by `build-flutter-web.ts` under
+  // `_flutter/<buildHash>/`. It is uploaded with the deploy and answered by
+  // the asset router before this Worker runs, which is why the payload
+  // needs no route, no bucket and no seeding step: the same `wrangler dev`
+  // that runs the Worker locally serves it from the same directory.
+  //
+  // `html_handling` and `not_found_handling` are both off. The document is
+  // rendered per account by the application artifact, so an asset
+  // directory that answered `/` or invented an index would answer for it.
+  "assets": {
+    "directory": "./dist/web",
+    "html_handling": "none",
+    "not_found_handling": "none",
+  },
   "worker_loaders": [
     {
       "binding": "USER_APPLICATIONS",
@@ -150,6 +164,20 @@
       // top-level custom domain and rewrites every request URL to
       // bot.frockbot.com — which the native auth origin check then refuses.
       "routes": [],
+      // The Flutter client, staged by `build-flutter-web.ts` under
+      // `_flutter/<buildHash>/`. It is uploaded with the deploy and answered by
+      // the asset router before this Worker runs, which is why the payload
+      // needs no route, no bucket and no seeding step: the same `wrangler dev`
+      // that runs the Worker locally serves it from the same directory.
+      //
+      // `html_handling` and `not_found_handling` are both off. The document is
+      // rendered per account by the application artifact, so an asset
+      // directory that answered `/` or invented an index would answer for it.
+      "assets": {
+        "directory": "./dist/web",
+        "html_handling": "none",
+        "not_found_handling": "none",
+      },
       "worker_loaders": [
         {
           "binding": "USER_APPLICATIONS",
@@ -260,6 +288,20 @@
           "custom_domain": true,
         },
       ],
+      // The Flutter client, staged by `build-flutter-web.ts` under
+      // `_flutter/<buildHash>/`. It is uploaded with the deploy and answered by
+      // the asset router before this Worker runs, which is why the payload
+      // needs no route, no bucket and no seeding step: the same `wrangler dev`
+      // that runs the Worker locally serves it from the same directory.
+      //
+      // `html_handling` and `not_found_handling` are both off. The document is
+      // rendered per account by the application artifact, so an asset
+      // directory that answered `/` or invented an index would answer for it.
+      "assets": {
+        "directory": "./dist/web",
+        "html_handling": "none",
+        "not_found_handling": "none",
+      },
       "worker_loaders": [
         {
           "binding": "USER_APPLICATIONS",
@@ -361,6 +403,20 @@
       // inherit the top-level custom domain and a stray `wrangler deploy --env
       // e2e` would reassign bot.frockbot.com to it.
       "routes": [],
+      // The Flutter client, staged by `build-flutter-web.ts` under
+      // `_flutter/<buildHash>/`. It is uploaded with the deploy and answered by
+      // the asset router before this Worker runs, which is why the payload
+      // needs no route, no bucket and no seeding step: the same `wrangler dev`
+      // that runs the Worker locally serves it from the same directory.
+      //
+      // `html_handling` and `not_found_handling` are both off. The document is
+      // rendered per account by the application artifact, so an asset
+      // directory that answered `/` or invented an index would answer for it.
+      "assets": {
+        "directory": "./dist/web",
+        "html_handling": "none",
+        "not_found_handling": "none",
+      },
       "worker_loaders": [
         {
           "binding": "USER_APPLICATIONS",

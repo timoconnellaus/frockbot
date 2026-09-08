@@ -44,10 +44,7 @@ describe("npm trusted publishing bootstrap", () => {
     // Each entry is a real scoped package rooted at its own directory.
     for (const entry of packages) {
       expect(entry.name.startsWith("@frockbot/")).toBe(true);
-      expect(
-        entry.directory.startsWith("packages/") ||
-          entry.directory === "applets/sdk",
-      ).toBe(true);
+      expect(entry.directory).toBe("applets/sdk");
     }
     const names = packages.map((entry) => entry.name);
     expect(new Set(names).size).toBe(names.length);

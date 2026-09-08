@@ -14,8 +14,9 @@
 // bundler's own list of every file that went in. Workspace files are checked
 // against the artifact's own mtime; `node_modules` is not, because installing a
 // dependency touches thousands of files that a build does not have to follow.
-// The Vue client is bundled by a separate `vite build` and inlined as a string,
-// so it never appears in that map: `src/client` is walked as well.
+// The client is built separately, by `flutter build web`, and reaches the
+// artifact only as a build hash, so no Dart file appears in that map:
+// `apps/native/lib` is walked as well.
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 
@@ -73,7 +74,7 @@ function bundledSources(artifactPath: string): string[] {
  * built.
  *
  * @param artifactPath `dist/artifacts/foundation-v1.mjs`.
- * @param clientRoot the Vue client's source directory, bundled separately.
+ * @param clientRoot the Flutter client's source directory, built separately.
  */
 export function readBuiltArtifact(
   artifactPath: string,

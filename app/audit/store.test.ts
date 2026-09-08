@@ -145,7 +145,7 @@ describe("the audit table", () => {
     // The Bot keeps working while the reader reads. Under an offset cursor
     // these two new rows shifted the window down by two, so "Load more"
     // returned `tool:1:1:2` and `tool:1:1:1` a second time — duplicate rows on
-    // screen and duplicate Vue keys — and `tool:1:1:0` was never reachable.
+    // screen and a duplicate key for each — and `tool:1:1:0` was never reachable.
     table.insert([
       entry({ occurrenceId: "tool:1:1:3", at: "2026-08-31T00:00:04.000Z" }),
       entry({ occurrenceId: "tool:1:1:4", at: "2026-08-31T00:00:05.000Z" }),

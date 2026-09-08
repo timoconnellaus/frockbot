@@ -95,21 +95,39 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
               child: ListView(
                 scrollDirection: Axis.horizontal,
                 children: [
-                  for (final applet in applets)
-                    ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 240),
-                      child: Tooltip(
-                        message: applet.label,
-                        child: TextButton.icon(
-                          onPressed: applet.onOpen,
-                          icon: const ChatIcon(ChatIconKind.applet, size: 16),
-                          label: Text(
-                            applet.label,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          style: _appletStyle(context),
-                        ),
+                  // The header's entry to the Applets, named as one thing: how
+                  // many buttons are in it is the header's business, and what
+                  // a reader means by "open the Applets" is the first of them.
+                  // The failure's Retry is outside it deliberately — pressing
+                  // the entry has to mean opening an Applet, never asking for
+                  // the list again.
+                  if (applets.isNotEmpty)
+                    identified(
+                      AppletIds.chip,
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          for (final applet in applets)
+                            ConstrainedBox(
+                              constraints: const BoxConstraints(maxWidth: 240),
+                              child: Tooltip(
+                                message: applet.label,
+                                child: TextButton.icon(
+                                  onPressed: applet.onOpen,
+                                  icon: const ChatIcon(
+                                    ChatIconKind.applet,
+                                    size: 16,
+                                  ),
+                                  label: Text(
+                                    applet.label,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  style: _appletStyle(context),
+                                ),
+                              ),
+                            ),
+                        ],
                       ),
                     ),
                   if (onRetryApplets != null)

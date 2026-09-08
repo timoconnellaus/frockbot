@@ -26,7 +26,7 @@
 //
 //   bun scripts/bootstrap-npm-trust.ts @frockbot/applet-sdk --confirm
 
-import { readdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -43,16 +43,15 @@ export type WorkspacePackage = {
   readonly directory: string;
 };
 
-/** Every publishable workspace, in a stable order. */
+/**
+ * Every publishable workspace, in a stable order.
+ *
+ * The Applets SDK sits beside the module it authors for, and is the only
+ * workspace a release publishes: nothing else in this repository has a
+ * consumer off it.
+ */
 export function readWorkspacePackages(root: string): WorkspacePackage[] {
-  const directories = readdirSync(join(root, "packages"), {
-    withFileTypes: true,
-  })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => join("packages", entry.name));
-  // The Applets SDK sits beside the module it authors for, and is the one
-  // package a release actually publishes.
-  directories.push(join("applets", "sdk"));
+  const directories = [join("applets", "sdk")];
 
   const packages: WorkspacePackage[] = [];
   for (const directory of directories) {

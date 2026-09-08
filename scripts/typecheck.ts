@@ -35,7 +35,7 @@ const manifestPaths = [
   "frock-compose/package.json",
   "providers/package.json",
 ];
-for (const group of ["packages", "apps"]) {
+for (const group of ["apps"]) {
   manifestPaths.push(
     ...new Bun.Glob(`${group}/*/package.json`).scanSync({
       cwd: repoRoot,

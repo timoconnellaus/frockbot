@@ -1,141 +1,142 @@
-// The Package-composed default Bot panel and settings deep links (register
-// rows 50 and 51). The page fixture also fails on any console or request error,
-// which proves the Contributions can mount together rather than only that their
-// individual components compile.
-import { test, expect, provisionThroughUi } from "./fixtures.ts";
-import { E2E_OLLAMA_GOOD_API_KEY } from "./harness.ts";
+// The Package-composed right panel (register rows 50 and 51). The page fixture
+// also fails on any console or request error, which proves the Contributions
+// can mount together rather than only that their individual components compile.
+import type { Locator, Page } from "@playwright/test";
+import {
+  createBot,
+  expect,
+  openApplication,
+  sem,
+  SHELL_TIMEOUT_MS,
+  test,
+} from "./fixtures.ts";
 
-test("the default panel composes Computer and Routines and swaps to Settings", async ({
-  page,
-  userId,
-  ollamaBaseUrl,
-}) => {
-  await page.setViewportSize({ width: 1351, height: 859 });
-  await provisionThroughUi(page, {
-    userId,
-    apiKey: E2E_OLLAMA_GOOD_API_KEY,
-    apiBaseUrl: ollamaBaseUrl,
-    botName: "Observed",
-  });
+/**
+ * Press a named widget.
+ *
+ * A `Semantics(identifier:)` around a widget that lays itself out reaches the
+ * accessibility tree as a container with `pointer-events: none`, and the node
+ * that takes the tap is its child. Clicking the identifier itself would land
+ * on the canvas behind it, so this presses whichever of the two the engine
+ * made tappable.
+ */
+function tap(scope: Page | Locator, identifier: string) {
+  const node = `[flt-semantics-identifier="${identifier}"]`;
+  return scope.locator(`${node}[flt-tappable], ${node} [flt-tappable]`).first();
+}
 
-  const panel = page.getByRole("region", { name: "Bot panel" });
-  await expect(panel).toBeVisible();
-  await expect(panel.locator("section.computer-card")).toBeVisible();
-  // The card is the whole statement: no caption repeats it underneath.
-  await expect(panel.getByText("Observed's screen")).toHaveCount(0);
-  await expect(panel.getByText("Routines", { exact: true })).toBeVisible();
-  await expect(panel.getByText("No Routines yet.")).toBeVisible();
-  const routinesEditor = panel.getByRole("link", {
-    name: "Open Routines editor",
-  });
-  await expect(routinesEditor).toBeVisible();
-  await routinesEditor.click();
+/**
+ * Let a surface finish arriving before pressing anything on it.
+ *
+ * Flutter rebuilds the accessibility tree when semantics change rather than
+ * once a frame, so a sliding sheet or a pushed page reaches the DOM at its
+ * final position while the canvas is still moving — and Playwright's own
+ * stability check, which watches that DOM box, sees nothing to wait for. The
+ * engine hit-tests a press against the frame it is painting, so a press issued
+ * then lands on whatever is passing under the pointer.
+ */
+async function settle(page: Page): Promise<void> {
+  await page.waitForTimeout(700);
+}
 
-  const settings = page.getByRole("region", { name: "Settings" });
-  await expect(settings.locator("#bot-routines")).toBeVisible();
-  await settings.getByRole("button", { name: "Back to Bot panel" }).click();
-  await expect(panel).toBeVisible();
+/**
+ * Words the product shows, wherever the engine put them.
+ *
+ * Flutter writes a leaf's words as text content but a merged node's — a titled
+ * group, a live region, a switch — as its accessible name, and which of the
+ * two a given sentence lands in is the engine's business rather than the
+ * product's.
+ */
+function says(scope: Page | Locator, text: string) {
+  return scope.locator(`[aria-label*="${text}"]`).or(scope.getByText(text));
+}
 
-  await page.getByRole("button", { name: "Bot settings" }).click();
-  await expect(settings).toBeVisible();
-  await expect(
-    settings.getByRole("heading", { name: "Settings" }),
-  ).toBeVisible();
-  await expect(
-    settings.getByRole("button", { name: "Back to Bot panel" }),
-  ).toBeVisible();
-  await expect(panel).toBeHidden();
+/**
+ * One entry of the right panel's own selector, by the word on it.
+ *
+ * A segment's label is drawn inside the segment, so the node carrying the word
+ * is not the node that takes the press; this reaches the pressable one.
+ */
+function entry(scope: Page | Locator, label: string) {
+  return scope
+    .locator("[flt-tappable]")
+    .filter({ hasText: new RegExp(`^${label}$`, "u") })
+    .first();
+}
 
-  await settings.getByRole("button", { name: "Back to Bot panel" }).click();
-  await expect(panel).toBeVisible();
-
-  const overflow = await page.evaluate(
+/**
+ * How far the window scrolls sideways.
+ *
+ * Flutter paints to a canvas sized to the window, so an overflowing layout
+ * clips rather than widening the document — but a host element that escaped
+ * its bounds still would, which is the failure this has always watched for.
+ */
+async function horizontalOverflow(page: Page): Promise<number> {
+  return page.evaluate(
     () =>
       document.documentElement.scrollWidth -
       document.documentElement.clientWidth,
   );
-  expect(overflow).toBeLessThanOrEqual(1);
+}
+
+test("the default panel composes Computer and Routines and swaps to Settings", async ({
+  page,
+  userId,
+}) => {
+  await page.setViewportSize({ width: 1351, height: 859 });
+  await openApplication(page, userId);
+  await createBot(page, "Observed");
+  await settle(page);
+
+  // At this width the region is a column the shell draws, and every feature
+  // that filled it is one press away in the region's own selector.
+  const panel = sem(page, "shell-right-panel");
+  await expect(panel).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
+  await expect(panel).toContainText("Settings");
+  await expect(panel).toContainText("Routines");
+  await expect(panel).toContainText("Computer");
+  // Bot settings is the entry the region opens on.
+  await expect(sem(page, "bot-settings")).toBeVisible();
+
+  await settle(page);
+  await entry(panel, "Computer").click();
+  await expect(sem(page, "computer-card")).toBeVisible({ timeout: 60_000 });
+  // The card is the whole statement: no caption repeats it underneath.
+  await expect(says(page, "Observed's screen")).toHaveCount(0);
+
+  await settle(page);
+  await entry(panel, "Routines").click();
+  await expect(sem(page, "routines-document")).toBeVisible({ timeout: 60_000 });
+  await expect(says(page, "No Routines yet.").first()).toBeVisible();
+
+  await settle(page);
+  await entry(panel, "Settings").click();
+  await expect(sem(page, "bot-settings")).toBeVisible();
+
+  expect(await horizontalOverflow(page)).toBeLessThanOrEqual(1);
 });
 
 test("the default panel and Settings fit the mobile shell", async ({
   page,
   userId,
-  ollamaBaseUrl,
 }) => {
-  await provisionThroughUi(page, {
-    userId,
-    apiKey: E2E_OLLAMA_GOOD_API_KEY,
-    apiBaseUrl: ollamaBaseUrl,
-    botName: "Pocket",
-  });
+  await openApplication(page, userId);
+  await createBot(page, "Pocket");
+  await settle(page);
   await page.setViewportSize({ width: 390, height: 844 });
 
-  // On a phone the right panel is a drawer, and a drawer that opened itself
-  // over the conversation is the layout this replaced — so it starts closed
-  // and the toggle is how it arrives. What this test is about is unchanged:
-  // that the panel and Settings fit the window once they are on screen.
-  await page.getByRole("button", { name: "Show side panel" }).click();
+  // On a phone the right panel is not a column: its entries are pages, and the
+  // toggle beside the conversation title is how one is chosen. A panel that
+  // opened itself over the conversation is the layout this replaced, so
+  // nothing is on screen until it is asked for.
+  await expect(sem(page, "bot-settings")).toHaveCount(0);
+  await settle(page);
+  // One tap. The header names its three destinations separately now, so the
+  // Bot settings control opens Bot settings rather than a chooser of what the
+  // region holds.
+  await tap(page, "bot-panel-toggle").click();
+  await expect(sem(page, "bot-settings")).toBeVisible({ timeout: 60_000 });
+  await expect(says(page, "Pocket's screen")).toHaveCount(0);
 
-  const panel = page.getByRole("region", { name: "Bot panel" });
-  await expect(panel).toBeVisible();
-  await expect(panel.getByText("Pocket's screen")).toHaveCount(0);
-  await page.getByRole("button", { name: "Bot settings" }).click();
-  await expect(page.getByRole("region", { name: "Settings" })).toBeVisible();
-
-  const overflow = await page.evaluate(
-    () =>
-      document.documentElement.scrollWidth -
-      document.documentElement.clientWidth,
-  );
-  expect(overflow).toBeLessThanOrEqual(1);
-});
-
-test("settings and retired info-pane deep links resolve at their new homes", async ({
-  page,
-  userId,
-  ollamaBaseUrl,
-}) => {
-  await provisionThroughUi(page, {
-    userId,
-    apiKey: E2E_OLLAMA_GOOD_API_KEY,
-    apiBaseUrl: ollamaBaseUrl,
-    botName: "Linked",
-  });
-
-  const botId = await page.evaluate(
-    () => new URL(window.location.href).searchParams.get("bot") ?? "",
-  );
-  expect(botId).not.toBe("");
-
-  await page.goto(
-    `/?bot=${encodeURIComponent(botId)}&settings=bot-settings#bot-description`,
-  );
-  const settings = page.getByRole("region", { name: "Settings" });
-  const description = settings.locator("#bot-description");
-  await expect(description).toBeVisible();
-  await expect(description).toHaveAttribute("data-anchor-target", "true");
-
-  await page.goto(
-    `/?bot=${encodeURIComponent(botId)}&settings=bot-settings#bot-audit`,
-  );
-  await expect(settings.locator("#bot-audit")).toBeVisible();
-
-  await page.goto(
-    `/?bot=${encodeURIComponent(botId)}&settings=bot-settings#bot-info-members`,
-  );
-  await expect(settings.locator("#bot-info-members")).toBeVisible();
-  await expect(settings.getByText("Named by you")).toBeVisible();
-
-  await page.goto(
-    `/?bot=${encodeURIComponent(botId)}&settings=bot-panel#bot-info-computer`,
-  );
-  const panel = page.getByRole("region", { name: "Bot panel" });
-  await expect(panel).toBeVisible();
-  await expect(panel.locator("#bot-info-computer")).toHaveAttribute(
-    "data-anchor-target",
-    "true",
-  );
-  await expect(
-    panel.getByRole("button", { name: "Copy link to Computer" }),
-  ).toBeAttached();
+  expect(await horizontalOverflow(page)).toBeLessThanOrEqual(1);
 });

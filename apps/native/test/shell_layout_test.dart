@@ -60,7 +60,7 @@ Finder byIdentifier(String identifier) => find.byWidgetPredicate(
 
 void main() {
   group('the three responsive tiers', () {
-    test('match the stylesheet the Vue shell has', () {
+    test('are the two widths the shell is designed against', () {
       expect(shellTierForWidth(390), ShellTier.single);
       expect(shellTierForWidth(640), ShellTier.single);
       expect(shellTierForWidth(641), ShellTier.dual);
@@ -110,6 +110,43 @@ void main() {
       await tester.pumpWidget(layout());
       await tester.pumpAndSettle();
       expect(tester.getSize(byIdentifier(ShellIds.conversation)).width, 390);
+    });
+
+    testWidgets('an open drawer is dismissed by tapping what it covers', (
+      tester,
+    ) async {
+      // The scrim has to be the size of the shell, and being in the tree does
+      // not say that: a `ColoredBox` with no child takes the smallest size its
+      // constraints allow, and a `Stack`'s non-positioned children are loosely
+      // constrained — so an unpositioned scrim was 0x0. It dimmed nothing, took
+      // no tap, and was dropped from the accessibility tree for having no area,
+      // which left the only way out of a phone's Bot list the control that
+      // opened it.
+      tester.view.physicalSize = const Size(390, 780);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      var dismissed = 0;
+      await tester.pumpWidget(
+        host(
+          ShellLayout(
+            navOpen: true,
+            panelOpen: false,
+            onDismiss: () => dismissed++,
+            sidebar: const Text('bots'),
+            conversation: const Text('thread'),
+            rightPanel: const Text('work'),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        tester.getSize(byIdentifier(ShellIds.scrim)),
+        const Size(390, 780),
+      );
+      // Beside the drawer, over the conversation the person can see.
+      await tester.tapAt(const Offset(340, 400));
+      expect(dismissed, 1);
     });
 
     testWidgets('a parked drawer is not read out or hit-tested', (
@@ -170,12 +207,11 @@ void main() {
       expect(find.text('Bot panel'), findsNothing);
     });
 
-    test('names its three regions the way the Vue slots are named', () {
-      expect([for (final slot in ShellSlot.values) slot.id], [
-        'right-panel',
-        'overlays',
-        'header-actions',
-      ]);
+    test('names its three regions', () {
+      expect(
+        [for (final slot in ShellSlot.values) slot.id],
+        ['right-panel', 'overlays', 'header-actions'],
+      );
     });
   });
 
@@ -204,9 +240,11 @@ void main() {
     });
 
     test('a blank pin is not a pin', () {
-      final split = partitionPinnedSidebarBots([bot('a', 'A')], id, {
-        'a': const SidebarProfile(pinnedAt: '   '),
-      });
+      final split = partitionPinnedSidebarBots(
+        [bot('a', 'A')],
+        id,
+        {'a': const SidebarProfile(pinnedAt: '   ')},
+      );
 
       expect(split.pinned, isEmpty);
       expect(split.rest.length, 1);
@@ -235,18 +273,20 @@ void main() {
       );
 
       expect(grouped.showHeadings, isTrue);
-      expect([for (final group in grouped.groups) group.label], [
-        'Work',
-        'Unassigned',
-      ]);
+      expect(
+        [for (final group in grouped.groups) group.label],
+        ['Work', 'Unassigned'],
+      );
       expect(grouped.groups.first.bots.length, 2);
       expect(grouped.groups.last.bots.single.botId.value, 'c');
     });
 
     test('offers no Unassigned group when every Bot has a label', () {
-      final grouped = groupSidebarBots([bot('a', 'A')], id, {
-        'a': const SidebarProfile(label: 'Work'),
-      });
+      final grouped = groupSidebarBots(
+        [bot('a', 'A')],
+        id,
+        {'a': const SidebarProfile(label: 'Work')},
+      );
 
       expect(grouped.groups.length, 1);
     });
@@ -309,9 +349,7 @@ void main() {
               'scout': SidebarProfile(label: 'Work'),
               'rosemary': SidebarProfile(pinnedAt: '2026-01-01T00:00:00.000Z'),
             },
-            unread: {
-              'scout': unread(botId: 'scout', count: 2, isUnread: true),
-            },
+            unread: {'scout': unread(botId: 'scout', count: 2, isUnread: true)},
             archived: const {},
             activeBotId: 'scout',
             workingBotId: null,
@@ -468,15 +506,18 @@ void main() {
         '```\ncode\n```\n\n> quoted\n\n---',
       );
 
-      expect([for (final block in blocks) block.kind], [
-        MarkdownBlockKind.heading,
-        MarkdownBlockKind.paragraph,
-        MarkdownBlockKind.listItem,
-        MarkdownBlockKind.listItem,
-        MarkdownBlockKind.code,
-        MarkdownBlockKind.quote,
-        MarkdownBlockKind.rule,
-      ]);
+      expect(
+        [for (final block in blocks) block.kind],
+        [
+          MarkdownBlockKind.heading,
+          MarkdownBlockKind.paragraph,
+          MarkdownBlockKind.listItem,
+          MarkdownBlockKind.listItem,
+          MarkdownBlockKind.code,
+          MarkdownBlockKind.quote,
+          MarkdownBlockKind.rule,
+        ],
+      );
       expect(blocks[1].text, 'A line\nand its continuation');
       expect(blocks[4].text, 'code');
     });

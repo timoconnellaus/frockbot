@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../shell/lifecycle.dart';
 import '../theme/frock_theme.dart';
 import '../theme/states.dart';
 import 'controller.dart';
@@ -42,13 +43,12 @@ class _ActivityPageState extends State<ActivityPage>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     timer?.cancel();
-    if (state == AppLifecycleState.resumed) {
-      unawaited(controller.load());
-      timer = Timer.periodic(
-        const Duration(seconds: 10),
-        (_) => unawaited(controller.load()),
-      );
-    }
+    if (appIsAwayV1(state)) return;
+    unawaited(controller.load());
+    timer = Timer.periodic(
+      const Duration(seconds: 10),
+      (_) => unawaited(controller.load()),
+    );
   }
 
   Future<void> open(String botId) async {

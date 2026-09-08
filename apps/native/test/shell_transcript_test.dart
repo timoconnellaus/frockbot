@@ -1,5 +1,5 @@
-/// The thread's own rules, ported from the Vue shell's `transcript-order` and
-/// `supersede-drain` suites case for case.
+/// The thread's own rules: how a Turn is ordered, and what the working row says
+/// while a supersede drains.
 library;
 
 import 'package:flutter_test/flutter_test.dart';
@@ -40,12 +40,13 @@ Map<String, dynamic> run({
   ],
   'responseText': ?responseText,
   if (queued) 'queued': true,
+  // A failed Turn's reason reaches a client on the run's `outcome`, which is
+  // where the projection puts the sentence it wrote for the person. The stored
+  // `failure` is a provider diagnostic and never crosses the wire, so a
+  // fixture that carried one would be testing a shape the product cannot
+  // receive.
   if (status != 'running')
-    'outcome': {
-      'type': status,
-      'message': ?failure,
-      'text': ?responseText,
-    },
+    'outcome': {'type': status, 'message': ?failure, 'text': ?responseText},
 };
 
 const haiku = 'Soft wool on green hills';

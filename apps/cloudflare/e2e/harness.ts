@@ -36,6 +36,10 @@ import { mkdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  APPLET_BUILD_ROUTE,
+  APPLET_BUILD_TOKEN_HEADER,
+} from "@frockbot/applets/build-contract";
 import { reserveFreePort } from "./ports.ts";
 import {
   OutputTail,
@@ -96,6 +100,12 @@ export const E2E_STREAMED_REPLY_TAIL = "**local Ollama stub**.";
 export const E2E_STREAM_GAP_MS = 8_000;
 
 const READY_TIMEOUT_MS = 120_000;
+/**
+ * A cold container start, behind a first-ever pull of the container runtime's
+ * proxy image, is minutes rather than seconds. Only the Applet build service
+ * waits this long, and only once per run.
+ */
+const APPLET_BUILD_READY_TIMEOUT_MS = 420_000;
 const SHUTDOWN_GRACE_MS = 5_000;
 
 function unauthorized(): { status: number; body: string } {
@@ -171,14 +181,36 @@ function scriptedToolCalls(
   return calls;
 }
 
+/**
+ * The endpoint root one test's Connection points at.
+ *
+ * A path under the fake server's origin rather than the origin itself, so the
+ * chat mode a spec switches on — `unauthorized`, `slow`, `streaming` — belongs
+ * to that spec alone and the specs can run in parallel. An Ollama-compatible
+ * endpoint behind a path prefix is a shape the product already supports:
+ * `decodeOllamaApiBaseUrl` keeps the pathname, and every call composes onto it.
+ */
+export function e2eOllamaEndpointV1(serverUrl: string, scope: string): string {
+  return `${serverUrl.replace(/\/+$/, "")}/s/${encodeURIComponent(scope)}`;
+}
+
 export function startFakeOllama(port: number): Promise<{
   url: string;
   close(): Promise<void>;
 }> {
-  let chatMode: FakeOllamaChatMode = "ok";
+  // Keyed by the scope in the endpoint the request arrived on. A request that
+  // names no scope — nothing in the suite sends one — reads the shared default.
+  const chatModes = new Map<string, FakeOllamaChatMode>();
 
   const server: Server = createHttpServer((request, response) => {
-    const url = new URL(request.url ?? "/", `http://127.0.0.1:${port}`);
+    const raw = new URL(request.url ?? "/", `http://127.0.0.1:${port}`);
+    const scoped = /^\/s\/([^/]+)(\/.*)?$/.exec(raw.pathname);
+    const scope = scoped ? decodeURIComponent(scoped[1]) : "";
+    const url = new URL(
+      `${scoped ? (scoped[2] ?? "/") : raw.pathname}${raw.search}`,
+      `http://127.0.0.1:${port}`,
+    );
+    const chatMode = chatModes.get(scope) ?? "ok";
     const header = request.headers.authorization ?? "";
     const key = header.toLowerCase().startsWith("bearer ")
       ? header.slice(7)
@@ -199,13 +231,14 @@ export function startFakeOllama(port: number): Promise<{
             }
           ).mode,
         );
-        chatMode =
+        const mode: FakeOllamaChatMode =
           requested === "unauthorized" ||
           requested === "slow" ||
           requested === "streaming"
             ? requested
             : "ok";
-        json(200, { mode: chatMode });
+        chatModes.set(scope, mode);
+        json(200, { mode });
       });
       return;
     }
@@ -468,6 +501,31 @@ export function e2ePersistDirectory(port: number): string {
 /** The shared secret the app Worker and the build service present each other. */
 export const E2E_APPLET_BUILD_TOKEN = "e2e-applet-build-token";
 
+/** The shared secret the app Worker presents the Computer host. */
+export const E2E_COMPUTER_HOST_TOKEN = "e2e-computer-host-token";
+
+/**
+ * Whether this run's deployment has a Computer at all.
+ *
+ * The app Worker calls a Computer configured when it has both the
+ * `COMPUTER_HOST` binding and the token to present it. The harness declares
+ * the binding exactly as production does and starts nothing behind it, so the
+ * token alone decides which of two real deployments a run proves: with it, one
+ * whose Computer host is unreachable — what production looks like when that
+ * dependency is down; without it, one that was never given a Computer.
+ *
+ * It is passed on the command line either way rather than left to
+ * `apps/cloudflare/.dev.vars`, because a `--var` outranks that file: otherwise
+ * the state a spec proves is whichever the developer happens to have on disk,
+ * which is exactly how these specs passed locally and failed in CI. Set
+ * `E2E_NO_COMPUTER_HOST=1` to run the second state on purpose.
+ */
+export function e2eComputerConfiguredV1(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return env.E2E_NO_COMPUTER_HOST !== "1";
+}
+
 /**
  * Whether this machine can run the Applet build service.
  *
@@ -700,11 +758,20 @@ export async function startHarness(
         `BETTER_AUTH_URL:http://127.0.0.1:${options.port}`,
         "--var",
         `CREDENTIAL_KEYRING:${E2E_CREDENTIAL_KEYRING}`,
-        // No Computer: the Sprite is unreachable from workerd and no spec
-        // touches it. An empty token is what production hands a Worker with
-        // no Computer configured.
+        // No Sprites: this Worker never holds that credential — the Computer
+        // host does — and an empty token is what production hands a Worker
+        // with no Computer of its own to open.
         "--var",
         "SPRITES_TOKEN:",
+        // The Computer host's shared secret. The `COMPUTER_HOST` binding is
+        // declared as production declares it and nothing answers it, so with
+        // this token the deployment has a Computer whose host is down, and
+        // without one it has no Computer at all. See
+        // `e2eComputerConfiguredV1`.
+        "--var",
+        `COMPUTER_HOST_TOKEN:${
+          e2eComputerConfiguredV1() ? E2E_COMPUTER_HOST_TOKEN : ""
+        }`,
         // better-auth needs a secret to construct; no spec signs in with it.
         "--var",
         "BETTER_AUTH_SECRET:e2e",
@@ -778,10 +845,14 @@ export async function startHarness(
       const supervisedAppletBuild = superviseProcess({
         label: "Applet build wrangler dev",
         spawnChild: spawnAppletBuild,
-        // `/healthz` is the Worker's own route: it answers without starting a
-        // container, so this waits for the Worker and the image build, not for
-        // a cold container start.
-        waitUntilReady: () => waitForHttpServer(`${appletBuildUrl}/healthz`),
+        // `/healthz` is the Worker's own route and answers without starting a
+        // container, so it proves nothing about whether a build can run: the
+        // container runtime still has to pull `cloudflare/proxy-everything`
+        // and cold-start an instance. A spec that raced that got an instant
+        // "Network connection lost" from the binding with nothing in the build
+        // Worker's log — the connection died before its handler. So readiness
+        // is one real build, which leaves a warm container behind it.
+        waitUntilReady: () => waitForAppletBuild(appletBuildUrl),
         stopChild: stopProcessTree,
         forwardOutput,
         report: note,
@@ -822,6 +893,51 @@ export async function startHarness(
     await stop();
     throw error;
   }
+}
+
+/**
+ * The Applet build service is ready when it has actually built something.
+ *
+ * The cheapest build there is: one file and no `applet.json`, which the
+ * container refuses at the descriptor stage. It costs a round trip and proves
+ * the whole path — Worker, container image, container runtime — and it leaves
+ * the instance warm, so the first spec to publish an Applet is not the one
+ * paying for a cold start.
+ *
+ * Longer than the other waits because a machine that has never run this pulls
+ * the container runtime's proxy image first.
+ */
+async function waitForAppletBuild(baseUrl: string): Promise<void> {
+  await waitForHttpServer(`${baseUrl}/healthz`);
+  const deadline = Date.now() + APPLET_BUILD_READY_TIMEOUT_MS;
+  let lastFailure = "no attempt was made";
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(`${baseUrl}${APPLET_BUILD_ROUTE}`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          [APPLET_BUILD_TOKEN_HEADER]: E2E_APPLET_BUILD_TOKEN,
+        },
+        body: JSON.stringify({
+          version: 1,
+          effectId: "e2e-harness-warmup",
+          appletId: "e2e.warmup",
+          mode: "check",
+          files: [{ path: "server.ts", text: "export default {};\n" }],
+        }),
+      });
+      const body = (await response.json()) as { status?: string };
+      if (response.ok && typeof body.status === "string") return;
+      lastFailure = `${response.status} ${JSON.stringify(body)}`;
+    } catch (error) {
+      lastFailure = error instanceof Error ? error.message : String(error);
+    }
+    await new Promise((sleep) => setTimeout(sleep, 1_000));
+  }
+  throw new Error(
+    `Timed out waiting for the Applet build service to build: ${lastFailure}`,
+  );
 }
 
 async function waitForHttpServer(baseUrl: string): Promise<void> {

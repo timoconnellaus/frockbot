@@ -47,7 +47,7 @@ function shellAssignment(name: string): string | undefined {
 }
 
 /** The pid files the stop path must scope every kill to. */
-const PID_FILES = ["wrangler.pid", "vite.pid"];
+const PID_FILES = ["wrangler.pid"];
 
 describe("the dogfood dev stack", () => {
   const development = wrangler.env.development!;

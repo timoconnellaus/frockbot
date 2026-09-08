@@ -12,12 +12,6 @@ import {
 } from "@frockbot/core/configuration";
 import { decodeRunCursorV1, RUN_CURSOR_PATTERN } from "./run-cursor.js";
 export { decodeRunCursorV1, RUN_CURSOR_PATTERN };
-import type {
-  ClientNotificationIntent,
-  ClientRun,
-  ClientTurnEvent,
-  ClientTurnResponse,
-} from "@frockbot/client-core";
 import {
   decodeRunIdV1,
   requireStoredRunV1,
@@ -30,6 +24,102 @@ import {
   CLIENT_VERSION_DEGRADED_MESSAGE_V1,
   runFailureCopyV1,
 } from "./run-failure-copy.js";
+
+/**
+ * One visible thing that happened inside a Turn.
+ *
+ * Flat and optional throughout, and deliberately so: a client draws the fields
+ * it knows and ignores the rest, which is what lets a deployed app keep
+ * working when a Turn carries an event kind it has never heard of.
+ */
+export interface ClientTurnEvent {
+  type: string;
+  /** A standalone event status, such as a projected Computer sync outcome. */
+  status?: string;
+  call?: { id: string; name: string; input?: unknown };
+  callId?: string;
+  content?: string;
+  isError?: boolean;
+  omittedInteractions?: number;
+  /**
+   * A `send/to-user` payload, carried untyped here and decoded by the surface
+   * that draws it with the versioned decoder in `core/contracts`.
+   */
+  payload?: unknown;
+  /** A `wake/parent` hand-off message. */
+  message?: string;
+  /** A `task/dispatched` subagent chip. */
+  taskId?: string;
+  taskType?: string;
+  description?: string;
+  model?: string;
+  background?: boolean;
+  /**
+   * Binaries a tool filed in a durable root. References - media type, content
+   * hash, and the encoded Workspace path - never bytes: a thread carries
+   * paths, not images.
+   */
+  attachments?: {
+    kind: "image";
+    mediaType: string;
+    contentHash: string;
+    bytes: number;
+    path: string;
+  }[];
+}
+
+export interface ClientNotificationIntent {
+  notificationId: string;
+  runId: string;
+  createdAt: string;
+  title: string;
+  body: string;
+  /** `critical` for an intent the Bot's notification policy does not gate. */
+  urgency?: "normal" | "critical";
+}
+
+export interface ClientNotificationListV1 {
+  schemaVersion: 1;
+  notifications: ClientNotificationIntent[];
+}
+
+export interface ClientNotificationAcknowledgementV1 {
+  schemaVersion: 1;
+  status: "acknowledged";
+}
+
+export interface ClientTurnResponse {
+  runId: string;
+  text: string;
+  events: ClientTurnEvent[];
+  notification?: ClientNotificationIntent;
+}
+
+export interface ClientRun {
+  runId: string;
+  admittedAt?: string;
+  input: string;
+  events: ClientTurnEvent[];
+  status: "running" | "completed" | "failed" | "cancelled" | "superseded";
+  responseText?: string;
+  failure?: string;
+  /** Durable Stop intent, projected independently of the run status. */
+  stopRequestedAt?: string;
+  /**
+   * True while the Turn is admitted and waiting rather than running: the User
+   * sent it while the Bot was still on the previous one. The thread draws it
+   * as an ordinary message it has not reached yet.
+   */
+  queued?: true;
+  /**
+   * The answer the Bot has written so far, present only while the Turn is
+   * still running. It is the same bubble `responseText` becomes when the Turn
+   * settles, so the thread never draws both.
+   */
+  partialText?: string;
+  /** Source marker for a message admitted on the agent lane. */
+  via?: { kind: "bot"; name: string; botId: string };
+}
 
 const MAX_RUN_ID_LENGTH = 128;
 const MAX_TIMESTAMP_LENGTH = 64;
@@ -1577,6 +1667,37 @@ function decodeNotificationV1(value: unknown): ClientNotificationIntent {
       "turn.notification",
     ),
   };
+}
+
+/**
+ * The notification list a client polls for, read back.
+ *
+ * The route that produces it is in this module, so the decoder that proves the
+ * wire fixtures parse is here too rather than in a client library.
+ */
+export function decodeClientNotificationListV1(
+  input: unknown,
+): ClientNotificationIntent[] {
+  const value = record(input, "notification list");
+  exactKeys(value, ["schemaVersion", "notifications"], "notification list");
+  if (value.schemaVersion !== 1 || !Array.isArray(value.notifications)) {
+    throw new Error("notification list is invalid");
+  }
+  return value.notifications.map((notification) =>
+    decodeNotificationV1(notification),
+  );
+}
+
+/** The receipt an acknowledgement answers with, read back. */
+export function decodeClientNotificationAcknowledgementV1(
+  input: unknown,
+): ClientNotificationAcknowledgementV1 {
+  const value = record(input, "acknowledgement");
+  exactKeys(value, ["schemaVersion", "status"], "acknowledgement");
+  if (value.schemaVersion !== 1 || value.status !== "acknowledged") {
+    throw new Error("acknowledgement is invalid");
+  }
+  return { schemaVersion: 1, status: "acknowledged" };
 }
 
 export function decodeClientTurnV1(input: unknown): ClientTurnResponse {

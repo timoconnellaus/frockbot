@@ -140,6 +140,82 @@ void main() {
     state.dispose();
   });
 
+  testWidgets('every command is fenced, and each fences on the last receipt', (
+    tester,
+  ) async {
+    // Every configuration command carries `expectedRevision`, and the route
+    // refuses one that does not: without this the whole panel saved nothing
+    // and reloaded with the switch back where it started.
+    final store = MemoryStore();
+    final commands = <Map<String, Object?>>[];
+    var applied = 3;
+    final state = BotSettingsController(
+      SettingsApi(store, (path, body) async {
+        if (body != null) {
+          commands.add(Map<String, Object?>.from(body as Map));
+          return {
+            'schemaVersion': 1,
+            'commandId': body['commandId'],
+            'revision': ++applied,
+            'status': 'applied',
+          };
+        }
+        if (path.startsWith('/api/settings')) return account();
+        return botSettings();
+      }),
+      'alpha',
+    );
+    await open(tester, state);
+    await tester.tap(find.text('Save settings'));
+    await tester.pumpAndSettle();
+    // The read was at 3, and each applied command moved it.
+    expect(commands.map((command) => command['expectedRevision']), [3, 4, 5]);
+    state.dispose();
+  });
+
+  testWidgets('a conflicting save is re-fenced once and then reported', (
+    tester,
+  ) async {
+    // Something else wrote between the read and the press. Asking again with
+    // the revision the authority now holds is what pressing Save once means.
+    final store = MemoryStore();
+    final commands = <Map<String, Object?>>[];
+    var refused = true;
+    final state = BotSettingsController(
+      SettingsApi(store, (path, body) async {
+        if (body != null) {
+          commands.add(Map<String, Object?>.from(body as Map));
+          if (refused) {
+            refused = false;
+            throw const RequestFailure('configuration revision is 7', 409);
+          }
+          return {
+            'schemaVersion': 1,
+            'commandId': body['commandId'],
+            'revision': 8,
+            'status': 'applied',
+          };
+        }
+        if (path.startsWith('/api/settings')) return account();
+        return {...botSettings(), 'revision': refused ? 3 : 7};
+      }),
+      'alpha',
+    );
+    await open(tester, state);
+    await tester.tap(find.text('Save settings'));
+    await tester.pumpAndSettle();
+    // The refused command is the same command, asked again at the revision the
+    // authority reported; the two after it fence on what that one left.
+    expect(commands.map((command) => command['expectedRevision']), [
+      3,
+      7,
+      8,
+      8,
+    ]);
+    expect(commands[0]['commandId'], commands[1]['commandId']);
+    state.dispose();
+  });
+
   testWidgets('an unpin clears the instant the sidebar orders by', (
     tester,
   ) async {

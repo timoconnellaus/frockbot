@@ -12,37 +12,74 @@
 // lands in the chat the User is reading never raises a badge at all — not even
 // for the beat between the fan-out returning and the read receipt landing,
 // which is the flicker that made the old behaviour wrong.
+//
+// The receipt these tests are watching for is `_markWhatIsBeingRead` in
+// `apps/native/lib/shell/app_shell.dart`: `_select` sends it when a chat is
+// opened, and it is an `ActivityController` listener as well, so it sends
+// again as each reply lands in the chat that is already on screen. Both halves
+// of the rule are that one call, which is why a spec that only opened a chat
+// would still pass with the second half missing.
 import {
   test,
   expect,
   composerInput,
   createBot,
+  expectReadyToSend,
+  press,
   provisionThroughUi,
   revealSidebar,
-  sendMessage,
-  setFakeOllamaChatMode,
+  sem,
+  SHELL_TIMEOUT_MS,
 } from "./fixtures.ts";
 import { E2E_OLLAMA_GOOD_API_KEY } from "./harness.ts";
 import type { Locator, Page } from "@playwright/test";
 
 /**
- * Longer than the sidebar's 15-second unread poll.
+ * Longer than the sidebar's unread poll.
  *
  * A badge that is absent because nothing has looked yet proves nothing, so the
  * "no badge" assertions wait past a full poll before they are made. The number
- * mirrors `UNREAD_POLL_INTERVAL_MS` in the Flock client.
+ * covers the 10-second timer `ActivityController.load` runs on, and the
+ * request it makes.
  */
 const PAST_ONE_UNREAD_POLL_MS = 20_000;
 
 function botRow(page: Page, name: string): Locator {
-  return page.locator(".flock-bot-row").filter({ hasText: name });
+  return sem(page, "shell-sidebar")
+    .locator('[flt-semantics-identifier^="sidebar-bot-"]')
+    .filter({ hasText: name });
 }
 
-/** Every way the sidebar says "unread", asked at once. */
-async function expectNoBadge(page: Page, name: string): Promise<void> {
+/** The durable id behind a row, which the row's own identifier carries. */
+async function botIdOf(page: Page, name: string): Promise<string> {
   const row = botRow(page, name);
-  await expect(row).not.toHaveClass(/unread/u);
-  await expect(row.locator(".flock-unread-badge")).toHaveCount(0);
+  await expect(row).toHaveCount(1);
+  const identifier = await row.getAttribute("flt-semantics-identifier");
+  if (!identifier) throw new Error(`the ${name} row has no identifier`);
+  return identifier.slice("sidebar-bot-".length);
+}
+
+/**
+ * The unread badge, which is a number at the end of a row and nothing else.
+ *
+ * A `ListTile` merges everything it draws into one semantics node, so the
+ * badge is not a node a spec can select: it is the last thing in the row's own
+ * text, after the name, the time and the preview of the last message. Nothing
+ * else there ends in a digit — the fake provider's reply ends in a full stop
+ * and a Bot with no messages ends in a word — so a trailing number is the
+ * badge.
+ */
+const BADGE = /\s\d+\+?$/u;
+
+async function expectBadge(page: Page, name: string, count: string) {
+  await expect(botRow(page, name)).toContainText(
+    new RegExp(`\\s${count}$`, "u"),
+    { timeout: 120_000 },
+  );
+}
+
+async function expectNoBadge(page: Page, name: string): Promise<void> {
+  await expect(botRow(page, name)).not.toContainText(BADGE);
 }
 
 test("a Bot that replies while another chat is open badges only its own row", async ({
@@ -61,35 +98,37 @@ test("a Bot that replies while another chat is open badges only its own row", as
     botName: "Alpha",
   });
   await createBot(page, "Beta");
-  await expect(
-    page.getByRole("heading", { name: "Beta is ready." }),
-  ).toBeVisible();
+  await expectReadyToSend(page);
 
-  // A Bot cannot reply to nobody, so the Turn is started in Beta and then left
-  // running while the User moves to Alpha: `slow` holds the completion open
-  // long enough for the switch, and the reply settles on a Bot whose chat is
-  // no longer the open one — exactly the case the rule is about.
-  await setFakeOllamaChatMode(page, ollamaBaseUrl, "slow");
-  const composer = composerInput(page);
-  await composer.fill("Answer me in your own time");
-  await expect(composer).toHaveValue("Answer me in your own time");
-  await page.getByRole("button", { name: "Send message" }).click();
-  await expect(composer).toHaveValue("", { timeout: 120_000 });
-
+  // Alpha is the chat the User is reading, and Beta is the Bot nobody is
+  // looking at.
   await revealSidebar(page);
   await botRow(page, "Alpha").click();
-  await expect(
-    page.getByRole("heading", { name: "Alpha is ready." }),
-  ).toBeVisible();
-  await setFakeOllamaChatMode(page, ollamaBaseUrl, "ok");
+  await expectReadyToSend(page);
+  const beta = await botIdOf(page, "Beta");
+
+  // Beta's Turn is started from outside this browser rather than typed into
+  // the composer and outrun. A message typed into the composer is a message
+  // typed into the chat that is open, so the old way was to hold the provider
+  // open with `slow` and switch chats before it answered — a race the read
+  // receipt now decides, because a reply that beats the switch is marked read
+  // on arrival and never badges anything. Starting the Turn once the User has
+  // already left has no such window, and it is how a Turn reaches a Bot in the
+  // real product anyway: a Routine, a webhook, another device.
+  const turn = await page.request.post(
+    `/api/bots/${encodeURIComponent(beta)}/turns`,
+    {
+      data: {
+        schemaVersion: 1,
+        commandId: crypto.randomUUID(),
+        text: "Answer me while nobody is looking",
+      },
+    },
+  );
+  expect(turn.ok(), "the Turn was admitted").toBe(true);
 
   // Beta's reply lands somewhere nobody is looking: its row goes unread.
-  await expect(botRow(page, "Beta")).toHaveClass(/unread/u, {
-    timeout: 120_000,
-  });
-  await expect(botRow(page, "Beta").locator(".flock-unread-badge")).toHaveText(
-    "1",
-  );
+  await expectBadge(page, "Beta", "1");
   // And the chat the User is actually reading is left alone.
   await expectNoBadge(page, "Alpha");
 
@@ -101,11 +140,12 @@ test("a Bot that replies while another chat is open badges only its own row", as
   // Alpha is put back in front first, so Beta's quiet row is the durable
   // record answering rather than the focus rule suppressing its own badge.
   await page.reload();
+  await expect(sem(page, "shell-sidebar")).toBeVisible({
+    timeout: SHELL_TIMEOUT_MS,
+  });
   await revealSidebar(page);
   await botRow(page, "Alpha").click();
-  await expect(
-    page.getByRole("heading", { name: "Alpha is ready." }),
-  ).toBeVisible();
+  await expectReadyToSend(page);
   await expectNoBadge(page, "Beta");
   // Still gone a full poll later, rather than reappearing on the next fan-out.
   await page.waitForTimeout(PAST_ONE_UNREAD_POLL_MS);
@@ -126,14 +166,19 @@ test("a reply in the chat the User is reading never raises a badge", async ({
     botName: "Alpha",
   });
   await createBot(page, "Beta");
-  await expect(
-    page.getByRole("heading", { name: "Beta is ready." }),
-  ).toBeVisible();
+  await expectReadyToSend(page);
   await revealSidebar(page);
   await botRow(page, "Alpha").click();
-  await expect(composerInput(page)).toBeEnabled();
+  await expectReadyToSend(page);
 
-  await sendMessage(page, "Say something back");
+  // A Flutter input is a live editing element only while the engine holds an
+  // editing session open on it, so the words go in as keystrokes.
+  const composer = composerInput(page);
+  await composer.click();
+  await composer.pressSequentially("Say something back");
+  await expect(composer).toHaveValue("Say something back");
+  await press(sem(page, "send-button"));
+  await expect(composer).toHaveValue("", { timeout: 120_000 });
 
   // The Bot Durable Object counted this Turn — it has to, it cannot see the
   // screen — so the only thing keeping the row quiet is the focus rule and the
@@ -145,10 +190,11 @@ test("a reply in the chat the User is reading never raises a badge", async ({
   // And it is still quiet after a reload with Beta in front — which is the
   // durable receipt answering, not the focus rule hiding Alpha's own badge.
   await page.reload();
+  await expect(sem(page, "shell-sidebar")).toBeVisible({
+    timeout: SHELL_TIMEOUT_MS,
+  });
   await revealSidebar(page);
   await botRow(page, "Beta").click();
-  await expect(
-    page.getByRole("heading", { name: "Beta is ready." }),
-  ).toBeVisible();
+  await expectReadyToSend(page);
   await expectNoBadge(page, "Alpha");
 });

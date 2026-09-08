@@ -41,12 +41,15 @@ import {
 } from "./request-body.js";
 
 const PUBLIC_APPLICATION_USER_ID = "anonymous";
-const PUBLIC_ASSET_PATHS = new Set([
-  "/",
-  "/app.js",
-  "/app.css",
-  "/favicon.ico",
-]);
+/**
+ * What an unauthenticated GET may reach: the document, and the site icon.
+ *
+ * The client's own payload is not here. It is the Worker's static assets,
+ * content-addressed under `/_flutter/<buildHash>/` and answered by the asset
+ * router before this Worker runs, so nothing about it is per-account and no
+ * request for it arrives at this function.
+ */
+const PUBLIC_ASSET_PATHS = new Set(["/", "/favicon.ico"]);
 const PACKAGE_UI_PATH = /^\/packages\/([0-9a-f]{64})\.html$/;
 /*
  * The artifact host is a host in the same zone, so the zone injected its

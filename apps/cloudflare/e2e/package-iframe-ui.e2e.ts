@@ -2,16 +2,34 @@
 // desktop-sized site or the same site at its 390px phone breakpoint. The
 // Package projection and immutable object are intercepted because this suite's
 // bundler is intentionally absent; everything that hosts and talks to the page
-// is the production client bundle.
+// is the production client.
+//
+// Under Flutter the host is `view/host_frame_web.dart`: a platform view over a
+// real iframe, which is why this is still a browser spec and not an integration
+// one. The iframe is a sibling of the semantics tree rather than a child of it
+// — a platform view is DOM the engine positions, and the identifiers live in
+// the accessibility tree — so the chrome is named by `PackageIds` and the frame
+// itself by the title the host gives it, which is the Package's display name.
 import { PACKAGE_IFRAME_HELPER_JS_V1 } from "@frockbot/core/contracts";
-import type { Page, TestInfo } from "@playwright/test";
-import { test, expect, provisionThroughUi, sendMessage } from "./fixtures.ts";
-import { E2E_OLLAMA_GOOD_API_KEY } from "./harness.ts";
+import type { Locator, Page, TestInfo } from "@playwright/test";
+import {
+  test,
+  expect,
+  createBot,
+  openApplication,
+  press,
+  sem,
+} from "./fixtures.ts";
 
 const CONTENT_HASH = "a".repeat(64);
 const PACKAGE_ID = "weather-card";
+const PAGE_ID = "main";
 const TOOL_NAME = "weather_lookup";
+const DESKTOP = { width: 1351, height: 831 } as const;
 const PHONE = { width: 390, height: 844 } as const;
+
+/** The height the page asks the host for, and the only one it ever asks for. */
+const REQUESTED_HEIGHT = 180;
 
 function artifactHtml(): string {
   return `<!doctype html>
@@ -20,21 +38,14 @@ function artifactHtml(): string {
 <script>
 window.frockbot.ready.then(({ slot }) => {
   const view = document.getElementById('view');
-  if (slot === 'frockbot.bot-settings-sections') {
-    const settings = document.getElementById('settings');
-    window.frockbot.subscribe('settings', value => {
-      settings.textContent = 'settings:' + JSON.stringify(value);
-    });
-    window.frockbot.subscribe('tool:${TOOL_NAME}', value => {
-      view.textContent = 'bridge:' + JSON.parse(value.content).temperature;
-    });
-    window.frockbot.callTool('${TOOL_NAME}', { city: 'Sydney' });
-  } else {
-    window.frockbot.subscribe('tool:${TOOL_NAME}', value => {
-      view.textContent = 'result:' + JSON.stringify(value);
-    });
-  }
-  window.frockbot.resize(180);
+  window.frockbot.subscribe('tool:${TOOL_NAME}', value => {
+    // What the host feeds back is the Turn the tool ran as, so the page reads
+    // its own result out of that Turn's events.
+    const result = (value.events || []).find(event => event.type === 'tool/result');
+    view.textContent = 'bridge:' + JSON.parse(result.content).temperature;
+  });
+  window.frockbot.callTool('${TOOL_NAME}', { city: 'Sydney' });
+  window.frockbot.resize(${REQUESTED_HEIGHT});
 });
 </script></body></html>`;
 }
@@ -42,12 +53,14 @@ window.frockbot.ready.then(({ slot }) => {
 async function installPackageRoutes(
   page: Page,
   testInfo: TestInfo,
-): Promise<{ toolCommands: unknown[] }> {
-  const port = process.env.FROCKBOT_E2E_PORT;
-  if (!port) throw new Error("the E2E app port is unavailable");
-  const artifactOrigin = `http://ui.localhost:${port}`;
+  baseURL: string | undefined,
+): Promise<{ toolCommands: unknown[]; documentLoads: () => number }> {
+  // The separate, anonymous serving origin a Package page is fetched from. It
+  // is stubbed below, so what matters is only that it is not the app's own
+  // origin — which is what the client refuses to accept a page from.
+  const artifactOrigin = `http://ui.localhost:${new URL(baseURL ?? "http://127.0.0.1:8787").port}`;
   const toolCommands: unknown[] = [];
-  let chatInput: string | undefined;
+  let loads = 0;
   const toolEvents = [
     { type: "tool/call", call: { id: "call-weather", name: TOOL_NAME } },
     {
@@ -96,7 +109,7 @@ async function installPackageRoutes(
               provenance: "Bot-authored",
               pages: [
                 {
-                  id: "main",
+                  id: PAGE_ID,
                   artifact: {
                     contentHash: CONTENT_HASH,
                     size: new TextEncoder().encode(artifactHtml()).byteLength,
@@ -105,7 +118,6 @@ async function installPackageRoutes(
                   },
                   mounts: [
                     { slot: "frockbot.bot-settings-sections", order: 20 },
-                    { slot: `frockbot.tool-result:${TOOL_NAME}`, order: 20 },
                   ],
                 },
               ],
@@ -120,6 +132,7 @@ async function installPackageRoutes(
   await page.route(
     `${artifactOrigin}/packages/${CONTENT_HASH}.html`,
     async (route) => {
+      loads += 1;
       await route.fulfill({
         status: 200,
         headers: {
@@ -132,51 +145,54 @@ async function installPackageRoutes(
       });
     },
   );
-  await page.route(new RegExp(`/api/bots/[^/]+/turns$`), async (route) => {
-    if (route.request().method() === "POST") {
-      const command = route.request().postDataJSON() as { text?: unknown };
-      chatInput = typeof command.text === "string" ? command.text : "";
-      await route.fulfill({
-        contentType: "application/json",
-        body: JSON.stringify({
-          schemaVersion: 1,
-          runId: "run-chat-tool",
-          text: "",
-          events: toolEvents,
-        }),
-      });
-      return;
-    }
-    await route.fulfill({
-      contentType: "application/json",
-      body: JSON.stringify({
-        schemaVersion: 1,
-        runs:
-          chatInput === undefined
-            ? []
-            : [
-                {
-                  schemaVersion: 2,
-                  runId: "run-chat-tool",
-                  admittedAt: "2026-09-02T00:00:00.000Z",
-                  input: chatInput,
-                  status: "completed",
-                  events: toolEvents,
-                  outcome: { type: "completed", text: "" },
-                },
-              ],
-        page: { truncated: false },
-      }),
-    });
-  });
 
   testInfo.annotations.push({
     type: "package-ui-origin",
     description: artifactOrigin,
   });
-  return { toolCommands };
+  return { toolCommands, documentLoads: () => loads };
 }
 
+/**
+ * The framed page itself.
+ *
+ * The iframe carries the Package's display name as its title, which is the
+ * host's own doing (`HostFrame` passes the contribution's name down as the
+ * frame's label) and the one handle a spec has on a platform view: it is not
+ * inside the semantics node that names the surface around it.
+ */
+function packageFrame(page: Page): Locator {
+  // The last one: a mount the shell has moved — the panel's column at desktop
+  // width, the panel's page on the phone — leaves the frame it replaced in the
+  // document, and the newest is the one on screen.
+  return page.locator('iframe[title="Sydney Weather"]').last();
+}
+
+/**
+ * The frame's box, once the shell has stopped moving it.
+ *
+ * A panel that becomes a page slides, and the engine repositions the platform
+ * view every frame of that: a box read mid-transition is of a layout that
+ * exists for 240ms, and it is wider than the one that lands.
+ */
+async function settledFrameBox(
+  page: Page,
+): Promise<{ x: number; width: number }> {
+  let previous = { x: Number.NaN, width: Number.NaN };
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    const box = await packageFrame(page).boundingBox();
+    if (box && box.x === previous.x && box.width === previous.width) return box;
+    previous = { x: box?.x ?? Number.NaN, width: box?.width ?? Number.NaN };
+    await page.waitForTimeout(250);
+  }
+  throw new Error("the framed page never settled");
+}
+
+/**
+ * The document is a canvas, so it can only overflow if the engine's own host
+ * element does. The frame's box is measured beside it, because a platform view
+ * is real DOM that a too-wide layout would push past the viewport.
+ */
 async function expectNoHorizontalOverflow(page: Page): Promise<void> {
   expect(
     await page.evaluate(
@@ -185,59 +201,74 @@ async function expectNoHorizontalOverflow(page: Page): Promise<void> {
         document.documentElement.clientWidth,
     ),
   ).toBeLessThanOrEqual(0);
+  const frame = await settledFrameBox(page);
+  const width = page.viewportSize()?.width ?? 0;
+  expect(frame.x).toBeGreaterThanOrEqual(0);
+  expect(frame.x + frame.width).toBeLessThanOrEqual(width);
 }
 
 test("a sandboxed Package page works at desktop and phone widths", async ({
   page,
   userId,
-  ollamaBaseUrl,
+  baseURL,
 }, testInfo) => {
-  const { toolCommands } = await installPackageRoutes(page, testInfo);
-  await provisionThroughUi(page, {
-    userId,
-    apiKey: E2E_OLLAMA_GOOD_API_KEY,
-    apiBaseUrl: ollamaBaseUrl,
-    botName: "Framed",
-  });
+  const { toolCommands, documentLoads } = await installPackageRoutes(
+    page,
+    testInfo,
+    baseURL,
+  );
+  await page.setViewportSize(DESKTOP);
+  await openApplication(page, userId);
+  await createBot(page, "Framed");
 
-  await page.getByRole("button", { name: "Bot settings" }).click();
-  const panel = page.getByRole("region", { name: "Settings" });
-  await panel.getByText("Advanced", { exact: true }).click();
-  const settingsFrame = panel.locator(".package-iframe-frame");
-  await expect(settingsFrame.getByText("Sydney Weather")).toBeVisible();
-  await expect(settingsFrame.getByText("Built by this Bot")).toBeVisible();
-  const iframe = settingsFrame.locator("iframe");
-  await expect(iframe).toHaveAttribute("sandbox", "allow-scripts");
-  await expect(iframe).toHaveAttribute("credentialless", "");
-  await expect(iframe).toHaveCSS("height", "180px");
+  // At this width the Bot's own panel is the third column and its Settings
+  // entry is what the Package page mounts into, so there is nothing to open.
+  const host = sem(page, `package-page-${PACKAGE_ID}-${PAGE_ID}`);
+  await expect(host).toBeVisible({ timeout: 60_000 });
+  // Whose page this is, said by the shell rather than by the page. The
+  // attribution is chrome the surface draws around the frame, so it reaches
+  // the tree as this node's own label rather than as text of its own.
+  await expect(host).toHaveAttribute("aria-label", /Sydney Weather/u);
+  await expect(host).toHaveAttribute("aria-label", /Built by this Bot/u);
+
+  const frame = packageFrame(page);
+  await expect(frame).toHaveAttribute("sandbox", "allow-scripts");
+  await expect(frame).toHaveAttribute("credentialless", "");
+  // The bridge round-trips: the page asked the host for a tool it declared,
+  // the host posted the command the shell owns, and the answer came back as a
+  // state feed the page rendered.
   await expect(
-    iframe.contentFrame().getByText("bridge:24", { exact: true }),
+    frame.contentFrame().getByText("bridge:24", { exact: true }),
   ).toBeVisible();
-  expect(toolCommands).toHaveLength(1);
+  // The host relays what the page asked for and nothing else: never a command
+  // the page did not make, and never more of them than there were documents
+  // to make them. The document is fetched twice because the page announces
+  // bridge version 2 during its handshake and this host answers by remaking
+  // the frame — and whether the first document gets as far as asking before it
+  // is replaced is a race, so what holds is the bound rather than a number.
+  // (What each command carries is asserted in the route that serves it.)
+  expect(documentLoads()).toBe(2);
+  expect(toolCommands.length).toBeGreaterThanOrEqual(1);
+  expect(toolCommands.length).toBeLessThanOrEqual(documentLoads());
+  // And the host gave the page the height it asked for, and no other.
+  await expect
+    .poll(async () => Math.round((await frame.boundingBox())?.height ?? 0))
+    .toBe(REQUESTED_HEIGHT);
   await expectNoHorizontalOverflow(page);
   await page.screenshot({ path: testInfo.outputPath("iframe-ui-desktop.png") });
 
+  // The phone: the panel is a page rather than a column, and the same framed
+  // page is in it.
   await page.setViewportSize(PHONE);
-  await expect(settingsFrame).toBeVisible();
-  await expectNoHorizontalOverflow(page);
-  const frameBox = await settingsFrame.boundingBox();
-  expect(frameBox?.width ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(
-    PHONE.width,
-  );
-  await page.screenshot({ path: testInfo.outputPath("iframe-ui-phone.png") });
-
-  await page.getByRole("button", { name: "Hide side panel" }).click();
-  await sendMessage(page, "Show Sydney weather");
-  const resultFrame = page.locator(".message-package-iframe");
-  await expect(resultFrame).toBeVisible();
+  // One tap. The panel toggle is Bot settings on a phone rather than a menu
+  // with Settings in it, so there is nothing between the gesture and the page
+  // the Package mounts into.
+  await press(sem(page, "bot-panel-toggle"));
+  await expect(host).toBeVisible({ timeout: 60_000 });
   await expect(
-    resultFrame
-      .locator("iframe")
-      .contentFrame()
-      .getByText('result:{"temperature":24}', { exact: true }),
+    frame.contentFrame().getByText("bridge:24", { exact: true }),
   ).toBeVisible();
   await expectNoHorizontalOverflow(page);
-  await page.screenshot({
-    path: testInfo.outputPath("iframe-ui-tool-result-phone.png"),
-  });
+  expect((await settledFrameBox(page)).width).toBeLessThanOrEqual(PHONE.width);
+  await page.screenshot({ path: testInfo.outputPath("iframe-ui-phone.png") });
 });

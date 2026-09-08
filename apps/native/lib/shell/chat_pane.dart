@@ -21,6 +21,7 @@ import '../client/chat_controller.dart';
 import '../client/transport.dart';
 import '../theme/states.dart';
 import 'composer.dart';
+import 'lifecycle.dart';
 import 'run_view.dart';
 import 'semantics.dart';
 import 'send_payload.dart';
@@ -181,7 +182,7 @@ class _ChatPaneState extends State<ChatPane> {
               style: TextStyle(color: Theme.of(context).colorScheme.error),
             ),
           ),
-        if (c.pendingId != null && !c.sending)
+        if (c.pending.isNotEmpty && !c.sending)
           identified(
             ShellIds.checkDelivery,
             TextButton(
@@ -196,7 +197,7 @@ class _ChatPaneState extends State<ChatPane> {
           // Readiness is about the transport, the Bot and the model; whether
           // there is something worth sending is the Composer's own question.
           ready: c.canSend,
-          stoppable: c.activeRunId != null,
+          stoppable: c.stoppable,
           stopping: c.stopping,
           onSend: _send,
           onStop: c.stop,
@@ -282,10 +283,10 @@ class _ConversationViewState extends State<ConversationView>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
-      widget.sessions.resume();
-    } else {
+    if (appIsAwayV1(state)) {
       widget.sessions.pause();
+    } else {
+      widget.sessions.resume();
     }
   }
 
@@ -328,8 +329,16 @@ class RunPage extends StatelessWidget {
 }
 
 /// What the middle column shows before a Bot is chosen.
+///
+/// A list that could not be read is not an empty one. Incident 1 is exactly
+/// this column telling a User who owns Bots that they had none, so a failure
+/// takes the slot ahead of the empty state and says what the sidebar says.
 class NoConversation extends StatelessWidget {
   final bool empty;
+
+  /// Why the directory is unreadable, when it is. An empty list this client
+  /// never managed to read is never described as an empty flock.
+  final String? failure;
   final String action;
   final VoidCallback onAction;
   const NoConversation({
@@ -337,14 +346,21 @@ class NoConversation extends StatelessWidget {
     required this.empty,
     required this.action,
     required this.onAction,
+    this.failure,
   });
 
   @override
   Widget build(BuildContext context) => FrockEmptyState(
-    title: empty ? 'No Bots yet' : 'Choose a Bot to begin',
-    detail: empty
-        ? 'Your Bots will appear here once they’re created.'
-        : 'Pick a Bot from your list to catch up or start something new.',
+    title: failure != null
+        ? 'Couldn’t load your Bots'
+        : empty
+        ? 'No Bots yet'
+        : 'Choose a Bot to begin',
+    detail:
+        failure ??
+        (empty
+            ? 'Your Bots will appear here once they’re created.'
+            : 'Pick a Bot from your list to catch up or start something new.'),
     action: action,
     onAction: onAction,
   );

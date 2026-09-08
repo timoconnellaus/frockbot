@@ -2,10 +2,6 @@ import { expect, test } from "bun:test";
 import valid from "../../../core/protocol-schemas/fixtures/valid.json";
 import invalid from "../../../core/protocol-schemas/fixtures/invalid.json";
 import {
-  decodeAcknowledgement,
-  decodeNotificationList,
-} from "@frockbot/client-core";
-import {
   decodeBotStateChannelFrameV1,
   decodeBotStateCursorV1,
 } from "@frockbot/core/protocol";
@@ -18,6 +14,8 @@ import {
 } from "@frockbot/core/contracts";
 import {
   decodeClientNotificationAcknowledgementCommandV1,
+  decodeClientNotificationAcknowledgementV1,
+  decodeClientNotificationListV1,
   decodeClientRunAdmissionFenceCommandV1,
   decodeClientRunListQueryV1,
   decodeClientRunLookupV1,
@@ -79,9 +77,9 @@ const existing: Record<string, (value: unknown) => unknown> = {
   AppletViewerToken: decodeAppletViewerTokenV1,
   SendPayload: decodeSendToUserPayloadV1,
   SkillRef: decodeSkillRefV1,
-  NotificationList: decodeNotificationList,
+  NotificationList: decodeClientNotificationListV1,
   NotificationAck: decodeClientNotificationAcknowledgementCommandV1,
-  Acknowledgement: decodeAcknowledgement,
+  Acknowledgement: decodeClientNotificationAcknowledgementV1,
   BotDirectory: decodeDirectoryViewV1,
   BotLifecycle: decodeBotLifecycleViewV1,
   BotLifecycleDirectory: decodeBotLifecycleDirectoryViewV1,

@@ -2,8 +2,7 @@
 ///
 /// Deleting a Bot removes the registration from the directory the Flock owns,
 /// so the affordance is contributed into Bot settings from here rather than
-/// rebuilt inside the settings surface, which is the seam `FlockDangerZone.vue`
-/// draws too.
+/// rebuilt inside the settings surface.
 ///
 /// One retained command, under one key, whatever surface issued it. The route
 /// answers `pending` for a change whose saga has not settled, so a lost reply
@@ -22,26 +21,24 @@ import '../shell/semantics.dart';
 
 /// The three lifecycle commands, and what each is called where a person reads
 /// it. The wire type is the key so nothing else has to know the strings.
-const botLifecycleWordsV1 = <String, ({String verb, String title, String body})>{
-  'bot/archive': (
-    verb: 'Archive Bot',
-    title: 'Archive',
-    body:
-        'Archiving stops new work and takes the Bot out of your flock. Its history is preserved, and you can restore it later.',
-  ),
-  'bot/restore': (
-    verb: 'Restore Bot',
-    title: 'Restore',
-    body:
-        'Bring this Bot back to your active list. Its history will still be there.',
-  ),
-  'bot/delete': (
-    verb: 'Delete',
-    title: 'Delete',
-    body:
-        'This removes its conversation and Applets, and cannot be undone. To stop the Bot working while keeping its history, archive it instead.',
-  ),
-};
+const botLifecycleWordsV1 =
+    <String, ({String verb, String title, String body})>{
+      'bot/archive': (
+        verb: 'Archive Bot',
+        title: 'Archive',
+        body: 'Archiving stops new work and takes the Bot out of your flock. Its history is preserved, and you can restore it later.',
+      ),
+      'bot/restore': (
+        verb: 'Restore Bot',
+        title: 'Restore',
+        body: 'Bring this Bot back to your active list. Its history will still be there.',
+      ),
+      'bot/delete': (
+        verb: 'Delete',
+        title: 'Delete',
+        body: 'This removes its conversation and Applets, and cannot be undone. To stop the Bot working while keeping its history, archive it instead.',
+      ),
+    };
 
 /// One retained lifecycle command, shared by every surface that issues one.
 class BotLifecycleCommands extends ChangeNotifier {
@@ -80,11 +77,12 @@ class BotLifecycleCommands extends ChangeNotifier {
     if (_closed || saving || pending) return false;
     _command = Map<String, dynamic>.from(
       wire.BotLifecycleCommand.fromJson({
-        'schemaVersion': 1,
-        'type': type,
-        'commandId': randomId(),
-        'botId': botId,
-      }).toJson()! as Map,
+            'schemaVersion': 1,
+            'type': type,
+            'commandId': randomId(),
+            'botId': botId,
+          }).toJson()!
+          as Map,
     );
     return retry();
   }
@@ -127,9 +125,7 @@ class BotLifecycleCommands extends ChangeNotifier {
       await store.delete(_key);
       _command = null;
       if (receipt['status'] == 'rejected') {
-        error =
-            (receipt['failure'] as String?) ??
-            'That change couldn’t be completed. Refresh your Bots and try again.';
+        error = (receipt['failure'] as String?) ?? 'That change couldn’t be completed. Refresh your Bots and try again.';
         return false;
       }
       applied = true;
@@ -140,8 +136,7 @@ class BotLifecycleCommands extends ChangeNotifier {
         _ => 'Bot deleted.',
       };
     } catch (_) {
-      error =
-          'Couldn’t confirm that change. Check its status before trying another action.';
+      error = 'Couldn’t confirm that change. Check its status before trying another action.';
     } finally {
       saving = false;
       _changed();
@@ -160,7 +155,7 @@ class BotLifecycleCommands extends ChangeNotifier {
 /// is, and the one or two changes that status allows.
 ///
 /// An archived Bot offers Restore and Delete; an active one offers Archive and
-/// Delete. Each asks its question first, in `FlockOverlay.vue`'s words.
+/// Delete. Each asks its question first.
 class BotDangerZone extends StatefulWidget {
   final BotLifecycleCommands lifecycle;
   final String botId;

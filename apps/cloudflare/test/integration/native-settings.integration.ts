@@ -102,7 +102,7 @@ test("browser and native Settings share one owner, revision, pending identity an
   ).toBe("applied");
   const chosen = await read(await asUser(userId, "/api/settings/models"));
   expect(
-    chosen.sections.find((s) => s.packageId === "provider-ollama-cloud")
+    chosen.sections.find((s) => s.id === "provider.provider-ollama-cloud")
       ?.actions?.[0]?.kind,
   ).toBe("manage-provider");
   const current = (await (

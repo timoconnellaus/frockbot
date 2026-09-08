@@ -1,5 +1,5 @@
-/// The composer's rules, ported from the Vue shell's `composer-draft`,
-/// `send-readiness`, `turn-limits` and `skill-invocation` suites.
+/// The composer's rules: the draft, send readiness, the Turn limits and the
+/// Skill invocation menu.
 library;
 
 import 'package:flutter_test/flutter_test.dart';

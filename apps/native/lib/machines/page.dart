@@ -111,11 +111,9 @@ class MachinesController extends ViewSurfaceController {
     if (kind == 'pair-machine') {
       final label = (input[machineLabelFieldV1] as String? ?? '').trim();
       offer = ((await api.request(
-                    '/api/machines/pair',
-                    body: label.isEmpty ? <String, Object?>{} : {'label': label},
-                  ))
-                  as Map)
-              .cast<String, Object?>();
+        '/api/machines/pair',
+        body: label.isEmpty ? <String, Object?>{} : {'label': label},
+      )) as Map).cast<String, Object?>();
       return {'commandId': command['commandId'], 'status': 'applied'};
     }
     final machineId = input['machineId'] as String?;

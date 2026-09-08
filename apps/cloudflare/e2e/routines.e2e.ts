@@ -4,42 +4,78 @@
 // Both were found by dogfooding, and neither could be seen from a unit test.
 // The write path already refused a bad schedule correctly and the delete
 // command already worked — what was missing was the browser telling anyone.
-// A refusal rendered in the section header, which sits above every Routine
-// card, so on a real Bot it painted hundreds of pixels above the form and the
-// form simply appeared to do nothing. And Delete went straight through from a
-// single click, in a row of six other buttons, taking the schedule, the
-// prompt and the whole run log with it.
-import { test, expect, provisionThroughUi } from "./fixtures.ts";
-import { E2E_OLLAMA_GOOD_API_KEY } from "./harness.ts";
+// A refusal was invisible, so the form simply appeared to do nothing; and
+// Delete went straight through from a single click, in a row of six other
+// buttons, taking the schedule, the prompt and the whole run log with it.
+//
+// Routines is a server-projected document, so every control here is named by
+// the projection's own ids — `view-field-routine.*`, `view-action-*` and the
+// group a Routine's name slugs to — and only the confirmation is host chrome
+// with a name of its own.
+import {
+  test,
+  expect,
+  action,
+  createBot,
+  answerFields,
+  documentField,
+  group,
+  openApplication,
+  press,
+  sem,
+} from "./fixtures.ts";
 import type { Locator, Page } from "@playwright/test";
 
 /**
- * The browser runs in a real zone that is not UTC, so "the form defaults to
- * the browser's zone" is a claim the spec can actually test. The CI runner's
- * own zone is UTC, where a default of UTC and a default of the browser's zone
- * are indistinguishable — this spec asserted "not UTC" and passed locally for
- * exactly that reason while failing on CI.
+ * The browser runs in a real zone that is not UTC, which is what makes "the
+ * moment is read in the Routine's own zone" a claim this spec can test: a
+ * schedule read in Sydney and the same schedule read in UTC are different
+ * times of day, and the panel must show the Routine's.
  */
 test.use({ timezoneId: "Australia/Sydney" });
 
 /**
- * Open Bot settings and reveal the Routines section, which lives under
- * Advanced — the same path `bot-settings.e2e.ts` walks.
+ * Answer the editor's fields, and leave them answered.
+ *
+ * `answerFields` types through the editing session rather than filling: a
+ * `fill` writes the element's value and not the widget's, so the document's
+ * required key could refuse a form this side had read back as answered. The
+ * click that helper once made is gone with it — inside the right panel the
+ * document's semantics nodes overlap and the node above the field took the
+ * pointer — and `focus()` names the element with no geometry at all.
  */
-async function openRoutines(page: Page): Promise<Locator> {
-  await page.getByRole("button", { name: "Bot settings" }).click();
-  const panel = page.getByRole("region", { name: "Settings" });
-  await expect(panel).toBeVisible();
-  await panel.getByText("Advanced").click();
-  const section = page.locator("section.routines");
-  await expect(section).toBeVisible();
-  return section;
+async function answer(
+  page: Page,
+  values: Record<string, string>,
+): Promise<void> {
+  await answerFields(page, values);
 }
 
-test("a refused schedule says why, next to the field that caused it", async ({
+/**
+ * Open the Routines surface, which the completions badge in the Bot's header
+ * opens — the badge is the only door to a Routine firing, so it is the door
+ * this spec uses.
+ */
+async function openRoutines(page: Page): Promise<Locator> {
+  await press(sem(page, "routine-inbox-badge"));
+  const document = sem(page, "routines-document");
+  await expect(document).toBeVisible({ timeout: 60_000 });
+  return document;
+}
+
+/**
+ * The one editor, expanded. There is a single form on the surface — a new
+ * Routine, or the one the reader asked to edit — and it ships collapsed so a
+ * surface someone came to read is not mostly a form.
+ */
+async function openEditor(page: Page): Promise<void> {
+  await group(page, "New Routine").click();
+  await expect(documentField(page, "routine.name")).toBeVisible();
+}
+
+test("a refused schedule is said out loud, and the form keeps what to correct", async ({
   page,
   userId,
-  ollamaBaseUrl,
   allowedFailures,
 }) => {
   // The refusal is a real 400 from the write path; the spec is about what the
@@ -47,112 +83,98 @@ test("a refused schedule says why, next to the field that caused it", async ({
   allowedFailures.requests.push(/\/api\/bots\/[^/]+\/routines$/u);
   allowedFailures.console.push(/Failed to load resource.*400/u);
 
-  await provisionThroughUi(page, {
-    userId,
-    apiKey: E2E_OLLAMA_GOOD_API_KEY,
-    apiBaseUrl: ollamaBaseUrl,
-    botName: "Scheduler",
+  await openApplication(page, userId);
+  await createBot(page, "Scheduler");
+  const document = await openRoutines(page);
+  await openEditor(page);
+
+  // A schedule is meant in a zone, and the phone has no IANA zone to send: the
+  // form starts from the zone this Bot's Routines already use, and says which
+  // that is, rather than from the browser's — which this document never learns.
+  await expect(sem(page, "view-field-routine.timezone")).toContainText(
+    "Starting from UTC",
+  );
+
+  await answer(page, {
+    "routine.name": "Blursday brief",
+    "routine.prompt": "Summarise overnight email.",
+    "routine.schedule": "every Blursday",
   });
-  const section = await openRoutines(page);
+  await press(action(page, "save-routine"));
 
-  await section.getByRole("button", { name: "New Routine" }).click();
-  const form = section.locator(".routine-form");
-  await expect(form).toBeVisible();
-
-  // The form defaults the time zone to the browser's own, not UTC: a schedule
-  // is meant in the day the person writing it is living in.
-  const timezone = form.getByLabel("Time zone");
-  await expect(timezone).toHaveValue("Australia/Sydney");
-  await expect(timezone).toHaveValue(
-    await page.evaluate(
-      () => new Intl.DateTimeFormat().resolvedOptions().timeZone,
+  // The refusal is on the surface, in the host's own words. The reason the
+  // route gave is not among them — the client does not carry a refusal's text
+  // — so what this proves is that the press was answered rather than swallowed.
+  await expect(
+    document.getByText(
+      "That action couldn’t be completed. Refresh and try again.",
     ),
-  );
-
-  await form.getByLabel("Name", { exact: true }).fill("Blursday brief");
-  await form.getByLabel("Prompt").fill("Summarise overnight email.");
-  await form.getByLabel(/^Schedule/u).fill("every Blursday");
-  await form.getByRole("button", { name: "Save Routine" }).click();
-
-  // The reason arrives inside the form, and it is the real one.
-  const refusal = form.locator("#routine-schedule-error");
-  await expect(refusal).toBeVisible();
-  await expect(refusal).toContainText("five fields");
-  await expect(form.getByLabel(/^Schedule/u)).toHaveAttribute(
-    "aria-invalid",
-    "true",
-  );
-
-  // And it is on screen with the field, not scrolled off above the cards.
-  const box = await refusal.boundingBox();
-  const viewport = page.viewportSize();
-  expect(box).not.toBeNull();
-  expect(box!.y).toBeGreaterThan(0);
-  expect(box!.y).toBeLessThan(viewport!.height);
+  ).toBeVisible();
 
   // Nothing was stored, and the form is still open with the value to correct.
-  await expect(section.locator(".routine-card")).toHaveCount(0);
-  await expect(form.getByLabel(/^Schedule/u)).toHaveValue("every Blursday");
+  await expect(group(page, "Blursday brief")).toHaveCount(0);
+  await expect(document).toHaveAttribute("aria-label", /No Routines yet/u);
+  // Focused before it is read. Flutter mirrors a field's text into the DOM
+  // input only while it is holding an editing session open on it, and it puts
+  // the text nowhere in the semantics tree at all — so a settled field reads
+  // back empty from the browser whatever it is showing a person. Focusing is
+  // what opens the session, and costs nothing: the reader's next act on a form
+  // they are being asked to correct is to put the caret in it.
+  const schedule = documentField(page, "routine.schedule");
+  await schedule.focus();
+  await expect(schedule).toHaveValue("every Blursday");
 
-  // Correcting it saves, and the refusal goes with it.
-  await form.getByLabel(/^Schedule/u).fill("0 9 * * *");
-  await form.getByRole("button", { name: "Save Routine" }).click();
-  await expect(section.locator(".routine-card")).toHaveCount(1);
-  await expect(section.getByText("Blursday brief")).toBeVisible();
+  // Correcting it saves, and the Routine is on the surface.
+  await answer(page, { "routine.schedule": "0 9 * * *" });
+  await press(action(page, "save-routine"));
+  const card = group(page, "Blursday brief");
+  await expect(card).toBeVisible({ timeout: 60_000 });
 
-  // The moment reads as a moment, not as the wire.
-  const nextRun = section.locator(".routine-card__facts time").first();
-  await expect(nextRun).toBeVisible();
-  await expect(nextRun).not.toContainText("T");
-  // Read in the Routine's own zone — the one it fires on — in the house
-  // order: "3 Sep 2026, 9:00am", never "2026-09-03T23:00:00.000Z".
-  await expect(nextRun).toContainText("9:00am");
-  await expect(nextRun).toHaveText(/^\d{1,2} [A-Z][a-z]{2} \d{4}, 9:00am$/u);
-  await expect(nextRun).toHaveAttribute("datetime", /^\d{4}-\d{2}-\d{2}T/u);
+  // The moment reads as a moment, not as the wire: the house order, in the
+  // Routine's own zone rather than the browser's — 9:00am in UTC is 7:00pm in
+  // Sydney, and this spec's browser is in Sydney.
+  await expect(card).toHaveAttribute(
+    "aria-label",
+    /Next \d{1,2} [A-Z][a-z]{2} \d{4}, 9:00am/u,
+  );
+  await expect(card).not.toHaveAttribute("aria-label", /\d{2}:\d{2}:\d{2}/u);
 });
 
 test("deleting a Routine asks first, and Cancel keeps it", async ({
   page,
   userId,
-  ollamaBaseUrl,
 }) => {
-  await provisionThroughUi(page, {
-    userId,
-    apiKey: E2E_OLLAMA_GOOD_API_KEY,
-    apiBaseUrl: ollamaBaseUrl,
-    botName: "Keeper",
-  });
-  const section = await openRoutines(page);
+  await openApplication(page, userId);
+  await createBot(page, "Keeper");
+  const document = await openRoutines(page);
+  await openEditor(page);
 
-  await section.getByRole("button", { name: "New Routine" }).click();
-  const form = section.locator(".routine-form");
-  await form.getByLabel("Name", { exact: true }).fill("Morning brief");
-  await form.getByLabel("Prompt").fill("Summarise overnight email.");
-  await form.getByLabel(/^Schedule/u).fill("0 9 * * *");
-  await form.getByRole("button", { name: "Save Routine" }).click();
-  const card = section.locator(".routine-card");
-  await expect(card).toHaveCount(1);
-
-  // One click used to be the whole of it. Now it asks, and names the Routine.
-  await card.getByRole("button", { name: "Delete", exact: true }).click();
-  const confirm = section.getByRole("alertdialog", {
-    name: "Delete Morning brief?",
+  await answer(page, {
+    "routine.name": "Morning brief",
+    "routine.prompt": "Summarise overnight email.",
+    "routine.schedule": "0 9 * * *",
   });
+  await press(action(page, "save-routine"));
+  const card = group(page, "Morning brief");
+  await expect(card).toBeVisible({ timeout: 60_000 });
+
+  // One click used to be the whole of it. Now it asks, and says what goes.
+  await press(action(card, "delete-routine"));
+  const confirm = sem(page, "routine-delete-confirm");
   await expect(confirm).toBeVisible();
   await expect(confirm).toContainText("run log");
-  await expect(card).toHaveCount(1);
 
-  // Cancelling keeps it, and leaves the panel exactly as it was.
-  await confirm.getByRole("button", { name: "Cancel" }).click();
-  await expect(confirm).toBeHidden();
-  await expect(section.getByText("Morning brief")).toBeVisible();
+  // Cancelling keeps it, and leaves the panel exactly as it was. That the
+  // Routine survived the asking is checked here rather than while the
+  // confirmation is up: a modal takes the surface behind it out of the
+  // accessibility tree, so there is nothing to count until it closes.
+  await confirm.getByText("Cancel").click();
+  await expect(confirm).toHaveCount(0);
+  await expect(card).toBeVisible();
 
   // Confirming is what deletes it.
-  await card.getByRole("button", { name: "Delete", exact: true }).click();
-  await section
-    .getByRole("alertdialog")
-    .getByRole("button", { name: "Delete Routine" })
-    .click();
-  await expect(section.locator(".routine-card")).toHaveCount(0);
-  await expect(section.getByText("No Routines yet.")).toBeVisible();
+  await press(action(card, "delete-routine"));
+  await confirm.getByText("Delete Routine").click();
+  await expect(card).toHaveCount(0, { timeout: 60_000 });
+  await expect(document).toHaveAttribute("aria-label", /No Routines yet/u);
 });

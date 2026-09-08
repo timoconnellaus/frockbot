@@ -18,3 +18,6 @@ Future<WebSocketChannel> connectSocketV1(
   await channel.ready;
   return channel;
 }
+
+/// The phone has no origin of its own, so an unset define means production.
+String defaultOriginV1() => 'https://bot.frockbot.com';

@@ -1,10 +1,9 @@
 /// Where a feature may render inside the shell.
 ///
-/// The Vue shell has `<k-slot name="frockbot.right-panel">` and its siblings:
-/// named regions the shell draws and a feature fills, so the shell never
-/// imports the feature. This is the same idea with Flutter's vocabulary — a
-/// registry a feature registers a builder into, and a [SlotRegion] the shell
-/// places where the region belongs.
+/// A slot is a named region — `frockbot.right-panel` and its siblings — that
+/// the shell draws and a feature fills, so the shell never imports the
+/// feature: a registry a feature registers a builder into, and a [SlotRegion]
+/// the shell places where the region belongs.
 ///
 /// Three regions, because three is what the shell actually opens. Trust chrome
 /// is never a slot: the transcript, the composer and the Bot list are the

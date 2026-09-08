@@ -1,5 +1,5 @@
 /// A host frame in the browser: a platform view over an iframe, with the same
-/// CSP posture the Vue canvas gives a Package page.
+/// CSP posture a Package page is given.
 ///
 /// `sandbox` is the whole of the guarantee. An untrusted page gets
 /// `allow-scripts` and nothing else, so it runs in an opaque origin with no
@@ -67,6 +67,12 @@ class _HostFrameViewState extends State<HostFrameView> {
           ? 'allow-same-origin allow-scripts'
           : 'allow-scripts',
     );
+    // Credentialless: the document loads in an ephemeral, unpartitioned store,
+    // so the request that fetches an untrusted page carries none of the
+    // viewer's cookies for the serving origin and leaves nothing behind for
+    // the next page to read. `sandbox` alone does not say that, and the Vue
+    // host said both.
+    _frame.setAttribute('credentialless', '');
     _frame.addEventListener(
       'load',
       ((web.Event _) {

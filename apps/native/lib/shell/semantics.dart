@@ -61,9 +61,19 @@ abstract final class ShellIds {
 Widget identified(String identifier, Widget child) =>
     Semantics(identifier: identifier, child: child);
 
+/// The sign-in door, which on the web is the first thing anyone sees.
+///
+/// The page is public and pre-session, so it is where a browser spec starts:
+/// the shell's own identifiers are not in the tree until an account is.
+abstract final class SignInIds {
+  static const page = 'sign-in';
+  static const submit = 'sign-in-submit';
+  static const note = 'sign-in-note';
+}
+
 /// Settings: the account surfaces, and the Bot's own panel.
 ///
-/// The names follow the Vue specs' selectors where those specs name a thing —
+/// The names follow the specs' selectors where those specs name a thing —
 /// `bot-settings.e2e.ts`, `settings-models.e2e.ts` and `profile.e2e.ts` — so
 /// each can be rewritten against Flutter Web with the same intent rather than
 /// re-derived from the widgets.
@@ -104,12 +114,14 @@ abstract final class SettingsIds {
 
 /// Connectors: the accounts a User authorizes for every Bot they own.
 ///
-/// The names follow what `connect-ollama.e2e.ts` selects on — the provider
-/// card, the connect form's three fields, the connect button and the account
-/// row's state line — so that spec can be rewritten against Flutter Web with
-/// the same intent rather than re-derived from the widgets. A provider's own
-/// controls are named by the projected field ids, which is the one place the
-/// document's conventions surface in a selector.
+/// The names cover what a connect flow is driven by — the provider card, the
+/// connect form's three fields, the connect button and the account row's state
+/// line. What the Connection *becomes* is asserted on the routes, in
+/// `test/integration/connect-ollama.integration.ts`; what is left for a
+/// browser spec here is the person's half: the form posts the command and the
+/// card's state line follows it. A provider's own controls are named by the
+/// projected field ids, which is the one place the document's conventions
+/// surface in a selector.
 abstract final class ConnectorIds {
   static const document = 'connections-document';
   static const refresh = 'connections-refresh';
@@ -159,8 +171,8 @@ abstract final class PluginIds {
 /// The names follow what `routines.e2e.ts` selects on — the section, a
 /// Routine's card, its controls and the delete confirmation — so that spec can
 /// be rewritten against Flutter Web with the same intent. The completions
-/// badge and its drawer follow `RoutineInboxBadge.vue`: a count, a trigger and
-/// one acknowledgement per entry.
+/// badge and its drawer are a count, a trigger and one acknowledgement per
+/// entry.
 abstract final class RoutineIds {
   static const document = 'routines-document';
   static const refresh = 'routines-refresh';
@@ -193,7 +205,7 @@ abstract final class RoutineIds {
 /// The names follow what `delete-bot.e2e.ts` and `bot-info.e2e.ts` select on —
 /// the create gesture, the danger zone's three verbs, and the one confirmation
 /// they share, whose title carries the Bot's name. The create sheet's names are
-/// new: the Vue overlay's wardrobe was four selects and this is one choice.
+/// new: its wardrobe is one choice, not four selects.
 abstract final class FlockIds {
   static const createTrigger = ShellIds.sidebarCreateBot;
   static const createSheet = 'flock-create';
@@ -270,7 +282,10 @@ abstract final class SearchIds {
 /// — the canvas region, its progress line, the App/Code toggle, one file
 /// button and the failure's retry — so both specs can be rewritten against
 /// Flutter Web with the same intent rather than re-derived from the widgets.
-/// The chip that opens the canvas is the Vue header's `Applet: <name>` button.
+/// The chip that opens the canvas is the header's Applet strip: one button per
+/// Applet the Bot holds, named for it. The identifier is on the strip rather
+/// than on a button, because how many buttons are in it is the header's
+/// business and "open the Applets" is one gesture whatever it holds.
 abstract final class AppletIds {
   static const canvas = 'applet-canvas';
   static const chip = 'applet-chip';

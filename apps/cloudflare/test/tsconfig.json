@@ -5,11 +5,10 @@
     // whose module graph reaches browser code. `app/shell` compiles
     // under the same combination.
     "lib": ["ES2023", "DOM", "DOM.Iterable", "WebWorker"],
-    "types": [
-      "@cloudflare/vitest-plugin/types",
-      "@cloudflare/workers-types",
-      "vite/client"
-    ]
+    // `vite/client` was here for the Vue client's `import.meta.env`; Vite left
+    // with that client, and naming a type package that is not installed fails
+    // the whole project.
+    "types": ["@cloudflare/vitest-plugin/types", "@cloudflare/workers-types"]
   },
   "include": [
     "./**/*.ts",

@@ -4,34 +4,30 @@ import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL(".", import.meta.url));
 const outdir = resolve(root, "dist/artifacts");
-const clientOutdir = resolve(root, "dist/client");
 await rm(outdir, { recursive: true, force: true });
 
-let manifest: Record<string, { file: string; isEntry?: boolean }>;
+// The document the artifact renders names the client's payload, which is
+// content-addressed under `/_flutter/<buildHash>/`; `build-flutter-web.ts`
+// stages it and writes the hash here.
+let flutterBuild: string;
 try {
-  manifest = JSON.parse(
-    await readFile(resolve(clientOutdir, ".vite/manifest.json"), "utf8"),
-  ) as Record<string, { file: string; isEntry?: boolean }>;
+  flutterBuild = (
+    JSON.parse(
+      await readFile(resolve(root, "dist/flutter-web.json"), "utf8"),
+    ) as {
+      buildHash: string;
+    }
+  ).buildHash;
 } catch (error) {
-  throw new Error("Worker renderer manifest is invalid", { cause: error });
+  throw new Error("Flutter web client was not built", { cause: error });
 }
-const clientEntry = Object.values(manifest).find((entry) => entry.isEntry);
-const clientStyle = Object.values(manifest).find((entry) =>
-  entry.file.endsWith(".css"),
+
+// The hosted shell serves the site icon the marketing site already serves,
+// read from the one canonical brand icon the app-icon script also renders.
+const clientIcon = await readFile(
+  resolve(root, "../../assets/marketing/app-icon/frockbot-icon-64.png"),
+  "base64",
 );
-if (!clientEntry || !clientStyle) {
-  throw new Error("Worker renderer assets were not emitted");
-}
-const [clientJavaScript, clientCss, clientIcon] = await Promise.all([
-  readFile(resolve(clientOutdir, clientEntry.file), "utf8"),
-  readFile(resolve(clientOutdir, clientStyle.file), "utf8"),
-  // The hosted shell serves the site icon the marketing site already serves,
-  // read from the one canonical brand icon the app-icon script also renders.
-  readFile(
-    resolve(root, "../../assets/marketing/app-icon/frockbot-icon-64.png"),
-    "base64",
-  ),
-]);
 
 const result = await Bun.build({
   entrypoints: [resolve(root, "src/user-application.ts")],
@@ -45,8 +41,7 @@ const result = await Bun.build({
   sourcemap: "external",
   packages: "bundle",
   define: {
-    __FROCKBOT_CLIENT_JS__: JSON.stringify(clientJavaScript),
-    __FROCKBOT_CLIENT_CSS__: JSON.stringify(clientCss),
+    __FROCKBOT_FLUTTER_BUILD__: JSON.stringify(flutterBuild),
     __FROCKBOT_CLIENT_ICON__: JSON.stringify(clientIcon),
   },
 });

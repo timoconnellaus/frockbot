@@ -1,66 +1,63 @@
-// Seam S6: the `/app-manifest` producer in `src/user-application.ts` against
-// the client decoder in `app/shell/client/index.ts`.
+// Seam S6: the `/app-manifest` producer in `src/user-application.ts`, against
+// the shapes the Plugins surface reads out of it.
 //
-// Both halves were tested, never against each other, and two incidents lived
-// in exactly that gap:
+// Both halves were tested, never against each other, and an incident lived in
+// exactly that gap:
 //
-//   Incident 3 — the decoder's per-Package field check did not allow the
+//   Incident 3 — the consumer's per-Package field check did not allow the
 //     optional keys, so every Package that declares configuration was
 //     refused.
 //
-// This test decodes the live body with the production decoder, imported, not
-// copied.
+// The consumer is now a server-side projection (`app/settings/plugins-
+// document.ts`), so what this proves is that the live body still carries every
+// shape that projection distinguishes: a Package with configuration and one
+// without, a Connection Type, a Capability with no Connection, settings with
+// no Capability, and the platform-owned mark that keeps the app's own shell
+// out of an enablement surface.
 import { describe, expect, it } from "vitest";
-import { decodePluginCatalog } from "@frockbot/app/shell/client";
 import { asUser, freshUserId, useApplicationArtifact } from "./fixtures.ts";
 
 useApplicationArtifact();
 
-describe("the live application manifest decodes with the client's decoder", () => {
-  it("is accepted by decodePluginCatalog, configuration and all", async () => {
+interface ManifestPackageV1 {
+  id: string;
+  displayName: string;
+  platformOwned?: boolean;
+  settings?: { id: string; scopes: string[]; role?: string }[];
+  capabilities?: { id: string }[];
+  connectionTypes?: { id: string }[];
+}
+
+describe("the live application manifest", () => {
+  it("carries every Package shape the Plugins surface distinguishes", async () => {
     const userId = freshUserId("manifest");
     const response = await asUser(userId, "/app-manifest");
 
     expect(response.status).toBe(200);
     const body = (await response.json()) as {
       deployment: { applicationHash: string };
-      packages: Array<{
-        id: string;
-        settings?: unknown;
-        capabilities?: unknown;
-        connectionTypes?: unknown;
-        platformOwned?: boolean;
-      }>;
+      packages: ManifestPackageV1[];
     };
 
     expect(body.deployment.applicationHash.length).toBeGreaterThan(0);
 
-    // The manifest must actually contain both shapes, or the decode below
-    // proves nothing about the optional keys.
-    const withConfiguration = body.packages.filter(
-      (pkg) =>
-        Object.hasOwn(pkg, "settings") ||
-        Object.hasOwn(pkg, "capabilities") ||
-        Object.hasOwn(pkg, "connectionTypes"),
-    );
+    const configured = (pkg: ManifestPackageV1) =>
+      Object.hasOwn(pkg, "settings") ||
+      Object.hasOwn(pkg, "capabilities") ||
+      Object.hasOwn(pkg, "connectionTypes");
+    const withConfiguration = body.packages.filter(configured);
     const withoutConfiguration = body.packages.filter(
-      (pkg) =>
-        !Object.hasOwn(pkg, "settings") &&
-        !Object.hasOwn(pkg, "capabilities") &&
-        !Object.hasOwn(pkg, "connectionTypes"),
+      (pkg) => !configured(pkg),
     );
     expect(withConfiguration.length).toBeGreaterThan(0);
     expect(withoutConfiguration.length).toBeGreaterThan(0);
 
-    // The decoder keeps only Packages the Plugins surface can enable — the
-    // ones that declare settings, a Connection Type or a Capability — so the
-    // provider Package must survive.
-    const catalog = decodePluginCatalog(body);
-    const provider = catalog.find(
-      (item) => item.packageId === "provider-ollama-cloud",
-    );
-    expect(provider).toBeDefined();
-    expect(provider?.connectionTypes.map((type) => type.id)).toContain(
+    const find = (id: string) => body.packages.find((pkg) => pkg.id === id);
+
+    // A provider Package carries its Connection Type, which is what a
+    // Connectors row is built from.
+    const provider = find("provider-ollama-cloud");
+    expect(provider?.connectionTypes?.map((type) => type.id)).toContain(
       "ollama-cloud-account",
     );
     expect(withConfiguration.map((pkg) => pkg.id)).toContain(
@@ -68,25 +65,22 @@ describe("the live application manifest decodes with the client's decoder", () =
     );
 
     // A Package whose only Capability is a tool that takes no Connection is
-    // still something a User installs and assigns, so it stays in the catalog.
-    const flock = catalog.find((item) => item.packageId === "flock");
-    expect(flock?.capabilities.map((capability) => capability.id)).toContain(
+    // still something a User enables, so it declares one and no Connection.
+    const flock = find("flock");
+    expect(flock?.capabilities?.map((capability) => capability.id)).toContain(
       "bot-self-management",
     );
-    expect(flock?.connectionTypes).toEqual([]);
+    expect(flock?.connectionTypes).toBeUndefined();
+    // A Package the User does choose carries no ownership mark.
+    expect(flock?.platformOwned).toBeUndefined();
 
-    // Custom models deliberately contributes settings and client sections,
-    // with no Capability or Connection Type. Its enablement is what makes the
-    // retained settings active, so that legitimate Package shape must remain
-    // visible in Plugins.
-    const customModels = catalog.find(
-      (item) => item.packageId === "custom-models",
-    );
-    expect(customModels).toMatchObject({
-      displayName: "Custom models",
-      capabilities: [],
-      connectionTypes: [],
-    });
+    // Custom models deliberately contributes settings with no Capability and
+    // no Connection Type. Its enablement is what makes the retained settings
+    // active, so that legitimate Package shape must remain visible.
+    const customModels = find("custom-models");
+    expect(customModels?.displayName).toBe("Custom models");
+    expect(customModels?.capabilities).toBeUndefined();
+    expect(customModels?.connectionTypes).toBeUndefined();
     expect(
       customModels?.settings?.map((setting) => [
         setting.id,
@@ -95,15 +89,8 @@ describe("the live application manifest decodes with the client's decoder", () =
       ]),
     ).toEqual([["model", ["bot"], "model"]]);
 
-    // The application's own shell is mounted unconditionally: it is projected
-    // so model resolution sees every manifest, but marked platform-owned so no
-    // enablement surface offers it as a choice.
-    const shell = body.packages.find((pkg) => pkg.id === "shell");
-    expect(shell?.platformOwned).toBe(true);
-    expect(
-      catalog.find((item) => item.packageId === "shell")?.platformOwned,
-    ).toBe(true);
-    // A Package the User does choose carries no ownership mark.
-    expect(flock?.platformOwned).toBeUndefined();
+    // The application's own shell is projected so model resolution sees every
+    // manifest, but marked platform-owned so no enablement surface offers it.
+    expect(find("shell")?.platformOwned).toBe(true);
   });
 });

@@ -1,8 +1,8 @@
 /// The shell's three responsive tiers.
 ///
-/// The same three the Vue shell's stylesheet has, at the same two widths. Wide
-/// enough and the shell is three columns — the Bot list, the conversation, and
-/// whatever a feature registered into the right panel. Below 980 the right
+/// Three tiers at two widths. Wide enough and the shell is three columns — the
+/// Bot list, the conversation, and whatever a feature registered into the right
+/// panel. Below 980 the right
 /// panel stops being a column and becomes a drawer over the conversation,
 /// because two columns plus a panel leaves the conversation too narrow to
 /// read. Below 640 the Bot list goes the same way: a hand-held viewport has
@@ -86,8 +86,8 @@ class ShellLayout extends StatelessWidget {
       final panel = rightPanel;
       final inlineSidebar = tier != ShellTier.single;
       // At the widest tier the panel is a column, and a column a feature has
-      // filled is simply there — the way the Vue shell's Bot panel is. The
-      // open flag is a drawer's, and only the narrower tiers have one.
+      // filled is simply there. The open flag is a drawer's, and only the
+      // narrower tiers have one.
       final inlinePanel = tier == ShellTier.triple && panel != null;
       // A drawer is only ever asked to open at a tier where it is a drawer.
       final drawnNav = navOpen && !inlineSidebar;
@@ -250,6 +250,12 @@ class _Scrim extends StatelessWidget {
           child: GestureDetector(
             onTap: onDismiss,
             behavior: HitTestBehavior.opaque,
+            // Sized by the fill above rather than by a child. A `ColoredBox`
+            // with no child takes the smallest size its constraints allow, and
+            // a `Stack`'s non-positioned children are loosely constrained — so
+            // an unpositioned scrim is 0x0: it never dims anything, never takes
+            // a tap, and is dropped from the accessibility tree for having no
+            // area. Tapping the conversation beside an open drawer did nothing.
             child: ColoredBox(color: Colors.black.withValues(alpha: 0.45)),
           ),
         ),

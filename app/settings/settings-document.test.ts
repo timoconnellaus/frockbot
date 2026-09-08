@@ -16,7 +16,6 @@ function frame(sections: SettingsFrame["sections"]): SettingsFrame {
     home: "application",
     ownerId: "tim",
     revision: 4,
-    title: "Settings",
     sections,
   });
 }
@@ -153,7 +152,6 @@ test("a section action carries its kind, and a resettable field gets its own act
           {
             kind: "manage-provider",
             label: "Manage account",
-            packageId: "example",
           },
         ],
       },

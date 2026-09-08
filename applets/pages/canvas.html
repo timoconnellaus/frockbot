@@ -2,8 +2,9 @@
 <!--
   The Applet canvas page.
 
-  `AppletCanvas.vue` owns the frame — the header, the two states, the slide —
-  and mounts this page in `frockbot.right-panel` for the "ready" half. All this
+  `apps/native/lib/applets/canvas.dart` owns the frame — the header, the two
+  states, the transition — and mounts this page in `frockbot.right-panel` for
+  the "ready" half. All this
   page does is nest the Applet's own UI artifact and hand it the one thing it
   cannot fetch for itself: the short-lived viewer token, the socket URL, and
   the theme tokens, in the `init` message `listenForAppletInit` in

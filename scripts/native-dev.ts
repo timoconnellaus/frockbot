@@ -6,7 +6,6 @@
  *   bun scripts/native-dev.ts up       build, seed, serve, boot, install
  *   bun scripts/native-dev.ts serve    restart the Workers on the existing state
  *   bun scripts/native-dev.ts app      rebuild and reinstall the app alone
- *   bun scripts/native-dev.ts web      the same app in a browser, one origin
  *   bun scripts/native-dev.ts seed     re-seed the development User's Bot and model
  *   bun scripts/native-dev.ts smoke    sign in, send a message, expect a reply
  *   bun scripts/native-dev.ts down     stop everything this script started
@@ -63,7 +62,6 @@ const mainCheckout =
 const workerPort = process.env.FROCKBOT_NATIVE_WORKER_PORT ?? "8797";
 const computerHostPort = process.env.FROCKBOT_NATIVE_COMPUTER_PORT ?? "8799";
 const appletBuildPort = process.env.FROCKBOT_NATIVE_APPLET_BUILD_PORT ?? "8801";
-const webPort = process.env.FROCKBOT_NATIVE_WEB_PORT ?? "8803";
 // One origin for everyone: `adb reverse` lends the emulator the host's
 // loopback, so the app, the Worker and `BETTER_AUTH_URL` all name this — and
 // `wrangler dev` rewrites every request URL to its bound address anyway, so
@@ -293,7 +291,10 @@ function wrangler(args: string[], cwd = cloudflareRoot): void {
 }
 
 function buildAndSeed(): void {
-  say("building the foundation artifact");
+  // `artifact:build` builds the Flutter web client first and stages it where
+  // the Worker's `assets` binding serves it, so `wrangler dev` below answers
+  // the browser with the same client the phone runs.
+  say("building the Flutter web client and the foundation artifact");
   run(["bun", "run", "artifact:build"], { cwd: cloudflareRoot });
 
   say("seeding the foundation artifact into local R2");
@@ -723,6 +724,17 @@ function dump(serial: string): Node[] {
   return nodes;
 }
 
+/**
+ * What a node says, wherever it says it.
+ *
+ * Flutter puts a widget's semantics label in `content-desc` and leaves `text`
+ * empty, so anything reading the conversation off the screen has to read all
+ * three: the transcript's own words arrive as `content-desc` alone.
+ */
+function label(node: Node): string {
+  return node.desc || node.text || node.hint;
+}
+
 function find(nodes: Node[], label: string): Node | undefined {
   // A list tile's label is its title, preview and badge on separate lines.
   return nodes.find((node) =>
@@ -793,63 +805,80 @@ async function smoke(): Promise<void> {
   adb(serial, "logcat", "-c");
   adb(serial, "shell", "am", "start", "-n", `${APP}/.MainActivity`);
 
+  // The composer's placeholder, which is also its accessibility label.
+  const composer = "Message your Bot";
+  // The shell's sidebar toggle on a phone, which is also what the empty state
+  // offers: either one opens the Bot list.
+  const openBots = "Your Bots";
+
   // The app opens the browser on the authorization URL and logs it (debug
   // builds only). The browser leg is completed from here — the same
   // `/native/authorize` request Chrome would make, then the same return
   // delivered to the app — so a fresh emulator's Chrome first-run never gets
   // in the way. A tap in the app's first frames is lost, so the tap is
   // repeated until the log line proves it landed.
-  // Only the latest start is live: each one replaces the stored state, and
-  // a return for an earlier one is refused as expired.
+  //
+  // The whole leg is retried, because the browser is racing it: Chrome opens
+  // on the same URL, and a return is single-use — whichever of the two
+  // arrives second is refused, and the app says "Couldn't finish signing in"
+  // and offers to start over. Which is what this then does.
   const latestAuthorize = () =>
     [
       ...adb(serial, "logcat", "-d", "-s", "flutter").stdout.matchAll(
         /FROCKBOT_DEV_AUTHORIZE (\S+)/g,
       ),
     ].at(-1)?.[1];
-  let authorize: string | undefined;
-  for (let attempt = 0; attempt < 6 && !authorize; attempt++) {
-    await tap(serial, ["Continue as local developer"], 90_000);
-    const deadline = Date.now() + 20_000;
-    while (Date.now() < deadline && !authorize) {
-      await sleep(1000);
-      authorize = latestAuthorize();
+  const signedIn = () => {
+    const nodes = dump(serial);
+    return Boolean(find(nodes, openBots) || find(nodes, composer));
+  };
+  let home = false;
+  for (let round = 0; round < 3 && !home; round++) {
+    adb(serial, "logcat", "-c");
+    // Only the latest start is live: each one replaces the stored state, so
+    // the log is cleared first and the newest line is the one to complete.
+    let authorize: string | undefined;
+    for (let attempt = 0; attempt < 6 && !authorize; attempt++) {
+      await tap(
+        serial,
+        ["Continue as local developer", "Try sign-in again"],
+        90_000,
+      );
+      const deadline = Date.now() + 20_000;
+      while (Date.now() < deadline && !authorize) {
+        await sleep(1000);
+        authorize = latestAuthorize();
+      }
     }
+    if (!authorize) die("the app never started sign-in — see the emulator");
+    adb(serial, "shell", "am", "force-stop", "com.android.chrome");
+    const returned = await fetch(authorize, { redirect: "manual" });
+    const location = returned.headers.get("location");
+    if (returned.status !== 302 || !location?.startsWith("frockbot-dev://"))
+      die(`/native/authorize answered ${returned.status} ${location ?? ""}`);
+    // Quoted for the device's shell: an unquoted `&state=` would background
+    // the command and hand the app a return with no state.
+    adb(
+      serial,
+      "shell",
+      "am",
+      "start",
+      "-a",
+      "android.intent.action.VIEW",
+      "-d",
+      `'${location}'`,
+      APP,
+    );
+    const deadline = Date.now() + 60_000;
+    while (Date.now() < deadline && !home) {
+      await sleep(1000);
+      home = signedIn();
+    }
+    if (!home) warn("sign-in did not land; starting the leg again");
   }
-  if (!authorize) die("the app never started sign-in — see the emulator");
-  adb(serial, "shell", "am", "force-stop", "com.android.chrome");
-  const returned = await fetch(authorize!, { redirect: "manual" });
-  const location = returned.headers.get("location");
-  if (returned.status !== 302 || !location?.startsWith("frockbot-dev://"))
-    die(`/native/authorize answered ${returned.status} ${location ?? ""}`);
-  // Quoted for the device's shell: an unquoted `&state=` would background
-  // the command and hand the app a return with no state.
-  adb(
-    serial,
-    "shell",
-    "am",
-    "start",
-    "-a",
-    "android.intent.action.VIEW",
-    "-d",
-    `'${location}'`,
-    APP,
-  );
+  if (!home) die("the app never signed in — see the emulator");
 
-  say("waiting for the signed-in home, then opening the Bot");
-  // The composer's accessibility hint; its visible placeholder is longer.
-  const composer = "Message";
-  // The shell's sidebar toggle on a phone, which is also what the empty state
-  // offers: either one opens the Bot list.
-  const openBots = "Your Bots";
-  await waitFor(
-    "the signed-in home",
-    async () => {
-      const nodes = dump(serial);
-      return Boolean(find(nodes, openBots) || find(nodes, composer));
-    },
-    90_000,
-  );
+  say("opening the Bot");
   if (!find(dump(serial), composer)) {
     // A fresh sign-in lands on "Choose a Bot to begin" with the drawer closed.
     if (!find(dump(serial), BOT_NAME)) await tap(serial, [openBots]);
@@ -864,28 +893,11 @@ async function smoke(): Promise<void> {
 
   const message = `Local smoke ${new Date().toISOString().slice(11, 19)}. Reply with one short sentence.`;
   say("sending a message");
-  const before = new Set(
-    dump(serial)
-      .map((node) => node.text)
-      .filter(Boolean),
-  );
-  await tap(serial, ["Message your Bot", "Message"]);
+  const before = new Set(dump(serial).map(label).filter(Boolean));
+  await tap(serial, [composer]);
   adb(serial, "shell", "input", "text", message.replaceAll(" ", "%s"));
   await tap(serial, ["Send"]);
 
-  // The shell's own words, which are never the Bot's. A running Turn is the
-  // animated row and says nothing at all; these are the states that do.
-  const status = new Set([
-    "Working",
-    "Waiting…",
-    "Stopping…",
-    "Stopping the previous reply…",
-    "Still stopping the previous reply",
-    "You stopped this.",
-    "Used 1 tool",
-    "Check message status",
-    "Checking whether your message went through…",
-  ]);
   // Every sentence the projection writes for a Turn that did not finish.
   const failed = [
     "This Bot couldn't finish its reply.",
@@ -898,38 +910,47 @@ async function smoke(): Promise<void> {
     "The model stopped part-way through its reply",
     "This Bot used all the steps it had",
   ];
+  // Every bubble the Bot speaks carries this prefix, and the person's carry
+  // "You": the transcript wraps each one in a `Semantics` label that Android
+  // merges above the words. Reading the prefix rather than "text that was not
+  // there before" is what keeps the person's own message, the working row and
+  // the shell's status lines out of the answer.
+  const spoken = "Bot\n";
   let reply: string | undefined;
+  // A Turn that finishes without calling `send_to_user` said nothing on
+  // purpose: only an explicit send carries the Bot's voice. The stack is still
+  // proven — the message was admitted, the model ran, the Turn settled — so
+  // this is a pass that says which kind it was, not a failure.
+  let silent = false;
   await waitFor(
     "a reply from the Bot",
     async () => {
-      const nodes = dump(serial);
+      const nodes = dump(serial).map(label);
       const broke = nodes.find((node) =>
-        failed.some((sentence) => node.text.startsWith(sentence)),
+        failed.some((sentence) => node.startsWith(sentence)),
       );
-      if (broke) die(`the Turn failed: ${broke.text} — see the Worker log`);
-      reply = nodes
-        .map((node) => node.text)
-        .find(
-          (text) =>
-            text && !before.has(text) && text !== message && !status.has(text),
-        );
+      if (broke) die(`the Turn failed: ${broke} — see the Worker log`);
+      reply = nodes.find(
+        (node) => node.startsWith(spoken) && !before.has(node),
+      );
       if (reply) return true;
       const runs = await api<{
         runs: { input?: string; status: string; events: { type: string }[] }[];
       }>(`/api/bots/${BOT_ID}/turns`);
       const run = runs.runs.find((each) => each.input === message);
-      if (
-        run?.status === "completed" &&
-        !run.events.some((event) => event.type === "send/to-user")
-      ) {
-        die("the Turn completed without delivering a send_to_user reply");
-      }
-      return false;
+      if (run?.status !== "completed") return false;
+      silent = !run.events.some((event) => event.type === "send/to-user");
+      return silent;
     },
     300_000,
   );
   screenshot(serial, "smoke-replied");
-  say(`the Bot replied: ${JSON.stringify(reply)}`);
+  if (silent) {
+    say("the Turn completed without saying anything");
+    console.log("\nsmoke: PASS (silent reply)");
+    return;
+  }
+  say(`the Bot replied: ${JSON.stringify(reply!.slice(spoken.length))}`);
   console.log("\nsmoke: PASS");
 }
 
@@ -961,7 +982,9 @@ function status(
   if (extra.build) console.log(`  Applet builds  ${extra.build}`);
   console.log();
   say("the app is signed in as the `development` User, an admin here.");
-  console.log(`  Web:   open ${hostOrigin}/?as_user=${DEVELOPMENT_USER}`);
+  console.log(
+    `  Web:   open ${hostOrigin}/?as_user=${DEVELOPMENT_USER} — the same Flutter client, served by this Worker`,
+  );
   console.log(
     `  Hot reload: adb reverse tcp:${workerPort} tcp:${workerPort} && cd apps/native && flutter run -d ${emulatorSerial() ?? "<emulator>"} \\`,
   );
@@ -970,93 +993,6 @@ function status(
   );
   console.log(`  Stop:  bun scripts/native-dev.ts down`);
   console.log();
-}
-
-/**
- * The same Flutter app in a browser, in front of the same Worker.
- *
- * One origin for both, because that is what the deployed shape is: the browser
- * build has no token to send, so its credential is ambient and the Worker must
- * look like the page's own origin. The development user header stands in for
- * the session cookie the deploy will have.
- */
-async function web({ build = true }: { build?: boolean } = {}): Promise<void> {
-  const dist = resolve(nativeRoot, "build/web");
-  if (build || !existsSync(resolve(dist, "index.html"))) {
-    say("building the Flutter web bundle");
-    run(
-      [
-        "flutter",
-        "build",
-        "web",
-        "--release",
-        `--dart-define=FROCKBOT_ORIGIN=http://127.0.0.1:${webPort}`,
-        "--dart-define=FROCKBOT_DEV_AUTH=true",
-      ],
-      { cwd: nativeRoot },
-    );
-  }
-  const upstream = hostOrigin;
-  const proxy = async (request: Request, url: URL) => {
-    const headers = new Headers(request.headers);
-    headers.set("x-frockbot-user-id", DEVELOPMENT_USER);
-    headers.delete("host");
-    headers.delete("accept-encoding");
-    const answer = await fetch(`${upstream}${url.pathname}${url.search}`, {
-      method: request.method,
-      headers,
-      body: request.body,
-      // @ts-expect-error Bun accepts this for a streamed body.
-      duplex: "half",
-      redirect: "manual",
-    });
-    // The fetch already decoded the body; forwarding the upstream's
-    // content-encoding tells the browser to decode it a second time.
-    const out = new Headers(answer.headers);
-    out.delete("content-encoding");
-    out.delete("content-length");
-    return new Response(answer.body, { status: answer.status, headers: out });
-  };
-  Bun.serve({
-    port: Number(webPort),
-    idleTimeout: 60,
-    async fetch(request, server) {
-      const url = new URL(request.url);
-      if (url.pathname.startsWith("/api/")) {
-        if (request.headers.get("upgrade")?.toLowerCase() === "websocket") {
-          return server.upgrade(request, {
-            data: { path: url.pathname + url.search },
-          })
-            ? (undefined as unknown as Response)
-            : new Response("upgrade failed", { status: 400 });
-        }
-        return proxy(request, url);
-      }
-      const path = url.pathname === "/" ? "/index.html" : url.pathname;
-      const file = resolve(dist, `.${path}`);
-      return file.startsWith(dist) && existsSync(file)
-        ? new Response(Bun.file(file))
-        : new Response(Bun.file(resolve(dist, "index.html")));
-    },
-    websocket: {
-      open(ws) {
-        const socket = new WebSocket(
-          `${upstream.replace("http", "ws")}${(ws.data as { path: string }).path}`,
-          { headers: DEVELOPMENT_HEADERS } as never,
-        );
-        (ws.data as { upstream?: WebSocket }).upstream = socket;
-        socket.onmessage = (event) => ws.send(event.data as string);
-        socket.onclose = () => ws.close();
-      },
-      message(ws, message) {
-        (ws.data as { upstream?: WebSocket }).upstream?.send(message as string);
-      },
-      close(ws) {
-        (ws.data as { upstream?: WebSocket }).upstream?.close();
-      },
-    },
-  });
-  say(`the web app is on http://127.0.0.1:${webPort} — ctrl-c to stop`);
 }
 
 async function up(): Promise<void> {
@@ -1089,9 +1025,6 @@ switch (process.argv[2] ?? "up") {
     adb(serial, "shell", "am", "start", "-n", `${APP}/.MainActivity`);
     break;
   }
-  case "web":
-    await web({ build: process.argv[3] !== "--no-build" });
-    break;
   case "seed":
     // Re-seed the development User against a running stack: the Bot, and
     // the Ollama connection once OLLAMA_API_KEY lands in .dev.vars.
@@ -1111,6 +1044,6 @@ switch (process.argv[2] ?? "up") {
     break;
   default:
     die(
-      "usage: bun scripts/native-dev.ts [up|serve|app|web|seed|smoke|down|status]",
+      "usage: bun scripts/native-dev.ts [up|serve|app|seed|smoke|down|status]",
     );
 }

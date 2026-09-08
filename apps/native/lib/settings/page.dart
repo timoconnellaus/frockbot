@@ -7,6 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../client/transport.dart';
 import '../connections/page.dart';
 import '../protocol/client_wire.generated.dart' as wire;
+import '../shell/lifecycle.dart';
 import '../shell/semantics.dart';
 import '../theme/states.dart';
 import '../view/action.dart';
@@ -72,7 +73,7 @@ class _SettingsPageState extends State<SettingsPage>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState phase) {
-    if (phase == AppLifecycleState.resumed) unawaited(state.load());
+    if (!appIsAwayV1(phase)) unawaited(state.load());
   }
 
   /// One controller per revision: a save moves the revision on, and the values
@@ -310,12 +311,11 @@ class _SettingsPageState extends State<SettingsPage>
           trailing: const Icon(Icons.chevron_right_rounded),
           onTap: () => Navigator.of(context).push(
             MaterialPageRoute<void>(
-              builder: (_) =>
-                  ConnectionsPage(
-                    api: widget.api,
-                    store: widget.store,
-                    userId: widget.userId,
-                  ),
+              builder: (_) => ConnectionsPage(
+                api: widget.api,
+                store: widget.store,
+                userId: widget.userId,
+              ),
             ),
           ),
         ),

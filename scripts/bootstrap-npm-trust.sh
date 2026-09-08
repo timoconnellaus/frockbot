@@ -81,9 +81,9 @@ fi
 # against a session with minutes to live — better spent on the work itself.
 
 # --- warn about a stale checkout -------------------------------------------
-# The set of packages comes from `packages/` on disk, so a checkout behind
+# The set of packages comes from the workspaces on disk, so a checkout behind
 # main bootstraps the wrong set. Not fatal: a deliberate bootstrap from a
-# branch that adds a Package is exactly when this script is most useful.
+# branch that adds a published workspace is when this script is most useful.
 if git fetch origin main --quiet 2>/dev/null \
   && behind="$(git rev-list --count HEAD..origin/main 2>/dev/null)" \
   && ((behind > 0)); then

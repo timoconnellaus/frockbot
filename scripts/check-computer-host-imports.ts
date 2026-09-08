@@ -55,7 +55,7 @@ function isForbidden(specifier: string): boolean {
 
 let filesChecked = 0;
 for (const path of scan(
-  "{app,applets,apps,computer,core,packages,providers,scripts}/**/*.{ts,tsx,mts,cts,js,mjs,cjs,vue}",
+  "{app,applets,apps,computer,core,providers,scripts}/**/*.{ts,tsx,mts,cts,js,mjs,cjs}",
 )) {
   if (isHostOwned(path)) continue;
   filesChecked += 1;
