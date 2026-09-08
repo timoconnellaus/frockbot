@@ -243,7 +243,7 @@ class _ChatPaneState extends State<ChatPane> {
               ...projectRuns(c.runs),
               ...projectAnnouncements(c.announcements),
             ],
-            pendingText: c.pendingId == null ? null : c.pendingText,
+            pendingText: c.visiblePendingText,
             loading: c.loading,
             hasEarlier: c.before != null,
             approvals: widget.approvals,
