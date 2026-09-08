@@ -362,7 +362,7 @@ test("the working avatar sits below the bubbles and never shifts them", async ({
           const thread = document.querySelector(".thread");
           const row = document.querySelector(".bot-working");
           const bubbles = document.querySelectorAll(
-            ".message-assistant .message-bubble",
+            ".message-assistant .send-text",
           );
           const bubble = bubbles[bubbles.length - 1];
           if (!thread || !row || !bubble) return null;
@@ -414,9 +414,7 @@ test("the working avatar sits below the bubbles and never shifts them", async ({
 
   // The Turn ended and the row went; the bubble did not move.
   const settledLeft = await page.evaluate(() => {
-    const bubbles = document.querySelectorAll(
-      ".message-assistant .message-bubble",
-    );
+    const bubbles = document.querySelectorAll(".message-assistant .send-text");
     const bubble = bubbles[bubbles.length - 1];
     return bubble ? bubble.getBoundingClientRect().left : Number.NaN;
   });
