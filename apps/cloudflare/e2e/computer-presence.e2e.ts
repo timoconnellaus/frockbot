@@ -106,10 +106,9 @@ test("the right-panel Computer card fits the mobile shell", async ({
   await page.setViewportSize(PHONE);
 
   // At this width the right panel is not a column: its entries are pages, and
-  // the header's panel button offers them by the same labels the wide layout
-  // puts in its segmented control.
-  await sem(page, "bot-panel-toggle").click();
-  await page.getByText("Computer", { exact: true }).click();
+  // the header names each of them itself rather than offering a list once one
+  // of them is opened.
+  await page.getByRole("button", { name: "Computer", exact: true }).click();
   const card = sem(page, "computer-card");
   await expect(card).toBeVisible({ timeout: 60_000 });
 

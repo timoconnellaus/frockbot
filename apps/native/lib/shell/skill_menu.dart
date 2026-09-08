@@ -69,6 +69,13 @@ class SkillCandidate {
 
 const int _noMatch = 1 << 30;
 
+final RegExp _whitespace = RegExp(r'\s');
+
+/// How far back a trigger may be from the caret. A Skill's name is a word, so
+/// nothing further back than a long one can be the query being typed — and the
+/// scan runs on every edit of a draft that may be the length of a whole Turn.
+const int _skillTriggerReach = 128;
+
 int _matchScore(SkillCatalogEntry entry, String query) {
   // 0 is "no query": everything matches and the catalog's own order stands.
   if (query.isEmpty) return 0;
@@ -114,12 +121,18 @@ List<SkillCandidate> rankSkillCandidates(
 /// Skill picker, and any whitespace after the trigger closes it again.
 SkillPopover? skillPopoverFor(String text, int caret) {
   final position = caret.clamp(0, text.length);
-  for (var index = position - 1; index >= 0; index -= 1) {
+  // A trigger is a word away at most, so a run of anything longer than a word
+  // is not one — and this is read on every edit, including a draft the length
+  // of the whole Turn limit.
+  final floor = position - _skillTriggerReach < 0
+      ? 0
+      : position - _skillTriggerReach;
+  for (var index = position - 1; index >= floor; index -= 1) {
     final character = text[index];
-    if (RegExp(r'\s').hasMatch(character)) return null;
+    if (_whitespace.hasMatch(character)) return null;
     if (character == '/' || character == '@') {
       final before = index == 0 ? '' : text[index - 1];
-      if (before.isNotEmpty && !RegExp(r'\s').hasMatch(before)) return null;
+      if (before.isNotEmpty && !_whitespace.hasMatch(before)) return null;
       return SkillPopover(
         character,
         index,

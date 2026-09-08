@@ -638,9 +638,11 @@ test("a working Bot shows a comet trail beside its avatar, and no tool names", a
   await expect(sem(page, "working-indicator")).toHaveCount(0, {
     timeout: 120_000,
   });
-  const transcript = (await sem(page, "chat-transcript").textContent()) ?? "";
-  expect(transcript).not.toMatch(/tool call/i);
-  expect(transcript).not.toMatch(/send_to_user/);
+  // The person's own message is left out: the words that script the stub are
+  // theirs, and the thread is right to show them back.
+  const said = await transcriptWithoutTheUser(page);
+  expect(said).not.toMatch(/tool call/i);
+  expect(said).not.toMatch(/send_to_user/);
 });
 
 test("a provider that stops accepting the key ends the Turn with a reason", async ({

@@ -129,18 +129,29 @@ class _ComposerState extends State<Composer> {
     widget.editor.addListener(_editorChanged);
   }
 
+  bool _reading = false;
+
   /// The trigger is read off the controller, which every path that changes the
   /// draft goes through.
   ///
   /// Reading it from `TextField.onChanged` alone was the defect: choosing a
   /// Skill rewrites the field from Dart, which fires no `onChanged`, so the
   /// popover's idea of the text stayed at the message the trigger had been in
-  /// — and the next `/` was read against stale text and opened nothing. The
-  /// controller notifies on the programmatic write and on the engine's, so
-  /// there is one source for both.
+  /// — and the next `/` was read against stale text and opened nothing.
+  ///
+  /// After the frame, and once per frame. The controller notifies from inside
+  /// the engine's own edit callback, and rebuilding the field from there hands
+  /// the engine a value mid-edit — which it answers by putting its element
+  /// back where it thinks the text was.
   void _editorChanged() {
-    _refreshPopover();
-    if (mounted) setState(() {});
+    if (_reading) return;
+    _reading = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _reading = false;
+      if (!mounted) return;
+      _refreshPopover();
+      setState(() {});
+    });
   }
 
   void _changed() {
@@ -304,11 +315,10 @@ class _ComposerState extends State<Composer> {
                             ),
                             counterText: '',
                           ),
-                          // The popover is re-read from the controller rather
-                          // than from here, so a rewrite from Dart arms it too.
                           onChanged: (value) {
                             AcceptanceMetrics.instance.inputChanged();
                             widget.onChanged(value);
+                            setState(() {});
                           },
                         ),
                       ),
