@@ -1,7 +1,11 @@
 // The agent lane end to end: Bot A asks Bot B, B runs an `agent` Turn, and B's
 // send_to_user text returns as A's `bot_message` tool result.
 import { describe, expect, it } from "vitest";
-import { TOOL_CALL_TRIGGER } from "../harness/miniflare.ts";
+import {
+  callsFrockbotTool,
+  frockbotToolCallPrompt,
+  toolCallTriggerPrompt,
+} from "../harness/miniflare.ts";
 import {
   asUser,
   expectOkJson,
@@ -32,17 +36,18 @@ describe("the agent lane through the gateway", () => {
     expect(created.status).toBe(201);
 
     const answer = "The specialist answer.";
-    const targetQuestion = `${TOOL_CALL_TRIGGER}send_to_user:${JSON.stringify({
-      payload: { type: "text", text: answer },
-    })}`;
+    const targetQuestion = toolCallTriggerPrompt([
+      "send_to_user",
+      { disposition: "finish", payload: { type: "text", text: answer } },
+    ]);
     const turn = (await expectOkJson(
       await postAsUser(userId, `/api/bots/${askingBotId}/turns`, {
         schemaVersion: 1,
         commandId: "ask-researcher",
-        text: `${TOOL_CALL_TRIGGER}bot_message:${JSON.stringify({
+        text: frockbotToolCallPrompt("bot_message", {
           target_id: targetBotId,
           message: targetQuestion,
-        })}`,
+        }),
       }),
     )) as {
       events: Array<
@@ -55,9 +60,8 @@ describe("the agent lane through the gateway", () => {
           }
       >;
     };
-    const call = turn.events.find(
-      (event) =>
-        event.type === "tool/call" && event.call.name === "bot_message",
+    const call = turn.events.find((event) =>
+      callsFrockbotTool(event, "bot_message"),
     );
     expect(call).toBeDefined();
     const result = turn.events.find(

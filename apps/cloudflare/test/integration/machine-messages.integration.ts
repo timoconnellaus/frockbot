@@ -18,7 +18,7 @@ import { describe, expect, it } from "vitest";
 import { machineRoutePathV1 } from "@frockbot/core/machine-protocol";
 import type { MachineCommandV1 } from "@frockbot/core/machine-protocol";
 import { MachineAgentDriverV1 } from "@frockbot/app/machine/testing";
-import { toolCallTriggerPrompt } from "../harness/miniflare.ts";
+import { frockbotToolCallPrompt } from "../harness/miniflare.ts";
 import {
   asUser,
   expectOkJson,
@@ -82,7 +82,7 @@ async function turn(
     await postAsUser(userId, `/api/bots/${botId}/turns`, {
       schemaVersion: 1,
       commandId,
-      text: toolCallTriggerPrompt([tool, input]),
+      text: frockbotToolCallPrompt(tool, input),
     }),
   )) as TurnView;
 }

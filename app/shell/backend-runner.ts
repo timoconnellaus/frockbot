@@ -16,6 +16,7 @@ import {
   BotTurnExecutionError,
   BotTurnRecoveryRequiredError,
 } from "@frockbot/core/durable";
+import { frockbotToolCallV1 } from "@frockbot/core/tools";
 import type { BotTurnCommand, BotTurnCompletion } from "./backend-contracts.js";
 import {
   compactionInFlightV1,
@@ -148,15 +149,11 @@ export async function executeDirectToolTurn(
   // The tool the page names is a registered first-party tool, called by its
   // discovered namespace: the same registry, guards and durable
   // occurrence a model-selected call goes through.
-  const call = {
+  const call = frockbotToolCallV1({
     id: command.runId,
-    name: "call_dynamic_tool",
-    input: {
-      namespace: "frockbot",
-      toolName: command.directTool.name,
-      arguments: command.directTool.input,
-    },
-  };
+    name: command.directTool.name,
+    input: command.directTool.input,
+  });
   try {
     let turnStart = [...session.events].findLast(
       (event) =>

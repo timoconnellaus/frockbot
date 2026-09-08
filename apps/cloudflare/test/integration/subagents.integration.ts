@@ -13,7 +13,7 @@ import {
   freshUserId,
   postAsUser,
   provisionThroughGateway,
-  toolCallTriggerPrompt,
+  frockbotToolCallPrompt,
   useApplicationArtifact,
 } from "./fixtures.ts";
 
@@ -48,13 +48,10 @@ describe("subagent tasks through the gateway", () => {
       await postAsUser(userId, `/api/bots/${botId}/turns`, {
         schemaVersion: 1,
         commandId: "tasks-turn-1",
-        text: toolCallTriggerPrompt([
-          "Task",
-          {
-            description: "Read the release notes",
-            prompt: "Read the release notes and summarise them.",
-          },
-        ]),
+        text: frockbotToolCallPrompt("Task", {
+          description: "Read the release notes",
+          prompt: "Read the release notes and summarise them.",
+        }),
       }),
     )) as {
       events: Array<{ type: string; content?: string; isError?: boolean }>;

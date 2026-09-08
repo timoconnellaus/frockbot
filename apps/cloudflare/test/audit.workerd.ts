@@ -18,7 +18,7 @@ import { evictDurableObject } from "cloudflare:test";
 import { describe, expect, test } from "vitest";
 import type { AuditEntryV1, AuditRebuildReceiptV1 } from "@frockbot/app/audit";
 import type { FakeExecScript } from "./computer-host-fake.ts";
-import { toolCallTriggerPrompt } from "./harness/miniflare.ts";
+import { frockbotToolCallPrompt } from "./harness/miniflare.ts";
 import { provisionBot, provisionSiblingBot } from "./provision-bot.ts";
 
 /** `computer/fly` reads the inner command's exit code off this marker. */
@@ -66,7 +66,7 @@ async function settleExecTurn(
       runId,
       sessionId: `${identity.userId}:${identity.botId}`,
       acceptedAt: new Date().toISOString(),
-      text: toolCallTriggerPrompt(["computer_exec", { command }]),
+      text: frockbotToolCallPrompt("computer_exec", { command }),
     },
   });
 }

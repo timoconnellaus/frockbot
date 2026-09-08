@@ -10,6 +10,7 @@
 // workerd. It must stay free of Worker-only globals.
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { dynamicToolInputV1 } from "../dynamic-tools.ts";
 
 /**
  * Reads one variable out of `apps/cloudflare/.dev.vars` without importing it
@@ -122,6 +123,47 @@ export function toolCallTriggerPrompt(
         `${TOOL_CALL_TRIGGER}${name}:${JSON.stringify(input ?? {})}`,
     )
     .join("\n");
+}
+
+/**
+ * One scripted call to a first-party tool, as a model reaches it.
+ *
+ * Every first-party tool but the Shell's own `send_to_user` and `wake_parent`
+ * is registered in the `frockbot` namespace, so it is discovered and then
+ * called through `call_dynamic_tool`. A script that names one bare is an
+ * unknown tool, exactly as it would be in production.
+ */
+export function frockbotToolCall(
+  name: string,
+  input: unknown = {},
+): [name: string, input: unknown] {
+  return [
+    "call_dynamic_tool",
+    dynamicToolInputV1({ namespace: "frockbot", toolName: name, input }),
+  ];
+}
+
+/** The trigger message for one scripted first-party tool call. */
+export function frockbotToolCallPrompt(name: string, input?: unknown): string {
+  return toolCallTriggerPrompt(frockbotToolCall(name, input));
+}
+
+/**
+ * Whether a durable `tool/call` event is a call to the named first-party tool.
+ *
+ * The journalled name is the wrapper the model called; the tool it meant is
+ * inside it.
+ */
+export function callsFrockbotTool(event: unknown, name: string): boolean {
+  const journalled = event as {
+    type?: unknown;
+    call?: { name?: unknown; input?: { toolName?: unknown } };
+  };
+  return (
+    journalled.type === "tool/call" &&
+    journalled.call?.name === "call_dynamic_tool" &&
+    journalled.call.input?.toolName === name
+  );
 }
 
 /**

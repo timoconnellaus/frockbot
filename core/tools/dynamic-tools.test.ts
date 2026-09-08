@@ -9,6 +9,7 @@ import {
 } from "@frockbot/core/contracts";
 import {
   CALL_DYNAMIC_TOOL_NAME,
+  frockbotToolCallV1,
   FROCKBOT_NAMESPACE_USE_INSTRUCTIONS,
   GET_DYNAMIC_TOOLS_NAME,
   ToolRegistry,
@@ -525,6 +526,32 @@ describe("progressive tool disclosure", () => {
         toolName: "fail",
       }),
     ).toEqual({ content: "inner failure", isError: true });
+  });
+
+  test("reaches a first-party tool the way the Bot's own dispatch sites do", async () => {
+    // A page's direct tool and a Package's `schedule` grant already know the
+    // tool they mean, and reached it by bare name — which a namespaced tool is
+    // not registered under, so the registry answered a Package isolate with a
+    // refusal addressed to a model. They build the same envelope now.
+    const { tools } = toolsFixture();
+    tools.register(dynamicTool("frockbot", "routine_manage"));
+
+    const bare = {
+      id: "call-1",
+      name: "routine_manage",
+      input: { value: "x" },
+    };
+    expect(await tools.prepare(bare, contextFor(bare))).toMatchObject({
+      kind: "denied",
+    });
+
+    const call = frockbotToolCallV1(bare);
+    const preparation = await tools.prepare(call, contextFor(call));
+    if (preparation.kind === "denied") throw new Error("was denied");
+    expect(await tools.executePrepared(preparation, contextFor(call))).toEqual({
+      content: '{"value":"x"}',
+      isError: false,
+    });
   });
 
   test("renders an escaped prompt catalog and omits the block when empty", async () => {

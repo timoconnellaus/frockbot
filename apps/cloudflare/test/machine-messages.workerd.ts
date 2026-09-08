@@ -29,7 +29,7 @@ import type {
 import type { MachineIntentRecordV1 } from "@frockbot/app/machine/intent";
 import { machineIntentKeyV1 } from "@frockbot/app/machine/intent";
 import { provisionBot } from "./provision-bot.ts";
-import { toolCallTriggerPrompt } from "./harness/miniflare.ts";
+import { frockbotToolCallPrompt } from "./harness/miniflare.ts";
 
 interface BotRpc {
   run(command: unknown): Promise<{ runId: string }>;
@@ -170,7 +170,7 @@ async function ask(
       runId,
       sessionId: `${identity.userId}:${identity.botId}`,
       acceptedAt: new Date().toISOString(),
-      text: toolCallTriggerPrompt([tool, input]),
+      text: frockbotToolCallPrompt(tool, input),
     },
   });
 }

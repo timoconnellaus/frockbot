@@ -10,7 +10,10 @@ import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { computerBotKey } from "@frockbot/computer/fly";
 import type { FakeExecScript } from "../computer-host-fake.ts";
-import { TOOL_CALL_TRIGGER } from "../harness/miniflare.ts";
+import {
+  callsFrockbotTool,
+  frockbotToolCallPrompt,
+} from "../harness/miniflare.ts";
 import {
   expectOkJson,
   freshUserId,
@@ -74,9 +77,7 @@ async function script(rule: FakeExecScript): Promise<void> {
 }
 
 function resultOf(turn: ClientTurn, name: string) {
-  const call = turn.events.find(
-    (event) => event.type === "tool/call" && event.call?.name === name,
-  );
+  const call = turn.events.find((event) => callsFrockbotTool(event, name));
   expect(call, `the Turn made no ${name} call`).toBeDefined();
   return turn.events.find(
     (event) => event.type === "tool/result" && event.callId === call!.call!.id,
@@ -95,7 +96,7 @@ describe("a Turn whose model asks the Computer how it is", () => {
       await postAsUser(userId, `/api/bots/${BOT_ID}/turns`, {
         schemaVersion: 1,
         commandId: "computer-doctor-1",
-        text: `${TOOL_CALL_TRIGGER}computer_doctor:{}`,
+        text: frockbotToolCallPrompt("computer_doctor"),
       }),
     )) as ClientTurn;
 
@@ -151,7 +152,9 @@ describe("a Turn whose model asks the Computer how it is", () => {
       await postAsUser(userId, `/api/bots/${BOT_ID}/turns`, {
         schemaVersion: 1,
         commandId: "computer-gui-1",
-        text: `${TOOL_CALL_TRIGGER}computer_exec:{"command":"chromium --headless https://example.com"}`,
+        text: frockbotToolCallPrompt("computer_exec", {
+          command: "chromium --headless https://example.com",
+        }),
       }),
     )) as ClientTurn;
 

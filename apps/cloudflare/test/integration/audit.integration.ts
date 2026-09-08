@@ -13,7 +13,7 @@ import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import type { AuditEntryV1 } from "@frockbot/app/audit";
 import type { FakeExecScript } from "../computer-host-fake.ts";
-import { toolCallTriggerPrompt } from "../harness/miniflare.ts";
+import { frockbotToolCallPrompt } from "../harness/miniflare.ts";
 import {
   asUser,
   expectJson,
@@ -73,10 +73,9 @@ describe("auditing one Turn's effects", () => {
       await postAsUser(userId, `/api/bots/${botId}/turns`, {
         schemaVersion: 1,
         commandId: "audit-turn-1",
-        text: toolCallTriggerPrompt([
-          "computer_exec",
-          { command: `echo ${marker} # Authorization: ${secret}` },
-        ]),
+        text: frockbotToolCallPrompt("computer_exec", {
+          command: `echo ${marker} # Authorization: ${secret}`,
+        }),
       }),
     )) as { runId: string };
     expect(turn.runId).toBe("audit-turn-1");
@@ -128,10 +127,9 @@ describe("auditing one Turn's effects", () => {
       await postAsUser(userId, `/api/bots/${botId}/turns`, {
         schemaVersion: 1,
         commandId: "audit-route-1",
-        text: toolCallTriggerPrompt([
-          "computer_exec",
-          { command: `echo ${marker}` },
-        ]),
+        text: frockbotToolCallPrompt("computer_exec", {
+          command: `echo ${marker}`,
+        }),
       }),
     );
 

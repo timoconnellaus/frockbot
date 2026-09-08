@@ -12,7 +12,10 @@ import type {
   FakeComputerHostCall,
   FakeExecScript,
 } from "../computer-host-fake.ts";
-import { TOOL_CALL_TRIGGER } from "../harness/miniflare.ts";
+import {
+  callsFrockbotTool,
+  frockbotToolCallPrompt,
+} from "../harness/miniflare.ts";
 import {
   expectOkJson,
   freshUserId,
@@ -73,9 +76,7 @@ async function turn(
 }
 
 function toolResult(run: ClientTurn, name: string) {
-  const call = run.events.find(
-    (event) => event.type === "tool/call" && event.call?.name === name,
-  );
+  const call = run.events.find((event) => callsFrockbotTool(event, name));
   expect(call, `the Turn made no ${name} call`).toBeDefined();
   const result = run.events.find(
     (event) => event.type === "tool/result" && event.callId === call!.call!.id,
@@ -102,10 +103,10 @@ describe("a background process across two Turns", () => {
     const first = await turn(
       userId,
       "computer-process-1",
-      `${TOOL_CALL_TRIGGER}computer_exec:${JSON.stringify({
+      frockbotToolCallPrompt("computer_exec", {
         command: "npm run build",
         background: true,
-      })}`,
+      }),
     );
     const launched = toolResult(first, "computer_exec");
     expect(launched.isError, launched.content).toBe(false);
@@ -129,9 +130,9 @@ describe("a background process across two Turns", () => {
     const second = await turn(
       userId,
       "computer-process-2",
-      `${TOOL_CALL_TRIGGER}computer_process_check:${JSON.stringify({
+      frockbotToolCallPrompt("computer_process_check", {
         processId: answer.processId,
-      })}`,
+      }),
     );
     const checked = toolResult(second, "computer_process_check");
     expect(checked.isError, checked.content).toBe(false);

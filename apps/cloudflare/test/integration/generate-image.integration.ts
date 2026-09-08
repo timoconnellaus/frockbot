@@ -23,7 +23,7 @@ import {
   postAsUser,
   provisionThroughGateway,
   readStoredRunWithEventsV1,
-  toolCallTriggerPrompt,
+  frockbotToolCallPrompt,
   useApplicationArtifact,
 } from "./fixtures.ts";
 
@@ -74,10 +74,9 @@ describe("generating an image", () => {
     const body = {
       schemaVersion: 1,
       commandId: "generate-image-1",
-      text: toolCallTriggerPrompt([
-        "generate_image",
-        { prompt: "a red barn at dusk" },
-      ]),
+      text: frockbotToolCallPrompt("generate_image", {
+        prompt: "a red barn at dusk",
+      }),
     };
 
     const turn = (await expectOkJson(

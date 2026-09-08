@@ -99,6 +99,7 @@ async function askForApproval(
       text: toolCallTriggerPrompt([
         "send_to_user",
         {
+          disposition: "finish",
           payload: {
             type: "approval",
             approvalId,

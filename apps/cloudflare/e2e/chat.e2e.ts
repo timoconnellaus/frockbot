@@ -71,6 +71,7 @@ test.afterEach(async () => {
 /** A prompt that makes the stub say `text` to the person, in the Bot's voice. */
 function says(text: string): string {
   return e2eToolCallPrompt("send_to_user", {
+    disposition: "finish",
     payload: { type: "text", text },
   });
 }

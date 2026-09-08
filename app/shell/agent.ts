@@ -373,9 +373,10 @@ function createWakeParentTool(sessions: {
 export const WAKE_PARENT_MESSAGE_LIMIT_V1 = 32_000;
 
 /**
- * The Shell's runtime Contribution. Registers the user-facing send tool, its
- * and parent hand-off, each bounded by the turn types its
- * manifest Capability declares.
+ * The Shell's runtime Contribution. Registers `send_to_user`, the Bot's voice
+ * to its User, and `wake_parent`, a background Turn's hand-off to the
+ * conversation that started it, each bounded by the turn types its manifest
+ * Capability declares.
  */
 export const shellAgentFeature: RuntimeFeatureV1<AgentRuntimeV1> = (
   runtime,

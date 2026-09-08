@@ -4,11 +4,14 @@
 //
 // Nothing here calls a tool directly. The stubbed Ollama Cloud endpoint returns
 // a `tool_calls` stream when the turn's user message carries
-// {@link TOOL_CALL_TRIGGER}, so the Agent loop inside the Bot Durable Object
+// {@link frockbotToolCallPrompt}, so the Agent loop inside the Bot Durable Object
 // prepares, admits, journals, and executes the call exactly as it would for a
 // real model, and every assertion afterwards is a request a browser makes.
 import { describe, expect, it } from "vitest";
-import { TOOL_CALL_TRIGGER } from "../harness/miniflare.ts";
+import {
+  callsFrockbotTool,
+  frockbotToolCallPrompt,
+} from "../harness/miniflare.ts";
 import {
   asUser,
   expectOkJson,
@@ -49,7 +52,7 @@ async function turnCalling(
     await postAsUser(userId, `/api/bots/${botId}/turns`, {
       schemaVersion: 1,
       commandId,
-      text: `${TOOL_CALL_TRIGGER}${name}:${JSON.stringify(input)}`,
+      text: frockbotToolCallPrompt(name, input),
     }),
   )) as ClientTurn;
 }
@@ -63,9 +66,7 @@ async function identities(userId: string): Promise<Identity[]> {
 
 /** The tool result of a Turn, asserting the loop actually ran the tool. */
 function toolResult(turn: ClientTurn, name: string): string {
-  const call = turn.events.find(
-    (event) => event.type === "tool/call" && event.call.name === name,
-  );
+  const call = turn.events.find((event) => callsFrockbotTool(event, name));
   expect(call, `the Turn made no ${name} call`).toBeDefined();
   const callId = (call as { call: { id: string } }).call.id;
   const result = turn.events.find(

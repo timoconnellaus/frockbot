@@ -20,7 +20,10 @@ import type {
   FakeComputerHostCall,
   FakeExecScript,
 } from "../computer-host-fake.ts";
-import { TOOL_CALL_TRIGGER } from "../harness/miniflare.ts";
+import {
+  callsFrockbotTool,
+  frockbotToolCallPrompt,
+} from "../harness/miniflare.ts";
 import {
   asUser,
   expectOkJson,
@@ -95,16 +98,15 @@ async function turnRunning(
     await postAsUser(userId, `/api/bots/${botId}/turns`, {
       schemaVersion: 1,
       commandId,
-      text: `${TOOL_CALL_TRIGGER}computer_exec:${JSON.stringify({ command })}`,
+      text: frockbotToolCallPrompt("computer_exec", { command }),
     }),
   )) as ClientTurn;
 }
 
 /** The `computer_exec` result of a Turn, whether it succeeded or failed. */
 function execResult(turn: ClientTurn): { content: string; isError: boolean } {
-  const call = turn.events.find(
-    (event) =>
-      event.type === "tool/call" && event.call.name === "computer_exec",
+  const call = turn.events.find((event) =>
+    callsFrockbotTool(event, "computer_exec"),
   );
   expect(call, "the Turn made no computer_exec call").toBeDefined();
   const callId = (call as { call: { id: string } }).call.id;
