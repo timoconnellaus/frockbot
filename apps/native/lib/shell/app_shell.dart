@@ -692,63 +692,19 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     }
   }
 
-  void _openApplets() {
+  Future<void> _openApplet(String appletId) async {
     final canvas = appletCanvas;
     if (canvas == null) return;
-    _push(
-      Scaffold(
-        appBar: AppBar(title: const Text('Applets')),
-        body: ListenableBuilder(
-          listenable: canvas,
-          builder: (context, _) {
-            if (canvas.loading && canvas.directory.isEmpty) {
-              return const Center(child: CircularProgressIndicator());
-            }
-            if (canvas.directory.isEmpty) {
-              return Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      canvas.failure == null
-                          ? 'Your Applets will appear here.'
-                          : 'Couldn’t load Applets.',
-                    ),
-                    TextButton(
-                      onPressed: canvas.retry,
-                      child: const Text('Refresh'),
-                    ),
-                  ],
-                ),
-              );
-            }
-            return ListView(
-              children: [
-                for (final applet in canvas.directory)
-                  ListTile(
-                    title: Text(applet.displayName),
-                    leading: const Icon(Icons.widgets_outlined),
-                    onTap: () async {
-                      await canvas.setFocus(applet.appletId);
-                      if (mounted && canvas.focusedId == applet.appletId) {
-                        _pushPanel('applet');
-                      } else if (mounted) {
-                        ScaffoldMessenger.of(this.context).showSnackBar(
-                          const SnackBar(
-                            content: Text(
-                              'Couldn’t open this Applet. Try again.',
-                            ),
-                          ),
-                        );
-                      }
-                    },
-                  ),
-              ],
-            );
-          },
-        ),
-      ),
-    );
+    await canvas.setFocus(appletId);
+    // A focus read may finish after the person switches Bots.
+    if (!mounted || canvas != appletCanvas) return;
+    if (canvas.focusedId == appletId) {
+      _openPanel('applet');
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Couldn’t open this Applet. Try again.')),
+      );
+    }
   }
 
   void _pushPanel(String key) {
@@ -936,7 +892,16 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                     ? () => _openPanel('computer')
                     : null,
                 onRoutines: () => _openPanel('routines'),
-                onApplets: appletCanvas == null ? null : _openApplets,
+                applets: [
+                  for (final applet in appletCanvas?.directory ?? const [])
+                    (
+                      label: applet.displayName,
+                      onOpen: () => unawaited(_openApplet(applet.appletId)),
+                    ),
+                ],
+                onRetryApplets: appletCanvas?.failure == null
+                    ? null
+                    : () => unawaited(appletCanvas!.retry()),
               ),
         body: SafeArea(
           child: ShellLayout(

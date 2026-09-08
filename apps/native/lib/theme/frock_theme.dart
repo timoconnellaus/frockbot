@@ -71,10 +71,10 @@ abstract final class FrockTheme {
           fontWeight: FontWeight.w700,
         ),
         titleMedium: type.titleMedium?.copyWith(
-          fontSize: 17,
+          fontSize: 16,
           fontWeight: FontWeight.w700,
         ),
-        bodyLarge: type.bodyLarge?.copyWith(fontSize: 16, height: 1.5),
+        bodyLarge: type.bodyLarge?.copyWith(fontSize: 15, height: 1.55),
         bodyMedium: type.bodyMedium?.copyWith(fontSize: 14, height: 1.5),
         bodySmall: type.bodySmall?.copyWith(
           fontSize: 12,

@@ -93,7 +93,7 @@ void main() {
       expect(find.text(text), findsOneWidget);
     }
     final heading = tester.widget<Text>(find.text('Heading')).style!;
-    expect(heading.fontSize, 17);
+    expect(heading.fontSize, 16);
     expect(heading.fontWeight, FontWeight.w700);
   });
 

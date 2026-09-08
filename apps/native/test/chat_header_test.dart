@@ -4,8 +4,32 @@ import 'package:frockbot_native/shell/chat_header.dart';
 import 'package:frockbot_native/theme/frock_theme.dart';
 
 void main() {
+  testWidgets(
+    'empty directory takes no row; directory failure stays repairable',
+    (tester) async {
+      Future<void> show({VoidCallback? retry}) => tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            appBar: ChatHeader(
+              name: 'Frock',
+              onSettings: () {},
+              onRoutines: () {},
+              onRetryApplets: retry,
+            ),
+          ),
+        ),
+      );
+      await show();
+      expect(tester.widget<AppBar>(find.byType(AppBar)).bottom, isNull);
+      var retried = false;
+      await show(retry: () => retried = true);
+      await tester.tap(find.text('Couldn’t load Applets · Retry'));
+      expect(retried, isTrue);
+    },
+  );
+
   for (final width in [320.0, 390.0]) {
-    for (final scale in [1.0, 2.0]) {
+    for (final scale in [0.85, 1.0, 2.0, 3.0]) {
       testWidgets(
         'direct header destinations at $width px and ${scale}x text',
         (tester) async {
@@ -27,7 +51,12 @@ void main() {
                     onSettings: () => opened.add('Settings'),
                     onComputer: () => opened.add('Computer'),
                     onRoutines: () => opened.add('Routines'),
-                    onApplets: () => opened.add('Applets'),
+                    applets: [
+                      (
+                        label: 'Project notes with a long name',
+                        onOpen: () => opened.add('Applet'),
+                      ),
+                    ],
                   ),
                 ),
               ),
@@ -36,10 +65,16 @@ void main() {
           await tester.pumpAndSettle();
           expect(tester.takeException(), isNull);
           await tester.tap(find.byTooltip('Bot settings'));
-          for (final name in ['Computer', 'Routines', 'Applets']) {
-            await tester.tap(find.text(name));
+          for (final name in ['Computer', 'Routines']) {
+            await tester.tap(find.byTooltip(name));
           }
-          expect(opened, ['Settings', 'Computer', 'Routines', 'Applets']);
+          await tester.tap(find.text('Project notes with a long name'));
+          expect(opened, ['Settings', 'Computer', 'Routines', 'Applet']);
+          expect(find.text('Applets'), findsNothing);
+          expect(
+            tester.getCenter(find.byTooltip('Computer')).dy,
+            tester.getCenter(find.byTooltip('Bot settings')).dy,
+          );
           expect(find.byType(PopupMenuButton<String>), findsNothing);
         },
       );
