@@ -621,6 +621,12 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   Future<void> _messageActions(TranscriptLine line) async {
     final bot = selected;
     if (bot == null) return;
+    final copyText = [
+      if (line.text.isNotEmpty) line.text,
+      for (final send in line.sends)
+        if (send.type == 'text' && send.payload?['text'] is String)
+          send.payload!['text'] as String,
+    ].join('\n\n');
     final action = await showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
@@ -637,7 +643,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                 onTap: () => Navigator.pop(context, 'read'),
               ),
 
-            if (line.text.isNotEmpty)
+            if (copyText.isNotEmpty)
               ListTile(
                 leading: const Icon(Icons.copy),
                 title: const Text('Copy'),
@@ -661,7 +667,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         ),
       ),
     );
-    if (!mounted || selected?.botId != bot.botId) return;
+    if (!mounted || selected?.botId.value != bot.botId.value) return;
     if (action == 'work') {
       final lines = projectRuns(
         widget.sessions.open(widget.userId, bot.botId.value).controller.runs,
@@ -671,7 +677,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       );
     }
     if (action == 'copy') {
-      await Clipboard.setData(ClipboardData(text: line.text));
+      await Clipboard.setData(ClipboardData(text: copyText));
     }
     if (action == 'unread' || action == 'read') {
       await activity.mark(
@@ -726,6 +732,14 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                       await canvas.setFocus(applet.appletId);
                       if (mounted && canvas.focusedId == applet.appletId) {
                         _pushPanel('applet');
+                      } else if (mounted) {
+                        ScaffoldMessenger.of(this.context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'Couldn’t open this Applet. Try again.',
+                            ),
+                          ),
+                        );
                       }
                     },
                   ),
