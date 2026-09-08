@@ -36,6 +36,10 @@ import { mkdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  APPLET_BUILD_ROUTE,
+  APPLET_BUILD_TOKEN_HEADER,
+} from "@frockbot/applets/build-contract";
 import { reserveFreePort } from "./ports.ts";
 import {
   OutputTail,
@@ -96,6 +100,12 @@ export const E2E_STREAMED_REPLY_TAIL = "**local Ollama stub**.";
 export const E2E_STREAM_GAP_MS = 8_000;
 
 const READY_TIMEOUT_MS = 120_000;
+/**
+ * A cold container start, behind a first-ever pull of the container runtime's
+ * proxy image, is minutes rather than seconds. Only the Applet build service
+ * waits this long, and only once per run.
+ */
+const APPLET_BUILD_READY_TIMEOUT_MS = 420_000;
 const SHUTDOWN_GRACE_MS = 5_000;
 
 function unauthorized(): { status: number; body: string } {
@@ -801,10 +811,14 @@ export async function startHarness(
       const supervisedAppletBuild = superviseProcess({
         label: "Applet build wrangler dev",
         spawnChild: spawnAppletBuild,
-        // `/healthz` is the Worker's own route: it answers without starting a
-        // container, so this waits for the Worker and the image build, not for
-        // a cold container start.
-        waitUntilReady: () => waitForHttpServer(`${appletBuildUrl}/healthz`),
+        // `/healthz` is the Worker's own route and answers without starting a
+        // container, so it proves nothing about whether a build can run: the
+        // container runtime still has to pull `cloudflare/proxy-everything`
+        // and cold-start an instance. A spec that raced that got an instant
+        // "Network connection lost" from the binding with nothing in the build
+        // Worker's log — the connection died before its handler. So readiness
+        // is one real build, which leaves a warm container behind it.
+        waitUntilReady: () => waitForAppletBuild(appletBuildUrl),
         stopChild: stopProcessTree,
         forwardOutput,
         report: note,
@@ -845,6 +859,51 @@ export async function startHarness(
     await stop();
     throw error;
   }
+}
+
+/**
+ * The Applet build service is ready when it has actually built something.
+ *
+ * The cheapest build there is: one file and no `applet.json`, which the
+ * container refuses at the descriptor stage. It costs a round trip and proves
+ * the whole path — Worker, container image, container runtime — and it leaves
+ * the instance warm, so the first spec to publish an Applet is not the one
+ * paying for a cold start.
+ *
+ * Longer than the other waits because a machine that has never run this pulls
+ * the container runtime's proxy image first.
+ */
+async function waitForAppletBuild(baseUrl: string): Promise<void> {
+  await waitForHttpServer(`${baseUrl}/healthz`);
+  const deadline = Date.now() + APPLET_BUILD_READY_TIMEOUT_MS;
+  let lastFailure = "no attempt was made";
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(`${baseUrl}${APPLET_BUILD_ROUTE}`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          [APPLET_BUILD_TOKEN_HEADER]: E2E_APPLET_BUILD_TOKEN,
+        },
+        body: JSON.stringify({
+          version: 1,
+          effectId: "e2e-harness-warmup",
+          appletId: "e2e.warmup",
+          mode: "check",
+          files: [{ path: "server.ts", text: "export default {};\n" }],
+        }),
+      });
+      const body = (await response.json()) as { status?: string };
+      if (response.ok && typeof body.status === "string") return;
+      lastFailure = `${response.status} ${JSON.stringify(body)}`;
+    } catch (error) {
+      lastFailure = error instanceof Error ? error.message : String(error);
+    }
+    await new Promise((sleep) => setTimeout(sleep, 1_000));
+  }
+  throw new Error(
+    `Timed out waiting for the Applet build service to build: ${lastFailure}`,
+  );
 }
 
 async function waitForHttpServer(baseUrl: string): Promise<void> {

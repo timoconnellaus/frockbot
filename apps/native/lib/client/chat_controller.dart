@@ -225,7 +225,26 @@ class ChatController extends ChangeNotifier {
 
   void _put(Map<String, dynamic> run) {
     _cachedRunIds.remove(run['runId']);
+    _optimisticRunIds.remove(run['runId']);
     _runs[run['runId'] as String] = run;
+  }
+
+  /// Runs this client drew for itself, so it can take them back if the
+  /// submission behind one turns out never to have been admitted.
+  final _optimisticRunIds = <String>{};
+
+  void _putOptimisticQueuedRun(PendingSend submission) {
+    // Never over a run authority already told this client about.
+    if (_runs.containsKey(submission.id)) return;
+    _optimisticRunIds.add(submission.id);
+    _runs[submission.id] = {
+      'runId': submission.id,
+      'input': submission.text,
+      'admittedAt': DateTime.now().toUtc().toIso8601String(),
+      'status': 'running',
+      'queued': true,
+      'events': const <Object?>[],
+    };
   }
 
   Future<void> invalidate() async {
@@ -267,7 +286,20 @@ class ChatController extends ChangeNotifier {
       }
       error = null;
       {
-        unawaited(writePageCache(store, userId, botId, runs, before));
+        // Never the rows this client drew for itself: a cache that holds one
+        // reopens the conversation with a Turn that may never have existed.
+        unawaited(
+          writePageCache(
+            store,
+            userId,
+            botId,
+            [
+              for (final run in runs)
+                if (!_optimisticRunIds.contains(run['runId'])) run,
+            ],
+            before,
+          ),
+        );
       }
     } finally {
       loading = false;
@@ -293,6 +325,13 @@ class ChatController extends ChangeNotifier {
     // message the person had every right to send.
     final supersedes = runningRunId;
     pending = [...pending, submission];
+    // A message that displaces a running Turn joins the thread at once, greyed
+    // and queued, rather than waiting for a durable read. The send route does
+    // not answer until the Turn it replaced has settled, so the whole of the
+    // drain — the only window in which the thread has anything to say about
+    // it — is over by the time authority could have told this client. The
+    // durable projection replaces this by run id the moment it arrives.
+    if (supersedes != null) _putOptimisticQueuedRun(submission);
     changed();
     draft = '';
     try {
@@ -333,6 +372,7 @@ class ChatController extends ChangeNotifier {
   }
 
   void _forget(PendingSend submission) {
+    if (_optimisticRunIds.remove(submission.id)) _runs.remove(submission.id);
     pending = [
       for (final entry in pending)
         if (entry.id != submission.id) entry,

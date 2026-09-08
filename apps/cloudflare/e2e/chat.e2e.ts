@@ -675,7 +675,11 @@ test("a send the server refuses for size keeps the draft and says why", async ({
   // never leaves the browser: the count appears and the button closes. The
   // count is what is left rather than what is over, so over the limit it is a
   // negative number.
-  await composer.click();
+  // Filled rather than typed: 32,010 keystrokes is minutes of them. `fill`
+  // reaches the widget only while the engine is holding an editing session
+  // open on the field, so the focus is the part that matters and the read
+  // below is what proves the widget took it.
+  await composer.focus();
   await composer.fill("x".repeat(TURN_TEXT_MAX_CHARACTERS_V1 + 10));
   // Read off the conversation rather than the field's own node: the count is
   // a line under the composer row, and which semantics node the engine merges
@@ -686,7 +690,7 @@ test("a send the server refuses for size keeps the draft and says why", async ({
     })
     .toContain("-10 characters left");
   await expect.poll(() => pressDisabled(sem(page, "send-button"))).toBe(true);
-  await composer.fill("");
+  await answerInputs([[composer, ""]]);
 
   // A refusal that reaches the client anyway — another tab, an older build, a
   // proxy of its own — is still a refusal, and the answer already says why.
@@ -701,9 +705,7 @@ test("a send the server refuses for size keeps the draft and says why", async ({
   });
 
   const prompt = "this one is refused";
-  await composer.click();
-  await composer.fill(prompt);
-  await expect(composer).toHaveValue(prompt);
+  await answerInputs([[composer, prompt]]);
   await sem(page, "send-button").click();
 
   // The server's own sentence, not "Agent request failed" and not a guess.
@@ -746,8 +748,7 @@ test("a Bot the client cannot reach settles with a reason and a Retry", async ({
 
   const composer = composerInput(page);
   const prompt = "are you there";
-  await composer.click();
-  await composer.fill(prompt);
+  await answerInputs([[composer, prompt]]);
   await sem(page, "send-button").click();
 
   // The bound is several seconds of backoff, and then it settles by itself,

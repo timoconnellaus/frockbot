@@ -27,33 +27,23 @@ async function expectHighlighted(
 }
 
 /**
- * Type the trigger and wait for the popover.
+ * Type the trigger and wait for the popover, the way a person reaches it: tap
+ * the composer, then type.
  *
- * Retried as a whole because a keystroke aimed at a Flutter text field only
- * lands while the engine holds an editing session open on it, and choosing a
- * Skill rewrites the field's value from Dart — which closes the session and
- * builds a new element under the one this side just clicked. The retry types
- * into whatever is there now.
+ * Choosing a Skill rewrites the field's value from Dart, and the engine
+ * answers a rewrite by tearing its editing element down — so between one
+ * popover and the next there may be no `<input>` inside the composer's
+ * semantics node at all. Anything holding the old element, `focus()` included,
+ * then types into nothing. The gesture is on the semantics node, which is
+ * always there, and the element is looked up again afterwards.
  */
 async function openPopover(page: Page): Promise<void> {
-  const composer = composerInput(page);
   await expect(async () => {
-    // Focused and typed rather than clicked and filled. `fill` writes the
-    // element's value, which the engine reads only while it is holding an
-    // editing session open on that field — and choosing a Skill rewrites the
-    // field from Dart, which ends the session and builds a new element under
-    // the one this side just clicked. So the trigger was landing in the DOM,
-    // `toHaveValue` was agreeing about it, and the widget never saw a `/` at
-    // all: the menu opened the first time and never again. Typing into a
-    // focused field always reaches the widget, and select-all is what clears
-    // whatever was there without a `fill`.
-    // Clicked, not merely focused. Choosing a Skill rewrites the field from
-    // Dart, and the engine answers a rewrite by tearing its editing element
-    // down and building another: `focus()` on the element this side is holding
-    // lands on the one that is going away, and the keys that follow reach no
-    // widget at all. A click is a real gesture at whatever is there now, which
-    // is what opens the session the trigger needs.
-    await composer.click();
+    await sem(page, "chat-composer").click();
+    // The engine builds the editing element when it opens the session, so this
+    // is the first moment there is one to type into.
+    const composer = composerInput(page);
+    await expect(composer).toBeVisible({ timeout: 5_000 });
     await composer.press("ControlOrMeta+a");
     await composer.pressSequentially("/");
     await expect(composer).toHaveValue("/");
@@ -121,7 +111,10 @@ test("the Skill popover keeps the highlight the arrow keys put on it", async ({
   await expect(
     sem(sem(page, "skill-chips"), `skill-chip-${third}`),
   ).toBeVisible();
-  await expect(composer).toHaveValue("");
+  // Read with the session open: the rewrite closed it, and a Flutter field
+  // with no editing element has no value on this side to read at all.
+  await sem(page, "chat-composer").click();
+  await expect(composerInput(page)).toHaveValue("");
 
   // Escape closes the popover and leaves what was typed alone.
   await openPopover(page);

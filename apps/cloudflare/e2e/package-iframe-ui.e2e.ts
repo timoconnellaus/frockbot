@@ -244,7 +244,17 @@ test("a sandboxed Package page works at desktop and phone widths", async ({
   // document that asked. It is one command per *document* rather than one
   // outright because this host remakes the frame when the page announces
   // bridge version 2, so the page is loaded a second time and asks again.
-  expect(toolCommands).toHaveLength(documentLoads());
+  //
+  // Polled, and against both counts at once. The words the page renders come
+  // from the feed the *first* document's answer created, and the host replays
+  // every feed to the second document — so "bridge:24" is on screen before the
+  // second document's own command has been posted, and reading the two
+  // counters at that instant saw one command against two loads.
+  await expect
+    .poll(() => `${toolCommands.length} of ${documentLoads()}`, {
+      timeout: 30_000,
+    })
+    .toBe("2 of 2");
   // And the host gave the page the height it asked for, and no other.
   await expect
     .poll(async () => Math.round((await frame.boundingBox())?.height ?? 0))

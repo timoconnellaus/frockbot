@@ -60,19 +60,31 @@ async function recentToolResults(page: Page, userId: string): Promise<string> {
   return `${JSON.stringify(await applets.json(), null, 2)}\n${JSON.stringify(await detail.json(), null, 2)}`;
 }
 
-/** The preview URL `applet_check` handed the Bot, from the operator surface. */
+/**
+ * The preview URL `applet_check` handed the Bot, from the operator surface.
+ *
+ * Polled, because a real check is a type check, a lint and two bundles inside
+ * a container: the composer is free again long before the tool has answered,
+ * and reading the operator surface once caught the Turn mid-build and called
+ * that "no preview URL". A check that answers with diagnostics instead ends
+ * the wait at once, with what it said.
+ */
 async function previewUrlFromCheck(
   page: Page,
   userId: string,
 ): Promise<string> {
-  const results = await recentToolResults(page, userId);
-  const match = results.match(
-    /http:\/\/ui\.localhost:\d+\/packages\/[0-9a-f]{64}\.html/,
-  );
-  if (!match) {
-    throw new Error(`applet_check returned no preview URL.\n${results}`);
+  const deadline = Date.now() + 300_000;
+  let results = "";
+  while (Date.now() < deadline) {
+    results = await recentToolResults(page, userId);
+    const match = results.match(
+      /http:\/\/ui\.localhost:\d+\/packages\/[0-9a-f]{64}\.html/,
+    );
+    if (match) return match[0];
+    if (results.includes("does not build yet")) break;
+    await new Promise((sleep) => setTimeout(sleep, 2_000));
   }
-  return match[0];
+  throw new Error(`applet_check returned no preview URL.\n${results}`);
 }
 
 async function runTool(
@@ -197,8 +209,11 @@ async function settle(page: Page): Promise<void> {
   let previous = -1;
   for (let attempt = 0; attempt < 40; attempt += 1) {
     const box = await canvas.boundingBox().catch(() => null);
-    const width = Math.round(box?.width ?? -1);
-    if (width >= 0 && width === previous) return;
+    // No canvas on screen is nothing to wait for: the shots of the closed
+    // shell were spending ten seconds proving the box stayed absent.
+    if (!box) return;
+    const width = Math.round(box.width);
+    if (width === previous) return;
     previous = width;
     await page.waitForTimeout(250);
   }
@@ -207,7 +222,15 @@ async function settle(page: Page): Promise<void> {
 async function shot(page: Page, name: string): Promise<void> {
   await settle(page);
   await mkdir(shotDirectory, { recursive: true });
-  await page.screenshot({ path: join(shotDirectory, `${name}.png`) });
+  // Bounded, and with the engine's own animation left alone. A Flutter view
+  // repaints forever, so a screenshot that waits for the page to go still
+  // waits for something that never happens — and an unbounded one takes the
+  // whole test's budget with it rather than failing on its own line.
+  await page.screenshot({
+    path: join(shotDirectory, `${name}.png`),
+    animations: "disabled",
+    timeout: 30_000,
+  });
 }
 
 async function expectNoHorizontalOverflow(page: Page): Promise<void> {
@@ -239,7 +262,10 @@ test("a Bot writes, checks and publishes an Applet, and its tool reaches the Bot
   userId,
   ollamaBaseUrl,
 }) => {
-  test.setTimeout(900_000);
+  // Two container builds, a live Applet in an iframe, a second page watching
+  // the same tables, and eight scripted Turns. Fifteen minutes was the whole
+  // budget and this spec now reaches the end of itself inside it.
+  test.setTimeout(1_500_000);
   expect(
     appletBuildAvailableV1(),
     "Docker is not running, so apps/applet-build could not start and no Applet can be built. Start Docker and run this spec again.",

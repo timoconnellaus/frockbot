@@ -964,4 +964,36 @@ describe("the Applet viewer token route", () => {
       definitive: true,
     });
   });
+
+  test("the socket address carries no token of its own", async () => {
+    // It used to. The page then offered the same token as a subprotocol — the
+    // browser carrier — and the gateway, which refuses a token presented
+    // twice, answered every Applet's socket 401 (2026-09-08).
+    const env: UserApplicationEnv = {
+      BOT_STATE: {
+        ...rpcBindingFor({} as BotStateBinding),
+        mintAppletViewerToken: () =>
+          Promise.resolve({
+            token: "viewer-token",
+            expiresAt: new Date(Date.now() + 900_000).toISOString(),
+            appletId: "alice.todo",
+            generationId: "g1",
+          }),
+      },
+      DEPLOYMENT: { userId: "alice", applicationHash: "foundation-v1" },
+    };
+    const response = await createUserApplication()(
+      new Request("https://frockbot.test/api/applets/alice.todo/token"),
+      env,
+    );
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      token: string;
+      socketUrl: string;
+    };
+    expect(body.token).toBe("viewer-token");
+    expect(body.socketUrl).toBe(
+      "wss://frockbot.test/api/applets/alice.todo/socket",
+    );
+  });
 });

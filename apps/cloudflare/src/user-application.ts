@@ -486,10 +486,13 @@ function createUserApplicationRoute() {
           schemaVersion: 1,
           appletId,
         });
+        // The address only. Which carrier the token rides is the page's
+        // choice — a browser offers it as a subprotocol, everything else puts
+        // it in the query — and a token presented twice is refused, so the
+        // address must never carry one of its own.
         const socket = new URL(url.origin);
         socket.protocol = url.protocol === "http:" ? "ws:" : "wss:";
         socket.pathname = `/api/applets/${encodeURIComponent(appletId)}/socket`;
-        socket.searchParams.set("token", minted.token);
         return Response.json({
           token: minted.token,
           expiresAt: minted.expiresAt,
