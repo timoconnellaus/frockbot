@@ -1,8 +1,8 @@
 import { DurableObject } from "cloudflare:workers";
 import { type SessionEvent } from "@frockbot/core/contracts";
-import { ComputerRegistry } from "@frockbot/computer/core";
+import { ComputerRegistry } from "@frockbot/computer/core/host";
 import {
-  ComputerHostClient,
+  FlyHostTransportV1,
   createFlySpriteProviderFeature,
   FlySpriteComputer,
 } from "@frockbot/computer/fly";
@@ -84,7 +84,7 @@ export { AppletCapabilities, AppletState } from "../src/applet-state.ts";
 export { BotIsolateProbe } from "./bot-isolate-probe.ts";
 export { SearchSpikeProbe } from "./search-probe.ts";
 export { AuditProbe } from "./audit-probe.ts";
-export { ComputerHostClientProbe } from "./computer-host-probe.ts";
+export { FlyHostTransportProbeV1 } from "./computer-host-probe.ts";
 
 /**
  * A write outcome flattened for the RPC seam: the fields a test asserts on,
@@ -1051,7 +1051,7 @@ export class FlyCompatibilityProbe extends DurableObject<FlyCompatibilityEnv> {
       spriteName,
       identity: { userId: "workerd" },
       host: (identity, tenant) =>
-        new ComputerHostClient({
+        new FlyHostTransportV1({
           fetcher: this.env.COMPUTER_HOST,
           hostToken: this.env.COMPUTER_HOST_TOKEN,
           identity,
@@ -1079,7 +1079,7 @@ export class FlyCompatibilityProbe extends DurableObject<FlyCompatibilityEnv> {
       "frockbot-workerd-compatibility",
     );
     const identity = { userId: "workerd" };
-    this.computers.assign(identity, "fly-sprite");
+    this.computers.assign(identity, "computer-host");
     const computer = await this.computers.open(identity, { botId });
     try {
       const captured = await computer.screenshot!.capture();
@@ -1131,7 +1131,7 @@ export class FlyCompatibilityProbe extends DurableObject<FlyCompatibilityEnv> {
       "frockbot-workerd-compatibility",
     );
     const identity = { userId: "workerd" };
-    this.computers.assign(identity, "fly-sprite");
+    this.computers.assign(identity, "computer-host");
     const computer = await this.computers.open(identity, { botId });
     try {
       const report = await computer.doctor!.run();
@@ -1175,7 +1175,7 @@ export class FlyCompatibilityProbe extends DurableObject<FlyCompatibilityEnv> {
       "frockbot-workerd-compatibility",
     );
     const identity = { userId: "workerd" };
-    this.computers.assign(identity, "fly-sprite");
+    this.computers.assign(identity, "computer-host");
     const computer = await this.computers.open(identity, {
       botId: input.botId,
     });
@@ -1249,7 +1249,7 @@ export class FlyCompatibilityProbe extends DurableObject<FlyCompatibilityEnv> {
       "frockbot-workerd-compatibility",
     );
     const identity = { userId: "workerd" };
-    const assignment = this.computers.assign(identity, "fly-sprite");
+    const assignment = this.computers.assign(identity, "computer-host");
     const computer = await this.computers.open(identity, {
       botId: "compatibility",
     });

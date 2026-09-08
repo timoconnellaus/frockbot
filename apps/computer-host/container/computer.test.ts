@@ -58,7 +58,7 @@ import {
   WATCHDOG_SCRIPT,
   WATCHDOG_SERVICE,
   WORKSPACE_SYNC_SERVICE,
-} from "@frockbot/computer/host-runtime";
+} from "@frockbot/computer/fly/runtime";
 import {
   ComputerHost,
   COMPUTER_HOST_STATE_PATH,
@@ -312,7 +312,7 @@ describe("open", () => {
     const response = await host.handle(request({ kind: "open" }));
     expect(response.status).toBe(200);
     const result = decodeComputerHostOpenResultV1(await response.json());
-    expect(result.spriteName).toBe(host.spriteNameFor("user-1"));
+    expect(result.instanceId).toBe(host.spriteNameFor("user-1"));
     expect(result.generation).toBe(1);
     expect(client.created).toEqual([host.spriteNameFor("user-1")]);
 
@@ -857,7 +857,7 @@ describe("open", () => {
     const opened = decodeComputerHostOpenResultV1(await response.json());
 
     expect(response.status).toBe(200);
-    expect(opened.spriteName).toBe(sprite.name);
+    expect(opened.instanceId).toBe(sprite.name);
     expect(opened.generation).toBe(4);
     expect(opened.provisioning).toMatchObject({
       kind: "update",

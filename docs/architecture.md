@@ -740,13 +740,19 @@ The facet's own SQLite inside the per-`<userId>:<appletId>` Durable Object, with
 
 ## 9. Computer
 
+### The interface
+
+One interface, `ComputerHostV1` (`computer/core/host.ts`), and one implementation of it, `computer/fly`. A host `open`s a session for one Bot tenant of one User; the session is where every operation lives — `workspace`, `sync`, `exec`, `browser`, `screenshot`, `processes`, `doctor`, `presence`, `viewer`, `control` — and `close()` ends the session rather than the Computer. `teardown?(identity)` destroys the Computer itself; it is optional and has no caller, because the retention decision behind it has not been made (known issue 27). Nothing above the host names Fly: `@frockbot/computer/fly/**` is importable only from `computer/fly/**`, `apps/computer-host/**` and the two places that register the host, enforced by `scripts/check-computer-host-imports.ts`.
+
+`ComputerHostCapabilitiesV1` is what a host _is_, as opposed to what it does: `scratchPath`, `refuseGuiCommand`, `desktop` and `viewerFrameOrigins`. It hangs off the host and off every session it opens, because the readers need it before there is a session — the app builds its `frame-src` from `viewerFrameOrigins` with no Bot running, and `computer_exec` describes the scratch and refuses a GUI command without waking a Computer to ask. `desktop` is descriptive — slots and geometry — and never says that anything is shared: Fly's one browser per User follows from Chromium's `user-data-dir` lock, and a host with a container per Bot would isolate better.
+
 ### What it is
 
 A persistent Linux desktop virtual machine per User, rented from Fly Sprites (`api.sprites.dev`, SDK `@fly/sprites@0.1.0`). `apps/computer-host` is a Worker that shards and authorizes, fronting a Cloudflare Container (`node:24-slim`, no desktop) that runs the Sprites SDK. It serves the v1 protocol and nothing else: the prototype's `/v1/effects` route and its `ComputerEffectJournal` are gone, retired by migration `v5`.
 
 ### Provisioning
 
-`getSprite`, and on a miss `createSprite`, named `frockbot-<sha256(["user", userId])[0..12]>` (`computer/host-runtime/runtime.ts:2718-2739`). The host then adopts an existing machine via a marker file, or provisions through a detached, resumable five-phase shell run — `layout`, `packages`, `runtime`, `browser`, `reference` — bounded at 10 minutes, at most 8 relaunches, polled every 3 seconds. Egress is restricted to one host: `enableInternet: false, allowedHosts: ["api.sprites.dev"], interceptHttps: true` (`apps/computer-host/src/egress.ts:23-27`), with a WebSocket bridge for upgrades.
+`getSprite`, and on a miss `createSprite`, named `frockbot-<sha256(["user", userId])[0..12]>` (`computer/fly/runtime.ts:2718-2739`). The host then adopts an existing machine via a marker file, or provisions through a detached, resumable five-phase shell run — `layout`, `packages`, `runtime`, `browser`, `reference` — bounded at 10 minutes, at most 8 relaunches, polled every 3 seconds. Egress is restricted to one host: `enableInternet: false, allowedHosts: ["api.sprites.dev"], interceptHttps: true` (`apps/computer-host/src/egress.ts:23-27`), with a WebSocket bridge for upgrades.
 
 ### Inside the Sprite
 
@@ -760,7 +766,7 @@ One Sprite, one browser and one screen per User; one slot — window plus clippe
 
 ### Screenshots and live view
 
-A screenshot is a guarded `exec` running `scrot`, clipped to the Bot's slot of the shared screen, followed by a `file/read` (`computer/fly/computer.ts:732-797`); the bytes are filed into the durable `screenshots` root and attached to the model turn. The live view is noVNC iframed directly at `https://<sprite>.sprites.app/...`, with no Worker proxy; CSP allows `frame-src https://*.sprites.app` (`apps/cloudflare/src/user-application.ts:178`). FrockBot ships its own viewer page because stock noVNC fixes `view_only` at construction.
+A screenshot is a guarded `exec` running `scrot`, clipped to the Bot's slot of the shared screen, followed by a `file/read` (`computer/fly/computer.ts:732-797`); the bytes are filed into the durable `screenshots` root and attached to the model turn. The live view is noVNC iframed directly at `https://<sprite>.sprites.app/...`, with no Worker proxy; CSP allows `frame-src https://*.sprites.app` (`apps/cloudflare/src/user-application.ts`, from the host's `viewerFrameOrigins`). FrockBot ships its own viewer page because stock noVNC fixes `view_only` at construction.
 
 ### Tools
 

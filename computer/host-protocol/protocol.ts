@@ -277,7 +277,12 @@ export interface ComputerHostProvisioningV1 {
 export interface ComputerHostOpenResultV1 {
   version: typeof COMPUTER_HOST_PROTOCOL_VERSION;
   effectId: string;
-  spriteName: string;
+  /**
+   * The host's own name for the machine this Computer opened on: opaque above
+   * the host, and compared only with itself, to notice that a Computer was
+   * replaced underneath a caller.
+   */
+  instanceId: string;
   /** The tenant's durable directory, relative to the Workspace home. */
   directory: string;
   /** The tenant's X display, when the Computer allocated one. */
@@ -526,7 +531,7 @@ const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/;
 
 /**
  * An absolute, normalized path on the Computer. Relative paths, traversal, and
- * control characters are refused here rather than on the Sprite: the mount
+ * control characters are refused here rather than on the Computer: the mount
  * path never leaves the provider Package, and a path that reaches the host is
  * already resolved.
  */
@@ -941,13 +946,13 @@ export function decodeComputerHostOpenResultV1(
   const label = "Computer host open result";
   const value = resultEnvelope(
     input,
-    ["spriteName", "directory", "display", "generation", "provisioning"],
+    ["instanceId", "directory", "display", "generation", "provisioning"],
     label,
   );
   return {
     version: COMPUTER_HOST_PROTOCOL_VERSION,
     effectId: value.effectId as string,
-    spriteName: identifier(value.spriteName, `${label} sprite name`),
+    instanceId: identifier(value.instanceId, `${label} instance id`),
     directory: boundedString(
       value.directory,
       COMPUTER_HOST_LIMITS.path,

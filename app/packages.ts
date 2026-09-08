@@ -64,7 +64,7 @@ export const FOUNDATION_PACKAGES_V1: readonly PackageDefinitionV1[] = [
   { id: "memory", displayName: "Memory" },
   imageDefinitionV1,
   computerDefinitionV1,
-  { id: "fly-sprite", displayName: "Computer" },
+  { id: "computer-host", displayName: "Computer" },
   userMachineDefinitionV1,
   machineMessagesDefinitionV1,
   subagentsDefinitionV1,

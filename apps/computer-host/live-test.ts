@@ -48,7 +48,7 @@ import {
   RUNTIME_ROOT,
   runtimeDocumentDigestV1,
   SCRATCH_ROOT,
-} from "@frockbot/computer/host-runtime";
+} from "@frockbot/computer/fly/runtime";
 
 Object.defineProperty(globalThis, "WebSocket", { value: WebSocket });
 
@@ -340,7 +340,7 @@ try {
   process.stdout.write(
     `  cold open took ${coldSeconds}s over ${coldAttempts} connection(s)\n`,
   );
-  check(opened.spriteName === spriteName, "it provisioned this User's Sprite");
+  check(opened.instanceId === spriteName, "it provisioned this User's Sprite");
   check(
     opened.provisioning?.status === "complete",
     "it reports provisioning complete rather than silence",
@@ -763,7 +763,7 @@ try {
     ),
   );
   check(
-    reopened.spriteName === spriteName,
+    reopened.instanceId === spriteName,
     "a restarted container resolves the same Sprite for the same User",
   );
   check(

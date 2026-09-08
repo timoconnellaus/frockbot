@@ -5,10 +5,8 @@
 // tools both write through the Workspace, and a fixture per suite would let
 // two of them drift from one contract. Deliberately absent from this Package's
 // `exports`, and not a `*.test.ts` file, so `bun test` never runs it as one.
-import type {
-  ComputerWorkspace,
-  WorkspaceLayoutV1,
-} from "@frockbot/computer/core";
+import type { WorkspaceLayoutV1 } from "@frockbot/computer/core";
+import type { ComputerWorkspace } from "@frockbot/computer/core/host";
 import type {
   WorkspaceEntryV1,
   WorkspaceGenerationV1,

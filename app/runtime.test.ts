@@ -39,7 +39,7 @@ describe("foundation application", () => {
       "memory",
       "image",
       "computer",
-      "fly-sprite",
+      "computer-host",
       "user-machine",
       "machine-messages",
       "subagents",
@@ -369,7 +369,7 @@ describe("foundation application", () => {
           return undefined;
         },
       }).map((pkg) => pkg.id),
-    ).toEqual(["credentials", "fly-sprite", "computer"]);
+    ).toEqual(["credentials", "computer-host", "computer"]);
     expect(requestedSecrets).toEqual(["SPRITES_TOKEN"]);
 
     // The Skills Package mounts only for a Turn whose instruction root the
@@ -387,7 +387,7 @@ describe("foundation application", () => {
           },
         },
       }).map((pkg) => pkg.id),
-    ).toEqual(["skills", "credentials", "fly-sprite", "computer"]);
+    ).toEqual(["skills", "credentials", "computer-host", "computer"]);
 
     const webCapability = {
       packageId: "web",

@@ -1,6 +1,6 @@
 # Both container images are built with the repository root as their context,
 # because each needs a workspace module alongside its own app directory:
-# `apps/computer-host` needs `computer/host-{protocol,runtime}`, and
+# `apps/computer-host` needs `computer/host-protocol` and `computer/fly`, and
 # `apps/applet-build` needs `applets/sdk` and the build contract. Everything
 # else stays out of the context.
 *
@@ -8,7 +8,7 @@
 !apps/applet-build
 !computer/package.json
 !computer/host-protocol
-!computer/host-runtime
+!computer/fly/runtime.ts
 !applets/package.json
 !applets/build-contract.ts
 !applets/sdk

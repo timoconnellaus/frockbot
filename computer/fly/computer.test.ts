@@ -2,9 +2,9 @@
 
 import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import type { ComputerConnectionProgressV1 } from "@frockbot/computer/core";
+import type { ComputerConnectionProgressV1 } from "@frockbot/computer/core/host";
 import { COMPUTER_UNCONFIGURED_MESSAGE_V1 } from "@frockbot/computer/core";
-import { DESKTOP_GUI_LEASE_KEY } from "@frockbot/computer/host-runtime";
+import { DESKTOP_GUI_LEASE_KEY } from "./runtime.js";
 import {
   computerBotKey,
   FlySpriteComputer,
@@ -13,13 +13,13 @@ import {
 } from "./computer.ts";
 import { FakeComputerHost, type FakeComputerRunV1 } from "./host-double.ts";
 import {
-  FlySpriteComputerProvider,
+  FlySpriteComputerHostV1,
   flySpriteNameForComputer,
 } from "./provider.ts";
 
 // The Computer's own shell scripts — the provisioning document, `control.sh`'s
 // `flock` lease, and `ensure-agent.sh`'s slot reclaim — are run for real in
-// `@frockbot/computer/host-runtime`'s suite. They moved there with the scripts
+// `@frockbot/computer/fly/runtime`'s suite. They moved there with the scripts
 // themselves: a Bot Durable Object no longer installs them, so a
 // test that stood up a provider to read one out of a provisioning command was
 // testing the wrong module. What is left here is this Package's own subject:
@@ -190,11 +190,11 @@ describe("Fly Sprite computer", () => {
       resumed: false,
     };
 
-    const provider = new FlySpriteComputerProvider(attach(host));
+    const provider = new FlySpriteComputerHostV1(attach(host));
     const computer = await provider.open(
       { userId: "owner" },
       { botId: "general" },
-      { providerId: "fly-sprite", generation: 1 },
+      { providerId: "computer-host", generation: 1 },
     );
     const connected = await computer.presence?.connect();
 
@@ -215,11 +215,11 @@ describe("Fly Sprite computer", () => {
       resumed: false,
     };
 
-    const provider = new FlySpriteComputerProvider(attach(host));
+    const provider = new FlySpriteComputerHostV1(attach(host));
     const computer = await provider.open(
       { userId: "owner" },
       { botId: "general" },
-      { providerId: "fly-sprite", generation: 1 },
+      { providerId: "computer-host", generation: 1 },
     );
     const connected = await computer.presence?.connect();
 
@@ -229,11 +229,11 @@ describe("Fly Sprite computer", () => {
 
   test("reports provider-neutral connection boundaries around the host calls", async () => {
     const host = fakeHost();
-    const provider = new FlySpriteComputerProvider(attach(host));
+    const provider = new FlySpriteComputerHostV1(attach(host));
     const computer = await provider.open(
       { userId: "owner" },
       { botId: "general" },
-      { providerId: "fly-sprite", generation: 1 },
+      { providerId: "computer-host", generation: 1 },
     );
     const progress: string[] = [];
 
@@ -279,11 +279,11 @@ describe("Fly Sprite computer", () => {
         index: 4,
       },
     );
-    const provider = new FlySpriteComputerProvider(attach(host));
+    const provider = new FlySpriteComputerHostV1(attach(host));
     const computer = await provider.open(
       { userId: "owner" },
       { botId: "general" },
-      { providerId: "fly-sprite", generation: 1 },
+      { providerId: "computer-host", generation: 1 },
     );
     const progress: ComputerConnectionProgressV1[] = [];
 
@@ -359,12 +359,12 @@ describe("Fly Sprite computer", () => {
     await expect(
       generalAgent.run("echo tool-output", signal()),
     ).rejects.toThrow("user is controlling");
-    const providerComputer = await new FlySpriteComputerProvider(
+    const providerComputer = await new FlySpriteComputerHostV1(
       agentComputer,
     ).open(
       { userId: "owner" },
       { botId: "general" },
-      { providerId: "fly-sprite", generation: 1 },
+      { providerId: "computer-host", generation: 1 },
     );
     await expect(
       providerComputer.workspace?.write({
@@ -440,7 +440,7 @@ describe("Fly Sprite computer", () => {
 
   test("opens durable files without provisioning a browser or public viewer", async () => {
     const host = fakeHost();
-    const provider = new FlySpriteComputerProvider(
+    const provider = new FlySpriteComputerHostV1(
       new FlySpriteComputer({
         identity: { userId: "owner" },
         host: storageOnlyHost(host),
@@ -450,7 +450,7 @@ describe("Fly Sprite computer", () => {
     const computer = await provider.open(
       { userId: "owner" },
       { botId: "health" },
-      { providerId: "fly-sprite", generation: 1 },
+      { providerId: "computer-host", generation: 1 },
     );
 
     // The host would throw if this reached `open` or `viewer`: "The Agent
@@ -481,7 +481,7 @@ describe("Fly Sprite computer", () => {
   // their directories and desktops differ.
   test("puts two Bots of one User on one Sprite", async () => {
     const host = fakeHost();
-    const provider = new FlySpriteComputerProvider(undefined, host.factory);
+    const provider = new FlySpriteComputerHostV1(undefined, host.factory);
 
     const first = provider.computerFor({ userId: "owner" });
     const second = provider.computerFor({ userId: "owner" });
@@ -493,8 +493,8 @@ describe("Fly Sprite computer", () => {
     );
     expect(other.spriteName).not.toBe(first.spriteName);
 
-    const shared = new FlySpriteComputerProvider(attach(host));
-    const assignment = { providerId: "fly-sprite", generation: 1 };
+    const shared = new FlySpriteComputerHostV1(attach(host));
+    const assignment = { providerId: "computer-host", generation: 1 };
     const health = await shared.open(
       { userId: "owner" },
       { botId: "health" },
@@ -516,8 +516,8 @@ describe("Fly Sprite computer", () => {
 
   test("adapts Fly execution through the provider-neutral Computer interface", async () => {
     const host = fakeHost();
-    const provider = new FlySpriteComputerProvider(attach(host));
-    const assignment = { providerId: "fly-sprite", generation: 1 };
+    const provider = new FlySpriteComputerHostV1(attach(host));
+    const assignment = { providerId: "computer-host", generation: 1 };
     const computer = await provider.open(
       { userId: "owner" },
       { botId: "health" },
@@ -615,11 +615,11 @@ describe("Fly Sprite computer", () => {
 
   test("a viewer and a control lease are reachable from the Durable Object", async () => {
     const host = fakeHost();
-    const provider = new FlySpriteComputerProvider(attach(host));
+    const provider = new FlySpriteComputerHostV1(attach(host));
     const computer = await provider.open(
       { userId: "owner" },
       { botId: "health" },
-      { providerId: "fly-sprite", generation: 1 },
+      { providerId: "computer-host", generation: 1 },
     );
 
     // Neither was reachable before: both need the Sprite's URL and its

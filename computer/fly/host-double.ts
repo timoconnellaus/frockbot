@@ -24,7 +24,7 @@ import {
   type ComputerHostProvisioningV1,
   type ComputerHostViewerResultV1,
 } from "@frockbot/computer/host-protocol";
-import { DESKTOP_GUI_LEASE_KEY } from "@frockbot/computer/host-runtime";
+import { DESKTOP_GUI_LEASE_KEY } from "./runtime.js";
 import {
   computerBotKey,
   type ComputerHostFactoryV1,
@@ -124,7 +124,7 @@ export class FakeComputerHost {
         return {
           version: 1,
           effectId: options?.effectId ?? "effect-open",
-          spriteName: host.spriteName,
+          instanceId: host.spriteName,
           directory: `/home/box/agent-data/agents/${botKey}`,
           ...(host.display ? { display: host.display } : {}),
           generation: host.generation,

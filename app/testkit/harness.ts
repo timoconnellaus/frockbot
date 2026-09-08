@@ -1,5 +1,5 @@
 // A runtime for a feature under test: the real registries, no loop.
-import { ComputerRegistry } from "@frockbot/computer/core";
+import { ComputerRegistry } from "@frockbot/computer/core/host";
 import {
   type AgentRuntimeV1,
   LoopHookListV1,

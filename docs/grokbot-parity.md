@@ -496,7 +496,7 @@ The parity register below carries the capability comparison; the code-level dive
 
 **The paths are GrokBot's, not Fly's.** `HOME_ROOT = "/home/box"` and `DATA_ROOT = ${HOME_ROOT}/agent-data` are still
 hardcoded, and this document is what that code was copying — Fly's own home is `/home/sprite`. Since ADR 0004 they are
-declared once in `computer/host-runtime/runtime.ts` rather than in `computer/fly/computer.ts`, because
+declared once in `computer/fly/runtime.ts` rather than in `computer/fly/computer.ts`, because
 the on-Sprite layout is shared by the provider and the Computer host; the divergence is unchanged, only its address is.
 
 **The browser is not the distribution's.** GrokBot runs the box's own Chromium; FrockBot downloads Playwright's build and
@@ -562,7 +562,7 @@ primary-source evidence, the Package proposed to own it, and status against `doc
 | 32  | Cookies and logins survive computer replacement; seeding, periodic capture, cross-window mirroring, import                                                                                    | `sand-cookie-persist.mjs` (5 s → `chrome-cookie-seed.json`), `sand-session-sync.mjs` (1.5 s CDP), `chrome-cookie-import`                                           | §A3, §2A, §3.3     | `computer`                                                                                                                                                                                                                                                                                 | not started                                         |
 | 33  | A launcher that enforces correct browser flags; GUI never driven from the shell                                                                                                               | `box-chrome`; no `xdotool`/CDP from `Shell`                                                                                                                        | §B9, §2A           | `frockbot-chrome`; exec denylist + PATH shims                                                                                                                                                                                                                                              | done                                                |
 | 34a | Egress routed through the User's desktop                                                                                                                                                      | settings `egress`, `sand-egress-tunnel`                                                                                                                            | §A3                | none — declined                                                                                                                                                                                                                                                                            | declined                                            |
-| 34b | UA / fingerprint governance                                                                                                                                                                   | `sand-ua-governor.mjs`, `sand-fingerprint-profiles.mjs`                                                                                                            | §A3                | `computer/host-runtime` (`box-doctor`'s `browser-identity` check); per-site profiles declined                                                                                                                                                                                              | partial                                             |
+| 34b | UA / fingerprint governance                                                                                                                                                                   | `sand-ua-governor.mjs`, `sand-fingerprint-profiles.mjs`                                                                                                            | §A3                | `computer/fly/runtime` (`box-doctor`'s `browser-identity` check); per-site profiles declined                                                                                                                                                                                               | partial                                             |
 | 34c | WebAuthn proxying to the User's authenticator                                                                                                                                                 | `sand-webauthn-proxy-host`, `.sand-webauthn-proxy-enabled`                                                                                                         | §A3                | none — declined                                                                                                                                                                                                                                                                            | declined                                            |
 | 35  | **Channels** — Bot-to-Bot group chats, 1–6 members, in the sidebar, posted into by id                                                                                                         | `CreateChannel`/`UpdateChannel`; `SendToAgent`                                                                                                                     | §2.14              | none — removed by owner decision 2026-09-01 (not needed yet)                                                                                                                                                                                                                               | removed — owner decision 2026-09-01, not needed yet |
 | 36  | External channel connectors (Telegram etc.) connected and disconnected per Bot                                                                                                                | info-pane Channels; `update_state channel disconnect{platform}`                                                                                                    | §2.14, §2A         | none — removed by owner decision 2026-09-01 (not needed yet)                                                                                                                                                                                                                               | removed — owner decision 2026-09-01, not needed yet |
@@ -909,7 +909,7 @@ the rows whose status the code moved:
   is no state-DB snapshot and no basename list.
 - **27** — one in-box reference file is written
   (`/home/box/reference/README.md`, written by the provisioning document in
-  `computer/host-runtime/runtime.ts`, which is where the on-Sprite
+  `computer/fly/runtime.ts`, which is where the on-Sprite
   layout moved after ADR 0004), but there is no self-check the Bot runs and no
   log it is pointed at: nothing in the tree answers to `box-doctor` or any
   other name for one.
@@ -920,7 +920,7 @@ the rows whose status the code moved:
   Turn"). GrokBot's "don't poll" guidance is prompt policy on both sides.
 - **33** — **`partial`, upgraded from `not started` after reading the code.**
   A flag-enforcing launcher does exist: `start-desktop.sh`
-  (`computer/host-runtime/runtime.ts`) is the only thing that
+  (`computer/fly/runtime.ts`) is the only thing that
   starts a browser, it starts exactly one, and it fixes the flags —
   `--user-data-dir` at the shared `/home/box/chrome-profile`, the remote
   debugging address pinned to loopback and its port to the tenant's. It runs
@@ -955,7 +955,7 @@ the rows whose status the code moved:
   whether our browser announces itself as a robot was an assumption nobody had
   checked, and it depends on the headful/Xvfb path and the pinned Playwright
   build. `box-doctor` now has a `browser-identity` check
-  (`computer/host-runtime/runtime.ts`): it asks the browser over
+  (`computer/fly/runtime.ts`): it asks the browser over
   the tenant's existing CDP port what it presents, records `navigator.userAgent`,
   `navigator.webdriver` and the `userAgentData` brands as one
   `[box-doctor] PASS|FAIL` line and a `browserIdentity` field on the report

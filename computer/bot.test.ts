@@ -2,8 +2,9 @@ import { describe, expect, test } from "bun:test";
 import type {
   ComputerConnectionOptionsV1,
   ComputerControlLease,
-  ComputerHandle,
-} from "@frockbot/computer/core";
+  ComputerHostCapabilitiesV1,
+  ComputerHostSessionV1,
+} from "@frockbot/computer/core/host";
 import {
   computerBotPathKeyV1,
   COMPUTER_UNCONFIGURED_MESSAGE_V1,
@@ -27,6 +28,11 @@ import {
   type ComputerCommandV1,
 } from "./protocol.js";
 import { FakeWorkspace } from "./workspace-fixture.js";
+
+/** A host that offers nothing beyond the operations under test. */
+const TEST_HOST_CAPABILITIES: ComputerHostCapabilitiesV1 = {
+  viewerFrameOrigins: [],
+};
 
 function png(): Uint8Array {
   const bytes = new Uint8Array(32);
@@ -102,11 +108,12 @@ function fakeHandle(options: {
     display: string;
     capturedAt: string;
   }>;
-}): ComputerHandle {
+}): ComputerHostSessionV1 {
   return {
     assignment: { providerId: "fake", generation: 1 },
     identity: { userId: "user-1" },
     tenant: { botId: "scout" },
+    capabilities: TEST_HOST_CAPABILITIES,
     ...(options.presence ? { presence: { connect: options.presence } } : {}),
     ...(options.renewViewer
       ? {
@@ -1043,6 +1050,7 @@ describe("Computer Bot Durable Object Contribution", () => {
           assignment: { providerId: "fake", generation: 1 },
           identity: { userId: "user-1" },
           tenant: { botId: "scout" },
+          capabilities: TEST_HOST_CAPABILITIES,
           doctor: {
             run: () =>
               Promise.resolve({

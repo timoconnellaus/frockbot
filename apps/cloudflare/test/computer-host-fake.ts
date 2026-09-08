@@ -514,7 +514,7 @@ export function createComputerHostFake(
         const result = {
           version: 1,
           effectId: value.effectId,
-          spriteName: `frockbot-fake-${computerHostShardV1(
+          instanceId: `frockbot-fake-${computerHostShardV1(
             value.identity.userId,
             shards,
           ).replace(/[^a-z0-9-]/g, "")}`,

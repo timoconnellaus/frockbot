@@ -7,18 +7,32 @@
 // a `chromium …` command is refused with the sentence that names the tool to
 // use instead.
 import { describe, expect, test } from "bun:test";
+import { computerBotPathKeyV1 } from "@frockbot/computer/core";
 import {
-  computerBotPathKeyV1,
   type ComputerDoctorReportV1,
-  type ComputerHandle,
-  type ComputerProvider,
-} from "@frockbot/computer/core";
+  type ComputerHostCapabilitiesV1,
+  type ComputerHostSessionV1,
+  type ComputerHostV1,
+} from "@frockbot/computer/core/host";
 import {
   type AgentRuntimeHarness,
   createAgentRuntimeHarness,
 } from "@frockbot/app/testkit";
 import { createComputerAgentFeature } from "./agent.js";
 import { FakeWorkspace } from "./workspace-fixture.js";
+
+/**
+ * A host with its own scratch path and its own GUI policy, neither of which
+ * this Package knows: what the tools say and refuse has to come from here.
+ */
+const TEST_HOST_CAPABILITIES: ComputerHostCapabilitiesV1 = {
+  scratchPath: "/host-scratch",
+  refuseGuiCommand: (command) =>
+    command.includes("xdotool")
+      ? "this host refuses xdotool from the shell"
+      : undefined,
+  viewerFrameOrigins: [],
+};
 
 const REPORT: ComputerDoctorReportV1 = {
   schemaVersion: 2,
@@ -39,7 +53,7 @@ const REPORT: ComputerDoctorReportV1 = {
 };
 
 interface Fixture {
-  provider: ComputerProvider;
+  provider: ComputerHostV1;
   runs: number;
   execs: string[];
 }
@@ -50,11 +64,13 @@ function fixture(workspace: FakeWorkspace): Fixture {
     execs: [],
     provider: {
       id: "fixture",
-      open: (identity, tenant, assignment): Promise<ComputerHandle> =>
+      capabilities: TEST_HOST_CAPABILITIES,
+      open: (identity, tenant, assignment): Promise<ComputerHostSessionV1> =>
         Promise.resolve({
           assignment,
           identity,
           tenant,
+          capabilities: TEST_HOST_CAPABILITIES,
           workspace,
           doctor: {
             run: () => {
@@ -80,7 +96,7 @@ function fixture(workspace: FakeWorkspace): Fixture {
   return state;
 }
 
-async function mount(provider: ComputerProvider) {
+async function mount(provider: ComputerHostV1) {
   const harness = createAgentRuntimeHarness();
   harness.computers.register(provider);
   await harness.mount(
@@ -193,29 +209,26 @@ describe("computer_doctor", () => {
   });
 });
 
+// Which commands drive a GUI, and what to say about one, is the host's own
+// policy — it is the thing that also shims those binaries on its PATH. What
+// this Package owes is to ask before it runs anything, and to answer in the
+// host's words. The policy itself is `computer/fly/runtime.test.ts`.
 describe("the GUI is never driven from the shell", () => {
-  test("refuses a command that reaches for the browser or the X tools", async () => {
+  test("refuses in the host's words, without waking the Computer", async () => {
     const state = fixture(new FakeWorkspace());
     const harness = await mount(state.provider);
 
-    for (const command of [
-      "chromium --headless https://example.com",
-      "cd /tmp && scrot shot.png",
-      "xdotool key Return",
-      "sudo x11vnc -display :1",
-    ]) {
-      const result = await call(harness, "computer_exec", { command });
-      expect(result.isError, command).toBe(true);
-      expect(result.content).toContain("never driven from the shell");
-      expect(result.content).toContain("computer_browser");
-      expect(result.content).toContain("computer_screenshot");
-      expect(result.content).toContain("frockbot-chrome");
-    }
-    // Refused at the seam: none of them reached the Computer at all.
+    const result = await call(harness, "computer_exec", {
+      command: "xdotool key Return",
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.content).toBe("this host refuses xdotool from the shell");
+    // Refused at the seam: it never reached the Computer at all.
     expect(state.execs).toEqual([]);
   });
 
-  test("lets a command that merely mentions one through", async () => {
+  test("lets a command the host does not refuse through", async () => {
     const state = fixture(new FakeWorkspace());
     const harness = await mount(state.provider);
 
@@ -227,14 +240,15 @@ describe("the GUI is never driven from the shell", () => {
     expect(state.execs).toHaveLength(1);
   });
 
-  test("says where the shared scratch is, and that it is not durable", async () => {
+  test("says where the host's shared scratch is, and that it is not durable", async () => {
     const state = fixture(new FakeWorkspace());
     const harness = await mount(state.provider);
     const description = harness.tools
       .schemas({ turnType: "chat" })
       .find((schema) => schema.name === "computer_exec")?.description;
 
-    expect(description).toContain("/workspace");
+    expect(description).toContain("/host-scratch");
+    expect(description).not.toContain("/workspace");
     expect(description).toContain("not durable");
     expect(description).toContain("never driven from the shell");
   });

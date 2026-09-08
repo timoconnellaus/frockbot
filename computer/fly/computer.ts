@@ -2,12 +2,14 @@ import { createHash, randomUUID } from "node:crypto";
 import {
   COMPUTER_UNCONFIGURED_MESSAGE_V1,
   ComputerError,
+  type ComputerOperationOptions,
+} from "@frockbot/computer/core";
+import {
   decodeComputerDoctorReportV1,
   type ComputerConnectionOptionsV1,
   type ComputerControlRequestV1,
   type ComputerDoctorReportV1,
-  type ComputerOperationOptions,
-} from "@frockbot/computer/core";
+} from "@frockbot/computer/core/host";
 import type {
   ComputerHostControlResultV1,
   ComputerHostFileReadResultV1,
@@ -38,7 +40,7 @@ import {
   SLOT_WIDTH,
   WORKSPACE_SYNC_SERVICE,
   WORKSPACES_ROOT,
-} from "@frockbot/computer/host-runtime";
+} from "./runtime.js";
 import type {
   ComputerHostCallOptions,
   ComputerHostExecCommandV1,
@@ -47,7 +49,7 @@ import type {
 } from "./host-client.js";
 
 // The Computer's on-Sprite layout, its provisioning script, and its declared
-// services live in `@frockbot/computer/host-runtime`, so the shared Computer
+// services live in `@frockbot/computer/fly/runtime`, so the shared Computer
 // host and this provider ship one runtime rather than two. Both
 // names below are re-exported because they are part of this module's public
 // surface: the sync Package names the watcher service, and the slot-reclaim
@@ -89,7 +91,7 @@ const TIMEOUTS = {
 /**
  * The shared Computer host as this provider uses it.
  *
- * `ComputerHostClient` satisfies it, and so does a test double. It is declared
+ * `FlyHostTransportV1` satisfies it, and so does a test double. It is declared
  * here rather than imported as a class so this module depends on the *shape*
  * of the host and not on the transport: the client owns the service binding,
  * the framing, and the retry classification, and this module owns what a Bot
@@ -1298,7 +1300,7 @@ export class FlySpriteComputer {
       }
       throw error;
     }
-    this.expectedSpriteName = opened.spriteName;
+    this.expectedSpriteName = opened.instanceId;
     this.generations.set(layout.key, opened.generation);
     if (opened.display) this.displays.set(layout.key, opened.display);
     const updating =
@@ -1377,7 +1379,7 @@ export class FlySpriteComputer {
     return {
       botId: layout.identity.id,
       botKey: layout.key,
-      spriteName: opened.spriteName,
+      spriteName: opened.instanceId,
       viewerUrl: viewer.session.url,
       viewerSessionId: viewer.session.id,
       ...(viewer.session.expiresAt

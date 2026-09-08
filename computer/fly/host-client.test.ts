@@ -13,7 +13,7 @@ import {
 } from "@frockbot/computer/host-protocol";
 import { COMPUTER_COLD_PROVISION_EXPECTATION_MS } from "@frockbot/computer/protocol";
 import {
-  ComputerHostClient,
+  FlyHostTransportV1,
   COMPUTER_HOST_OPEN_TIMEOUT_MS,
   type ComputerHostFetcherV1,
 } from "./host-client.ts";
@@ -126,10 +126,10 @@ function openNdjson(
 
 function client(
   fetcher: ComputerHostFetcherV1,
-  overrides: Partial<ConstructorParameters<typeof ComputerHostClient>[0]> = {},
-): ComputerHostClient {
+  overrides: Partial<ConstructorParameters<typeof FlyHostTransportV1>[0]> = {},
+): FlyHostTransportV1 {
   let counter = 0;
-  return new ComputerHostClient({
+  return new FlyHostTransportV1({
     fetcher,
     hostToken: "host-token",
     identity: { userId: "user-1" },
@@ -152,13 +152,13 @@ function exitFrames(
   ];
 }
 
-describe("ComputerHostClient envelope", () => {
+describe("FlyHostTransportV1 envelope", () => {
   test("carries version, effect, identity, tenant, and credential reference", async () => {
     const { fetcher, calls } = recorder(() =>
       Response.json({
         version: 1,
         effectId: "effect-1",
-        spriteName: "frockbot-abc",
+        instanceId: "frockbot-abc",
         directory: "/home/box/agent-data/agents/bot-1",
         generation: 3,
       }),
@@ -177,7 +177,7 @@ describe("ComputerHostClient envelope", () => {
       // a reference the host resolves.
       credentialRef: "sprites:user:user-1",
     });
-    expect(result.spriteName).toBe("frockbot-abc");
+    expect(result.instanceId).toBe("frockbot-abc");
     expect(result.generation).toBe(3);
   });
 
@@ -213,7 +213,7 @@ describe("ComputerHostClient envelope", () => {
   });
 });
 
-describe("ComputerHostClient open", () => {
+describe("FlyHostTransportV1 open", () => {
   const starting: ComputerHostProvisioningV1 = {
     kind: "provision",
     phase: "starting",
@@ -234,7 +234,7 @@ describe("ComputerHostClient open", () => {
     const result = {
       version: 1 as const,
       effectId: "effect-1",
-      spriteName: "frockbot-abc",
+      instanceId: "frockbot-abc",
       directory: "/home/box/agent-data/agents/bot-1",
       generation: 1,
       provisioning: {
@@ -272,7 +272,7 @@ describe("ComputerHostClient open", () => {
     const result = {
       version: 1 as const,
       effectId: "effect-1",
-      spriteName: "frockbot-abc",
+      instanceId: "frockbot-abc",
       directory: "/home/box/agent-data/agents/bot-1",
       generation: 1,
     };
@@ -326,7 +326,7 @@ describe("ComputerHostClient open", () => {
   });
 });
 
-describe("ComputerHostClient exec", () => {
+describe("FlyHostTransportV1 exec", () => {
   test("ships the script in the body and never on an argv", async () => {
     const script = "echo hello\n".repeat(400);
     const { fetcher, calls } = recorder(() => ndjson(exitFrames("hello\n"), 8));
@@ -479,7 +479,7 @@ describe("ComputerHostClient exec", () => {
   });
 });
 
-describe("ComputerHostClient failures", () => {
+describe("FlyHostTransportV1 failures", () => {
   test("computer-updating is provider-neutral updating and retryable", async () => {
     const { fetcher } = recorder(() =>
       Response.json(
@@ -639,7 +639,7 @@ describe("ComputerHostClient failures", () => {
       Response.json({
         version: 1,
         effectId: "effect-1",
-        spriteName: "frockbot-abc",
+        instanceId: "frockbot-abc",
         directory: "/home/box",
         generation: 1,
         // Not in the schema. A caller must not be able to smuggle a field
@@ -655,7 +655,7 @@ describe("ComputerHostClient failures", () => {
       Response.json({
         version: 2,
         effectId: "effect-1",
-        spriteName: "frockbot-abc",
+        instanceId: "frockbot-abc",
         directory: "/home/box",
         generation: 1,
       }),
@@ -664,7 +664,7 @@ describe("ComputerHostClient failures", () => {
   });
 });
 
-describe("ComputerHostClient operations", () => {
+describe("FlyHostTransportV1 operations", () => {
   test("file bytes round-trip as base64 and never as text", async () => {
     const bytes = Uint8Array.from([0, 1, 250, 255, 10]);
     const { fetcher, calls } = recorder((call) =>

@@ -13,10 +13,10 @@ import {
   backendDescriptorsV1,
   shellBotContribution,
 } from "@frockbot/app/contributions";
-import { ComputerRegistry } from "@frockbot/computer/core";
+import { ComputerRegistry } from "@frockbot/computer/core/host";
 import { createFlySpriteProviderFeature } from "@frockbot/computer/fly/agent";
 import { mountRuntimeFeaturesV1 } from "@frockbot/core/contracts";
-import { ComputerHostClient } from "@frockbot/computer/fly/host-client";
+import { FlyHostTransportV1 } from "@frockbot/computer/fly/host-client";
 import {
   decodeBotConfigurationExecuteRpcV1,
   decodeBotConfigurationReadRpcV1,
@@ -490,7 +490,7 @@ export class BotState extends DurableObject<BotStateEnv> {
             ...(computerConfigured
               ? {
                   host: (identity, tenant) =>
-                    new ComputerHostClient({
+                    new FlyHostTransportV1({
                       fetcher: this.backendEnv.COMPUTER_HOST!,
                       hostToken: this.backendEnv.COMPUTER_HOST_TOKEN!,
                       identity,
@@ -595,7 +595,7 @@ export class BotState extends DurableObject<BotStateEnv> {
             openComputer: (userId, botId, effectId) => {
               const identity = { userId };
               if (!computers.assignment(identity)) {
-                computers.assign(identity, "fly-sprite");
+                computers.assign(identity, "computer-host");
               }
               return computers.open(identity, { botId }, { effectId });
             },

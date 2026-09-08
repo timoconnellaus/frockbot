@@ -195,7 +195,7 @@ async function control(
           effectId: `${action}-${ownerId}`,
           identity: { userId: identity.userId },
           tenant: { botId: identity.botId },
-          credentialRef: `sprites:user:${identity.userId}`,
+          credentialRef: `computer:user:${identity.userId}`,
           operation: {
             kind: "control",
             action,

@@ -7,12 +7,13 @@
 // log tail leaves the Computer so a rebuild cannot erase the only evidence a
 // job ran.
 import { describe, expect, test } from "bun:test";
+import { computerBotPathKeyV1 } from "@frockbot/computer/core";
 import {
-  computerBotPathKeyV1,
   type ComputerBackgroundStateV1,
-  type ComputerHandle,
-  type ComputerProvider,
-} from "@frockbot/computer/core";
+  type ComputerHostCapabilitiesV1,
+  type ComputerHostSessionV1,
+  type ComputerHostV1,
+} from "@frockbot/computer/core/host";
 import {
   type AgentRuntimeHarness,
   createAgentRuntimeHarness,
@@ -20,6 +21,11 @@ import {
 import { createComputerAgentFeature } from "./agent.js";
 import type { ComputerProcessStorageV1 } from "./process-store.js";
 import { FakeWorkspace } from "./workspace-fixture.js";
+
+/** A host that offers nothing beyond the operations under test. */
+const TEST_HOST_CAPABILITIES: ComputerHostCapabilitiesV1 = {
+  viewerFrameOrigins: [],
+};
 
 /** Storage enough for the store: a map with a prefix listing. */
 function storage(): ComputerProcessStorageV1 & { map: Map<string, unknown> } {
@@ -45,7 +51,7 @@ function storage(): ComputerProcessStorageV1 & { map: Map<string, unknown> } {
 }
 
 interface Computer {
-  provider: ComputerProvider;
+  provider: ComputerHostV1;
   calls: string[];
   generation: number;
   state: ComputerBackgroundStateV1;
@@ -62,11 +68,13 @@ function fakeComputer(options: { launchFails?: boolean } = {}): Computer {
     workspace,
     provider: {
       id: "fixture",
-      open: (identity, tenant, assignment): Promise<ComputerHandle> =>
+      capabilities: TEST_HOST_CAPABILITIES,
+      open: (identity, tenant, assignment): Promise<ComputerHostSessionV1> =>
         Promise.resolve({
           assignment,
           identity,
           tenant,
+          capabilities: TEST_HOST_CAPABILITIES,
           workspace,
           processes: {
             launch: (request) => {

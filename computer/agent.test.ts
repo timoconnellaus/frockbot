@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { ComputerError, type ComputerProvider } from "@frockbot/computer/core";
+import { ComputerError } from "@frockbot/computer/core";
+import {
+  type ComputerHostV1,
+  type ComputerHostCapabilitiesV1,
+} from "@frockbot/computer/core/host";
 import {
   type AgentRuntimeHarness,
   createAgentRuntimeHarness,
@@ -10,6 +14,11 @@ import {
   HUMAN_CONTROL_PROMPT_LINE,
 } from "./agent.js";
 import { COMPUTER_CONTROL_RECORD_KEY } from "./control-record.js";
+
+/** A host that offers nothing beyond the operations under test. */
+const TEST_HOST_CAPABILITIES: ComputerHostCapabilitiesV1 = {
+  viewerFrameOrigins: [],
+};
 
 async function execute(
   harness: AgentRuntimeHarness,
@@ -36,14 +45,16 @@ async function execute(
 describe("computer agent contribution", () => {
   test("routes generic tools through the Bot's selected Computer provider", async () => {
     const calls: string[] = [];
-    const provider: ComputerProvider = {
+    const provider: ComputerHostV1 = {
       id: "fixture",
+      capabilities: TEST_HOST_CAPABILITIES,
       open: async (identity, tenant, assignment) => {
         calls.push(`open:${identity.userId}:${tenant.botId}`);
         return {
           assignment,
           identity,
           tenant,
+          capabilities: TEST_HOST_CAPABILITIES,
           exec: {
             execute: async (request) => {
               calls.push(
@@ -97,12 +108,14 @@ describe("computer agent contribution", () => {
 
   test("computer_browser says which field a click is missing and takes label as name", async () => {
     const calls: string[] = [];
-    const provider: ComputerProvider = {
+    const provider: ComputerHostV1 = {
       id: "fixture",
+      capabilities: TEST_HOST_CAPABILITIES,
       open: async (identity, tenant, assignment) => ({
         assignment,
         identity,
         tenant,
+        capabilities: TEST_HOST_CAPABILITIES,
         exec: {
           execute: async () => ({
             exitCode: 0,
@@ -168,12 +181,14 @@ describe("computer agent contribution", () => {
   // now, and an argument the tool does not know is refused by name.
   test("computer_exec runs in the cwd it is given and names an argument it does not know", async () => {
     const requests: Array<{ cwd?: string; command?: string }> = [];
-    const provider: ComputerProvider = {
+    const provider: ComputerHostV1 = {
       id: "fixture",
+      capabilities: TEST_HOST_CAPABILITIES,
       open: async (identity, tenant, assignment) => ({
         assignment,
         identity,
         tenant,
+        capabilities: TEST_HOST_CAPABILITIES,
         exec: {
           execute: async (request) => {
             requests.push({
@@ -234,12 +249,14 @@ describe("computer agent contribution", () => {
   });
 
   test("computer_exec during an update returns an actionable tool failure", async () => {
-    const provider: ComputerProvider = {
+    const provider: ComputerHostV1 = {
       id: "fixture",
+      capabilities: TEST_HOST_CAPABILITIES,
       open: async (identity, tenant, assignment) => ({
         assignment,
         identity,
         tenant,
+        capabilities: TEST_HOST_CAPABILITIES,
         exec: {
           execute: async () => {
             throw new ComputerError(
@@ -276,12 +293,14 @@ describe("computer agent contribution", () => {
       "Computer command failed: WebSocket keepalive timeout after 45000ms",
       "The Computer effect was cancelled",
     ]) {
-      const provider: ComputerProvider = {
+      const provider: ComputerHostV1 = {
         id: "fixture",
+        capabilities: TEST_HOST_CAPABILITIES,
         open: async (identity, tenant, assignment) => ({
           assignment,
           identity,
           tenant,
+          capabilities: TEST_HOST_CAPABILITIES,
           exec: {
             execute: () => Promise.reject(new Error(message)),
           },
@@ -371,12 +390,14 @@ describe("computer agent contribution", () => {
   });
 
   test("human-control-active is a non-throwing actionable tool result", async () => {
-    const provider: ComputerProvider = {
+    const provider: ComputerHostV1 = {
       id: "fixture",
+      capabilities: TEST_HOST_CAPABILITIES,
       open: async (identity, tenant, assignment) => ({
         assignment,
         identity,
         tenant,
+        capabilities: TEST_HOST_CAPABILITIES,
         exec: {
           execute: async () => {
             throw new ComputerError(

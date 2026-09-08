@@ -9,14 +9,14 @@
 // come off the Sprite before the Workspace writes them.
 import { describe, expect, test } from "bun:test";
 import { ComputerError } from "@frockbot/computer/core";
-import { BOTS_ROOT } from "@frockbot/computer/host-runtime";
+import { BOTS_ROOT } from "./runtime.js";
 import {
   computerBotKey,
   FlySpriteComputer,
   SCREENSHOT_MAX_BYTES,
 } from "./computer.ts";
 import { FakeComputerHost } from "./host-double.ts";
-import { FlySpriteComputerProvider } from "./provider.ts";
+import { FlySpriteComputerHostV1 } from "./provider.ts";
 
 const KEY = computerBotKey("health");
 const PATH = `${BOTS_ROOT}/${KEY}/screenshot.png`;
@@ -149,11 +149,11 @@ describe("screenshotForAgent", () => {
 
   test("reaches the provider-neutral Computer interface as a PNG capture", async () => {
     const host = hostWith(64);
-    const provider = new FlySpriteComputerProvider(computerOn(host));
+    const provider = new FlySpriteComputerHostV1(computerOn(host));
     const handle = await provider.open(
       { userId: "owner" },
       { botId: "health" },
-      { providerId: "fly-sprite", generation: 1 },
+      { providerId: "computer-host", generation: 1 },
     );
 
     const captured = await handle.screenshot!.capture({ signal: signal() });

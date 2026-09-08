@@ -10,9 +10,9 @@
  * when necessary", so what leaves the Durable Object is a `credentialRef` the
  * host resolves.
  *
- * It lives in this Package rather than in `computer/core` because the protocol
- * it speaks is not provider-neutral: `ComputerHostOpenResultV1` answers with a
- * `spriteName`, and the host it addresses is the Fly Sprites host. "Electron,
+ * It lives in this Package rather than in `computer/core` because the host it
+ * addresses is the Fly Sprites host and the binding it holds is that host's.
+ * The wire shape is neutral; this transport is not. "Electron,
  * Cloudflare, provider SDK, and Computer implementation types remain inside
  * their adapters" — this is that adapter, and `computer/core` stays free of
  * both the wire protocol and the binding.
@@ -106,7 +106,7 @@ export interface ComputerHostFetcherV1 {
   fetch(request: Request): Promise<Response>;
 }
 
-export interface ComputerHostClientOptions {
+export interface FlyHostTransportOptionsV1 {
   fetcher: ComputerHostFetcherV1;
   /**
    * The shared secret between this Worker, the host Worker, and the container.
@@ -309,7 +309,7 @@ class CallLease {
   }
 }
 
-export class ComputerHostClient {
+export class FlyHostTransportV1 {
   private readonly fetcher: ComputerHostFetcherV1;
   private readonly hostToken: string;
   private readonly origin: string;
@@ -319,7 +319,7 @@ export class ComputerHostClient {
   readonly tenant: { botId: string };
   readonly credentialRef: string;
 
-  constructor(options: ComputerHostClientOptions) {
+  constructor(options: FlyHostTransportOptionsV1) {
     this.fetcher = options.fetcher;
     this.hostToken = options.hostToken;
     this.identity = { userId: options.identity.userId };
@@ -332,8 +332,8 @@ export class ComputerHostClient {
   }
 
   /** A client for another Bot on the same User's Computer. */
-  forTenant(botId: string): ComputerHostClient {
-    return new ComputerHostClient({
+  forTenant(botId: string): FlyHostTransportV1 {
+    return new FlyHostTransportV1({
       fetcher: this.fetcher,
       hostToken: this.hostToken,
       identity: this.identity,

@@ -43,7 +43,7 @@ The left sidebar lists the authenticated User's Bots and switches the conversati
 
 `@frockbot/providers/frock-ai` is the built-in credential-free model path. On a User's first configuration read its User Contribution idempotently installs and enables the Package, creates the ready ambient `flock-ai-account` Connection, and records `@frock/auto` as the platform model. The runtime sends Auto through Cloudflare AI Gateway as `dynamic/<FROCK_AI_AUTO_ROUTE>` and manual `@frock/...` ids as `workers-ai/@cf/...`, behind one narrow streaming adapter. No User secret enters FrockBot state; the Gateway credentials below are deployment configuration, held by the Worker and never by a User.
 
-To attach the built-in Fly Sprites Computer provider Package, provide a Sprites token. The provider sits behind the provider-neutral Computer interface used by generic tools and memory. It provisions **one persistent Sprite per User**, shared by every Bot that User owns: each Bot receives its own directories and an on-demand Chromium/noVNC desktop slot, and every Bot on the Computer shares the one browser profile at `/home/box/chrome-profile`, so logins are a User-level asset. There is no separate User storage Sprite. `FROCKBOT_SPRITE_NAME` optionally selects the base name the User's Sprite name is derived from for standalone development; the hosted backend supplies durable User identity. `FROCKBOT_COMPUTER_PROVIDER` selects an installed provider and currently defaults to `fly-sprite`. In the hosted deployment the Sprites SDK and `SPRITES_TOKEN` live in `apps/computer-host`, which the Bot Durable Object reaches over the `COMPUTER_HOST` service binding; the app Worker keeps `SPRITES_TOKEN` only as the answer to "has this deployment a Computer at all".
+To attach the built-in Fly Sprites Computer provider Package, provide a Sprites token. The provider sits behind the provider-neutral Computer interface used by generic tools and memory. It provisions **one persistent Sprite per User**, shared by every Bot that User owns: each Bot receives its own directories and an on-demand Chromium/noVNC desktop slot, and every Bot on the Computer shares the one browser profile at `/home/box/chrome-profile`, so logins are a User-level asset. There is no separate User storage Sprite. `FROCKBOT_SPRITE_NAME` optionally selects the base name the User's Sprite name is derived from for standalone development; the hosted backend supplies durable User identity. The deployment's Computer host is registered under the id `computer-host`, and Fly is what implements it. In the hosted deployment the Sprites SDK and `SPRITES_TOKEN` live in `apps/computer-host`, which the Bot Durable Object reaches over the `COMPUTER_HOST` service binding; the app Worker keeps `SPRITES_TOKEN` only as the answer to "has this deployment a Computer at all".
 
 ```bash
 SPRITES_TOKEN="..." \
@@ -276,11 +276,10 @@ apps/
   computer-host/    Shared Computer host Worker and its Node container
   marketing/        Public frockbot.com site and static-assets Worker
   native/           The client: the phone app, and the web build the app Worker serves
-computer/          The Computer: tools, prompt, state, host seam, and the Fly provider
-  core/            Provider registry and capability interfaces for Computers
+computer/          The Computer: tools, prompt, state, and the ComputerHost interface
+  core/            The host interface, its capabilities, the registry, and the shared helpers
   host-protocol/   Versioned v1 DTOs and decoders for the Computer host seam
-  host-runtime/    The Computer's on-Sprite layout, scripts, and Sprite naming
-  fly/             Fly Sprites Computer provider and takeover adapter
+  fly/             The one host implementation: Fly Sprites, its on-Sprite runtime and takeover adapter
 core/
   contracts/        Session, LLM, prompt, and tool execution contracts
   durable/          Bot Durable Object admission, log, cursor, scheduling, and Composition generations

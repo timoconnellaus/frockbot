@@ -28,8 +28,11 @@ import { createCredentialsFeature } from "@frockbot/app/credentials/user";
 // pi-lens-ignore: ts:2307
 // Runtime implementations are statically bound by the immutable application.
 import echoFeature from "@frockbot/app/echo/agent";
-import { createFlySpriteProviderFeature } from "@frockbot/computer/fly/agent";
-import { ComputerHostClient } from "@frockbot/computer/fly/host-client";
+import {
+  FLY_HOST_CAPABILITIES_V1,
+  createFlySpriteProviderFeature,
+} from "@frockbot/computer/fly/agent";
+import { FlyHostTransportV1 } from "@frockbot/computer/fly/host-client";
 import type {
   ShellApplicationV1,
   ShellComputerHostBindingV1,
@@ -38,9 +41,10 @@ import type {
   ShellModelRuntimeHostV1,
 } from "@frockbot/app/shell/backend-runtime";
 import type {
+  ComputerHostCapabilitiesV1,
   ComputerRegistry,
   ComputerSyncHostV1,
-} from "@frockbot/computer/core";
+} from "@frockbot/computer/core/host";
 // Flock contributes lifecycle routes and durable User/Bot state.
 import {
   createFlockRuntimeFeature,
@@ -401,6 +405,15 @@ function computerConfiguredV1(host: {
   );
 }
 
+/**
+ * What this deployment's Computer host is, for the surfaces that must know
+ * before a Bot is running — the app's `frame-src` above all. This file is
+ * where the host is chosen, so it is where the choice is published; nothing
+ * else in the app names Fly.
+ */
+export const COMPUTER_HOST_CAPABILITIES_V1: ComputerHostCapabilitiesV1 =
+  FLY_HOST_CAPABILITIES_V1;
+
 function computerProviderFeature(
   host: {
     computerSync?: ComputerSyncHostV1;
@@ -414,7 +427,7 @@ function computerProviderFeature(
     ...(configured && binding
       ? {
           host: (identity, tenant) =>
-            new ComputerHostClient({
+            new FlyHostTransportV1({
               fetcher: binding.fetcher,
               hostToken: binding.hostToken,
               identity,
@@ -499,14 +512,14 @@ export function createFoundationHostedRuntimePackages(
       createCredentialsFeature({ readSecret: host.readSecret }),
     ),
     runtimePackage(
-      "fly-sprite",
+      "computer-host",
       computerProviderFeature(host, computerConfigured),
     ),
     runtimePackage(
       "computer",
       createComputerAgentFeature({
         userId: host.userId,
-        defaultProviderId: "fly-sprite",
+        defaultProviderId: "computer-host",
         configured: computerConfigured,
         ...(host.computerWriter ? { writer: host.computerWriter } : {}),
         ...(host.computerProcesses

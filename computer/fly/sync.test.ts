@@ -21,7 +21,7 @@ import {
 } from "@frockbot/core/workspace-store/testing";
 import { computerBotKey, FlySpriteComputer } from "./computer.ts";
 import { FakeComputerHost, type FakeComputerRunV1 } from "./host-double.ts";
-import { FLY_WORKSPACE_LAYOUT, FlySpriteComputerProvider } from "./provider.ts";
+import { FLY_WORKSPACE_LAYOUT, FlySpriteComputerHostV1 } from "./provider.ts";
 import {
   createFlySpriteSyncV1,
   declaredWorkspaceRootsV1,
@@ -1295,7 +1295,7 @@ describe("the durable-root sync on the Computer handle", () => {
     const effects = recordingEffects(log);
     const sprite = new FakeSyncSprite();
     const computer = attach(sprite);
-    const provider = new FlySpriteComputerProvider(computer, undefined, {
+    const provider = new FlySpriteComputerHostV1(computer, undefined, {
       // Every write the store takes is announced, so "intent before the push"
       // is an ordering claim about this one list.
       store: {
@@ -1319,7 +1319,7 @@ describe("the durable-root sync on the Computer handle", () => {
       provider.open(
         { userId: USER },
         { botId: BOT },
-        { providerId: "fly-sprite", generation: 1 },
+        { providerId: "computer-host", generation: 1 },
       );
     return { sprite, store, bucket, generations, effects, provider, open };
   }
@@ -1502,12 +1502,12 @@ describe("the durable-root sync on the Computer handle", () => {
 
   test("carries no sync at all when the host supplies no object-storage side", async () => {
     const sprite = new FakeSyncSprite();
-    const provider = new FlySpriteComputerProvider(attach(sprite));
+    const provider = new FlySpriteComputerHostV1(attach(sprite));
 
     const handle = await provider.open(
       { userId: USER },
       { botId: BOT },
-      { providerId: "fly-sprite", generation: 1 },
+      { providerId: "computer-host", generation: 1 },
     );
 
     expect(handle.sync).toBeUndefined();

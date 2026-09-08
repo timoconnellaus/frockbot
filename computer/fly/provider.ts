@@ -2,25 +2,28 @@ import { createHash } from "node:crypto";
 import {
   ComputerError,
   computerIdentityKeyV1,
-  computerSyncSummaryV1,
   computerTenantBotIdV1,
   type ComputerAssignment,
+  type ComputerIdentityV1,
+  type ComputerOperationOptions,
+  type ComputerTenantV1,
+  type WorkspaceLayoutV1,
+} from "@frockbot/computer/core";
+import {
+  computerSyncSummaryV1,
   type ComputerBrowserAction,
   type ComputerBrowserState,
   type ComputerControlLease,
   type ComputerExecRequest,
-  type ComputerHandle,
-  type ComputerIdentityV1,
-  type ComputerOperationOptions,
-  type ComputerProvider,
+  type ComputerHostCapabilitiesV1,
+  type ComputerHostSessionV1,
+  type ComputerHostV1,
   type ComputerRegistry,
   type ComputerSyncHostV1,
   type ComputerSyncReasonV1,
   type ComputerSyncSummaryV1,
   type ComputerSyncV1,
-  type ComputerTenantV1,
-  type WorkspaceLayoutV1,
-} from "@frockbot/computer/core";
+} from "@frockbot/computer/core/host";
 import { type WorkspaceRootV1 } from "@frockbot/core/contracts";
 import type { RuntimeFeatureV1 } from "@frockbot/core/contracts";
 import {
@@ -31,6 +34,14 @@ import {
   type FlySpriteAgentComputer,
   flySpriteNameForBot,
 } from "./computer.js";
+import {
+  computerGuiRefusalV1,
+  DESKTOP_SLOTS,
+  SCRATCH_ROOT,
+  shellGuiCommandV1,
+  SLOT_HEIGHT,
+  SLOT_WIDTH,
+} from "./runtime.js";
 import { FlyComputerWorkspace } from "./workspace.js";
 import {
   createFlySpriteSyncV1,
@@ -347,17 +358,36 @@ function lease(result: {
   };
 }
 
+/**
+ * What a Fly Sprite is, for the neutral tools that have to say it out loud.
+ *
+ * Every value here is a Sprite fact and lives nowhere else: the scratch mount
+ * the provisioning creates, the GUI-shell policy the image's PATH shim also
+ * prints, the screen this host lays out per Bot, and the viewer origin the app
+ * frames. `desktop` describes that layout and promises nothing about sharing.
+ */
+export const FLY_HOST_CAPABILITIES_V1: ComputerHostCapabilitiesV1 = {
+  scratchPath: SCRATCH_ROOT,
+  refuseGuiCommand: (command) => {
+    const gui = shellGuiCommandV1(command);
+    return gui === undefined ? undefined : computerGuiRefusalV1(gui);
+  },
+  desktop: { slots: DESKTOP_SLOTS, width: SLOT_WIDTH, height: SLOT_HEIGHT },
+  viewerFrameOrigins: ["https://*.sprites.app"],
+};
+
 function handle(
   identity: ComputerIdentityV1,
   tenant: ComputerTenantV1,
   computer: FlySpriteAgentComputer,
   assignment: ComputerAssignment,
   syncHost?: ComputerSyncHostV1,
-): ComputerHandle {
+): ComputerHostSessionV1 {
   return {
     assignment,
     identity,
     tenant,
+    capabilities: FLY_HOST_CAPABILITIES_V1,
     ...(syncHost
       ? {
           sync: new FlySpriteComputerSync(computer, identity, tenant, syncHost),
@@ -537,8 +567,9 @@ export function flySpriteNameForComputer(identity: ComputerIdentityV1): string {
 }
 
 /** Provider adapter that keeps Fly-specific lifecycle behind Computer core. */
-export class FlySpriteComputerProvider implements ComputerProvider {
-  readonly id = "fly-sprite";
+export class FlySpriteComputerHostV1 implements ComputerHostV1 {
+  readonly id = "computer-host";
+  readonly capabilities = FLY_HOST_CAPABILITIES_V1;
   readonly workspaceLayout = FLY_WORKSPACE_LAYOUT;
   private readonly computers = new Map<string, FlySpriteComputer>();
 
@@ -589,7 +620,7 @@ export class FlySpriteComputerProvider implements ComputerProvider {
     tenant: ComputerTenantV1,
     assignment: ComputerAssignment,
     _options?: ComputerOperationOptions,
-  ): Promise<ComputerHandle> {
+  ): Promise<ComputerHostSessionV1> {
     computerIdentityKeyV1(identity);
     const botId = computerTenantBotIdV1(tenant);
     const attached = this.computerFor(identity).bot(botId);
@@ -619,7 +650,7 @@ export function createFlySpriteProviderFeature(
 ): RuntimeFeatureV1<{ computers: ComputerRegistry }> {
   return (runtime) =>
     runtime.computers.register(
-      new FlySpriteComputerProvider(
+      new FlySpriteComputerHostV1(
         computer,
         options?.host,
         options?.sync,

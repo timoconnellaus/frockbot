@@ -8,7 +8,7 @@ import type {
   ResolvedModelBindingV1,
 } from "@frockbot/core/configuration";
 import type { FoundationAgentPackage } from "@frockbot/app/agent-runtime";
-import type { ComputerSyncHostV1 } from "@frockbot/computer/core";
+import type { ComputerSyncHostV1 } from "@frockbot/computer/core/host";
 import type {
   ComputerAgentPluginConfig,
   ComputerProcessStorageV1,

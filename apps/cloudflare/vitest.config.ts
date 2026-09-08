@@ -53,7 +53,7 @@ export default defineConfig({
           BOT_ISOLATES: "BotIsolateProbe",
           BOT_STATES: "WorkerdBotState",
           COMPOSITIONS: "CompositionProbe",
-          COMPUTER_HOST_CLIENT: "ComputerHostClientProbe",
+          COMPUTER_HOST_CLIENT: "FlyHostTransportProbeV1",
           FLY_COMPATIBILITY: "FlyCompatibilityProbe",
           SEARCH_SPIKE: { className: "SearchSpikeProbe", useSQLite: true },
           // The audit table on real SQLite, at a size the unit fake cannot
