@@ -67,6 +67,14 @@ test("a plain answer is repaired by an explicit send, never promoted or silently
   });
   expect(requests).toHaveLength(3);
   expect(requests[1]?.system).toContain("Call `send_to_user`");
+  expect(requests[1]?.tools.map((tool) => tool.name)).toEqual(["send_to_user"]);
+  expect(requests[1]?.messages.at(-1)).toMatchObject({
+    role: "user",
+    content: expect.stringContaining("[FrockBot runtime: delivery repair]"),
+  });
+  expect(events.filter((event) => event.type === "user/message")).toHaveLength(
+    1,
+  );
   const sends = events.filter((e) => e.type === "send/to-user");
   expect(sends).toHaveLength(1);
   expect(sends[0]).toMatchObject({ payload: { type: "text", text: "Hi!" } });
