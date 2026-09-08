@@ -44,7 +44,6 @@ class FakeTransport implements ChatTransport {
   Future<Map<String, dynamic>> page(
     String botId, {
     String? before,
-    String? conversationId,
   }) async => {
     'runs': observed == null ? <Object>[] : [observed],
     'page': {'truncated': false},
@@ -96,7 +95,6 @@ class PagedTransport extends FakeTransport {
   Future<Map<String, dynamic>> page(
     String botId, {
     String? before,
-    String? conversationId,
   }) async => {
     'runs': List.generate(
       20,
@@ -289,7 +287,8 @@ void main() {
     final composer = find.byKey(const ValueKey('composer'));
     String draft() => tester.widget<TextField>(composer).controller!.text;
     Finder bubbles() => find.byWidgetPredicate(
-      (widget) => widget is SelectableText && widget.data == 'Hello',
+      (widget) => (widget is SelectableText && widget.data == 'Hello') ||
+          (widget is Text && widget.data == 'Hello'),
     );
     await tester.enterText(composer, 'Hello');
     await tester.pump();

@@ -6,11 +6,6 @@ import {
   decodeSessionEvent,
   type SessionEvent,
 } from "@frockbot/core/contracts";
-import {
-  CONVERSATION_BUSY_MESSAGE_V1,
-  isConversationBusyV1,
-  type BotIdentity,
-} from "@frockbot/core/durable";
 import type { StoredRunStatus } from "./backend-contracts.js";
 import type { ShellBotStateV1 } from "./backend-state.js";
 import {
@@ -25,8 +20,6 @@ import {
   projectClientAnnouncementsV1,
   projectClientRunLookupV1,
   projectClientRunOrDegradedV1,
-  type ClientConversationListV1,
-  type ClientConversationOutcomeV1,
   type ClientRunListV1,
   type ClientRunLookupV1,
   type ClientRunV1,
@@ -157,12 +150,9 @@ export async function listRuns(
 ): Promise<ClientRunListV1> {
   const query = decodeClientRunListQueryV1(input);
   await state.authority.recoverActiveRun();
-  // The transcript is one conversation, not every Turn the Bot has ever
-  // run. Absent means the conversation the Bot is on; naming an earlier one
-  // reads it exactly as it was left. A Bot whose object has not learned its
-  // identity yet has no conversation to filter by and shows what it has.
-  const conversationId =
-    query.conversationId ?? (await state.authority.readConversationSessionId());
+  // Only the Bot’s continuous chat belongs in the transcript. Routine and
+  // child sessions remain in the durable log and their own projections.
+  const conversationId = await state.authority.readConversationSessionId();
   // A record nobody can decode has no trustworthy session id, and a
   // transcript that hid it would be back to silently losing the Turn. An
   // unknown session belongs to the conversation being read.
@@ -315,53 +305,6 @@ export async function listRuns(
     throw new Error("required run projections exceed the wire byte limit");
   }
   return page;
-}
-
-/** The conversations this Bot has had, newest first. */
-export async function listConversations(
-  state: ShellBotStateV1,
-): Promise<ClientConversationListV1> {
-  return {
-    schemaVersion: 1,
-    conversations: (await state.authority.listConversations()).map(
-      (conversation) => ({
-        schemaVersion: 1 as const,
-        conversationId: conversation.sessionId,
-        ordinal: conversation.ordinal,
-        startedAt: conversation.startedAt,
-        ...(conversation.endedAt ? { endedAt: conversation.endedAt } : {}),
-      }),
-    ),
-  };
-}
-
-/**
- * Puts this conversation down and starts the next one.
- *
- * Memory is untouched: it is not conversation history, and the point of a
- * new conversation is to prove that it is not.
- */
-export async function startConversation(
-  state: ShellBotStateV1,
-  identity: BotIdentity,
-): Promise<ClientConversationOutcomeV1> {
-  await state.authority.validateIdentity(identity);
-  try {
-    await state.authority.startConversation(identity);
-  } catch (error) {
-    // The one refusal this can give travels as data. Everything else is a
-    // genuine failure and still throws, so the boundary above answers 500.
-    if (isConversationBusyV1(error)) {
-      return {
-        status: "refused",
-        schemaVersion: 1,
-        reason:
-          error instanceof Error ? error.message : CONVERSATION_BUSY_MESSAGE_V1,
-      };
-    }
-    throw error;
-  }
-  return { status: "started", ...(await listConversations(state)) };
 }
 
 export async function lookupRun(

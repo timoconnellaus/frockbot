@@ -455,14 +455,23 @@ truncated — and a chosen hit opens its Bot and brings its Turn into view;
 `ChatController.focusRunId` carries that as far as the loaded page reaches, and
 a Turn further back is simply absent rather than pretended at.
 
-"New conversation" sits in the conversation header beside the picker
-(`BotSession.startConversation`). A Bot mid-Turn refuses with its reason, said
-where the press was. The Session's announcements — a rename, a compaction —
-are `LineRole.system` lines projected by `projectAnnouncements`; the `/turns`
-route already carried them (`projectClientAnnouncementsV1`) and no Flutter
-client read them. `orderTranscript` already seated a system line by its own
-timestamp, which is why a compaction marker lands between the Turns it covers
-and the first verbatim one.
+Each Bot has one continuous chat Session, addressed by User and Bot id. Automatic
+compaction bounds model context; there is no conversation creation or switching
+API. Older extra conversations are no longer exposed. The owner accepted their
+removal without migration on 2026-09-08.
+
+The native header has two rows: Bot identity and direct Bot settings above,
+Computer, Routines and the account-wide Applets directory below. Bot messages
+have no avatar or tool-count row; the in-chat avatar is reserved for the working
+indicator and its comet trails. Message long-press opens work details or records
+“Mark unread from here”. That boundary names a validated chat message in the
+Bot-owned unread record, is included in the command fingerprint and receipt,
+and is projected to the native transcript after reconnect. An explicit mark-read
+clears it. Applets and Computer continue through their existing backend surfaces;
+header navigation adds no authority or credentials.
+
+Session announcements such as rename and compaction remain system lines,
+projected by `projectAnnouncements` and ordered by their recorded timestamps.
 
 **PR 9: the Flock, and three more projections.**
 

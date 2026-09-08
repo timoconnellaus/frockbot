@@ -26,6 +26,7 @@ import {
 } from "@frockbot/app/routines/storage-keys";
 import type { ShellBotStateV1 } from "./backend-state.js";
 import { runWorkingV1 } from "./reads.js";
+import { isVisibleRunV1 } from "./run-protocol.js";
 import { decodeRunCursorV1 } from "./run-cursor.js";
 
 /** The single durable key the whole record lives under. */
@@ -63,6 +64,7 @@ export interface UnreadStateV1 {
   lastViewedAt?: string;
   /** User intent that is not derivable from any cursor. */
   manuallyUnread: boolean;
+  unreadFromMessageId?: string;
 }
 
 /**
@@ -144,13 +146,31 @@ function optionalTimestamp(
   return candidate;
 }
 
+function messageBoundary(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  if (
+    typeof value !== "string" ||
+    value.length > 200 ||
+    !/^[-a-zA-Z0-9._]+:(?:user|send:(?:0|[1-9][0-9]*))(?![\s\S])/.test(value)
+  ) {
+    throw new UnreadDecodeError("unread message boundary is invalid");
+  }
+  return value;
+}
+
 /** Strict codec: exact keys, real cursors, real ISO timestamps. */
 export function decodeUnreadStateV1(input: unknown): UnreadStateV1 {
   const value = record(input, "unread state");
   exactKeys(
     value,
     ["schemaVersion", "manuallyUnread"],
-    ["lastActivityCursor", "lastActivityAt", "lastSeenCursor", "lastViewedAt"],
+    [
+      "lastActivityCursor",
+      "lastActivityAt",
+      "lastSeenCursor",
+      "lastViewedAt",
+      "unreadFromMessageId",
+    ],
     "unread state",
   );
   if (value.schemaVersion !== 1) {
@@ -186,6 +206,9 @@ export function decodeUnreadStateV1(input: unknown): UnreadStateV1 {
   return {
     schemaVersion: 1,
     manuallyUnread: value.manuallyUnread,
+    ...(value.unreadFromMessageId === undefined
+      ? {}
+      : { unreadFromMessageId: messageBoundary(value.unreadFromMessageId) }),
     ...(lastActivityCursor === undefined ? {} : { lastActivityCursor }),
     ...(lastActivityAt === undefined ? {} : { lastActivityAt }),
     ...(lastSeenCursor === undefined ? {} : { lastSeenCursor }),
@@ -369,6 +392,7 @@ export function markUnreadReadV1(
     lastSeenCursor,
     lastViewedAt,
     manuallyUnread: false,
+    unreadFromMessageId: undefined,
   };
 }
 
@@ -391,6 +415,7 @@ export interface BotUnreadViewV1 {
   /** Whether the row renders bold: a count, or the manual flag. */
   unread: boolean;
   manuallyUnread: boolean;
+  unreadFromMessageId?: string;
   /** What a `bot/mark-read` should name as `upToCursor`. */
   lastActivityCursor?: string;
   lastActivityAt?: string;
@@ -458,6 +483,9 @@ export function projectBotUnreadViewV1(
     capped,
     unread: count > 0 || state.manuallyUnread,
     manuallyUnread: state.manuallyUnread,
+    ...(state.unreadFromMessageId === undefined
+      ? {}
+      : { unreadFromMessageId: state.unreadFromMessageId }),
     ...(state.lastActivityCursor === undefined
       ? {}
       : { lastActivityCursor: state.lastActivityCursor }),
@@ -483,6 +511,7 @@ export interface BotUnreadCommandV1 {
   botId: string;
   /** Required by `bot/mark-read`, refused on `bot/mark-unread`. */
   upToCursor?: string;
+  fromMessageId?: string;
 }
 
 export interface BotUnreadReceiptV1 {
@@ -497,7 +526,7 @@ export function decodeBotUnreadCommandV1(input: unknown): BotUnreadCommandV1 {
   exactKeys(
     value,
     ["schemaVersion", "type", "commandId", "botId"],
-    ["upToCursor"],
+    ["upToCursor", "fromMessageId"],
     "unread command",
   );
   if (value.schemaVersion !== 1) {
@@ -516,6 +545,12 @@ export function decodeBotUnreadCommandV1(input: unknown): BotUnreadCommandV1 {
   if (typeof value.botId !== "string" || !isPublicIdentifier(value.botId)) {
     throw new UnreadDecodeError("unread command botId is invalid");
   }
+  const fromMessageId = messageBoundary(value.fromMessageId);
+  if (fromMessageId !== undefined && value.type !== "bot/mark-unread") {
+    throw new UnreadDecodeError(
+      "message boundary belongs only to bot/mark-unread",
+    );
+  }
   const upToCursor = optionalCursor(value, "upToCursor", "unread command");
   if ((value.type === "bot/mark-read") !== (upToCursor !== undefined)) {
     throw new UnreadDecodeError(
@@ -528,6 +563,7 @@ export function decodeBotUnreadCommandV1(input: unknown): BotUnreadCommandV1 {
     commandId: value.commandId,
     botId: value.botId,
     ...(upToCursor === undefined ? {} : { upToCursor }),
+    ...(fromMessageId === undefined ? {} : { fromMessageId }),
   };
 }
 
@@ -554,6 +590,7 @@ function decodeBotUnreadViewV1(input: unknown): BotUnreadViewV1 {
       "lastViewedAt",
       "lastMessage",
       "working",
+      "unreadFromMessageId",
     ],
     "unread view",
   );
@@ -599,6 +636,9 @@ function decodeBotUnreadViewV1(input: unknown): BotUnreadViewV1 {
     capped: value.capped,
     unread: value.unread,
     manuallyUnread: value.manuallyUnread,
+    ...(value.unreadFromMessageId === undefined
+      ? {}
+      : { unreadFromMessageId: messageBoundary(value.unreadFromMessageId) }),
     ...(lastActivityCursor === undefined ? {} : { lastActivityCursor }),
     ...(lastActivityAt === undefined ? {} : { lastActivityAt }),
     ...(lastViewedAt === undefined ? {} : { lastViewedAt }),
@@ -863,6 +903,23 @@ export async function executeUnreadCommand(
         preview: await transaction.get<unknown>(SIDEBAR_PREVIEW_KEY),
       };
     }
+    if (command.fromMessageId !== undefined) {
+      const [runId, kind, position] = command.fromMessageId.split(":");
+      const run = await state.authority.readRun(runId!);
+      const sessionId = await state.authority.readConversationSessionId();
+      if (
+        !run ||
+        run.sessionId !== sessionId ||
+        !isVisibleRunV1(run) ||
+        (kind === "send" &&
+          Number(position) >=
+            run.events.filter((event) => event.type === "send/to-user").length)
+      ) {
+        throw new Error(
+          "Unread boundary does not name a message in this Bot’s chat",
+        );
+      }
+    }
     const current = optionalUnreadStateV1(
       await transaction.get<unknown>(UNREAD_STATE_KEY),
     );
@@ -876,7 +933,10 @@ export async function executeUnreadCommand(
         at: new Date().toISOString(),
       });
     } else {
-      next = markUnreadV1(current);
+      next = {
+        ...markUnreadV1(current),
+        unreadFromMessageId: command.fromMessageId,
+      };
     }
     await transaction.put({
       [UNREAD_STATE_KEY]: next,

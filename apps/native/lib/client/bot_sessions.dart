@@ -1,13 +1,11 @@
 import 'dart:async';
 
-import '../protocol/client_wire.generated.dart' as wire;
 import 'chat_controller.dart';
 import 'page_cache.dart';
 import 'state_channel.dart';
 import 'transport.dart';
 
-/// One Bot's live conversation: its controller, its observer channel and the
-/// conversation list beside them. It outlives the widget that shows it, so
+/// One Bot's continuous chat: its controller and its observer channel. It outlives the widget that shows it, so
 /// returning to a Bot neither refetches its transcript nor reconnects it.
 class BotSession {
   final NativeApi api;
@@ -15,7 +13,6 @@ class BotSession {
   final String botId;
   final ChatController controller;
   final BotStateChannel channel;
-  List<wire.Conversation> conversations = const [];
   Future<void>? _started;
   bool disposed = false;
   BotSession({
@@ -29,54 +26,8 @@ class BotSession {
   /// Starting is done once per session, however often its view is rebuilt.
   Future<void> start() => _started ??= _start();
 
-  String get _conversationsPath =>
-      '/api/bots/${Uri.encodeComponent(botId)}/conversations';
-
-  /// Puts the current conversation down and starts the next.
-  ///
-  /// The Bot keeps every Turn of the one just ended: it is still listed and
-  /// still readable by naming it. A Bot mid-Turn refuses with its reason — the
-  /// log a running Turn is appending to is not something a press may pull out
-  /// from under it — and the refusal reaches the caller rather than half-ending
-  /// a conversation.
-  Future<void> startConversation() async {
-    final list = wire.ConversationList.fromJson(
-      await api.request(_conversationsPath, body: const {'schemaVersion': 1}),
-    );
-    if (disposed) return;
-    conversations = list.conversations;
-    // The new conversation is the one the transcript shows, and it is empty:
-    // reading it back is the only thing that proves both.
-    await controller.selectConversation(null);
-    controller.changed();
-  }
-
-  /// Reads the conversation list again, so a rename or a new one shows.
-  Future<void> refreshConversations() async {
-    try {
-      final list = wire.ConversationList.fromJson(
-        await api.request(_conversationsPath),
-      );
-      if (disposed) return;
-      conversations = list.conversations;
-      controller.changed();
-    } catch (_) {
-      // The picker keeps the list it has; nothing is lost but a new entry.
-    }
-  }
-
   Future<void> _start() async {
     await controller.initialize();
-    try {
-      final list = wire.ConversationList.fromJson(
-        await api.request(_conversationsPath),
-      );
-      if (disposed) return;
-      conversations = list.conversations;
-      controller.changed();
-    } catch (_) {
-      /* History itself has its own retry state. */
-    }
     if (!disposed) await channel.connect();
   }
 

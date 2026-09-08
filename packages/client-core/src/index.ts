@@ -234,7 +234,6 @@ export interface AgentTransport {
    * Puts the current conversation down and starts the next one. Memory is
    * kept; only the history the next Turn carries is new.
    */
-  startConversation?(botId: string): Promise<void>;
   listAnnouncements?(botId: string): Promise<ClientAnnouncement[]>;
   lookupRun?(botId: string, runId: string): Promise<ClientRun | undefined>;
   fenceRunAdmission?(

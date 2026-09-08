@@ -457,7 +457,6 @@ export interface FrockBotWebData {
    * Puts this conversation down and starts the next one. Memory is kept; only
    * the history the next Turn carries is new.
    */
-  startConversation(): Promise<void>;
   startConnection(
     packageId: string,
     connectionTypeId: string,

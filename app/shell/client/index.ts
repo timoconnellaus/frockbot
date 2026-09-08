@@ -1474,46 +1474,6 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       }
       await web.value.loadBotSettings();
     },
-    /**
-     * Puts this conversation down and starts the next one.
-     *
-     * What the Bot knows about you is Memory and stays; what it carries into
-     * the next model request is the new conversation and nothing else. The
-     * transcript clears because it is showing the conversation, and the one
-     * just ended is still durable behind it.
-     */
-    async startConversation(): Promise<void> {
-      const start = ctx.transport.startConversation;
-      const botId = web.value.activeBotId;
-      if (!start || !botId) return;
-      const generation = selectionGeneration;
-      try {
-        await start(botId);
-      } catch (error) {
-        web.value.settingsError =
-          error instanceof Error
-            ? error.message
-            : "Could not start a new conversation";
-        return;
-      }
-      if (generation !== selectionGeneration || web.value.activeBotId !== botId)
-        return;
-      // Reads already in flight answer with the conversation that just ended;
-      // the epoch drops them instead of letting them redraw it.
-      conversationGeneration += 1;
-      // The conversation just ended keeps none of this Bot's cache: its key
-      // moves with it, and the transcript behind it is not this one.
-      transcriptEpochs.set(botId, (transcriptEpochs.get(botId) ?? 0) + 1);
-      transcripts.forget(botId);
-      restoredWithoutRead = undefined;
-      runObserver?.abort();
-      runObserver = undefined;
-      web.value.messages = [];
-      web.value.activeRun = undefined;
-      web.value.activeRunId = undefined;
-      web.value.runningRunId = undefined;
-      web.value.settingsError = undefined;
-    },
     async loadSkillCatalog(): Promise<void> {
       // A missing transport method or an unreadable catalog is an empty
       // popover, never a visible error: a Skill list the User did not ask for

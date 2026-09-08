@@ -28,7 +28,7 @@ const corpus: SpecWeight[] = [
   { file: "errors.e2e.ts", tests: 2 },
   { file: "first-run.e2e.ts", tests: 1 },
   { file: "mobile.e2e.ts", tests: 2 },
-  { file: "new-conversation.e2e.ts", tests: 2 },
+  { file: "continuous-chat.e2e.ts", tests: 2 },
   { file: "package-iframe-ui.e2e.ts", tests: 1 },
   { file: "pinned-bots.e2e.ts", tests: 1 },
   { file: "profile.e2e.ts", tests: 1 },
