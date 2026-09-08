@@ -480,17 +480,6 @@ export type WebArtifact = {
   mediaType: "text/html";
   bundlerVersion: string;
 };
-export type FallbackBootstrap = {
-  schemaVersion: 1;
-  appletId: string;
-  userId: Identifier;
-  generationId: GenerationId;
-  navigationEpoch: Identifier;
-  bootstrapUrl: HttpsUrl;
-  artifactOrigin: HttpsUrl;
-  artifact: WebArtifact;
-  viewer: AppletViewerToken;
-};
 export type ActionValueSchema =
   | { type: "string"; maxLength: number }
   | { type: "boolean" }
@@ -862,7 +851,6 @@ export interface ProtocolTypes {
   AppletViewerToken: AppletViewerToken;
   ImmutableArtifact: ImmutableArtifact;
   WebArtifact: WebArtifact;
-  FallbackBootstrap: FallbackBootstrap;
   ActionValueSchema: ActionValueSchema;
   ActionSchema: ActionSchema;
   ViewNode: ViewNode;

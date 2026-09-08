@@ -600,11 +600,6 @@
     "value": null
   },
   {
-    "name": "FallbackBootstrap wrong shape",
-    "schema": "FallbackBootstrap",
-    "value": null
-  },
-  {
     "name": "ActionValueSchema wrong shape",
     "schema": "ActionValueSchema",
     "value": null
@@ -868,31 +863,6 @@
     "schema": "ActionSchema",
     "value": {
       "$ref": "https://attacker.example/schema.json"
-    }
-  },
-  {
-    "name": "applet bootstrap session leak",
-    "schema": "FallbackBootstrap",
-    "value": {
-      "schemaVersion": 1,
-      "appletId": "user.applet",
-      "userId": "command-1",
-      "generationId": "command-1",
-      "navigationEpoch": "command-1",
-      "bootstrapUrl": "https://bot.frockbot.com/return",
-      "artifactOrigin": "https://bot.frockbot.com/return",
-      "artifact": {
-        "contentHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "size": 1,
-        "mediaType": "text/html",
-        "bundlerVersion": "1.1.0"
-      },
-      "viewer": {
-        "token": "1.1.0",
-        "expiresAt": "2026-09-05T00:00:00.000Z",
-        "socketUrl": "wss://bot.frockbot.com/view"
-      },
-      "sessionToken": "app-session"
     }
   },
   {

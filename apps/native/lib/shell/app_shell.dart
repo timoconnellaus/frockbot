@@ -9,21 +9,24 @@ library;
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
 import '../activity/controller.dart';
 import '../activity/page.dart';
 import '../admin/page.dart';
+import '../applets/canvas.dart';
 import '../audit/page.dart';
 import '../client/auth.dart' show developmentAuth;
 import '../client/bot_sessions.dart';
 import '../client/transport.dart';
+import '../computer/card.dart';
+import '../computer/client.dart';
 import '../connections/page.dart';
-import '../extensions/fallback.dart';
 import '../flock/create.dart';
 import '../flock/lifecycle.dart';
 import '../machines/page.dart';
+import '../packages/catalog.dart';
+import '../packages/frame.dart';
 import '../plugins/page.dart';
 import '../recovery/page.dart';
 import '../routines/page.dart';
@@ -88,6 +91,13 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   String? workingRunId;
   BotSettingsController? botSettings;
   RoutineInboxController? routineInbox;
+
+  /// The selected Bot's Applet canvas, its Computer, and the Package pages its
+  /// Composition declares. All three belong to one Bot and are replaced whole
+  /// when the selection moves.
+  AppletCanvasController? appletCanvas;
+  ComputerController? computer;
+  PackageCatalog? catalog;
   String? error;
   bool loaded = false;
   bool navOpen = false;
@@ -318,12 +328,18 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       'bot-settings',
       (context) => SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
-        child: BotSettingsView(
-          controller: controller,
-          onSaved: load,
-          background: _background(botId),
-          onEditAvatar: () => unawaited(_editAvatar(botId, name)),
-          dangerZone: _dangerZone(botId, name),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            BotSettingsView(
+              controller: controller,
+              onSaved: load,
+              background: _background(botId),
+              onEditAvatar: () => unawaited(_editAvatar(botId, name)),
+              dangerZone: _dangerZone(botId, name),
+            ),
+            ..._packageSettings(botId),
+          ],
         ),
       ),
       label: 'Settings',
@@ -354,8 +370,155 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         onOpen: () => _openPanel('routines'),
       ),
     );
+    appletCanvas?.dispose();
+    computer?.dispose();
+    appletCanvas = null;
+    computer = null;
+    catalog = null;
+    slots.remove(ShellSlot.rightPanel, 'applet');
+    slots.remove(ShellSlot.rightPanel, 'computer');
+    slots.remove(ShellSlot.headerActions, 'package-entries');
     unawaited(controller.load());
     unawaited(inbox.load());
+    unawaited(_adoptComposition(botId));
+  }
+
+  /// What this Bot's Composition declares it may show: the Applet canvas, the
+  /// Computer, and the Package pages and entries. An absent capability is
+  /// silence — no catalog means none of these are registered, and the shell
+  /// asks for no route that does not exist here.
+  Future<void> _adoptComposition(String botId) async {
+    final read = await readPackageCatalogV1(widget.api, botId);
+    if (!mounted || selected?.botId.value != botId) return;
+    setState(() => catalog = read);
+    if (read != null && read.appletsAvailable) {
+      final canvas = AppletCanvasController(widget.api, botId);
+      appletCanvas = canvas;
+      canvas.addListener(_repaint);
+      slots.register(
+        ShellSlot.rightPanel,
+        'applet',
+        (context) => _appletCanvas(botId, canvas),
+        label: 'Applet',
+      );
+      unawaited(canvas.load());
+    }
+    final machine = ComputerController(widget.api, botId);
+    computer = machine;
+    machine.addListener(() {
+      if (!mounted) return;
+      // The Computer is registered only once the deployment has said it has
+      // one, so a card never appears and then disappears.
+      if (machine.available &&
+          !slots.keys(ShellSlot.rightPanel).contains('computer')) {
+        slots.register(
+          ShellSlot.rightPanel,
+          'computer',
+          (context) => SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+            child: ComputerCard(
+              controller: machine,
+              turnRunning: workingRunId != null,
+            ),
+          ),
+          label: 'Computer',
+        );
+      }
+      _repaint();
+    });
+    unawaited(machine.read());
+    final entries = packageIframeEntriesV1(read);
+    if (entries.isNotEmpty) {
+      slots.register(
+        ShellSlot.headerActions,
+        'package-entries',
+        (context) => Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final entry in entries)
+              identified(
+                PackageIds.entry(entry.contribution.packageId, entry.entry.id),
+                IconButton(
+                  tooltip: entry.entry.label,
+                  icon: Icon(_packageIcon(entry.entry.icon)),
+                  onPressed: () => _openPackagePage(entry),
+                ),
+              ),
+          ],
+        ),
+      );
+    }
+    if (mounted) setState(() {});
+  }
+
+  /// The icon set a Package may name. A Package naming one this client does
+  /// not have falls back to the generic one rather than drawing nothing.
+  IconData _packageIcon(String name) => switch (name) {
+    'applets' => Icons.widgets_outlined,
+    'plugins' => Icons.extension_outlined,
+    'settings' => Icons.settings_outlined,
+    'search' => Icons.search,
+    _ => Icons.extension_outlined,
+  };
+
+  /// A Package page as a surface. Its chrome — the title and the way out —
+  /// belongs to the shell; the page fills the body and is attributed to the
+  /// Package that ships it, so a reader always knows whose screen this is.
+  void _openPackagePage(PackageEntryPage entry) {
+    final held = catalog;
+    final bot = selected;
+    if (held == null || bot == null) return;
+    _push(
+      Scaffold(
+        appBar: AppBar(title: Text(entry.entry.label)),
+        body: SafeArea(
+          top: false,
+          child: identified(
+            PackageIds.page(entry.contribution.packageId, entry.page.id),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+              child: PackagePageFrame(
+                api: widget.api,
+                catalog: held,
+                contribution: entry.contribution,
+                page: entry.page,
+                botId: bot.botId.value,
+                slot: entry.slot,
+                layout: PackageFrameLayout.fill,
+                surfaceTitle: entry.entry.label,
+                states: {
+                  packageIframeAppletsStateV2: appletsBridgeStateV2(
+                    appletCanvas,
+                  ),
+                },
+                onFocus: (appletId) async {
+                  await appletCanvas?.setFocus(appletId);
+                  if (mounted) _openPanel('applet');
+                },
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// The canvas, over the thread the progress line is read from.
+  Widget _appletCanvas(
+    String botId,
+    AppletCanvasController canvas, {
+    VoidCallback? onClose,
+  }) {
+    final session = widget.sessions.open(widget.userId, botId);
+    return AnimatedBuilder(
+      animation: session.controller,
+      builder: (context, _) => AppletCanvas(
+        controller: canvas,
+        lines: projectRuns(session.controller.runs),
+        running: session.controller.activeRunId != null,
+        onClose: onClose ?? () => setState(() => panelOpen = false),
+      ),
+    );
   }
 
   void _push(Widget page) {
@@ -453,6 +616,34 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     });
   }
 
+  /// On the phone the region has no selector of its own, because it is not a
+  /// column: the entries are pages. This is the selector — the same labels the
+  /// wide layout puts in its segmented control, offered once and then opened.
+  Future<void> _choosePanel() async {
+    final keys = slots.keys(ShellSlot.rightPanel);
+    if (keys.length <= 1) {
+      _pushPanel(keys.isEmpty ? panelKey : keys.first);
+      return;
+    }
+    final chosen = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final key in keys)
+              ListTile(
+                title: Text(slots.labelOf(ShellSlot.rightPanel, key) ?? key),
+                onTap: () => Navigator.of(context).pop(key),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (chosen != null && mounted) _pushPanel(chosen);
+  }
+
   void _pushPanel(String key) {
     final bot = selected;
     final controller = botSettings;
@@ -470,6 +661,43 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       );
       return;
     }
+    // On the phone the right panel's entries are pages, which is the same
+    // rule Routines and Bot settings already follow: a drawer over a
+    // full-width conversation is the same thing with less room.
+    if (key == 'applet' && appletCanvas != null) {
+      _push(
+        Scaffold(
+          appBar: AppBar(title: const Text('Applet')),
+          body: SafeArea(
+            top: false,
+            child: _appletCanvas(
+              bot.botId.value,
+              appletCanvas!,
+              onClose: () => Navigator.of(context).maybePop(),
+            ),
+          ),
+        ),
+      );
+      return;
+    }
+    if (key == 'computer' && computer != null) {
+      _push(
+        Scaffold(
+          appBar: AppBar(title: const Text('Computer')),
+          body: SafeArea(
+            top: false,
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+              child: ComputerCard(
+                controller: computer!,
+                turnRunning: workingRunId != null,
+              ),
+            ),
+          ),
+        ),
+      );
+      return;
+    }
     if (controller == null) return;
     _push(
       Scaffold(
@@ -478,18 +706,51 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           top: false,
           child: SingleChildScrollView(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
-            child: BotSettingsView(
-              controller: controller,
-              onSaved: load,
-              background: _background(bot.botId.value),
-              onEditAvatar: () =>
-                  unawaited(_editAvatar(bot.botId.value, _name(bot))),
-              dangerZone: _dangerZone(bot.botId.value, _name(bot)),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                BotSettingsView(
+                  controller: controller,
+                  onSaved: load,
+                  background: _background(bot.botId.value),
+                  onEditAvatar: () =>
+                      unawaited(_editAvatar(bot.botId.value, _name(bot))),
+                  dangerZone: _dangerZone(bot.botId.value, _name(bot)),
+                ),
+                ..._packageSettings(bot.botId.value),
+              ],
             ),
           ),
         ),
       ),
     );
+  }
+
+  /// The Package pages mounted in Bot settings, drawn under the Bot's own
+  /// sections the way `PackageIframeSettings.vue` draws them.
+  List<Widget> _packageSettings(String botId) {
+    final held = catalog;
+    if (held == null) return const [];
+    return [
+      for (final mounted in packageIframePagesForSlotV1(
+        held,
+        packageBotSettingsSlotV1,
+      ))
+        Padding(
+          padding: const EdgeInsets.only(top: 16),
+          child: identified(
+            PackageIds.page(mounted.contribution.packageId, mounted.page.id),
+            PackagePageFrame(
+              api: widget.api,
+              catalog: held,
+              contribution: mounted.contribution,
+              page: mounted.page,
+              botId: botId,
+              slot: packageBotSettingsSlotV1,
+            ),
+          ),
+        ),
+    ];
   }
 
   /// The sheep a Bot wears, from the registration the directory carries.
@@ -590,14 +851,13 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                   ),
                 ],
               ),
-            // The Applet fallback is a WebView, which the browser has no
-            // implementation of; the web client reaches an Applet directly.
-            if (!kIsWeb)
-              IconButton(
-                tooltip: 'Your Applets',
-                icon: const Icon(Icons.widgets_outlined),
-                onPressed: () => _push(
-                  AppletDirectoryPage(api: widget.api, userId: widget.userId),
+            if (bot != null && appletCanvas != null)
+              identified(
+                AppletIds.chip,
+                IconButton(
+                  tooltip: 'Applets',
+                  icon: const Icon(Icons.widgets_outlined),
+                  onPressed: () => _openPanel('applet'),
                 ),
               ),
             if (bot != null && tier != ShellTier.triple)
@@ -608,7 +868,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                   onPressed: _rightPanel() == null
                       ? null
                       : tier == ShellTier.single && openRun == null
-                      ? () => _pushPanel(panelKey)
+                      ? () => unawaited(_choosePanel())
                       : () => setState(() => panelOpen = !panelOpen),
                   icon: Icon(
                     openRun == null
@@ -958,6 +1218,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     lifecycle.dispose();
     botSettings?.dispose();
     routineInbox?.dispose();
+    appletCanvas?.dispose();
+    computer?.dispose();
     slots.dispose();
     super.dispose();
   }

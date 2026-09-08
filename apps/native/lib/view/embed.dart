@@ -23,19 +23,56 @@ typedef ViewFieldBuilder = Widget Function(
   void Function(Object? value)? onChanged,
 );
 
-/// Both names exist now; their widgets arrive with the surfaces that own them.
-/// Until then they draw the reserved region, and a name the host does not know
-/// draws the unavailable one — never the plugin's idea of either.
+/// What a host has actually put in each named region, for the surface it is
+/// under.
+///
+/// The Applet canvas and the Computer viewer are host chrome: they hold a
+/// scoped viewer credential, which is minted per reader and can never be in a
+/// document that may be read twice. So the region a plugin names is filled by
+/// whatever host surface is above it, and by nothing at all elsewhere — which
+/// is the same rule as before, with the reserved region as the default rather
+/// than as the only answer.
+class HostViewFrames extends InheritedWidget {
+  final Map<String, WidgetBuilder> frames;
+  const HostViewFrames({super.key, required this.frames, required super.child});
+
+  static WidgetBuilder? lookup(BuildContext context, String name) => context
+      .dependOnInheritedWidgetOfExactType<HostViewFrames>()
+      ?.frames[name];
+
+  @override
+  bool updateShouldNotify(HostViewFrames old) => frames != old.frames;
+}
+
+Widget _hostFrame(
+  BuildContext context,
+  String name,
+  String label,
+  IconData icon,
+  String detail,
+) {
+  final draw = HostViewFrames.lookup(context, name);
+  return draw == null
+      ? ViewRegion(label: label, icon: icon, detail: detail)
+      : draw(context);
+}
+
+/// The two names a plugin may put an `embed` on. A name the host does not know
+/// draws the unavailable region — never the plugin's idea of either.
 final Map<String, ViewFrameBuilder> hostViewFramesV1 = Map.unmodifiable({
-  appletViewerFrameV1: (context, label) => ViewRegion(
-    label: label,
-    icon: Icons.widgets_outlined,
-    detail: 'The Applet viewer opens here.',
+  appletViewerFrameV1: (context, label) => _hostFrame(
+    context,
+    appletViewerFrameV1,
+    label,
+    Icons.widgets_outlined,
+    'The Applet viewer opens here.',
   ),
-  computerViewerFrameV1: (context, label) => ViewRegion(
-    label: label,
-    icon: Icons.desktop_windows_outlined,
-    detail: 'The Computer viewer opens here.',
+  computerViewerFrameV1: (context, label) => _hostFrame(
+    context,
+    computerViewerFrameV1,
+    label,
+    Icons.desktop_windows_outlined,
+    'The Computer viewer opens here.',
   ),
 });
 
