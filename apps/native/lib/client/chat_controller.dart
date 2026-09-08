@@ -64,6 +64,9 @@ class ChatController extends ChangeNotifier {
     return pendingId;
   }
 
+  String? get visiblePendingText =>
+      pendingId == null || _runs.containsKey(pendingId) ? null : pendingText;
+
   bool get canSend => ready && !sending && pendingId == null;
   void changed() {
     if (!_disposed) notifyListeners();
@@ -218,11 +221,12 @@ class ChatController extends ChangeNotifier {
     final id = nextId();
     pendingId = id;
     pendingText = text;
-    draft = text;
     changed();
+    draft = '';
     try {
       await _persist(); // No transport call can precede this durable local write.
     } catch (_) {
+      _restoreSubmission(text);
       pendingId = null;
       pendingText = null;
       sending = false;
@@ -230,11 +234,13 @@ class ChatController extends ChangeNotifier {
       changed();
       return;
     }
+    changed();
     try {
       await transport.send(botId, id, text);
       await checkDelivery();
     } on RequestFailure catch (failure) {
       if (failure.refused) {
+        _restoreSubmission(text);
         pendingId = null;
         pendingText = null;
         await _persist();
@@ -252,6 +258,10 @@ class ChatController extends ChangeNotifier {
     }
   }
 
+  void _restoreSubmission(String text) {
+    draft = draft.isEmpty ? text : '$text\n\n$draft';
+  }
+
   Future<void> checkDelivery() async {
     final id = pendingId;
     if (id == null || checking) return;
@@ -261,13 +271,15 @@ class ChatController extends ChangeNotifier {
       final observed = await transport.lookup(botId, id);
       // A read alone cannot prove a delayed POST will never be admitted.
       final run = observed ?? await transport.lookup(botId, id, fence: true);
+      final previousDraft = draft;
       if (run != null) {
         _put(run);
         error = null;
-        if (draft == pendingText) draft = '';
       } else {
+        _restoreSubmission(pendingText!);
         error = 'Your message didn’t go through. You can send it again.';
       }
+      final reconciledDraft = draft;
       final savedText = pendingText;
       pendingId = null;
       pendingText = null;
@@ -276,6 +288,7 @@ class ChatController extends ChangeNotifier {
       } catch (_) {
         pendingId = id;
         pendingText = savedText;
+        if (draft == reconciledDraft) draft = previousDraft;
         rethrow;
       }
     } catch (_) {
