@@ -8,7 +8,6 @@ import {
   computerHostShardCountV1,
   computerHostShardV1,
   fnv1aV1,
-  legacyEffectShardV1,
   routeComputerHostRequestV1,
 } from "./router.ts";
 
@@ -103,11 +102,6 @@ describe("shard function", () => {
     // The empty string is the offset basis; "a" is one round.
     expect(fnv1aV1("")).toBe(2_166_136_261);
     expect(fnv1aV1("a")).toBe(0xe40c_292c);
-  });
-
-  test("the superseded seam keeps its own Bot-keyed shard names", () => {
-    expect(legacyEffectShardV1("bot-1", 1)).toBe("shared-0");
-    expect(legacyEffectShardV1("bot-1", 4)).toMatch(/^shared-[0-3]$/);
   });
 });
 

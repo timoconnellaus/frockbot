@@ -5,21 +5,9 @@
  * The prototype proved the boundary with a single `/v1/computer/smoke` DTO;
  * this Worker serves the real v1 protocol and routes it to a bounded pool of
  * containers, one of which holds each User's Computer.
- *
- * The prototype's durable `ComputerEffectJournal` and its `/v1/effects` route
- * are carried forward untouched. Superseding a Worker script must not delete a
- * durable class or the effect outcomes it recorded, so the journal keeps its
- * class, its binding, and its container shards while the protocol underneath
- * it is migrated separately.
  */
 
 import { Container, ContainerProxy } from "@cloudflare/containers";
-import { decodeComputerHostEffectRequestV1 } from "@frockbot/computer/core/host-protocol";
-import {
-  ComputerEffectJournal,
-  shardCount,
-  type ComputerEffectJournalEnv,
-} from "./effect-journal.ts";
 import { COMPUTER_HOST_EGRESS_V1, SPRITES_API_HOST } from "./egress.ts";
 import { createOutboundWebSocketProxyV1 } from "./outbound.ts";
 import {
@@ -27,13 +15,9 @@ import {
   routeComputerHostRequestV1,
 } from "./router.ts";
 
-export interface ComputerHostEnv extends ComputerEffectJournalEnv {
+export interface ComputerHostEnv {
   COMPUTER_HOST_CONTAINER: DurableObjectNamespace<FlyHostContainer>;
-  /** The superseded seam's binding onto the same container class. */
-  FLY_HOST: DurableObjectNamespace<FlyHostContainer>;
-  COMPUTER_EFFECTS: DurableObjectNamespace;
   COMPUTER_HOST_SHARDS: string;
-  FLY_HOST_SHARDS: string;
   /** Fly Sprites account token. Reaches the container's env and nothing else. */
   SPRITES_TOKEN: string;
   /** Shared secret between the app Worker, this Worker, and the container. */
@@ -109,7 +93,7 @@ export class FlyHostContainer extends Container<ComputerHostEnv> {
   }
 }
 
-export { ComputerEffectJournal, ContainerProxy };
+export { ContainerProxy };
 
 export default {
   async fetch(request: Request, env: ComputerHostEnv): Promise<Response> {
@@ -118,29 +102,6 @@ export default {
       pathname = new URL(request.url).pathname;
     } catch {
       return Response.json({ error: "invalid-url" }, { status: 400 });
-    }
-
-    // The superseded single-effect seam, unchanged.
-    if (pathname === "/v1/effects" && request.method === "POST") {
-      let effect;
-      try {
-        effect = decodeComputerHostEffectRequestV1(
-          await request.clone().json(),
-        );
-      } catch (error) {
-        return Response.json(
-          { error: error instanceof Error ? error.message : "invalid request" },
-          { status: 400 },
-        );
-      }
-      const journal = env.COMPUTER_EFFECTS.getByName(
-        JSON.stringify([
-          effect.identity.userId,
-          effect.tenant.botId,
-          effect.effectId,
-        ]),
-      );
-      return journal.fetch(request);
     }
 
     return routeComputerHostRequestV1(
@@ -153,5 +114,3 @@ export default {
     );
   },
 } satisfies ExportedHandler<ComputerHostEnv>;
-
-export { shardCount };

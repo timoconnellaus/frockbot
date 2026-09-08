@@ -368,9 +368,6 @@ describe("foundation application", () => {
           requestedSecrets.push(name);
           return undefined;
         },
-        computerHost: {
-          effect: () => Promise.reject(new Error("not invoked while mounting")),
-        },
       }).map((pkg) => pkg.id),
     ).toEqual(["credentials", "fly-sprite", "computer"]);
     expect(requestedSecrets).toEqual(["SPRITES_TOKEN"]);

@@ -163,14 +163,7 @@ class FakeSyncSprite {
     const root = quoted(shell, "ROOT");
     const relative = quoted(shell, "REL");
     if (shell.includes("append_manifest") && shell.includes("sha256sum")) {
-      const encoded = quoted(shell, "REQUIRED_PATHS") ?? "W10=";
-      const required = new Set<string>(
-        Buffer.from(encoded, "base64")
-          .toString("utf8")
-          .split("\n")
-          .filter(Boolean),
-      );
-      return this.scan(root ?? "", required);
+      return this.scan(root ?? "");
     }
     if (shell.includes("__STAGED__")) return this.stageChunk(shell);
     if (root && relative) {
@@ -273,37 +266,23 @@ class FakeSyncSprite {
       : `${decoder.decode(bytes)}\n`;
   }
 
-  private scan(root: string, required: ReadonlySet<string>): string {
+  private scan(root: string): string {
     const rows: string[] = [];
     const ignoredDirectories = new Set<string>();
-    const requiredIgnoredDirectories = new Set(
-      [...required].map((path) => {
-        const segments = path.split("/");
-        const index = segments.findIndex((segment) =>
-          (WORKSPACE_SYNC_IGNORED_DIRECTORIES_V1 as readonly string[]).includes(
-            segment,
-          ),
-        );
-        return segments.slice(0, index + 1).join("/");
-      }),
-    );
     const generations = `${root}/.frockbot-generations/`;
     const graves = `${root}/.frockbot-sync/tombstones/`;
     for (const [path, bytes] of [...this.files].sort()) {
       if (!path.startsWith(`${root}/`)) continue;
       const relative = path.slice(root.length + 1);
       if (relative.startsWith(".frockbot-")) continue;
-      if (isWorkspaceSyncIgnoredPathV1(relative) && !required.has(relative)) {
+      if (isWorkspaceSyncIgnoredPathV1(relative)) {
         const segments = relative.split("/");
         const index = segments.findIndex((segment) =>
           (WORKSPACE_SYNC_IGNORED_DIRECTORIES_V1 as readonly string[]).includes(
             segment,
           ),
         );
-        const ignoredRoot = segments.slice(0, index + 1).join("/");
-        if (!requiredIgnoredDirectories.has(ignoredRoot)) {
-          ignoredDirectories.add(ignoredRoot);
-        }
+        ignoredDirectories.add(segments.slice(0, index + 1).join("/"));
         continue;
       }
       const meta = this.files.get(`${generations}${relative}`);
@@ -320,8 +299,7 @@ class FakeSyncSprite {
     for (const [path, bytes] of [...this.files].sort()) {
       if (path.startsWith(graves)) {
         const relative = path.slice(graves.length);
-        if (isWorkspaceSyncIgnoredPathV1(relative) && !required.has(relative))
-          continue;
+        if (isWorkspaceSyncIgnoredPathV1(relative)) continue;
         rows.push(
           [
             "T",
@@ -333,8 +311,7 @@ class FakeSyncSprite {
       }
       if (!path.startsWith(generations)) continue;
       const relative = path.slice(generations.length);
-      if (isWorkspaceSyncIgnoredPathV1(relative) && !required.has(relative))
-        continue;
+      if (isWorkspaceSyncIgnoredPathV1(relative)) continue;
       if (this.files.has(`${root}/${relative}`)) continue;
       rows.push(
         [
@@ -830,7 +807,7 @@ describe("the durable-root sync, Package-declared roots", () => {
     expect(outcome.scan.omitted).toBe(100);
   });
 
-  test("emits valid Bash with exact required build paths", async () => {
+  test("emits valid Bash for the scan manifest", async () => {
     const sprite = new FakeSyncSprite();
     const surface = new FlySpriteSyncSurface({
       computer: attach(sprite).bot(BOT),
@@ -839,12 +816,7 @@ describe("the durable-root sync, Package-declared roots", () => {
       botDirectoryKey: computerBotKey,
     });
 
-    await surface.scan(declaredRoot, [
-      "todo/dist/server.js",
-      "todo/dist/ui.html",
-      "todo/dist/manifest.json",
-      "todo/dist/it's-$(not-a-command).js",
-    ]);
+    await surface.scan(declaredRoot);
 
     expect(sprite.lastScanScript).toBeString();
     const process = Bun.spawn(["bash", "-n"], {
@@ -1435,234 +1407,6 @@ describe("the durable-root sync on the Computer handle", () => {
     expect(summary.detail).toBe("");
   });
 
-  // The sync-now seam, provider side: a caller that has to read bytes a shell
-  // just wrote needs them in the store first, and needs that for one root
-  // rather than for the Workspace.
-  test("reconciles one declared root on demand and refuses a root it does not sync", async () => {
-    const { sprite, store, open } = providerHarness([DECLARED_PACKAGE_ROOT]);
-    const handle = await open();
-    const folder = "pub-user-1.0123456789abcdef0123456789abcdef";
-    sprite.shellWrite(MOUNTS.skills, "unrelated.md", "not this root");
-    sprite.shellWrite(
-      MOUNTS.packageDeclared,
-      `${folder}/dist/server.js`,
-      "export class A{}",
-    );
-
-    const summary = await handle.sync!.reconcileRoot!(declaredRoot, "publish", {
-      requiredPaths: [`${folder}/dist/server.js`],
-    });
-
-    expect(summary.status).toBe("ok");
-    expect(summary.pushed).toBe(1);
-    expect(
-      (
-        await store.read({
-          root: declaredRoot,
-          path: `${folder}/dist/server.js`,
-        })
-      ).status,
-    ).toBe("ok");
-    // One root, not the Workspace: the instruction root's shell write is still
-    // waiting for the Turn's own `turn-end` push.
-    expect(
-      (await store.read({ root: skillsRoot, path: "unrelated.md" })).status,
-    ).toBe("not-found");
-
-    // A root no Package declared is refused rather than quietly reconciled.
-    const refused = await handle.sync!.reconcileRoot!(
-      {
-        kind: "package-declared",
-        userId: USER,
-        packageId: "notes",
-        rootId: "pages",
-      },
-      "publish",
-    );
-    expect(refused.status).toBe("refused");
-  });
-
-  // Production, 2026-09-04, run 76b4f8d9: a shell wrote `dist/`, the sync
-  // answered `pushed=0 removed=0 failures=0`, and the caller then read
-  // `dist/manifest.json` as `not-found`.
-  // The reconcile had trusted the sidecar: hash matched, entry "clean",
-  // nothing to do — while the store held no object for it at all. A required
-  // path is the one thing the caller has asserted about, so the Computer's
-  // copy of it decides, not its sidecar.
-  // The state a fresh build leaves: three files under an ignored directory,
-  // none of them ever synced, so none of them has a sidecar. The caller names
-  // all three, and all three must be readable from the store
-  // when the reconcile returns — the last one included. (`sync-script.test.ts`
-  // is where the shell that emits their manifest rows is held to that; this is
-  // the reconcile above it.)
-  test("carries every required file of a fresh build that has no sidecars", async () => {
-    const { sprite, store, open } = providerHarness([DECLARED_PACKAGE_ROOT]);
-    const handle = await open();
-    const folder = "pub-user-1.0123456789abcdef0123456789abcdef";
-    const built = {
-      "dist/server.js": "export const value = 1;",
-      "dist/ui.html": "<h1>todo</h1>",
-      "dist/manifest.json": '{"contract":1,"tools":[]}',
-    };
-    for (const [file, text] of Object.entries(built)) {
-      sprite.shellWrite(MOUNTS.packageDeclared, `${folder}/${file}`, text);
-    }
-    expect(
-      sprite.keys(`${MOUNTS.packageDeclared}/.frockbot-generations`),
-    ).toEqual([]);
-
-    const summary = await handle.sync!.reconcileRoot!(declaredRoot, "publish", {
-      requiredPaths: Object.keys(built).map((file) => `${folder}/${file}`),
-    });
-
-    expect(summary).toMatchObject({ status: "ok", pushed: 3, failures: 0 });
-    expect(summary.required).toEqual(
-      Object.entries(built).map(([file, text]) => ({
-        path: `${folder}/${file}`,
-        contentHash: sha256(encoder.encode(text)),
-        durable: true,
-      })),
-    );
-    for (const [file, text] of Object.entries(built)) {
-      const read = await store.read({
-        root: declaredRoot,
-        path: `${folder}/${file}`,
-      });
-      expect(read.status).toBe("ok");
-      if (read.status === "ok") {
-        expect(decoder.decode(read.file.bytes)).toBe(text);
-      }
-    }
-  });
-
-  test("pushes a required file the store is missing even when its sidecar says clean", async () => {
-    const { sprite, store, open } = providerHarness([DECLARED_PACKAGE_ROOT]);
-    const handle = await open();
-    const folder = "pub-user-1.0123456789abcdef0123456789abcdef";
-    const path = `${folder}/dist/manifest.json`;
-    const manifest = '{"tools":[{"name":"add"},{"name":"list"}]}';
-    sprite.shellWrite(MOUNTS.packageDeclared, path, manifest);
-    // One good publish: the store takes the bytes and the Computer records the
-    // sidecar that attributes them.
-    await handle.sync!.reconcileRoot!(declaredRoot, "publish", {
-      requiredPaths: [path],
-    });
-    const stat = await store.stat({ root: declaredRoot, path });
-    expect(stat.status).toBe("ok");
-    if (stat.status !== "ok") return;
-    // The object goes; the sidecar and the built file do not.
-    await store.delete({
-      path: { root: declaredRoot, path },
-      writer: USER_WRITER,
-      expectedGenerationId: stat.entry.generation.generationId,
-    });
-    expect(
-      sprite.files.has(
-        `${MOUNTS.packageDeclared}/.frockbot-generations/${path}`,
-      ),
-    ).toBe(true);
-
-    const summary = await handle.sync!.reconcileRoot!(declaredRoot, "publish", {
-      requiredPaths: [path],
-    });
-
-    expect(summary).toMatchObject({
-      status: "ok",
-      pushed: 1,
-      removed: 0,
-      failures: 0,
-    });
-    const read = await store.read({ root: declaredRoot, path });
-    expect(read.status).toBe("ok");
-    if (read.status === "ok")
-      expect(decoder.decode(read.file.bytes)).toBe(manifest);
-    expect(summary.required).toEqual([
-      { path, contentHash: sha256(encoder.encode(manifest)), durable: true },
-    ]);
-  });
-
-  // The same drift, the other way round: the file the publish needs must never
-  // be deleted from the Computer because the store is missing it. Before this,
-  // the reconcile read the absence as a store-side delete and removed the build
-  // output — the publish's own artifact — on the way past.
-  test("never removes a required file from the Computer because the store lacks it", async () => {
-    const { sprite, store, generations, open } = providerHarness([
-      DECLARED_PACKAGE_ROOT,
-    ]);
-    const handle = await open();
-    const folder = "pub-user-1.0123456789abcdef0123456789abcdef";
-    const path = `${folder}/dist/server.js`;
-    sprite.shellWrite(MOUNTS.packageDeclared, path, "export class A{}");
-    await handle.sync!.reconcileRoot!(declaredRoot, "publish", {
-      requiredPaths: [path],
-    });
-    const stat = await store.stat({ root: declaredRoot, path });
-    if (stat.status !== "ok") throw new Error("the first push did not land");
-    // A recorded store-side delete: the ledger holds a tombstone, so this is a
-    // removal by every rule the sync knows — and a required path still wins.
-    await store.delete({
-      path: { root: declaredRoot, path },
-      writer: USER_WRITER,
-      expectedGenerationId: stat.entry.generation.generationId,
-    });
-    expect((await generations.current(declaredRoot, path))?.deleted).toBe(true);
-
-    await handle.sync!.reconcileRoot!(declaredRoot, "publish", {
-      requiredPaths: [path],
-    });
-
-    expect(sprite.text(`${MOUNTS.packageDeclared}/${path}`)).toBe(
-      "export class A{}",
-    );
-    expect((await store.read({ root: declaredRoot, path })).status).toBe("ok");
-  });
-
-  // A store that lost the object but kept the generation the sidecar names is
-  // repaired rather than re-written: the bytes already match, so a second
-  // generation for identical content would be noise in the ledger.
-  test("repairs a required file's sidecar without writing a second generation", async () => {
-    const { sprite, store, open } = providerHarness([DECLARED_PACKAGE_ROOT]);
-    const handle = await open();
-    const folder = "pub-user-1.0123456789abcdef0123456789abcdef";
-    const path = `${folder}/dist/manifest.json`;
-    sprite.shellWrite(MOUNTS.packageDeclared, path, '{"tools":[]}');
-    await handle.sync!.reconcileRoot!(declaredRoot, "publish", {
-      requiredPaths: [path],
-    });
-    // A rebuild reproducing byte-identical output, with the
-    // sidecar lost: the store already holds these bytes.
-    sprite.files.delete(
-      `${MOUNTS.packageDeclared}/.frockbot-generations/${path}`,
-    );
-
-    const summary = await handle.sync!.reconcileRoot!(declaredRoot, "publish", {
-      requiredPaths: [path],
-    });
-
-    expect(summary).toMatchObject({ status: "ok", pushed: 0, conflicts: 0 });
-    expect(summary.required).toMatchObject([{ path, durable: true }]);
-    expect(
-      sprite.files.has(
-        `${MOUNTS.packageDeclared}/.frockbot-generations/${path}`,
-      ),
-    ).toBe(true);
-  });
-
-  // A required file the Computer simply does not have is still a truthful
-  // answer, and the caller is owed the fact rather than a silent `ok`.
-  test("reports a required file the Computer does not hold", async () => {
-    const { open } = providerHarness([DECLARED_PACKAGE_ROOT]);
-    const handle = await open();
-    const path = "pub-user-1.0123456789abcdef0123456789abcdef/dist/ui.html";
-
-    const summary = await handle.sync!.reconcileRoot!(declaredRoot, "publish", {
-      requiredPaths: [path],
-    });
-
-    expect(summary.status).toBe("ok");
-    expect(summary.required).toEqual([{ path, durable: false }]);
-  });
-
   // A delete is a recorded generation, so an absence the ledger never
   // recorded is drift and not a removal. The general case: an ordinary
   // Skill whose object went missing under a sidecar keeps its bytes, and the
@@ -1697,16 +1441,14 @@ describe("the durable-root sync on the Computer handle", () => {
     const handle = await open();
     const folder = "pub-user-1.0123456789abcdef0123456789abcdef";
     const page = largeText(700_000);
-    sprite.shellWrite(MOUNTS.packageDeclared, `${folder}/dist/ui.html`, page);
+    sprite.shellWrite(MOUNTS.packageDeclared, `${folder}/ui.html`, page);
 
-    const summary = await handle.sync!.reconcileRoot!(declaredRoot, "publish", {
-      requiredPaths: [`${folder}/dist/ui.html`],
-    });
+    const summary = await handle.sync!.reconcile("turn-end");
 
     expect(summary).toMatchObject({ status: "ok", pushed: 1, failures: 0 });
     const stored = await store.read({
       root: declaredRoot,
-      path: `${folder}/dist/ui.html`,
+      path: `${folder}/ui.html`,
     });
     expect(stored.status).toBe("ok");
     if (stored.status === "ok") {

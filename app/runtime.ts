@@ -24,10 +24,6 @@ import {
   type ComputerAgentPluginConfig,
   type ComputerProcessStorageV1,
 } from "@frockbot/computer/agent";
-import {
-  createSharedComputerProviderFeature,
-  type SharedComputerHostClient,
-} from "@frockbot/computer/shared-provider";
 import { createCredentialsFeature } from "@frockbot/app/credentials/user";
 // pi-lens-ignore: ts:2307
 // Runtime implementations are statically bound by the immutable application.
@@ -385,47 +381,36 @@ function runtimePackage(
 }
 
 /**
- * The Computer providers this application registers. The in-worker Fly Sprites
- * provider is the default: it is the one that carries a Computer's per-User
- * identity, its Workspace file surface, and the durable-root sync.
- * When the host also supplies the shared Computer host, its effect-journaling
- * proxy is registered beside it so an identified effect can be replayed rather
- * than repeated across Durable Object eviction.
- */
-/**
  * Whether this deployment can reach a Computer.
  *
- * `SPRITES_TOKEN` is not a credential in this Worker — the Computer host holds
- * the only copy — but it is still the one durable answer to "has this
- * deployment a Computer at all", and without the host binding there is nothing
- * to send the call to.
+ * `SPRITES_TOKEN` is no longer a credential in this Worker — the Computer host
+ * holds the only copy, and this Worker could not use one if it had it. It
+ * survives as the answer to one question: has this deployment a Computer at
+ * all? Without it, or without the host binding there is nothing to send the
+ * call to, every Computer surface reads as unconfigured, which is the truth.
+ *
+ * Answered once per mount, so the provider, the tools and the prompt cannot
+ * disagree about whether there is a Computer.
  */
 function computerConfiguredV1(host: {
   readSecret(name: string): string | undefined;
-  computerHost?: SharedComputerHostClient;
   computerHostBinding?: ShellComputerHostBindingV1;
 }): boolean {
-  if (host.computerHost) return true;
   return Boolean(
     host.readSecret("SPRITES_TOKEN")?.trim() && host.computerHostBinding,
   );
 }
 
-function computerProviderFeature(host: {
-  readSecret(name: string): string | undefined;
-  computerSync?: ComputerSyncHostV1;
-  computerHost?: SharedComputerHostClient;
-  computerHostBinding?: ShellComputerHostBindingV1;
-  computerAgentControlOwnerId?: string;
-}): FoundationFeature {
-  // `SPRITES_TOKEN` is no longer a credential here — the Computer host holds
-  // the only copy, and this Worker could not use one if it had it. It survives
-  // as the answer to one question: has this deployment a Computer at all? With
-  // it unset every Computer surface reads as unconfigured, which is the truth:
-  // no host of ours has a Sprites account.
-  const configured = Boolean(host.readSecret("SPRITES_TOKEN")?.trim());
+function computerProviderFeature(
+  host: {
+    computerSync?: ComputerSyncHostV1;
+    computerHostBinding?: ShellComputerHostBindingV1;
+    computerAgentControlOwnerId?: string;
+  },
+  configured: boolean,
+): FoundationFeature {
   const binding = host.computerHostBinding;
-  const fly = createFlySpriteProviderFeature(undefined, {
+  return createFlySpriteProviderFeature(undefined, {
     ...(configured && binding
       ? {
           host: (identity, tenant) =>
@@ -442,24 +427,12 @@ function computerProviderFeature(host: {
       ? { agentControlOwnerId: host.computerAgentControlOwnerId }
       : {}),
   });
-  const shared = host.computerHost
-    ? createSharedComputerProviderFeature(host.computerHost)
-    : undefined;
-  if (!shared) return fly;
-  return async (runtime) => {
-    const cleanups = [await fly(runtime), await shared(runtime)];
-    return () => {
-      for (const cleanup of cleanups.toReversed()) {
-        if (typeof cleanup === "function") cleanup();
-        else for (const fn of cleanup ?? []) fn();
-      }
-    };
-  };
 }
 
 export function createFoundationHostedRuntimePackages(
   host: ShellHostedRuntimeHostV1,
 ): FoundationRuntimePackage[] {
+  const computerConfigured = computerConfiguredV1(host);
   return [
     ...(host.botSelfManagement
       ? [
@@ -525,16 +498,16 @@ export function createFoundationHostedRuntimePackages(
       "credentials",
       createCredentialsFeature({ readSecret: host.readSecret }),
     ),
-    runtimePackage("fly-sprite", computerProviderFeature(host)),
+    runtimePackage(
+      "fly-sprite",
+      computerProviderFeature(host, computerConfigured),
+    ),
     runtimePackage(
       "computer",
       createComputerAgentFeature({
         userId: host.userId,
         defaultProviderId: "fly-sprite",
-        // Exactly the condition `computerProviderPlugin` uses to hand the
-        // provider a host. Read here too, so the tools and the prompt agree
-        // with the provider about whether there is a Computer at all.
-        configured: computerConfiguredV1(host),
+        configured: computerConfigured,
         ...(host.computerWriter ? { writer: host.computerWriter } : {}),
         ...(host.computerProcesses
           ? { processes: host.computerProcesses }

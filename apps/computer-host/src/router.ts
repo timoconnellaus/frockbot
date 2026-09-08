@@ -116,16 +116,3 @@ export async function routeComputerHostRequestV1(
     }),
   );
 }
-
-/**
- * The container shard the superseded single-effect seam routes to.
- *
- * It keys on **botId** and names shards `shared-<n>`, which is wrong for a
- * Computer — a Computer is a property of its User — and is exactly
- * why `computerHostShardV1` exists. It is preserved verbatim because live
- * `ComputerEffectJournal` objects already resolved containers this way, and a
- * superseding deploy must not silently re-place them.
- */
-export function legacyEffectShardV1(botId: string, shards: number): string {
-  return `shared-${fnv1aV1(botId) % poolSize(shards)}`;
-}

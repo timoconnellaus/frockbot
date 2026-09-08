@@ -12,7 +12,6 @@ import {
   type ComputerHandle,
   type ComputerIdentityV1,
   type ComputerOperationOptions,
-  type ComputerRootSyncOptionsV1,
   type ComputerProvider,
   type ComputerRegistry,
   type ComputerSyncHostV1,
@@ -22,10 +21,7 @@ import {
   type ComputerTenantV1,
   type WorkspaceLayoutV1,
 } from "@frockbot/computer/core";
-import {
-  workspaceRootKeyV1,
-  type WorkspaceRootV1,
-} from "@frockbot/core/contracts";
+import { type WorkspaceRootV1 } from "@frockbot/core/contracts";
 import type { RuntimeFeatureV1 } from "@frockbot/core/contracts";
 import {
   computerBotKey,
@@ -243,45 +239,6 @@ class FlySpriteComputerSync implements ComputerSyncV1 {
     return summarize(report);
   }
 
-  /**
-   * One declared root, pulled and pushed. Never throws, exactly like
-   * `reconcile`: the caller records the outcome and carries on.
-   *
-   * A root this Computer does not cover is `refused` rather than reconciled.
-   * Silently syncing an undeclared root would mount a directory the layout
-   * never placed, and silently succeeding on nothing would tell a publish its
-   * artifact had reached the store when it had not.
-   */
-  async reconcileRoot(
-    root: WorkspaceRootV1,
-    _reason: ComputerSyncReasonV1,
-    options?: ComputerRootSyncOptionsV1,
-  ): Promise<ComputerSyncSummaryV1> {
-    if (options?.signal?.aborted) {
-      return computerSyncSummaryV1("skipped", "the Turn was cancelled");
-    }
-    const key = workspaceRootKeyV1(root);
-    if (!this.declared.some((known) => workspaceRootKeyV1(known) === key)) {
-      return computerSyncSummaryV1(
-        "refused",
-        `this Computer syncs no durable root ${key}`,
-      );
-    }
-    try {
-      const report = await this.sync.syncRoot(root, options?.requiredPaths);
-      return summarize({
-        roots: [report],
-        conflicts: report.conflicts,
-        failures: report.failures,
-      });
-    } catch (error) {
-      return computerSyncSummaryV1(
-        "unavailable",
-        error instanceof Error ? error.message : String(error),
-      );
-    }
-  }
-
   async signal(
     options?: ComputerOperationOptions,
   ): Promise<string | undefined> {
@@ -302,7 +259,6 @@ function summarize(report: WorkspaceSyncReportV1): ComputerSyncSummaryV1 {
   const failed = report.failures[0];
   const ignored = total((root) => root.ignored);
   const omitted = total((root) => root.omitted);
-  const required = report.roots.flatMap((root) => root.required);
   const detail: string[] = [];
   // Reproducible trees (node_modules, dist, …) are excluded by design; the
   // count is kept on the summary for the Session log, but it is not a reason
@@ -312,16 +268,6 @@ function summarize(report: WorkspaceSyncReportV1): ComputerSyncSummaryV1 {
   if (omitted > 0) {
     detail.push(
       `Omitted ${omitted} manifest ${omitted === 1 ? "entry" : "entries"} at the sync safety limit.`,
-    );
-  }
-  // A path the caller declared required, that the Computer holds and the store
-  // still does not, is the one outcome a caller must never read as success.
-  const stranded = required.filter(
-    (entry) => entry.contentHash !== undefined && !entry.durable,
-  );
-  if (stranded[0]) {
-    detail.push(
-      `${stranded.length} required ${stranded.length === 1 ? "file is" : "files are"} on the Computer but not in the Workspace, starting at "${stranded[0].path}".`,
     );
   }
   if (failed) {
@@ -337,7 +283,7 @@ function summarize(report: WorkspaceSyncReportV1): ComputerSyncSummaryV1 {
       report.failures.length > 0 &&
       report.roots.every((root) => root.failures.length > 0)
         ? "unavailable"
-        : report.failures.length > 0 || omitted > 0 || stranded.length > 0
+        : report.failures.length > 0 || omitted > 0
           ? "degraded"
           : "ok",
     detail: detail.join(" ").slice(0, 512),
@@ -352,7 +298,6 @@ function summarize(report: WorkspaceSyncReportV1): ComputerSyncSummaryV1 {
     omitted,
     conflicts: report.conflicts.length,
     failures: report.failures.length,
-    ...(required.length > 0 ? { required } : {}),
   };
   return summary;
 }

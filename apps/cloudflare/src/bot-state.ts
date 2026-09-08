@@ -18,10 +18,6 @@ import { createFlySpriteProviderFeature } from "@frockbot/computer/fly/agent";
 import { mountRuntimeFeaturesV1 } from "@frockbot/core/contracts";
 import { ComputerHostClient } from "@frockbot/computer/fly/host-client";
 import {
-  computerHostEffectRequestWireV1,
-  decodeComputerHostEffectResponseV1,
-} from "@frockbot/computer/core/host-protocol";
-import {
   decodeBotConfigurationExecuteRpcV1,
   decodeBotConfigurationReadRpcV1,
   decodeCompositionGenerationIdV1,

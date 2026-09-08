@@ -663,25 +663,6 @@ export type ComputerSyncReasonV1 = "open" | "signal" | "turn-end" | "publish";
  * than treating a dropped connection as failure" — so an unreachable Computer
  * answers `unavailable` and a Turn continues.
  */
-/**
- * What one run saw for one path its caller declared required.
- *
- * A required path is the only thing a sync caller asserts about: "these exact
- * bytes must be readable from the store when this returns". Reporting it is
- * what lets the caller's own failure be honest — a caller that cannot
- * read `dist/manifest.json` can say the Computer held it at hash X and the
- * store answered `not-found`, instead of telling a Bot to run a build whose
- * output is demonstrably on disk (production, 2026-09-04).
- */
-export interface ComputerSyncRequiredPathV1 {
-  /** The root-relative path the caller named. */
-  path: string;
-  /** sha-256 of the bytes on the Computer, absent when it held no such file. */
-  contentHash?: string;
-  /** True when the store is known to hold exactly those bytes. */
-  durable: boolean;
-}
-
 export interface ComputerSyncSummaryV1 {
   status: "ok" | "degraded" | "unavailable" | "refused" | "skipped";
   /** Human-readable reason, empty when the run had nothing to say. */
@@ -697,11 +678,6 @@ export interface ComputerSyncSummaryV1 {
   omitted: number;
   conflicts: number;
   failures: number;
-  /**
-   * One row per path the caller declared required, absent when it declared
-   * none. Present even on a failed run: what the sync saw is the evidence.
-   */
-  required?: readonly ComputerSyncRequiredPathV1[];
 }
 
 export function computerSyncSummaryV1(
@@ -742,35 +718,11 @@ export interface ComputerSyncV1 {
     options?: ComputerOperationOptions,
   ): Promise<ComputerSyncSummaryV1>;
   /**
-   * Reconciles exactly one declared durable root. Never throws.
-   *
-   * Optional, because a provider that cannot reconcile a root on its own has
-   * nothing to answer with and a caller must fall back to `reconcile`. A root
-   * this Computer declares no mount for is `refused`, not silently skipped.
-   */
-  reconcileRoot?(
-    root: WorkspaceRootV1,
-    reason: ComputerSyncReasonV1,
-    options?: ComputerRootSyncOptionsV1,
-  ): Promise<ComputerSyncSummaryV1>;
-  /**
    * The Computer-side watcher's change signal, or `undefined` when it cannot
    * be read. A caller reconciles again when this changes, rather than scanning
    * every root on every tool call.
    */
   signal(options?: ComputerOperationOptions): Promise<string | undefined>;
-}
-
-/** Options for the one-root reconciliation used by artifact publishers. */
-export interface ComputerRootSyncOptionsV1 extends ComputerOperationOptions {
-  /**
-   * Exact root-relative files that are required even when they live below a
-   * reproducible directory the ordinary Workspace sync excludes.
-   *
-   * This is a path selection, not a Package exception: the Computer provider
-   * does not learn which caller or Package needs the bytes.
-   */
-  requiredPaths?: readonly string[];
 }
 
 /**
@@ -920,29 +872,6 @@ function guardedHandle(
             guardedOperation(assertCurrent, () =>
               sync.reconcile(reason, options),
             ),
-          // Forwarded when the provider offers it. Dropping it here is how a
-          // publish's required `dist/` pull was "refused: this Computer cannot
-          // reconcile a single durable root" on production (Bob, 2026-09-04)
-          // while the provider underneath could — and once ordinary sync
-          // stopped carrying `dist/`, that refusal was the whole failure.
-          ...(sync.reconcileRoot
-            ? {
-                reconcileRoot: (
-                  root: Parameters<
-                    NonNullable<ComputerSyncV1["reconcileRoot"]>
-                  >[0],
-                  reason: Parameters<
-                    NonNullable<ComputerSyncV1["reconcileRoot"]>
-                  >[1],
-                  options?: Parameters<
-                    NonNullable<ComputerSyncV1["reconcileRoot"]>
-                  >[2],
-                ) =>
-                  guardedOperation(assertCurrent, () =>
-                    sync.reconcileRoot!(root, reason, options),
-                  ),
-              }
-            : {}),
           signal: (options) =>
             guardedOperation(assertCurrent, () => sync.signal(options)),
         }

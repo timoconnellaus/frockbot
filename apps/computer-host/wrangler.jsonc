@@ -33,22 +33,13 @@
         "name": "COMPUTER_HOST_CONTAINER",
         "class_name": "FlyHostContainer",
       },
-      // The superseded single-effect seam addressed the same containers under
-      // this name. Kept so live ComputerEffectJournal objects keep resolving.
-      {
-        "name": "FLY_HOST",
-        "class_name": "FlyHostContainer",
-      },
-      {
-        "name": "COMPUTER_EFFECTS",
-        "class_name": "ComputerEffectJournal",
-      },
     ],
   },
   // The prototype's v1/v2, plus the pair that reconciles this list with what
   // production actually has: v3 records the rename a partial deploy already
   // applied there, and v4 renames back to the legacy class name this script
-  // and its container application are built around.
+  // and its container application are built around. v5 retires the prototype's
+  // effect journal.
   "migrations": [
     {
       "tag": "v1",
@@ -76,13 +67,19 @@
         { "from": "ComputerHostContainer", "to": "FlyHostContainer" },
       ],
     },
+    // v5 retires the superseded single-effect seam's durable class. A
+    // `new_sqlite_classes` entry is immutable once applied, so the class is
+    // deleted rather than dropped from the list. `FlyHostContainer` is never
+    // renamed or deleted: the live container application is bound to it.
+    {
+      "tag": "v5",
+      "deleted_classes": ["ComputerEffectJournal"],
+    },
   ],
   "vars": {
     // Two warm shards. A User is routed by userId, so every Bot of one User
     // reaches the one container that holds its Computer's locks.
     "COMPUTER_HOST_SHARDS": "2",
-    // The superseded seam's own shard count, unchanged.
-    "FLY_HOST_SHARDS": "1",
   },
   "observability": {
     "enabled": true,

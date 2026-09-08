@@ -258,10 +258,7 @@ export type ComputerSyncNoteOutcomeV1 =
  */
 export interface ComputerSyncSurfaceV1 {
   /** Every file and every recorded removal under one durable root. */
-  scan(
-    root: WorkspaceRootV1,
-    requiredPaths?: readonly string[],
-  ): Promise<ComputerSyncScanOutcomeV1>;
+  scan(root: WorkspaceRootV1): Promise<ComputerSyncScanOutcomeV1>;
   read(
     root: WorkspaceRootV1,
     path: string,
@@ -325,20 +322,6 @@ export interface WorkspaceSyncFailureV1 extends WorkspaceFailureV1 {
   path?: string;
 }
 
-/**
- * What the run saw for one path its caller declared required.
- *
- * `durable` is a statement about the store and not about the sidecar: it is
- * true only when the store answered with the same content hash the Computer
- * holds, or accepted a push of exactly those bytes during this run.
- */
-export interface WorkspaceSyncRequiredPathV1 {
-  path: string;
-  /** sha-256 of the bytes on the Computer, absent when it held no such file. */
-  contentHash?: string;
-  durable: boolean;
-}
-
 export interface WorkspaceSyncRootReportV1 {
   root: WorkspaceRootV1;
   /** Store generations materialized on the Computer. */
@@ -359,8 +342,6 @@ export interface WorkspaceSyncRootReportV1 {
   omitted: number;
   conflicts: WorkspaceSyncConflictV1[];
   failures: WorkspaceSyncFailureV1[];
-  /** One row per path the caller declared required; empty when it named none. */
-  required: WorkspaceSyncRequiredPathV1[];
 }
 
 export interface WorkspaceSyncReportV1 {
@@ -391,10 +372,7 @@ export interface WorkspaceRootSyncOptionsV1 {
 export interface WorkspaceRootSyncV1 {
   /** Reconciles every declared root. */
   sync(): Promise<WorkspaceSyncReportV1>;
-  syncRoot(
-    root: WorkspaceRootV1,
-    requiredPaths?: readonly string[],
-  ): Promise<WorkspaceSyncRootReportV1>;
+  syncRoot(root: WorkspaceRootV1): Promise<WorkspaceSyncRootReportV1>;
   /**
    * The on-Sprite watcher's change signal. A caller runs the sync on wake and
    * whenever this changes, rather than scanning every root every Turn.
@@ -437,7 +415,6 @@ function emptyReport(root: WorkspaceRootV1): WorkspaceSyncRootReportV1 {
     omitted: 0,
     conflicts: [],
     failures: [],
-    required: [],
   };
 }
 
@@ -467,24 +444,16 @@ class WorkspaceRootSync implements WorkspaceRootSyncV1 {
     };
   }
 
-  async syncRoot(
-    root: WorkspaceRootV1,
-    requiredPaths: readonly string[] = [],
-  ): Promise<WorkspaceSyncRootReportV1> {
+  async syncRoot(root: WorkspaceRootV1): Promise<WorkspaceSyncRootReportV1> {
     const report = emptyReport(root);
-    // Normalized on the way in, because every path this compares it against —
-    // a scan row, a store listing entry — has been through the same
-    // normalization, and a required path that missed it would silently match
-    // nothing.
-    const required = new Set(requiredPaths.map(normalizedOrRaw));
-    const scanned = await this.options.computer.scan(root, requiredPaths);
+    const scanned = await this.options.computer.scan(root);
     if (isFailure(scanned)) {
       report.failures.push({ ...scanned, root });
       return report;
     }
     report.ignored = scanned.scan.ignored;
     report.omitted = scanned.scan.omitted;
-    const stored = await this.listStore(root, requiredPaths);
+    const stored = await this.listStore(root);
     if (isFailure(stored)) {
       report.failures.push({ ...stored, root });
       return report;
@@ -505,28 +474,8 @@ class WorkspaceRootSync implements WorkspaceRootSyncV1 {
       // Push first: a Computer-side write must reach the store's conditional
       // write before the pull could overwrite it.
       for (const entry of scanned.scan.entries) {
-        // A required path is authoritative on the Computer. The caller has
-        // asserted that these exact bytes must be readable from the store when
-        // this returns, so the sidecar's opinion is not enough: ask the store
-        // what it holds, and push whenever it does not hold these bytes. A
-        // sidecar that survived its file (sidecars live outside `dist/`, so
-        // `rm -rf dist` never touches them) or an object the store lost after
-        // the push that recorded one otherwise leaves a "clean" entry nobody
-        // ever carries — the publish failure of 2026-09-04.
-        const drift = required.has(entry.path)
-          ? await this.requiredDrift(root, entry, report)
-          : undefined;
-        if (drift?.kind === "aligned") {
-          settled.add(entry.path);
-          continue;
-        }
-        if (!drift && this.clean(entry)) continue;
-        const pushed = await this.push(
-          root,
-          entry,
-          report,
-          drift ? { expected: drift.expected } : undefined,
-        );
+        if (this.clean(entry)) continue;
+        const pushed = await this.push(root, entry, report);
         if (pushed === "pushed") settled.add(entry.path);
         else if (pushed === "conflict") conflicted.add(entry.path);
         else held.add(entry.path);
@@ -572,11 +521,6 @@ class WorkspaceRootSync implements WorkspaceRootSyncV1 {
       if (stored.generations.has(entry.path)) continue;
       if (held.has(entry.path) || settled.has(entry.path)) continue;
       if (conflicted.has(entry.path)) continue;
-      // A required path is never turned into a local removal. The caller named
-      // it because the Computer's copy is the thing being published; deleting
-      // it because the store is missing it destroys the very bytes the caller
-      // asked for, and the forced push above has already had its say.
-      if (required.has(entry.path)) continue;
       if (!entry.recorded) continue;
       // The Computer holds a file the store recorded and no longer holds: a
       // delete happened there. It becomes a removal here, recorded, never a
@@ -597,64 +541,7 @@ class WorkspaceRootSync implements WorkspaceRootSyncV1 {
       const removed = await this.removeLocally(root, entry, report, tombstone);
       if (removed) report.removedOnComputer.push(entry.path);
     }
-    for (const path of required) {
-      const entry = local.get(path);
-      report.required.push({
-        path,
-        ...(entry ? { contentHash: entry.contentHash } : {}),
-        // Either this run put those bytes in the store, or the listing already
-        // answered with them. Anything else is reported as not durable, which
-        // is what makes the caller's own failure honest.
-        durable:
-          entry !== undefined &&
-          (settled.has(path) ||
-            stored.generations.get(path)?.contentHash === entry.contentHash),
-      });
-    }
     return report;
-  }
-
-  /**
-   * What the store holds for one required path, when that differs from the
-   * Computer.
-   *
-   * `undefined` means nothing is provable — the store could not answer — and
-   * the sidecar rule stands. `aligned` means the store already holds these
-   * exact bytes, and the sidecar (missing or stale) is repaired rather than a
-   * second generation written. Otherwise the answer carries the generation the
-   * forced push must condition on, so the push cannot lose a race it started.
-   */
-  private async requiredDrift(
-    root: WorkspaceRootV1,
-    entry: ComputerSyncEntryV1,
-    report: WorkspaceSyncRootReportV1,
-  ): Promise<
-    { kind: "aligned" } | { kind: "push"; expected: string | null } | undefined
-  > {
-    const current = await this.options.store.stat({ root, path: entry.path });
-    if (current.status === "not-found") {
-      return this.clean(entry) ? { kind: "push", expected: null } : undefined;
-    }
-    if (current.status !== "ok") return undefined;
-    if (current.entry.generation.contentHash !== entry.contentHash) {
-      return { kind: "push", expected: current.entry.generation.generationId };
-    }
-    if (entry.recorded?.generationId === current.entry.generation.generationId)
-      return { kind: "aligned" };
-    // The store holds these bytes under a generation the Computer does not
-    // record. Repair the sidecar so the next run agrees, and carry nothing.
-    const bytes = await this.options.computer.read(root, entry.path);
-    if (isFailure(bytes)) return { kind: "aligned" };
-    const sidecar = await this.options.computer.materialize(
-      root,
-      entry.path,
-      bytes.bytes,
-      current.entry.generation,
-    );
-    if (sidecar.status !== "ok") {
-      report.failures.push({ ...sidecar, root, path: entry.path });
-    }
-    return { kind: "aligned" };
   }
 
   /** True when the file's bytes are still the ones its sidecar attributes. */
@@ -665,10 +552,7 @@ class WorkspaceRootSync implements WorkspaceRootSyncV1 {
     );
   }
 
-  private async listStore(
-    root: WorkspaceRootV1,
-    requiredPaths: readonly string[],
-  ): Promise<
+  private async listStore(root: WorkspaceRootV1): Promise<
     | {
         status: "ok";
         generations: Map<string, WorkspaceGenerationV1>;
@@ -677,7 +561,6 @@ class WorkspaceRootSync implements WorkspaceRootSyncV1 {
     | WorkspaceFailureV1
   > {
     const generations = new Map<string, WorkspaceGenerationV1>();
-    const required = new Set(requiredPaths.map(normalizedOrRaw));
     let ignored = 0;
     let cursor: string | undefined;
     for (let page = 0; page < MAX_STORE_PAGES; page += 1) {
@@ -688,10 +571,7 @@ class WorkspaceRootSync implements WorkspaceRootSyncV1 {
       });
       if (listed.status !== "ok") return listed;
       for (const entry of listed.entries) {
-        if (
-          isWorkspaceSyncIgnoredPathV1(entry.path.path) &&
-          !required.has(entry.path.path)
-        ) {
+        if (isWorkspaceSyncIgnoredPathV1(entry.path.path)) {
           ignored += 1;
           continue;
         }
@@ -1127,41 +1007,15 @@ export class FlySpriteSyncSurface implements ComputerSyncSurfaceV1 {
     ).toString("base64");
   }
 
-  async scan(
-    root: WorkspaceRootV1,
-    requiredPaths: readonly string[] = [],
-  ): Promise<ComputerSyncScanOutcomeV1> {
+  async scan(root: WorkspaceRootV1): Promise<ComputerSyncScanOutcomeV1> {
     const mount = this.mount(root);
     if (typeof mount !== "string") return mount;
-    const requiredIgnoredPaths: string[] = [];
-    for (const path of requiredPaths) {
-      const relative = this.relative(path);
-      if (typeof relative !== "string") return relative;
-      if (
-        isWorkspaceSyncIgnoredPathV1(relative) &&
-        !requiredIgnoredPaths.includes(relative)
-      ) {
-        requiredIgnoredPaths.push(relative);
-      }
-    }
-    const requiredIgnoredRoots = [
-      ...new Set(
-        requiredIgnoredPaths.map((path) => {
-          const segments = path.split("/");
-          const index = segments.findIndex((segment) =>
-            ignoredDirectoryNames.has(segment),
-          );
-          return segments.slice(0, index + 1).join("/");
-        }),
-      ),
-    ];
     const ignoredExpression = WORKSPACE_SYNC_IGNORED_DIRECTORIES_V1.map(
       (name) => `-name ${shellQuote(name)}`,
     ).join(" -o ");
     const script = [
       "set -eu",
       `ROOT=${shellQuote(mount)}`,
-      `REQUIRED_PATHS=${shellQuote(Buffer.from(requiredIgnoredPaths.join("\n")).toString("base64"))}`,
       `mkdir -p "$ROOT" "$ROOT/${WORKSPACE_GENERATIONS_DIR}" "$ROOT/${WORKSPACE_SYNC_DIR}/${SYNC_TOMBSTONES_DIR}"`,
       "MANIFEST=$(mktemp)",
       "trap 'rm -f \"$MANIFEST\"' EXIT",
@@ -1183,50 +1037,15 @@ export class FlySpriteSyncSurface implements ComputerSyncSurfaceV1 {
       "  MANIFEST_ENTRIES=$((MANIFEST_ENTRIES + 1))",
       "}",
       "ignored_relative() {",
-      '  included_relative "$1" && return 1',
       '  IFS=/ read -r -a PARTS <<< "$1"',
       '  for PART in "${PARTS[@]}"; do',
       `    case "$PART" in ${WORKSPACE_SYNC_IGNORED_DIRECTORIES_V1.map((name) => shellQuote(name)).join("|")}) return 0 ;; esac`,
       "  done",
       "  return 1",
       "}",
-      "included_relative() {",
-      requiredIgnoredPaths.length > 0
-        ? `  case "$1" in ${requiredIgnoredPaths.map((path) => shellQuote(path)).join("|")}) return 0 ;; esac`
-        : "  :",
-      "  return 1",
-      "}",
-      "required_directory() {",
-      requiredIgnoredRoots.length > 0
-        ? `  case "$1" in ${requiredIgnoredRoots.map((path) => shellQuote(path)).join("|")}) return 0 ;; esac`
-        : "  :",
-      "  return 1",
-      "}",
-      // Required artifact files go first: the source manifest may be full,
-      // but an explicit one-root publisher must still receive the exact bytes
-      // it named. They remain subject to the same byte and entry bounds.
-      //
-      // `|| [ -n "$REL" ]` is not defensive style, it is the loop's last
-      // iteration. The list is newline-*separated*, not newline-terminated, so
-      // `read` consumes the final path and then reports EOF, and a plain
-      // `while read` throws that path away. Every publish therefore lost the
-      // last file it named: `dist/manifest.json`, which is why a tree that
-      // had just been built read back as "not-found"
-      // (production, 2026-09-04 and 2026-09-05). `REL` is primed so `set -u`
-      // has something to read on an empty list.
-      'REL=""',
-      'while IFS= read -r REL || [ -n "$REL" ]; do',
-      '  [ -n "$REL" ] || continue',
-      '  FILE="$ROOT/$REL"',
-      '  if [ -f "$FILE" ]; then',
-      `  META="$ROOT/${WORKSPACE_GENERATIONS_DIR}/$REL"`,
-      '  printf -v ROW "F\\t%s\\t%s\\t%s\\t%s" "$(printf %s "$REL" | base64 -w0)" "$({ cat "$META" 2>/dev/null || printf \'\'; } | base64 -w0)" "$(sha256sum "$FILE" | cut -d" " -f1)" "$(stat -c %s "$FILE")"',
-      '  append_manifest "$ROW"',
-      "  fi",
-      'done < <(printf %s "$REQUIRED_PATHS" | base64 -d)',
       // Count pruned directory roots, not every file below them: the count is
       // useful and bounded work even when a dependency tree holds millions.
-      `while IFS= read -r -d "" DIR; do REL=\${DIR#"$ROOT"/}; required_directory "$REL" || IGNORED=$((IGNORED + 1)); done < <(find "$ROOT" \\( -path "$ROOT/${WORKSPACE_GENERATIONS_DIR}" -o -path "$ROOT/${WORKSPACE_SYNC_DIR}" -o -path "$ROOT/.frockbot-locks" \\) -prune -o -type d \\( ${ignoredExpression} \\) -print0 -prune)`,
+      `while IFS= read -r -d "" DIR; do IGNORED=$((IGNORED + 1)); done < <(find "$ROOT" \\( -path "$ROOT/${WORKSPACE_GENERATIONS_DIR}" -o -path "$ROOT/${WORKSPACE_SYNC_DIR}" -o -path "$ROOT/.frockbot-locks" \\) -prune -o -type d \\( ${ignoredExpression} \\) -print0 -prune)`,
       `GRAVES="$ROOT/${WORKSPACE_SYNC_DIR}/${SYNC_TOMBSTONES_DIR}"`,
       'while IFS= read -r -d "" FILE; do',
       '  REL=${FILE#"$GRAVES"/}',
