@@ -78,7 +78,8 @@ export function createNotification(
     };
   }
   const text = sentTextV1(result.events);
-  if (!text) return undefined;
+  if (!result.events.some((event) => event.type === "send/to-user"))
+    return undefined;
   return {
     notificationId: result.runId,
     runId: result.runId,
