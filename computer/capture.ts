@@ -18,7 +18,7 @@ export type ComputerProjectionFileKindV1 = "screenshots" | "doctor";
  * The shortest gap between two progress captures of the same desktop.
  *
  * A Turn can run a dozen Computer actions a second, and each capture crosses
- * a service binding to the Sprite and writes durable bytes. Two seconds is
+ * a service binding to the Computer host and writes durable bytes. Two seconds is
  * fast enough that the card looks like it is following the Bot and slow
  * enough that a busy Turn does not spend itself photographing a screen.
  */

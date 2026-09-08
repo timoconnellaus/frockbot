@@ -21,7 +21,7 @@ import 'client.dart';
 /// The desktop, framed. Also the widget the `computer-viewer` host frame
 /// resolves to for any `embed` node under a Computer surface.
 ///
-/// noVNC is first-party and addresses its own origin, so this frame keeps it —
+/// The viewer is first-party and addresses its own origin, so this frame keeps it —
 /// which is the one place a framed page here does.
 class ComputerViewerFrame extends StatelessWidget {
   final String viewerUrl;

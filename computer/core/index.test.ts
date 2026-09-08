@@ -130,8 +130,8 @@ describe("ComputerRegistry", () => {
   test("opens a Bot's selected provider without exposing provider selection to consumers", async () => {
     const computers = new ComputerRegistry();
     const opened: string[] = [];
-    computers.register(provider("sprites", opened));
-    const assignment = computers.assign({ userId: "user-1" }, "sprites");
+    computers.register(provider("host-a", opened));
+    const assignment = computers.assign({ userId: "user-1" }, "host-a");
 
     const computer = await computers.open(
       { userId: "user-1" },
@@ -147,9 +147,9 @@ describe("ComputerRegistry", () => {
   test("keys the Computer assignment per User, so a User's Bots share one Computer", async () => {
     const computers = new ComputerRegistry();
     const opened: string[] = [];
-    computers.register(provider("sprites", opened));
+    computers.register(provider("host-a", opened));
 
-    const assignment = computers.assign({ userId: "user-1" }, "sprites");
+    const assignment = computers.assign({ userId: "user-1" }, "host-a");
 
     expect(computers.assignment({ userId: "user-1" })).toEqual(assignment);
     const first = await computers.open(
@@ -172,9 +172,9 @@ describe("ComputerRegistry", () => {
 
   test("a second User gets a separate Computer assignment", async () => {
     const computers = new ComputerRegistry();
-    computers.register(provider("sprites", []));
+    computers.register(provider("host-a", []));
 
-    computers.assign({ userId: "user-1" }, "sprites");
+    computers.assign({ userId: "user-1" }, "host-a");
 
     expect(computers.assignment({ userId: "user-2" })).toBeUndefined();
     expect(computerIdentityKeyV1({ userId: "user-1" })).not.toBe(
@@ -184,11 +184,11 @@ describe("ComputerRegistry", () => {
 
   test("increments the generation when a User changes provider", async () => {
     const computers = new ComputerRegistry();
-    computers.register(provider("sprites", []));
+    computers.register(provider("host-a", []));
     computers.register(provider("local", []));
     const identity = { userId: "user-1" };
 
-    expect(computers.assign(identity, "sprites").generation).toBe(1);
+    expect(computers.assign(identity, "host-a").generation).toBe(1);
     expect(computers.assign(identity, "local")).toMatchObject({
       providerId: "local",
       generation: 2,
@@ -216,10 +216,10 @@ describe("ComputerRegistry", () => {
         close: () => Promise.resolve(),
       }),
     });
-    computers.register(executable("sprites"));
+    computers.register(executable("host-a"));
     computers.register(executable("local"));
     const identity = { userId: "user-1" };
-    computers.assign(identity, "sprites");
+    computers.assign(identity, "host-a");
     const oldComputer = await computers.open(identity, {
       botId: "bot-1",
     });
@@ -243,8 +243,8 @@ describe("ComputerRegistry", () => {
 
   test("refuses an empty User or Bot identifier", async () => {
     const computers = new ComputerRegistry();
-    computers.register(provider("sprites", []));
-    computers.assign({ userId: "user-1" }, "sprites");
+    computers.register(provider("host-a", []));
+    computers.assign({ userId: "user-1" }, "host-a");
 
     expect(() => computerIdentityKeyV1({ userId: "  " })).toThrow(
       ComputerError,

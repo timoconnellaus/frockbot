@@ -416,16 +416,9 @@ export async function agentRuntime(
               : {}),
           }
         : {}),
-      // The Computer host, when this deployment has one. Both halves or
-      // neither: a binding with no token reaches a host that refuses.
-      ...(state.env.COMPUTER_HOST && state.env.COMPUTER_HOST_TOKEN
-        ? {
-            computerHostBinding: {
-              fetcher: state.env.COMPUTER_HOST,
-              hostToken: state.env.COMPUTER_HOST_TOKEN,
-            },
-          }
-        : {}),
+      // The Computer host this deployment runs, when it has one. Which host
+      // that is was chosen by the shell that holds the bindings.
+      ...(state.computerHost ? { computerHost: state.computerHost } : {}),
     }),
     ...(await state.application.runtime.enabled(plan, {
       userId: identity.userId,

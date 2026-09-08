@@ -78,7 +78,7 @@ describe("the Durable Object's Computer host client", () => {
     expect(call?.botId).toBe("bot-a");
     // What crosses the seam is a reference, never a token. `SPRITES_TOKEN`
     // lives on the host Worker and reaches only the container's env.
-    expect(call?.credentialRef).toBe("sprites:user:user-a");
+    expect(call?.credentialRef).toBe("computer:user:user-a");
     expect(JSON.stringify(call)).not.toContain("SPRITES_TOKEN");
   });
 
@@ -98,7 +98,7 @@ describe("the Durable Object's Computer host client", () => {
     });
     const routed = await calls();
     // A Computer is keyed by User. Two Bots of one User landing on two
-    // containers would race on one Sprite's slot registry and lease.
+    // containers would race on one Computer's slot registry and lease.
     expect(routed[0]?.shard).toBe(routed[1]?.shard ?? "");
   });
 
@@ -228,7 +228,7 @@ describe("the Durable Object's Computer host client", () => {
       effectId: "effect-smuggle",
       identity: { userId: "user-probe" },
       tenant: { botId: "bot-probe" },
-      credentialRef: "sprites:user:user-probe",
+      credentialRef: "computer:user:user-probe",
       script: "echo hi",
       timeoutMs: 1_000,
       maxOutputBytes: 1_000,
@@ -242,7 +242,7 @@ describe("the Durable Object's Computer host client", () => {
       effectId: "effect-version",
       identity: { userId: "user-probe" },
       tenant: { botId: "bot-probe" },
-      credentialRef: "sprites:user:user-probe",
+      credentialRef: "computer:user:user-probe",
       script: "echo hi",
       timeoutMs: 1_000,
       maxOutputBytes: 1_000,
@@ -255,7 +255,7 @@ describe("the Durable Object's Computer host client", () => {
       effectId: "effect-limit",
       identity: { userId: "user-probe" },
       tenant: { botId: "bot-probe" },
-      credentialRef: "sprites:user:user-probe",
+      credentialRef: "computer:user:user-probe",
       script: "echo hi",
       timeoutMs: 1_000,
       // Past the declared ceiling: refused as a limit, not as a bad field.
@@ -282,7 +282,11 @@ describe("the Durable Object's Computer host client", () => {
       userId: "user-open",
     });
     expect(opened.ok).toBe(true);
-    expect(opened.instanceId).toMatch(/^frockbot-fake-/);
+    // Opaque: an open answers *an* instance, and nothing above the host may
+    // read a host's naming out of the string. All the client promises is that
+    // there is one.
+    expect(typeof opened.instanceId).toBe("string");
+    expect(opened.instanceId?.trim()).not.toBe("");
     expect((await calls())[0]?.stream).toBe(true);
   });
 

@@ -102,7 +102,7 @@ exit 0
 describe("production setup", () => {
   test("provisions only active production integrations", async () => {
     const { exitCode, stdout, stderr, calls } = await runProductionSetup(
-      "\ncloudflare-token\n\ngoogle-client\ngoogle-secret\nsprites-production\n\n",
+      "\ncloudflare-token\n\ngoogle-client\ngoogle-secret\ncomputer-host-token-production\n\n",
     );
 
     expect(exitCode).toBe(0);
@@ -125,7 +125,9 @@ describe("production setup", () => {
     expect(calls).toContain(
       "secret set SPRITES_TOKEN --repo timoconnellaus/frockbot --env production",
     );
-    expect(calls).toContain("secret-value:SPRITES_TOKEN:sprites-production");
+    expect(calls).toContain(
+      "secret-value:SPRITES_TOKEN:computer-host-token-production",
+    );
     expect(calls).toContain(
       "secret set CREDENTIAL_KEYRING --repo timoconnellaus/frockbot --env production",
     );
@@ -136,7 +138,7 @@ describe("production setup", () => {
 
   test("aborts when the production keyring cannot be inspected", async () => {
     const { exitCode, calls } = await runProductionSetup(
-      "\ncloudflare-token\n\ngoogle-client\ngoogle-secret\nsprites-production\n\n",
+      "\ncloudflare-token\n\ngoogle-client\ngoogle-secret\ncomputer-host-token-production\n\n",
       "failure",
     );
 
@@ -151,7 +153,7 @@ describe("production setup", () => {
 
   test("aborts when the generated production keyring cannot be stored", async () => {
     const { exitCode, stdout, calls } = await runProductionSetup(
-      "\ncloudflare-token\n\ngoogle-client\ngoogle-secret\nsprites-production\n\n",
+      "\ncloudflare-token\n\ngoogle-client\ngoogle-secret\ncomputer-host-token-production\n\n",
       "set-failure",
     );
 
@@ -193,8 +195,8 @@ describe("production setup", () => {
     expect(computerHost?.env?.SPRITES_TOKEN).toBe(
       "${{ secrets.SPRITES_TOKEN }}",
     );
-    // The shared Computer host holds the Sprites token and re-checks the
-    // service token; both are its secrets and neither is the app Worker's.
+    // The shared Computer host holds its own vendor credential and re-checks
+    // the service token; both are its secrets and neither is the app Worker's.
     expect(computerHost?.env?.COMPUTER_HOST_TOKEN).toBe(
       "${{ secrets.COMPUTER_HOST_TOKEN }}",
     );
@@ -254,7 +256,7 @@ describe("production setup", () => {
       GOOGLE_CLIENT_ID: "google-client",
       GOOGLE_CLIENT_SECRET: "google-secret",
       FROCKBOT_ADMIN_EMAILS: "owner@example.com",
-      SPRITES_TOKEN: "sprites-production",
+      SPRITES_TOKEN: "computer-host-token-production",
       COMPUTER_HOST_TOKEN: "computer-host-production",
       CREDENTIAL_KEYRING:
         '{"schemaVersion":1,"currentKeyId":"primary","keys":{"primary":"MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY"}}',
@@ -277,16 +279,13 @@ describe("production setup", () => {
     );
     expect(validConfiguration.exitCode).toBe(0);
 
-    const missingSprites = Bun.spawnSync(
-      ["bash", "-c", validation?.run ?? ""],
-      {
-        env: { ...productionEnvironment, SPRITES_TOKEN: "" },
-        stdout: "pipe",
-        stderr: "pipe",
-      },
-    );
-    expect(missingSprites.exitCode).toBe(1);
-    expect(missingSprites.stderr.toString()).toContain(
+    const missingToken = Bun.spawnSync(["bash", "-c", validation?.run ?? ""], {
+      env: { ...productionEnvironment, SPRITES_TOKEN: "" },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    expect(missingToken.exitCode).toBe(1);
+    expect(missingToken.stderr.toString()).toContain(
       "Missing production configuration: SPRITES_TOKEN",
     );
 
@@ -377,9 +376,9 @@ exit 1
       string,
       string
     >;
-    expect(hostSecrets.SPRITES_TOKEN).toBe("sprites-production");
+    expect(hostSecrets.SPRITES_TOKEN).toBe("computer-host-token-production");
     expect(hostSecrets.COMPUTER_HOST_TOKEN).toBe("computer-host-production");
-    // The Sprites token belongs to the host and to the app Worker's provider
+    // That credential belongs to the host and to the app Worker's provider
     // gate; nothing else the host holds reaches anywhere else.
     expect(Object.keys(hostSecrets).sort()).toEqual([
       "COMPUTER_HOST_TOKEN",
@@ -401,7 +400,7 @@ exit 1
       string,
       string
     >;
-    expect(forwarded.SPRITES_TOKEN).toBe("sprites-production");
+    expect(forwarded.SPRITES_TOKEN).toBe("computer-host-token-production");
     expect(forwarded.CREDENTIAL_KEYRING).toBe(
       productionEnvironment.CREDENTIAL_KEYRING,
     );

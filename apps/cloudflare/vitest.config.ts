@@ -25,7 +25,7 @@ const computerHost = createComputerHostFake();
 export default defineConfig({
   plugins: [
     cloudflareTest({
-      main: "./test/fly-compatibility-worker.ts",
+      main: "./test/computer-compatibility-worker.ts",
       miniflare: {
         outboundService: createOutboundService(),
         compatibilityDate: "2026-08-27",
@@ -54,7 +54,7 @@ export default defineConfig({
           BOT_STATES: "WorkerdBotState",
           COMPOSITIONS: "CompositionProbe",
           COMPUTER_HOST_CLIENT: "FlyHostTransportProbeV1",
-          FLY_COMPATIBILITY: "FlyCompatibilityProbe",
+          COMPUTER_COMPATIBILITY: "ComputerCompatibilityProbe",
           SEARCH_SPIKE: { className: "SearchSpikeProbe", useSQLite: true },
           // The audit table on real SQLite, at a size the unit fake cannot
           // honestly stand in for.
@@ -83,13 +83,6 @@ export default defineConfig({
           // state the gateway accepts and forge one it must refuse; strong
           // enough to pass the same check production makes, because the
           // Contribution refuses to serve its routes at all otherwise.
-          // Not a credential: no Sprite token reaches this Worker in
-          // production either, because the Computer host holds the only
-          // copy. `SPRITES_TOKEN` is only the "is a Computer configured"
-          // gate, and this suite exercises a deployment that has one — with it
-          // unset the Computer Package mounts no tools at all, which is a
-          // different subject.
-          SPRITES_TOKEN: "configured",
           COMPUTER_HOST_TOKEN: FAKE_COMPUTER_HOST_TOKEN,
           COMPUTER_HOST_SHARDS: String(FAKE_COMPUTER_HOST_SHARDS),
           // A fixed signing secret, so a test can mint the key it presents.

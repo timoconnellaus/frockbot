@@ -8,7 +8,7 @@
 // HIBERNATION. "The Agent loop, Memory, Skills, Package composition, and
 // Routines function correctly while the Computer is hibernated and do not wake
 // it." Nothing here reaches the Computer registry, a Computer provider, or a
-// Sprite. The surface handed to the Memory Package is a binding on the Durable
+// Computer. The surface handed to the Memory Package is a binding on the Durable
 // Object's environment, backed by object storage; whether a Computer host
 // happens to be running changes nothing above this line.
 //

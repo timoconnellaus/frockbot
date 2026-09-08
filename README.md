@@ -43,7 +43,7 @@ The left sidebar lists the authenticated User's Bots and switches the conversati
 
 `@frockbot/providers/frock-ai` is the built-in credential-free model path. On a User's first configuration read its User Contribution idempotently installs and enables the Package, creates the ready ambient `flock-ai-account` Connection, and records `@frock/auto` as the platform model. The runtime sends Auto through Cloudflare AI Gateway as `dynamic/<FROCK_AI_AUTO_ROUTE>` and manual `@frock/...` ids as `workers-ai/@cf/...`, behind one narrow streaming adapter. No User secret enters FrockBot state; the Gateway credentials below are deployment configuration, held by the Worker and never by a User.
 
-To attach the built-in Fly Sprites Computer provider Package, provide a Sprites token. The provider sits behind the provider-neutral Computer interface used by generic tools and memory. It provisions **one persistent Sprite per User**, shared by every Bot that User owns: each Bot receives its own directories and an on-demand Chromium/noVNC desktop slot, and every Bot on the Computer shares the one browser profile at `/home/box/chrome-profile`, so logins are a User-level asset. There is no separate User storage Sprite. `FROCKBOT_SPRITE_NAME` optionally selects the base name the User's Sprite name is derived from for standalone development; the hosted backend supplies durable User identity. The deployment's Computer host is registered under the id `computer-host`, and Fly is what implements it. In the hosted deployment the Sprites SDK and `SPRITES_TOKEN` live in `apps/computer-host`, which the Bot Durable Object reaches over the `COMPUTER_HOST` service binding; the app Worker keeps `SPRITES_TOKEN` only as the answer to "has this deployment a Computer at all".
+To attach the built-in Fly Sprites Computer provider Package, provide a Sprites token. The provider sits behind the provider-neutral Computer interface used by generic tools and memory. It provisions **one persistent Sprite per User**, shared by every Bot that User owns: each Bot receives its own directories and an on-demand Chromium/noVNC desktop slot, and every Bot on the Computer shares the one browser profile at `/home/box/chrome-profile`, so logins are a User-level asset. There is no separate User storage Sprite. `FROCKBOT_SPRITE_NAME` optionally selects the base name the User's Sprite name is derived from for standalone development; the hosted backend supplies durable User identity. The deployment's Computer host is registered under the id `computer-host`, and Fly is what implements it: `apps/cloudflare/src/computer-host.ts` is the one file that chooses, and nothing above it names an implementation. In the hosted deployment the Sprites SDK and `SPRITES_TOKEN` live in `apps/computer-host`, which the Bot Durable Object reaches over the `COMPUTER_HOST` service binding; the app Worker keeps `SPRITES_TOKEN` only as the answer to "has this deployment a Computer at all".
 
 ```bash
 SPRITES_TOKEN="..." \
@@ -51,7 +51,7 @@ SPRITES_TOKEN="..." \
   bun run dev
 ```
 
-The client exposes Computer viewer and human-takeover controls: the Computer card (`apps/native/lib/computer/`) renders a live noVNC viewer, **Take control** and **Release control**, and a full-window viewer, and the card is a `right-panel` region at wide widths and a page on the phone. The backend's token-routed noVNC gateway serves each Bot desktop through the User Sprite's public HTTPS URL, and its Bot-scoped takeover lease blocks new process and browser actions while leaving durable Package file operations available. Shells start in `/workspaces/<bot-key>` with `HOME=/home/box`. Canonical Memory Markdown does **not** live on the Computer: the Memory Package is its single writer and writes object storage directly, and the Computer sees Memory roots read-only, so a Turn can read and write Memory with the Computer hibernated.
+The client exposes Computer viewer and human-takeover controls: the Computer card (`apps/native/lib/computer/`) renders the live viewer, **Take control** and **Release control**, and a full-window viewer, and the card is a `right-panel` region at wide widths and a page on the phone. The backend's token-routed viewer gateway serves each Bot desktop through the host's public HTTPS URL, and its Bot-scoped takeover lease blocks new process and browser actions while leaving durable Package file operations available. Shells start in `/workspaces/<bot-key>` with `HOME=/home/box`. Canonical Memory Markdown does **not** live on the Computer: the Memory Package is its single writer and writes object storage directly, and the Computer sees Memory roots read-only, so a Turn can read and write Memory with the Computer hibernated.
 
 ## Checks
 
@@ -107,7 +107,7 @@ Five layers, each answering a different question. The first four run in CI; the 
 | **e2e**         | `bun run --filter @frockbot/cloudflare test:e2e`         | `e2e/**/*.e2e.ts` — real Chromium against `wrangler dev`; the only layer in which the shipped client runs.                     |
 | **live**        | `bun run --filter @frockbot/computer-host test:live`     | The production container image against a real disposable Fly Sprite. Needs Docker and `SPRITES_TOKEN`; deleted in `finally`.   |
 
-The suffixes matter: root `bun test` matches `*.test.ts` and `*.spec.ts` and neither `*.workerd.ts`, `*.integration.ts`, nor `*.e2e.ts`, so the pre-commit hook never starts a runtime project. A commit that touches only documentation — anything under `docs/` or a Markdown file at the repository root — runs Prettier and nothing else, locally and in CI: `scripts/docs-only.sh` is the one definition both the hook and CI's `Classify changes` job use, so such a pull request needs only the `Check documentation` job before it merges. There is no live Sprite probe inside the workerd project any more — the old `fly-compatibility.workerd.ts` live path went away with the Sprites SDK when it moved to the Computer host. `apps/computer-host/live-test.ts` is the only thing in the repository that touches a real Sprite. `apps/cloudflare/test/README.md` documents each runtime project in full.
+The suffixes matter: root `bun test` matches `*.test.ts` and `*.spec.ts` and neither `*.workerd.ts`, `*.integration.ts`, nor `*.e2e.ts`, so the pre-commit hook never starts a runtime project. A commit that touches only documentation — anything under `docs/` or a Markdown file at the repository root — runs Prettier and nothing else, locally and in CI: `scripts/docs-only.sh` is the one definition both the hook and CI's `Classify changes` job use, so such a pull request needs only the `Check documentation` job before it merges. There is no live Sprite probe inside the workerd project any more — the old `computer-compatibility.workerd.ts` live path went away with the Sprites SDK when it moved to the Computer host. `apps/computer-host/live-test.ts` is the only thing in the repository that touches a real Sprite. `apps/cloudflare/test/README.md` documents each runtime project in full.
 
 ## Releases
 
@@ -276,10 +276,11 @@ apps/
   computer-host/    Shared Computer host Worker and its Node container
   marketing/        Public frockbot.com site and static-assets Worker
   native/           The client: the phone app, and the web build the app Worker serves
-computer/          The Computer: tools, prompt, state, and the ComputerHost interface
+computer/          The Computer: tools, prompt, state, and the ComputerHostV1 interface
   core/            The host interface, its capabilities, the registry, and the shared helpers
   host-protocol/   Versioned v1 DTOs and decoders for the Computer host seam
-  fly/             The one host implementation: Fly Sprites, its on-Sprite runtime and takeover adapter
+  fake/            An in-memory host: the substitution proof, and the suites' fixture
+  fly/             The production host implementation: Fly Sprites, its runtime and takeover adapter
 core/
   contracts/        Session, LLM, prompt, and tool execution contracts
   durable/          Bot Durable Object admission, log, cursor, scheduling, and Composition generations

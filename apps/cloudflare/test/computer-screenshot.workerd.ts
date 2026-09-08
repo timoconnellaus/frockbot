@@ -78,7 +78,7 @@ describe("a screenshot through the shared Computer host", () => {
     });
 
     const captured =
-      await env.FLY_COMPATIBILITY.getByName("screenshot").screenshot(
+      await env.COMPUTER_COMPATIBILITY.getByName("screenshot").screenshot(
         "screenshot-ok",
       );
 
@@ -114,7 +114,7 @@ describe("a screenshot through the shared Computer host", () => {
     });
 
     const captured =
-      await env.FLY_COMPATIBILITY.getByName("screenshot-empty").screenshot(
+      await env.COMPUTER_COMPATIBILITY.getByName("screenshot-empty").screenshot(
         "screenshot-empty",
       );
 

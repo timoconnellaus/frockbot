@@ -19,9 +19,9 @@ import {
   createInMemoryObjectBucketV1,
   createInMemoryWorkspaceGenerationsV1,
 } from "@frockbot/core/workspace-store/testing";
-import { computerBotKey, FlySpriteComputer } from "./computer.ts";
+import { computerBotKey, FlyComputer } from "./computer.ts";
 import { FakeComputerHost, type FakeComputerRunV1 } from "./host-double.ts";
-import { FLY_WORKSPACE_LAYOUT, FlySpriteComputerHostV1 } from "./provider.ts";
+import { FLY_WORKSPACE_LAYOUT, FlyComputerHostV1 } from "./provider.ts";
 import {
   createFlySpriteSyncV1,
   declaredWorkspaceRootsV1,
@@ -385,8 +385,8 @@ class FakeSyncSprite {
 }
 
 /** One Computer whose disk is `sprite`, reached through the shared host. */
-function attach(sprite: FakeSyncSprite): FlySpriteComputer {
-  return new FlySpriteComputer({
+function attach(sprite: FakeSyncSprite): FlyComputer {
+  return new FlyComputer({
     identity: { userId: "sync-user" },
     host: new FakeComputerHost(sprite.run).factory,
     spriteName: "frockbot-test",
@@ -1295,7 +1295,7 @@ describe("the durable-root sync on the Computer handle", () => {
     const effects = recordingEffects(log);
     const sprite = new FakeSyncSprite();
     const computer = attach(sprite);
-    const provider = new FlySpriteComputerHostV1(computer, undefined, {
+    const provider = new FlyComputerHostV1(computer, undefined, {
       // Every write the store takes is announced, so "intent before the push"
       // is an ordering claim about this one list.
       store: {
@@ -1502,7 +1502,7 @@ describe("the durable-root sync on the Computer handle", () => {
 
   test("carries no sync at all when the host supplies no object-storage side", async () => {
     const sprite = new FakeSyncSprite();
-    const provider = new FlySpriteComputerHostV1(attach(sprite));
+    const provider = new FlyComputerHostV1(attach(sprite));
 
     const handle = await provider.open(
       { userId: USER },

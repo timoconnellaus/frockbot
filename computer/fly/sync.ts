@@ -99,7 +99,7 @@ import {
   type WorkspaceSyncEffectsV1,
   type WorkspaceSyncEffectV1,
 } from "@frockbot/core/contracts";
-import type { FlySpriteAgentComputer } from "./computer.js";
+import type { FlyAgentComputer } from "./computer.js";
 import {
   SYNC_CONFLICTS_DIR,
   SYNC_STAGING_DIR,
@@ -929,7 +929,7 @@ export function createWorkspaceSidecarEffectsV1(
 }
 
 export interface FlySpriteSyncSurfaceOptions {
-  computer: FlySpriteAgentComputer;
+  computer: FlyAgentComputer;
   layout: WorkspaceLayoutV1;
   userId: string;
   botDirectoryKey: (botId: string) => string;
@@ -1558,7 +1558,7 @@ export interface FlySpriteSyncOptionsV1 extends Omit<
   WorkspaceRootSyncOptionsV1,
   "computer" | "roots"
 > {
-  computer: FlySpriteAgentComputer;
+  computer: FlyAgentComputer;
   layout: WorkspaceLayoutV1;
   userId: string;
   botDirectoryKey: (botId: string) => string;

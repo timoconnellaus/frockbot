@@ -742,45 +742,68 @@ The facet's own SQLite inside the per-`<userId>:<appletId>` Durable Object, with
 
 ### The interface
 
-One interface, `ComputerHostV1` (`computer/core/host.ts`), and one implementation of it, `computer/fly`. A host `open`s a session for one Bot tenant of one User; the session is where every operation lives — `workspace`, `sync`, `exec`, `browser`, `screenshot`, `processes`, `doctor`, `presence`, `viewer`, `control` — and `close()` ends the session rather than the Computer. `teardown?(identity)` destroys the Computer itself; it is optional and has no caller, because the retention decision behind it has not been made (known issue 27). Nothing above the host names Fly: `@frockbot/computer/fly/**` is importable only from `computer/fly/**`, `apps/computer-host/**` and the two places that register the host, enforced by `scripts/check-computer-host-imports.ts`.
+One interface, `ComputerHostV1` (`computer/core/host.ts`), and two implementations of it: `computer/fly`, which is what production runs, and `computer/fake`, an in-memory host the tests substitute for it. A host `open`s a session for one Bot tenant of one User; the session is where every operation lives — `workspace`, `sync`, `exec`, `browser`, `screenshot`, `processes`, `doctor`, `presence`, `viewer`, `control` — and `close()` ends the session rather than the Computer. `teardown?(identity)` destroys the Computer itself; it is optional, the in-memory host implements it, and nothing calls it, because the retention decision behind it has not been made (known issue 27).
 
-`ComputerHostCapabilitiesV1` is what a host _is_, as opposed to what it does: `scratchPath`, `refuseGuiCommand`, `desktop` and `viewerFrameOrigins`. It hangs off the host and off every session it opens, because the readers need it before there is a session — the app builds its `frame-src` from `viewerFrameOrigins` with no Bot running, and `computer_exec` describes the scratch and refuses a GUI command without waking a Computer to ask. `desktop` is descriptive — slots and geometry — and never says that anything is shared: Fly's one browser per User follows from Chromium's `user-data-dir` lock, and a host with a container per Bot would isolate better.
+`ComputerHostCapabilitiesV1` is what a host _is_, as opposed to what it does: `scratchPath`, `refuseGuiCommand`, `desktop` and `viewerFrameOrigins`. It hangs off the host and off every session it opens, because the readers need it before there is a session — the app builds its `frame-src` from `viewerFrameOrigins` with no Bot running, and `computer_exec` describes the scratch and refuses a GUI command without waking a Computer to ask. `desktop` is descriptive — slots and geometry — and never says that anything is shared: Fly's one browser per User follows from Chromium's `user-data-dir` lock, and a host with a container per Bot would isolate better. That model is deliberately absent from the interface, so no reader above the Computer can come to depend on it.
 
-### What it is
+### Choosing a host
+
+One file chooses: `apps/cloudflare/src/computer-host.ts`, beside the bindings the choice depends on. It hands the app a factory over the per-Turn seams (`ShellComputerHostFactoryV1`), and the app registers whatever it is given — `app/runtime.ts` for the Turn's runtime, `apps/cloudflare/src/bot-state.ts` for the Durable Object Contribution. "Is there a Computer" is the presence of that factory and nothing else; `SPRITES_TOKEN` is read in the chooser and nowhere above it. Substituting a k8s host is that one file and a new directory beside `computer/fly`.
+
+### The gate
+
+`scripts/check-computer-host-imports.ts`, four rules:
+
+1. `@fly/sprites` is imported, and declared as a dependency, only under `apps/computer-host/**`. It speaks an HTTP exec protocol that depends on chunk boundaries workerd does not preserve, so it may exist only in the Node container app.
+2. `@frockbot/computer/fly` is importable only from `computer/fly/**`, `apps/computer-host/**`, the one deployment chooser, and the two rigs that prove the implementation — `computer/host-contract.test.ts` and `apps/cloudflare/test/**`.
+3. No source outside `computer/fly/**` and `apps/computer-host/**` may _name_ a Sprite or its desktop stack (`sprite`, `sprites.app`, `novnc`, `x11vnc`, `xvfb`, `fluxbox`, `websockify`) in code or in prose. An import gate stops the dependency; this stops the vocabulary. `SPRITES_TOKEN` is the one admitted occurrence, because it is the production secret name. `apps/marketing/**` is exempt: its privacy policy has to name the real sub-processor, and its own "sprite" is an SVG sprite sheet.
+4. `computer/fake/**` imports `@frockbot/computer/core` and `@frockbot/computer/core/host` and nothing else from this Package. A fake that reached into an implementation would be that implementation's double rather than a second host.
+
+Two names the gate does not police and that must not be changed: the Durable Object class `FlyHostContainer` (`apps/computer-host/wrangler.jsonc`), because a Cloudflare container application is bound to one class for its lifetime and the v3/v4 rename pair is already applied in production; and the header `x-frockbot-host-token`, which is checked in the app Worker, in the host Worker and in the container, all of which deploy on different tags.
+
+### Proving the substitution
+
+`computer/host-contract.test.ts` is one suite run twice — over `computer/fake` and over `computer/fly` on its wire-level double (`computer/fly/host-double.ts`). Its cases are the interface's own behaviour: a session opened and closed, a Workspace round-trip, the shape of an exec result, PNG bytes from a capture, a viewer opened, renewed and revoked on a URL within the host's declared origins, a control lease taken, refused to a second owner and given back, and an idempotent `teardown` where a host offers one. A third host is a third entry in its `HOSTS` list and no new assertion. `apps/cloudflare/test/computer-compatibility-worker.ts` is the other half: the Fly implementation in workerd, over the real v1 wire on a service binding.
+
+### The Fly implementation
 
 A persistent Linux desktop virtual machine per User, rented from Fly Sprites (`api.sprites.dev`, SDK `@fly/sprites@0.1.0`). `apps/computer-host` is a Worker that shards and authorizes, fronting a Cloudflare Container (`node:24-slim`, no desktop) that runs the Sprites SDK. It serves the v1 protocol and nothing else: the prototype's `/v1/effects` route and its `ComputerEffectJournal` are gone, retired by migration `v5`.
 
-### Provisioning
+#### Provisioning
 
-`getSprite`, and on a miss `createSprite`, named `frockbot-<sha256(["user", userId])[0..12]>` (`computer/fly/runtime.ts:2718-2739`). The host then adopts an existing machine via a marker file, or provisions through a detached, resumable five-phase shell run — `layout`, `packages`, `runtime`, `browser`, `reference` — bounded at 10 minutes, at most 8 relaunches, polled every 3 seconds. Egress is restricted to one host: `enableInternet: false, allowedHosts: ["api.sprites.dev"], interceptHttps: true` (`apps/computer-host/src/egress.ts:23-27`), with a WebSocket bridge for upgrades.
+`getSprite`, and on a miss `createSprite`, named `frockbot-<sha256(["user", userId])[0..12]>` (`computer/fly/runtime.ts`). The host then adopts an existing machine via a marker file, or provisions through a detached, resumable five-phase shell run — `layout`, `packages`, `runtime`, `browser`, `reference` — bounded at 10 minutes, at most 8 relaunches, polled every 3 seconds. Egress is restricted to one host: `enableInternet: false, allowedHosts: ["api.sprites.dev"], interceptHttps: true` (`apps/computer-host/src/egress.ts`), with a WebSocket bridge for upgrades.
 
-### Inside the Sprite
+#### Inside the Sprite
 
 Ubuntu 25.10 running one `Xvfb :100 -screen 0 5120x720x24`; `fluxbox`; one Chromium — Playwright 1.55's build — on CDP port 9222 with a single shared `~/chrome-profile`; a per-Bot `x11vnc -clip 1280x720+<slot*1280>+0 -rfbport $((5900+slot))`; `websockify --web=~/.frockbot/viewer` on port 6080, the only public port; a browser watchdog; and a workspace sync service.
 
-One Sprite, one browser and one screen per User; one slot — window plus clipped VNC port — per Bot. `DESKTOP_SLOTS = 4` and `SCREEN_WIDTH = SLOT_WIDTH * DESKTOP_SLOTS`. The single browser follows from Chromium's per-`user-data-dir` singleton lock.
+One Sprite, one browser and one screen per User; one slot — window plus clipped VNC port — per Bot. `DESKTOP_SLOTS = 4` and `SCREEN_WIDTH = SLOT_WIDTH * DESKTOP_SLOTS`. The single browser follows from Chromium's per-`user-data-dir` singleton lock, and is a fact about this host rather than about the Computer (known issue 25).
+
+#### Lifecycle
+
+The container sets `sleepAfter: "10m"` with `max_instances: 3`. A renderer watchdog sends SIGKILL to Chromium renderer processes only, above 1.5 GiB RSS or when `MemAvailable` is under 512 MiB. A service refresh that does not complete returns without writing the state digest, so the next `open` retries it. The Bot Durable Object arms a 60-second connect watchdog before each connect. Slots are reclaimed after 900 seconds idle unless a 90-second lease is held; with no free slot the process exits 75.
+
+### The in-memory host
+
+`computer/fake/host.ts`, exported as `@frockbot/computer/fake`: one `FakeComputerV1` per User holding a `Map`-backed `FakeWorkspace`, a table of scripted `exec` answers, a 1×1 PNG, viewer sessions on `https://viewer.invalid/session/<id>`, process records, a doctor report, leases keyed by scope, and a `teardown` that destroys the Computer and can be asked twice. It records every operation it was asked for, so a suite asserts on calls rather than on a filesystem. There is no Sprite, slot, VNC or shell script anywhere in it — rule 4 is what keeps it that way.
 
 ### Protocol
 
-`computer/host-protocol/protocol.ts` — HTTP POST per operation with optional NDJSON streaming; not a WebSocket. The envelope is `{version: 1, effectId, identity: {userId}, tenant: {botId}, credentialRef}`. Eleven operation kinds: `open`, `exec`, `file/read`, `file/write`, `file/list`, `file/stat`, `file/delete`, `control`, `viewer`, `service`, `cancel`. Frames: `open` yields `progress | result | error`; `exec` yields `stdout | stderr | exit | error`. Requests shard to `computer-host-<fnv1a(userId) % 2>` (`apps/computer-host/src/router.ts:38-48`) and carry `x-frockbot-host-token`, checked in both the Worker and the container.
+`computer/host-protocol/protocol.ts` — HTTP POST per operation with optional NDJSON streaming; not a WebSocket. The envelope is `{version: 1, effectId, identity: {userId}, tenant: {botId}, credentialRef}`, and `credentialRef` is `computer:user:<userId>`, decoded and length-limited but never read (known issue 26). Eleven operation kinds: `open`, `exec`, `file/read`, `file/write`, `file/list`, `file/stat`, `file/delete`, `control`, `viewer`, `service`, `cancel`. An `open` answers an opaque `instanceId`; nothing above the host reads a host's naming out of it. Frames: `open` yields `progress | result | error`; `exec` yields `stdout | stderr | exit | error`. Requests shard to `computer-host-<fnv1a(userId) % 2>` (`apps/computer-host/src/router.ts`) and carry `x-frockbot-host-token`, checked in both the Worker and the container.
 
 ### Screenshots and live view
 
-A screenshot is a guarded `exec` running `scrot`, clipped to the Bot's slot of the shared screen, followed by a `file/read` (`computer/fly/computer.ts:732-797`); the bytes are filed into the durable `screenshots` root and attached to the model turn. The live view is noVNC iframed directly at `https://<sprite>.sprites.app/...`, with no Worker proxy; CSP allows `frame-src https://*.sprites.app` (`apps/cloudflare/src/user-application.ts`, from the host's `viewerFrameOrigins`). FrockBot ships its own viewer page because stock noVNC fixes `view_only` at construction.
+A screenshot is one operation on the session — `screenshot.capture()` — which the Fly host implements as a guarded `exec` running `scrot`, clipped to the Bot's slot of the shared screen, followed by a `file/read` (`computer/fly/computer.ts`); the bytes are filed into the durable `screenshots` root and attached to the model turn. The live view is the URL a viewer session answers with, iframed directly and with no Worker proxy; the app's `frame-src` is built from the registered host's `viewerFrameOrigins` (`apps/cloudflare/src/user-application.ts`), which is `https://*.sprites.app` for Fly. FrockBot ships its own viewer page because stock noVNC fixes `view_only` at construction.
 
 ### Tools
 
-All from `computer/`; `computer/fly` registers none.
+All from `computer/`; neither implementation registers one.
 
-- `computer_exec` — `agent.ts:794`
-- `computer_screenshot` — `:1309`
-- `computer_doctor` — `:1507`
-- `computer_process_check` / `computer_process_logs` / `computer_process_stop` — `:1579`, `:1609`, `:1648`
-- `computer_browser` — `:1678`, actions `snapshot | navigate | click | fill | press | wait`, returning an accessibility snapshot over CDP
-
-### Lifecycle
-
-The container sets `sleepAfter: "10m"` with `max_instances: 3`. A renderer watchdog sends SIGKILL to Chromium renderer processes only, above 1.5 GiB RSS or when `MemAvailable` is under 512 MiB (`runtime.ts:601-677`). A service refresh that does not complete returns without writing the state digest, so the next `open` retries it. The Bot Durable Object arms a 60-second connect watchdog before each connect. Slots are reclaimed after 900 seconds idle unless a 90-second lease is held; with no free slot the process exits 75.
+- `computer_exec` — `agent.ts`
+- `computer_screenshot`
+- `computer_doctor`
+- `computer_process_check` / `computer_process_logs` / `computer_process_stop`
+- `computer_browser` — actions `snapshot | navigate | click | fill | press | wait`, returning an accessibility snapshot over CDP
 
 ---
 
@@ -843,7 +866,7 @@ Admin is membership of the comma-separated `FROCKBOT_ADMIN_EMAILS` secret (`apps
 ### Test layers
 
 1. **Bun unit** — root `bun test` (`package.json`), matching `*.test.ts` and `*.spec.ts` across every workspace. No `bunfig.toml`.
-2. **Workerd, hermetic** — `apps/cloudflare/vitest.config.ts`, `test/**/*.workerd.ts`, entry `./test/fly-compatibility-worker.ts`, with Miniflare fakes for the Computer host, Frock AI and Vectorize. `fileParallelism: false`.
+2. **Workerd, hermetic** — `apps/cloudflare/vitest.config.ts`, `test/**/*.workerd.ts`, entry `./test/computer-compatibility-worker.ts`, with Miniflare fakes for the Computer host, Frock AI and Vectorize. `fileParallelism: false`.
 3. **Workerd, integration** — `apps/cloudflare/vitest.integration.config.ts`, `test/integration/**/*.integration.ts`, entry `./src/index.ts`, with the real gateway, the built artifact and D1 migrations via `readD1Migrations`.
 4. **Computer host** — `apps/computer-host/vitest.config.ts` plus `bun test src container`. Opt-in live suites `test:live` and `test:live:desktop` are not run by CI.
 5. **Playwright** — `apps/cloudflare/e2e/playwright.config.ts`, `**/*.e2e.ts`, `fullyParallel: false`, `workers: 1`, 240 s timeout, 4-way CI sharding through `balanced-shard-reporter.ts`, `webServer` of `bun e2e/serve.ts`. Roughly 28 spec files.

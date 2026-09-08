@@ -35,6 +35,13 @@ export interface ProductionSecretV1 {
   readonly name: string;
   /** What it is for, in one line, for the operator reading a failed deploy. */
   readonly why: string;
+  /**
+   * Required by the deployment but read by another Worker in it, not by the
+   * app Worker. The deploy still refuses without it — the deployment is not
+   * complete — but the app Worker declares no `env` string for it, and the
+   * manifest's "names nothing the Worker does not read" rule skips it.
+   */
+  readonly hostOnly?: boolean;
 }
 
 /** One setting the deploy may omit, and what the product loses when it does. */
@@ -76,7 +83,12 @@ export const REQUIRED_PRODUCTION_SECRETS_V1: readonly ProductionSecretV1[] = [
   },
   {
     name: "SPRITES_TOKEN",
-    why: "Authorizes the Computer host's Sprite provider. Absent, no Computer starts.",
+    why: "Authorizes the Computer host against its vendor. Absent, no Computer starts.",
+    // Read by `apps/computer-host`, never by this Worker: the app Worker asks
+    // whether it was handed a Computer host, not which credential that host
+    // needs. It is required here because the deployment is not complete
+    // without it, and the release forwards it to both Workers.
+    hostOnly: true,
   },
   {
     name: "COMPUTER_HOST_TOKEN",

@@ -79,7 +79,7 @@ describe("the Computer's self-check through the shared Computer host", () => {
     await script({ match: DOCTOR_SCRIPT, stdout: reportLine(checks) });
 
     const report =
-      await env.FLY_COMPATIBILITY.getByName("doctor").doctor("doctor-ok");
+      await env.COMPUTER_COMPATIBILITY.getByName("doctor").doctor("doctor-ok");
 
     expect(report, JSON.stringify(report)).toMatchObject({
       ok: true,
@@ -137,7 +137,7 @@ describe("the Computer's self-check through the shared Computer host", () => {
     });
 
     const report =
-      await env.FLY_COMPATIBILITY.getByName("doctor-identity").doctor(
+      await env.COMPUTER_COMPATIBILITY.getByName("doctor-identity").doctor(
         "doctor-identity",
       );
 
@@ -157,7 +157,7 @@ describe("the Computer's self-check through the shared Computer host", () => {
       ]),
     });
     const unmeasured =
-      await env.FLY_COMPATIBILITY.getByName("doctor-unmeasured").doctor(
+      await env.COMPUTER_COMPATIBILITY.getByName("doctor-unmeasured").doctor(
         "doctor-unmeasured",
       );
     expect(unmeasured).not.toHaveProperty("browserIdentity");
@@ -174,7 +174,9 @@ describe("the Computer's self-check through the shared Computer host", () => {
     await script({ match: DOCTOR_SCRIPT, stdout: line });
 
     const report =
-      await env.FLY_COMPATIBILITY.getByName("doctor-log").doctor("doctor-log");
+      await env.COMPUTER_COMPATIBILITY.getByName("doctor-log").doctor(
+        "doctor-log",
+      );
 
     expect((report as { ok: boolean }).ok).toBe(true);
     const exec = (await calls()).find(
@@ -190,7 +192,9 @@ describe("the Computer's self-check through the shared Computer host", () => {
     await script({ match: DOCTOR_SCRIPT, stdout: "everything is fine\n" });
 
     const report =
-      await env.FLY_COMPATIBILITY.getByName("doctor-bad").doctor("doctor-bad");
+      await env.COMPUTER_COMPATIBILITY.getByName("doctor-bad").doctor(
+        "doctor-bad",
+      );
 
     expect(report).toMatchObject({ ok: false });
     expect((report as { message: string }).message).toContain(

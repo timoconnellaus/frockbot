@@ -17,7 +17,7 @@ import {
   createAgentRuntimeHarness,
 } from "@frockbot/app/testkit";
 import { createComputerAgentFeature, pngDimensionsV1 } from "./agent.js";
-import { FakeWorkspace } from "./workspace-fixture.js";
+import { FakeWorkspace } from "@frockbot/computer/fake";
 
 /** A host that offers nothing beyond the operations under test. */
 const TEST_HOST_CAPABILITIES: ComputerHostCapabilitiesV1 = {

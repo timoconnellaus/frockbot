@@ -370,7 +370,11 @@ describe("foundation application", () => {
         },
       }).map((pkg) => pkg.id),
     ).toEqual(["credentials", "computer-host", "computer"]);
-    expect(requestedSecrets).toEqual(["SPRITES_TOKEN"]);
+    // Whether there is a Computer is the presence of a host and nothing else.
+    // The application asks the shell for no secret to answer it: which
+    // credential a particular host needs is that host's business, and is
+    // settled where the host is chosen.
+    expect(requestedSecrets).toEqual([]);
 
     // The Skills Package mounts only for a Turn whose instruction root the
     // host can read, and then it leads the hosted runtime packages.

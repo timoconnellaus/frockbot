@@ -56,7 +56,7 @@ export interface DeclaredPackageRootSourceV1 {
  * Package definitions." `image/generated` is the one that exists, and it
  * reaches the durable-root sync through here. Applet source is a declared root
  * too, but Applets declares none to the Computer: it is authored and built in
- * the cloud, so mirroring it onto a Sprite would materialize files no tool
+ * the cloud, so mirroring it onto the Computer would materialize files no tool
  * there reads.
  *
  * ENABLEMENT decides membership, by the same `state === "installed"` test

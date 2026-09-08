@@ -1,6 +1,6 @@
 // The `SELF.fetch` integration project.
 //
-// `vitest.config.ts` boots `test/fly-compatibility-worker.ts`, so its `SELF` is
+// `vitest.config.ts` boots `test/computer-compatibility-worker.ts`, so its `SELF` is
 // a probe Worker and no test there crosses the gateway. Here `main` is
 // `./src/index.ts` — the deployed Worker, unmodified — so `SELF.fetch` enters
 // production code at the same door a browser does: gateway auth, the User
@@ -122,12 +122,6 @@ export default defineConfig({
           // state the gateway accepts and forge one it must refuse; strong
           // enough to pass the same check production makes, because the
           // Contribution refuses to serve its routes at all otherwise.
-          // Not a credential: no Sprite token reaches this Worker in
-          // production either, because the Computer host holds the only
-          // copy. `SPRITES_TOKEN` is only the "is a Computer configured"
-          // gate, so a placeholder is exactly what a deployment with a
-          // Computer looks like from here.
-          SPRITES_TOKEN: "configured",
           COMPUTER_HOST_TOKEN: FAKE_COMPUTER_HOST_TOKEN,
           // A fixed signing secret, so a test can mint the key it presents and
           // forge one that must be refused.

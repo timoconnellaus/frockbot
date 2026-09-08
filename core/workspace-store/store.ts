@@ -3,7 +3,7 @@
 //
 // This is the object-storage half of the durable-root sync. The Computer-side
 // half — `FlyWorkspaceFiles` in `@frockbot/computer/fly` — implements the same
-// interface over a Sprite's filesystem, and the two must answer the same way,
+// interface over the Computer's filesystem, and the two must answer the same way,
 // because the same durable root is reachable through both: a refusal here is a
 // refusal there, `unavailable` is an ordinary answer on both, and a losing
 // conditional write is preserved on both rather than dropped.

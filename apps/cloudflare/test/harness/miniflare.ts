@@ -297,7 +297,7 @@ function toolCallStream(
  * The stub origin the web-tools suite fetches. It is a real origin name with a
  * dot, so `web_fetch`'s classifier allows it, and it is answered here rather
  * than on the network: nothing in this repository's tests ever leaves the
- * machine except the opt-in live Sprite probe.
+ * machine except the opt-in live Computer probe.
  */
 export const WEB_STUB_ORIGIN = "https://example.test";
 
@@ -482,9 +482,9 @@ export async function ollamaCloudStub(request: Request): Promise<Response> {
  * The `outboundService` both configs install.
  *
  * Every outbound request is answered by {@link ollamaCloudStub}, and nothing
- * is ever let out. There is no longer an exception for the Sprites API: the
- * Computer host holds the SDK and the token, so no Worker under test has any
- * business reaching `api.sprites.dev` at all.
+ * is ever let out. There is no longer an exception for the Computer host's
+ * own vendor API: the host app holds the SDK and the token, so no Worker under
+ * test has any business reaching it at all.
  */
 export function createOutboundService(): (
   request: Request,

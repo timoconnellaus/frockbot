@@ -14,7 +14,7 @@
 // instead resolved from the same User's Flock directory before admission.
 //
 // HIBERNATION. Nothing here reaches the Computer registry, a Computer
-// provider, or a Sprite: identity is Durable Object state, so self-management
+// provider, or the Computer: identity is Durable Object state, so self-management
 // works while the Computer is hibernated and does not wake it.
 import type {
   BotSettingsViewV1,

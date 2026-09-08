@@ -61,7 +61,7 @@ import {
   type WorkspaceWriteRequestV1,
   type WorkspaceWriterV1,
 } from "@frockbot/core/contracts";
-import type { FlySpriteAgentComputer } from "./computer.js";
+import type { FlyAgentComputer } from "./computer.js";
 
 /** Where a root records the generation of each file beneath it. */
 export const WORKSPACE_GENERATIONS_DIR = ".frockbot-generations";
@@ -168,7 +168,7 @@ interface RawFile {
 }
 
 export interface FlyWorkspaceFilesOptions {
-  computer: FlySpriteAgentComputer;
+  computer: FlyAgentComputer;
   layout: WorkspaceLayoutV1;
   /** The User whose Computer this is; every root must belong to them. */
   userId: string;

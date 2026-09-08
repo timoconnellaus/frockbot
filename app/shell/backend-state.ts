@@ -22,7 +22,10 @@ import {
   createBotRoutines,
 } from "@frockbot/app/routines/bot";
 import type { ConfigurationActivityV1 } from "@frockbot/app/settings/bot";
-import type { ShellApplicationV1 } from "./backend-runtime.js";
+import type {
+  ShellApplicationV1,
+  ShellComputerHostFactoryV1,
+} from "./backend-runtime.js";
 
 export interface BotStateEnv {
   MEMORY_FILES: R2Bucket;
@@ -85,7 +88,6 @@ export interface BotStateEnv {
    * that should be visible as "no Computer" rather than as a 401 per Turn.
    */
   COMPUTER_HOST_TOKEN?: string;
-  SPRITES_TOKEN?: string;
   CREDENTIAL_KEYRING?: string;
   /**
    * The HMAC secret every Routine webhook key is signed with. Absent in a
@@ -121,6 +123,11 @@ export interface ShellBotBackendHost extends ShellApplicationV1 {
     botId: string,
     kind: "screenshots" | "doctor",
   ): void;
+  /**
+   * This deployment's Computer host. The Durable Object's own shell chooses
+   * which one it is; nothing under `app/` names an implementation.
+   */
+  computerHost?: ShellComputerHostFactoryV1;
   /** Package deadlines composed into the Bot authority's one durable alarm. */
   scheduledDeadlines?(transaction: DurableObjectTransaction): Promise<number[]>;
   scheduledWorkInFlight?(): boolean;
@@ -247,6 +254,8 @@ export class ShellBotStateV1 {
   readonly outboundFetch: typeof fetch | undefined;
   readonly lifecycleAdmission: ShellBotBackendHost["assertLifecycleActive"];
   readonly invalidateComputerProjectionFile: ShellBotBackendHost["invalidateComputerProjectionFile"];
+  /** This deployment's Computer host, handed in by the shell. */
+  readonly computerHost: ShellComputerHostFactoryV1 | undefined;
   readonly hostScheduled: HostScheduledWorkV1;
   readonly now: () => Date;
   readonly sleep: (milliseconds: number) => Promise<void>;
@@ -274,6 +283,7 @@ export class ShellBotStateV1 {
     this.outboundFetch = host.outboundFetch;
     this.invalidateComputerProjectionFile =
       host.invalidateComputerProjectionFile;
+    this.computerHost = host.computerHost;
     this.hostScheduled = {
       deadlines: host.scheduledDeadlines,
       inFlight: host.scheduledWorkInFlight,
