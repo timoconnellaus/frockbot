@@ -7,7 +7,11 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../protocol/client_wire.generated.dart' as wire;
 
-const hostedOrigin = 'https://bot.frockbot.com';
+// A fixed loopback target reached only through ADB reverse forwarding.
+const localDevelopment = bool.fromEnvironment('FROCKBOT_LOCAL_DEV');
+const hostedOrigin = localDevelopment
+    ? 'http://127.0.0.1:8787'
+    : 'https://bot.frockbot.com';
 const clientHello = <String, Object>{
   'schemaVersion': 1,
   'protocolVersion': 1,
@@ -159,6 +163,7 @@ class NativeApi {
     return {
       'content-type': 'application/json',
       'x-frockbot-client': jsonEncode(clientHello),
+      if (localDevelopment) 'x-frockbot-user-id': 'development',
       'authorization': ?authorization,
     };
   }
@@ -228,7 +233,7 @@ class NativeApi {
 
   Future<WebSocket> socket(String botId, String? cursor) async {
     final uri = Uri.parse(hostedOrigin).replace(
-      scheme: 'wss',
+      scheme: localDevelopment ? 'ws' : 'wss',
       path: '/api/bots/$botId/state-channel',
       queryParameters: {'version': '1', 'cursor': ?cursor},
     );

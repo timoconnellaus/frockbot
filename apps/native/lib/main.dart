@@ -106,31 +106,35 @@ class _FrockBotAppState extends State<FrockBotApp> with WidgetsBindingObserver {
   Future<void> restore() async {
     try {
       final savedSession = await store.read('session');
-      if (savedSession == null) return;
-      final cachedSession = wire.AuthSessionView.fromJson(
-        jsonDecode(savedSession),
-      );
-      api.adoptSession(savedSession);
-      final cachedDirectory = await store.read(
-        'directory/${cachedSession.userId.value}',
-      );
-      if (cachedDirectory != null && userId == null) {
-        final cached = wire.BotDirectory.fromJson(jsonDecode(cachedDirectory));
-        final saved = await store.read(
-          'selection.${cachedSession.userId.value}',
+      if (localDevelopment) userId = 'development';
+      if (savedSession == null && !localDevelopment) return;
+      if (savedSession != null && !localDevelopment) {
+        final cachedSession = wire.AuthSessionView.fromJson(
+          jsonDecode(savedSession),
         );
-        if (mounted) {
-          setState(() {
-            userId = cachedSession.userId.value;
-            bots = cached.bots;
-            selected = bots
-                .where((bot) => bot.botId.value == saved)
-                .firstOrNull;
-            busy = false;
-          });
+        api.adoptSession(savedSession);
+        final cachedDirectory = await store.read(
+          'directory/${cachedSession.userId.value}',
+        );
+        if (cachedDirectory != null && userId == null) {
+          final cached = wire.BotDirectory.fromJson(
+            jsonDecode(cachedDirectory),
+          );
+          final saved = await store.read(
+            'selection.${cachedSession.userId.value}',
+          );
+          if (mounted) {
+            setState(() {
+              userId = cachedSession.userId.value;
+              bots = cached.bots;
+              selected = bots
+                  .where((bot) => bot.botId.value == saved)
+                  .firstOrNull;
+              busy = false;
+            });
+          }
         }
       }
-
       final identity = wire.AuthIdentity.fromJson(
         await api.request('/api/identity'),
       );
@@ -419,31 +423,31 @@ class _FrockBotAppState extends State<FrockBotApp> with WidgetsBindingObserver {
                 ),
               ),
             ),
-            ListTile(
-              leading: const Icon(Icons.logout),
-              title: const Text('Sign out'),
-              onTap: () async {
-                try {
-                  clearActivity();
-                  await auth.signOut();
-                  sessions.clear();
-                  if (mounted) {
-                    setState(() {
-                      userId = null;
-                      selected = null;
-                      bots = [];
-                    });
+            if (!localDevelopment)
+              ListTile(
+                leading: const Icon(Icons.logout),
+                title: const Text('Sign out'),
+                onTap: () async {
+                  try {
+                    clearActivity();
+                    await auth.signOut();
+                    sessions.clear();
+                    if (mounted) {
+                      setState(() {
+                        userId = null;
+                        selected = null;
+                        bots = [];
+                      });
+                    }
+                  } catch (_) {
+                    if (mounted) {
+                      setState(() {
+                        error = 'Couldn’t sign out. Please reconnect and try again.';
+                      });
+                    }
                   }
-                } catch (_) {
-                  if (mounted) {
-                    setState(() {
-                      error =
-                          'Couldn’t sign out. Please reconnect and try again.';
-                    });
-                  }
-                }
-              },
-            ),
+                },
+              ),
           ],
         );
         final wide = MediaQuery.sizeOf(context).width >= 800;
