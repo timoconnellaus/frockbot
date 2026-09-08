@@ -1,3 +1,4 @@
+import { cleanIncidentTestChatsV1 } from "./test-chat-cleanup.js";
 import { DurableObject } from "cloudflare:workers";
 import {
   BotStateChannel,
@@ -444,6 +445,10 @@ export class BotState extends DurableObject<BotStateEnv> {
     dependencies: BotStateDependencies = {},
   ) {
     super(ctx, env);
+    // Runs before any request or alarm can mount the old conversation.
+    this.ctx.blockConcurrencyWhile(() =>
+      cleanIncidentTestChatsV1(this.ctx.storage),
+    );
     this.outboundFetch = dependencies.outboundFetch;
     // The surfaces are built per identity in `bindSurfaces`, not here: they
     // carry the `owner` guard, and a Durable Object learns which User it

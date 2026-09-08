@@ -7,9 +7,12 @@ import 'package:frockbot_native/shell/transcript_model.dart';
 
 /// How the thread reads, one line per row, in the order it is drawn.
 List<String> thread(List<TranscriptLine> lines) => [
-  for (final line in orderTranscript(lines, '2026-09-05T12:30:00.000Z'))
+  for (final line in orderTranscript(lines, '2026-09-05T12:30:00.000Z')) ...[
+    for (final send in line.sends)
+      '${line.role.name}: ${send.payload?['text']}',
     if (line.text.isNotEmpty || line.notice != null)
       '${line.role.name}: ${line.text.isNotEmpty ? line.text : line.notice}',
+  ],
 ];
 
 Map<String, dynamic> run({
@@ -18,6 +21,7 @@ Map<String, dynamic> run({
   String status = 'completed',
   String admittedAt = '2026-09-05T12:19:00.000Z',
   String? responseText,
+  String? sentText,
   List<Object?> events = const [],
   bool queued = false,
   String? failure,
@@ -26,10 +30,22 @@ Map<String, dynamic> run({
   'input': input,
   'status': status,
   'admittedAt': admittedAt,
-  'events': events,
+  'events': [
+    if (sentText != null)
+      {
+        'type': 'send/to-user',
+        'payload': {'type': 'text', 'text': sentText},
+      },
+    ...events,
+  ],
   'responseText': ?responseText,
   if (queued) 'queued': true,
-  'failure': ?failure,
+  if (status != 'running')
+    'outcome': {
+      'type': status,
+      'message': ?failure,
+      'text': ?responseText,
+    },
 };
 
 const haiku = 'Soft wool on green hills';
@@ -67,13 +83,13 @@ void main() {
           runId: 'run-a',
           input: 'QA check: reply with a short haiku about sheep.',
           admittedAt: '2026-09-05T12:19:00.000Z',
-          responseText: haiku,
+          sentText: haiku,
         ),
         run(
           runId: 'run-b',
           input: 'Second message sent while the first reply is still running.',
           admittedAt: '2026-09-05T12:19:21.000Z',
-          responseText: answer,
+          sentText: answer,
         ),
         run(
           runId: 'run-c',
@@ -94,6 +110,7 @@ void main() {
               runId: row.runId,
               role: row.role,
               text: row.text,
+              sends: row.sends,
               at: '2026-09-05T12:19:20.000Z',
               status: row.status,
             )
@@ -116,49 +133,52 @@ void main() {
           runId: 'run-b',
           input: 'Second message sent while the first reply is still running.',
           admittedAt: '2026-09-05T12:19:21.000Z',
-          responseText: answer,
+          sentText: answer,
         ),
       ]);
 
       expect(turnAnchors(lines)['run-b'], '2026-09-05T12:19:21.000Z');
     });
 
-    test('still sorts a line the product wrote between Turns by its own time', () {
-      expect(
-        thread([
-          line(
-            runId: 'run-a',
-            role: LineRole.user,
-            text: 'first',
-            at: '2026-09-05T12:19:00.000Z',
-          ),
-          line(
-            runId: 'run-a',
-            role: LineRole.assistant,
-            text: 'first reply',
-            at: '2026-09-05T12:19:00.000Z',
-          ),
-          line(
-            runId: 'run-b',
-            role: LineRole.user,
-            text: 'second',
-            at: '2026-09-05T12:20:00.000Z',
-          ),
-          line(
-            runId: 'announcement-1',
-            role: LineRole.system,
-            text: 'Renamed to Test by user',
-            at: '2026-09-05T12:19:30.000Z',
-          ),
-        ]),
-        [
-          'user: first',
-          'assistant: first reply',
-          'system: Renamed to Test by user',
-          'user: second',
-        ],
-      );
-    });
+    test(
+      'still sorts a line the product wrote between Turns by its own time',
+      () {
+        expect(
+          thread([
+            line(
+              runId: 'run-a',
+              role: LineRole.user,
+              text: 'first',
+              at: '2026-09-05T12:19:00.000Z',
+            ),
+            line(
+              runId: 'run-a',
+              role: LineRole.assistant,
+              text: 'first reply',
+              at: '2026-09-05T12:19:00.000Z',
+            ),
+            line(
+              runId: 'run-b',
+              role: LineRole.user,
+              text: 'second',
+              at: '2026-09-05T12:20:00.000Z',
+            ),
+            line(
+              runId: 'announcement-1',
+              role: LineRole.system,
+              text: 'Renamed to Test by user',
+              at: '2026-09-05T12:19:30.000Z',
+            ),
+          ]),
+          [
+            'user: first',
+            'assistant: first reply',
+            'system: Renamed to Test by user',
+            'user: second',
+          ],
+        );
+      },
+    );
 
     test('sorts a line with no time at all to the bottom', () {
       expect(
@@ -181,11 +201,7 @@ void main() {
 
     /// The thread the moment a message is sent into a Turn still running.
     List<TranscriptLine> draining() => [
-      line(
-        runId: 'run-a',
-        role: LineRole.user,
-        at: '2026-09-04T23:59:00.000Z',
-      ),
+      line(runId: 'run-a', role: LineRole.user, at: '2026-09-04T23:59:00.000Z'),
       // The Turn being displaced: still streaming, not waiting on anything.
       line(
         runId: 'run-a',
@@ -229,9 +245,9 @@ void main() {
       expect(
         supersedeDrainState(
           draining(),
-          sentAt.add(supersedeDrainSlowAfter).subtract(
-            const Duration(milliseconds: 1),
-          ),
+          sentAt
+              .add(supersedeDrainSlowAfter)
+              .subtract(const Duration(milliseconds: 1)),
         ),
         SupersedeDrainState.stopping,
       );
@@ -263,7 +279,11 @@ void main() {
     test('says nothing about an ordinary running Turn', () {
       expect(
         supersedeDrainState([
-          line(runId: 'run-a', role: LineRole.user, at: '2026-09-05T00:00:00.000Z'),
+          line(
+            runId: 'run-a',
+            role: LineRole.user,
+            at: '2026-09-05T00:00:00.000Z',
+          ),
           line(
             runId: 'run-a',
             role: LineRole.assistant,
@@ -330,19 +350,17 @@ void main() {
         ),
       ]);
 
-      expect([for (final row in lines) row.id], [
-        'run-a:user',
-        'run-a:send:0',
-        'run-a:send:1',
-        'run-a:assistant',
-      ]);
+      expect(
+        [for (final row in lines) row.id],
+        ['run-a:user', 'run-a:send:0', 'run-a:send:1', 'run-a:assistant'],
+      );
       // A Turn that sent anything is drawn entirely from its sends; the text
       // the model wrote beside them is scratch space.
       expect(lines.last.text, '');
       expect(lines[1].sends.single.payload!['text'], 'On it.');
     });
 
-    test('keeps what a broken Turn said, with the reason underneath', () {
+    test('keeps private partial text hidden and shows the failure reason', () {
       final line = projectRuns([
         run(
           runId: 'run-a',
@@ -353,7 +371,7 @@ void main() {
         ),
       ]).last;
 
-      expect(line.text, 'Half an answer');
+      expect(line.text, '');
       expect(line.notice, "The model couldn't finish its reply.");
       expect(line.retry, LineRetry.resendTurn);
       expect(line.status, LineStatus.error);
@@ -388,9 +406,7 @@ void main() {
     });
 
     test('offers nothing again for an ending the person chose', () {
-      final line = projectRuns([
-        run(runId: 'run-a', status: 'cancelled'),
-      ]).last;
+      final line = projectRuns([run(runId: 'run-a', status: 'cancelled')]).last;
 
       expect(line.notice, 'You stopped this.');
       expect(line.retry, isNull);
@@ -437,10 +453,7 @@ void main() {
     test('a Turn with nothing to say again is not offered again', () {
       expect(resendableTurnText(null, maxCharacters: 32000), isNull);
       expect(resendableTurnText('   ', maxCharacters: 32000), isNull);
-      expect(
-        resendableTurnText('x' * 32001, maxCharacters: 32000),
-        isNull,
-      );
+      expect(resendableTurnText('x' * 32001, maxCharacters: 32000), isNull);
     });
   });
 

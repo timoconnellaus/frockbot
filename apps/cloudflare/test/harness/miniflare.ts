@@ -143,6 +143,7 @@ export function repeatedToolCallPrompt(
 interface WireMessage {
   role?: unknown;
   content?: unknown;
+  tool_calls?: Array<{ function?: { name?: string } }>;
 }
 
 /**
@@ -438,8 +439,36 @@ export async function ollamaCloudStub(request: Request): Promise<Response> {
     if (compaction) return compaction;
     const calls = scriptedToolCalls(body);
     if (calls.length > 0) return toolCallStream(calls);
+    const wire = body as {
+      tools?: Array<{ function?: { name?: string } }>;
+      messages?: WireMessage[];
+    };
+    const canSend = wire?.tools?.some(
+      (tool) => tool.function?.name === "send_to_user",
+    );
+    const messages = wire?.messages ?? [];
+    const sinceUser = messages.slice(
+      messages.findLastIndex((message) => message.role === "user") + 1,
+    );
+    const sent = sinceUser.some((message) =>
+      message.tool_calls?.some(
+        (call) =>
+          call.function?.name === "send_to_user" ||
+          call.function?.name === "send_message",
+      ),
+    );
+    if (canSend && !sent)
+      return toolCallStream([
+        {
+          id: "reply-send",
+          name: "send_to_user",
+          arguments: JSON.stringify({
+            payload: { type: "text", text: "Ollama reply" },
+          }),
+        },
+      ]);
     return new Response(
-      'data: {"choices":[{"delta":{"content":"Ollama reply"}}]}\n\n' +
+      `data: ${JSON.stringify({ choices: [{ delta: { content: canSend ? "" : "Ollama reply" } }] })}\n\n` +
         'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n' +
         'data: {"choices":[],"prompt_eval_count":20,"eval_count":6}\n\n' +
         "data: [DONE]\n\n",

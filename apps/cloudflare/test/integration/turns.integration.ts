@@ -77,10 +77,10 @@ describe("a Turn through the gateway, the loaded artifact and the Bot", () => {
     const events = stored?.events ?? [];
     expect(
       events.filter((event) => event.type === "model/request"),
-    ).toHaveLength(2);
+    ).toHaveLength(3);
     expect(
       events.filter((event) => event.type === "assistant/message"),
-    ).toHaveLength(1);
+    ).toHaveLength(2);
     const retries = events.filter((event) => event.type === "model/retry");
     expect(retries).toHaveLength(1);
     expect(retries[0]).toMatchObject({ classification: "transient" });

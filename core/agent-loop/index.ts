@@ -428,10 +428,20 @@ class LoopAgent implements Agent, LoopRuntime {
           nextStep = latestStep + 1;
         } else if (latestStepStatus === "ended") {
           const outcome = plan.latestStepOutcome ?? "interrupted";
+          if (outcome !== "completed" || !latestAssistant) {
+            return { kind: "settled", outcome };
+          }
+          // A completed step may have been told to continue by application
+          // policy before eviction. Re-evaluate that decision from the durable
+          // journal instead of treating zero tool calls as a terminal Turn.
           if (
-            outcome !== "completed" ||
-            !latestAssistant ||
-            latestAssistant.toolCalls.length === 0
+            latestAssistant.toolCalls.length === 0 &&
+            (await this.#stepShouldStop(
+              openTurn,
+              latestStep,
+              { kind: "stop" },
+              signal,
+            ))
           ) {
             return { kind: "settled", outcome };
           }

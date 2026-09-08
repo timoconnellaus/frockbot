@@ -183,10 +183,9 @@ test("a Turn that is running when the page reloads still delivers its reply", as
   });
 });
 
-// The reply is drawn as it is written, not only when the Turn settles. The
-// provider sends half the answer, waits, then sends the rest; the half the
-// person can read has to reach the thread while the Turn is still running.
-test("a reply appears while the Bot is still writing it", async ({
+// An explicit send reaches the thread before the Turn settles; model text
+// streamed after that delivery stays private.
+test("an explicit send appears while model text stays private", async ({
   page,
   userId,
   ollamaBaseUrl,
@@ -207,13 +206,15 @@ test("a reply appears while the Bot is still writing it", async ({
   await expect(composer).toHaveValue("", { timeout: 120_000 });
 
   // Latched rather than asserted at one instant: the Turn settles on its own
-  // schedule, and the claim is that the partial answer was drawn at some point
-  // before it did — never that it is still partial when the poll runs.
-  let sawPartialWhileRunning = false;
+  // schedule, and the claim is that the explicit send was drawn before the
+  // private model continuation finished.
+  let sawSendWhileRunning = false;
   await expect
     .poll(
       async () => {
-        const last = assistantMessages(page).last();
+        const last = assistantMessages(page)
+          .filter({ hasText: "Reply from the" })
+          .last();
         if ((await last.count()) === 0) return false;
         const text = (await last.textContent()) ?? "";
         // The working row is the thread's own last child, not part of the
@@ -223,17 +224,20 @@ test("a reply appears while the Bot is still writing it", async ({
         if (
           live > 0 &&
           text.includes("Reply from the") &&
-          !text.includes("Ollama stub")
+          text.includes("Ollama stub")
         ) {
-          sawPartialWhileRunning = true;
+          sawSendWhileRunning = true;
         }
-        return sawPartialWhileRunning;
+        return sawSendWhileRunning;
       },
       { timeout: 60_000 },
     )
     .toBe(true);
 
-  // And the settled answer replaces the partial one in the same bubble.
+  // Private model streaming never creates another bubble or changes the send.
+  await expect(page.locator(".thread")).not.toContainText(
+    "PRIVATE MODEL SCRATCH",
+  );
   await expect(assistantMessages(page).last()).toContainText(
     "Reply from the local Ollama stub.",
     { timeout: 120_000 },
@@ -334,8 +338,8 @@ test("the working avatar sits below the bubbles and never shifts them", async ({
   });
   await page.setViewportSize({ width: 1351, height: 831 });
 
-  // The provider writes half the answer, waits, then writes the rest, which is
-  // the window where a bubble and the working row are both on screen.
+  // The provider sends its reply, then takes time finishing privately, leaving
+  // a window where the delivered bubble and working row are both on screen.
   await setFakeOllamaChatMode(page, ollamaBaseUrl, "streaming");
 
   const composer = composerInput(page);
@@ -358,7 +362,7 @@ test("the working avatar sits below the bubbles and never shifts them", async ({
           const thread = document.querySelector(".thread");
           const row = document.querySelector(".bot-working");
           const bubbles = document.querySelectorAll(
-            ".message-assistant .message-bubble",
+            ".message-assistant .send-text",
           );
           const bubble = bubbles[bubbles.length - 1];
           if (!thread || !row || !bubble) return null;
@@ -410,9 +414,7 @@ test("the working avatar sits below the bubbles and never shifts them", async ({
 
   // The Turn ended and the row went; the bubble did not move.
   const settledLeft = await page.evaluate(() => {
-    const bubbles = document.querySelectorAll(
-      ".message-assistant .message-bubble",
-    );
+    const bubbles = document.querySelectorAll(".message-assistant .send-text");
     const bubble = bubbles[bubbles.length - 1];
     return bubble ? bubble.getBoundingClientRect().left : Number.NaN;
   });

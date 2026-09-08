@@ -70,8 +70,12 @@ class FakeGateway extends RpcTarget {
         choices: [{ message: { content }, finish_reason: "stop" }],
       });
     }
+    const canSend = query.tools?.some(tool => tool.function?.name === "send_to_user");
+    const sinceUser = messages.slice(messages.findLastIndex(message => message.role === "user") + 1);
+    const sent = sinceUser.some(message => message.tool_calls?.some(call => call.function?.name === "send_to_user"));
+    const delta = canSend && !sent ? {tool_calls: [{index: 0, id: "frock-reply", function: {name: "send_to_user", arguments: JSON.stringify({payload: {type: "text", text: "Frock AI reply"}})}}]} : {content: canSend ? "" : "Frock AI reply"};
     const payload =
-      'data: {"choices":[{"delta":{"content":"Frock AI reply"}}]}\\n\\n' +
+      'data: ' + JSON.stringify({choices: [{delta}]}) + '\\n\\n' +
       'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\\n\\n' +
       'data: [DONE]\\n\\n';
     return new Response(new ReadableStream({

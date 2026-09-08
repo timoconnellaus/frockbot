@@ -122,11 +122,19 @@ describe("conversation compaction in Workerd", () => {
         message.content.startsWith(`Turn ${compacted.throughTurn + 1} says:`),
       ),
     ).toBe(true);
-    expect(rest.at(-1)?.content).toContain("Turn 12 says:");
-
-    // Still exactly one summary of that prefix after another Turn.
     expect(
-      after.filter((event) => event.type === "conversation/compacted"),
+      rest.findLast((message) => message.role === "user")?.content,
+    ).toContain("Turn 12 says:");
+
+    // Still exactly one summary of that prefix. The extra send/tool-result
+    // messages may cause a newer range to cross the threshold on this Turn.
+    expect(
+      after.filter(
+        (event) =>
+          event.type === "conversation/compacted" &&
+          event.fromTurn === compacted.fromTurn &&
+          event.throughTurn === compacted.throughTurn,
+      ),
     ).toHaveLength(1);
 
     // And the transcript says so, once, without putting the summary on the wire.

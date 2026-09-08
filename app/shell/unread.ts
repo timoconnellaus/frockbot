@@ -1,3 +1,4 @@
+import { sentTextV1 } from "./sent-text.js";
 /**
  * Per-Bot unread state (parity register row 56).
  *
@@ -251,14 +252,17 @@ export function optionalSidebarMessagePreviewV1(
  * the preview. Both are bounded before they enter the durable projection.
  */
 export function sidebarMessagePreviewForTurnV1(
-  turn: { acceptedAt: string; input: string; responseText?: string },
+  turn: {
+    acceptedAt: string;
+    input: string;
+    responseText?: string;
+    events?: Parameters<typeof sentTextV1>[0];
+  },
   settledAt: string,
 ): SidebarMessagePreviewV1 | undefined {
-  const role = turn.responseText ? "assistant" : "user";
-  const text = (turn.responseText || turn.input).slice(
-    0,
-    SIDEBAR_PREVIEW_TEXT_LIMIT,
-  );
+  const delivered = sentTextV1(turn.events ?? []);
+  const role = delivered ? "assistant" : "user";
+  const text = (delivered || turn.input).slice(0, SIDEBAR_PREVIEW_TEXT_LIMIT);
   if (text.length === 0) return undefined;
   return decodeSidebarMessagePreviewV1({
     schemaVersion: 1,
@@ -274,8 +278,12 @@ export interface SidebarPreviewRunV1 {
   input: string;
   responseText?: string;
   status: string;
-  /** Only the timestamps are read: the newest one is when the Turn settled. */
-  events?: readonly { timestamp?: string }[];
+  /** The journal supplies the latest delivery and settlement timestamp. */
+  events?: readonly {
+    timestamp?: string;
+    type?: string;
+    payload?: { type?: string; text?: string };
+  }[];
   /** Absent means the Turn was admitted as `chat`, as everywhere else. */
   admission?: { turnType?: string };
 }

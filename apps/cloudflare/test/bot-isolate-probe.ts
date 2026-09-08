@@ -214,7 +214,23 @@ function scriptedProviderPackage(
         description: `The scripted model called ${toolName}.`,
       });
       if (step.kind === "answer") {
-        yield { type: "text-delta", text: `tool:${step.content}` };
+        const canSend = request.tools.some(
+          (tool) => tool.name === "send_to_user",
+        );
+        const latest = request.messages.at(-1);
+        if (canSend) {
+          if (latest?.role !== "tool" || latest.name !== "send_to_user")
+            yield {
+              type: "tool-call",
+              call: {
+                id: "probe-send",
+                name: "send_to_user",
+                input: {
+                  payload: { type: "text", text: `tool:${step.content}` },
+                },
+              },
+            };
+        } else yield { type: "text-delta", text: `tool:${step.content}` };
         yield { type: "finish", reason: "completed" };
         return;
       }

@@ -255,7 +255,7 @@ describe("the subagent lifecycle across two Durable Objects", () => {
         isError?: boolean;
       }>
     ).filter((event) => event.type === "tool/result");
-    expect(results).toHaveLength(1);
+    expect(results).toHaveLength(2); // task_stop, then the explicit user reply.
     expect(results[0]?.isError).toBe(false);
     expect(results[0]?.content).toContain(`Stopped subagent ${taskId}`);
     expect(results[0]?.content).toContain("durable");

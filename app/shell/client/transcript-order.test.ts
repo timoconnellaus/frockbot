@@ -21,7 +21,14 @@ import { orderTranscriptV1 } from "./transcript-order.ts";
 /** How the thread reads, one line per row, in the order it is drawn. */
 function thread(messages: readonly WebChatMessage[]): string[] {
   return orderTranscriptV1(messages, "2026-09-05T12:30:00.000Z")
-    .filter((message) => message.text || message.notice)
+    .flatMap((message) => [
+      ...message.sends.flatMap((send) =>
+        send.kind === "payload" && send.payload.type === "text"
+          ? [{ ...message, text: send.payload.text }]
+          : [],
+      ),
+      ...(message.text || message.notice ? [message] : []),
+    ])
     .map((message) => `${message.role}: ${message.text || message.notice}`);
 }
 
@@ -53,13 +60,17 @@ describe("the order a thread is drawn in", () => {
         runId: "run-a",
         input: "QA check: reply with a short haiku about sheep.",
         admittedAt: "2026-09-05T12:19:00.000Z",
-        responseText: HAIKU,
+        events: [
+          { type: "send/to-user", payload: { type: "text", text: HAIKU } },
+        ],
       }),
       run({
         runId: "run-b",
         input: "Second message sent while the first reply is still running.",
         admittedAt: "2026-09-05T12:19:21.000Z",
-        responseText: ANSWER,
+        events: [
+          { type: "send/to-user", payload: { type: "text", text: ANSWER } },
+        ],
       }),
       run({
         runId: "run-c",
@@ -94,7 +105,9 @@ describe("the order a thread is drawn in", () => {
         runId: "run-b",
         input: "Second message sent while the first reply is still running.",
         admittedAt: "2026-09-05T12:19:21.000Z",
-        responseText: ANSWER,
+        events: [
+          { type: "send/to-user", payload: { type: "text", text: ANSWER } },
+        ],
       }),
     ] as ClientRun[]);
 

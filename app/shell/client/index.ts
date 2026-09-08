@@ -262,38 +262,6 @@ function turnRefusalCopyV1(reason: ClientTurnRefusalReasonV1): string {
   return "That message didn't go through. Try sending it again.";
 }
 
-/**
- * The Bot's voice is its sends. When a Turn delivered anything to the User the
- * model's own assistant text is scratch space and the thread does not draw it
- * (issue 153): drawing both is how a one-word reply arrived twice, once as the
- * model's text and once as the bubble that was actually delivered — the Turn's
- * derived text is the last text send when the model wrote no message of its
- * own (`backend-runner.ts`'s `lastSentTextV1`), so it is literally that copy.
- *
- * A running Turn has no `responseText` yet — that is written only at
- * settlement — so it draws the words it has written so far. They occupy the
- * same bubble the settled answer will, and that bubble is the Turn's own line,
- * which follows the sends rather than replacing any of them.
- *
- * The gate is absolute, and it has to be. Relaxing it to "suppress only text
- * that duplicates a send" looked safer and was not: the model's *last* step
- * routinely writes something of its own after the step that spoke — the e2e
- * that pins this sends "pong" through the tool and then answers again in text —
- * and comparing the two drew both. Two bubbles for one reply is the exact
- * regression issue 153 named.
- *
- * So a Turn that sent anything is drawn entirely from its sends, and text the
- * model wrote beside them is scratch space. That is what makes the promotion in
- * `promoteAssistantTextToSendV1` the right shape: an acknowledgement reaches
- * the person by *becoming* a send — and under the per-send projection it is
- * then its own bubble, in the order it was journaled — rather than being drawn
- * as text next to one.
- */
-function visibleAssistantText(run: ClientRun, fallback = ""): string {
-  if (sendsFrom(run.events).length > 0) return "";
-  return run.responseText ?? run.partialText ?? fallback;
-}
-
 function isTerminalRun(run: ClientRun): boolean {
   return (
     run.status === "completed" ||
@@ -347,8 +315,8 @@ function failedNotice(
 }
 
 /**
- * The Turn's own line: the model's words, why the Turn ended where it did,
- * the tools it ran and the subagents it dispatched. It closes the run, under
+ * The Turn's status line: why it ended, the tools it ran, and the subagents
+ * it dispatched. It closes the run, under
  * whatever the Turn had already sent.
  */
 function assistantMessage(
@@ -363,13 +331,12 @@ function assistantMessage(
       .filter((part): part is string => Boolean(part))
       .join(" ") || undefined;
   if (run.status === "running") {
-    // A streaming Turn carries only the text the model has produced. Until
-    // there is any, the thread shows the animated avatar and no bubble.
+    // The running Turn owns its working indicator; sends own the bubbles.
     return {
       id: `${run.runId}:assistant`,
       runId: run.runId,
       role: "assistant",
-      text: visibleAssistantText(run),
+      text: "",
       status: "streaming",
       // A Turn that has not started shows nothing of its own: the greyed user
       // message is the whole of what the thread says about it.
@@ -389,7 +356,7 @@ function assistantMessage(
       id: `${run.runId}:assistant`,
       runId: run.runId,
       role: "assistant",
-      text: visibleAssistantText(run),
+      text: "",
       status: "aborted",
       ...(syncNotice ? { notice: syncNotice } : {}),
       tools: toolsFrom(run.events),
@@ -402,34 +369,9 @@ function assistantMessage(
       id: `${run.runId}:assistant`,
       runId: run.runId,
       role: "assistant",
-      text: visibleAssistantText(run),
+      text: "",
       notice: notice("You stopped this."),
       status: "aborted",
-      tools: toolsFrom(run.events),
-      sends: [],
-      tasks: tasksFrom(run.events),
-    };
-  }
-  // A Turn that broke after it had started talking keeps what it said, with
-  // the reason underneath it — the treatment a stopped Turn already gets, for
-  // the same reason: the words arrived and the person read them.
-  // A Turn that broke before saying anything is still just the reason.
-  if (run.status === "failed" && run.responseText) {
-    return {
-      id: `${run.runId}:assistant`,
-      runId: run.runId,
-      role: "assistant",
-      text: run.responseText,
-      // The durable failure text is a provider's, not the product's — `Bot
-      // turn ended with outcome model-error`, a status code, once a run UUID —
-      // and under a bubble it reads as part of what the Bot was saying. By the
-      // time it reaches here it is already the sentence for a person: the
-      // projection maps it through `runFailureCopyV1` before it crosses the
-      // wire, so this keeps whatever that chose — the model-deadline copy says
-      // something the outcome alone cannot — and falls back to the same line a
-      // reply-less failure gets.
-      ...failedNotice(run, notice),
-      status: "error",
       tools: toolsFrom(run.events),
       sends: [],
       tasks: tasksFrom(run.events),
@@ -439,10 +381,7 @@ function assistantMessage(
     id: `${run.runId}:assistant`,
     runId: run.runId,
     role: "assistant",
-    text:
-      run.status === "failed"
-        ? visibleAssistantText(run)
-        : visibleAssistantText(run, notification?.body ?? ""),
+    text: "",
     // Why the Turn ends there, under whatever it had already said — never as
     // the bubble's own text, which reads as the Bot saying it.
     ...(run.status === "failed"
