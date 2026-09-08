@@ -501,6 +501,31 @@ export function e2ePersistDirectory(port: number): string {
 /** The shared secret the app Worker and the build service present each other. */
 export const E2E_APPLET_BUILD_TOKEN = "e2e-applet-build-token";
 
+/** The shared secret the app Worker presents the Computer host. */
+export const E2E_COMPUTER_HOST_TOKEN = "e2e-computer-host-token";
+
+/**
+ * Whether this run's deployment has a Computer at all.
+ *
+ * The app Worker calls a Computer configured when it has both the
+ * `COMPUTER_HOST` binding and the token to present it. The harness declares
+ * the binding exactly as production does and starts nothing behind it, so the
+ * token alone decides which of two real deployments a run proves: with it, one
+ * whose Computer host is unreachable — what production looks like when that
+ * dependency is down; without it, one that was never given a Computer.
+ *
+ * It is passed on the command line either way rather than left to
+ * `apps/cloudflare/.dev.vars`, because a `--var` outranks that file: otherwise
+ * the state a spec proves is whichever the developer happens to have on disk,
+ * which is exactly how these specs passed locally and failed in CI. Set
+ * `E2E_NO_COMPUTER_HOST=1` to run the second state on purpose.
+ */
+export function e2eComputerConfiguredV1(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return env.E2E_NO_COMPUTER_HOST !== "1";
+}
+
 /**
  * Whether this machine can run the Applet build service.
  *
@@ -733,11 +758,20 @@ export async function startHarness(
         `BETTER_AUTH_URL:http://127.0.0.1:${options.port}`,
         "--var",
         `CREDENTIAL_KEYRING:${E2E_CREDENTIAL_KEYRING}`,
-        // No Computer: the Sprite is unreachable from workerd and no spec
-        // touches it. An empty token is what production hands a Worker with
-        // no Computer configured.
+        // No Sprites: this Worker never holds that credential — the Computer
+        // host does — and an empty token is what production hands a Worker
+        // with no Computer of its own to open.
         "--var",
         "SPRITES_TOKEN:",
+        // The Computer host's shared secret. The `COMPUTER_HOST` binding is
+        // declared as production declares it and nothing answers it, so with
+        // this token the deployment has a Computer whose host is down, and
+        // without one it has no Computer at all. See
+        // `e2eComputerConfiguredV1`.
+        "--var",
+        `COMPUTER_HOST_TOKEN:${
+          e2eComputerConfiguredV1() ? E2E_COMPUTER_HOST_TOKEN : ""
+        }`,
         // better-auth needs a secret to construct; no spec signs in with it.
         "--var",
         "BETTER_AUTH_SECRET:e2e",

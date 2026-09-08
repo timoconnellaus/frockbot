@@ -233,6 +233,80 @@ void main() {
       await close(tester, controller);
     });
 
+    /// The Computer host being down is not the same answer as the Bot never
+    /// having had a Computer: the first is a card that stays, says what
+    /// refused, and opens.
+    Future<ComputerController> refused(
+      WidgetTester tester,
+      Object error,
+    ) async {
+      final store = MemoryStore();
+      final controller = ComputerController(
+        SettingsApi(store, (path, body) async => throw error),
+        'bot-1',
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: FrockTheme.theme(Brightness.dark),
+          home: Scaffold(body: ComputerCard(controller: controller)),
+        ),
+      );
+      await tester.pump();
+      return controller;
+    }
+
+    testWidgets('a host that cannot be reached keeps the card and says so', (
+      tester,
+    ) async {
+      final controller = await refused(
+        tester,
+        const RequestFailure('The Computer host answered 503', 500),
+      );
+      // Available, because the shell registers the panel entry from it: a
+      // dependency being down must not read as a Bot with no Computer.
+      expect(controller.available, isTrue);
+      expect(find.text('The Computer host answered 503'), findsOneWidget);
+      expect(find.text('No computer'), findsNothing);
+      // And it opens, because the full window is where the way out lives.
+      expect(tester.widget<InkWell>(find.byType(InkWell)).onTap, isNotNull);
+      await close(tester, controller);
+    });
+
+    testWidgets('a read that answers nothing at all says that', (tester) async {
+      final controller = await refused(tester, Exception('socket closed'));
+      expect(controller.available, isTrue);
+      expect(find.text('Couldn’t read the computer.'), findsOneWidget);
+      await close(tester, controller);
+    });
+
+    testWidgets(
+      'the full window says what refused, and offers the read again',
+      (tester) async {
+        final store = MemoryStore();
+        final controller = ComputerController(
+          SettingsApi(store, (path, body) async {
+            throw const RequestFailure('The Computer host answered 503', 500);
+          }),
+          'bot-1',
+        );
+        await controller.read();
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: FrockTheme.theme(Brightness.dark),
+            home: ComputerViewerPage(controller: controller),
+          ),
+        );
+        await tester.pump();
+        expect(find.text('No computer'), findsOneWidget);
+        expect(find.text('Try again'), findsOneWidget);
+        expect(
+          find.text('The Computer host answered 503'),
+          findsAtLeastNWidgets(1),
+        );
+        await close(tester, controller);
+      },
+    );
+
     testWidgets('a settled Computer shows its snapshot and says so', (
       tester,
     ) async {
