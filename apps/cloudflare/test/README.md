@@ -90,7 +90,27 @@ a revoked one (validates, then fails on a Turn), and a bad one.
 
 `e2e/playwright.config.ts`, files `e2e/**/*.e2e.ts`. A real Chromium against
 `wrangler dev` running `src/index.ts` and the artifact the harness builds, so
-it is the only layer in which the shipped Vue client executes.
+it is the only layer in which the shipped Flutter client executes.
+
+Run the whole suite with `bun run test:e2e`, one file with
+`bun run test:e2e -- e2e/chat.e2e.ts`, and with a browser you can watch by
+adding `--headed`. Locally it runs four workers at once; `--workers 1` puts it
+back to one file at a time when a failure needs reading.
+
+Three things keep that parallelism honest, and a new spec inherits all three:
+
+- Every test takes a fresh `?as_user=` identity, so no two ever meet in one
+  User Durable Object.
+- The fake provider's chat mode is keyed by the endpoint the test's own
+  Connection points at (`e2eOllamaEndpointV1` builds it, and the `ollamaBaseUrl`
+  fixture hands it over already scoped), so one test's `unauthorized` is
+  invisible to the rest.
+- A file that provisions once for all of its tests says so with
+  `shareProvisionedApplication`, which owns the page for the file: it walks
+  `provisionThroughUi` in `beforeAll`, resets the viewport and any route between
+  tests, and still fails each test on the console errors reported while it ran.
+  `chat.e2e.ts` is the worked example — every test in it makes a Bot of its own
+  and shares everything above that.
 
 `e2e/harness.ts` is the Playwright `webServer`: it runs `artifact:build`, seeds
 `dist/artifacts/foundation-v1.mjs` into the local `APPLICATION_ARTIFACTS`
@@ -110,6 +130,13 @@ its Connection at the fake server the way a User points one at a local Ollama.
 The file suffix is `*.e2e.ts`, not `*.spec.ts`: root `bun test` matches
 `*.spec.ts` as well as `*.test.ts`, and a Playwright spec loaded by Bun's
 runner throws.
+
+`artifact:build` begins with `flutter build web --release`, which is a minute
+whether or not a line changed. `build-flutter-web.ts` fingerprints what the
+build reads — `apps/native/lib`, `web`, `assets`, `vendor`, both pubspecs, the
+build flags and the Flutter version — and skips the build when the staged
+bundle already came from exactly those. `FROCKBOT_FORCE_CLIENT_BUILD=1` builds
+anyway.
 
 `docs/architecture-checks.md` § Browser end to end maps each spec to its seam
 and incident.

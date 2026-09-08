@@ -22,17 +22,13 @@ import {
   createBot,
   press,
   pressDisabled,
-  provisionThroughUi,
   revealSidebar,
   sem,
   setFakeOllamaChatMode,
+  shareProvisionedApplication,
   spokenText,
 } from "./fixtures.ts";
-import {
-  E2E_ASSISTANT_REPLY,
-  E2E_OLLAMA_GOOD_API_KEY,
-  e2eToolCallPrompt,
-} from "./harness.ts";
+import { E2E_ASSISTANT_REPLY, e2eToolCallPrompt } from "./harness.ts";
 // The send route's own rule, read from the module that enforces it: a spec
 // that restated the number would keep passing after the limit moved.
 import {
@@ -48,15 +44,27 @@ import {
 import type { Locator, Page } from "@playwright/test";
 
 /*
- * The fake provider is one server shared by every spec in the shard, so a mode
- * a spec switched on is switched off here rather than on its own last line —
- * a spec that fails mid-Turn never reaches its last line. Leaving
- * `unauthorized` on made every later spec's Turn fail with a 401 it never
- * asked for; leaving `streaming` on made every later spec wait out the gap in
- * the middle of every reply until it ran out of time. Both read as a
- * regression in whatever ran next.
+ * One account, one browser, one walk through provisioning, for the whole file.
+ *
+ * Every test here is about what a Bot does in a conversation, and none of them
+ * is about the account it happens in: they used to boot the client and walk
+ * `provisionThroughUi` eleven times over to reach the same place. Each test
+ * makes a Bot of its own instead, which is the fresh conversation it needs.
  */
-test.afterEach(async ({ page, ollamaBaseUrl }) => {
+const application = shareProvisionedApplication({ botName: "First" });
+
+/*
+ * The chat mode belongs to this file's own Connection endpoint, so a mode a
+ * test switched on is invisible to every other spec in the run — but not to
+ * the test after this one, which shares that endpoint. It is switched off here
+ * rather than on a test's own last line: a test that fails mid-Turn never
+ * reaches its last line. Leaving `unauthorized` on made every later test's
+ * Turn fail with a 401 it never asked for; leaving `streaming` on made every
+ * later test wait out the gap in the middle of every reply until it ran out of
+ * time. Both read as a regression in whatever ran next.
+ */
+test.afterEach(async () => {
+  const { page, ollamaBaseUrl } = application();
   await setFakeOllamaChatMode(page, ollamaBaseUrl, "ok");
 });
 
@@ -183,17 +191,9 @@ async function send(
   });
 }
 
-test("Turns stay ordered, render Markdown, and survive a reload", async ({
-  page,
-  userId,
-  ollamaBaseUrl,
-}) => {
-  await provisionThroughUi(page, {
-    userId,
-    apiKey: E2E_OLLAMA_GOOD_API_KEY,
-    apiBaseUrl: ollamaBaseUrl,
-    botName: "Talker",
-  });
+test("Turns stay ordered, render Markdown, and survive a reload", async () => {
+  const { page } = application();
+  await createBot(page, "Talker");
 
   const firstReply = "Rendered **this** for you";
   const secondReply = "And _that_ as well";
@@ -247,17 +247,9 @@ test("Turns stay ordered, render Markdown, and survive a reload", async ({
   await expect(sidebarRow).toContainText(E2E_ASSISTANT_REPLY);
 });
 
-test("a Turn that is running when the page reloads still delivers its reply", async ({
-  page,
-  userId,
-  ollamaBaseUrl,
-}) => {
-  await provisionThroughUi(page, {
-    userId,
-    apiKey: E2E_OLLAMA_GOOD_API_KEY,
-    apiBaseUrl: ollamaBaseUrl,
-    botName: "Patient",
-  });
+test("a Turn that is running when the page reloads still delivers its reply", async () => {
+  const { page, ollamaBaseUrl } = application();
+  await createBot(page, "Patient");
 
   // The provider holds the completion open, so the Turn is genuinely running
   // while the browser goes away.
@@ -297,17 +289,9 @@ test("a Turn that is running when the page reloads still delivers its reply", as
 // once. The regression this pins was every block of an assistant Turn laying
 // out side by side, which squeezed a one-word reply into a 17px column that
 // broke "pong" across two lines and drew it twice.
-test("a delivered reply is one bubble, wide enough for its own text", async ({
-  page,
-  userId,
-  ollamaBaseUrl,
-}) => {
-  await provisionThroughUi(page, {
-    userId,
-    apiKey: E2E_OLLAMA_GOOD_API_KEY,
-    apiBaseUrl: ollamaBaseUrl,
-    botName: "Ponger",
-  });
+test("a delivered reply is one bubble, wide enough for its own text", async () => {
+  const { page } = application();
+  await createBot(page, "Ponger");
   await page.setViewportSize({ width: 1351, height: 831 });
 
   await send(page, `ping\n${says("pong")}`, { replies: 1 });
@@ -349,17 +333,9 @@ test("a delivered reply is one bubble, wide enough for its own text", async ({
 // under the bubbles now, so a bubble is at the transcript's left edge while
 // the Bot is still writing, the sheep is below it rather than beside it, and
 // the end of the Turn moves nothing horizontally.
-test("the working avatar sits below the bubbles and never shifts them", async ({
-  page,
-  userId,
-  ollamaBaseUrl,
-}) => {
-  await provisionThroughUi(page, {
-    userId,
-    apiKey: E2E_OLLAMA_GOOD_API_KEY,
-    apiBaseUrl: ollamaBaseUrl,
-    botName: "Stacker",
-  });
+test("the working avatar sits below the bubbles and never shifts them", async () => {
+  const { page, ollamaBaseUrl } = application();
+  await createBot(page, "Stacker");
   await page.setViewportSize({ width: 1351, height: 831 });
 
   // `slow` rather than `streaming`: the fake splits its answer across a gap
@@ -418,17 +394,9 @@ test("the working avatar sits below the bubbles and never shifts them", async ({
 // arrive below the animation that was supposedly about to answer them — and the
 // Turn they had just replaced was labelled "Interrupted by your next message.",
 // which said nothing their own message did not already say.
-test("a message sent mid-Turn lands above the working sheep, unlabelled", async ({
-  page,
-  userId,
-  ollamaBaseUrl,
-}) => {
-  await provisionThroughUi(page, {
-    userId,
-    apiKey: E2E_OLLAMA_GOOD_API_KEY,
-    apiBaseUrl: ollamaBaseUrl,
-    botName: "Stepper",
-  });
+test("a message sent mid-Turn lands above the working sheep, unlabelled", async () => {
+  const { page, ollamaBaseUrl } = application();
+  await createBot(page, "Stepper");
 
   // The provider holds every model call open for ten seconds, which is the
   // window to send into. Not `streaming`, which splits an answer across a gap
@@ -508,17 +476,9 @@ test("a message sent mid-Turn lands above the working sheep, unlabelled", async 
 // the same bubble, so the newest overwrote the one before it and a person
 // watching an acknowledgement followed by a result was left with only the
 // result.
-test("every message the Bot sends is its own bubble, in order", async ({
-  page,
-  userId,
-  ollamaBaseUrl,
-}) => {
-  await provisionThroughUi(page, {
-    userId,
-    apiKey: E2E_OLLAMA_GOOD_API_KEY,
-    apiBaseUrl: ollamaBaseUrl,
-    botName: "Sayer",
-  });
+test("every message the Bot sends is its own bubble, in order", async () => {
+  const { page } = application();
+  await createBot(page, "Sayer");
 
   const said = ["On it.", "Looking now.", "Booked."];
   await send(page, ["book it", ...said.map(says)].join("\n"), {
@@ -537,17 +497,9 @@ test("every message the Bot sends is its own bubble, in order", async ({
 // tool calls has to look like it is working without naming one. The comet
 // trail off the Bot's avatar is that — a working row while the Turn runs, gone
 // once it settles, and never a word about a tool.
-test("a working Bot shows a comet trail beside its avatar, and no tool names", async ({
-  page,
-  userId,
-  ollamaBaseUrl,
-}) => {
-  await provisionThroughUi(page, {
-    userId,
-    apiKey: E2E_OLLAMA_GOOD_API_KEY,
-    apiBaseUrl: ollamaBaseUrl,
-    botName: "Ringer",
-  });
+test("a working Bot shows a comet trail beside its avatar, and no tool names", async () => {
+  const { page, ollamaBaseUrl } = application();
+  await createBot(page, "Ringer");
 
   // `slow` for the same reason the two specs above use it: the fake's gap is
   // for an answer it wrote itself, and this Turn scripts a reply.
@@ -575,17 +527,10 @@ test("a working Bot shows a comet trail beside its avatar, and no tool names", a
 });
 
 test("a provider that stops accepting the key ends the Turn with a reason", async ({
-  page,
-  userId,
-  ollamaBaseUrl,
   allowedFailures,
 }) => {
-  await provisionThroughUi(page, {
-    userId,
-    apiKey: E2E_OLLAMA_GOOD_API_KEY,
-    apiBaseUrl: ollamaBaseUrl,
-    botName: "Revoked",
-  });
+  const { page, ollamaBaseUrl } = application();
+  await createBot(page, "Revoked");
 
   // The key validated, so the Connection is ready; the endpoint then refuses
   // inference, which is what an upstream revocation looks like.
@@ -656,17 +601,10 @@ test("a provider that stops accepting the key ends the Turn with a reason", asyn
 // message drawn as though it had been sent, followed by a spinner over a run
 // that was never admitted.
 test("a send the server refuses for size keeps the draft and says why", async ({
-  page,
-  userId,
-  ollamaBaseUrl,
   allowedFailures,
 }) => {
-  await provisionThroughUi(page, {
-    userId,
-    apiKey: E2E_OLLAMA_GOOD_API_KEY,
-    apiBaseUrl: ollamaBaseUrl,
-    botName: "Terse",
-  });
+  const { page } = application();
+  await createBot(page, "Terse");
 
   const composer = composerInput(page);
 
@@ -718,17 +656,10 @@ test("a send the server refuses for size keeps the draft and says why", async ({
 // number of times, and then it says the one thing no copy in the product used
 // to say, which is that the app could not reach the Bot.
 test("a Bot the client cannot reach settles with a reason and a Retry", async ({
-  page,
-  userId,
-  ollamaBaseUrl,
   allowedFailures,
 }) => {
-  await provisionThroughUi(page, {
-    userId,
-    apiKey: E2E_OLLAMA_GOOD_API_KEY,
-    apiBaseUrl: ollamaBaseUrl,
-    botName: "Unreachable",
-  });
+  const { page } = application();
+  await createBot(page, "Unreachable");
 
   allowedFailures.requests.push(/\/api\/bots\/[^/]+\/turns/);
   allowedFailures.console.push(/Failed to load resource/);
@@ -764,17 +695,9 @@ test("a Bot the client cannot reach settles with a reason and a Retry", async ({
   await expect(sem(page, "check-delivery")).toBeVisible();
 });
 
-test("a conversation opens at its end, and switching back to it does not reload it", async ({
-  page,
-  userId,
-  ollamaBaseUrl,
-}) => {
-  await provisionThroughUi(page, {
-    userId,
-    apiKey: E2E_OLLAMA_GOOD_API_KEY,
-    apiBaseUrl: ollamaBaseUrl,
-    botName: "Long",
-  });
+test("a conversation opens at its end, and switching back to it does not reload it", async () => {
+  const { page } = application();
+  await createBot(page, "Long");
 
   // Long enough that the thread has to scroll: an opening that is already at
   // the end proves nothing on a transcript that fits.

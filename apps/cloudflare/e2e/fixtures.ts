@@ -27,14 +27,19 @@
 import {
   expect,
   test as base,
+  type BrowserContext,
   type Locator,
   type Page,
 } from "@playwright/test";
-import type { FakeOllamaChatMode } from "./harness.ts";
+import {
+  e2eOllamaEndpointV1,
+  E2E_OLLAMA_GOOD_API_KEY,
+  type FakeOllamaChatMode,
+} from "./harness.ts";
 
 export interface E2EOptions {
-  /** The fake Ollama server the harness started, for `api-base-url`. */
-  ollamaBaseUrl: string;
+  /** The fake Ollama server the harness started, as its bare origin. */
+  ollamaServerUrl: string;
 }
 
 export interface AllowedFailures {
@@ -46,6 +51,11 @@ export interface AllowedFailures {
 
 interface E2EFixtures {
   userId: string;
+  /**
+   * The endpoint this test's Connection points at: the fake server, behind a
+   * path that belongs to this test alone. See `e2eOllamaEndpointV1`.
+   */
+  ollamaBaseUrl: string;
   allowedFailures: AllowedFailures;
   serverReady: void;
 }
@@ -118,11 +128,77 @@ interface Problem {
   text: string;
 }
 
-export const test = base.extend<E2EOptions & E2EFixtures>({
-  ollamaBaseUrl: ["", { option: true }],
+/**
+ * Record everything the page reports that a test might not have wanted.
+ *
+ * Separate from the `page` fixture because a spec file that provisions once
+ * and hands the same page to every test in it (`shareProvisionedApplication`)
+ * still owes each of those tests the same check.
+ */
+function collectProblems(page: Page): Problem[] {
+  const problems: Problem[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") {
+      problems.push({ kind: "console", text: message.text() });
+    }
+  });
+  page.on("pageerror", (error) => {
+    problems.push({ kind: "pageerror", text: error.message });
+  });
+  page.on("requestfailed", (request) => {
+    const failure = request.failure()?.errorText ?? "failed";
+    // `requestfailed` also fires for a request somebody cancelled, and the
+    // client is a poller: closing the page or navigating away aborts whatever
+    // poll is in flight. An abort is not a transport failure the product owns.
+    if (failure === "net::ERR_ABORTED") return;
+    problems.push({
+      kind: "requestfailed",
+      text: `${request.url()}: ${failure}`,
+    });
+  });
+  page.on("response", (response) => {
+    if (response.status() >= 500) {
+      problems.push({
+        kind: "server-error",
+        text: `${response.status()} ${response.url()}`,
+      });
+    }
+  });
+  return problems;
+}
+
+/**
+ * Fail unless every problem recorded is one the test said it expected.
+ *
+ * The allow-list is consulted here rather than at capture time, so a test may
+ * declare what it expects at any point before it ends.
+ */
+function expectNoUnexpectedProblems(
+  problems: readonly Problem[],
+  allowed: AllowedFailures,
+): void {
+  const unexpected = problems.filter((problem) => {
+    const patterns =
+      problem.kind === "console" || problem.kind === "pageerror"
+        ? allowed.console
+        : allowed.requests;
+    return !patterns.some((pattern) => pattern.test(problem.text));
+  });
+  expect(
+    unexpected.map((problem) => `${problem.kind}: ${problem.text}`),
+    "the page reported errors no test allowed",
+  ).toEqual([]);
+}
+
+export const test = base.extend<E2EFixtures, E2EOptions>({
+  ollamaServerUrl: ["", { scope: "worker", option: true }],
 
   userId: async ({}, use) => {
     await use(`e2e-${crypto.randomUUID()}`);
+  },
+
+  ollamaBaseUrl: async ({ ollamaServerUrl, userId }, use) => {
+    await use(e2eOllamaEndpointV1(ollamaServerUrl, userId));
   },
 
   allowedFailures: async ({}, use) => {
@@ -139,52 +215,148 @@ export const test = base.extend<E2EOptions & E2EFixtures>({
   // that may still be coming back up.
   page: async ({ page, allowedFailures, serverReady }, use) => {
     void serverReady;
-    const problems: Problem[] = [];
-    page.on("console", (message) => {
-      if (message.type() === "error") {
-        problems.push({ kind: "console", text: message.text() });
-      }
-    });
-    page.on("pageerror", (error) => {
-      problems.push({ kind: "pageerror", text: error.message });
-    });
-    page.on("requestfailed", (request) => {
-      const failure = request.failure()?.errorText ?? "failed";
-      // `requestfailed` also fires for a request somebody cancelled, and the
-      // client is a poller: closing the page or navigating away aborts whatever
-      // poll is in flight. An abort is not a transport failure the product owns.
-      if (failure === "net::ERR_ABORTED") return;
-      problems.push({
-        kind: "requestfailed",
-        text: `${request.url()}: ${failure}`,
-      });
-    });
-    page.on("response", (response) => {
-      if (response.status() >= 500) {
-        problems.push({
-          kind: "server-error",
-          text: `${response.status()} ${response.url()}`,
-        });
-      }
-    });
-
+    const problems = collectProblems(page);
     await use(page);
-
-    // The allow-list is consulted here rather than at capture time, so a test
-    // may declare what it expects at any point before it ends.
-    const unexpected = problems.filter((problem) => {
-      const patterns =
-        problem.kind === "console" || problem.kind === "pageerror"
-          ? allowedFailures.console
-          : allowedFailures.requests;
-      return !patterns.some((pattern) => pattern.test(problem.text));
-    });
-    expect(
-      unexpected.map((problem) => `${problem.kind}: ${problem.text}`),
-      "the page reported errors no test allowed",
-    ).toEqual([]);
+    expectNoUnexpectedProblems(problems, allowedFailures);
   },
 });
+
+/** What a spec file gets back when it provisions once for all of its tests. */
+export interface SharedApplication {
+  page: Page;
+  /** The account every test in the file shares. */
+  userId: string;
+  /** That account's Connection endpoint, for `setFakeOllamaChatMode`. */
+  ollamaBaseUrl: string;
+}
+
+/**
+ * Provision one account, in one browser, for a whole spec file.
+ *
+ * Booting the client is the most expensive thing a test does — a 3 MB CanvasKit
+ * bundle downloaded, compiled and painted — and walking `provisionThroughUi` is
+ * the second: two Packages, a Connection and a default model, each a press on a
+ * surface that has to arrive first. A file whose tests differ in what they do to
+ * a Bot, rather than in what account they do it as, pays both once here.
+ *
+ * The tests then run in declaration order and share the page, so each one
+ * starts from whatever the last left behind: a test that wants a conversation
+ * of its own makes a Bot of its own. What is *not* shared is the check every
+ * test gets from the `page` fixture — problems are attributed to the test that
+ * was running when the page reported them.
+ */
+export function shareProvisionedApplication(options: {
+  /** The Bot `provisionThroughUi` leaves selected, before any test runs. */
+  botName: string;
+  perBotModels?: boolean;
+}): () => SharedApplication {
+  let shared: SharedApplication | undefined;
+  let context: BrowserContext | undefined;
+  let problems: Problem[] = [];
+  let seen = 0;
+  let windowSize: { width: number; height: number } | null = null;
+
+  test.beforeAll(async ({ browser, ollamaServerUrl }, testInfo) => {
+    // The context options the project declares, named one at a time: the
+    // project's `use` also carries this suite's own options, which
+    // `newContext` would not know what to do with.
+    const {
+      baseURL,
+      viewport,
+      deviceScaleFactor,
+      hasTouch,
+      isMobile,
+      userAgent,
+      permissions,
+      timezoneId,
+      locale,
+      colorScheme,
+    } = testInfo.project.use;
+    if (baseURL) await waitForServer(baseURL);
+    context = await browser.newContext({
+      baseURL,
+      viewport,
+      deviceScaleFactor,
+      hasTouch,
+      isMobile,
+      userAgent,
+      permissions,
+      timezoneId,
+      locale,
+      colorScheme,
+    });
+    // Tracing and video are the project's own (`use.trace`, `use.video`):
+    // Playwright arms them on every context the `browser` fixture makes,
+    // including this one, and saves them when the context closes.
+    const page = await context.newPage();
+    problems = collectProblems(page);
+    const userId = `e2e-${crypto.randomUUID()}`;
+    const ollamaBaseUrl = e2eOllamaEndpointV1(ollamaServerUrl, userId);
+    await provisionThroughUi(page, {
+      userId,
+      apiKey: E2E_OLLAMA_GOOD_API_KEY,
+      apiBaseUrl: ollamaBaseUrl,
+      botName: options.botName,
+      ...(options.perBotModels ? { perBotModels: true } : {}),
+    });
+    windowSize = page.viewportSize();
+    shared = { page, userId, ollamaBaseUrl };
+  });
+
+  test.beforeEach(async () => {
+    seen = problems.length;
+    const page = shared?.page;
+    if (!page) return;
+    // The page is handed on from the test before, which may have resized the
+    // window or put a route in front of the network to make its own point.
+    // Neither belongs to the test about to run.
+    await page.unrouteAll({ behavior: "ignoreErrors" });
+    if (windowSize) await page.setViewportSize(windowSize);
+    // And it is left on the conversation, wherever the last test finished —
+    // including a test that failed inside a settings sheet. Walking back is
+    // cheap; reloading, which boots the engine again, is the fallback.
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      if (
+        await sem(page, "shell-conversation")
+          .isVisible()
+          .catch(() => false)
+      ) {
+        return;
+      }
+      await page.goBack().catch(() => undefined);
+    }
+    await page.reload();
+    await expect(sem(page, "shell-conversation")).toBeVisible({
+      timeout: SHELL_TIMEOUT_MS,
+    });
+  });
+
+  test.afterEach(async ({ allowedFailures }, testInfo) => {
+    if (testInfo.status !== testInfo.expectedStatus && shared) {
+      // The project's `screenshot: only-on-failure` is the `page` fixture's,
+      // and this page is not it: a failing test keeps the one thing that says
+      // what was on screen.
+      const path = testInfo.outputPath("failure.png");
+      await shared.page.screenshot({ path }).catch(() => undefined);
+      await testInfo.attach("failure", { path, contentType: "image/png" });
+    }
+    // Whatever the page reported while *this* test ran. A file-scoped page
+    // outlives a test, so the slice — not the whole list — is this test's.
+    expectNoUnexpectedProblems(problems.slice(seen), allowedFailures);
+  });
+
+  test.afterAll(async () => {
+    await context?.close();
+    context = undefined;
+    shared = undefined;
+  });
+
+  return () => {
+    if (!shared)
+      throw new Error("the shared application was never provisioned");
+    return shared;
+  };
+}
 
 export { expect } from "@playwright/test";
 
