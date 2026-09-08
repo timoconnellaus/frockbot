@@ -687,6 +687,44 @@ describe("client run protocol v1", () => {
     );
   });
 
+  test("keeps a first-party tool's arguments out of the projection", () => {
+    const projected = projectClientTurnV1({
+      runId: "run-first-party-tool",
+      text: "",
+      events: [
+        event({
+          type: "tool/call",
+          seq: 0,
+          timestamp,
+          turn: 1,
+          step: 1,
+          occurrenceId: "tool:1:1:0",
+          name: "call_dynamic_tool",
+          input: {
+            namespace: "frockbot",
+            toolName: "computer_exec",
+            arguments: { command: "cat ~/.aws/credentials" },
+          },
+        }),
+      ],
+    });
+
+    // The client is still told which tool ran — only what it was given stays
+    // inside the Bot, exactly as it did while these tools were native.
+    expect(projected.events[0]).toEqual({
+      type: "tool/call",
+      call: {
+        id: "tool-1",
+        name: "call_dynamic_tool",
+        input: { namespace: "frockbot", toolName: "computer_exec" },
+      },
+    });
+    expect(JSON.stringify(projected)).not.toContain("credentials");
+    expect(decodeClientTurnV1(structuredClone(projected)).events[0]).toEqual(
+      projected.events[0],
+    );
+  });
+
   test("projects only bounded user-visible run state", () => {
     const stored = {
       runId: "run-1",

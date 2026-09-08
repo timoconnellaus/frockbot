@@ -108,7 +108,7 @@ describe("the settled-run projection", () => {
       projectClientRunV1(dynamicRun("frockbot", "computer_exec")),
     );
     expect(firstParty.find((entry) => entry.kind === "tool")?.body).toBe(
-      "computer_exec\nok",
+      "frockbot/computer_exec\nok",
     );
 
     const external = searchRowsFromClientRunV1(

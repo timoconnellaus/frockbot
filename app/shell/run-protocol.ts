@@ -558,17 +558,19 @@ export const UNRECORDED_TOOL_RESULT_TEXT_V1 =
 /** The wrapper every namespaced tool call is journalled and projected under. */
 const CALL_DYNAMIC_TOOL_NAME_V1 = "call_dynamic_tool";
 
-/** The first-party namespace, whose tools are presented under their bare name. */
+/** The first-party namespace, whose tool arguments stay inside the Bot. */
 const FROCKBOT_NAMESPACE_V1 = "frockbot";
 
 /**
- * The tool a projected call actually named.
+ * The name a projected call is shown under.
  *
  * The projection keeps the wrapper on the wire because that is what the
- * journal recorded, and the wrapper's input names the tool: every presenter of
- * a projected call resolves it the same way, the Flutter transcript included
- * (`apps/native/lib/shell/transcript_model.dart`). A reader that skips this
- * step shows every first-party tool under one indistinguishable name.
+ * journal recorded, and the wrapper's input names the tool. This is the
+ * spelling the Flutter transcript already puts in front of a person
+ * (`_presentedToolCall` in `apps/native/lib/shell/transcript_model.dart`), so
+ * a name copied out of the Work view is the name the search index holds. The
+ * audit classifier answers a different question — which tool ran, regardless
+ * of how it is displayed — and strips the first-party namespace instead.
  */
 export function clientToolCallNameV1(call: {
   name: string;
@@ -581,9 +583,7 @@ export function clientToolCallNameV1(call: {
   if (typeof namespace !== "string" || typeof toolName !== "string") {
     return call.name;
   }
-  return namespace === FROCKBOT_NAMESPACE_V1
-    ? toolName
-    : `${namespace}/${toolName}`;
+  return `${namespace}/${toolName}`;
 }
 
 function dynamicToolCallInput(
@@ -599,9 +599,16 @@ function dynamicToolCallInput(
   ) {
     return undefined;
   }
-  const argumentsJson = Object.hasOwn(input, "arguments")
-    ? JSON.stringify(input.arguments)
-    : undefined;
+  // A first-party tool's arguments never leave the Bot: routing them through
+  // the dynamic envelope changed how they are dispatched, not who may read
+  // what a `computer_exec` ran. Only a genuinely external namespace — an MCP
+  // server or an isolate the person themselves connected — carries its
+  // arguments to the client, which is what the Work view has always shown.
+  const argumentsJson =
+    input.namespace !== FROCKBOT_NAMESPACE_V1 &&
+    Object.hasOwn(input, "arguments")
+      ? JSON.stringify(input.arguments)
+      : undefined;
   return {
     namespace: truncateWireString(input.namespace, MAX_EVENT_NAME_BYTES),
     toolName: truncateWireString(input.toolName, MAX_EVENT_NAME_BYTES),
