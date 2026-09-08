@@ -208,9 +208,12 @@ async function settle(page: Page): Promise<void> {
   const canvas = canvasOf(page);
   let previous = -1;
   for (let attempt = 0; attempt < 40; attempt += 1) {
-    const box = await canvas.boundingBox().catch(() => null);
-    // No canvas on screen is nothing to wait for: the shots of the closed
-    // shell were spending ten seconds proving the box stayed absent.
+    // With its own bound. `boundingBox()` waits for the element first, and
+    // this project sets no action timeout — so a shot of a shell with the
+    // canvas closed waited for a canvas that was never coming, and spent the
+    // whole test's budget inside a `catch` that never ran.
+    const box = await canvas.boundingBox({ timeout: 1_000 }).catch(() => null);
+    // No canvas on screen is nothing to wait for.
     if (!box) return;
     const width = Math.round(box.width);
     if (width === previous) return;
@@ -263,9 +266,8 @@ test("a Bot writes, checks and publishes an Applet, and its tool reaches the Bot
   ollamaBaseUrl,
 }) => {
   // Two container builds, a live Applet in an iframe, a second page watching
-  // the same tables, and eight scripted Turns. Fifteen minutes was the whole
-  // budget and this spec now reaches the end of itself inside it.
-  test.setTimeout(1_500_000);
+  // the same tables, and eight scripted Turns.
+  test.setTimeout(900_000);
   expect(
     appletBuildAvailableV1(),
     "Docker is not running, so apps/applet-build could not start and no Applet can be built. Start Docker and run this spec again.",

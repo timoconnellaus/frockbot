@@ -290,8 +290,11 @@ test("a Bot creates an Applet, the canvas shows its source, and the surface list
     { appletId: await appletIdFromSurface(page) },
     async () => !(await directoryHolds(page, "Weekly Todos")),
   );
-  const emptied = await openCanvas(page);
-  await expect(named(emptied, "Weekly Todos")).toHaveCount(0);
+  // The header's Applet strip *is* the Applets this Bot holds — one entry per
+  // Applet — so a Bot with none has nothing left to press, and there is no
+  // canvas to open behind it either.
+  await expect(sem(page, "applet-chip")).toHaveCount(0, { timeout: 60_000 });
+  await expect(named(page.locator("body"), "Weekly Todos")).toHaveCount(0);
 });
 
 /** The Applet's id, read from the directory the Package itself renders. */

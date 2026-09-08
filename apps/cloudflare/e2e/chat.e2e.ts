@@ -759,10 +759,17 @@ test("a Bot the client cannot reach settles with a reason and a Retry", async ({
     })
     .toContain("Couldn’t confirm your message");
 
-  // Nothing is running, so nothing offers to stop it; the draft is back, and
-  // the way to send it again is offered beside the reason.
+  // Nothing is running, so nothing offers to stop it, and the way to find out
+  // what became of the message is offered beside the reason.
+  //
+  // The words are not handed back to the composer, and deliberately: this
+  // client cannot tell a message that never arrived from one the Bot admitted
+  // and answered, so putting the text back would invite the person to send it
+  // twice. It stays a submission the client is still holding — which is what
+  // "Check message status" is about — and the composer is free for whatever
+  // they want to say next.
   await expect(sem(page, "stop-button")).toHaveCount(0);
-  await expect(composer).toHaveValue(prompt);
+  await expect(composer).toHaveValue("");
   await expect(sem(page, "check-delivery")).toBeVisible();
 });
 
