@@ -212,7 +212,37 @@ describe("BotState Ollama execution", () => {
       }
       return Promise.resolve(
         new Response(
-          'data: {"choices":[{"delta":{"content":"Ollama reply"}}]}\n\n' +
+          "data: " +
+            JSON.stringify({
+              choices: [
+                {
+                  delta: {
+                    tool_calls: [
+                      {
+                        index: 0,
+                        id: "send",
+                        type: "function",
+                        function: {
+                          name: "send_to_user",
+                          arguments: JSON.stringify({
+                            payload: {
+                              type: "widget",
+                              widget: {
+                                prompt: "Ollama reply",
+                                options: ["Continue"],
+                                allowCustom: true,
+                                dismissOnMoveOn: false,
+                              },
+                            },
+                          }),
+                        },
+                      },
+                    ],
+                  },
+                },
+              ],
+            }) +
+            "\n\n" +
             'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n' +
             "data: [DONE]\n\n",
           {
@@ -243,9 +273,16 @@ describe("BotState Ollama execution", () => {
       },
     } as unknown as BotStateEnv;
     const state = () =>
-      new BotState({ storage } as unknown as DurableObjectState, env, {
-        outboundFetch,
-      });
+      new BotState(
+        {
+          storage,
+          blockConcurrencyWhile: (body: () => Promise<unknown>) => body(),
+        } as unknown as DurableObjectState,
+        env,
+        {
+          outboundFetch,
+        },
+      );
 
     const firstState = state();
     const first = await firstState.run({
@@ -271,8 +308,12 @@ describe("BotState Ollama execution", () => {
       },
     });
 
-    expect(first.text).toBe("Ollama reply");
-    expect(second.text).toBe("Ollama reply");
+    expect(first.events.some((event) => event.type === "send/to-user")).toBe(
+      true,
+    );
+    expect(second.events.some((event) => event.type === "send/to-user")).toBe(
+      true,
+    );
     expect(requests).toHaveLength(2);
     expect(leases).toHaveLength(2);
     expect(settlements).toHaveLength(2);
@@ -346,7 +387,10 @@ describe("BotState mount failures", () => {
       MEMORY_INDEX: memoryIndex(),
     } as unknown as BotStateEnv;
     const state = new BotState(
-      { storage } as unknown as DurableObjectState,
+      {
+        storage,
+        blockConcurrencyWhile: (body: () => Promise<unknown>) => body(),
+      } as unknown as DurableObjectState,
       env,
     );
     const identity = { schemaVersion: 1, userId: "user-1", botId: "primary" };

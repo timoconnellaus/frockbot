@@ -13,6 +13,7 @@ import {
   SessionEventLog,
   sessionEventLogIndexKeyV1,
 } from "@frockbot/core/durable";
+import { executeUnreadCommand, readUnread } from "./unread.js";
 import { createShellBotBackendContribution } from "./backend.js";
 import {
   botTurnCommandFingerprintV1,
@@ -328,8 +329,17 @@ describe("Bot recovery", () => {
         toolCalls: [],
       },
       {
-        type: "step/end" as const,
+        type: "send/to-user" as const,
         seq: 3,
+        timestamp: "2026-08-28T00:00:01.000Z",
+        turn: 1,
+        step: 1,
+        occurrenceId: "tool:1:1:0",
+        payload: { type: "text" as const, text: "Durable reply" },
+      },
+      {
+        type: "step/end" as const,
+        seq: 4,
         timestamp: "2026-08-28T00:00:01.000Z",
         turn: 1,
         step: 1,
@@ -337,7 +347,7 @@ describe("Bot recovery", () => {
       },
       {
         type: "turn/end" as const,
-        seq: 4,
+        seq: 5,
         timestamp: "2026-08-28T00:00:01.000Z",
         turn: 1,
         outcome: "completed" as const,
@@ -1115,7 +1125,7 @@ describe("Bot recovery", () => {
       run: {
         runId: "command-1",
         status: "completed",
-        outcome: { type: "completed", text: "done" },
+        outcome: { type: "completed", text: "" },
       },
     });
     expect(storage.listRequests).toEqual([]);
@@ -1409,6 +1419,7 @@ describe("Bot recovery", () => {
       turnType?: "chat" | "automation";
     }>,
   ): Promise<void> {
+    await storage.put("identity", { userId: "user", botId: "primary" });
     const baseTime = Date.parse("2026-09-01T00:00:00.000Z");
     for (const [index, entry] of runs.entries()) {
       const acceptedAt = new Date(baseTime + index * 1_000).toISOString();
@@ -1437,13 +1448,56 @@ describe("Bot recovery", () => {
     }
   }
 
-  test("reaches an older conversation buried under newer Turns", async () => {
+  test("message unread survives reconstruction and rejects a different session", async () => {
     const storage = new MemoryStorage();
     await writeRunHistory(storage, [
-      { runId: "run-older", sessionId: "user:primary:older" },
+      { runId: "run-chat", sessionId: "user:primary" },
+      { runId: "run-routine", sessionId: "routine:other" },
+    ]);
+    const make = () =>
+      createShellBotBackendContribution({
+        ...shellTestApplicationV1(),
+        state: { storage } as unknown as DurableObjectState,
+        env: {} as never,
+      });
+    const identity = { userId: "user", botId: "primary" };
+    const command = {
+      schemaVersion: 1 as const,
+      type: "bot/mark-unread" as const,
+      commandId: "message-unread-1",
+      botId: "primary",
+      fromMessageId: "run-chat:user",
+    };
+    const first = await executeUnreadCommand(make().state, identity, command);
+    expect(first.unread.unreadFromMessageId).toBe("run-chat:user");
+    const replay = await executeUnreadCommand(make().state, identity, command);
+    expect(replay).toEqual(first);
+    expect((await readUnread(make().state, identity)).unreadFromMessageId).toBe(
+      "run-chat:user",
+    );
+    await expect(
+      executeUnreadCommand(make().state, identity, {
+        ...command,
+        commandId: "other",
+        fromMessageId: "run-routine:user",
+      }),
+    ).rejects.toThrow();
+    await expect(
+      executeUnreadCommand(make().state, identity, {
+        ...command,
+        commandId: "missing-send",
+        fromMessageId: "run-chat:send:0",
+      }),
+    ).rejects.toThrow();
+  });
+
+  test("reaches the chat buried under other sessions", async () => {
+    const storage = new MemoryStorage();
+    await writeRunHistory(storage, [
+      { runId: "run-older", sessionId: "user:primary" },
       ...Array.from({ length: CLIENT_RUN_PAGE_LIMIT + 2 }, (_value, index) => ({
         runId: `run-newer-${index.toString().padStart(3, "0")}`,
-        sessionId: "user:primary:newer",
+        sessionId: "routine:newer",
       })),
     ]);
     const contribution = createShellBotBackendContribution({
@@ -1454,7 +1508,6 @@ describe("Bot recovery", () => {
 
     const page = await contribution.listRuns({
       schemaVersion: 1,
-      conversationId: "user:primary:older",
     });
 
     expect(page.runs.map((run) => run.runId)).toEqual(["run-older"]);
@@ -1479,7 +1532,6 @@ describe("Bot recovery", () => {
 
     const page = await contribution.listRuns({
       schemaVersion: 1,
-      conversationId: "user:primary",
     });
 
     expect(page.runs.map((run) => run.runId)).toEqual(["run-chat"]);
@@ -1489,10 +1541,10 @@ describe("Bot recovery", () => {
     const storage = new MemoryStorage();
     const buried = CLIENT_RUN_SCAN_LIMIT + CLIENT_RUN_PAGE_LIMIT;
     await writeRunHistory(storage, [
-      { runId: "run-older", sessionId: "user:primary:older" },
+      { runId: "run-older", sessionId: "user:primary" },
       ...Array.from({ length: buried }, (_value, index) => ({
         runId: `run-newer-${index.toString().padStart(4, "0")}`,
-        sessionId: "user:primary:newer",
+        sessionId: "routine:newer",
       })),
     ]);
     const contribution = createShellBotBackendContribution({
@@ -1503,7 +1555,6 @@ describe("Bot recovery", () => {
 
     let page = await contribution.listRuns({
       schemaVersion: 1,
-      conversationId: "user:primary:older",
     });
     // The budget stops the scan short of the match, so the page must be empty
     // *and* say where to resume. Answering `truncated: false` here is the
@@ -1523,7 +1574,7 @@ describe("Bot recovery", () => {
       if (requests > 20) throw new Error("run list did not converge");
       page = await contribution.listRuns({
         schemaVersion: 1,
-        conversationId: "user:primary:older",
+
         before: page.page.nextCursor,
       });
     }

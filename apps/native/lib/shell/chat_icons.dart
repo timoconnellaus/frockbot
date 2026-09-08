@@ -1,0 +1,108 @@
+import 'dart:math' as math;
+
+import 'package:flutter/material.dart';
+
+enum ChatIconKind { menu, computer, routines, settings, applet, send }
+
+/// One light stroke weight for the compact chat chrome, independent of the
+/// platform's bundled Material glyph weight.
+class ChatIcon extends StatelessWidget {
+  final ChatIconKind kind;
+  final double size;
+  const ChatIcon(this.kind, {super.key, this.size = 19});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = IconTheme.of(context);
+    final base = theme.color ?? Theme.of(context).colorScheme.onSurface;
+    final color = base.withValues(alpha: base.a * (theme.opacity ?? 1));
+    return ExcludeSemantics(
+      child: SizedBox.square(
+        dimension: size,
+        child: CustomPaint(painter: _ChatIconPainter(kind, color)),
+      ),
+    );
+  }
+}
+
+class _ChatIconPainter extends CustomPainter {
+  final ChatIconKind kind;
+  final Color color;
+  const _ChatIconPainter(this.kind, this.color);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.scale(size.width / 24, size.height / 24);
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+    final path = Path();
+    switch (kind) {
+      case ChatIconKind.menu:
+        for (final y in [6.0, 12.0, 18.0]) {
+          path.moveTo(4, y);
+          path.lineTo(20, y);
+        }
+      case ChatIconKind.computer:
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(
+            const Rect.fromLTWH(3, 4, 18, 13),
+            const Radius.circular(1.5),
+          ),
+          paint,
+        );
+        path.moveTo(12, 17);
+        path.lineTo(12, 21);
+        path.moveTo(8, 21);
+        path.lineTo(16, 21);
+      case ChatIconKind.routines:
+        canvas.drawCircle(const Offset(12, 12), 9, paint);
+        path.moveTo(12, 6);
+        path.lineTo(12, 12);
+        path.lineTo(16, 14);
+      case ChatIconKind.settings:
+        // Eight shallow teeth keep the gear legible at 19 logical pixels.
+        for (var i = 0; i < 32; i++) {
+          final angle = i * math.pi / 16 - math.pi / 2;
+          final radius = i % 4 < 2 ? 9.5 : 7.5;
+          final point = Offset(
+            12 + radius * math.cos(angle),
+            12 + radius * math.sin(angle),
+          );
+          if (i == 0) {
+            path.moveTo(point.dx, point.dy);
+          } else {
+            path.lineTo(point.dx, point.dy);
+          }
+        }
+        path.close();
+        canvas.drawCircle(const Offset(12, 12), 3, paint);
+      case ChatIconKind.send:
+        path.moveTo(12, 20);
+        path.lineTo(12, 4);
+        path.moveTo(6, 10);
+        path.lineTo(12, 4);
+        path.lineTo(18, 10);
+      case ChatIconKind.applet:
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(
+            const Rect.fromLTWH(4, 4, 16, 16),
+            const Radius.circular(1.5),
+          ),
+          paint,
+        );
+        path.moveTo(4, 10);
+        path.lineTo(20, 10);
+        path.moveTo(10, 10);
+        path.lineTo(10, 20);
+    }
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(_ChatIconPainter oldDelegate) =>
+      oldDelegate.kind != kind || oldDelegate.color != color;
+}

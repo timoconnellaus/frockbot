@@ -45,6 +45,37 @@ async function* foundationStream(
 ): AsyncGenerator<LlmStreamEvent> {
   signal.throwIfAborted();
   const latest = request.messages.at(-1);
+  if (request.tools.some((tool) => tool.name === "send_to_user")) {
+    if (
+      latest?.role === "tool" &&
+      (latest.name === "send_to_user" || latest.name === "send_message")
+    ) {
+      yield { type: "finish", reason: "completed" };
+      return;
+    }
+    const user = request.messages.findLast(
+      (message) => message.role === "user",
+    );
+    const name =
+      latest?.role === "tool"
+        ? presentedToolName(request, latest.callId, latest.name)
+        : undefined;
+    const text =
+      latest?.role === "tool"
+        ? `${name === "echo" ? "Echo" : name}: ${latest.content}`
+        : `Built-in model: ${user?.role === "user" ? user.content : ""}`;
+    yield {
+      type: "tool-call",
+      call: {
+        id: `send-${request.requestId}`,
+        name: "send_to_user",
+        input: { payload: { type: "text", text } },
+      },
+    };
+    yield { type: "finish", reason: "tool-calls" };
+    return;
+  }
+
   if (latest?.role === "tool") {
     const name = presentedToolName(request, latest.callId, latest.name);
     const label = name === "echo" ? "Echo" : name;

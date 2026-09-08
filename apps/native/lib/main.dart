@@ -53,7 +53,7 @@ class _FrockBotAppState extends State<FrockBotApp> {
   late final SignIn auth = signInV1(api, store);
   late final BotSessions sessions = BotSessions(api: api, store: store);
   StreamSubscription<Uri>? links;
-  String? userId;
+  String? userId = localDevelopment ? 'development' : null;
   String? error;
   bool busy = true;
   bool awaitingBrowser = false;
@@ -112,7 +112,7 @@ class _FrockBotAppState extends State<FrockBotApp> {
       final bootstrap = bootstrapUserIdV1();
       if (bootstrap != null && mounted) setState(() => userId = bootstrap);
       final savedSession = await store.read('session');
-      if (savedSession != null) {
+      if (savedSession != null && !localDevelopment) {
         api.adoptSession(savedSession);
         final cached = wire.AuthSessionView.fromJson(jsonDecode(savedSession));
         if (mounted) setState(() => userId = cached.userId.value);

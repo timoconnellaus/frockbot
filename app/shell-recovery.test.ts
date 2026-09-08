@@ -179,7 +179,37 @@ describe("Bot recovery on this application", () => {
       if (failRequests) return Promise.reject(new Error("response lost"));
       return Promise.resolve(
         new Response(
-          'data: {"choices":[{"delta":{"content":"Ollama reply"}}]}\n\n' +
+          "data: " +
+            JSON.stringify({
+              choices: [
+                {
+                  delta: {
+                    tool_calls: [
+                      {
+                        index: 0,
+                        id: "send",
+                        type: "function",
+                        function: {
+                          name: "send_to_user",
+                          arguments: JSON.stringify({
+                            payload: {
+                              type: "widget",
+                              widget: {
+                                prompt: "Ollama reply",
+                                options: ["Continue"],
+                                allowCustom: true,
+                                dismissOnMoveOn: false,
+                              },
+                            },
+                          }),
+                        },
+                      },
+                    ],
+                  },
+                },
+              ],
+            }) +
+            "\n\n" +
             'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n' +
             "data: [DONE]\n\n",
           {
@@ -230,8 +260,21 @@ describe("Bot recovery on this application", () => {
       text: "again",
     });
 
-    expect(first.text).toBe("Ollama reply");
-    expect(second.text).toBe("Ollama reply");
+    expect(first.events).toContainEqual({
+      type: "send/to-user",
+      payload: {
+        type: "widget",
+        widget: {
+          prompt: "Ollama reply",
+          options: ["Continue"],
+          allowCustom: true,
+          dismissOnMoveOn: false,
+        },
+      },
+    });
+    expect(second.events.some((event) => event.type === "send/to-user")).toBe(
+      true,
+    );
     expect(requests).toHaveLength(2);
     expect(
       await Promise.all(requests.map((request) => request.clone().json())),

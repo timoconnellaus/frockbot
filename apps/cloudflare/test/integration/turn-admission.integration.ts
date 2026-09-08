@@ -266,13 +266,12 @@ describe("turn admission through the gateway and the Bot", () => {
         .filter((event) => event.type === "send/to-user")
         .map((event) => event.payload?.text),
     ).toEqual(["On it.", "Looking now.", "Booked."]);
-    // The Turn's own line is the model's reply, kept whole beside the sends
-    // rather than replacing them — the last send does not become the Turn's
-    // text, and no send is dropped for the one after it.
-    expect(run?.outcome?.text).toContain("Ollama reply");
+    // The outcome is only a summary of explicit delivery; it carries no
+    // independent assistant-text path.
+    expect(run?.outcome?.text).toBe("Booked.");
   });
 
-  it("falls back to the last text send when the Turn wrote no assistant message", async () => {
+  it("summarizes the last text send when a widget ends the Turn", async () => {
     const userId = freshUserId("admission-text");
     const botId = "admission-text-bot";
     await provisionThroughGateway({ userId, botId });

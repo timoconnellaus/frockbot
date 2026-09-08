@@ -1,3 +1,4 @@
+import { sentTextV1 } from "./sent-text.js";
 import {
   decodeSendToUserPayloadV1,
   decodeSkillRefsV1,
@@ -381,98 +382,9 @@ export interface ClientRunListV1 {
   announcements?: ClientAnnouncementV1[];
 }
 
-/**
- * One conversation a Bot has had.
- *
- * A Bot holds one conversation at a time and keeps the ones before it: the
- * transcript shows the current one, and an earlier one is still readable.
- */
-export interface ClientConversationV1 {
-  schemaVersion: 1;
-  /** The Session id this conversation's Turns recorded. */
-  conversationId: string;
-  ordinal: number;
-  startedAt: string;
-  /** Absent while this is the conversation the Bot is on. */
-  endedAt?: string;
-}
-
-export interface ClientConversationListV1 {
-  schemaVersion: 1;
-  /** Newest first; the first entry is the conversation the Bot is on. */
-  conversations: ClientConversationV1[];
-}
-
-/**
- * The answer to "start a new conversation": the list, or the reason not now.
- *
- * A refusal is a value, not an exception. The request crosses a Durable Object
- * boundary and a Worker boundary to get here, and an exception that crosses
- * either is logged by workerd as `Uncaught Error` — the log then showed the
- * isolate going down with a broken pipe behind it. Carrying the refusal as
- * data means the only thing that reaches the client is the 409 it expects.
- */
-export type ClientConversationOutcomeV1 =
-  | ({ status: "started" } & ClientConversationListV1)
-  | { status: "refused"; schemaVersion: 1; reason: string };
-
-export function decodeClientConversationListV1(
-  input: unknown,
-): ClientConversationListV1 {
-  const list = record(input, "conversation list");
-  exactKeys(list, ["schemaVersion", "conversations"], "conversation list");
-  if (list.schemaVersion !== 1) {
-    throw new Error("conversation list.schemaVersion is invalid");
-  }
-  if (!Array.isArray(list.conversations)) {
-    throw new Error("conversation list.conversations is invalid");
-  }
-  return {
-    schemaVersion: 1,
-    conversations: list.conversations.map((entry) => {
-      const conversation = record(entry, "conversation");
-      exactKeys(
-        conversation,
-        ["schemaVersion", "conversationId", "ordinal", "startedAt", "endedAt"],
-        "conversation",
-      );
-      if (conversation.schemaVersion !== 1) {
-        throw new Error("conversation.schemaVersion is invalid");
-      }
-      if (
-        typeof conversation.ordinal !== "number" ||
-        !Number.isSafeInteger(conversation.ordinal) ||
-        conversation.ordinal < 1
-      ) {
-        throw new Error("conversation.ordinal is invalid");
-      }
-      return {
-        schemaVersion: 1 as const,
-        conversationId: string(
-          conversation,
-          "conversationId",
-          MAX_SESSION_ID_LENGTH,
-          "conversation",
-        ),
-        ordinal: conversation.ordinal,
-        startedAt: string(conversation, "startedAt", 64, "conversation"),
-        ...(conversation.endedAt === undefined
-          ? {}
-          : { endedAt: string(conversation, "endedAt", 64, "conversation") }),
-      };
-    }),
-  };
-}
-
 export interface ClientRunListQueryV1 {
   schemaVersion: 1;
   before?: string;
-  /**
-   * The conversation to read. Absent means the one the Bot is on now, which
-   * is what the transcript shows; an earlier conversation is named by the
-   * Session id `listConversations` gave for it.
-   */
-  conversationId?: string;
 }
 
 export interface ClientTurnCommandV1 {
@@ -927,28 +839,6 @@ export function assistantTextSoFarV1(
   return text;
 }
 
-function interruptedOutcomeTextV1(run: StoredRun): { text?: string } {
-  const text = assistantTextSoFarV1(run.events, run.responseText ?? "");
-  return text ? { text: truncateWireString(text, MAX_OUTCOME_BYTES) } : {};
-}
-
-/**
- * What a still-running Turn has said so far, read out of the same journal an
- * interrupted one is read from.
- *
- * The kernel appends an `assistant/chunk` per provider text delta and each
- * append lands on the run record, so the words are already durable while the
- * Turn runs; nothing here is a second copy and nothing crosses the channel.
- * Bounded exactly as an outcome is, because a long answer must not be able to
- * grow the run list past its wire budget.
- */
-function partialTextV1(run: StoredRun): { partialText?: string } {
-  const text = assistantTextSoFarV1(run.events);
-  return text
-    ? { partialText: truncateWireString(text, MAX_OUTCOME_BYTES) }
-    : {};
-}
-
 function runStatus(run: StoredRun): ClientRunStatusV1 {
   return requireStoredRunV1(run).status;
 }
@@ -959,7 +849,7 @@ export function projectClientRunV1(run: StoredRun): ClientRunV1 {
     status === "completed"
       ? ({
           type: "completed",
-          text: truncateWireString(run.responseText ?? "", MAX_OUTCOME_BYTES),
+          text: truncateWireString(sentTextV1(run.events), MAX_OUTCOME_BYTES),
         } satisfies ClientRunOutcomeV1)
       : status === "failed"
         ? ({
@@ -971,19 +861,16 @@ export function projectClientRunV1(run: StoredRun): ClientRunV1 {
               runFailureCopyV1({ failure: run.failure, events: run.events }),
               MAX_FAILURE_BYTES,
             ),
-            ...interruptedOutcomeTextV1(run),
           } satisfies ClientRunOutcomeV1)
         : status === "cancelled"
           ? ({
               type: "cancelled",
               message: CANCELLED_RUN_MESSAGE,
-              ...interruptedOutcomeTextV1(run),
             } satisfies ClientRunOutcomeV1)
           : status === "superseded"
             ? ({
                 type: "superseded",
                 message: SUPERSEDED_RUN_MESSAGE,
-                ...interruptedOutcomeTextV1(run),
               } satisfies ClientRunOutcomeV1)
             : undefined;
   const origin = run.admission?.origin;
@@ -1003,7 +890,6 @@ export function projectClientRunV1(run: StoredRun): ClientRunV1 {
     input: truncateWireString(run.input, MAX_INPUT_BYTES),
     status,
     events: visibleEvents(run.events, status),
-    ...(status === "running" ? partialTextV1(run) : {}),
     ...(run.stopRequestedAt
       ? {
           stopRequestedAt: truncate(run.stopRequestedAt, MAX_TIMESTAMP_LENGTH),
@@ -1855,11 +1741,7 @@ export function decodeClientRunListQueryV1(
   input: unknown,
 ): ClientRunListQueryV1 {
   const query = record(input, "run list query");
-  exactKeys(
-    query,
-    ["schemaVersion", "before", "conversationId"],
-    "run list query",
-  );
+  exactKeys(query, ["schemaVersion", "before"], "run list query");
   if (query.schemaVersion !== 1) {
     throw new Error("run list query.schemaVersion is invalid");
   }
@@ -1874,19 +1756,9 @@ export function decodeClientRunListQueryV1(
       throw new Error("run list query.before is invalid");
     }
   }
-  const conversationId =
-    query.conversationId === undefined
-      ? undefined
-      : string(
-          query,
-          "conversationId",
-          MAX_SESSION_ID_LENGTH,
-          "run list query",
-        );
   return {
     schemaVersion: 1,
     ...(before ? { before } : {}),
-    ...(conversationId ? { conversationId } : {}),
   };
 }
 

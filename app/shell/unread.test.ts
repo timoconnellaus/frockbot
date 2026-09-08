@@ -105,7 +105,10 @@ describe("the sidebar message preview", () => {
         {
           acceptedAt: "2026-08-31T00:01:00.000Z",
           input: "Question",
-          responseText: "Answer",
+          responseText: "private scratch",
+          events: [
+            { type: "send/to-user", payload: { type: "text", text: "Answer" } },
+          ],
         },
         preview.at,
       ),
@@ -301,7 +304,19 @@ describe("the sidebar preview derived from stored runs", () => {
     input: "What is the plan?",
     responseText: "Here is the plan.",
     status: "completed",
-    events: [{ timestamp: "2026-08-31T00:02:05.000Z" }],
+    events: [
+      {
+        timestamp: "2026-08-31T00:02:05.000Z",
+        type: "send/to-user",
+        payload: {
+          type: "text",
+          text:
+            "responseText" in over
+              ? String(over.responseText ?? "")
+              : "Here is the plan.",
+        },
+      },
+    ],
     ...over,
   });
 
@@ -480,4 +495,50 @@ test("notification fan-out preserves critical urgency without accepting arbitrar
       notifications: [{ ...notice, secret: "invalid" }],
     }),
   ).toThrow();
+});
+
+describe("message unread boundary", () => {
+  test("survives storage decoding and projection, and clears on an explicit read", () => {
+    const state = decodeUnreadStateV1({
+      schemaVersion: 1,
+      manuallyUnread: true,
+      unreadFromMessageId: "run-1:send:2",
+    });
+    expect(
+      projectBotUnreadViewV1("primary", state, []).unreadFromMessageId,
+    ).toBe("run-1:send:2");
+    expect(
+      markUnreadReadV1(state, {
+        upToCursor: cursor(1),
+        at: "2026-08-31T00:01:00.000Z",
+      }).unreadFromMessageId,
+    ).toBeUndefined();
+  });
+  test("the boundary participates in command identity and cannot accompany mark-read", () => {
+    const base = {
+      schemaVersion: 1,
+      type: "bot/mark-unread",
+      commandId: "mark-1",
+      botId: "primary",
+    };
+    const one = decodeBotUnreadCommandV1({
+      ...base,
+      fromMessageId: "run-1:send:0",
+    });
+    const two = decodeBotUnreadCommandV1({
+      ...base,
+      fromMessageId: "run-1:send:1",
+    });
+    expect(botUnreadCommandFingerprintV1(one)).not.toBe(
+      botUnreadCommandFingerprintV1(two),
+    );
+    expect(() =>
+      decodeBotUnreadCommandV1({
+        ...base,
+        type: "bot/mark-read",
+        upToCursor: cursor(1),
+        fromMessageId: "run-1:user",
+      }),
+    ).toThrow();
+  });
 });

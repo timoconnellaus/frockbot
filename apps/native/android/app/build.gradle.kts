@@ -6,6 +6,11 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+// One build switch controls both Dart transport and the separate Android identity.
+val localDevelopment = (project.findProperty("dart-defines") as? String).orEmpty().split(",").any {
+    runCatching { String(Base64.getDecoder().decode(it)) == "FROCKBOT_LOCAL_DEV=true" }.getOrDefault(false)
+}
+
 val existingDebugKey = file(System.getenv("FROCKBOT_ANDROID_KEYSTORE") ?: "${System.getProperty("user.home")}/.android/debug.keystore")
 check(existingDebugKey.isFile) { "Existing Android signing key is required. Never generate a replacement." }
 val installedCode = System.getenv("FROCKBOT_INSTALLED_VERSION_CODE")?.toIntOrNull()
@@ -26,7 +31,10 @@ android {
 
     defaultConfig {
         // Preserve the installed Capacitor identity.
-        applicationId = "com.frockbot.mobile"
+        applicationId = if (localDevelopment) "com.frockbot.mobile.dev" else "com.frockbot.mobile"
+        manifestPlaceholders["appLabel"] = if (localDevelopment) "FrockBot (Dev)" else "FrockBot"
+        manifestPlaceholders["cleartext"] = localDevelopment.toString()
+        manifestPlaceholders["linkHost"] = if (localDevelopment) "localhost" else "bot.frockbot.com"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = 24

@@ -1,13 +1,13 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET"/>
     <application
-        android:label="FrockBot"
+        android:label="${appLabel}"
         android:name="com.frockbot.mobile.FrockBotApplication"
         android:allowBackup="false"
-        android:usesCleartextTraffic="false"
+        android:usesCleartextTraffic="${cleartext}"
         android:icon="@mipmap/ic_launcher">
         <activity
-            android:name=".MainActivity"
+            android:name="com.frockbot.mobile.MainActivity"
             android:exported="true"
             android:launchMode="singleTop"
             android:taskAffinity=""
@@ -32,8 +32,8 @@
                 <action android:name="android.intent.action.VIEW"/>
                 <category android:name="android.intent.category.DEFAULT"/>
                 <category android:name="android.intent.category.BROWSABLE"/>
-                <data android:scheme="https" android:host="bot.frockbot.com" android:path="/native/return/android"/>
-                <data android:scheme="https" android:host="bot.frockbot.com" android:path="/"/>
+                <data android:scheme="https" android:host="${linkHost}" android:path="/native/return/android"/>
+                <data android:scheme="https" android:host="${linkHost}" android:path="/"/>
             </intent-filter>
         </activity>
         <!-- Don't delete the meta-data below.

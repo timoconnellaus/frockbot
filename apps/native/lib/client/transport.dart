@@ -14,13 +14,16 @@ export 'store.dart';
 
 /// The gateway this build talks to.
 ///
-/// A development build is pointed at the local stack with
-/// `--dart-define=FROCKBOT_ORIGIN=…` (`bun run dev:native` lends the host's
-/// loopback to the emulator). Left unset, the phone talks to production and
-/// the browser talks to the origin it was served from — which is the deployed
-/// shape, and the only one that works for a stack on an unknown port.
-final String hostedOrigin = const String.fromEnvironment('FROCKBOT_ORIGIN')
-    .ifEmpty(defaultOriginV1);
+/// A development build is pointed at the local stack: the wireless Android dev
+/// app carries `--dart-define=FROCKBOT_LOCAL_DEV=true` and talks to the host's
+/// loopback, and `bun run dev:native` passes `--dart-define=FROCKBOT_ORIGIN=…`
+/// directly. Left unset, the phone talks to production and the browser talks
+/// to the origin it was served from — which is the deployed shape, and the
+/// only one that works for a stack on an unknown port.
+const localDevelopment = bool.fromEnvironment('FROCKBOT_LOCAL_DEV');
+final String hostedOrigin = localDevelopment
+    ? 'http://127.0.0.1:8787'
+    : const String.fromEnvironment('FROCKBOT_ORIGIN').ifEmpty(defaultOriginV1);
 
 extension on String {
   String ifEmpty(String Function() fallback) => isEmpty ? fallback() : this;
@@ -90,6 +93,7 @@ class NativeApi {
     return {
       'content-type': 'application/json',
       'x-frockbot-client': jsonEncode(clientHello),
+      if (localDevelopment) 'x-frockbot-user-id': 'development',
       'authorization': ?authorization,
     };
   }
@@ -200,11 +204,7 @@ class NativeApi {
 }
 
 abstract interface class ChatTransport {
-  Future<Map<String, dynamic>> page(
-    String botId, {
-    String? before,
-    String? conversationId,
-  });
+  Future<Map<String, dynamic>> page(String botId, {String? before});
   Future<void> send(String botId, String id, String text);
   Future<Map<String, dynamic>?> lookup(
     String botId,
@@ -219,14 +219,8 @@ class BackendChatTransport implements ChatTransport {
   BackendChatTransport(this.api);
   String path(String bot) => '/api/bots/${Uri.encodeComponent(bot)}/turns';
   @override
-  Future<Map<String, dynamic>> page(
-    String botId, {
-    String? before,
-    String? conversationId,
-  }) async {
-    final query = Uri(
-      queryParameters: {'before': ?before, 'conversationId': ?conversationId},
-    ).query;
+  Future<Map<String, dynamic>> page(String botId, {String? before}) async {
+    final query = Uri(queryParameters: {'before': ?before}).query;
     return wire.ConversationProjection.fromJson(
           await api.request(
             '${path(botId)}${query.isEmpty ? '' : '?$query'}',

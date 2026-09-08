@@ -49,7 +49,8 @@ describe("a sixty-step Turn through the production gateway", () => {
         schemaVersion: 1,
         commandId: runId,
         text: `${repeatedToolCallPrompt(
-          MODEL_STEPS - 1,
+          // Reserve the final two steps for send_to_user and its completion.
+          MODEL_STEPS - 2,
           "get_dynamic_tools",
           {},
         )}\n${"p".repeat(HISTORY_TEXT_BYTES)}`,

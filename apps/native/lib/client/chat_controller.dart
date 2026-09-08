@@ -29,7 +29,6 @@ class ChatController extends ChangeNotifier {
   String? stopId;
   String? stopTarget;
   String? before;
-  String? conversationId;
   String? error;
   bool ready = false;
   bool sending = false;
@@ -86,6 +85,9 @@ class ChatController extends ChangeNotifier {
   bool get stoppable =>
       runningRunId != null || (pendingId != null && error == null);
 
+  String? get visiblePendingText =>
+      pendingId == null || _runs.containsKey(pendingId) ? null : pendingText;
+
   bool get canSend => ready && !sending && pendingId == null;
   void changed() {
     if (!_disposed) notifyListeners();
@@ -119,11 +121,12 @@ class ChatController extends ChangeNotifier {
   /// the User remembers instead of an empty pane. The network page that follows
   /// replaces it, including the cursor it restored.
   void _restoreCachedPage(SnapshotStore? snapshot) {
-    if (snapshot == null || conversationId != null) return;
+    if (snapshot == null) return;
     final cached = decodePageCache(snapshot.peek(pageKey));
     if (cached == null) return;
     for (final run in cached.runs) {
       _put(run);
+      _cachedRunIds.add(run['runId'] as String);
     }
     before = cached.before;
     _cachedCursor = before != null;
@@ -131,6 +134,7 @@ class ChatController extends ChangeNotifier {
 
   bool _initialized = false;
   bool _cachedCursor = false;
+  final Set<String> _cachedRunIds = {};
   Future<void> initialize() async {
     if (_initialized) return;
     _initialized = true;
@@ -171,6 +175,7 @@ class ChatController extends ChangeNotifier {
   }
 
   void _put(Map<String, dynamic> run) {
+    _cachedRunIds.remove(run['runId']);
     _runs[run['runId'] as String] = run;
   }
 
@@ -194,11 +199,15 @@ class ChatController extends ChangeNotifier {
     loading = true;
     changed();
     try {
-      final page = await transport.page(
-        botId,
-        before: older ? before : null,
-        conversationId: conversationId,
-      );
+      final page = await transport.page(botId, before: older ? before : null);
+      // The first live page replaces restored cache rows. Preserve any live
+      // admission or lookup that arrived while this page was in flight.
+      if (!older) {
+        for (final id in _cachedRunIds) {
+          _runs.remove(id);
+        }
+        _cachedRunIds.clear();
+      }
       for (final run in page['runs'] as List) {
         _put(Map<String, dynamic>.from(run as Map));
       }
@@ -208,23 +217,13 @@ class ChatController extends ChangeNotifier {
         _cachedCursor = false;
       }
       error = null;
-      if (conversationId == null) {
+      {
         unawaited(writePageCache(store, userId, botId, runs, before));
       }
     } finally {
       loading = false;
       changed();
     }
-  }
-
-  Future<void> selectConversation(String? id) async {
-    if (loading || sending || checking || stopping) return;
-    conversationId = id;
-    before = null;
-    _runs.clear();
-    announcements = const [];
-    focusRunId = null;
-    await refresh();
   }
 
   /// Takes the reader to one Turn of this conversation.
@@ -240,11 +239,12 @@ class ChatController extends ChangeNotifier {
     final id = nextId();
     pendingId = id;
     pendingText = text;
-    draft = text;
     changed();
+    draft = '';
     try {
       await _persist(); // No transport call can precede this durable local write.
     } catch (_) {
+      _restoreSubmission(text);
       pendingId = null;
       pendingText = null;
       sending = false;
@@ -252,11 +252,13 @@ class ChatController extends ChangeNotifier {
       changed();
       return;
     }
+    changed();
     try {
       await transport.send(botId, id, text);
       await checkDelivery();
     } on RequestFailure catch (failure) {
       if (failure.refused) {
+        _restoreSubmission(text);
         pendingId = null;
         pendingText = null;
         await _persist();
@@ -274,6 +276,10 @@ class ChatController extends ChangeNotifier {
     }
   }
 
+  void _restoreSubmission(String text) {
+    draft = draft.isEmpty ? text : '$text\n\n$draft';
+  }
+
   Future<void> checkDelivery() async {
     final id = pendingId;
     if (id == null || checking) return;
@@ -283,13 +289,15 @@ class ChatController extends ChangeNotifier {
       final observed = await transport.lookup(botId, id);
       // A read alone cannot prove a delayed POST will never be admitted.
       final run = observed ?? await transport.lookup(botId, id, fence: true);
+      final previousDraft = draft;
       if (run != null) {
         _put(run);
         error = null;
-        if (draft == pendingText) draft = '';
       } else {
+        _restoreSubmission(pendingText!);
         error = 'Your message didn’t go through. You can send it again.';
       }
+      final reconciledDraft = draft;
       final savedText = pendingText;
       pendingId = null;
       pendingText = null;
@@ -298,6 +306,7 @@ class ChatController extends ChangeNotifier {
       } catch (_) {
         pendingId = id;
         pendingText = savedText;
+        if (draft == reconciledDraft) draft = previousDraft;
         rethrow;
       }
     } catch (_) {

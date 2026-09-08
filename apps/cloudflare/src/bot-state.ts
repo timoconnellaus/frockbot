@@ -1,3 +1,4 @@
+import { cleanIncidentTestChatsV1 } from "./test-chat-cleanup.js";
 import { DurableObject } from "cloudflare:workers";
 import {
   BotStateChannel,
@@ -444,6 +445,10 @@ export class BotState extends DurableObject<BotStateEnv> {
     dependencies: BotStateDependencies = {},
   ) {
     super(ctx, env);
+    // Runs before any request or alarm can mount the old conversation.
+    this.ctx.blockConcurrencyWhile(() =>
+      cleanIncidentTestChatsV1(this.ctx.storage),
+    );
     this.outboundFetch = dependencies.outboundFetch;
     // The surfaces are built per identity in `bindSurfaces`, not here: they
     // carry the `owner` guard, and a Durable Object learns which User it
@@ -2016,33 +2021,6 @@ export class BotState extends DurableObject<BotStateEnv> {
     const { shell } = await this.materialized(identity);
     await shell.validateIdentity(identity);
     return revertComposition(shell.state, identity, command);
-  }
-
-  async listConversations(input: unknown) {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      botId: rpcBotId,
-    });
-    const identity = {
-      userId: request.userId as string,
-      botId: request.botId as string,
-    };
-    const { shell } = await this.materialized(identity);
-    await shell.validateIdentity(identity);
-    return shell.listConversations();
-  }
-
-  async startConversation(input: unknown) {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      botId: rpcBotId,
-    });
-    const identity = {
-      userId: request.userId as string,
-      botId: request.botId as string,
-    };
-    const { shell } = await this.materialized(identity);
-    return shell.startConversation(identity);
   }
 
   async listRuns(input: unknown) {

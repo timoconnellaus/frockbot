@@ -261,9 +261,37 @@ export function startFakeOllama(port: number): Promise<{
       request.on("data", (chunk: Buffer) => chunks.push(chunk));
       request.on("end", () => {
         const answer = () => {
-          const calls = scriptedToolCalls(
-            Buffer.concat(chunks).toString("utf8"),
+          const body = Buffer.concat(chunks).toString("utf8");
+          const calls = scriptedToolCalls(body);
+          const parsed = JSON.parse(body) as {
+            tools?: Array<{ function?: { name?: string } }>;
+            messages?: Array<{
+              role?: string;
+              tool_calls?: Array<{ function?: { name?: string } }>;
+            }>;
+          };
+          const messages = parsed.messages ?? [];
+          const sinceUser = messages.slice(
+            messages.findLastIndex((message) => message.role === "user") + 1,
           );
+          const sent = sinceUser.some((message) =>
+            message.tool_calls?.some(
+              (call) =>
+                call.function?.name === "send_to_user" ||
+                call.function?.name === "send_message",
+            ),
+          );
+          if (
+            !calls.length &&
+            !sent &&
+            parsed.tools?.some((tool) => tool.function?.name === "send_to_user")
+          )
+            calls.push({
+              name: "send_to_user",
+              arguments: JSON.stringify({
+                payload: { type: "text", text: E2E_ASSISTANT_REPLY },
+              }),
+            });
           response.writeHead(200, { "content-type": "text/event-stream" });
           if (calls.length > 0) {
             response.write(
@@ -291,17 +319,19 @@ export function startFakeOllama(port: number): Promise<{
               })}\n\n`,
             );
           } else if (streaming) {
-            // Half the answer now, half after a gap: the words the person can
-            // already read are durable while the Turn is still running.
+            // Private model text after an explicit send must stay hidden while
+            // the delivered bubble and the working row remain visible.
             response.write(
               `data: ${JSON.stringify({
-                choices: [{ delta: { content: E2E_STREAMED_REPLY_HEAD } }],
+                choices: [{ delta: { content: "PRIVATE MODEL SCRATCH HEAD" } }],
               })}\n\n`,
             );
             setTimeout(() => {
               response.write(
                 `data: ${JSON.stringify({
-                  choices: [{ delta: { content: E2E_STREAMED_REPLY_TAIL } }],
+                  choices: [
+                    { delta: { content: "PRIVATE MODEL SCRATCH TAIL" } },
+                  ],
                 })}\n\n`,
               );
               response.write(
@@ -316,7 +346,7 @@ export function startFakeOllama(port: number): Promise<{
           } else {
             response.write(
               `data: ${JSON.stringify({
-                choices: [{ delta: { content: E2E_ASSISTANT_REPLY } }],
+                choices: [{ delta: { content: "" } }],
               })}\n\n`,
             );
             response.write(

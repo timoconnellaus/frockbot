@@ -201,7 +201,7 @@ describe("durable Stop", () => {
    * production sweep on v0.3.31 pressed Stop on a long reply and watched every
    * word of it disappear, leaving "You stopped this." over an empty bubble.
    */
-  test("keeps the words a stopped Turn had already streamed", async () => {
+  test("never exposes private streamed text when a Turn is stopped", async () => {
     const streamed = [
       { type: "session/created", createdAt: timestamp },
       { type: "turn/start", turn: 1 },
@@ -224,7 +224,7 @@ describe("durable Stop", () => {
 
     const receipt = await stopRun(contribution.state, identity, stopCommand());
 
-    expect(receipt.run.partialText).toBe("Sheep farming begins with");
+    expect(receipt.run.partialText).toBeUndefined();
   });
 
   test("records durable intent and an idempotency receipt", async () => {

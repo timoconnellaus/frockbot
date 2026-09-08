@@ -360,32 +360,6 @@
     }
   },
   {
-    "name": "Conversation valid",
-    "schema": "Conversation",
-    "value": {
-      "schemaVersion": 1,
-      "conversationId": "1.1.0",
-      "ordinal": 1,
-      "startedAt": "2026-09-05T00:00:00.000Z"
-    }
-  },
-  {
-    "name": "ConversationList valid",
-    "schema": "ConversationList",
-    "value": {
-      "schemaVersion": 1,
-      "conversations": []
-    }
-  },
-  {
-    "name": "ConversationStartCommand valid",
-    "schema": "ConversationStartCommand",
-    "value": {
-      "schemaVersion": 1,
-      "commandId": "command-1"
-    }
-  },
-  {
     "name": "ConversationQuery valid",
     "schema": "ConversationQuery",
     "value": {
@@ -920,7 +894,7 @@
     "value": {
       "schemaVersion": 1,
       "commandId": "command-1",
-      "text": "Hello \ud83d\udc11 \u3053\u3093\u306b\u3061\u306f"
+      "text": "Hello 🐑 こんにちは"
     }
   },
   {
@@ -1179,7 +1153,7 @@
           ]
         }
       ],
-      "modelInUse": "Auto \u00b7 Frock AI"
+      "modelInUse": "Auto · Frock AI"
     }
   },
   {
@@ -1318,6 +1292,17 @@
           "failures": []
         }
       ]
+    }
+  },
+  {
+    "name": "message unread boundary valid",
+    "schema": "MarkReadCommand",
+    "value": {
+      "schemaVersion": 1,
+      "type": "bot/mark-unread",
+      "commandId": "message-mark-1",
+      "botId": "primary",
+      "fromMessageId": "run-1:send:0"
     }
   }
 ]

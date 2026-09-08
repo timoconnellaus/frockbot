@@ -54,6 +54,7 @@ import {
   runCompactionV1,
 } from "./compaction.js";
 import { compactionWorkV1 } from "./compaction-scheduler.js";
+import { conversationDeliveryHooksV1 } from "./delivery.js";
 import { shellDefinitionV1 } from "./definition.js";
 
 export const SEND_TO_USER_TOOL_V1 = "send_to_user";
@@ -105,74 +106,6 @@ function openStepPositionV1(
     throw new Error(`${tool} has no open step to record against`);
   }
   return { turn: started.turn, step: started.step };
-}
-
-/** The longest acknowledgement worth promoting; longer is not an ack. */
-export const PROMOTED_ASSISTANT_TEXT_LIMIT_V1 = 600;
-
-/** The occurrence id a promoted send is recorded under, per model request. */
-export function promotedSendOccurrenceIdV1(requestId: string): string {
-  return `assistant-text:${requestId}`;
-}
-
-/**
- * Promotes a step's assistant text to a send when the model wrote to the
- * person and then called tools without sending.
- *
- * The verification run is the whole argument for this. The model did exactly
- * what the contract asks — "On it — building the 2027 countdown applet now.",
- * one short line, no narration — and then called its tools. It went nowhere:
- * the thread draws one bubble per send (issue 153) and there was no send, so
- * the person watched a spinner and then a failure, with the acknowledgement
- * they were owed sitting in the log where only the debug surface could see it.
- *
- * A step that already sent is left alone: the model's own text is scratch
- * space once it has spoken, and promoting it there is how the same line
- * arrives twice. The occurrence id is derived from the model request, so a
- * step replayed after an eviction promotes the same text to the same
- * occurrence rather than a second bubble.
- *
- * The prompt asks for the call and this does not replace it — a model that
- * calls `send_to_user` never reaches here.
- */
-export async function promoteAssistantTextToSendV1(
-  session: Session,
-  text: string,
-  position: {
-    turn: number;
-    step: number;
-    requestId: string;
-    toolNames?: readonly string[];
-  },
-): Promise<void> {
-  const trimmed = text.trim();
-  if (trimmed.length === 0 || trimmed.length > PROMOTED_ASSISTANT_TEXT_LIMIT_V1)
-    return;
-  // A step that narrates "On it — building it now." AND calls `send_to_user`
-  // with the same line is about to speak for itself; promoting the narration
-  // too is how the person saw the bubble twice. The send has not run yet when
-  // this hook fires (it runs before the tools, on purpose), so the pending
-  // call names are the only evidence.
-  const aboutToSend = (position.toolNames ?? []).some(
-    (name) => name === SEND_TO_USER_TOOL_V1 || name === SEND_MESSAGE_ALIAS_V1,
-  );
-  if (aboutToSend) return;
-  const occurrenceId = promotedSendOccurrenceIdV1(position.requestId);
-  const spokeThisStep = session.events.some(
-    (event) =>
-      event.type === "send/to-user" &&
-      event.turn === position.turn &&
-      event.step === position.step,
-  );
-  if (spokeThisStep) return;
-  session.append({
-    type: "send/to-user",
-    turn: position.turn,
-    step: position.step,
-    occurrenceId,
-    payload: { type: "text", text: trimmed },
-  });
-  await session.flush();
 }
 
 /** What a recorded send tells the model it did. */
@@ -488,14 +421,7 @@ export const shellAgentFeature: RuntimeFeatureV1<AgentRuntimeV1> = (
       createWakeParentTool(runtime.sessions),
       parentHandoff ? { admissionCeiling: parentHandoff } : undefined,
     ),
-    // The safety net under the prompt: a model that acknowledges the request
-    // in its own text instead of calling `send_to_user` still reaches the
-    // person. See `promoteAssistantTextToSendV1`.
-    runtime.hooks.add({
-      assistantText: async (agent, text, position) => {
-        await promoteAssistantTextToSendV1(agent.session, text, position);
-      },
-    }),
+    runtime.hooks.add(conversationDeliveryHooksV1),
     // The hook is evaluated after `turn/end` is on the log and flushed — but
     // `turnStopping` is a hook the loop *awaits* inside its `finally`, so
     // running the summariser here is exactly the latency a compaction must

@@ -457,11 +457,7 @@ describe("the conversation prompt section", () => {
   });
 });
 
-// Two ends of one defect. The prompt tells the model to acknowledge with the
-// call; the promotion catches the model that acknowledges in text anyway. The
-// verification run watched a real model do exactly that — "On it — building
-// the 2027 countdown applet now." as plain assistant text, then three tool
-// calls — and nobody ever saw the line.
+// The prompt and runtime agree: private text is never a delivery.
 describe("the acknowledgement reaches the user", () => {
   test("the prompt names the call, not just the line", () => {
     expect(CONVERSATION_PROMPT_TEXT_V1).toContain(
@@ -472,7 +468,7 @@ describe("the acknowledgement reaches the user", () => {
     );
   });
 
-  test("assistant text in a tool-calling step is promoted to one send", async () => {
+  test("assistant text in a tool-calling step is never promoted to a send", async () => {
     const mounted = await mount();
     try {
       await mounted.root.hooks.assistantText(
@@ -484,16 +480,7 @@ describe("the acknowledgement reaches the user", () => {
       const sends = mounted.session.events.filter(
         (event) => event.type === "send/to-user",
       );
-      expect(sends).toHaveLength(1);
-      expect(sends[0]).toMatchObject({
-        turn: 4,
-        step: 2,
-        occurrenceId: "assistant-text:request-1",
-        payload: {
-          type: "text",
-          text: "On it — building the 2027 countdown applet now.",
-        },
-      });
+      expect(sends).toHaveLength(0);
     } finally {
       await mounted.dispose();
     }

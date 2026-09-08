@@ -12,6 +12,7 @@ import 'package:flutter/services.dart';
 
 import '../acceptance_metrics.dart';
 import 'semantics.dart';
+import 'chat_icons.dart';
 import 'skill_menu.dart';
 
 /// The composer's copy of the send route's size rule.
@@ -124,6 +125,7 @@ class _ComposerState extends State<Composer> {
   void initState() {
     super.initState();
     widget.skills?.addListener(_changed);
+    widget.focus.addListener(_changed);
   }
 
   void _changed() {
@@ -133,6 +135,7 @@ class _ComposerState extends State<Composer> {
   @override
   void dispose() {
     widget.skills?.removeListener(_changed);
+    widget.focus.removeListener(_changed);
     super.dispose();
   }
 
@@ -191,88 +194,142 @@ class _ComposerState extends State<Composer> {
               ),
             ),
           ),
+        if (widget.stoppable)
+          Align(
+            alignment: Alignment.centerRight,
+            child: Padding(
+              padding: const EdgeInsets.only(right: 12),
+              child: identified(
+                ShellIds.stopButton,
+                TextButton.icon(
+                  key: const ValueKey('stop'),
+                  onPressed: widget.stopping
+                      ? null
+                      : () {
+                          unawaitedHaptic();
+                          widget.onStop();
+                        },
+                  icon: const Icon(Icons.stop_rounded, size: 14),
+                  label: Text(widget.stopping ? 'Stopping…' : 'Stop'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: theme.colorScheme.onSurfaceVariant,
+                    textStyle: theme.textTheme.bodySmall,
+                  ),
+                ),
+              ),
+            ),
+          ),
         Padding(
-          padding: const EdgeInsets.all(12),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Expanded(
-                child: CallbackShortcuts(
-                  bindings: {
-                    const SingleActivator(LogicalKeyboardKey.enter, meta: true):
-                        widget.onSend,
-                    const SingleActivator(
-                      LogicalKeyboardKey.enter,
-                      control: true,
-                    ): widget.onSend,
-                    if (skills != null && skills.open) ...{
-                      const SingleActivator(LogicalKeyboardKey.arrowUp): () =>
-                          skills.move(-1),
-                      const SingleActivator(LogicalKeyboardKey.arrowDown): () =>
-                          skills.move(1),
-                      const SingleActivator(LogicalKeyboardKey.escape):
-                          skills.close,
-                    },
-                  },
-                  child: identified(
-                    ShellIds.composer,
-                    TextField(
-                      key: const ValueKey('composer'),
-                      controller: widget.editor,
-                      focusNode: widget.focus,
-                      minLines: 1,
-                      maxLines: 6,
-                      keyboardType: TextInputType.multiline,
-                      textInputAction: TextInputAction.newline,
-                      decoration: InputDecoration(
-                        hintText: 'Message your Bot',
-                        labelText: 'Message',
-                        counterText: '',
-                        helperText: turnTextCounterVisible(text)
-                            ? '${turnTextRemaining(text)} characters left'
-                            : null,
-                        helperStyle: turnTextTooLong(text)
-                            ? TextStyle(color: theme.colorScheme.error)
-                            : null,
-                      ),
-                      onChanged: (value) {
-                        AcceptanceMetrics.instance.inputChanged();
-                        widget.onChanged(value);
-                        _refreshPopover();
-                        setState(() {});
+          padding: const EdgeInsets.fromLTRB(14, 4, 14, 10),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: theme.colorScheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(19),
+              border: Border.all(
+                color: widget.focus.hasFocus
+                    ? Color.alphaBlend(
+                        theme.colorScheme.primary.withValues(alpha: 0.4),
+                        theme.colorScheme.outlineVariant,
+                      )
+                    : theme.colorScheme.outlineVariant,
+              ),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Expanded(
+                  child: CallbackShortcuts(
+                    bindings: {
+                      const SingleActivator(
+                        LogicalKeyboardKey.enter,
+                        meta: true,
+                      ): widget.onSend,
+                      const SingleActivator(
+                        LogicalKeyboardKey.enter,
+                        control: true,
+                      ): widget.onSend,
+                      if (skills != null && skills.open) ...{
+                        const SingleActivator(LogicalKeyboardKey.arrowUp): () =>
+                            skills.move(-1),
+                        const SingleActivator(
+                          LogicalKeyboardKey.arrowDown,
+                        ): () =>
+                            skills.move(1),
+                        const SingleActivator(LogicalKeyboardKey.escape):
+                            skills.close,
                       },
+                    },
+                    child: identified(
+                      ShellIds.composer,
+                      Semantics(
+                        label: 'Message your Bot',
+                        child: TextField(
+                          key: const ValueKey('composer'),
+                          controller: widget.editor,
+                          focusNode: widget.focus,
+                          style: theme.textTheme.bodyLarge?.copyWith(
+                            fontWeight: FontWeight.w300,
+                          ),
+                          minLines: 1,
+                          maxLines: 6,
+                          keyboardType: TextInputType.multiline,
+                          textInputAction: TextInputAction.newline,
+                          decoration: InputDecoration(
+                            hintText: 'Message your Bot',
+                            filled: false,
+                            border: InputBorder.none,
+                            enabledBorder: InputBorder.none,
+                            focusedBorder: InputBorder.none,
+                            contentPadding: const EdgeInsets.fromLTRB(
+                              15,
+                              14,
+                              4,
+                              14,
+                            ),
+                            counterText: '',
+                          ),
+                          onChanged: (value) {
+                            AcceptanceMetrics.instance.inputChanged();
+                            widget.onChanged(value);
+                            _refreshPopover();
+                            setState(() {});
+                          },
+                        ),
+                      ),
                     ),
                   ),
                 ),
-              ),
-              const SizedBox(width: 8),
-              if (widget.stoppable)
                 identified(
-                  ShellIds.stopButton,
-                  IconButton.filledTonal(
-                    key: const ValueKey('stop'),
-                    tooltip: 'Stop',
-                    onPressed: widget.stopping
-                        ? null
-                        : () {
-                            unawaitedHaptic();
-                            widget.onStop();
-                          },
-                    icon: const Icon(Icons.stop_rounded),
+                  ShellIds.sendButton,
+                  Padding(
+                    padding: const EdgeInsets.all(3),
+                    child: IconButton.filled(
+                      key: const ValueKey('send'),
+                      tooltip: 'Send',
+                      onPressed: canSend ? widget.onSend : null,
+                      style: IconButton.styleFrom(
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(11),
+                        ),
+                      ),
+                      icon: const ChatIcon(ChatIconKind.send),
+                    ),
                   ),
                 ),
-              identified(
-                ShellIds.sendButton,
-                IconButton.filled(
-                  key: const ValueKey('send'),
-                  tooltip: 'Send',
-                  onPressed: canSend ? widget.onSend : null,
-                  icon: const Icon(Icons.arrow_upward_rounded),
-                ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
+        if (turnTextCounterVisible(text))
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: Text(
+              '${turnTextRemaining(text)} characters left',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: turnTextTooLong(text) ? theme.colorScheme.error : null,
+              ),
+            ),
+          ),
       ],
     );
   }

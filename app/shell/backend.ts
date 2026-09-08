@@ -35,15 +35,11 @@ import { type BotDebugSnapshotV1 } from "./debug-protocol.js";
 import { validateIdentity } from "./identity.js";
 import {
   announcementsFromSession,
-  listConversations,
   listRunEventPage,
   listRuns,
   lookupRun,
-  startConversation,
 } from "./reads.js";
 import type {
-  ClientConversationListV1,
-  ClientConversationOutcomeV1,
   ClientRunListV1,
   ClientRunLookupV1,
   ClientTurnV1,
@@ -140,16 +136,6 @@ export class ShellBotBackendContribution {
     input: unknown = { schemaVersion: 1 },
   ): Promise<ClientRunListV1> {
     return listRuns(this.state, input);
-  }
-
-  async listConversations(): Promise<ClientConversationListV1> {
-    return listConversations(this.state);
-  }
-
-  async startConversation(
-    identity: BotIdentity,
-  ): Promise<ClientConversationOutcomeV1> {
-    return startConversation(this.state, identity);
   }
 
   async lookupRun(input: unknown): Promise<ClientRunLookupV1> {

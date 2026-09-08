@@ -56,10 +56,7 @@ the production origin, only when `ALLOW_DEVELOPMENT_AUTH` is set — a variable
 - Logs: `.native-dev/logs/` (or `$CLAUDE_JOB_DIR/tmp/native-dev/` in a job).
 - Fresh state: `down`, delete `.native-dev/`, `up`.
 
-`smoke:native` passes on a reply bubble. It also passes, with a warning, when
-the Turn completed and the model answered but nothing reached the chat — the
-Bot wrote plain text instead of calling `send_to_user`, which is issue #153 and
-a model-behaviour problem rather than a stack one.
+`smoke:native` passes only when the reply appears in the native transcript. A completed Turn with no `send_to_user` event fails the smoke check.
 
 `smoke:native` completes the browser leg itself — the debug build logs the
 authorization URL it opens, the smoke makes that request and delivers the

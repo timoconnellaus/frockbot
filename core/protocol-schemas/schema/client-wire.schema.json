@@ -842,63 +842,6 @@
         }
       ]
     },
-    "Conversation": {
-      "type": "object",
-      "properties": {
-        "schemaVersion": {
-          "const": 1
-        },
-        "conversationId": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 320
-        },
-        "ordinal": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 9007199254740991
-        },
-        "startedAt": {
-          "$ref": "#/$defs/Instant"
-        },
-        "endedAt": {
-          "$ref": "#/$defs/Instant"
-        }
-      },
-      "required": ["schemaVersion", "conversationId", "ordinal", "startedAt"],
-      "additionalProperties": false
-    },
-    "ConversationList": {
-      "type": "object",
-      "properties": {
-        "schemaVersion": {
-          "const": 1
-        },
-        "conversations": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/Conversation"
-          },
-          "minItems": 0,
-          "maxItems": 100
-        }
-      },
-      "required": ["schemaVersion", "conversations"],
-      "additionalProperties": false
-    },
-    "ConversationStartCommand": {
-      "type": "object",
-      "properties": {
-        "schemaVersion": {
-          "const": 1
-        },
-        "commandId": {
-          "$ref": "#/$defs/Identifier"
-        }
-      },
-      "required": ["schemaVersion", "commandId"],
-      "additionalProperties": false
-    },
     "ConversationQuery": {
       "type": "object",
       "properties": {
@@ -907,11 +850,6 @@
         },
         "before": {
           "$ref": "#/$defs/RunCursor"
-        },
-        "conversationId": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 320
         }
       },
       "required": ["schemaVersion"],
@@ -2147,6 +2085,12 @@
         },
         "working": {
           "type": "boolean"
+        },
+        "unreadFromMessageId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "pattern": "^[-a-zA-Z0-9._]+:(?:user|send:(?:0|[1-9][0-9]*))(?![\\s\\S])"
         }
       },
       "required": [
@@ -2203,6 +2147,12 @@
             },
             "botId": {
               "$ref": "#/$defs/BotId"
+            },
+            "fromMessageId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200,
+              "pattern": "^[-a-zA-Z0-9._]+:(?:user|send:(?:0|[1-9][0-9]*))(?![\\s\\S])"
             }
           },
           "required": ["schemaVersion", "type", "commandId", "botId"],
@@ -2513,9 +2463,17 @@
         {
           "type": "object",
           "properties": {
-            "type": { "const": "text" },
-            "text": { "type": "string", "minLength": 1, "maxLength": 4000 },
-            "style": { "enum": ["body", "heading", "label", "status"] }
+            "type": {
+              "const": "text"
+            },
+            "text": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4000
+            },
+            "style": {
+              "enum": ["body", "heading", "label", "status"]
+            }
           },
           "required": ["type", "text"],
           "additionalProperties": false
@@ -2523,15 +2481,27 @@
         {
           "type": "object",
           "properties": {
-            "type": { "const": "group" },
-            "orientation": { "enum": ["row", "column"] },
-            "title": { "type": "string", "minLength": 1, "maxLength": 200 },
-            "collapsed": { "type": "boolean" },
+            "type": {
+              "const": "group"
+            },
+            "orientation": {
+              "enum": ["row", "column"]
+            },
+            "title": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "collapsed": {
+              "type": "boolean"
+            },
             "children": {
               "type": "array",
               "minItems": 0,
               "maxItems": 256,
-              "items": { "$ref": "#/$defs/ViewNode" }
+              "items": {
+                "$ref": "#/$defs/ViewNode"
+              }
             }
           },
           "required": ["type", "orientation", "children"],
@@ -2540,8 +2510,12 @@
         {
           "type": "object",
           "properties": {
-            "type": { "const": "field" },
-            "field": { "$ref": "#/$defs/SettingField" }
+            "type": {
+              "const": "field"
+            },
+            "field": {
+              "$ref": "#/$defs/SettingField"
+            }
           },
           "required": ["type", "field"],
           "additionalProperties": false
@@ -2549,15 +2523,29 @@
         {
           "type": "object",
           "properties": {
-            "type": { "const": "action" },
-            "actionId": { "$ref": "#/$defs/Identifier" },
-            "label": { "type": "string", "minLength": 1, "maxLength": 100 },
-            "style": { "enum": ["primary", "secondary", "danger"] },
+            "type": {
+              "const": "action"
+            },
+            "actionId": {
+              "$ref": "#/$defs/Identifier"
+            },
+            "label": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "style": {
+              "enum": ["primary", "secondary", "danger"]
+            },
             "input": {
               "type": "object",
               "maxProperties": 32,
-              "propertyNames": { "$ref": "#/$defs/Identifier" },
-              "additionalProperties": { "$ref": "#/$defs/Json" }
+              "propertyNames": {
+                "$ref": "#/$defs/Identifier"
+              },
+              "additionalProperties": {
+                "$ref": "#/$defs/Json"
+              }
             }
           },
           "required": ["type", "actionId", "label"],
@@ -2566,8 +2554,14 @@
         {
           "type": "object",
           "properties": {
-            "type": { "const": "list" },
-            "empty": { "type": "string", "minLength": 1, "maxLength": 200 },
+            "type": {
+              "const": "list"
+            },
+            "empty": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
             "rows": {
               "type": "array",
               "minItems": 0,
@@ -2575,10 +2569,18 @@
               "items": {
                 "type": "object",
                 "properties": {
-                  "id": { "$ref": "#/$defs/Identifier" },
-                  "node": { "$ref": "#/$defs/ViewNode" },
-                  "actionId": { "$ref": "#/$defs/Identifier" },
-                  "selected": { "type": "boolean" }
+                  "id": {
+                    "$ref": "#/$defs/Identifier"
+                  },
+                  "node": {
+                    "$ref": "#/$defs/ViewNode"
+                  },
+                  "actionId": {
+                    "$ref": "#/$defs/Identifier"
+                  },
+                  "selected": {
+                    "type": "boolean"
+                  }
                 },
                 "required": ["id", "node"],
                 "additionalProperties": false
@@ -2591,11 +2593,27 @@
         {
           "type": "object",
           "properties": {
-            "type": { "const": "embed" },
-            "kind": { "enum": ["image", "frame"] },
-            "source": { "type": "string", "minLength": 1, "maxLength": 2048 },
-            "label": { "type": "string", "minLength": 1, "maxLength": 200 },
-            "aspectRatio": { "type": "number", "minimum": 0.1, "maximum": 10 }
+            "type": {
+              "const": "embed"
+            },
+            "kind": {
+              "enum": ["image", "frame"]
+            },
+            "source": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            "label": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "aspectRatio": {
+              "type": "number",
+              "minimum": 0.1,
+              "maximum": 10
+            }
           },
           "required": ["type", "kind", "source", "label"],
           "additionalProperties": false,
@@ -2603,24 +2621,40 @@
             {
               "if": {
                 "type": "object",
-                "properties": { "kind": { "const": "image" } },
+                "properties": {
+                  "kind": {
+                    "const": "image"
+                  }
+                },
                 "required": ["kind"]
               },
               "then": {
                 "type": "object",
-                "properties": { "source": { "$ref": "#/$defs/HttpsUrl" } },
+                "properties": {
+                  "source": {
+                    "$ref": "#/$defs/HttpsUrl"
+                  }
+                },
                 "required": ["source"]
               }
             },
             {
               "if": {
                 "type": "object",
-                "properties": { "kind": { "const": "frame" } },
+                "properties": {
+                  "kind": {
+                    "const": "frame"
+                  }
+                },
                 "required": ["kind"]
               },
               "then": {
                 "type": "object",
-                "properties": { "source": { "$ref": "#/$defs/Identifier" } },
+                "properties": {
+                  "source": {
+                    "$ref": "#/$defs/Identifier"
+                  }
+                },
                 "required": ["source"]
               }
             }
@@ -2631,14 +2665,20 @@
     "ViewDocument": {
       "type": "object",
       "properties": {
-        "schemaVersion": { "const": 1 },
-        "surfaceId": { "$ref": "#/$defs/Identifier" },
+        "schemaVersion": {
+          "const": 1
+        },
+        "surfaceId": {
+          "$ref": "#/$defs/Identifier"
+        },
         "revision": {
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991
         },
-        "root": { "$ref": "#/$defs/ViewNode" },
+        "root": {
+          "$ref": "#/$defs/ViewNode"
+        },
         "actions": {
           "type": "array",
           "minItems": 0,
@@ -2646,8 +2686,12 @@
           "items": {
             "type": "object",
             "properties": {
-              "id": { "$ref": "#/$defs/Identifier" },
-              "schema": { "$ref": "#/$defs/ActionSchema" }
+              "id": {
+                "$ref": "#/$defs/Identifier"
+              },
+              "schema": {
+                "$ref": "#/$defs/ActionSchema"
+              }
             },
             "required": ["id", "schema"],
             "additionalProperties": false

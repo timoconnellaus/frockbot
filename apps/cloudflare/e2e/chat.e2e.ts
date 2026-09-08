@@ -284,6 +284,59 @@ test("a Turn that is running when the page reloads still delivers its reply", as
   });
 });
 
+// The owner's claim from the chat refinement, in this client's terms: what the
+// Bot *sent* reaches the thread while the Turn is still running, and the model
+// text that follows the send stays private. The fake provider's `streaming`
+// mode writes "PRIVATE MODEL SCRATCH" across a gap on the call after the
+// delivery, which is the window this watches.
+test("an explicit send appears while model text stays private", async ({
+  page,
+  userId,
+  ollamaBaseUrl,
+}) => {
+  await provisionThroughUi(page, {
+    userId,
+    apiKey: E2E_OLLAMA_GOOD_API_KEY,
+    apiBaseUrl: ollamaBaseUrl,
+    botName: "Streamer",
+  });
+
+  await setFakeOllamaChatMode(page, ollamaBaseUrl, "streaming");
+  await beginTurn(page, "Say it as you think of it");
+
+  // Latched rather than asserted at one instant: the Turn settles on its own
+  // schedule, and the claim is that the delivered send was drawn while the
+  // private model continuation was still going.
+  let sawSendWhileRunning = false;
+  await expect
+    .poll(
+      async () => {
+        if (sawSendWhileRunning) return true;
+        const [texts, working] = await Promise.all([
+          sendTexts(page),
+          sem(page, "working-indicator").count(),
+        ]);
+        sawSendWhileRunning =
+          working > 0 &&
+          texts.some((text) => text.includes("local Ollama stub"));
+        return sawSendWhileRunning;
+      },
+      { timeout: 90_000 },
+    )
+    .toBe(true);
+
+  // Private model streaming never becomes a bubble of its own, and never
+  // changes the one the Bot sent.
+  await expect(sem(page, "working-indicator")).toHaveCount(0, {
+    timeout: 120_000,
+  });
+  const transcript = (await sem(page, "chat-transcript").textContent()) ?? "";
+  expect(transcript).not.toContain("PRIVATE MODEL SCRATCH");
+  await expect
+    .poll(() => sendTexts(page), { timeout: 120_000 })
+    .toEqual([E2E_ASSISTANT_REPLY.replaceAll("**", "")]);
+});
+
 // One claim this file used to make is gone, and its absence is deliberate:
 // "a reply appears while the Bot is still writing it". The Flutter client
 // does not stream. `ChatController` has no poll of its own — `refresh()` runs

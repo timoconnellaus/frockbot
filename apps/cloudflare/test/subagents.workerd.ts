@@ -252,8 +252,8 @@ describe("subagent dispatch across two Durable Objects", () => {
         isError?: boolean;
       }>
     ).filter((event) => event.type === "tool/result");
-    expect(results).toHaveLength(5);
-    expect(results.filter((result) => result.isError !== true)).toHaveLength(4);
+    expect(results).toHaveLength(6);
+    expect(results.filter((result) => result.isError !== true)).toHaveLength(5);
     const refused = results.find((result) => result.isError === true);
     expect(refused?.content).toContain("the bound is 4");
 
@@ -287,6 +287,6 @@ describe("subagent dispatch across two Durable Objects", () => {
       (again.events as Array<{ type: string; isError?: boolean }>).filter(
         (event) => event.type === "tool/result" && event.isError !== true,
       ),
-    ).toHaveLength(1);
+    ).toHaveLength(2); // Task, then its explicit user-facing result.
   });
 });

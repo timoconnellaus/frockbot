@@ -42,7 +42,7 @@ The conformance test maps every fixture for the existing named seams to their pr
 
 ## Admission, observation and recovery contract
 
-A User/Bot owner authenticates the route identity and decodes before recording a command. Persist a cryptographically random command id locally **before** sending; retries retain the exact id and body. The owner fingerprints the normalized body, admits durably, records a receipt and replays that receipt for duplicates; a changed body under an old id is a refusal. Accepted means durable intent, not completed execution. The planned generic receipt and new-conversation lookup must use this existing admission machinery before native consumes them.
+A User/Bot owner authenticates the route identity and decodes before recording a command. Persist a cryptographically random command id locally **before** sending; retries retain the exact id and body. The owner fingerprints the normalized body, admits durably, records a receipt and replays that receipt for duplicates; a changed body under an old id is a refusal. Accepted means durable intent, not completed execution. The planned generic receipt must use this existing admission machinery before native consumes it.
 
 Stop targets a run and has its own command id. Its accepted receipt may still project `running`; cancellation becomes terminal only through the Bot's durable fence and reconciliation. Network loss, backgrounding, a stream ending, and WebView disposal are never Stop. On an uncertain send, lookup by the retained id and use the existing admission-fence/reconciliation protocol; never mint a replacement id merely because a request timed out.
 
