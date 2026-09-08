@@ -452,9 +452,7 @@ export async function ollamaCloudStub(request: Request): Promise<Response> {
     );
     const sent = sinceUser.some((message) =>
       message.tool_calls?.some(
-        (call) =>
-          call.function?.name === "send_to_user" ||
-          call.function?.name === "send_message",
+        (call) => call.function?.name === "send_to_user",
       ),
     );
     if (canSend && !sent)
@@ -463,6 +461,7 @@ export async function ollamaCloudStub(request: Request): Promise<Response> {
           id: "reply-send",
           name: "send_to_user",
           arguments: JSON.stringify({
+            disposition: "finish",
             payload: { type: "text", text: "Ollama reply" },
           }),
         },

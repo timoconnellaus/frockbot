@@ -1,3 +1,4 @@
+import { frockbotToolCall, discoverFrockbotTools } from "@frockbot/app/testkit";
 import { describe, expect, test } from "bun:test";
 import { createAgentRuntimeHarness } from "@frockbot/app/testkit";
 import type { ToolExecutionContext } from "@frockbot/core/contracts";
@@ -138,7 +139,7 @@ describe("the Ollama Cloud web_search Capability", () => {
     });
 
     const prepared = await root.tools.prepare(
-      { id: "call-1", name: "web_search", input: { query: "frockbot" } },
+      frockbotToolCall("web_search", { query: "frockbot" }, "call-1"),
       toolContext(),
     );
     expect(prepared.kind).toBe("ready");
@@ -186,11 +187,11 @@ describe("the Ollama Cloud web_search Capability", () => {
           })),
         }),
     });
-    const call = {
-      id: "c",
-      name: "web_search",
-      input: { query: "q", max_results: 2 },
-    };
+    const call = frockbotToolCall(
+      "web_search",
+      { query: "q", max_results: 2 },
+      "c",
+    );
     const prepared = await root.tools.prepare(call, toolContext());
     if (prepared.kind !== "ready") throw new Error("not ready");
     const result = await root.tools.executePrepared(prepared, toolContext());
@@ -214,12 +215,7 @@ describe("the Ollama Cloud web_search Capability", () => {
         }),
     });
     const prepared = await root.tools.prepare(
-      {
-        id: "c",
-        name: "web_search",
-        // The model asks for the contract's maximum; the User's ceiling wins.
-        input: { query: "q", max_results: 10 },
-      },
+      frockbotToolCall("web_search", { query: "q", max_results: 10 }, "c"),
       toolContext(),
     );
     if (prepared.kind !== "ready") throw new Error("not ready");
@@ -239,7 +235,7 @@ describe("the Ollama Cloud web_search Capability", () => {
       respond: () => Response.json({ results: [] }),
     });
     const prepared = await root.tools.prepare(
-      { id: "c", name: "web_search", input: { query: "q", max_results: 3 } },
+      frockbotToolCall("web_search", { query: "q", max_results: 3 }, "c"),
       toolContext(),
     );
     if (prepared.kind !== "ready") throw new Error("not ready");
@@ -261,7 +257,7 @@ describe("the Ollama Cloud web_search Capability", () => {
       { query: "x".repeat(401) },
     ]) {
       const prepared = await root.tools.prepare(
-        { id: "c", name: "web_search", input },
+        frockbotToolCall("web_search", input, "c"),
         toolContext(),
       );
       expect({ input, kind: prepared.kind }).toEqual({ input, kind: "denied" });
@@ -278,7 +274,7 @@ describe("the Ollama Cloud web_search Capability", () => {
         }),
     });
     const prepared = await root.tools.prepare(
-      { id: "c", name: "web_search", input: { query: "q" } },
+      frockbotToolCall("web_search", { query: "q" }, "c"),
       toolContext(),
     );
     if (prepared.kind !== "ready") throw new Error("not ready");
@@ -309,7 +305,7 @@ describe("the Ollama Cloud web_search Capability", () => {
         }),
     });
     const prepared = await root.tools.prepare(
-      { id: "c", name: "web_search", input: { query: "q" } },
+      frockbotToolCall("web_search", { query: "q" }, "c"),
       toolContext(),
     );
     if (prepared.kind !== "ready") throw new Error("not ready");
@@ -326,7 +322,9 @@ describe("the Ollama Cloud web_search Capability", () => {
     for (const turnType of ["chat", "automation", "subagent"] as const) {
       expect({
         turnType,
-        names: root.tools.schemas({ turnType }).map((schema) => schema.name),
+        names: (await discoverFrockbotTools(root.tools, { turnType })).map(
+          (schema) => schema.name,
+        ),
       }).toEqual({
         turnType,
         names: ["web_search", "get_dynamic_tools", "call_dynamic_tool"],

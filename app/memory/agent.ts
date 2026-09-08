@@ -589,6 +589,7 @@ export function createMemoryWriteTool(
 ): ToolDefinition {
   return {
     name: "memory_write",
+    namespace: "frockbot",
     // A general work tool: the full toolset an `executor` subagent gets, and
     // not part of the narrow reach of `browserUse`, `computerUse`, or the two
     // video roles. See `@frockbot/app/subagents` `SUBAGENT_TOOL_REACH_V1`.
@@ -704,6 +705,7 @@ export function createMemoryForgetTool(
 ): ToolDefinition {
   return {
     name: "memory_forget",
+    namespace: "frockbot",
     // A general work tool: the full toolset an `executor` subagent gets, and
     // not part of the narrow reach of `browserUse`, `computerUse`, or the two
     // video roles. See `@frockbot/app/subagents` `SUBAGENT_TOOL_REACH_V1`.
@@ -896,6 +898,7 @@ export function createMemorySearchTool(
 ): ToolDefinition {
   return {
     name: "memory_search",
+    namespace: "frockbot",
     // A general work tool: the full toolset an `executor` subagent gets, and
     // not part of the narrow reach of `browserUse`, `computerUse`, or the two
     // video roles. See `@frockbot/app/subagents` `SUBAGENT_TOOL_REACH_V1`.
@@ -943,6 +946,7 @@ export function createMemoryRebuildIndexTool(
 ): ToolDefinition {
   return {
     name: "memory_rebuild_index",
+    namespace: "frockbot",
     // A general work tool: the full toolset an `executor` subagent gets, and
     // not part of the narrow reach of `browserUse`, `computerUse`, or the two
     // video roles. See `@frockbot/app/subagents` `SUBAGENT_TOOL_REACH_V1`.
@@ -1027,6 +1031,7 @@ export function createProjectTools(
     description: string,
   ): ToolDefinition => ({
     name,
+    namespace: "frockbot",
     description,
     inputSchema: PROJECT_SCHEMA as unknown as Record<string, unknown>,
     idempotent: false,

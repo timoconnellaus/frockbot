@@ -225,6 +225,7 @@ describe("BotState Ollama execution", () => {
                         function: {
                           name: "send_to_user",
                           arguments: JSON.stringify({
+                            disposition: "finish",
                             payload: {
                               type: "widget",
                               widget: {

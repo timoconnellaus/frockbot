@@ -309,9 +309,7 @@ export function startFakeOllama(port: number): Promise<{
           );
           const sent = sinceUser.some((message) =>
             message.tool_calls?.some(
-              (call) =>
-                call.function?.name === "send_to_user" ||
-                call.function?.name === "send_message",
+              (call) => call.function?.name === "send_to_user",
             ),
           );
           if (
@@ -322,6 +320,7 @@ export function startFakeOllama(port: number): Promise<{
             calls.push({
               name: "send_to_user",
               arguments: JSON.stringify({
+                disposition: "finish",
                 payload: { type: "text", text: E2E_ASSISTANT_REPLY },
               }),
             });

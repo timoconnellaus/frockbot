@@ -145,7 +145,7 @@ function host(storage: MemoryStorage, readUser: () => UserSettingsViewV1) {
               start(controller) {
                 controller.enqueue(
                   new TextEncoder().encode(
-                    `data: ${JSON.stringify({ choices: [{ delta: completionCalls++ % 2 === 0 ? { tool_calls: [{ index: 0, id: "send", function: { name: "send_to_user", arguments: JSON.stringify({ payload: { type: "text", text: "Built-in model: hello" } }) } }] } : {} }] })}\n\n` +
+                    `data: ${JSON.stringify({ choices: [{ delta: completionCalls++ % 2 === 0 ? { tool_calls: [{ index: 0, id: "send", function: { name: "send_to_user", arguments: JSON.stringify({ disposition: "finish", payload: { type: "text", text: "Built-in model: hello" } }) } }] } : {} }] })}\n\n` +
                       'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n' +
                       "data: [DONE]\n\n",
                   ),

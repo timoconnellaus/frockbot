@@ -10,6 +10,7 @@ describe("Package iframe direct tool Turn", () => {
     let calls = 0;
     runtime.tools.register({
       name: "weather_lookup",
+      namespace: "frockbot",
       description: "Weather",
       inputSchema: {},
       idempotent: true,
@@ -64,7 +65,7 @@ describe("Package iframe direct tool Turn", () => {
     expect(
       result.events.find((event) => event.type === "tool/result"),
     ).toMatchObject({
-      name: "weather_lookup",
+      name: "call_dynamic_tool",
       content: '{"temperature":21}',
     });
   });

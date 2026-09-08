@@ -146,12 +146,16 @@ export async function executeDirectToolTurn(
   const { command, composition, previousEvents, admitEffect, signal } = options;
   const session = composition.runtime.agent.agent.session;
   // The tool the page names is a registered first-party tool, called by its
-  // own name: the same registry, the same guards and the same durable
+  // discovered namespace: the same registry, guards and durable
   // occurrence a model-selected call goes through.
   const call = {
     id: command.runId,
-    name: command.directTool.name,
-    input: command.directTool.input,
+    name: "call_dynamic_tool",
+    input: {
+      namespace: "frockbot",
+      toolName: command.directTool.name,
+      arguments: command.directTool.input,
+    },
   };
   try {
     let turnStart = [...session.events].findLast(

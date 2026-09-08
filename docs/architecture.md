@@ -167,6 +167,9 @@ Sequential, not parallel. Per occurrence: validate the journal, skip if a result
 - An occurrence with an intent and no result is dispatched again under the same effect id.
 - A throw that is not a cancellation becomes an error result. For a tool not declared `idempotent` the content says the outcome is uncertain, because the loop does not know whether the work happened and does not try to find out.
 - A result carrying `endsTurn: true` closes the Turn unless the `agent/step-continuation` waterfall overrides it.
+- `send_to_user` requires `disposition: "finish" | "continue"`. A final answer ends the Turn immediately; an interim update leaves a final reply owed. Widgets and approvals always end the Turn. The Shell derives completion from the durable tool input and matching send occurrence, including after eviction.
+- Chat/agent requests expose only `send_to_user`, `get_dynamic_tools`, and `call_dynamic_tool` initially. Specialist first-party tools live in the `frockbot` namespace: names are listed in the prompt, schemas are read on demand, and execution retains the same admission and authority checks. Background Turns expose `wake_parent` in place of user delivery.
+- A provider that emits private text instead of a final send gets one bounded delivery-repair step. No provider-specific forced-tool option is assumed.
 
 ### Usage accounting
 

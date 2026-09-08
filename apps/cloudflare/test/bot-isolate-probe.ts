@@ -226,6 +226,7 @@ function scriptedProviderPackage(
                 id: "probe-send",
                 name: "send_to_user",
                 input: {
+                  disposition: "finish",
                   payload: { type: "text", text: `tool:${step.content}` },
                 },
               },
