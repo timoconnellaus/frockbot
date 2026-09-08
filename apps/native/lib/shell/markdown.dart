@@ -50,7 +50,9 @@ class _ShellMarkdownState extends State<ShellMarkdown> {
     }
     _recognizers.clear();
     final theme = Theme.of(context);
-    final base = widget.style ?? theme.textTheme.bodyLarge!;
+    final base =
+        widget.style ??
+        theme.textTheme.bodyLarge!.copyWith(fontWeight: FontWeight.w300);
     final blocks = parseMarkdownBlocks(widget.text);
     final children = <Widget>[];
     for (final block in blocks) {
@@ -73,7 +75,7 @@ class _ShellMarkdownState extends State<ShellMarkdown> {
           _inline(block.text, base),
           style: base.copyWith(
             fontSize: base.fontSize! * sizes[(block.level - 1).clamp(0, 3)],
-            fontWeight: FontWeight.w700,
+            fontWeight: FontWeight.w600,
             height: 1.25,
             color: block.level >= 4 ? theme.colorScheme.onSurfaceVariant : null,
           ),
@@ -125,10 +127,14 @@ class _ShellMarkdownState extends State<ShellMarkdown> {
                 width: 22,
                 child: Text(
                   block.marker ?? '•',
-                  style: base.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                  style: base.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
                 ),
               ),
-              Expanded(child: Text.rich(_inline(block.text, base), style: base)),
+              Expanded(
+                child: Text.rich(_inline(block.text, base), style: base),
+              ),
             ],
           ),
         );
@@ -142,7 +148,7 @@ class _ShellMarkdownState extends State<ShellMarkdown> {
     final spans = <InlineSpan>[];
     for (final run in parseMarkdownInline(source)) {
       var style = base;
-      if (run.bold) style = style.copyWith(fontWeight: FontWeight.w700);
+      if (run.bold) style = style.copyWith(fontWeight: FontWeight.w600);
       if (run.italic) style = style.copyWith(fontStyle: FontStyle.italic);
       if (run.code) {
         style = style.copyWith(
@@ -206,7 +212,9 @@ List<MarkdownBlock> parseMarkdownBlocks(String source) {
   final quoted = <String>[];
   void flushParagraph() {
     if (paragraph.isEmpty) return;
-    blocks.add(MarkdownBlock(MarkdownBlockKind.paragraph, paragraph.join('\n')));
+    blocks.add(
+      MarkdownBlock(MarkdownBlockKind.paragraph, paragraph.join('\n')),
+    );
     paragraph.clear();
   }
 

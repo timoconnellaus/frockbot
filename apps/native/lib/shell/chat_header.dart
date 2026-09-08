@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 
 import '../flock/sheep.dart';
 import 'semantics.dart';
+import 'chat_icons.dart';
 
-/// Identity stays separate from destinations so tools never squeeze the name.
+typedef ChatApplet = ({String label, VoidCallback onOpen});
+
 class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
   final String name;
   final double textScale;
@@ -12,7 +14,8 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
   final VoidCallback onSettings;
   final VoidCallback? onComputer;
   final VoidCallback onRoutines;
-  final VoidCallback? onApplets;
+  final List<ChatApplet> applets;
+  final VoidCallback? onRetryApplets;
 
   const ChatHeader({
     super.key,
@@ -23,15 +26,22 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
     required this.onSettings,
     this.onComputer,
     required this.onRoutines,
-    this.onApplets,
+    this.applets = const [],
+    this.onRetryApplets,
   });
 
+  double get _toolbarHeight => 56 * textScale.clamp(1, 3);
+  double get _appletHeight => 38 * textScale.clamp(1, 3);
+  bool get _hasApplets => applets.isNotEmpty || onRetryApplets != null;
+
   @override
-  Size get preferredSize => Size.fromHeight(116 * textScale.clamp(1, 3));
+  Size get preferredSize =>
+      Size.fromHeight(_toolbarHeight + (_hasApplets ? _appletHeight : 0));
 
   @override
   Widget build(BuildContext context) => AppBar(
-    toolbarHeight: 64 * textScale.clamp(1, 3),
+    toolbarHeight: _toolbarHeight,
+    leadingWidth: 48,
     leading: onBots == null
         ? null
         : identified(
@@ -39,67 +49,100 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
             IconButton(
               tooltip: 'Your Bots',
               onPressed: onBots,
-              icon: const Icon(Icons.menu),
+              icon: const ChatIcon(ChatIconKind.menu, size: 20),
             ),
           ),
-    titleSpacing: 8,
+    titleSpacing: 4,
     title: Row(
       children: [
-        SheepAvatar(size: 34, background: background),
-        const SizedBox(width: 10),
+        SheepAvatar(size: 28, background: background),
+        const SizedBox(width: 8),
         Expanded(
           child: Text(
             name,
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
-            style: Theme.of(context).textTheme.titleMedium,
+            style: Theme.of(context).textTheme.titleMedium
+                ?.copyWith(fontWeight: FontWeight.w500),
           ),
         ),
       ],
     ),
     actions: [
+      _destination('Computer', ChatIconKind.computer, onComputer),
+      _destination('Routines', ChatIconKind.routines, onRoutines),
       identified(
         ShellIds.botPanelToggle,
-        IconButton(
-          tooltip: 'Bot settings',
-          onPressed: onSettings,
-          icon: const Icon(Icons.settings_outlined),
-        ),
+        _destination('Bot settings', ChatIconKind.settings, onSettings),
       ),
+      const SizedBox(width: 4),
     ],
-    bottom: PreferredSize(
-      preferredSize: Size.fromHeight(52 * textScale.clamp(1, 3)),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(8, 0, 8, 4),
-        child: Row(
-          children: [
-            _destination(
-              'Computer',
-              Icons.desktop_windows_outlined,
-              onComputer,
+    bottom: !_hasApplets
+        ? null
+        : PreferredSize(
+            preferredSize: Size.fromHeight(_appletHeight),
+            child: Container(
+              height: _appletHeight,
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surface,
+                border: Border(
+                  bottom: BorderSide(
+                    color: Theme.of(context).colorScheme.outlineVariant,
+                  ),
+                ),
+              ),
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 3),
+              child: ListView(
+                scrollDirection: Axis.horizontal,
+                children: [
+                  for (final applet in applets)
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 240),
+                      child: Tooltip(
+                        message: applet.label,
+                        child: TextButton.icon(
+                          onPressed: applet.onOpen,
+                          icon: const ChatIcon(ChatIconKind.applet, size: 16),
+                          label: Text(
+                            applet.label,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          style: _appletStyle(context),
+                        ),
+                      ),
+                    ),
+                  if (onRetryApplets != null)
+                    TextButton.icon(
+                      onPressed: onRetryApplets,
+                      icon: const Icon(Icons.refresh, size: 16),
+                      label: const Text('Couldn’t load Applets · Retry'),
+                      style: _appletStyle(context),
+                    ),
+                ],
+              ),
             ),
-            _destination('Routines', Icons.schedule, onRoutines),
-            _destination('Applets', Icons.widgets_outlined, onApplets),
-          ],
-        ),
-      ),
-    ),
+          ),
   );
 
-  Widget _destination(String label, IconData icon, VoidCallback? open) =>
-      Expanded(
-        child: TextButton(
-          onPressed: open,
-          style: TextButton.styleFrom(
-            minimumSize: const Size(44, 48),
-            padding: const EdgeInsets.symmetric(horizontal: 2),
-          ),
-          child: Wrap(
-            alignment: WrapAlignment.center,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            spacing: 5,
-            children: [Icon(icon, size: 18), Text(label)],
-          ),
+  ButtonStyle _appletStyle(BuildContext context) => TextButton.styleFrom(
+    foregroundColor: Theme.of(context).colorScheme.onSurfaceVariant,
+    textStyle: Theme.of(context).textTheme.bodySmall,
+    minimumSize: const Size(40, 34),
+    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    padding: const EdgeInsets.symmetric(horizontal: 10),
+  );
+
+  Widget _destination(String label, ChatIconKind icon, VoidCallback? open) =>
+      IconButton(
+        tooltip: label,
+        onPressed: open,
+        icon: ChatIcon(icon),
+        style: IconButton.styleFrom(
+          minimumSize: const Size(40, 48),
+          maximumSize: const Size(40, 48),
+          padding: EdgeInsets.zero,
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
         ),
       );
 }

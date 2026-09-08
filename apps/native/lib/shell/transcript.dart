@@ -292,27 +292,34 @@ class _Bubble extends StatelessWidget {
               child: Container(
                 constraints: const BoxConstraints(maxWidth: 720),
                 margin: EdgeInsets.fromLTRB(
-                  mine ? 56 : 16,
+                  mine ? 56 : 20,
                   6,
-                  mine ? 16 : 56,
+                  mine ? 16 : 20,
                   6,
                 ),
-                padding: const EdgeInsets.all(16),
+                padding: mine
+                    ? const EdgeInsets.symmetric(horizontal: 14, vertical: 11)
+                    : const EdgeInsets.symmetric(vertical: 10),
                 decoration: BoxDecoration(
                   color: mine
                       ? theme.colorScheme.primary.withValues(alpha: 0.16)
-                      : theme.colorScheme.surfaceContainerHighest,
+                      : Colors.transparent,
                   border: failed
                       ? Border.all(color: theme.colorScheme.error)
                       : null,
                   borderRadius: BorderRadius.only(
-                    topLeft: const Radius.circular(20),
-                    topRight: const Radius.circular(20),
-                    bottomLeft: Radius.circular(mine ? 20 : 6),
-                    bottomRight: Radius.circular(mine ? 6 : 20),
+                    topLeft: const Radius.circular(16),
+                    topRight: const Radius.circular(16),
+                    bottomLeft: Radius.circular(mine ? 16 : 6),
+                    bottomRight: Radius.circular(mine ? 6 : 16),
                   ),
                 ),
-                child: Semantics(label: mine ? 'You' : 'Bot', child: child),
+                child: DefaultTextStyle.merge(
+                  style: theme.textTheme.bodyLarge?.copyWith(
+                    fontWeight: FontWeight.w300,
+                  ),
+                  child: Semantics(label: mine ? 'You' : 'Bot', child: child),
+                ),
               ),
             ),
           ],

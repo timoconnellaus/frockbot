@@ -692,63 +692,19 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     }
   }
 
-  void _openApplets() {
+  Future<void> _openApplet(String appletId) async {
     final canvas = appletCanvas;
     if (canvas == null) return;
-    _push(
-      Scaffold(
-        appBar: AppBar(title: const Text('Applets')),
-        body: ListenableBuilder(
-          listenable: canvas,
-          builder: (context, _) {
-            if (canvas.loading && canvas.directory.isEmpty) {
-              return const Center(child: CircularProgressIndicator());
-            }
-            if (canvas.directory.isEmpty) {
-              return Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      canvas.failure == null
-                          ? 'Your Applets will appear here.'
-                          : 'Couldn’t load Applets.',
-                    ),
-                    TextButton(
-                      onPressed: canvas.retry,
-                      child: const Text('Refresh'),
-                    ),
-                  ],
-                ),
-              );
-            }
-            return ListView(
-              children: [
-                for (final applet in canvas.directory)
-                  ListTile(
-                    title: Text(applet.displayName),
-                    leading: const Icon(Icons.widgets_outlined),
-                    onTap: () async {
-                      await canvas.setFocus(applet.appletId);
-                      if (mounted && canvas.focusedId == applet.appletId) {
-                        _pushPanel('applet');
-                      } else if (mounted) {
-                        ScaffoldMessenger.of(this.context).showSnackBar(
-                          const SnackBar(
-                            content: Text(
-                              'Couldn’t open this Applet. Try again.',
-                            ),
-                          ),
-                        );
-                      }
-                    },
-                  ),
-              ],
-            );
-          },
-        ),
-      ),
-    );
+    await canvas.setFocus(appletId);
+    // A focus read may finish after the person switches Bots.
+    if (!mounted || canvas != appletCanvas) return;
+    if (canvas.focusedId == appletId) {
+      _openPanel('applet');
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Couldn’t open this Applet. Try again.')),
+      );
+    }
   }
 
   void _pushPanel(String key) {
@@ -921,9 +877,18 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     final bot = selected;
     return ShellSlotScope(
       slots: slots,
-      child: Scaffold(
-        appBar: bot == null
-            ? AppBar(title: const Text('FrockBot'))
+      child: ShellLayout(
+        header: bot == null
+            ? AppBar(
+                title: const Text('FrockBot'),
+                leading: tier == ShellTier.single
+                    ? IconButton(
+                        tooltip: 'Your Bots',
+                        onPressed: () => setState(() => navOpen = true),
+                        icon: const Icon(Icons.menu),
+                      )
+                    : null,
+              )
             : ChatHeader(
                 name: _name(bot),
                 textScale: MediaQuery.textScalerOf(context).scale(14) / 14,
@@ -936,94 +901,95 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                     ? () => _openPanel('computer')
                     : null,
                 onRoutines: () => _openPanel('routines'),
-                onApplets: appletCanvas == null ? null : _openApplets,
+                applets: [
+                  for (final applet in appletCanvas?.directory ?? const [])
+                    (
+                      label: applet.displayName,
+                      onOpen: () => unawaited(_openApplet(applet.appletId)),
+                    ),
+                ],
+                onRetryApplets: appletCanvas?.failure == null
+                    ? null
+                    : () => unawaited(appletCanvas!.retry()),
               ),
-        body: SafeArea(
-          child: ShellLayout(
-            navOpen: navOpen,
-            panelOpen: panelOpen,
-            onDismiss: () => setState(() {
-              navOpen = false;
-              panelOpen = false;
-            }),
-            rightPanel: _rightPanel(),
-            sidebar: Column(
-              children: [
-                const SlotRegion(
-                  ShellSlot.headerActions,
-                  direction: Axis.horizontal,
-                ),
-                Expanded(
-                  child: ShellSidebar(
-                    bots: bots,
-                    profiles: profiles,
-                    unread: activity.unread,
-                    archived: archived,
-                    activeBotId: bot?.botId.value,
-                    workingBotId: workingRunId == null
-                        ? null
-                        : bot?.botId.value,
-                    loaded: loaded,
-                    error: error,
-                    showHidden: showHidden,
-                    inboxCount: activity.notices.length,
-                    onSelect: _select,
-                    onCreateBot: () => unawaited(_createBot()),
-                    onSearch: _openSearch,
-                    onProfile: _openProfile,
-                    onInbox: () => _push(
-                      ActivityPage(
-                        controller: activity,
-                        openBot: _openBotFromInbox,
-                      ),
-                    ),
-                    onManage: () => _push(
-                      BotRecoveryPage(
-                        api: widget.api,
-                        store: widget.store,
-                        userId: widget.userId,
-                        changed: load,
-                      ),
-                    ),
-                    onToggleHidden: () =>
-                        setState(() => showHidden = !showHidden),
-                    onRetry: load,
+        navOpen: navOpen,
+        panelOpen: panelOpen,
+        onDismiss: () => setState(() {
+          navOpen = false;
+          panelOpen = false;
+        }),
+        rightPanel: _rightPanel(),
+        sidebar: Column(
+          children: [
+            const SlotRegion(
+              ShellSlot.headerActions,
+              direction: Axis.horizontal,
+            ),
+            Expanded(
+              child: ShellSidebar(
+                bots: bots,
+                profiles: profiles,
+                unread: activity.unread,
+                archived: archived,
+                activeBotId: bot?.botId.value,
+                workingBotId: workingRunId == null ? null : bot?.botId.value,
+                loaded: loaded,
+                error: error,
+                showHidden: showHidden,
+                inboxCount: activity.notices.length,
+                onSelect: _select,
+                onCreateBot: () => unawaited(_createBot()),
+                onSearch: _openSearch,
+                onProfile: _openProfile,
+                onInbox: () => _push(
+                  ActivityPage(
+                    controller: activity,
+                    openBot: _openBotFromInbox,
                   ),
                 ),
-              ],
-            ),
-            conversation: bot == null
-                ? NoConversation(
-                    empty: bots.isEmpty,
-                    action: bots.isEmpty || tier != ShellTier.single
-                        ? 'Refresh Bots'
-                        : 'Your Bots',
-                    onAction: bots.isEmpty || tier != ShellTier.single
-                        ? () => unawaited(load())
-                        : () => setState(() => navOpen = true),
-                  )
-                : ConversationView(
-                    key: ValueKey('${widget.userId}:${bot.botId.value}'),
-                    sessions: widget.sessions,
+                onManage: () => _push(
+                  BotRecoveryPage(
                     api: widget.api,
                     store: widget.store,
                     userId: widget.userId,
-                    botId: bot.botId.value,
-                    onOpenRun: _openRun,
-                    onOpenSettings: _openSettings,
-                    onMessageActions: (line) =>
-                        unawaited(_messageActions(line)),
-                    unreadFromMessageId:
-                        activity.unread[bot.botId.value]?.unreadFromMessageId,
-                    background: _background(bot.botId.value),
-                    onWorkingChanged: (runId) {
-                      if (runId != workingRunId && mounted) {
-                        setState(() => workingRunId = runId);
-                      }
-                    },
+                    changed: load,
                   ),
-          ),
+                ),
+                onToggleHidden: () => setState(() => showHidden = !showHidden),
+                onRetry: load,
+              ),
+            ),
+          ],
         ),
+        conversation: bot == null
+            ? NoConversation(
+                empty: bots.isEmpty,
+                action: bots.isEmpty || tier != ShellTier.single
+                    ? 'Refresh Bots'
+                    : 'Your Bots',
+                onAction: bots.isEmpty || tier != ShellTier.single
+                    ? () => unawaited(load())
+                    : () => setState(() => navOpen = true),
+              )
+            : ConversationView(
+                key: ValueKey('${widget.userId}:${bot.botId.value}'),
+                sessions: widget.sessions,
+                api: widget.api,
+                store: widget.store,
+                userId: widget.userId,
+                botId: bot.botId.value,
+                onOpenRun: _openRun,
+                onOpenSettings: _openSettings,
+                onMessageActions: (line) => unawaited(_messageActions(line)),
+                unreadFromMessageId:
+                    activity.unread[bot.botId.value]?.unreadFromMessageId,
+                background: _background(bot.botId.value),
+                onWorkingChanged: (runId) {
+                  if (runId != workingRunId && mounted) {
+                    setState(() => workingRunId = runId);
+                  }
+                },
+              ),
       ),
     );
   }
@@ -1056,217 +1022,201 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     SettingsPage(api: widget.api, store: widget.store, userId: widget.userId),
   );
 
-  /// The profile sheet: who is signed in, and the account surfaces reachable
-  /// from where the User already is. The Vue trigger's menu, on the phone's
-  /// terms — the account's own settings are one entry, not five.
+  /// Account destinations push above Profile, so Back returns here.
   void _openProfile() {
-    setState(() => navOpen = false);
-    showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      // The sheet grew past a hand-held screen once the account had more than
-      // a handful of surfaces on it, and a sheet that overflows loses whatever
-      // is at the bottom of it.
-      isScrollControlled: true,
-      builder: (sheet) => identified(
-        SettingsIds.profileMenu,
-        SafeArea(
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                identified(
-                  SettingsIds.profileName,
-                  ListTile(
-                    leading: const CircleAvatar(
-                      child: Icon(Icons.person_outline),
-                    ),
-                    title: FutureBuilder<String>(
-                      future: _displayName(),
-                      builder: (context, answer) =>
-                          Text(answer.data ?? widget.userId),
-                    ),
-                    subtitle: const Text('Signed in'),
-                  ),
-                ),
-                const Divider(height: 1),
-                identified(
-                  SettingsIds.profileSettings,
-                  ListTile(
-                    leading: const Icon(Icons.settings_outlined),
-                    title: const Text('Settings'),
-                    onTap: () {
-                      Navigator.of(sheet).pop();
-                      _openSettings();
-                    },
-                  ),
-                ),
-                identified(
-                  SettingsIds.profileModels,
-                  ListTile(
-                    leading: const Icon(Icons.auto_awesome_rounded),
-                    title: const Text('Models'),
-                    onTap: () {
-                      Navigator.of(sheet).pop();
-                      _push(
-                        SettingsPage(
-                          api: widget.api,
-                          store: widget.store,
-                          userId: widget.userId,
-                          home: 'models',
-                        ),
-                      );
-                    },
-                  ),
-                ),
-                identified(
-                  SettingsIds.profileConnections,
-                  ListTile(
-                    leading: const Icon(Icons.link_outlined),
-                    title: const Text('Connectors'),
-                    onTap: () {
-                      Navigator.of(sheet).pop();
-                      _push(
-                        ConnectionsPage(
-                          api: widget.api,
-                          store: widget.store,
-                          userId: widget.userId,
-                        ),
-                      );
-                    },
-                  ),
-                ),
-                identified(
-                  AuditIds.recoveryEntry,
-                  ListTile(
-                    leading: const Icon(Icons.history_rounded),
-                    title: const Text('Audit log'),
-                    subtitle: const Text('Every effect your Bots performed'),
-                    onTap: () {
-                      Navigator.of(sheet).pop();
-                      _push(
-                        AuditPage(
-                          api: widget.api,
-                          store: widget.store,
-                          userId: widget.userId,
-                          botId: selected?.botId.value,
-                          botName: selected == null ? null : _name(selected!),
-                        ),
-                      );
-                    },
-                  ),
-                ),
-                identified(
-                  TemplateIds.profileEntry,
-                  ListTile(
-                    leading: const Icon(Icons.inventory_2_outlined),
-                    title: const Text('Bot templates'),
-                    subtitle: const Text(
-                      'Pack a Bot up, or unpack one someone sent you',
-                    ),
-                    onTap: () {
-                      Navigator.of(sheet).pop();
-                      _push(
-                        TemplatesPage(
-                          api: widget.api,
-                          store: widget.store,
-                          userId: widget.userId,
-                          botId: selected?.botId.value,
-                          botName: selected == null ? null : _name(selected!),
-                        ),
-                      );
-                    },
-                  ),
-                ),
-                identified(
-                  MachineIds.profileEntry,
-                  ListTile(
-                    leading: const Icon(Icons.computer_outlined),
-                    title: const Text('Registered machines'),
-                    subtitle: const Text(
-                      'Computers a Bot may reach, with your approval',
-                    ),
-                    onTap: () {
-                      Navigator.of(sheet).pop();
-                      _push(
-                        MachinesPage(
-                          api: widget.api,
-                          store: widget.store,
-                          userId: widget.userId,
-                        ),
-                      );
-                    },
-                  ),
-                ),
-                identified(
-                  PluginIds.profileEntry,
-                  ListTile(
-                    leading: const Icon(Icons.extension_outlined),
-                    title: const Text('Plugins'),
-                    onTap: () {
-                      Navigator.of(sheet).pop();
-                      _push(
-                        PluginsPage(
-                          api: widget.api,
-                          store: widget.store,
-                          userId: widget.userId,
-                        ),
-                      );
-                    },
-                  ),
-                ),
-                // Admin belongs to the deployment, not to the account, so the
-                // entry is here only for someone the gateway already answers it
-                // for. A non-admin is not offered a door that refuses them.
-                if (isAdmin)
+    _push(
+      Scaffold(
+        appBar: AppBar(title: const Text('Profile')),
+        body: identified(
+          SettingsIds.profileMenu,
+          SafeArea(
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
                   identified(
-                    AdminIds.profileEntry,
+                    SettingsIds.profileName,
                     ListTile(
-                      leading: const Icon(Icons.shield_outlined),
-                      title: const Text('Admin'),
+                      leading: const CircleAvatar(
+                        child: Icon(Icons.person_outline),
+                      ),
+                      title: FutureBuilder<String>(
+                        future: _displayName(),
+                        builder: (context, answer) =>
+                            Text(answer.data ?? widget.userId),
+                      ),
+                      subtitle: const Text('Signed in'),
+                    ),
+                  ),
+                  const Divider(height: 1),
+                  identified(
+                    SettingsIds.profileSettings,
+                    ListTile(
+                      leading: const Icon(Icons.settings_outlined),
+                      title: const Text('Settings'),
                       onTap: () {
-                        Navigator.of(sheet).pop();
-                        _push(AdminPage(api: widget.api));
+                        _openSettings();
                       },
                     ),
                   ),
-                // A development build can look at the ViewNode renderer before a
-                // plugin produces a document; the shipped app has no such door.
-                if (developmentAuth)
-                  ListTile(
-                    leading: const Icon(Icons.dashboard_customize_outlined),
-                    title: const Text('View sample'),
-                    onTap: () {
-                      Navigator.of(sheet).pop();
-                      _push(
-                        ViewSamplePage(
-                          store: widget.store,
-                          userId: widget.userId,
-                        ),
-                      );
-                    },
-                  ),
-                ListTile(
-                  leading: const Icon(Icons.refresh),
-                  title: const Text('Refresh'),
-                  onTap: () {
-                    Navigator.of(sheet).pop();
-                    unawaited(load());
-                  },
-                ),
-                if (!localDevelopment)
                   identified(
-                    SettingsIds.profileSignOut,
+                    SettingsIds.profileModels,
                     ListTile(
-                      leading: const Icon(Icons.logout),
-                      title: const Text('Sign out'),
+                      leading: const Icon(Icons.auto_awesome_rounded),
+                      title: const Text('Models'),
                       onTap: () {
-                        Navigator.of(sheet).pop();
-                        unawaited(widget.onSignOut());
+                        _push(
+                          SettingsPage(
+                            api: widget.api,
+                            store: widget.store,
+                            userId: widget.userId,
+                            home: 'models',
+                          ),
+                        );
                       },
                     ),
                   ),
-              ],
+                  identified(
+                    SettingsIds.profileConnections,
+                    ListTile(
+                      leading: const Icon(Icons.link_outlined),
+                      title: const Text('Connectors'),
+                      onTap: () {
+                        _push(
+                          ConnectionsPage(
+                            api: widget.api,
+                            store: widget.store,
+                            userId: widget.userId,
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  identified(
+                    AuditIds.recoveryEntry,
+                    ListTile(
+                      leading: const Icon(Icons.history_rounded),
+                      title: const Text('Audit log'),
+                      subtitle: const Text('Every effect your Bots performed'),
+                      onTap: () {
+                        _push(
+                          AuditPage(
+                            api: widget.api,
+                            store: widget.store,
+                            userId: widget.userId,
+                            botId: selected?.botId.value,
+                            botName: selected == null ? null : _name(selected!),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  identified(
+                    TemplateIds.profileEntry,
+                    ListTile(
+                      leading: const Icon(Icons.inventory_2_outlined),
+                      title: const Text('Bot templates'),
+                      subtitle: const Text(
+                        'Pack a Bot up, or unpack one someone sent you',
+                      ),
+                      onTap: () {
+                        _push(
+                          TemplatesPage(
+                            api: widget.api,
+                            store: widget.store,
+                            userId: widget.userId,
+                            botId: selected?.botId.value,
+                            botName: selected == null ? null : _name(selected!),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  identified(
+                    MachineIds.profileEntry,
+                    ListTile(
+                      leading: const Icon(Icons.computer_outlined),
+                      title: const Text('Registered machines'),
+                      subtitle: const Text(
+                        'Computers a Bot may reach, with your approval',
+                      ),
+                      onTap: () {
+                        _push(
+                          MachinesPage(
+                            api: widget.api,
+                            store: widget.store,
+                            userId: widget.userId,
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  identified(
+                    PluginIds.profileEntry,
+                    ListTile(
+                      leading: const Icon(Icons.extension_outlined),
+                      title: const Text('Plugins'),
+                      onTap: () {
+                        _push(
+                          PluginsPage(
+                            api: widget.api,
+                            store: widget.store,
+                            userId: widget.userId,
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  // Admin belongs to the deployment, not to the account, so the
+                  // entry is here only for someone the gateway already answers it
+                  // for. A non-admin is not offered a door that refuses them.
+                  if (isAdmin)
+                    identified(
+                      AdminIds.profileEntry,
+                      ListTile(
+                        leading: const Icon(Icons.shield_outlined),
+                        title: const Text('Admin'),
+                        onTap: () {
+                          _push(AdminPage(api: widget.api));
+                        },
+                      ),
+                    ),
+                  // A development build can look at the ViewNode renderer before a
+                  // plugin produces a document; the shipped app has no such door.
+                  if (developmentAuth)
+                    ListTile(
+                      leading: const Icon(Icons.dashboard_customize_outlined),
+                      title: const Text('View sample'),
+                      onTap: () {
+                        _push(
+                          ViewSamplePage(
+                            store: widget.store,
+                            userId: widget.userId,
+                          ),
+                        );
+                      },
+                    ),
+                  ListTile(
+                    leading: const Icon(Icons.refresh),
+                    title: const Text('Refresh'),
+                    onTap: () {
+                      unawaited(load());
+                    },
+                  ),
+                  if (!localDevelopment)
+                    identified(
+                      SettingsIds.profileSignOut,
+                      ListTile(
+                        leading: const Icon(Icons.logout),
+                        title: const Text('Sign out'),
+                        onTap: () {
+                          Navigator.of(context).pop();
+                          unawaited(widget.onSignOut());
+                        },
+                      ),
+                    ),
+                ],
+              ),
             ),
           ),
         ),
@@ -1275,7 +1225,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   }
 
   /// The saved profile name, falling back to the account this session holds.
-  /// A name is a courtesy: a read that fails leaves the sheet usable.
+  /// A name is a courtesy: a read that fails leaves the page usable.
   Future<String> _displayName() async {
     try {
       final settings =

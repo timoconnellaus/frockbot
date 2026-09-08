@@ -59,6 +59,7 @@ ShellTier shellTierForWidth(double width) => width <= shellSinglePaneWidth
 /// where a region is a column, the flag is ignored: the column is drawn
 /// whenever a feature has filled it.
 class ShellLayout extends StatelessWidget {
+  final PreferredSizeWidget? header;
   final Widget sidebar;
   final Widget conversation;
 
@@ -69,6 +70,7 @@ class ShellLayout extends StatelessWidget {
   final VoidCallback onDismiss;
   const ShellLayout({
     super.key,
+    this.header,
     required this.sidebar,
     required this.conversation,
     required this.rightPanel,
@@ -94,43 +96,72 @@ class ShellLayout extends StatelessWidget {
           ? constraints.maxWidth
           : shellRightPanelWidth;
       final divider = Theme.of(context).colorScheme.outlineVariant;
-      return Stack(
-        children: [
-          Row(
-            children: [
-              if (inlineSidebar)
-                _Column(
-                  width: shellSidebarWidth,
-                  border: Border(right: BorderSide(color: divider)),
-                  child: identified(ShellIds.sidebar, sidebar),
+      final overlayOpen = drawnNav || drawnPanel;
+      return PopScope(
+        canPop: !overlayOpen,
+        onPopInvokedWithResult: (didPop, _) {
+          if (!didPop && overlayOpen) onDismiss();
+        },
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            ExcludeFocus(
+              excluding: overlayOpen,
+              child: ExcludeSemantics(
+                excluding: overlayOpen,
+                child: Scaffold(
+                  appBar: header,
+                  body: SafeArea(
+                    top: header == null,
+                    child: Row(
+                      children: [
+                        if (inlineSidebar)
+                          _Column(
+                            width: shellSidebarWidth,
+                            border: Border(right: BorderSide(color: divider)),
+                            child: identified(ShellIds.sidebar, sidebar),
+                          ),
+                        Expanded(
+                          child: identified(
+                            ShellIds.conversation,
+                            conversation,
+                          ),
+                        ),
+                        if (inlinePanel)
+                          _Column(
+                            width: shellRightPanelWidth,
+                            border: Border(left: BorderSide(color: divider)),
+                            child: identified(ShellIds.rightPanel, panel),
+                          ),
+                      ],
+                    ),
+                  ),
                 ),
-              Expanded(child: identified(ShellIds.conversation, conversation)),
-              if (inlinePanel)
-                _Column(
-                  width: shellRightPanelWidth,
-                  border: Border(left: BorderSide(color: divider)),
-                  child: identified(ShellIds.rightPanel, panel),
+              ),
+            ),
+            Positioned.fill(
+              child: _Scrim(open: overlayOpen, onDismiss: onDismiss),
+            ),
+            if (!inlineSidebar)
+              _Drawer(
+                open: drawnNav,
+                // Keep a useful strip of scrim even on a narrow phone.
+                width: min(
+                  shellDrawerWidth,
+                  (constraints.maxWidth - 48).clamp(0, constraints.maxWidth),
                 ),
-            ],
-          ),
-          _Scrim(open: drawnNav || drawnPanel, onDismiss: onDismiss),
-          // A region is a column or a drawer, never both: building it twice
-          // would put two of every control in the tree.
-          if (!inlineSidebar)
-            _Drawer(
-              open: drawnNav,
-              width: min(shellDrawerWidth, constraints.maxWidth),
-              from: AxisDirection.left,
-              child: identified(ShellIds.sidebar, sidebar),
-            ),
-          if (panel != null && !inlinePanel)
-            _Drawer(
-              open: drawnPanel,
-              width: min(drawerWidth, constraints.maxWidth),
-              from: AxisDirection.right,
-              child: identified(ShellIds.rightPanel, panel),
-            ),
-        ],
+                from: AxisDirection.left,
+                child: identified(ShellIds.sidebar, sidebar),
+              ),
+            if (panel != null && !inlinePanel)
+              _Drawer(
+                open: drawnPanel,
+                width: min(drawerWidth, constraints.maxWidth),
+                from: AxisDirection.right,
+                child: identified(ShellIds.rightPanel, panel),
+              ),
+          ],
+        ),
       );
     },
   );
@@ -218,6 +249,7 @@ class _Scrim extends StatelessWidget {
           button: true,
           child: GestureDetector(
             onTap: onDismiss,
+            behavior: HitTestBehavior.opaque,
             child: ColoredBox(color: Colors.black.withValues(alpha: 0.45)),
           ),
         ),
