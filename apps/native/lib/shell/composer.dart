@@ -126,34 +126,6 @@ class _ComposerState extends State<Composer> {
     super.initState();
     widget.skills?.addListener(_changed);
     widget.focus.addListener(_changed);
-    widget.editor.addListener(_editorChanged);
-  }
-
-  bool _reading = false;
-
-  /// The trigger is read off the controller, which every path that changes the
-  /// draft goes through.
-  ///
-  /// Reading it from `TextField.onChanged` alone was the defect: choosing a
-  /// Skill rewrites the field from Dart, which fires no `onChanged`, so the
-  /// popover's idea of the text stayed at the message the trigger had been in
-  /// — and the next `/` was read against stale text and opened nothing.
-  ///
-  /// After the frame, and once per frame. The controller notifies from inside
-  /// the engine's own edit callback, and rebuilding the field from there hands
-  /// the engine a value mid-edit — which it answers by putting its element
-  /// back where it thinks the text was.
-  void _editorChanged() {
-    if (_reading) return;
-    _reading = true;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _reading = false;
-      if (!mounted) return;
-      // No `setState` of its own: the popover's own controller notifies when
-      // it changed, and a rebuild for an edit that touched no trigger is a
-      // rebuild of the field the engine is in the middle of editing.
-      _refreshPopover();
-    });
   }
 
   void _changed() {
@@ -164,7 +136,6 @@ class _ComposerState extends State<Composer> {
   void dispose() {
     widget.skills?.removeListener(_changed);
     widget.focus.removeListener(_changed);
-    widget.editor.removeListener(_editorChanged);
     super.dispose();
   }
 
@@ -187,6 +158,10 @@ class _ComposerState extends State<Composer> {
       selection: TextSelection.collapsed(offset: replaced.caret),
     );
     widget.onChanged(replaced.text);
+    // The rewrite came from Dart, so no `onChanged` will follow it: the
+    // popover's view of the text is brought up to date here, or the next
+    // trigger is matched against the message this one was taken out of.
+    _refreshPopover();
     widget.focus.requestFocus();
   }
 
@@ -320,6 +295,7 @@ class _ComposerState extends State<Composer> {
                           onChanged: (value) {
                             AcceptanceMetrics.instance.inputChanged();
                             widget.onChanged(value);
+                            _refreshPopover();
                             setState(() {});
                           },
                         ),

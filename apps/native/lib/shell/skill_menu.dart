@@ -267,7 +267,6 @@ class SkillMenuController extends ChangeNotifier {
     final next = skillPopoverFor(text, caret < 0 ? text.length : caret);
     popover = next;
     if (next == null) {
-      if (candidates.isEmpty) return;
       candidates = const [];
       _changed();
       return;

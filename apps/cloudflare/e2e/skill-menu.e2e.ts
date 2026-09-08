@@ -47,7 +47,13 @@ async function openPopover(page: Page): Promise<void> {
     // all: the menu opened the first time and never again. Typing into a
     // focused field always reaches the widget, and select-all is what clears
     // whatever was there without a `fill`.
-    await composer.focus();
+    // Clicked, not merely focused. Choosing a Skill rewrites the field from
+    // Dart, and the engine answers a rewrite by tearing its editing element
+    // down and building another: `focus()` on the element this side is holding
+    // lands on the one that is going away, and the keys that follow reach no
+    // widget at all. A click is a real gesture at whatever is there now, which
+    // is what opens the session the trigger needs.
+    await composer.click();
     await composer.press("ControlOrMeta+a");
     await composer.pressSequentially("/");
     await expect(composer).toHaveValue("/");
