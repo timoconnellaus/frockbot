@@ -16,10 +16,13 @@ export 'store.dart';
 /// local stack with `--dart-define=FROCKBOT_ORIGIN=…` (`bun run dev:native`
 /// lends the host's loopback to the emulator); every other build talks to
 /// production.
-const hostedOrigin = String.fromEnvironment(
-  'FROCKBOT_ORIGIN',
-  defaultValue: 'https://bot.frockbot.com',
-);
+const localDevelopment = bool.fromEnvironment('FROCKBOT_LOCAL_DEV');
+const hostedOrigin = localDevelopment
+    ? 'http://127.0.0.1:8787'
+    : String.fromEnvironment(
+        'FROCKBOT_ORIGIN',
+        defaultValue: 'https://bot.frockbot.com',
+      );
 const clientHello = <String, Object>{
   'schemaVersion': 1,
   'protocolVersion': 1,
@@ -84,6 +87,7 @@ class NativeApi {
     return {
       'content-type': 'application/json',
       'x-frockbot-client': jsonEncode(clientHello),
+      if (localDevelopment) 'x-frockbot-user-id': 'development',
       'authorization': ?authorization,
     };
   }

@@ -23,6 +23,7 @@
     "build:cloudflare": "bun scripts/build-applets-assets.ts && bun run --filter @frockbot/cloudflare build",
     "build:marketing": "bun run --filter @frockbot/marketing build",
     "bootstrap:npm-trust": "./scripts/bootstrap-npm-trust.sh",
+    "dev:phone": "./scripts/phone-dev.sh",
     "dogfood:dev": "./scripts/dogfood/dev-stack.sh",
     "dev:native": "bun scripts/native-dev.ts up",
     "smoke:native": "bun scripts/native-dev.ts smoke",
