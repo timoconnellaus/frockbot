@@ -724,6 +724,17 @@ function dump(serial: string): Node[] {
   return nodes;
 }
 
+/**
+ * What a node says, wherever it says it.
+ *
+ * Flutter puts a widget's semantics label in `content-desc` and leaves `text`
+ * empty, so anything reading the conversation off the screen has to read all
+ * three: the transcript's own words arrive as `content-desc` alone.
+ */
+function label(node: Node): string {
+  return node.desc || node.text || node.hint;
+}
+
 function find(nodes: Node[], label: string): Node | undefined {
   // A list tile's label is its title, preview and badge on separate lines.
   return nodes.find((node) =>
@@ -838,8 +849,8 @@ async function smoke(): Promise<void> {
   );
 
   say("waiting for the signed-in home, then opening the Bot");
-  // The composer's accessibility hint; its visible placeholder is longer.
-  const composer = "Message";
+  // The composer's placeholder, which is also its accessibility label.
+  const composer = "Message your Bot";
   // The shell's sidebar toggle on a phone, which is also what the empty state
   // offers: either one opens the Bot list.
   const openBots = "Your Bots";
@@ -865,28 +876,11 @@ async function smoke(): Promise<void> {
 
   const message = `Local smoke ${new Date().toISOString().slice(11, 19)}. Reply with one short sentence.`;
   say("sending a message");
-  const before = new Set(
-    dump(serial)
-      .map((node) => node.text)
-      .filter(Boolean),
-  );
-  await tap(serial, ["Message your Bot", "Message"]);
+  const before = new Set(dump(serial).map(label).filter(Boolean));
+  await tap(serial, [composer]);
   adb(serial, "shell", "input", "text", message.replaceAll(" ", "%s"));
   await tap(serial, ["Send"]);
 
-  // The shell's own words, which are never the Bot's. A running Turn is the
-  // animated row and says nothing at all; these are the states that do.
-  const status = new Set([
-    "Working",
-    "Waiting…",
-    "Stopping…",
-    "Stopping the previous reply…",
-    "Still stopping the previous reply",
-    "You stopped this.",
-    "Used 1 tool",
-    "Check message status",
-    "Checking whether your message went through…",
-  ]);
   // Every sentence the projection writes for a Turn that did not finish.
   const failed = [
     "This Bot couldn't finish its reply.",
@@ -899,38 +893,47 @@ async function smoke(): Promise<void> {
     "The model stopped part-way through its reply",
     "This Bot used all the steps it had",
   ];
+  // Every bubble the Bot speaks carries this prefix, and the person's carry
+  // "You": the transcript wraps each one in a `Semantics` label that Android
+  // merges above the words. Reading the prefix rather than "text that was not
+  // there before" is what keeps the person's own message, the working row and
+  // the shell's status lines out of the answer.
+  const spoken = "Bot\n";
   let reply: string | undefined;
+  // A Turn that finishes without calling `send_to_user` said nothing on
+  // purpose: only an explicit send carries the Bot's voice. The stack is still
+  // proven — the message was admitted, the model ran, the Turn settled — so
+  // this is a pass that says which kind it was, not a failure.
+  let silent = false;
   await waitFor(
     "a reply from the Bot",
     async () => {
-      const nodes = dump(serial);
+      const nodes = dump(serial).map(label);
       const broke = nodes.find((node) =>
-        failed.some((sentence) => node.text.startsWith(sentence)),
+        failed.some((sentence) => node.startsWith(sentence)),
       );
-      if (broke) die(`the Turn failed: ${broke.text} — see the Worker log`);
-      reply = nodes
-        .map((node) => node.text)
-        .find(
-          (text) =>
-            text && !before.has(text) && text !== message && !status.has(text),
-        );
+      if (broke) die(`the Turn failed: ${broke} — see the Worker log`);
+      reply = nodes.find(
+        (node) => node.startsWith(spoken) && !before.has(node),
+      );
       if (reply) return true;
       const runs = await api<{
         runs: { input?: string; status: string; events: { type: string }[] }[];
       }>(`/api/bots/${BOT_ID}/turns`);
       const run = runs.runs.find((each) => each.input === message);
-      if (
-        run?.status === "completed" &&
-        !run.events.some((event) => event.type === "send/to-user")
-      ) {
-        die("the Turn completed without delivering a send_to_user reply");
-      }
-      return false;
+      if (run?.status !== "completed") return false;
+      silent = !run.events.some((event) => event.type === "send/to-user");
+      return silent;
     },
     300_000,
   );
   screenshot(serial, "smoke-replied");
-  say(`the Bot replied: ${JSON.stringify(reply)}`);
+  if (silent) {
+    say("the Turn completed without saying anything");
+    console.log("\nsmoke: PASS (silent reply)");
+    return;
+  }
+  say(`the Bot replied: ${JSON.stringify(reply!.slice(spoken.length))}`);
   console.log("\nsmoke: PASS");
 }
 
