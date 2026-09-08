@@ -13,7 +13,8 @@
 // `x-frockbot-host-token` check, and the real Worker's own
 // `computerHostShardV1`, so a test can prove a User's calls all land on one
 // shard. Only the Computer is different: an in-memory file map and a scripted
-// exec table instead of a Sprite.
+// exec table, the same shape `@frockbot/computer/fake` gives the interface,
+// one protocol layer further down.
 //
 // It runs in Node (a Miniflare `serviceBindings` function), so the test that
 // drives it lives in workerd and cannot touch its state directly. Control
@@ -93,9 +94,10 @@ interface FakeState {
   cancelled: Set<string>;
   generation: number;
   /**
-   * The control leases, keyed exactly as the Sprite's `control.sh` keys them:
-   * one directory per lease key on one box. A `bot` lease is keyed by tenant, a
-   * `desktop-gui` lease by the box — which is what makes it User-wide.
+   * The control leases, keyed exactly as the Computer's own lease script keys
+   * them: one directory per lease key on one Computer. A `bot` lease is keyed
+   * by tenant, a `desktop-gui` lease by the Computer — which is what makes it
+   * User-wide.
    */
   leases: Map<string, { ownerId: string; expiresAt: number }>;
 }
@@ -433,9 +435,9 @@ export function createComputerHostFake(
   }
 
   /**
-   * The control lease, with the same rule `control.sh` runs on the Sprite: one
-   * owner per key, a fresh lease refuses a different owner, and a release only
-   * releases your own. Faking a lease that always grants would prove nothing —
+   * The control lease, with the same rule the Computer's own lease script
+   * runs: one owner per key, a fresh lease refuses a different owner, and a
+   * release only releases your own. A lease that always granted proves nothing —
    * the whole claim of the `desktop-gui` scope is that a *second* caller is
    * refused, and named the holder.
    */
@@ -514,7 +516,9 @@ export function createComputerHostFake(
         const result = {
           version: 1,
           effectId: value.effectId,
-          instanceId: `frockbot-fake-${computerHostShardV1(
+          // Opaque by declaration: the wire names an instance, and nothing
+          // above the host may read a vendor's naming out of it.
+          instanceId: `fake-computer-${computerHostShardV1(
             value.identity.userId,
             shards,
           ).replace(/[^a-z0-9-]/g, "")}`,
@@ -549,7 +553,7 @@ export function createComputerHostFake(
               effectId: value.effectId,
               session: {
                 id: "fake-viewer-token",
-                url: "https://fake-sprite.example/index.html#autoconnect=1&reconnect=1&resize=scale&view_only=1&path=websockify%3Ftoken%3Dfake-viewer-token&password=fake-password",
+                url: "https://viewer.invalid/session/fake-viewer-token",
                 expiresAt: new Date(Date.now() + 90_000).toISOString(),
               },
             });

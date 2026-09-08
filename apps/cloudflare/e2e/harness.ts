@@ -758,11 +758,6 @@ export async function startHarness(
         `BETTER_AUTH_URL:http://127.0.0.1:${options.port}`,
         "--var",
         `CREDENTIAL_KEYRING:${E2E_CREDENTIAL_KEYRING}`,
-        // No Sprites: this Worker never holds that credential — the Computer
-        // host does — and an empty token is what production hands a Worker
-        // with no Computer of its own to open.
-        "--var",
-        "SPRITES_TOKEN:",
         // The Computer host's shared secret. The `COMPUTER_HOST` binding is
         // declared as production declares it and nothing answers it, so with
         // this token the deployment has a Computer whose host is down, and

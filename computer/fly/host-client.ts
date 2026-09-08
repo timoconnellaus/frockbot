@@ -120,7 +120,7 @@ export interface FlyHostTransportOptionsV1 {
   tenant: { botId: string };
   /**
    * The opaque reference the host resolves to a credential. It carries no
-   * credential material and is `sprites:user:<userId>` unless a caller names
+   * credential material and is `computer:user:<userId>` unless a caller names
    * another; shipping it from day one is what lets the credential broker land
    * without a protocol version bump.
    */
@@ -325,7 +325,7 @@ export class FlyHostTransportV1 {
     this.identity = { userId: options.identity.userId };
     this.tenant = { botId: options.tenant.botId };
     this.credentialRef =
-      options.credentialRef ?? `sprites:user:${options.identity.userId}`;
+      options.credentialRef ?? `computer:user:${options.identity.userId}`;
     this.origin = options.origin ?? COMPUTER_HOST_ORIGIN;
     this.grace = options.timeoutGraceMs ?? COMPUTER_HOST_TIMEOUT_GRACE_MS;
     this.newEffectId = options.newEffectId ?? defaultEffectId;

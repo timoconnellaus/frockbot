@@ -33,7 +33,7 @@ const result = await Bun.build({
   entrypoints: [resolve(root, "src/user-application.ts")],
   outdir,
   // The Worker uses nodejs_compat, and hosted runtime Contributions may import
-  // supported Node built-ins (for example the Fly Sprites SDK's node:net shim).
+  // supported Node built-ins (for example the Computer host SDK's node:net shim).
   target: "node",
   format: "esm",
   naming: "foundation-v1.mjs",

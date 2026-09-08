@@ -51,8 +51,17 @@ describe("the production secrets manifest", () => {
 
   test("names nothing the Worker does not read", () => {
     const declared = new Set(declaredStringSettings());
+    // A `hostOnly` secret is read by another Worker of this deployment — the
+    // Computer host — and the app Worker declares no `env` string for it,
+    // which is the point of the flag.
+    const hostOnly = new Set(
+      REQUIRED_PRODUCTION_SECRETS_V1.filter((secret) => secret.hostOnly).map(
+        (secret) => secret.name,
+      ),
+    );
+    expect([...hostOnly]).toEqual(["SPRITES_TOKEN"]);
     const named = [
-      ...deployedSecretNamesV1(),
+      ...deployedSecretNamesV1().filter((name) => !hostOnly.has(name)),
       ...NON_SECRET_WORKER_SETTINGS_V1.map((setting) => setting.name),
     ];
     expect(named.filter((name) => !declared.has(name))).toEqual([]);

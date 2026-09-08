@@ -1,11 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { type SessionEvent } from "@frockbot/core/contracts";
 import { ComputerRegistry } from "@frockbot/computer/core/host";
-import {
-  FlyHostTransportV1,
-  createFlySpriteProviderFeature,
-  FlySpriteComputer,
-} from "@frockbot/computer/fly";
+import { FlyHostTransportV1, FlyComputerHostV1 } from "@frockbot/computer/fly";
 import {
   BotDurableAuthority,
   createStoredRunCodecV1,
@@ -67,13 +63,13 @@ import type { BotSettingsViewV1 } from "@frockbot/core/configuration";
 import { UserConfiguration } from "../src/user-configuration.ts";
 export { DeploymentPolicy } from "../src/deployment-policy.ts";
 
-interface FlyCompatibilityEnv {
-  /** The shared Computer host. The provider reaches a Sprite here. */
+interface ComputerCompatibilityEnv {
+  /** The shared Computer host. The implementation reaches a Computer here. */
   COMPUTER_HOST: Fetcher;
   COMPUTER_HOST_TOKEN: string;
 }
 
-export interface FlyMountResult {
+export interface ComputerMountResult {
   providerId: string;
   generation: number;
 }
@@ -140,7 +136,7 @@ export interface WorkspaceProbeWrite {
 
 /**
  * The Computer half of the sync, as a probe: a durable map in one Durable
- * Object's storage standing in for a Sprite's filesystem. It is deliberately
+ * Object's storage standing in for the Computer's filesystem. It is deliberately
  * durable rather than in-memory — the claim under test is that an intent and
  * the Computer-side bytes both survive an eviction, and an in-memory disk
  * would forget the second half.
@@ -564,11 +560,11 @@ export class WorkerdBotState extends BotState {
    * The durable-root sync with its production halves in place: the
    * object-storage store this object serves, the push intent records this
    * object holds, and its generation ledger. Only the Computer side is a
-   * probe — a durable map in this object's own storage standing in for a
-   * Sprite's filesystem, so what the "Computer" holds survives eviction the
-   * way a Sprite's disk does.
+   * probe — a durable map in this object's own storage standing in for the
+   * Computer's filesystem, so what the "Computer" holds survives eviction the
+   * way a real disk does.
    *
-   * `interrupt` drops the connection the way a Sprite pause does: after the
+   * `interrupt` drops the connection the way a paused Computer does: after the
    * store has taken the write but before the sync could settle its intent.
    */
   async computerSyncRun(input: {
@@ -1033,32 +1029,34 @@ export class CompositionProbe extends DurableObject {
 }
 
 /**
- * The Fly provider mounted in workerd, through the shared Computer host.
+ * The deployment's Computer host implementation, mounted in workerd.
  *
- * This probe used to prove the opposite: that the provider could reach a
- * Sprite from workerd only far enough to fail on HTTP chunk framing. It no
- * longer can reach one at all — the SDK is on the host now — so
- * what is left to prove here is that the provider still mounts behind the
- * provider-neutral Computer interface and opens a Computer over the binding.
- * The live probe it used to carry is retired with the path it probed.
+ * This probe used to prove the opposite: that the implementation could reach
+ * a Computer from workerd only far enough to fail on HTTP chunk framing. It
+ * no longer can reach one at all — the vendor SDK is on the host app now — so
+ * what is left to prove here is that it still mounts behind `ComputerHostV1`
+ * and opens a Computer over the binding, and that its two-call operations
+ * survive the real v1 wire. It is the one place both halves of that pair run
+ * where the Bot runs; `computer/host-contract.test.ts` is where the same
+ * implementation is held to the interface beside the in-memory host.
  */
-export class FlyCompatibilityProbe extends DurableObject<FlyCompatibilityEnv> {
+export class ComputerCompatibilityProbe extends DurableObject<ComputerCompatibilityEnv> {
   private computers: ComputerRegistry | undefined;
 
-  private async createComputers(spriteName: string): Promise<ComputerRegistry> {
+  private createComputers(): ComputerRegistry {
     const computers = new ComputerRegistry();
-    const computer = new FlySpriteComputer({
-      spriteName,
-      identity: { userId: "workerd" },
-      host: (identity, tenant) =>
-        new FlyHostTransportV1({
-          fetcher: this.env.COMPUTER_HOST,
-          hostToken: this.env.COMPUTER_HOST_TOKEN,
-          identity,
-          tenant,
-        }),
-    });
-    await createFlySpriteProviderFeature(computer)({ computers });
+    computers.register(
+      new FlyComputerHostV1(
+        undefined,
+        (identity, tenant) =>
+          new FlyHostTransportV1({
+            fetcher: this.env.COMPUTER_HOST,
+            hostToken: this.env.COMPUTER_HOST_TOKEN,
+            identity,
+            tenant,
+          }),
+      ),
+    );
     return computers;
   }
 
@@ -1075,9 +1073,7 @@ export class FlyCompatibilityProbe extends DurableObject<FlyCompatibilityEnv> {
     | { ok: true; display: string; mediaType: string; bytesBase64: string }
     | { ok: false; message: string }
   > {
-    this.computers ??= await this.createComputers(
-      "frockbot-workerd-compatibility",
-    );
+    this.computers ??= this.createComputers();
     const identity = { userId: "workerd" };
     this.computers.assign(identity, "computer-host");
     const computer = await this.computers.open(identity, { botId });
@@ -1127,9 +1123,7 @@ export class FlyCompatibilityProbe extends DurableObject<FlyCompatibilityEnv> {
       }
     | { ok: false; message: string }
   > {
-    this.computers ??= await this.createComputers(
-      "frockbot-workerd-compatibility",
-    );
+    this.computers ??= this.createComputers();
     const identity = { userId: "workerd" };
     this.computers.assign(identity, "computer-host");
     const computer = await this.computers.open(identity, { botId });
@@ -1171,9 +1165,7 @@ export class FlyCompatibilityProbe extends DurableObject<FlyCompatibilityEnv> {
     logTail?: string;
     message?: string;
   }> {
-    this.computers ??= await this.createComputers(
-      "frockbot-workerd-compatibility",
-    );
+    this.computers ??= this.createComputers();
     const identity = { userId: "workerd" };
     this.computers.assign(identity, "computer-host");
     const computer = await this.computers.open(identity, {
@@ -1244,10 +1236,8 @@ export class FlyCompatibilityProbe extends DurableObject<FlyCompatibilityEnv> {
     }
   }
 
-  async mountProvider(): Promise<FlyMountResult> {
-    this.computers ??= await this.createComputers(
-      "frockbot-workerd-compatibility",
-    );
+  async mountProvider(): Promise<ComputerMountResult> {
+    this.computers ??= this.createComputers();
     const identity = { userId: "workerd" };
     const assignment = this.computers.assign(identity, "computer-host");
     const computer = await this.computers.open(identity, {

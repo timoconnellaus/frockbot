@@ -18,20 +18,18 @@ import {
   type ComputerHostCapabilitiesV1,
   type ComputerHostSessionV1,
   type ComputerHostV1,
-  type ComputerRegistry,
   type ComputerSyncHostV1,
   type ComputerSyncReasonV1,
   type ComputerSyncSummaryV1,
   type ComputerSyncV1,
 } from "@frockbot/computer/core/host";
 import { type WorkspaceRootV1 } from "@frockbot/core/contracts";
-import type { RuntimeFeatureV1 } from "@frockbot/core/contracts";
 import {
   computerBotKey,
   type BrowserAction,
   type ComputerHostFactoryV1,
-  FlySpriteComputer,
-  type FlySpriteAgentComputer,
+  FlyComputer,
+  type FlyAgentComputer,
   flySpriteNameForBot,
 } from "./computer.js";
 import {
@@ -195,13 +193,13 @@ function commandFor(
  * that refuses: each is a declared outcome its caller records on the Turn and
  * carries on — "a dropped connection is an outcome, not a failure."
  */
-class FlySpriteComputerSync implements ComputerSyncV1 {
+class FlyComputerSync implements ComputerSyncV1 {
   private readonly sync: ReturnType<typeof createFlySpriteSyncV1>;
   /** Every root this sync covers, so a per-root run can refuse a stranger. */
   private readonly declared: readonly WorkspaceRootV1[];
 
   constructor(
-    computer: FlySpriteAgentComputer,
+    computer: FlyAgentComputer,
     identity: ComputerIdentityV1,
     tenant: ComputerTenantV1,
     host: ComputerSyncHostV1,
@@ -379,7 +377,7 @@ export const FLY_HOST_CAPABILITIES_V1: ComputerHostCapabilitiesV1 = {
 function handle(
   identity: ComputerIdentityV1,
   tenant: ComputerTenantV1,
-  computer: FlySpriteAgentComputer,
+  computer: FlyAgentComputer,
   assignment: ComputerAssignment,
   syncHost?: ComputerSyncHostV1,
 ): ComputerHostSessionV1 {
@@ -390,7 +388,7 @@ function handle(
     capabilities: FLY_HOST_CAPABILITIES_V1,
     ...(syncHost
       ? {
-          sync: new FlySpriteComputerSync(computer, identity, tenant, syncHost),
+          sync: new FlyComputerSync(computer, identity, tenant, syncHost),
         }
       : {}),
     workspace: new FlyComputerWorkspace(FLY_WORKSPACE_LAYOUT, {
@@ -567,14 +565,14 @@ export function flySpriteNameForComputer(identity: ComputerIdentityV1): string {
 }
 
 /** Provider adapter that keeps Fly-specific lifecycle behind Computer core. */
-export class FlySpriteComputerHostV1 implements ComputerHostV1 {
+export class FlyComputerHostV1 implements ComputerHostV1 {
   readonly id = "computer-host";
   readonly capabilities = FLY_HOST_CAPABILITIES_V1;
   readonly workspaceLayout = FLY_WORKSPACE_LAYOUT;
-  private readonly computers = new Map<string, FlySpriteComputer>();
+  private readonly computers = new Map<string, FlyComputer>();
 
   constructor(
-    private readonly fixedComputer?: FlySpriteComputer,
+    private readonly fixedComputer?: FlyComputer,
     /**
      * The shared Computer host. Absent, and every Computer this
      * provider opens is unconfigured: the provider Package holds no Sprites
@@ -596,12 +594,12 @@ export class FlySpriteComputerHostV1 implements ComputerHostV1 {
    * The one Sprite backing a User's Computer. One Computer per User: every
    * Bot the User owns is a tenant on the instance this returns.
    */
-  computerFor(identity: ComputerIdentityV1): FlySpriteComputer {
+  computerFor(identity: ComputerIdentityV1): FlyComputer {
     if (this.fixedComputer) return this.fixedComputer;
     const key = computerIdentityKeyV1(identity);
     let computer = this.computers.get(key);
     if (!computer) {
-      computer = new FlySpriteComputer({
+      computer = new FlyComputer({
         identity: { userId: identity.userId },
         ...(this.host ? { host: this.host } : {}),
         respectHumanControl: true,
@@ -639,25 +637,3 @@ export class FlySpriteComputerHostV1 implements ComputerHostV1 {
     );
   }
 }
-
-export function createFlySpriteProviderFeature(
-  computer?: FlySpriteComputer,
-  options?: {
-    host?: ComputerHostFactoryV1;
-    sync?: ComputerSyncHostV1;
-    agentControlOwnerId?: string;
-  },
-): RuntimeFeatureV1<{ computers: ComputerRegistry }> {
-  return (runtime) =>
-    runtime.computers.register(
-      new FlySpriteComputerHostV1(
-        computer,
-        options?.host,
-        options?.sync,
-        options?.agentControlOwnerId,
-      ),
-    );
-}
-
-export const flySpriteProviderFeature = createFlySpriteProviderFeature();
-export default flySpriteProviderFeature;

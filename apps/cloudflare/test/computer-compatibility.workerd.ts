@@ -3,8 +3,8 @@ import { evictDurableObject, runDurableObjectAlarm } from "cloudflare:test";
 import { describe, expect, test } from "vitest";
 import { provisionBot } from "./provision-bot.ts";
 
-function flyProbe(name: string) {
-  return env.FLY_COMPATIBILITY.getByName(name);
+function probe(name: string) {
+  return env.COMPUTER_COMPATIBILITY.getByName(name);
 }
 
 function bot(name: string) {
@@ -15,16 +15,14 @@ function user(name: string) {
   return env.USER_CONFIGURATIONS.getByName(name);
 }
 
-describe("Fly provider Workerd compatibility", () => {
+describe("the Computer host implementation in Workerd", () => {
   // The live probe that used to sit beside this one asserted the workerd
-  // chunk-framing failure. That path no longer exists: the Sprites SDK is on
-  // the Computer host now, and the provider reaches a Computer only
+  // chunk-framing failure. That path no longer exists: the vendor SDK is on
+  // the Computer host now, and the implementation reaches a Computer only
   // through the `COMPUTER_HOST` binding. It is retired with the path it
-  // probed; `apps/computer-host/live-test.ts` drives the real Sprite.
+  // probed; `apps/computer-host/live-test.ts` drives a real one.
   test("mounts through the provider-neutral Computer interface", async () => {
-    const result = await flyProbe(
-      `mount-${crypto.randomUUID()}`,
-    ).mountProvider();
+    const result = await probe(`mount-${crypto.randomUUID()}`).mountProvider();
 
     expect(result).toEqual({
       providerId: "computer-host",

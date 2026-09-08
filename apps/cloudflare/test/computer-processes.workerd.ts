@@ -30,7 +30,7 @@ async function script(rule: FakeExecScript): Promise<void> {
 }
 
 function probe() {
-  return env.FLY_COMPATIBILITY.getByName("processes");
+  return env.COMPUTER_COMPATIBILITY.getByName("processes");
 }
 
 beforeAll(async () => {

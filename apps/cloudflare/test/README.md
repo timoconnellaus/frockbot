@@ -5,7 +5,7 @@ Two Vitest projects run in local workerd, and they answer different questions.
 ## `bun run test:workerd` — runtime compatibility
 
 `vitest.config.ts`, files `test/**/*.workerd.ts`. Its worker `main` is
-`test/fly-compatibility-worker.ts`, a probe Worker, so these tests drive
+`test/computer-compatibility-worker.ts`, a probe Worker, so these tests drive
 Durable Objects and probe subclasses directly. Hermetic; it does not read or
 expose a Sprites credential.
 
@@ -144,7 +144,7 @@ and incident.
 ## The Computer, and what no local pool can prove
 
 There is no opt-in live Sprite probe here any more. The probe that used to sit
-in `fly-compatibility.workerd.ts` asserted the workerd chunk-framing failure in
+in `computer-compatibility.workerd.ts` asserted the workerd chunk-framing failure in
 `@fly/sprites`; that path no longer exists, because the SDK is on the Computer
 host and a Bot Durable Object reaches a Computer only through the
 `COMPUTER_HOST` binding (ADR 0004). `apps/computer-host/live-test.ts` builds the

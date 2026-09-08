@@ -4,7 +4,7 @@
 /// `sandbox` is the whole of the guarantee. An untrusted page gets
 /// `allow-scripts` and nothing else, so it runs in an opaque origin with no
 /// storage, no top-level navigation and no form submission; the Computer's own
-/// viewer keeps its origin because noVNC is first-party and needs it.
+/// viewer keeps its origin because the viewer page is first-party and needs it.
 library;
 
 import 'dart:convert';

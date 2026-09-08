@@ -16,7 +16,7 @@
  *   - The app Worker under `wrangler dev --env development` — the same workerd
  *     as production, local R2/D1/Durable Objects under `.native-dev/`, and the
  *     remote AI, Vectorize and memory bindings when wrangler is signed in.
- *   - With `SPRITES_TOKEN`, the Computer host — real Sprites — under its own
+ *   - With `SPRITES_TOKEN`, the Computer host — a real Computer — under its own
  *     `wrangler dev`, because a service binding resolves only through the dev
  *     registry.
  *   - With Docker running, the Applet build service the same way. Both are
@@ -387,7 +387,7 @@ async function serve(
       ],
       computerHostRoot,
     );
-    computer = `real Sprites through the Computer host on :${computerHostPort}`;
+    computer = `a real Computer through the host on :${computerHostPort}`;
   }
 
   const remote = cloudflareAuthenticated();

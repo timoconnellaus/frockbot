@@ -37,7 +37,7 @@ const envelope = {
   effectId: "effect-1",
   identity: { userId: "user-1" },
   tenant: { botId: "bot-1" },
-  credentialRef: "sprites:user:user-1",
+  credentialRef: "computer:user:user-1",
 };
 
 function request(operation: ComputerHostOperationV1): Record<string, unknown> {
@@ -596,7 +596,7 @@ describe("results", () => {
         version: 1,
         effectId: "effect-1",
         cancelled: true,
-        spritesToken: "leaked",
+        hostToken: "leaked",
       }),
     ).toThrow(/unknown field/);
   });

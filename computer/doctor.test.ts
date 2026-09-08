@@ -8,31 +8,29 @@
 // use instead.
 import { describe, expect, test } from "bun:test";
 import { computerBotPathKeyV1 } from "@frockbot/computer/core";
-import {
-  type ComputerDoctorReportV1,
-  type ComputerHostCapabilitiesV1,
-  type ComputerHostSessionV1,
-  type ComputerHostV1,
-} from "@frockbot/computer/core/host";
+import { type ComputerDoctorReportV1 } from "@frockbot/computer/core/host";
 import {
   type AgentRuntimeHarness,
   createAgentRuntimeHarness,
 } from "@frockbot/app/testkit";
 import { createComputerAgentFeature } from "./agent.js";
-import { FakeWorkspace } from "./workspace-fixture.js";
+import {
+  createFakeComputerHostV1,
+  FAKE_HOST_CAPABILITIES_V1,
+  FAKE_SCRATCH_ROOT,
+  type FakeComputerHostV1,
+  type FakeWorkspace,
+} from "@frockbot/computer/fake";
 
 /**
- * A host with its own scratch path and its own GUI policy, neither of which
- * this Package knows: what the tools say and refuse has to come from here.
+ * The in-memory host carries its own scratch path and its own GUI policy,
+ * neither of which this Package knows: what the tools say and refuse has to
+ * come from the host, so the assertions below name the host's constants and
+ * never a literal of their own.
  */
-const TEST_HOST_CAPABILITIES: ComputerHostCapabilitiesV1 = {
-  scratchPath: "/host-scratch",
-  refuseGuiCommand: (command) =>
-    command.includes("xdotool")
-      ? "this host refuses xdotool from the shell"
-      : undefined,
-  viewerFrameOrigins: [],
-};
+const REFUSED_GUI_COMMAND = "xdotool key Return";
+const HOST_GUI_REFUSAL =
+  FAKE_HOST_CAPABILITIES_V1.refuseGuiCommand!(REFUSED_GUI_COMMAND)!;
 
 const REPORT: ComputerDoctorReportV1 = {
   schemaVersion: 2,
@@ -53,50 +51,34 @@ const REPORT: ComputerDoctorReportV1 = {
 };
 
 interface Fixture {
-  provider: ComputerHostV1;
-  runs: number;
-  execs: string[];
+  host: FakeComputerHostV1;
+  workspace: FakeWorkspace;
+  /** How many times the self-check ran on this host. */
+  readonly runs: number;
+  /** Every command that reached the Computer, in order. */
+  readonly execs: string[];
 }
 
-function fixture(workspace: FakeWorkspace): Fixture {
-  const state: Fixture = {
-    runs: 0,
-    execs: [],
-    provider: {
-      id: "fixture",
-      capabilities: TEST_HOST_CAPABILITIES,
-      open: (identity, tenant, assignment): Promise<ComputerHostSessionV1> =>
-        Promise.resolve({
-          assignment,
-          identity,
-          tenant,
-          capabilities: TEST_HOST_CAPABILITIES,
-          workspace,
-          doctor: {
-            run: () => {
-              state.runs += 1;
-              return Promise.resolve(REPORT);
-            },
-          },
-          exec: {
-            execute: (request) => {
-              state.execs.push(request.args?.at(-1) ?? "");
-              return Promise.resolve({
-                exitCode: 0,
-                stdout: new TextEncoder().encode("ran"),
-                stderr: new Uint8Array(),
-                outputTruncated: false,
-              });
-            },
-          },
-          close: () => Promise.resolve(),
-        }),
+function fixture(): Fixture {
+  const host = createFakeComputerHostV1({
+    id: "fixture",
+    doctor: REPORT,
+    execDefault: { stdout: "ran" },
+  });
+  const computer = host.computerFor({ userId: "user-1" });
+  return {
+    host,
+    workspace: computer.workspace,
+    get runs() {
+      return host.calls.filter((call) => call.startsWith("doctor:")).length;
+    },
+    get execs() {
+      return computer.execCalls.map((call) => call.command);
     },
   };
-  return state;
 }
 
-async function mount(provider: ComputerHostV1) {
+async function mount(provider: FakeComputerHostV1) {
   const harness = createAgentRuntimeHarness();
   harness.computers.register(provider);
   await harness.mount(
@@ -138,9 +120,9 @@ async function call(
 
 describe("computer_doctor", () => {
   test("answers the report and files it with the Bot as its writer", async () => {
-    const workspace = new FakeWorkspace();
-    const state = fixture(workspace);
-    const harness = await mount(state.provider);
+    const state = fixture();
+    const workspace = state.workspace;
+    const harness = await mount(state.host);
 
     const result = await call(harness, "computer_doctor", {});
 
@@ -183,8 +165,8 @@ describe("computer_doctor", () => {
   test("is offered on every turn type, so a Routine can diagnose too", async () => {
     // A Routine that finds a Computer misbehaving has to be able to say what
     // is wrong with it, and a read-only call is admissible wherever a Turn is.
-    const state = fixture(new FakeWorkspace());
-    const harness = await mount(state.provider);
+    const state = fixture();
+    const harness = await mount(state.host);
 
     for (const turnType of ["chat", "automation", "subagent"] as const) {
       const names = harness.tools
@@ -199,8 +181,8 @@ describe("computer_doctor", () => {
     // this Bot reaches its Computer after this Package loaded — the first Turn
     // after a cold provisioning. Repeating it costs a read-only exec and no
     // effect, so the guard is against waste and never against damage.
-    const state = fixture(new FakeWorkspace());
-    const harness = await mount(state.provider);
+    const state = fixture();
+    const harness = await mount(state.host);
 
     await call(harness, "computer_exec", { command: "ls" }, "tool:1:1:0");
     await call(harness, "computer_exec", { command: "pwd" }, "tool:1:1:1");
@@ -215,22 +197,22 @@ describe("computer_doctor", () => {
 // host's words. The policy itself is `computer/fly/runtime.test.ts`.
 describe("the GUI is never driven from the shell", () => {
   test("refuses in the host's words, without waking the Computer", async () => {
-    const state = fixture(new FakeWorkspace());
-    const harness = await mount(state.provider);
+    const state = fixture();
+    const harness = await mount(state.host);
 
     const result = await call(harness, "computer_exec", {
-      command: "xdotool key Return",
+      command: REFUSED_GUI_COMMAND,
     });
 
     expect(result.isError).toBe(true);
-    expect(result.content).toBe("this host refuses xdotool from the shell");
+    expect(result.content).toBe(HOST_GUI_REFUSAL);
     // Refused at the seam: it never reached the Computer at all.
     expect(state.execs).toEqual([]);
   });
 
   test("lets a command the host does not refuse through", async () => {
-    const state = fixture(new FakeWorkspace());
-    const harness = await mount(state.provider);
+    const state = fixture();
+    const harness = await mount(state.host);
 
     const result = await call(harness, "computer_exec", {
       command: "grep -c chromium /home/box/.frockbot/bots/x/chromium.log",
@@ -241,13 +223,13 @@ describe("the GUI is never driven from the shell", () => {
   });
 
   test("says where the host's shared scratch is, and that it is not durable", async () => {
-    const state = fixture(new FakeWorkspace());
-    const harness = await mount(state.provider);
+    const state = fixture();
+    const harness = await mount(state.host);
     const description = harness.tools
       .schemas({ turnType: "chat" })
       .find((schema) => schema.name === "computer_exec")?.description;
 
-    expect(description).toContain("/host-scratch");
+    expect(description).toContain(FAKE_SCRATCH_ROOT);
     expect(description).not.toContain("/workspace");
     expect(description).toContain("not durable");
     expect(description).toContain("never driven from the shell");

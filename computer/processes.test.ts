@@ -20,7 +20,7 @@ import {
 } from "@frockbot/app/testkit";
 import { createComputerAgentFeature } from "./agent.js";
 import type { ComputerProcessStorageV1 } from "./process-store.js";
-import { FakeWorkspace } from "./workspace-fixture.js";
+import { FakeWorkspace } from "@frockbot/computer/fake";
 
 /** A host that offers nothing beyond the operations under test. */
 const TEST_HOST_CAPABILITIES: ComputerHostCapabilitiesV1 = {
@@ -80,7 +80,7 @@ function fakeComputer(options: { launchFails?: boolean } = {}): Computer {
             launch: (request) => {
               calls.push(`launch:${request.processId}:${request.command}`);
               if (options.launchFails) {
-                return Promise.reject(new Error("Sprite is unreachable"));
+                return Promise.reject(new Error("The Computer is unreachable"));
               }
               return Promise.resolve({
                 pid: 4321,

@@ -8,7 +8,10 @@ import type {
   ResolvedModelBindingV1,
 } from "@frockbot/core/configuration";
 import type { FoundationAgentPackage } from "@frockbot/app/agent-runtime";
-import type { ComputerSyncHostV1 } from "@frockbot/computer/core/host";
+import type {
+  ComputerHostV1,
+  ComputerSyncHostV1,
+} from "@frockbot/computer/core/host";
 import type {
   ComputerAgentPluginConfig,
   ComputerProcessStorageV1,
@@ -24,29 +27,41 @@ import type { RoutinesRuntimeHostV1 } from "@frockbot/app/routines/agent";
 import type { SkillsRuntimeHostV1 } from "@frockbot/app/skills/agent";
 import type { SubagentsRuntimeHostV1 } from "@frockbot/app/subagents/agent";
 
-/**
- * The `COMPUTER_HOST` service binding and the secret presented on it.
- *
- * Both or neither: a binding with no token reaches a host that refuses every
- * call, which would surface as a 401 on each Turn rather than as a Computer
- * that is not configured.
- */
-export interface ShellComputerHostBindingV1 {
-  fetcher: { fetch(request: Request): Promise<Response> };
-  hostToken: string;
+/** The per-Turn seams a Computer host is built over. */
+export interface ShellComputerHostOptionsV1 {
+  /**
+   * The object-storage side of the durable roots, for one admitted Turn.
+   * Absent, and the host offers no `sync` at all.
+   */
+  sync?: ComputerSyncHostV1;
+  /** The `computerUse` task owner whose User-wide lease this child holds. */
+  agentControlOwnerId?: string;
 }
+
+/**
+ * This deployment's Computer host, as the app receives it.
+ *
+ * A factory rather than a value because two of the host's seams are per-Turn,
+ * and a function rather than an interface because the app has exactly one
+ * question to ask of it. Which host this is — Fly, or another — is chosen once
+ * by the shell that holds the bindings; nothing in `app/` names an
+ * implementation, which is what `scripts/check-computer-host-imports.ts`
+ * rule 2 enforces.
+ */
+export type ShellComputerHostFactoryV1 = (
+  options: ShellComputerHostOptionsV1,
+) => ComputerHostV1;
 
 /** The seams the Shell hands the application for the always-mounted Packages. */
 export interface ShellHostedRuntimeHostV1 {
   userId: string;
   readSecret(name: string): string | undefined;
   /**
-   * The shared Computer host: the service binding the Bot
-   * Durable Object reaches a Computer through, and the secret it presents.
-   * Absent, and the Fly provider registers unconfigured — this Worker holds
-   * no Sprites SDK and no way to reach a Computer without it.
+   * This deployment's Computer host. Absent, and there is no Computer at all:
+   * no host registers, the Computer tools are not mounted, and every Computer
+   * surface reads as unconfigured, which is the truth.
    */
-  computerHostBinding?: ShellComputerHostBindingV1;
+  computerHost?: ShellComputerHostFactoryV1;
   /**
    * The Skills seam, supplied by the Bot Durable Object for one admitted
    * Turn. Absent outside a Turn, and outside one whose Workspace reads are

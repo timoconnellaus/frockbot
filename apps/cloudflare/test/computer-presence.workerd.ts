@@ -62,7 +62,7 @@ describe("hosted Computer presence", () => {
       viewerSession: {
         version: 1,
         id: "fake-viewer-token",
-        url: "https://fake-sprite.example/index.html#autoconnect=1&reconnect=1&resize=scale&view_only=1&path=websockify%3Ftoken%3Dfake-viewer-token&password=fake-password",
+        url: "https://viewer.invalid/session/fake-viewer-token",
       },
     });
 

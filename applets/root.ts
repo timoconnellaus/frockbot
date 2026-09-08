@@ -9,7 +9,7 @@
 // (`core/contracts/workspace.ts`).
 //
 // The root is object storage and nothing else. Applets declares no root to the
-// Computer, so nothing here is mirrored onto a Sprite: the Bot reads and
+// Computer, so nothing here is mirrored onto it: the Bot reads and
 // writes source with `applet_files`, `applet_read_file` and
 // `applet_write_file`, and a publish reads the prefix, posts it to the build
 // service and stores the artifacts it returns under their content hashes. No

@@ -13,7 +13,7 @@ import {
   APPLETS_UNAVAILABLE_MESSAGE_V1,
   BotTurnRefusedError,
 } from "@frockbot/core/durable";
-import { COMPUTER_HOST_CAPABILITIES_V1 } from "@frockbot/app/runtime";
+import { COMPUTER_HOST_CAPABILITIES_V1 } from "./computer-host.js";
 
 function rpcBindingFor(state: BotStateBinding): UserBotStateBinding {
   return {

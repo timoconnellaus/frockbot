@@ -240,7 +240,7 @@ String? computerScreenStatusLabelV1({
       '${computerSnapshotAgeLabelV1((now ?? DateTime.now()).difference(capturedAt))}';
 }
 
-/// Changes only noVNC's client-visible input fence on one minted session.
+/// Changes only the viewer's client-visible input fence on one minted session.
 ///
 /// The bearer token and path stay byte for byte inside the same URL fragment;
 /// control changes no server session and mints no second secret.

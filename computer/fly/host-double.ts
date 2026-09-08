@@ -3,7 +3,7 @@
  *
  * It is a module under `src` rather than a fixture inside one test file
  * because three suites need the same one — `computer.test.ts`,
- * `workspace.test.ts`, and `sync.test.ts` all drive a `FlySpriteComputer`, and
+ * `workspace.test.ts`, and `sync.test.ts` all drive a `FlyComputer`, and
  * a double per suite would let three of them drift from one contract. It is
  * deliberately absent from this Package's `exports`, so nothing outside can
  * reach it, and it is not a `*.test.ts` file, so `bun test` never runs it as
@@ -16,6 +16,8 @@
  * `host-client.test.ts`'s subject and the workerd suite's, and repeating it
  * here would test the transport three more times and the provider none.
  */
+import { createHash } from "node:crypto";
+import { WORKSPACE_MAX_FILE_BYTES } from "@frockbot/core/contracts";
 import {
   COMPUTER_HOST_LIMITS,
   type ComputerHostControlResultV1,
@@ -24,12 +26,16 @@ import {
   type ComputerHostProvisioningV1,
   type ComputerHostViewerResultV1,
 } from "@frockbot/computer/host-protocol";
-import { DESKTOP_GUI_LEASE_KEY } from "./runtime.js";
+import type { ComputerHostV1 } from "@frockbot/computer/core/host";
+import { BOTS_ROOT, DESKTOP_GUI_LEASE_KEY } from "./runtime.js";
 import {
   computerBotKey,
+  FlyComputer,
+  MAX_STORAGE_OUTPUT,
   type ComputerHostFactoryV1,
   type ComputerHostSurfaceV1,
 } from "./computer.ts";
+import { FlyComputerHostV1 } from "./provider.ts";
 import type {
   ComputerHostCallOptions,
   ComputerHostExecCommandV1,
@@ -279,4 +285,227 @@ export class FakeComputerHost {
     }
     return undefined;
   }
+}
+
+export function sha256(bytes: Uint8Array): string {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+export function quoted(shell: string, name: string): string | undefined {
+  return new RegExp(`${name}='([^']*)'`).exec(shell)?.[1];
+}
+
+/**
+ * A Computer whose durable filesystem is an in-memory map. It interprets the
+ * shell the Workspace surface emits rather than running it, because the
+ * scripts are GNU coreutils and the test host is not.
+ */
+export class FakeWorkspaceDisk {
+  readonly files = new Map<string, { bytes: Uint8Array; meta?: string }>();
+  offline = false;
+  modifiedSeconds = 1_700_000_000;
+
+  /** Every script this disk was handed, in order. */
+  readonly scripts: string[] = [];
+  /** Rewrites the file at this path between two chunk commands of one read. */
+  midReadRewrite?: { path: string; bytes: Uint8Array };
+
+  /** The runner the shared host double hands every script to. */
+  readonly run = (script: string): FakeComputerRunV1 => {
+    this.scripts.push(script);
+    if (this.offline) return { exitCode: 1, stderr: "Sprite is paused" };
+    // The real host's storage surface refuses an answer past this, so a double
+    // that returned one would let a suite prove a read works at a size the
+    // Computer would never have carried.
+    const bounded = (stdout: string): FakeComputerRunV1 =>
+      stdout.length > MAX_STORAGE_OUTPUT
+        ? { stdout: stdout.slice(0, MAX_STORAGE_OUTPUT), outputTruncated: true }
+        : { stdout };
+    if (script.includes("__STAGED__")) {
+      return bounded(this.stageChunk(script));
+    }
+    const root = quoted(script, "ROOT");
+    const relative = quoted(script, "REL");
+    if (!root) return {};
+    if (script.includes("__WRITTEN__") && relative) {
+      return bounded(this.write(`${root}/${relative}`, script));
+    }
+    if (script.includes("__DELETED__") && relative) {
+      return bounded(this.remove(`${root}/${relative}`, script));
+    }
+    if (script.includes('find "$ROOT"')) {
+      return bounded(this.list(root, script));
+    }
+    if (relative) {
+      return bounded(this.load(`${root}/${relative}`, script));
+    }
+    return {};
+  };
+
+  private current(path: string): string {
+    const entry = this.files.get(path);
+    if (!entry) return "";
+    if (!entry.meta) return "__UNRECORDED__";
+    return (
+      Buffer.from(entry.meta, "base64").toString("utf8").split("\n")[0] ?? ""
+    );
+  }
+
+  private expected(shell: string): string {
+    return /if \[ "\$CURRENT" != '([^']*)' \]/.exec(shell)?.[1] ?? "";
+  }
+
+  /** One appended chunk of a staged file, as the write stages it. */
+  private stageChunk(shell: string): string {
+    const path = quoted(shell, "STAGE") ?? "";
+    const encoded =
+      /printf %s '([^']*)' \| base64 -d >> "\$STAGE"/.exec(shell)?.[1] ?? "";
+    const chunk = Buffer.from(encoded, "base64");
+    const held = shell.includes('rm -f "$STAGE"')
+      ? undefined
+      : this.files.get(path)?.bytes;
+    this.files.set(path, {
+      bytes: Uint8Array.from(
+        held ? Buffer.concat([Buffer.from(held), chunk]) : chunk,
+      ),
+    });
+    return "__STAGED__\n";
+  }
+
+  private write(path: string, shell: string): string {
+    const stage = quoted(shell, "STAGE");
+    if (this.current(path) !== this.expected(shell)) {
+      if (stage) this.files.delete(stage);
+      return "__CONFLICT__\n";
+    }
+    const meta = /printf %s '([^']*)' \| base64 -d > "\$MTMP"/.exec(shell)?.[1];
+    let bytes: Uint8Array;
+    if (stage) {
+      // The staged bytes are digest-checked exactly as the emitted
+      // `sha256sum` line checks them, so a torn staging file is __CORRUPT__
+      // here for the same reason it would be on the Sprite.
+      const staged = this.files.get(stage)?.bytes ?? new Uint8Array();
+      this.files.delete(stage);
+      const expected = /f1\)" != '([0-9a-f]{64})'/.exec(shell)?.[1];
+      if (expected && sha256(staged) !== expected) return "__CORRUPT__\n";
+      bytes = staged;
+    } else {
+      const inline = /printf %s '([^']*)' \| base64 -d > "\$TMP"/.exec(
+        shell,
+      )?.[1];
+      bytes = Uint8Array.from(Buffer.from(inline ?? "", "base64"));
+    }
+    this.files.set(path, { bytes, meta });
+    return "__WRITTEN__\n";
+  }
+
+  private remove(path: string, shell: string): string {
+    if (!this.files.has(path)) return "__MISSING__\n";
+    if (this.current(path) !== this.expected(shell)) return "__CONFLICT__\n";
+    this.files.delete(path);
+    return "__DELETED__\n";
+  }
+
+  /**
+   * The chunked file read: a header of sidecar, digest, size, and mtime with
+   * the first chunk, then one chunk per further command. `head -c` and
+   * `tail -c +N` are the coreutils the Workspace emits; the arithmetic is
+   * theirs, not an approximation.
+   */
+  private load(path: string, shell: string): string {
+    const chunk = /tail -c \+(\d+) "\$TARGET" \| head -c (\d+)/.exec(shell);
+    if (chunk) {
+      // A rewrite between two chunk commands is what makes a read report
+      // rather than stitch, so the double performs one where a test asks.
+      const rewrite = this.midReadRewrite;
+      if (rewrite) {
+        this.midReadRewrite = undefined;
+        this.files.set(rewrite.path, { bytes: rewrite.bytes });
+      }
+      const offset = Number(chunk[1]) - 1;
+      const limit = Number(chunk[2]);
+      const bytes = this.files.get(path)?.bytes;
+      const slice = bytes?.subarray(offset, offset + limit) ?? new Uint8Array();
+      return `${Buffer.from(slice).toString("base64")}\n`;
+    }
+    const entry = this.files.get(path);
+    if (!entry) return "__MISSING__\n";
+    if (entry.bytes.byteLength > WORKSPACE_MAX_FILE_BYTES) {
+      return "__TOO_LARGE__\n";
+    }
+    const lines = [
+      entry.meta ?? "",
+      sha256(entry.bytes),
+      String(entry.bytes.byteLength),
+      String(this.modifiedSeconds),
+    ];
+    const head = /head -c (\d+) "\$TARGET" \| base64 -w0/.exec(shell);
+    if (head) {
+      lines.push(
+        Buffer.from(entry.bytes.subarray(0, Number(head[1]))).toString(
+          "base64",
+        ),
+      );
+    }
+    return `${lines.join("\n")}\n`;
+  }
+
+  private list(root: string, shell: string): string {
+    const offset = Number(/OFFSET=(\d+)/.exec(shell)?.[1] ?? 0);
+    const limit = Number(/LIMIT=(\d+)/.exec(shell)?.[1] ?? 100);
+    const prefix = quoted(shell, "PREFIX") ?? "";
+    const rows = [...this.files.entries()]
+      .filter(([path]) => path.startsWith(`${root}/`))
+      .map(([path, entry]) => [path.slice(root.length + 1), entry] as const)
+      // The emitted `find` prunes the lock, generation, and sync directories,
+      // so a listing never shows a staging file mid-write.
+      .filter(([relative]) => !relative.startsWith(".frockbot-"))
+      .filter(
+        ([relative]) =>
+          !prefix || relative === prefix || relative.startsWith(`${prefix}/`),
+      )
+      .sort(([left], [right]) => (left < right ? -1 : 1))
+      .slice(offset, offset + limit + 1)
+      .map(([relative, entry]) =>
+        [
+          Buffer.from(relative).toString("base64"),
+          entry.meta ?? "",
+          sha256(entry.bytes),
+          String(entry.bytes.byteLength),
+          String(this.modifiedSeconds),
+        ].join("\t"),
+      );
+    return rows.length ? `${rows.join("\n")}\n` : "";
+  }
+}
+
+/**
+ * This implementation, standing up as a `ComputerHostV1` for the shared
+ * contract suite.
+ *
+ * It lives here rather than in `computer/host-contract.test.ts` because
+ * everything it has to say is this implementation's own vocabulary — the
+ * instance name, the exit marker its exec protocol carries, the byte count
+ * `scrot` prints beside the PNG a read brings back — and the contract suite is
+ * the one file that must contain none of it. What the suite gets is a host.
+ */
+export function contractHostV1(userId: string, botId: string): ComputerHostV1 {
+  const disk = new FakeWorkspaceDisk();
+  const png = new Uint8Array(64);
+  png.set([137, 80, 78, 71, 13, 10, 26, 10], 0);
+  const double = new FakeComputerHost((script) => {
+    if (script.includes("scrot")) return { stdout: "64\n" };
+    if (script.includes("__FROCKBOT_EXIT__")) {
+      return { stdout: "contract\n__FROCKBOT_EXIT__0\n" };
+    }
+    return disk.run(script);
+  });
+  double.files.set(`${BOTS_ROOT}/${computerBotKey(botId)}/screenshot.png`, png);
+  return new FlyComputerHostV1(
+    new FlyComputer({
+      identity: { userId },
+      host: double.factory,
+      spriteName: "frockbot-contract",
+    }),
+  );
 }

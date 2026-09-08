@@ -27,7 +27,7 @@ import {
   computerCommandFingerprintV1,
   type ComputerCommandV1,
 } from "./protocol.js";
-import { FakeWorkspace } from "./workspace-fixture.js";
+import { FakeWorkspace } from "@frockbot/computer/fake";
 
 /** A host that offers nothing beyond the operations under test. */
 const TEST_HOST_CAPABILITIES: ComputerHostCapabilitiesV1 = {
@@ -771,7 +771,8 @@ describe("Computer Bot Durable Object Contribution", () => {
                 expiresAt: "2026-09-02T00:01:30.000Z",
               }),
             renew: (lease) => Promise.resolve({ id: lease.id, expiresAt: "" }),
-            release: () => Promise.reject(new Error("Sprite is unreachable")),
+            release: () =>
+              Promise.reject(new Error("The Computer is unreachable")),
           }),
         ),
     };
@@ -792,7 +793,7 @@ describe("Computer Bot Durable Object Contribution", () => {
     // The failure reaches the User rather than being swallowed...
     expect(receipt).toMatchObject({
       status: "rejected",
-      failure: "Sprite is unreachable",
+      failure: "The Computer is unreachable",
     });
     // ...and the User-wide fence is gone, so no heartbeat can renew it and no
     // other Bot of this User is locked out of the Computer forever.

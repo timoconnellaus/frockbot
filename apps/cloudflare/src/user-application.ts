@@ -3,10 +3,10 @@ import {
   appletUiArtifactOriginV1,
 } from "@frockbot/applets/preview";
 import {
-  COMPUTER_HOST_CAPABILITIES_V1,
   FOUNDATION_PACKAGES_V1,
   FOUNDATION_PACKAGE_VERSION_V1,
 } from "@frockbot/app/runtime";
+import { COMPUTER_HOST_CAPABILITIES_V1 } from "./computer-host.js";
 import {
   decodeBotIdV1,
   isApplicationDeploymentHash,

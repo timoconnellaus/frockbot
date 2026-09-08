@@ -28,20 +28,14 @@ import { createCredentialsFeature } from "@frockbot/app/credentials/user";
 // pi-lens-ignore: ts:2307
 // Runtime implementations are statically bound by the immutable application.
 import echoFeature from "@frockbot/app/echo/agent";
-import {
-  FLY_HOST_CAPABILITIES_V1,
-  createFlySpriteProviderFeature,
-} from "@frockbot/computer/fly/agent";
-import { FlyHostTransportV1 } from "@frockbot/computer/fly/host-client";
 import type {
   ShellApplicationV1,
-  ShellComputerHostBindingV1,
+  ShellComputerHostFactoryV1,
   ShellEnabledRuntimeHostV1,
   ShellHostedRuntimeHostV1,
   ShellModelRuntimeHostV1,
 } from "@frockbot/app/shell/backend-runtime";
 import type {
-  ComputerHostCapabilitiesV1,
   ComputerRegistry,
   ComputerSyncHostV1,
 } from "@frockbot/computer/core/host";
@@ -387,59 +381,42 @@ function runtimePackage(
 /**
  * Whether this deployment can reach a Computer.
  *
- * `SPRITES_TOKEN` is no longer a credential in this Worker — the Computer host
- * holds the only copy, and this Worker could not use one if it had it. It
- * survives as the answer to one question: has this deployment a Computer at
- * all? Without it, or without the host binding there is nothing to send the
- * call to, every Computer surface reads as unconfigured, which is the truth.
- *
- * Answered once per mount, so the provider, the tools and the prompt cannot
- * disagree about whether there is a Computer.
+ * One question, answered once per mount, so the host registration, the tools
+ * and the prompt cannot disagree about whether there is a Computer. It is the
+ * presence of a host and nothing else: which credential a particular host
+ * needs is that host's business and is settled by the shell that built it,
+ * which is why no name of one appears here.
  */
 function computerConfiguredV1(host: {
-  readSecret(name: string): string | undefined;
-  computerHostBinding?: ShellComputerHostBindingV1;
+  computerHost?: ShellComputerHostFactoryV1;
 }): boolean {
-  return Boolean(
-    host.readSecret("SPRITES_TOKEN")?.trim() && host.computerHostBinding,
-  );
+  return Boolean(host.computerHost);
 }
 
 /**
- * What this deployment's Computer host is, for the surfaces that must know
- * before a Bot is running — the app's `frame-src` above all. This file is
- * where the host is chosen, so it is where the choice is published; nothing
- * else in the app names Fly.
+ * Registers the host the shell handed in, with this Turn's seams on it.
+ *
+ * A deployment with no host registers none: the Computer Package then mounts
+ * unconfigured, which is what every Computer surface already says when it
+ * cannot reach one.
  */
-export const COMPUTER_HOST_CAPABILITIES_V1: ComputerHostCapabilitiesV1 =
-  FLY_HOST_CAPABILITIES_V1;
-
-function computerProviderFeature(
-  host: {
-    computerSync?: ComputerSyncHostV1;
-    computerHostBinding?: ShellComputerHostBindingV1;
-    computerAgentControlOwnerId?: string;
-  },
-  configured: boolean,
-): FoundationFeature {
-  const binding = host.computerHostBinding;
-  return createFlySpriteProviderFeature(undefined, {
-    ...(configured && binding
-      ? {
-          host: (identity, tenant) =>
-            new FlyHostTransportV1({
-              fetcher: binding.fetcher,
-              hostToken: binding.hostToken,
-              identity,
-              tenant,
-            }),
-        }
-      : {}),
-    ...(host.computerSync ? { sync: host.computerSync } : {}),
-    ...(host.computerAgentControlOwnerId
-      ? { agentControlOwnerId: host.computerAgentControlOwnerId }
-      : {}),
-  });
+function computerProviderFeature(host: {
+  computerHost?: ShellComputerHostFactoryV1;
+  computerSync?: ComputerSyncHostV1;
+  computerAgentControlOwnerId?: string;
+}): FoundationFeature {
+  const build = host.computerHost;
+  return (runtime: { computers: ComputerRegistry }) => {
+    if (!build) return;
+    return runtime.computers.register(
+      build({
+        ...(host.computerSync ? { sync: host.computerSync } : {}),
+        ...(host.computerAgentControlOwnerId
+          ? { agentControlOwnerId: host.computerAgentControlOwnerId }
+          : {}),
+      }),
+    );
+  };
 }
 
 export function createFoundationHostedRuntimePackages(
@@ -511,10 +488,7 @@ export function createFoundationHostedRuntimePackages(
       "credentials",
       createCredentialsFeature({ readSecret: host.readSecret }),
     ),
-    runtimePackage(
-      "computer-host",
-      computerProviderFeature(host, computerConfigured),
-    ),
+    runtimePackage("computer-host", computerProviderFeature(host)),
     runtimePackage(
       "computer",
       createComputerAgentFeature({

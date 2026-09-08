@@ -11,7 +11,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   computerBotKey,
-  FlySpriteComputer,
+  FlyComputer,
   PROCESS_STOP_GRACE_SECONDS,
 } from "./computer.ts";
 import { FakeComputerHost } from "./host-double.ts";
@@ -23,8 +23,8 @@ function signal(): AbortSignal {
   return new AbortController().signal;
 }
 
-function computerOn(host: FakeComputerHost): FlySpriteComputer {
-  return new FlySpriteComputer({
+function computerOn(host: FakeComputerHost): FlyComputer {
+  return new FlyComputer({
     identity: { userId: "owner" },
     host: host.factory,
     spriteName: "frockbot-test",

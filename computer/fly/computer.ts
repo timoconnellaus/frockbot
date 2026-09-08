@@ -175,7 +175,7 @@ export interface SpriteAgentExecResult {
   outputTruncated: boolean;
 }
 
-export interface FlySpriteComputerOptions {
+export interface FlyComputerOptions {
   /** Whose Computer this is. One Computer per User. */
   identity?: { userId: string };
   /**
@@ -324,13 +324,13 @@ function isSlotExhaustion(error: unknown): boolean {
   );
 }
 
-export class FlySpriteAgentComputer {
+export class FlyAgentComputer {
   readonly botId: string;
   readonly botKey: string;
-  private readonly computer: FlySpriteComputer;
+  private readonly computer: FlyComputer;
   private readonly layout: AgentLayout;
 
-  constructor(computer: FlySpriteComputer, layout: AgentLayout) {
+  constructor(computer: FlyComputer, layout: AgentLayout) {
     this.computer = computer;
     this.layout = layout;
     this.botId = layout.identity.id;
@@ -523,11 +523,11 @@ export class FlySpriteAgentComputer {
  * provisioning script, the declared services, the viewer token files — is on
  * the host now. What remains is what a Bot *tenant* means on a Computer: its
  * directory key, its human-control guard, and the shape of the commands it
- * runs. That is why `FlySpriteAgentComputer`'s method surface is unchanged:
+ * runs. That is why `FlyAgentComputer`'s method surface is unchanged:
  * `workspace.ts` and `sync.ts` generate bash against it and neither knows, or
  * needs to know, that the bash now travels on a command's stdin.
  */
-export class FlySpriteComputer {
+export class FlyComputer {
   readonly configured: boolean;
   /** The caller identity guarded Bot commands name on the Computer. */
   readonly ownerId: string;
@@ -546,7 +546,7 @@ export class FlySpriteComputer {
   private readonly displays = new Map<string, string>();
   private readonly generations = new Map<string, number>();
 
-  constructor(options: FlySpriteComputerOptions = {}) {
+  constructor(options: FlyComputerOptions = {}) {
     this.identity = options.identity ?? {
       userId: process.env.FROCKBOT_USER_ID?.trim() || "local-user",
     };
@@ -566,8 +566,8 @@ export class FlySpriteComputer {
     return this.expectedSpriteName;
   }
 
-  bot(identity: string | ComputerBotIdentity): FlySpriteAgentComputer {
-    return new FlySpriteAgentComputer(this, layoutFor(identity));
+  bot(identity: string | ComputerBotIdentity): FlyAgentComputer {
+    return new FlyAgentComputer(this, layoutFor(identity));
   }
 
   /**

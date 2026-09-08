@@ -42,7 +42,7 @@ import type {
 } from "@frockbot/core/contracts";
 import type { FoundationAgentPackage } from "@frockbot/app/agent-runtime";
 import type { BotCapabilities } from "../src/bot-capabilities.ts";
-import type { WorkerdBotState } from "./fly-compatibility-worker.ts";
+import type { WorkerdBotState } from "./computer-compatibility-worker.ts";
 import { dynamicToolCallV1, twoTierStepV1 } from "./dynamic-tools.ts";
 
 /**

@@ -2,14 +2,14 @@ import type { BotIsolateProbe } from "./bot-isolate-probe.ts";
 import type { FlyHostTransportProbeV1 } from "./computer-host-probe.ts";
 import type {
   CompositionProbe,
-  FlyCompatibilityProbe,
+  ComputerCompatibilityProbe,
   WorkerdBotState,
-} from "./fly-compatibility-worker.ts";
+} from "./computer-compatibility-worker.ts";
 import type { UserConfiguration } from "../src/user-configuration.ts";
 import type { AppletState } from "../src/applet-state.ts";
 import type { DeploymentPolicy } from "../src/deployment-policy.ts";
 
-interface FlyTestEnv {
+interface ComputerTestEnv {
   APPLICATION_ARTIFACTS: R2Bucket;
   AI: Ai;
   BOT_ISOLATES: DurableObjectNamespace<BotIsolateProbe>;
@@ -28,8 +28,7 @@ interface FlyTestEnv {
   COMPUTER_HOST_CLIENT: DurableObjectNamespace<FlyHostTransportProbeV1>;
   COMPUTER_HOST_SHARDS: string;
   COMPUTER_HOST_TOKEN: string;
-  FLY_COMPATIBILITY: DurableObjectNamespace<FlyCompatibilityProbe>;
-  SPRITES_TOKEN: string;
+  COMPUTER_COMPATIBILITY: DurableObjectNamespace<ComputerCompatibilityProbe>;
   ROUTINE_HOOK_SECRET: string;
   MACHINE_TOKEN_SECRET: string;
   USER_CONFIGURATIONS: DurableObjectNamespace<UserConfiguration>;
@@ -38,6 +37,6 @@ interface FlyTestEnv {
 
 declare global {
   namespace Cloudflare {
-    interface Env extends FlyTestEnv {}
+    interface Env extends ComputerTestEnv {}
   }
 }

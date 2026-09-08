@@ -14,9 +14,12 @@ import {
   shellBotContribution,
 } from "@frockbot/app/contributions";
 import { ComputerRegistry } from "@frockbot/computer/core/host";
-import { createFlySpriteProviderFeature } from "@frockbot/computer/fly/agent";
 import { mountRuntimeFeaturesV1 } from "@frockbot/core/contracts";
-import { FlyHostTransportV1 } from "@frockbot/computer/fly/host-client";
+import {
+  computerHostBindingV1,
+  createComputerHostV1,
+} from "./computer-host.js";
+import type { ShellComputerHostOptionsV1 } from "@frockbot/app/shell/backend-runtime";
 import {
   decodeBotConfigurationExecuteRpcV1,
   decodeBotConfigurationReadRpcV1,
@@ -25,12 +28,7 @@ import {
   MAX_COMPOSITION_GENERATION_PAGE_V1,
   type RevertCompositionCommandV1,
 } from "@frockbot/core/configuration";
-import {
-  BotDurableAuthority,
-  IDENTITY_KEY,
-  type BotIdentity,
-  type StoredRunOriginV1,
-} from "@frockbot/core/durable";
+import { BotDurableAuthority } from "@frockbot/core/durable";
 import type {
   OwnedBotTurnCommand,
   ShellBotBackendContribution,
@@ -138,14 +136,12 @@ import {
   decodeIsolateWorkspacePathV1,
   decodeIsolateWorkspaceWriteRequestV1,
   decodeNormalizedModelRequestV1,
-  decodeWorkspaceRootV1,
   appletSourceArtefactPathV1,
 } from "@frockbot/core/contracts";
 import type {
   AppletBuildViewV1,
   AppletSourceViewV1,
   NormalizedModelRequest,
-  SessionEvent,
   WorkspaceFilesV1,
   WorkspaceGenerationsV1,
   WorkspacePathV1,
@@ -214,13 +210,6 @@ import {
   type MemoryChunkIndexWriterV1,
 } from "@frockbot/app/memory/chunk-index";
 import {
-  botMemoryRootV1,
-  buildMemoryIndexV1,
-  readAllMemoryDocumentsV1,
-  searchMemoryV1,
-  userMemoryRootV1,
-} from "@frockbot/app/memory";
-import {
   searchRowsFromClientRunV1,
   type SearchSinkV1,
 } from "@frockbot/app/search";
@@ -256,7 +245,6 @@ import {
   rpcAppletIdOrNull,
   rpcBotId,
   rpcDecoded,
-  rpcEnum,
   rpcIdentifier,
   rpcInteger,
   rpcObject,
@@ -481,24 +469,16 @@ export class BotState extends DurableObject<BotStateEnv> {
     if (!this.mounted) {
       const pending = (async () => {
         const computers = new ComputerRegistry();
-        const computerConfigured = Boolean(
-          this.backendEnv.COMPUTER_HOST &&
-          this.backendEnv.COMPUTER_HOST_TOKEN?.trim(),
-        );
+        // The Contribution's own registry, over the same host the Turn's
+        // runtime mounts. `./computer-host.ts` is where this deployment
+        // chooses which host that is.
+        const binding = computerHostBindingV1(this.backendEnv);
+        const computerConfigured = Boolean(binding);
         const disposeComputers = await mountRuntimeFeaturesV1({ computers }, [
-          createFlySpriteProviderFeature(undefined, {
-            ...(computerConfigured
-              ? {
-                  host: (identity, tenant) =>
-                    new FlyHostTransportV1({
-                      fetcher: this.backendEnv.COMPUTER_HOST!,
-                      hostToken: this.backendEnv.COMPUTER_HOST_TOKEN!,
-                      identity,
-                      tenant,
-                    }),
-                }
-              : {}),
-          }),
+          ({ computers: registry }) =>
+            binding
+              ? registry.register(createComputerHostV1(binding))
+              : undefined,
         ]);
         // Where each descriptor's mounted value lands as the mount runs. The
         // Shell and Flock Contributions need each other, and each reaches the
@@ -535,6 +515,14 @@ export class BotState extends DurableObject<BotStateEnv> {
             // The Computer Contribution's projection cache and its share of
             // the authority's one durable alarm, reached through the table
             // once it has mounted.
+            // The same host, for the Turn's runtime. The app is handed a
+            // factory because two of its seams belong to one Turn.
+            ...(binding
+              ? {
+                  computerHost: (options: ShellComputerHostOptionsV1) =>
+                    createComputerHostV1(binding, options),
+                }
+              : {}),
             invalidateComputerProjectionFile: (userId, botId, kind) => {
               mountedContributions
                 .get(computerBotContribution)
@@ -1370,7 +1358,7 @@ export class BotState extends DurableObject<BotStateEnv> {
    * The Workspace store is read and nothing else: the Applets Package's
    * declared root is User-scoped, so this answers from object storage while
    * the Computer is hibernated, exactly as the plan requires ("the store is
-   * read, never the Sprite"). Text only and bounded, because this is a
+   * read, never the Computer"). Text only and bounded, because this is a
    * projection for a person watching a Bot write code, not a file transfer.
    */
   async readAppletSourceV1(input: unknown): Promise<AppletSourceViewV1> {

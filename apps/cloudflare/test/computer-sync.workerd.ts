@@ -17,7 +17,7 @@
 //
 // The store, the effect records, the generation ledger and the writer are all
 // production; only the Computer side is a probe, and it keeps its files in
-// Durable Object storage so a Sprite's durable disk is modelled across the
+// Durable Object storage so the Computer's durable disk is modelled across the
 // same eviction.
 import { env } from "cloudflare:workers";
 import { evictDurableObject } from "cloudflare:test";

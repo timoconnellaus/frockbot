@@ -157,7 +157,7 @@ describe("a Turn that uses the Computer through the shared host", () => {
     expect(exec).toMatchObject({
       userId,
       botId,
-      credentialRef: `sprites:user:${userId}`,
+      credentialRef: `computer:user:${userId}`,
     });
     expect(JSON.stringify(exec)).not.toContain("SPRITES_TOKEN");
 

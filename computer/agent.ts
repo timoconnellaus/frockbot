@@ -147,7 +147,7 @@ export interface ComputerAgentPluginConfig {
 export const HUMAN_CONTROL_PROMPT_LINE =
   "Your User is currently controlling the Computer; do not use it this Turn.";
 
-/** Bounded copy for the two transport failures an overloaded Sprite emits. */
+/** Bounded copy for the two transport failures an overloaded Computer emits. */
 export const COMPUTER_OVERLOADED_TOOL_MESSAGE_V1 =
   "The Computer is overloaded; a browser tab using too much memory was closed. Try again.";
 
@@ -1174,7 +1174,7 @@ export function createComputerAgentFeature(
           effectId: `${context.effectId}:progress-screenshot`,
         });
       } catch {
-        // A desktop that refused a capture — human control, a Sprite that
+        // A desktop that refused a capture — human control, a Computer that
         // paused, a Computer with no screen — changes nothing the Bot did.
         return;
       }
@@ -1680,7 +1680,7 @@ export function createComputerAgentFeature(
           return next();
         },
         // "after a Turn that used the Computer": the Computer is already awake
-        // for this Bot, so the push costs no wake, and a Sprite that paused
+        // for this Bot, so the push costs no wake, and a Computer that paused
         // mid-Turn answers `unavailable` and the next run finishes the work.
         turnStopping: async (agent, turn) => {
           if (!turnSync.turnUsedTheComputer(turn)) return;

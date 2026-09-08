@@ -12,11 +12,11 @@ import { ComputerError } from "@frockbot/computer/core";
 import { BOTS_ROOT } from "./runtime.js";
 import {
   computerBotKey,
-  FlySpriteComputer,
+  FlyComputer,
   SCREENSHOT_MAX_BYTES,
 } from "./computer.ts";
 import { FakeComputerHost } from "./host-double.ts";
-import { FlySpriteComputerHostV1 } from "./provider.ts";
+import { FlyComputerHostV1 } from "./provider.ts";
 
 const KEY = computerBotKey("health");
 const PATH = `${BOTS_ROOT}/${KEY}/screenshot.png`;
@@ -37,8 +37,8 @@ function hostWith(size: number): FakeComputerHost {
   return host;
 }
 
-function computerOn(host: FakeComputerHost): FlySpriteComputer {
-  return new FlySpriteComputer({
+function computerOn(host: FakeComputerHost): FlyComputer {
+  return new FlyComputer({
     identity: { userId: "owner" },
     host: host.factory,
     spriteName: "frockbot-test",
@@ -149,7 +149,7 @@ describe("screenshotForAgent", () => {
 
   test("reaches the provider-neutral Computer interface as a PNG capture", async () => {
     const host = hostWith(64);
-    const provider = new FlySpriteComputerHostV1(computerOn(host));
+    const provider = new FlyComputerHostV1(computerOn(host));
     const handle = await provider.open(
       { userId: "owner" },
       { botId: "health" },

@@ -175,7 +175,7 @@ describe("FlyHostTransportV1 envelope", () => {
       tenant: { botId: "bot-1" },
       // The Durable Object never holds SPRITES_TOKEN: what crosses the seam is
       // a reference the host resolves.
-      credentialRef: "sprites:user:user-1",
+      credentialRef: "computer:user:user-1",
     });
     expect(result.instanceId).toBe("frockbot-abc");
     expect(result.generation).toBe(3);

@@ -12,7 +12,7 @@ import {
   SCRATCH_ROOT,
   SHIMS_ROOT,
 } from "./runtime.js";
-import { FlySpriteComputer } from "./computer.ts";
+import { FlyComputer } from "./computer.ts";
 import { FakeComputerHost } from "./host-double.ts";
 import { FLY_WORKSPACE_LAYOUT } from "./provider.ts";
 
@@ -39,8 +39,8 @@ function report(generation: number): string {
   })}\n`;
 }
 
-function computerOn(host: FakeComputerHost): FlySpriteComputer {
-  return new FlySpriteComputer({
+function computerOn(host: FakeComputerHost): FlyComputer {
+  return new FlyComputer({
     identity: { userId: "owner" },
     host: host.factory,
     spriteName: "frockbot-test",
