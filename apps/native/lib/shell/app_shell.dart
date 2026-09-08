@@ -1175,17 +1175,18 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                     unawaited(load());
                   },
                 ),
-                identified(
-                  SettingsIds.profileSignOut,
-                  ListTile(
-                    leading: const Icon(Icons.logout),
-                    title: const Text('Sign out'),
-                    onTap: () {
-                      Navigator.of(sheet).pop();
-                      unawaited(widget.onSignOut());
-                    },
+                if (!localDevelopment)
+                  identified(
+                    SettingsIds.profileSignOut,
+                    ListTile(
+                      leading: const Icon(Icons.logout),
+                      title: const Text('Sign out'),
+                      onTap: () {
+                        Navigator.of(sheet).pop();
+                        unawaited(widget.onSignOut());
+                      },
+                    ),
                   ),
-                ),
               ],
             ),
           ),

@@ -266,6 +266,95 @@ void main() {
       c.dispose();
     },
   );
+  testWidgets('send clears the draft and reconciles the pending bubble by ID', (
+    tester,
+  ) async {
+    final store = MemoryStore();
+    final transport = FakeTransport(store);
+    final controller = ChatController(
+      transport: transport,
+      store: store,
+      userId: 'user-1',
+      botId: 'bot-1',
+      nextId: () => 'send-1',
+    );
+    await controller.initialize();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ChatPane(controller: controller, onReconnect: () async {}),
+        ),
+      ),
+    );
+    final composer = find.byKey(const ValueKey('composer'));
+    String draft() => tester.widget<TextField>(composer).controller!.text;
+    Finder bubbles() => find.byWidgetPredicate(
+      (widget) => widget is SelectableText && widget.data == 'Hello',
+    );
+    await tester.enterText(composer, 'Hello');
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('send')));
+    await tester.pump();
+    expect(draft(), isEmpty);
+    expect(bubbles(), findsOneWidget);
+    expect(jsonDecode(store.values[controller.key]!)['draft'], '');
+    expect(jsonDecode(store.values[controller.key]!)['pendingText'], 'Hello');
+
+    // Identical text from another Turn must not hide this submission.
+    transport.observed = {...running(), 'runId': 'other'};
+    await controller.invalidate();
+    await tester.pump();
+    expect(bubbles(), findsNWidgets(2));
+    expect(controller.visiblePendingText, 'Hello');
+    expect(transport.calls, ['send:send-1']);
+
+    // A new draft may even repeat the submitted text.
+    await tester.enterText(composer, 'Hello');
+    transport.observed = running();
+    await controller.invalidate();
+    await tester.pump(const Duration(seconds: 1));
+    expect(bubbles(), findsNWidgets(2));
+    expect(controller.visiblePendingText, isNull);
+    expect(draft(), 'Hello');
+    expect(transport.calls, ['send:send-1']);
+
+    transport.completion.complete();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(draft(), 'Hello');
+    expect(controller.pendingId, isNull);
+    await tester.pumpWidget(const SizedBox());
+    controller.dispose();
+  });
+
+  test(
+    'failed delivery restores the submission without losing the next draft',
+    () async {
+      final store = MemoryStore();
+      final transport = FakeTransport(store)..loseReply = true;
+      final controller = ChatController(
+        transport: transport,
+        store: store,
+        userId: 'user-1',
+        botId: 'bot-1',
+        nextId: () => 'send-1',
+      );
+      await controller.initialize();
+      final sending = controller.send('Hello');
+      await Future<void>.delayed(Duration.zero);
+      await controller.saveDraft('Next message');
+      transport.completion.complete();
+      await sending;
+      expect(controller.draft, 'Hello\n\nNext message');
+      expect(
+        jsonDecode(store.values[controller.key]!)['draft'],
+        controller.draft,
+      );
+      expect(controller.pendingId, isNull);
+      controller.dispose();
+    },
+  );
+
   testWidgets('reconnect and widget disposal never send or stop work', (
     tester,
   ) async {
