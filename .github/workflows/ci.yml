@@ -131,9 +131,6 @@ jobs:
       - name: Check formatting
         run: bun run format:check
 
-      - name: Check UI style contract
-        run: bun run lint:ui-styles
-
       - name: Typecheck
         run: bun run typecheck
 
@@ -172,6 +169,19 @@ jobs:
       # a Worker impersonating the container at the binding it already uses.
       - name: Test Applet build service runtime
         run: bun run --filter @frockbot/applet-build test:workerd
+
+      # The web client is Flutter Web now: `client:build` runs `flutter build
+      # web` in `apps/native` and stages the payload the Worker's `assets`
+      # binding uploads, and `build` reaches that through `artifact:build`. The
+      # SDK is pinned to the revision `apps/native/qualification.json` records
+      # and `native.yml` checks for, so CI builds the client the qualification
+      # was taken against.
+      - name: Set up Flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          flutter-version: 3.47.0
+          channel: stable
+          cache: true
 
       - name: Build
         run: bun run build
@@ -216,6 +226,16 @@ jobs:
 
       - name: Install Chromium
         run: bunx playwright install --with-deps chromium
+
+      # The harness builds the artifact itself, and `artifact:build` now begins
+      # with `flutter build web`; without the SDK every shard fails before the
+      # first spec. Same pin as Validate and `native.yml`.
+      - name: Set up Flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          flutter-version: 3.47.0
+          channel: stable
+          cache: true
 
       - name: Test browser end to end
         # A browser against `wrangler dev` running `src/index.ts` and the real
@@ -524,6 +544,16 @@ jobs:
           }
           fs.writeFileSync(file, source.replace(staging, `$1${databaseId}$2`));
           NODE
+
+      # `artifact:build` chains `client:build`, which is `flutter build web`,
+      # so the staging Worker's `assets` payload is built here — before the
+      # deploy below uploads it. Same pin as Validate and `native.yml`.
+      - name: Set up Flutter # zizmor: ignore[cache-poisoning] trusted main deployment
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          flutter-version: 3.47.0
+          channel: stable
+          cache: true
 
       - name: Build application artifact
         working-directory: apps/cloudflare

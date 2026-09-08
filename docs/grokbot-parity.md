@@ -660,7 +660,8 @@ the rows whose status the code moved:
 
 - **4** — landed, with one shape difference: GrokBot keeps a hidden Bot
   reachable through a command palette, and FrockBot has no palette, so the Flock
-  sidebar grows a "Show N hidden" group instead (`FlockSidebar.vue`). The
+  sidebar grows a "Show N hidden" group instead
+  (`apps/native/lib/shell/sidebar.dart`). The
   durable field is `BotProfile.hiddenFromSidebar`, beside — not inside — the
   notification policy, because it describes how the Bot presents itself rather
   than when it notifies. GrokBot's `notifyOnAgentUpdates` default is `true`;
@@ -705,7 +706,8 @@ the rows whose status the code moved:
   authoring User is a User act. Export is `bot_export_template` staging at
   `visibility: "private"` and reporting an `agent-card`; import is a review
   card the User confirms before anything is written
-  (`plugin-bot-template/src/{scrub,import}.ts`, `BotTemplateImportSection.vue`).
+  (`plugin-bot-template/src/{scrub,import}.ts`,
+  `apps/native/lib/templates/page.dart`).
 - **7** — landed. `profile.md` per shard (`plugin-memory/src/roots.ts`) is
   read and rendered on every Turn by `renderMemoryPromptV1`
   (`plugin-memory/src/render.ts`) under GrokBot's own caps — own 200/30,
@@ -794,15 +796,16 @@ the rows whose status the code moved:
 - **19** — create, update, pause, resume, delete and run-now are landed end to
   end: as versioned Bot commands with durable fingerprinted receipts
   (`plugin-routines/src/store.ts`), as the `routine_manage` tool the Bot calls on
-  any turn type (`agent.ts`), and as `RoutinesSection.vue` in the Bot settings
-  surface, where "next run" is now the moment the scheduler armed an alarm on, a
+  any turn type (`agent.ts`), and as the Routines surface
+  (`apps/native/lib/routines/page.dart`), where "next run" is now the moment the scheduler armed an alarm on, a
   firing appears in the per-Routine run log, and a webhook Routine's delivery URL
   and key are shown once with rotate and revoke beside them. The silent half is
   landed too: an automation Turn is absent from `GET /api/bots/:id/turns` and
   from the run lookup, reachable only through the run log, and a completed
   firing writes a `RoutineInboxEntryV1` in the transaction that settles it —
   `attribution: "Automation: <name>"`, `acknowledged: false` — surfaced by the
-  header badge and drawer (`RoutineInboxBadge.vue`) and cleared by an explicit
+  header badge and drawer (`apps/native/lib/routines/page.dart`) and cleared by
+  an explicit
   acknowledge command. What is still missing is the confirmation **card**:
   a Routine write answers with a receipt the settings surface re-renders, not
   with a card in the conversation, because a Bot-authored write happens on a
@@ -849,7 +852,8 @@ the rows whose status the code moved:
   per Turn, bodies are disclosed on demand through `skill_load`
   (`plugin-skills/src/catalog.ts`, `agent.ts`), and `/` or `@` in the composer
   opens a popover over that catalog (`plugin-shell/src/client/`
-  `skill-invocation.ts`, `FrockBotApp.vue`) which attaches a `SkillRefV1` chip
+  `skill-invocation.ts`, `apps/native/lib/shell/skill_menu.dart`) which attaches
+  a `SkillRefV1` chip
   rather than pasting text. An invoked ref resolves against the Turn's catalog
   at its exact generation, is recorded as `skill/invoked`, and its body is
   expanded into step 1's `model/request`; an unresolvable ref blocks the Turn

@@ -5,7 +5,7 @@
 /// only the page inside it, so how finished this feels never depends on what a
 /// Bot published.
 ///
-/// Two states, as `AppletCanvas.vue` has them. **Building** is the Applet's
+/// There are two states. **Building** is the Applet's
 /// source as the Bot writes it, read from the Workspace store — nothing here
 /// wakes the Computer. **Ready** is the live Applet, which arrives over the
 /// code view once a generation is active. A publish that failed leaves the

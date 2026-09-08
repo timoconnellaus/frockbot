@@ -1,8 +1,8 @@
 /// What the thread holds and the order it draws it in.
 ///
-/// The rules here are the Vue shell's, ported without change: the projection
-/// that turns durable runs into lines, the ordering that keeps a Turn's lines
-/// together, and the words the working row says while a supersede drains.
+/// Three rules live here: the projection that turns durable runs into lines,
+/// the ordering that keeps a Turn's lines together, and the words the working
+/// row says while a supersede drains.
 /// Rendering is [TranscriptView]'s; nothing in this file touches a widget, so
 /// every rule below is testable without pumping a frame.
 library;
@@ -412,7 +412,13 @@ List<TranscriptLine> projectRuns(List<Map<String, dynamic>> runs) {
           ),
         );
       case 'failed':
-        final failure = failureNotice(run['failure'] as String?);
+        // The reason is on the run's `outcome`, which is where the projection
+        // puts the sentence it wrote for the person: the stored `failure` is a
+        // provider diagnostic and never crosses the wire at all. Reading a
+        // field the wire does not carry made every failed Turn say the one
+        // generic line, whatever had actually gone wrong.
+        final outcome = run['outcome'] as Map<String, Object?>?;
+        final failure = failureNotice(outcome?['message'] as String?);
         lines.add(
           TranscriptLine(
             id: '$runId:assistant',
@@ -420,7 +426,7 @@ List<TranscriptLine> projectRuns(List<Map<String, dynamic>> runs) {
             role: LineRole.assistant,
             // A Turn that broke after it had started talking keeps what it
             // said, with the reason underneath it.
-            text: (run['responseText'] as String?) ?? text,
+            text: (outcome?['text'] as String?) ?? text,
             at: admittedAt,
             status: LineStatus.error,
             notice: failure.notice,

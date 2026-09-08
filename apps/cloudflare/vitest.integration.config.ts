@@ -13,7 +13,6 @@
 // which production `main` does not export. What the two share lives in
 // `test/harness/miniflare.ts`.
 import { cloudflareTest, readD1Migrations } from "@cloudflare/vitest-plugin";
-import vue from "@vitejs/plugin-vue";
 import { resolve } from "node:path";
 import { defineConfig } from "vitest/config";
 import { readBuiltArtifact } from "./test/artifact-freshness.ts";
@@ -42,7 +41,7 @@ import {
 // nobody wrote.
 const foundationArtifact = readBuiltArtifact(
   resolve(import.meta.dirname, "dist/artifacts/foundation-v1.mjs"),
-  resolve(import.meta.dirname, "src/client"),
+  resolve(import.meta.dirname, "../native/lib"),
 );
 
 // better-auth's D1 schema. `gatewayAuth` degrades to an unconfigured stub when
@@ -62,13 +61,7 @@ const authMigrations = await readD1Migrations(
 const computerHost = createComputerHostFake({ maximumHangMs: 3_000 });
 
 export default defineConfig({
-  // `manifest-catalog.integration.ts` imports the production client decoder
-  // from `@frockbot/app/shell/client`, whose module graph reaches Vue single
-  // file components and the Cordis client runtime. The same two settings
-  // `vite.config.ts` uses to build the shipped client make that graph
-  // resolvable here; nothing in it executes — only `decodePluginCatalog` runs.
   plugins: [
-    vue(),
     cloudflareTest({
       main: "./src/index.ts",
       miniflare: {
@@ -155,14 +148,6 @@ export default defineConfig({
       },
     }),
   ],
-  resolve: {
-    alias: {
-      "@cordisjs/client": resolve(
-        import.meta.dirname,
-        "src/client/cordis-client-runtime.ts",
-      ),
-    },
-  },
   test: {
     // `*.integration.ts`, not `*.test.ts` or `*.spec.ts`: root `bun test` — and
     // therefore the pre-commit hook — matches neither pattern, so this layer

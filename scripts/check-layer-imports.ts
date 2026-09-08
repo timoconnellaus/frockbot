@@ -35,14 +35,10 @@ const modules: Module[] = [
     allowed: [
       ...coreAllowed,
       "@frockbot/computer/",
-      // Temporary: the Vue client and the backend contribution reach the app
-      // and the client libraries until step 9 deletes them. `app/subagents/
-      // shared` is reached only through the shell's own shared module, for one
-      // view type.
+      // Temporary: the backend contribution reaches the shell's own shared
+      // module, and `app/subagents/shared` only through it, for one view type.
       "@frockbot/app/shell/",
       "@frockbot/app/subagents/shared",
-      "@frockbot/client-core",
-      "@frockbot/client-ui",
     ],
   },
   {
@@ -62,8 +58,6 @@ const modules: Module[] = [
       ...coreAllowed,
       "@frockbot/app/",
       "@frockbot/applets/",
-      "@frockbot/client-core",
-      "@frockbot/client-ui",
       "@frockbot/computer/",
       "@frockbot/frock-compose/",
       "@frockbot/providers/",
@@ -102,7 +96,7 @@ const manifestPaths = [
   "frock-compose/package.json",
   "providers/package.json",
 ];
-for (const group of ["packages", "apps"]) {
+for (const group of ["apps"]) {
   manifestPaths.push(
     ...new Bun.Glob(`${group}/*/package.json`).scanSync({
       cwd: repoRoot,

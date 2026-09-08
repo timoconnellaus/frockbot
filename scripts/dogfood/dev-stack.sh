@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
-# Local "dogfood" dev stack: the real Worker, the real Vue client, real Workers
-# AI through the Frock AI Gateway, and the real Computer host service binding.
+# Local "dogfood" dev stack: the real Worker serving the real Flutter client,
+# real Workers AI through the Frock AI Gateway, and the real Computer host
+# service binding.
+#
+# One origin, because that is the deployed shape: the Worker's static assets
+# are the client, and `wrangler dev` serves them from the same directory the
+# deploy uploads.
 #
 #   scripts/dogfood/dev-stack.sh [start]   build, seed, serve, wait, report
-#   scripts/dogfood/dev-stack.sh stop      stop this stack's wrangler / workerd / vite
+#   scripts/dogfood/dev-stack.sh stop      stop this stack's wrangler / workerd
 #   scripts/dogfood/dev-stack.sh status    reprint the sign-in and health notes
 #
 # `start` is idempotent: it stops a previous stack first.
@@ -14,9 +19,7 @@ cloudflare_root="$repo_root/apps/cloudflare"
 main_checkout="${FROCKBOT_MAIN_CHECKOUT:-$HOME/repos/grokbot-headless}"
 
 worker_port="${FROCKBOT_DEV_WORKER_PORT:-8787}"
-client_port="${FROCKBOT_DEV_CLIENT_PORT:-5173}"
 worker_url="http://127.0.0.1:${worker_port}"
-client_url="http://127.0.0.1:${client_port}"
 
 # The R2 bucket name bound by the `development` environment in
 # `apps/cloudflare/wrangler.jsonc`. `wrangler r2 object put` addresses a bucket
@@ -30,7 +33,6 @@ log_dir="${CLAUDE_JOB_DIR:+$CLAUDE_JOB_DIR/tmp}"
 log_dir="${log_dir:-$state_dir/logs}"
 mkdir -p "$log_dir" "$state_dir"
 worker_log="$log_dir/wrangler.log"
-client_log="$log_dir/vite.log"
 
 say() { printf '\033[1;36m[dogfood]\033[0m %s\n' "$*"; }
 die() {
@@ -62,7 +64,7 @@ stop_stack() {
   # own `wrangler dev`: a `dogfood:dev` start or stop while a suite is in flight
   # used to SIGKILL the harness's runtime mid-test, which surfaces as a 500 on
   # the next request and ERR_CONNECTION_REFUSED on every one after it.
-  for pid_file in "$state_dir/wrangler.pid" "$state_dir/vite.pid"; do
+  for pid_file in "$state_dir/wrangler.pid"; do
     [ -f "$pid_file" ] || continue
     recorded="$(cat "$pid_file" 2>/dev/null || true)"
     case "$recorded" in
@@ -84,16 +86,14 @@ stop_stack() {
       done
     done
   done
-  # And the holders of this stack's own two ports, with their descendants.
-  for port in "$worker_port" "$client_port"; do
-    holders="$(lsof -ti "tcp:${port}" -sTCP:LISTEN 2>/dev/null || true)"
-    for holder in $holders; do
-      for pid in $(process_tree "$holder"); do
-        kill -9 "$pid" 2>/dev/null || true
-      done
+  # And the holders of this stack's own port, with their descendants.
+  holders="$(lsof -ti "tcp:${worker_port}" -sTCP:LISTEN 2>/dev/null || true)"
+  for holder in $holders; do
+    for pid in $(process_tree "$holder"); do
+      kill -9 "$pid" 2>/dev/null || true
     done
   done
-  rm -f "$state_dir/wrangler.pid" "$state_dir/vite.pid"
+  rm -f "$state_dir/wrangler.pid"
   sleep 1
 }
 
@@ -135,19 +135,10 @@ wait_for_manifest() {
   die "timed out waiting for $worker_url/app-manifest - see $worker_log"
 }
 
-wait_for_client() {
-  deadline=$((SECONDS + 120))
-  while [ "$SECONDS" -lt "$deadline" ]; do
-    curl -sf -o /dev/null "$client_url/" && return 0
-    sleep 1
-  done
-  die "timed out waiting for $client_url - see $client_log"
-}
-
 # ------------------------------------------------------------------ seed
 
 build_and_seed() {
-  say "building the client bundle and the foundation artifact"
+  say "building the Flutter client and the foundation artifact"
   (cd "$cloudflare_root" && bun run artifact:build)
 
   say "seeding applications/foundation-v1.mjs into the local R2 bucket"
@@ -215,34 +206,23 @@ start_stack() {
     echo $! >"$state_dir/wrangler.pid"
   )
 
-  say "starting vite on :$client_port (log: $client_log)"
-  (
-    cd "$cloudflare_root"
-    FROCKBOT_DEV_GATEWAY_URL="$worker_url" nohup bunx vite --host 127.0.0.1 \
-      >"$client_log" 2>&1 &
-    echo $! >"$state_dir/vite.pid"
-  )
-
   wait_for_manifest
-  wait_for_client
   status_stack
 }
 
 status_stack() {
   echo
   say "stack is up"
-  printf '  Worker      %s   (pid %s)\n' "$worker_url" \
+  printf '  Worker + UI %s   (pid %s)\n' "$worker_url" \
     "$(cat "$state_dir/wrangler.pid" 2>/dev/null || echo '?')"
-  printf '  Client UI   %s   (pid %s)\n' "$client_url" \
-    "$(cat "$state_dir/vite.pid" 2>/dev/null || echo '?')"
   printf '  Logs        %s\n' "$log_dir"
   printf '  Model       %s\n' "${model_note:-unknown - run start to find out}"
   echo
   say "sign in"
-  echo "  Open $client_url and click \"Continue as local developer\"."
-  echo "  The button appears only on localhost / 127.0.0.1 / ::1, uses the fixed"
-  echo "  \`development\` identity, and needs no Google credentials. The vite proxy"
-  echo "  also stamps \`x-frockbot-user-id: development\` onto /api and /app-manifest."
+  echo "  Open $worker_url/?as_user=development."
+  echo "  The development door is enabled by \`--var ALLOW_DEVELOPMENT_AUTH:true\`"
+  echo "  above, uses the fixed \`development\` identity, sets the"
+  echo "  \`frockbot_dev_user\` cookie, and needs no Google credentials."
   echo
   say "health and debug"
   echo "  curl -s -o /dev/null -w '%{http_code}\\n' -H 'x-frockbot-user-id: development' $worker_url/app-manifest"

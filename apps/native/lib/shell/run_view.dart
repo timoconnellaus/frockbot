@@ -138,12 +138,7 @@ ActivityTrailMemory activityTrailBegin(
   if (sample.status != 'streaming') {
     return (
       memory: ActivityTrailMemory(sample, memory.lastEventAt, const []),
-      plan: const ActivityTrailPlan(
-        false,
-        ActivityTrailState.ended,
-        0,
-        [],
-      ),
+      plan: const ActivityTrailPlan(false, ActivityTrailState.ended, 0, []),
     );
   }
 
@@ -445,8 +440,7 @@ class RunView extends StatelessWidget {
                 : ListView(
                     padding: const EdgeInsets.symmetric(vertical: 8),
                     children: [
-                      for (final tool in line.tools)
-                        _ToolRow(tool: tool),
+                      for (final tool in line.tools) _ToolRow(tool: tool),
                       if (line.notice != null)
                         Padding(
                           padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),

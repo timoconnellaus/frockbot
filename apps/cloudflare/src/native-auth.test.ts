@@ -357,7 +357,7 @@ function gateway(nativeAuth?: ReturnType<typeof createNativeAuth>) {
   };
 }
 
-test("gateway serves public associations and exact returns without loading Vue; disabled routes never fall through", async () => {
+test("gateway serves public associations and exact returns without loading the application; disabled routes never fall through", async () => {
   const f = fixture();
   const enabled = gateway(f.auth);
   const disabled = gateway();

@@ -125,10 +125,14 @@ class _ShellMarkdownState extends State<ShellMarkdown> {
                 width: 22,
                 child: Text(
                   block.marker ?? '•',
-                  style: base.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                  style: base.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
                 ),
               ),
-              Expanded(child: Text.rich(_inline(block.text, base), style: base)),
+              Expanded(
+                child: Text.rich(_inline(block.text, base), style: base),
+              ),
             ],
           ),
         );
@@ -206,7 +210,9 @@ List<MarkdownBlock> parseMarkdownBlocks(String source) {
   final quoted = <String>[];
   void flushParagraph() {
     if (paragraph.isEmpty) return;
-    blocks.add(MarkdownBlock(MarkdownBlockKind.paragraph, paragraph.join('\n')));
+    blocks.add(
+      MarkdownBlock(MarkdownBlockKind.paragraph, paragraph.join('\n')),
+    );
     paragraph.clear();
   }
 

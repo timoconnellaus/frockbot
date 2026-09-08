@@ -277,7 +277,9 @@ class _Widget extends StatelessWidget {
                         vertical: 4,
                       ),
                       decoration: BoxDecoration(
-                        border: Border.all(color: theme.colorScheme.outlineVariant),
+                        border: Border.all(
+                          color: theme.colorScheme.outlineVariant,
+                        ),
                         borderRadius: BorderRadius.circular(999),
                       ),
                       child: Text('$option', style: theme.textTheme.bodySmall),
@@ -388,7 +390,8 @@ class _Approval extends StatelessWidget {
                   ),
                 ),
               ],
-        footer: approvals?.error ??
+        footer:
+            approvals?.error ??
             (expiry == null
                 ? null
                 : 'Expires ${expiry.toLocal().toString().substring(0, 16)}'),
@@ -415,7 +418,8 @@ class _SecretRequest extends StatelessWidget {
       ],
     ),
     title: '${payload['prompt'] ?? ''}',
-    body: 'Stored as ${payload['secretName']}. Secrets are added in Settings, '
+    body:
+        'Stored as ${payload['secretName']}. Secrets are added in Settings, '
         'never in the conversation.',
     actions: onOpenSettings == null
         ? const []

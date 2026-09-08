@@ -11,11 +11,9 @@
     "computer",
     "core",
     "frock-compose",
-    "packages/*",
     "providers"
   ],
   "overrides": {
-    "element-plus": "2.14.5",
     "file-type": "^21.3.1",
     "uuid": "^11.1.1"
   },
@@ -31,7 +29,6 @@
     "dev": "bun run dev:cloudflare",
     "build": "bun run build:cloudflare && bun run build:marketing",
     "typecheck": "bun scripts/check-client-protocol.ts && bun scripts/check-layer-imports.ts && bun scripts/check-computer-host-imports.ts && bun scripts/generate-isolate-context-catalog.ts --check && bun scripts/build-applets-assets.ts --check && bun scripts/typecheck.ts",
-    "lint:ui-styles": "bun scripts/check-ui-styles.ts",
     "lint:layer-imports": "bun scripts/check-layer-imports.ts",
     "lint:computer-host-imports": "bun scripts/check-computer-host-imports.ts",
     "test": "bun test",
@@ -43,9 +40,6 @@
   },
   "devDependencies": {
     "@types/bun": "1.4.0",
-    "@types/css-tree": "2.3.11",
-    "@vue/compiler-sfc": "3.5.41",
-    "css-tree": "3.2.1",
     "esbuild": "0.28.2",
     "husky": "^9.1.7",
     "lint-staged": "^17.4.1",

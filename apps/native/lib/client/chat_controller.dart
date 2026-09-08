@@ -55,14 +55,36 @@ class ChatController extends ChangeNotifier {
       (a, b) =>
           (a['admittedAt'] as String).compareTo(b['admittedAt'] as String),
     );
-  String? get activeRunId {
+  /// The Turn a Stop could reach: one the Bot is running now.
+  ///
+  /// A submission whose delivery is still unconfirmed is not one. There may be
+  /// no Turn behind it at all — that is the whole reason the state exists — so
+  /// what it earns is "Check message status", not a Stop over something that
+  /// may never have been admitted.
+  String? get runningRunId {
     for (final run in runs) {
       if (run['status'] == 'running' && run['queued'] != true) {
         return run['runId'] as String;
       }
     }
-    return pendingId;
+    return null;
   }
+
+  /// The Turn this conversation is waiting on, admitted or not. The working
+  /// row and the Bot's "busy" mark are about the wait, so they include a
+  /// submission that has not been confirmed yet.
+  String? get activeRunId => runningRunId ?? pendingId;
+
+  /// Whether there is anything a Stop could reach.
+  ///
+  /// A submission still being delivered counts: the Turn may well have been
+  /// admitted at the other end, and that is exactly when a person wants to
+  /// stop it. One the client has given up confirming does not — the
+  /// conversation is already saying it could not reach the Bot, and an offer
+  /// to stop a Turn that may never have existed is not one the product can
+  /// keep. What that state offers is "Check message status".
+  bool get stoppable =>
+      runningRunId != null || (pendingId != null && error == null);
 
   bool get canSend => ready && !sending && pendingId == null;
   void changed() {

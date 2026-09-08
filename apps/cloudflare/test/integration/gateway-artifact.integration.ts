@@ -28,29 +28,28 @@ describe("the gateway serves the built application artifact", () => {
     expect(html).toContain(
       `data-frockbot-user-application="${APPLICATION_HASH}"`,
     );
-    expect(html).toContain('<script type="module" src="/app.js"></script>');
+    // The client is Flutter Web: one script under a content-addressed prefix
+    // the document also declares as its `<base href>`, so every engine URL
+    // resolves inside that directory. The payload itself is the Worker's
+    // static assets and never reaches this Worker.
+    const base = /<base href="(\/_flutter\/[a-z0-9]+\/)">/.exec(html)?.[1];
+    expect(base).toBeDefined();
+    expect(html).toContain(`<script src="${base}flutter_bootstrap.js" async>`);
   });
 
-  it("serves /app.js as JavaScript and /app.css as CSS", async () => {
-    const userId = freshUserId("assets");
-
-    const script = await asUser(userId, "/app.js");
-    expect(script.status).toBe(200);
-    expect(script.headers.get("content-type")).toContain("text/javascript");
-    const source = await script.text();
-    expect(source.length).toBeGreaterThan(1000);
-    expect(source.trimStart().startsWith("<")).toBe(false);
-
-    const style = await asUser(userId, "/app.css");
-    expect(style.status).toBe(200);
-    expect(style.headers.get("content-type")).toContain("text/css");
+  it("serves the site icon it links, as a PNG", async () => {
+    const icon = await asUser(freshUserId("icon"), "/favicon.ico");
+    expect(icon.status).toBe(200);
+    expect(icon.headers.get("content-type")).toBe("image/png");
   });
 });
 
 describe("gateway authentication", () => {
-  // `gateway.ts` treats exactly `/`, `/app.js` and `/app.css` as public so an
-  // unauthenticated browser can boot the client and then sign in.
-  it.each(["/", "/app.js", "/app.css"])(
+  // `gateway.ts` treats exactly `/` and `/favicon.ico` as public, so an
+  // unauthenticated browser can boot the client and then sign in. The client's
+  // own payload needs no entry here: the asset router answers it before this
+  // Worker runs.
+  it.each(["/", "/favicon.ico"])(
     "serves %s without an identity",
     async (path) => {
       const response = await SELF.fetch(`${ORIGIN}${path}`);

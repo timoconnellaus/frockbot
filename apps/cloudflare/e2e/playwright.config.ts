@@ -99,12 +99,12 @@ export default defineConfig<E2EOptions>({
   webServer: {
     command: "bun e2e/serve.ts",
     cwd: cloudflareRoot,
-    // `/app.js` is one of the gateway's public asset paths, so it needs no
+    // `/favicon.ico` is one of the gateway's public asset paths, so it needs no
     // identity header — which `webServer.url` cannot send. It is served by the
     // loaded artifact, so a 200 here already proves the artifact was built,
     // seeded into R2 and loaded. The harness additionally waits for
     // `/app-manifest` under a real identity before it reports ready.
-    url: `${baseURL}/app.js`,
+    url: `${baseURL}/favicon.ico`,
     // The Applet build service is a container app, and `wrangler dev` builds
     // its image on start. That is minutes on a cold Docker cache and seconds
     // afterwards, and it happens before the app Worker is up.

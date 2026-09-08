@@ -17,9 +17,9 @@
  * rather than opening the wrong thing. That is the whole point of holding the
  * anchors in one table — a Bot may cite a link, and cannot invent one.
  *
- * The module is deliberately free of Vue and of every client type, so a
- * backend Contribution rendering an error message or a `send_to_user` payload
- * can cite the same anchors the panel renders.
+ * The module is deliberately free of every client type, so a backend
+ * Contribution rendering an error message or a `send_to_user` payload can cite
+ * the same anchors the panel renders.
  */
 
 /** A client surface a settings link may open. */

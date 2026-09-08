@@ -4,15 +4,12 @@
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "allowImportingTsExtensions": true,
-    "paths": {
-      "@cordisjs/client": ["./shell/client/cordis-client-shim.d.ts"]
-    },
     "strict": true,
     "noEmit": true,
     "skipLibCheck": true,
     "lib": ["ES2023", "DOM", "DOM.Iterable", "WebWorker"],
     "types": ["bun", "node", "@cloudflare/workers-types"]
   },
-  "include": ["**/*.ts", "**/*.vue"],
+  "include": ["**/*.ts"],
   "exclude": ["node_modules", "dist"]
 }

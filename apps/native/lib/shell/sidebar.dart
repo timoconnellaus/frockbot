@@ -1,9 +1,8 @@
 /// The Bot list: pinned tiles, label groups, unread, and the way out of it.
 ///
-/// The grouping and the pin order are the Vue sidebar's rules, ported without
-/// change. A pinned Bot is a tile above the list instead of a row inside it,
-/// never both — the tile *is* the row, moved — so grouping runs over what is
-/// left. Hidden and archived are different states: archiving stops a Bot
+/// A pinned Bot is a tile above the list instead of a row inside it, never
+/// both — the tile *is* the row, moved — so grouping runs over what is left.
+/// Hidden and archived are different states: archiving stops a Bot
 /// working, hiding only takes it out of this list, so a hidden Bot stays
 /// selectable and its own group is how a person reaches it again.
 library;
@@ -71,11 +70,7 @@ PinnedSidebarBots<T> partitionPinnedSidebarBots<T>(
       continue;
     }
     final at = DateTime.tryParse(pinnedAt);
-    pinned.add((
-      bot: bot,
-      at: at?.millisecondsSinceEpoch ?? 0,
-      index: index,
-    ));
+    pinned.add((bot: bot, at: at?.millisecondsSinceEpoch ?? 0, index: index));
   }
   pinned.sort(
     (left, right) =>
@@ -219,6 +214,7 @@ class ShellSidebar extends StatelessWidget {
       profiles[_id(bot)]?.name ?? bot.initialName;
   bool _hidden(wire.BotRegistration bot) =>
       profiles[_id(bot)]?.hiddenFromSidebar == true;
+
   /// The open Bot's own Turn is the shell's — it projects the run and knows
   /// about it a poll sooner — so that row reads [workingBotId]. Every other
   /// row reads the unread fan-out, which is the only thing that knows a Bot in
@@ -344,11 +340,7 @@ class ShellSidebar extends StatelessWidget {
           ),
         ),
         const Divider(height: 1),
-        _Footer(
-          inboxCount: inboxCount,
-          onInbox: onInbox,
-          onProfile: onProfile,
-        ),
+        _Footer(inboxCount: inboxCount, onInbox: onInbox, onProfile: onProfile),
       ],
     );
   }
@@ -380,8 +372,9 @@ class ShellSidebar extends StatelessWidget {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.bodyLarge?.copyWith(
-                  fontWeight:
-                      view?.unread == true ? FontWeight.w700 : FontWeight.w600,
+                  fontWeight: view?.unread == true
+                      ? FontWeight.w700
+                      : FontWeight.w600,
                 ),
               ),
             ),
@@ -409,8 +402,7 @@ class ShellSidebar extends StatelessWidget {
                 children: [
                   if (isArchived)
                     Text('Archived', style: theme.textTheme.labelSmall),
-                  if (badge != null)
-                    Badge(label: Text(badge)),
+                  if (badge != null) Badge(label: Text(badge)),
                 ],
               ),
         onTap: isArchived ? null : () => onSelect(botId),
@@ -545,11 +537,7 @@ class _PinnedTile extends StatelessWidget {
           children: [
             Stack(
               children: [
-                SheepAvatar(
-                  size: 40,
-                  background: background,
-                  working: working,
-                ),
+                SheepAvatar(size: 40, background: background, working: working),
                 if (unread)
                   Positioned(
                     right: 0,
@@ -639,9 +627,8 @@ class _NoBots extends StatelessWidget {
     padding: const EdgeInsets.all(24),
     child: Text(
       'No Bots yet. Add your first sheep.',
-      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-        color: Theme.of(context).colorScheme.onSurfaceVariant,
-      ),
+      style: Theme.of(context).textTheme.bodyMedium
+          ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
     ),
   );
 }

@@ -1,8 +1,8 @@
 /// A Package page, hosted.
 ///
-/// A port of `PackageIframeHost.vue`: the shell owns the frame's chrome — the
-/// attribution, the failure line, the height a `flow` page asks for — and the
-/// Package owns only the document inside it. Every message is decoded exactly
+/// The shell owns the frame's chrome — the attribution, the failure line, the
+/// height a `flow` page asks for — and the Package owns only the document
+/// inside it. Every message is decoded exactly
 /// before it is acted on, and a capability the Package did not declare is
 /// refused with the host's own sentence rather than silently ignored.
 library;
@@ -26,8 +26,8 @@ const packageBridgeVersionsV2 = {1, 2};
 ///
 /// Design tokens are the contract between the shell and a Package's page: a
 /// page is handed semantic names, never the shell's own styles, and never a
-/// colour to hard-code. The names match `PackageIframeHost.vue`, so a page
-/// written for the browser is themed identically here.
+/// colour to hard-code. The names are the contract itself, so a page written
+/// against them is themed identically wherever it is hosted.
 Map<String, String> packageThemeTokensV1(BuildContext context) {
   final scheme = Theme.of(context).colorScheme;
   String hex(Color colour) =>

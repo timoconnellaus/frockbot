@@ -4,7 +4,7 @@ FrockBot is an experimental application for persistent conversational bots. The 
 
 The current vertical slice includes:
 
-- a hosted Vue client composed from declared Package Contributions;
+- one Flutter client, served at `bot.frockbot.com` as the app Worker's static assets and built from the same source for the phone;
 - backend-owned Bot Durable Objects running the event-sourced custom agent loop;
 - a durable User-owned Bot directory with Bot-owned settings, sessions, and composable sheep identities;
 - account-wide Package enablement and User-owned Connections;
@@ -24,7 +24,7 @@ bun install
 bun run dev
 ```
 
-The development launcher builds the hosted WebUI and starts its local Cloudflare origin.
+The development launcher builds the client and the application artifact, then starts the local Cloudflare origin on port 8787. Building the client needs the pinned Flutter SDK on `PATH`; see [`apps/native/README.md`](apps/native/README.md).
 
 The deterministic foundation provider runs without credentials. To use an OpenAI-compatible endpoint:
 
@@ -37,7 +37,7 @@ FROCKBOT_LLM_BASE_URL="https://api.example.com/v1" \
 
 `FROCKBOT_LLM_API_KEY` is optional for local endpoints. `FROCKBOT_LLM_PROVIDER_ID` customizes the provider label.
 
-The left sidebar lists the authenticated User's active Bots and switches the workspace. **Add sheep** creates a Bot with a random sheep identity; selecting the active sheep opens an editor where its background, headwear, facewear, and neckwear can be changed independently or rerolled together. **Manage** shows archived Bots and provides archive and restore controls without deleting their history or settings. Bot settings remain behind the selected workspace's header gear. The sidebar's **Connectors** button authorizes external accounts and MCP servers for every Bot the User owns. **Profile → Plugins** installs, uninstalls, enables, and disables Packages account-wide, while **Profile → Settings** owns remaining declared application settings. Models renders Package contributions; enabling the default-disabled Custom models Package adds the account model picker and a Package-scoped model override to Bot settings. Without it, every Bot follows the platform's Frock AI model. During an active Turn, **Stop** records cancellation intent; closing or switching clients does not stop backend work.
+The left sidebar lists the authenticated User's Bots and switches the conversation. **Add a sheep** creates a Bot with a sheep identity, a name and the first thing to say to it; pressing the sheep in Bot settings opens the editor where its colour bands change. **Manage Bots** shows archived Bots and provides archive and restore controls without deleting their history or settings. Bot settings are the right panel at wide widths and a page on the phone. From the profile sheet, **Connectors** authorizes external accounts and MCP servers for every Bot the User owns, **Plugins** installs, uninstalls, enables and disables Packages account-wide, **Settings** owns the remaining declared application settings, and **Models** renders Package contributions; enabling the default-disabled Custom models Package adds the account model picker and a Package-scoped model override to Bot settings. Without it, every Bot follows the platform's Frock AI model. During an active Turn, **Stop** records cancellation intent; closing or switching clients does not stop backend work.
 
 `@frockbot/providers/ollama-cloud` lets each User create multiple named Ollama Cloud Connections with their own write-only API keys. It is disabled by default and depends on the Custom models Package. The backend validates and encrypts each credential and discovers that Connection's model catalog; connecting it does not change the platform model. Rotation affects subsequent model effects while already-admitted effects retain their credential lease, and disconnect prevents new leases without cancelling admitted Turns.
 
@@ -51,13 +51,12 @@ SPRITES_TOKEN="..." \
   bun run dev
 ```
 
-The hosted shell does expose Computer viewer and human-takeover controls: `computer/`'s Computer card renders a live noVNC viewer, **Take control** and **Release control**, and a full-window overlay, and the same card is a section of the per-Bot info pane. The backend's token-routed noVNC gateway serves each Bot desktop through the User Sprite's public HTTPS URL, and its Bot-scoped takeover lease blocks new process and browser actions while leaving durable Package file operations available. Shells start in `/workspaces/<bot-key>` with `HOME=/home/box`. Canonical Memory Markdown does **not** live on the Computer: the Memory Package is its single writer and writes object storage directly, and the Computer sees Memory roots read-only, so a Turn can read and write Memory with the Computer hibernated.
+The client exposes Computer viewer and human-takeover controls: the Computer card (`apps/native/lib/computer/`) renders a live noVNC viewer, **Take control** and **Release control**, and a full-window viewer, and the card is a `right-panel` region at wide widths and a page on the phone. The backend's token-routed noVNC gateway serves each Bot desktop through the User Sprite's public HTTPS URL, and its Bot-scoped takeover lease blocks new process and browser actions while leaving durable Package file operations available. Shells start in `/workspaces/<bot-key>` with `HOME=/home/box`. Canonical Memory Markdown does **not** live on the Computer: the Memory Package is its single writer and writes object storage directly, and the Computer sees Memory roots read-only, so a Turn can read and write Memory with the Computer hibernated.
 
 ## Checks
 
 ```bash
 bun run format:check
-bun run lint:ui-styles
 bun run typecheck
 bun test
 bun run build
@@ -77,9 +76,9 @@ TYPECHECK_CONCURRENCY=8 bun run typecheck # 0 means unbounded
 ```
 
 Every package checks with TypeScript 7. Most declare `typescript` at `^7.0.2`
-directly. The rest — the Vue packages, `applets/sdk` and the workspace
-root — depend on a tool that embeds the TypeScript compiler API, which
-TypeScript 7's package does not ship, so they alias `typescript` to the
+directly. The rest — `applets/sdk` and the workspace root — depend on a tool
+that embeds the TypeScript compiler API, which TypeScript 7's package does not
+ship, so they alias `typescript` to the
 `typescript-native-bridge` build that keeps the TS 6 JavaScript API while
 checking on tsgo 7.0.2. No TypeScript 5 is left in the repo.
 
@@ -105,7 +104,7 @@ Five layers, each answering a different question. The first four run in CI; the 
 | **unit**        | `bun test`                                               | `*.test.ts` and `*.spec.ts` under Bun, in every workspace. Pure logic and doubles.                                             |
 | **workerd**     | `bun run --filter @frockbot/cloudflare test:workerd`     | `test/**/*.workerd.ts` in local workerd against a probe Worker, so Durable Objects and their storage are real. Hermetic.       |
 | **integration** | `bun run --filter @frockbot/cloudflare test:integration` | `test/integration/**/*.integration.ts` — `SELF.fetch` through the deployed gateway, the Worker Loader, and the built artifact. |
-| **e2e**         | `bun run --filter @frockbot/cloudflare test:e2e`         | `e2e/**/*.e2e.ts` — real Chromium against `wrangler dev`; the only layer in which the shipped Vue client runs.                 |
+| **e2e**         | `bun run --filter @frockbot/cloudflare test:e2e`         | `e2e/**/*.e2e.ts` — real Chromium against `wrangler dev`; the only layer in which the shipped client runs.                     |
 | **live**        | `bun run --filter @frockbot/computer-host test:live`     | The production container image against a real disposable Fly Sprite. Needs Docker and `SPRITES_TOKEN`; deleted in `finally`.   |
 
 The suffixes matter: root `bun test` matches `*.test.ts` and `*.spec.ts` and neither `*.workerd.ts`, `*.integration.ts`, nor `*.e2e.ts`, so the pre-commit hook never starts a runtime project. A commit that touches only documentation — anything under `docs/` or a Markdown file at the repository root — runs Prettier and nothing else, locally and in CI: `scripts/docs-only.sh` is the one definition both the hook and CI's `Classify changes` job use, so such a pull request needs only the `Check documentation` job before it merges. There is no live Sprite probe inside the workerd project any more — the old `fly-compatibility.workerd.ts` live path went away with the Sprites SDK when it moved to the Computer host. `apps/computer-host/live-test.ts` is the only thing in the repository that touches a real Sprite. `apps/cloudflare/test/README.md` documents each runtime project in full.
@@ -114,7 +113,7 @@ The suffixes matter: root `bun test` matches `*.test.ts` and `*.spec.ts` and nei
 
 Merging integrates; tagging ships. A pull request is queued to merge itself as soon as CI is green (`auto-merge.yml`), so `main` stays continuously integrated and nothing about landing a change touches production. Production moves only when a maintainer pushes a version tag.
 
-Pushing a valid SemVer tag such as `v0.1.0` or `v0.1.0-rc.1` (build metadata such as `+build.1` is rejected because npm does not accept it in package versions) validates the monorepo, publishes every workspace under `packages/` to npm with the tag's version, creates a GitHub release with generated notes, and then deploys production. Prereleases use npm's `next` dist-tag rather than `latest`. Application workspaces remain private.
+Pushing a valid SemVer tag such as `v0.1.0` or `v0.1.0-rc.1` (build metadata such as `+build.1` is rejected because npm does not accept it in package versions) validates the monorepo, publishes `applets/sdk` to npm with the tag's version — the one workspace whose manifest declares `frockbot.npm` — creates a GitHub release with generated notes, and then deploys production. Prereleases use npm's `next` dist-tag rather than `latest`. Application workspaces remain private.
 
 Auto-merge waits on the branch ruleset for `main`, which requires the `Validate` and `Browser end-to-end` checks. That ruleset is what holds a queued pull request back; without it GitHub has nothing to wait for and would merge on open. **Allow auto-merge** must also be enabled in the repository's settings.
 
@@ -134,7 +133,7 @@ It reports the two quiet failures by name rather than waiting them out: a pull r
 
 Releases publish to npm through GitHub OIDC. There is no `NPM_TOKEN`, and no registry credential exists in this repository at all: each package names `timoconnellaus/frockbot` and the workflow file `release.yml` as its trusted publisher, and npm exchanges the job's OIDC identity for a credential that expires with the job. Provenance attestation comes with it, so `--provenance` is never passed.
 
-Trusted publishing cannot bootstrap itself. npm will only attach a trusted publisher to a package that already exists, so the very first publication of a name cannot come from a workflow that holds no token. **Every new Package needs this once**, not just the first one: add a workspace under `packages/`, and the next tag's publish step fails on that name alone until it has been bootstrapped. Run it from a terminal, before the tag:
+Trusted publishing cannot bootstrap itself. npm will only attach a trusted publisher to a package that already exists, so the very first publication of a name cannot come from a workflow that holds no token. **Every new published package needs this once**, not just the first one: declare `frockbot.npm` in a workspace's manifest, and the next tag's publish step fails on that name alone until it has been bootstrapped. Run it from a terminal, before the tag:
 
 ```
 bun run bootstrap:npm-trust
@@ -248,9 +247,9 @@ app/              The product: `runtime.ts`, the Contribution tables, and one di
   audit/          Audited-effect projection and the User's rebuildable audit table
   auth/           Authenticated identity contributions for the hosted gateway
   bot-template/   Bot template export, share records, and guarded import
-  clock/          Reference feature with agent, host, and WebUI contributions
+  clock/          Reference feature with agent and host contributions
   credentials/    Per-User Connection credential encryption and leases
-  custom-models/  Opt-in account and Bot model selection surfaces
+  custom-models/  Opt-in Bot model override setting, default-disabled
   echo/           Minimal reference feature used by tests and examples
   flock/          Durable Bot directory and composable sheep identity
   identity/       Sheep identity composition and rendering
@@ -267,17 +266,17 @@ app/              The product: `runtime.ts`, the Contribution tables, and one di
   skills/         Skill catalog, disclosure on demand, managed Skills, and the Bot's Workspace seam
   subagents/      Subagent Tasks: the parent Bot's task authority, the Durable Object binding, and their records
   testkit/        Shared test doubles and harnesses
-  ui-theme/       Global semantic tokens for hosted client Contributions
+  ui-theme/       The Appearance Package definition; it contributes no code
   web/            web_search and a bounded, SSRF-classified web_fetch
 applets/          Applets: the seven applet_* tools, the source root, and the shell's pages
   sdk/            Applet authoring SDK, component kit, linter, and `applet` CLI; published to npm
 apps/
   applet-build/     Applet build service Worker and its Node container
-  cloudflare/       User application loader, Dynamic Worker artifact, and bot state
+  cloudflare/       User application loader, Dynamic Worker artifact, the client's web build, and bot state
   computer-host/    Shared Computer host Worker and its Node container
   marketing/        Public frockbot.com site and static-assets Worker
-  native/           Flutter client for the hosted application
-computer/          The Computer: tools, prompt, state, viewer UI, host seam, and the Fly provider
+  native/           The client: the phone app, and the web build the app Worker serves
+computer/          The Computer: tools, prompt, state, host seam, and the Fly provider
   core/            Provider registry and capability interfaces for Computers
   host-protocol/   Versioned v1 DTOs and decoders for the Computer host seam
   host-runtime/    The Computer's on-Sprite layout, scripts, and Sprite naming
@@ -298,9 +297,6 @@ core/
   prompt/           System prompt assembly from Package contributions
   tools/            The trusted tool registry and its guards
 frock-compose/     Frock Compose: the Bot isolate host that loads an untrusted member's artifact
-packages/
-  client-core/      Shared client runtime helpers and brand typography stylesheet
-  client-ui/        Reusable Vue primitives and surface registry
 providers/
   openai-compatible/ Shared model transport: request mapping, deadlines, AI SDK decoding
   frock-ai/         Built-in credential-free Frock AI model provider
@@ -315,7 +311,7 @@ docs/
 
 ## Cloudflare vertical slice
 
-The Cloudflare application builds an immutable Dynamic Worker artifact containing the user-facing UI and gateway routes. The gateway loads the User's active `userId:applicationHash`; the Dynamic Worker forwards authoritative Bot execution through a user-scoped capability backed by one Durable Object per Bot.
+The Cloudflare application builds an immutable Dynamic Worker artifact holding the gateway routes and the document that names the client; the client's own payload is the Worker's static assets, content-addressed under `/_flutter/<buildHash>/`. The gateway loads the User's active `userId:applicationHash`; the Dynamic Worker forwards authoritative Bot execution through a user-scoped capability backed by one Durable Object per Bot.
 
 ```bash
 bun run --filter @frockbot/cloudflare test

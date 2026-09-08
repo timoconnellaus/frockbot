@@ -1,9 +1,8 @@
 /// Adding a Bot to the flock, and changing how one looks.
 ///
-/// `FlockOverlay.vue`'s two halves on this app's terms: a name, the sheep, and
-/// — because a new Bot with nothing to do is a blank screen — the first thing
-/// to say to it; and, from Bot settings, the same sheep again for a Bot that
-/// already exists. The wardrobe's other three selects are in neither:
+/// Two halves: a name, the sheep, and — because a new Bot with nothing to do
+/// is a blank screen — the first thing to say to it; and, from Bot settings,
+/// the same sheep again for a Bot that already exists. The wardrobe's other three selects are in neither:
 /// wearables are deferred (`docs/plan.md`), so the background is the whole of
 /// the choice and every band stays at the catalogue's neutral root.
 ///
@@ -150,9 +149,8 @@ class CreateBotController extends ChangeNotifier {
   }
 
   /// The directory revision the create fences on, read fresh.
-  Future<int> _revision() async => wire.BotDirectory.fromJson(
-    await api.request('/api/bots'),
-  ).revision;
+  Future<int> _revision() async =>
+      wire.BotDirectory.fromJson(await api.request('/api/bots')).revision;
 
   /// The receipt, or nothing when the authority says the revision moved.
   Future<wire.FlockReceipt?> _send(Map<String, Object?> command) async {
@@ -187,9 +185,7 @@ class CreateBotSheet extends StatefulWidget {
     showDragHandle: true,
     isScrollControlled: true,
     builder: (sheet) => Padding(
-      padding: EdgeInsets.only(
-        bottom: MediaQuery.viewInsetsOf(sheet).bottom,
-      ),
+      padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(sheet).bottom),
       child: CreateBotSheet(controller: controller),
     ),
   );
@@ -352,8 +348,8 @@ class _CreateBotSheetState extends State<CreateBotSheet> {
 
 /// Changing an existing Bot's colour.
 ///
-/// The one thing `FlockOverlay.vue`'s edit half still does under the
-/// single-default-avatar rule. It is fenced on the revision the read just
+/// The one thing the edit half still does under the single-default-avatar
+/// rule. It is fenced on the revision the read just
 /// reported rather than on one held since the sheet opened, because the sheet
 /// is open for as long as somebody is looking at six sheep.
 class SheepColourSheet extends StatefulWidget {
@@ -420,9 +416,7 @@ class _SheepColourSheetState extends State<SheepColourSheet> {
     } on RequestFailure catch (failure) {
       setState(() => message = failure.message);
     } catch (_) {
-      setState(
-        () => message = 'Couldn’t change this Bot’s colour. Try again.',
-      );
+      setState(() => message = 'Couldn’t change this Bot’s colour. Try again.');
     } finally {
       if (mounted) setState(() => busy = false);
     }

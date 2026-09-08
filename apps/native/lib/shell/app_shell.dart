@@ -38,6 +38,7 @@ import '../view/sample_page.dart';
 import '../protocol/client_wire.generated.dart' as wire;
 import 'chat_pane.dart';
 import 'desktop_layout.dart';
+import 'lifecycle.dart';
 import 'run_view.dart';
 import 'semantics.dart';
 import 'sidebar.dart';
@@ -116,6 +117,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     activity.addListener(_repaint);
+    activity.addListener(_markWhatIsBeingRead);
     widget.botLinks.addListener(_followBotLink);
     // A lifecycle command nobody has an answer for is adopted here rather than
     // when the danger zone happens to be opened: it is the account's, and it
@@ -141,10 +143,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     _activityTimer?.cancel();
     _activityTimer = null;
-    if (state == AppLifecycleState.resumed) {
-      unawaited(activity.load());
-      _startPolling();
-    }
+    if (appIsAwayV1(state)) return;
+    unawaited(activity.load());
+    _startPolling();
   }
 
   /// Whether this account administers the deployment. The gateway is the
@@ -301,6 +302,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       openRun = null;
       panelOpen = false;
     });
+    _markWhatIsBeingRead();
     _adoptBotPanels(botId);
     unawaited(
       widget.store
@@ -309,9 +311,23 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     );
   }
 
+  /// A conversation on screen has been read.
+  ///
+  /// The badge counts what the person has not seen, so the Bot they are looking
+  /// at must never raise one: opening it clears what is there, and a reply that
+  /// arrives while it is open is read as it lands. Marking is idempotent and
+  /// declines when there is nothing to mark, so this is safe to call on every
+  /// selection and on every poll.
+  void _markWhatIsBeingRead() {
+    final botId = selected?.botId.value;
+    if (botId == null) return;
+    if (activity.unread[botId]?.lastActivityCursor == null) return;
+    unawaited(activity.mark(botId, read: true));
+  }
+
   /// The Bot's own settings and its Routines are features in the `right-panel`
-  /// region, which is how the Vue shell mounts them too: the shell draws the
-  /// region and never imports what goes in it.
+  /// region, which is what that region is for: the shell draws the region and
+  /// never imports what goes in it.
   void _adoptBotPanels(String botId) {
     final name =
         bots.where((bot) => bot.botId.value == botId).map(_name).firstOrNull ??
@@ -727,7 +743,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   }
 
   /// The Package pages mounted in Bot settings, drawn under the Bot's own
-  /// sections the way `PackageIframeSettings.vue` draws them.
+  /// sections.
   List<Widget> _packageSettings(String botId) {
     final held = catalog;
     if (held == null) return const [];
@@ -920,6 +936,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
             conversation: bot == null
                 ? NoConversation(
                     empty: bots.isEmpty,
+                    failure: bots.isEmpty ? error : null,
                     action: bots.isEmpty || tier != ShellTier.single
                         ? 'Refresh Bots'
                         : 'Your Bots',
@@ -978,8 +995,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   );
 
   /// The profile sheet: who is signed in, and the account surfaces reachable
-  /// from where the User already is. The Vue trigger's menu, on the phone's
-  /// terms — the account's own settings are one entry, not five.
+  /// from where the User already is. On the phone's terms, the account's own
+  /// settings are one entry, not five.
   void _openProfile() {
     setState(() => navOpen = false);
     showModalBottomSheet<void>(
@@ -1214,6 +1231,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     widget.botLinks.removeListener(_followBotLink);
     _activityTimer?.cancel();
     activity.removeListener(_repaint);
+    activity.removeListener(_markWhatIsBeingRead);
     activity.dispose();
     lifecycle.dispose();
     botSettings?.dispose();

@@ -1,8 +1,8 @@
 /// The Computer card, and the full-window viewer it opens.
 ///
-/// A port of `ComputerCard.vue` and `ComputerViewerOverlay.vue`. The card
-/// draws the Bot's own screen region as it changes, in the same view-only
-/// frame the viewer uses and on the same minted session — no second token, no
+/// The card draws the Bot's own screen region as it changes, in the same
+/// view-only frame the viewer uses and on the same minted session — no second
+/// token, no
 /// takeover lease, and no input reaching the desktop. Drawing it wakes
 /// nothing: with no session minted the card stays on the stored capture, which
 /// the Bot files after every Computer action.

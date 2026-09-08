@@ -12,14 +12,20 @@ import 'transport_io.dart' if (dart.library.js_interop) 'transport_web.dart';
 
 export 'store.dart';
 
-/// The gateway this build talks to. A development build is pointed at the
-/// local stack with `--dart-define=FROCKBOT_ORIGIN=…` (`bun run dev:native`
-/// lends the host's loopback to the emulator); every other build talks to
-/// production.
-const hostedOrigin = String.fromEnvironment(
-  'FROCKBOT_ORIGIN',
-  defaultValue: 'https://bot.frockbot.com',
-);
+/// The gateway this build talks to.
+///
+/// A development build is pointed at the local stack with
+/// `--dart-define=FROCKBOT_ORIGIN=…` (`bun run dev:native` lends the host's
+/// loopback to the emulator). Left unset, the phone talks to production and
+/// the browser talks to the origin it was served from — which is the deployed
+/// shape, and the only one that works for a stack on an unknown port.
+final String hostedOrigin = const String.fromEnvironment('FROCKBOT_ORIGIN')
+    .ifEmpty(defaultOriginV1);
+
+extension on String {
+  String ifEmpty(String Function() fallback) => isEmpty ? fallback() : this;
+}
+
 const clientHello = <String, Object>{
   'schemaVersion': 1,
   'protocolVersion': 1,
@@ -135,7 +141,14 @@ class NativeApi {
           400 when path.startsWith('/api/auth/native/') => 'That sign-in has expired or is unavailable on this device. Please sign in again.',
           503 when path.startsWith('/api/auth/native/') => 'Native sign-in is temporarily unavailable. Please try again in a few minutes.',
           426 => 'Update the app to continue using FrockBot.',
-          413 => 'That message is too long. Please shorten it.',
+          // The send route refuses an over-long message with the limit in
+          // it, in the product's own words. A client that restated that
+          // sentence would carry a number the route is free to change, so
+          // what the reader is shown is the answer's own reason where the
+          // answer gave one.
+          413 =>
+            _refusalReason(bytes) ??
+                'That message is too long. Please shorten it.',
           409 => 'That action could not be completed. Refresh and try again.',
           _ => 'FrockBot couldn’t complete that request. Please try again.',
         };
@@ -151,6 +164,22 @@ class NativeApi {
         'Couldn’t reach FrockBot. Check your connection and try again.',
       );
     }
+  }
+
+  /// The sentence a refusal carried, where it carried one written for the
+  /// person. A body that is not JSON, or carries no `error`, or carries
+  /// something longer than a sentence, is not one.
+  static String? _refusalReason(List<int> bytes) {
+    try {
+      final body = jsonDecode(utf8.decode(bytes));
+      if (body is Map && body['error'] is String) {
+        final reason = body['error'] as String;
+        if (reason.isNotEmpty && reason.length <= 200) return reason;
+      }
+    } catch (_) {
+      // A refusal whose body cannot be read still has the client's own line.
+    }
+    return null;
   }
 
   Future<WebSocketChannel> socket(String botId, String? cursor) async {

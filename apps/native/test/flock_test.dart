@@ -48,8 +48,8 @@ void main() {
 
   test('the sheep is the background plus the canonical, and nothing else', () {
     // The wardrobe's three bands stay at the catalogue's neutral roots:
-    // wearables are deferred, and a Bot this app makes must still be one the
-    // Vue wardrobe can dress later.
+    // wearables are deferred, and a Bot this app makes must still be one a
+    // wardrobe can dress when they return.
     expect(defaultSheepRecipeV1('hot-pink'), {
       'schemaVersion': 1,
       'background': 'hot-pink',
@@ -269,7 +269,7 @@ void main() {
     expect(find.text('Restore Bot'), findsNothing);
     expect(find.text('Delete Bot'), findsOneWidget);
 
-    // A delete asks first, in the words the Vue confirmation uses.
+    // A delete asks first, and names the Bot in the question.
     await tester.tap(find.text('Delete Bot'));
     await tester.pumpAndSettle();
     expect(find.text('Delete Alpha?'), findsOneWidget);

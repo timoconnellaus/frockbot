@@ -12,9 +12,9 @@ at the cited location. Items the re-orientation already removes are marked; see
 
 4. ~~**Staging omits two required secrets.**~~ **Fixed.** `APPLET_VIEWER_SECRET` and `FROCKBOT_AUTHORIZATION_STATE_SECRET` are both required by `production-secrets.ts` and were absent from the staging deploy, so staging answered 503 for every Applet. Both are now sent. Still open: staging runs no secrets gate.
 
-5. **Staging `vars` differ from production silently.** `apps/cloudflare/wrangler.jsonc:361-369` omits `FROCK_AI_GATEWAY_ID`, `FROCK_AI_AUTO_ROUTE` and `NATIVE_SLICE_2_AUTH`; named environments do not inherit top-level vars.
+5. **Staging `vars` differ from production silently.** `apps/cloudflare/wrangler.jsonc:377-384` omits `FROCK_AI_GATEWAY_ID`, `FROCK_AI_AUTO_ROUTE` and `NATIVE_SLICE_2_AUTH`; named environments do not inherit top-level vars.
 
-6. **Two deploy paths rewrite `wrangler.jsonc` by regex** (`ci.yml:517-527`, `release.yml:385-420`). The checked-in placeholder `database_id` `00000000-0000-0000-0000-000000000000` and the string `foundation-v1` are load-bearing; reformatting the file breaks deployment.
+6. **Two deploy paths rewrite `wrangler.jsonc` by regex** (`ci.yml:531-578`, `release.yml:394-446`). The checked-in placeholder `database_id` `00000000-0000-0000-0000-000000000000` and the string `foundation-v1` are load-bearing; reformatting the file breaks deployment.
 
 7. ~~**Signups-closed does not prevent account creation.**~~ **Fixed.** `/api/auth/*` is served at `gateway.ts:753` ahead of the admission check, so any Google account could write `user`, `account` and `session` rows while signups were closed. `signupDatabaseHooksV1` (`apps/cloudflare/src/auth.ts`) now refuses the create unless signups are open or the email is a configured admin.
 
@@ -22,15 +22,15 @@ at the cited location. Items the re-orientation already removes are marked; see
 
 9. ~~**The Electron desktop shell is not in the repository**, yet `electron()` is an enabled better-auth plugin and `com.frockbot.desktop:/` is a trusted origin.~~ **Fixed.** The better-auth plugin, the trusted origin, the `electronProxyClient`, the `window.frockbotDesktop` branches, the `frockbot://localhost` client origin, `app/auth`'s abstract `DesktopAuthCapability`, the `DesktopApiResponseV1` DTO and the Electron-only `agent-runtime` entry point are gone. Still there: the `"desktop"` client vocabulary the backends and Subagent roles carry, and the `desktop` contributions of `computer/fly` and `app/machine`.
 
-10. ~~**The Capacitor path is dead.**~~ **Fixed.** `FrockBotGoogleAuth`, the `AuthGate` id-token branch, the `@capacitor/core` dependency and the server's `verifyIdToken` are removed. Google sign-in is the OAuth redirect the web app and the Flutter app both use.
+10. ~~**The Capacitor path is dead.**~~ **Fixed.** `FrockBotGoogleAuth`, the `AuthGate` id-token branch, the `@capacitor/core` dependency and the server's `verifyIdToken` are removed. Google sign-in is the OAuth redirect the client uses, in the browser and on the phone.
 
 11. **`apple-app-site-association` is served unconditionally**, but `nativeReturnUris("android")` omits the macOS URI, so a macOS app following it reaches a 404.
 
-12. **`production-secrets.ts:171-173` states that native auth is not enabled in production**, while `wrangler.jsonc:141` sets `NATIVE_SLICE_2_AUTH` to `"android"` in production vars.
+12. **`production-secrets.ts:171-173` states that native auth is not enabled in production**, while `wrangler.jsonc:146` sets `NATIVE_SLICE_2_AUTH` to `"android"` in production vars.
 
 13. **Two better-auth instances are constructed per request** (`apps/cloudflare/src/index.ts:2235`, `:2252`).
 
-14. **The Flutter app is not the shipping client.** `apps/native/README.md:3` and `apps/native/qualification.json:2` both say prototype, and `native.yml` is advisory with no build, sign or publish job. `apps/native/android/app/build.gradle.kts:12-13` hard-errors unless an `installedCode` value derived from a connected device is supplied, so the Android build cannot run unattended. There is no iOS directory.
+14. ~~**The Flutter app is not the shipping client.**~~ **Half gone with step 9.** It is the shipping client on the web: `bot.frockbot.com` serves its browser build, which `ci.yml`'s required `Validate` job compiles. What survives is the device half. `apps/native/qualification.json:2` still records `unqualified-prototype`; `native.yml` is advisory with no APK, IPA, sign or publish job; `apps/native/android/app/build.gradle.kts:12-13` hard-errors unless an `installedCode` value derived from a connected device is supplied, so the Android build cannot run unattended; and there is no iOS directory.
 
 15. ~~**The `genui` / `a2ui_core` dependency is inert.**~~ **Fixed.** The A2UI path is gone: both packages, the vendored `0.9.1` schemas, the catalog adapter, `FormPreview`, the three `A2ui*` wire types and the qualification-form route the preview posted to. The `ViewNode` renderer (`apps/native/lib/view/`) replaces it.
 
@@ -76,7 +76,7 @@ at the cited location. Items the re-orientation already removes are marked; see
 
 36. **The `flock` to `frock` rename is partial.** Code reads `FROCK_AI_*` with `FLOCK_AI_*` fallbacks (`apps/cloudflare/src/index.ts:249-256`), while the Cloudflare resources (`FROCK_AI_GATEWAY_ID: "flock"`, `FROCK_AI_AUTO_ROUTE: "flock-auto"`), the package `@frockbot/app/flock` and every stored id remain `flock`.
 
-37. ~~**`release.yml` publishes test fixtures to npm.** All of `packages/*` is published by flipping `private: false`, including `plugin-testkit`.~~ **Fixed.** The app cut moved the test doubles into `app/testkit`; `packages/*` is now the four client and Compose libraries.
+37. ~~**`release.yml` publishes test fixtures to npm.** All of `packages/*` is published by flipping `private: false`, including `plugin-testkit`.~~ **Fixed.** The app cut moved the test doubles into `app/testkit`, and step 9 deleted `packages/` altogether with the Vue client the last two libraries in it served. See 43 for what publishes now.
 
 38. **`APPLET_STATES` is typed inconsistently.** It is optional in `UserConfigurationEnv` (`apps/cloudflare/src/user-configuration.ts:210`, guarded at `:1826`) but non-optional and dereferenced unguarded in the gateway (`apps/cloudflare/src/index.ts:1060`, `:2339`).
 

@@ -1,8 +1,9 @@
 /// A web page the host frames but does not draw.
 ///
 /// Two implementations, one seam. In the browser the frame is a platform view
-/// over an iframe under the sandbox attribute the Vue canvas uses; on the
-/// phone it is a WebView with every one of those guarantees set by hand. Both
+/// over an iframe under the `sandbox` attribute `host_frame_web.dart` sets; on
+/// the phone it is a WebView with every one of those guarantees set by hand.
+/// Both
 /// take the same three things — the URL, the messages the host hands the
 /// page, and whether the document keeps its own origin — because everything
 /// above this line is about which page is shown, never about how.

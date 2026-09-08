@@ -4,16 +4,12 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./index.ts",
     "./agent": "./agent.ts",
     "./backend": "./backend.ts",
     "./bot": "./bot.ts",
-    "./client": "./client/application.ts",
-    "./client-state-machine": "./client/state-machine.ts",
     "./definition": "./definition.ts",
     "./protocol": "./protocol.ts",
     "./roots": "./roots.ts",
-    "./shared": "./shared.ts",
     "./shared-provider": "./shared-provider.ts",
     "./core": "./core/core.ts",
     "./core/host-protocol": "./core/host-protocol.ts",
@@ -30,20 +26,16 @@
   },
   "scripts": {
     "test": "bun test .",
-    "typecheck": "vue-tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
     "@frockbot/app": "workspace:*",
-    "@frockbot/client-core": "workspace:*",
-    "@frockbot/client-ui": "workspace:*",
-    "@frockbot/core": "workspace:*",
-    "vue": "3.5.41"
+    "@frockbot/core": "workspace:*"
   },
   "devDependencies": {
     "@frockbot/app": "workspace:*",
     "@types/bun": "1.4.0",
     "@types/node": "26.2.0",
-    "typescript": "npm:typescript-native-bridge@6.0.3-bridge.16.tsgo.7.0.2",
-    "vue-tsc": "3.3.10"
+    "typescript": "npm:typescript-native-bridge@6.0.3-bridge.16.tsgo.7.0.2"
   }
 }

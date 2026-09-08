@@ -1,8 +1,7 @@
 /// The composer: the draft, what makes Send available, and the size rule.
 ///
-/// The rules are the Vue shell's — `composer-draft.ts`, `send-readiness.ts`
-/// and `turn-limits.ts` — and the reasons they are three separate things are
-/// theirs too. A draft belongs to the Bot it was typed for and survives a
+/// The draft, send readiness and the turn limit are three separate rules, and
+/// deliberately so. A draft belongs to the Bot it was typed for and survives a
 /// refused send. "Can this client send at all" and "is there something worth
 /// sending" are different questions, and folding them into one predicate is
 /// what disabled Try again for the exact case it exists for.

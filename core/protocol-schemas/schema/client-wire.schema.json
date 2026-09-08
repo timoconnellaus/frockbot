@@ -2227,16 +2227,6 @@
         "value": {
           "$ref": "#/$defs/Json"
         },
-        "options": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 200
-          },
-          "minItems": 0,
-          "maxItems": 100
-        },
         "editable": {
           "type": "boolean"
         },
@@ -2297,11 +2287,6 @@
         "ownerId": {
           "$ref": "#/$defs/Identifier"
         },
-        "title": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
-        },
         "sections": {
           "type": "array",
           "items": {
@@ -2312,9 +2297,6 @@
                 "minLength": 1,
                 "maxLength": 256,
                 "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,255}$"
-              },
-              "packageId": {
-                "$ref": "#/$defs/Identifier"
               },
               "label": {
                 "type": "string",
@@ -2350,12 +2332,9 @@
                       "type": "string",
                       "minLength": 1,
                       "maxLength": 100
-                    },
-                    "packageId": {
-                      "$ref": "#/$defs/Identifier"
                     }
                   },
-                  "required": ["kind", "label", "packageId"],
+                  "required": ["kind", "label"],
                   "additionalProperties": false
                 }
               }
@@ -2367,14 +2346,7 @@
           "maxItems": 64
         }
       },
-      "required": [
-        "schemaVersion",
-        "home",
-        "revision",
-        "ownerId",
-        "title",
-        "sections"
-      ],
+      "required": ["schemaVersion", "home", "revision", "ownerId", "sections"],
       "additionalProperties": false
     },
     "AppletViewerToken": {
@@ -3135,11 +3107,6 @@
                 "minLength": 1,
                 "maxLength": 200
               },
-              "service": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 200
-              },
               "state": {
                 "enum": [
                   "authorizing",
@@ -3173,7 +3140,6 @@
             "required": [
               "id",
               "label",
-              "service",
               "state",
               "packageId",
               "kind",

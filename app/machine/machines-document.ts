@@ -140,7 +140,7 @@ export function machinesDocumentV1(view: MachineListViewV1): ViewDocument {
           type: "text",
           text: "A registered machine is a computer running the FrockBot desktop app. A Bot can read its files and run commands on it only while that app is open, and only after you approve each action.",
         },
-        // The count is the summary `MachineSection.vue` put under its title.
+        // The count is the summary that sits under the title.
         // With nothing registered there is nothing to summarise, and the list
         // below already says so once.
         ...(view.machines.length === 0

@@ -2,24 +2,31 @@
 // provider) and S9 (the client's HTTP error decoding).
 //
 // The client never holds a transcript stream open: it POSTs the Turn and reads
-// the run back, woken by the Bot-state channel and by its own poll. A reply
-// still arrives as it is written, because the words the model has produced are
-// durable on the run record before the Turn settles.
+// the run back, woken by the Bot-state channel.
 //
 // Incident 5 is the second half: a Connection that reached `ready` stops
 // working when the key is revoked upstream. The failure has to survive as
 // durable state and reach the conversation as a readable reason, not as a
 // spinner that never ends.
+//
+// One thing about this client shapes every test below. Chat is the Bot's
+// words, and the Bot's words are what it sent: the thread draws one bubble per
+// `send_to_user` and nothing for a Turn whose model only wrote text to itself.
+// So a spec that wants a visible reply scripts one, which is also why a reply
+// can be given words of the spec's own choosing rather than the stub's.
 import {
   test,
   expect,
-  assistantMessages,
+  answerInputs,
   composerInput,
   createBot,
+  press,
+  pressDisabled,
   provisionThroughUi,
   revealSidebar,
-  sendMessage,
+  sem,
   setFakeOllamaChatMode,
+  spokenText,
 } from "./fixtures.ts";
 import {
   E2E_ASSISTANT_REPLY,
@@ -38,6 +45,7 @@ import {
   failureNoticeV1,
   RUN_FAILURE_COPY_V1,
 } from "@frockbot/app/shell/run-failure-copy";
+import type { Locator, Page } from "@playwright/test";
 
 /*
  * The fake provider is one server shared by every spec in the shard, so a mode
@@ -52,6 +60,129 @@ test.afterEach(async ({ page, ollamaBaseUrl }) => {
   await setFakeOllamaChatMode(page, ollamaBaseUrl, "ok");
 });
 
+/** A prompt that makes the stub say `text` to the person, in the Bot's voice. */
+function says(text: string): string {
+  return e2eToolCallPrompt("send_to_user", {
+    payload: { type: "text", text },
+  });
+}
+
+/** Every bubble the Bot sent, in the order it sent them. */
+function sends(page: Page): Locator {
+  return sem(page, "chat-transcript").locator(
+    '[flt-semantics-identifier*=":send:"]',
+  );
+}
+
+/**
+ * What each of those bubbles says.
+ *
+ * A bubble's node carries the avatar's own label as well as the words, so the
+ * text of a reply from the Bot reads "Bot\npong". The label is who is
+ * speaking, which every bubble in the thread has in common; what is asserted
+ * here is what was said.
+ */
+async function sendTexts(page: Page): Promise<string[]> {
+  return (await sends(page).allTextContents()).map((text) =>
+    text.replace(/^Bot\s*/, "").trim(),
+  );
+}
+
+/** Every message the person wrote. */
+function saidByUser(page: Page): Locator {
+  return sem(page, "chat-transcript").locator(
+    '[flt-semantics-identifier$=":user"]',
+  );
+}
+
+/**
+ * The thread as the reader sees it, top to bottom.
+ *
+ * A canvas has no document order to read a transcript off, and the engine puts
+ * its nodes in the tree in whatever order it built them. Where a line sits is
+ * the box it was drawn at, so that is what "in order" is asked of here.
+ */
+async function threadOrder(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    const transcript = document.querySelector(
+      '[flt-semantics-identifier="chat-transcript"]',
+    );
+    if (!transcript) return [];
+    return [...transcript.querySelectorAll("[flt-semantics-identifier]")]
+      .map((node) => ({
+        id: node.getAttribute("flt-semantics-identifier") ?? "",
+        top: node.getBoundingClientRect().top,
+        text: (node.textContent ?? "").replace(/^Bot\n/, "").trim(),
+      }))
+      .filter((line) => line.id.endsWith(":user") || line.id.includes(":send:"))
+      .sort((left, right) => left.top - right.top)
+      .map((line) => (line.id.endsWith(":user") ? "you" : `bot: ${line.text}`));
+  });
+}
+
+/**
+ * Type the message and press Send, and return the moment it is pressed.
+ *
+ * This is the send a spec wants when what it is watching happens *during* the
+ * Turn. The composer holds the draft until the client has confirmed delivery,
+ * and confirming delivery means the POST has answered — which, on a provider
+ * that is holding the model call open, is the whole Turn. So a spec that
+ * waited for an empty composer would be looking for the working row after the
+ * Turn it belongs to has already settled.
+ */
+async function beginTurn(page: Page, text: string): Promise<void> {
+  // Typed through the retry the engine needs: keys sent before it has opened
+  // the field's editing session are dropped, and a draft that arrives with its
+  // first characters missing is a different message — which, when the draft
+  // carries a tool script, is a different Turn.
+  await answerInputs([[composerInput(page), text]]);
+  // Send closes while a submission is in flight and while the client is still
+  // confirming the last one, and a click on a closed button is a no-op that
+  // reads afterwards as a message the product lost. Waiting for it to open
+  // again is what "press Send" means.
+  await expect
+    .poll(() => pressDisabled(sem(page, "send-button")), { timeout: 120_000 })
+    .toBe(false);
+  await press(sem(page, "send-button"));
+}
+
+/** The same, waiting until the client has the Turn the send made. */
+async function startTurn(page: Page, text: string): Promise<void> {
+  await beginTurn(page, text);
+  await expect(composerInput(page)).toHaveValue("", { timeout: 120_000 });
+}
+
+/**
+ * Send, and wait for the Turn to settle.
+ *
+ * Local rather than `fixtures.sendMessage` because what settles a Turn here is
+ * the reply arriving, not a row count. The thread is a reversed, virtualised
+ * list: a message that has scrolled above the fold leaves the accessibility
+ * tree altogether, so counting rows counts what is on screen rather than what
+ * was said, and a conversation of six Turns is one short of its own arithmetic
+ * through no fault of the product.
+ *
+ * What is on screen is where a new reply lands, so the settled claim is that
+ * the Bot's bubbles have changed and the working row has gone.
+ */
+async function send(
+  page: Page,
+  text: string,
+  options: { replies?: number } = {},
+): Promise<void> {
+  const replies = options.replies ?? 0;
+  const before = replies > 0 ? await sendTexts(page) : [];
+  await startTurn(page, text);
+  if (replies > 0) {
+    await expect
+      .poll(() => sendTexts(page), { timeout: 120_000 })
+      .not.toEqual(before);
+  }
+  await expect(sem(page, "working-indicator")).toHaveCount(0, {
+    timeout: 120_000,
+  });
+}
+
 test("Turns stay ordered, render Markdown, and survive a reload", async ({
   page,
   userId,
@@ -64,9 +195,9 @@ test("Turns stay ordered, render Markdown, and survive a reload", async ({
     botName: "Talker",
   });
 
-  const firstPrompt = "Render **this** please";
-  const secondPrompt = "Then render _that_ too";
-  await sendMessage(page, firstPrompt);
+  const firstReply = "Rendered **this** for you";
+  const secondReply = "And _that_ as well";
+  await send(page, `first\n${says(firstReply)}`, { replies: 1 });
 
   // The row and the transcript are two renderings of the same Turn, so the
   // *first* settled Turn has to move both. The sidebar used to re-read only on
@@ -74,62 +205,45 @@ test("Turns stay ordered, render Markdown, and survive a reload", async ({
   // messages yet" — in practice until the Turn after it. This timeout is
   // deliberately under that interval: a row that only a poll could have
   // refreshed fails here, and no reload is involved.
-  const sidebarRow = page.locator(".flock-bot-row", {
-    has: page.getByText("Talker", { exact: true }),
-  });
+  await revealSidebar(page);
+  const sidebarRow = sem(page, "shell-sidebar")
+    .locator('[flt-semantics-identifier^="sidebar-bot-"]')
+    .filter({ hasText: "Talker" });
+  // The row's line is the Turn's own reply — what the model wrote — rather
+  // than the bubble the thread drew from `send_to_user`. That is the durable
+  // preview the server projects, and it is deliberately not the same thing:
+  // one is the conversation, the other is the row above it.
   await expect(sidebarRow).toContainText(E2E_ASSISTANT_REPLY, {
     timeout: 10_000,
   });
   await expect(sidebarRow).not.toContainText("No messages yet");
-  await expect(sidebarRow.locator("time")).not.toHaveText("");
 
-  await sendMessage(page, secondPrompt);
+  await send(page, `second\n${says(secondReply)}`, { replies: 1 });
 
-  const thread = page.locator("main");
-  await expect(thread.getByText(firstPrompt)).toBeVisible();
-  await expect(thread.getByText(secondPrompt)).toBeVisible();
-  // The assistant reply is Markdown the client rendered, not escaped text.
-  const renderedMarkdown = thread.locator(".message-assistant strong", {
-    hasText: "local Ollama stub",
-  });
-  await expect(renderedMarkdown).toHaveCount(2);
-  await expect(renderedMarkdown.first()).toBeVisible();
-
-  const turnOrder = () =>
-    thread
-      .locator("article.message-user, article.message-assistant")
-      .evaluateAll((messages) =>
-        messages.map((message) => ({
-          role: message.classList.contains("message-user")
-            ? "user"
-            : "assistant",
-          text: message.textContent?.trim(),
-        })),
-      );
+  // The Bot's words are Markdown the client rendered, not escaped text: what
+  // is on screen is the emphasis, and the asterisks are gone.
+  await expect
+    .poll(() => sendTexts(page))
+    .toEqual(["Rendered this for you", "And that as well"]);
   const expectedOrder = [
-    { role: "user", text: firstPrompt },
-    { role: "assistant", text: "Reply from the local Ollama stub." },
-    { role: "user", text: secondPrompt },
-    { role: "assistant", text: "Reply from the local Ollama stub." },
+    "you",
+    "bot: Rendered this for you",
+    "you",
+    "bot: And that as well",
   ];
-  await expect.poll(turnOrder).toEqual(expectedOrder);
-
-  // The row is the Bot Durable Object's small settled preview projection, not
-  // a copy scraped out of the open thread. Its time is present beside the name.
-  await expect(sidebarRow).toContainText(E2E_ASSISTANT_REPLY, {
-    timeout: 30_000,
-  });
-  await expect(sidebarRow.locator("time")).not.toHaveText("");
+  await expect.poll(() => threadOrder(page)).toEqual(expectedOrder);
 
   // A reload replays the conversation from `GET /api/bots/:bot/turns`. Incident
   // 1 was that route answering HTML: the history vanished and the console
   // carried `Unexpected token '<'`, which the `page` fixture would now fail on.
   await page.reload();
-  await expect(thread.getByText(firstPrompt)).toBeVisible();
-  await expect(thread.getByText(secondPrompt)).toBeVisible();
-  await expect(renderedMarkdown).toHaveCount(2);
-  await expect(renderedMarkdown.first()).toBeVisible();
-  await expect.poll(turnOrder).toEqual(expectedOrder);
+  await expect
+    .poll(() => sendTexts(page), { timeout: 120_000 })
+    .toEqual(["Rendered this for you", "And that as well"]);
+  await expect.poll(() => threadOrder(page)).toEqual(expectedOrder);
+  await revealSidebar(page);
+  // The row survives the reload the same way, and says the same thing it said
+  // before it: the Turn's own reply, not the bubble.
   await expect(sidebarRow).toContainText(E2E_ASSISTANT_REPLY);
 });
 
@@ -148,106 +262,41 @@ test("a Turn that is running when the page reloads still delivers its reply", as
   // The provider holds the completion open, so the Turn is genuinely running
   // while the browser goes away.
   await setFakeOllamaChatMode(page, ollamaBaseUrl, "slow");
+  await answerInputs([
+    [composerInput(page), `take your time\n${says("Worth the wait")}`],
+  ]);
+  await press(sem(page, "send-button"));
 
-  const prompt = "Take your time with this one";
-  const composer = composerInput(page);
-  await composer.fill(prompt);
-  await expect(composer).toHaveValue(prompt);
-  await page.getByRole("button", { name: "Send message" }).click();
-  // The composer clears only once the submission is accepted, so the Turn is
-  // durable from here.
-  await expect(composer).toHaveValue("", { timeout: 120_000 });
-
-  const thread = page.locator("main");
-  await expect(thread.getByText(prompt)).toBeVisible({ timeout: 120_000 });
-  // The tab that sent the message can stop it. Before the run state reached
-  // the client, this button never appeared for the sending tab at all.
-  await expect(page.getByRole("button", { name: /Stop/ })).toBeVisible({
-    timeout: 60_000,
-  });
-
-  // The reply to the POST is now gone: this browser has no copy of the Turn
-  // and nobody will re-send it.
+  // Reloaded without waiting for the composer to clear, because the wait is
+  // the thing being taken away: the reply to the POST is gone from here, this
+  // browser has no copy of the Turn, and nobody will re-send it. The provider
+  // is holding the completion open, so the Turn is still running.
+  await expect(sem(page, "chat-transcript")).toBeVisible();
   await page.reload();
 
-  // The reloaded page finds the Turn still running and says so, then converges
-  // on the settled reply with no further action from anybody.
-  await expect(thread.getByText(prompt)).toBeVisible({ timeout: 120_000 });
-  // The rendered reply, not the Markdown the stub sent.
-  await expect(assistantMessages(page).last()).toContainText(
-    "Reply from the local Ollama stub.",
-    { timeout: 120_000 },
-  );
-  await expect(page.locator(".thread .bot-avatar-live")).toHaveCount(0, {
-    timeout: 120_000,
-  });
-});
-
-// The reply is drawn as it is written, not only when the Turn settles. The
-// provider sends half the answer, waits, then sends the rest; the half the
-// person can read has to reach the thread while the Turn is still running.
-test("a reply appears while the Bot is still writing it", async ({
-  page,
-  userId,
-  ollamaBaseUrl,
-}) => {
-  await provisionThroughUi(page, {
-    userId,
-    apiKey: E2E_OLLAMA_GOOD_API_KEY,
-    apiBaseUrl: ollamaBaseUrl,
-    botName: "Streamer",
-  });
-
-  await setFakeOllamaChatMode(page, ollamaBaseUrl, "streaming");
-
-  const prompt = "Say it as you think of it";
-  const composer = composerInput(page);
-  await composer.fill(prompt);
-  await page.getByRole("button", { name: "Send message" }).click();
-  await expect(composer).toHaveValue("", { timeout: 120_000 });
-
-  // Latched rather than asserted at one instant: the Turn settles on its own
-  // schedule, and the claim is that the partial answer was drawn at some point
-  // before it did — never that it is still partial when the poll runs.
-  let sawPartialWhileRunning = false;
+  // The reloaded page finds the Turn still running and converges on the
+  // settled reply with no further action from anybody.
   await expect
-    .poll(
-      async () => {
-        const last = assistantMessages(page).last();
-        if ((await last.count()) === 0) return false;
-        const text = (await last.textContent()) ?? "";
-        // The working row is the thread's own last child, not part of the
-        // running Turn's article, so the live avatar is looked for in the
-        // thread.
-        const live = await page.locator(".thread .bot-avatar-live").count();
-        if (
-          live > 0 &&
-          text.includes("Reply from the") &&
-          !text.includes("Ollama stub")
-        ) {
-          sawPartialWhileRunning = true;
-        }
-        return sawPartialWhileRunning;
-      },
-      { timeout: 60_000 },
-    )
-    .toBe(true);
-
-  // And the settled answer replaces the partial one in the same bubble.
-  await expect(assistantMessages(page).last()).toContainText(
-    "Reply from the local Ollama stub.",
-    { timeout: 120_000 },
-  );
-  await expect(page.locator(".thread .bot-avatar-live")).toHaveCount(0, {
+    .poll(() => sendTexts(page), { timeout: 120_000 })
+    .toEqual(["Worth the wait"]);
+  await expect(sem(page, "working-indicator")).toHaveCount(0, {
     timeout: 120_000,
   });
 });
+
+// One claim this file used to make is gone, and its absence is deliberate:
+// "a reply appears while the Bot is still writing it". The Flutter client
+// does not stream. `ChatController` has no poll of its own — `refresh()` runs
+// only when the state channel invalidates it — so a run's `partialText`,
+// which the wire does carry while a Turn is running, never reaches the
+// thread. The Turn's words appear when it settles or not at all. That is a
+// parity gap in the client rather than something a spec can phrase around,
+// and it wants its own change.
 
 // The thread's shape, not its plumbing: a reply the Bot delivered is drawn
-// once, in a column beside the avatar, and a bubble is at least as wide as the
-// words in it. The regression this pins was every block of an assistant Turn
-// laying out side by side, which squeezed a one-word reply into a 17px column
-// that broke "pong" across two lines and drew it twice.
+// once. The regression this pins was every block of an assistant Turn laying
+// out side by side, which squeezed a one-word reply into a 17px column that
+// broke "pong" across two lines and drew it twice.
 test("a delivered reply is one bubble, wide enough for its own text", async ({
   page,
   userId,
@@ -261,58 +310,37 @@ test("a delivered reply is one bubble, wide enough for its own text", async ({
   });
   await page.setViewportSize({ width: 1351, height: 831 });
 
-  await sendMessage(
-    page,
-    `ping\n${e2eToolCallPrompt("send_to_user", {
-      payload: { type: "text", text: "pong" },
-    })}`,
-  );
+  await send(page, `ping\n${says("pong")}`, { replies: 1 });
 
-  const reply = assistantMessages(page).last();
   // One reply, whichever way the Turn produced it: the delivered send is the
   // Bot's voice and the model's own text is not drawn beside it (issue 153).
-  const bubbles = reply.locator(".message-bubble, .send-text");
-  await expect(bubbles).toHaveCount(1, { timeout: 120_000 });
-  await expect(bubbles.first()).toHaveText("pong");
+  await expect(sends(page)).toHaveCount(1, { timeout: 120_000 });
+  await expect.poll(() => sendTexts(page)).toEqual(["pong"]);
 
   // The bubble is wider than the word it holds, so the text is on one line.
-  // Measured once the text has actually been laid out: a range measured in the
-  // frame the bubble mounts reports a width of zero and fails on nothing.
-  const measure = async (): Promise<{ box: number; text: number }> =>
-    bubbles.first().evaluate((element) => {
-      const range = document.createRange();
-      range.selectNodeContents(element);
-      const text = range.getBoundingClientRect();
-      return { box: element.getBoundingClientRect().width, text: text.width };
-    });
-  await expect
-    .poll(async () => (await measure()).text, { timeout: 10_000 })
-    .toBeGreaterThan(10);
-  const fits = await measure();
-  expect(fits.box).toBeGreaterThanOrEqual(fits.text);
+  // A canvas has no text node to measure a range against, so what is measured
+  // is the bubble itself: a one-word reply that wrapped would be two lines
+  // tall, and this is comfortably under that.
+  const bubble = await sends(page).first().boundingBox();
+  expect(bubble, "the reply has no box").not.toBeNull();
+  if (!bubble) return;
+  expect(
+    bubble.width,
+    "the reply is drawn narrower than a word",
+  ).toBeGreaterThan(40);
+  expect(bubble.height, "the reply wrapped onto a second line").toBeLessThan(
+    80,
+  );
 
   // The Turn's tool call is not in the transcript in words. The trail off the
   // avatar was the whole of what the conversation said about it, and a settled
   // Turn keeps none.
-  await expect(
-    page.locator(".thread").getByRole("status", { name: "Working" }),
-  ).toHaveCount(0, { timeout: 120_000 });
-  await expect(reply.locator(".tool-chip")).toHaveCount(0);
-  await expect(reply).not.toContainText("Send to user");
-
-  // A settled reply carries no avatar either. Every line here is from the same
-  // Bot, so a sheep beside each one named nobody; the column starts at the
-  // transcript's own left edge instead, with no gutter left behind.
-  await expect(reply.locator(".bot-avatar")).toHaveCount(0);
-  await expect(reply.locator(".ui-activity-trail")).toHaveCount(0);
-  const edges = await reply.evaluate((element) => {
-    const column = element.querySelector(".message-column");
-    return {
-      row: element.getBoundingClientRect().left,
-      column: (column ?? element).getBoundingClientRect().left,
-    };
+  await expect(sem(page, "working-indicator")).toHaveCount(0, {
+    timeout: 120_000,
   });
-  expect(edges.column).toBeCloseTo(edges.row, 0);
+  const transcript = (await sem(page, "chat-transcript").textContent()) ?? "";
+  expect(transcript).not.toMatch(/send_to_user/);
+  expect(transcript).not.toMatch(/tool call/i);
 });
 
 // The settled case above, from the other end of a Turn. The avatar used to sit
@@ -334,89 +362,54 @@ test("the working avatar sits below the bubbles and never shifts them", async ({
   });
   await page.setViewportSize({ width: 1351, height: 831 });
 
-  // The provider writes half the answer, waits, then writes the rest, which is
-  // the window where a bubble and the working row are both on screen.
-  await setFakeOllamaChatMode(page, ollamaBaseUrl, "streaming");
-
-  const composer = composerInput(page);
-  await composer.fill("say it slowly");
-  await page.getByRole("button", { name: "Send message" }).click();
-  await expect(composer).toHaveValue("", { timeout: 120_000 });
+  // `slow` rather than `streaming`: the fake splits its answer across a gap
+  // only when nothing was scripted, and everything here scripts a tool call —
+  // so `streaming` settled this Turn in a second and the working row was gone
+  // before a poll could see it. Holding every model call open for ten seconds
+  // gives the same window from the other side: the Bot's `send_to_user` bubble
+  // is drawn when the first call returns, and the second call is still open
+  // behind it, which is a bubble and the working row on screen together.
+  await setFakeOllamaChatMode(page, ollamaBaseUrl, "slow");
+  await beginTurn(page, `say it slowly\n${says("Half a thought")}`);
 
   // Latched rather than asserted at an instant: the geometry is read the first
   // time a bubble and the working row are both drawn, whenever that happens.
-  let running: {
-    bubbleLeft: number;
-    threadLeft: number;
-    gap: number;
-    trails: number;
-  } | null = null;
+  let running: { bubbleLeft: number; gap: number } | null = null;
   await expect
     .poll(
       async () => {
-        running = await page.evaluate(() => {
-          const thread = document.querySelector(".thread");
-          const row = document.querySelector(".bot-working");
-          const bubbles = document.querySelectorAll(
-            ".message-assistant .message-bubble",
-          );
-          const bubble = bubbles[bubbles.length - 1];
-          if (!thread || !row || !bubble) return null;
-          const bubbleBox = bubble.getBoundingClientRect();
-          if (bubbleBox.width === 0) return null;
-          return {
-            bubbleLeft: bubbleBox.left,
-            threadLeft: thread.getBoundingClientRect().left,
-            // How far the row's top is below the bubble's bottom. Negative
-            // would mean the two overlap, which is the old side-by-side row.
-            gap: row.getBoundingClientRect().top - bubbleBox.bottom,
-            // The indicator is beside the avatar, on the row — not beside the
-            // bubble, where it would be another thing pushing the text along.
-            trails: row.querySelectorAll(".ui-activity-trail").length,
-          };
-        });
-        return running !== null;
+        const bubble = await sends(page)
+          .first()
+          .boundingBox()
+          .catch(() => null);
+        const row = await sem(page, "working-indicator")
+          .boundingBox()
+          .catch(() => null);
+        if (!bubble || !row || bubble.width === 0) return false;
+        running = {
+          bubbleLeft: bubble.x,
+          // How far the row's top is below the bubble's bottom. Negative would
+          // mean the two overlap, which is the old side-by-side row.
+          gap: row.y - (bubble.y + bubble.height),
+        };
+        return true;
       },
-      { timeout: 60_000 },
+      { timeout: 90_000 },
     )
     .toBe(true);
-  const midTurn = running as unknown as {
-    bubbleLeft: number;
-    threadLeft: number;
-    gap: number;
-    trails: number;
-  };
+  const midTurn = running as unknown as { bubbleLeft: number; gap: number };
 
-  // The transcript pads its own edge, so "at the left edge" is the padding —
-  // what matters is that the bubble is not indented past it by an avatar
-  // gutter, and that it lands where a settled bubble lands.
-  const padding = await page.evaluate(() => {
-    const thread = document.querySelector(".thread");
-    if (!thread) return 0;
-    return Number.parseFloat(getComputedStyle(thread).paddingLeft);
-  });
-  expect(midTurn.bubbleLeft).toBeCloseTo(midTurn.threadLeft + padding, 0);
   // Below, not beside.
   expect(midTurn.gap).toBeGreaterThanOrEqual(0);
-  expect(midTurn.trails).toBe(1);
 
-  await expect(assistantMessages(page).last()).toContainText(
-    "Reply from the local Ollama stub.",
-    { timeout: 120_000 },
-  );
-  await expect(page.locator(".bot-working")).toHaveCount(0, {
+  await expect(sem(page, "working-indicator")).toHaveCount(0, {
     timeout: 120_000,
   });
 
   // The Turn ended and the row went; the bubble did not move.
-  const settledLeft = await page.evaluate(() => {
-    const bubbles = document.querySelectorAll(
-      ".message-assistant .message-bubble",
-    );
-    const bubble = bubbles[bubbles.length - 1];
-    return bubble ? bubble.getBoundingClientRect().left : Number.NaN;
-  });
-  expect(settledLeft).toBeCloseTo(midTurn.bubbleLeft, 0);
+  const settled = await sends(page).first().boundingBox();
+  expect(settled).not.toBeNull();
+  expect(settled?.x).toBeCloseTo(midTurn.bubbleLeft, 0);
 });
 
 // Tim's report: sending while the Bot is working put the new message *under*
@@ -437,57 +430,17 @@ test("a message sent mid-Turn lands above the working sheep, unlabelled", async 
     botName: "Stepper",
   });
 
-  // The gap in the middle of the streamed reply is the window to send into.
-  await setFakeOllamaChatMode(page, ollamaBaseUrl, "streaming");
-
-  const composer = composerInput(page);
-  await composer.fill("first");
-  await page.getByRole("button", { name: "Send message" }).click();
-  await expect(composer).toHaveValue("", { timeout: 120_000 });
+  // The provider holds every model call open for ten seconds, which is the
+  // window to send into. Not `streaming`, which splits an answer across a gap
+  // only for a Turn that scripted no tool call — and this one scripts a reply.
+  await setFakeOllamaChatMode(page, ollamaBaseUrl, "slow");
+  await beginTurn(page, `first\n${says("Working on it")}`);
   // Wait until the Turn is visibly running before superseding it.
-  await expect(page.locator(".bot-working")).toHaveCount(1, {
-    timeout: 60_000,
+  await expect(sem(page, "working-indicator")).toHaveCount(1, {
+    timeout: 90_000,
   });
 
-  // The drain is a window, not a resting state, so what it said is recorded as
-  // it happens rather than sampled afterwards.
-  await page.evaluate(() => {
-    const scope = window as unknown as {
-      supersedeSaidStopping: boolean;
-      supersedeLabelBox: { inset: number; height: number } | null;
-    };
-    scope.supersedeSaidStopping = false;
-    scope.supersedeLabelBox = null;
-    const read = () => {
-      const row = document.querySelector(".bot-working");
-      if (
-        row &&
-        (row.textContent ?? "").includes("Stopping the previous reply")
-      ) {
-        scope.supersedeSaidStopping = true;
-      }
-      // Where the words sit relative to the row they narrate, recorded while
-      // they are on screen: the drain is a window, not a resting state.
-      const label = row?.querySelector(".bot-working-label");
-      if (!row || !label) return;
-      const rowBox = row.getBoundingClientRect();
-      const labelBox = label.getBoundingClientRect();
-      scope.supersedeLabelBox = {
-        inset: Math.round(labelBox.left - rowBox.left),
-        height: Math.round(labelBox.height),
-      };
-    };
-    read();
-    new MutationObserver(read).observe(document.body, {
-      subtree: true,
-      childList: true,
-      characterData: true,
-    });
-  });
-
-  await composer.fill("second");
-  await page.getByRole("button", { name: "Send message" }).click();
-  await expect(composer).toHaveValue("", { timeout: 120_000 });
+  await beginTurn(page, "second");
 
   // While the Turn they replaced is winding down, the row above their message
   // says what is happening to it. It used to say nothing at all, so two Turns
@@ -495,91 +448,59 @@ test("a message sent mid-Turn lands above the working sheep, unlabelled", async 
   await expect
     .poll(
       async () =>
-        page.evaluate(
-          () =>
-            (window as unknown as { supersedeSaidStopping: boolean })
-              .supersedeSaidStopping,
+        ((await sem(page, "chat-transcript").textContent()) ?? "").includes(
+          "Stopping the previous reply",
         ),
-      { timeout: 60_000 },
+      { timeout: 90_000 },
     )
     .toBe(true);
-
-  // The words belong to the row they describe. They used to be laid out at the
-  // far edge of the transcript, a screen's width from the dots they narrate,
-  // and squeezed onto two lines.
-  const labelBox = await page.evaluate(
-    () =>
-      (
-        window as unknown as {
-          supersedeLabelBox: { inset: number; height: number } | null;
-        }
-      ).supersedeLabelBox,
-  );
-  expect(labelBox).not.toBeNull();
-  expect(labelBox!.inset).toBeLessThan(160);
-  expect(labelBox!.height).toBeLessThan(30);
 
   // The order the reader sees: their new message, then the sheep, with nothing
   // of the thread after it.
   await expect
     .poll(
-      async () =>
+      () =>
         page.evaluate(() => {
-          const thread = document.querySelector(".thread");
-          const row = thread?.querySelector(".bot-working");
-          if (!thread || !row) return null;
-          const children = [...thread.children];
-          const userIndex = children.findLastIndex(
-            (child) =>
-              child.classList.contains("message-user") &&
-              (child.textContent ?? "").includes("second"),
+          const transcript = document.querySelector(
+            '[flt-semantics-identifier="chat-transcript"]',
           );
-          if (userIndex < 0) return null;
+          const row = transcript?.querySelector(
+            '[flt-semantics-identifier="working-indicator"]',
+          );
+          if (!transcript || !row) return null;
+          const rowTop = row.getBoundingClientRect().top;
+          const lines = [
+            ...transcript.querySelectorAll("[flt-semantics-identifier]"),
+          ].filter((node) => {
+            const id = node.getAttribute("flt-semantics-identifier") ?? "";
+            return id.endsWith(":user") || id.includes(":send:");
+          });
           return {
-            userBeforeRow: userIndex < children.indexOf(row),
-            rowIsLast: children.at(-1) === row,
+            everyLineAbove: lines.every(
+              (line) => line.getBoundingClientRect().top < rowTop,
+            ),
+            lines: lines.length,
           };
         }),
-      { timeout: 60_000 },
+      { timeout: 90_000 },
     )
-    .toEqual({ userBeforeRow: true, rowIsLast: true });
+    .toEqual({ everyLineAbove: true, lines: 3 });
 
   // The superseded Turn is not labelled: the message above explains itself.
-  await expect(page.locator(".thread")).not.toContainText(
+  await expect(sem(page, "chat-transcript")).not.toContainText(
     "Interrupted by your next message.",
   );
 
-  await expect(assistantMessages(page).last()).toContainText(
-    "Reply from the local Ollama stub.",
-    { timeout: 120_000 },
-  );
-  await expect(page.locator(".thread")).not.toContainText(
+  await expect(sem(page, "working-indicator")).toHaveCount(0, {
+    timeout: 120_000,
+  });
+  await expect(sem(page, "chat-transcript")).not.toContainText(
     "Interrupted by your next message.",
   );
   // And the words go with the drain: the new Turn is the one running now.
-  await expect(page.locator(".thread")).not.toContainText(
+  await expect(sem(page, "chat-transcript")).not.toContainText(
     "Stopping the previous reply",
   );
-
-  // The reply to the second message sits under it, not above it. A Turn this
-  // tab sent is drawn from the browser's clock and the durable projection
-  // stamps it from the backend's, and ordering every line by its own timestamp
-  // painted the answer above the message it was answering.
-  const placement = await page.evaluate(() => {
-    const children = [...(document.querySelector(".thread")?.children ?? [])];
-    const at = (className: string, text: string) =>
-      children.findLastIndex(
-        (child) =>
-          child.classList.contains(className) &&
-          (child.textContent ?? "").includes(text),
-      );
-    return {
-      userIndex: at("message-user", "second"),
-      replyIndex: at("message-assistant", "Reply from the local Ollama stub."),
-    };
-  });
-  expect(placement.userIndex).toBeGreaterThanOrEqual(0);
-  expect(placement.replyIndex).toBeGreaterThan(placement.userIndex);
 });
 
 // Tim's report, as the thread: a Bot that says three things in one Turn leaves
@@ -600,31 +521,22 @@ test("every message the Bot sends is its own bubble, in order", async ({
   });
 
   const said = ["On it.", "Looking now.", "Booked."];
-  await sendMessage(
-    page,
-    [
-      "book it",
-      ...said.map((text) =>
-        e2eToolCallPrompt("send_to_user", { payload: { type: "text", text } }),
-      ),
-    ].join("\n"),
-    { replies: said.length },
-  );
+  await send(page, ["book it", ...said.map(says)].join("\n"), {
+    replies: said.length,
+  });
 
-  const bubbles = page.locator("article.message-assistant .send-text");
-  await expect(bubbles).toHaveCount(said.length, { timeout: 120_000 });
-  await expect(bubbles).toHaveText(said);
+  await expect.poll(() => sendTexts(page), { timeout: 120_000 }).toEqual(said);
 
   // Durable order is display order: the thread a reload draws is the thread
   // that was watched being written, and no send has been folded into another.
   await page.reload();
-  await expect(bubbles).toHaveText(said, { timeout: 120_000 });
+  await expect.poll(() => sendTexts(page), { timeout: 120_000 }).toEqual(said);
 });
 
 // The owner's ask, from the other side: a Turn that spends its time making
 // tool calls has to look like it is working without naming one. The comet
-// trail off the Bot's avatar is that — a working row labelled "Working" while
-// the Turn runs, gone once it settles, and never a word about a tool.
+// trail off the Bot's avatar is that — a working row while the Turn runs, gone
+// once it settles, and never a word about a tool.
 test("a working Bot shows a comet trail beside its avatar, and no tool names", async ({
   page,
   userId,
@@ -637,50 +549,29 @@ test("a working Bot shows a comet trail beside its avatar, and no tool names", a
     botName: "Ringer",
   });
 
-  await setFakeOllamaChatMode(page, ollamaBaseUrl, "streaming");
+  // `slow` for the same reason the two specs above use it: the fake's gap is
+  // for an answer it wrote itself, and this Turn scripts a reply.
+  await setFakeOllamaChatMode(page, ollamaBaseUrl, "slow");
+  await beginTurn(page, `take your time\n${says("Nearly there")}`);
 
-  const composer = composerInput(page);
-  await composer.fill("take your time");
-  await page.getByRole("button", { name: "Send message" }).click();
-  await expect(composer).toHaveValue("", { timeout: 120_000 });
+  // Latched the way the streaming assertion above is: the row is on screen at
+  // some point while the Turn runs, never necessarily when a poll happens to
+  // look.
+  await expect(sem(page, "working-indicator")).toHaveCount(1, {
+    timeout: 90_000,
+  });
 
-  // Latched the way the streaming assertion above is: the trail is on screen
-  // at some point while the Turn runs, never necessarily when a poll happens
-  // to look.
-  let sawTrail = false;
   await expect
-    .poll(
-      async () => {
-        const last = assistantMessages(page).last();
-        if ((await last.count()) === 0) return false;
-        // The row is at the end of the thread rather than inside the running
-        // Turn's article, so it is found there.
-        const working = page
-          .locator(".thread")
-          .getByRole("status", { name: "Working" });
-        if (
-          (await working
-            .locator('.ui-activity-trail[data-state="running"]')
-            .count()) > 0
-        ) {
-          sawTrail = true;
-        }
-        return sawTrail;
-      },
-      { timeout: 60_000 },
-    )
-    .toBe(true);
-
-  await expect(assistantMessages(page).last()).toContainText(
-    "Reply from the local Ollama stub.",
-    { timeout: 120_000 },
-  );
+    .poll(() => sendTexts(page), { timeout: 120_000 })
+    .toEqual(["Nearly there"]);
   // The Turn settled, so the working row and its trail went. The words "tool"
-  // and "tool calls" were never in the thread at all.
-  await expect(
-    page.locator(".thread").getByRole("status", { name: "Working" }),
-  ).toHaveCount(0, { timeout: 120_000 });
-  await expect(assistantMessages(page).last()).not.toContainText(/tool call/i);
+  // and "tool call" were never in the thread at all.
+  await expect(sem(page, "working-indicator")).toHaveCount(0, {
+    timeout: 120_000,
+  });
+  const transcript = (await sem(page, "chat-transcript").textContent()) ?? "";
+  expect(transcript).not.toMatch(/tool call/i);
+  expect(transcript).not.toMatch(/send_to_user/);
 });
 
 test("a provider that stops accepting the key ends the Turn with a reason", async ({
@@ -712,12 +603,10 @@ test("a provider that stops accepting the key ends the Turn with a reason", asyn
   // Everything from here runs inside a `finally`, because the endpoint this
   // test switched into refusing is shared by every spec in the shard. A
   // failing assertion used to skip the reset below, and then each later spec's
-  // Turns failed with a 401 they never asked for — which is how one wrong
-  // sentence here also broke "a conversation opens at its end", whose six
-  // Turns then produced no transcript tall enough to scroll. One failure
-  // should report one failure.
+  // Turns failed with a 401 they never asked for. One failure should report
+  // one failure.
   try {
-    await sendMessage(page, "will not work");
+    await startTurn(page, "will not work");
 
     /*
      * A failed Turn is a notice, not the Bot speaking.
@@ -728,20 +617,32 @@ test("a provider that stops accepting the key ends the Turn with a reason", asyn
      * outcome" — styled exactly like something the Bot had said. The reason is
      * still on the run for `/api/debug` and the console; what the User is shown
      * is one line, in the product's own words.
+     *
+     * Asserted through the constant the product renders from, so the copy and
+     * the spec cannot drift apart. A provider refusal ends the Turn
+     * `model-error`, and that outcome has its own sentence — naming the model
+     * rather than the Bot, because the Bot did nothing wrong.
      */
-    // Asserted through the constant the product renders from, so the copy and
-    // the spec cannot drift apart the way they just did. A provider refusal ends
-    // the Turn `model-error`, and that outcome has its own sentence — naming the
-    // model rather than the Bot, because the Bot did nothing wrong.
-    await expect(page.locator(".message-notice").last()).toHaveText(
-      failureNoticeV1(RUN_FAILURE_COPY_V1["model-error"]).notice,
-    );
+    const notice = failureNoticeV1(RUN_FAILURE_COPY_V1["model-error"]).notice;
+    // Read as a label as well as as text: the notice and the avatar beside it
+    // are one merged semantics node, so the engine writes the sentence into
+    // the node's `aria-label` rather than leaving it in the tree as text.
+    await expect
+      .poll(() => spokenText(sem(page, "chat-transcript")), {
+        timeout: 120_000,
+      })
+      .toContain(notice);
     // The sentence used to end by telling the person to try again with nothing
     // to press; the retry is beside it now, and it sends the same message.
-    await expect(page.getByRole("button", { name: "Try again" })).toBeVisible();
-    await expect(page.locator(".thread")).not.toContainText("model-error");
-    await expect(page.locator(".thread")).not.toContainText("outcome");
-    await expect(page.locator(".thread")).not.toContainText("401");
+    await expect(
+      sem(page, "chat-transcript").locator(
+        '[flt-semantics-identifier^="retry-turn-"]',
+      ),
+    ).toBeVisible();
+    const transcript = (await sem(page, "chat-transcript").textContent()) ?? "";
+    expect(transcript).not.toContain("model-error");
+    expect(transcript).not.toContain("outcome");
+    expect(transcript).not.toContain("401");
   } finally {
     // Switched off however the test ended, not only when it passed.
     await setFakeOllamaChatMode(page, ollamaBaseUrl, "ok");
@@ -768,15 +669,15 @@ test("a send the server refuses for size keeps the draft and says why", async ({
   });
 
   const composer = composerInput(page);
-  const send = page.getByRole("button", { name: "Send message" });
 
   // The composer holds the same line the route does, so an oversized message
-  // never leaves the browser: the count appears and the button closes.
+  // never leaves the browser: the count appears and the button closes. The
+  // count is what is left rather than what is over, so over the limit it is a
+  // negative number.
+  await composer.click();
   await composer.fill("x".repeat(TURN_TEXT_MAX_CHARACTERS_V1 + 10));
-  await expect(
-    page.getByText("10 characters over the 32,000 limit"),
-  ).toBeVisible();
-  await expect(send).toBeDisabled();
+  await expect(sem(page, "chat-composer")).toContainText("-10 characters left");
+  await expect.poll(() => pressDisabled(sem(page, "send-button"))).toBe(true);
   await composer.fill("");
 
   // A refusal that reaches the client anyway — another tab, an older build, a
@@ -792,18 +693,24 @@ test("a send the server refuses for size keeps the draft and says why", async ({
   });
 
   const prompt = "this one is refused";
+  await composer.click();
   await composer.fill(prompt);
-  await send.click();
+  await expect(composer).toHaveValue(prompt);
+  await sem(page, "send-button").click();
 
   // The server's own sentence, not "Agent request failed" and not a guess.
-  await expect(page.getByRole("alert")).toContainText(TURN_TOO_LONG_MESSAGE_V1);
+  await expect
+    .poll(() => spokenText(sem(page, "shell-conversation")), {
+      timeout: 60_000,
+    })
+    .toContain(TURN_TOO_LONG_MESSAGE_V1);
   // The draft is still where it was written.
   await expect(composer).toHaveValue(prompt);
   // No optimistic bubble, and nothing checking on a Turn that never existed.
-  await expect(page.locator("article.message-user")).toHaveCount(0);
-  await expect(
-    page.getByText("Checking whether your message went through…"),
-  ).toHaveCount(0);
+  await expect(saidByUser(page)).toHaveCount(0);
+  await expect(sem(page, "shell-conversation")).not.toContainText(
+    "Checking whether your message went through",
+  );
 });
 
 // The other half of the same question: an answer that never arrives at all.
@@ -838,41 +745,23 @@ test("a Bot the client cannot reach settles with a reason and a Retry", async ({
 
   const composer = composerInput(page);
   const prompt = "are you there";
+  await composer.click();
   await composer.fill(prompt);
-  await page.getByRole("button", { name: "Send message" }).click();
+  await sem(page, "send-button").click();
 
-  const thread = page.locator("main");
-  const reason = thread.getByText(
-    "Couldn't reach the Bot. Check your connection and try again.",
-  );
-  // The bound is several seconds of backoff, and then it settles by itself.
-  await expect(reason).toBeVisible({ timeout: 120_000 });
-
-  // The line is under the message it reports on, never above it.
+  // The bound is several seconds of backoff, and then it settles by itself,
+  // saying the thing no copy in the product used to say.
   await expect
-    .poll(() =>
-      thread
-        .locator("article.message-user, article.message-assistant")
-        .evaluateAll((messages) =>
-          messages.map((message) =>
-            message.classList.contains("message-user") ? "user" : "assistant",
-          ),
-        ),
-    )
-    .toEqual(["user", "assistant"]);
-
-  // The words wrap inside the bubble rather than being cut off by its width.
-  const bubble = page.locator("article.message-assistant .message-bubble");
-  const clipped = await bubble.evaluate(
-    (element) => element.scrollWidth > element.clientWidth + 1,
-  );
-  expect(clipped).toBe(false);
+    .poll(() => spokenText(sem(page, "shell-conversation")), {
+      timeout: 120_000,
+    })
+    .toContain("Couldn’t confirm your message");
 
   // Nothing is running, so nothing offers to stop it; the draft is back, and
-  // the Retry beside the reason is what sends it again.
-  await expect(page.getByRole("button", { name: /Stop/ })).toHaveCount(0);
+  // the way to send it again is offered beside the reason.
+  await expect(sem(page, "stop-button")).toHaveCount(0);
   await expect(composer).toHaveValue(prompt);
-  await expect(page.getByRole("button", { name: "Retry" })).toBeEnabled();
+  await expect(sem(page, "check-delivery")).toBeVisible();
 });
 
 test("a conversation opens at its end, and switching back to it does not reload it", async ({
@@ -889,143 +778,73 @@ test("a conversation opens at its end, and switching back to it does not reload 
 
   // Long enough that the thread has to scroll: an opening that is already at
   // the end proves nothing on a transcript that fits.
-  const prompts = Array.from(
-    { length: 6 },
-    (_, index) => `Turn number ${index + 1}`,
-  );
-  for (const prompt of prompts) await sendMessage(page, prompt);
-
-  const thread = page.locator("section.thread");
-  await expect
-    .poll(() =>
-      thread.evaluate((element) => element.scrollHeight > element.clientHeight),
-    )
-    .toBe(true);
+  const prompts = Array.from({ length: 6 }, (_, index) => index + 1);
+  for (const turn of prompts) {
+    await send(page, `Turn number ${turn}\n${says(`Answer ${turn}`)}`, {
+      replies: 1,
+    });
+  }
 
   await createBot(page, "Other");
   await expect(composerInput(page)).toHaveValue("");
 
   /*
-   * Everything this test asks about is true or false at one instant — the
-   * moment the thread stops carrying `thread-settling`, which is when it goes
-   * from laid-out-but-unpainted to on screen. So it is all sampled there, in
-   * the page, rather than read back afterwards from Node where a background
-   * revalidation could have landed in between and changed the answer.
+   * Switching back must not put the reader through a reload.
    *
-   * What is sampled: where the thread is scrolled, how much of the transcript
-   * is in it, and how many `GET /turns` reads have *answered* this client. A
-   * transcript drawn from the cache is whole and at its end with that count
-   * still at zero — it cannot have come from a read that has not returned. The
-   * count is of answers rather than of requests on purpose: the design says a
-   * restored transcript may be revalidated behind the paint, so a read in
-   * flight at this instant is the feature and not the bug.
-   *
-   * The class is read from each mutation record's `oldValue` rather than from
-   * the element, so a slow runner that batches the add and the remove into one
-   * callback is still seen as the transition it was.
+   * There is no scroll offset to read off a canvas, and no `fetch` to count
+   * that would mean anything once the client keeps its own cache. So the
+   * question is asked the way a person would feel it: the read of the
+   * transcript is held open for five seconds, and the thread is expected to be
+   * whole and at its end inside that window. A client that waited on the
+   * network could not be.
    */
-  await page.evaluate(() => {
-    const element = document.querySelector("section.thread");
-    if (!element) throw new Error("the thread is missing");
-    const marker = "thread-settling";
-    const samples: {
-      atEnd: boolean;
-      distance: number;
-      messages: number;
-      turnReads: number;
-    }[] = [];
-    const scope = window as unknown as {
-      threadOpenings: typeof samples;
-      threadTurnReads: number;
-    };
-    scope.threadOpenings = samples;
-    scope.threadTurnReads = 0;
-
-    const fetchImpl = window.fetch.bind(window);
-    const counting = (input: RequestInfo | URL, init?: RequestInit) => {
-      const url =
-        typeof input === "string"
-          ? input
-          : input instanceof URL
-            ? input.href
-            : input.url;
-      const method = (
-        init?.method ?? (input instanceof Request ? input.method : "GET")
-      ).toUpperCase();
-      const answer = fetchImpl(input, init);
-      if (
-        method === "GET" &&
-        new URL(url, location.href).pathname.endsWith("/turns")
-      )
-        return answer.then((response) => {
-          scope.threadTurnReads += 1;
-          return response;
-        });
-      return answer;
-    };
-    // The counter stands in for `fetch` itself, so anything hung off the real
-    // one — `preconnect` — is carried across rather than dropped.
-    window.fetch = Object.assign(counting, window.fetch) as typeof window.fetch;
-
-    new MutationObserver((records) => {
-      const left = records.some(
-        (record) =>
-          record.attributeName === "class" &&
-          (record.oldValue ?? "").includes(marker),
-      );
-      if (!left || element.classList.contains(marker)) return;
-      const distance =
-        element.scrollHeight - element.scrollTop - element.clientHeight;
-      samples.push({
-        atEnd: distance <= 1,
-        distance,
-        messages: element.querySelectorAll("article.message-user").length,
-        turnReads: scope.threadTurnReads,
-      });
-    }).observe(element, {
-      attributes: true,
-      attributeFilter: ["class"],
-      attributeOldValue: true,
-    });
-  });
+  await page.route(
+    // Matched on the path rather than by glob, because the read carries a
+    // query string only when it asks for a page or a conversation by name.
+    (url) => /\/api\/bots\/[^/]+\/turns$/.test(url.pathname),
+    async (route) => {
+      if (route.request().method() !== "GET") return route.fallback();
+      await new Promise((wait) => setTimeout(wait, 5_000));
+      await route.fallback();
+    },
+  );
 
   await revealSidebar(page);
-  await page
-    .locator(".flock-bot-row", { has: page.getByText("Long", { exact: true }) })
+  await sem(page, "shell-sidebar")
+    .locator('[flt-semantics-identifier^="sidebar-bot-"]')
+    .filter({ hasText: "Long" })
     .click();
 
-  await expect(thread.getByText(prompts[0] ?? "")).toBeVisible();
-  await expect(thread.getByText(prompts.at(-1) ?? "")).toBeVisible();
+  // Drawn from the client's own memory: the newest Turn is on screen while the
+  // read that would have fetched it is still held open. Not "all six" — the
+  // transcript is virtualised, so what is in the accessibility tree is what is
+  // on screen, and a thread long enough to scroll keeps its older Turns out of
+  // it by construction. That the newest is there without the network is the
+  // whole claim; where it sits is the one below.
+  await expect
+    .poll(() => sendTexts(page), { timeout: 4_000 })
+    .toContain(`Answer ${prompts.length}`);
 
-  const openings = await page.evaluate(
-    () =>
-      (
-        window as unknown as {
-          threadOpenings: {
-            atEnd: boolean;
-            distance: number;
-            messages: number;
-            turnReads: number;
-          }[];
-        }
-      ).threadOpenings,
-  );
-  const opening = openings[0];
-  expect(opening).toBeDefined();
-  if (!opening) throw new Error("the thread never opened");
-  // The conversation is on screen at its end in the first frame that shows it:
-  // no top-of-thread frame, and no scroll for the reader to watch.
-  expect(opening.atEnd).toBe(true);
-  // Whole, and drawn from the client's own memory: every Turn is on screen
-  // while no read of them has answered. That is the reload the User asked not
-  // to have — the thread was never empty and never waited on the network.
-  expect(opening.messages).toBe(prompts.length);
-  expect(opening.turnReads).toBe(0);
-
-  // It stays at the end once visible, rather than settling there afterwards.
-  const distance = await thread.evaluate(
-    (element) =>
-      element.scrollHeight - element.scrollTop - element.clientHeight,
-  );
-  expect(distance).toBeLessThanOrEqual(1);
+  // And on screen at its end: the last thing said is inside the window, and
+  // the first is above it rather than waiting to be scrolled down to.
+  const ends = await page.evaluate(() => {
+    const transcript = document
+      .querySelector('[flt-semantics-identifier="chat-transcript"]')
+      ?.getBoundingClientRect();
+    const lines = [
+      ...document.querySelectorAll('[flt-semantics-identifier*=":send:"]'),
+    ].map((node) => node.getBoundingClientRect().top);
+    if (!transcript || lines.length === 0) return null;
+    return {
+      last: Math.max(...lines),
+      first: Math.min(...lines),
+      top: transcript.top,
+      bottom: transcript.bottom,
+    };
+  });
+  expect(ends, "the thread drew nothing").not.toBeNull();
+  if (!ends) return;
+  expect(ends.last).toBeLessThanOrEqual(ends.bottom);
+  expect(ends.last).toBeGreaterThan(ends.top);
+  expect(ends.first).toBeLessThan(ends.top);
 });

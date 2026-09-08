@@ -575,7 +575,6 @@
       "home": "models",
       "revision": 0,
       "ownerId": "command-1",
-      "title": "1.1.0",
       "sections": []
     }
   },
@@ -1153,7 +1152,6 @@
         {
           "id": "calendar-work",
           "label": "Work calendar",
-          "service": "Calendar",
           "state": "ready",
           "packageId": "connector-calendar",
           "kind": "connector",

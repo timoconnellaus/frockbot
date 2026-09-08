@@ -18,6 +18,7 @@ import 'activity/controller.dart';
 import 'auth/sign_in_page.dart';
 import 'client/auth.dart';
 import 'client/bot_sessions.dart';
+import 'client/identity.dart';
 import 'client/plain_store.dart';
 import 'client/transport.dart';
 import 'shell/app_shell.dart';
@@ -101,9 +102,15 @@ class _FrockBotAppState extends State<FrockBotApp> {
   ///
   /// The identity read happens either way. The phone carries its session as a
   /// stored token; the browser carries it as an ambient cookie it cannot see,
-  /// so the only way to learn whether anyone is signed in there is to ask.
+  /// and learns the account from the document the gateway rendered — the read
+  /// then confirms it.
   Future<void> restore() async {
     try {
+      // The browser's session is an ambient cookie it cannot read, but the
+      // document it was served names the account, so the shell paints before
+      // the identity read rather than after it.
+      final bootstrap = bootstrapUserIdV1();
+      if (bootstrap != null && mounted) setState(() => userId = bootstrap);
       final savedSession = await store.read('session');
       if (savedSession != null) {
         api.adoptSession(savedSession);

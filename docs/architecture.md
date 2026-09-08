@@ -6,21 +6,23 @@ Paths are relative to the repository root.
 
 ## 1. Deployables
 
-Five Workers, two container images, one Flutter app.
+Five Workers, two container images, one Flutter client — on the web and on the phone.
 
 | Deployable           | Worker name              | Config                              | Serves                                                                                                                                                                                                                                                                                                                             |
 | -------------------- | ------------------------ | ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `apps/cloudflare`    | `frockbot-cloudflare`    | `apps/cloudflare/wrangler.jsonc`    | The product. Custom domains `bot.frockbot.com` and `ui.bot.frockbot.com`. `main: src/index.ts`, compatibility date `2026-08-27`, flag `nodejs_compat`.                                                                                                                                                                             |
+| `apps/cloudflare`    | `frockbot-cloudflare`    | `apps/cloudflare/wrangler.jsonc`    | The product. Custom domains `bot.frockbot.com` and `ui.bot.frockbot.com`. `main: src/index.ts`, compatibility date `2026-08-27`, flag `nodejs_compat`. Carries an `assets` payload (`:27`): the Flutter web client, uploaded with the deploy.                                                                                      |
 | `apps/computer-host` | `frockbot-computer-host` | `apps/computer-host/wrangler.jsonc` | No routes; reached only through the app's `COMPUTER_HOST` service binding. Fronts a Cloudflare Container built from `apps/computer-host/Dockerfile` (`node:24-slim`, `instance_type: basic`, `max_instances: 3`).                                                                                                                  |
 | `apps/applet-build`  | `frockbot-applet-build`  | `apps/applet-build/wrangler.jsonc`  | No routes; reached only through the app's `APPLET_BUILD` service binding. Fronts a Cloudflare Container built from `apps/applet-build/Dockerfile` (`node:24-slim`, `instance_type: standard`, `max_instances: 3`, no egress) that runs the Applets SDK's build pipeline. `applet_check` and `applet_publish` are its only callers. |
 | `apps/marketing`     | `frockbot-marketing`     | `apps/marketing/wrangler.jsonc`     | `frockbot.com` and `www.frockbot.com`. Static `ASSETS` from `./public` with `run_worker_first: true`; the Worker is a canonical-host redirect plus security headers (`apps/marketing/src/index.ts:1-31`).                                                                                                                          |
-| `apps/native`        | `frockbot_native`        | `apps/native/pubspec.yaml`          | Flutter, Android and macOS. Not deployed by CI.                                                                                                                                                                                                                                                                                    |
+| `apps/native`        | `frockbot_native`        | `apps/native/pubspec.yaml`          | The client. Its web build ships as the app Worker's `assets` payload, so `bot.frockbot.com` is deployed by `apps/cloudflare`. The Android and macOS builds are not deployed by CI.                                                                                                                                                 |
 
 Named environments on the app Worker (`apps/cloudflare/wrangler.jsonc`):
 
-- `development` (:148)
-- `staging` (:251) — `frockbot-cloudflare-staging`, routes `staging-bot.frockbot.com` and `ui.staging-bot.frockbot.com`
-- `e2e` (:359) — `"routes": []`, never deployed
+- `development` (:162)
+- `staging` (:279) — `frockbot-cloudflare-staging`, routes `staging-bot.frockbot.com` and `ui.staging-bot.frockbot.com`
+- `e2e` (:401) — `"routes": []`, never deployed
+
+The client's bytes are not in the Worker bundle and not in R2. `apps/cloudflare/build-flutter-web.ts` builds `apps/native` for the browser and stages it under `apps/cloudflare/dist/web/_flutter/<buildHash>/`, which is the `assets` directory; the asset router answers those URLs before the Worker runs. The Worker renders only the document that names them (§6).
 
 Not deployed, though it carries a wrangler config: `apps/cloudflare/e2e/frock-ai-fake.wrangler.jsonc` (bound as a service by the `e2e` env, run from the local wrangler dev registry).
 
@@ -28,8 +30,8 @@ No Fly configuration exists in the repository. Fly Sprites are rented at runtime
 
 Deploy paths:
 
-- `.github/workflows/ci.yml:367` `deploy-staging` — on push to `main`, deploys the app Worker to `staging`.
-- `.github/workflows/release.yml` — on tag `v*.*.*`, deploys marketing (:272), the computer host (:451), the Applet build service (:479) and the app Worker (:505).
+- `.github/workflows/ci.yml:387` `deploy-staging` — on push to `main`, deploys the app Worker to `staging`.
+- `.github/workflows/release.yml` — on tag `v*.*.*`, deploys marketing (:273), the computer host (:465), the Applet build service (:493) and the app Worker (:519).
 
 ---
 
@@ -75,13 +77,13 @@ Four classes in the app Worker, exported from `apps/cloudflare/src/index.ts:178-
 
 ## 3. Request path: one user message
 
-1. **Client.** `app/shell/client/FrockBotApp.vue` posts `{schemaVersion, commandId, text}` to `POST /api/bots/{botId}/turns`.
+1. **Client.** `apps/native/lib/client/transport.dart:197` posts `{schemaVersion, commandId, text}` to `POST /api/bots/{botId}/turns`.
 
 2. **Gateway.** `apps/cloudflare/src/gateway.ts`, the Worker's `fetch`. Order of dispatch in `createGateway` (`:706`): client-compatibility refusal, native-auth routes, `/api/auth/*` to better-auth, the Applet socket, `/sign-out`, the debug route, public Package routes, then identity resolution — native bearer token, development identity, or a better-auth session — then the signup admission check (`:801-830`), then authenticated Package backend contributions.
 
 3. **Per-user application isolate.** Unmatched requests fall through to `routeUserApplication` (`:612`). It resolves the user's `applicationHash`, then `dependencies.loader.get(workerId, ...)` loads that artifact from R2 into a Worker Loader isolate whose `env` holds `BOT_STATE` — a Durable Object stub already scoped to the user — plus `DEPLOYMENT` (`:633-646`). The client's `x-frockbot-user-id` header is deleted before forwarding (`:650`); the gateway sets `x-frockbot-deployment`, `x-frockbot-auth-session-v1` and `x-frockbot-is-admin-v1` itself. Authorization is established here and passed downward as capability; nothing below re-verifies it.
 
-4. **Application.** `apps/cloudflare/src/user-application.ts:775` matches the turn route; `:1188` calls `env.BOT_STATE.run({schemaVersion, botId, command: {runId: commandId, sessionId: "<userId>:<botId>", acceptedAt, text, skills?, supersedes?}})`. The session id is derived server-side. The command decoder accepts exact keys only, so a client cannot name a turn type; an absent turn type means `chat`.
+4. **Application.** `apps/cloudflare/src/user-application.ts:719` matches the turn route; `:1093` calls `env.BOT_STATE.run({schemaVersion, botId, command: {runId: commandId, sessionId: "<userId>:<botId>", acceptedAt, text, skills?, supersedes?}})`. The session id is derived server-side. The command decoder accepts exact keys only, so a client cannot name a turn type; an absent turn type means `chat`.
 
 5. **Bot Durable Object.** `apps/cloudflare/src/bot-state.ts:1168` `run()` decodes the envelope, materializes the identity and calls `shell.run(...)`.
 
@@ -228,47 +230,101 @@ Nothing produces a member today. The isolate host, the `BOT_PACKAGES` loader and
 
 ## 6. Clients
 
-### Web client
+There is one client. `apps/native` is a Flutter app; built for the browser it is
+what `bot.frockbot.com` serves, and built for Android or macOS it is the same
+Dart on a device. The two differ only at four conditional-import seams — the
+HTTP client and the state-channel socket, the credential, the sign-in door and
+the durable store — so what differs between the two is the platform's doing,
+never the product's.
 
-The shipping client is Vue 3. Comments in `apps/cloudflare/src/client/client-contributions.ts:7` and elsewhere refer to React; they do not describe the code.
+`apps/native/qualification.json:2` still records `"status": "unqualified-prototype"`,
+and that is about the device: `.github/workflows/native.yml` is advisory
+(`continue-on-error: true`), builds no APK or IPA and has no release job, and
+`apps/native/android/app/build.gradle.kts` refuses a build without a value read
+off a connected phone. The web build carries no such caveat.
+`ci.yml`'s `validate` installs the pinned SDK and `bun run build` reaches
+`flutter build web`, so a client that does not compile for the browser fails a
+required check, and the browser end-to-end suite drives the same build.
 
-- Entry `apps/cloudflare/src/client/index.ts:394` constructs one `ClientApplication` transport object, installs plugins and calls `application.mount("#app")`.
-- Vue 3.5.41; Vite 8.2.2 with `@vitejs/plugin-vue` (`apps/cloudflare/vite.config.ts`). Build options set `cssCodeSplit: false` and `assetsInlineLimit: Infinity`, producing one JS and one CSS payload.
-- No router and no state library. Navigation is a surface registry (`packages/client-ui/src/surfaces.ts:6`, interfaces at `packages/client-core/src/index.ts:536-558`); state is `ref` and `shallowReactive` with `provide`/`inject`.
-- The app Worker declares no `assets` binding. `apps/cloudflare/build-artifact.ts:25-52` inlines the Vite output into the Worker bundle as `__FROCKBOT_CLIENT_JS__`, `__FROCKBOT_CLIENT_CSS__` and `__FROCKBOT_CLIENT_ICON__`, emitting `foundation-v1.mjs`. That artifact is stored in R2 and loaded per request through the `USER_APPLICATIONS` Worker Loader. The document is generated by `appHtml()` (`apps/cloudflare/src/user-application.ts:125-141`), serving `/app.js` and `/app.css`.
+### Served on the web
 
-Plugin UI mounts two ways.
+`apps/cloudflare/build-flutter-web.ts` runs
+`flutter build web --release --pwa-strategy=none --no-web-resources-cdn` in
+`apps/native`, drops what no
+browser asks for (the engine's `.symbols` maps, Flutter's own `index.html`, the
+PWA manifest and its icons, and the service worker `--pwa-strategy=none` leaves
+empty), hashes every remaining file's path and contents into one build hash, and
+stages the payload under `apps/cloudflare/dist/web/_flutter/<buildHash>/`. It
+writes a `_headers` file marking everything under the prefix `immutable` for a
+year, and records the hash in `apps/cloudflare/dist/flutter-web.json`.
 
-1. **In-bundle Vue components, through slots and the surface registry.** `ClientApplication` (`packages/client-core/src/index.ts:585`) requires exactly one `root` slot and registers a global `<k-slot name="...">` outlet (`:624-643`). `app/auth/client/index.ts:13` fills `root` with `AuthGate.vue`, which renders `<k-slot name="authenticated-root">` (`AuthGate.vue:157`); `app/shell/client/index.ts:3374-3378` fills that with `FrockBotApp.vue`. The contribution table is `apps/cloudflare/src/client/client-contributions.ts:36-63` — 17 entries, mounted in order.
-2. **Sandboxed iframes, for Bot-authored and user-installed package UI.** `app/shell/client/index.ts` reads iframe entries from the Bot's first-party page registry (`applets/pages.ts`) and registers a sidebar trigger plus a surface per entry. Frames load from `ui.bot.frockbot.com/packages/<sha256>.html` (`apps/cloudflare/src/gateway.ts:1275`) and communicate through a versioned postMessage bridge (`app/shell/client/PackageIframeHost.vue`). Package-supplied code does not execute in the app origin.
+That directory is the app Worker's `assets` binding
+(`apps/cloudflare/wrangler.jsonc:27`, and again in `development` (:176),
+`staging` (:300) and `e2e` (:415)). The payload is uploaded with the deploy and answered by the asset router before the
+Worker runs, so it needs no route, no bucket and no seeding step, and the same
+`wrangler dev` that runs the Worker locally serves it. `html_handling` and
+`not_found_handling` are both `"none"`: the document is rendered per account, so
+an asset directory that answered `/` or invented an index would answer for it.
+`PUBLIC_ASSET_PATHS` (`apps/cloudflare/src/gateway.ts:52`) is `/` and
+`/favicon.ico` only — no request for the client's own bytes ever reaches the
+gateway.
 
-The chat view lives in `app/shell/client/FrockBotApp.vue` (2108 lines). The transcript is a `v-for` at `:1520`; assistant text renders through `UiMarkdown` at `:1551`. Turn merge logic is `replaceTurnMessages()` (`app/shell/client/index.ts:3405`). Data arrives over REST, with invalidation over the state channel (`apps/cloudflare/src/client/bot-state-channel.ts:147-170`).
+The document is `appHtml()` (`apps/cloudflare/src/user-application.ts:117`).
+`build-artifact.ts` defines `__FROCKBOT_FLUTTER_BUILD__` from `flutter-web.json`
+and `__FROCKBOT_CLIENT_ICON__` from the brand icon; those two are all the
+artifact carries of the client. The page is a
+`<base href="/_flutter/<buildHash>/">`, four `data-frockbot-*` body attributes
+and one `<script src="…/flutter_bootstrap.js" async>`. Every engine URL is relative to that base, so a new client build is a new path
+rather than a new body at an old one, and the document is the only thing that
+changes when the client does.
 
-`app/settings/client/index.ts` registers five surfaces (`bot-settings`, `plugins`, `models`, `connections`, `user-settings`) and three slot fillers; other plugins mount into slots that settings declares.
+Identity is handed over in the document. A browser's session is a cookie it
+cannot read, so the Worker stamps the account onto `<body>` —
+`HOSTED_EMBEDDED_BODY_ATTRIBUTES_V1` (`user-application.ts:111`):
+`data-frockbot-user-id`, `data-frockbot-auth-mode`, `data-frockbot-is-admin` —
+and `bootstrapUserIdV1()` (`apps/native/lib/client/identity_web.dart`) reads
+them on the first frame, so `restore()` (`apps/native/lib/main.dart:107`) paints
+the shell instead of flashing the sign-in door at someone who is already signed in.
+The `/api/identity` read still happens; the attributes are what it confirms.
+`identity_io.dart` returns null, because the phone is handed no document.
 
-### Flutter app
+The app origin's policy is `withSecurityHeaders` (`user-application.ts:147`).
+Two relaxations belong to the engine and neither is avoidable:
+`script-src 'wasm-unsafe-eval'`, because CanvasKit instantiates WebAssembly, and
+`style-src 'unsafe-inline'`, because the engine injects a `<style>` element to
+measure text.
+`img-src` allows `data:` and `blob:` for what the app decodes itself, and
+`base-uri` is `'self'` rather than `'none'` because the document sets a `<base
+href>` of its own. All of this is the app origin's alone — the artifact origin,
+where untrusted pages live, keeps `default-src 'none'` (`gateway.ts`) unchanged.
+CanvasKit is built local (`--no-web-resources-cdn`) so `script-src 'self'` stays
+true and no engine byte is fetched from gstatic.
 
-`apps/native/README.md:3` states that the Vue application is the production client and that the Flutter app does not claim acceptance. `apps/native/qualification.json:2` records `"status": "unqualified-prototype"`. `.github/workflows/native.yml:18` is advisory: analyze and test only, no APK or IPA build, no release job.
+There is no service worker. Every URL under the prefix is content-addressed and
+served `immutable`, so a cache the page managed itself would duplicate the
+browser's with a second staleness rule to get wrong.
+
+### The app
 
 `lib/main.dart` is the app entry and the sign-in door and nothing else: the
 `MaterialApp`, the session, and the `?bot=` deep link, which it hands to the
 shell through a `ValueNotifier` rather than acting on. Everything a person
 looks at is `lib/shell/`.
 
-**The shell layout.** `lib/shell/desktop_layout.dart` has the three tiers the
-Vue stylesheet has, at the same two widths. Above 980 points the shell is three
-columns — the Bot list, the conversation, and the right panel. At or below 980
-the right panel becomes a drawer over the conversation; at or below 640 the Bot
-list goes the same way and the conversation has the window. A region is a
-column or a drawer, never both, so nothing is built twice; a parked drawer is
+**The shell layout.** `lib/shell/desktop_layout.dart` has three tiers at two
+widths. Above 980 points the shell is three columns — the Bot list, the
+conversation, and the right panel. At or below 980 the right panel becomes a
+drawer over the conversation; at or below 640 the Bot list goes the same way and
+the conversation has the window. A region is a column or a drawer, never both,
+so nothing is built twice; a parked drawer is
 inert to the pointer, to assistive technology and to its own tickers, and one
 scrim serves whichever drawer is open.
 
-**The slot registry.** `lib/shell/slots.dart` is the Flutter analogue of the
-Vue `<k-slot>`: three named regions — `right-panel`, `overlays`,
-`header-actions` — that a feature registers a `WidgetBuilder` into and the
-shell draws where the region belongs. An empty region draws nothing, so the
-layout reserves no space for a feature that is not there. Trust chrome is never
+**The slot registry.** `lib/shell/slots.dart` is where a feature reaches the
+shell: three named regions — `right-panel`, `overlays`, `header-actions` — that
+a feature registers a `WidgetBuilder` into and the shell draws where the region
+belongs. An empty region draws nothing, so the layout reserves no space for a
+feature that is not there. Trust chrome is never
 a slot: the transcript, the composer and the Bot list are the shell's own.
 
 **Semantics identifiers.** Flutter Web draws to a canvas, so a browser spec can
@@ -329,26 +385,23 @@ Screens (no router; `MaterialApp(home:)` plus `Navigator.push`):
   Package page, in Bot settings and behind a header entry
 - `ViewSamplePage` — `lib/view/sample_page.dart:117`, reachable only from a `--dart-define=FROCKBOT_DEV_AUTH=true` build
 
-The thread's rules are the Vue shell's, ported without change and with its
-tests: a Turn is ordered as a unit by its own user message's stamp
-(`transcript_model.dart`), the working row says the previous reply is being
+The thread's rules were ported from the Vue shell without change and with its
+tests, and are unchanged since: a Turn is ordered as a unit by its own user
+message's stamp (`transcript_model.dart`), the working row says the previous
+reply is being
 stopped only while a supersede drains, a draft belongs to the Bot it was typed
 for and survives a refusal (`composer.dart`), and readiness and the draft are
 separate questions so Try again works with an empty composer.
 
-Transport is REST over `package:http` behind a conditional import (`lib/client/transport.dart`, `transport_io.dart`, `transport_web.dart`) with the base URL defaulting to `https://bot.frockbot.com`, plus one read-only WebSocket at `/api/bots/{botId}/state-channel` (`:229`) with a strict `cursor + 1` contiguity rule (`lib/client/state_channel.dart:69-82`), a 4096-byte frame cap and 1–30 s backoff.
+Transport is REST over `package:http` behind a conditional import (`lib/client/transport.dart`, `transport_io.dart`, `transport_web.dart`). `--dart-define=FROCKBOT_ORIGIN` names the gateway; left unset it is `https://bot.frockbot.com` on the phone, which has no origin of its own, and `window.location.origin` in the browser, which is served by the gateway it talks to and may be on any port. There is one read-only WebSocket at `/api/bots/{botId}/state-channel` (`:167`) with a strict `cursor + 1` contiguity rule (`lib/client/state_channel.dart:69-82`), a 4096-byte frame cap and 1–30 s backoff.
 
-Auth is PKCE in the system browser (`lib/client/auth.dart:17`), returning over an App Link validated in `accept()` (`:60`). The session token lives in `flutter_secure_storage`; the directory, drafts, cached transcripts and cursors are plaintext JSON on disk (`lib/client/plain_store.dart:13`, `:97`).
+On the phone, auth is PKCE in the system browser (`lib/client/auth.dart:17`), returning over an App Link validated in `accept()` (`:60`); the session token lives in `flutter_secure_storage`, and the directory, drafts, cached transcripts and cursors are plaintext JSON on disk (`lib/client/plain_store.dart:13`, `:97`). In the browser the same seams are the hosted better-auth Google redirect (`auth_web.dart`), a cookie the client never sees, and `localStorage` (`plain_store_web.dart`).
 
 `lib/protocol/client_wire.generated.dart` (987 lines) is generated by `scripts/generate-dart-protocol.ts:119` from `core/protocol-schemas/schema/client-wire.schema.json`. Its classes wrap an opaque `Object? _json` and validate; they are not typed models, so call sites index by string.
 
-A framed web page is `lib/view/host_frame.dart`, one seam over two implementations: on the web a platform view over an `<iframe>` under the same `sandbox` the Vue canvas uses, and on the phone a WebView with every one of those guarantees set by hand. Neither ever receives the app session; a page is loaded anonymously and told who it is by `postMessage` afterwards.
+A framed web page is `lib/view/host_frame.dart`, one seam over two implementations: on the web a platform view over an `<iframe>` sandboxed to `allow-scripts` (plus `allow-same-origin` only where the document must keep its origin), and on the phone a WebView with every one of those guarantees set by hand. Neither ever receives the app session; a page is loaded anonymously and told who it is by `postMessage` afterwards.
 
-**Capability gap.** Present in web, absent in native: nothing this step has reached. Present in native, absent in web: a connector's accounts and a model provider's on one surface rather than two.
-
-Present in native, absent in web: a durable offline store of directory, transcripts and drafts; inbox as a first-class screen; Bot archive, restore and delete UI with composition-generation and audit detail; deep-link-to-Bot; PKCE system-browser sign-in; tool receipts on a Work view rather than inside the thread.
-
-Both speak the same REST API and the same state-channel WebSocket. Native validates every payload against the shared schema; the web client uses hand-written decoders.
+Every payload is validated against the shared schema (`lib/protocol/client_wire.generated.dart`), on both platforms, because there is no second decoder to disagree with.
 
 **Settings, through the renderer.** The server describes settings as a
 `SettingsFrame` and projects that frame as a `ViewDocument`
@@ -414,11 +467,11 @@ family, both reached with `?as=document`:
 
 - `app/routines/routines-document.ts` over a `RoutinesFrame`
   (`GET /api/bots/:botId/routines`, the one route in that group that takes a
-  query parameter at all). The frame is the two reads the Vue section made
-  separately — the Routines a Bot holds and the completion inbox the header
-  badge counts — because a client that had to ask twice could show a list and
-  a badge that disagreed. Five action kinds: three Routine commands the route
-  already takes, the inbox command on the inbox route, and the run log, which
+  query parameter at all). The frame is one read where there were two —
+  the Routines a Bot holds and the completion inbox the header badge counts —
+  because a client that had to ask twice could show a list and a badge that
+  disagreed. Five action kinds: three Routine commands the route already takes,
+  the inbox command on the inbox route, and the run log, which
   is navigation and belongs to no route.
 - `app/audit/audit-document.ts` over an `AuditFrame` (`GET /api/audit`). Four
   kinds: the filter and the page, which the host owns because the host owns
@@ -441,9 +494,9 @@ selector over them, and `ViewSurfacePage`'s `chrome` flag is off inside it
 because the region already carries the title. On the phone each entry is a page.
 
 **The rest of PR 8.** The completions badge is `RoutineInboxBadge` in the
-`header-actions` region, matching `RoutineInboxBadge.vue`: a Routine firing has
-no `send_to_user` and its Turn is filtered out of the visible transcript, so a
-count is the only place a completion becomes visible. "Mark all read" means the
+`header-actions` region: a Routine firing has no `send_to_user` and its Turn is
+filtered out of the visible transcript, so a count is the only place a
+completion becomes visible. "Mark all read" means the
 entries the document carried — an empty `entryIds` on the wire acknowledges
 everything, including a firing that landed a second ago and has never been on
 screen.
@@ -477,9 +530,9 @@ three bands to the catalogue's neutral roots — a Bot this app creates is still
 one the wardrobe can dress when they return.
 
 `create.dart` is the sidebar's create gesture, which no longer hands off to
-Manage Bots, and `SheepColourSheet` beside it is the Vue wardrobe's edit half —
-the one thing left of it under the single-default-avatar rule — reached by
-pressing the avatar in Bot settings and fenced on the sheep revision the read
+Manage Bots, and `SheepColourSheet` beside it is the wardrobe's edit half — the
+one thing left of the wardrobe under the single-default-avatar rule — reached
+by pressing the avatar in Bot settings and fenced on the sheep revision the read
 just reported rather than one held since the sheet opened. The command is written to the durable store before it is sent and
 cleared only once the authority has answered it, so a lost reply finishes the
 Bot that was asked for rather than making a second one; a 409 is not a failure
@@ -492,10 +545,9 @@ one is.
 surface issued it — `BotDangerZone` inside Bot settings' Advanced, or Manage
 Bots, which now shares it rather than keeping a second copy. The zone is
 contributed by the Flock rather than rebuilt inside the settings surface,
-because the directory a delete changes is the Flock's; that is the seam
-`FlockDangerZone.vue` draws too. The route answers `pending` for a saga that
-has not settled, which is why the zone locks rather than offering a second
-command.
+because the directory a delete changes is the Flock's. The route answers
+`pending` for a saga that has not settled, which is why the zone locks rather
+than offering a second command.
 
 Three more projections in the settings-document family:
 
@@ -535,10 +587,9 @@ view action's two do not.
 
 **PR 10a: Applets, the Computer and Package pages.**
 
-`lib/applets/` is the canvas `AppletCanvas.vue` draws, on the same routes
-`applets-client.ts` reads. Two states and the transition between them: the
-source as the Bot writes it, and the live Applet arriving over it once a
-generation is active. `progress.dart` is the sentence in between — a projection
+`lib/applets/` is the Applet canvas, over the Applet routes of §8. Two states
+and the transition between them: the source as the Bot writes it, and the live
+Applet arriving over it once a generation is active. `progress.dart` is the sentence in between — a projection
 of the thread the client already holds, taking the furthest step it has evidence
 for across every Turn rather than only the open one, and recognising the
 `applet` CLI's own stated output rather than guessing at a command.
@@ -546,7 +597,7 @@ for across every Turn rather than only the open one, and recognising the
 policy: a network that might come back is retried on a widening backoff, and a
 deployment that cannot sign a viewer token is not retried at all.
 
-`lib/computer/` is `ComputerCard.vue` and `ComputerViewerOverlay.vue`: the
+`lib/computer/` is the Computer card and its full-window viewer: the
 projection, one versioned command per action, and the two rules the card needs —
 whether the desktop or its last photograph is on screen, and what to call that.
 The card streams only a desktop that exists, to a card someone is looking at,
@@ -555,8 +606,8 @@ capture, which costs nothing to hold. Taking control is two gestures, and only
 the second reaches the Bot.
 
 `lib/packages/` is the entry projection and the postMessage bridge.
-`catalog.dart` is `package-iframe-entries.ts` over `/api/bots/:botId/package-ui`;
-`frame.dart` is `PackageIframeHost.vue` — the handshake, the theme tokens, the
+`catalog.dart` is the entry read over `/api/bots/:botId/package-ui`;
+`frame.dart` is the frame host — the handshake, the theme tokens, the
 named state feeds, and a page's five messages back, each refused against what
 its Package declared rather than trusted. On the phone the page is its own
 `parent`, so what it posts raises a `message` event on the same window and a
@@ -634,7 +685,7 @@ Stream events (`core/contracts/types.ts:158-166`): `text-delta`, `tool-call`, `u
 
 **`core/models`** — the registry service. Also implements `structured<T>()` by streaming with a `json_schema` response format and validating the accumulated text.
 
-**`app/custom-models`** — client-only, `defaultEnablement: "disabled"`. Contributes a Vue `BotModelSection` into slot `frockbot.bot-settings-sections` and declares the Bot-scoped `role: "model"` setting. It has no runtime and no provider; it is the model picker.
+**`app/custom-models`** — `defaultEnablement: "disabled"`, and nothing but the Bot-scoped `role: "model"` setting it declares (`app/custom-models/definition.ts`). It has no runtime and no provider: enabling it is what puts the model picker in Bot settings, which the client draws from the settings document.
 
 Adjacent, outside the loop: image generation uses Workers AI ids directly (`app/image/model.ts:40-52`, default `@cf/black-forest-labs/flux-1-schnell`).
 
@@ -783,7 +834,7 @@ Admin is membership of the comma-separated `FROCKBOT_ADMIN_EMAILS` secret (`apps
 4. **Computer host** — `apps/computer-host/vitest.config.ts` plus `bun test src container`. Opt-in live suites `test:live` and `test:live:desktop` are not run by CI.
 5. **Playwright** — `apps/cloudflare/e2e/playwright.config.ts`, `**/*.e2e.ts`, `fullyParallel: false`, `workers: 1`, 240 s timeout, 4-way CI sharding through `balanced-shard-reporter.ts`, `webServer` of `bun e2e/serve.ts`. Roughly 28 spec files.
 6. **Flutter** — `apps/native/test/*.dart` (14 files) plus `integration_test/settings_screens.dart`, which is a screenshot runner.
-7. **Gate scripts** — run under `typecheck`: `scripts/check-client-protocol.ts`, `scripts/check-layer-imports.ts`, `scripts/check-computer-host-imports.ts`, `scripts/generate-isolate-context-catalog.ts --check`, `scripts/build-applets-assets.ts --check` (the SDK scaffold, the Applets Skill and the two page HTMLs, as strings the Worker bundle can carry), then `scripts/typecheck.ts`. Plus `lint:ui-styles` (`scripts/check-ui-styles.ts`).
+7. **Gate scripts** — run under `typecheck`: `scripts/check-client-protocol.ts`, `scripts/check-layer-imports.ts`, `scripts/check-computer-host-imports.ts`, `scripts/generate-isolate-context-catalog.ts --check`, `scripts/build-applets-assets.ts --check` (the SDK scaffold, the Applets Skill and the two page HTMLs, as strings the Worker bundle can carry), then `scripts/typecheck.ts`.
 
 ### `.github/workflows/ci.yml`
 
@@ -791,18 +842,18 @@ Triggers: push to `main`, all pull requests, `workflow_dispatch`.
 
 - `changes` (:17) — classifies documentation-only runs through `scripts/docs-only.sh`, so ruleset-required checks report `skipped` rather than remaining pending.
 - `docs` (:83) — install plus `format:check`.
-- `validate` (:110) — Bun 1.3.6: `format:check`, `lint:ui-styles`, `typecheck`, `bun test`, app `test:workerd`, bundler `test:workerd`, app `test:integration`, computer-host `test` and `test:workerd`, `bun run build`.
-- `e2e` (:179) — 4-shard matrix, `fail-fast: false`, Chromium install, `bun run test:e2e --shard=N/4`; uploads blob reports, failure diagnostics and wrangler logs.
-- `e2e-gate` (:298) — aggregates the matrix into the ruleset-required check `Browser end-to-end`.
-- `e2e-report` (:326) — merges blob reports into HTML on failure.
+- `validate` (:110) — Bun 1.3.6: `format:check`, `typecheck`, `bun test`, app `test:workerd`, app `test:integration`, computer-host `test` and `test:workerd`, Applet build service `test` and `test:workerd`, then the pinned Flutter SDK and `bun run build`, whose first step builds the web client.
+- `e2e` (:189) — 4-shard matrix, `fail-fast: false`, Chromium install, `bun run test:e2e --shard=N/4`; uploads blob reports, failure diagnostics and wrangler logs.
+- `e2e-gate` (:318) — aggregates the matrix into the ruleset-required check `Browser end-to-end`.
+- `e2e-report` (:346) — merges blob reports into HTML on failure.
 - `deploy-staging` (:367) — push to `main`, `needs: [validate, e2e]`, environment `staging`. Validates required env names, creates missing staging R2 buckets, the Vectorize index and D1, rewrites `wrangler.jsonc` in place to inject the staging `database_id` and replace `foundation-v1` with the artifact sha256, applies D1 migrations, uploads the artifact to R2, then `wrangler deploy --env staging --secrets-file`.
 
 ### `.github/workflows/release.yml`
 
 Trigger: push of a tag matching `v*.*.*`.
 
-- `verify` (:16) — validates strict SemVer, then `typecheck`, `bun test`, `bun run build`.
-- `publish-npm` (:84) — rewrites every `packages/*/package.json` to the tag version and sets `private: false`, resolves `workspace:` ranges to literals, requires npm ≥ 11.5.1, then publishes all of `packages/*` concurrently with `npm publish --access public` (`--tag next` for prereleases) through OIDC trusted publishing. `EPUBLISHCONFLICT` is treated as success.
+- `verify` (:16) — validates strict SemVer, then `typecheck`, `bun test`, and `bun run build` behind the pinned Flutter SDK, because the build compiles the web client.
+- `publish-npm` (:95) — `applets/sdk` is the only workspace it considers, and it publishes only because its manifest declares `frockbot.npm`. It rewrites that manifest to the tag version and sets `private: false`, resolves `workspace:` ranges to literals, requires npm ≥ 11.5.1, then `npm publish --access public` (`--tag next` for prereleases) through OIDC trusted publishing. `EPUBLISHCONFLICT` is treated as success.
 - `github-release` (:233) — `gh release create --generate-notes --verify-tag`.
 - `deploy-marketing` (:255).
 - `deploy-backend` (:307, environment `production`) — rewrites the production D1 id and artifact hash into `wrangler.jsonc`, applies D1 migrations remotely, uploads the artifact, deploys the bundler and then the computer host with its own secrets file, runs `scripts/check-production-secrets.ts check --live` and `write-secrets-file`, then `wrangler deploy --secrets-file`.
@@ -813,6 +864,6 @@ On pull request `opened`, `reopened` and `ready_for_review`. Skips drafts and fo
 
 ### `.github/workflows/native.yml`
 
-On pull requests touching `apps/native/**`, `core/protocol-schemas/**`, `scripts/*protocol*`, `scripts/*native*` or itself. Advisory (`continue-on-error: true`). Runs `scripts/check-native-pins.py`, then runs `flutter pub get --enforce-lockfile`, `flutter analyze` and `flutter test` only when Flutter is installed and its `frameworkRevision` equals `4cf24164269a5ebf0c16a028a00727d0e77bbb05`.
+On pull requests touching `apps/native/**`, `core/protocol-schemas/**`, `scripts/*protocol*`, `scripts/*native*` or itself. Advisory (`continue-on-error: true`). Runs `scripts/check-native-pins.py`, installs the pinned SDK, fails unless its `frameworkRevision` is `4cf24164269a5ebf0c16a028a00727d0e77bbb05`, then `flutter pub get --enforce-lockfile`, `flutter analyze`, `flutter test` and `flutter build web --release`. The web client is a required check elsewhere — `ci.yml`'s `validate` builds it — so this job is the device's analysis, not the client's gate.
 
 ---

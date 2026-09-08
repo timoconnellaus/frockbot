@@ -19,12 +19,10 @@ import {
   decodePackageIframeToolCommandV1,
   type PackageIframeCatalogV1,
 } from "@frockbot/core/contracts";
-import type {
-  ClientNotificationAcknowledgementV1,
-  ClientNotificationListV1,
-} from "@frockbot/client-core";
 import {
   decodeClientNotificationAcknowledgementCommandV1,
+  type ClientNotificationAcknowledgementV1,
+  type ClientNotificationListV1,
   decodeClientRunAdmissionFenceCommandV1,
   decodeClientRunLookupQueryV1,
   decodeClientRunListQueryV1,
@@ -53,16 +51,21 @@ import {
   turnBodyIsOversizedV1,
 } from "./request-body.js";
 
-declare const __FROCKBOT_CLIENT_JS__: string;
-declare const __FROCKBOT_CLIENT_CSS__: string;
+declare const __FROCKBOT_FLUTTER_BUILD__: string;
 declare const __FROCKBOT_CLIENT_ICON__: string;
 
-const APP_JS =
-  typeof __FROCKBOT_CLIENT_JS__ === "string"
-    ? __FROCKBOT_CLIENT_JS__
-    : "throw new Error('Worker renderer was not bundled')";
-const APP_CSS =
-  typeof __FROCKBOT_CLIENT_CSS__ === "string" ? __FROCKBOT_CLIENT_CSS__ : "";
+/**
+ * The content-addressed prefix the Flutter client is served from.
+ *
+ * The payload is the Worker's own static assets, uploaded with the deploy and
+ * served straight from the edge; the artifact only names it. Every URL under
+ * the prefix carries the build hash, so the document is the one thing that
+ * changes when the client does.
+ */
+const FLUTTER_BASE =
+  typeof __FROCKBOT_FLUTTER_BUILD__ === "string"
+    ? `/_flutter/${__FROCKBOT_FLUTTER_BUILD__}/`
+    : "/_flutter/development/";
 // The site icon is a PNG, so it rides the artifact as base64 and is decoded
 // once at module scope rather than on every request.
 const APP_ICON = Uint8Array.from(
@@ -97,12 +100,13 @@ function hostedIsAdmin(request: Request): boolean {
 }
 
 /**
- * The `<body>` attributes the hosted client's auth projection decodes
- * (`app/auth/client/browser.ts`, which throws rather than
- * mounting when one is missing). Every document that mounts the client - the
- * Worker-rendered one below and the vite development document
- * (`apps/cloudflare/index.html`) - carries all of them, so the list lives in
- * one place and both documents are tested against it.
+ * The `<body>` attributes the client reads before it has asked anything.
+ *
+ * A browser's session is a cookie it cannot see, so the account is stamped
+ * onto the document the Worker renders and the Flutter app adopts it on its
+ * first frame (`apps/native/lib/client/identity_web.dart`) rather than
+ * flashing the sign-in door at someone who is already signed in. The identity
+ * read still happens; this is what it confirms.
  */
 export const HOSTED_EMBEDDED_BODY_ATTRIBUTES_V1 = [
   "data-frockbot-user-id",
@@ -126,14 +130,16 @@ function appHtml(
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="frockbot-application" content="${applicationHash}">
+  <base href="${FLUTTER_BASE}">
   <title>FrockBot</title>
   <link rel="icon" type="image/png" href="/favicon.ico">
   <link rel="apple-touch-icon" href="/favicon.ico">
-  <link rel="stylesheet" href="/app.css">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#1f1e24">
+  <style>html,body{margin:0;height:100%;background:#1f1e24}</style>
 </head>
 <body data-frockbot-user-id="${userId}" data-frockbot-user-application="${applicationHash}" data-frockbot-auth-mode="${authMode}" data-frockbot-is-admin="${String(isAdmin)}">
-  <div id="app"></div>
-  <script type="module" src="/app.js"></script>
+  <script src="${FLUTTER_BASE}flutter_bootstrap.js" async></script>
 </body>
 </html>`;
 }
@@ -162,7 +168,16 @@ function withSecurityHeaders(
     // fetched from one Cloudflare host and it reports to another. Removing it
     // instead would mean turning the feature off in the zone, which the code
     // cannot state or keep true.
-    `default-src 'self'; script-src 'self' ${INSIGHTS_SCRIPT_ORIGIN}; style-src 'self'; font-src 'self' data:; img-src 'self' data:; connect-src 'self' ${INSIGHTS_REPORT_ORIGIN} ${applicationUrl.protocol === "https:" ? "wss:" : "ws:"}//${applicationUrl.host}; frame-src ${artifactOrigin} https://*.sprites.app; frame-ancestors 'none'; base-uri 'none'`,
+    //
+    // `script-src 'wasm-unsafe-eval'` and `style-src 'unsafe-inline'` are what
+    // the Flutter engine needs and neither is optional: CanvasKit instantiates
+    // WebAssembly, and the engine injects a `<style>` element to measure text.
+    // The relaxation is on the app origin only - the artifact origin, where
+    // untrusted pages live, keeps `default-src 'none'` (`gateway.ts`).
+    // `base-uri 'self'` rather than `'none'` because the document sets a
+    // `<base href>` of its own to the content-addressed directory every engine
+    // URL is relative to.
+    `default-src 'self'; script-src 'self' 'wasm-unsafe-eval' ${INSIGHTS_SCRIPT_ORIGIN}; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob:; connect-src 'self' ${INSIGHTS_REPORT_ORIGIN} ${applicationUrl.protocol === "https:" ? "wss:" : "ws:"}//${applicationUrl.host}; frame-src ${artifactOrigin} https://*.sprites.app; frame-ancestors 'none'; base-uri 'self'`,
   );
   return secured;
 }
@@ -370,30 +385,6 @@ function createUserApplicationRoute() {
             headers: { "content-type": "text/html; charset=utf-8" },
           },
         ),
-        appletUiArtifactOriginV1(url),
-        url,
-      );
-    }
-    if (request.method === "GET" && url.pathname === "/app.js") {
-      return withSecurityHeaders(
-        new Response(APP_JS, {
-          headers: {
-            "content-type": "text/javascript; charset=utf-8",
-            "cache-control": "no-cache",
-          },
-        }),
-        appletUiArtifactOriginV1(url),
-        url,
-      );
-    }
-    if (request.method === "GET" && url.pathname === "/app.css") {
-      return withSecurityHeaders(
-        new Response(APP_CSS, {
-          headers: {
-            "content-type": "text/css; charset=utf-8",
-            "cache-control": "no-cache",
-          },
-        }),
         appletUiArtifactOriginV1(url),
         url,
       );

@@ -5,15 +5,12 @@
     "moduleResolution": "Bundler",
     "allowImportingTsExtensions": true,
     "resolveJsonModule": true,
-    "paths": {
-      "@cordisjs/client": ["./client/cordis-client-shim.d.ts"]
-    },
     "strict": true,
     "noEmit": true,
     "skipLibCheck": true,
     "lib": ["ES2024", "DOM", "DOM.Iterable"],
     "types": ["bun", "node"]
   },
-  "include": ["**/*.ts", "**/*.vue"],
+  "include": ["**/*.ts"],
   "exclude": ["node_modules", "dist"]
 }

@@ -1166,8 +1166,6 @@ describe("Cloudflare user application gateway", () => {
 
     const page = await gateway(request("/", "alice"));
     expect(page.headers.get(DEPLOYMENT_HEADER_V1)).toBe("foundation-v1");
-    const script = await gateway(request("/app.js", "alice"));
-    expect(script.headers.get(DEPLOYMENT_HEADER_V1)).toBe("foundation-v1");
     const manifest = await gateway(request("/app-manifest", "alice"));
     expect(manifest.headers.get(DEPLOYMENT_HEADER_V1)).toBe("foundation-v1");
   });
@@ -1669,10 +1667,11 @@ describe("Cloudflare user application gateway", () => {
     const html = await page.text();
     expect(html).toContain('data-frockbot-user-id="alice"');
     expect(html).toContain('data-frockbot-user-application="foundation-v1"');
-    const script = await gateway(request("/app.js", "alice"));
-    expect(script.headers.get("content-type")).toContain("text/javascript");
-    const stylesheet = await gateway(request("/app.css", "alice"));
-    expect(stylesheet.headers.get("content-type")).toContain("text/css");
+    // One script tag, under the content-addressed prefix the deploy's own
+    // static assets answer; the payload never reaches this Worker.
+    expect(html).toMatch(
+      /<script src="\/_flutter\/[a-z0-9]+\/flutter_bootstrap\.js" async>/,
+    );
 
     const turn = await gateway(
       request("/api/bots/primary/turns", "alice", {
@@ -2006,12 +2005,13 @@ describe("Cloudflare user application gateway", () => {
       'data-frockbot-auth-mode="development"',
     );
     expect(page.headers.get("set-cookie")).toContain("frockbot_dev_user=alice");
-    const script = await gateway(
-      new Request("https://frockbot.test/app.js", {
+    const again = await gateway(
+      new Request("https://frockbot.test/", {
         headers: { cookie: "frockbot_dev_user=alice" },
       }),
     );
-    expect(script.status).toBe(200);
+    expect(again.status).toBe(200);
+    expect(await again.text()).toContain('data-frockbot-user-id="alice"');
   });
 
   test("consumes the development identity before strict hosted query decoding", async () => {
@@ -2624,7 +2624,7 @@ describe("Cross-origin access for configured clients", () => {
     expect(page.headers.get("access-control-allow-origin")).toBeNull();
     expect(page.headers.get("vary")).toBeNull();
 
-    const asset = await gateway(clientOriginRequest("/app.js"));
+    const asset = await gateway(clientOriginRequest("/favicon.ico"));
     expect(asset.status).toBe(200);
     expect(asset.headers.get("access-control-allow-origin")).toBeNull();
   });

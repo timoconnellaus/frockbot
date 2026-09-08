@@ -1,8 +1,8 @@
 // The `SettingsFrame` a settings route already produces, projected as the
 // `ViewDocument` the host renders. The frame stays the authority — this reads
-// one and writes the other — so the Vue client keeps the shape it has while
-// the Flutter client renders settings through the one renderer a plugin will
-// use.
+// one and writes the other — so settings reach the client through the one
+// renderer a plugin will use, rather than through a second renderer of typed
+// fields.
 //
 // Two conventions carry the frame's extra meaning through a vocabulary that
 // has no room for it:

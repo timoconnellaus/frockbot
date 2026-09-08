@@ -2,8 +2,8 @@
 // `ViewDocument` the host renders — the same convention as
 // `app/settings/settings-document.ts`, reached with `?as=document`.
 //
-// The frame is the two reads the Vue section made separately: the Routines a
-// Bot holds, and the completion inbox the header badge counts. They are one
+// The frame is two reads in one: the Routines a Bot holds, and the completion
+// inbox the header badge counts. They are one
 // document because they are one surface, and because a client that had to ask
 // twice could show a Routine list and a badge that disagreed.
 //

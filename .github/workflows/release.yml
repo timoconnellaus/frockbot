@@ -78,6 +78,17 @@ jobs:
       - name: Test
         run: bun test
 
+      # `build` reaches `artifact:build`, whose first step is `flutter build
+      # web` in `apps/native` — the web client is Flutter Web. Pinned to the
+      # revision `apps/native/qualification.json` records and `native.yml`
+      # checks for. No cache in this privileged tag-only job, for the same
+      # reason the Bun and Node setups above restore none.
+      - name: Set up Flutter # zizmor: ignore[cache-poisoning] tag-only release job
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          flutter-version: 3.47.0
+          channel: stable
+
       - name: Build
         run: bun run build
 
@@ -121,12 +132,9 @@ jobs:
           const fs = require('node:fs');
           const path = require('node:path');
 
-          const directories = fs
-            .readdirSync('packages', { withFileTypes: true })
-            .filter((entry) => entry.isDirectory())
-            .map((entry) => path.join('packages', entry.name));
-          // The Applets SDK sits beside the module it authors for.
-          directories.push(path.join('applets', 'sdk'));
+          // The Applets SDK is the only published workspace: `packages/` is
+          // gone, and nothing else in this repository has a consumer off it.
+          const directories = [path.join('applets', 'sdk')];
 
           for (const directory of directories) {
             const file = path.join(directory, 'package.json');
@@ -190,19 +198,13 @@ jobs:
           fi
           export NPM_TAG_ARGS="${npm_tag_args[*]-}"
 
-          # Sixty packages publishing one after another spend almost all of
-          # their time waiting on the registry, so they run concurrently. Each
-          # is an independent registry write: the version rewrite above has
-          # already replaced every `workspace:` range with a literal version,
-          # so no package needs another to be on the registry first. Turn the
-          # width down if npm ever rate-limits the OIDC token exchange.
           publish_one() {
             local package_dir="${1%/}"
             local log status
 
             # Publishing from inside the package directory, rather than with
-            # `--workspace` from the root, keeps npm from resolving all sixty
-            # workspaces to pack one of them.
+            # `--workspace` from the root, keeps npm from resolving every
+            # workspace in the repository to pack one of them.
             log="$(cd "$package_dir" && npm publish --access public ${NPM_TAG_ARGS} 2>&1)"
             status=$?
 
@@ -224,15 +226,13 @@ jobs:
             printf '%s\n' "FAILED $package_dir@$VERSION" "$log" >&2
             return 1
           }
-          export -f publish_one
-
           # Only packages that declare `frockbot.npm` are published. Every
           # other package exists to build this product and has no consumer off
           # this repository; publishing them meant a release went red whenever
           # npm had no trusted publisher for one, while the deploy that
           # actually matters had already succeeded.
           published=()
-          for package_dir in packages/*/ applets/sdk/; do
+          for package_dir in applets/sdk/; do
             if node -e "process.exit(require('./${package_dir}package.json').frockbot?.npm === true ? 0 : 1)" 2>/dev/null; then
               published+=("$package_dir")
             fi
@@ -243,8 +243,9 @@ jobs:
             exit 1
           fi
 
-          printf '%s\n' "${published[@]}" \
-            | xargs -P 8 -I{} bash -c 'publish_one "$@"' _ {}
+          for package_dir in "${published[@]}"; do
+            publish_one "$package_dir" || exit 1
+          done
 
   github-release:
     name: Create GitHub release
@@ -409,6 +410,18 @@ jobs:
           }
           fs.writeFileSync(file, source.replace(production, `$1${databaseId}$2`));
           NODE
+
+      # The Flutter Web client is part of the app Worker's `assets` payload, so
+      # its build must happen before `wrangler deploy` below. `artifact:build`
+      # already chains it — `client:build` runs `flutter build web` in
+      # `apps/native` and stages `apps/cloudflare/dist/web` — so this step only
+      # has to make the pinned SDK present. Same pin as `native.yml`; no cache
+      # in this privileged tag-only job.
+      - name: Set up Flutter # zizmor: ignore[cache-poisoning] tag-only release job
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          flutter-version: 3.47.0
+          channel: stable
 
       - name: Build application artifact
         working-directory: apps/cloudflare

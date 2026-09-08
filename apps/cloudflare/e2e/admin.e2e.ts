@@ -1,70 +1,85 @@
-import { expect, test } from "./fixtures.ts";
-import { firstRunDialog, openApplication } from "./fixtures.ts";
+import type { Page } from "@playwright/test";
+import {
+  expect,
+  openApplication,
+  openProfileMenu,
+  sem,
+  SHELL_TIMEOUT_MS,
+  test,
+} from "./fixtures.ts";
 
 /**
- * Send the first-run dialog away. This User owns no Bot — it never creates
- * one — so the dialog and its backdrop come back on every load, and the
- * backdrop swallows the clicks the profile menu needs.
+ * Press a named widget.
+ *
+ * A `Semantics(identifier:)` around a widget that lays itself out — a
+ * `ListTile` in a `Card`, a `SwitchListTile` — reaches the accessibility tree
+ * as a container with `pointer-events: none`, and the node that takes the tap
+ * is its child. Clicking the identifier itself would land on the canvas behind
+ * it, so this presses whichever of the two the engine made tappable.
  */
-async function dismissFirstRun(page: Parameters<typeof openApplication>[0]) {
-  const firstRun = firstRunDialog(page);
-  if (!(await firstRun.isVisible().catch(() => false))) return;
-  await firstRun.getByRole("button", { name: "Cancel" }).click();
-  await expect(firstRun).toBeHidden();
-  await expect(page.locator(".flock-backdrop")).toHaveCount(0);
+function tap(scope: Page, identifier: string) {
+  const node = `[flt-semantics-identifier="${identifier}"]`;
+  return scope.locator(`${node}[flt-tappable], ${node} [flt-tappable]`).first();
 }
 
 /**
- * Two states have to converge, the way `createBot` converges them: the dialog
- * may not have opened yet when the profile menu is clicked, and its backdrop
- * swallows that click the moment it does. Retrying the whole approach settles
- * whichever order the shell arrives in.
+ * Let a surface finish arriving before pressing anything on it.
+ *
+ * Flutter rebuilds the accessibility tree when semantics change rather than
+ * once a frame, so a sliding sheet or a pushed page reaches the DOM at its
+ * final position while the canvas is still moving — and Playwright's own
+ * stability check, which watches that DOM box, sees nothing to wait for. The
+ * engine hit-tests a press against the frame it is painting, so a press issued
+ * then lands on whatever is passing under the pointer.
  */
-async function openAdmin(page: Parameters<typeof openApplication>[0]) {
-  await expect(async () => {
-    await dismissFirstRun(page);
-    await page.locator("button.profile-trigger").click({ timeout: 2_000 });
-    await page
-      .getByRole("menuitem", { name: "Admin" })
-      .click({ timeout: 2_000 });
-    await expect(page.getByRole("heading", { name: "Admin" })).toBeVisible({
-      timeout: 2_000,
-    });
-  }).toPass({ timeout: 60_000 });
+async function settle(page: Page): Promise<void> {
+  await page.waitForTimeout(700);
+}
+
+/**
+ * Admin belongs to the deployment rather than to the account, so its entry is
+ * in the profile sheet only for someone the gateway already answers it for.
+ */
+async function openAdmin(page: Page) {
+  await openProfileMenu(page);
+  await settle(page);
+  await tap(page, "profile-admin").click();
+  await expect(sem(page, "admin-signups")).toBeVisible({
+    timeout: SHELL_TIMEOUT_MS,
+  });
+}
+
+/** The switch itself, which is the child node of the named row. */
+function signups(page: Page) {
+  return sem(page, "admin-signups").locator('[role="switch"]');
 }
 
 test("an admin changes the durable signup policy", async ({ page }) => {
+  // `development` is the one identity this deployment treats as an admin, so
+  // this test does not take a fresh `userId` the way every other one does.
   await openApplication(page, "development");
-  await expect(page.locator("button.profile-trigger")).toHaveText(
-    "Local developer",
-  );
-  await openAdmin(page);
-
-  const toggle = page.getByLabel("Accept new signups");
-  await expect(toggle).toBeEnabled();
-  const initial = await toggle.isChecked();
-  // The same convergence `openAdmin` needs, for the same reason: this User owns
-  // no Bot, so the first-run dialog can arrive after the Admin page has opened
-  // and its backdrop then swallows this click — on a loaded CI runner it did,
-  // for the whole four-minute budget. Dismissing it and retrying the approach
-  // settles whichever order the shell arrives in; the subject of this test is
-  // the durable policy, not the dialog's timing.
-  //
-  // The click is guarded by the toggle's own reading rather than issued every
-  // attempt, because a retry that clicked again would toggle the policy back
-  // and the assertion would oscillate instead of settling.
-  await expect(async () => {
-    await dismissFirstRun(page);
-    if ((await toggle.isChecked()) === initial) {
-      await toggle.click({ timeout: 2_000 });
-    }
-    await expect(toggle).toBeChecked({ checked: !initial, timeout: 2_000 });
-  }).toPass({ timeout: 60_000 });
-
-  await page.reload();
-  await expect(page.locator("button.profile-trigger")).toBeVisible();
-  await openAdmin(page);
-  await expect(page.getByLabel("Accept new signups")).toBeChecked({
-    checked: !initial,
+  await openProfileMenu(page);
+  await expect(sem(page, "profile-name")).toContainText("FrockBot user");
+  await settle(page);
+  await tap(page, "profile-admin").click();
+  await expect(sem(page, "admin-signups")).toBeVisible({
+    timeout: SHELL_TIMEOUT_MS,
   });
+  await settle(page);
+
+  await expect(signups(page)).toBeEnabled();
+  const initial = await signups(page).getAttribute("aria-checked");
+  const flipped = initial === "true" ? "false" : "true";
+  await signups(page).click();
+  await expect(signups(page)).toHaveAttribute("aria-checked", flipped);
+
+  // The policy is the deployment's, not this session's: a reload reads it back
+  // from the authority rather than from anything the page was holding.
+  await page.reload();
+  await expect(
+    sem(page, "shell-sidebar").or(sem(page, "sidebar-toggle")),
+  ).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
+  await openAdmin(page);
+  await settle(page);
+  await expect(signups(page)).toHaveAttribute("aria-checked", flipped);
 });

@@ -70,7 +70,6 @@ test("every action names the Connection command it means", () => {
         {
           id: "conn-1",
           label: "Local Ollama",
-          service: "Ollama Cloud",
           state: "ready",
           packageId: "provider-ollama-cloud",
           kind: "model",
@@ -96,7 +95,6 @@ test("the platform's own account offers nothing to press", () => {
         {
           id: "flock-ai-ambient",
           label: "Frock AI",
-          service: "Frock AI",
           state: "ready",
           packageId: "provider-flock-ai",
           kind: "model",

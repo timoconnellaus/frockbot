@@ -3,8 +3,8 @@
 /// Two hosts over `ViewDocumentView`, because the server projects two
 /// documents (`app/bot-template/templates-document.ts`): what this Bot has
 /// been packed into is per-Bot, and what this account has imported is not.
-/// They share one page and a tab apiece, which is where the Vue put them too —
-/// the export section in Bot settings, the import section under Advanced.
+/// They share one page and a tab apiece — the export section in Bot settings,
+/// the import section under Advanced.
 ///
 /// Which Bot a pack is of is never in the document: it is the Bot the host is
 /// showing, and the host names it when it turns the press into a command.
@@ -79,11 +79,7 @@ Map<String, Object?> templateCommandV1(
         'visibility': chosen,
       };
     case 'revoke-share':
-      return {
-        ...meta,
-        'type': 'template/revoke',
-        'shareId': input['shareId'],
-      };
+      return {...meta, 'type': 'template/revoke', 'shareId': input['shareId']};
     case 'plan-import':
       final shareId = templateShareIdV1(
         input[templateLinkFieldV1] as String? ?? '',
@@ -209,7 +205,12 @@ class TemplatesPage extends StatelessWidget {
     child: Scaffold(
       appBar: AppBar(
         title: const Text('Bot templates'),
-        bottom: const TabBar(tabs: [Tab(text: 'Share'), Tab(text: 'Import')]),
+        bottom: const TabBar(
+          tabs: [
+            Tab(text: 'Share'),
+            Tab(text: 'Import'),
+          ],
+        ),
       ),
       body: TabBarView(
         children: [
@@ -218,8 +219,7 @@ class TemplatesPage extends StatelessWidget {
               builder: (context) => FrockEmptyState(
                 icon: Icons.inventory_2_outlined,
                 title: 'No Bot open',
-                detail:
-                    'Open a Bot to pack its profile, Skills, Routines and plugins into a template.',
+                detail: 'Open a Bot to pack its profile, Skills, Routines and plugins into a template.',
                 action: 'Back',
                 onAction: Navigator.of(context).pop,
               ),

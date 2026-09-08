@@ -128,6 +128,10 @@ class BotSettingsController extends ChangeNotifier {
   /// Three commands, each idempotent by its own id: the profile, the
   /// notification policy, and the Bot's model override. A failure leaves what
   /// already landed in place and says so, rather than pretending nothing did.
+  ///
+  /// Every configuration command is fenced on a revision, and each of these
+  /// three moves it — so the revision the receipt reports is what the next one
+  /// fences on rather than the one the read returned.
   Future<bool> save() async {
     if (saving) return false;
     saving = true;
@@ -184,8 +188,41 @@ class BotSettingsController extends ChangeNotifier {
     }
   }
 
+  /// One fenced command, and the revision it left behind.
+  ///
+  /// A conflict is re-fenced once against the revision the authority now
+  /// holds. The only writer that moves a Bot's settings between two of these
+  /// three is the previous one, so asking again with the current revision is
+  /// what a person pressing Save once means — and a second conflict is a real
+  /// one, from somewhere else, which is reported rather than retried.
   Future<void> _command(Map<String, Object?> command) async {
-    await api.request('/api/bots/$botId/settings', body: command);
+    try {
+      _settle(await _send(command));
+    } on RequestFailure catch (failure) {
+      if (failure.status != 409) rethrow;
+      final current = (await api.request('/api/bots/$botId/settings'))! as Map;
+      revision = current['revision']! as int;
+      _settle(await _send(command));
+    }
+  }
+
+  Future<Map<String, Object?>> _send(Map<String, Object?> command) async {
+    final answer = await api.request(
+      '/api/bots/$botId/settings',
+      body: {...command, 'expectedRevision': revision},
+    );
+    return (answer! as Map).cast<String, Object?>();
+  }
+
+  /// Adopt the receipt's revision, and refuse in the authority's own words.
+  void _settle(Map<String, Object?> receipt) {
+    final settled = receipt['revision'];
+    if (settled is int) revision = settled;
+    if (receipt['status'] != 'rejected') return;
+    final failure = receipt['failure'];
+    throw RequestFailure(
+      failure is String ? failure : 'Couldn’t save these settings. Try again.',
+    );
   }
 
   @override
@@ -211,8 +248,8 @@ class BotSettingsView extends StatefulWidget {
   final VoidCallback? onEditAvatar;
 
   /// Archiving, restoring and deleting belong to the Flock, whose directory
-  /// they change, so the zone is handed in rather than rebuilt here. This is
-  /// the seam `FlockDangerZone.vue` draws too.
+  /// they change, so the zone is handed in rather than rebuilt here. It is
+  /// built in `lib/flock/lifecycle.dart`, which owns that seam.
   final Widget? dangerZone;
   const BotSettingsView({
     super.key,

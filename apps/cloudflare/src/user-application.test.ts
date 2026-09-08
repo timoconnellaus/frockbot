@@ -97,6 +97,12 @@ const securityEnv = {
   DEPLOYMENT: { userId: "alice", applicationHash: "foundation-v1" },
 } as unknown as UserApplicationEnv;
 
+/** The projection the gateway stamps on a signed-in development session. */
+const developmentSession = {
+  "x-frockbot-auth-session-v1": "development",
+  "x-frockbot-is-admin-v1": "false",
+};
+
 describe("user application security headers", () => {
   test("strictly projects the gateway-owned auth mode into the hosted shell", async () => {
     const fetchUserApplication = createUserApplication();
@@ -138,11 +144,11 @@ describe("user application security headers", () => {
     }
   });
 
-  test("serves the stylesheet with a policy that allows the embedded fonts", async () => {
+  test("serves the document with the policy the Flutter engine needs", async () => {
     const fetchUserApplication = createUserApplication();
 
     const response = await fetchUserApplication(
-      new Request("https://app.example/app.css"),
+      new Request("https://app.example/", { headers: developmentSession }),
       securityEnv,
     );
 
@@ -150,15 +156,19 @@ describe("user application security headers", () => {
     const policy = parseContentSecurityPolicy(
       response.headers.get("content-security-policy"),
     );
-    // The shipped stylesheet embeds Manrope and Archivo Black as data: URIs,
-    // so fonts render only when the policy declares font-src for them.
+    // The client bundles Manrope and Archivo Black, and CanvasKit paints
+    // images through blob URLs.
     expect(policy.get("font-src")).toEqual(["'self'", "data:"]);
-    expect(policy.get("img-src")).toEqual(["'self'", "data:"]);
-    expect(policy.get("style-src")).toEqual(["'self'"]);
+    expect(policy.get("img-src")).toEqual(["'self'", "data:", "blob:"]);
+    // Two deliberate relaxations, and neither is optional: CanvasKit
+    // instantiates WebAssembly, and the engine injects a `<style>` element to
+    // measure text. The artifact origin's own policy is untouched.
+    expect(policy.get("style-src")).toEqual(["'self'", "'unsafe-inline'"]);
     // The zone injects the Cloudflare Insights beacon above this Worker, so a
     // policy that refused it logged a console error on every page load.
     expect(policy.get("script-src")).toEqual([
       "'self'",
+      "'wasm-unsafe-eval'",
       "https://static.cloudflareinsights.com",
     ]);
     expect(policy.get("connect-src")).toEqual([
@@ -166,6 +176,9 @@ describe("user application security headers", () => {
       "https://cloudflareinsights.com",
       "wss://app.example",
     ]);
+    // The document sets a `<base href>` of its own to the content-addressed
+    // directory the engine's URLs are relative to.
+    expect(policy.get("base-uri")).toEqual(["'self'"]);
     // Package pages use the anonymous UI origin; the expanded Computer viewer
     // frames the Sprite's own noVNC page.
     expect(policy.get("frame-src")).toEqual([
@@ -177,7 +190,7 @@ describe("user application security headers", () => {
 
   test("permits the same-origin development WebSocket explicitly", async () => {
     const response = await createUserApplication()(
-      new Request("http://localhost:8787/app.css"),
+      new Request("http://localhost:8787/", { headers: developmentSession }),
       securityEnv,
     );
     const policy = parseContentSecurityPolicy(
@@ -188,6 +201,21 @@ describe("user application security headers", () => {
       "https://cloudflareinsights.com",
       "ws://localhost:8787",
     ]);
+  });
+
+  test("boots the Flutter client from one content-addressed directory", async () => {
+    const response = await createUserApplication()(
+      new Request("https://app.example/", { headers: developmentSession }),
+      securityEnv,
+    );
+    const html = await response.text();
+    const base = html.match(/<base href="([^"]+)">/)?.[1];
+    expect(base).toMatch(/^\/_flutter\/[a-z0-9]+\/$/);
+    // One script, under the same prefix, so the document is the only thing
+    // that changes when the client does.
+    expect(html).toContain(`<script src="${base}flutter_bootstrap.js" async>`);
+    expect(html).not.toContain("/app.js");
+    expect(html).not.toContain("/app.css");
   });
 
   test("serves the site icon the hosted shell links", async () => {

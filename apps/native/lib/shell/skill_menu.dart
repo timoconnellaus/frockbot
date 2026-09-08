@@ -6,8 +6,8 @@
 /// whole point — a pasted body is a message the person could edit into
 /// something the Skill never said, while a ref is a name the Bot resolves.
 ///
-/// The ranking, the keyboard model and the three-chip bound are the Vue
-/// module's, kept free of any widget so they are testable without a frame.
+/// The ranking, the keyboard model and the three-chip bound are kept free of
+/// any widget, so they are testable without a frame.
 library;
 
 import 'package:flutter/material.dart';
@@ -148,7 +148,10 @@ SkillPopover? skillPopoverFor(String text, int caret) {
 /// Carried by ref rather than by index: the Skill under it keeps its place for
 /// as long as the query still offers it, and only a Skill that has dropped out
 /// of the list hands the highlight back to the first row.
-int keptSkillHighlight(String? highlightedRef, List<SkillCandidate> candidates) {
+int keptSkillHighlight(
+  String? highlightedRef,
+  List<SkillCandidate> candidates,
+) {
   if (candidates.isEmpty) return 0;
   final index = candidates.indexWhere(
     (candidate) => candidate.entry.ref == highlightedRef,
