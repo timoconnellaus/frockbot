@@ -86,7 +86,11 @@ export function nativeSessionOperation(
   if (op.action === "issue") {
     if (record)
       throw new Error("This sign-in has already been used. Sign in again.");
-    if (current.length >= 32)
+    // Active ones only. A revoked session is a device that has signed out,
+    // and counting it kept the slot for the rest of its seven days: sign in
+    // and out enough times on one phone and the app told you to sign out on
+    // another device, which could not have helped.
+    if (current.filter((item) => !item.revoked).length >= 32)
       throw new Error("Too many active sign-ins. Sign out on another device.");
     if (op.expiresAt <= now || op.expiresAt > now + 7 * 86400_000)
       throw new Error("Invalid native session expiry");

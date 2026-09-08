@@ -805,63 +805,80 @@ async function smoke(): Promise<void> {
   adb(serial, "logcat", "-c");
   adb(serial, "shell", "am", "start", "-n", `${APP}/.MainActivity`);
 
+  // The composer's placeholder, which is also its accessibility label.
+  const composer = "Message your Bot";
+  // The shell's sidebar toggle on a phone, which is also what the empty state
+  // offers: either one opens the Bot list.
+  const openBots = "Your Bots";
+
   // The app opens the browser on the authorization URL and logs it (debug
   // builds only). The browser leg is completed from here — the same
   // `/native/authorize` request Chrome would make, then the same return
   // delivered to the app — so a fresh emulator's Chrome first-run never gets
   // in the way. A tap in the app's first frames is lost, so the tap is
   // repeated until the log line proves it landed.
-  // Only the latest start is live: each one replaces the stored state, and
-  // a return for an earlier one is refused as expired.
+  //
+  // The whole leg is retried, because the browser is racing it: Chrome opens
+  // on the same URL, and a return is single-use — whichever of the two
+  // arrives second is refused, and the app says "Couldn't finish signing in"
+  // and offers to start over. Which is what this then does.
   const latestAuthorize = () =>
     [
       ...adb(serial, "logcat", "-d", "-s", "flutter").stdout.matchAll(
         /FROCKBOT_DEV_AUTHORIZE (\S+)/g,
       ),
     ].at(-1)?.[1];
-  let authorize: string | undefined;
-  for (let attempt = 0; attempt < 6 && !authorize; attempt++) {
-    await tap(serial, ["Continue as local developer"], 90_000);
-    const deadline = Date.now() + 20_000;
-    while (Date.now() < deadline && !authorize) {
-      await sleep(1000);
-      authorize = latestAuthorize();
+  const signedIn = () => {
+    const nodes = dump(serial);
+    return Boolean(find(nodes, openBots) || find(nodes, composer));
+  };
+  let home = false;
+  for (let round = 0; round < 3 && !home; round++) {
+    adb(serial, "logcat", "-c");
+    // Only the latest start is live: each one replaces the stored state, so
+    // the log is cleared first and the newest line is the one to complete.
+    let authorize: string | undefined;
+    for (let attempt = 0; attempt < 6 && !authorize; attempt++) {
+      await tap(
+        serial,
+        ["Continue as local developer", "Try sign-in again"],
+        90_000,
+      );
+      const deadline = Date.now() + 20_000;
+      while (Date.now() < deadline && !authorize) {
+        await sleep(1000);
+        authorize = latestAuthorize();
+      }
     }
+    if (!authorize) die("the app never started sign-in — see the emulator");
+    adb(serial, "shell", "am", "force-stop", "com.android.chrome");
+    const returned = await fetch(authorize, { redirect: "manual" });
+    const location = returned.headers.get("location");
+    if (returned.status !== 302 || !location?.startsWith("frockbot-dev://"))
+      die(`/native/authorize answered ${returned.status} ${location ?? ""}`);
+    // Quoted for the device's shell: an unquoted `&state=` would background
+    // the command and hand the app a return with no state.
+    adb(
+      serial,
+      "shell",
+      "am",
+      "start",
+      "-a",
+      "android.intent.action.VIEW",
+      "-d",
+      `'${location}'`,
+      APP,
+    );
+    const deadline = Date.now() + 60_000;
+    while (Date.now() < deadline && !home) {
+      await sleep(1000);
+      home = signedIn();
+    }
+    if (!home) warn("sign-in did not land; starting the leg again");
   }
-  if (!authorize) die("the app never started sign-in — see the emulator");
-  adb(serial, "shell", "am", "force-stop", "com.android.chrome");
-  const returned = await fetch(authorize!, { redirect: "manual" });
-  const location = returned.headers.get("location");
-  if (returned.status !== 302 || !location?.startsWith("frockbot-dev://"))
-    die(`/native/authorize answered ${returned.status} ${location ?? ""}`);
-  // Quoted for the device's shell: an unquoted `&state=` would background
-  // the command and hand the app a return with no state.
-  adb(
-    serial,
-    "shell",
-    "am",
-    "start",
-    "-a",
-    "android.intent.action.VIEW",
-    "-d",
-    `'${location}'`,
-    APP,
-  );
+  if (!home) die("the app never signed in — see the emulator");
 
-  say("waiting for the signed-in home, then opening the Bot");
-  // The composer's placeholder, which is also its accessibility label.
-  const composer = "Message your Bot";
-  // The shell's sidebar toggle on a phone, which is also what the empty state
-  // offers: either one opens the Bot list.
-  const openBots = "Your Bots";
-  await waitFor(
-    "the signed-in home",
-    async () => {
-      const nodes = dump(serial);
-      return Boolean(find(nodes, openBots) || find(nodes, composer));
-    },
-    90_000,
-  );
+  say("opening the Bot");
   if (!find(dump(serial), composer)) {
     // A fresh sign-in lands on "Choose a Bot to begin" with the drawer closed.
     if (!find(dump(serial), BOT_NAME)) await tap(serial, [openBots]);

@@ -727,3 +727,43 @@ test("settings input is byte- and depth-bounded before JSON decoding", async () 
     readNativeJsonBody(request(JSON.stringify("🐑".repeat(10))), 20),
   ).rejects.toThrow("Too much input");
 });
+
+// A person who signs in and out on the same phone was locked out of it: a
+// revoked session kept its slot for the rest of its seven days, so the
+// thirty-third sign-in was refused with "Sign out on another device" — which
+// is the one thing that could not have helped.
+test("a device that signed out gives its slot back", () => {
+  const storage = new Map<string, unknown>();
+  const kv = {
+    get: <T>(key: string) => storage.get(key) as T | undefined,
+    put: (key: string, value: unknown) => storage.set(key, value),
+  };
+  const now = Date.UTC(2026, 8, 8);
+  const hello = {
+    schemaVersion: 1 as const,
+    protocolVersion: 1 as const,
+    nativeVersion: "1.1.0",
+    catalogs: [],
+  };
+  const sign = (sessionId: string, action: "issue" | "revoke") =>
+    nativeSessionOperation(
+      kv,
+      {
+        schemaVersion: 1 as const,
+        userId: "user-1",
+        sessionId,
+        hello,
+        expiresAt: now + 7 * 86400_000,
+        action,
+      },
+      now,
+    );
+
+  for (let index = 0; index < 32; index += 1) {
+    expect(sign(`session-${index}`, "issue")).not.toBeNull();
+  }
+  expect(() => sign("session-32", "issue")).toThrow("Too many active sign-ins");
+
+  sign("session-0", "revoke");
+  expect(sign("session-32", "issue")).not.toBeNull();
+});
