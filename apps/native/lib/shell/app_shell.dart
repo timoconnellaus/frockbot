@@ -1002,9 +1002,16 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                     activity.unread[bot.botId.value]?.unreadFromMessageId,
                 background: _background(bot.botId.value),
                 onWorkingChanged: (runId) {
-                  if (runId != workingRunId && mounted) {
-                    setState(() => workingRunId = runId);
-                  }
+                  if (runId == workingRunId || !mounted) return;
+                  final settled = workingRunId != null && runId == null;
+                  setState(() => workingRunId = runId);
+                  // A Turn is how an Applet comes into existence, and the
+                  // header names the Applets the Bot holds — so the directory
+                  // is re-read when the Turn that may have changed it ends.
+                  // Read on adoption alone, a Bot that had just made its first
+                  // Applet had no way to it until the page was reloaded.
+                  final canvas = appletCanvas;
+                  if (settled && canvas != null) unawaited(canvas.load());
                 },
               ),
       ),
