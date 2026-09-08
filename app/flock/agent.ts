@@ -705,7 +705,7 @@ export function createInboundAgentPromptSectionV1(
     order: 93,
     render: (context) => {
       if (context.turnType !== "agent" || !host.inboundAgent) return "";
-      return `Bot ${promptText(host.inboundAgent.fromBotName)} (${promptText(host.inboundAgent.fromBotId)}) asked you the current question. Answer it directly with send_to_user; that answer returns to the asking Bot.`;
+      return `Bot ${promptText(host.inboundAgent.fromBotName)} (${promptText(host.inboundAgent.fromBotId)}) asked you the current question. Answer it directly with a send_to_user call carrying disposition:"finish"; that answer returns to the asking Bot.`;
     },
   };
 }

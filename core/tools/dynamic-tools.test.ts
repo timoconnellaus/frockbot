@@ -593,6 +593,36 @@ describe("progressive tool disclosure", () => {
     );
   });
 
+  test("the prompt catalog applies the same subagent-role ceiling as admission", async () => {
+    const { tools, systemPrompt } = toolsFixture();
+    tools.register({
+      ...dynamicTool("frockbot", "computer_exec"),
+      admission: { turnTypes: ["subagent"], subagentRoles: ["computerUse"] },
+    });
+    tools.register({
+      ...dynamicTool("frockbot", "memory_write"),
+      admission: { turnTypes: ["subagent"] },
+    });
+
+    const catalogFor = async (subagentRole?: string) =>
+      (
+        await systemPrompt.assemble({
+          sessionId: "session",
+          provider: "provider",
+          model: "model",
+          turnType: "subagent",
+          ...(subagentRole === undefined ? {} : { subagentRole }),
+        })
+      ).text;
+
+    expect(await catalogFor("computerUse")).toContain(
+      'tools="computer_exec, memory_write"',
+    );
+    const videoReview = await catalogFor("videoReview");
+    expect(videoReview).toContain('tools="memory_write"');
+    expect(videoReview).not.toContain("computer_exec");
+  });
+
   test("rejects duplicate namespace/tool identities but permits the same bare name elsewhere", async () => {
     const { tools } = toolsFixture();
     tools.register(dynamicTool("mail-one", "search"));

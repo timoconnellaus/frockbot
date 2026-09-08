@@ -402,7 +402,13 @@ export class ToolRegistry implements ToolExecution {
     systemPrompt?.register({
       id: "dynamic-tool-catalog",
       order: 70,
-      render: (context) => this.renderDynamicToolCatalog(context.turnType),
+      render: (context) =>
+        this.renderDynamicToolCatalog({
+          turnType: context.turnType,
+          ...(context.subagentRole === undefined
+            ? {}
+            : { subagentRole: context.subagentRole }),
+        }),
     });
   }
 
@@ -946,8 +952,11 @@ export class ToolRegistry implements ToolExecution {
     };
   }
 
-  private renderDynamicToolCatalog(turnType: TurnTypeV1): string {
-    const namespaces = this.availableNamespaces({ turnType });
+  private renderDynamicToolCatalog(admission: {
+    turnType: TurnTypeV1;
+    subagentRole?: string;
+  }): string {
+    const namespaces = this.availableNamespaces(admission);
     if (namespaces.length === 0) return "";
     const entries = namespaces.map((namespace) => {
       const attributes = [

@@ -328,6 +328,137 @@ test("eviction after a final send or its completed step never calls the model ag
   }
 });
 
+test("a repaired interim update restores the full toolset for the rest of the Turn", async () => {
+  const requests: NormalizedModelRequest[] = [];
+  const events = await run({
+    id: "test",
+    async *stream(request) {
+      requests.push(request);
+      if (requests.length === 1) {
+        yield { type: "text-delta", text: "I should look that up." };
+        yield { type: "finish", reason: "completed" };
+        return;
+      }
+      if (requests.length === 2) {
+        expect(request.tools.map((tool) => tool.name)).toEqual([
+          "send_to_user",
+        ]);
+        yield {
+          type: "tool-call",
+          call: {
+            id: "ack",
+            name: "send_to_user",
+            input: {
+              disposition: "continue",
+              payload: { type: "text", text: "On it." },
+            },
+          },
+        };
+        yield { type: "finish", reason: "tool-calls" };
+        return;
+      }
+      expect(request.tools.map((tool) => tool.name)).toEqual([
+        "send_to_user",
+        "get_dynamic_tools",
+        "call_dynamic_tool",
+      ]);
+      expect(request.messages.at(-1)).not.toMatchObject({
+        content: expect.stringContaining("[FrockBot runtime: delivery repair]"),
+      });
+      if (requests.length === 3) {
+        yield {
+          type: "tool-call",
+          call: {
+            id: "fetch",
+            name: "call_dynamic_tool",
+            input: {
+              namespace: "frockbot",
+              toolName: "web_fetch",
+              arguments: { url: "https://example.com" },
+            },
+          },
+        };
+        yield { type: "finish", reason: "tool-calls" };
+        return;
+      }
+      const result = request.messages.at(-1);
+      expect(result?.role === "tool" && result.content).toContain(
+        "Example result",
+      );
+      yield {
+        type: "tool-call",
+        call: {
+          id: "answer",
+          name: "send_to_user",
+          input: {
+            disposition: "finish",
+            payload: { type: "text", text: "Example result" },
+          },
+        },
+      };
+      yield { type: "finish", reason: "tool-calls" };
+    },
+  });
+  expect(requests).toHaveLength(4);
+  const sends = events.filter((e) => e.type === "send/to-user");
+  expect(sends).toHaveLength(2);
+  expect(sends.at(-1)).toMatchObject({
+    payload: { type: "text", text: "Example result" },
+  });
+  expect(events.at(-1)).toMatchObject({
+    type: "turn/end",
+    outcome: "completed",
+  });
+});
+
+test("text-only steps either side of a delivered update do not fail the Turn", async () => {
+  let requests = 0;
+  const events = await run({
+    id: "test",
+    async *stream() {
+      requests++;
+      if (requests === 2) {
+        yield {
+          type: "tool-call",
+          call: {
+            id: "ack",
+            name: "send_to_user",
+            input: {
+              disposition: "continue",
+              payload: { type: "text", text: "On it." },
+            },
+          },
+        };
+        yield { type: "finish", reason: "tool-calls" };
+        return;
+      }
+      if (requests === 4) {
+        yield {
+          type: "tool-call",
+          call: {
+            id: "answer",
+            name: "send_to_user",
+            input: {
+              disposition: "finish",
+              payload: { type: "text", text: "Done." },
+            },
+          },
+        };
+        yield { type: "finish", reason: "tool-calls" };
+        return;
+      }
+      yield { type: "text-delta", text: "private scratch text" };
+      yield { type: "finish", reason: "completed" };
+    },
+  });
+  expect(requests).toBe(4);
+  expect(events.filter((e) => e.type === "send/to-user")).toHaveLength(2);
+  expect(events.at(-1)).toMatchObject({
+    type: "turn/end",
+    outcome: "completed",
+  });
+});
+
 test("specialist schemas are disclosed on demand and interim work reaches a final reply", async () => {
   let requests = 0;
   const events = await run({

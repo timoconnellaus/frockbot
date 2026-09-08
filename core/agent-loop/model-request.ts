@@ -123,6 +123,11 @@ export async function requestModelV1(
     // The same turn type the tool catalog is trimmed to. A section that
     // renders what a Turn may do would otherwise have to guess it.
     turnType: runtime.turnType,
+    // The same role ceiling the tool catalog is trimmed to, so a section
+    // never names a tool this subagent would be refused.
+    ...(runtime.subagentRole === undefined
+      ? {}
+      : { subagentRole: runtime.subagentRole }),
     // Where the Turn is in its budget, so a section can warn the model
     // before the loop stops it.
     step: { current: step, max: runtime.maxSteps },

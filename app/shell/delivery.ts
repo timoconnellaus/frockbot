@@ -4,9 +4,24 @@ import { turnTypesByTurnV1 } from "./history.js";
 export const UNSENT_REPLY_REASON_V1 =
   "The model finished without sending a reply. Try again.";
 
-/** The disposition is already durable in tool/call; tie it to a successful send. */
+/**
+ * Two independent facts about the Turn, deliberately not one.
+ *
+ * `required` is the final reply still owed to the user: only a finish send
+ * (or a widget/approval, which end the Turn themselves) clears it, so an
+ * interim update never completes the Turn.
+ *
+ * `attempts` counts undelivered model steps *since the last successful send*,
+ * and `repair` says the most recent step was one of them. A send of either
+ * disposition proves the model can reach the user, so it clears both and the
+ * next step gets its full toolset back instead of being locked to the reply
+ * tool for the rest of the Turn.
+ *
+ * The disposition is already durable in tool/call; tie it to a successful send.
+ */
 function delivery(events: readonly SessionEvent[], turn: number) {
   let attempts = 0;
+  let repair = false;
   const finalCalls = new Set<string>();
   for (const event of events) {
     if (!("turn" in event) || event.turn !== turn) continue;
@@ -20,18 +35,22 @@ function delivery(events: readonly SessionEvent[], turn: number) {
       )
         finalCalls.add(event.occurrenceId);
     }
-    if (
-      event.type === "send/to-user" &&
-      (finalCalls.has(event.occurrenceId) ||
+    if (event.type === "send/to-user") {
+      if (
+        finalCalls.has(event.occurrenceId) ||
         event.payload.type === "widget" ||
-        event.payload.type === "approval")
-    )
-      return { required: false, attempts };
-    if (event.type === "assistant/message" && event.toolCalls.length === 0)
+        event.payload.type === "approval"
+      )
+        return { required: false, attempts: 0, repair: false };
+      attempts = 0;
+      repair = false;
+    }
+    if (event.type === "assistant/message" && event.toolCalls.length === 0) {
       attempts++;
+      repair = true;
+    } else if (event.type === "assistant/message") repair = false;
   }
-  // An interim update never fulfils the final reply owed to the user.
-  return { required: true, attempts };
+  return { required: true, attempts, repair };
 }
 
 function conversational(events: readonly SessionEvent[], turn: number) {
@@ -50,7 +69,9 @@ export const conversationDeliveryHooksV1: LoopHooksV1 = {
     )
       return request;
     const state = delivery(agent.session.events, start.turn);
-    if (!state.required || state.attempts === 0) return request;
+    // Repair the step that failed to deliver, not the rest of the Turn: a Bot
+    // that has already spoken keeps every tool it needs to finish the work.
+    if (!state.required || !state.repair) return request;
     return {
       ...request,
       system: `${request.system}\n\nYour previous step ended without delivering a reply. Your assistant text is private. Call \`send_to_user\` now with the answer, result, or blocker. Do not repeat work you have already done.`,

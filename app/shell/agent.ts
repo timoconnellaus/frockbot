@@ -141,13 +141,13 @@ export function stepBudgetPromptTextV1(context: {
   if (remaining === 0) {
     return [
       "<step_budget>",
-      `This is the last step of this reply; after it the reply is stopped automatically. Do nothing except call \`${SEND_TO_USER_TOOL_V1}\` once with a short status for the person: what is finished, what is not, and what they can do next.`,
+      `This is the last step of this reply; after it the reply is stopped automatically. Do nothing except call \`${SEND_TO_USER_TOOL_V1}\` once with disposition:"finish" and a short status for the person: what is finished, what is not, and what they can do next.`,
       "</step_budget>",
     ].join("\n");
   }
   return [
     "<step_budget>",
-    `This reply has ${remaining} ${remaining === 1 ? "step" : "steps"} left after this one before it is stopped automatically. Do not start new work. Call \`${SEND_TO_USER_TOOL_V1}\` now with a short status for the person: what is finished, what is not, and what they can do next.`,
+    `This reply has ${remaining} ${remaining === 1 ? "step" : "steps"} left after this one before it is stopped automatically. Do not start new work. Call \`${SEND_TO_USER_TOOL_V1}\` now with disposition:"finish" and a short status for the person: what is finished, what is not, and what they can do next.`,
     "</step_budget>",
   ].join("\n");
 }
@@ -164,7 +164,7 @@ export function timeBudgetPromptTextV1(context: {
   }
   return [
     "<time_budget>",
-    `This Turn has fewer than 2 minutes left before it is stopped automatically. Do not start new work. Call \`${SEND_TO_USER_TOOL_V1}\` now with a short status for the person: what is finished, what is not, and what they can do next.`,
+    `This Turn has fewer than 2 minutes left before it is stopped automatically. Do not start new work. Call \`${SEND_TO_USER_TOOL_V1}\` now with disposition:"finish" and a short status for the person: what is finished, what is not, and what they can do next.`,
     "</time_budget>",
   ].join("\n");
 }
