@@ -108,7 +108,14 @@ test("the right-panel Computer card fits the mobile shell", async ({
   // At this width the right panel is not a column: its entries are pages, and
   // the header names each of them itself rather than offering a list once one
   // of them is opened.
-  await page.getByRole("button", { name: "Computer", exact: true }).click();
+  // The header's, which is the first one in the document. The panel it opens
+  // names itself too — with `aria-current` on it, because it is the one being
+  // shown — and the desktop leg above has already opened it once, so both are
+  // in the tree by the time the width changes.
+  await page
+    .getByRole("button", { name: "Computer", exact: true })
+    .first()
+    .click();
   const card = sem(page, "computer-card");
   await expect(card).toBeVisible({ timeout: 60_000 });
 

@@ -324,6 +324,10 @@ class ChatController extends ChangeNotifier {
     // intent on what happened to be on screen would have the Bot refuse a
     // message the person had every right to send.
     final supersedes = runningRunId;
+    // Whether this message is waiting behind anything at all — a Turn the Bot
+    // is running, or an earlier send whose own admission is still in flight.
+    // Read before the new submission joins the list.
+    final waitsBehind = activeRunId != null;
     pending = [...pending, submission];
     // A message that displaces a running Turn joins the thread at once, greyed
     // and queued, rather than waiting for a durable read. The send route does
@@ -331,7 +335,7 @@ class ChatController extends ChangeNotifier {
     // drain — the only window in which the thread has anything to say about
     // it — is over by the time authority could have told this client. The
     // durable projection replaces this by run id the moment it arrives.
-    if (supersedes != null) _putOptimisticQueuedRun(submission);
+    if (waitsBehind) _putOptimisticQueuedRun(submission);
     changed();
     draft = '';
     try {

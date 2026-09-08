@@ -163,12 +163,60 @@ void main() {
       }
     },
   );
+  // The same window, one beat earlier: the Turn ahead has been sent but its own
+  // POST has not answered yet, so the transcript has no durable run to read it
+  // from. The composer is open either way — "do this instead" does not wait for
+  // a projection — and what the thread says has to be about the wait, not about
+  // what this client had managed to observe.
+  test('a message sent behind one still being delivered says so too', () async {
+    final store = MemoryStore();
+    final transport = HeldSendTransport(runs: const []);
+    final controller = ChatController(
+      transport: transport,
+      store: store,
+      userId: 'user-1',
+      botId: 'bot-1',
+    );
+    try {
+      await controller.initialize();
+      expect(controller.runningRunId, isNull);
+
+      unawaited(controller.send('first'));
+      await Future<void>.delayed(Duration.zero);
+      unawaited(controller.send('second'));
+      await Future<void>.delayed(Duration.zero);
+
+      expect(
+        supersedeDrainState(
+          projectRuns(controller.runs),
+          DateTime.now(),
+        ),
+        SupersedeDrainState.stopping,
+      );
+    } finally {
+      controller.dispose();
+    }
+  });
+
 }
 
 /// A transport whose send never answers, which is what superseding a running
 /// Turn looks like from the client: the route holds the POST open until the
 /// Turn it replaced has settled.
 class HeldSendTransport implements ChatTransport {
+  HeldSendTransport({List<Map<String, dynamic>>? runs}) : runs = runs ?? _oneRunning;
+
+  static const _oneRunning = [
+    {
+      'runId': 'run-a',
+      'admittedAt': '2026-09-05T01:00:00Z',
+      'input': 'the first message',
+      'status': 'running',
+      'events': <Object>[],
+    },
+  ];
+
+  final List<Map<String, dynamic>> runs;
   final _held = Completer<void>();
   final observedSupersedes = <String?>[];
 
@@ -176,15 +224,7 @@ class HeldSendTransport implements ChatTransport {
 
   @override
   Future<Map<String, dynamic>> page(String botId, {String? before}) async => {
-    'runs': [
-      {
-        'runId': 'run-a',
-        'admittedAt': '2026-09-05T01:00:00Z',
-        'input': 'the first message',
-        'status': 'running',
-        'events': <Object>[],
-      },
-    ],
+    'runs': runs,
     'page': {'truncated': false},
   };
 
