@@ -14,7 +14,13 @@ function delivery(events: readonly SessionEvent[], turn: number) {
   let attempts = 0;
   for (const event of events) {
     if (!("turn" in event) || event.turn !== turn) continue;
-    if (event.type === "send/to-user") required = false;
+    if (event.type === "send/to-user") {
+      // A question or approval hands control to the User. A later call in
+      // the same batch must not make delivery repair reopen that Turn.
+      if (event.payload.type === "widget" || event.payload.type === "approval")
+        return { required: false, attempts };
+      required = false;
+    }
     // An acknowledgement before doing work does not deliver its result.
     if (event.type === "tool/call" && !isSend(event.name)) required = true;
     if (

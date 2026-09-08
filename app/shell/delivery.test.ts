@@ -161,3 +161,41 @@ test("eviction after an unsent step does not silently complete the Turn", async 
     outcome: "completed",
   });
 });
+
+test("a widget still ends the Turn when another tool in its batch fails", async () => {
+  let requests = 0;
+  const events = await run({
+    id: "test",
+    async *stream() {
+      requests++;
+      yield {
+        type: "tool-call",
+        call: {
+          id: "question",
+          name: "send_to_user",
+          input: {
+            payload: {
+              type: "widget",
+              widget: {
+                prompt: "Which option?",
+                options: ["Continue"],
+                allowCustom: true,
+                dismissOnMoveOn: false,
+              },
+            },
+          },
+        },
+      };
+      yield {
+        type: "tool-call",
+        call: { id: "unavailable", name: "unavailable_tool", input: {} },
+      };
+      yield { type: "finish", reason: "tool-calls" };
+    },
+  });
+  expect(requests).toBe(1);
+  expect(events.at(-1)).toMatchObject({
+    type: "turn/end",
+    outcome: "completed",
+  });
+});
