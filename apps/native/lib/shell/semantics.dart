@@ -282,7 +282,10 @@ abstract final class SearchIds {
 /// — the canvas region, its progress line, the App/Code toggle, one file
 /// button and the failure's retry — so both specs can be rewritten against
 /// Flutter Web with the same intent rather than re-derived from the widgets.
-/// The chip that opens the canvas is the header's `Applet: <name>` button.
+/// The chip that opens the canvas is the header's Applet strip: one button per
+/// Applet the Bot holds, named for it. The identifier is on the strip rather
+/// than on a button, because how many buttons are in it is the header's
+/// business and "open the Applets" is one gesture whatever it holds.
 abstract final class AppletIds {
   static const canvas = 'applet-canvas';
   static const chip = 'applet-chip';

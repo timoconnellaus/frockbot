@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/shell/chat_header.dart';
+import 'package:frockbot_native/shell/semantics.dart';
 import 'package:frockbot_native/theme/frock_theme.dart';
+
+import 'shell_layout_test.dart' show byIdentifier;
 
 void main() {
   testWidgets(
@@ -68,6 +71,9 @@ void main() {
           for (final name in ['Computer', 'Routines']) {
             await tester.tap(find.byTooltip(name));
           }
+          // The Applet strip is the header's named entry to the canvas, which
+          // is the gesture the Applet specs make at every width.
+          expect(byIdentifier(AppletIds.chip), findsOneWidget);
           await tester.tap(find.text('Project notes with a long name'));
           expect(opened, ['Settings', 'Computer', 'Routines', 'Applet']);
           expect(find.text('Applets'), findsNothing);

@@ -92,34 +92,41 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
                 ),
               ),
               padding: const EdgeInsets.fromLTRB(12, 0, 12, 3),
-              child: ListView(
-                scrollDirection: Axis.horizontal,
-                children: [
-                  for (final applet in applets)
-                    ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 240),
-                      child: Tooltip(
-                        message: applet.label,
-                        child: TextButton.icon(
-                          onPressed: applet.onOpen,
-                          icon: const ChatIcon(ChatIconKind.applet, size: 16),
-                          label: Text(
-                            applet.label,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
+              // The header's entry to the Applets, named as one thing: how
+              // many buttons are in the strip is the header's business, and
+              // what a reader means by "open the Applets" is the first of
+              // them.
+              child: identified(
+                AppletIds.chip,
+                ListView(
+                  scrollDirection: Axis.horizontal,
+                  children: [
+                    for (final applet in applets)
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 240),
+                        child: Tooltip(
+                          message: applet.label,
+                          child: TextButton.icon(
+                            onPressed: applet.onOpen,
+                            icon: const ChatIcon(ChatIconKind.applet, size: 16),
+                            label: Text(
+                              applet.label,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            style: _appletStyle(context),
                           ),
-                          style: _appletStyle(context),
                         ),
                       ),
-                    ),
-                  if (onRetryApplets != null)
-                    TextButton.icon(
-                      onPressed: onRetryApplets,
-                      icon: const Icon(Icons.refresh, size: 16),
-                      label: const Text('Couldn’t load Applets · Retry'),
-                      style: _appletStyle(context),
-                    ),
-                ],
+                    if (onRetryApplets != null)
+                      TextButton.icon(
+                        onPressed: onRetryApplets,
+                        icon: const Icon(Icons.refresh, size: 16),
+                        label: const Text('Couldn’t load Applets · Retry'),
+                        style: _appletStyle(context),
+                      ),
+                  ],
+                ),
               ),
             ),
           ),

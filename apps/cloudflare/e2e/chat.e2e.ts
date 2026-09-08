@@ -96,6 +96,20 @@ function saidByUser(page: Page): Locator {
 }
 
 /**
+ * The thread with the person's own messages taken out of it.
+ *
+ * A spec scripts the stub by putting a tool-call line in the message it sends,
+ * and the thread shows a person their own words back — so the words "send_to_
+ * user" are in the transcript because *they* typed them. What a claim about
+ * what the conversation says of a tool means is what it says that nobody typed.
+ */
+async function transcriptWithoutTheUser(page: Page): Promise<string> {
+  const transcript = (await sem(page, "chat-transcript").textContent()) ?? "";
+  const mine = await saidByUser(page).allTextContents();
+  return mine.reduce((text, said) => text.split(said).join(""), transcript);
+}
+
+/**
  * The thread as the reader sees it, top to bottom.
  *
  * A canvas has no document order to read a transcript off, and the engine puts
@@ -209,13 +223,12 @@ test("Turns stay ordered, render Markdown, and survive a reload", async ({
   const sidebarRow = sem(page, "shell-sidebar")
     .locator('[flt-semantics-identifier^="sidebar-bot-"]')
     .filter({ hasText: "Talker" });
-  // The row's line is the Turn's own reply — what the model wrote — rather
-  // than the bubble the thread drew from `send_to_user`. That is the durable
-  // preview the server projects, and it is deliberately not the same thing:
-  // one is the conversation, the other is the row above it.
-  await expect(sidebarRow).toContainText(E2E_ASSISTANT_REPLY, {
-    timeout: 10_000,
-  });
+  // The row's line is what the Bot *said* — the last explicit send of the
+  // Turn — and never the model's own text, which is private whatever the row
+  // has room for. It is the durable preview the server projects, so it is the
+  // words rather than the rendering: the thread draws the Markdown, the row
+  // repeats the sentence.
+  await expect(sidebarRow).toContainText(firstReply, { timeout: 10_000 });
   await expect(sidebarRow).not.toContainText("No messages yet");
 
   await send(page, `second\n${says(secondReply)}`, { replies: 1 });
@@ -242,9 +255,8 @@ test("Turns stay ordered, render Markdown, and survive a reload", async ({
     .toEqual(["Rendered this for you", "And that as well"]);
   await expect.poll(() => threadOrder(page)).toEqual(expectedOrder);
   await revealSidebar(page);
-  // The row survives the reload the same way, and says the same thing it said
-  // before it: the Turn's own reply, not the bubble.
-  await expect(sidebarRow).toContainText(E2E_ASSISTANT_REPLY);
+  // The row survives the reload the same way, on the newest Turn's send.
+  await expect(sidebarRow).toContainText(secondReply);
 });
 
 test("a Turn that is running when the page reloads still delivers its reply", async ({
@@ -391,9 +403,13 @@ test("a delivered reply is one bubble, wide enough for its own text", async ({
   await expect(sem(page, "working-indicator")).toHaveCount(0, {
     timeout: 120_000,
   });
-  const transcript = (await sem(page, "chat-transcript").textContent()) ?? "";
-  expect(transcript).not.toMatch(/send_to_user/);
-  expect(transcript).not.toMatch(/tool call/i);
+  // The person's own message is left out of the reading: the script that told
+  // the stub what to say is words *they* typed, and the thread is right to
+  // show them back. What is claimed here is that the conversation adds nothing
+  // of its own about the call.
+  const said = await transcriptWithoutTheUser(page);
+  expect(said).not.toMatch(/send_to_user/);
+  expect(said).not.toMatch(/tool call/i);
 });
 
 // The settled case above, from the other end of a Turn. The avatar used to sit
