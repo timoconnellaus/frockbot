@@ -131,9 +131,10 @@ test("the default panel and Settings fit the mobile shell", async ({
   // nothing is on screen until it is asked for.
   await expect(sem(page, "bot-settings")).toHaveCount(0);
   await settle(page);
+  // One tap. The header names its three destinations separately now, so the
+  // Bot settings control opens Bot settings rather than a chooser of what the
+  // region holds.
   await tap(page, "bot-panel-toggle").click();
-  await settle(page);
-  await entry(page, "Settings").click();
   await expect(sem(page, "bot-settings")).toBeVisible({ timeout: 60_000 });
   await expect(says(page, "Pocket's screen")).toHaveCount(0);
 
