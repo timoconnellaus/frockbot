@@ -924,7 +924,7 @@ describe("client run protocol v1", () => {
       type: "tool/result",
       callId: "tool-257",
     });
-    expect(overBoundary?.outcome).toEqual({ type: "completed", text: "done" });
+    expect(overBoundary?.outcome).toEqual({ type: "completed", text: "" });
     expect(
       decodeClientRunListV1({
         schemaVersion: 1,
@@ -1483,7 +1483,7 @@ describe("dispatched subagents in the run projection", () => {
     ).toHaveLength(1);
   });
 
-  test("an interrupted Turn keeps the text it had already streamed", () => {
+  test("an interrupted Turn keeps private model text off the wire", () => {
     const streamed: SessionEvent[] = [
       event({
         type: "assistant/chunk",
@@ -1517,21 +1517,18 @@ describe("dispatched subagents in the run projection", () => {
       });
       expect(projected.outcome).toMatchObject({
         type: status,
-        text: "The three things to know are first, that",
       });
       // And it survives the wire: the client reads it as the Turn's text, with
       // the notice kept separately as the line that says why it stops there.
       const decoded = decodeClientRunPageV1(
         createClientRunListV1([projected], { truncated: false }),
       ).runs[0];
-      expect(decoded?.responseText).toBe(
-        "The three things to know are first, that",
-      );
+      expect(decoded?.responseText).toBeUndefined();
       expect(decoded?.failure).toBeDefined();
     }
   });
 
-  test("a running Turn projects the words it has written so far", () => {
+  test("a running Turn keeps model chunks off the wire", () => {
     const streamed: SessionEvent[] = [
       event({
         type: "assistant/chunk",
@@ -1554,14 +1551,14 @@ describe("dispatched subagents in the run projection", () => {
     ];
 
     const projected = projectClientRunV1(storedRun(streamed, "running"));
-    expect(projected.partialText).toBe("Half a thought");
+    expect(projected.partialText).toBeUndefined();
     expect(projected.outcome).toBeUndefined();
 
     // And it survives the wire, so the thread draws it while the Turn runs.
     const decoded = decodeClientRunPageV1(
       createClientRunListV1([projected], { truncated: false }),
     ).runs[0];
-    expect(decoded?.partialText).toBe("Half a thought");
+    expect(decoded?.partialText).toBeUndefined();
     expect(decoded?.responseText).toBeUndefined();
   });
 
@@ -1617,9 +1614,9 @@ describe("dispatched subagents in the run projection", () => {
         text: "the answer",
       }),
     ];
-    expect(projectClientRunV1(storedRun(streamed, "running")).partialText).toBe(
-      "the answer",
-    );
+    expect(
+      projectClientRunV1(storedRun(streamed, "running")).partialText,
+    ).toBeUndefined();
   });
 
   test("a later request restarts the partial answer", () => {
@@ -1658,9 +1655,9 @@ describe("dispatched subagents in the run projection", () => {
         text: "the answer",
       }),
     ];
-    expect(projectClientRunV1(storedRun(streamed, "running")).partialText).toBe(
-      "the answer",
-    );
+    expect(
+      projectClientRunV1(storedRun(streamed, "running")).partialText,
+    ).toBeUndefined();
   });
 
   test("a settled Turn carries its answer once, as an outcome", () => {

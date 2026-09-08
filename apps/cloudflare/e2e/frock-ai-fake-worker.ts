@@ -7,11 +7,56 @@ const reply =
   "data: [DONE]\n\n";
 
 class FrockAiGatewayFake extends RpcTarget {
-  run(_request: Record<string, unknown>): Response {
+  run(request: Record<string, unknown>): Response {
+    const query = request.query as
+      | {
+          tools?: Array<{ function?: { name?: string } }>;
+          messages?: Array<{
+            role?: string;
+            tool_calls?: Array<{ function?: { name?: string } }>;
+          }>;
+        }
+      | undefined;
+    const messages = query?.messages ?? [];
+    const canSend = query?.tools?.some(
+      (tool) => tool.function?.name === "send_to_user",
+    );
+    const sinceUser = messages.slice(
+      messages.findLastIndex((message) => message.role === "user") + 1,
+    );
+    const sent = sinceUser.some((message) =>
+      message.tool_calls?.some(
+        (call) => call.function?.name === "send_to_user",
+      ),
+    );
+    const delta =
+      canSend && !sent
+        ? {
+            tool_calls: [
+              {
+                index: 0,
+                id: "send-reply",
+                function: {
+                  name: "send_to_user",
+                  arguments: JSON.stringify({
+                    payload: {
+                      type: "text",
+                      text: "Reply from the Frock AI stub.",
+                    },
+                  }),
+                },
+              },
+            ],
+          }
+        : { content: canSend ? "" : "Reply from the Frock AI stub." };
+    const response =
+      `data: ${JSON.stringify({ choices: [{ delta }] })}\n\n` +
+      'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n' +
+      "data: [DONE]\n\n";
     return new Response(
       new ReadableStream({
         start(controller) {
-          controller.enqueue(encoder.encode(reply));
+          controller.enqueue(encoder.encode(response));
           controller.close();
         },
       }),

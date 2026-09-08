@@ -171,6 +171,7 @@
     "./shell/reads": "./shell/reads.ts",
     "./shell/run-cursor": "./shell/run-cursor.ts",
     "./shell/run-failure-copy": "./shell/run-failure-copy.ts",
+    "./shell/sent-text": "./shell/sent-text.ts",
     "./shell/run-protocol": "./shell/run-protocol.ts",
     "./shell/runtime-mount": "./shell/runtime-mount.ts",
     "./shell/settings-links": "./shell/settings-links.ts",

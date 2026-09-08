@@ -1689,20 +1689,27 @@ describe("Cloudflare user application gateway", () => {
     const publicTurn: unknown = await turn.json();
     expect(decodeClientTurnV1(publicTurn)).toMatchObject({
       text: "Echo: hello workers",
-      events: [
-        {
+      events: expect.arrayContaining([
+        expect.objectContaining({
           type: "tool/call",
-          call: {
+          call: expect.objectContaining({
             name: "call_dynamic_tool",
             input: {
               namespace: "frockbot",
               toolName: "echo",
               argumentsJson: '{"text":"hello workers"}',
             },
-          },
-        },
-        { type: "tool/result", content: "hello workers" },
-      ],
+          }),
+        }),
+        expect.objectContaining({
+          type: "tool/result",
+          content: "hello workers",
+        }),
+        expect.objectContaining({
+          type: "send/to-user",
+          payload: { type: "text", text: "Echo: hello workers" },
+        }),
+      ]),
     });
     const wire = JSON.stringify(publicTurn);
     expect(Object.keys(publicTurn as Record<string, unknown>).sort()).toEqual([

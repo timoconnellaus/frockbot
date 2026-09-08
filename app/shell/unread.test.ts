@@ -105,7 +105,10 @@ describe("the sidebar message preview", () => {
         {
           acceptedAt: "2026-08-31T00:01:00.000Z",
           input: "Question",
-          responseText: "Answer",
+          responseText: "private scratch",
+          events: [
+            { type: "send/to-user", payload: { type: "text", text: "Answer" } },
+          ],
         },
         preview.at,
       ),
@@ -301,7 +304,19 @@ describe("the sidebar preview derived from stored runs", () => {
     input: "What is the plan?",
     responseText: "Here is the plan.",
     status: "completed",
-    events: [{ timestamp: "2026-08-31T00:02:05.000Z" }],
+    events: [
+      {
+        timestamp: "2026-08-31T00:02:05.000Z",
+        type: "send/to-user",
+        payload: {
+          type: "text",
+          text:
+            "responseText" in over
+              ? String(over.responseText ?? "")
+              : "Here is the plan.",
+        },
+      },
+    ],
     ...over,
   });
 

@@ -12,6 +12,8 @@ import {
   TURN_DEADLINE_REASON_V1,
 } from "@frockbot/core/agent-loop";
 
+import { UNSENT_REPLY_REASON_V1 } from "./delivery.js";
+
 /**
  * The one place a Turn that did not finish is turned into a sentence for the
  * person who was waiting on it.
@@ -47,6 +49,7 @@ export const USER_FACING_FAILURE_REASONS_V1: readonly string[] = [
   MODEL_IDLE_DEADLINE_REASON_V1,
   TURN_DEADLINE_REASON_V1,
   STEP_LIMIT_REASON_V1,
+  UNSENT_REPLY_REASON_V1,
 ];
 
 /**

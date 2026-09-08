@@ -328,8 +328,17 @@ describe("Bot recovery", () => {
         toolCalls: [],
       },
       {
-        type: "step/end" as const,
+        type: "send/to-user" as const,
         seq: 3,
+        timestamp: "2026-08-28T00:00:01.000Z",
+        turn: 1,
+        step: 1,
+        occurrenceId: "tool:1:1:0",
+        payload: { type: "text" as const, text: "Durable reply" },
+      },
+      {
+        type: "step/end" as const,
+        seq: 4,
         timestamp: "2026-08-28T00:00:01.000Z",
         turn: 1,
         step: 1,
@@ -337,7 +346,7 @@ describe("Bot recovery", () => {
       },
       {
         type: "turn/end" as const,
-        seq: 4,
+        seq: 5,
         timestamp: "2026-08-28T00:00:01.000Z",
         turn: 1,
         outcome: "completed" as const,
@@ -1115,7 +1124,7 @@ describe("Bot recovery", () => {
       run: {
         runId: "command-1",
         status: "completed",
-        outcome: { type: "completed", text: "done" },
+        outcome: { type: "completed", text: "" },
       },
     });
     expect(storage.listRequests).toEqual([]);

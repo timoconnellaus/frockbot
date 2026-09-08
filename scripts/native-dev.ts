@@ -888,7 +888,6 @@ async function smoke(): Promise<void> {
     "This Bot used all the steps it had",
   ];
   let reply: string | undefined;
-  let outcome: string | undefined;
   await waitFor(
     "a reply from the Bot",
     async () => {
@@ -904,28 +903,23 @@ async function smoke(): Promise<void> {
             text && !before.has(text) && text !== message && !status.has(text),
         );
       if (reply) return true;
-      // The Turn may have completed with the model's text in the run's outcome
-      // and no bubble: plain assistant text is not rendered, only what the
-      // Bot sends with `send_to_user` (issue #153).
       const runs = await api<{
-        runs: { input?: string; status: string; outcome?: { text?: string } }[];
+        runs: { input?: string; status: string; events: { type: string }[] }[];
       }>(`/api/bots/${BOT_ID}/turns`);
       const run = runs.runs.find((each) => each.input === message);
-      if (run?.status === "completed") outcome = run.outcome?.text ?? "";
-      return outcome !== undefined;
+      if (
+        run?.status === "completed" &&
+        !run.events.some((event) => event.type === "send/to-user")
+      ) {
+        die("the Turn completed without delivering a send_to_user reply");
+      }
+      return false;
     },
     300_000,
   );
   screenshot(serial, "smoke-replied");
-  if (reply) {
-    say(`the Bot replied: ${JSON.stringify(reply)}`);
-    console.log("\nsmoke: PASS");
-  } else {
-    warn(
-      `the Turn completed and the model answered ${JSON.stringify(outcome)}, but nothing reached the chat: the Bot did not call send_to_user (issue #153)`,
-    );
-    console.log("\nsmoke: PASS (silent reply)");
-  }
+  say(`the Bot replied: ${JSON.stringify(reply)}`);
+  console.log("\nsmoke: PASS");
 }
 
 // --------------------------------------------------------------- status

@@ -1,3 +1,4 @@
+import { sentTextV1 } from "@frockbot/app/shell/sent-text";
 // What a Bot tells the person who is not looking at it: the notification
 // intents a settled Turn produces, and the durable records that settlement
 // writes beside them.
@@ -76,12 +77,14 @@ export function createNotification(
       body: handoff.slice(0, 240),
     };
   }
+  const text = sentTextV1(result.events);
+  if (!text) return undefined;
   return {
     notificationId: result.runId,
     runId: result.runId,
     createdAt: new Date().toISOString(),
     title: `${settings.profile.name} replied`,
-    body: result.text.slice(0, 240),
+    body: text.slice(0, 240),
   };
 }
 

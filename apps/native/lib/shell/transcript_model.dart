@@ -207,6 +207,7 @@ const knownFailureCopy = <String>{
   'You stopped this.',
   'This reply stopped before it finished. Try again.',
   "The model couldn't finish its reply. Try again.",
+  'The model finished without sending a reply. Try again.',
   "Something the Bot was using didn't work. Try again.",
   "This message can't be shown in this version. Reload to update.",
   // The four the kernel writes for the person rather than for the log. They
@@ -314,18 +315,6 @@ List<ToolActivity> _toolsFrom(List<Object?> events) {
   return tools.values.toList();
 }
 
-/// The Bot's voice is its sends.
-///
-/// A Turn is not one bubble: the Bot acknowledges, works, and reports back,
-/// and each of those is a message exactly as it would be from a person. When a
-/// Turn delivered anything the model's own assistant text is scratch space and
-/// the thread does not draw it — drawing both is how a one-word reply arrived
-/// twice.
-String _visibleAssistantText(Map<String, Object?> run, List<Object?> events) {
-  if (_sendsFrom(events).isNotEmpty) return '';
-  return (run['responseText'] ?? run['partialText'] ?? '') as String;
-}
-
 /// Projects durable runs into the lines the thread draws.
 ///
 /// One line per `send_to_user` in the order the Bot sent them, then the Turn's
@@ -365,7 +354,9 @@ List<TranscriptLine> projectRuns(List<Map<String, dynamic>> runs) {
       );
     }
     final tools = _toolsFrom(events);
-    final text = _visibleAssistantText(run, events);
+    // Only explicit sends carry the Bot's voice; outcome text is private.
+    const text = '';
+    final outcome = run['outcome'] as Map?;
     switch (status) {
       case 'running':
         lines.add(
@@ -412,7 +403,7 @@ List<TranscriptLine> projectRuns(List<Map<String, dynamic>> runs) {
           ),
         );
       case 'failed':
-        final failure = failureNotice(run['failure'] as String?);
+        final failure = failureNotice(outcome?['message'] as String?);
         lines.add(
           TranscriptLine(
             id: '$runId:assistant',
@@ -420,7 +411,7 @@ List<TranscriptLine> projectRuns(List<Map<String, dynamic>> runs) {
             role: LineRole.assistant,
             // A Turn that broke after it had started talking keeps what it
             // said, with the reason underneath it.
-            text: (run['responseText'] as String?) ?? text,
+            text: text,
             at: admittedAt,
             status: LineStatus.error,
             notice: failure.notice,

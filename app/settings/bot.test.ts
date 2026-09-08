@@ -120,6 +120,7 @@ function configuredUser(): UserSettingsViewV1 {
 }
 
 function host(storage: MemoryStorage, readUser: () => UserSettingsViewV1) {
+  let completionCalls = 0;
   return createShellBotBackendContribution({
     ...foundationShellApplicationV1,
     state: { storage } as unknown as DurableObjectState,
@@ -144,7 +145,7 @@ function host(storage: MemoryStorage, readUser: () => UserSettingsViewV1) {
               start(controller) {
                 controller.enqueue(
                   new TextEncoder().encode(
-                    'data: {"choices":[{"delta":{"content":"Built-in model: hello"}}]}\n\n' +
+                    `data: ${JSON.stringify({ choices: [{ delta: completionCalls++ % 2 === 0 ? { tool_calls: [{ index: 0, id: "send", function: { name: "send_to_user", arguments: JSON.stringify({ payload: { type: "text", text: "Built-in model: hello" } }) } }] } : {} }] })}\n\n` +
                       'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n' +
                       "data: [DONE]\n\n",
                   ),

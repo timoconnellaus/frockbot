@@ -1,3 +1,4 @@
+import { sentTextV1 } from "./sent-text.js";
 import {
   decodeSendToUserPayloadV1,
   decodeSkillRefsV1,
@@ -837,28 +838,6 @@ export function assistantTextSoFarV1(
   return text;
 }
 
-function interruptedOutcomeTextV1(run: StoredRun): { text?: string } {
-  const text = assistantTextSoFarV1(run.events, run.responseText ?? "");
-  return text ? { text: truncateWireString(text, MAX_OUTCOME_BYTES) } : {};
-}
-
-/**
- * What a still-running Turn has said so far, read out of the same journal an
- * interrupted one is read from.
- *
- * The kernel appends an `assistant/chunk` per provider text delta and each
- * append lands on the run record, so the words are already durable while the
- * Turn runs; nothing here is a second copy and nothing crosses the channel.
- * Bounded exactly as an outcome is, because a long answer must not be able to
- * grow the run list past its wire budget.
- */
-function partialTextV1(run: StoredRun): { partialText?: string } {
-  const text = assistantTextSoFarV1(run.events);
-  return text
-    ? { partialText: truncateWireString(text, MAX_OUTCOME_BYTES) }
-    : {};
-}
-
 function runStatus(run: StoredRun): ClientRunStatusV1 {
   return requireStoredRunV1(run).status;
 }
@@ -869,7 +848,7 @@ export function projectClientRunV1(run: StoredRun): ClientRunV1 {
     status === "completed"
       ? ({
           type: "completed",
-          text: truncateWireString(run.responseText ?? "", MAX_OUTCOME_BYTES),
+          text: truncateWireString(sentTextV1(run.events), MAX_OUTCOME_BYTES),
         } satisfies ClientRunOutcomeV1)
       : status === "failed"
         ? ({
@@ -881,19 +860,16 @@ export function projectClientRunV1(run: StoredRun): ClientRunV1 {
               runFailureCopyV1({ failure: run.failure, events: run.events }),
               MAX_FAILURE_BYTES,
             ),
-            ...interruptedOutcomeTextV1(run),
           } satisfies ClientRunOutcomeV1)
         : status === "cancelled"
           ? ({
               type: "cancelled",
               message: CANCELLED_RUN_MESSAGE,
-              ...interruptedOutcomeTextV1(run),
             } satisfies ClientRunOutcomeV1)
           : status === "superseded"
             ? ({
                 type: "superseded",
                 message: SUPERSEDED_RUN_MESSAGE,
-                ...interruptedOutcomeTextV1(run),
               } satisfies ClientRunOutcomeV1)
             : undefined;
   const origin = run.admission?.origin;
@@ -913,7 +889,6 @@ export function projectClientRunV1(run: StoredRun): ClientRunV1 {
     input: truncateWireString(run.input, MAX_INPUT_BYTES),
     status,
     events: visibleEvents(run.events, status),
-    ...(status === "running" ? partialTextV1(run) : {}),
     ...(run.stopRequestedAt
       ? {
           stopRequestedAt: truncate(run.stopRequestedAt, MAX_TIMESTAMP_LENGTH),

@@ -124,7 +124,7 @@ test("a degraded Computer sync is a notice beneath the Turn once", () => {
   expect(state.messages).toHaveLength(2);
   expect(state.messages[1]).toMatchObject({
     role: "assistant",
-    text: "The Applet is ready.",
+    text: "",
     notice: "Excluded 1 reproducible Workspace item from sync.",
   });
 });
@@ -1204,7 +1204,7 @@ describe("detached Turn projection", () => {
     expect(projected.has("notification-run-1")).toBe(true);
     expect(messages).toMatchObject([
       { role: "user", text: "Finish the task" },
-      { role: "assistant", text: "Finished exactly." },
+      { role: "assistant", text: "" },
     ]);
   });
 
@@ -1227,7 +1227,7 @@ describe("detached Turn projection", () => {
     expect(projected.size).toBe(0);
     expect(messages.map((message) => message.text)).toEqual([
       "Continue while detached",
-      "Completed while detached",
+      "",
     ]);
   });
 
@@ -1270,7 +1270,7 @@ describe("detached Turn projection", () => {
     expect(messages).toHaveLength(2);
     expect(messages[1]).toMatchObject({
       role: "assistant",
-      text: "Finished successfully.",
+      text: "",
       status: "completed",
     });
   });
@@ -1390,7 +1390,7 @@ describe("active durable Turn projection", () => {
       {
         id: "run-1:assistant",
         role: "assistant",
-        text: "answer-1",
+        text: "",
         at: "2026-09-01T00:01:00.000Z",
       },
       {
@@ -1402,7 +1402,7 @@ describe("active durable Turn projection", () => {
       {
         id: "run-2:assistant",
         role: "assistant",
-        text: "answer-2",
+        text: "",
         at: "2026-09-01T00:02:00.000Z",
       },
     ];
@@ -1701,7 +1701,7 @@ describe("active durable Turn projection", () => {
     expect(state.messages[2]?.text).toBe("");
   });
 
-  test("a Turn that sent nothing still draws the model's text", () => {
+  test("a Turn that sent nothing never draws the model's text", () => {
     const state: Pick<
       FrockBotWebData,
       "messages" | "activeRunId" | "activeRun"
@@ -1721,10 +1721,10 @@ describe("active durable Turn projection", () => {
       ],
     );
 
-    expect(state.messages[1]?.text).toBe("pong");
+    expect(state.messages[1]?.text).toBe("");
   });
 
-  test("streams running text without a banner and clears busy state", () => {
+  test("keeps running scratch text private and clears busy state", () => {
     const state: Pick<
       FrockBotWebData,
       "messages" | "activeRunId" | "activeRun"
@@ -1754,7 +1754,7 @@ describe("active durable Turn projection", () => {
     );
     expect(state.activeRunId).toBe("run-2");
     expect(state.messages[1]).toMatchObject({
-      text: "Because",
+      text: "",
       status: "streaming",
     });
 
@@ -1774,12 +1774,12 @@ describe("active durable Turn projection", () => {
     expect(state.activeRunId).toBeUndefined();
     expect(state.activeRun).toBeUndefined();
     expect(state.messages[1]).toMatchObject({
-      text: "Because it is.",
+      text: "",
       status: "completed",
     });
   });
 
-  test("a running Turn's partial text fills the bubble it will settle into", () => {
+  test("a running Turn's partial and final text never become delivery", () => {
     const state: Pick<
       FrockBotWebData,
       "messages" | "activeRunId" | "activeRun"
@@ -1799,7 +1799,7 @@ describe("active durable Turn projection", () => {
       ],
     );
     expect(state.messages[1]).toMatchObject({
-      text: "Because it",
+      text: "",
       status: "streaming",
     });
 
@@ -1819,7 +1819,7 @@ describe("active durable Turn projection", () => {
     );
     expect(state.messages).toHaveLength(2);
     expect(state.messages[1]).toMatchObject({
-      text: "Because it is.",
+      text: "",
       status: "completed",
     });
   });
@@ -1876,7 +1876,7 @@ describe("active durable Turn projection", () => {
     expect(resumed.activeRunId).toBe("run-resumed");
     expect(resumed.messages[1]).toMatchObject({
       role: "assistant",
-      text: "Half a",
+      text: "",
       status: "streaming",
     });
   });
@@ -1915,7 +1915,7 @@ describe("active durable Turn projection", () => {
     expect(state.activeRunId).toBeUndefined();
     expect(state.activeRun).toBeUndefined();
     expect(state.messages[1]).toMatchObject({
-      text: "Done",
+      text: "",
       status: "completed",
     });
   });
@@ -1975,7 +1975,7 @@ describe("active durable Turn projection", () => {
 
     expect(provided.value.activeRunId).toBeUndefined();
     expect(provided.value.messages[1]).toMatchObject({
-      text: "Done",
+      text: "",
       status: "completed",
     });
   });
@@ -2349,7 +2349,7 @@ describe("uncertain Turn admission", () => {
     expect(provided.value.settingsError).toBeUndefined();
     expect(outstandingAbortListeners).toBe(0);
     expect(provided.value.messages.at(-1)).toMatchObject({
-      text: "Done successfully",
+      text: "",
       status: "completed",
     });
   });
@@ -2590,7 +2590,7 @@ describe("uncertain Turn admission", () => {
     expect(provided.value.activeRunId).toBeUndefined();
     expect(provided.value.activeRun).toBeUndefined();
     expect(provided.value.messages.at(-1)).toMatchObject({
-      text: "Finished later",
+      text: "",
       status: "completed",
     });
   });

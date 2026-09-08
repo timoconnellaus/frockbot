@@ -1,3 +1,4 @@
+import { sentTextV1 } from "./sent-text.js";
 import type {
   AgentEffectAdmission,
   AgentHandle,
@@ -87,23 +88,16 @@ function settleBotTurn(
   const assistantText = message?.role === "assistant" ? message.content : "";
   return {
     runId: command.runId,
-    // A Turn the Bot ended by speaking through `send_to_user` writes no
-    // assistant message at all, so the derived text falls back to the last
-    // text payload it sent. Every other payload leaves the text empty and
-    // reaches the client as a projected `send/to-user` event instead.
-    text: assistantText || lastSentTextV1(events),
+    text:
+      command.turnType === "automation" || command.turnType === "subagent"
+        ? assistantText
+        : sentTextV1(
+            events.filter(
+              (event) => "turn" in event && event.turn === currentTurn,
+            ),
+          ),
     events: appendedSessionEvents(previousEvents, events),
   };
-}
-
-/** The last `text` payload the Turn sent, or `""` when it sent none. */
-function lastSentTextV1(events: readonly SessionEvent[]): string {
-  const sent = events.findLast(
-    (event) => event.type === "send/to-user" && event.payload.type === "text",
-  );
-  return sent?.type === "send/to-user" && sent.payload.type === "text"
-    ? sent.payload.text
-    : "";
 }
 
 function turnExecutionError(
