@@ -104,6 +104,7 @@ class ChatController extends ChangeNotifier {
     if (cached == null) return;
     for (final run in cached.runs) {
       _put(run);
+      _cachedRunIds.add(run['runId'] as String);
     }
     before = cached.before;
     _cachedCursor = before != null;
@@ -111,6 +112,7 @@ class ChatController extends ChangeNotifier {
 
   bool _initialized = false;
   bool _cachedCursor = false;
+  final Set<String> _cachedRunIds = {};
   Future<void> initialize() async {
     if (_initialized) return;
     _initialized = true;
@@ -151,6 +153,7 @@ class ChatController extends ChangeNotifier {
   }
 
   void _put(Map<String, dynamic> run) {
+    _cachedRunIds.remove(run['runId']);
     _runs[run['runId'] as String] = run;
   }
 
@@ -175,6 +178,14 @@ class ChatController extends ChangeNotifier {
     changed();
     try {
       final page = await transport.page(botId, before: older ? before : null);
+      // The first live page replaces restored cache rows. Preserve any live
+      // admission or lookup that arrived while this page was in flight.
+      if (!older) {
+        for (final id in _cachedRunIds) {
+          _runs.remove(id);
+        }
+        _cachedRunIds.clear();
+      }
       for (final run in page['runs'] as List) {
         _put(Map<String, dynamic>.from(run as Map));
       }

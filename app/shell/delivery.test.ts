@@ -65,7 +65,7 @@ test("a plain answer is repaired by an explicit send, never promoted or silently
       yield { type: "finish", reason: "completed" };
     },
   });
-  expect(requests).toHaveLength(3);
+  expect(requests).toHaveLength(2);
   expect(requests[1]?.system).toContain("Call `send_to_user`");
   expect(requests[1]?.tools.map((tool) => tool.name)).toEqual(["send_to_user"]);
   expect(requests[1]?.messages.at(-1)).toMatchObject({

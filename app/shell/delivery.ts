@@ -69,9 +69,12 @@ export const conversationDeliveryHooksV1: LoopHooksV1 = {
   },
   async stepContinuation(agent, _decision, turn, _step, _signal, next) {
     const decision = await next();
-    if (decision.kind !== "stop" || !conversational(agent.session.events, turn))
-      return decision;
+    if (!conversational(agent.session.events, turn)) return decision;
     const state = delivery(agent.session.events, turn);
+    // Repair is a final delivery step. Once it succeeds, another model call
+    // can only repeat the answer or reopen work the Turn already finished.
+    if (state.attempts > 0 && !state.required) return { kind: "stop" };
+    if (decision.kind !== "stop") return decision;
     if (!state.required) return decision;
     if (state.attempts >= 2) throw new Error(UNSENT_REPLY_REASON_V1);
     return { kind: "continue" };

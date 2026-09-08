@@ -63,10 +63,7 @@ class FakeSecrets implements EnumerableStore {
 class LatchedPages implements ChatTransport {
   final pages = <Completer<Map<String, dynamic>>>[];
   @override
-  Future<Map<String, dynamic>> page(
-    String botId, {
-    String? before,
-  }) {
+  Future<Map<String, dynamic>> page(String botId, {String? before}) {
     final page = Completer<Map<String, dynamic>>();
     pages.add(page);
     return page.future;
@@ -177,10 +174,7 @@ void main() {
         'page': {'truncated': false},
       });
       await initialized;
-      expect(controller.runs.map((row) => row['input']), [
-        'Earlier message',
-        'Latest message',
-      ]);
+      expect(controller.runs.map((row) => row['input']), ['Latest message']);
       // The live projection replaces the cursor the cache restored.
       expect(controller.before, isNull);
       await Future<void>.delayed(Duration.zero);
@@ -188,11 +182,43 @@ void main() {
         decodePageCache(store.values[pageCacheKey('user-1', 'bot-1')])!
             .runs
             .length,
-        2,
+        1,
       );
       controller.dispose();
     });
   });
+
+  test(
+    'an empty live history removes cached chats without losing the draft',
+    () async {
+      final store = LatchedStore();
+      store.values[pageCacheKey('user-1', 'bot-1')] = encodePageCache([
+        run('removed-run', 'Deleted test chat'),
+      ], null);
+      final transport = LatchedPages();
+      final controller = ChatController(
+        transport: transport,
+        store: store,
+        userId: 'user-1',
+        botId: 'bot-1',
+      );
+      final initialized = controller.initialize();
+      await controller.saveDraft('Keep my draft');
+      transport.pages.single.complete({
+        'runs': [],
+        'page': {'truncated': false},
+      });
+      await initialized;
+      expect(controller.runs, isEmpty);
+      expect(controller.draft, 'Keep my draft');
+      await Future<void>.delayed(Duration.zero);
+      expect(
+        decodePageCache(store.values[pageCacheKey('user-1', 'bot-1')])!.runs,
+        isEmpty,
+      );
+      controller.dispose();
+    },
+  );
 
   test(
     'the session is read from the keystore once, not on every request',
