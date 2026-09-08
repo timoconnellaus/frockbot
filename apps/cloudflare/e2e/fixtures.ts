@@ -285,33 +285,30 @@ export async function answerInputs(
       if (value.length === 0) await input.press("Backspace");
       else await input.pressSequentially(value);
     }
-    // The editing session is closed before anything is read back, and before
-    // the caller goes on to press something. While one is open the engine
-    // keeps its own input element over the canvas, and that element answers
-    // `elementFromPoint` for the button the spec is about to click — which
-    // reads as "`<flutter-view>` intercepts pointer events" and retries until
-    // the action times out. Blurring hands the field's value to the widget and
-    // takes the overlay away.
+    // A second pass over every field once the last one is typed, because what
+    // a stray edit empties is the field *before* the one being typed. A plain
+    // read rather than an `expect`: a field that snapped back costs one read
+    // and another attempt, where a polling assertion would wait out its whole
+    // timeout with nobody left to re-type it.
+    //
+    // Read while the session is still open, which is the only time a Flutter
+    // field's text is in the DOM at all: a blurred field reads back empty
+    // whatever it is showing a person, so a check on the far side of the blur
+    // fails every form it is asked about.
+    let missing = false;
+    for (const [input, value] of entries) {
+      if ((await input.inputValue()) !== value) missing = true;
+    }
+    if (missing) continue;
+    // The editing session is closed before the caller goes on to press
+    // something. While one is open the engine keeps its own input element over
+    // the canvas, and that element answers `elementFromPoint` for the button
+    // the spec is about to click — which reads as "`<flutter-view>` intercepts
+    // pointer events" and retries until the action times out. Blurring hands
+    // the field's value to the widget and takes the overlay away.
     for (const [input] of entries) {
       await input.evaluate((element: HTMLElement) => element.blur());
     }
-    // A second pass over every field once every one is committed, because what
-    // a stray edit empties is the field *before* the one being typed — and
-    // because the read is only worth anything on the far side of a blur. The
-    // element's value while a session is open is what this side typed; after
-    // the blur and a fresh focus it is what the *widget* holds, which is the
-    // thing being asserted. A form that agreed about a half-typed base URL was
-    // reading its own keystrokes back. A plain read rather than an `expect`: a
-    // field that did not take costs one read and another attempt, where a
-    // polling assertion would wait out its whole timeout with nobody left to
-    // re-type it.
-    let missing = false;
-    for (const [input, value] of entries) {
-      await input.focus();
-      if ((await input.inputValue()) !== value) missing = true;
-      await input.evaluate((element: HTMLElement) => element.blur());
-    }
-    if (missing) continue;
     return;
   }
   throw new Error("the form would not hold what this spec typed into it");
