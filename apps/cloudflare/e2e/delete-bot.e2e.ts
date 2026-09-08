@@ -77,6 +77,12 @@ test("deleting a Bot from its settings removes it for good", async ({
   // one no client can close from its side. What this does *not* allow is a
   // 500, which is what these routes used to return.
   allowedFailures.console.push(/Failed to load resource.*(404|410)/u);
+  // The state channel is the same race over a socket: an upgrade already
+  // on the wire when the delete lands is answered 404, and the browser
+  // reports a failed handshake rather than a failed resource.
+  allowedFailures.console.push(
+    /WebSocket connection to .*state-channel.*(404|410)/u,
+  );
   await openApplication(page, userId);
 
   await createBot(page, "Alpha");
@@ -143,6 +149,12 @@ test("manage mode offers Archive and Delete, and Delete confirms first", async (
   // Same reason as above: a poll already on the wire when the delete lands is
   // answered 410 or 404, and neither is a fault in the client.
   allowedFailures.console.push(/Failed to load resource.*(404|410)/u);
+  // The state channel is the same race over a socket: an upgrade already
+  // on the wire when the delete lands is answered 404, and the browser
+  // reports a failed handshake rather than a failed resource.
+  allowedFailures.console.push(
+    /WebSocket connection to .*state-channel.*(404|410)/u,
+  );
   await openApplication(page, userId);
 
   await createBot(page, "Keeper");

@@ -430,9 +430,17 @@ export async function answerInputs(
   entries: readonly (readonly [Locator, string])[],
 ): Promise<void> {
   for (const [input] of entries) await expect(input).toBeVisible();
+  // A Flutter field's editing element exists only while the engine is holding
+  // a session open on it, and the engine tears one down whenever the widget is
+  // rebuilt from Dart. This project sets no action timeout, so a read that
+  // caught a rebuild waited for an element that was never coming back and
+  // spent the whole test's budget on it. Bounded, an unreadable field is one
+  // that does not hold what this wants — which is what the retry is for.
+  const read = (input: Locator) =>
+    input.inputValue({ timeout: 15_000 }).catch(() => undefined);
   for (let attempt = 0; attempt < 3; attempt += 1) {
     for (const [input, value] of entries) {
-      if ((await input.inputValue()) === value) continue;
+      if ((await read(input)) === value) continue;
       // Typed rather than filled, from the first attempt. `fill` writes the
       // element's value and dispatches `input`, which the engine reads only
       // while it is holding an editing session open on that field — and
@@ -469,7 +477,7 @@ export async function answerInputs(
     // fails every form it is asked about.
     let missing = false;
     for (const [input, value] of entries) {
-      if ((await input.inputValue()) !== value) missing = true;
+      if ((await read(input)) !== value) missing = true;
     }
     if (missing) continue;
     // The editing session is closed before the caller goes on to press
