@@ -453,10 +453,6 @@ export interface FrockBotWebData {
     values: Record<string, string | number | boolean>,
   ): Promise<void>;
   uninstallPackage(packageId: string): Promise<void>;
-  /**
-   * Puts this conversation down and starts the next one. Memory is kept; only
-   * the history the next Turn carries is new.
-   */
   startConnection(
     packageId: string,
     connectionTypeId: string,

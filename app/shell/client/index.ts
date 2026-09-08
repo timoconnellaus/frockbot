@@ -960,28 +960,8 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       void web.value.refreshAppletCanvas();
     }, appletCanvasRetryDelayMsV1(appletRetryAttempt));
   }
-  /*
-   * Which conversation the transcript is showing.
-   *
-   * A read that was already in flight when the User starts a new conversation
-   * answers with the conversation that just ended, and projecting it puts the
-   * old Turns back on a transcript the User has just been told is empty. The
-   * epoch is bumped at the boundary so those answers are dropped.
-   */
-  let conversationGeneration = 0;
-  /*
-   * The conversations this client is still holding.
-   *
-   * Switching Bots used to be a blank thread and a read; the last few are now
-   * redrawn from memory and read back behind the paint. `transcriptEpochs`
-   * names the conversation each entry belongs to: the backend does not tell a
-   * client its Session id, but the client is the one that ends a conversation,
-   * so counting that action locally is the same boundary.
-   */
+  // Keep each Bot's continuous transcript warm while switching Bots.
   const transcripts = new TranscriptCache();
-  const transcriptEpochs = new Map<string, number>();
-  const conversationKeyFor = (botId: string): string =>
-    `${botId}#${transcriptEpochs.get(botId) ?? 0}`;
   /*
    * The Bot whose first channel reset is already answered by the cache. A
    * socket opening emits an untopiced invalidation meaning "read everything";
@@ -1156,7 +1136,6 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     if (!ctx.transport.lookupRun) return;
     let delayMs = 250;
     let observationError: string | undefined;
-    const conversation = conversationGeneration;
     while (!signal.aborted) {
       try {
         const run = await observeWhileAttached(
@@ -1166,9 +1145,6 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         if (
           signal.aborted ||
           generation !== selectionGeneration ||
-          // The Turn belongs to the conversation it was sent in, so a new one
-          // ends the observation rather than drawing it on an empty thread.
-          conversation !== conversationGeneration ||
           web.value.activeBotId !== botId
         ) {
           return;
@@ -1197,11 +1173,8 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     botId: string,
     generation = selectionGeneration,
   ): Promise<void> {
-    const conversation = conversationGeneration;
     const current = () =>
-      generation === selectionGeneration &&
-      conversation === conversationGeneration &&
-      web.value.activeBotId === botId;
+      generation === selectionGeneration && web.value.activeBotId === botId;
     const runs = await (ctx.transport.listRuns?.(botId) ?? Promise.resolve([]));
     if (!current()) return;
     projectDurableRuns(web.value, [], runs);
@@ -1433,7 +1406,6 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       const leaving = web.value.activeBotId;
       if (leaving) {
         transcripts.save(leaving, {
-          conversationKey: conversationKeyFor(leaving),
           messages: web.value.messages.map((message) => toRaw(message)),
           ...(web.value.activeRun ? { activeRun: web.value.activeRun } : {}),
           ...(web.value.activeRunId
@@ -1444,7 +1416,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
             : {}),
         });
       }
-      const restored = transcripts.take(botId, conversationKeyFor(botId));
+      const restored = transcripts.take(botId);
       restoredWithoutRead = restored && !restored.stale ? botId : undefined;
       web.value.activeBotId = botId;
       web.value.composerContext = botId;

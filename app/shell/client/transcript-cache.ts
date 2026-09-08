@@ -6,15 +6,8 @@
  * A Bot's conversation is small, already durable behind it, and cheap to hold,
  * so the last few are kept in memory and redrawn immediately.
  *
- * Two rules keep the cache from lying:
- *
- * - **It is keyed by conversation, not by Bot.** "New conversation" changes
- *   the Session a Bot's Turns record, so the transcript that belonged to the
- *   previous one must not come back under the same key.
- * - **A cached transcript is still revalidated.** The entry carries when it
- *   was written; past {@link TRANSCRIPT_FRESH_MS}, or once something has told
- *   the client the Bot's runs moved, the restore is followed by a read. Inside
- *   that window the click costs nothing, which is the whole point.
+ * Each Bot has one continuous conversation. Cached transcripts are revalidated
+ * after TRANSCRIPT_FRESH_MS or when a channel notice marks them stale.
  *
  * The cache is memory only and never outlives the page: nothing about one
  * User's conversations reaches the next one through it.
@@ -44,8 +37,6 @@ export interface TranscriptViewport {
 
 /** One conversation, as the thread last drew it. */
 export interface TranscriptSnapshot {
-  /** Distinguishes this conversation from the next one on the same Bot. */
-  conversationKey: string;
   messages: WebChatMessage[];
   activeRun?: WebActiveRun;
   activeRunId?: string;
@@ -97,24 +88,14 @@ export class TranscriptCache {
     return this.#entries.size;
   }
 
-  /**
-   * The transcript for this Bot's current conversation, if it is held.
-   *
-   * A key mismatch is a miss and drops the entry: the conversation it holds
-   * is over, and nothing will ask for it again.
-   */
-  take(botId: string, conversationKey: string): TranscriptRestore | undefined {
+  /** The transcript for this Bot, if it is held. */
+  take(botId: string): TranscriptRestore | undefined {
     const entry = this.#entries.get(botId);
     if (!entry) return undefined;
-    if (entry.conversationKey !== conversationKey) {
-      this.#entries.delete(botId);
-      return undefined;
-    }
     // Reading is using: this Bot is now the most recent and the last to go.
     this.#entries.delete(botId);
     this.#entries.set(botId, entry);
     return {
-      conversationKey: entry.conversationKey,
       // Copies, so the caller's edits never reach back into the cache.
       messages: entry.messages.map((message) => ({ ...message })),
       ...(entry.activeRun ? { activeRun: { ...entry.activeRun } } : {}),
@@ -139,7 +120,6 @@ export class TranscriptCache {
       snapshot.viewport ?? this.#entries.get(botId)?.viewport ?? undefined;
     this.#entries.delete(botId);
     this.#entries.set(botId, {
-      conversationKey: snapshot.conversationKey,
       messages: snapshot.messages.map((message) => ({ ...message })),
       ...(snapshot.activeRun ? { activeRun: { ...snapshot.activeRun } } : {}),
       ...(snapshot.activeRunId ? { activeRunId: snapshot.activeRunId } : {}),
