@@ -257,10 +257,17 @@ class SkillMenuController extends ChangeNotifier {
     }
   }
 
+  /// Re-reads the trigger out of the composer's text.
+  ///
+  /// Silent when nothing about the popover changed. This is called on every
+  /// edit of the draft, and a listener that fired anyway would rebuild the
+  /// composer a second time for every keystroke that has nothing to do with a
+  /// Skill — which is most of them.
   void readFrom(String text, int caret) {
     final next = skillPopoverFor(text, caret < 0 ? text.length : caret);
     popover = next;
     if (next == null) {
+      if (candidates.isEmpty) return;
       candidates = const [];
       _changed();
       return;

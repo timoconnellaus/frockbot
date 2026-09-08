@@ -149,8 +149,10 @@ class _ComposerState extends State<Composer> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _reading = false;
       if (!mounted) return;
+      // No `setState` of its own: the popover's own controller notifies when
+      // it changed, and a rebuild for an edit that touched no trigger is a
+      // rebuild of the field the engine is in the middle of editing.
       _refreshPopover();
-      setState(() {});
     });
   }
 
