@@ -113,14 +113,6 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Build publishable packages
-        # No package declares `files`, so whatever sits in a package directory
-        # at pack time ships in its tarball — `dist/` included. Only the webui
-        # build writes into `packages/`; the app builds the verify job runs
-        # write into `apps/`, so this is the whole of `bun run build` that can
-        # change a published tarball.
-        run: bun run build:webui
-
       - name: Set package versions
         env:
           VERSION: ${{ needs.verify.outputs.version }}
@@ -129,11 +121,18 @@ jobs:
           const fs = require('node:fs');
           const path = require('node:path');
 
-          for (const entry of fs.readdirSync('packages', { withFileTypes: true })) {
-            if (!entry.isDirectory()) continue;
-            const file = path.join('packages', entry.name, 'package.json');
+          const directories = fs
+            .readdirSync('packages', { withFileTypes: true })
+            .filter((entry) => entry.isDirectory())
+            .map((entry) => path.join('packages', entry.name));
+          // The Applets SDK sits beside the module it authors for.
+          directories.push(path.join('applets', 'sdk'));
+
+          for (const directory of directories) {
+            const file = path.join(directory, 'package.json');
             if (!fs.existsSync(file)) continue;
             const manifest = JSON.parse(fs.readFileSync(file, 'utf8'));
+            if (manifest.frockbot?.npm !== true) continue;
             manifest.version = process.env.VERSION;
             manifest.private = false;
 
@@ -227,7 +226,24 @@ jobs:
           }
           export -f publish_one
 
-          printf '%s\n' packages/*/ \
+          # Only packages that declare `frockbot.npm` are published. Every
+          # other package exists to build this product and has no consumer off
+          # this repository; publishing them meant a release went red whenever
+          # npm had no trusted publisher for one, while the deploy that
+          # actually matters had already succeeded.
+          published=()
+          for package_dir in packages/*/ applets/sdk/; do
+            if node -e "process.exit(require('./${package_dir}package.json').frockbot?.npm === true ? 0 : 1)" 2>/dev/null; then
+              published+=("$package_dir")
+            fi
+          done
+
+          if (( ${#published[@]} == 0 )); then
+            echo "no package declares frockbot.npm; nothing to publish" >&2
+            exit 1
+          fi
+
+          printf '%s\n' "${published[@]}" \
             | xargs -P 8 -I{} bash -c 'publish_one "$@"' _ {}
 
   github-release:
@@ -345,13 +361,9 @@ jobs:
           ROUTINE_HOOK_SECRET: ${{ secrets.ROUTINE_HOOK_SECRET }}
           MACHINE_TOKEN_SECRET: ${{ secrets.MACHINE_TOKEN_SECRET }}
           APPLET_VIEWER_SECRET: ${{ secrets.APPLET_VIEWER_SECRET }}
+          APPLET_BUILD_TOKEN: ${{ secrets.APPLET_BUILD_TOKEN }}
           DEBUG_TOKEN: ${{ secrets.DEBUG_TOKEN }}
           FROCK_AI_GATEWAY_TOKEN: ${{ secrets.FROCK_AI_GATEWAY_TOKEN || secrets.FLOCK_AI_GATEWAY_TOKEN }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          COMPOSIO_API_KEY: ${{ secrets.COMPOSIO_API_KEY }}
-          COMPOSIO_WEBHOOK_SECRET: ${{ secrets.COMPOSIO_WEBHOOK_SECRET }}
-          FROCKBOT_AUTHORIZATION_STATE_SECRET: ${{ secrets.FROCKBOT_AUTHORIZATION_STATE_SECRET }}
         shell: bash
         run: |
           missing=()
@@ -375,7 +387,7 @@ jobs:
           bun scripts/check-production-secrets.ts check || exit 1
 
           bun -e '
-            import { parseCredentialKeyringV1 } from "./packages/connection-core/src/index.ts";
+            import { parseCredentialKeyringV1 } from "./core/connection/index.ts";
             parseCredentialKeyringV1(process.env.CREDENTIAL_KEYRING ?? "");
           '
       - name: Configure production D1 database
@@ -437,44 +449,6 @@ jobs:
           --file dist/artifacts/foundation-v1.mjs
           --remote
 
-      - name: Publish Package Catalog
-        # The remote Catalog: immutable generations plus one mutable pointer.
-        # The bucket is created here, not by hand, so a fresh account needs no
-        # manual provisioning step. Every generation object is uploaded before
-        # `catalog/current` names it, because the pointer is the only mutable
-        # object and must never name a half-written generation.
-        working-directory: apps/cloudflare
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        shell: bash
-        run: |
-          bucket=frockbot-package-catalog
-          if ! bunx wrangler r2 bucket info "$bucket" >/dev/null 2>&1; then
-            bunx wrangler r2 bucket create "$bucket"
-          fi
-          catalog_dir="$RUNNER_TEMP/frockbot-catalog"
-          rm -rf "$catalog_dir"
-          bun ../../scripts/publish-catalog.ts --out "$catalog_dir"
-          while IFS= read -r file; do
-            key="${file#"$catalog_dir"/}"
-            if [[ "$key" == "catalog/current" ]]; then continue; fi
-            bunx wrangler r2 object put "$bucket/$key" \
-              --file "$file" --content-type application/json --remote
-          done < <(find "$catalog_dir" -type f | sort)
-          bunx wrangler r2 object put "$bucket/catalog/current" \
-            --file "$catalog_dir/catalog/current" \
-            --content-type application/json --remote
-
-      - name: Deploy bundler Worker
-        # The app's PACKAGE_BUNDLER service binding names this Worker, so it
-        # must exist before the app version can be created.
-        working-directory: apps/cloudflare-bundler
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: bunx wrangler deploy
-
       - name: Deploy computer host
         # The app's COMPUTER_HOST service binding names this Worker, so it
         # must exist before the app version can be created; and the host must
@@ -494,6 +468,32 @@ jobs:
 
           node <<'NODE' > "$secrets_file"
           const names = ['SPRITES_TOKEN', 'COMPUTER_HOST_TOKEN'];
+          console.log(
+            JSON.stringify(
+              Object.fromEntries(names.map((name) => [name, process.env[name]])),
+            ),
+          );
+          NODE
+
+          bunx wrangler deploy --secrets-file "$secrets_file"
+
+      - name: Deploy Applet build service
+        # The app's APPLET_BUILD service binding names this Worker, so it must
+        # exist before the app version can be created. Wrangler builds and
+        # pushes the container image here, which needs Docker — the hosted
+        # runner has it.
+        working-directory: apps/applet-build
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          APPLET_BUILD_TOKEN: ${{ secrets.APPLET_BUILD_TOKEN }}
+        shell: bash
+        run: |
+          secrets_file="$RUNNER_TEMP/frockbot-applet-build.env"
+          trap 'rm -f "$secrets_file"' EXIT
+
+          node <<'NODE' > "$secrets_file"
+          const names = ['APPLET_BUILD_TOKEN'];
           console.log(
             JSON.stringify(
               Object.fromEntries(names.map((name) => [name, process.env[name]])),
@@ -523,6 +523,10 @@ jobs:
           # production did, unnoticed, from the day the Applet authority
           # shipped until 2026-09-05.
           APPLET_VIEWER_SECRET: ${{ secrets.APPLET_VIEWER_SECRET }}
+          # Required: the same shared secret the Applet build Worker and its
+          # container check. A Turn's applet_check and applet_publish both call
+          # the service, so without it no Applet can be built or published.
+          APPLET_BUILD_TOKEN: ${{ secrets.APPLET_BUILD_TOKEN }}
           # Optional: authorizes the read-only /api/debug operator surface.
           # Absent and the deployed Worker simply 404s those routes.
           DEBUG_TOKEN: ${{ secrets.DEBUG_TOKEN }}
@@ -534,18 +538,6 @@ jobs:
           # re-added as FROCK_AI_GATEWAY_TOKEN; `--secrets-file` replaces the
           # Worker's whole secret set, so an unresolved name would delete it.
           FROCK_AI_GATEWAY_TOKEN: ${{ secrets.FROCK_AI_GATEWAY_TOKEN || secrets.FLOCK_AI_GATEWAY_TOKEN }}
-          # Optional: the direct OpenAI realtime key composer dictation
-          # prefers. Present, the `VoiceSession` Durable Object opens
-          # `wss://api.openai.com/v1/realtime` with it; absent, it falls back
-          # to the AI Gateway's BYOK key and `cf-aig-authorization`.
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          # Optional: read the same way by the voice assistant in slice B.
-          # Carried now so the secret survives the deploys before that lands —
-          # `--secrets-file` replaces the whole set every time.
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          COMPOSIO_API_KEY: ${{ secrets.COMPOSIO_API_KEY }}
-          COMPOSIO_WEBHOOK_SECRET: ${{ secrets.COMPOSIO_WEBHOOK_SECRET }}
-          FROCKBOT_AUTHORIZATION_STATE_SECRET: ${{ secrets.FROCKBOT_AUTHORIZATION_STATE_SECRET }}
         shell: bash
         run: |
           secrets_file="$RUNNER_TEMP/frockbot-production.env"

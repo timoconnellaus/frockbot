@@ -29,11 +29,6 @@ import {
   createFrockAiFakeWorker,
   FROCK_AI_FAKE_SERVICE,
 } from "./test/frock-ai-fake.ts";
-import {
-  createVoiceUpstreamFakeWorker,
-  VOICE_ASSISTANT_FAKE_UPSTREAM_URL,
-  VOICE_UPSTREAM_FAKE_NAME,
-} from "./test/voice-upstream-fake.ts";
 
 // The bytes `test:integration` just built, read here rather than imported with
 // Vite's `?raw` from a test file: `tsc` resolves a relative specifier on disk
@@ -68,7 +63,7 @@ const computerHost = createComputerHostFake({ maximumHangMs: 3_000 });
 
 export default defineConfig({
   // `manifest-catalog.integration.ts` imports the production client decoder
-  // from `@frockbot/plugin-shell/client`, whose module graph reaches Vue single
+  // from `@frockbot/app/shell/client`, whose module graph reaches Vue single
   // file components and the Cordis client runtime. The same two settings
   // `vite.config.ts` uses to build the shipped client make that graph
   // resolvable here; nothing in it executes — only `decodePluginCatalog` runs.
@@ -77,10 +72,7 @@ export default defineConfig({
     cloudflareTest({
       main: "./src/index.ts",
       miniflare: {
-        // Not the Node-side stub directly: `test/voice-upstream-fake.ts`
-        // explains why the outbound has to be a Worker here, and hands
-        // everything but the voice provider back to it unchanged.
-        outboundService: VOICE_UPSTREAM_FAKE_NAME,
+        outboundService: createOutboundService(),
         compatibilityDate: "2026-08-27",
         compatibilityFlags: ["nodejs_compat"],
         workerLoaders: {
@@ -98,11 +90,8 @@ export default defineConfig({
           AI: FROCK_AI_FAKE_SERVICE,
           AI_PROBE: FROCK_AI_FAKE_SERVICE,
         },
-        workers: [
-          createFrockAiFakeWorker("2026-08-27"),
-          createVoiceUpstreamFakeWorker("2026-08-27", createOutboundService()),
-        ],
-        r2Buckets: ["APPLICATION_ARTIFACTS", "MEMORY_FILES", "PACKAGE_CATALOG"],
+        workers: [createFrockAiFakeWorker("2026-08-27")],
+        r2Buckets: ["APPLICATION_ARTIFACTS", "MEMORY_FILES"],
         d1Databases: ["AUTH_DB"],
         durableObjects: {
           // Production classes, not probes.
@@ -115,17 +104,12 @@ export default defineConfig({
             className: "UserConfiguration",
             useSQLite: true,
           },
-          // VoiceSession owns only the socket bridge. This binding lets the
-          // gateway integration test prove its RPCs reach the User authority.
-          VOICE_SESSIONS: "VoiceSession",
           DEPLOYMENT_POLICY: {
             className: "DeploymentPolicy",
             useSQLite: true,
           },
         },
         bindings: {
-          COMPOSIO_API_KEY: "test-composio-backend-key",
-          COMPOSIO_WEBHOOK_SECRET: "test-provider-webhook-secret",
           BETTER_AUTH_URL: "https://bot.frockbot.com",
           TEST_MIGRATIONS: authMigrations,
           FOUNDATION_ARTIFACT: foundationArtifact,
@@ -140,17 +124,14 @@ export default defineConfig({
           // per-test identities here are ordinary Users.
           FROCKBOT_ADMIN_EMAILS: "owner@example.com",
           DEBUG_TOKEN: "integration-debug-token",
-          ALLOWED_CLIENT_ORIGINS: "capacitor://localhost,frockbot://localhost",
           CREDENTIAL_KEYRING: TEST_CREDENTIAL_KEYRING,
           // Signs the `mcp-oauth` callback state. Fixed, so a test can mint a
           // state the gateway accepts and forge one it must refuse; strong
           // enough to pass the same check production makes, because the
           // Contribution refuses to serve its routes at all otherwise.
-          FROCKBOT_AUTHORIZATION_STATE_SECRET:
-            "workerd-mcp-oauth-state-secret-0123456789abcdef",
           // Not a credential: no Sprite token reaches this Worker in
-          // production either, because the Computer host holds the only copy
-          // (ADR 0004). `SPRITES_TOKEN` is only the "is a Computer configured"
+          // production either, because the Computer host holds the only
+          // copy. `SPRITES_TOKEN` is only the "is a Computer configured"
           // gate, so a placeholder is exactly what a deployment with a
           // Computer looks like from here.
           SPRITES_TOKEN: "configured",
@@ -162,10 +143,6 @@ export default defineConfig({
           // mint the token a machine presents and forge one that must be
           // refused.
           MACHINE_TOKEN_SECRET: "workerd-machine-token-secret-0123456789ab",
-          // A Gemini Live stand-in, so the voice transport's own failure
-          // handling — a refused resumption handle, a provider that never
-          // answers — is reachable at the Durable Object boundary.
-          VOICE_ASSISTANT_UPSTREAM_URL: VOICE_ASSISTANT_FAKE_UPSTREAM_URL,
         },
         // Deliberately absent, and why:
         //
@@ -175,13 +152,6 @@ export default defineConfig({
         //   binds an auxiliary RPC fake in `vitest.config.ts` where deletion
         //   paging itself is under test. `AI` is bound above because image
         //   generation exercises it throughout this integration suite.
-        // - `PACKAGE_BUNDLER`: `BotStateEnv` types it optional precisely so a
-        //   host without Bot authoring still runs; the Bot Durable Object then
-        //   refuses `package_author` visibly instead of throwing. No test in
-        //   this layer authors a Package, and `test/authoring.workerd.ts`
-        //   already covers that seam with `test/package-bundler-fake.ts`. The
-        //   auxiliary-RPC-Worker pattern above is what would wire it in the
-        //   day a test here needs it.
       },
     }),
   ],

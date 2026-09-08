@@ -1,12 +1,12 @@
 import type {
   BotStateChannelFrameV1,
   BotStateTopicV1,
-} from "@frockbot/protocol";
-import { decodeBotStateCursorV1 } from "@frockbot/protocol";
+} from "@frockbot/core/protocol";
+import { decodeBotStateCursorV1 } from "@frockbot/core/protocol";
 import type {
   ComputerBotStorage,
   ComputerBotTransaction,
-} from "@frockbot/plugin-computer/bot";
+} from "@frockbot/computer/bot";
 
 const CHANNEL_TAG = "bot-state-v1";
 export const BOT_STATE_CHANNEL_INTERNAL_PATH = "/internal/bot-state-channel/v1";

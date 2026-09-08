@@ -1,6 +1,6 @@
 # Shared Computer host
 
-The production Computer host of [ADR 0004](../../docs/adr/0004-host-fly-computer-in-cloudflare-containers.md), and the successor to `apps/fly-host-prototype`.
+The production Computer host: a Worker that shards and authorizes, fronting a Cloudflare Container that runs the Fly Sprites SDK.
 
 A Bot Durable Object cannot drive a Fly Sprite itself. This Worker is where the Sprites SDK, `SPRITES_TOKEN`, and the WebSocket exec transport live, behind a versioned protocol the Durable Object speaks and a service binding nothing public can reach.
 
@@ -23,15 +23,15 @@ The SDK puts a command's argv **and** its environment into the request URL, and 
 
 ## Layout
 
-| Path                                                                        | What it is                                                                                                                                                  |
-| --------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/router.ts`                                                             | Token check, decode, shard, forward. Decoding here means a malformed body never starts a container.                                                         |
-| `src/index.ts`                                                              | The Container Durable Object and the Worker entrypoint. Also carries forward the prototype's `ComputerEffectJournal` and its `/v1/effects` route unchanged. |
-| `container/computer.ts`                                                     | The whole protocol over one Sprites client: open, exec, files, control, viewer, services, cancel.                                                           |
-| `container/server.ts`                                                       | Node HTTP glue. Owns cancellation: `req.on("close")` aborts the effect.                                                                                     |
-| `container/fake-sprites.ts`                                                 | The fake `SpritesClient` the tests drive, including chunk-split output.                                                                                     |
-| [`@frockbot/computer-host-protocol`](../../packages/computer-host-protocol) | The v1 DTOs and decoders both sides import.                                                                                                                 |
-| [`@frockbot/computer-host-runtime`](../../packages/computer-host-runtime)   | The Computer's on-Sprite layout and shell scripts, shared with `@frockbot/plugin-fly-sprite`.                                                               |
+| Path                                                               | What it is                                                                                                                                                  |
+| ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/router.ts`                                                    | Token check, decode, shard, forward. Decoding here means a malformed body never starts a container.                                                         |
+| `src/index.ts`                                                     | The Container Durable Object and the Worker entrypoint. Also carries forward the prototype's `ComputerEffectJournal` and its `/v1/effects` route unchanged. |
+| `container/computer.ts`                                            | The whole protocol over one Sprites client: open, exec, files, control, viewer, services, cancel.                                                           |
+| `container/server.ts`                                              | Node HTTP glue. Owns cancellation: `req.on("close")` aborts the effect.                                                                                     |
+| `container/fake-sprites.ts`                                        | The fake `SpritesClient` the tests drive, including chunk-split output.                                                                                     |
+| [`@frockbot/computer/host-protocol`](../../computer/host-protocol) | The v1 DTOs and decoders both sides import.                                                                                                                 |
+| [`@frockbot/computer/host-runtime`](../../computer/host-runtime)   | The Computer's on-Sprite layout and shell scripts, shared with `@frockbot/computer/fly`.                                                                    |
 
 ## Checks
 

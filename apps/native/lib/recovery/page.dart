@@ -2,9 +2,11 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../audit/page.dart';
 import '../client/transport.dart';
+import '../flock/sheep.dart';
 import '../protocol/client_wire.generated.dart' as wire;
-import '../theme/frock_theme.dart';
+import '../shell/semantics.dart';
 import '../theme/states.dart';
 import 'controller.dart';
 
@@ -136,7 +138,7 @@ class _BotRecoveryPageState extends State<BotRecoveryPage>
   Widget row(wire.BotRegistration bot, bool archived) => Card(
     child: ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
-      leading: const SheepAvatar(),
+      leading: SheepAvatar(background: bot.sheep.background),
       title: Text(bot.initialName),
       subtitle: Text(
         archived
@@ -428,79 +430,30 @@ class _BotRecoveryDetailState extends State<BotRecoveryDetail> {
                       style: Theme.of(context).textTheme.titleLarge,
                     ),
                     const SizedBox(height: 8),
-                    if (controller.auditState != 'ready')
-                      const Text(
-                        'Some activity is still being indexed. Refresh to check again.',
-                      ),
-                    if (controller.audit.isEmpty &&
-                        !controller.detailsLoading &&
-                        controller.detailError == null)
-                      const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 16),
-                        child: Text(
-                          'No recorded effects yet. Actions will appear here as your Bot works.',
-                        ),
-                      ),
-                    for (final entry in controller.audit)
-                      Card(
-                        child: Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                entry['preview'] as String,
-                                style: Theme.of(context).textTheme.titleMedium,
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                '${switch (entry['outcome']) {
-                                  'ok' => 'Completed',
-                                  'error' => 'Failed',
-                                  'refused' => 'Refused',
-                                  'interrupted' => 'Interrupted',
-                                  _ => 'Outcome unknown',
-                                }} · ${entry['toolName']}',
-                              ),
-                              Text(
-                                MaterialLocalizations.of(context)
-                                    .formatShortDate(
-                                      DateTime.parse(entry['at'] as String)
-                                          .toLocal(),
-                                    ),
-                                style: Theme.of(context).textTheme.bodySmall,
-                              ),
-                              if (entry['outcome'] == 'unknown')
-                                const Text(
-                                  'Its outcome is uncertain. Inspect the affected service before repeating the action.',
-                                ),
-                              ExpansionTile(
-                                expansionAnimationStyle:
-                                    MediaQuery.disableAnimationsOf(context)
-                                    ? AnimationStyle.noAnimation
-                                    : null,
-                                tilePadding: EdgeInsets.zero,
-                                title: const Text('Details'),
-                                children: [
-                                  SelectableText(
-                                    'Target: ${entry['target']}\nEffect: ${entry['effectId']}\nArgument digest: ${entry['argumentDigest']}',
-                                  ),
-                                ],
-                              ),
-                            ],
+                    const Text(
+                      'Every shell command, browser action, remote tool call '
+                      'and file write this Bot has made, with what the log can '
+                      'and cannot explain about each one.',
+                    ),
+                    const SizedBox(height: 12),
+                    identified(
+                      AuditIds.recoveryEntry,
+                      OutlinedButton.icon(
+                        onPressed: () => Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => AuditPage(
+                              api: widget.controller.api,
+                              store: widget.controller.store,
+                              userId: widget.controller.userId,
+                              botId: botId,
+                              botName: widget.bot.initialName,
+                            ),
                           ),
                         ),
+                        icon: const Icon(Icons.history_rounded),
+                        label: const Text('Open the audit log'),
                       ),
-                    if (controller.auditCursor != null)
-                      TextButton(
-                        onPressed: controller.detailsLoading
-                            ? null
-                            : () => controller.loadDetails(
-                                botId,
-                                moreAudit: true,
-                              ),
-                        child: const Text('Earlier activity'),
-                      ),
+                    ),
                   ]),
                   section([
                     ...notices,

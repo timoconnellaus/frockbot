@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, test } from "vitest";
-import { BOT_ISOLATE_CONTEXT_KEYS_V1 } from "@frockbot/kernel-contracts";
+import { BOT_ISOLATE_CONTEXT_KEYS_V1 } from "@frockbot/core/contracts";
 import {
   PROBE_BROKEN_SOURCE,
   PROBE_PACKAGE_SOURCE,
@@ -33,7 +33,7 @@ describe("a Bot Package in a loaded Dynamic Worker", () => {
     const stub = probe(`external-${crypto.randomUUID()}`);
     const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);
 
-    // `external` is external-*service* status (ADR 0023): it forces a
+    // `external` is external-*service* status: it forces a
     // human-readable reason onto a call that leaves for a third party. An
     // isolate runs this deployment's own reviewed code with `globalOutbound:
     // null`, so it is not that — and calling it external had a cost. The
@@ -158,7 +158,9 @@ describe("a Bot Package in a loaded Dynamic Worker", () => {
     expect(loaded[0]?.identityKeys).toEqual([
       "botId",
       "generationId",
+      "grants",
       "packageId",
+      "userId",
     ]);
     expect(loaded[0]?.limits.subRequests).toBeGreaterThan(0);
   });
@@ -307,10 +309,8 @@ describe("the isolate capability binding", () => {
       status: "available",
       connections: [connection],
       model,
-      tools: true,
       memory: true,
       workspace: true,
-      notify: true,
       schedule: true,
     });
   });

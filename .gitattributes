@@ -2,8 +2,8 @@
 # binary file has no three-way merge: two branches that both edit it do not
 # conflict cleanly — one side is kept whole and the other's edits are dropped,
 # with nothing in the merge output to say so. That is the shape of trap
-# `packages/plugin-flock/src/client/index.ts` was, holding a literal NUL as a
-# watch-key separator until it was written as an escape instead.
+# `app/flock/client/index.ts` was, holding a literal NUL as a watch-key
+# separator until it was written as an escape instead.
 #
 # `diff` below forces a textual diff whatever bytes a file holds, so such a
 # file can never again review as "Bin 24493 -> 25169 bytes" with its real

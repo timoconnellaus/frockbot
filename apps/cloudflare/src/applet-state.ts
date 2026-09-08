@@ -1,25 +1,25 @@
 // The kernel's authority for one Applet instance.
 //
-// ADR 0022 decision 2: a Durable Object keyed `<userId>:<appletId>` owns an
-// Applet's current code generation, its version history, its failures, its
-// viewer sessions, its tool routing, and its deletion — and never its contents.
-// The contents live in a **facet** mounted from the Applet's own server
-// artifact, loaded through the `APPLETS` Worker Loader binding with
+// A Durable Object keyed `<userId>:<appletId>` owns an Applet's current code
+// generation, its version history, its failures, its viewer sessions, its
+// tool routing, and its deletion — and never its contents. The contents live
+// in a **facet** mounted from the Applet's own server artifact, loaded
+// through the `APPLETS` Worker Loader binding with
 // `globalOutbound: null` and an `env` of exactly `IDENTITY` and `CAPABILITIES`.
 //
-// Four things here come straight from `docs/research/spike-applet-facets.md`
-// and are not free to change:
+// Four things here are measured facts about the runtime, and are not free to
+// change:
 //
 //  1. the loader id includes `appletId`, because the loader freezes the first
-//     caller's `env` for an id process-wide (§7);
-//  2. a facet cannot set an alarm (§5b), so this object owns the alarm, exposes
+//     caller's `env` for an id process-wide;
+//  2. a facet cannot set an alarm, so this object owns the alarm, exposes
 //     `scheduleAlarm` on `CAPABILITIES`, and persists the mount input on the
 //     synchronous key/value surface so `alarm()` can remount after eviction;
 //  3. `facets.get` is lazy and synchronous, so mount and `health()` are one
 //     guarded phase; `facets.clone(src, dst)` copies a facet's whole storage,
 //     which is what makes that phase a commit boundary the kernel can undo
-//     (ADR 0041) rather than a mount the candidate is trusted to survive;
-//  4. a facet stub is not serializable (§8), so `invokeTool` and `connect`
+//     rather than a mount the candidate is trusted to survive;
+//  4. a facet stub is not serializable, so `invokeTool` and `connect`
 //     forward through this object. Only the 101 `Response` and its `webSocket`
 //     travel.
 import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
@@ -51,8 +51,8 @@ import {
   type AppletMountInputV1,
   type AppletPointerV1,
   type AppletTrialV1,
-} from "@frockbot/kernel-do";
-import { BOT_ISOLATE_COMPATIBILITY_DATE } from "@frockbot/plugin-shell/backend-isolate";
+} from "@frockbot/core/durable";
+import { BOT_ISOLATE_COMPATIBILITY_DATE } from "@frockbot/app/isolates/capabilities";
 import {
   decodeRpcEnvelopeV1,
   rpcDecodedValue,
@@ -507,7 +507,7 @@ export class AppletState extends DurableObject<AppletStateEnv> {
   }
 
   /**
-   * The guarded phase, as a commit boundary the kernel owns (ADR 0041).
+   * The guarded phase, as a commit boundary the kernel owns.
    *
    * A candidate generation is never handed the Applet's live storage on the
    * promise that it will fail cleanly: its constructor, the SDK's migrations,
@@ -797,8 +797,8 @@ export class AppletState extends DurableObject<AppletStateEnv> {
    * serializable`), and the call is bounded exactly like an isolate tool's.
    *
    * The caller names the generation its Turn pinned, and this object runs that
-   * generation or none (ADR 0041). A Turn's Composition advertises one Applet
-   * generation's tools, schemas, and provenance to the model; executing a
+   * generation or none. A Turn's Composition advertises one Applet generation's
+   * tools, schemas, and provenance to the model; executing a
    * different generation behind that description would make the Turn
    * unreconstructable, so a mismatch is a plain refusal the Turn can read and
    * the model can act on, not a silent upgrade.

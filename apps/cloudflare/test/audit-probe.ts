@@ -1,5 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
-import { AuditStoreV1, type AuditEntryV1 } from "@frockbot/plugin-audit";
+import { AuditStoreV1, type AuditEntryV1 } from "@frockbot/app/audit";
 
 /**
  * `AuditStoreV1` against real Durable Object SQL storage, at a size the unit

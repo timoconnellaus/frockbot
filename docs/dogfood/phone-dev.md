@@ -89,3 +89,12 @@ On Tim's Pixel 9a through its paired wireless ADB transport:
 
 This proves the local phone workflow, not native release qualification or
 Computer availability. The test stack had no `COMPUTER_HOST_TOKEN`.
+
+After integrating current main (`fecea8c7`), the same setup was rechecked with
+its new Flutter shell and cross-platform transport. Native analysis and all
+493 native tests passed. Dev versionCode 2 installed wirelessly, restored the
+existing local conversation, and displayed `Updated dev app passed.` after a
+new message sent from the phone. Production remained versionCode 27 with the
+same last-update timestamp. The updated repository's 13-package typecheck
+passed. This is the implementation retained by the PR; the earlier acceptance
+above records the initial build before main advanced.

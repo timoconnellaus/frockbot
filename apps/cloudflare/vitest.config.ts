@@ -32,11 +32,11 @@ export default defineConfig({
         compatibilityFlags: ["nodejs_compat"],
         workerLoaders: {
           BOT_PACKAGES: {},
-          // Applet server artifacts (ADR 0022), mounted as a facet of the
-          // AppletState Durable Object.
+          // Applet server artifacts, mounted as a facet of the AppletState
+          // Durable Object.
           APPLETS: {},
         },
-        // The shared Computer host (ADR 0004) as the Durable Object sees it:
+        // The shared Computer host as the Durable Object sees it:
         // a service binding, decoding the real v1 protocol.
         serviceBindings: {
           COMPUTER_HOST: (request: Request) => computerHost.fetch(request),
@@ -48,9 +48,8 @@ export default defineConfig({
           createFrockAiFakeWorker("2026-08-27"),
           createVectorizeFakeWorker("2026-08-27"),
         ],
-        r2Buckets: ["APPLICATION_ARTIFACTS", "MEMORY_FILES", "PACKAGE_CATALOG"],
+        r2Buckets: ["APPLICATION_ARTIFACTS", "MEMORY_FILES"],
         durableObjects: {
-          AUTHORING: "AuthoringProbe",
           BOT_ISOLATES: "BotIsolateProbe",
           BOT_STATES: "WorkerdBotState",
           COMPOSITIONS: "CompositionProbe",
@@ -78,19 +77,15 @@ export default defineConfig({
           },
         },
         bindings: {
-          COMPOSIO_API_KEY: "test-composio-backend-key",
-          COMPOSIO_WEBHOOK_SECRET: "test-provider-webhook-secret",
           BETTER_AUTH_URL: "https://bot.frockbot.com",
           CREDENTIAL_KEYRING: TEST_CREDENTIAL_KEYRING,
           // Signs the `mcp-oauth` callback state. Fixed, so a test can mint a
           // state the gateway accepts and forge one it must refuse; strong
           // enough to pass the same check production makes, because the
           // Contribution refuses to serve its routes at all otherwise.
-          FROCKBOT_AUTHORIZATION_STATE_SECRET:
-            "workerd-mcp-oauth-state-secret-0123456789abcdef",
           // Not a credential: no Sprite token reaches this Worker in
-          // production either, because the Computer host holds the only copy
-          // (ADR 0004). `SPRITES_TOKEN` is only the "is a Computer configured"
+          // production either, because the Computer host holds the only
+          // copy. `SPRITES_TOKEN` is only the "is a Computer configured"
           // gate, and this suite exercises a deployment that has one — with it
           // unset the Computer Package mounts no tools at all, which is a
           // different subject.
@@ -106,9 +101,8 @@ export default defineConfig({
           // A leak canary: a Bot isolate — and an Applet facet — must never see
           // a host binding.
           SECRET_TOKEN: "host-only-secret",
-          // The Applet viewer door's signing secret (ADR 0022 §4). Fixed, so a
-          // test can mint the token a page presents and forge one that must be
-          // refused.
+          // The Applet viewer door's signing secret. Fixed, so a test can mint
+          // the token a page presents and forge one that must be refused.
           APPLET_VIEWER_SECRET: "workerd-applet-viewer-secret-0123456789ab",
         },
       },

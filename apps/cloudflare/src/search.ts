@@ -19,8 +19,8 @@ import {
   type SearchRowPageV1,
   type SearchRowV1,
   type SearchSinkV1,
-} from "@frockbot/plugin-search";
-import { decodeClientRunPageV1 } from "@frockbot/plugin-shell/run-protocol";
+} from "@frockbot/app/search";
+import { decodeClientRunPageV1 } from "@frockbot/app/shell/run-protocol";
 
 /** The User Durable Object's search RPC surface, as the Bot object calls it. */
 export interface UserSearchRpc {

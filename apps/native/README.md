@@ -2,7 +2,7 @@
 
 Flutter Android/macOS renderer over the existing cloud commands. The Vue application remains the production client. This prototype does not claim Slice 2 acceptance: see [the evidence and remaining gates](../../docs/plans/native-acceptance-2026-09-05.md).
 
-Use Flutter **3.47.0 / Dart 3.13.0**, framework `4cf24164269a5ebf0c16a028a00727d0e77bbb05`, from `/Users/tim/repos/flutter/bin/flutter`. Do not upgrade it. `pubspec.lock` pins GenUI **0.10.2**, A2UI core **0.1.1**, WebView **4.14.1**, Android WebView adapter **4.14.1**, WebKit adapter **3.26.1**, and secure storage **11.0.0**. The A2UI **0.9.1** source schemas and their exact upstream hashes are in `spec/a2ui-0.9.1/`.
+Use Flutter **3.47.0 / Dart 3.13.0**, framework `4cf24164269a5ebf0c16a028a00727d0e77bbb05`, from `/Users/tim/repos/flutter/bin/flutter`. Do not upgrade it. `pubspec.lock` pins WebView **4.14.1**, Android WebView adapter **4.14.1**, WebKit adapter **3.26.1**, and secure storage **11.0.0**.
 
 ```sh
 export PATH="/Users/tim/repos/flutter/bin:$PATH"
@@ -24,6 +24,20 @@ The application retains `com.frockbot.mobile`. Compile SDK 37 is required by sec
 
 Build with `flutter build macos --release`. The app is configured for Apple team `Q444L76529`, bundle `com.frockbot.mobile`, the default protected Keychain group, and the exact associated return domain. A matching provisioning profile is required. Xcode currently reports no signed-in account/profile. A `CODE_SIGNING_ALLOWED=NO` build plus ad-hoc local signing proves only renderer compilation/launch, never verified links or production credential protection. iOS is not a target in this slice.
 
+## Web
+
+`flutter build web --release` is a supported target and the advisory workflow builds it. Nothing serves it yet: `bot.frockbot.com` still ships the Vue bundle, and the Worker route that replaces it is the next change. To look at it now, build and serve `build/web` with any static server.
+
+```sh
+flutter build web --release \
+  --dart-define=FROCKBOT_ORIGIN=http://127.0.0.1:8797 \
+  --dart-define=FROCKBOT_DEV_AUTH=true
+```
+
+`dart:io` is confined to `lib/**/*_io.dart`, which a test enforces. Four seams choose an implementation by conditional import: the HTTP client and the state-channel socket (`client/transport_io.dart`, `client/transport_web.dart`), the credential (`client/credential_*.dart`), the sign-in door (`client/auth_*.dart`) and the durable store (`client/plain_store_*.dart`).
+
+The phone holds a PKCE bearer token in the platform keystore and sends it as a header. The browser holds nothing: `withCredentials` carries the ambient better-auth cookie, sign-in navigates to better-auth's Google door, and everything that is not a secret lives in `localStorage`. Bootstrapping from that cookie is not wired up yet, so a browser reaches the sign-in screen and stops there. The Applet fallback WebView has no web implementation and is hidden on the web.
+
 ## Backend and auth
 
 Production enables Android qualification transport with `NATIVE_SLICE_2_AUTH=android`; `android,macos` additionally permits the macOS return after its signing gate passes. Wait for the orchestrator’s release and HTTP 200 from the association endpoint before device auth. See the [rollout ledger](../../docs/plans/native-acceptance-2026-09-05-slice3.md). The anonymous fallback bootstrap is on `https://ui.bot.frockbot.com`.
@@ -32,9 +46,7 @@ The app persists PKCE state/verifier before opening the system browser. The gate
 
 ## Extension boundary
 
-The deterministic form uses a bounded FrockBot catalog and zero model calls. Its save fixture persists a User-owned receipt and reconciles duplicate saves. It is a qualification fixture, not a production Package action lifecycle. The compiled candidate catalog is intentionally absent from the advertised client hello.
-
-GenUI's transitive A2UI parser accepts `v0.9`; the adapter constructs typed `v0.9.1` messages for the validated subset. No claim is made for every A2UI feature. Unknown/deep/cyclic/oversized documents become a host-owned unavailable region.
+A plugin renders by returning a `ViewDocument`, which `lib/view/` draws with the host's own widgets: six node types, no markup and no third-party renderer. The budgets — 512 nodes, depth 16, 262,144 bytes — are checked before the first widget is built, and a document past any of them becomes a host-owned unavailable region rather than a partial view. `embed` names a host region; the host decides what goes in it. A development build reaches `View sample` from the drawer to look at the renderer before any plugin produces a document.
 
 The Applet fallback never loads the authenticated app or receives its native session. A trusted anonymous bootstrap identifies the exact sandboxed child frame and current navigation epoch. A two-minute User/Applet/generation-scoped viewer token travels only after handshake and uses the WebSocket subprotocol, never a URL. Existing artifacts need rebuilding with the updated Applet SDK handshake. The native host confirms external links before opening the system browser. WebKit's pinned source override selects a nonpersistent store because the public plugin API does not expose it; see its vendor README.
 

@@ -7,7 +7,7 @@
 // `apps/computer-host/live-test.ts` is what drives it there.
 //
 // What is real here: the wire contract. This module runs
-// `@frockbot/computer-host-protocol` verbatim — the same
+// `@frockbot/computer/host-protocol` verbatim — the same
 // `decodeComputerHostHttpRequestV1` at the seam, the same `problem()` refusal
 // shape, the same open and exec NDJSON framing, the same
 // `x-frockbot-host-token` check, and the real Worker's own
@@ -30,7 +30,7 @@ import {
   type ComputerHostErrorCodeV1,
   type ComputerHostExecFrameV1,
   type ComputerHostRequestV1,
-} from "@frockbot/computer-host-protocol";
+} from "@frockbot/computer/host-protocol";
 import { computerHostShardV1 } from "../../computer-host/src/router.ts";
 
 /** The token the fake accepts. The configs hand the same string to the app. */

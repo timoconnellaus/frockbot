@@ -7,10 +7,22 @@ import 'package:url_launcher/url_launcher.dart';
 import '../client/transport.dart';
 import '../connections/page.dart';
 import '../protocol/client_wire.generated.dart' as wire;
+import '../shell/semantics.dart';
 import '../theme/states.dart';
+import '../view/action.dart';
+import '../view/document.dart';
 import 'controller.dart';
+import 'document.dart';
 import 'model_picker.dart';
 
+/// Settings, rendered by the host's one renderer.
+///
+/// The server projects the settings frame it already produces as a
+/// `ViewDocument`, so this page is a host over `ViewDocumentView` rather than
+/// a second renderer of typed fields: the widgets, the budgets and the
+/// retained command envelope are the ones every plugin-described view gets.
+/// What is left here is the surface's own chrome and the route an action
+/// lands on.
 class SettingsPage extends StatefulWidget {
   final NativeApi api;
   final LocalStore store;
@@ -29,23 +41,31 @@ class SettingsPage extends StatefulWidget {
 
 class _SettingsPageState extends State<SettingsPage>
     with WidgetsBindingObserver {
-  late final state = SettingsController(
+  late final SettingsController state = SettingsController(
     widget.api,
-    widget.store,
     widget.userId,
     widget.home,
   );
+  ViewController? view;
+  int? shown;
   bool handingOff = false;
+  bool reloadWanted = false;
+  String? saved;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    state.addListener(_adopt);
     unawaited(state.load());
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    state.removeListener(_adopt);
+    view?.removeListener(_afterAction);
+    view?.dispose();
     state.dispose();
     super.dispose();
   }
@@ -55,7 +75,60 @@ class _SettingsPageState extends State<SettingsPage>
     if (phase == AppLifecycleState.resumed) unawaited(state.load());
   }
 
-  Future<void> manageProvider() async {
+  /// One controller per revision: a save moves the revision on, and the values
+  /// a person had typed against the previous one are no longer answers to it.
+  void _adopt() {
+    final document = state.document;
+    if (!mounted) return;
+    if (document == null || document.revision == shown) {
+      setState(() {});
+      return;
+    }
+    view?.removeListener(_afterAction);
+    view?.dispose();
+    final next = ViewController(
+      store: widget.store,
+      userId: widget.userId,
+      surfaceId: state.surfaceId,
+      revision: document.revision,
+      dispatch: _dispatch,
+    );
+    next.addListener(_afterAction);
+    setState(() {
+      shown = document.revision;
+      view = next;
+    });
+    unawaited(next.restore());
+  }
+
+  /// A change the owner accepted moves the revision, so the document is read
+  /// again — but only once the command that moved it has finished being
+  /// confirmed, so the controller is never replaced under its own dispatch.
+  void _afterAction() {
+    if (!mounted) return;
+    setState(() {});
+    if (!reloadWanted || view!.busy || view!.pending != null) return;
+    reloadWanted = false;
+    unawaited(state.load());
+  }
+
+  Future<Map<String, Object?>> _dispatch(Map<String, Object?> command) async {
+    if (viewActionKindV1(command) == manageProviderKindV1) {
+      await _manageProvider();
+      return {'commandId': command['commandId'], 'status': 'applied'};
+    }
+    final receipt = await state.dispatch(command);
+    if (receipt['status'] == 'applied') {
+      reloadWanted = true;
+      saved = 'Saved.';
+    }
+    return receipt;
+  }
+
+  /// Provider account setup is the hosted web flow, in the system browser. The
+  /// destination is checked against the origin this app talks to, so a
+  /// tampered answer cannot send a person somewhere else wearing our name.
+  Future<void> _manageProvider() async {
     if (handingOff) return;
     setState(() => handingOff = true);
     try {
@@ -65,7 +138,7 @@ class _SettingsPageState extends State<SettingsPage>
           body: {'schemaVersion': 1, 'home': 'models'},
         ),
       );
-      final uri = Uri.parse(result.authorizationUrl.value);
+      final uri = Uri.parse(result.authorizationUrl.value as String);
       if (uri.origin != hostedOrigin ||
           uri.path != '/native/settings' ||
           uri.userInfo.isNotEmpty ||
@@ -90,23 +163,67 @@ class _SettingsPageState extends State<SettingsPage>
     }
   }
 
+  Widget _modelField(
+    BuildContext context,
+    wire.SettingField field,
+    String id,
+    Object? value,
+    void Function(Object? value)? onChanged,
+  ) {
+    // A projected select carries JSON-encoded values, so the current value is
+    // matched as it stands and decoded only for the picker's own comparison.
+    final decoded = value is String ? jsonDecode(value) : null;
+    final matched = (field.choices ?? const <wire.SettingChoice>[]).where(
+      (choice) => choice.value.value == value,
+    );
+    return identified(
+      SettingsIds.modelField,
+      Card(
+        child: ListTile(
+          leading: const Icon(Icons.auto_awesome_rounded),
+          title: Text(matched.isEmpty ? 'Choose a model' : matched.first.label),
+          subtitle: Text(field.hint ?? 'Used by all your Bots'),
+          trailing: const Icon(Icons.expand_more_rounded),
+          onTap: onChanged == null
+              ? null
+              : () async {
+                  final choice = await Navigator.of(context)
+                      .push<wire.SettingChoice>(
+                        MaterialPageRoute(
+                          builder: (_) => ModelPicker(
+                            load: state.options,
+                            selected: decoded,
+                          ),
+                        ),
+                      );
+                  if (choice != null) onChanged(jsonEncode(choice.value.value));
+                },
+        ),
+      ),
+    );
+  }
+
   @override
-  Widget build(BuildContext context) => AnimatedBuilder(
-    animation: state,
-    builder: (context, _) => Scaffold(
+  Widget build(BuildContext context) {
+    final document = state.document;
+    final controller = view;
+    return Scaffold(
       appBar: AppBar(
         title: Text(widget.home == 'models' ? 'Models' : 'Settings'),
         actions: [
-          IconButton(
-            tooltip: 'Refresh settings',
-            onPressed: state.busy ? null : state.load,
-            icon: const Icon(Icons.refresh_rounded),
+          identified(
+            SettingsIds.refresh,
+            IconButton(
+              tooltip: 'Refresh settings',
+              onPressed: state.busy ? null : state.load,
+              icon: const Icon(Icons.refresh_rounded),
+            ),
           ),
         ],
       ),
       body: SafeArea(
         top: false,
-        child: state.frame == null
+        child: document == null || controller == null
             ? state.busy
                   ? const FrockLoading(label: 'Loading settings')
                   : FrockEmptyState(
@@ -130,83 +247,26 @@ class _SettingsPageState extends State<SettingsPage>
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            if (widget.home == 'application')
-                              Card(
-                                child: ListTile(
-                                  leading: const Icon(
-                                    Icons.auto_awesome_rounded,
-                                  ),
-                                  title: const Text('Models'),
-                                  subtitle: const Text(
-                                    'Your default model and provider accounts',
-                                  ),
-                                  trailing: const Icon(
-                                    Icons.chevron_right_rounded,
-                                  ),
-                                  onTap: () => Navigator.of(context).push(
-                                    MaterialPageRoute<void>(
-                                      builder: (_) => SettingsPage(
-                                        api: widget.api,
-                                        store: widget.store,
-                                        userId: widget.userId,
-                                        home: 'models',
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            if (widget.home == 'application')
-                              Card(
-                                child: ListTile(
-                                  leading: const Icon(Icons.hub_outlined),
-                                  title: const Text('Connectors'),
-                                  subtitle: const Text(
-                                    'Accounts and services for every Bot',
-                                  ),
-                                  trailing: const Icon(
-                                    Icons.chevron_right_rounded,
-                                  ),
-                                  onTap: () => Navigator.of(context).push(
-                                    MaterialPageRoute<void>(
-                                      builder: (_) => ConnectionsPage(
-                                        api: widget.api,
-                                        userId: widget.userId,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            if (state.message != null)
+                            if (widget.home == 'application') ..._homeLinks(),
+                            if (saved != null)
                               Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 12,
-                                ),
+                                padding: const EdgeInsets.only(bottom: 8),
                                 child: Semantics(
                                   liveRegion: true,
-                                  child: Text(state.message!),
+                                  child: Text(saved!),
                                 ),
                               ),
-                            if (state.pending != null)
-                              FilledButton.tonal(
-                                onPressed: state.busy ? null : state.checkSave,
-                                child: Text(
-                                  state.busy ? 'Checking save…' : 'Check save',
-                                ),
-                              ),
-                            for (final section in state.frame!.sections)
-                              _SettingsSection(
+                            identified(
+                              SettingsIds.document,
+                              ViewDocumentView(
                                 key: ValueKey(
-                                  '${section['id']}.${state.frame!.revision}',
+                                  '${state.surfaceId}.${document.revision}',
                                 ),
-                                section: section,
-                                disabled:
-                                    state.busy ||
-                                    state.pending != null ||
-                                    handingOff,
-                                onSave: state.save,
-                                onManage: manageProvider,
-                                loadOptions: state.options,
+                                document: document,
+                                controller: controller,
+                                fields: {'account-models': _modelField},
                               ),
+                            ),
                           ],
                         ),
                       ),
@@ -215,308 +275,51 @@ class _SettingsPageState extends State<SettingsPage>
                 ),
               ),
       ),
-    ),
-  );
-}
-
-class _SettingsSection extends StatefulWidget {
-  final Map<String, Object?> section;
-  final bool disabled;
-  final Future<void> Function(
-    String,
-    Map<String, Object?>, {
-    List<String> unset,
-  })
-  onSave;
-  final Future<void> Function() onManage;
-  final Future<wire.SettingsOptionsPage> Function(String, int?) loadOptions;
-  const _SettingsSection({
-    super.key,
-    required this.section,
-    required this.disabled,
-    required this.onSave,
-    required this.onManage,
-    required this.loadOptions,
-  });
-  @override
-  State<_SettingsSection> createState() => _SettingsSectionState();
-}
-
-class _SettingsSectionState extends State<_SettingsSection> {
-  final form = GlobalKey<FormState>();
-  final values = <String, Object?>{};
-  final dirty = <String>{};
-  final reset = <String>{};
-  final selectedLabels = <String, String>{};
-  late final fields = (widget.section['fields'] as List)
-      .map(wire.SettingField.fromJson)
-      .toList();
-  @override
-  void initState() {
-    super.initState();
-    for (final field in fields) {
-      values[field.id.value] = field.value.value;
-    }
-  }
-
-  void change(String id, Object? value) => setState(() {
-    values[id] = value;
-    dirty.add(id);
-    reset.remove(id);
-  });
-  bool isDefault(wire.SettingField field) =>
-      reset.contains(field.id.value) ||
-      (!dirty.contains(field.id.value) && field.isSet == false);
-  Future<void> save() async {
-    if (!form.currentState!.validate()) return;
-    final id = widget.section['id'] as String;
-    final selected = id == 'profile' ? values.keys : dirty;
-    final patch = <String, Object?>{};
-    final unset = <String>[];
-    for (final key in selected) {
-      if (reset.contains(key)) {
-        unset.add(key);
-      } else {
-        patch[key] = values[key];
-      }
-    }
-    await widget.onSave(id, patch, unset: unset);
-  }
-
-  Widget field(wire.SettingField field) {
-    final id = field.id.value;
-    final enabled = !widget.disabled && field.editable;
-    final decoration = InputDecoration(
-      labelText: field.label,
-      helperText: field.hint,
-      helperMaxLines: 4,
     );
-    if (field.choiceSource == 'account-models') {
-      final choices = field.choices ?? [];
-      final selected = choices.where(
-        (c) => jsonEncode(c.value.value) == jsonEncode(values[id]),
-      );
-      final label =
-          selectedLabels[id] ??
-          (selected.isEmpty ? 'Choose a model' : selected.first.label);
-      return Card(
+  }
+
+  List<Widget> _homeLinks() => [
+    identified(
+      SettingsIds.modelsLink,
+      Card(
         child: ListTile(
-          title: Text(label),
-          subtitle: Text(field.hint ?? ''),
           leading: const Icon(Icons.auto_awesome_rounded),
-          trailing: const Icon(Icons.expand_more_rounded),
-          onTap: enabled
-              ? () async {
-                  final choice = await Navigator.of(context)
-                      .push<wire.SettingChoice>(
-                        MaterialPageRoute(
-                          builder: (_) => ModelPicker(
-                            load: widget.loadOptions,
-                            selected: values[id],
-                          ),
-                        ),
-                      );
-                  if (!mounted || choice == null) return;
-                  change(id, choice.value.value);
-                  setState(() => selectedLabels[id] = choice.label);
-                }
-              : null,
-        ),
-      );
-    }
-    if (field.kind == 'boolean' && field.canReset == true) {
-      return DropdownButtonFormField<String>(
-        initialValue: isDefault(field)
-            ? 'default'
-            : values[id] == true
-            ? 'on'
-            : 'off',
-        decoration: decoration,
-        items: const [
-          DropdownMenuItem(value: 'default', child: Text('Use default')),
-          DropdownMenuItem(value: 'on', child: Text('On')),
-          DropdownMenuItem(value: 'off', child: Text('Off')),
-        ],
-        onChanged: enabled
-            ? (v) {
-                if (v == 'default') {
-                  setState(() {
-                    reset.add(id);
-                    dirty.add(id);
-                  });
-                } else {
-                  change(id, v == 'on');
-                }
-              }
-            : null,
-      );
-    }
-    if (field.kind == 'boolean') {
-      return SwitchListTile.adaptive(
-        contentPadding: EdgeInsets.zero,
-        title: Text(field.label),
-        subtitle: field.hint == null ? null : Text(field.hint!),
-        value: values[id] == true,
-        onChanged: enabled ? (v) => change(id, v) : null,
-      );
-    }
-    if (field.kind == 'select') {
-      return DropdownButtonFormField<String>(
-        initialValue: isDefault(field) ? '__default__' : jsonEncode(values[id]),
-        decoration: decoration,
-        isExpanded: true,
-        items: [
-          if (field.canReset == true)
-            const DropdownMenuItem(
-              value: '__default__',
-              child: Text('Use default'),
-            ),
-          for (final choice in field.choices ?? [])
-            DropdownMenuItem(
-              value: jsonEncode(choice.value.value),
-              child: Text(
-                choice.label,
-                maxLines: 3,
-                overflow: TextOverflow.ellipsis,
+          title: const Text('Models'),
+          subtitle: const Text('Your default model and provider accounts'),
+          trailing: const Icon(Icons.chevron_right_rounded),
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) => SettingsPage(
+                api: widget.api,
+                store: widget.store,
+                userId: widget.userId,
+                home: 'models',
               ),
-            ),
-        ],
-        onChanged: enabled
-            ? (v) {
-                if (v == '__default__') {
-                  setState(() {
-                    reset.add(id);
-                    dirty.add(id);
-                  });
-                } else if (v != null) {
-                  change(id, jsonDecode(v));
-                }
-              }
-            : null,
-      );
-    }
-    return TextFormField(
-      key: ValueKey('$id.${reset.contains(id)}'),
-      initialValue: isDefault(field) ? '' : values[id]?.toString() ?? '',
-      enabled: enabled,
-      decoration: decoration.copyWith(
-        helperText: isDefault(field)
-            ? 'Using default${field.hint == null ? '' : ' · ${field.hint}'}'
-            : field.hint,
-        suffixIcon: field.canReset == true && !isDefault(field)
-            ? IconButton(
-                tooltip: 'Use default for ${field.label}',
-                onPressed: enabled
-                    ? () => setState(() {
-                        reset.add(id);
-                        dirty.add(id);
-                      })
-                    : null,
-                icon: const Icon(Icons.restart_alt_rounded),
-              )
-            : null,
-      ),
-      maxLength: field.maxLength,
-      keyboardType: field.kind == 'number'
-          ? const TextInputType.numberWithOptions(decimal: true, signed: true)
-          : id == 'email'
-          ? TextInputType.emailAddress
-          : TextInputType.text,
-      onChanged: (v) => change(
-        id,
-        field.kind == 'number' ? (v.isEmpty ? null : num.tryParse(v)) : v,
-      ),
-      validator: (v) {
-        if (field.required == true && (v == null || v.trim().isEmpty)) {
-          return 'Enter ${field.label.toLowerCase()}.';
-        }
-        if (field.kind == 'number' && v != null && v.isNotEmpty) {
-          final number = num.tryParse(v);
-          if (number == null || !number.isFinite) return 'Enter a number.';
-          if (field.minimum != null && number < field.minimum!) {
-            return 'Use ${field.minimum} or more.';
-          }
-          if (field.maximum != null && number > field.maximum!) {
-            return 'Use ${field.maximum} or less.';
-          }
-        }
-        return null;
-      },
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(top: 24),
-    child: Form(
-      key: form,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Semantics(
-            header: true,
-            child: Text(
-              widget.section['label'] as String,
-              style: Theme.of(context).textTheme.titleMedium,
             ),
           ),
-          const SizedBox(height: 16),
-          if (widget.section['credentialStatus'] case final String status)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: Text(
-                status == 'connected'
-                    ? 'Account connected'
-                    : status == 'revoked'
-                    ? 'Account revoked'
-                    : status == 'missing'
-                    ? 'Connect an account to use this provider'
-                    : 'Ready to use',
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
-              ),
-            ),
-          if (widget.section['failure'] case final String failure)
-            Text(failure),
-          for (final item in fields)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 16),
-              child: field(item),
-            ),
-          if (fields.any((f) => f.editable))
-            Align(
-              alignment: Alignment.centerRight,
-              child: FilledButton(
-                onPressed: widget.disabled || dirty.isEmpty ? null : save,
-                child: Text(
-                  widget.section['id'] == 'profile'
-                      ? 'Save profile'
-                      : 'Save changes',
-                ),
-              ),
-            ),
-          for (final action in (widget.section['actions'] as List?) ?? [])
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: OutlinedButton.icon(
-                onPressed: widget.disabled
-                    ? null
-                    : action['kind'] == 'manage-provider'
-                    ? widget.onManage
-                    : () => widget.onSave(widget.section['id'] as String, {}),
-                icon: Icon(
-                  action['kind'] == 'manage-provider'
-                      ? Icons.open_in_browser_rounded
-                      : Icons.add_rounded,
-                ),
-                label: Text(action['label'] as String),
-              ),
-            ),
-          const SizedBox(height: 20),
-          const Divider(height: 1),
-        ],
+        ),
       ),
     ),
-  );
+    identified(
+      SettingsIds.connectorsLink,
+      Card(
+        child: ListTile(
+          leading: const Icon(Icons.hub_outlined),
+          title: const Text('Connectors'),
+          subtitle: const Text('Accounts and services for every Bot'),
+          trailing: const Icon(Icons.chevron_right_rounded),
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) =>
+                  ConnectionsPage(
+                    api: widget.api,
+                    store: widget.store,
+                    userId: widget.userId,
+                  ),
+            ),
+          ),
+        ),
+      ),
+    ),
+  ];
 }

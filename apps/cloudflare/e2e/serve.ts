@@ -18,10 +18,11 @@ const harness = await startHarness({
   port: requiredPort("FROCKBOT_E2E_PORT"),
   ollamaPort: requiredPort("FROCKBOT_E2E_OLLAMA_PORT"),
   frockAiPort: requiredPort("FROCKBOT_E2E_FROCK_AI_PORT"),
+  appletBuildPort: requiredPort("FROCKBOT_E2E_APPLET_BUILD_PORT"),
 });
 
 console.log(
-  `FrockBot e2e harness ready on ${harness.baseUrl} (fake Ollama on ${harness.ollamaUrl}, fake Frock AI on ${harness.frockAiUrl})`,
+  `FrockBot e2e harness ready on ${harness.baseUrl} (fake Ollama on ${harness.ollamaUrl}, fake Frock AI on ${harness.frockAiUrl}, Applet build ${harness.appletBuildUrl ?? "off — no Docker"})`,
 );
 console.log(`Harness and wrangler logs: ${harness.logFile}`);
 

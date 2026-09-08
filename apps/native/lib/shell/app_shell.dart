@@ -1,0 +1,1227 @@
+/// The signed-in shell: the Bot list, the conversation, and the right panel.
+///
+/// Everything above a single Bot lives here — the directory, the identities
+/// the sidebar groups by, the unread fan-out, the drawers' state and the slot
+/// registry a feature renders into. `main.dart` is the app entry and the sign
+/// -in door, and hands this a signed-in session and nothing else.
+library;
+
+import 'dart:async';
+import 'dart:convert';
+
+import 'package:flutter/material.dart';
+
+import '../activity/controller.dart';
+import '../activity/page.dart';
+import '../admin/page.dart';
+import '../applets/canvas.dart';
+import '../audit/page.dart';
+import '../client/auth.dart' show developmentAuth;
+import '../client/bot_sessions.dart';
+import '../client/transport.dart';
+import '../computer/card.dart';
+import '../computer/client.dart';
+import '../connections/page.dart';
+import '../flock/create.dart';
+import '../flock/lifecycle.dart';
+import '../machines/page.dart';
+import '../packages/catalog.dart';
+import '../packages/frame.dart';
+import '../plugins/page.dart';
+import '../recovery/page.dart';
+import '../routines/page.dart';
+import '../search/overlay.dart';
+import '../settings/bot_settings.dart';
+import '../settings/page.dart';
+import '../templates/page.dart';
+import '../view/sample_page.dart';
+import '../protocol/client_wire.generated.dart' as wire;
+import 'chat_pane.dart';
+import 'desktop_layout.dart';
+import 'run_view.dart';
+import 'semantics.dart';
+import 'sidebar.dart';
+import 'slots.dart';
+import 'transcript.dart';
+
+class AppShell extends StatefulWidget {
+  final NativeApi api;
+  final LocalStore store;
+  final BotSessions sessions;
+  final String userId;
+
+  /// A `?bot=` deep link the app entry received. Pushing into it opens that
+  /// Bot, which is the only thing the entry asks of the shell.
+  final ValueNotifier<String?> botLinks;
+  final Future<void> Function() onSignOut;
+  const AppShell({
+    super.key,
+    required this.api,
+    required this.store,
+    required this.sessions,
+    required this.userId,
+    required this.botLinks,
+    required this.onSignOut,
+  });
+
+  @override
+  State<AppShell> createState() => _AppShellState();
+}
+
+class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
+  final ShellSlots slots = ShellSlots();
+
+  /// One retained lifecycle command for the account, whichever surface issued
+  /// it: the danger zone in Bot settings, or Manage Bots.
+  late final BotLifecycleCommands lifecycle = BotLifecycleCommands(
+    widget.api,
+    widget.store,
+    widget.userId,
+  );
+  late final ActivityController activity = ActivityController(
+    widget.api,
+    widget.store,
+    widget.userId,
+  );
+  Timer? _activityTimer;
+  List<wire.BotRegistration> bots = [];
+  Map<String, SidebarProfile> profiles = {};
+  Set<String> archived = {};
+  wire.BotRegistration? selected;
+  String? workingRunId;
+  BotSettingsController? botSettings;
+  RoutineInboxController? routineInbox;
+
+  /// The selected Bot's Applet canvas, its Computer, and the Package pages its
+  /// Composition declares. All three belong to one Bot and are replaced whole
+  /// when the selection moves.
+  AppletCanvasController? appletCanvas;
+  ComputerController? computer;
+  PackageCatalog? catalog;
+  String? error;
+  bool loaded = false;
+  bool navOpen = false;
+  bool panelOpen = false;
+
+  /// Which right-panel entry is on. The region holds two — the Bot's settings
+  /// and its Routines — and shows one, because a column is a place to read one
+  /// thing rather than a stack of everything a feature registered.
+  String panelKey = 'bot-settings';
+  bool showHidden = false;
+  bool isAdmin = false;
+  TranscriptLine? openRun;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    activity.addListener(_repaint);
+    widget.botLinks.addListener(_followBotLink);
+    // A lifecycle command nobody has an answer for is adopted here rather than
+    // when the danger zone happens to be opened: it is the account's, and it
+    // is what locks the zone until it is accounted for.
+    unawaited(lifecycle.restore());
+    unawaited(load());
+    _startPolling();
+  }
+
+  void _repaint() {
+    if (mounted) setState(() {});
+  }
+
+  void _startPolling() {
+    _activityTimer?.cancel();
+    _activityTimer = Timer.periodic(
+      const Duration(seconds: 10),
+      (_) => unawaited(activity.load()),
+    );
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _activityTimer?.cancel();
+    _activityTimer = null;
+    if (state == AppLifecycleState.resumed) {
+      unawaited(activity.load());
+      _startPolling();
+    }
+  }
+
+  /// Whether this account administers the deployment. The gateway is the
+  /// authority; this only decides whether the door is offered at all.
+  Future<void> _readIdentity() async {
+    try {
+      final identity = wire.AuthIdentity.fromJson(
+        await widget.api.request('/api/identity'),
+      );
+      if (mounted && identity.isAdmin != isAdmin) {
+        setState(() => isAdmin = identity.isAdmin);
+      }
+    } catch (_) {
+      // Nothing is lost but the Admin entry.
+    }
+  }
+
+  Future<void> load() async {
+    unawaited(_readIdentity());
+    try {
+      final cached = await widget.store.read('directory/${widget.userId}');
+      if (cached != null && bots.isEmpty) {
+        _adopt(wire.BotDirectory.fromJson(jsonDecode(cached)).bots, const {});
+      }
+      final directory = wire.BotDirectory.fromJson(
+        await widget.api.request('/api/bots'),
+      );
+      final lifecycle = wire.BotLifecycleDirectory.fromJson(
+        await widget.api.request('/api/bots/lifecycles'),
+      );
+      final unavailable = {
+        for (final state in lifecycle.lifecycles)
+          if (state.status != 'active') state.botId.value: state.status,
+      };
+      final active = [
+        for (final bot in directory.bots)
+          if (unavailable[bot.botId.value] == null) bot,
+      ];
+      for (final prior in bots) {
+        if (!active.any((bot) => bot.botId.value == prior.botId.value)) {
+          widget.sessions.forget(widget.userId, prior.botId.value);
+        }
+      }
+      await widget.store.write(
+        'directory/${widget.userId}',
+        jsonEncode({
+          ...directory.toJson()! as Map,
+          'bots': [for (final bot in active) bot.toJson()],
+        }),
+      );
+      if (!mounted) return;
+      _adopt(active, {
+        for (final entry in unavailable.entries)
+          if (entry.value == 'archived') entry.key,
+      });
+      unawaited(_loadIdentities());
+      unawaited(activity.load());
+      unawaited(
+        widget.sessions.prefetch(widget.userId, [
+          for (final bot in active) bot.botId.value,
+        ], after: selected?.botId.value),
+      );
+    } catch (failure) {
+      if (mounted) {
+        setState(() {
+          error = failure is RequestFailure
+              ? failure.message
+              : 'Couldn’t load your Bots. Please try again.';
+        });
+      }
+    } finally {
+      if (mounted) setState(() => loaded = true);
+    }
+  }
+
+  void _adopt(List<wire.BotRegistration> active, Set<String> archivedIds) {
+    setState(() {
+      bots = active;
+      archived = archivedIds;
+      // The cached directory is an answer, so the skeleton goes now rather
+      // than waiting on a read that only replaces it.
+      loaded = true;
+      selected = selected == null
+          ? null
+          : active
+                .where((bot) => bot.botId.value == selected!.botId.value)
+                .firstOrNull;
+      error = null;
+    });
+    activity.botNames = {for (final bot in bots) bot.botId.value: _name(bot)};
+    unawaited(_restoreSelection());
+  }
+
+  Future<void> _restoreSelection() async {
+    if (selected != null) return;
+    final saved = await widget.store.read('selection.${widget.userId}');
+    if (!mounted || saved == null) return;
+    final bot = bots.where((bot) => bot.botId.value == saved).firstOrNull;
+    if (bot == null) return;
+    setState(() => selected = bot);
+    _adoptBotPanels(bot.botId.value);
+  }
+
+  /// A deployment with no identity directory leaves the sidebar one plain
+  /// list, which is exactly what it looks like before anything is labelled.
+  Future<void> _loadIdentities() async {
+    try {
+      final answer = await widget.api.request('/api/bots/identities');
+      if (answer is! Map || !mounted) return;
+      setState(() {
+        profiles = {
+          for (final entry in (answer['identities'] as List? ?? const []))
+            if (entry is Map && entry['botId'] is String)
+              entry['botId'] as String: SidebarProfile.decode(entry)!,
+        };
+      });
+      activity.botNames = {for (final bot in bots) bot.botId.value: _name(bot)};
+    } catch (_) {
+      // The registration seed is still a name; nothing is lost but the label.
+    }
+  }
+
+  String _name(wire.BotRegistration bot) =>
+      profiles[bot.botId.value]?.name ?? bot.initialName;
+
+  void _followBotLink() {
+    final botId = widget.botLinks.value;
+    if (botId == null) return;
+    widget.botLinks.value = null;
+    final bot = bots.where((bot) => bot.botId.value == botId).firstOrNull;
+    if (bot == null) {
+      unawaited(load());
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'That Bot isn’t available. Refresh your Bots and try again.',
+          ),
+        ),
+      );
+      return;
+    }
+    Navigator.of(context).popUntil((route) => route.isFirst);
+    _select(botId);
+  }
+
+  void _select(String botId) {
+    final bot = bots.where((bot) => bot.botId.value == botId).firstOrNull;
+    if (bot == null) return;
+    // The switch is the person's; remembering it is bookkeeping and never
+    // delays the pane behind a store write.
+    setState(() {
+      selected = bot;
+      navOpen = false;
+      openRun = null;
+      panelOpen = false;
+    });
+    _adoptBotPanels(botId);
+    unawaited(
+      widget.store
+          .write('selection.${widget.userId}', botId)
+          .catchError((Object _) {}),
+    );
+  }
+
+  /// The Bot's own settings and its Routines are features in the `right-panel`
+  /// region, which is how the Vue shell mounts them too: the shell draws the
+  /// region and never imports what goes in it.
+  void _adoptBotPanels(String botId) {
+    final name =
+        bots.where((bot) => bot.botId.value == botId).map(_name).firstOrNull ??
+        botId;
+    botSettings?.dispose();
+    routineInbox?.dispose();
+    final controller = BotSettingsController(widget.api, botId);
+    final inbox = RoutineInboxController(widget.api, botId);
+    botSettings = controller;
+    routineInbox = inbox;
+    inbox.addListener(_repaint);
+    slots.register(
+      ShellSlot.rightPanel,
+      'bot-settings',
+      (context) => SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            BotSettingsView(
+              controller: controller,
+              onSaved: load,
+              background: _background(botId),
+              onEditAvatar: () => unawaited(_editAvatar(botId, name)),
+              dangerZone: _dangerZone(botId, name),
+            ),
+            ..._packageSettings(botId),
+          ],
+        ),
+      ),
+      label: 'Settings',
+    );
+    slots.register(
+      ShellSlot.rightPanel,
+      'routines',
+      (context) => RoutinesView(
+        api: widget.api,
+        store: widget.store,
+        userId: widget.userId,
+        botId: botId,
+        botName: name,
+        chrome: false,
+        onOpenRun: _openRun,
+        onInbox: inbox.adopt,
+      ),
+      label: 'Routines',
+    );
+    // A firing that finished while the app was open is only ever visible as a
+    // count, so the badge is read on this Bot's own signal rather than on a
+    // click that may never come.
+    slots.register(
+      ShellSlot.headerActions,
+      'routine-inbox',
+      (context) => RoutineInboxBadge(
+        controller: inbox,
+        onOpen: () => _openPanel('routines'),
+      ),
+    );
+    appletCanvas?.dispose();
+    computer?.dispose();
+    appletCanvas = null;
+    computer = null;
+    catalog = null;
+    slots.remove(ShellSlot.rightPanel, 'applet');
+    slots.remove(ShellSlot.rightPanel, 'computer');
+    slots.remove(ShellSlot.headerActions, 'package-entries');
+    unawaited(controller.load());
+    unawaited(inbox.load());
+    unawaited(_adoptComposition(botId));
+  }
+
+  /// What this Bot's Composition declares it may show: the Applet canvas, the
+  /// Computer, and the Package pages and entries. An absent capability is
+  /// silence — no catalog means none of these are registered, and the shell
+  /// asks for no route that does not exist here.
+  Future<void> _adoptComposition(String botId) async {
+    final read = await readPackageCatalogV1(widget.api, botId);
+    if (!mounted || selected?.botId.value != botId) return;
+    setState(() => catalog = read);
+    if (read != null && read.appletsAvailable) {
+      final canvas = AppletCanvasController(widget.api, botId);
+      appletCanvas = canvas;
+      canvas.addListener(_repaint);
+      slots.register(
+        ShellSlot.rightPanel,
+        'applet',
+        (context) => _appletCanvas(botId, canvas),
+        label: 'Applet',
+      );
+      unawaited(canvas.load());
+    }
+    final machine = ComputerController(widget.api, botId);
+    computer = machine;
+    machine.addListener(() {
+      if (!mounted) return;
+      // The Computer is registered only once the deployment has said it has
+      // one, so a card never appears and then disappears.
+      if (machine.available &&
+          !slots.keys(ShellSlot.rightPanel).contains('computer')) {
+        slots.register(
+          ShellSlot.rightPanel,
+          'computer',
+          (context) => SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+            child: ComputerCard(
+              controller: machine,
+              turnRunning: workingRunId != null,
+            ),
+          ),
+          label: 'Computer',
+        );
+      }
+      _repaint();
+    });
+    unawaited(machine.read());
+    final entries = packageIframeEntriesV1(read);
+    if (entries.isNotEmpty) {
+      slots.register(
+        ShellSlot.headerActions,
+        'package-entries',
+        (context) => Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final entry in entries)
+              identified(
+                PackageIds.entry(entry.contribution.packageId, entry.entry.id),
+                IconButton(
+                  tooltip: entry.entry.label,
+                  icon: Icon(_packageIcon(entry.entry.icon)),
+                  onPressed: () => _openPackagePage(entry),
+                ),
+              ),
+          ],
+        ),
+      );
+    }
+    if (mounted) setState(() {});
+  }
+
+  /// The icon set a Package may name. A Package naming one this client does
+  /// not have falls back to the generic one rather than drawing nothing.
+  IconData _packageIcon(String name) => switch (name) {
+    'applets' => Icons.widgets_outlined,
+    'plugins' => Icons.extension_outlined,
+    'settings' => Icons.settings_outlined,
+    'search' => Icons.search,
+    _ => Icons.extension_outlined,
+  };
+
+  /// A Package page as a surface. Its chrome — the title and the way out —
+  /// belongs to the shell; the page fills the body and is attributed to the
+  /// Package that ships it, so a reader always knows whose screen this is.
+  void _openPackagePage(PackageEntryPage entry) {
+    final held = catalog;
+    final bot = selected;
+    if (held == null || bot == null) return;
+    _push(
+      Scaffold(
+        appBar: AppBar(title: Text(entry.entry.label)),
+        body: SafeArea(
+          top: false,
+          child: identified(
+            PackageIds.page(entry.contribution.packageId, entry.page.id),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+              child: PackagePageFrame(
+                api: widget.api,
+                catalog: held,
+                contribution: entry.contribution,
+                page: entry.page,
+                botId: bot.botId.value,
+                slot: entry.slot,
+                layout: PackageFrameLayout.fill,
+                surfaceTitle: entry.entry.label,
+                states: {
+                  packageIframeAppletsStateV2: appletsBridgeStateV2(
+                    appletCanvas,
+                  ),
+                },
+                onFocus: (appletId) async {
+                  await appletCanvas?.setFocus(appletId);
+                  if (mounted) _openPanel('applet');
+                },
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// The canvas, over the thread the progress line is read from.
+  Widget _appletCanvas(
+    String botId,
+    AppletCanvasController canvas, {
+    VoidCallback? onClose,
+  }) {
+    final session = widget.sessions.open(widget.userId, botId);
+    return AnimatedBuilder(
+      animation: session.controller,
+      builder: (context, _) => AppletCanvas(
+        controller: canvas,
+        lines: projectRuns(session.controller.runs),
+        running: session.controller.activeRunId != null,
+        onClose: onClose ?? () => setState(() => panelOpen = false),
+      ),
+    );
+  }
+
+  void _push(Widget page) {
+    setState(() => navOpen = false);
+    Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => page));
+  }
+
+  void _openRun(TranscriptLine line) {
+    if (shellTierForWidth(MediaQuery.sizeOf(context).width) ==
+        ShellTier.single) {
+      _push(RunPage(line: line));
+      return;
+    }
+    setState(() {
+      openRun = line;
+      panelOpen = true;
+    });
+  }
+
+  Widget? _rightPanel() {
+    final line = openRun;
+    if (line != null) {
+      return RunView(
+        line: line,
+        onClose: () => setState(() {
+          openRun = null;
+          panelOpen = false;
+        }),
+      );
+    }
+    final keys = slots.keys(ShellSlot.rightPanel);
+    if (keys.isEmpty) return null;
+    final key = keys.contains(panelKey) ? panelKey : keys.first;
+    return identified(
+      ShellIds.slot(ShellSlot.rightPanel.id),
+      Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 8, 4, 4),
+            child: Row(
+              children: [
+                Expanded(
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: SegmentedButton<String>(
+                      showSelectedIcon: false,
+                      segments: [
+                        for (final entry in keys)
+                          ButtonSegment(
+                            value: entry,
+                            label: Text(
+                              slots.labelOf(ShellSlot.rightPanel, entry) ??
+                                  entry,
+                            ),
+                          ),
+                      ],
+                      selected: {key},
+                      onSelectionChanged: (next) =>
+                          setState(() => panelKey = next.first),
+                    ),
+                  ),
+                ),
+                identified(
+                  ShellIds.rightPanelClose,
+                  IconButton(
+                    tooltip: 'Close the panel',
+                    onPressed: () => setState(() => panelOpen = false),
+                    icon: const Icon(Icons.close),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const Divider(height: 1),
+          Expanded(child: slots.buildOne(context, ShellSlot.rightPanel, key)!),
+        ],
+      ),
+    );
+  }
+
+  /// Opens one right-panel entry. On the phone the panel is a page: a drawer
+  /// over a full-width conversation is the same thing with less room and a
+  /// scrim in the way.
+  void _openPanel(String key) {
+    if (shellTierForWidth(MediaQuery.sizeOf(context).width) ==
+        ShellTier.single) {
+      _pushPanel(key);
+      return;
+    }
+    setState(() {
+      openRun = null;
+      panelKey = key;
+      panelOpen = true;
+    });
+  }
+
+  /// On the phone the region has no selector of its own, because it is not a
+  /// column: the entries are pages. This is the selector — the same labels the
+  /// wide layout puts in its segmented control, offered once and then opened.
+  Future<void> _choosePanel() async {
+    final keys = slots.keys(ShellSlot.rightPanel);
+    if (keys.length <= 1) {
+      _pushPanel(keys.isEmpty ? panelKey : keys.first);
+      return;
+    }
+    final chosen = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final key in keys)
+              ListTile(
+                title: Text(slots.labelOf(ShellSlot.rightPanel, key) ?? key),
+                onTap: () => Navigator.of(context).pop(key),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (chosen != null && mounted) _pushPanel(chosen);
+  }
+
+  void _pushPanel(String key) {
+    final bot = selected;
+    final controller = botSettings;
+    if (bot == null) return;
+    if (key == 'routines') {
+      _push(
+        RoutinesView(
+          api: widget.api,
+          store: widget.store,
+          userId: widget.userId,
+          botId: bot.botId.value,
+          botName: _name(bot),
+          onInbox: routineInbox?.adopt,
+        ),
+      );
+      return;
+    }
+    // On the phone the right panel's entries are pages, which is the same
+    // rule Routines and Bot settings already follow: a drawer over a
+    // full-width conversation is the same thing with less room.
+    if (key == 'applet' && appletCanvas != null) {
+      _push(
+        Scaffold(
+          appBar: AppBar(title: const Text('Applet')),
+          body: SafeArea(
+            top: false,
+            child: _appletCanvas(
+              bot.botId.value,
+              appletCanvas!,
+              onClose: () => Navigator.of(context).maybePop(),
+            ),
+          ),
+        ),
+      );
+      return;
+    }
+    if (key == 'computer' && computer != null) {
+      _push(
+        Scaffold(
+          appBar: AppBar(title: const Text('Computer')),
+          body: SafeArea(
+            top: false,
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+              child: ComputerCard(
+                controller: computer!,
+                turnRunning: workingRunId != null,
+              ),
+            ),
+          ),
+        ),
+      );
+      return;
+    }
+    if (controller == null) return;
+    _push(
+      Scaffold(
+        appBar: AppBar(title: const Text('Bot settings')),
+        body: SafeArea(
+          top: false,
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                BotSettingsView(
+                  controller: controller,
+                  onSaved: load,
+                  background: _background(bot.botId.value),
+                  onEditAvatar: () =>
+                      unawaited(_editAvatar(bot.botId.value, _name(bot))),
+                  dangerZone: _dangerZone(bot.botId.value, _name(bot)),
+                ),
+                ..._packageSettings(bot.botId.value),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// The Package pages mounted in Bot settings, drawn under the Bot's own
+  /// sections the way `PackageIframeSettings.vue` draws them.
+  List<Widget> _packageSettings(String botId) {
+    final held = catalog;
+    if (held == null) return const [];
+    return [
+      for (final mounted in packageIframePagesForSlotV1(
+        held,
+        packageBotSettingsSlotV1,
+      ))
+        Padding(
+          padding: const EdgeInsets.only(top: 16),
+          child: identified(
+            PackageIds.page(mounted.contribution.packageId, mounted.page.id),
+            PackagePageFrame(
+              api: widget.api,
+              catalog: held,
+              contribution: mounted.contribution,
+              page: mounted.page,
+              botId: botId,
+              slot: packageBotSettingsSlotV1,
+            ),
+          ),
+        ),
+    ];
+  }
+
+  /// The sheep a Bot wears, from the registration the directory carries.
+  String? _background(String botId) => bots
+      .where((bot) => bot.botId.value == botId)
+      .map((bot) => bot.sheep.background)
+      .firstOrNull;
+
+  /// The Bot's colour, which the Flock owns and the directory carries — so a
+  /// change is read back with everything else rather than patched in here.
+  Future<void> _editAvatar(String botId, String botName) async {
+    final chosen = await SheepColourSheet.show(
+      context,
+      api: widget.api,
+      botId: botId,
+      botName: botName,
+    );
+    if (chosen != null) await load();
+  }
+
+  Widget _dangerZone(String botId, String botName) => BotDangerZone(
+    lifecycle: lifecycle,
+    botId: botId,
+    botName: botName,
+    archived: archived.contains(botId),
+    onChanged: load,
+    // The Bot this panel is about no longer exists, so the panel closes and
+    // the shell falls back to whatever the reload leaves selected.
+    onDeleted: () => setState(() {
+      panelOpen = false;
+      selected = null;
+    }),
+  );
+
+  /// Adding a Bot: the sheet, then the Bot, then the first thing said to it.
+  ///
+  /// The message is sent through the same session the conversation uses, so a
+  /// new Bot's first Turn is admitted exactly as every other one is.
+  Future<void> _createBot() async {
+    setState(() => navOpen = false);
+    final controller = CreateBotController(
+      widget.api,
+      widget.store,
+      widget.userId,
+    );
+    final made = await CreateBotSheet.show(context, controller);
+    controller.dispose();
+    if (made == null || !mounted) return;
+    await load();
+    if (!mounted) return;
+    _select(made.botId);
+    if (made.firstMessage.isEmpty) return;
+    final session = widget.sessions.open(widget.userId, made.botId);
+    await session.start();
+    await session.controller.send(made.firstMessage);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tier = shellTierForWidth(MediaQuery.sizeOf(context).width);
+    final bot = selected;
+    return ShellSlotScope(
+      slots: slots,
+      child: Scaffold(
+        appBar: AppBar(
+          leading: tier == ShellTier.single
+              ? identified(
+                  ShellIds.sidebarToggle,
+                  IconButton(
+                    tooltip: 'Your Bots',
+                    onPressed: () => setState(() => navOpen = !navOpen),
+                    icon: const Icon(Icons.menu),
+                  ),
+                )
+              : null,
+          title: Text(bot == null ? 'FrockBot' : _name(bot)),
+          actions: [
+            const SlotRegion(
+              ShellSlot.headerActions,
+              direction: Axis.horizontal,
+            ),
+            if (bot != null)
+              PopupMenuButton<String>(
+                tooltip: 'Conversation actions',
+                enabled: !activity.saving && !activity.pending,
+                onSelected: (value) =>
+                    activity.mark(bot.botId.value, read: value == 'read'),
+                itemBuilder: (_) => [
+                  if (activity.unread[bot.botId.value]?.lastActivityCursor !=
+                      null)
+                    const PopupMenuItem(
+                      value: 'read',
+                      child: Text('Mark as read'),
+                    ),
+                  const PopupMenuItem(
+                    value: 'unread',
+                    child: Text('Mark as unread'),
+                  ),
+                ],
+              ),
+            if (bot != null && appletCanvas != null)
+              identified(
+                AppletIds.chip,
+                IconButton(
+                  tooltip: 'Applets',
+                  icon: const Icon(Icons.widgets_outlined),
+                  onPressed: () => _openPanel('applet'),
+                ),
+              ),
+            if (bot != null && tier != ShellTier.triple)
+              identified(
+                ShellIds.botPanelToggle,
+                IconButton(
+                  tooltip: openRun == null ? 'Bot settings' : 'Work',
+                  onPressed: _rightPanel() == null
+                      ? null
+                      : tier == ShellTier.single && openRun == null
+                      ? () => unawaited(_choosePanel())
+                      : () => setState(() => panelOpen = !panelOpen),
+                  icon: Icon(
+                    openRun == null
+                        ? Icons.settings_outlined
+                        : Icons.view_sidebar_outlined,
+                  ),
+                ),
+              ),
+          ],
+        ),
+        body: SafeArea(
+          child: ShellLayout(
+            navOpen: navOpen,
+            panelOpen: panelOpen,
+            onDismiss: () => setState(() {
+              navOpen = false;
+              panelOpen = false;
+            }),
+            rightPanel: _rightPanel(),
+            sidebar: ShellSidebar(
+              bots: bots,
+              profiles: profiles,
+              unread: activity.unread,
+              archived: archived,
+              activeBotId: bot?.botId.value,
+              workingBotId: workingRunId == null ? null : bot?.botId.value,
+              loaded: loaded,
+              error: error,
+              showHidden: showHidden,
+              inboxCount: activity.notices.length,
+              onSelect: _select,
+              onCreateBot: () => unawaited(_createBot()),
+              onSearch: _openSearch,
+              onProfile: _openProfile,
+              onInbox: () => _push(
+                ActivityPage(controller: activity, openBot: _openBotFromInbox),
+              ),
+              onManage: () => _push(
+                BotRecoveryPage(
+                  api: widget.api,
+                  store: widget.store,
+                  userId: widget.userId,
+                  changed: load,
+                ),
+              ),
+              onToggleHidden: () => setState(() => showHidden = !showHidden),
+              onRetry: load,
+            ),
+            conversation: bot == null
+                ? NoConversation(
+                    empty: bots.isEmpty,
+                    action: bots.isEmpty || tier != ShellTier.single
+                        ? 'Refresh Bots'
+                        : 'Your Bots',
+                    onAction: bots.isEmpty || tier != ShellTier.single
+                        ? () => unawaited(load())
+                        : () => setState(() => navOpen = true),
+                  )
+                : ConversationView(
+                    key: ValueKey('${widget.userId}:${bot.botId.value}'),
+                    sessions: widget.sessions,
+                    api: widget.api,
+                    store: widget.store,
+                    userId: widget.userId,
+                    botId: bot.botId.value,
+                    onOpenRun: _openRun,
+                    onOpenSettings: _openSettings,
+                    background: _background(bot.botId.value),
+                    onWorkingChanged: (runId) {
+                      if (runId != workingRunId && mounted) {
+                        setState(() => workingRunId = runId);
+                      }
+                    },
+                  ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openBotFromInbox(String botId) async {
+    await load();
+    if (mounted) _select(botId);
+  }
+
+  /// Search over every conversation this account has, which is the backend's
+  /// index rather than the names the sidebar happens to hold. A chosen hit is
+  /// its Bot and its Turn: the shell opens the Bot and the transcript scrolls
+  /// to the Turn.
+  Future<void> _openSearch() async {
+    setState(() => navOpen = false);
+    final hit = await showSearchOverlayV1(context, widget.api);
+    if (hit == null || !mounted) return;
+    if (bots.every((bot) => bot.botId.value != hit.botId)) await load();
+    if (!mounted) return;
+    _select(hit.botId);
+    // The Turn may sit further back than the newest page, so the transcript is
+    // asked to reach it and says so itself when it cannot.
+    widget.sessions
+        .open(widget.userId, hit.botId)
+        .controller
+        .focusRun(hit.runId);
+  }
+
+  void _openSettings() => _push(
+    SettingsPage(api: widget.api, store: widget.store, userId: widget.userId),
+  );
+
+  /// The profile sheet: who is signed in, and the account surfaces reachable
+  /// from where the User already is. The Vue trigger's menu, on the phone's
+  /// terms — the account's own settings are one entry, not five.
+  void _openProfile() {
+    setState(() => navOpen = false);
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      // The sheet grew past a hand-held screen once the account had more than
+      // a handful of surfaces on it, and a sheet that overflows loses whatever
+      // is at the bottom of it.
+      isScrollControlled: true,
+      builder: (sheet) => identified(
+        SettingsIds.profileMenu,
+        SafeArea(
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                identified(
+                  SettingsIds.profileName,
+                  ListTile(
+                    leading: const CircleAvatar(
+                      child: Icon(Icons.person_outline),
+                    ),
+                    title: FutureBuilder<String>(
+                      future: _displayName(),
+                      builder: (context, answer) =>
+                          Text(answer.data ?? widget.userId),
+                    ),
+                    subtitle: const Text('Signed in'),
+                  ),
+                ),
+                const Divider(height: 1),
+                identified(
+                  SettingsIds.profileSettings,
+                  ListTile(
+                    leading: const Icon(Icons.settings_outlined),
+                    title: const Text('Settings'),
+                    onTap: () {
+                      Navigator.of(sheet).pop();
+                      _openSettings();
+                    },
+                  ),
+                ),
+                identified(
+                  SettingsIds.profileModels,
+                  ListTile(
+                    leading: const Icon(Icons.auto_awesome_rounded),
+                    title: const Text('Models'),
+                    onTap: () {
+                      Navigator.of(sheet).pop();
+                      _push(
+                        SettingsPage(
+                          api: widget.api,
+                          store: widget.store,
+                          userId: widget.userId,
+                          home: 'models',
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                identified(
+                  SettingsIds.profileConnections,
+                  ListTile(
+                    leading: const Icon(Icons.link_outlined),
+                    title: const Text('Connectors'),
+                    onTap: () {
+                      Navigator.of(sheet).pop();
+                      _push(
+                        ConnectionsPage(
+                          api: widget.api,
+                          store: widget.store,
+                          userId: widget.userId,
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                identified(
+                  AuditIds.recoveryEntry,
+                  ListTile(
+                    leading: const Icon(Icons.history_rounded),
+                    title: const Text('Audit log'),
+                    subtitle: const Text('Every effect your Bots performed'),
+                    onTap: () {
+                      Navigator.of(sheet).pop();
+                      _push(
+                        AuditPage(
+                          api: widget.api,
+                          store: widget.store,
+                          userId: widget.userId,
+                          botId: selected?.botId.value,
+                          botName: selected == null ? null : _name(selected!),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                identified(
+                  TemplateIds.profileEntry,
+                  ListTile(
+                    leading: const Icon(Icons.inventory_2_outlined),
+                    title: const Text('Bot templates'),
+                    subtitle: const Text(
+                      'Pack a Bot up, or unpack one someone sent you',
+                    ),
+                    onTap: () {
+                      Navigator.of(sheet).pop();
+                      _push(
+                        TemplatesPage(
+                          api: widget.api,
+                          store: widget.store,
+                          userId: widget.userId,
+                          botId: selected?.botId.value,
+                          botName: selected == null ? null : _name(selected!),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                identified(
+                  MachineIds.profileEntry,
+                  ListTile(
+                    leading: const Icon(Icons.computer_outlined),
+                    title: const Text('Registered machines'),
+                    subtitle: const Text(
+                      'Computers a Bot may reach, with your approval',
+                    ),
+                    onTap: () {
+                      Navigator.of(sheet).pop();
+                      _push(
+                        MachinesPage(
+                          api: widget.api,
+                          store: widget.store,
+                          userId: widget.userId,
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                identified(
+                  PluginIds.profileEntry,
+                  ListTile(
+                    leading: const Icon(Icons.extension_outlined),
+                    title: const Text('Plugins'),
+                    onTap: () {
+                      Navigator.of(sheet).pop();
+                      _push(
+                        PluginsPage(
+                          api: widget.api,
+                          store: widget.store,
+                          userId: widget.userId,
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                // Admin belongs to the deployment, not to the account, so the
+                // entry is here only for someone the gateway already answers it
+                // for. A non-admin is not offered a door that refuses them.
+                if (isAdmin)
+                  identified(
+                    AdminIds.profileEntry,
+                    ListTile(
+                      leading: const Icon(Icons.shield_outlined),
+                      title: const Text('Admin'),
+                      onTap: () {
+                        Navigator.of(sheet).pop();
+                        _push(AdminPage(api: widget.api));
+                      },
+                    ),
+                  ),
+                // A development build can look at the ViewNode renderer before a
+                // plugin produces a document; the shipped app has no such door.
+                if (developmentAuth)
+                  ListTile(
+                    leading: const Icon(Icons.dashboard_customize_outlined),
+                    title: const Text('View sample'),
+                    onTap: () {
+                      Navigator.of(sheet).pop();
+                      _push(
+                        ViewSamplePage(
+                          store: widget.store,
+                          userId: widget.userId,
+                        ),
+                      );
+                    },
+                  ),
+                ListTile(
+                  leading: const Icon(Icons.refresh),
+                  title: const Text('Refresh'),
+                  onTap: () {
+                    Navigator.of(sheet).pop();
+                    unawaited(load());
+                  },
+                ),
+                if (!localDevelopment)
+                  identified(
+                    SettingsIds.profileSignOut,
+                    ListTile(
+                      leading: const Icon(Icons.logout),
+                      title: const Text('Sign out'),
+                      onTap: () {
+                        Navigator.of(sheet).pop();
+                        unawaited(widget.onSignOut());
+                      },
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// The saved profile name, falling back to the account this session holds.
+  /// A name is a courtesy: a read that fails leaves the sheet usable.
+  Future<String> _displayName() async {
+    try {
+      final settings =
+          (await widget.api.request('/api/settings?view=2'))! as Map;
+      final name = (settings['profile'] as Map?)?['name'];
+      if (name is String && name.trim().isNotEmpty) return name.trim();
+    } catch (_) {
+      // Nothing is lost but the name.
+    }
+    return widget.userId;
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    widget.botLinks.removeListener(_followBotLink);
+    _activityTimer?.cancel();
+    activity.removeListener(_repaint);
+    activity.dispose();
+    lifecycle.dispose();
+    botSettings?.dispose();
+    routineInbox?.dispose();
+    appletCanvas?.dispose();
+    computer?.dispose();
+    slots.dispose();
+    super.dispose();
+  }
+}

@@ -1,0 +1,87 @@
+import { describe, expect, test } from "bun:test";
+import {
+  BOT_ISOLATE_HOOK_EVENTS_V1,
+  decodeBotIsolateHookReplacementV1,
+  LOOP_EVENTS_V1,
+} from "./loop-events.js";
+
+const call = { id: "call-1", name: "write", input: { value: 1 } };
+
+describe("the public loop event declaration", () => {
+  test("flags every isolate event, and only those, as an isolate hook", () => {
+    const flagged = Object.entries(LOOP_EVENTS_V1)
+      .filter(([, definition]) => definition.isolateHook)
+      .map(([event]) => event);
+    expect(flagged.toSorted()).toEqual([...BOT_ISOLATE_HOOK_EVENTS_V1].sort());
+  });
+
+  test("dispatches every isolate event a plugin can replace as a waterfall", () => {
+    // `turn.terminate` is the exception: it notifies a settling Turn and has
+    // no value to replace, so it is serial.
+    expect(
+      BOT_ISOLATE_HOOK_EVENTS_V1.filter(
+        (event) => LOOP_EVENTS_V1[event].mode !== "waterfall",
+      ),
+    ).toEqual(["agent/turn-stopping"]);
+  });
+
+  test("decodes an exact tool exposure replacement", () => {
+    expect(
+      decodeBotIsolateHookReplacementV1(
+        "agent/tool-exposure",
+        [
+          {
+            name: "read_only",
+            description: "Reads without effects.",
+            inputSchema: { type: "object" },
+          },
+        ],
+        [],
+      ),
+    ).toEqual([
+      {
+        name: "read_only",
+        description: "Reads without effects.",
+        inputSchema: { type: "object" },
+      },
+    ]);
+    expect(() =>
+      decodeBotIsolateHookReplacementV1(
+        "agent/tool-exposure",
+        [
+          {
+            name: "read_only",
+            description: "Reads without effects.",
+            inputSchema: {},
+            execute: "not part of a schema",
+          },
+        ],
+        [],
+      ),
+    ).toThrow(/invalid fields/);
+  });
+
+  test("a pre-execute hook may add a denial but cannot lift one", () => {
+    const ready = { kind: "ready" as const, call, idempotent: false };
+    expect(
+      decodeBotIsolateHookReplacementV1(
+        "tools/pre-execute",
+        {
+          kind: "denied",
+          call,
+          result: { content: "Bot policy denied this call", isError: true },
+        },
+        ready,
+      ),
+    ).toMatchObject({ kind: "denied" });
+
+    const denied = {
+      kind: "denied" as const,
+      call,
+      result: { content: "Core denied this call", isError: true },
+    };
+    expect(() =>
+      decodeBotIsolateHookReplacementV1("tools/pre-execute", ready, denied),
+    ).toThrow(/cannot lift/);
+  });
+});

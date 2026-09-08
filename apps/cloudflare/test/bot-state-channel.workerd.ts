@@ -5,8 +5,8 @@ import {
   runInDurableObject,
 } from "cloudflare:test";
 import { describe, expect, test } from "vitest";
-import { decodeBotStateChannelFrameV1 } from "@frockbot/protocol";
-import { decodeComputerProjectionV1 } from "@frockbot/plugin-computer/protocol";
+import { decodeBotStateChannelFrameV1 } from "@frockbot/core/protocol";
+import { decodeComputerProjectionV1 } from "@frockbot/computer/protocol";
 import {
   BotStateChannel,
   BOT_STATE_CHANNEL_INTERNAL_PATH,

@@ -5,7 +5,7 @@ import { dirname, resolve } from "node:path";
 // mechanically. `@fly/sprites` speaks a HTTP exec protocol that depends on
 // response chunk boundaries workerd does not preserve, so it may exist only in
 // the Node container app; every other package reaches the Computer through the
-// `COMPUTER_HOST` service binding and `packages/computer-host-protocol`.
+// `COMPUTER_HOST` service binding and `computer/host-protocol`.
 //
 // Two facts are checked: no source file outside the host imports the SDK, and
 // no manifest outside the host declares it as a dependency (a manifest entry is
@@ -55,7 +55,7 @@ function isForbidden(specifier: string): boolean {
 
 let filesChecked = 0;
 for (const path of scan(
-  "{apps,applications,packages,scripts}/**/*.{ts,tsx,mts,cts,js,mjs,cjs,vue}",
+  "{app,applets,apps,computer,core,packages,providers,scripts}/**/*.{ts,tsx,mts,cts,js,mjs,cjs,vue}",
 )) {
   if (isHostOwned(path)) continue;
   filesChecked += 1;

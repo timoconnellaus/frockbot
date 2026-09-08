@@ -1,12 +1,12 @@
 import type {
   ApprovalDecisionReceiptV1,
   ApprovalListViewV1,
-} from "@frockbot/plugin-shell/approvals";
+} from "@frockbot/app/shell/approvals";
 import { describe, expect, test } from "bun:test";
-import { type SessionEvent } from "@frockbot/kernel-contracts";
-import type { ConnectionCommandReceiptV1 } from "@frockbot/connection-core";
-import { createSettingsBackendContribution } from "@frockbot/plugin-settings/backend";
-import { applyBotProfilePatchV1 } from "@frockbot/configuration-core";
+import { type SessionEvent } from "@frockbot/core/contracts";
+import type { ConnectionCommandReceiptV1 } from "@frockbot/core/connection";
+import { createSettingsBackendContribution } from "@frockbot/app/settings/backend";
+import { applyBotProfilePatchV1 } from "@frockbot/core/configuration";
 import type {
   BotConfigurationReadRpcV1,
   BotSettingsViewV1,
@@ -16,17 +16,17 @@ import type {
   OperationReceiptV1,
   UserConfigurationReadRpcV1,
   UserSettingsViewV1,
-} from "@frockbot/configuration-core";
-import type { StoredRun } from "@frockbot/plugin-shell/backend-contracts";
-import type { DeploymentPolicyV1 } from "@frockbot/plugin-admin/shared";
-import { createFlockBackendContribution } from "@frockbot/plugin-flock/backend";
+} from "@frockbot/core/configuration";
+import type { StoredRun } from "@frockbot/app/shell/backend-contracts";
+import type { DeploymentPolicyV1 } from "@frockbot/app/admin/shared";
+import { createFlockBackendContribution } from "@frockbot/app/flock/backend";
+import { foundationBaseRuntimePackagesV1 } from "@frockbot/app/runtime";
 import {
   bootstrapCompositionGeneration,
   createShellCompositionHost,
-} from "@frockbot/plugin-shell/backend-composition";
-import { executeBotTurn } from "@frockbot/plugin-shell/backend-runner";
-import { compileFoundationApplication } from "@frockbot/application-foundation/runtime";
-import { randomSheepRecipeV1 } from "@frockbot/plugin-flock/shared";
+} from "@frockbot/app/shell/backend-composition";
+import { executeBotTurn } from "@frockbot/app/shell/backend-runner";
+import { randomSheepRecipeV1 } from "@frockbot/app/flock/shared";
 import {
   createClientRunStopReceiptV1,
   decodeClientRunLookupV1,
@@ -43,14 +43,13 @@ import {
   type ClientRunListV1,
   type ClientRunStopCommandV1,
   type ClientRunStopReceiptV1,
-} from "@frockbot/plugin-shell/run-protocol";
+} from "@frockbot/app/shell/run-protocol";
 import type {
   BotNotificationIntent,
   BotConfigurationBinding,
   BotStateBinding,
   BotTurnCommand,
   BotTurnResult,
-  CatalogGatewayStore,
   ConnectionBinding,
   GatewayAuth,
   GatewayDependencies,
@@ -60,16 +59,15 @@ import type {
   WorkerCode,
   WorkerLoader,
 } from "./contracts.js";
-import { RoutineStore } from "@frockbot/plugin-routines/store";
-import { RoutineInboxStore } from "@frockbot/plugin-routines/inbox-store";
-import { createMemoryRoutineStorageV1 } from "@frockbot/plugin-routines/testing";
-import { executeResidentBotTurn } from "./bot-runner.js";
+import { RoutineStore } from "@frockbot/app/routines/store";
+import { RoutineInboxStore } from "@frockbot/app/routines/inbox-store";
+import { createMemoryRoutineStorageV1 } from "@frockbot/app/routines/testing";
 import {
   applicationDeploymentId,
   createGateway,
   deploymentAnsweredV1,
 } from "./gateway.js";
-import { DEPLOYMENT_HEADER_V1 } from "@frockbot/protocol";
+import { DEPLOYMENT_HEADER_V1 } from "@frockbot/core/protocol";
 import { createUserApplication } from "./user-application.js";
 
 class MemoryBotState implements BotStateBinding {
@@ -99,7 +97,6 @@ class MemoryBotState implements BotStateBinding {
     }
     const previousEvents = this.sessions.get(botId) ?? [];
     const generation = await bootstrapCompositionGeneration(
-      await compileFoundationApplication(),
       "2026-01-01T00:00:00.000Z",
     );
     const run: StoredRun = {
@@ -131,6 +128,9 @@ class MemoryBotState implements BotStateBinding {
         sessionId: command.sessionId,
         sessionEvents: previousEvents,
         admitEffect: () => Promise.resolve(true),
+        // The Bot Durable Object hands these over on a real Turn; this double
+        // stands in for it, so it hands over the same base Packages.
+        agentPackages: foundationBaseRuntimePackagesV1(),
       }).mount(generation, new AbortController().signal);
       const result = await executeBotTurn({
         command,
@@ -239,22 +239,6 @@ class MemoryBotState implements BotStateBinding {
       ),
     );
   }
-
-  reconcileRun(botId: string, runId: string): Promise<BotTurnResult> {
-    const run = (this.runs.get(botId) ?? []).find(
-      (candidate) => candidate.runId === runId,
-    );
-    if (!run || run.status !== "completed") {
-      return Promise.reject(new Error("run does not require reconciliation"));
-    }
-    return Promise.resolve(
-      projectClientTurnV1({
-        runId,
-        text: run.responseText ?? "",
-        events: structuredClone(run.events),
-      }),
-    );
-  }
 }
 
 function rpcBindingFor(state: BotStateBinding): UserBotStateBinding {
@@ -321,7 +305,6 @@ function rpcBindingFor(state: BotStateBinding): UserBotStateBinding {
       state.decideApproval(botId, approvalId, command),
     acknowledgeNotification: ({ botId, notificationId }) =>
       state.acknowledgeNotification(botId, notificationId),
-    reconcileRun: ({ botId, runId }) => state.reconcileRun(botId, runId),
     stopRun: ({ botId, command }) => state.stopRun(botId, command),
   };
 }
@@ -488,6 +471,9 @@ class MemoryConfiguration
   async readConnectionsFrame(): Promise<never> {
     throw new Error("Connections frame not configured in this fixture");
   }
+  async readPluginsFrame(): Promise<never> {
+    throw new Error("Plugins frame not configured in this fixture");
+  }
 
   async readSettingsFrame(): Promise<never> {
     throw new Error("Settings frame not configured in this fixture");
@@ -552,51 +538,6 @@ class MemoryConfiguration
     };
     this.connectionReceipts.set(request.command.commandId, receipt);
     return Promise.resolve(receipt);
-  }
-
-  composioRequest(): Promise<unknown> {
-    return Promise.resolve({ schemaVersion: 1, items: [] });
-  }
-  readMcpServers(): ReturnType<UserConfigurationBinding["readMcpServers"]> {
-    return Promise.reject(new Error("MCP status is not used in these tests"));
-  }
-
-  executeMcpCommand(): ReturnType<
-    UserConfigurationBinding["executeMcpCommand"]
-  > {
-    return Promise.reject(
-      new Error("MCP lifecycle is not used in these tests"),
-    );
-  }
-
-  recordMcpMountOutcome(): Promise<void> {
-    return Promise.reject(
-      new Error("MCP outcomes are not used in these tests"),
-    );
-  }
-
-  startMcpAuthorization(): ReturnType<
-    UserConfigurationBinding["startMcpAuthorization"]
-  > {
-    return Promise.reject(
-      new Error("MCP authorization is not used in these tests"),
-    );
-  }
-
-  completeMcpAuthorization(): ReturnType<
-    UserConfigurationBinding["completeMcpAuthorization"]
-  > {
-    return Promise.reject(
-      new Error("MCP authorization is not used in these tests"),
-    );
-  }
-
-  revokeMcpAuthorization(): ReturnType<
-    UserConfigurationBinding["revokeMcpAuthorization"]
-  > {
-    return Promise.reject(
-      new Error("MCP authorization is not used in these tests"),
-    );
   }
 
   lookupConnectionCommand(
@@ -698,24 +639,6 @@ class MemoryConfiguration
       botId: request.botId,
       registered: true,
     });
-  }
-  readPackageRevisions() {
-    return Promise.resolve({
-      schemaVersion: 1 as const,
-      revision: 0,
-      revisions: [],
-    });
-  }
-  publishPackage(): Promise<never> {
-    return Promise.reject(
-      new Error("publication is not configured in this test"),
-    );
-  }
-  rollbackPackage(): Promise<never> {
-    return Promise.reject(new Error("rollback is not configured in this test"));
-  }
-  activeApplicationHash(): Promise<undefined> {
-    return Promise.resolve(undefined);
   }
   listTemplateShares() {
     return Promise.resolve({ schemaVersion: 1 as const, shares: [] });
@@ -1028,14 +951,12 @@ function createTestGateway(
   auth: GatewayAuth = unauthenticatedAuth,
   allowDevelopmentIdentity = true,
   allowedClientOrigins?: string[],
-  catalog?: CatalogGatewayStore,
   signup?: {
     userExists?: (userId: string) => Promise<boolean>;
     policy?: DeploymentPolicyV1;
     adminEmails?: string;
   },
   openBotStateChannel?: NonNullable<GatewayDependencies["openBotStateChannel"]>,
-  workspaceSeed?: NonNullable<GatewayDependencies["workspaceSeed"]>,
 ) {
   const loader = new DirectWorkerLoader();
   const states = new Map<string, MemoryBotState>();
@@ -1071,7 +992,6 @@ function createTestGateway(
       return configurationFor(userId);
     },
     ...(openBotStateChannel ? { openBotStateChannel } : {}),
-    ...(workspaceSeed ? { workspaceSeed } : {}),
     backendContributions: [
       createFlockBackendContribution({
         listBots: (userId) => configurationFor(userId).listBots(),
@@ -1209,7 +1129,6 @@ function createTestGateway(
     ],
     allowDevelopmentIdentity,
     ...(allowedClientOrigins ? { allowedClientOrigins } : {}),
-    ...(catalog ? { catalog } : {}),
   });
   return {
     gateway,
@@ -2242,7 +2161,6 @@ describe("Cloudflare user application gateway", () => {
       auth,
       false,
       undefined,
-      undefined,
       { userExists: () => Promise.resolve(false) },
     );
 
@@ -2269,7 +2187,6 @@ describe("Cloudflare user application gateway", () => {
       undefined,
       auth,
       false,
-      undefined,
       undefined,
       {
         userExists: () => Promise.resolve(false),
@@ -2303,7 +2220,6 @@ describe("Cloudflare user application gateway", () => {
         auth,
         false,
         undefined,
-        undefined,
         {
           userExists: () => {
             existenceChecks += 1;
@@ -2327,7 +2243,6 @@ describe("Cloudflare user application gateway", () => {
       undefined,
       unauthenticatedAuth,
       true,
-      undefined,
       undefined,
       {
         userExists: () => {
@@ -2365,14 +2280,9 @@ describe("Cloudflare user application gateway", () => {
           user: { id: "new-user", email: "new@example.com" },
         }),
     };
-    const { gateway } = createTestGateway(
-      undefined,
-      auth,
-      false,
-      undefined,
-      undefined,
-      { userExists: () => Promise.resolve(false) },
-    );
+    const { gateway } = createTestGateway(undefined, auth, false, undefined, {
+      userExists: () => Promise.resolve(false),
+    });
 
     const response = await gateway(
       new Request("https://frockbot.test/sign-out"),
@@ -2387,7 +2297,7 @@ describe("Cloudflare user application gateway", () => {
   });
 });
 
-const MOBILE_ORIGIN = "capacitor://localhost";
+const CLIENT_ORIGIN = "https://client.frockbot.test";
 
 const rejectingAuth: GatewayAuth = {
   handler: () => Promise.reject(new Error("auth handler was invoked")),
@@ -2403,7 +2313,6 @@ describe("Bot-state WebSocket gateway", () => {
       undefined,
       unauthenticatedAuth,
       false,
-      undefined,
       undefined,
       undefined,
       () => {
@@ -2425,7 +2334,6 @@ describe("Bot-state WebSocket gateway", () => {
       undefined,
       undefined,
       true,
-      undefined,
       undefined,
       undefined,
       (userId, botId) => {
@@ -2455,8 +2363,7 @@ describe("Bot-state WebSocket gateway", () => {
       undefined,
       undefined,
       true,
-      ["capacitor://localhost"],
-      undefined,
+      [CLIENT_ORIGIN],
       { adminEmails: "" },
       (userId, botId, _request, forwarded) => {
         context = { userId, botId, ...forwarded };
@@ -2481,8 +2388,7 @@ describe("Bot-state WebSocket gateway", () => {
       undefined,
       undefined,
       true,
-      ["capacitor://localhost"],
-      undefined,
+      [CLIENT_ORIGIN],
       undefined,
       () => {
         opened = true;
@@ -2501,15 +2407,14 @@ describe("Bot-state WebSocket gateway", () => {
     expect(opened).toBe(false);
   });
 
-  test("allows the configured Electron and mobile WebView origins", async () => {
-    const origins = ["frockbot://localhost", "capacitor://localhost"];
+  test("allows every configured client origin", async () => {
+    const origins = [CLIENT_ORIGIN, "https://kiosk.frockbot.test"];
     const opened: string[] = [];
     const { gateway } = createTestGateway(
       undefined,
       undefined,
       true,
       origins,
-      undefined,
       undefined,
       (_userId, _botId, request) => {
         opened.push(request.headers.get("origin") ?? "");
@@ -2543,26 +2448,26 @@ const bearerAuth: GatewayAuth = {
     ),
 };
 
-function mobileRequest(path: string, init?: RequestInit): Request {
+function clientOriginRequest(path: string, init?: RequestInit): Request {
   const headers = new Headers(init?.headers);
-  headers.set("origin", MOBILE_ORIGIN);
+  headers.set("origin", CLIENT_ORIGIN);
   return new Request(`https://frockbot.test${path}`, { ...init, headers });
 }
 
-describe("Cross-origin access for mobile clients", () => {
+describe("Cross-origin access for configured clients", () => {
   test("answers preflight for allowed origins without touching auth", async () => {
     const { gateway, loader } = createTestGateway(
       undefined,
       rejectingAuth,
       false,
-      [MOBILE_ORIGIN],
+      [CLIENT_ORIGIN],
     );
     const response = await gateway(
-      mobileRequest("/api/bots/primary/turns", { method: "OPTIONS" }),
+      clientOriginRequest("/api/bots/primary/turns", { method: "OPTIONS" }),
     );
     expect(response.status).toBe(204);
     expect(response.headers.get("access-control-allow-origin")).toBe(
-      MOBILE_ORIGIN,
+      CLIENT_ORIGIN,
     );
     expect(response.headers.get("access-control-allow-methods")).toBe(
       "GET, POST, OPTIONS",
@@ -2580,7 +2485,7 @@ describe("Cross-origin access for mobile clients", () => {
       undefined,
       unauthenticatedAuth,
       false,
-      [MOBILE_ORIGIN],
+      [CLIENT_ORIGIN],
     );
     const preflight = await gateway(
       new Request("https://frockbot.test/api/bots/primary/turns", {
@@ -2598,7 +2503,7 @@ describe("Cross-origin access for mobile clients", () => {
       undefined,
       unauthenticatedAuth,
       true,
-      [MOBILE_ORIGIN],
+      [CLIENT_ORIGIN],
     );
     const response = await gateway(
       new Request("https://frockbot.test/api/connections", {
@@ -2647,15 +2552,15 @@ describe("Cross-origin access for mobile clients", () => {
     expect(sameOrigin.status).toBe(200);
   });
 
-  test("shares authenticated bearer turns with the mobile origin", async () => {
+  test("shares authenticated bearer turns with a configured client origin", async () => {
     const { gateway, loader } = createTestGateway(
       undefined,
       bearerAuth,
       false,
-      [MOBILE_ORIGIN],
+      [CLIENT_ORIGIN],
     );
     const response = await gateway(
-      mobileRequest("/api/bots/primary/turns", {
+      clientOriginRequest("/api/bots/primary/turns", {
         method: "POST",
         headers: {
           authorization: "Bearer test-token",
@@ -2671,7 +2576,7 @@ describe("Cross-origin access for mobile clients", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ text: "Echo: hello mobile" });
     expect(response.headers.get("access-control-allow-origin")).toBe(
-      MOBILE_ORIGIN,
+      CLIENT_ORIGIN,
     );
     expect(response.headers.get("access-control-expose-headers")).toBe(
       `set-auth-token, ${DEPLOYMENT_HEADER_V1}`,
@@ -2680,28 +2585,30 @@ describe("Cross-origin access for mobile clients", () => {
     expect(loader.ids).toEqual(["mobile-user:foundation-v1"]);
   });
 
-  test("shares rejections so the mobile client can read the status", async () => {
+  test("shares rejections so a cross-origin client can read the status", async () => {
     const { gateway } = createTestGateway(undefined, bearerAuth, false, [
-      MOBILE_ORIGIN,
+      CLIENT_ORIGIN,
     ]);
-    const response = await gateway(mobileRequest("/api/bots/primary/turns"));
+    const response = await gateway(
+      clientOriginRequest("/api/bots/primary/turns"),
+    );
     expect(response.status).toBe(401);
     expect(response.headers.get("access-control-allow-origin")).toBe(
-      MOBILE_ORIGIN,
+      CLIENT_ORIGIN,
     );
     expect(response.headers.get("vary")).toBe("origin");
   });
 
   test("exposes the sign-in token header from Better Auth routes", async () => {
     const { gateway } = createTestGateway(undefined, bearerAuth, false, [
-      MOBILE_ORIGIN,
+      CLIENT_ORIGIN,
     ]);
     const response = await gateway(
-      mobileRequest("/api/auth/sign-in/social", { method: "POST" }),
+      clientOriginRequest("/api/auth/sign-in/social", { method: "POST" }),
     );
     expect(response.headers.get("set-auth-token")).toBe("test-token");
     expect(response.headers.get("access-control-allow-origin")).toBe(
-      MOBILE_ORIGIN,
+      CLIENT_ORIGIN,
     );
     expect(response.headers.get("access-control-expose-headers")).toBe(
       `set-auth-token, ${DEPLOYMENT_HEADER_V1}`,
@@ -2710,14 +2617,14 @@ describe("Cross-origin access for mobile clients", () => {
 
   test("leaves same-origin and asset requests unchanged", async () => {
     const { gateway } = createTestGateway(undefined, bearerAuth, false, [
-      MOBILE_ORIGIN,
+      CLIENT_ORIGIN,
     ]);
     const page = await gateway(new Request("https://frockbot.test/"));
     expect(page.status).toBe(200);
     expect(page.headers.get("access-control-allow-origin")).toBeNull();
     expect(page.headers.get("vary")).toBeNull();
 
-    const asset = await gateway(mobileRequest("/app.js"));
+    const asset = await gateway(clientOriginRequest("/app.js"));
     expect(asset.status).toBe(200);
     expect(asset.headers.get("access-control-allow-origin")).toBeNull();
   });
@@ -2725,7 +2632,7 @@ describe("Cross-origin access for mobile clients", () => {
   test("carries no cross-origin headers when none are configured", async () => {
     const { gateway } = createTestGateway(undefined, bearerAuth, false);
     const response = await gateway(
-      mobileRequest("/api/bots/primary/turns", { method: "OPTIONS" }),
+      clientOriginRequest("/api/bots/primary/turns", { method: "OPTIONS" }),
     );
     expect(response.status).toBe(403);
     expect(response.headers.get("access-control-allow-origin")).toBeNull();
@@ -2746,193 +2653,6 @@ describe("Cross-origin access for mobile clients", () => {
     );
     expect(accepted.status).toBe(200);
     expect(loader.ids).toEqual(["mobile-user:foundation-v1"]);
-  });
-});
-
-describe("the remote Package Catalog routes", () => {
-  const indexDocument = JSON.stringify({
-    schemaVersion: 1,
-    generation: "gen-one",
-    entries: [],
-  });
-  const entryDocument = JSON.stringify({
-    schemaVersion: 1,
-    catalogId: "clock",
-  });
-
-  function catalogGateway(overrides: Partial<CatalogGatewayStore> = {}) {
-    const catalog: CatalogGatewayStore = {
-      readIndexDocument: (generation) =>
-        Promise.resolve(
-          generation !== undefined && generation !== "gen-one"
-            ? undefined
-            : {
-                generation: "gen-one",
-                hash: "a".repeat(64),
-                document: indexDocument,
-              },
-        ),
-      readEntryDocument: (catalogId) =>
-        Promise.resolve(
-          catalogId === "clock"
-            ? {
-                generation: "gen-one",
-                hash: "b".repeat(64),
-                document: entryDocument,
-              }
-            : undefined,
-        ),
-      ...overrides,
-    };
-    return createTestGateway(undefined, undefined, true, undefined, catalog);
-  }
-
-  test("serves the index with its content hash as an etag", async () => {
-    const { gateway } = catalogGateway();
-    const response = await gateway(request("/catalog/v1/index", "alice"));
-
-    expect(response.status).toBe(200);
-    expect(await response.text()).toBe(indexDocument);
-    expect(response.headers.get("etag")).toBe(`"${"a".repeat(64)}"`);
-    expect(response.headers.get("x-frockbot-catalog-generation")).toBe(
-      "gen-one",
-    );
-    // The live read follows a pointer that moves, so it revalidates.
-    expect(response.headers.get("cache-control")).toContain("must-revalidate");
-  });
-
-  test("a pinned generation is immutable and cached as such", async () => {
-    const { gateway } = catalogGateway();
-    const response = await gateway(
-      request("/catalog/v1/index?generation=gen-one", "alice"),
-    );
-
-    expect(response.status).toBe(200);
-    expect(response.headers.get("cache-control")).toContain("immutable");
-  });
-
-  test("answers a matching etag with 304 and no body", async () => {
-    const { gateway } = catalogGateway();
-    const response = await gateway(
-      request("/catalog/v1/index", "alice", {
-        headers: { "if-none-match": `"${"a".repeat(64)}"` },
-      }),
-    );
-
-    expect(response.status).toBe(304);
-    expect(await response.text()).toBe("");
-  });
-
-  test("serves one entry and 404s an entry the generation does not carry", async () => {
-    const { gateway } = catalogGateway();
-
-    expect(
-      await (await gateway(request("/catalog/v1/entry/clock", "alice"))).text(),
-    ).toBe(entryDocument);
-    expect(
-      (await gateway(request("/catalog/v1/entry/weather", "alice"))).status,
-    ).toBe(404);
-  });
-
-  test("is authenticated, read-only, and refuses an unknown query", async () => {
-    const { gateway } = catalogGateway();
-
-    expect(
-      (await gateway(new Request("https://frockbot.test/catalog/v1/index")))
-        .status,
-    ).toBe(401);
-    expect(
-      (await gateway(request("/catalog/v1/index", "alice", { method: "POST" })))
-        .status,
-    ).toBe(405);
-    expect(
-      (await gateway(request("/catalog/v1/index?q=1", "alice"))).status,
-    ).toBe(400);
-  });
-
-  test("reports an unconfigured Catalog rather than falling through", async () => {
-    const { gateway } = createTestGateway();
-    const response = await gateway(request("/catalog/v1/index", "alice"));
-
-    expect(response.status).toBe(503);
-    expect(await response.json()).toMatchObject({
-      error: "Package Catalog is not configured",
-    });
-  });
-
-  test("a generation that fails verification is a broken publish, not a body", async () => {
-    const { gateway } = catalogGateway({
-      readIndexDocument: () =>
-        Promise.reject(
-          new Error("catalog index failed content hash verification"),
-        ),
-    });
-    const response = await gateway(request("/catalog/v1/index", "alice"));
-
-    expect(response.status).toBe(502);
-    expect(await response.json()).toMatchObject({
-      error: "catalog index failed content hash verification",
-    });
-  });
-});
-
-describe("the Workspace seed door", () => {
-  const seedRequest = (token: string | undefined, body: unknown) =>
-    new Request("https://frockbot.test/api/workspace-seed/alice/bot-1", {
-      method: "PUT",
-      headers: {
-        ...(token ? { authorization: `Bearer ${token}` } : {}),
-        "content-type": "application/json",
-      },
-      body: JSON.stringify(body),
-    });
-  const body = {
-    root: {
-      kind: "package-declared",
-      userId: "alice",
-      packageId: "applets",
-      rootId: "source",
-    },
-    path: "u.applet/dist/server.js",
-    bytesBase64: Buffer.from("export {}", "utf8").toString("base64"),
-    mediaType: "application/javascript",
-  };
-
-  test("does not exist in a deployment that sets no seed token", async () => {
-    const { gateway } = createTestGateway();
-    expect((await gateway(seedRequest("anything", body))).status).toBe(404);
-  });
-
-  test("refuses a missing or wrong token and lands a User write with the right one", async () => {
-    const writes: unknown[] = [];
-    const { gateway } = createTestGateway(
-      undefined,
-      undefined,
-      true,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      {
-        token: "seed-secret",
-        write: (userId, botId, request) => {
-          writes.push({ userId, botId, ...request });
-          return Promise.resolve({ status: "written", generationId: "g-1" });
-        },
-      },
-    );
-    expect((await gateway(seedRequest(undefined, body))).status).toBe(401);
-    expect((await gateway(seedRequest("wrong", body))).status).toBe(401);
-    expect(writes).toEqual([]);
-
-    const response = await gateway(seedRequest("seed-secret", body));
-    expect(response.status).toBe(200);
-    const answer = (await response.json()) as {
-      status: string;
-      generationId: string;
-    };
-    expect(answer).toEqual({ status: "written", generationId: "g-1" });
-    expect(writes).toEqual([{ userId: "alice", botId: "bot-1", ...body }]);
   });
 });
 

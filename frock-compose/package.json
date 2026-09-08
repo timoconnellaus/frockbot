@@ -1,0 +1,23 @@
+{
+  "name": "@frockbot/frock-compose",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "The FrockBot Bot isolate host: loads a Composition member's artifact as a Dynamic Worker.",
+  "exports": {
+    ".": "./index.ts",
+    "./package.json": "./package.json"
+  },
+  "sideEffects": false,
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@frockbot/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.0",
+    "typescript": "^7.0.2"
+  }
+}

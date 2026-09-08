@@ -1,9 +1,9 @@
 // `ComputerHostClient` in real workerd, from inside a real Durable Object,
 // against the fake Computer host on a real service binding.
 //
-// The unit tests in `packages/plugin-fly-sprite/src/host-client.test.ts` prove
-// the client's logic against a hand-written fetcher. They cannot prove the two
-// things that only exist here: that a workerd `Fetcher` behaves the way the
+// The unit tests in `computer/fly/host-client.test.ts` prove the client's logic
+// against a hand-written fetcher. They cannot prove the two things that only
+// exist here: that a workerd `Fetcher` behaves the way the
 // client assumes when a body streams and when a request aborts, and that a
 // Computer effect leaves a durable record a recovery could read. Both are
 // asserted through `ComputerHostClientProbe`, whose storage is real Durable
@@ -97,8 +97,8 @@ describe("the Durable Object's Computer host client", () => {
       botId: "bot-two",
     });
     const routed = await calls();
-    // ADR 0012: a Computer is keyed by User. Two Bots of one User landing on
-    // two containers would race on one Sprite's slot registry and lease.
+    // A Computer is keyed by User. Two Bots of one User landing on two
+    // containers would race on one Sprite's slot registry and lease.
     expect(routed[0]?.shard).toBe(routed[1]?.shard ?? "");
   });
 

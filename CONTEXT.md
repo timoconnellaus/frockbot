@@ -25,10 +25,10 @@ One run of an agent that begins when queued input is durably admitted and ends w
 _Avoid_: Message, request
 
 **Lane**:
-The queue a turn is admitted on. `user` is the conversation and may supersede what is running; `agent` is a question from another Bot or Voice and waits FIFO behind user work; `background` is work the bot started for itself — a routine firing, a subagent dispatch — and retries when the Bot is busy. A turn's lane is what its turn type says unless its record names another.
+The queue a turn is admitted on. `user` is the conversation and may supersede what is running; `agent` is a question from another Bot and waits FIFO behind user work; `background` is work the bot started for itself — a routine firing, a subagent dispatch — and retries when the Bot is busy. A turn's lane is what its turn type says unless its record names another.
 
 **Agent Turn**
-: A non-user conversational Turn admitted by another Bot or the Voice Package. It runs in the target Bot Durable Object on the `agent` lane, is visible in that Bot's thread with its origin, and answers its caller through `send_to_user`.
+: A non-user conversational Turn admitted by another Bot. It runs in the target Bot Durable Object on the `agent` lane, is visible in that Bot's thread with its origin, and answers its caller through `send_to_user`.
 
 **Bot message**
 : A same-User question sent with the Flock Package's `bot_message` tool. It is not a Channel: the target Bot's answer returns as the asking Turn's tool result, while the target's own Session records the exchange.
@@ -39,7 +39,7 @@ A user message sent mid-turn taking the place of the running turn: the running t
 _Avoid_: Steer, interrupt, barge-in, queue
 
 **Package**:
-A versioned, installable FrockBot distribution containing a manifest and one or more Contributions.
+A swappable implementation chosen at build time, behind an interface: the Computer host, model providers, storage. First-party Packages ship with the deploy and describe themselves with a static `PackageDefinitionV1`; only untrusted code carries a descriptor, an artifact and a generation.
 _Avoid_: Plugin, extension
 
 **Connection Type**:
@@ -71,7 +71,7 @@ One environment-specific part of a package, such as desktop-host behavior, agent
 _Avoid_: Package
 
 **Plugin**:
-A live contribution mounted into an application context with owned lifecycle and cleanup.
+Code that runs at runtime and was not there at build time: Bot-authored extensions, Applets, third-party installs. It declares itself with a Frock Compose descriptor and reaches only the actions, grants, slots and context keys `AGENTS.md` names.
 _Avoid_: Package
 
 **Computer**:
@@ -101,18 +101,6 @@ _Avoid_: Skill id, skill path, handle
 **Invoke**:
 A User attaching a Skill ref to a message, which expands that Skill's body into the Turn's first step. Distinct from a Bot loading a Skill on its own initiative, and from merely mentioning one.
 _Avoid_: Run a skill, trigger, call
-
-**Catalog**:
-The set of Packages available for installation, whether first-party, User-published, or Bot-authored. Published as immutable, content-addressed generations; a reader pins one generation and installs only from it.
-_Avoid_: Registry, marketplace, store
-
-**Catalog generation**:
-One immutable, content-addressed publication of the Catalog: an index and its entries, named by a mutable pointer. A generation is never edited, only superseded.
-_Avoid_: Version, snapshot, release
-
-**Catalog entry**:
-One installable row in a Catalog generation, identified by an opaque immutable catalogId and naming the Package it installs.
-_Avoid_: Listing, item, plugin record
 
 **Applet**:
 A small real-time application a Bot builds for its User and the User opens beside the conversation: one Package's Instance Contribution, one durable instance of it, its UI, and the tools it exposes to every Bot of that User. Its code is a Package; its state is not.
@@ -151,7 +139,7 @@ The only non-Package code: Durable Object authority, the Agent loop, and Package
 _Avoid_: Core, host
 
 **Composition**:
-The durable, versioned set of Package generations a Bot mounts. Every admitted Turn records the Composition it ran under.
+The durable, versioned set of plugin generations a Bot mounts: Bot-authored Packages and the User's Applets, never first-party code. Every admitted Turn records the Composition it ran under.
 _Avoid_: Configuration, bundle, profile
 
 **Generation**:
@@ -171,7 +159,7 @@ A durable per-User bound on generation rate, artifact size, retained generations
 _Avoid_: Limit, rate limit
 
 **Parity register**:
-The checklist of GrokBot capabilities FrockBot must match, kept in `docs/research/grokbot-computer.md`.
+The checklist of GrokBot capabilities FrockBot must match, kept in `docs/grokbot-parity.md`.
 _Avoid_: Feature list, roadmap
 
 **Provenance**:

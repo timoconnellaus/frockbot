@@ -1,17 +1,28 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 import 'dart:math';
 
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:http/http.dart' as http;
+import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../protocol/client_wire.generated.dart' as wire;
+import 'credential.dart';
+import 'store.dart';
+import 'transport_io.dart' if (dart.library.js_interop) 'transport_web.dart';
 
-// A fixed loopback target reached only through ADB reverse forwarding.
+export 'store.dart';
+
+/// The gateway this build talks to. A development build is pointed at the
+/// local stack with `--dart-define=FROCKBOT_ORIGIN=…` (`bun run dev:native`
+/// lends the host's loopback to the emulator); every other build talks to
+/// production.
 const localDevelopment = bool.fromEnvironment('FROCKBOT_LOCAL_DEV');
 const hostedOrigin = localDevelopment
     ? 'http://127.0.0.1:8787'
-    : 'https://bot.frockbot.com';
+    : String.fromEnvironment(
+        'FROCKBOT_ORIGIN',
+        defaultValue: 'https://bot.frockbot.com',
+      );
 const clientHello = <String, Object>{
   'schemaVersion': 1,
   'protocolVersion': 1,
@@ -51,63 +62,6 @@ Object? decodeBoundedJson(String text, {int maxBytes = 512000}) {
   return jsonDecode(text);
 }
 
-abstract interface class LocalStore {
-  Future<String?> read(String key);
-  Future<void> write(String key, String value);
-  Future<void> delete(String key);
-}
-
-/// A store whose values are resident in memory, so the first frame after a
-/// switch is painted without awaiting the platform.
-abstract interface class SnapshotStore implements LocalStore {
-  /// Whether [peek] is authoritative. While this is false a null answer only
-  /// means "not loaded yet" and the asynchronous read still has to be awaited.
-  bool get resident;
-
-  /// The value already held in memory, without a platform round trip.
-  String? peek(String key);
-}
-
-/// A store that can list what it holds, which a migration to another store
-/// needs and ordinary reads and writes do not.
-abstract interface class EnumerableStore implements LocalStore {
-  Future<Map<String, String>> readAll();
-}
-
-class ProtectedStore implements LocalStore, EnumerableStore {
-  final FlutterSecureStorage _storage = const FlutterSecureStorage();
-  Future<void> _writes = Future.value();
-  Future<void> _enqueue(Future<void> Function() operation) {
-    final next = _writes.then((_) => operation());
-    _writes = next.catchError((Object _) {});
-    return next;
-  }
-
-  @override
-  Future<String?> read(String key) async {
-    await _writes;
-    return _storage.read(key: 'native.v1.$key');
-  }
-
-  @override
-  Future<void> write(String key, String value) =>
-      _enqueue(() => _storage.write(key: 'native.v1.$key', value: value));
-  @override
-  Future<void> delete(String key) =>
-      _enqueue(() => _storage.delete(key: 'native.v1.$key'));
-  @override
-  Future<Map<String, String>> readAll() async {
-    await _writes;
-    const prefix = 'native.v1.';
-    final all = await _storage.readAll();
-    return {
-      for (final entry in all.entries)
-        if (entry.key.startsWith(prefix))
-          entry.key.substring(prefix.length): entry.value,
-    };
-  }
-}
-
 class RequestFailure implements Exception {
   final int? status;
   final String message;
@@ -119,47 +73,17 @@ class RequestFailure implements Exception {
 
 class NativeApi {
   final LocalStore store;
-  final HttpClient _client = HttpClient()
-    ..connectionTimeout = const Duration(seconds: 10);
-  NativeApi(this.store);
-  String? _authorization;
-  bool _sessionKnown = false;
-  Future<void>? _sessionRead;
+  final AuthCredential credential;
+  final http.Client _client = httpClientV1();
+  NativeApi(this.store, {AuthCredential? credential})
+    : credential = credential ?? authCredentialV1(store);
 
-  /// The session is the one secret this client holds, and every request needs
-  /// it. It is read from the keystore once and then kept in memory; sign-in,
-  /// sign-out and restore hand the new value straight in, so no request waits
-  /// on the platform keystore or on writes queued ahead of it.
-  void adoptSession(String? session) {
-    _authorization = session == null ? null : _bearer(session);
-    _sessionKnown = true;
-    _sessionRead = null;
-  }
-
-  static String _bearer(String session) =>
-      'Bearer ${wire.AuthSessionView.fromJson(jsonDecode(session)).sessionToken}';
-
-  Future<String?> _authorizationHeader() async {
-    if (_sessionKnown) return _authorization;
-    final read = _sessionRead ??= store.read('session').then((session) {
-      // A sign-in that landed while this read was in flight already holds
-      // the current session and must not be overwritten by the older one.
-      if (_sessionKnown) return;
-      _authorization = session == null ? null : _bearer(session);
-      _sessionKnown = true;
-    });
-    try {
-      await read;
-    } catch (_) {
-      // A failed read stays retryable rather than caching its failure.
-      if (identical(_sessionRead, read)) _sessionRead = null;
-      rethrow;
-    }
-    return _authorization;
-  }
+  /// Learn of a session sign-in, sign-out or restore just established, so the
+  /// next request does not wait on the platform keystore.
+  void adoptSession(String? session) => credential.adopt(session);
 
   Future<Map<String, String>> headers() async {
-    final authorization = await _authorizationHeader();
+    final authorization = await credential.authorization();
     return {
       'content-type': 'application/json',
       'x-frockbot-client': jsonEncode(clientHello),
@@ -181,24 +105,26 @@ class NativeApi {
       throw const FormatException('Invalid path');
     }
     try {
-      final request = await _client.openUrl(
+      final request = http.Request(
         body == null ? 'GET' : 'POST',
         Uri.parse('$hostedOrigin$path'),
+      )..followRedirects = false;
+      request.headers.addAll(
+        authenticated
+            ? await headers()
+            : {
+                'content-type': 'application/json',
+                'x-frockbot-client': jsonEncode(clientHello),
+              },
       );
-      request.followRedirects = false;
-      final values = authenticated
-          ? await headers()
-          : {
-              'content-type': 'application/json',
-              'x-frockbot-client': jsonEncode(clientHello),
-            };
-      values.forEach(request.headers.set);
-      if (body != null) request.write(jsonEncode(body));
-      final response = await request.close().timeout(
-        const Duration(seconds: 30),
-      );
+      if (body != null) request.bodyBytes = utf8.encode(jsonEncode(body));
+      final response = await _client
+          .send(request)
+          .timeout(const Duration(seconds: 30));
       final bytes = <int>[];
-      await for (final chunk in response.timeout(const Duration(seconds: 30))) {
+      await for (final chunk in response.stream.timeout(
+        const Duration(seconds: 30),
+      )) {
         if (bytes.length + chunk.length > limit) {
           throw const RequestFailure('That reply is too large to show.');
         }
@@ -231,19 +157,21 @@ class NativeApi {
     }
   }
 
-  Future<WebSocket> socket(String botId, String? cursor) async {
-    final uri = Uri.parse(hostedOrigin).replace(
-      scheme: localDevelopment ? 'ws' : 'wss',
+  Future<WebSocketChannel> socket(String botId, String? cursor) async {
+    final origin = Uri.parse(hostedOrigin);
+    final uri = origin.replace(
+      // Plain HTTP only ever names the local stack.
+      scheme: origin.scheme == 'http' ? 'ws' : 'wss',
       path: '/api/bots/$botId/state-channel',
       queryParameters: {'version': '1', 'cursor': ?cursor},
     );
-    return WebSocket.connect(
-      uri.toString(),
-      headers: await headers(),
+    return connectSocketV1(
+      uri,
+      await headers(),
     ).timeout(const Duration(seconds: 5));
   }
 
-  void close() => _client.close(force: true);
+  void close() => _client.close();
 }
 
 abstract interface class ChatTransport {
@@ -275,7 +203,14 @@ class BackendChatTransport implements ChatTransport {
       queryParameters: {'before': ?before, 'conversationId': ?conversationId},
     ).query;
     return wire.ConversationProjection.fromJson(
-          await api.request('${path(botId)}${query.isEmpty ? '' : '?$query'}'),
+          await api.request(
+            '${path(botId)}${query.isEmpty ? '' : '?$query'}',
+            // The server cuts a page at 512,000 wire bytes but always admits
+            // the newest finished Turn past that line, so a Bot with history
+            // answers with a page the default limit refuses — and the chat
+            // could never restore (Bob and Test, 2026-09-07).
+            limit: 2000000,
+          ),
         ).toJson()
         as Map<String, dynamic>;
   }

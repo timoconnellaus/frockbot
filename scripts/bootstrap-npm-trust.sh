@@ -93,7 +93,7 @@ fi
 
 # --- bootstrap -------------------------------------------------------------
 # Any arguments are package names, narrowing the run further. Passing them
-# through means `bun run bootstrap:npm-trust @frockbot/plugin-applets` works.
+# through means `bun run bootstrap:npm-trust @frockbot/applet-sdk` works.
 echo
 plan="$(mktemp)"
 trap 'rm -f "$plan"' EXIT

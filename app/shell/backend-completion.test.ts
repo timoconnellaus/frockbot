@@ -1,0 +1,304 @@
+import { describe, expect, test } from "bun:test";
+import { type SessionEvent } from "@frockbot/core/contracts";
+import { initializeBotSettingsV1 } from "@frockbot/core/configuration";
+import { SessionEventLog } from "@frockbot/core/durable";
+import {
+  botTurnCommandFingerprintV1,
+  type BotTurnCompletion,
+  type StoredRun,
+} from "./backend-contracts.js";
+import {
+  cancelStoredRun,
+  completeStoredRun,
+  failStoredRun,
+  type RunTerminalKeys,
+  type RunTerminalStorage,
+} from "./backend-completion.js";
+
+const keys: RunTerminalKeys = {
+  run: "run:run-1",
+  activeRun: "active-run",
+  latestEvents: "latest-events",
+  notificationPrefix: "notification:",
+};
+
+const ended = {
+  type: "turn/end" as const,
+  seq: 0,
+  timestamp: "2026-08-28T00:00:00.000Z",
+  turn: 1,
+  outcome: "completed" as const,
+};
+
+const unansweredRequest = {
+  type: "model/request" as const,
+  seq: 0,
+  timestamp: "2026-08-28T00:00:00.000Z",
+  turn: 1,
+  step: 1,
+  request: {
+    requestId: "request-1",
+    provider: "openai-compatible",
+    model: "model-1",
+    system: "",
+    messages: [],
+    tools: [],
+  },
+} satisfies SessionEvent;
+
+function storedRun(): StoredRun {
+  return {
+    runId: "run-1",
+    commandFingerprint: botTurnCommandFingerprintV1({
+      userId: "user-1",
+      botId: "primary",
+      runId: "run-1",
+      sessionId: "user:primary",
+      acceptedAt: "2026-08-28T00:00:00.000Z",
+      text: "hello",
+    }),
+    sessionId: "user:primary",
+    acceptedAt: "2026-08-28T00:00:00.000Z",
+    input: "hello",
+    events: [ended],
+    effectAdmissions: [],
+    status: "running",
+    phase: "executing",
+    compositionGenerationId: "test-composition-generation",
+    configurationSnapshot: initializeBotSettingsV1("primary"),
+    previousEventCount: 0,
+  };
+}
+
+function result(): BotTurnCompletion {
+  return {
+    runId: "run-1",
+    text: "Done",
+    events: [ended],
+    notification: {
+      notificationId: "run-1",
+      runId: "run-1",
+      createdAt: "2026-08-28T00:00:01.000Z",
+      title: "Bot replied",
+      body: "Done",
+    },
+  };
+}
+
+class MemoryRunStorage implements RunTerminalStorage {
+  readonly values = new Map<string, unknown>([
+    [keys.run, storedRun()],
+    [keys.activeRun, "run-1"],
+    [keys.latestEvents, []],
+  ]);
+  putFailure: Error | undefined;
+  putBatches: Array<Record<string, unknown>> = [];
+
+  get<T>(key: string): Promise<T | undefined> {
+    return Promise.resolve(this.values.get(key) as T | undefined);
+  }
+
+  put(key: string | Record<string, unknown>, value?: unknown): Promise<void> {
+    if (typeof key === "string") {
+      this.values.set(key, structuredClone(value));
+      return Promise.resolve();
+    }
+    this.putBatches.push(structuredClone(key));
+    if (this.putFailure) return Promise.reject(this.putFailure);
+    for (const [entry, item] of Object.entries(key)) {
+      this.values.set(entry, structuredClone(item));
+    }
+    return Promise.resolve();
+  }
+
+  delete(key: string): Promise<boolean> {
+    return Promise.resolve(this.values.delete(key));
+  }
+
+  list<T>(options: { prefix: string }): Promise<Map<string, T>> {
+    return Promise.resolve(
+      new Map(
+        [...this.values.entries()].filter(([key]) =>
+          key.startsWith(options.prefix),
+        ) as Array<[string, T]>,
+      ),
+    );
+  }
+}
+
+describe("Bot run terminal persistence", () => {
+  test("commits completion and notification in one durable batch", async () => {
+    const storage = new MemoryRunStorage();
+
+    await completeStoredRun(storage, keys, "run-1", [], result());
+
+    expect(storage.putBatches).toHaveLength(1);
+    expect(storage.putBatches[0]).toHaveProperty(keys.run);
+    expect(storage.putBatches[0]).toHaveProperty("notification:run-1");
+    expect(storage.values.get(keys.run)).toMatchObject({ status: "completed" });
+    expect(storage.values.has(keys.activeRun)).toBe(false);
+  });
+
+  test("cancels without notifying when Stop wins the terminal transaction", async () => {
+    const storage = new MemoryRunStorage();
+    storage.values.set(keys.run, {
+      ...storedRun(),
+      stopRequestedAt: "2026-08-30T00:00:00.000Z",
+    } satisfies StoredRun);
+
+    await expect(
+      completeStoredRun(storage, keys, "run-1", [], result()),
+    ).resolves.toBe("cancelled");
+
+    expect(storage.values.get(keys.run)).toMatchObject({
+      status: "cancelled",
+      stopRequestedAt: "2026-08-30T00:00:00.000Z",
+    });
+    expect(storage.values.has("notification:run-1")).toBe(false);
+    expect(storage.values.has(keys.activeRun)).toBe(false);
+  });
+
+  test("rejects malformed terminal events before clearing active work", async () => {
+    const storage = new MemoryRunStorage();
+    const malformed = {
+      ...result(),
+      events: [
+        {
+          type: "model/request",
+          seq: 0,
+          timestamp: "2026-08-28T00:00:00.000Z",
+          turn: 1,
+          step: 1,
+        },
+      ] as SessionEvent[],
+    };
+
+    await expect(
+      completeStoredRun(storage, keys, "run-1", [], malformed),
+    ).rejects.toThrow();
+
+    expect(storage.values.get(keys.run)).toMatchObject({ status: "running" });
+    expect(storage.values.get(keys.activeRun)).toBe("run-1");
+  });
+
+  test("persists responses up to the public wire limit", async () => {
+    const storage = new MemoryRunStorage();
+
+    await completeStoredRun(storage, keys, "run-1", [], {
+      ...result(),
+      text: "x".repeat(64_000),
+    });
+
+    expect(storage.values.get(keys.run)).toMatchObject({
+      status: "completed",
+      responseText: "x".repeat(64_000),
+    });
+  });
+
+  test("does not leave a success notification when completion rolls back", async () => {
+    const storage = new MemoryRunStorage();
+    storage.putFailure = new Error("completion transaction failed");
+
+    await expect(
+      completeStoredRun(storage, keys, "run-1", [], result()),
+    ).rejects.toThrow("completion transaction failed");
+    storage.putFailure = undefined;
+    await failStoredRun(
+      storage,
+      keys,
+      "run-1",
+      [],
+      [ended],
+      "completion transaction failed",
+    );
+
+    expect(storage.values.get(keys.run)).toMatchObject({ status: "failed" });
+    expect(storage.values.has("notification:run-1")).toBe(false);
+  });
+
+  test("cancels instead of failing when Stop wins the failure transaction", async () => {
+    const storage = new MemoryRunStorage();
+    storage.values.set(keys.run, {
+      ...storedRun(),
+      stopRequestedAt: "2026-08-30T00:00:00.000Z",
+    } satisfies StoredRun);
+
+    await expect(
+      failStoredRun(storage, keys, "run-1", [], [ended], "late failure"),
+    ).resolves.toBe("cancelled");
+
+    expect(storage.values.get(keys.run)).toMatchObject({ status: "cancelled" });
+    expect(storage.values.has(keys.activeRun)).toBe(false);
+  });
+
+  test("terminalizes a run abandoned mid-request", async () => {
+    const storage = new MemoryRunStorage();
+    storage.values.set(keys.run, {
+      ...storedRun(),
+      events: [unansweredRequest],
+    } satisfies StoredRun);
+
+    await failStoredRun(
+      storage,
+      keys,
+      "run-1",
+      [],
+      [unansweredRequest],
+      "model retries exhausted",
+    );
+
+    expect(storage.values.get(keys.run)).toMatchObject({
+      status: "failed",
+      phase: "executing",
+      failure: "model retries exhausted",
+    });
+    expect(storage.values.has(keys.activeRun)).toBe(false);
+  });
+
+  test("preserves committed success after an uncertain response", async () => {
+    const storage = new MemoryRunStorage();
+    await completeStoredRun(storage, keys, "run-1", [], result());
+
+    await expect(
+      failStoredRun(
+        storage,
+        keys,
+        "run-1",
+        [],
+        [
+          {
+            ...ended,
+            outcome: "model-error",
+          } satisfies SessionEvent,
+        ],
+        "completion response lost",
+      ),
+    ).resolves.toBe("preserved-completion");
+
+    expect(storage.values.get(keys.run)).toMatchObject({ status: "completed" });
+    expect(storage.values.has("notification:run-1")).toBe(true);
+  });
+
+  // The request is keyed by its own requestId, so a stopped run that never
+  // heard back settles cancelled rather than waiting on the provider.
+  test("cancels a stopped run whose model request went unanswered", async () => {
+    const storage = new MemoryRunStorage();
+    storage.values.set(keys.run, {
+      ...storedRun(),
+      events: [unansweredRequest],
+      stopRequestedAt: "2026-08-30T00:00:00.000Z",
+    } satisfies StoredRun);
+
+    await expect(
+      cancelStoredRun(storage, keys, "run-1", [], [unansweredRequest]),
+    ).resolves.toBe("cancelled");
+
+    expect(storage.values.get(keys.run)).toMatchObject({
+      status: "cancelled",
+    });
+    expect(storage.values.has(keys.activeRun)).toBe(false);
+    expect(
+      await new SessionEventLog(storage).read("user:primary"),
+    ).toMatchObject([{ type: "model/request" }]);
+  });
+});

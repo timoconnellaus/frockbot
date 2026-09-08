@@ -1,5 +1,5 @@
 // The Computer half of seam S7: the Bot Durable Object → the shared Computer
-// host (ADR 0004), driven from the gateway's own door.
+// host, driven from the gateway's own door.
 //
 // `computer-host-client.workerd.ts` proves the client against the fake from
 // inside a probe Durable Object. What it cannot prove is that the production
@@ -36,7 +36,7 @@ useApplicationArtifact();
 const HOST = "http://computer-host.internal";
 
 /**
- * `plugin-fly-sprite` wraps the Bot's command in a guard and reads the inner
+ * `computer/fly` wraps the Bot's command in a guard and reads the inner
  * command's exit code back off this marker, so a scripted answer that omits it
  * is a command with no exit code — which the Computer Package reports as a
  * failure. Kept as a literal rather than imported: the fake is standing in for
@@ -152,7 +152,7 @@ describe("a Turn that uses the Computer through the shared host", () => {
     const recorded = await execsFor(userId);
     const exec = recorded.find((call) => call.script?.includes(marker));
     expect(exec, "the host recorded no exec for this Turn").toBeDefined();
-    // Whose Computer, which tenant, and — the point of ADR 0004 — a reference
+    // Whose Computer, which tenant, and — the point of the host — a reference
     // rather than a credential. `SPRITES_TOKEN` never leaves the host Worker.
     expect(exec).toMatchObject({
       userId,

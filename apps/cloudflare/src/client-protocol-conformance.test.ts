@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
-import valid from "../../../packages/protocol-schemas/fixtures/valid.json";
-import invalid from "../../../packages/protocol-schemas/fixtures/invalid.json";
+import valid from "../../../core/protocol-schemas/fixtures/valid.json";
+import invalid from "../../../core/protocol-schemas/fixtures/invalid.json";
 import {
   decodeAcknowledgement,
   decodeNotificationList,
@@ -8,14 +8,14 @@ import {
 import {
   decodeBotStateChannelFrameV1,
   decodeBotStateCursorV1,
-} from "@frockbot/protocol";
+} from "@frockbot/core/protocol";
 import {
   decodeAppletViewerTokenV1,
   decodeAppletListViewV1,
   decodeAppletSummaryV1,
   decodeSendToUserPayloadV1,
   decodeSkillRefV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import {
   decodeClientConversationListV1,
   decodeClientNotificationAcknowledgementCommandV1,
@@ -23,21 +23,20 @@ import {
   decodeClientRunListQueryV1,
   decodeClientRunLookupV1,
   decodeClientRunPageV1,
-  decodeClientRunReconciliationCommandV1,
   decodeClientRunStopCommandV1,
   decodeClientRunStopReceiptV1,
   decodeClientTurnCommandV1,
   decodeClientTurnV1,
   decodeClientTurnRefusalV1,
   decodeRunCursorV1,
-} from "@frockbot/plugin-shell/run-protocol";
-import { CLIENT_VERSION_DEGRADED_MESSAGE_V1 } from "@frockbot/plugin-shell/run-failure-copy";
+} from "@frockbot/app/shell/run-protocol";
+import { CLIENT_VERSION_DEGRADED_MESSAGE_V1 } from "@frockbot/app/shell/run-failure-copy";
 import {
   decodeBotUnreadCommandV1,
   decodeBotUnreadDirectoryViewV1,
   decodeBotNotificationDirectoryViewV1,
   decodeBotUnreadReceiptV1,
-} from "@frockbot/plugin-shell/unread";
+} from "@frockbot/app/shell/unread";
 import {
   decodeDirectoryViewV1,
   decodeBotLifecycleCommandV1,
@@ -45,10 +44,10 @@ import {
   decodeBotLifecycleReceiptV1,
   decodeBotLifecycleDirectoryViewV1,
   decodeCreateBotCommandV1,
-} from "@frockbot/plugin-flock/shared";
+} from "@frockbot/app/flock/shared";
 
-import { decodeClientAuditPageV1 } from "@frockbot/plugin-audit";
-import { decodeCompositionGenerationListViewV1 } from "@frockbot/configuration-core";
+import { decodeClientAuditPageV1 } from "@frockbot/app/audit";
+import { decodeCompositionGenerationListViewV1 } from "@frockbot/core/configuration";
 
 const existing: Record<string, (value: unknown) => unknown> = {
   TurnCommand: decodeClientTurnCommandV1,
@@ -58,7 +57,6 @@ const existing: Record<string, (value: unknown) => unknown> = {
   StopCommand: decodeClientRunStopCommandV1,
   StopReceipt: decodeClientRunStopReceiptV1,
   RunFenceCommand: decodeClientRunAdmissionFenceCommandV1,
-  ReconcileCommand: decodeClientRunReconciliationCommandV1,
   ConversationList: decodeClientConversationListV1,
   ConversationProjection: decodeClientRunPageV1,
   ConversationQuery: decodeClientRunListQueryV1,

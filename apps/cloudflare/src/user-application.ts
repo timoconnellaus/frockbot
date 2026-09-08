@@ -1,13 +1,16 @@
 import {
-  createFoundationRuntimeApplication,
-  isPlatformOwnedPackageV1,
-} from "@frockbot/application-foundation/runtime";
-import { foundationDefaultPackageIds } from "@frockbot/application-foundation/user";
+  appletPreviewUrlV1,
+  appletUiArtifactOriginV1,
+} from "@frockbot/applets/preview";
+import {
+  FOUNDATION_PACKAGES_V1,
+  FOUNDATION_PACKAGE_VERSION_V1,
+} from "@frockbot/app/runtime";
 import {
   decodeBotIdV1,
   isApplicationDeploymentHash,
   isRpcIdentifier,
-} from "@frockbot/configuration-core";
+} from "@frockbot/core/configuration";
 import {
   APPLET_ID_V1,
   decodeAppletFocusViewV1,
@@ -15,7 +18,7 @@ import {
   decodeAppletUiViewV1,
   decodePackageIframeToolCommandV1,
   type PackageIframeCatalogV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import type {
   ClientNotificationAcknowledgementV1,
   ClientNotificationListV1,
@@ -25,7 +28,6 @@ import {
   decodeClientRunAdmissionFenceCommandV1,
   decodeClientRunLookupQueryV1,
   decodeClientRunListQueryV1,
-  decodeClientRunReconciliationCommandV1,
   decodeClientRunStopCommandV1,
   decodeClientTurnCommandV1,
   type ClientRunLookupQueryV1,
@@ -33,17 +35,13 @@ import {
   type ClientTurnCommandV1,
   type ClientTurnRefusalReasonV1,
   type ClientTurnRefusalV1,
-} from "@frockbot/plugin-shell/run-protocol";
-import { decodeApprovalDecisionCommandV1 } from "@frockbot/plugin-shell/approvals";
+} from "@frockbot/app/shell/run-protocol";
+import { decodeApprovalDecisionCommandV1 } from "@frockbot/app/shell/approvals";
 import {
   APPLETS_UNAVAILABLE_MESSAGE_V1,
   botTurnRefusalCodeV1,
-} from "@frockbot/kernel-do";
+} from "@frockbot/core/durable";
 import type { UserApplicationEnv } from "./contracts.js";
-import {
-  VOICE_CAPTURE_WORKLET_PATH_V1,
-  VOICE_CAPTURE_WORKLET_SOURCE_V1,
-} from "@frockbot/plugin-shell/client/voice-worklet";
 import { answeredEntryV1, entryFailureStatusV1 } from "./entry-boundary.js";
 import { INSIGHTS_REPORT_ORIGIN, INSIGHTS_SCRIPT_ORIGIN } from "./insights.js";
 import {
@@ -100,7 +98,7 @@ function hostedIsAdmin(request: Request): boolean {
 
 /**
  * The `<body>` attributes the hosted client's auth projection decodes
- * (`packages/plugin-auth/src/client/browser.ts`, which throws rather than
+ * (`app/auth/client/browser.ts`, which throws rather than
  * mounting when one is missing). Every document that mounts the client - the
  * Worker-rendered one below and the vite development document
  * (`apps/cloudflare/index.html`) - carries all of them, so the list lives in
@@ -140,17 +138,6 @@ function appHtml(
 </html>`;
 }
 
-function packageUiArtifactOrigin(requestUrl: URL): string {
-  const appHost = requestUrl.hostname;
-  const host =
-    appHost === "localhost" || appHost === "127.0.0.1"
-      ? "ui.localhost"
-      : appHost.startsWith("ui.")
-        ? appHost
-        : `ui.${appHost}`;
-  return `${requestUrl.protocol}//${host}${requestUrl.port ? `:${requestUrl.port}` : ""}`;
-}
-
 function withSecurityHeaders(
   response: Response,
   artifactOrigin: string,
@@ -162,8 +149,8 @@ function withSecurityHeaders(
   secured.headers.set(
     "content-security-policy",
     // Package pages use the anonymous artifact origin. The expanded Computer
-    // viewer frames the Sprite's own noVNC page (ADR 0004); both are optional
-    // projections and neither becomes an authority in the hosted client. An
+    // viewer frames the Sprite's own noVNC page; both are optional projections
+    // and neither becomes an authority in the hosted client. An
     // Applet's own UI is another page on the same artifact origin, nested by
     // the Applets canvas page, so the origin already named here covers it.
     //
@@ -230,10 +217,6 @@ const TURN_ADMISSION_REFUSALS_V1: readonly {
   reason: ClientTurnRefusalReasonV1;
 }[] = [
   { match: /bot already has an active run/i, reason: "busy" },
-  {
-    match: /requires reconciliation before/i,
-    reason: "reconciliation-required",
-  },
   { match: /admission was fenced/i, reason: "fenced" },
   { match: /already (exists|completed)/i, reason: "duplicate" },
 ];
@@ -363,7 +346,6 @@ export function createUserApplication() {
 }
 
 function createUserApplicationRoute() {
-  const application = createFoundationRuntimeApplication();
   return async (
     request: Request,
     env: UserApplicationEnv,
@@ -388,7 +370,7 @@ function createUserApplicationRoute() {
             headers: { "content-type": "text/html; charset=utf-8" },
           },
         ),
-        packageUiArtifactOrigin(url),
+        appletUiArtifactOriginV1(url),
         url,
       );
     }
@@ -400,26 +382,7 @@ function createUserApplicationRoute() {
             "cache-control": "no-cache",
           },
         }),
-        packageUiArtifactOrigin(url),
-        url,
-      );
-    }
-    // The composer's dictation worklet. A first-party asset rather than a
-    // blob URL because the page is served under `script-src 'self'`, which a
-    // blob module does not satisfy; the alternative was widening that policy
-    // for every script to load one file. See `plugin-shell/.../voice-worklet.ts`.
-    if (
-      request.method === "GET" &&
-      url.pathname === VOICE_CAPTURE_WORKLET_PATH_V1
-    ) {
-      return withSecurityHeaders(
-        new Response(VOICE_CAPTURE_WORKLET_SOURCE_V1, {
-          headers: {
-            "content-type": "text/javascript; charset=utf-8",
-            "cache-control": "no-cache",
-          },
-        }),
-        packageUiArtifactOrigin(url),
+        appletUiArtifactOriginV1(url),
         url,
       );
     }
@@ -431,7 +394,7 @@ function createUserApplicationRoute() {
             "cache-control": "no-cache",
           },
         }),
-        packageUiArtifactOrigin(url),
+        appletUiArtifactOriginV1(url),
         url,
       );
     }
@@ -445,43 +408,33 @@ function createUserApplicationRoute() {
             "cache-control": "no-cache",
           },
         }),
-        packageUiArtifactOrigin(url),
+        appletUiArtifactOriginV1(url),
         url,
       );
     }
     if (request.method === "GET" && url.pathname === "/app-manifest") {
-      const compiled = await application;
-      const defaultPackageIds = foundationDefaultPackageIds(compiled.plan);
       return Response.json({
         schemaVersion: 1,
         deployment: env.DEPLOYMENT,
-        applicationHash: compiled.plan.applicationHash,
-        // The client needs model-provider manifest facts even when a Package
-        // is platform-owned. The backend therefore projects every Package and
-        // marks the ownership decision it derived from immutable manifest
-        // facts; enablement surfaces omit those rows while model resolution
-        // still sees them.
-        packages: compiled.plan.packages.map((pkg) => ({
+        // The client needs model-provider facts even when a Package is
+        // platform-owned, so every Package is projected and each carries the
+        // ownership its definition declares; enablement surfaces omit those
+        // rows while model resolution still sees them.
+        packages: FOUNDATION_PACKAGES_V1.map((pkg) => ({
           id: pkg.id,
-          displayName: pkg.manifest.displayName,
-          version: pkg.version,
-          platformOwned: isPlatformOwnedPackageV1(
-            pkg.manifest,
-            defaultPackageIds.has(pkg.id),
-          ),
-          contributions: [
-            ...(pkg.manifest.contributions.backend ? ["backend"] : []),
-            ...(pkg.manifest.contributions.runtime ? ["runtime"] : []),
-            ...(pkg.manifest.contributions.client ? ["client"] : []),
-            ...(pkg.manifest.contributions.desktop ? ["desktop"] : []),
-            ...(pkg.manifest.contributions.mobile ? ["mobile"] : []),
-          ],
-          configuration: pkg.manifest.configuration,
+          displayName: pkg.displayName,
+          version: FOUNDATION_PACKAGE_VERSION_V1,
+          ...(pkg.platformOwned ? { platformOwned: true } : {}),
+          ...(pkg.settings ? { settings: pkg.settings } : {}),
+          ...(pkg.capabilities ? { capabilities: pkg.capabilities } : {}),
+          ...(pkg.connectionTypes
+            ? { connectionTypes: pkg.connectionTypes }
+            : {}),
         })),
       });
     }
 
-    // --- Applets (ADR 0022 §4) ---------------------------------------------
+    // --- Applets -----------------------------------------------------------
     //
     // Session-authenticated and User-scoped: the gateway has already proved who
     // is asking, and an Applet belongs to the User rather than to a Bot. The
@@ -531,7 +484,7 @@ function createUserApplicationRoute() {
             decodeAppletUiViewV1({
               // The anonymous artifact origin, exactly as a Package page is
               // served: the Applet's UI is immutable content addressed by hash.
-              uiUrl: `${packageUiArtifactOrigin(url)}/packages/${ui.contentHash}.html`,
+              uiUrl: appletPreviewUrlV1(url, ui.contentHash),
               ...(ui.generationId === undefined
                 ? {}
                 : { generationId: ui.generationId }),
@@ -776,9 +729,6 @@ function createUserApplicationRoute() {
     const lookupMatch = url.pathname.match(
       /^\/api\/bots\/([^/]+)\/turns\/([^/]+)$/,
     );
-    const reconcileMatch = url.pathname.match(
-      /^\/api\/bots\/([^/]+)\/turns\/([^/]+)\/reconcile$/,
-    );
     const fenceMatch = url.pathname.match(
       /^\/api\/bots\/([^/]+)\/turns\/([^/]+)\/fence$/,
     );
@@ -798,7 +748,6 @@ function createUserApplicationRoute() {
       !workspaceFileMatch &&
       !turnMatch &&
       !lookupMatch &&
-      !reconcileMatch &&
       !fenceMatch &&
       !stopMatch
     ) {
@@ -816,7 +765,6 @@ function createUserApplicationRoute() {
         workspaceFileMatch ??
         turnMatch ??
         lookupMatch ??
-        reconcileMatch ??
         fenceMatch ??
         stopMatch;
       botId = decodeURIComponent(matched![1]);
@@ -853,7 +801,7 @@ function createUserApplicationRoute() {
         });
         return Response.json({
           ...composition,
-          artifactOrigin: packageUiArtifactOrigin(url),
+          artifactOrigin: appletUiArtifactOriginV1(url),
         } satisfies PackageIframeCatalogV1);
       } catch (error) {
         return botFailure(error, "Package UI catalog failed");
@@ -962,42 +910,6 @@ function createUserApplicationRoute() {
         return jsonError(
           400,
           error instanceof Error ? error.message : "workspace read failed",
-        );
-      }
-    }
-
-    if (reconcileMatch) {
-      if (request.method !== "POST")
-        return jsonError(405, "method not allowed");
-      let runId: string;
-      try {
-        runId = decodeURIComponent(reconcileMatch[2]);
-      } catch {
-        return jsonError(400, "invalid run id");
-      }
-      if (!isRpcIdentifier(runId)) return jsonError(400, "invalid run id");
-      try {
-        decodeClientRunReconciliationCommandV1(await request.json());
-      } catch (error) {
-        return jsonError(
-          400,
-          error instanceof Error
-            ? error.message
-            : "reconciliation action is invalid",
-        );
-      }
-      try {
-        return Response.json(
-          await env.BOT_STATE.reconcileRun({
-            schemaVersion: 1,
-            botId,
-            runId,
-          }),
-        );
-      } catch (error) {
-        return jsonError(
-          409,
-          error instanceof Error ? error.message : "Reconciliation failed",
         );
       }
     }

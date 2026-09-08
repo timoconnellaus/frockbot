@@ -1,4 +1,3 @@
-import type { AuthoringProbe } from "./authoring-probe.ts";
 import type { BotIsolateProbe } from "./bot-isolate-probe.ts";
 import type { ComputerHostClientProbe } from "./computer-host-probe.ts";
 import type {
@@ -9,11 +8,9 @@ import type {
 import type { UserConfiguration } from "../src/user-configuration.ts";
 import type { AppletState } from "../src/applet-state.ts";
 import type { DeploymentPolicy } from "../src/deployment-policy.ts";
-import type { VoiceSession } from "../src/voice-session.ts";
 
 interface FlyTestEnv {
   APPLICATION_ARTIFACTS: R2Bucket;
-  AUTHORING: DurableObjectNamespace<AuthoringProbe>;
   AI: Ai;
   BOT_ISOLATES: DurableObjectNamespace<BotIsolateProbe>;
   BOT_STATES: DurableObjectNamespace<WorkerdBotState>;
@@ -32,12 +29,10 @@ interface FlyTestEnv {
   COMPUTER_HOST_SHARDS: string;
   COMPUTER_HOST_TOKEN: string;
   FLY_COMPATIBILITY: DurableObjectNamespace<FlyCompatibilityProbe>;
-  PACKAGE_CATALOG: R2Bucket;
   SPRITES_TOKEN: string;
   ROUTINE_HOOK_SECRET: string;
   MACHINE_TOKEN_SECRET: string;
   USER_CONFIGURATIONS: DurableObjectNamespace<UserConfiguration>;
-  VOICE_SESSIONS: DurableObjectNamespace<VoiceSession>;
   DEPLOYMENT_POLICY: DurableObjectNamespace<DeploymentPolicy>;
 }
 

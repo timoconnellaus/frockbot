@@ -1,38 +1,83 @@
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/client/transport.dart';
 import 'package:frockbot_native/settings/controller.dart';
-import 'package:frockbot_native/settings/page.dart';
+import 'package:frockbot_native/settings/document.dart';
 import 'package:frockbot_native/settings/model_picker.dart';
+import 'package:frockbot_native/settings/page.dart';
 import 'package:frockbot_native/protocol/client_wire.generated.dart' as wire;
 import 'package:frockbot_native/theme/frock_theme.dart';
 
 import 'widget_test.dart' show MemoryStore;
 
-Map<String, Object?> profile({int revision = 1}) => {
+/// The shape `settingsDocumentV1` produces for the profile section, written by
+/// hand so the Flutter side is pinned to the projection's contract rather than
+/// to whatever the server happens to emit today.
+Map<String, Object?> document({int revision = 1, Object? model}) => {
   'schemaVersion': 1,
-  'home': 'application',
-  'ownerId': 'tim',
+  'surfaceId': 'settings-application',
   'revision': revision,
-  'title': 'Settings',
-  'sections': [
+  'root': {
+    'type': 'group',
+    'orientation': 'column',
+    'children': [
+      {
+        'type': 'group',
+        'orientation': 'column',
+        'title': 'Your profile',
+        'children': [
+          {
+            'type': 'field',
+            'field': {
+              'id': 'f0.name',
+              'label': 'Name',
+              'kind': 'text',
+              'value': 'Tim',
+              'editable': true,
+              'required': true,
+              'maxLength': 100,
+            },
+          },
+          {
+            'type': 'field',
+            'field': {
+              'id': 'j0.account-model',
+              'label': 'Model',
+              'kind': 'select',
+              'value': model == null ? 'null' : '"$model"',
+              'editable': true,
+              'choiceSource': 'account-models',
+              'choices': [
+                {'label': 'Frock AI · Auto', 'value': 'null'},
+              ],
+            },
+          },
+          {
+            'type': 'action',
+            'actionId': 'save-0',
+            'label': 'Save profile',
+            'style': 'primary',
+            'input': {'sectionId': 'profile'},
+          },
+        ],
+      },
+    ],
+  },
+  'actions': [
     {
-      'id': 'profile',
-      'label': 'Your profile',
-      'fields': [
-        {
-          'id': 'name',
-          'label': 'Name',
-          'kind': 'text',
-          'value': 'Tim',
-          'editable': true,
-          'required': true,
-          'maxLength': 100,
+      'id': 'save-0',
+      'schema': {
+        'type': 'object',
+        'properties': {
+          'sectionId': {'type': 'string', 'maxLength': 256},
+          'f0.name': {'type': 'string', 'maxLength': 100},
+          'j0.account-model': {'type': 'string', 'maxLength': 8000},
         },
-      ],
+        'required': ['sectionId', 'f0.name'],
+        'additionalProperties': false,
+      },
     },
   ],
 };
@@ -50,134 +95,217 @@ class SettingsApi extends NativeApi {
 }
 
 void main() {
-  test(
-    'uncertain save persists before dispatch and reconstructs the same command',
-    () async {
-      final store = MemoryStore();
-      final commands = <Map<String, Object?>>[];
-      var revision = 1;
-      final api = SettingsApi(store, (path, body) async {
-        if (body == null) return profile(revision: revision);
-        final command = Map<String, Object?>.from(body as Map);
-        expect(
-          jsonDecode(store.values['settings-pending.tim.application']!),
-          command,
-        );
-        commands.add(command);
-        revision = 2;
-        if (commands.length == 1) throw const RequestFailure('Network lost');
-        return {
-          'schemaVersion': 1,
-          'commandId': command['commandId'],
-          'revision': 2,
-          'status': 'applied',
-        };
-      });
-      final first = SettingsController(api, store, 'tim', 'application');
-      await first.load();
-      await first.save('profile', {'name': 'Timothy'});
-      expect(first.pending, isNotNull);
-      first.dispose();
-      final restored = SettingsController(api, store, 'tim', 'application');
-      await restored.load();
-      await restored.save('profile', {'name': 'Different'});
-      expect(commands, hasLength(1));
-      await restored.checkSave();
-      expect(commands, [commands.first, commands.first]);
-      expect(restored.pending, isNull);
-      expect(restored.frame!.revision, 2);
-      restored.dispose();
-    },
-  );
-  test(
-    'protected storage failure prevents dispatch; wrong receipt stays pending',
-    () async {
-      final store = MemoryStore()..fail = true;
-      var dispatches = 0;
-      final api = SettingsApi(store, (_, body) async {
-        if (body == null) return profile();
-        dispatches++;
-        return {
-          'schemaVersion': 1,
-          'commandId': 'wrong',
-          'revision': 2,
-          'status': 'applied',
-        };
-      });
-      final state = SettingsController(api, store, 'tim', 'application');
-      await state.load();
-      await state.save('profile', {'name': 'Timothy'});
-      expect(dispatches, 0);
-      expect(state.pending, isNotNull);
-      store.fail = false;
-      await state.checkSave();
-      expect(dispatches, 1);
-      expect(state.pending, isNotNull);
-      state.dispose();
-    },
-  );
-  test(
-    'wrong frame owner and mismatched catalog revisions fail visibly',
-    () async {
-      final store = MemoryStore();
-      final bad = SettingsController(
-        SettingsApi(store, (_, _) async => {...profile(), 'ownerId': 'other'}),
-        store,
-        'tim',
-        'application',
-      );
-      await bad.load();
-      expect(bad.frame, isNull);
-      expect(bad.message, contains('Couldn’t load'));
-      bad.dispose();
-      final state = SettingsController(
-        SettingsApi(
-          store,
-          (_, body) async => body == null
-              ? profile()
-              : {
-                  'schemaVersion': 1,
-                  'source': 'account-models',
-                  'ownerId': 'tim',
-                  'revision': 99,
-                  'items': [],
-                },
+  group('the projection read back', () {
+    test('a save names its section and strips the projected field ids', () {
+      expect(
+        settingsChangeCommandV1(
+          userId: 'tim',
+          command: {
+            'commandId': 'c1',
+            'surfaceId': 'settings-application',
+            'revision': 4,
+            'actionId': 'save-0',
+            'input': {
+              'sectionId': 'profile',
+              'f0.name': 'Timothy',
+              'j0.account-model': '{"connectionId":"work"}',
+            },
+          },
         ),
-        store,
-        'tim',
-        'application',
+        {
+          'schemaVersion': 1,
+          'commandId': 'c1',
+          'expectedRevision': 4,
+          'ownerId': 'tim',
+          'sectionId': 'profile',
+          'values': {
+            'name': 'Timothy',
+            'account-model': {'connectionId': 'work'},
+          },
+        },
       );
-      await state.load();
-      await expectLater(state.options('', null), throwsFormatException);
-      state.dispose();
-    },
-  );
+    });
+
+    test('a reset action unsets one setting and carries no values', () {
+      expect(
+        settingsChangeCommandV1(
+          userId: 'tim',
+          command: {
+            'commandId': 'c2',
+            'revision': 4,
+            'actionId': 'unset-1-0',
+            'input': {'sectionId': 'package.notes', 'fieldId': 'region'},
+          },
+        ),
+        containsPair('unset', ['region']),
+      );
+    });
+
+    test('a section action carries its kind and nothing else', () {
+      const command = {
+        'commandId': 'c3',
+        'revision': 4,
+        'actionId': 'section-2-0',
+        'input': {'sectionId': 'provider.ollama', 'kind': 'choose-provider'},
+      };
+      expect(viewActionKindV1(command), 'choose-provider');
+      expect(
+        settingsChangeCommandV1(userId: 'tim', command: command),
+        containsPair('values', <String, Object?>{}),
+      );
+    });
+
+    test('an action naming no section is refused before dispatch', () {
+      expect(
+        () => settingsChangeCommandV1(
+          userId: 'tim',
+          command: const {
+            'commandId': 'c4',
+            'revision': 1,
+            'actionId': 'save-0',
+            'input': <String, Object?>{},
+          },
+        ),
+        throwsFormatException,
+      );
+    });
+  });
+
+  test('a document for another surface fails visibly', () async {
+    final store = MemoryStore();
+    final state = SettingsController(
+      SettingsApi(store, (_, _) async => {...document(), 'surfaceId': 'other'}),
+      'tim',
+      'application',
+    );
+    await state.load();
+    expect(state.document, isNull);
+    expect(state.message, contains('Couldn’t load'));
+    state.dispose();
+  });
+
+  test('a model catalog page from another revision is refused', () async {
+    final store = MemoryStore();
+    final state = SettingsController(
+      SettingsApi(
+        store,
+        (_, body) async => body == null
+            ? document()
+            : {
+                'schemaVersion': 1,
+                'source': 'account-models',
+                'ownerId': 'tim',
+                'revision': 99,
+                'items': <Object?>[],
+              },
+      ),
+      'tim',
+      'application',
+    );
+    await state.load();
+    await expectLater(state.options('', null), throwsFormatException);
+    state.dispose();
+  });
+
   for (final brightness in Brightness.values) {
     testWidgets(
-      'Settings profile has one scoped Save at 200% text ($brightness)',
+      'Settings renders the projected document and saves through it ($brightness)',
       (tester) async {
-        tester.view.physicalSize = const Size(390, 844);
+        tester.view.physicalSize = const Size(390, 1400);
         tester.view.devicePixelRatio = 1;
-        addTearDown(tester.view.resetPhysicalSize);
-        addTearDown(tester.view.resetDevicePixelRatio);
+        addTearDown(tester.view.reset);
         final store = MemoryStore();
-        final api = SettingsApi(store, (_, _) async => profile());
+        final commands = <Map<String, Object?>>[];
+        var revision = 1;
+        final api = SettingsApi(store, (path, body) async {
+          if (body == null) return document(revision: revision);
+          final command = Map<String, Object?>.from(body as Map);
+          commands.add(command);
+          revision = 2;
+          return {
+            'schemaVersion': 1,
+            'commandId': command['commandId'],
+            'revision': 2,
+            'status': 'applied',
+          };
+        });
         await tester.pumpWidget(
           MaterialApp(
             theme: FrockTheme.theme(brightness),
-            home: MediaQuery(
-              data: const MediaQueryData(textScaler: TextScaler.linear(2)),
-              child: SettingsPage(api: api, store: store, userId: 'tim'),
-            ),
+            home: SettingsPage(api: api, store: store, userId: 'tim'),
           ),
         );
         await tester.pumpAndSettle();
-        expect(find.text('Save profile'), findsOneWidget);
+        expect(find.text('Your profile'), findsOneWidget);
         expect(find.text('Models'), findsOneWidget);
+        await tester.enterText(find.byType(TextFormField).first, 'Timothy');
+        await tester.tap(find.text('Save profile'));
+        await tester.pumpAndSettle();
+        expect(commands, hasLength(1));
+        expect(commands.first['sectionId'], 'profile');
+        expect(commands.first['values'], {
+          'name': 'Timothy',
+          'account-model': null,
+        });
+        expect(commands.first['expectedRevision'], 1);
+        expect(find.text('Saved.'), findsOneWidget);
         expect(tester.takeException(), isNull);
       },
     );
   }
+
+  testWidgets('the model field is the host picker, and its choice travels', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(390, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final store = MemoryStore();
+    final commands = <Map<String, Object?>>[];
+    final api = SettingsApi(store, (path, body) async {
+      if (path.contains('options')) {
+        return {
+          'schemaVersion': 1,
+          'source': 'account-models',
+          'ownerId': 'tim',
+          'revision': 1,
+          'items': [
+            {
+              'label': 'Llama 3 · Work',
+              'value': {'connectionId': 'work', 'providerModelId': 'llama3'},
+            },
+          ],
+        };
+      }
+      if (body == null) return document();
+      final command = Map<String, Object?>.from(body as Map);
+      commands.add(command);
+      return {
+        'schemaVersion': 1,
+        'commandId': command['commandId'],
+        'revision': 2,
+        'status': 'applied',
+      };
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: FrockTheme.theme(Brightness.dark),
+        home: SettingsPage(api: api, store: store, userId: 'tim'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Frock AI · Auto'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Llama 3 · Work'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Save profile'));
+    await tester.pumpAndSettle();
+    expect(commands.single['values'], {
+      'name': 'Tim',
+      'account-model': {'connectionId': 'work', 'providerModelId': 'llama3'},
+    });
+  });
+
   testWidgets(
     'model search fences a slow previous query and selecting Auto is not cancel',
     (tester) async {

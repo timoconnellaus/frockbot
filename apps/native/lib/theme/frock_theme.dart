@@ -155,21 +155,6 @@ abstract final class FrockTheme {
   }
 }
 
-class SheepAvatar extends StatelessWidget {
-  final double size;
-  const SheepAvatar({super.key, this.size = 40});
-  @override
-  Widget build(BuildContext context) => ClipRRect(
-    borderRadius: BorderRadius.circular(size * 0.27),
-    child: Image.asset(
-      'assets/sheep.png',
-      width: size,
-      height: size,
-      excludeFromSemantics: true,
-    ),
-  );
-}
-
 /// Finite, quiet placeholders: no idle animation or accessibility chatter.
 class FrockSkeleton extends StatelessWidget {
   final double width;

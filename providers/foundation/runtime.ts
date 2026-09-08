@@ -1,0 +1,119 @@
+import {
+  type AgentRuntimeV1,
+  type LlmProvider,
+  type LlmStreamEvent,
+  ModelProviderFailureError,
+  type RuntimeFeatureV1,
+} from "@frockbot/core/contracts";
+
+export const FOUNDATION_PROVIDER = "foundation";
+export const FOUNDATION_MODEL = "deterministic-v1";
+
+function presentedToolName(
+  request: Parameters<LlmProvider["stream"]>[0],
+  toolCallId: string,
+  name: string,
+): string {
+  if (name !== "call_dynamic_tool") return name;
+  const call = request.messages
+    .toReversed()
+    .find((message) => message.role === "assistant")
+    ?.toolCalls.find((candidate) => candidate.id === toolCallId);
+  if (
+    !call ||
+    typeof call.input !== "object" ||
+    call.input === null ||
+    Array.isArray(call.input)
+  ) {
+    return name;
+  }
+  const input = call.input as Record<string, unknown>;
+  if (
+    typeof input.namespace !== "string" ||
+    typeof input.toolName !== "string"
+  ) {
+    return name;
+  }
+  return input.namespace === "frockbot"
+    ? input.toolName
+    : `${input.namespace}/${input.toolName}`;
+}
+
+async function* foundationStream(
+  request: Parameters<LlmProvider["stream"]>[0],
+  signal: AbortSignal,
+): AsyncGenerator<LlmStreamEvent> {
+  signal.throwIfAborted();
+  const latest = request.messages.at(-1);
+  if (latest?.role === "tool") {
+    const name = presentedToolName(request, latest.callId, latest.name);
+    const label = name === "echo" ? "Echo" : name;
+    yield { type: "text-delta", text: `${label}: ` };
+    await Promise.resolve();
+    signal.throwIfAborted();
+    yield { type: "text-delta", text: latest.content };
+    yield { type: "finish", reason: "completed" };
+    return;
+  }
+  const user = request.messages.findLast((message) => message.role === "user");
+  const text = user?.role === "user" ? user.content : "";
+  yield { type: "text-delta", text: "Built-in model: " };
+  await Promise.resolve();
+  signal.throwIfAborted();
+  yield { type: "text-delta", text };
+  yield { type: "finish", reason: "completed" };
+}
+
+async function foundationReconciliation(
+  request: Parameters<LlmProvider["stream"]>[0],
+  signal: AbortSignal,
+): Promise<LlmStreamEvent[]> {
+  const events: LlmStreamEvent[] = [];
+  for await (const event of foundationStream(request, signal)) {
+    events.push(event);
+  }
+  return events;
+}
+
+/** Foundation has no remote status surface; an unexpected pre-stream fault is unknown. */
+export function classifyFoundationFailureV1(
+  error: unknown,
+): ModelProviderFailureError {
+  return error instanceof ModelProviderFailureError
+    ? error
+    : new ModelProviderFailureError({
+        classification: "unknown",
+        reason:
+          error instanceof Error
+            ? error.message
+            : "Foundation model failed before replying",
+      });
+}
+
+async function* classifiedFoundationStream(
+  request: Parameters<LlmProvider["stream"]>[0],
+  signal: AbortSignal,
+): AsyncGenerator<LlmStreamEvent> {
+  let started = false;
+  try {
+    for await (const event of foundationStream(request, signal)) {
+      started = true;
+      yield event;
+    }
+  } catch (error) {
+    if (started || signal.aborted) throw error;
+    throw classifyFoundationFailureV1(error);
+  }
+}
+
+export const foundationProvider: LlmProvider = {
+  id: FOUNDATION_PROVIDER,
+  supports: { structuredOutput: "none" },
+  stream: classifiedFoundationStream,
+};
+
+export const foundationProviderFeature: RuntimeFeatureV1<AgentRuntimeV1> = (
+  runtime,
+) => runtime.llm.register(foundationProvider);
+
+export default foundationProviderFeature;

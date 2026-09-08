@@ -2,11 +2,10 @@ import { describe, expect, mock, test } from "bun:test";
 import {
   parseCredentialKeyringV1,
   sealCredentialV1,
-} from "@frockbot/connection-core";
-import type { UserSettingsViewV1 } from "@frockbot/configuration-core";
-import type { StoredRun } from "@frockbot/plugin-shell/backend-contracts";
-import { randomSheepRecipeV1 } from "@frockbot/plugin-flock/shared";
-import { compileFoundationApplication } from "@frockbot/application-foundation/runtime";
+} from "@frockbot/core/connection";
+import type { UserSettingsViewV1 } from "@frockbot/core/configuration";
+import type { StoredRun } from "@frockbot/app/shell/backend-contracts";
+import { randomSheepRecipeV1 } from "@frockbot/app/flock/shared";
 import type { BotStateEnv } from "./bot-state.js";
 import { hydrateStoredRunEventsV1 } from "../test/session-log-probe.js";
 
@@ -107,25 +106,6 @@ function memoryIndex() {
     upsert: () => Promise.resolve({ count: 0 }),
     query: () => Promise.resolve({ matches: [], count: 0 }),
     deleteByIds: () => Promise.resolve(),
-  };
-}
-
-/*
- * The application as a host with no Worker Loader can mount it.
- *
- * This suite runs under `bun test`, where there is no `BOT_PACKAGES` binding
- * and no `BotCapabilities` loopback, so an artifact-backed member — the
- * Applets Package, ADR 0022 decision 8 — has nowhere to load from and the
- * Composition fails verification closed, which is correct and is not what
- * this test is about. workerd's suites mount the real thing.
- */
-async function compileWithoutIsolateMembers(): ReturnType<
-  typeof compileFoundationApplication
-> {
-  const application = await compileFoundationApplication();
-  return {
-    ...application,
-    packages: application.packages.filter((pkg) => pkg.artifact === undefined),
   };
 }
 
@@ -265,7 +245,6 @@ describe("BotState Ollama execution", () => {
     const state = () =>
       new BotState({ storage } as unknown as DurableObjectState, env, {
         outboundFetch,
-        compileApplication: compileWithoutIsolateMembers,
       });
 
     const firstState = state();
@@ -335,13 +314,18 @@ describe("BotState mount failures", () => {
   test("a failed mount is retried rather than memoized until eviction", async () => {
     const storage = new MemoryStorage();
     let attempts = 0;
-    const compileApplication = (() => {
-      attempts += 1;
-      return attempts === 1
-        ? Promise.reject(new Error("transient mount failure"))
-        : compileWithoutIsolateMembers();
-    }) as typeof compileFoundationApplication;
     const env = {
+      // A binding the mount reads, failing once. The constructor copies the
+      // env, so the failure has to happen when the mount *uses* the token,
+      // not when it is read: any transient failure inside the mount would do.
+      COMPUTER_HOST: {},
+      COMPUTER_HOST_TOKEN: {
+        trim() {
+          attempts += 1;
+          if (attempts === 1) throw new Error("transient mount failure");
+          return "";
+        },
+      },
       USER_CONFIGURATIONS: {
         idFromName: () => "user-configuration-id",
         get: () => ({
@@ -364,7 +348,6 @@ describe("BotState mount failures", () => {
     const state = new BotState(
       { storage } as unknown as DurableObjectState,
       env,
-      { compileApplication },
     );
     const identity = { schemaVersion: 1, userId: "user-1", botId: "primary" };
 

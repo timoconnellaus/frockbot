@@ -15,8 +15,8 @@
 //     never silently duplicates ... tool calls", and this effect is billed.
 import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
-import { generatedImageRootV1 } from "@frockbot/plugin-image/root";
-import { workspaceObjectKeyV1 } from "@frockbot/workspace-store/keys";
+import { generatedImageRootV1 } from "@frockbot/app/image/root";
+import { workspaceObjectKeyV1 } from "@frockbot/core/workspace-store/keys";
 import {
   expectOkJson,
   freshUserId,

@@ -59,10 +59,6 @@ export interface NonSecretWorkerSettingV1 extends ProductionSecretV1 {
  */
 export const REQUIRED_PRODUCTION_SECRETS_V1: readonly ProductionSecretV1[] = [
   {
-    name: "FROCKBOT_AUTHORIZATION_STATE_SECRET",
-    why: "Signs and binds public Connection callbacks to their durable User and pending authorization; independent of the session secret.",
-  },
-  {
     name: "BETTER_AUTH_URL",
     why: "The deployment's own origin; every sign-in redirect is built from it.",
   },
@@ -99,6 +95,10 @@ export const REQUIRED_PRODUCTION_SECRETS_V1: readonly ProductionSecretV1[] = [
     why: "Signs machine tokens and pairing codes. Absent, no machine can pair.",
   },
   {
+    name: "APPLET_BUILD_TOKEN",
+    why: "Presented on every call to the Applet build service. Absent, no Applet can be checked or published.",
+  },
+  {
     name: "APPLET_VIEWER_SECRET",
     why: "Signs the viewer token an open Applet's page presents. Absent, every published Applet answers 503.",
   },
@@ -113,18 +113,6 @@ export const REQUIRED_PRODUCTION_SECRETS_V1: readonly ProductionSecretV1[] = [
 export const OPTIONAL_PRODUCTION_SECRETS_V1: readonly OptionalProductionSecretV1[] =
   [
     {
-      name: "COMPOSIO_WEBHOOK_SECRET",
-      why: "Verifies service event deliveries against the project webhook subscription.",
-      degraded:
-        "service-event Routines are unavailable; existing Connections and tools keep working",
-    },
-    {
-      name: "COMPOSIO_API_KEY",
-      why: "Connect Link and toolkit API for external services.",
-      degraded:
-        "Composio Connections are unavailable; the Package advertises nothing",
-    },
-    {
       name: "FROCKBOT_ADMIN_EMAILS",
       why: "The identities allowed to open Admin.",
       degraded:
@@ -137,19 +125,9 @@ export const OPTIONAL_PRODUCTION_SECRETS_V1: readonly OptionalProductionSecretV1
     },
     {
       name: "FROCK_AI_GATEWAY_TOKEN",
-      why: "The `cf-aig-authorization` bearer for the AI Gateway (ADR 0025).",
+      why: "The `cf-aig-authorization` bearer for the AI Gateway.",
       degraded:
         "Frock AI falls back to the `AI` binding and the Auto model fails",
-    },
-    {
-      name: "OPENAI_API_KEY",
-      why: "The direct realtime key composer dictation prefers.",
-      degraded: "dictation falls back to the AI Gateway's BYOK key",
-    },
-    {
-      name: "GEMINI_API_KEY",
-      why: "Read the same way by the voice assistant.",
-      degraded: "the voice assistant falls back to the AI Gateway",
     },
   ];
 
@@ -162,12 +140,6 @@ export const OPTIONAL_PRODUCTION_SECRETS_V1: readonly OptionalProductionSecretV1
 export const NON_SECRET_WORKER_SETTINGS_V1: readonly NonSecretWorkerSettingV1[] =
   [
     {
-      name: "COMPOSIO_TEST_URL",
-      why: "Provider HTTP stand-in used only with development authentication; never deployed.",
-      forbiddenLive:
-        "it points Composio's provider calls at a stand-in host instead of Composio",
-    },
-    {
       name: "NATIVE_SLICE_2_AUTH",
       why: "Qualification gate; not enabled by the production configuration.",
     },
@@ -176,7 +148,10 @@ export const NON_SECRET_WORKER_SETTINGS_V1: readonly NonSecretWorkerSettingV1[] 
       why: "A `vars` entry the deploy writes.",
     },
     { name: "UI_ARTIFACT_HOSTS", why: "A `vars` entry." },
-    { name: "ALLOWED_CLIENT_ORIGINS", why: "A `vars` entry." },
+    {
+      name: "ALLOWED_CLIENT_ORIGINS",
+      why: "Admits a cross-origin client; no deployment configures one, since the web app is same-origin and the native app sends no `Origin`.",
+    },
     { name: "FROCK_AI_GATEWAY_ID", why: "A `vars` entry." },
     { name: "FROCK_AI_AUTO_ROUTE", why: "A `vars` entry." },
     { name: "FROCK_AI_ACCOUNT_ID", why: "A `vars` entry." },
@@ -201,23 +176,6 @@ export const NON_SECRET_WORKER_SETTINGS_V1: readonly NonSecretWorkerSettingV1[] 
       why: "Opens the development sign-in door; never set in production.",
       forbiddenLive:
         "anybody reaching the deployment can sign in as any identity without Google",
-    },
-    {
-      name: "WORKSPACE_SEED_TOKEN",
-      why: "Opens the Workspace seed door; set by the end-to-end harness only.",
-      forbiddenLive:
-        "whoever holds the token can write a Bot's Workspace without a Computer",
-    },
-    {
-      name: "VOICE_UPSTREAM_URL",
-      why: "Local dictation stand-in; set by the end-to-end harness only.",
-      forbiddenLive: "every dictation session is sent to that host instead",
-    },
-    {
-      name: "VOICE_ASSISTANT_UPSTREAM_URL",
-      why: "Local Gemini Live stand-in; set by the end-to-end harness only.",
-      forbiddenLive:
-        "every voice assistant session is sent to that host instead",
     },
   ];
 

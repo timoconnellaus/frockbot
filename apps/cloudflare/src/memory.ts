@@ -25,12 +25,12 @@ import {
   type WorkspaceGenerationRecordV1,
   type WorkspaceGenerationsV1,
   type WorkspaceRootV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import type {
   MemoryProjectsOutcomeV1,
   MemoryProjectsV1,
   MemoryProjectV1,
-} from "@frockbot/plugin-memory/agent";
+} from "@frockbot/app/memory/agent";
 
 /** The User Durable Object's Memory RPC surface, as the Bot object calls it. */
 export interface UserMemoryRpc {

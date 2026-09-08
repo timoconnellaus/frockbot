@@ -44,18 +44,21 @@ describe("npm trusted publishing bootstrap", () => {
     // Each entry is a real scoped package rooted at its own directory.
     for (const entry of packages) {
       expect(entry.name.startsWith("@frockbot/")).toBe(true);
-      expect(entry.directory.startsWith("packages/")).toBe(true);
+      expect(
+        entry.directory.startsWith("packages/") ||
+          entry.directory === "applets/sdk",
+      ).toBe(true);
     }
     const names = packages.map((entry) => entry.name);
     expect(new Set(names).size).toBe(names.length);
   });
 
   test("the trusted publisher names this workflow and claims no environment", () => {
-    const args = trustArguments("@frockbot/kernel-contracts");
+    const args = trustArguments("@frockbot/core/contracts");
     expect(args).toEqual([
       "trust",
       "github",
-      "@frockbot/kernel-contracts",
+      "@frockbot/core/contracts",
       "--file",
       WORKFLOW_FILE,
       "--repo",
@@ -180,7 +183,7 @@ describe("npm trusted publishing bootstrap", () => {
         run: stubNpm({ calls: [] }),
         log: () => {},
       }),
-    ).rejects.toThrow("no workspace under packages/ is named");
+    ).rejects.toThrow("no publishable workspace is named");
   });
 
   test("an absent package is published once, then trusted", async () => {

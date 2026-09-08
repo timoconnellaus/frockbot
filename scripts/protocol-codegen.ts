@@ -17,7 +17,7 @@ export interface Schema {
 }
 export const source = JSON.parse(
   readFileSync(
-    resolve(root, "packages/protocol-schemas/schema/client-wire.schema.json"),
+    resolve(root, "core/protocol-schemas/schema/client-wire.schema.json"),
     "utf8",
   ),
 ) as {

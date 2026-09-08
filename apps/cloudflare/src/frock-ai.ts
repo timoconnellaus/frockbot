@@ -1,6 +1,6 @@
-import { MODEL_FIRST_BYTE_DEADLINE_MS_V1 } from "@frockbot/kernel-contracts";
-import { FROCK_AI_DEFAULT_AUTO_ROUTE } from "@frockbot/plugin-provider-frock-ai/catalog";
-import { FrockAiTransportErrorV1 } from "@frockbot/plugin-provider-frock-ai/runtime";
+import { MODEL_FIRST_BYTE_DEADLINE_MS_V1 } from "@frockbot/core/contracts";
+import { FROCK_AI_DEFAULT_AUTO_ROUTE } from "@frockbot/providers/frock-ai/catalog";
+import { FrockAiTransportErrorV1 } from "@frockbot/providers/frock-ai/runtime";
 
 export const DEFAULT_FROCK_AI_GATEWAY_ID_V1 = "flock";
 

@@ -8,12 +8,13 @@
 // `BOT_ISOLATE_WRAPPER_SOURCE`, `BotCapabilities`), and only the Turn's
 // surrounding configuration is fixture.
 import { DurableObject } from "cloudflare:workers";
+import { decodePluginDescriptorV1 } from "@frockbot/core/contracts";
 import type {
   LlmProvider,
   LlmStreamEvent,
   NormalizedModelRequest,
   SessionEvent,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import {
   bootstrapGeneration,
   compositionArtifactSetHashV1,
@@ -21,35 +22,33 @@ import {
   type ArtifactRefV1,
   type CompositionGenerationV1,
   type CompositionMemberV1,
-} from "@frockbot/kernel-composition/generation";
-import { canonicalJson } from "@frockbot/kernel-composition/compiler";
+} from "@frockbot/core/durable";
 import type {
   BotIsolateLoader,
   BotIsolateWorkerCode,
-} from "@frockbot/kernel-composition/isolate";
+} from "@frockbot/frock-compose";
 import {
   createShellCompositionHost,
   type ShellMountedComposition,
-} from "@frockbot/plugin-shell/backend-composition";
+} from "@frockbot/app/shell/backend-composition";
 import {
   BOT_ISOLATE_COMPATIBILITY_DATE,
   isolateBindingDigestV1,
   type BotCapabilitiesPropsV1,
-} from "@frockbot/plugin-shell/backend-isolate";
+} from "@frockbot/app/isolates/capabilities";
 import type {
   IsolateConnectionV1,
   IsolateModelBindingV1,
-} from "@frockbot/kernel-contracts";
-import type { FoundationAgentPackage } from "@frockbot/agent-runtime/runtime";
-import type { Plugin } from "cordis";
+} from "@frockbot/core/contracts";
+import type { FoundationAgentPackage } from "@frockbot/app/agent-runtime";
 import type { BotCapabilities } from "../src/bot-capabilities.ts";
 import type { WorkerdBotState } from "./fly-compatibility-worker.ts";
 import { dynamicToolCallV1, twoTierStepV1 } from "./dynamic-tools.ts";
 
 /**
  * The Package id this probe's isolate mounts under, which is therefore also
- * the namespace its tools are disclosed in (ADR 0023). Non-first-party
- * namespaces are external, so a call into one carries `mcpDetails.description`.
+ * the namespace its tools are disclosed in. Non-first-party namespaces are
+ * external, so a call into one carries `mcpDetails.description`.
  */
 export const PROBE_PACKAGE_ID = "bot-authored";
 
@@ -113,7 +112,7 @@ export async function execute(tool, input, ctx) {
     case "leak_probe":
       return JSON.stringify({
         packageId: ctx.packageId,
-        botId: ctx.botId,
+        botId: ctx.bot.botId,
         secret: typeof globalThis.SECRET_TOKEN,
         botStates: typeof globalThis.BOT_STATES,
         loader: typeof globalThis.BOT_PACKAGES,
@@ -167,16 +166,10 @@ export const PROBE_UNDECODABLE_HOOK_SOURCE = PROBE_PACKAGE_SOURCE.replace(
   }];`,
 );
 
-const PROBE_PACKAGE_MANIFEST = {
-  schemaVersion: 3,
-  id: "bot-authored",
+const PROBE_PACKAGE_DESCRIPTOR = decodePluginDescriptorV1({
+  id: PROBE_PACKAGE_ID,
   displayName: "Bot authored probe",
   version: "0.0.1",
-  compatibility: { frockbot: ">=0.0.1" },
-  dependencies: {},
-  contributions: {
-    runtime: { entry: "./package.js", host: "bot-isolate" },
-  },
   tools: [
     "reverse_text",
     "env_keys",
@@ -188,9 +181,10 @@ const PROBE_PACKAGE_MANIFEST = {
     "schedule_surface",
     "context_keys",
   ].map((name) => ({ name, description: name, inputSchema: {} })),
-  hooks: ["agent/tool-exposure"],
-  permissions: [],
-} as const;
+  actions: ["tools.expose"],
+  grants: ["ai", "http", "schedule", "memory", "workspace"],
+  contextKeys: ["user", "bot", "session"],
+});
 
 /** A deliberate syntax error: `prepare()` must fail with a diagnostic, not hang. */
 export const PROBE_BROKEN_SOURCE = `
@@ -228,22 +222,9 @@ function scriptedProviderPackage(
       yield { type: "finish", reason: "tool-calls" };
     },
   };
-  const plugin: Plugin.Function = (ctx) => ctx.llm.register(provider);
-  plugin.inject = ["llm"];
   return {
-    specifier: "@frockbot/test-scripted-provider",
-    contributionSpecifier: "@frockbot/test-scripted-provider/runtime.js",
-    manifest: {
-      schemaVersion: 3,
-      id: "test-scripted-provider",
-      displayName: "Scripted provider",
-      version: "0.0.1",
-      compatibility: { frockbot: "^0.0.1" },
-      dependencies: {},
-      contributions: { runtime: { entry: "./runtime.js" } },
-      permissions: [],
-    },
-    plugin,
+    id: "test-scripted-provider",
+    feature: ({ llm }) => llm.register(provider),
   };
 }
 
@@ -318,25 +299,14 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
     artifact?: ArtifactRefV1,
     createdAt = "2026-08-31T00:00:00.000Z",
   ): Promise<CompositionGenerationV1> {
-    const base = await bootstrapGeneration(
-      [
-        {
-          packageId: "shell",
-          specifier: "@frockbot/plugin-shell",
-          version: "0.0.1",
-          manifest: { id: "shell", version: "0.0.1" },
-        },
-      ],
-      { createdAt },
-    );
+    const base = await bootstrapGeneration({ createdAt });
     if (!artifact) return base;
     const members: CompositionMemberV1[] = [
       ...base.members,
       {
         packageId: PROBE_PACKAGE_ID,
-        specifier: "@bot/authored",
         version: "0.0.1",
-        manifestHash: await sha256Hex(canonicalJson(PROBE_PACKAGE_MANIFEST)),
+        descriptor: PROBE_PACKAGE_DESCRIPTOR,
         provenance: {
           kind: "bot" as const,
           packageId: PROBE_PACKAGE_ID,
@@ -418,7 +388,6 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
             return module;
           },
         },
-        manifestFor: () => Promise.resolve(PROBE_PACKAGE_MANIFEST),
         capabilitiesFor: (member) =>
           exports.BotCapabilities({
             props: {
@@ -478,7 +447,7 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
     try {
       await composition.verify(new AbortController().signal);
       // A Bot isolate's tools are namespaced by its immutable Package id and
-      // the namespace is external (ADR 0023), so the only way in is
+      // the namespace is external, so the only way in is
       // `call_dynamic_tool` carrying that namespace and call metadata. The
       // tests still name the bare tool; the addressing lives here, once.
       const call = dynamicToolCallV1("call-1", {
@@ -489,26 +458,32 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
           ? {}
           : { description: `The probe called ${input.tool}.` }),
       });
-      const preparation = await composition.root.tools.prepare(call, {
-        botId: input.botId,
-        agentId: input.botId,
-        sessionId: `${input.userId}:${input.botId}`,
-        compositionGenerationId: generation.generationId,
-        turnType: "chat" as const,
-        effectId: "tool:1:1:0",
-        toolCall: call,
-        signal: new AbortController().signal,
-      });
+      const preparation = await composition.runtime.services.tools.prepare(
+        call,
+        {
+          botId: input.botId,
+          agentId: input.botId,
+          sessionId: `${input.userId}:${input.botId}`,
+          compositionGenerationId: generation.generationId,
+          turnType: "chat" as const,
+          effectId: "tool:1:1:0",
+          toolCall: call,
+          signal: new AbortController().signal,
+        },
+      );
       if (preparation.kind !== "ready") return preparation.result;
-      return await composition.root.tools.executePrepared(preparation, {
-        botId: input.botId,
-        agentId: input.botId,
-        sessionId: `${input.userId}:${input.botId}`,
-        compositionGenerationId: generation.generationId,
-        turnType: "chat" as const,
-        effectId: "tool:1:1:0",
-        signal: new AbortController().signal,
-      });
+      return await composition.runtime.services.tools.executePrepared(
+        preparation,
+        {
+          botId: input.botId,
+          agentId: input.botId,
+          sessionId: `${input.userId}:${input.botId}`,
+          compositionGenerationId: generation.generationId,
+          turnType: "chat" as const,
+          effectId: "tool:1:1:0",
+          signal: new AbortController().signal,
+        },
+      );
     } finally {
       await composition.dispose();
     }

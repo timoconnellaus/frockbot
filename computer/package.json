@@ -1,0 +1,49 @@
+{
+  "name": "@frockbot/computer",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./index.ts",
+    "./agent": "./agent.ts",
+    "./backend": "./backend.ts",
+    "./bot": "./bot.ts",
+    "./client": "./client/application.ts",
+    "./client-state-machine": "./client/state-machine.ts",
+    "./definition": "./definition.ts",
+    "./protocol": "./protocol.ts",
+    "./roots": "./roots.ts",
+    "./shared": "./shared.ts",
+    "./shared-provider": "./shared-provider.ts",
+    "./core": "./core/core.ts",
+    "./core/host-protocol": "./core/host-protocol.ts",
+    "./host-protocol": "./host-protocol/protocol.ts",
+    "./host-runtime": "./host-runtime/runtime.ts",
+    "./fly": "./fly/index.ts",
+    "./fly/agent": "./fly/agent.ts",
+    "./fly/computer": "./fly/computer.ts",
+    "./fly/host-client": "./fly/host-client.ts",
+    "./fly/provider": "./fly/provider.ts",
+    "./fly/sync": "./fly/sync.ts",
+    "./fly/workspace": "./fly/workspace.ts",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "test": "bun test .",
+    "typecheck": "vue-tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@frockbot/app": "workspace:*",
+    "@frockbot/client-core": "workspace:*",
+    "@frockbot/client-ui": "workspace:*",
+    "@frockbot/core": "workspace:*",
+    "vue": "3.5.41"
+  },
+  "devDependencies": {
+    "@frockbot/app": "workspace:*",
+    "@types/bun": "1.4.0",
+    "@types/node": "26.2.0",
+    "typescript": "npm:typescript-native-bridge@6.0.3-bridge.16.tsgo.7.0.2",
+    "vue-tsc": "3.3.10"
+  }
+}

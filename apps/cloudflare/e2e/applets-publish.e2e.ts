@@ -1,35 +1,37 @@
-// An Applet is published and used, end to end, on the real routes.
+// An Applet is written, checked, published and used, end to end, on the real
+// routes.
 //
-// `applets.e2e.ts` stops where the Computer starts: a publish reads `dist/`
-// from the Applets Package's durable root, and only `applet build` on the
-// Computer writes it. This spec supplies exactly that one missing writer. The
-// template is built with the published `applet` CLI under plain Node — what
-// the Computer runs — and its three files are put into the run's local
-// Workspace bucket at the keys the Computer's sync would land them on. From
-// there nothing is faked: the Bot's `applet_publish` reconciles nothing (no
-// Computer is assigned), reads the store, verifies the build manifest against
-// the bytes, stores the artifacts, records the generation, mounts the facet,
-// and proposes the Bot's next Composition; the canvas slides the live Applet
-// in; a second page sees a todo the first one added; and the Applet's own
-// `add_todo` reaches the Bot as an ordinary tool.
-import { spawn } from "node:child_process";
-import { mkdir, mkdtemp } from "node:fs/promises";
-import { tmpdir } from "node:os";
+// Nothing here is faked and nothing is seeded. `applet_create` writes the SDK
+// template into the Applet's source root through the Turn's own Workspace
+// surface, `applet_check` and `applet_publish` post that source to the real
+// `apps/applet-build` service — the Worker and its container, running beside
+// this harness in the dev service registry — and the artifacts that come back
+// are hash-verified and stored by the app Worker. From there the canvas slides
+// the live Applet in, a second page sees a todo the first one added, and the
+// Applet's own `add_todo` reaches the Bot as an ordinary tool.
+//
+// The build needs Docker. When it is not running this spec fails saying so,
+// rather than passing without having built anything.
+import { mkdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Page } from "@playwright/test";
 import { test, expect, provisionThroughUi, sendMessage } from "./fixtures.ts";
 import {
+  appletBuildAvailableV1,
   E2E_DEBUG_TOKEN,
   E2E_OLLAMA_GOOD_API_KEY,
   e2eToolCallPrompt,
-  seedWorkspaceFile,
 } from "./harness.ts";
+
+const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
+const DESKTOP = { width: 1351, height: 831 } as const;
+const PHONE = { width: 390, height: 844 } as const;
 
 /**
  * The latest Turns' tool results, from the operator surface. The transcript
- * hides them on purpose, so when an assertion about what a tool *did* fails,
- * this is what says why.
+ * hides them on purpose, so this is both what an assertion about what a tool
+ * *did* reads and what says why when one fails.
  */
 async function recentToolResults(page: Page, userId: string): Promise<string> {
   const headers = { authorization: `Bearer ${E2E_DEBUG_TOKEN}` };
@@ -46,78 +48,19 @@ async function recentToolResults(page: Page, userId: string): Promise<string> {
   return `${JSON.stringify(await applets.json(), null, 2)}\n${JSON.stringify(await detail.json(), null, 2)}`;
 }
 
-const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
-const sdkRoot = resolve(repoRoot, "packages/applet-sdk");
-const cli = resolve(sdkRoot, "dist/cli.mjs");
-const DESKTOP = { width: 1351, height: 831 } as const;
-const PHONE = { width: 390, height: 844 } as const;
-
-async function run(
-  command: string,
-  args: string[],
-  cwd: string,
-): Promise<void> {
-  await new Promise<void>((done, fail) => {
-    const child = spawn(command, args, { cwd, stdio: "inherit" });
-    child.on("error", fail);
-    child.on("exit", (code) =>
-      code === 0
-        ? done()
-        : fail(new Error(`${command} ${args.join(" ")} exited with ${code}`)),
-    );
-  });
-}
-
-/** The template, scaffolded and built the way the Computer does it. */
-async function buildTemplate(displayName: string): Promise<string> {
-  await run("bun", ["scripts/build-cli.ts"], sdkRoot);
-  const parent = await mkdtemp(join(tmpdir(), "frockbot-applet-e2e-"));
-  await run("node", [cli, "new", displayName], parent);
-  const directory = join(parent, "weekly-todos");
-  await run("node", [cli, "build"], directory);
-  return join(directory, "dist");
-}
-
-async function seedBuild(
-  baseUrl: string,
+/** The preview URL `applet_check` handed the Bot, from the operator surface. */
+async function previewUrlFromCheck(
+  page: Page,
   userId: string,
-  botId: string,
-  appletId: string,
-  dist: string,
-): Promise<void> {
-  const root = {
-    kind: "package-declared",
-    userId,
-    packageId: "applets",
-    rootId: "source",
-  };
-  for (const [file, mediaType] of [
-    ["server.js", "application/javascript"],
-    ["ui.html", "text/html; charset=utf-8"],
-    ["manifest.json", "application/json"],
-  ] as const) {
-    await seedWorkspaceFile(
-      baseUrl,
-      userId,
-      botId,
-      root,
-      `${appletId}/dist/${file}`,
-      join(dist, file),
-      mediaType,
-    );
+): Promise<string> {
+  const results = await recentToolResults(page, userId);
+  const match = results.match(
+    /http:\/\/ui\.localhost:\d+\/packages\/[0-9a-f]{64}\.html/,
+  );
+  if (!match) {
+    throw new Error(`applet_check returned no preview URL.\n${results}`);
   }
-}
-
-/** The one Bot this spec provisioned, from the operator surface. */
-async function botIdFor(page: Page, userId: string): Promise<string> {
-  const bots = (await (
-    await page.request.get(`/api/debug/bots?userId=${userId}`, {
-      headers: { authorization: `Bearer ${E2E_DEBUG_TOKEN}` },
-    })
-  ).json()) as { bots?: Array<{ botId: string }> };
-  const botId = bots.bots?.[0]?.botId;
-  if (!botId) throw new Error("the User has no Bot");
-  return botId;
+  return match[0];
 }
 
 async function runTool(
@@ -126,18 +69,9 @@ async function runTool(
   name: string,
   input: unknown = {},
 ): Promise<void> {
-  // The Applets member is isolate-loaded, so its tools are disclosed under
-  // the `applets` namespace (ADR 0023) and a model reaches them only
-  // through `call_dynamic_tool`; the scripted model does exactly that.
-  await sendMessage(
-    page,
-    `${text}\n${e2eToolCallPrompt("call_dynamic_tool", {
-      namespace: "applets",
-      toolName: name,
-      arguments: input,
-      mcpDetails: { description: `${name} for the User` },
-    })}`,
-  );
+  // The Applets tools are first-party registrations, so the scripted model
+  // calls them by name.
+  await sendMessage(page, `${text}\n${e2eToolCallPrompt(name, input)}`);
 }
 
 async function appletIdNamed(page: Page, displayName: string): Promise<string> {
@@ -195,15 +129,17 @@ async function expectNoHorizontalOverflow(page: Page): Promise<void> {
   ).toBeLessThanOrEqual(0);
 }
 
-test("a Bot publishes an Applet, it goes live in the canvas, and its tool reaches the Bot", async ({
+test("a Bot writes, checks and publishes an Applet, and its tool reaches the Bot", async ({
   page,
   context,
   userId,
   ollamaBaseUrl,
 }) => {
-  test.setTimeout(600_000);
-  const port = Number(process.env.FROCKBOT_E2E_PORT);
-  const dist = await buildTemplate("Weekly Todos");
+  test.setTimeout(900_000);
+  expect(
+    appletBuildAvailableV1(),
+    "Docker is not running, so apps/applet-build could not start and no Applet can be built. Start Docker and run this spec again.",
+  ).toBe(true);
 
   await page.setViewportSize(DESKTOP);
   await provisionThroughUi(page, {
@@ -230,16 +166,31 @@ test("a Bot publishes an Applet, it goes live in the canvas, and its tool reache
   });
   await shot(page, "canvas-building");
 
-  // What `applet build` on the Computer would have written, landed where the
-  // sync lands it.
   const appletId = await appletIdNamed(page, "Weekly Todos");
-  await seedBuild(
-    `http://127.0.0.1:${port}`,
-    userId,
-    await botIdFor(page, userId),
+
+  // The Bot edits its own source with no Computer anywhere: the file it reads
+  // back is the file the check and the publish compile.
+  await runTool(page, "Read the page.", "applet_read_file", {
     appletId,
-    dist,
-  );
+    path: "ui.tsx",
+  });
+  await runTool(page, "Rename the heading.", "applet_write_file", {
+    appletId,
+    path: "README.md",
+    text: "# Weekly Todos\n\nWritten by the Bot, in the cloud.\n",
+  });
+
+  // The check builds through the real service and hands back a page to look
+  // at. The artifacts are stored, so the URL resolves before anything is
+  // published.
+  await runTool(page, "Check it.", "applet_check", { appletId });
+  const previewUrl = await previewUrlFromCheck(page, userId);
+  const preview = await context.newPage();
+  await preview.goto(previewUrl);
+  await expect(preview.getByText("Weekly Todos")).toBeVisible({
+    timeout: 60_000,
+  });
+  await preview.close();
 
   await runTool(page, "Publish it.", "applet_publish", { appletId });
 

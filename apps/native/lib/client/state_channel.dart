@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
+
+import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../protocol/client_wire.generated.dart' as wire;
 import 'chat_controller.dart';
@@ -13,7 +14,7 @@ class BotStateChannel {
   final String botId;
   final Future<void> Function() invalidate;
   final void Function(ConnectionState) status;
-  WebSocket? _socket;
+  WebSocketChannel? _socket;
   Timer? _retry;
   Timer? _deadline;
   int _epoch = 0;
@@ -38,7 +39,7 @@ class BotStateChannel {
     _deadline?.cancel();
     final old = _socket;
     _socket = null;
-    await old?.close();
+    await old?.sink.close();
     status(ConnectionState.connecting);
     _dirty = false;
     try {
@@ -46,13 +47,13 @@ class BotStateChannel {
       _cursor = wire.isProtocolValue('ObserverCursor', saved) ? saved : null;
       final socket = await api.socket(botId, _cursor);
       if (epoch != _epoch || _disposed || _paused) {
-        await socket.close();
+        await socket.sink.close();
         return;
       }
       _socket = socket;
       _deadline = Timer(const Duration(seconds: 5), () => _failed(epoch));
       Future<void> queue = Future.value();
-      socket.listen(
+      socket.stream.listen(
         (dynamic value) {
           queue = queue
               .then((_) async {
@@ -133,7 +134,7 @@ class BotStateChannel {
     _deadline?.cancel();
     final socket = _socket;
     _socket = null;
-    unawaited(socket?.close());
+    unawaited(socket?.sink.close());
     status(_paused ? ConnectionState.paused : ConnectionState.disconnected);
     if (!_paused) {
       final seconds = (1 << _attempt.clamp(0, 5)).clamp(1, 30);
@@ -158,6 +159,6 @@ class BotStateChannel {
     ++_epoch;
     _retry?.cancel();
     _deadline?.cancel();
-    unawaited(_socket?.close());
+    unawaited(_socket?.sink.close());
   }
 }

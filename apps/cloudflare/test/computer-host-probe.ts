@@ -15,8 +15,8 @@
 // directly: after a refusal, storage says what happened, and after a
 // cancellation it says the effect is unresolved rather than lost.
 import { DurableObject } from "cloudflare:workers";
-import { ComputerError } from "@frockbot/computer-core";
-import { ComputerHostClient } from "@frockbot/plugin-fly-sprite/host-client";
+import { ComputerError } from "@frockbot/computer/core";
+import { ComputerHostClient } from "@frockbot/computer/fly/host-client";
 
 interface ProbeEnv {
   COMPUTER_HOST: Fetcher;

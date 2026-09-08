@@ -1,0 +1,359 @@
+* {
+  box-sizing: border-box;
+}
+
+:root {
+  color-scheme: dark;
+  color: #f4f2f6;
+  background: #1f1e24;
+  accent-color: #ec386b;
+  font-family:
+    Manrope,
+    ui-sans-serif,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+  font-synthesis: none;
+
+  /* Semantic color aliases. Feature plugins consume these names only. */
+  --frock-text: #f4f2f6;
+  --frock-text-muted: #aaa6b1;
+  --frock-text-subtle: #8d8896;
+  --frock-on-accent: #fff;
+  --frock-surface-window: #1f1e24;
+  --frock-surface: #211f26;
+  --frock-surface-sidebar: #1a191e;
+  --frock-surface-raised: #2c2a33;
+  --frock-surface-subtle: #26242c;
+  --frock-surface-accent: #432330;
+  --frock-surface-accent-soft: #2f2027;
+  --frock-border: #3a3742;
+  --frock-border-strong: #6c6874;
+  --frock-border-focus: #ec386b;
+  --frock-action-primary: #ec386b;
+  --frock-action-primary-hover: #d92d5f;
+  --frock-action-primary-pressed: #c62656;
+  --frock-action-secondary: #432330;
+  --frock-action-secondary-text: #f2a6bd;
+  --frock-success: #73d6aa;
+  --frock-success-surface: #203329;
+  --frock-success-border: #355f4a;
+  --frock-warning: #f0c36a;
+  --frock-warning-surface: #3a301e;
+  --frock-warning-border: #6d5a2e;
+  --frock-danger-text: #ff9aa8;
+  --frock-danger-surface: #3a2025;
+  --frock-danger-border: #70404a;
+  --frock-focus-ring: rgb(236 56 107 / 32%);
+  --frock-scrollbar: #514d5b;
+  --frock-overlay-tint: rgb(10 9 12 / 76%);
+
+  /* Shared typography, geometry, elevation, and motion aliases. */
+  /* The reading face, named so a sandboxed Package page can be handed it. */
+  --frock-font-sans:
+    Manrope, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+  --frock-font-display: "Archivo Black", Manrope, sans-serif;
+  --frock-font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /*
+   * Type scale. Feature styles must size text with these aliases only;
+   * `scripts/check-ui-styles.ts` rejects literal font sizes. The steps match
+   * the desktop chat apps FrockBot sits beside: 13px is the working size,
+   * 15px carries titles and primary rows, 11px is reserved for eyebrows.
+   */
+  --frock-text-xs: 11px;
+  --frock-text-sm: 12px;
+  --frock-text-base: 13px;
+  --frock-text-md: 14px;
+  --frock-text-lg: 15px;
+  --frock-text-xl: 17px;
+  --frock-text-2xl: 20px;
+  --frock-text-display: 24px;
+  --frock-leading-tight: 1.2;
+  --frock-leading-snug: 1.35;
+  --frock-leading-normal: 1.5;
+  --frock-tracking-eyebrow: 0.08em;
+  --frock-tracking-display: -0.02em;
+
+  /* Legacy aliases kept for older styles; prefer the scale above. */
+  --frock-font-body: var(--frock-text-md);
+  --frock-font-label: var(--frock-text-sm);
+  --frock-font-title: var(--frock-text-2xl);
+
+  /* Application geometry shared by the shell and the plugins it hosts. */
+  --frock-sidebar-width: 280px;
+  --frock-panel-width: 320px;
+
+  /*
+   * Phone geometry. A hand-held viewport has room for one column, so the
+   * columns a desktop shows side by side become drawers over it; these are the
+   * shared measurements of that layout, in the theme rather than in the shell
+   * because panel plugins lay themselves out against the same edges.
+   *
+   * `--frock-viewport-height` is `100dvh` on a phone: a browser whose toolbar
+   * collapses on scroll changes the visible height without changing the layout
+   * viewport, and a composer pinned to `100%` of the latter ends up under the
+   * toolbar. The native Android shell's Capacitor 8 SystemBars bridge injects
+   * corrected `--safe-area-inset-*` properties (including its IME workaround),
+   * while ordinary browsers fall back to their standard `env()` values. Both
+   * are zero on devices that have no inset.
+   */
+  --frock-viewport-height: 100%;
+  --frock-drawer-width: min(300px, 84vw);
+  --frock-safe-bottom: var(
+    --safe-area-inset-bottom,
+    env(safe-area-inset-bottom, 0px)
+  );
+  --frock-safe-top: var(--safe-area-inset-top, env(safe-area-inset-top, 0px));
+
+  /*
+   * The size text is entered at. Mobile Safari zooms the page in on a focused
+   * field whose text is below 16px, and a zoomed page cannot be scrolled back
+   * out, so the composer and every plugin's inputs size through this alias
+   * rather than through the reading scale.
+   */
+  --frock-text-input: var(--frock-text-md);
+  --frock-titlebar-height: 52px;
+  --frock-control-sm: 28px;
+  --frock-control-md: 32px;
+  --frock-control-lg: 36px;
+  --frock-avatar-sm: 28px;
+  --frock-avatar-md: 38px;
+  /* The pinned sidebar tile: a Bot addressed as a destination, not a row. */
+  --frock-avatar-lg: 56px;
+  --frock-icon-sm: 14px;
+  --frock-icon-md: 16px;
+  --frock-icon-lg: 18px;
+  --frock-radius-control: 10px;
+  --frock-radius-card: 14px;
+  --frock-radius-panel: 20px;
+  --frock-settings-width: 520px;
+  --frock-shadow-card: 0 8px 22px rgb(0 0 0 / 24%);
+  --frock-shadow-panel: 18px 0 55px rgb(0 0 0 / 42%);
+  --frock-shadow-floating: 0 18px 45px rgb(0 0 0 / 44%);
+  --frock-shadow-icon: 0 8px 18px rgb(236 56 107 / 28%);
+  --frock-shadow-control: 0 8px 28px rgb(0 0 0 / 34%);
+  --frock-shadow-composer: 0 12px 32px rgb(0 0 0 / 38%);
+  --frock-shadow-right-panel: -16px 0 36px rgb(0 0 0 / 38%);
+  --frock-motion-fast: 140ms cubic-bezier(0.2, 0, 0, 1);
+  --frock-motion-panel: 220ms cubic-bezier(0.2, 0, 0, 1);
+  --frock-motion-enter: 260ms cubic-bezier(0.16, 1, 0.3, 1);
+  --frock-fill-hover: rgb(244 242 246 / 7%);
+  --frock-fill-pressed: rgb(244 242 246 / 12%);
+  --frock-skeleton: rgb(244 242 246 / 8%);
+  --frock-skeleton-shine: rgb(255 255 255 / 12%);
+  --frock-layer-menu: 30;
+  --frock-layer-panel: 40;
+  --frock-layer-surface: 100;
+
+  /* Capability presentation aliases shared across first-party plugins. */
+  --frock-computer-accent: #67a9e8;
+  --frock-computer-accent-text: #9ecfff;
+  --frock-computer-surface: #1e3044;
+  --frock-computer-border: #315e87;
+  --frock-computer-viewer: #0c0c0c;
+  --frock-provider-google: #8ab4f8;
+  --frock-text-disabled: #77727f;
+  --frock-surface-disabled: #35323b;
+  --frock-danger-strong: #ff788c;
+  --frock-accent-border: #704052;
+  --frock-accent-text: #f2a6bd;
+  --frock-accent-surface: #321f28;
+  --frock-success-bright: #73d6aa;
+  --frock-overlay-border: rgb(255 255 255 / 25%);
+  --frock-shadow-accent: 0 10px 24px rgb(236 56 107 / 28%);
+  --frock-shadow-auth: 0 24px 70px rgb(0 0 0 / 42%);
+  --frock-shadow-avatar: 0 15px 35px rgb(0 0 0 / 34%);
+  --frock-shadow-dialog: 0 30px 90px rgb(0 0 0 / 62%);
+  --frock-thread-gradient: linear-gradient(
+    180deg,
+    var(--frock-surface) 0%,
+    var(--frock-surface) 78%,
+    var(--frock-surface-window) 100%
+  );
+  --frock-auth-background: radial-gradient(
+    circle at 50% 20%,
+    rgb(236 56 107 / 14%),
+    transparent 34%
+  );
+  --frock-flock-preview: linear-gradient(
+    160deg,
+    var(--frock-surface-accent),
+    var(--frock-surface-subtle)
+  );
+
+  --frock-computer-success-border: #355f4a;
+  --frock-computer-error-border: #70404a;
+  --frock-computer-error-text: #ff9aa8;
+  --frock-computer-error-surface: #3a2025;
+  --frock-computer-grid: rgb(244 242 246 / 5%);
+  --frock-computer-inset: rgb(244 242 246 / 4%);
+  --frock-computer-control-tint: rgb(31 30 36 / 84%);
+  --frock-computer-control-surface: rgb(44 42 51 / 96%);
+  --frock-computer-focus: rgb(103 169 232 / 34%);
+
+  --frock-viewer-overlay: rgb(3 3 3 / 94%);
+  --frock-viewer-text: #dedede;
+  --frock-viewer-text-strong: #e1e1e1;
+  --frock-viewer-text-muted: #727272;
+  --frock-viewer-text-subtle: #858585;
+  --frock-viewer-border: #272727;
+  --frock-viewer-border-hover: #3d3d3d;
+  --frock-viewer-surface: #141414;
+  --frock-viewer-surface-hover: #1b1b1b;
+  --frock-viewer-stage: #0c0c0c;
+  --frock-viewer-frame: #252525;
+  --frock-viewer-close: #a8a8a8;
+  --frock-viewer-close-surface: #171717;
+  --frock-viewer-blue-border: #2f6699;
+  --frock-viewer-blue-text: #b8dcff;
+  --frock-viewer-blue-surface: #17324b;
+  --frock-viewer-status-border: #333;
+  --frock-viewer-status-surface: #151515;
+  --frock-viewer-success-border: #24513e;
+  --frock-viewer-success-text: #64c99b;
+  --frock-viewer-success-surface: #10251c;
+  --frock-viewer-control-border: #2b5f92;
+  --frock-viewer-control-text: #87c5ff;
+  --frock-viewer-control-surface: #102235;
+  --frock-viewer-error-border: #5c3034;
+  --frock-viewer-error-text: #e28b92;
+  --frock-viewer-error-surface: #2a1719;
+  --frock-viewer-grid: rgb(255 255 255 / 2%);
+  --frock-viewer-grid-surface: #121212;
+  --frock-viewer-mark-text: #90c9ff;
+  --frock-viewer-mark-surface: #142b42;
+  --frock-viewer-content-text: #c8c8c8;
+  --frock-viewer-content-muted: #767676;
+  --frock-viewer-button-border: #3e3e3e;
+  --frock-viewer-button-text: #d8d8d8;
+  --frock-viewer-button-surface: #292929;
+  --frock-viewer-button-border-hover: #575757;
+  --frock-viewer-control-shield: rgb(7 7 7 / 78%);
+  --frock-viewer-control-panel: rgb(20 20 20 / 92%);
+  --frock-viewer-panel-border: #303030;
+  --frock-viewer-shadow-control: 0 4px 18px rgb(0 0 0 / 24%);
+  --frock-viewer-shadow-stage: 0 22px 80px rgb(0 0 0 / 42%);
+  --frock-viewer-shadow-panel: 0 8px 28px rgb(0 0 0 / 35%);
+}
+
+html,
+body,
+#app {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+body {
+  background: var(--frock-surface-window);
+
+  /*
+   * The working size, on the document as well as on the shell root. Anything
+   * rendered outside `.frockbot-root` — an auth gate, a package page's own
+   * body — otherwise inherits the browser's 16px and reads a size larger than
+   * the rest of the product. Inputs keep their own alias, which is 16px on a
+   * phone so focusing a field does not zoom the page in.
+   */
+  font-size: var(--frock-text-base);
+  line-height: var(--frock-leading-normal);
+}
+
+button,
+input,
+textarea,
+select {
+  color: inherit;
+  font: inherit;
+}
+
+button {
+  border: 0;
+}
+
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+summary:focus-visible {
+  outline: 3px solid var(--frock-focus-ring);
+  outline-offset: 2px;
+}
+
+/* Shared motion primitives. Feature styles reference these by name. */
+@keyframes frock-fade-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes frock-rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes frock-scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes frock-shimmer {
+  from {
+    transform: translateX(-100%);
+  }
+
+  to {
+    transform: translateX(100%);
+  }
+}
+
+/*
+ * The phone breakpoint. `app/shell/client/FrockBotApp.vue`
+ * matches the same width in `matchMedia`, because which layout is on screen
+ * decides behaviour as well as appearance — a drawer that is closed by default
+ * and a right panel that does not open over the conversation.
+ */
+@media (max-width: 640px) {
+  :root {
+    --frock-viewport-height: 100dvh;
+    --frock-text-input: 16px;
+
+    /*
+     * Touch, not a cursor. Apple and Google both put the smallest comfortable
+     * target at around 44px, and every control in the product is sized through
+     * these three aliases.
+     */
+    --frock-control-sm: 34px;
+    --frock-control-md: 40px;
+    --frock-control-lg: 44px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --frock-motion-fast: 0ms linear;
+    --frock-motion-panel: 0ms linear;
+    --frock-motion-enter: 0ms linear;
+  }
+}

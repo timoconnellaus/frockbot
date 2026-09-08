@@ -1,19 +1,17 @@
 # FrockBot
 
-FrockBot is an experimental Cordis-first application for persistent conversational bots. The hosted WebUI and cloud backend provide the product path; Electron and mobile are thin platform shells around the same hosted protocols.
+FrockBot is an experimental application for persistent conversational bots. The hosted WebUI and cloud backend provide the product path.
 
 The current vertical slice includes:
 
-- a hosted Cordis WebUI/Vue client composed from declared Package Contributions;
+- a hosted Vue client composed from declared Package Contributions;
 - backend-owned Bot Durable Objects running the event-sourced custom agent loop;
 - a durable User-owned Bot directory with Bot-owned settings, sessions, and composable sheep identities;
 - account-wide Package enablement and User-owned Connections;
 - provider-neutral durable User settings independent of external integrations;
-- thin Electron and Capacitor shells that load the hosted application and broker narrow optional platform capabilities;
-- streamed text, journaled tool calls, durable recovery, and lifecycle cleanup;
-- an executable Cordis loader, dependency, isolation, WebSocket, CSP, and Electron foundation proof.
+- streamed text, journaled tool calls, durable recovery, and lifecycle cleanup.
 
-See [`docs/architecture.md`](docs/architecture.md) and [`docs/adr/0001-cordis-application-spine.md`](docs/adr/0001-cordis-application-spine.md).
+See [`docs/architecture.md`](docs/architecture.md).
 
 ## Requirements
 
@@ -23,10 +21,10 @@ See [`docs/architecture.md`](docs/architecture.md) and [`docs/adr/0001-cordis-ap
 
 ```bash
 bun install
-bun run dev:cloudflare:electron
+bun run dev
 ```
 
-The development launcher builds the hosted application, starts its local Cloudflare and Vite origins, and passes both required origins to the Electron thin shell. Starting the desktop workspace directly requires explicit `FROCKBOT_APPLICATION_URL` and `FROCKBOT_AUTH_BASE_URL` values.
+The development launcher builds the hosted WebUI and starts its local Cloudflare origin.
 
 The deterministic foundation provider runs without credentials. To use an OpenAI-compatible endpoint:
 
@@ -34,32 +32,26 @@ The deterministic foundation provider runs without credentials. To use an OpenAI
 FROCKBOT_LLM_BASE_URL="https://api.example.com/v1" \
   FROCKBOT_LLM_MODEL="model-id" \
   FROCKBOT_LLM_API_KEY="..." \
-  bun run dev:cloudflare:electron
+  bun run dev
 ```
 
 `FROCKBOT_LLM_API_KEY` is optional for local endpoints. `FROCKBOT_LLM_PROVIDER_ID` customizes the provider label.
 
-The left sidebar lists the authenticated User's active Bots and switches the workspace. **Add sheep** creates a Bot with a random sheep identity; selecting the active sheep opens an editor where its background, headwear, facewear, and neckwear can be changed independently or rerolled together. **Manage** shows archived Bots and provides archive and restore controls without deleting their history or settings. Bot settings remain behind the selected workspace's header gear. The sidebar's **Connectors** button authorizes external accounts and MCP servers for every Bot the User owns. **Profile → Plugins** installs, uninstalls, enables, and disables Packages account-wide, while **Profile → Settings** owns remaining declared application settings. Models renders Package contributions; enabling the default-disabled Custom models Package adds the account model picker and a Package-scoped model override to Bot settings. Without it, every Bot follows the platform's Frock AI model. During an active Turn, **Stop** records cancellation intent; closing or switching clients does not stop backend work. Browser, desktop, and mobile render the same hosted Bot, sheep, Connection, and settings workflows.
+The left sidebar lists the authenticated User's active Bots and switches the workspace. **Add sheep** creates a Bot with a random sheep identity; selecting the active sheep opens an editor where its background, headwear, facewear, and neckwear can be changed independently or rerolled together. **Manage** shows archived Bots and provides archive and restore controls without deleting their history or settings. Bot settings remain behind the selected workspace's header gear. The sidebar's **Connectors** button authorizes external accounts and MCP servers for every Bot the User owns. **Profile → Plugins** installs, uninstalls, enables, and disables Packages account-wide, while **Profile → Settings** owns remaining declared application settings. Models renders Package contributions; enabling the default-disabled Custom models Package adds the account model picker and a Package-scoped model override to Bot settings. Without it, every Bot follows the platform's Frock AI model. During an active Turn, **Stop** records cancellation intent; closing or switching clients does not stop backend work.
 
-`@frockbot/plugin-provider-ollama-cloud` lets each User create multiple named Ollama Cloud Connections with their own write-only API keys. It is disabled by default and depends on the Custom models Package. The backend validates and encrypts each credential and discovers that Connection's model catalog; connecting it does not change the platform model. Rotation affects subsequent model effects while already-admitted effects retain their credential lease, and disconnect prevents new leases without cancelling admitted Turns.
+`@frockbot/providers/ollama-cloud` lets each User create multiple named Ollama Cloud Connections with their own write-only API keys. It is disabled by default and depends on the Custom models Package. The backend validates and encrypts each credential and discovers that Connection's model catalog; connecting it does not change the platform model. Rotation affects subsequent model effects while already-admitted effects retain their credential lease, and disconnect prevents new leases without cancelling admitted Turns.
 
-`@frockbot/plugin-provider-frock-ai` is the built-in credential-free model path. On a User's first configuration read its User Contribution idempotently installs and enables the Package, creates the ready ambient `flock-ai-account` Connection, and records `@frock/auto` as the platform model. The runtime sends Auto through Cloudflare AI Gateway as `dynamic/<FROCK_AI_AUTO_ROUTE>` and manual `@frock/...` ids as `workers-ai/@cf/...`, behind one narrow streaming adapter. No User secret enters FrockBot state; the Gateway credentials below are deployment configuration, held by the Worker and never by a User.
+`@frockbot/providers/frock-ai` is the built-in credential-free model path. On a User's first configuration read its User Contribution idempotently installs and enables the Package, creates the ready ambient `flock-ai-account` Connection, and records `@frock/auto` as the platform model. The runtime sends Auto through Cloudflare AI Gateway as `dynamic/<FROCK_AI_AUTO_ROUTE>` and manual `@frock/...` ids as `workers-ai/@cf/...`, behind one narrow streaming adapter. No User secret enters FrockBot state; the Gateway credentials below are deployment configuration, held by the Worker and never by a User.
 
-To attach the built-in Fly Sprites Computer provider Package, provide a Sprites token. The provider sits behind the provider-neutral Computer interface used by generic tools and memory. It provisions **one persistent Sprite per User** ([ADR 0012](docs/adr/0012-one-computer-per-user.md)), shared by every Bot that User owns: each Bot receives its own directories and an on-demand Chromium/noVNC desktop slot, and every Bot on the Computer shares the one browser profile at `/home/box/chrome-profile`, so logins are a User-level asset. There is no separate User storage Sprite. `FROCKBOT_SPRITE_NAME` optionally selects the base name the User's Sprite name is derived from for standalone development; the hosted backend supplies durable User identity. `FROCKBOT_COMPUTER_PROVIDER` selects an installed provider and currently defaults to `fly-sprite`. In the hosted deployment the Sprites SDK and `SPRITES_TOKEN` live in `apps/computer-host` ([ADR 0004](docs/adr/0004-host-fly-computer-in-cloudflare-containers.md)), which the Bot Durable Object reaches over the `COMPUTER_HOST` service binding; the app Worker keeps `SPRITES_TOKEN` only as the answer to "has this deployment a Computer at all".
+To attach the built-in Fly Sprites Computer provider Package, provide a Sprites token. The provider sits behind the provider-neutral Computer interface used by generic tools and memory. It provisions **one persistent Sprite per User**, shared by every Bot that User owns: each Bot receives its own directories and an on-demand Chromium/noVNC desktop slot, and every Bot on the Computer shares the one browser profile at `/home/box/chrome-profile`, so logins are a User-level asset. There is no separate User storage Sprite. `FROCKBOT_SPRITE_NAME` optionally selects the base name the User's Sprite name is derived from for standalone development; the hosted backend supplies durable User identity. `FROCKBOT_COMPUTER_PROVIDER` selects an installed provider and currently defaults to `fly-sprite`. In the hosted deployment the Sprites SDK and `SPRITES_TOKEN` live in `apps/computer-host`, which the Bot Durable Object reaches over the `COMPUTER_HOST` service binding; the app Worker keeps `SPRITES_TOKEN` only as the answer to "has this deployment a Computer at all".
 
 ```bash
 SPRITES_TOKEN="..." \
   FROCKBOT_SPRITE_NAME="frockbot-barebones" \
-  bun run dev:cloudflare:electron
+  bun run dev
 ```
 
-The hosted shell does expose Computer viewer and human-takeover controls: `plugin-computer`'s Computer card renders a live noVNC viewer, **Take control** and **Release control**, and a full-window overlay, and the same card is a section of the per-Bot info pane. The backend's token-routed noVNC gateway serves each Bot desktop through the User Sprite's public HTTPS URL, and its Bot-scoped takeover lease blocks new process and browser actions while leaving durable Package file operations available. Shells start in `/workspaces/<bot-key>` with `HOME=/home/box`. Canonical Memory Markdown does **not** live on the Computer: the Memory Package is its single writer and writes object storage directly, and the Computer sees Memory roots read-only ([ADR 0013](docs/adr/0013-bidirectional-memory-sync.md)), so a Turn can read and write Memory with the Computer hibernated. See [`docs/research/fly-sprites-computer.md`](docs/research/fly-sprites-computer.md) for provider constraints and primary sources.
-
-Electron's installer script is explicitly allowed through the root `trustedDependencies` setting. If Electron was installed before that setting existed, rebuild its binary once:
-
-```bash
-node apps/desktop/node_modules/electron/install.js
-```
+The hosted shell does expose Computer viewer and human-takeover controls: `computer/`'s Computer card renders a live noVNC viewer, **Take control** and **Release control**, and a full-window overlay, and the same card is a section of the per-Bot info pane. The backend's token-routed noVNC gateway serves each Bot desktop through the User Sprite's public HTTPS URL, and its Bot-scoped takeover lease blocks new process and browser actions while leaving durable Package file operations available. Shells start in `/workspaces/<bot-key>` with `HOME=/home/box`. Canonical Memory Markdown does **not** live on the Computer: the Memory Package is its single writer and writes object storage directly, and the Computer sees Memory roots read-only, so a Turn can read and write Memory with the Computer hibernated.
 
 ## Checks
 
@@ -69,7 +61,6 @@ bun run lint:ui-styles
 bun run typecheck
 bun test
 bun run build
-bun run proof:cordis
 ```
 
 GitHub Actions runs these checks on pushes to `main` and on pull requests. Dependabot checks Bun/npm dependencies and GitHub Actions weekly.
@@ -86,12 +77,11 @@ TYPECHECK_CONCURRENCY=8 bun run typecheck # 0 means unbounded
 ```
 
 Every package checks with TypeScript 7. Most declare `typescript` at `^7.0.2`
-directly. The rest — the Vue packages, `packages/applet-sdk` and the workspace
+directly. The rest — the Vue packages, `applets/sdk` and the workspace
 root — depend on a tool that embeds the TypeScript compiler API, which
 TypeScript 7's package does not ship, so they alias `typescript` to the
 `typescript-native-bridge` build that keeps the TS 6 JavaScript API while
-checking on tsgo 7.0.2. No TypeScript 5 is left in the repo. See
-[ADR 0029](docs/adr/0029-typescript-7-where-the-toolchain-allows-it.md).
+checking on tsgo 7.0.2. No TypeScript 5 is left in the repo.
 
 ### Editor setup
 
@@ -118,7 +108,7 @@ Five layers, each answering a different question. The first four run in CI; the 
 | **e2e**         | `bun run --filter @frockbot/cloudflare test:e2e`         | `e2e/**/*.e2e.ts` — real Chromium against `wrangler dev`; the only layer in which the shipped Vue client runs.                 |
 | **live**        | `bun run --filter @frockbot/computer-host test:live`     | The production container image against a real disposable Fly Sprite. Needs Docker and `SPRITES_TOKEN`; deleted in `finally`.   |
 
-The suffixes matter: root `bun test` matches `*.test.ts` and `*.spec.ts` and neither `*.workerd.ts`, `*.integration.ts`, nor `*.e2e.ts`, so the pre-commit hook never starts a runtime project. A commit that touches only documentation — anything under `docs/` or a Markdown file at the repository root — runs Prettier and nothing else, locally and in CI: `scripts/docs-only.sh` is the one definition both the hook and CI's `Classify changes` job use, so such a pull request needs only the `Check documentation` job before it merges. There is no live Sprite probe inside the workerd project any more — the old `fly-compatibility.workerd.ts` live path went away with the Sprites SDK when it moved to the Computer host (ADR 0004). `apps/computer-host/live-test.ts` is the only thing in the repository that touches a real Sprite. `apps/cloudflare/test/README.md` documents each runtime project in full.
+The suffixes matter: root `bun test` matches `*.test.ts` and `*.spec.ts` and neither `*.workerd.ts`, `*.integration.ts`, nor `*.e2e.ts`, so the pre-commit hook never starts a runtime project. A commit that touches only documentation — anything under `docs/` or a Markdown file at the repository root — runs Prettier and nothing else, locally and in CI: `scripts/docs-only.sh` is the one definition both the hook and CI's `Classify changes` job use, so such a pull request needs only the `Check documentation` job before it merges. There is no live Sprite probe inside the workerd project any more — the old `fly-compatibility.workerd.ts` live path went away with the Sprites SDK when it moved to the Computer host. `apps/computer-host/live-test.ts` is the only thing in the repository that touches a real Sprite. `apps/cloudflare/test/README.md` documents each runtime project in full.
 
 ## Releases
 
@@ -157,7 +147,7 @@ It touches only the packages npm is missing, which is usually one or two, and as
 The exception is a run that published a placeholder and then failed before trusting it. That leaves a package npm has and the workflow still cannot publish, which the default pass now skips. Name it to bootstrap it anyway — the failure says so when it happens:
 
 ```
-bun run bootstrap:npm-trust @frockbot/plugin-applets
+bun run bootstrap:npm-trust @frockbot/applet-sdk
 ```
 
 `scripts/bootstrap-npm-trust.sh` wraps `scripts/bootstrap-npm-trust.ts` with the two things that are easy to get wrong by hand. It provisions npm 11.15.0 or later into `node_modules/.cache` when the installed npm is older, because that is the version `npm trust` requires — the workflow itself needs only 11.5.1 and checks that before publishing. And it signs in, then leaves the terminal to npm for every call that changes the registry.
@@ -170,9 +160,9 @@ A failure in the publish step reporting a 404 from the token exchange means the 
 
 Staging follows the branch as production follows the tag. Every push to `main` that passes `validate` and the browser end-to-end job runs `ci.yml`'s `deploy-staging`, which deploys `apps/cloudflare` to `https://staging-bot.frockbot.com` through the GitHub `staging` environment. It is the same Worker code production runs, in Wrangler's `staging` environment, with none of production's data.
 
-Staging isolates everything that holds state or identity — its own D1 database `frockbot-auth-staging`, its own R2 buckets, its own Vectorize index, its own secrets, and its own Durable Object namespaces, which come free because a namespace belongs to the Worker that declares it. It shares the two stateless service Workers, `frockbot-cloudflare-bundler` and `frockbot-computer-host`: the bundler has no bindings at all and the Computer host owns only the Sprites credential, so staging exercises the same host production does instead of paying for a second container deployment. The consequence is production's ordering constraint — a change to either Worker's contract ships with a tag, so staging sees it only once that tag lands.
+Staging isolates everything that holds state or identity — its own D1 database `frockbot-auth-staging`, its own R2 buckets, its own Vectorize index, its own secrets, and its own Durable Object namespaces, which come free because a namespace belongs to the Worker that declares it. It shares the stateless `frockbot-computer-host` Worker, which owns only the Sprites credential, so staging exercises the same host production does instead of paying for a second container deployment. The consequence is production's ordering constraint — a change to the host's contract ships with a tag, so staging sees it only once that tag lands.
 
-Unlike production, the staging deploy provisions its own resources. Each step is create-if-absent, so the first deploy creates the D1 database, the three R2 buckets, and the Vectorize index, and every later deploy finds them and moves on. The D1 identifier is resolved at deploy time and written into the staging `database_id`, so no variable records it.
+Unlike production, the staging deploy provisions its own resources. Each step is create-if-absent, so the first deploy creates the D1 database, the two R2 buckets, and the Vectorize index, and every later deploy finds them and moves on. The D1 identifier is resolved at deploy time and written into the staging `database_id`, so no variable records it.
 
 **Staging admits exactly one identity.** Signups default to closed and nothing in the deploy opens them, so the only way in is the admin allowlist: `FROCKBOT_ADMIN_EMAILS` is a **required** staging secret, and the deploy fails without it rather than publishing a deployment nobody can sign in to. Anyone else who completes Google sign-in is refused at the gateway — the signup gate turns on whether a User has been provisioned, not on whether Better Auth has a row — so no Durable Object is ever created for them.
 
@@ -199,21 +189,21 @@ Register `https://staging-bot.frockbot.com/api/auth/callback/google` as an autho
 
 ## Production deployment
 
-After a version tag's packages are published, `release.yml` deploys four Cloudflare Workers through the GitHub `production` environment. Merging to `main` deploys nothing — a tag is the only thing that reaches production, so code can be integrated freely and released deliberately:
+After a version tag's packages are published, `release.yml` deploys four Cloudflare Workers — marketing, the Applet build service, the Computer host and the app — through the GitHub `production` environment. Merging to `main` deploys nothing — a tag is the only thing that reaches production, so code can be integrated freely and released deliberately:
 
 - `apps/marketing` serves the public marketing site at `https://frockbot.com` and redirects `www.frockbot.com` to the apex domain;
-- `apps/cloudflare-bundler` is the binding-less Package bundler the app reaches through its `PACKAGE_BUNDLER` service binding; it deploys before the app because that binding must resolve;
-- `apps/computer-host` is the shared Computer host of [ADR 0004](docs/adr/0004-host-fly-computer-in-cloudflare-containers.md): an internal Worker with no public route, a bounded pool of Cloudflare Containers, and the only place `SPRITES_TOKEN` is used. It deploys before the app for the same reason the bundler does, and because a stale host would be serving a current app;
+- `apps/applet-build` is the Applet build service: an internal Worker with no public route and a Cloudflare Container that type-checks, lints, bundles and boots an Applet's source. It deploys before the app because that binding must resolve. Dark for now — nothing calls it;
+- `apps/computer-host` is the shared Computer host: an internal Worker with no public route, a bounded pool of Cloudflare Containers, and the only place `SPRITES_TOKEN` is used. It deploys before the app because that binding must resolve, and because a stale host would be serving a current app;
 - `apps/cloudflare` serves the authenticated application and API at `https://bot.frockbot.com`.
 
-The Computer host runs Containers, which require the **Workers Paid plan**; its deploy step builds and pushes the container image, so the runner needs Docker (`ubuntu-latest` has it).
+The Computer host and the Applet build service both run Containers, which require the **Workers Paid plan**; each deploy step builds and pushes its container image, so the runner needs Docker (`ubuntu-latest` has it).
 
-The app deployment applies remote D1 migrations, uploads the immutable application artifact to R2 under its SHA-256 digest, sets `DEFAULT_APPLICATION_HASH` to that digest, publishes one Package Catalog generation, and then deploys the Worker, so each build is content-addressed and never overwrites a previously deployed artifact. The Catalog step runs `scripts/publish-catalog.ts` and writes into the `frockbot-package-catalog` bucket: the generation's entry documents and index are written first and are immutable, and the mutable pointer `catalog/current` is written last, so a reader either sees the previous generation whole or the new one whole ([ADR 0014](docs/adr/0014-catalog-package-provenance.md)). Both Wrangler configurations declare their custom domains, so Cloudflare creates and maintains the required proxied DNS records when the Workers are first deployed.
+The app deployment applies remote D1 migrations, uploads the immutable application artifact to R2 under its SHA-256 digest, sets `DEFAULT_APPLICATION_HASH` to that digest, and then deploys the Worker, so each build is content-addressed and never overwrites a previously deployed artifact. Both Wrangler configurations declare their custom domains, so Cloudflare creates and maintains the required proxied DNS records when the Workers are first deployed.
 
 Create the resources named in `apps/cloudflare/wrangler.jsonc` before the first app deployment:
 
 - D1 database `frockbot-auth`;
-- R2 buckets `frockbot-application-artifacts`, `frockbot-memory-files`, and `frockbot-package-catalog`;
+- R2 buckets `frockbot-application-artifacts` and `frockbot-memory-files`;
 - Vectorize index `frockbot-memory` with 768 cosine dimensions (`bunx wrangler vectorize create frockbot-memory --preset @cf/baai/bge-base-en-v1.5`).
 
 The same Wrangler file declares Cloudflare's `AI` binding for production and development. `generate_image` uses its native image inference, and the Cloudflare account must have billing for the configured Gateway routes and native models. Frock AI reaches the Gateway over HTTP rather than through the binding: the binding's `gateway(...).run()` targets the _universal_ endpoint, whose request-shape translation rejects a `dynamic/<route>` model before inference runs ([cloudflare/ai#617](https://github.com/cloudflare/ai/issues/617)), so Auto is only accepted on the Gateway's `compat/chat/completions` endpoint. Reaching it needs the `FROCK_AI_ACCOUNT_ID` var and the `FROCK_AI_GATEWAY_TOKEN` secret, which is the `cf-aig-authorization` bearer for an authenticated Gateway. Both absent, Frock AI falls back to the binding, which still serves manual `@frock/...` ids but fails Auto. The browser e2e environment binds `AI` to a local RPC fake and sets no token, so CI takes that fallback, neither authenticating to Cloudflare nor incurring model usage.
@@ -236,8 +226,6 @@ Configure these GitHub `production` environment values:
 | Secret   | `ROUTINE_HOOK_SECRET`       | HMAC secret every Routine webhook key is signed with; generate it                       |
 | Secret   | `MACHINE_TOKEN_SECRET`      | HMAC secret every registered-machine token and pairing code is signed with; generate it |
 
-Composio is temporarily excluded from the foundation application and production setup while its integration is redesigned around Composio Connect MCP. No Composio credential is required or forwarded by the current deployment.
-
 New signups are closed by default. Set `FROCKBOT_ADMIN_EMAILS` to one or more comma-separated email addresses in the GitHub `production` environment; those identities can open **Admin** from the profile menu and change the durable signup policy. The allowlist stays in the gateway and only an `isAdmin` boolean reaches the client. Existing Users continue to sign in while signups are closed.
 
 `ROUTINE_HOOK_SECRET` is generated too, once, with `openssl rand -hex 32` — `./scripts/setup-production.sh` does it if the secret is absent and preserves it if it is not. Every Routine webhook key is `HMAC-SHA256` over its own claims under this secret, and the gateway verifies that signature before any Durable Object is addressed. Rotating it invalidates every webhook key already handed out, which each Routine's owner then has to re-mint; without it set, the delivery route answers `503` and a webhook Routine is recorded without a key rather than given one nothing could verify.
@@ -250,89 +238,84 @@ Run `./scripts/setup-production.sh` to create the scoped Cloudflare token, confi
 
 Register `https://bot.frockbot.com/api/auth/callback/google` as an authorized Google redirect URI. The deploy token must include Workers Scripts and Workers Routes edit access, and the `frockbot.com` zone must be active in the same Cloudflare account. Production deployment intentionally does not create or delete D1, R2, or Vectorize resources.
 
-The desktop smoke path can capture the connected UI without a model call:
-
-```bash
-FROCKBOT_SMOKE_SCREENSHOT="$PWD/artifacts/frockbot.png" \
-  FROCKBOT_APPLICATION_URL="https://bot.frockbot.com" \
-  FROCKBOT_AUTH_BASE_URL="https://bot.frockbot.com" \
-  bun run --filter @frockbot/desktop start
-```
-
-To exercise one streamed custom-loop turn and its WebUI projection:
-
-```bash
-FROCKBOT_SMOKE_SCREENSHOT="$PWD/artifacts/frockbot-chat.png" \
-  FROCKBOT_SMOKE_PROMPT='/echo FrockBot is ready.' \
-  FROCKBOT_APPLICATION_URL="https://bot.frockbot.com" \
-  FROCKBOT_AUTH_BASE_URL="https://bot.frockbot.com" \
-  bun run --filter @frockbot/desktop start
-```
-
-`bun run --filter @frockbot/desktop package` builds unsigned installers (DMG, NSIS, AppImage) into `apps/desktop/release/`. `bun run icons:generate` regenerates the desktop, Android, and iOS app icons from the canonical `assets/marketing/app-icon/frockbot-icon-1024.png`; it requires ImageMagick 7 and macOS `iconutil`. Packaged builds take their icon from those generated resources; on macOS an unpackaged local run also sets the Dock icon to `apps/desktop/resources/icons/512x512.png` so development windows show the FrockBot sheep rather than Electron's default.
-
 ## Structure
 
 ```text
+app/              The product: `runtime.ts`, the Contribution tables, and one directory per feature
+  admin/          Deployment policy administration surface
+  applets-host/   The app's side of Applets: the capability host, records, and the Bot's focus
+  approvals/      Recording one approval decision inside the Bot Durable Object
+  audit/          Audited-effect projection and the User's rebuildable audit table
+  auth/           Authenticated identity contributions for the hosted gateway
+  bot-template/   Bot template export, share records, and guarded import
+  clock/          Reference feature with agent, host, and WebUI contributions
+  credentials/    Per-User Connection credential encryption and leases
+  custom-models/  Opt-in account and Bot model selection surfaces
+  echo/           Minimal reference feature used by tests and examples
+  flock/          Durable Bot directory and composable sheep identity
+  identity/       Sheep identity composition and rendering
+  image/          generate_image through Cloudflare's AI binding, fenced by the Workspace
+  isolates/       The authority a Bot isolate member is mounted with, and its grants
+  machine/        Registered-machine enrollment and pairing
+  machine-messages/ Message delivery to and from a User's registered machines
+  memory/         Bot, User and Project Markdown memory over the Workspace store
+  notifications/  What a settled Turn tells the person who was not watching it
+  routines/       Durable Routines, the alarm scheduler, and the webhook door
+  search/         Per-User transcript index, search route, and overlay
+  settings/       Bot, Package, and User settings surfaces
+  shell/          The Bot Durable Object's state, its Turn, the Composition mount, and the hosted geometry
+  skills/         Skill catalog, disclosure on demand, managed Skills, and the Bot's Workspace seam
+  subagents/      Subagent Tasks: the parent Bot's task authority, the Durable Object binding, and their records
+  testkit/        Shared test doubles and harnesses
+  ui-theme/       Global semantic tokens for hosted client Contributions
+  web/            web_search and a bounded, SSRF-classified web_fetch
+applets/          Applets: the seven applet_* tools, the source root, and the shell's pages
+  sdk/            Applet authoring SDK, component kit, linter, and `applet` CLI; published to npm
 apps/
-  desktop/          Electron hosted-window shell and optional platform adapters
-  mobile/           Direct-hosted Capacitor shell and optional native capabilities
-  agent-runtime/    Transport-neutral backend Agent composition
+  applet-build/     Applet build service Worker and its Node container
   cloudflare/       User application loader, Dynamic Worker artifact, and bot state
-  cloudflare-bundler/ Binding-less Package bundler behind the PACKAGE_BUNDLER binding
-  computer-host/    Shared Computer host Worker and its Node container (ADR 0004)
+  computer-host/    Shared Computer host Worker and its Node container
   marketing/        Public frockbot.com site and static-assets Worker
-  cordis-poc/       Executable pinned Cordis/Electron/WebUI foundation proof
-packages/
-  kernel-contracts/ Session, LLM, prompt, and tool execution contracts
-  kernel-agent-loop/ Concrete event-sourced durable agent loop and Agent registry
-  kernel-composition/ Package manifest, activation, isolate host, and compiler
-  kernel-do/        Bot Durable Object admission, log, cursor, and scheduling
-  client-core/      Shared client runtime helpers and brand typography stylesheet
-  client-ui/        Cordis-free reusable Vue primitives and surface registry
-  computer-core/    Provider registry and capability interfaces for Computers
-  computer-host-protocol/  Versioned v1 DTOs and decoders for the Computer host seam
-  computer-host-runtime/   The Computer's on-Sprite layout, scripts, and Sprite naming
-  configuration-core/ Versioned durable User/Bot settings contracts
-  connection-core/  Provider-neutral Connection transport result contracts
-  catalog-core/     Remote Package Catalog generations, index, and entry decoding
+  native/           Flutter client for the hosted application
+computer/          The Computer: tools, prompt, state, viewer UI, host seam, and the Fly provider
+  core/            Provider registry and capability interfaces for Computers
+  host-protocol/   Versioned v1 DTOs and decoders for the Computer host seam
+  host-runtime/    The Computer's on-Sprite layout, scripts, and Sprite naming
+  fly/             Fly Sprites Computer provider and takeover adapter
+core/
+  contracts/        Session, LLM, prompt, and tool execution contracts
+  durable/          Bot Durable Object admission, log, cursor, scheduling, and Composition generations
+  agent-loop/       Concrete event-sourced durable agent loop and Agent registry
+  configuration/    Versioned durable User/Bot settings contracts
+  connection/       Provider-neutral Connection transport result contracts
   workspace-store/  Object-storage durable-root store and its generation ledger
-  template-core/    Bot template recipe document and its decoder (ADR 0015)
-  architecture-checks/ Automated checks for the constitutional rules
-  plugin-clock/     Reference package with agent, host, and WebUI contributions
-  plugin-composio/  Dormant Composio source pending Connect MCP redesign
-  plugin-audit/     Audited-effect projection and the User's rebuildable audit table
-  plugin-bot-template/ Bot template export, share records, and guarded import
-  plugin-computer/  Generic Computer tools, prompt, state, and viewer UI
-  plugin-custom-models/  Opt-in account and Bot model selection surfaces
-  plugin-flock/     Durable Bot directory and composable sheep identity Package
-  plugin-fly-sprite/ Fly Sprites Computer provider and takeover adapter
-  plugin-image/     generate_image through Cloudflare's AI binding, fenced by the Workspace
-  plugin-mcp/       Remote MCP servers as Connections, and their lifecycle
-  plugin-memory/    Bot, User and Project Markdown memory over the Workspace store
-  plugin-package-publisher/ Durable User application publication and rollback
-  plugin-provider-frock-ai/  Built-in credential-free Frock AI model provider
-  plugin-provider-ollama-cloud/  Optional Ollama Cloud model provider
-  plugin-routines/  Durable Routines, the alarm scheduler, and the webhook door
-  plugin-search/    Per-User transcript index, search route, and overlay
-  plugin-settings/  Plugin-owned Bot, Package, and User settings surfaces
-  plugin-shell/     Hosted application geometry and surface presenter
-  plugin-skills/    Skill catalog, disclosure on demand, and managed Skills
-  plugin-ui-theme/  Global semantic tokens for hosted client Contributions
-  plugin-web/       web_search and a bounded, SSRF-classified web_fetch
+  secret-shapes/    Declared shapes of the deployment's secrets
+  template/         Bot template recipe document and its decoder
   protocol/         Commands and events shared across process seams
-  provider-openai-compatible/  Streaming production model adapter
+  protocol-schemas/ Generated protocol schemas shared by clients
+  machine-protocol/ Contracts for registered User machines and their tokens
+  models/           Model role bindings and the provider-neutral model registry
+  prompt/           System prompt assembly from Package contributions
+  tools/            The trusted tool registry and its guards
+frock-compose/     Frock Compose: the Bot isolate host that loads an untrusted member's artifact
+packages/
+  client-core/      Shared client runtime helpers and brand typography stylesheet
+  client-ui/        Reusable Vue primitives and surface registry
+providers/
+  openai-compatible/ Shared model transport: request mapping, deadlines, AI SDK decoding
+  frock-ai/         Built-in credential-free Frock AI model provider
+  ollama-cloud/     Optional Ollama Cloud model provider
+  anthropic/        Optional Anthropic (Claude) model provider
+  foundation/       Deterministic credential-free development provider
 docs/
   architecture.md   Current system shape
-  adr/              Architectural decisions
-  research/         Primary-source compatibility research
+  grokbot-parity.md The GrokBot capabilities FrockBot must match
+  plan.md           The current plan
 ```
 
 ## Cloudflare vertical slice
 
-The Cloudflare application builds an immutable Dynamic Worker artifact containing the user-facing UI and gateway routes. The gateway loads the User's active `userId:applicationHash`; the Dynamic Worker forwards authoritative Bot execution through a user-scoped capability backed by one Durable Object per Bot. Bots can publish content-hashed application artifacts through the Package Publisher Contribution, and the User Durable Object retains durable revision and rollback state.
-
-Every Bot has `list_setup_revisions`, `publish_setup`, and `rollback_setup` tools. The editable setup is the Git repository at `/home/box/setup` in its Sprite. After the Bot commits and tests a change, `publish_setup` archives Git `HEAD`, reads `dist/application.mjs`, and submits the check results; failed checks block publication, and the backend independently loads and health-checks the exact module before activation. File editing and choice of Sprite editor remain outside this Contribution. The hosted **Revisions** surface lists history and can roll every Bot back to an earlier shared application revision.
+The Cloudflare application builds an immutable Dynamic Worker artifact containing the user-facing UI and gateway routes. The gateway loads the User's active `userId:applicationHash`; the Dynamic Worker forwards authoritative Bot execution through a user-scoped capability backed by one Durable Object per Bot.
 
 ```bash
 bun run --filter @frockbot/cloudflare test
@@ -340,15 +323,13 @@ bun run --filter @frockbot/cloudflare typecheck
 bun run --filter @frockbot/cloudflare build
 ```
 
-Run the real Electron renderer against the local Worker backend with Wrangler, Vite renderer HMR, and Electron main-process HMR:
+Run the hosted WebUI against the local Worker backend:
 
 ```bash
-bun run dev:cloudflare:electron
+bun run dev
 ```
 
-The command builds and seeds the Dynamic Worker artifact, then starts Wrangler on port 8787, the renderer development server on port 5173, and Electron pointed at that renderer. On `localhost`, `127.0.0.1`, or `::1`, the sign-in screen includes **Continue as local developer**; it uses the fixed `development` identity and does not require Google credentials. The identity is accepted by the backend only when local development authentication is enabled.
-
-When one authorized Android device is visible to `adb` and Tailscale has an IPv4 address, the same command also starts the mobile Vite server on port 5174, binds Wrangler to the Mac's Tailscale address, builds and syncs the Capacitor Android project, installs the debug APK with `adb install -r`, and launches it. The phone loads both live-reload UI and gateway traffic over Tailscale; no LAN-wide bind or production deployment is used. Keep Tailscale connected on the Mac and phone. When the same phone appears through both USB and wireless ADB, the wireless endpoint is preferred. If multiple authorized devices are connected, set `ANDROID_SERIAL` to the intended serial. With no eligible device or no Tailscale address, desktop development continues and phone installation is skipped.
+The command builds and seeds the Dynamic Worker artifact, then starts Wrangler on port 8787. On `localhost`, `127.0.0.1`, or `::1`, the sign-in screen includes **Continue as local developer**; it uses the fixed `development` identity and does not require Google credentials. The identity is accepted by the backend only when local development authentication is enabled.
 
 For Worker-only development, place the artifact in local R2 before starting Wrangler:
 
@@ -365,9 +346,9 @@ Then open `http://localhost:8787/?as_user=alice`. CLI requests may instead send 
 
 ### Google authentication
 
-The hosted gateway uses Better Auth with D1 and Google social login. Electron uses Better Auth's official desktop integration: sign-in opens in the system browser, returns over the `com.frockbot.desktop` protocol, and stores encrypted session material in the main process rather than the renderer.
+The hosted gateway uses Better Auth with D1 and Google social login.
 
-For local Google sign-in in either the browser or desktop shell:
+For local Google sign-in in the browser:
 
 ```bash
 cp apps/cloudflare/.dev.vars.example apps/cloudflare/.dev.vars
@@ -375,7 +356,7 @@ cp apps/cloudflare/.dev.vars.example apps/cloudflare/.dev.vars
 # then initialize D1.
 cd apps/cloudflare
 bunx wrangler d1 migrations apply AUTH_DB --env development --local
-bun run dev:electron
+bun run dev
 ```
 
 Create a Google **Web application** OAuth client and register this local redirect URI:
@@ -386,24 +367,20 @@ http://127.0.0.1:8787/api/auth/callback/google
 
 For production, keep `ALLOW_DEVELOPMENT_AUTH` unset and configure the GitHub `production` environment described above. `BETTER_AUTH_URL` is `https://bot.frockbot.com`; register `https://bot.frockbot.com/api/auth/callback/google` with Google. Never commit `BETTER_AUTH_SECRET`, provider credentials, or OAuth client secrets.
 
-The desktop host requires both `FROCKBOT_APPLICATION_URL` (the public application URL loaded by its sandboxed window) and `FROCKBOT_AUTH_BASE_URL` (the Better Auth Worker origin). They may be the same hosted origin. A desktop deployment with either origin missing is invalid and must fail before exposing chat; there is no local Agent or WebUI product fallback.
-
-The memory Package has a provider-neutral document-store seam. Memory has one store on every platform: the Memory Package writes canonical Markdown to object storage through `WorkspaceFilesV1` and is its only writer ([ADR 0013](docs/adr/0013-bidirectional-memory-sync.md)); the Computer mirrors Memory roots read-only and never writes one. Cloudflare runtimes use R2 for canonical documents and Vectorize with 768-dimensional embeddings from `@cf/baai/bge-base-en-v1.5`. Local Cloudflare development selects Wrangler's `development` environment and uses the remote-only development resources `frockbot-memory-files-development` and `frockbot-memory-development`; local application artifacts, D1, and Durable Objects remain isolated in `.wrangler/state`. The development memory resources are separate from the production names listed in [Production deployment](#production-deployment).
+The memory Package has a provider-neutral document-store seam. Memory has one store on every platform: the Memory Package writes canonical Markdown to object storage through `WorkspaceFilesV1` and is its only writer; the Computer mirrors Memory roots read-only and never writes one. Cloudflare runtimes use R2 for canonical documents and Vectorize with 768-dimensional embeddings from `@cf/baai/bge-base-en-v1.5`. Local Cloudflare development selects Wrangler's `development` environment and uses the remote-only development resources `frockbot-memory-files-development` and `frockbot-memory-development`; local application artifacts, D1, and Durable Objects remain isolated in `.wrangler/state`. The development memory resources are separate from the production names listed in [Production deployment](#production-deployment).
 
 Memory has two user-private tiers: **agent** memory belongs to one bot, while **global** memory is shared by all of that user's bots. Reads and recall check both by default; when the same path exists in both tiers, the agent copy wins. Writes default to the safer agent tier.
 
 ## Security model
 
-The Electron renderer uses `nodeIntegration: false`, context isolation, Chromium sandboxing, hosted-origin navigation checks, and a narrow decoded preload bridge. Authentication handoff, external authorization, notifications, clipboard, and file selection are optional shell capabilities; core chat and Agent execution remain hosted and continue without a native process.
-
-Cordis contexts provide composition and lifecycle ownership, not security isolation. Generated or unreviewed executable plugins must run inside a restricted process, container, or micro-VM rather than Electron main; untrusted rich UI must run in a sandboxed frame rather than the trusted WebUI context.
+The runtime's features and registries provide composition and lifecycle ownership, not security isolation. Generated or unreviewed executable plugins must run inside a restricted process, container, or micro-VM; untrusted rich UI must run in a sandboxed frame rather than the trusted WebUI context.
 
 ## Current limitations
 
 - Ollama Cloud model onboarding uses hosted account Connections and explicit per-Bot model bindings; standalone Foundation provider defaults still use environment configuration;
 - Fly Sprite live provisioning requires a valid Sprites token and is not exercised by repository CI; `bun run --filter @frockbot/computer-host test:live` is the only check that drives a real Sprite, and it needs Docker and `SPRITES_TOKEN`;
-- Fly uses one Sprite per User (ADR 0012) and separation between that User's Bots is organizational; the User's Computer is the trust boundary, and live isolation depends on Fly's VM and network enforcement rather than on directory naming;
+- Fly uses one Sprite per User and separation between that User's Bots is organizational; the User's Computer is the trust boundary, and live isolation depends on Fly's VM and network enforcement rather than on directory naming;
 - the local derived memory vector index is process-local and rebuilt through canonical-file fallback; cloud Vectorize remains durable;
-- the Computer interface has exactly one runtime behind it — Fly Sprites, driven from the Cloudflare Container host of ADR 0004. A Kubernetes or Container-native Computer can be added as a provider Package, but no second adapter is implemented;
-- the remote Package Catalog serves pinned, content-addressed generations, but its entries are the first-party Packages compiled into the application; no third-party or Bot-published entry is indexed, and a Bot has no tool over the Catalog;
+- the Computer interface has exactly one runtime behind it — Fly Sprites, driven from the Cloudflare Container host. A Kubernetes or Container-native Computer can be added as a provider Package, but no second adapter is implemented;
+- there is no Package catalog: the Packages a User can install are the ones compiled into the deployment, and nothing installs a third-party or Bot-published Package;
 - packaged applications are not code signed.

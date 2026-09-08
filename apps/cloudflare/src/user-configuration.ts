@@ -1,5 +1,4 @@
-import { decodeProtocol } from "@frockbot/protocol-schemas";
-import { saveNativeQualificationForm } from "./native-form.js";
+import { decodeProtocol } from "@frockbot/core/protocol-schemas";
 import { DurableObject } from "cloudflare:workers";
 import {
   decodeNativeSessionOperation,
@@ -9,36 +8,34 @@ import {
   createFoundationUserBackendContributions,
   type FoundationConnectionUserBackendContribution,
   type MountedFoundationUserBackend,
-} from "@frockbot/application-foundation/user";
-import { compileFoundationApplication } from "@frockbot/application-foundation/runtime";
+} from "@frockbot/app/user";
 import {
   decodeConnectionCommandIdV1,
   decodeConnectionCommandV1,
-} from "@frockbot/connection-core";
+} from "@frockbot/core/connection";
 import {
   decodeBotSettingsViewV1,
   type UserSettingsViewV1,
   decodeUserConfigurationExecuteRpcV1,
   decodeUserConfigurationReadRpcV1,
-} from "@frockbot/configuration-core";
+} from "@frockbot/core/configuration";
 import {
   MAX_TEMPLATE_BYTES_V1,
   parseTemplateShareIdV1,
-} from "@frockbot/template-core";
-import { parseCatalogIndexDocumentV1 } from "@frockbot/catalog-core";
+} from "@frockbot/core/template";
 import {
   decodeRoutineCommandReceiptV1,
   decodeRoutineListViewV1,
-} from "@frockbot/plugin-routines/shared";
+} from "@frockbot/app/routines/shared";
 import {
   decodeTemplateCommandV1,
   type TemplateCommandV1,
-} from "@frockbot/plugin-bot-template/shared";
+} from "@frockbot/app/bot-template/shared";
 import type {
   TemplateBlobStoreV1,
   TemplateBotReaderV1,
   TemplateImportWriterV1,
-} from "@frockbot/plugin-bot-template/user";
+} from "@frockbot/app/bot-template/user";
 import {
   decodeBotLifecycleCommandV1,
   decodeBotLifecycleReceiptV1,
@@ -46,35 +43,27 @@ import {
   decodeCreateBotCommandV1,
   decodeSheepIdentityViewV1,
   BotNotFoundError,
-} from "@frockbot/plugin-flock/shared";
-import {
-  AUTHORING_QUOTA_CONFIG_KEY,
-  AUTHORING_QUOTA_DAY,
-  decodeAuthoringQuotaConfigV1,
-  reserveAuthoringQuotaV1,
-  type AuthoringQuotaConfigV1,
-  type AuthoringQuotaReceiptV1,
-} from "@frockbot/plugin-authoring/quota";
+} from "@frockbot/app/flock/shared";
 import {
   releaseSubagentSlotV1,
   reserveSubagentSlotV1,
   type SubagentSlotReceiptV1,
-} from "@frockbot/plugin-subagents/quota";
+} from "@frockbot/app/subagents/quota";
 import {
   releaseAgentTurnSlotV1,
   reserveAgentTurnSlotV1,
   type AgentTurnSlotReceiptV1,
-} from "@frockbot/plugin-flock/quota";
-import { machineTokenClaimsV1 } from "@frockbot/machine-protocol";
+} from "@frockbot/app/flock/quota";
+import { machineTokenClaimsV1 } from "@frockbot/core/machine-protocol";
 import {
   appletStateNameV1,
   DurableWorkspaceGenerations,
-} from "@frockbot/kernel-do";
+} from "@frockbot/core/durable";
 import {
   decodeAppletProvenanceV1,
   decodeAppletToolDeclarationV1,
   type AppletSummaryV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import {
   AppletDirectory,
   type AppletDirectoryViewV1,
@@ -87,14 +76,14 @@ import {
   normalizeWorkspaceRelativePathV1,
   type WorkspaceGenerationRecordV1,
   type WorkspaceRootV1,
-} from "@frockbot/kernel-contracts";
-import type { MemoryProjectV1 } from "@frockbot/plugin-memory/agent";
+} from "@frockbot/core/contracts";
+import type { MemoryProjectV1 } from "@frockbot/app/memory/agent";
 import {
   SEARCH_MAX_ROW_PAGE_V1,
   decodeSearchQueryV1,
   type ClientSearchRebuildReceiptV1,
   type SearchIndexResultsV1,
-} from "@frockbot/plugin-search";
+} from "@frockbot/app/search";
 import type { BotSearchRpc } from "./search.js";
 import {
   AUDIT_KINDS_V1,
@@ -102,50 +91,9 @@ import {
   AUDIT_MAX_RESULTS_V1,
   type AuditRebuildReceiptV1,
   type ClientAuditPageV1,
-} from "@frockbot/plugin-audit";
+} from "@frockbot/app/audit";
 import type { BotAuditRpc } from "./audit.js";
-import type {
-  VoiceBotActivityV1,
-  VoiceMemoryHitV1,
-} from "@frockbot/plugin-voice/tools";
-import {
-  decodeVoiceAnswerDeliveryV1,
-  VOICE_MAX_PENDING_ANSWERS_V1,
-  type VoiceAnswerDeliveryV1,
-} from "@frockbot/plugin-voice/shared";
-import type {
-  VoiceUserBackendContributionV1,
-  VoiceUserBackendHostV1,
-} from "@frockbot/plugin-voice/user";
-import { VOICE_GEMINI_MODEL_V1 } from "@frockbot/plugin-voice/prompt";
-import {
-  USAGE_ENTRY_PAGE_MAX_V1,
-  type UsageReportV1,
-} from "@frockbot/plugin-billing";
-import {
-  decodePublishPackageCommandV1,
-  decodeRollbackPackageCommandV1,
-} from "@frockbot/plugin-package-publisher/shared";
-import { decodeMcpMountOutcomeV1 } from "@frockbot/plugin-mcp/records";
-import type {
-  McpAuthorizationCompletionRequestV1,
-  McpAuthorizationStartRequestV1,
-} from "@frockbot/plugin-mcp/backend";
-import {
-  readVoiceAssistantQuotaV1,
-  recordVoiceAssistantUsageSyncV1,
-  reserveVoiceAssistantV1,
-  recordVoiceUsageSyncV1,
-  reserveVoiceCaptureV1,
-  VOICE_QUOTA_MONTH,
-  VOICE_QUOTA_DAY,
-  voiceQuotaMonthV1,
-  type VoiceQuotaReceiptV1,
-  type VoiceUsageReceiptV1,
-} from "./voice-quota.js";
 import type { WorkerLoader } from "./contracts.js";
-import { createPackagePublicationHost } from "./package-publication.js";
-import { R2PackageCatalog } from "./package-catalog.js";
 import {
   decodeRpcEnvelopeV1,
   rpcBotId,
@@ -158,7 +106,6 @@ import {
   rpcDecodedValue,
   rpcJsonRecord,
   rpcJsonSnapshotV1,
-  rpcObject,
 } from "./durable-rpc.js";
 import { loggedEntryV1 } from "./entry-boundary.js";
 
@@ -173,9 +120,6 @@ const MEMORY_PROJECT_ID = /^[a-z0-9][a-z0-9-]{0,127}$/;
 const USER_IDENTITY_KEY = "user:identity";
 
 interface UserConfigurationEnv {
-  COMPOSIO_API_KEY?: string;
-  COMPOSIO_WEBHOOK_SECRET?: string;
-  COMPOSIO_TEST_URL?: string;
   ALLOW_DEVELOPMENT_AUTH?: string;
   BETTER_AUTH_URL?: string;
   CREDENTIAL_KEYRING?: string;
@@ -193,22 +137,13 @@ interface UserConfigurationEnv {
    * that the `userId` an RPC carries is the one it *is*.
    */
   USER_CONFIGURATIONS: DurableObjectNamespace;
-  /** Socket-only live projection; all durable Voice state remains here. */
-  VOICE_SESSIONS: DurableObjectNamespace;
   /** Immutable published application source and artifact bytes. */
   APPLICATION_ARTIFACTS: R2Bucket;
   /** The loader that health-checks a candidate artifact before activation. */
   USER_APPLICATIONS: WorkerLoader;
   /**
-   * The remote Package Catalog, read-only. The User Durable Object pins one
-   * generation from it and validates every Catalog install against that pin.
-   * Optional: a deployment without a Catalog installs compiled-in Packages
-   * exactly as before.
-   */
-  PACKAGE_CATALOG?: R2Bucket;
-  /**
-   * One Applet Durable Object per Applet instance (ADR 0022). The User object
-   * owns the directory and calls `delete()` on the instance; it never reads an
+   * One Applet Durable Object per Applet instance. The User object owns the
+   * directory and calls `delete()` on the instance; it never reads an
    * Applet's contents. Optional so a deployment without the binding still
    * serves every other User RPC, and an Applet deletion refuses visibly.
    */
@@ -219,25 +154,6 @@ interface UserConfigurationEnv {
 const SEARCH_REBUILD_BOT_LIMIT = 200;
 
 export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
-  async saveNativeForm(input: unknown) {
-    try {
-      const rpc = decodeRpcEnvelopeV1(input, {
-        userId: rpcIdentifier,
-        command: rpcJsonRecord,
-      });
-      await this.assertUserIdentity(rpc.userId as string);
-      return this.ctx.storage.transactionSync(() =>
-        saveNativeQualificationForm(
-          this.ctx.storage.kv,
-          rpc.userId as string,
-          rpc.command,
-        ),
-      );
-    } catch {
-      return { schemaVersion: 1 as const, status: "refused" as const };
-    }
-  }
-
   async nativeSession(input: unknown) {
     try {
       const operation = decodeNativeSessionOperation(input);
@@ -257,179 +173,111 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
 
   private contributions(): Promise<MountedFoundationUserBackend> {
     if (!this.mounted) {
-      this.mounted = compileFoundationApplication().then((plan) =>
-        createFoundationUserBackendContributions(plan, {
-          storage: this.ctx.storage,
-          readSecret: (name) =>
-            name === "MACHINE_TOKEN_SECRET"
-              ? this.env.MACHINE_TOKEN_SECRET
-              : name === "COMPOSIO_TEST_URL"
-                ? this.env.ALLOW_DEVELOPMENT_AUTH === "true"
-                  ? this.env.COMPOSIO_TEST_URL
-                  : undefined
-                : name === "COMPOSIO_WEBHOOK_SECRET"
-                  ? this.env.COMPOSIO_WEBHOOK_SECRET
-                  : name === "COMPOSIO_API_KEY"
-                    ? this.env.COMPOSIO_API_KEY
-                    : name === "BETTER_AUTH_URL"
-                      ? this.env.BETTER_AUTH_URL
-                      : this.env.CREDENTIAL_KEYRING,
-          deliverConnectionEvent: async (userId, botId, delivery) => {
-            await this.assertUserIdentity(userId);
-            await (await this.contributions()).flock.registration(botId);
-            // SAFETY: this namespace is bound to BotState; the DTO is decoded at its RPC seam.
-            const rpc = this.env.BOT_STATES.getByName(
-              `${userId}:${botId}`,
-            ) as unknown as {
-              deliverConnectionEvent(input: unknown): Promise<unknown>;
-            };
-            return rpcJsonSnapshotV1(
-              await rpc.deliverConnectionEvent({
+      this.mounted = createFoundationUserBackendContributions({
+        storage: this.ctx.storage,
+        readSecret: (name) =>
+          name === "MACHINE_TOKEN_SECRET"
+            ? this.env.MACHINE_TOKEN_SECRET
+            : name === "BETTER_AUTH_URL"
+              ? this.env.BETTER_AUTH_URL
+              : this.env.CREDENTIAL_KEYRING,
+        // The Bot Template seams. The blob store is the artifact bucket,
+        // written through the same collision-checking rule immutable
+        // application artifacts already use; the Bot reader is three
+        // read-only RPCs to the Bot Durable Object that already owns that
+        // state.
+        botTemplate: {
+          bots: this.templateBotReader(),
+          blobs: this.templateBlobStore(),
+          importer: this.templateImportWriter(),
+          readPublishedShare: (shareId: string) =>
+            this.readPublishedShare(shareId),
+        },
+        // The transcript index (parity register row 52). It lives on this
+        // object's own SQL storage because "The User's Durable Object is the
+        // authority for everything User-scoped", and it is a *projection*:
+        // its rows are read back out of the Bots' own stored runs by
+        // `rebuildSearchIndex`, so it holds no authority of its own.
+        search: {
+          sql: this.ctx.storage.sql,
+          projectBotRows: (botId, cursor) => {
+            // Every caller of a rebuild has already passed
+            // `assertFlockIdentity`, so this object knows which User it is;
+            // a rebuild that reached here without one would address an
+            // arbitrary Bot object, so it refuses instead.
+            const userId = this.identity;
+            if (!userId) {
+              throw new Error(
+                "this User Durable Object has no proven identity to rebuild for",
+              );
+            }
+            const id = this.env.BOT_STATES.idFromName(`${userId}:${botId}`);
+            // SAFETY: BOT_STATES is bound to BotState; generated RPC methods are not represented by workers-types.
+            const rpc = this.env.BOT_STATES.get(id) as unknown as BotSearchRpc;
+            return rpc
+              .projectSearchRows({
                 schemaVersion: 1,
                 userId,
                 botId,
-                delivery,
-              }),
-            );
+                ...(cursor === undefined ? {} : { cursor }),
+              })
+              .then(rpcJsonSnapshotV1);
           },
-          packagePublisher: createPackagePublicationHost(
-            this.env,
-            this.ctx.storage,
-          ),
-          ...(this.env.PACKAGE_CATALOG
-            ? { catalog: new R2PackageCatalog(this.env.PACKAGE_CATALOG) }
-            : {}),
-          // The Bot Template seams. The blob store is the same bucket the
-          // Catalog's own immutable generations live in, written through the
-          // same collision-checking rule; the Bot reader is three read-only
-          // RPCs to the Bot Durable Object that already owns that state.
-          botTemplate: {
-            bots: this.templateBotReader(),
-            blobs: this.templateBlobStore(),
-            importer: this.templateImportWriter(),
-            readPublishedShare: (shareId: string) =>
-              this.readPublishedShare(shareId),
-            ...(this.env.PACKAGE_CATALOG
-              ? {
-                  readCatalogIds: async (generation: string) => {
-                    const found = await new R2PackageCatalog(
-                      this.env.PACKAGE_CATALOG!,
-                    ).readIndexDocument(generation);
-                    if (!found) return [];
-                    return parseCatalogIndexDocumentV1(
-                      found.document,
-                    ).entries.map((entry) => entry.catalogId);
-                  },
-                }
-              : {}),
-            ...(this.env.PACKAGE_CATALOG
-              ? {
-                  readCatalogDisplayName: async (
-                    generation: string,
-                    catalogId: string,
-                  ) =>
-                    (
-                      await new R2PackageCatalog(
-                        this.env.PACKAGE_CATALOG!,
-                      ).readEntry(generation, catalogId)
-                    )?.displayName,
-                }
-              : {}),
-          },
-          // The transcript index (parity register row 52). It lives on this
-          // object's own SQL storage because "The User's Durable Object is the
-          // authority for everything User-scoped", and it is a *projection*:
-          // its rows are read back out of the Bots' own stored runs by
-          // `rebuildSearchIndex`, so it holds no authority of its own.
-          search: {
-            sql: this.ctx.storage.sql,
-            projectBotRows: (botId, cursor) => {
-              // Every caller of a rebuild has already passed
-              // `assertFlockIdentity`, so this object knows which User it is;
-              // a rebuild that reached here without one would address an
-              // arbitrary Bot object, so it refuses instead.
-              const userId = this.identity;
-              if (!userId) {
-                throw new Error(
-                  "this User Durable Object has no proven identity to rebuild for",
-                );
-              }
-              const id = this.env.BOT_STATES.idFromName(`${userId}:${botId}`);
-              // SAFETY: BOT_STATES is bound to BotState; generated RPC methods are not represented by workers-types.
-              const rpc = this.env.BOT_STATES.get(
-                id,
-              ) as unknown as BotSearchRpc;
-              return rpc
-                .projectSearchRows({
-                  schemaVersion: 1,
-                  userId,
-                  botId,
-                  ...(cursor === undefined ? {} : { cursor }),
-                })
-                .then(rpcJsonSnapshotV1);
-            },
-          },
-          voice: this.voiceToolHost(),
-          // The audit table (parity register rows 30 and 30b). Same object,
-          // same SQL storage, same discipline as the transcript index: every
-          // row is a projection of the Bots' own durable session events, and
-          // `rebuildAuditIndex` reads them back from that authority.
-          audit: {
-            sql: this.ctx.storage.sql,
-            projectBotEntries: (botId, cursor) => {
-              const userId = this.identity;
-              if (!userId) {
-                throw new Error(
-                  "this User Durable Object has no proven identity to rebuild for",
-                );
-              }
-              const id = this.env.BOT_STATES.idFromName(`${userId}:${botId}`);
-              // SAFETY: BOT_STATES is bound to BotState; generated RPC methods are not represented by workers-types.
-              const rpc = this.env.BOT_STATES.get(id) as unknown as BotAuditRpc;
-              return rpc
-                .projectAuditEntries({
-                  schemaVersion: 1,
-                  userId,
-                  botId,
-                  ...(cursor === undefined ? {} : { cursor }),
-                })
-                .then(rpcJsonSnapshotV1);
-            },
-          },
-          billing: {
-            sql: this.ctx.storage.sql,
-            transactionSync: (closure) =>
-              this.ctx.storage.transactionSync(closure),
-          },
-          commandBotLifecycle: async (userId, command) => {
-            const id = this.env.BOT_STATES.idFromName(
-              `${userId}:${command.botId}`,
-            );
-            // SAFETY: BOT_STATES is bound to BotState; generated RPC methods are not represented by workers-types.
-            const rpc = this.env.BOT_STATES.get(id) as unknown as {
-              executeLifecycle(input: unknown): Promise<unknown>;
-            };
-            return decodeBotLifecycleReceiptV1(
-              await rpc.executeLifecycle({
-                schemaVersion: 1,
-                userId,
-                botId: command.botId,
-                command,
-              }),
-            );
-          },
-          readBotLifecycle: async (userId, botId) => {
+        },
+        // The audit table (parity register rows 30 and 30b). Same object,
+        // same SQL storage, same discipline as the transcript index: every
+        // row is a projection of the Bots' own durable session events, and
+        // `rebuildAuditIndex` reads them back from that authority.
+        audit: {
+          sql: this.ctx.storage.sql,
+          projectBotEntries: (botId, cursor) => {
+            const userId = this.identity;
+            if (!userId) {
+              throw new Error(
+                "this User Durable Object has no proven identity to rebuild for",
+              );
+            }
             const id = this.env.BOT_STATES.idFromName(`${userId}:${botId}`);
             // SAFETY: BOT_STATES is bound to BotState; generated RPC methods are not represented by workers-types.
-            const rpc = this.env.BOT_STATES.get(id) as unknown as {
-              readLifecycle(input: unknown): Promise<unknown>;
-            };
-            return decodeBotLifecycleViewV1(
-              await rpc.readLifecycle({ schemaVersion: 1, userId, botId }),
-            );
+            const rpc = this.env.BOT_STATES.get(id) as unknown as BotAuditRpc;
+            return rpc
+              .projectAuditEntries({
+                schemaVersion: 1,
+                userId,
+                botId,
+                ...(cursor === undefined ? {} : { cursor }),
+              })
+              .then(rpcJsonSnapshotV1);
           },
-        }),
-      );
+        },
+        commandBotLifecycle: async (userId, command) => {
+          const id = this.env.BOT_STATES.idFromName(
+            `${userId}:${command.botId}`,
+          );
+          // SAFETY: BOT_STATES is bound to BotState; generated RPC methods are not represented by workers-types.
+          const rpc = this.env.BOT_STATES.get(id) as unknown as {
+            executeLifecycle(input: unknown): Promise<unknown>;
+          };
+          return decodeBotLifecycleReceiptV1(
+            await rpc.executeLifecycle({
+              schemaVersion: 1,
+              userId,
+              botId: command.botId,
+              command,
+            }),
+          );
+        },
+        readBotLifecycle: async (userId, botId) => {
+          const id = this.env.BOT_STATES.idFromName(`${userId}:${botId}`);
+          // SAFETY: BOT_STATES is bound to BotState; generated RPC methods are not represented by workers-types.
+          const rpc = this.env.BOT_STATES.get(id) as unknown as {
+            readLifecycle(input: unknown): Promise<unknown>;
+          };
+          return decodeBotLifecycleViewV1(
+            await rpc.readLifecycle({ schemaVersion: 1, userId, botId }),
+          );
+        },
+      });
     }
     return this.mounted;
   }
@@ -529,119 +377,6 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     return (await this.contributions()).flock;
   }
 
-  private async voiceContribution(): Promise<VoiceUserBackendContributionV1> {
-    return (await this.contributions()).voice;
-  }
-
-  private voiceBotState(userId: string, botId: string) {
-    const id = this.env.BOT_STATES.idFromName(`${userId}:${botId}`);
-    return this.env.BOT_STATES.get(id) as unknown as {
-      readVoiceActivity(input: unknown): Promise<VoiceBotActivityV1>;
-      searchVoiceMemory(input: unknown): Promise<VoiceMemoryHitV1[]>;
-    };
-  }
-
-  private voiceToolHost(): VoiceUserBackendHostV1 {
-    return {
-      storage: this.ctx.storage,
-      userId: () => {
-        if (!this.identity)
-          throw new Error("Voice User identity is unavailable");
-        return this.identity;
-      },
-      listBots: async () => {
-        const flock = await this.flockContribution();
-        const [directory, lifecycles] = await Promise.all([
-          flock.listBots(),
-          flock.listBotLifecycles(),
-        ]);
-        const statuses = new Map(
-          lifecycles.lifecycles.map((entry) => [entry.botId, entry.status]),
-        );
-        return directory.bots
-          .filter((bot) => statuses.get(bot.botId) !== "deleted")
-          .map((bot) => ({
-            botId: bot.botId,
-            name: bot.initialName,
-            status:
-              statuses.get(bot.botId) === "archived"
-                ? ("archived" as const)
-                : ("active" as const),
-          }));
-      },
-      botActivity: async (botId, since) => {
-        await this.assertVoiceBot(botId);
-        const userId = this.identity!;
-        return this.voiceBotState(userId, botId).readVoiceActivity({
-          schemaVersion: 1,
-          userId,
-          botId,
-          ...(since ? { since } : {}),
-        });
-      },
-      memorySearch: async ({ query, botId }) => {
-        const bots = (await this.voiceToolHost().listBots()).filter(
-          (bot) => bot.status === "active" && (!botId || bot.botId === botId),
-        );
-        if (botId && bots.length === 0) throw new BotNotFoundError(botId);
-        const userId = this.identity!;
-        const reads: Array<Promise<VoiceMemoryHitV1[]>> = bots.map((bot) =>
-          this.voiceBotState(userId, bot.botId).searchVoiceMemory({
-            schemaVersion: 1,
-            userId,
-            botId: bot.botId,
-            query,
-            scope: "bot",
-          }),
-        );
-        const first = bots[0];
-        if (first) {
-          reads.push(
-            this.voiceBotState(userId, first.botId).searchVoiceMemory({
-              schemaVersion: 1,
-              userId,
-              botId: first.botId,
-              query,
-              scope: "user",
-            }),
-          );
-        }
-        return (await Promise.all(reads)).flat().slice(0, 24);
-      },
-      pendingAnswers: async () =>
-        (await this.voiceContribution())
-          .view()
-          .then((view) => view.pendingAnswers),
-      reserveAgentTurn: (request) =>
-        reserveAgentTurnSlotV1(this.ctx.storage, request),
-      releaseAgentTurn: async (request) => {
-        await releaseAgentTurnSlotV1(this.ctx.storage, request);
-      },
-      runAgent: async (request) => {
-        const id = this.env.BOT_STATES.idFromName(
-          `${request.userId}:${request.botId}`,
-        );
-        const rpc = this.env.BOT_STATES.get(id) as unknown as {
-          runAgent(input: unknown): Promise<unknown>;
-        };
-        return rpc.runAgent(request);
-      },
-      defer: (task) => this.ctx.waitUntil(task),
-    };
-  }
-
-  private async assertVoiceBot(botId: string): Promise<void> {
-    if (!(await (await this.flockContribution()).hasBot(botId))) {
-      throw new BotNotFoundError(botId);
-    }
-  }
-
-  private async publisherContribution(): Promise<
-    MountedFoundationUserBackend["publisher"]
-  > {
-    return (await this.contributions()).publisher;
-  }
-
   /**
    * Cheap, read-only signup-gate probe.
    *
@@ -681,6 +416,14 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
     await this.assertUserIdentity(request.userId as string);
     return (await this.settingsContribution()).readConnectionsFrame(
+      request.userId as string,
+    );
+  }
+
+  async readPluginsFrame(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
+    await this.assertUserIdentity(request.userId as string);
+    return (await this.settingsContribution()).readPluginsFrame(
       request.userId as string,
     );
   }
@@ -812,184 +555,6 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
   }
 
   /**
-   * The User's MCP servers, as the status projection GrokBot calls
-   * `GetMcpServerStatus`. A read of durable records this object owns; it
-   * reaches no server and wakes nothing.
-   */
-  async composioRequest(input: unknown): Promise<unknown> {
-    const request = decodeRpcEnvelopeV1(
-      input,
-      {
-        userId: rpcIdentifier,
-        command: rpcDecodedValue,
-      },
-      { botId: rpcIdentifier },
-    );
-    const userId = request.userId as string;
-    await this.assertUserIdentity(userId);
-    const contributions = await this.contributions();
-    const operation = (request.command as { operation?: unknown })?.operation;
-    if (
-      operation === "list-tools" ||
-      operation === "execute-tool" ||
-      operation === "tool-availability" ||
-      operation === "validate-trigger" ||
-      operation === "sync-subscription" ||
-      operation === "subscription-status"
-    ) {
-      if (typeof request.botId !== "string")
-        throw new Error("Bot identity is required for tools");
-      await contributions.flock.registration(request.botId);
-    }
-    const contribution = contributions.composio;
-    if (!contribution) throw new Error("Connected apps are unavailable");
-    return contribution.request(
-      userId,
-      request.command,
-      typeof request.botId === "string" ? request.botId : undefined,
-    );
-  }
-
-  async readMcpServers(input: unknown) {
-    const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
-    await this.assertUserIdentity(request.userId as string);
-    return (await this.contributions()).mcp.readServerStatus(
-      request.userId as string,
-    );
-  }
-
-  /**
-   * One MCP lifecycle command: add a server, set its instructions, restart
-   * it. Decoded inside the Contribution that owns the records, so the seam
-   * carries no shape of its own.
-   */
-  async executeMcpCommand(input: unknown) {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      command: rpcDecodedValue,
-    });
-    await this.assertUserIdentity(request.userId as string);
-    return (await this.contributions()).mcp.executeLifecycle(
-      request.userId as string,
-      request.command,
-    );
-  }
-
-  /**
-   * What a Bot's mount of an MCP server found. The Bot Durable Object holds
-   * no MCP record — this object does — so a mount that could not reach the
-   * server reports it here and the failure becomes visible on the User's own
-   * surface rather than dying inside a Turn.
-   */
-  async recordMcpMountOutcome(input: unknown) {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      outcome: rpcDecoded(decodeMcpMountOutcomeV1),
-    });
-    await this.assertUserIdentity(request.userId as string);
-    await (
-      await this.contributions()
-    ).mcp.recordMountOutcome({
-      accountId: request.userId as string,
-      ...(request.outcome as ReturnType<typeof decodeMcpMountOutcomeV1>),
-    });
-  }
-
-  /**
-   * Start one `mcp-remote-oauth` authorization.
-   *
-   * The gateway signs the state and forwards; every outbound OAuth request —
-   * discovery, registration, the token exchange — happens on the far side of
-   * this seam, inside the object that holds the keyring. Nothing about the
-   * flow's secrets crosses back: the answer is a redirect URL and nothing
-   * else.
-   */
-  async startMcpAuthorization(input: unknown) {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      start: rpcObject(
-        {
-          commandId: rpcIdentifier,
-          redirectUri: rpcString(2_048),
-          callbackState: rpcString(8_192),
-          authorizationStateId: rpcString(128),
-          authorizationStateExpiresAt: rpcInteger({
-            minimum: 0,
-            maximum: Number.MAX_SAFE_INTEGER,
-          }),
-          returnTarget: rpcString(16),
-        },
-        {
-          connectionId: rpcIdentifier,
-          label: rpcString(120),
-          settings: rpcJsonRecord,
-          nativeReturnNonce: rpcIdentifier,
-        },
-      ),
-    });
-    await this.assertUserIdentity(request.userId as string);
-    const start = request.start as McpAuthorizationStartRequestV1;
-    if (start.returnTarget !== "browser" && start.returnTarget !== "desktop") {
-      throw new Error("MCP authorization returnTarget is invalid");
-    }
-    return (await this.contributions()).mcp.startAuthorization(
-      request.userId as string,
-      start,
-    );
-  }
-
-  /**
-   * Finish one authorization, once the gateway has verified its signed state.
-   *
-   * The `authorizationStateId` is consumed here, transactionally: a replayed
-   * callback is a no-op that reports the Connection's settled state rather
-   * than a second token exchange.
-   */
-  async completeMcpAuthorization(input: unknown) {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      completion: rpcObject(
-        {
-          authorizationStateId: rpcString(128),
-          connectionId: rpcIdentifier,
-          returnTarget: rpcString(16),
-        },
-        {
-          nativeReturnNonce: rpcIdentifier,
-          code: rpcString(4_096),
-          error: rpcString(512),
-        },
-      ),
-    });
-    await this.assertUserIdentity(request.userId as string);
-    const completion =
-      request.completion as McpAuthorizationCompletionRequestV1;
-    if (
-      completion.returnTarget !== "browser" &&
-      completion.returnTarget !== "desktop"
-    ) {
-      throw new Error("MCP authorization returnTarget is invalid");
-    }
-    return (await this.contributions()).mcp.completeAuthorization(
-      request.userId as string,
-      completion,
-    );
-  }
-
-  /** RFC 7009 revocation, then the local teardown. */
-  async revokeMcpAuthorization(input: unknown) {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      connectionId: rpcIdentifier,
-    });
-    await this.assertUserIdentity(request.userId as string);
-    return (await this.contributions()).mcp.revokeAuthorization(
-      request.userId as string,
-      request.connectionId as string,
-    );
-  }
-
-  /**
    * An expiring lease over a Connection's credential for a tool
    * Contribution's mount. The Package that owns the Connection is resolved
    * from the durable projection, so a caller cannot name a Package the
@@ -1063,36 +628,7 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
   }
 
   /**
-   * D7. The User Durable Object is the authority for User-scoped quotas: the
-   * Bot's Durable Object reserves one authored-generation unit here before it
-   * records an authorship intent. Reservation is idempotent on `effectId`, so
-   * a resumed Turn does not consume a second unit, and a breach is a refusal
-   * receipt rather than a throw — the Bot records the visible failure.
-   */
-  async reserveAuthoringQuota(
-    input: unknown,
-  ): Promise<AuthoringQuotaReceiptV1> {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      botId: rpcBotId,
-      effectId: rpcString(200),
-      day: rpcPattern(AUTHORING_QUOTA_DAY, 10),
-      sourceBytes: rpcInteger({ minimum: 0, maximum: 64 * 1024 * 1024 }),
-      retainedGenerations: rpcInteger({ minimum: 0, maximum: 1_000_000 }),
-    });
-    return reserveAuthoringQuotaV1(this.ctx.storage, {
-      schemaVersion: 1,
-      userId: request.userId as string,
-      botId: request.botId as string,
-      effectId: request.effectId as string,
-      day: request.day as string,
-      sourceBytes: request.sourceBytes as number,
-      retainedGenerations: request.retainedGenerations as number,
-    });
-  }
-
-  /**
-   * The per-User concurrent-subagent bound (ADR 0017).
+   * The per-User concurrent-subagent bound.
    *
    * A Bot's own bound is countable in its Durable Object; a User's is not,
    * because a User's Bots are separate objects. So the slot is held here, and
@@ -1129,7 +665,7 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     });
   }
 
-  /** User-wide agent-lane budget shared by every Bot and Voice session. */
+  /** User-wide agent-lane budget shared by every Bot. */
   async reserveAgentTurnSlot(input: unknown): Promise<AgentTurnSlotReceiptV1> {
     const request = decodeRpcEnvelopeV1(input, {
       userId: rpcIdentifier,
@@ -1160,309 +696,6 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
       requesterId: request.requesterId as string,
       runId: request.runId as string,
     });
-  }
-
-  /**
-   * The durable per-User voice budget (voice plan D1).
-   *
-   * The `VoiceSession` Durable Object holds the sockets and no authority, so
-   * it asks here before it opens a microphone and reports here when it closes
-   * one — the same seam `reserveSubagentSlot` gives the Bot object, and for
-   * the same reason: a User's budget is not countable anywhere else.
-   */
-  async reserveVoiceCapture(input: unknown): Promise<VoiceQuotaReceiptV1> {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      day: rpcPattern(VOICE_QUOTA_DAY, 10),
-      sessionId: rpcString(128),
-    });
-    await this.assertUserIdentity(request.userId as string);
-    return reserveVoiceCaptureV1(this.ctx.storage, {
-      day: request.day as string,
-      sessionId: request.sessionId as string,
-    });
-  }
-
-  async recordVoiceUsage(input: unknown): Promise<VoiceUsageReceiptV1> {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      day: rpcPattern(VOICE_QUOTA_DAY, 10),
-      sessionId: rpcString(128),
-      seconds: rpcInteger({ minimum: 0, maximum: 24 * 60 * 60 }),
-    });
-    await this.assertUserIdentity(request.userId as string);
-    const billing = await this.billingContribution();
-    return this.ctx.storage.transactionSync(() => {
-      const receipt = recordVoiceUsageSyncV1(this.ctx.storage.kv, {
-        day: request.day as string,
-        sessionId: request.sessionId as string,
-        seconds: request.seconds as number,
-      });
-      if (receipt.recordedSeconds > 0) {
-        billing.recordVoiceInCurrentTransaction({
-          day: receipt.day,
-          sessionId: receipt.sessionId,
-          sessionSeconds: receipt.sessionSeconds,
-          recordedSeconds: receipt.recordedSeconds,
-          at: new Date().toISOString(),
-        });
-      }
-      return receipt;
-    });
-  }
-
-  async startVoiceAssistant(input: unknown) {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      month: rpcPattern(VOICE_QUOTA_MONTH, 7),
-      sessionId: rpcString(128),
-      deviceId: rpcString(128),
-      at: rpcString(64),
-    });
-    await this.assertUserIdentity(request.userId as string);
-    const quota = await reserveVoiceAssistantV1(this.ctx.storage, {
-      month: request.month as string,
-      sessionId: request.sessionId as string,
-    });
-    if (quota.status === "refused") return { schemaVersion: 1, quota };
-    const voice = await this.voiceContribution();
-    const started = await voice.start({
-      sessionId: request.sessionId as string,
-      deviceId: request.deviceId as string,
-      at: request.at as string,
-    });
-    const pendingAnswers = (await voice.view()).pendingAnswers;
-    return { schemaVersion: 1, quota, ...started, pendingAnswers };
-  }
-
-  async endVoiceAssistant(input: unknown) {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      month: rpcPattern(VOICE_QUOTA_MONTH, 7),
-      sessionId: rpcString(128),
-      at: rpcString(64),
-      reason: rpcEnum(["stopped", "idle", "quota", "error", "replaced"]),
-      seconds: rpcInteger({ minimum: 0, maximum: 31 * 24 * 60 * 60 }),
-    });
-    await this.assertUserIdentity(request.userId as string);
-    const billing = await this.billingContribution();
-    const usage = this.ctx.storage.transactionSync(() => {
-      const receipt = recordVoiceAssistantUsageSyncV1(this.ctx.storage.kv, {
-        month: request.month as string,
-        sessionId: request.sessionId as string,
-        seconds: request.seconds as number,
-      });
-      if (receipt.recordedSeconds > 0) {
-        billing.recordVoiceInCurrentTransaction({
-          day: (request.at as string).slice(0, 10),
-          sessionId: receipt.sessionId,
-          sessionSeconds: receipt.sessionSeconds,
-          recordedSeconds: receipt.recordedSeconds,
-          at: request.at as string,
-          provider: "google-ai-studio",
-          model: VOICE_GEMINI_MODEL_V1,
-          pricing: "unpriced",
-        });
-      }
-      return receipt;
-    });
-    const state = await (
-      await this.voiceContribution()
-    ).end({
-      sessionId: request.sessionId as string,
-      at: request.at as string,
-      reason: request.reason as
-        "stopped" | "idle" | "quota" | "error" | "replaced",
-      seconds: request.seconds as number,
-    });
-    return { schemaVersion: 1, usage, state };
-  }
-
-  async saveVoiceResumptionHandle(input: unknown): Promise<void> {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      sessionId: rpcString(128),
-      handle: rpcString(16_384),
-      at: rpcString(64),
-    });
-    await this.assertUserIdentity(request.userId as string);
-    await (
-      await this.voiceContribution()
-    ).saveResumptionHandle({
-      sessionId: request.sessionId as string,
-      handle: request.handle as string,
-      at: request.at as string,
-    });
-  }
-
-  async clearVoiceResumptionHandle(input: unknown): Promise<void> {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      sessionId: rpcString(128),
-      at: rpcString(64),
-    });
-    await this.assertUserIdentity(request.userId as string);
-    await (
-      await this.voiceContribution()
-    ).clearResumptionHandle({
-      sessionId: request.sessionId as string,
-      at: request.at as string,
-    });
-  }
-
-  async appendVoiceTranscript(input: unknown): Promise<void> {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      sessionId: rpcString(128),
-      entryId: rpcString(128),
-      speaker: rpcEnum(["user", "assistant"]),
-      text: rpcString(8_192),
-      at: rpcString(64),
-    });
-    await this.assertUserIdentity(request.userId as string);
-    await (
-      await this.voiceContribution()
-    ).appendTranscript(request.sessionId as string, {
-      schemaVersion: 1,
-      id: request.entryId as string,
-      speaker: request.speaker as "user" | "assistant",
-      text: request.text as string,
-      at: request.at as string,
-    });
-  }
-
-  async executeVoiceTool(input: unknown) {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      sessionId: rpcString(128),
-      callId: rpcString(128),
-      name: rpcString(128),
-      args: rpcJsonRecord,
-      at: rpcString(64),
-    });
-    await this.assertUserIdentity(request.userId as string);
-    return (await this.voiceContribution()).executeTool({
-      sessionId: request.sessionId as string,
-      callId: request.callId as string,
-      name: request.name as string,
-      args: request.args,
-      at: request.at as string,
-    });
-  }
-
-  /** A target Bot's durable outbox calls this after its Voice Turn settles. */
-  async recordVoiceAnswer(input: unknown): Promise<void> {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      delivery: rpcDecoded(decodeVoiceAnswerDeliveryV1),
-    });
-    const userId = await this.assertUserIdentity(request.userId as string);
-    const delivery = request.delivery as VoiceAnswerDeliveryV1;
-    if (delivery.userId !== userId) {
-      throw new Error("voice answer belongs to a different User");
-    }
-    const voice = await this.voiceContribution();
-    const ask = await voice.ledger.readAsk(delivery.askId);
-    if (!ask) throw new Error("voice ask was not found");
-    const settled = await voice.recordAnswerDelivery(delivery);
-    await releaseAgentTurnSlotV1(this.ctx.storage, {
-      requesterId: `voice-${ask.ask.sessionId}`,
-      runId: ask.ask.runId,
-    });
-    if (delivery.outcome !== "answered" || !("answer" in settled)) return;
-    if (settled.answer.briefedAt) return;
-    const view = await voice.view();
-    const activeSessionId = view.state.activeSessionId;
-    if (!view.state.enabled || !activeSessionId) return;
-    const namespace = this.env.VOICE_SESSIONS;
-    const rpc = namespace.get(namespace.idFromName(userId)) as unknown as {
-      deliverVoiceAnswer(input: unknown): Promise<unknown>;
-    };
-    try {
-      await rpc.deliverVoiceAnswer({
-        schemaVersion: 1,
-        userId,
-        sessionId: activeSessionId,
-        answer: settled.answer,
-      });
-    } catch {
-      // The answer is already durable and remains pending for reconnection.
-    }
-  }
-
-  /** Gemini's completed speech turn durably acknowledges these answers. */
-  async markVoiceAnswersBriefed(input: unknown): Promise<number> {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      sessionId: rpcString(128),
-      askIds: rpcDecoded((value) => {
-        if (
-          !Array.isArray(value) ||
-          value.length > VOICE_MAX_PENDING_ANSWERS_V1
-        ) {
-          throw new Error("voice briefing ask ids are invalid");
-        }
-        return value.map((askId) => {
-          if (
-            typeof askId !== "string" ||
-            !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(askId)
-          ) {
-            throw new Error("voice briefing ask id is invalid");
-          }
-          return askId;
-        });
-      }),
-      at: rpcString(64),
-    });
-    await this.assertUserIdentity(request.userId as string);
-    return (await this.voiceContribution()).markBriefed({
-      askIds: request.askIds as string[],
-      sessionId: request.sessionId as string,
-      at: request.at as string,
-    });
-  }
-
-  async readVoiceAssistant(input: unknown) {
-    const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
-    await this.assertUserIdentity(request.userId as string);
-    const month = voiceQuotaMonthV1();
-    const [ledger, quota] = await Promise.all([
-      (await this.voiceContribution()).view(),
-      readVoiceAssistantQuotaV1(this.ctx.storage, month),
-    ]);
-    return { schemaVersion: 1, ledger, quota };
-  }
-
-  /** Internal reconciliation/read seam for one durable Voice ask record. */
-  async readVoiceAsk(input: unknown) {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      askId: rpcIdentifier,
-    });
-    await this.assertUserIdentity(request.userId as string);
-    return (await this.voiceContribution()).ledger.readAsk(
-      request.askId as string,
-    );
-  }
-
-  /** The durable per-User authoring quota configuration; defaults when unset. */
-  async readAuthoringQuota(input: unknown): Promise<AuthoringQuotaConfigV1> {
-    decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
-    return decodeAuthoringQuotaConfigV1(
-      await this.ctx.storage.get<unknown>(AUTHORING_QUOTA_CONFIG_KEY),
-    );
-  }
-
-  async configureAuthoringQuota(
-    input: unknown,
-  ): Promise<AuthoringQuotaConfigV1> {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      quota: rpcDecoded(decodeAuthoringQuotaConfigV1),
-    });
-    const quota = request.quota as AuthoringQuotaConfigV1;
-    await this.ctx.storage.put(AUTHORING_QUOTA_CONFIG_KEY, quota);
-    return quota;
   }
 
   // ---------------------------------------------------------------------
@@ -1748,7 +981,6 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     for (const contribution of contributions.connections.values()) {
       await contribution.alarm?.();
     }
-    await contributions.publisher.recover();
     // An import left mid-apply by an eviction resumes here, from the first
     // step its record does not already mark done. The eviction is exactly what
     // clears the in-memory identity, so the durable pin is what this reads.
@@ -1788,20 +1020,13 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     contributions.search.purge(botId);
     contributions.audit.purgeAuditForBot(botId);
     await this.ctx.storage.delete(`${MEMORY_PROJECTS_KEY}:${botId}`);
-    const userId = await this.provenIdentity();
-    if (userId)
-      await contributions.composio?.triggerSubscriptions.removeBot(
-        userId,
-        botId,
-      );
     await contributions.flock.forgetDeletedBot(botId);
   }
 
-  // --- Applet directory (ADR 0022 decision 3) ------------------------------
+  // --- Applet directory ----------------------------------------------------
   //
-  // Account-wide by decision D2: every Bot of this User sees every Applet. The
-  // directory holds identity, the current generation, and the tool
-  // declarations; the instance itself lives in its own Durable Object and its
+  // Account-wide: every Bot of this User sees every Applet. The directory
+  // holds identity, the current generation, and the tool declarations; the instance itself lives in its own Durable Object and its
   // contents are never read here.
 
   private appletDirectory(): AppletDirectory {
@@ -1996,42 +1221,6 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
       request.userId as string,
       request.packageId as string,
     );
-  }
-
-  async readPackageRevisions(input: unknown) {
-    const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
-    await this.assertFlockIdentity(request.userId as string);
-    return (await this.publisherContribution()).read();
-  }
-
-  async publishPackage(input: unknown) {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      command: rpcDecoded(decodePublishPackageCommandV1),
-    });
-    const userId = request.userId as string;
-    await this.assertFlockIdentity(userId);
-    return (await this.publisherContribution()).publish(
-      userId,
-      request.command as ReturnType<typeof decodePublishPackageCommandV1>,
-    );
-  }
-
-  async rollbackPackage(input: unknown) {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      command: rpcDecoded(decodeRollbackPackageCommandV1),
-    });
-    await this.assertFlockIdentity(request.userId as string);
-    return (await this.publisherContribution()).rollback(
-      request.command as ReturnType<typeof decodeRollbackPackageCommandV1>,
-    );
-  }
-
-  async activeApplicationHash(input: unknown) {
-    const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
-    await this.assertFlockIdentity(request.userId as string);
-    return (await this.publisherContribution()).activeApplicationHash();
   }
 
   private async searchContribution(): Promise<
@@ -2278,8 +1467,6 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
             ).revision,
             packageId: install.packageId,
             version: install.version,
-            catalogId: install.catalogId,
-            catalogGeneration: install.catalogGeneration,
           },
         });
         return receipt.status === "rejected"
@@ -2366,7 +1553,8 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
   }
 
   /**
-   * The immutable template blob store, over the Catalog bucket.
+   * The immutable template blob store, over the artifact bucket under the
+   * `templates/` prefix.
    *
    * The collision check is the whole write rule, and it is the one
    * `apps/cloudflare/src/package-publication.ts` already applies to a published
@@ -2374,12 +1562,9 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
    * different bytes are a collision rather than an overwrite.
    */
   private templateBlobStore(): TemplateBlobStoreV1 {
-    const bucket = this.env.PACKAGE_CATALOG;
+    const bucket = this.env.APPLICATION_ARTIFACTS;
     return {
       putImmutable: async (key, document) => {
-        if (!bucket) {
-          throw new Error("the template store is not configured");
-        }
         const existing = await bucket.get(key);
         if (existing) {
           if ((await existing.text()) !== document) {
@@ -2392,7 +1577,6 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
         });
       },
       read: async (key) => {
-        if (!bucket) return undefined;
         const object = await bucket.get(key);
         if (!object) return undefined;
         if (object.size > MAX_TEMPLATE_BYTES_V1) {
@@ -2491,49 +1675,6 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     MountedFoundationUserBackend["audit"]
   > {
     return (await this.contributions()).audit;
-  }
-
-  private async billingContribution(): Promise<
-    MountedFoundationUserBackend["billing"]
-  > {
-    return (await this.contributions()).billing;
-  }
-
-  /** Model usage projected by the Bot object after a durable Turn end. */
-  async recordUsageEntries(
-    input: unknown,
-  ): Promise<{ recorded: number; quarantined: number }> {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      botId: rpcBotId,
-      entries: rpcDecodedValue,
-    });
-    await this.assertFlockIdentity(request.userId as string);
-    const botId = request.botId as string;
-    if (!(await (await this.flockContribution()).hasBot(botId))) {
-      throw new Error(`Bot "${botId}" is not registered to this User`);
-    }
-    if (!Array.isArray(request.entries)) {
-      throw new Error("RPC request.entries must be an array");
-    }
-    if (request.entries.length > USAGE_ENTRY_PAGE_MAX_V1) {
-      throw new Error("RPC request.entries exceeds its bound");
-    }
-    const foreign = request.entries.find(
-      (entry) =>
-        !entry ||
-        typeof entry !== "object" ||
-        (entry as { botId?: unknown }).botId !== botId,
-    );
-    if (foreign) throw new Error("usage entries name another Bot");
-    return (await this.billingContribution()).recordEntries(request.entries);
-  }
-
-  /** Account-wide totals for the hosted client and operator debug surface. */
-  async readUsage(input: unknown): Promise<UsageReportV1> {
-    const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
-    await this.assertFlockIdentity(request.userId as string);
-    return (await this.billingContribution()).report();
   }
 
   /**

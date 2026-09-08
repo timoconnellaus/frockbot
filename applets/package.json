@@ -1,0 +1,27 @@
+{
+  "name": "@frockbot/applets",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./build-contract": "./build-contract.ts",
+    "./definition": "./definition.ts",
+    "./feature": "./feature.ts",
+    "./pages": "./pages.ts",
+    "./preview": "./preview.ts",
+    "./root": "./root.ts",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "test": "bun test ./*.test.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@frockbot/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.0",
+    "@types/node": "26.2.0",
+    "typescript": "^7.0.2"
+  }
+}

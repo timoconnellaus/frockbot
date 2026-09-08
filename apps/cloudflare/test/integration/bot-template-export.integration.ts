@@ -1,23 +1,17 @@
 // Slice M, export half, end to end through `SELF.fetch`.
 //
 // One Bot is built the way a User builds one: a Skill authored by the Agent
-// loop inside the Bot Durable Object, a webhook Routine created over the
-// Routines route, and a keyed MCP Connection created over the Connections
-// route with a real API key. The Bot then packs itself with its own
+// loop inside the Bot Durable Object and a webhook Routine created over the
+// Routines route. The Bot then packs itself with its own
 // `bot_export_template` tool, its User publishes the share, and the published
 // blob is fetched from the *unauthenticated* `/templates/v1/:shareId`.
 //
 // What the blob must contain: the Skill's body and the Routine's prompt.
-// What it must not: the API key, any `connectionId`, the server's URL, or a
-// webhook key — and the keyed server must be a `needs-connection` placeholder
-// instead. What another User must see while the share is private: 404.
+// What it must not: any `connectionId` or a webhook key. What another User
+// must see while the share is private: 404.
 import { SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
-import {
-  MCP_ENDPOINT,
-  MCP_GOOD_API_KEY,
-  TOOL_CALL_TRIGGER,
-} from "../harness/miniflare.ts";
+import { TOOL_CALL_TRIGGER } from "../harness/miniflare.ts";
 import { dynamicToolInputV1 } from "../dynamic-tools.ts";
 import {
   asUser,
@@ -80,35 +74,6 @@ async function createWebhookRoutine(
   );
 }
 
-async function addKeyedMcpConnection(userId: string): Promise<string> {
-  const settings = (await expectOkJson(
-    await asUser(userId, "/api/settings"),
-  )) as { revision: number };
-  await expectOkJson(
-    await postAsUser(userId, "/api/settings", {
-      schemaVersion: 1,
-      type: "user/install-package",
-      commandId: "template-install-mcp",
-      expectedRevision: settings.revision,
-      packageId: "mcp",
-      version: "0.0.1",
-    }),
-  );
-  const receipt = (await expectOkJson(
-    await postAsUser(userId, "/api/connections", {
-      schemaVersion: 1,
-      type: "connection/create-api-key",
-      commandId: "template-connect-mcp",
-      packageId: "mcp",
-      connectionTypeId: "mcp-remote-key",
-      label: "Example connector",
-      apiKey: MCP_GOOD_API_KEY,
-      settings: { url: MCP_ENDPOINT, transport: "streamable-http" },
-    }),
-  )) as { connectionId: string };
-  return receipt.connectionId;
-}
-
 describe("exporting a Bot as a shareable template", () => {
   it("packs the recipe, publishes it, and leaks nothing", async () => {
     const userId = freshUserId("template-export");
@@ -116,13 +81,12 @@ describe("exporting a Bot as a shareable template", () => {
     await provisionThroughGateway({ userId, botId });
     await writeSkill(userId, botId);
     await createWebhookRoutine(userId, botId);
-    const connectionId = await addKeyedMcpConnection(userId);
 
     // THE BOT PACKS ITSELF. `bot_export_template` is a chat-turn tool that
     // reaches the User's own staging command and nothing wider. It lives in
-    // the `frockbot` namespace so progressive disclosure can surface it
-    // (ADR 0023), so a model reaches it through `call_dynamic_tool` — the same
-    // envelope every other namespaced tool takes.
+    // the `frockbot` namespace so progressive disclosure can surface it, so a
+    // model reaches it through `call_dynamic_tool` — the same envelope every
+    // other namespaced tool takes.
     const exported = (await expectOkJson(
       await postAsUser(userId, `/api/bots/${botId}/turns`, {
         schemaVersion: 1,
@@ -195,7 +159,6 @@ describe("exporting a Bot as a shareable template", () => {
       profile: { avatar: { kind: string } };
       skills: Array<{ slug: string; body: string }>;
       routines: Array<{ slug: string; prompt: string; triggerKind?: string }>;
-      mcpServers: Array<{ kind: string; connectionTypeId?: string }>;
     };
 
     // The recipe is there.
@@ -205,21 +168,8 @@ describe("exporting a Bot as a shareable template", () => {
     expect(template.routines[0]!.triggerKind).toBe("webhook");
     expect(template.profile.avatar.kind).toBe("sheep");
 
-    // The keyed server is a placeholder the importer fills themselves.
-    expect(template.mcpServers).toEqual([
-      {
-        kind: "needs-connection",
-        name: "Example connector",
-        connectionTypeId: "mcp-remote-key",
-        hint: "This server needs your own Connection and credential.",
-      },
-    ]);
-
     // Nothing else travelled.
-    expect(document).not.toContain(MCP_GOOD_API_KEY);
-    expect(document).not.toContain(connectionId);
     expect(document).not.toContain("connectionId");
-    expect(document).not.toContain(MCP_ENDPOINT);
     expect(document).not.toContain("memory");
     expect(document).not.toContain("digest");
 

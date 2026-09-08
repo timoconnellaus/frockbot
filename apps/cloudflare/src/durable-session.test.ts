@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { type SessionEvent } from "@frockbot/kernel-contracts";
+import { type SessionEvent } from "@frockbot/core/contracts";
 import { appendedSessionEvents } from "./durable-session.js";
 
 const created: SessionEvent = {

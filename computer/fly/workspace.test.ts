@@ -1,0 +1,1206 @@
+/// <reference types="bun" />
+
+import { describe, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
+import {
+  isLoadableSkillSourceV1,
+  WORKSPACE_MAX_FILE_BYTES,
+  WORKSPACE_MAX_LIST_ENTRIES,
+  type WorkspaceGenerationsV1,
+  type WorkspaceRootV1,
+  type WorkspaceWriterV1,
+} from "@frockbot/core/contracts";
+import { workspaceMountPathV1 } from "@frockbot/computer/core";
+import { createObjectWorkspaceFilesV1 } from "@frockbot/core/workspace-store";
+import {
+  createInMemoryObjectBucketV1,
+  createInMemoryWorkspaceGenerationsV1,
+} from "@frockbot/core/workspace-store/testing";
+import {
+  computerBotKey,
+  type ComputerHostFactoryV1,
+  FlySpriteComputer,
+  MAX_STORAGE_OUTPUT,
+} from "./computer.ts";
+import { FakeComputerHost, type FakeComputerRunV1 } from "./host-double.ts";
+import { FLY_WORKSPACE_LAYOUT, FlySpriteComputerProvider } from "./provider.ts";
+import { FlyComputerWorkspace, WORKSPACE_CHUNK_BYTES_V1 } from "./workspace.ts";
+
+const USER = "owner";
+const BOT = "health";
+const OTHER_BOT = "general";
+
+const USER_WRITER: WorkspaceWriterV1 = { kind: "user", userId: USER };
+const BOT_WRITER: WorkspaceWriterV1 = {
+  kind: "bot",
+  botId: BOT,
+  sessionId: "session-1",
+  turnId: "turn-1",
+  runId: "run-1",
+};
+const PACKAGE_WRITER: WorkspaceWriterV1 = {
+  kind: "first-party",
+  packageId: "@frockbot/app/skills",
+};
+
+const skillsRoot: WorkspaceRootV1 = {
+  kind: "bot-instructions",
+  userId: USER,
+  botId: BOT,
+};
+const otherSkillsRoot: WorkspaceRootV1 = {
+  kind: "bot-instructions",
+  userId: USER,
+  botId: OTHER_BOT,
+};
+const botMemoryRoot: WorkspaceRootV1 = {
+  kind: "bot-memory",
+  userId: USER,
+  botId: BOT,
+};
+const userMemoryRoot: WorkspaceRootV1 = { kind: "user-memory", userId: USER };
+const packageRoot: WorkspaceRootV1 = {
+  kind: "package-declared",
+  userId: USER,
+  packageId: "@frockbot/app/notes",
+  rootId: "notes",
+};
+
+function sha256(bytes: Uint8Array): string {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+/**
+ * Bytes of an exact length whose every chunk differs from every other, so a
+ * chunk carried twice, dropped, or reordered changes the bytes rather than
+ * hiding inside a repeated pattern.
+ */
+function largeBytes(length: number): Uint8Array {
+  let text = "";
+  for (let index = 0; text.length < length; index += 1) {
+    text += `${index}:${"abcdefghijklmnopqrstuvwxyz".repeat(3)}\n`;
+  }
+  return new TextEncoder().encode(text.slice(0, length));
+}
+
+function quoted(shell: string, name: string): string | undefined {
+  return new RegExp(`${name}='([^']*)'`).exec(shell)?.[1];
+}
+
+/**
+ * A Computer whose durable filesystem is an in-memory map. It interprets the
+ * shell the Workspace surface emits rather than running it, because the
+ * scripts are GNU coreutils and the test host is not.
+ */
+class FakeWorkspaceDisk {
+  readonly files = new Map<string, { bytes: Uint8Array; meta?: string }>();
+  offline = false;
+  modifiedSeconds = 1_700_000_000;
+
+  /** Every script this disk was handed, in order. */
+  readonly scripts: string[] = [];
+  /** Rewrites the file at this path between two chunk commands of one read. */
+  midReadRewrite?: { path: string; bytes: Uint8Array };
+
+  /** The runner the shared host double hands every script to. */
+  readonly run = (script: string): FakeComputerRunV1 => {
+    this.scripts.push(script);
+    if (this.offline) return { exitCode: 1, stderr: "Sprite is paused" };
+    // The real host's storage surface refuses an answer past this, so a double
+    // that returned one would let a suite prove a read works at a size the
+    // Computer would never have carried.
+    const bounded = (stdout: string): FakeComputerRunV1 =>
+      stdout.length > MAX_STORAGE_OUTPUT
+        ? { stdout: stdout.slice(0, MAX_STORAGE_OUTPUT), outputTruncated: true }
+        : { stdout };
+    if (script.includes("__STAGED__")) {
+      return bounded(this.stageChunk(script));
+    }
+    const root = quoted(script, "ROOT");
+    const relative = quoted(script, "REL");
+    if (!root) return {};
+    if (script.includes("__WRITTEN__") && relative) {
+      return bounded(this.write(`${root}/${relative}`, script));
+    }
+    if (script.includes("__DELETED__") && relative) {
+      return bounded(this.remove(`${root}/${relative}`, script));
+    }
+    if (script.includes('find "$ROOT"')) {
+      return bounded(this.list(root, script));
+    }
+    if (relative) {
+      return bounded(this.load(`${root}/${relative}`, script));
+    }
+    return {};
+  };
+
+  private current(path: string): string {
+    const entry = this.files.get(path);
+    if (!entry) return "";
+    if (!entry.meta) return "__UNRECORDED__";
+    return (
+      Buffer.from(entry.meta, "base64").toString("utf8").split("\n")[0] ?? ""
+    );
+  }
+
+  private expected(shell: string): string {
+    return /if \[ "\$CURRENT" != '([^']*)' \]/.exec(shell)?.[1] ?? "";
+  }
+
+  /** One appended chunk of a staged file, as the write stages it. */
+  private stageChunk(shell: string): string {
+    const path = quoted(shell, "STAGE") ?? "";
+    const encoded =
+      /printf %s '([^']*)' \| base64 -d >> "\$STAGE"/.exec(shell)?.[1] ?? "";
+    const chunk = Buffer.from(encoded, "base64");
+    const held = shell.includes('rm -f "$STAGE"')
+      ? undefined
+      : this.files.get(path)?.bytes;
+    this.files.set(path, {
+      bytes: Uint8Array.from(
+        held ? Buffer.concat([Buffer.from(held), chunk]) : chunk,
+      ),
+    });
+    return "__STAGED__\n";
+  }
+
+  private write(path: string, shell: string): string {
+    const stage = quoted(shell, "STAGE");
+    if (this.current(path) !== this.expected(shell)) {
+      if (stage) this.files.delete(stage);
+      return "__CONFLICT__\n";
+    }
+    const meta = /printf %s '([^']*)' \| base64 -d > "\$MTMP"/.exec(shell)?.[1];
+    let bytes: Uint8Array;
+    if (stage) {
+      // The staged bytes are digest-checked exactly as the emitted
+      // `sha256sum` line checks them, so a torn staging file is __CORRUPT__
+      // here for the same reason it would be on the Sprite.
+      const staged = this.files.get(stage)?.bytes ?? new Uint8Array();
+      this.files.delete(stage);
+      const expected = /f1\)" != '([0-9a-f]{64})'/.exec(shell)?.[1];
+      if (expected && sha256(staged) !== expected) return "__CORRUPT__\n";
+      bytes = staged;
+    } else {
+      const inline = /printf %s '([^']*)' \| base64 -d > "\$TMP"/.exec(
+        shell,
+      )?.[1];
+      bytes = Uint8Array.from(Buffer.from(inline ?? "", "base64"));
+    }
+    this.files.set(path, { bytes, meta });
+    return "__WRITTEN__\n";
+  }
+
+  private remove(path: string, shell: string): string {
+    if (!this.files.has(path)) return "__MISSING__\n";
+    if (this.current(path) !== this.expected(shell)) return "__CONFLICT__\n";
+    this.files.delete(path);
+    return "__DELETED__\n";
+  }
+
+  /**
+   * The chunked file read: a header of sidecar, digest, size, and mtime with
+   * the first chunk, then one chunk per further command. `head -c` and
+   * `tail -c +N` are the coreutils the Workspace emits; the arithmetic is
+   * theirs, not an approximation.
+   */
+  private load(path: string, shell: string): string {
+    const chunk = /tail -c \+(\d+) "\$TARGET" \| head -c (\d+)/.exec(shell);
+    if (chunk) {
+      // A rewrite between two chunk commands is what makes a read report
+      // rather than stitch, so the double performs one where a test asks.
+      const rewrite = this.midReadRewrite;
+      if (rewrite) {
+        this.midReadRewrite = undefined;
+        this.files.set(rewrite.path, { bytes: rewrite.bytes });
+      }
+      const offset = Number(chunk[1]) - 1;
+      const limit = Number(chunk[2]);
+      const bytes = this.files.get(path)?.bytes;
+      const slice = bytes?.subarray(offset, offset + limit) ?? new Uint8Array();
+      return `${Buffer.from(slice).toString("base64")}\n`;
+    }
+    const entry = this.files.get(path);
+    if (!entry) return "__MISSING__\n";
+    if (entry.bytes.byteLength > WORKSPACE_MAX_FILE_BYTES) {
+      return "__TOO_LARGE__\n";
+    }
+    const lines = [
+      entry.meta ?? "",
+      sha256(entry.bytes),
+      String(entry.bytes.byteLength),
+      String(this.modifiedSeconds),
+    ];
+    const head = /head -c (\d+) "\$TARGET" \| base64 -w0/.exec(shell);
+    if (head) {
+      lines.push(
+        Buffer.from(entry.bytes.subarray(0, Number(head[1]))).toString(
+          "base64",
+        ),
+      );
+    }
+    return `${lines.join("\n")}\n`;
+  }
+
+  private list(root: string, shell: string): string {
+    const offset = Number(/OFFSET=(\d+)/.exec(shell)?.[1] ?? 0);
+    const limit = Number(/LIMIT=(\d+)/.exec(shell)?.[1] ?? 100);
+    const prefix = quoted(shell, "PREFIX") ?? "";
+    const rows = [...this.files.entries()]
+      .filter(([path]) => path.startsWith(`${root}/`))
+      .map(([path, entry]) => [path.slice(root.length + 1), entry] as const)
+      // The emitted `find` prunes the lock, generation, and sync directories,
+      // so a listing never shows a staging file mid-write.
+      .filter(([relative]) => !relative.startsWith(".frockbot-"))
+      .filter(
+        ([relative]) =>
+          !prefix || relative === prefix || relative.startsWith(`${prefix}/`),
+      )
+      .sort(([left], [right]) => (left < right ? -1 : 1))
+      .slice(offset, offset + limit + 1)
+      .map(([relative, entry]) =>
+        [
+          Buffer.from(relative).toString("base64"),
+          entry.meta ?? "",
+          sha256(entry.bytes),
+          String(entry.bytes.byteLength),
+          String(this.modifiedSeconds),
+        ].join("\t"),
+      );
+    return rows.length ? `${rows.join("\n")}\n` : "";
+  }
+}
+
+/**
+ * The host double over one such disk, with `open` and `viewer` fenced off:
+ * reaching a Workspace file must never provision a desktop or publish a
+ * viewer, and a fixture that answered them would hide it if one did.
+ */
+function hostFor(disk: FakeWorkspaceDisk): {
+  host: FakeComputerHost;
+  factory: ComputerHostFactoryV1;
+} {
+  const host = new FakeComputerHost(disk.run);
+  const factory: ComputerHostFactoryV1 = (identity, tenant) => ({
+    ...host.factory(identity, tenant),
+    open(): never {
+      throw new Error("Workspace access must not provision a desktop");
+    },
+    viewer(): never {
+      throw new Error("Workspace access must not publish a viewer");
+    },
+  });
+  return { host, factory };
+}
+
+/**
+ * The Workspace a User's own authority opens, rather than a Bot's. The
+ * shell and Turn paths open a Computer as the Bot, so this is the only shape
+ * in which a `user` writer is admitted.
+ */
+function openUserWorkspace(
+  botId = BOT,
+  disk = new FakeWorkspaceDisk(),
+  generations: WorkspaceGenerationsV1 | "none" = ledger(),
+) {
+  const injected = generations === "none" ? undefined : generations;
+  const { host, factory } = hostFor(disk);
+  const computer = new FlySpriteComputer({
+    identity: { userId: "workspace-user" },
+    host: factory,
+    spriteName: "frockbot-test",
+  }).bot(botId);
+  return {
+    disk,
+    host,
+    generations: injected,
+    workspace: new FlyComputerWorkspace(FLY_WORKSPACE_LAYOUT, {
+      computer,
+      userId: USER,
+      botId,
+      botDirectoryKey: computerBotKey,
+      userAuthority: true,
+      ...(injected ? { generations: injected } : {}),
+    }),
+  };
+}
+
+/**
+ * The Durable Object's generation ledger, in memory. The Computer's Workspace
+ * can attribute nothing without one — a sidecar on the Computer is a hint, and
+ * the ledger is the authority — so every handle a Turn opens carries it.
+ */
+function ledger(): WorkspaceGenerationsV1 {
+  return createInMemoryWorkspaceGenerationsV1();
+}
+
+/** A sync host over one in-memory bucket, sharing the ledger with the handle. */
+function syncHostFor(generations: WorkspaceGenerationsV1) {
+  return {
+    store: createObjectWorkspaceFilesV1({
+      bucket: createInMemoryObjectBucketV1(),
+      generations,
+      owner: { userId: USER },
+      surface: "sync" as const,
+    }),
+    generations,
+  };
+}
+
+async function openWorkspace(
+  botId = BOT,
+  disk = new FakeWorkspaceDisk(),
+  generations: WorkspaceGenerationsV1 | "none" = ledger(),
+) {
+  const injected = generations === "none" ? undefined : generations;
+  const { host, factory } = hostFor(disk);
+  const provider = new FlySpriteComputerProvider(
+    new FlySpriteComputer({
+      identity: { userId: "workspace-user" },
+      host: factory,
+      spriteName: "frockbot-test",
+    }),
+    factory,
+    injected ? syncHostFor(injected) : undefined,
+  );
+  const computer = await provider.open(
+    { userId: USER },
+    { botId },
+    { providerId: "fly-sprite", generation: 1 },
+  );
+  const workspace = computer.workspace;
+  if (!workspace) throw new Error("The Fly provider must expose a Workspace");
+  return { disk, host, workspace, computer, generations: injected };
+}
+
+describe("Fly Workspace layout", () => {
+  // Constitution — Computer and Workspace: "durable roots, declared by the
+  // Computer Package's Workspace layout". The Workspace presents Memory roots
+  // read-only.
+  test("declares instruction, Memory, and Package roots, with Memory and the User-global instruction root read-only", () => {
+    expect(FLY_WORKSPACE_LAYOUT.home).toBe("/home/box");
+    expect(
+      Object.fromEntries(
+        FLY_WORKSPACE_LAYOUT.roots.map((root) => [
+          root.kind,
+          [root.mountPath, root.access, root.scope],
+        ]),
+      ),
+    ).toEqual({
+      "bot-instructions": [
+        "/home/box/agent-data/agents/{bot}/skills",
+        "read-write",
+        "bot",
+      ],
+      // GrokBot's `agent-data/workflows`, read-only on the Computer because
+      // the Skills Package writes it through object storage.
+      "user-instructions": [
+        "/home/box/agent-data/workflows",
+        "read-only",
+        "user",
+      ],
+      "bot-memory": [
+        "/home/box/agent-data/agents/{bot}/memory",
+        "read-only",
+        "bot",
+      ],
+      "user-memory": ["/home/box/agent-data/user-memory", "read-only", "user"],
+      "package-declared": [
+        "/home/box/agent-data/user-packages/{package}/{root}",
+        "read-write",
+        "user",
+      ],
+    });
+  });
+
+  // The Image Package's generated root, `image/generated`. The ids are
+  // written out here rather than imported so this provider Package keeps
+  // knowing nothing about the Packages that declare roots.
+  test("mounts a Package-declared root with no layout change of its own", () => {
+    expect(
+      workspaceMountPathV1(FLY_WORKSPACE_LAYOUT, {
+        kind: "package-declared",
+        userId: USER,
+        packageId: "image",
+        rootId: "generated",
+      }),
+    ).toBe("/home/box/agent-data/user-packages/image/generated");
+    // Read-write, unlike Memory: writing source with a shell is the point.
+    expect(
+      FLY_WORKSPACE_LAYOUT.roots.find(
+        (root) => root.kind === "package-declared",
+      )?.access,
+    ).toBe("read-write");
+  });
+});
+
+describe("Fly Workspace files", () => {
+  // Constitution — Computer and Workspace: "every write to a durable root
+  // records its writer."
+  test("records the writer of every durable-root write and answers with the generation", async () => {
+    const { workspace } = await openWorkspace();
+
+    const written = await workspace.write({
+      path: { root: skillsRoot, path: "deploy/SKILL.md" },
+      bytes: new TextEncoder().encode("# deploy"),
+      writer: BOT_WRITER,
+      expectedGenerationId: null,
+    });
+
+    expect(written).toMatchObject({ status: "ok" });
+    if (written.status !== "ok") throw new Error(written.reason);
+    expect(written.generation).toMatchObject({
+      schemaVersion: 1,
+      contentHash: sha256(new TextEncoder().encode("# deploy")),
+      size: 8,
+      writer: BOT_WRITER,
+    });
+
+    const stat = await workspace.stat({
+      root: skillsRoot,
+      path: "deploy/SKILL.md",
+    });
+    expect(stat).toMatchObject({
+      status: "ok",
+      entry: { generation: { writer: BOT_WRITER } },
+    });
+    const read = await workspace.read({
+      root: skillsRoot,
+      path: "deploy/SKILL.md",
+    });
+    if (read.status !== "ok") throw new Error(read.reason);
+    expect(new TextDecoder().decode(read.file.bytes)).toBe("# deploy");
+    expect(read.file.generation.generationId).toBe(
+      written.generation.generationId,
+    );
+  });
+
+  // Constitution — Memory: "the Workspace presents Memory roots read-only".
+  test("refuses a write to either Memory root through the kernel-consumed surface", async () => {
+    const { workspace } = await openWorkspace();
+
+    for (const root of [botMemoryRoot, userMemoryRoot]) {
+      expect(
+        await workspace.write({
+          path: { root, path: "profile.md" },
+          bytes: new TextEncoder().encode("fact"),
+          writer: BOT_WRITER,
+          expectedGenerationId: null,
+        }),
+      ).toMatchObject({ status: "refused" });
+      expect(
+        await workspace.delete({
+          path: { root, path: "profile.md" },
+          writer: BOT_WRITER,
+          expectedGenerationId: "whatever",
+        }),
+      ).toMatchObject({ status: "refused" });
+    }
+  });
+
+  // A Memory root the sync materialized is readable through the kernel
+  // surface: read-only, not invisible.
+  test("reads a Memory root the sync materialized, and refuses to write it", async () => {
+    const { disk, workspace } = await openWorkspace();
+    disk.files.set(
+      `/home/box/agent-data/agents/${computerBotKey(BOT)}/memory/profile.md`,
+      { bytes: new TextEncoder().encode("fact") },
+    );
+
+    expect(
+      await workspace.read({ root: botMemoryRoot, path: "profile.md" }),
+    ).toMatchObject({ status: "ok" });
+    expect(
+      await workspace.write({
+        path: { root: botMemoryRoot, path: "profile.md" },
+        bytes: new TextEncoder().encode("other"),
+        writer: BOT_WRITER,
+        expectedGenerationId: null,
+      }),
+    ).toMatchObject({ status: "refused" });
+  });
+
+  // Constitution — Computer and Workspace: "a Bot's instruction root and Bot
+  // Memory root are writable only by that Bot or its User."
+  test("refuses a write to another Bot's instruction root and a first-party writer", async () => {
+    const { workspace } = await openWorkspace();
+
+    expect(
+      await workspace.write({
+        path: { root: otherSkillsRoot, path: "SKILL.md" },
+        bytes: new TextEncoder().encode("x"),
+        writer: BOT_WRITER,
+        expectedGenerationId: null,
+      }),
+    ).toMatchObject({ status: "refused" });
+    expect(
+      await workspace.write({
+        path: { root: skillsRoot, path: "SKILL.md" },
+        bytes: new TextEncoder().encode("x"),
+        writer: PACKAGE_WRITER,
+        expectedGenerationId: null,
+      }),
+    ).toMatchObject({ status: "refused" });
+    // The Bot's User may write it — from a handle the User opened.
+    expect(
+      await openUserWorkspace().workspace.write({
+        path: { root: skillsRoot, path: "SKILL.md" },
+        bytes: new TextEncoder().encode("x"),
+        writer: USER_WRITER,
+        expectedGenerationId: null,
+      }),
+    ).toMatchObject({ status: "ok" });
+  });
+
+  // Constitution — Computer and Workspace: "every write to a durable root
+  // records its writer." The writer a request names is a claim; the handle's
+  // tenant is the authority on it, or a Bot could record another Bot as the
+  // writer of a file and a Package root would accept it.
+  test("refuses a write naming a Bot that is not the handle's tenant", async () => {
+    const { workspace } = await openWorkspace();
+    const otherBotWriter: WorkspaceWriterV1 = {
+      ...BOT_WRITER,
+      botId: OTHER_BOT,
+    };
+
+    expect(
+      await workspace.write({
+        path: { root: otherSkillsRoot, path: "SKILL.md" },
+        bytes: new TextEncoder().encode("x"),
+        writer: otherBotWriter,
+        expectedGenerationId: null,
+      }),
+    ).toMatchObject({ status: "refused" });
+    expect(
+      await workspace.write({
+        path: { root: packageRoot, path: "shared.md" },
+        bytes: new TextEncoder().encode("x"),
+        writer: otherBotWriter,
+        expectedGenerationId: null,
+      }),
+    ).toMatchObject({ status: "refused" });
+  });
+
+  // "Only Skills under the Bot's own instruction root, written under the Bot's
+  // own authority or its User's, are loaded as instructions." A Bot that could
+  // name its User as the writer would author itself a loadable Skill under an
+  // authority it does not hold.
+  test("refuses a user writer from a handle opened for a Bot", async () => {
+    const { workspace } = await openWorkspace();
+
+    expect(
+      await workspace.write({
+        path: { root: skillsRoot, path: "SKILL.md" },
+        bytes: new TextEncoder().encode("x"),
+        writer: USER_WRITER,
+        expectedGenerationId: null,
+      }),
+    ).toMatchObject({ status: "refused" });
+    expect(
+      await workspace.delete({
+        path: { root: skillsRoot, path: "SKILL.md" },
+        writer: USER_WRITER,
+        expectedGenerationId: "whatever",
+      }),
+    ).toMatchObject({ status: "refused" });
+    // A User handle for a different User is refused by the root check too.
+    expect(
+      await openUserWorkspace().workspace.write({
+        path: { root: skillsRoot, path: "SKILL.md" },
+        bytes: new TextEncoder().encode("x"),
+        writer: { kind: "user", userId: "someone-else" },
+        expectedGenerationId: null,
+      }),
+    ).toMatchObject({ status: "refused" });
+  });
+
+  // Bots of one User may read each other's Workspace files: separation
+  // between tenants is organizational, not a security boundary.
+  test("a Bot reads another Bot of the same User's Workspace file", async () => {
+    const disk = new FakeWorkspaceDisk();
+    const owner = await openWorkspace(OTHER_BOT, disk);
+    await owner.workspace.write({
+      path: { root: otherSkillsRoot, path: "notes.md" },
+      bytes: new TextEncoder().encode("shared"),
+      writer: { ...BOT_WRITER, botId: OTHER_BOT },
+      expectedGenerationId: null,
+    });
+
+    const reader = await openWorkspace(BOT, disk);
+    const read = await reader.workspace.read({
+      root: otherSkillsRoot,
+      path: "notes.md",
+    });
+
+    if (read.status !== "ok") throw new Error(read.reason);
+    expect(new TextDecoder().decode(read.file.bytes)).toBe("shared");
+  });
+
+  test("refuses every root belonging to another User", async () => {
+    const { workspace } = await openWorkspace();
+
+    expect(
+      await workspace.read({
+        root: { kind: "user-memory", userId: "someone-else" },
+        path: "profile.md",
+      }),
+    ).toMatchObject({ status: "refused" });
+  });
+
+  // A write that would overwrite a generation its writer has not seen is
+  // never silently merged.
+  test("answers conflict when the expected generation is not the current one", async () => {
+    const { workspace } = await openWorkspace();
+    const first = await workspace.write({
+      path: { root: packageRoot, path: "a.md" },
+      bytes: new TextEncoder().encode("one"),
+      writer: BOT_WRITER,
+      expectedGenerationId: null,
+    });
+    if (first.status !== "ok") throw new Error(first.reason);
+
+    expect(
+      await workspace.write({
+        path: { root: packageRoot, path: "a.md" },
+        bytes: new TextEncoder().encode("two"),
+        writer: BOT_WRITER,
+        expectedGenerationId: null,
+      }),
+    ).toMatchObject({ status: "conflict" });
+    expect(
+      await workspace.write({
+        path: { root: packageRoot, path: "a.md" },
+        bytes: new TextEncoder().encode("two"),
+        writer: BOT_WRITER,
+        expectedGenerationId: first.generation.generationId,
+      }),
+    ).toMatchObject({ status: "ok" });
+  });
+
+  test("bounds a write at the contract's file size and refuses a traversal path", async () => {
+    const { workspace } = await openWorkspace();
+
+    expect(
+      await workspace.write({
+        path: { root: packageRoot, path: "big.bin" },
+        bytes: new Uint8Array(WORKSPACE_MAX_FILE_BYTES + 1),
+        writer: BOT_WRITER,
+        expectedGenerationId: null,
+      }),
+    ).toMatchObject({ status: "refused" });
+    expect(
+      await workspace.read({ root: packageRoot, path: "../escape" }),
+    ).toMatchObject({ status: "refused" });
+  });
+
+  test("lists a root by page and bounds a page at the contract limit", async () => {
+    const { host, workspace } = await openWorkspace();
+    for (let index = 0; index < 5; index += 1) {
+      await workspace.write({
+        path: { root: packageRoot, path: `note-${index}.md` },
+        bytes: new TextEncoder().encode(String(index)),
+        writer: BOT_WRITER,
+        expectedGenerationId: null,
+      });
+    }
+
+    const page = await workspace.list({ root: packageRoot, limit: 2 });
+    if (page.status !== "ok") throw new Error(page.reason);
+    expect(page.entries.map((entry) => entry.path.path)).toEqual([
+      "note-0.md",
+      "note-1.md",
+    ]);
+    expect(page.cursor).toBe("2");
+    expect(page.entries[0]?.generation.writer).toEqual(BOT_WRITER);
+
+    const rest = await workspace.list({
+      root: packageRoot,
+      cursor: page.cursor,
+      limit: 10,
+    });
+    if (rest.status !== "ok") throw new Error(rest.reason);
+    expect(rest.entries).toHaveLength(3);
+    expect(rest.cursor).toBeUndefined();
+
+    await workspace.list({ root: packageRoot, limit: 10_000 });
+    expect(host.scripts.at(-1)).toContain(
+      `LIMIT=${WORKSPACE_MAX_LIST_ENTRIES}`,
+    );
+  });
+
+  test("deletes with a tombstone generation and then answers not-found", async () => {
+    const { workspace } = await openWorkspace();
+    const written = await workspace.write({
+      path: { root: packageRoot, path: "gone.md" },
+      bytes: new TextEncoder().encode("bye"),
+      writer: BOT_WRITER,
+      expectedGenerationId: null,
+    });
+    if (written.status !== "ok") throw new Error(written.reason);
+
+    const removed = await workspace.delete({
+      path: { root: packageRoot, path: "gone.md" },
+      writer: BOT_WRITER,
+      expectedGenerationId: written.generation.generationId,
+    });
+
+    expect(removed).toMatchObject({ status: "ok" });
+    if (removed.status !== "ok") throw new Error(removed.reason);
+    expect(removed.generation.size).toBe(0);
+    expect(removed.generation.writer).toEqual(BOT_WRITER);
+    expect(
+      await workspace.read({ root: packageRoot, path: "gone.md" }),
+    ).toMatchObject({ status: "not-found" });
+    expect(
+      await workspace.delete({
+        path: { root: packageRoot, path: "gone.md" },
+        writer: BOT_WRITER,
+        expectedGenerationId: written.generation.generationId,
+      }),
+    ).toMatchObject({ status: "not-found" });
+  });
+
+  // A file written by ordinary shell work went around this surface, so no
+  // sidecar records who wrote it. It is `unattributed` — not the User, not a
+  // Bot — so it is readable data and never loadable as a Skill.
+  test("attributes a file with no recorded writer as unattributed", async () => {
+    const { disk, workspace } = await openWorkspace();
+    disk.files.set(
+      `/home/box/agent-data/agents/${computerBotKey(BOT)}/skills/by-shell.md`,
+      { bytes: new TextEncoder().encode("hand-written") },
+    );
+
+    const stat = await workspace.stat({
+      root: skillsRoot,
+      path: "by-shell.md",
+    });
+
+    if (stat.status !== "ok") throw new Error(stat.reason);
+    expect(stat.entry.generation.writer).toEqual({ kind: "unattributed" });
+
+    const listed = await workspace.list({ root: skillsRoot });
+    if (listed.status !== "ok") throw new Error(listed.reason);
+    expect(
+      listed.entries.find((entry) => entry.path.path === "by-shell.md")
+        ?.generation.writer,
+    ).toEqual({ kind: "unattributed" });
+  });
+
+  // A sidecar is an ordinary file beside the bytes it describes, so a shell can
+  // overwrite the bytes and leave the sidecar standing — or plant a sidecar of
+  // its own. The recorded content address is what such a write cannot forge
+  // without producing the bytes, so a sidecar that does not describe the file
+  // is stale or invented and the file is `unattributed`: the previous writer's
+  // authority does not survive a write that went around this surface.
+  test("answers unattributed when the sidecar does not describe the bytes", async () => {
+    const { disk, workspace } = await openWorkspace();
+    const path = `/home/box/agent-data/agents/${computerBotKey(BOT)}/skills/deploy/SKILL.md`;
+    const written = await workspace.write({
+      path: { root: skillsRoot, path: "deploy/SKILL.md" },
+      bytes: new TextEncoder().encode("---\nname: deploy\n---\n"),
+      writer: BOT_WRITER,
+      expectedGenerationId: null,
+    });
+    if (written.status !== "ok") throw new Error(written.reason);
+    const before = await workspace.stat({
+      root: skillsRoot,
+      path: "deploy/SKILL.md",
+    });
+    if (before.status !== "ok") throw new Error(before.reason);
+    expect(before.entry.generation.writer).toEqual(BOT_WRITER);
+
+    // A shell overwrites the file. The sidecar the surface wrote stays put.
+    const kept = disk.files.get(path);
+    disk.files.set(path, {
+      bytes: new TextEncoder().encode("---\nname: deploy\n---\nrm -rf /\n"),
+      ...(kept?.meta ? { meta: kept.meta } : {}),
+    });
+
+    const stat = await workspace.stat({
+      root: skillsRoot,
+      path: "deploy/SKILL.md",
+    });
+
+    if (stat.status !== "ok") throw new Error(stat.reason);
+    expect(stat.entry.generation.writer).toEqual({ kind: "unattributed" });
+    expect(
+      isLoadableSkillSourceV1(
+        {
+          path: { root: skillsRoot, path: "deploy/SKILL.md" },
+          writer: stat.entry.generation.writer,
+          generation: stat.entry.generation,
+        },
+        { botId: BOT, userId: USER },
+      ),
+    ).toBe(false);
+    // The listing answers the same way, and so does a read of the bytes.
+    const listed = await workspace.list({ root: skillsRoot });
+    if (listed.status !== "ok") throw new Error(listed.reason);
+    expect(
+      listed.entries.find((entry) => entry.path.path === "deploy/SKILL.md")
+        ?.generation.writer,
+    ).toEqual({ kind: "unattributed" });
+    const read = await workspace.read({
+      root: skillsRoot,
+      path: "deploy/SKILL.md",
+    });
+    if (read.status !== "ok") throw new Error(read.reason);
+    expect(read.file.generation.writer).toEqual({ kind: "unattributed" });
+  });
+
+  // A sidecar that does not decode at this seam is no sidecar at all.
+  test("answers unattributed when the sidecar does not decode", async () => {
+    const { disk, workspace } = await openWorkspace();
+    disk.files.set(
+      `/home/box/agent-data/agents/${computerBotKey(BOT)}/skills/planted.md`,
+      {
+        bytes: new TextEncoder().encode("body"),
+        meta: Buffer.from(
+          `forged\n${JSON.stringify({ writer: { kind: "user", userId: USER } })}`,
+        ).toString("base64"),
+      },
+    );
+
+    const stat = await workspace.stat({ root: skillsRoot, path: "planted.md" });
+
+    if (stat.status !== "ok") throw new Error(stat.reason);
+    expect(stat.entry.generation.writer).toEqual({ kind: "unattributed" });
+  });
+
+  // "every write to a durable root records its writer": `unattributed` is an
+  // answer about a file nobody recorded, never a writer a caller may present.
+  test("refuses a write or a delete that names an unattributed writer", async () => {
+    const { workspace } = await openWorkspace();
+
+    expect(
+      await workspace.write({
+        path: { root: skillsRoot, path: "SKILL.md" },
+        bytes: new TextEncoder().encode("body"),
+        writer: { kind: "unattributed" },
+        expectedGenerationId: null,
+      }),
+    ).toMatchObject({ status: "refused" });
+    expect(
+      await workspace.delete({
+        path: { root: packageRoot, path: "a.md" },
+        writer: { kind: "unattributed" },
+        expectedGenerationId: "whatever",
+      }),
+    ).toMatchObject({ status: "refused" });
+  });
+
+  // Constitution — Computer and Workspace: connections drop on every pause, so
+  // "unavailable" is an ordinary answer, not an exception.
+  test("answers unavailable rather than throwing when the Sprite is paused", async () => {
+    const { disk, workspace } = await openWorkspace();
+    disk.offline = true;
+
+    expect(
+      await workspace.read({ root: packageRoot, path: "a.md" }),
+    ).toMatchObject({ status: "unavailable" });
+    expect(await workspace.list({ root: packageRoot })).toMatchObject({
+      status: "unavailable",
+    });
+    expect(
+      await workspace.write({
+        path: { root: packageRoot, path: "a.md" },
+        bytes: new Uint8Array(1),
+        writer: BOT_WRITER,
+        expectedGenerationId: null,
+      }),
+    ).toMatchObject({ status: "unavailable" });
+  });
+});
+
+describe("the Computer's sidecar is a hint; the Durable Object is the authority", () => {
+  const SKILLS_MOUNT = `/home/box/agent-data/agents/${computerBotKey(BOT)}/skills`;
+
+  /** What a shell on the Computer can write: bytes, and a sidecar for them. */
+  function plant(
+    disk: FakeWorkspaceDisk,
+    relative: string,
+    text: string,
+    generation: {
+      generationId: string;
+      writer: WorkspaceWriterV1;
+      writtenAt?: string;
+    },
+  ): void {
+    const bytes = new TextEncoder().encode(text);
+    const meta = {
+      schemaVersion: 1,
+      generationId: generation.generationId,
+      // The forger has the bytes, so it has their hash too.
+      contentHash: sha256(bytes),
+      size: bytes.byteLength,
+      writer: generation.writer,
+      writtenAt: generation.writtenAt ?? new Date(0).toISOString(),
+    };
+    disk.files.set(`${SKILLS_MOUNT}/${relative}`, {
+      bytes,
+      meta: Buffer.from(
+        `${meta.generationId}\n${JSON.stringify(meta)}`,
+      ).toString("base64"),
+    });
+  }
+
+  test("a forged sidecar whose hash matches the bytes is still unattributed", async () => {
+    const { disk, workspace } = await openWorkspace();
+    // A shell writes the file *and* a perfectly-formed sidecar claiming the
+    // Bot itself wrote it. Nothing about the bytes is wrong; only the ledger
+    // can tell, and it never recorded this generation.
+    plant(disk, "forged/SKILL.md", "# Forged", {
+      generationId: "000001700000000000-000001",
+      writer: BOT_WRITER,
+    });
+
+    const stat = await workspace.stat({
+      root: skillsRoot,
+      path: "forged/SKILL.md",
+    });
+    if (stat.status !== "ok") throw new Error(stat.reason);
+    expect(stat.entry.generation.writer).toEqual({ kind: "unattributed" });
+    expect(
+      isLoadableSkillSourceV1(
+        {
+          path: stat.entry.path,
+          writer: stat.entry.generation.writer,
+          generation: stat.entry.generation,
+        },
+        { userId: USER, botId: BOT },
+      ),
+    ).toBe(false);
+    const listed = await workspace.list({ root: skillsRoot });
+    if (listed.status !== "ok") throw new Error(listed.reason);
+    expect(listed.entries[0]?.generation.writer).toEqual({
+      kind: "unattributed",
+    });
+  });
+
+  test("a write through the surface is attributed, because the ledger holds it", async () => {
+    const { disk, workspace, generations } = await openWorkspace();
+    const written = await workspace.write({
+      path: { root: skillsRoot, path: "authored/SKILL.md" },
+      bytes: new TextEncoder().encode("# Authored"),
+      writer: BOT_WRITER,
+      expectedGenerationId: null,
+    });
+    if (written.status !== "ok") throw new Error(written.reason);
+
+    const recorded = await generations?.current(
+      skillsRoot,
+      "authored/SKILL.md",
+    );
+    expect(recorded?.generation.generationId).toBe(
+      written.generation.generationId,
+    );
+    const read = await workspace.read({
+      root: skillsRoot,
+      path: "authored/SKILL.md",
+    });
+    if (read.status !== "ok") throw new Error(read.reason);
+    expect(read.file.generation.writer).toEqual(BOT_WRITER);
+
+    // And a shell overwriting those bytes takes the attribution with it: the
+    // record the ledger holds no longer describes what is on disk, and a
+    // sidecar re-forged over the new bytes names a generation the ledger
+    // never minted.
+    plant(disk, "authored/SKILL.md", "# Overwritten", {
+      generationId: written.generation.generationId,
+      writer: BOT_WRITER,
+    });
+    const after = await workspace.read({
+      root: skillsRoot,
+      path: "authored/SKILL.md",
+    });
+    if (after.status !== "ok") throw new Error(after.reason);
+    expect(after.file.generation.writer).toEqual({ kind: "unattributed" });
+  });
+
+  test("with no ledger injected, every file is unattributed", async () => {
+    const disk = new FakeWorkspaceDisk();
+    const { workspace } = openUserWorkspace(BOT, disk, "none");
+    const written = await workspace.write({
+      path: { root: skillsRoot, path: "local/SKILL.md" },
+      bytes: new TextEncoder().encode("# Local"),
+      writer: USER_WRITER,
+      expectedGenerationId: null,
+    });
+    if (written.status !== "ok") throw new Error(written.reason);
+
+    const read = await workspace.read({
+      root: skillsRoot,
+      path: "local/SKILL.md",
+    });
+    if (read.status !== "ok") throw new Error(read.reason);
+    expect(read.file.generation.writer).toEqual({ kind: "unattributed" });
+  });
+});
+
+/**
+ * The Workspace's own per-file rule is what bounds a file; the shape of the
+ * commands that carry it never is.
+ *
+ * A Bot's file tools read and write through this surface, and both directions
+ * used to be one command carrying the whole file as base64: a 470 KB page is
+ * 627 KB of base64, past what a storage command may answer, so a Bot could not
+ * read a file it had just written. These prove the transport is
+ * no longer the constraint, in both directions, at sizes the Workspace admits.
+ */
+describe("Fly Workspace files past one storage command", () => {
+  const mount = workspaceMountPathV1(
+    FLY_WORKSPACE_LAYOUT,
+    packageRoot,
+    computerBotKey,
+  );
+
+  test("reads a file far larger than one storage command can answer, byte for byte", async () => {
+    const disk = new FakeWorkspaceDisk();
+    const bytes = largeBytes(900 * 1024);
+    disk.files.set(`${mount}/dist/ui.html`, { bytes });
+    const { workspace } = await openWorkspace(BOT, disk);
+
+    const read = await workspace.read({
+      root: packageRoot,
+      path: "dist/ui.html",
+    });
+
+    if (read.status !== "ok") throw new Error(read.reason);
+    expect(read.file.bytes).toEqual(bytes);
+    expect(read.file.generation.contentHash).toBe(sha256(bytes));
+    // The first command answers the size, the digest, and one chunk; the rest
+    // of the file is one command per further chunk.
+    expect(
+      disk.scripts.filter((script) => script.includes("$TARGET")).length,
+    ).toBe(Math.ceil(bytes.byteLength / WORKSPACE_CHUNK_BYTES_V1));
+  });
+
+  test("writes a file far larger than one storage command can carry, byte for byte", async () => {
+    const disk = new FakeWorkspaceDisk();
+    const { workspace } = await openWorkspace(BOT, disk);
+    const bytes = largeBytes(700 * 1024);
+
+    const written = await workspace.write({
+      path: { root: packageRoot, path: "dist/bundle.js" },
+      bytes,
+      writer: BOT_WRITER,
+      expectedGenerationId: null,
+    });
+
+    if (written.status !== "ok") throw new Error(written.reason);
+    expect(written.generation.contentHash).toBe(sha256(bytes));
+    expect(disk.files.get(`${mount}/dist/bundle.js`)?.bytes).toEqual(bytes);
+    // The staging file is gone the moment its bytes are in place, so nothing
+    // half-written is left under a durable root.
+    expect(
+      [...disk.files.keys()].filter((path) => path.includes("/staging/")),
+    ).toEqual([]);
+    const read = await workspace.read({
+      root: packageRoot,
+      path: "dist/bundle.js",
+    });
+    if (read.status !== "ok") throw new Error(read.reason);
+    expect(read.file.bytes).toEqual(bytes);
+  });
+
+  test("a file that fits in one command still takes one command, in each direction", async () => {
+    const disk = new FakeWorkspaceDisk();
+    const { workspace } = await openWorkspace(BOT, disk);
+
+    const written = await workspace.write({
+      path: { root: packageRoot, path: "note.md" },
+      bytes: new TextEncoder().encode("small"),
+      writer: BOT_WRITER,
+      expectedGenerationId: null,
+    });
+    if (written.status !== "ok") throw new Error(written.reason);
+    expect(disk.scripts.filter((script) => script.includes("$STAGE"))).toEqual(
+      [],
+    );
+    expect(
+      disk.scripts.filter((script) => script.includes("__WRITTEN__")),
+    ).toHaveLength(1);
+
+    disk.scripts.length = 0;
+    const read = await workspace.read({ root: packageRoot, path: "note.md" });
+    if (read.status !== "ok") throw new Error(read.reason);
+    expect(new TextDecoder().decode(read.file.bytes)).toBe("small");
+    expect(disk.scripts).toHaveLength(1);
+  });
+
+  test("reports a rewrite between two chunks rather than stitching two versions", async () => {
+    const disk = new FakeWorkspaceDisk();
+    const path = `${mount}/dist/ui.html`;
+    disk.files.set(path, { bytes: largeBytes(900 * 1024) });
+    // A shell on the Computer replaces the file after its size and digest were
+    // answered but before the last chunk arrives.
+    disk.midReadRewrite = { path, bytes: largeBytes(900 * 1024).reverse() };
+    const { workspace } = await openWorkspace(BOT, disk);
+
+    expect(
+      await workspace.read({ root: packageRoot, path: "dist/ui.html" }),
+    ).toMatchObject({
+      status: "unavailable",
+      reason: `"dist/ui.html" changed on the Computer while it was being read`,
+    });
+  });
+
+  // The write used to hold the lock across the whole script, which was fine
+  // while the whole file arrived inside it. Chunks arrive in commands of their
+  // own, and holding the lock across all of them would keep one writer's file
+  // open for as long as its bytes take to travel.
+  test("stages the chunks unlocked and holds the lock only around the final verify-and-rename", async () => {
+    const disk = new FakeWorkspaceDisk();
+    const { workspace } = await openWorkspace(BOT, disk);
+
+    const written = await workspace.write({
+      path: { root: packageRoot, path: "dist/bundle.js" },
+      bytes: largeBytes(700 * 1024),
+      writer: BOT_WRITER,
+      expectedGenerationId: null,
+    });
+
+    if (written.status !== "ok") throw new Error(written.reason);
+    const staging = disk.scripts.filter((script) =>
+      script.includes("__STAGED__"),
+    );
+    expect(staging.length).toBeGreaterThan(1);
+    for (const script of staging) expect(script).not.toContain("flock");
+    const commit = disk.scripts.filter((script) =>
+      script.includes("__WRITTEN__"),
+    );
+    expect(commit).toHaveLength(1);
+    expect(commit[0]).toContain("flock -x 9");
+    // Under the lock: the expected generation, the staged bytes' digest, and
+    // the rename. No file bytes travel inside it.
+    expect(commit[0]).toContain('mv "$STAGE" "$TMP"');
+    expect(commit[0]).not.toContain('base64 -d > "$TMP"');
+    expect(commit[0]!.length).toBeLessThan(WORKSPACE_CHUNK_BYTES_V1);
+  });
+
+  test("refuses a file past the Workspace's own limit in plain words, in each direction", async () => {
+    const disk = new FakeWorkspaceDisk();
+    disk.files.set(`${mount}/huge.bin`, {
+      bytes: new Uint8Array(WORKSPACE_MAX_FILE_BYTES + 1),
+    });
+    const { workspace } = await openWorkspace(BOT, disk);
+
+    expect(
+      await workspace.read({ root: packageRoot, path: "huge.bin" }),
+    ).toMatchObject({
+      status: "refused",
+      reason: `"huge.bin" is past the 1 MB limit on a Workspace file`,
+    });
+    expect(
+      await workspace.write({
+        path: { root: packageRoot, path: "other.bin" },
+        bytes: new Uint8Array(WORKSPACE_MAX_FILE_BYTES + 1),
+        writer: BOT_WRITER,
+        expectedGenerationId: null,
+      }),
+    ).toMatchObject({
+      status: "refused",
+      reason: `"other.bin" is past the 1 MB limit on a Workspace file`,
+    });
+  });
+});

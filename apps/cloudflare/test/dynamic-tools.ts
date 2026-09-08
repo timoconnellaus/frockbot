@@ -1,7 +1,7 @@
-// Addressing a progressively disclosed tool, the way a model has to (ADR 0023).
+// Addressing a progressively disclosed tool, the way a model has to.
 //
-// After ADR 0023 the only tools a model is handed by name are the native set
-// plus the two meta-tools. Everything else — `frockbot`'s own tools, a Bot
+// The only tools a model is handed by name are the native set plus the two
+// meta-tools. Everything else — `frockbot`'s own tools, a Bot
 // isolate's, a connected account's — is reachable only through
 // `call_dynamic_tool`, and an external namespace additionally requires
 // `mcpDetails.description`. These probes drive fake models, and a fake model
@@ -10,15 +10,14 @@
 //
 // So the helpers here are deliberately the *whole* envelope rather than a
 // convenience wrapper that hides it: a test reads the namespace and the
-// external-ness at its call site, which is exactly the part ADR 0023 made
-// load-bearing.
+// external-ness at its call site, which is exactly the load-bearing part.
 import type {
   LlmMessage,
   ToolCall,
   ToolSchema,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 
-/** The meta-tools `@frockbot/plugin-tools` contributes to every registry. */
+/** The meta-tools `@frockbot/core/tools` contributes to every registry. */
 export const META_TOOL_NAMES_V1 = [
   "get_dynamic_tools",
   "call_dynamic_tool",
@@ -137,9 +136,9 @@ export interface TwoTierScriptV1 {
 /**
  * The next step of a model that must find a tool before it can call it.
  *
- * This is the whole of ADR 0023 from the model's side: one `get_dynamic_tools`
- * round-trip to learn which namespace owns the name, then one
- * `call_dynamic_tool` carrying that namespace. It is derived from the
+ * This is the whole of progressive disclosure from the model's side: one
+ * `get_dynamic_tools` round-trip to learn which namespace owns the name, then
+ * one `call_dynamic_tool` carrying that namespace. It is derived from the
  * transcript rather than from probe-side state, so an evicted-and-resumed Turn
  * replays it identically.
  */
@@ -150,7 +149,7 @@ export function twoTierStepV1(
   const { messages } = request;
   // A native tool is offered by name in the request, so it is called by name.
   // Only what the request does *not* name has to be discovered — which is the
-  // whole distinction ADR 0023 draws, and the one a real model acts on.
+  // whole distinction, and the one a real model acts on.
   const native = request.tools.some((tool) => tool.name === script.toolName);
   // Only this Turn's exchange counts. A Session runs several Turns, and the
   // discovery the *previous* Turn did is history, not an answer to this one.

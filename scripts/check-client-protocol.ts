@@ -28,7 +28,7 @@ for (const result of results) {
   }
 }
 const artifact = readFileSync(
-  resolve(root, "packages/protocol-schemas/src/validators.generated.js"),
+  resolve(root, "core/protocol-schemas/validators.generated.js"),
   "utf8",
 );
 if (/\beval\s*\(|new Function\s*\(|\bfetch\s*\(/.test(artifact))

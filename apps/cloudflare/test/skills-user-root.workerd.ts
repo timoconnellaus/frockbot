@@ -1,8 +1,8 @@
 // The User-global instruction root, written by two Bot Durable Objects over
 // real R2 and real Durable Object storage.
 //
-// ADR 0016 gives one User one `user-instructions` root at `users/<id>/skills/`,
-// shared by every Bot that User owns and written only through object storage.
+// One User has one `user-instructions` root at `users/<id>/skills/`, shared by
+// every Bot that User owns and written only through object storage.
 // Three claims a Bun double cannot make, because all three are about the
 // deployed pieces:
 //
@@ -18,7 +18,7 @@ import { describe, expect, test } from "vitest";
 import type {
   WorkspaceRootV1,
   WorkspaceWriterV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import { provisionBot, provisionSiblingBot } from "./provision-bot.ts";
 
 function bot(name: string) {

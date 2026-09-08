@@ -3,7 +3,7 @@ import {
   COMPUTER_HOST_ROUTES,
   COMPUTER_HOST_TOKEN_HEADER,
   decodeComputerHostProblemV1,
-} from "@frockbot/computer-host-protocol";
+} from "@frockbot/computer/host-protocol";
 import {
   computerHostShardCountV1,
   computerHostShardV1,
@@ -78,7 +78,7 @@ describe("shard function", () => {
   });
 
   test("every Bot of one User reaches one container", () => {
-    // ADR 0012: the Computer, its slot registry, and its takeover lease are
+    // The Computer, its slot registry, and its takeover lease are
     // all per-User, so the Bot must not appear in the key at all.
     const shard = computerHostShardV1("user-1", 8);
     expect(computerHostShardV1("user-1", 8)).toBe(shard);

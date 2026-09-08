@@ -1,38 +1,25 @@
-import {
-  decodeConnectionEventDeliveryV1,
-  type ConnectionEventDeliveryV1,
-} from "@frockbot/connection-core";
 import { DurableObject } from "cloudflare:workers";
 import {
   BotStateChannel,
   BOT_STATE_CHANNEL_INTERNAL_PATH,
 } from "./bot-state-channel.js";
-import {
-  compileFoundationApplication,
-  createFoundationHostedRuntimePackages,
-  createFoundationRuntimeApplication,
-} from "@frockbot/application-foundation/runtime";
+import { foundationShellApplicationV1 } from "@frockbot/app/runtime";
 import {
   computerBotContribution,
   createFoundationBackendContributions,
   createFoundationMountedContributionsV1,
   flockBotContribution,
-  plannedFoundationBackendContributions,
+  backendDescriptorsV1,
   shellBotContribution,
-} from "@frockbot/application-foundation/contributions";
-import { FIRST_PARTY_PACKAGE_ARTIFACTS_V1 } from "@frockbot/application-foundation/generated/applets-artifact";
-import {
-  createFoundationResidentRuntime,
-  type FoundationResidentRuntime,
-} from "@frockbot/agent-runtime/runtime";
-import { Context } from "cordis";
-import { ComputerRegistry } from "@frockbot/computer-core";
-import { createFlySpriteProviderPlugin } from "@frockbot/plugin-fly-sprite/agent";
-import { ComputerHostClient } from "@frockbot/plugin-fly-sprite/host-client";
+} from "@frockbot/app/contributions";
+import { ComputerRegistry } from "@frockbot/computer/core";
+import { createFlySpriteProviderFeature } from "@frockbot/computer/fly/agent";
+import { mountRuntimeFeaturesV1 } from "@frockbot/core/contracts";
+import { ComputerHostClient } from "@frockbot/computer/fly/host-client";
 import {
   computerHostEffectRequestWireV1,
   decodeComputerHostEffectResponseV1,
-} from "@frockbot/computer-core/host-protocol";
+} from "@frockbot/computer/core/host-protocol";
 import {
   decodeBotConfigurationExecuteRpcV1,
   decodeBotConfigurationReadRpcV1,
@@ -40,39 +27,94 @@ import {
   decodeRevertCompositionCommandV1,
   MAX_COMPOSITION_GENERATION_PAGE_V1,
   type RevertCompositionCommandV1,
-} from "@frockbot/configuration-core";
+} from "@frockbot/core/configuration";
 import {
   BotDurableAuthority,
   IDENTITY_KEY,
   type BotIdentity,
   type StoredRunOriginV1,
-} from "@frockbot/kernel-do";
+} from "@frockbot/core/durable";
 import type {
-  BotStateEnv,
   OwnedBotTurnCommand,
   ShellBotBackendContribution,
-} from "@frockbot/plugin-shell/backend";
-import type {
-  BotResidentExecution,
-  BotResidentProjection,
-} from "@frockbot/plugin-shell/backend-execution";
-import { executeResidentBotTurn } from "@frockbot/plugin-shell/backend-runner";
-import type { FlockBotBackendContribution } from "@frockbot/plugin-flock/bot";
-import type { ComputerBotBackendContribution } from "@frockbot/plugin-computer/bot";
+} from "@frockbot/app/shell/backend";
+import type { BotStateEnv } from "@frockbot/app/shell/backend-state";
 import {
-  VoiceAnswerOutboxV1,
-  voiceAnswerFromSettledTurnV1,
-  type VoiceAnswerSinkV1,
-} from "@frockbot/plugin-voice/bot";
-import { decodeComputerCommandV1 } from "@frockbot/plugin-computer/protocol";
+  acceptSubagentTask,
+  claimTaskMessages,
+  listTasks,
+  readSubagentTaskContext,
+  readTask,
+  settleTask,
+  stopSubagentTask,
+  stopTaskForUser,
+} from "@frockbot/app/subagents/bot";
+import {
+  readFocusedApplet,
+  setFocusedApplet,
+} from "@frockbot/app/applets-host/bot";
+import {
+  isolateConnection,
+  isolateInvokeModel,
+  isolateMemoryForget,
+  isolateMemoryRead,
+  isolateMemoryWrite,
+  isolateSchedule,
+  isolateWorkspaceDelete,
+  isolateWorkspaceList,
+  isolateWorkspaceRead,
+  isolateWorkspaceStat,
+  isolateWorkspaceWrite,
+} from "@frockbot/app/isolates/bot";
+import { deliverMachineResult } from "@frockbot/app/machine/bot";
+import {
+  listOwnSkillDocuments,
+  listPackageUi,
+  listSkills,
+  runPackageUiTool,
+  writeUserSkill,
+} from "@frockbot/app/skills/bot";
+import {
+  archiveEligible,
+  refreshScheduledWork,
+} from "@frockbot/app/shell/identity";
+import { stopRun } from "@frockbot/app/shell/turn";
+import {
+  acknowledgeNotification,
+  listNotifications,
+} from "@frockbot/app/notifications/bot";
+import {
+  deliverRoutineHook,
+  executeRoutineCommand,
+  executeRoutineInboxCommand,
+  listRoutineInbox,
+  listRoutineRuns,
+  listRoutines,
+  readRoutineRun,
+} from "@frockbot/app/routines/bot";
+import {
+  executeConfiguration,
+  readConfiguration,
+  resolveConfiguration,
+} from "@frockbot/app/settings/bot";
+import { decideApproval, listApprovals } from "@frockbot/app/approvals/bot";
+import {
+  getCompositionGeneration,
+  listCompositionGenerations,
+  revertComposition,
+} from "@frockbot/app/shell/composition-views";
+import { executeUnreadCommand, readUnread } from "@frockbot/app/shell/unread";
+import type { FlockBotBackendContribution } from "@frockbot/app/flock/bot";
+import type { ComputerBotBackendContribution } from "@frockbot/computer/bot";
+import { decodeComputerCommandV1 } from "@frockbot/computer/protocol";
 import {
   decodeBotLifecycleCommandV1,
   decodeBotRegistrationV1,
   decodeUpdateSheepCommandV1,
   type BotLifecycleCommandV1,
   type BotRegistrationV1,
-} from "@frockbot/plugin-flock/shared";
-import { decodeBotDebugQueryV1 } from "@frockbot/plugin-shell/debug-protocol";
+} from "@frockbot/app/flock/shared";
+import { decodeBotDebugQueryV1 } from "@frockbot/app/shell/debug-protocol";
 import {
   decodeClientRunListQueryV1,
   decodeClientRunLookupQueryV1,
@@ -80,23 +122,20 @@ import {
   type ClientRunListQueryV1,
   type ClientRunLookupQueryV1,
   type ClientRunStopCommandV1,
-} from "@frockbot/plugin-shell/run-protocol";
+} from "@frockbot/app/shell/run-protocol";
 import {
   decodeBotUnreadCommandV1,
   type BotUnreadCommandV1,
-} from "@frockbot/plugin-shell/unread";
+} from "@frockbot/app/shell/unread";
 import {
   decodeApprovalDecisionCommandV1,
   type ApprovalDecisionCommandV1,
-} from "@frockbot/plugin-shell/approvals";
+} from "@frockbot/app/shell/approvals";
 import {
   decodePackageIframeToolCommandV1,
   decodeIsolateMemoryReadRequestV1,
   decodeIsolateMemoryWriteRequestV1,
-  decodeIsolateNotificationRequestV1,
   decodeIsolateScheduleRequestV1,
-  decodeIsolateAppletsRequestV1,
-  decodeIsolateToolRequestV1,
   decodeIsolateWorkspaceDeleteRequestV1,
   decodeIsolateWorkspaceListRequestV1,
   decodeIsolateWorkspacePathV1,
@@ -104,7 +143,7 @@ import {
   decodeNormalizedModelRequestV1,
   decodeWorkspaceRootV1,
   appletSourceArtefactPathV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import type {
   AppletBuildViewV1,
   AppletSourceViewV1,
@@ -115,13 +154,13 @@ import type {
   WorkspacePathV1,
   WorkspaceRootV1,
   WorkspaceSyncEffectsV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import {
   APPLET_ID_V1,
   APPLET_SOURCE_MAX_BYTES_V1,
   APPLET_SOURCE_MAX_FILES_V1,
   decodeWorkspacePathV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 
 /*
  * Where an Applet's source lives.
@@ -144,56 +183,50 @@ import {
   decodeRoutineInboxCommandV1,
   type RoutineCommandV1,
   type RoutineInboxCommandV1,
-} from "@frockbot/plugin-routines/shared";
+} from "@frockbot/app/routines/shared";
 import {
   decodeRoutineHookDeliveryV1,
   type RoutineHookDeliveryV1,
-} from "@frockbot/plugin-routines/hook";
+} from "@frockbot/app/routines/hook";
 import {
   decodeSubagentRunTaskRequestV1,
   type SubagentRunTaskRequestV1,
-} from "@frockbot/plugin-shell/backend-subagents";
+} from "@frockbot/app/subagents/durable-binding";
 import {
   decodeTaskOutcomeV1,
   type TaskOutcomeV1,
-} from "@frockbot/plugin-subagents/records";
+} from "@frockbot/app/subagents/records";
 import {
   decodeMachineResultDeliveryV1,
   type MachineResultDeliveryV1,
-} from "@frockbot/plugin-user-machine/delivery";
+} from "@frockbot/app/machine/delivery";
 import {
   createDurableWorkspaceFilesV1,
   deleteBotWorkspaceRootsV1,
 } from "./workspace.js";
-import { R2PackageCatalog } from "./package-catalog.js";
-import type { BotSkillCatalogReaderV1 } from "@frockbot/plugin-shell/backend-skills";
 import type { ClientWorkspaceFileV1 } from "./contracts.js";
 import {
   DurableWorkspaceGenerations,
   DurableWorkspaceSyncEffects,
-} from "@frockbot/kernel-do";
-import type { MemoryProjectsV1 } from "@frockbot/plugin-memory/agent";
+} from "@frockbot/core/durable";
+import type { MemoryProjectsV1 } from "@frockbot/app/memory/agent";
 import {
   decodeMemoryChunkIndexEntryV1,
   memoryChunkIndexEntriesV1,
   MEMORY_CHUNK_INDEX_PREFIX_V1,
   type MemoryChunkIndexWriterV1,
-} from "@frockbot/plugin-memory/chunk-index";
+} from "@frockbot/app/memory/chunk-index";
 import {
   botMemoryRootV1,
   buildMemoryIndexV1,
   readAllMemoryDocumentsV1,
   searchMemoryV1,
   userMemoryRootV1,
-} from "@frockbot/plugin-memory";
-import type {
-  VoiceBotActivityV1,
-  VoiceMemoryHitV1,
-} from "@frockbot/plugin-voice/tools";
+} from "@frockbot/app/memory";
 import {
   searchRowsFromClientRunV1,
   type SearchSinkV1,
-} from "@frockbot/plugin-search";
+} from "@frockbot/app/search";
 import {
   createBotSearchRowPageV1,
   createUserSearchSinkV1,
@@ -203,18 +236,12 @@ import {
   AuditOutboxV1,
   auditEntriesFromStoredRunV1,
   type AuditSinkV1,
-} from "@frockbot/plugin-audit";
-import {
-  UsageOutboxV1,
-  usageEntriesFromTurnV1,
-  type UsageSinkV1,
-} from "@frockbot/plugin-billing";
+} from "@frockbot/app/audit";
 import {
   createBotAuditEntryPageV1,
   createUserAuditSinkV1,
   type UserAuditRpc,
 } from "./audit.js";
-import { createUserUsageSinkV1, type UserUsageRpcV1 } from "./usage.js";
 import {
   createRoutedWorkspaceGenerationsV1,
   createUserMemoryProjectsV1,
@@ -329,7 +356,6 @@ function decodeMemoryVectorPurgeJournalV1(
 export type { BotStateEnv, OwnedBotTurnCommand };
 
 export interface BotStateDependencies {
-  compileApplication?: typeof compileFoundationApplication;
   outboundFetch?: typeof fetch;
 }
 
@@ -367,7 +393,6 @@ function decodeIsolateCallRpcV1(
 }
 
 export class BotState extends DurableObject<BotStateEnv> {
-  private readonly compileApplication: typeof compileFoundationApplication;
   private readonly outboundFetch?: typeof fetch;
   /**
    * The environment the Shell Package runs under: the Durable Object's
@@ -379,7 +404,6 @@ export class BotState extends DurableObject<BotStateEnv> {
   protected readonly backendEnv: BotStateEnv & {
     FROCK_AI?: FrockAiGatewayHostV1;
     WORKSPACE_FILES?: WorkspaceFilesV1;
-    PACKAGE_CATALOG_ENTRIES?: BotSkillCatalogReaderV1;
     MEMORY_WORKSPACE_FILES?: WorkspaceFilesV1;
     MEMORY_PROJECTS?: MemoryProjectsV1;
     MEMORY_CHUNK_INDEX?: MemoryChunkIndexWriterV1;
@@ -390,8 +414,6 @@ export class BotState extends DurableObject<BotStateEnv> {
     SEARCH_SINK?: SearchSinkV1;
     /** The User-scoped audit table this object's outbox drains into. */
     AUDIT_SINK?: AuditSinkV1;
-    /** The authoritative User spend ledger this object's outbox drains into. */
-    USAGE_SINK?: UsageSinkV1;
   };
   /** The identity the Workspace and Memory surfaces above were built for. */
   private surfacesFor: string | undefined;
@@ -422,8 +444,6 @@ export class BotState extends DurableObject<BotStateEnv> {
     dependencies: BotStateDependencies = {},
   ) {
     super(ctx, env);
-    this.compileApplication =
-      dependencies.compileApplication ?? compileFoundationApplication;
     this.outboundFetch = dependencies.outboundFetch;
     // The surfaces are built per identity in `bindSurfaces`, not here: they
     // carry the `owner` guard, and a Durable Object learns which User it
@@ -458,15 +478,14 @@ export class BotState extends DurableObject<BotStateEnv> {
     dispose(): Promise<void>;
   }> {
     if (!this.mounted) {
-      const pending = this.compileApplication().then(async (plan) => {
-        const root = new Context();
-        await root.plugin(ComputerRegistry);
+      const pending = (async () => {
+        const computers = new ComputerRegistry();
         const computerConfigured = Boolean(
           this.backendEnv.COMPUTER_HOST &&
           this.backendEnv.COMPUTER_HOST_TOKEN?.trim(),
         );
-        await root.plugin(
-          createFlySpriteProviderPlugin(undefined, {
+        const disposeComputers = await mountRuntimeFeaturesV1({ computers }, [
+          createFlySpriteProviderFeature(undefined, {
             ...(computerConfigured
               ? {
                   host: (identity, tenant) =>
@@ -479,7 +498,7 @@ export class BotState extends DurableObject<BotStateEnv> {
                 }
               : {}),
           }),
-        );
+        ]);
         // Where each descriptor's mounted value lands as the mount runs. The
         // Shell and Flock Contributions need each other, and each reaches the
         // other by naming the table entry it imported.
@@ -493,116 +512,97 @@ export class BotState extends DurableObject<BotStateEnv> {
           | ShellBotBackendContribution
           | FlockBotBackendContribution
           | ComputerBotBackendContribution
-        >(
-          plan,
-          {
-            backendHost: "bot",
-            mountedContributions,
-            shell: {
-              state: this.ctx,
-              env: this.backendEnv,
-              outboundFetch: this.outboundFetch,
-              // One application, compiled once: the Contributions mounted here
-              // and the Composition the Shell bootstraps have to be the same
-              // plan, or a member could be in one and not the other.
-              compileApplication: this.compileApplication,
-              // The immutable bytes of every first-party artifact-backed
-              // member the application ships (ADR 0022 decision 8). The store
-              // reads object storage first and falls back to these, so a
-              // deploy needs no seeding step for a Package that is already in
-              // this bundle.
-              bundledPackageArtifacts: FIRST_PARTY_PACKAGE_ARTIFACTS_V1,
-              // The Durable Object owns the kernel authority; the Shell
-              // Package supplies only its configuration and Composition
-              // hooks.
-              // The authority writes through the channel's storage facade, so
-              // every committed run write pushes a `runs` invalidation to
-              // attached browsers. The kernel is unaware it is observed.
-              createAuthority: (options) =>
-                new BotDurableAuthority({
-                  ...options,
-                  state: this.stateChannel.observeRuns(options.state),
-                }),
-              // The Computer Contribution's projection cache and its share of
-              // the authority's one durable alarm, reached through the table
-              // once it has mounted.
-              invalidateComputerProjectionFile: (userId, botId, kind) => {
-                mountedContributions
-                  .get(computerBotContribution)
-                  ?.invalidateProjectionFile(userId, botId, kind);
-                // Dropping the resident cache only makes the next read
-                // honest. The notice is what makes an attached browser take
-                // that read, so a capture filed mid-Turn reaches the card in
-                // about a second instead of at the next projection poll.
-                this.stateChannel.noticeComputer();
-              },
-              scheduledDeadlines: (transaction) =>
-                mountedContributions
-                  .get(computerBotContribution)
-                  ?.scheduledDeadlines(transaction) ?? Promise.resolve([]),
-              scheduledWorkInFlight: () =>
-                mountedContributions
-                  .get(computerBotContribution)
-                  ?.scheduledWorkInFlight() ?? false,
-              deferScheduledWork: (transaction) =>
-                mountedContributions
-                  .get(computerBotContribution)
-                  ?.deferScheduledWork(transaction) ?? Promise.resolve(),
-              settleScheduledWork: () =>
-                mountedContributions
-                  .get(computerBotContribution)
-                  ?.settleScheduledWork() ?? Promise.resolve(),
-              recordSettledUsage: (settled) => this.recordSettledUsage(settled),
-              recordSettledAgentOutcome: (settled) =>
-                this.recordSettledVoiceAnswer(settled),
-              // An archived Bot admits no configuration command; the Flock
-              // Contribution owns that durable lifecycle state.
-              assertLifecycleActive: (storage, botId) => {
-                const flock = mountedContributions.get(flockBotContribution);
-                if (!flock) {
-                  throw new Error("Flock Bot Contribution is unavailable");
-                }
-                return flock.assertActive(storage, botId);
-              },
+        >({
+          backendHost: "bot",
+          mountedContributions,
+          shell: {
+            ...foundationShellApplicationV1,
+            state: this.ctx,
+            env: this.backendEnv,
+            outboundFetch: this.outboundFetch,
+            // The Durable Object owns the kernel authority; the Shell
+            // Package supplies only its configuration and Composition
+            // hooks.
+            // The authority writes through the channel's storage facade, so
+            // every committed run write pushes a `runs` invalidation to
+            // attached browsers. The kernel is unaware it is observed.
+            createAuthority: (options) =>
+              new BotDurableAuthority({
+                ...options,
+                state: this.stateChannel.observeRuns(options.state),
+              }),
+            // The Computer Contribution's projection cache and its share of
+            // the authority's one durable alarm, reached through the table
+            // once it has mounted.
+            invalidateComputerProjectionFile: (userId, botId, kind) => {
+              mountedContributions
+                .get(computerBotContribution)
+                ?.invalidateProjectionFile(userId, botId, kind);
+              // Dropping the resident cache only makes the next read
+              // honest. The notice is what makes an attached browser take
+              // that read, so a capture filed mid-Turn reaches the card in
+              // about a second instead of at the next projection poll.
+              this.stateChannel.noticeComputer();
             },
-            flock: {
-              storage: this.ctx.storage,
-              materializeSettings: async (registration, userId) => {
-                await requireShell().materializeSettings(
-                  { userId, botId: registration.botId },
-                  {
-                    name: registration.initialName,
-                    ...(registration.initialDescription === undefined
-                      ? {}
-                      : { description: registration.initialDescription }),
-                  },
-                );
-              },
-              archiveEligible: (storage) =>
-                requireShell().archiveEligible(storage),
-              tearDown: (identity) => this.tearDown(identity),
-            },
-            computer: {
-              storage: this.stateChannel.computerStorage,
-              workspace: this.backendEnv.WORKSPACE_FILES,
-              providerLabel: "Computer",
-              configured: computerConfigured,
-              openComputer: (userId, botId, effectId) => {
-                const identity = { userId };
-                if (!root.computers.assignment(identity)) {
-                  root.computers.assign(identity, "fly-sprite");
-                }
-                return root.computers.open(identity, { botId }, { effectId });
-              },
+            scheduledDeadlines: (transaction) =>
+              mountedContributions
+                .get(computerBotContribution)
+                ?.scheduledDeadlines(transaction) ?? Promise.resolve([]),
+            scheduledWorkInFlight: () =>
+              mountedContributions
+                .get(computerBotContribution)
+                ?.scheduledWorkInFlight() ?? false,
+            deferScheduledWork: (transaction) =>
+              mountedContributions
+                .get(computerBotContribution)
+                ?.deferScheduledWork(transaction) ?? Promise.resolve(),
+            settleScheduledWork: () =>
+              mountedContributions
+                .get(computerBotContribution)
+                ?.settleScheduledWork() ?? Promise.resolve(),
+            // An archived Bot admits no configuration command; the Flock
+            // Contribution owns that durable lifecycle state.
+            assertLifecycleActive: (storage, botId) => {
+              const flock = mountedContributions.get(flockBotContribution);
+              if (!flock) {
+                throw new Error("Flock Bot Contribution is unavailable");
+              }
+              return flock.assertActive(storage, botId);
             },
           },
-          root,
-        );
-        // The kernel-declared required core set for a Bot, expressed against
-        // the plan's own Contributions: every Bot-host Contribution the plan
-        // declares must have mounted, and each of the three the Bot Durable
-        // Object depends on must be one of them. A Composition that lacks one
-        // never becomes resident.
+          flock: {
+            storage: this.ctx.storage,
+            materializeSettings: async (registration, userId) => {
+              await requireShell().materializeSettings(
+                { userId, botId: registration.botId },
+                {
+                  name: registration.initialName,
+                  ...(registration.initialDescription === undefined
+                    ? {}
+                    : { description: registration.initialDescription }),
+                },
+              );
+            },
+            archiveEligible: (storage) => archiveEligible(storage),
+            tearDown: (identity) => this.tearDown(identity),
+          },
+          computer: {
+            storage: this.stateChannel.computerStorage,
+            workspace: this.backendEnv.WORKSPACE_FILES,
+            providerLabel: "Computer",
+            configured: computerConfigured,
+            openComputer: (userId, botId, effectId) => {
+              const identity = { userId };
+              if (!computers.assignment(identity)) {
+                computers.assign(identity, "fly-sprite");
+              }
+              return computers.open(identity, { botId }, { effectId });
+            },
+          },
+        });
+        // Every Bot-host Contribution the application lists must have
+        // mounted, and each of the three the Bot Durable Object depends on
+        // must be one of them.
         const shell = mounted.get(shellBotContribution);
         const flock = mounted.get(flockBotContribution);
         const computer = mounted.get(computerBotContribution);
@@ -611,19 +611,19 @@ export class BotState extends DurableObject<BotStateEnv> {
           !flock ||
           !computer ||
           mounted.contributions.length !==
-            plannedFoundationBackendContributions(plan).filter(
-              (planned) => planned.host === "bot",
+            backendDescriptorsV1.filter(
+              (descriptor) => descriptor.host === "bot",
             ).length
         ) {
           await mounted.dispose();
-          await root.fiber.dispose();
+          await disposeComputers();
           throw new Error(
             "Foundation requires Shell, Flock and Computer Bot backend Contributions",
           );
         }
         const alarmOwner = shell;
         this.stateChannel.setAlarmRefresher((transaction) =>
-          alarmOwner.refreshScheduledWork(transaction),
+          refreshScheduledWork(alarmOwner.state, transaction),
         );
         return {
           shell,
@@ -631,10 +631,10 @@ export class BotState extends DurableObject<BotStateEnv> {
           computer,
           async dispose() {
             await mounted.dispose();
-            await root.fiber.dispose();
+            await disposeComputers();
           },
         };
-      });
+      })();
       this.mounted = pending;
       // A mount that failed is not a durable verdict. Memoizing the rejection
       // made one transient failure — an artifact read, a User RPC, a member
@@ -723,14 +723,6 @@ export class BotState extends DurableObject<BotStateEnv> {
       generations: routed,
     });
     if (workspace) this.backendEnv.WORKSPACE_FILES = workspace;
-    // The Catalog reader is identity-independent, but it is bound here beside
-    // the other constructed surfaces so the Shell Package reads one
-    // environment and names no Cloudflare type.
-    if (this.env.PACKAGE_CATALOG && !this.backendEnv.PACKAGE_CATALOG_ENTRIES) {
-      this.backendEnv.PACKAGE_CATALOG_ENTRIES = new R2PackageCatalog(
-        this.env.PACKAGE_CATALOG,
-      );
-    }
     if (sync) {
       this.backendEnv.WORKSPACE_SYNC_FILES = sync;
       this.backendEnv.WORKSPACE_SYNC_EFFECTS = new DurableWorkspaceSyncEffects({
@@ -758,10 +750,6 @@ export class BotState extends DurableObject<BotStateEnv> {
     // completeness is the parity item (register row 30b).
     this.backendEnv.AUDIT_SINK = createUserAuditSinkV1(
       rpc as unknown as UserAuditRpc,
-      identity,
-    );
-    this.backendEnv.USAGE_SINK = createUserUsageSinkV1(
-      rpc as unknown as UserUsageRpcV1,
       identity,
     );
     this.surfacesFor = key;
@@ -923,7 +911,7 @@ export class BotState extends DurableObject<BotStateEnv> {
       userId: request.userId,
       botId: request.botId,
     });
-    return shell.readConfiguration(request);
+    return readConfiguration(shell.state, request);
   }
 
   async executeConfiguration(input: unknown) {
@@ -932,7 +920,7 @@ export class BotState extends DurableObject<BotStateEnv> {
       userId: request.userId,
       botId: request.botId,
     });
-    return shell.executeConfiguration(request);
+    return executeConfiguration(shell.state, request);
   }
 
   /** A non-waking projection of this Bot's durable Computer presence. */
@@ -1029,7 +1017,7 @@ export class BotState extends DurableObject<BotStateEnv> {
       botId: request.botId as string,
     };
     const shell = await this.contribution();
-    return shell.isolateInvokeModel(identity, {
+    return isolateInvokeModel(shell.state, identity, {
       runId: request.runId as string,
       sessionId: request.sessionId as string,
       turnId: request.turnId as string,
@@ -1039,38 +1027,37 @@ export class BotState extends DurableObject<BotStateEnv> {
     });
   }
 
-  async isolateInvokeTool(input: unknown) {
-    return (await this.contribution()).isolateInvokeTool(
-      decodeIsolateCallRpcV1(input, decodeIsolateToolRequestV1) as never,
-    );
-  }
-
   async isolateMemoryRead(input: unknown) {
-    return (await this.contribution()).isolateMemoryRead(
+    return isolateMemoryRead(
+      (await this.contribution()).state,
       decodeIsolateCallRpcV1(input, decodeIsolateMemoryReadRequestV1) as never,
     );
   }
 
   async isolateMemoryWrite(input: unknown) {
-    return (await this.contribution()).isolateMemoryWrite(
+    return isolateMemoryWrite(
+      (await this.contribution()).state,
       decodeIsolateCallRpcV1(input, decodeIsolateMemoryWriteRequestV1) as never,
     );
   }
 
   async isolateMemoryForget(input: unknown) {
-    return (await this.contribution()).isolateMemoryForget(
+    return isolateMemoryForget(
+      (await this.contribution()).state,
       decodeIsolateCallRpcV1(input, decodeIsolateMemoryWriteRequestV1) as never,
     );
   }
 
   async isolateWorkspaceRead(input: unknown) {
-    return (await this.contribution()).isolateWorkspaceRead(
+    return isolateWorkspaceRead(
+      (await this.contribution()).state,
       decodeIsolateCallRpcV1(input, decodeIsolateWorkspacePathV1) as never,
     );
   }
 
   async isolateWorkspaceList(input: unknown) {
-    return (await this.contribution()).isolateWorkspaceList(
+    return isolateWorkspaceList(
+      (await this.contribution()).state,
       decodeIsolateCallRpcV1(
         input,
         decodeIsolateWorkspaceListRequestV1,
@@ -1079,13 +1066,15 @@ export class BotState extends DurableObject<BotStateEnv> {
   }
 
   async isolateWorkspaceStat(input: unknown) {
-    return (await this.contribution()).isolateWorkspaceStat(
+    return isolateWorkspaceStat(
+      (await this.contribution()).state,
       decodeIsolateCallRpcV1(input, decodeIsolateWorkspacePathV1) as never,
     );
   }
 
   async isolateWorkspaceWrite(input: unknown) {
-    return (await this.contribution()).isolateWorkspaceWrite(
+    return isolateWorkspaceWrite(
+      (await this.contribution()).state,
       decodeIsolateCallRpcV1(
         input,
         decodeIsolateWorkspaceWriteRequestV1,
@@ -1094,7 +1083,8 @@ export class BotState extends DurableObject<BotStateEnv> {
   }
 
   async isolateWorkspaceDelete(input: unknown) {
-    return (await this.contribution()).isolateWorkspaceDelete(
+    return isolateWorkspaceDelete(
+      (await this.contribution()).state,
       decodeIsolateCallRpcV1(
         input,
         decodeIsolateWorkspaceDeleteRequestV1,
@@ -1103,7 +1093,8 @@ export class BotState extends DurableObject<BotStateEnv> {
   }
 
   async isolateConnection(input: unknown) {
-    return (await this.contribution()).isolateConnection(
+    return isolateConnection(
+      (await this.contribution()).state,
       decodeIsolateCallRpcV1(input, (value) => {
         if (
           typeof value !== "string" ||
@@ -1117,31 +1108,17 @@ export class BotState extends DurableObject<BotStateEnv> {
     );
   }
 
-  async isolateNotify(input: unknown) {
-    return (await this.contribution()).isolateNotify(
-      decodeIsolateCallRpcV1(
-        input,
-        decodeIsolateNotificationRequestV1,
-      ) as never,
-    );
-  }
-
   async isolateSchedule(input: unknown) {
-    return (await this.contribution()).isolateSchedule(
+    return isolateSchedule(
+      (await this.contribution()).state,
       decodeIsolateCallRpcV1(input, decodeIsolateScheduleRequestV1) as never,
-    );
-  }
-
-  async isolateApplets(input: unknown) {
-    return (await this.contribution()).isolateApplets(
-      decodeIsolateCallRpcV1(input, decodeIsolateAppletsRequestV1) as never,
     );
   }
 
   /** The Session's focused Applet (plan §6). One per Session by decision D10. */
   async readFocusedApplet(input: unknown) {
     const identity = decodeBotIdentityRpcV1(input);
-    return (await this.contribution()).readFocusedApplet(identity);
+    return readFocusedApplet((await this.contribution()).state, identity);
   }
 
   async setFocusedApplet(input: unknown) {
@@ -1150,7 +1127,8 @@ export class BotState extends DurableObject<BotStateEnv> {
       botId: rpcBotId,
       appletId: rpcAppletIdOrNull,
     });
-    return (await this.contribution()).setFocusedApplet(
+    return setFocusedApplet(
+      (await this.contribution()).state,
       {
         userId: request.userId as string,
         botId: request.botId as string,
@@ -1162,7 +1140,7 @@ export class BotState extends DurableObject<BotStateEnv> {
   async resolveConfiguration(input: unknown) {
     const identity = decodeBotIdentityRpcV1(input);
     const { shell } = await this.materialized(identity);
-    return shell.resolveConfiguration(identity);
+    return resolveConfiguration(shell.state, identity);
   }
 
   async run(input: unknown) {
@@ -1197,86 +1175,6 @@ export class BotState extends DurableObject<BotStateEnv> {
   /** This object's bounded, durable audit outbox. */
   private auditOutbox(): AuditOutboxV1 {
     return new AuditOutboxV1(this.ctx.storage);
-  }
-
-  /** This object's bounded, durable usage delivery outbox. */
-  private usageOutbox(): UsageOutboxV1 {
-    return new UsageOutboxV1(this.ctx.storage);
-  }
-
-  /** This object's bounded, durable Voice-answer delivery outbox. */
-  private voiceAnswerOutbox(): VoiceAnswerOutboxV1 {
-    return new VoiceAnswerOutboxV1(this.ctx.storage);
-  }
-
-  private voiceAnswerSink(userId: string): VoiceAnswerSinkV1 {
-    const namespace = this.env.USER_CONFIGURATIONS;
-    const rpc = namespace.get(namespace.idFromName(userId)) as unknown as {
-      recordVoiceAnswer(input: unknown): Promise<void>;
-    };
-    return {
-      recordVoiceAnswer: (delivery) =>
-        rpc.recordVoiceAnswer({
-          schemaVersion: 1,
-          userId,
-          delivery,
-        }),
-    };
-  }
-
-  /** Queues a Voice-origin Turn's first text send after `turn/end` is durable. */
-  private async recordSettledVoiceAnswer(input: {
-    userId: string;
-    botId: string;
-    runId: string;
-    turn: number;
-    origin?: StoredRunOriginV1;
-    events: readonly SessionEvent[];
-  }): Promise<void> {
-    const delivery = voiceAnswerFromSettledTurnV1(input);
-    if (!delivery) return;
-    await this.voiceAnswerOutbox().append(delivery);
-    await this.drainVoiceAnswerOutbox(input.userId);
-  }
-
-  private async drainVoiceAnswerOutbox(userId?: string): Promise<void> {
-    const identity =
-      userId ?? (await this.ctx.storage.get<BotIdentity>(IDENTITY_KEY))?.userId;
-    if (!identity) return;
-    try {
-      await this.voiceAnswerOutbox().drain(this.voiceAnswerSink(identity));
-    } catch {
-      // The delivery stays in the durable outbox for this object's next alarm.
-    }
-  }
-
-  /**
-   * Queues the exact `model/usage` events from one just-settled Turn.
-   *
-   * This callback runs for chat, Routine, recovery, Subagent, and agent-lane
-   * Turns at the Shell's common loop boundary. Queueing precedes the
-   * cross-object call; ledger ids make every retry idempotent.
-   */
-  private async recordSettledUsage(input: {
-    botId: string;
-    runId: string;
-    turn: number;
-    events: readonly SessionEvent[];
-  }): Promise<void> {
-    const sink = this.backendEnv.USAGE_SINK;
-    if (!sink) return;
-    await this.usageOutbox().append(usageEntriesFromTurnV1(input));
-    await this.drainUsageOutbox();
-  }
-
-  private async drainUsageOutbox(): Promise<void> {
-    const sink = this.backendEnv.USAGE_SINK;
-    if (!sink) return;
-    try {
-      await this.usageOutbox().drain(sink);
-    } catch {
-      // Still durable and retried by this object's next alarm.
-    }
   }
 
   /**
@@ -1509,10 +1407,9 @@ export class BotState extends DurableObject<BotStateEnv> {
     for (const entry of listing.entries) {
       const relative = entry.path.path.slice(appletId.length + 1);
       if (!relative) continue;
-      // Machine output is not source: `dist/` is what `applet build` wrote,
-      // `.wrangler/` is a toolchain cache, `node_modules/` is a dependency
-      // tree. The canvas shows what the Bot wrote, and the publish reads the
-      // build.
+      // Machine output is not source: `dist/`, `.wrangler/` and
+      // `node_modules/` are build leftovers a Bot may have written, and the
+      // canvas shows the files it authors.
       if (appletSourceArtefactPathV1(relative)) continue;
       if (bytes + entry.generation.size > APPLET_SOURCE_MAX_BYTES_V1) {
         truncated = true;
@@ -1540,7 +1437,7 @@ export class BotState extends DurableObject<BotStateEnv> {
   }
 
   /**
-   * The outcome the Bot last recorded for `applet check` or `applet build`.
+   * The outcome the Bot last recorded for `applet_check`.
    * Until the Applet authority records one, this is honestly `unknown` rather
    * than a green tick nobody earned.
    */
@@ -1562,13 +1459,13 @@ export class BotState extends DurableObject<BotStateEnv> {
   async listSkills(input: unknown) {
     const identity = decodeBotIdentityRpcV1(input);
     const { shell } = await this.materialized(identity);
-    return shell.listSkills(identity);
+    return listSkills(shell.state, identity);
   }
 
   async listPackageUi(input: unknown) {
     const identity = decodeBotIdentityRpcV1(input);
     const { shell } = await this.materialized(identity);
-    return shell.listPackageUi(identity);
+    return listPackageUi(shell.state, identity);
   }
 
   async runPackageUiTool(input: unknown) {
@@ -1583,8 +1480,8 @@ export class BotState extends DurableObject<BotStateEnv> {
     };
     const { shell } = await this.materialized(identity);
     const command =
-      request.command as import("@frockbot/kernel-contracts").PackageIframeToolCommandV1;
-    const turn = await shell.runPackageUiTool(identity, command);
+      request.command as import("@frockbot/core/contracts").PackageIframeToolCommandV1;
+    const turn = await runPackageUiTool(shell.state, identity, command);
     await this.projectSettledRun(shell, identity, command.commandId);
     await this.projectSettledAudit(shell, identity, command.commandId);
     return turn;
@@ -1598,38 +1495,6 @@ export class BotState extends DurableObject<BotStateEnv> {
    * instruction root — so an imported Skill is loadable on the Bot's first
    * Turn and its provenance records who put it there.
    */
-  /**
-   * A file written into one of the User's durable roots, as the User. The
-   * gateway's seed door calls this in an environment with no Computer; see
-   * `writeUserWorkspaceFile` on the Shell Contribution for why it is a User
-   * write and nothing wider.
-   */
-  async writeUserWorkspaceFileV1(input: unknown) {
-    const request = decodeRpcEnvelopeV1(
-      input,
-      {
-        userId: rpcIdentifier,
-        botId: rpcBotId,
-        root: rpcDecoded(decodeWorkspaceRootV1),
-        path: rpcString(1_024),
-        bytesBase64: rpcString(8 * 1024 * 1024),
-      },
-      { mediaType: rpcString(128) },
-    );
-    const identity = {
-      userId: request.userId as string,
-      botId: request.botId as string,
-    };
-    const { shell } = await this.materialized(identity);
-    return shell.writeUserWorkspaceFile(identity, {
-      root: request.root as WorkspaceRootV1,
-      path: request.path as string,
-      bytes: Uint8Array.from(atob(request.bytesBase64 as string), (character) =>
-        character.charCodeAt(0),
-      ),
-      ...(request.mediaType ? { mediaType: request.mediaType as string } : {}),
-    });
-  }
 
   async writeUserSkill(input: unknown) {
     const request = decodeRpcEnvelopeV1(input, {
@@ -1645,7 +1510,7 @@ export class BotState extends DurableObject<BotStateEnv> {
       botId: request.botId as string,
     };
     const { shell } = await this.materialized(identity);
-    return shell.writeUserSkill(identity, {
+    return writeUserSkill(shell.state, identity, {
       slug: request.slug as string,
       name: request.name as string,
       description: request.description as string,
@@ -1663,7 +1528,7 @@ export class BotState extends DurableObject<BotStateEnv> {
   async listOwnSkillDocuments(input: unknown) {
     const identity = decodeBotIdentityRpcV1(input);
     const { shell } = await this.materialized(identity);
-    return shell.listOwnSkillDocuments(identity);
+    return listOwnSkillDocuments(shell.state, identity);
   }
 
   async stopRun(input: unknown) {
@@ -1677,28 +1542,18 @@ export class BotState extends DurableObject<BotStateEnv> {
       botId: request.botId as string,
     };
     const { shell } = await this.materialized(identity);
-    return shell.stopRun(identity, request.command as ClientRunStopCommandV1);
-  }
-
-  async reconcileRun(input: unknown) {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      botId: rpcBotId,
-      runId: rpcIdentifier,
-    });
-    const identity = {
-      userId: request.userId as string,
-      botId: request.botId as string,
-    };
-    const { shell } = await this.materialized(identity);
-    return shell.reconcileRun(identity, request.runId as string);
+    return stopRun(
+      shell.state,
+      identity,
+      request.command as ClientRunStopCommandV1,
+    );
   }
 
   /** The Bot's unread projection; the Bot Durable Object derives the count. */
   async readUnread(input: unknown) {
     const identity = decodeBotIdentityRpcV1(input);
     const { shell } = await this.materialized(identity);
-    return shell.readUnread(identity);
+    return readUnread(shell.state, identity);
   }
 
   /** `bot/mark-read` / `bot/mark-unread`, idempotent on the command id. */
@@ -1713,7 +1568,8 @@ export class BotState extends DurableObject<BotStateEnv> {
       botId: request.botId as string,
     };
     const { shell } = await this.materialized(identity);
-    return shell.executeUnreadCommand(
+    return executeUnreadCommand(
+      shell.state,
       identity,
       request.command as BotUnreadCommandV1,
     );
@@ -1723,7 +1579,7 @@ export class BotState extends DurableObject<BotStateEnv> {
   async listApprovals(input: unknown) {
     const identity = decodeBotIdentityRpcV1(input);
     const { shell } = await this.materialized(identity);
-    return shell.listApprovals(identity);
+    return listApprovals(shell.state, identity);
   }
 
   /**
@@ -1742,7 +1598,8 @@ export class BotState extends DurableObject<BotStateEnv> {
       botId: request.botId as string,
     };
     const { shell } = await this.materialized(identity);
-    return shell.decideApproval(
+    return decideApproval(
+      shell.state,
       identity,
       request.approvalId as string,
       request.command as ApprovalDecisionCommandV1,
@@ -1753,7 +1610,7 @@ export class BotState extends DurableObject<BotStateEnv> {
     const identity = decodeBotIdentityRpcV1(input);
     const { shell } = await this.materialized(identity);
     await shell.validateIdentity(identity);
-    return shell.listNotifications();
+    return listNotifications(shell.state);
   }
 
   async acknowledgeNotification(input: unknown) {
@@ -1768,7 +1625,10 @@ export class BotState extends DurableObject<BotStateEnv> {
     };
     const { shell } = await this.materialized(identity);
     await shell.validateIdentity(identity);
-    return shell.acknowledgeNotification(request.notificationId as string);
+    return acknowledgeNotification(
+      shell.state,
+      request.notificationId as string,
+    );
   }
 
   /**
@@ -1776,14 +1636,14 @@ export class BotState extends DurableObject<BotStateEnv> {
    * same way the other Bot RPCs do: a Bot that is not this User's is not found.
    *
    * This is the *parent* object's answer. A Subagent Durable Object has no
-   * route of its own and holds no task list: it holds one Session, and ADR 0017
-   * leaves every authority here.
+   * route of its own and holds no task list: it holds one Session, and every
+   * authority stays here.
    */
   async listTasks(input: unknown) {
     const identity = decodeBotIdentityRpcV1(input);
     const { shell } = await this.materialized(identity);
     await shell.validateIdentity(identity);
-    return shell.listTasks(identity);
+    return listTasks(shell.state, identity);
   }
 
   /** One task, by id. The parent object's answer; a child holds no list. */
@@ -1798,7 +1658,7 @@ export class BotState extends DurableObject<BotStateEnv> {
       botId: request.botId as string,
     };
     const { shell } = await this.materialized(identity);
-    return shell.readTask(identity, request.taskId as string);
+    return readTask(shell.state, identity, request.taskId as string);
   }
 
   /**
@@ -1818,10 +1678,10 @@ export class BotState extends DurableObject<BotStateEnv> {
       botId: request.botId as string,
     };
     const { shell } = await this.materialized(identity);
-    return shell.stopTaskForUser(identity, request.taskId as string);
+    return stopTaskForUser(shell.state, identity, request.taskId as string);
   }
 
-  /** The Subagent Durable Object's cancellation door (ADR 0017). */
+  /** The Subagent Durable Object's cancellation door. */
   async stopSubagentTask(input: unknown) {
     const request = decodeRpcEnvelopeV1(input, {
       userId: rpcIdentifier,
@@ -1833,11 +1693,11 @@ export class BotState extends DurableObject<BotStateEnv> {
       botId: request.botId as string,
     };
     const { shell } = await this.materialized(identity);
-    return shell.stopSubagentTask(identity, request.taskId as string);
+    return stopSubagentTask(shell.state, identity, request.taskId as string);
   }
 
   /**
-   * The Subagent Durable Object's door (ADR 0017).
+   * The Subagent Durable Object's door.
    *
    * It records the task and arms its own alarm; the Turn runs on that alarm.
    * The parent is still inside the Turn that dispatched when this returns, so
@@ -1854,7 +1714,8 @@ export class BotState extends DurableObject<BotStateEnv> {
       botId: request.botId as string,
     };
     const { shell } = await this.materialized(identity);
-    return shell.acceptSubagentTask(
+    return acceptSubagentTask(
+      shell.state,
       identity,
       request.request as SubagentRunTaskRequestV1,
     );
@@ -1872,12 +1733,12 @@ export class BotState extends DurableObject<BotStateEnv> {
       botId: request.botId as string,
     };
     const { shell } = await this.materialized(identity);
-    return shell.readSubagentTaskContext(request.taskId as string);
+    return readSubagentTaskContext(shell.state, request.taskId as string);
   }
 
   /**
    * The messages a parent has queued for one of its tasks, claimed by the
-   * child that is running it (ADR 0017).
+   * child that is running it.
    *
    * The claim marks what it hands over in the parent's own transaction, so a
    * child that retries a step reads the marks back rather than the message.
@@ -1893,7 +1754,7 @@ export class BotState extends DurableObject<BotStateEnv> {
       botId: request.botId as string,
     };
     const { shell } = await this.materialized(identity);
-    return shell.claimTaskMessages(identity, request.taskId as string);
+    return claimTaskMessages(shell.state, identity, request.taskId as string);
   }
 
   /** One terminal task outcome, recorded on the parent. Idempotent per task. */
@@ -1909,7 +1770,8 @@ export class BotState extends DurableObject<BotStateEnv> {
       botId: request.botId as string,
     };
     const { shell } = await this.materialized(identity);
-    return shell.settleTask(
+    return settleTask(
+      shell.state,
       identity,
       request.taskId as string,
       request.outcome as TaskOutcomeV1,
@@ -1931,35 +1793,7 @@ export class BotState extends DurableObject<BotStateEnv> {
     };
     const { shell } = await this.materialized(identity);
     await shell.validateIdentity(identity);
-    return shell.listRoutines(identity);
-  }
-
-  async listRoutineTriggers(input: unknown) {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      botId: rpcBotId,
-    });
-    const identity = {
-      userId: request.userId as string,
-      botId: request.botId as string,
-    };
-    const { shell } = await this.materialized(identity);
-    return shell.listRoutineTriggers(identity);
-  }
-  async deliverConnectionEvent(input: unknown) {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      botId: rpcBotId,
-      delivery: rpcDecoded(decodeConnectionEventDeliveryV1),
-    });
-    const identity = {
-      userId: request.userId as string,
-      botId: request.botId as string,
-    };
-    const { shell } = await this.materialized(identity);
-    return shell.deliverConnectionEvent(
-      request.delivery as ConnectionEventDeliveryV1,
-    );
+    return listRoutines(shell.state, identity);
   }
 
   /** One Routine command, applied durably with the User recorded as writer. */
@@ -1975,7 +1809,8 @@ export class BotState extends DurableObject<BotStateEnv> {
     };
     const { shell } = await this.materialized(identity);
     await shell.validateIdentity(identity);
-    return shell.executeRoutineCommand(
+    return executeRoutineCommand(
+      shell.state,
       identity,
       request.command as RoutineCommandV1,
     );
@@ -2002,7 +1837,10 @@ export class BotState extends DurableObject<BotStateEnv> {
       botId: request.botId as string,
     };
     const { shell } = await this.materialized(identity);
-    return shell.deliverRoutineHook(request.delivery as RoutineHookDeliveryV1);
+    return deliverRoutineHook(
+      shell.state,
+      request.delivery as RoutineHookDeliveryV1,
+    );
   }
 
   /**
@@ -2024,7 +1862,8 @@ export class BotState extends DurableObject<BotStateEnv> {
       botId: request.botId as string,
     };
     const { shell } = await this.materialized(identity);
-    return shell.deliverMachineResult(
+    return deliverMachineResult(
+      shell.state,
       request.delivery as MachineResultDeliveryV1,
     );
   }
@@ -2042,7 +1881,7 @@ export class BotState extends DurableObject<BotStateEnv> {
     };
     const { shell } = await this.materialized(identity);
     await shell.validateIdentity(identity);
-    return shell.listRoutineRuns(identity, request.routineId as string);
+    return listRoutineRuns(shell.state, identity, request.routineId as string);
   }
 
   /**
@@ -2062,7 +1901,8 @@ export class BotState extends DurableObject<BotStateEnv> {
     };
     const { shell } = await this.materialized(identity);
     await shell.validateIdentity(identity);
-    return shell.readRoutineRun(
+    return readRoutineRun(
+      shell.state,
       identity,
       request.routineId as string,
       request.runId as string,
@@ -2081,7 +1921,7 @@ export class BotState extends DurableObject<BotStateEnv> {
     };
     const { shell } = await this.materialized(identity);
     await shell.validateIdentity(identity);
-    return shell.listRoutineInbox(identity);
+    return listRoutineInbox(shell.state, identity);
   }
 
   /** Acknowledging inbox entries; an explicit command, never a read. */
@@ -2097,7 +1937,8 @@ export class BotState extends DurableObject<BotStateEnv> {
     };
     const { shell } = await this.materialized(identity);
     await shell.validateIdentity(identity);
-    return shell.executeRoutineInboxCommand(
+    return executeRoutineInboxCommand(
+      shell.state,
       identity,
       request.command as RoutineInboxCommandV1,
     );
@@ -2127,7 +1968,8 @@ export class BotState extends DurableObject<BotStateEnv> {
     };
     const { shell } = await this.materialized(identity);
     await shell.validateIdentity(identity);
-    return shell.listCompositionGenerations(
+    return listCompositionGenerations(
+      shell.state,
       identity,
       request.query as { limit: number; cursor?: string },
     );
@@ -2149,7 +1991,8 @@ export class BotState extends DurableObject<BotStateEnv> {
     };
     const { shell } = await this.materialized(identity);
     await shell.validateIdentity(identity);
-    return shell.getCompositionGeneration(
+    return getCompositionGeneration(
+      shell.state,
       identity,
       request.generationId as string,
     );
@@ -2172,7 +2015,7 @@ export class BotState extends DurableObject<BotStateEnv> {
     }
     const { shell } = await this.materialized(identity);
     await shell.validateIdentity(identity);
-    return shell.revertComposition(identity, command);
+    return revertComposition(shell.state, identity, command);
   }
 
   async listConversations(input: unknown) {
@@ -2215,93 +2058,6 @@ export class BotState extends DurableObject<BotStateEnv> {
     const { shell } = await this.materialized(identity);
     await shell.validateIdentity(identity);
     return shell.listRuns(request.query as ClientRunListQueryV1);
-  }
-
-  /**
-   * Bounded Bot activity for Voice. Every source is this object's durable
-   * run/task/inbox state; no Computer interface is touched.
-   */
-  async readVoiceActivity(input: unknown): Promise<VoiceBotActivityV1> {
-    const request = decodeRpcEnvelopeV1(
-      input,
-      { userId: rpcIdentifier, botId: rpcBotId },
-      { since: rpcString(64) },
-    );
-    const identity = {
-      userId: request.userId as string,
-      botId: request.botId as string,
-    };
-    const { shell } = await this.materialized(identity);
-    await shell.validateIdentity(identity);
-    const since = request.since as string | undefined;
-    if (since && !Number.isFinite(Date.parse(since))) {
-      throw new Error("Voice activity since must be an ISO timestamp");
-    }
-    const [runs, tasks, pendingInbox] = await Promise.all([
-      shell.listRuns({ schemaVersion: 1 }),
-      shell.listTasks(identity),
-      shell.pendingInputCount(identity),
-    ]);
-    return {
-      botId: identity.botId,
-      since: since ?? "all",
-      runs: runs.runs
-        .filter((run) => !since || run.admittedAt >= since)
-        .slice(0, 12)
-        .map((run) => ({
-          runId: run.runId,
-          status: run.status,
-          startedAt: run.admittedAt,
-          ...(run.partialText
-            ? { partialText: run.partialText.slice(0, 1_000) }
-            : {}),
-        })),
-      tasks: tasks.tasks
-        .filter((task) => task.status === "queued" || task.status === "running")
-        .slice(0, 12)
-        .map((task) => ({
-          taskId: task.taskId,
-          title: task.description.slice(0, 240),
-          status: task.status,
-        })),
-      pendingInbox: Math.min(pendingInbox, 128),
-    };
-  }
-
-  /** Search one Memory tier from durable Workspace files, never a Computer. */
-  async searchVoiceMemory(input: unknown): Promise<VoiceMemoryHitV1[]> {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      botId: rpcBotId,
-      query: rpcString(512),
-      scope: rpcEnum(["user", "bot"]),
-    });
-    const identity = {
-      userId: request.userId as string,
-      botId: request.botId as string,
-    };
-    const { shell } = await this.materialized(identity);
-    await shell.validateIdentity(identity);
-    const files = this.backendEnv.MEMORY_WORKSPACE_FILES;
-    if (!files) return [];
-    const scope = request.scope as "user" | "bot";
-    const root =
-      scope === "user" ? userMemoryRootV1(identity) : botMemoryRootV1(identity);
-    const listing = await readAllMemoryDocumentsV1(files, [root]);
-    const index = await buildMemoryIndexV1(listing.documents);
-    const results = await searchMemoryV1({
-      index,
-      query: request.query as string,
-      maxResults: 12,
-      scope,
-    });
-    return results.map((result) => ({
-      scope,
-      ...(scope === "bot" ? { botId: identity.botId } : {}),
-      path: result.path.slice(0, 512),
-      snippet: result.snippet.slice(0, 700),
-      score: result.score ?? 0,
-    }));
   }
 
   /**
@@ -2395,12 +2151,6 @@ export class BotState extends DurableObject<BotStateEnv> {
         await Promise.all([
           loggedEntryV1("Bot audit outbox drain", () =>
             this.drainAuditOutbox(),
-          ),
-          loggedEntryV1("Bot usage outbox drain", () =>
-            this.drainUsageOutbox(),
-          ),
-          loggedEntryV1("Bot Voice answer outbox drain", () =>
-            this.drainVoiceAnswerOutbox(),
           ),
         ]);
       }

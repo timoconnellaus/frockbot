@@ -1,4 +1,3 @@
-import { createComposioFake } from "../test/composio-fake.js";
 // The browser end-to-end harness.
 //
 // It boots the production serving path and nothing else: the real client
@@ -14,6 +13,13 @@ import { createComposioFake } from "../test/composio-fake.js";
 // `wrangler dev`), lifted here so the test layer runs the developer's own
 // path rather than a second one.
 //
+// The Applet build service is real too: `apps/applet-build` runs under its own
+// `wrangler dev` in the same dev service registry, so the app's `APPLET_BUILD`
+// binding resolves and an Applet is compiled by the container production
+// compiles it with. That needs Docker; `appletBuildAvailableV1` says whether
+// this machine has it, and the one spec that builds an Applet fails with that
+// sentence rather than passing without having built anything.
+//
 // The providers are the only things that are not real. `wrangler dev` has no
 // `outboundService` knob, so the Worker's outbound `fetch` is the machine's,
 // and a test must not depend on https://ollama.com. Instead this harness runs
@@ -23,7 +29,7 @@ import { createComposioFake } from "../test/composio-fake.js";
 // test-only branch. Frock AI is an auxiliary local Wrangler process,
 // discovered through Wrangler's dev service registry and bound under `AI` at
 // the Gateway and native-image seams.
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createServer as createHttpServer, type Server } from "node:http";
 import { createWriteStream, mkdirSync, type WriteStream } from "node:fs";
 import { mkdir, readFile, rm } from "node:fs/promises";
@@ -100,12 +106,11 @@ function unauthorized(): { status: number; body: string } {
  * A fake Ollama server.
  *
  * The authentication behaviour is the one measured against https://ollama.com
- * on 2026-08-31 and recorded in `docs/research/ollama-cloud-auth.md`, and the
- * same one `test/harness/miniflare.ts` reproduces for the workerd layers: the
- * catalog reads answer 200 for any key at all, and only `POST /api/chat` and
- * `POST /v1/chat/completions` authenticate. Reproducing that asymmetry is what
- * lets a spec prove a Connection is validated by an inference call and not by a
- * catalog read.
+ * on 2026-08-31, and the same one `test/harness/miniflare.ts` reproduces for
+ * the workerd layers: the catalog reads answer 200 for any key at all, and
+ * only `POST /api/chat` and `POST /v1/chat/completions` authenticate.
+ * Reproducing that asymmetry is what lets a spec prove a Connection is
+ * validated by an inference call and not by a catalog read.
  *
  * `POST /__e2e/chat-mode` is not an Ollama route: it lets a spec revoke the key
  * mid-run, so a Turn can fail at the provider after the Connection is ready.
@@ -171,40 +176,9 @@ export function startFakeOllama(port: number): Promise<{
   close(): Promise<void>;
 }> {
   let chatMode: FakeOllamaChatMode = "ok";
-  const composio = createComposioFake("https://connect.example.test");
 
   const server: Server = createHttpServer((request, response) => {
     const url = new URL(request.url ?? "/", `http://127.0.0.1:${port}`);
-    if (url.pathname.startsWith("/composio/")) {
-      const chunks: Buffer[] = [];
-      request.on("data", (chunk: Buffer) => chunks.push(chunk));
-      request.on("end", () => {
-        const providerUrl = new URL(url);
-        providerUrl.pathname = providerUrl.pathname.replace("/composio", "");
-        void composio(
-          new Request(providerUrl, {
-            method: request.method,
-            headers: {
-              "x-api-key": String(request.headers["x-api-key"] ?? ""),
-            },
-            ...(request.method !== "GET"
-              ? { body: Buffer.concat(chunks).toString("utf8") }
-              : {}),
-          }),
-        )
-          .then(async (result) => {
-            response.writeHead(result.status, {
-              "content-type": "application/json",
-            });
-            response.end(await result.text());
-          })
-          .catch(() => {
-            response.writeHead(500);
-            response.end("Provider stand-in failed");
-          });
-      });
-      return;
-    }
     const header = request.headers.authorization ?? "";
     const key = header.toLowerCase().startsWith("bearer ")
       ? header.slice(7)
@@ -453,58 +427,6 @@ async function waitForManifest(baseUrl: string): Promise<void> {
   );
 }
 
-/**
- * Seed the remote Package Catalog the way the production deploy does: build one
- * immutable generation with `scripts/publish-catalog.ts`, then put its
- * documents into the local bucket. Without it `GET /catalog/v1/index` answers
- * 503 and the Plugins surface opens with a load error on every spec.
- *
- * Only the pointer and the index are uploaded. Entry documents are read one at
- * a time, when a User opens a Catalog row, and no spec opens one; each
- * `wrangler r2 object put` costs several seconds of wrangler start-up, and 23
- * unread entries would cost more than the whole browser layer. A spec that
- * opens a row must seed that entry — its key is
- * `catalog/<generation>/entry/<catalogId>.json` in the same directory.
- */
-async function seedPackageCatalog(persistDirectory: string): Promise<void> {
-  const source = join(persistDirectory, "catalog-source");
-  await run("bun", [
-    resolve(cloudflareRoot, "../../scripts/publish-catalog.ts"),
-    "--out",
-    source,
-  ]);
-  const pointerPath = join(source, "catalog", "current");
-  const pointer = JSON.parse(await readFile(pointerPath, "utf8")) as {
-    generation?: unknown;
-  };
-  if (typeof pointer.generation !== "string") {
-    throw new Error("the published Catalog pointer names no generation");
-  }
-  const indexKey = `catalog/${pointer.generation}/index.json`;
-  // The index first, so the pointer never names a generation that is not there.
-  for (const [key, file] of [
-    [indexKey, join(source, "catalog", pointer.generation, "index.json")],
-    ["catalog/current", pointerPath],
-  ] as const) {
-    await run("bunx", [
-      "wrangler",
-      "--env",
-      "e2e",
-      "r2",
-      "object",
-      "put",
-      `frockbot-package-catalog/${key}`,
-      "--file",
-      file,
-      "--content-type",
-      "application/json",
-      "--local",
-      "--persist-to",
-      persistDirectory,
-    ]);
-  }
-}
-
 /** The bearer token `/api/debug/*` accepts in an end-to-end run. */
 export const E2E_DEBUG_TOKEN = "e2e-debug-token";
 
@@ -513,59 +435,22 @@ export function e2ePersistDirectory(port: number): string {
   return join(tmpdir(), `frockbot-e2e-${port}`);
 }
 
-/** The bearer token the Workspace seed door accepts in an end-to-end run. */
-export const E2E_WORKSPACE_SEED_TOKEN = "e2e-workspace-seed-token";
+/** The shared secret the app Worker and the build service present each other. */
+export const E2E_APPLET_BUILD_TOKEN = "e2e-applet-build-token";
 
 /**
- * Land one file in one of the User's durable roots while the Worker is up.
+ * Whether this machine can run the Applet build service.
  *
- * Production has exactly one writer of a durable root's bytes besides the
- * Package that owns it: the Computer's sync. An end-to-end run has no Computer,
- * so a spec that needs a file "the Computer wrote" — an Applet's `dist/` after
- * `applet build` — writes it through the gateway's seed door, which the Bot
- * Durable Object serves as a User write over the same store and generation
- * record the sync uses. Nothing else is faked: the publish that reads it is
- * real.
- *
- * Over HTTP rather than a second `wrangler r2 object put` against the running
- * server's `--persist-to` directory: that second process shares the local
- * store's files with the live one, and on Linux it took the dev server down.
+ * `wrangler dev` builds and runs the container's image, which needs a running
+ * Docker daemon. A spec calls this to say so out loud: an Applet build that
+ * cannot happen is a spec that fails with the reason, never one that quietly
+ * proves nothing.
  */
-export async function seedWorkspaceFile(
-  baseUrl: string,
-  userId: string,
-  botId: string,
-  root: unknown,
-  path: string,
-  file: string,
-  mediaType: string,
-): Promise<void> {
-  const bytes = await readFile(file);
-  const response = await fetch(
-    `${baseUrl}/api/workspace-seed/${encodeURIComponent(userId)}/${encodeURIComponent(botId)}`,
-    {
-      method: "PUT",
-      headers: {
-        authorization: `Bearer ${E2E_WORKSPACE_SEED_TOKEN}`,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        root,
-        path,
-        bytesBase64: Buffer.from(bytes).toString("base64"),
-        mediaType,
-      }),
-    },
+export function appletBuildAvailableV1(): boolean {
+  return (
+    spawnSync("docker", ["info"], { stdio: "ignore", timeout: 30_000 })
+      .status === 0
   );
-  const outcome = (await response.json()) as {
-    status?: string;
-    reason?: string;
-  };
-  if (!response.ok || outcome.status !== "written") {
-    throw new Error(
-      `seeding ${path} failed: ${response.status} ${outcome.reason ?? ""}`,
-    );
-  }
 }
 
 export interface HarnessOptions {
@@ -575,6 +460,8 @@ export interface HarnessOptions {
   ollamaPort: number;
   /** The port the auxiliary Frock AI RPC Worker listens on. */
   frockAiPort: number;
+  /** The port the Applet build service listens on, when Docker can run it. */
+  appletBuildPort: number;
 }
 
 export interface RunningHarness {
@@ -583,6 +470,8 @@ export interface RunningHarness {
   frockAiUrl: string;
   /** The file both `wrangler dev` processes are teed into. */
   logFile: string;
+  /** Absent when Docker is not running and the build service was not started. */
+  appletBuildUrl?: string;
   /** How many times each supervised server has had to be restarted. */
   restarts(): { worker: number; frockAi: number };
   stop(): Promise<void>;
@@ -669,16 +558,22 @@ export async function startHarness(
     options.port,
     options.ollamaPort,
     options.frockAiPort,
+    options.appletBuildPort,
   ]);
   const workerInspectorPort = await reserveFreePort({ taken: reservedHere });
   const frockAiInspectorPort = await reserveFreePort({ taken: reservedHere });
+  const appletBuildInspectorPort = await reserveFreePort({
+    taken: reservedHere,
+  });
 
   let ollama: Awaited<ReturnType<typeof startFakeOllama>> | undefined;
   let frockAi: SupervisedProcess | undefined;
+  let appletBuild: SupervisedProcess | undefined;
   let worker: SupervisedProcess | undefined;
 
   const stop = async (): Promise<void> => {
     if (worker) await worker.stop();
+    if (appletBuild) await appletBuild.stop();
     if (frockAi) await frockAi.stop();
     if (ollama) await ollama.close();
     await new Promise<void>((closed) => log.end(closed));
@@ -722,6 +617,34 @@ export async function startHarness(
       },
     );
 
+  const spawnAppletBuild = (): ChildProcess =>
+    spawn(
+      "bunx",
+      [
+        "wrangler",
+        "dev",
+        "--ip",
+        "127.0.0.1",
+        "--port",
+        String(options.appletBuildPort),
+        "--inspector-port",
+        String(appletBuildInspectorPort),
+        // The same secret the app Worker presents, and the container re-checks.
+        "--var",
+        `APPLET_BUILD_TOKEN:${E2E_APPLET_BUILD_TOKEN}`,
+        "--persist-to",
+        persistDirectory,
+        "--log-level",
+        "warn",
+      ],
+      {
+        cwd: resolve(cloudflareRoot, "../applet-build"),
+        stdio: ["ignore", "pipe", "pipe"],
+        detached: true,
+        env: childEnvironment,
+      },
+    );
+
   const spawnWorker = (): ChildProcess =>
     spawn(
       "bunx",
@@ -744,21 +667,12 @@ export async function startHarness(
         "--var",
         "ALLOW_DEVELOPMENT_AUTH:true",
         "--var",
-        "COMPOSIO_API_KEY:test-composio-backend-key",
-        "--var",
-        "COMPOSIO_WEBHOOK_SECRET:test-provider-webhook-secret",
-        "--var",
-        `COMPOSIO_TEST_URL:http://127.0.0.1:${options.ollamaPort}/composio/api/v3.1`,
-        "--var",
         `BETTER_AUTH_URL:http://127.0.0.1:${options.port}`,
         "--var",
-        "FROCKBOT_AUTHORIZATION_STATE_SECRET:e2e-composio-state-independent-secret-0123456789",
-
-        "--var",
         `CREDENTIAL_KEYRING:${E2E_CREDENTIAL_KEYRING}`,
-        // No Computer: the Sprite is unreachable from workerd (ADR 0004) and
-        // no spec touches it. An empty token is what production hands a Worker
-        // with no Computer configured.
+        // No Computer: the Sprite is unreachable from workerd and no spec
+        // touches it. An empty token is what production hands a Worker with
+        // no Computer configured.
         "--var",
         "SPRITES_TOKEN:",
         // better-auth needs a secret to construct; no spec signs in with it.
@@ -771,20 +685,12 @@ export async function startHarness(
         // transcript deliberately hides them — when it has to explain a state.
         "--var",
         `DEBUG_TOKEN:${E2E_DEBUG_TOKEN}`,
-        // The Workspace seed door: how a run with no Computer lands a file
-        // the Computer would have written. See `seedWorkspaceFile`.
+        // The Applet build service, when this machine has Docker. The binding
+        // is declared either way; without the token the app refuses a publish
+        // with "the build service is unavailable" rather than calling a
+        // service that is not there.
         "--var",
-        `WORKSPACE_SEED_TOKEN:${E2E_WORKSPACE_SEED_TOKEN}`,
-        // Dictation's provider, faked like every other one: the `VoiceSession`
-        // object opens this instead of OpenAI or the AI Gateway, so the layer
-        // needs no key and spends nothing. Production sets no such var.
-        "--var",
-        `VOICE_UPSTREAM_URL:ws://127.0.0.1:${options.frockAiPort}/v1/realtime`,
-        "--var",
-        // Gemini Live's fake provider. The test-only query also shortens the
-        // production two-minute silence ceiling so the offline state is
-        // observable without making the suite wait two minutes.
-        `VOICE_ASSISTANT_UPSTREAM_URL:ws://127.0.0.1:${options.frockAiPort}/v1/gemini-live?frock_idle_ms=5000`,
+        `APPLET_BUILD_TOKEN:${E2E_APPLET_BUILD_TOKEN}`,
         "--persist-to",
         persistDirectory,
         // As above: the per-request log is the flood, not the signal.
@@ -821,8 +727,6 @@ export async function startHarness(
       persistDirectory,
     ]);
 
-    await seedPackageCatalog(persistDirectory);
-
     ollama = await startFakeOllama(options.ollamaPort);
 
     const frockAiUrl = `http://127.0.0.1:${options.frockAiPort}`;
@@ -836,6 +740,29 @@ export async function startHarness(
     });
     frockAi = supervisedFrockAi;
     await supervisedFrockAi.start();
+
+    // Before the app Worker, so the dev service registry already has the
+    // service its APPLET_BUILD binding names.
+    const appletBuildUrl = `http://127.0.0.1:${options.appletBuildPort}`;
+    if (appletBuildAvailableV1()) {
+      const supervisedAppletBuild = superviseProcess({
+        label: "Applet build wrangler dev",
+        spawnChild: spawnAppletBuild,
+        // `/healthz` is the Worker's own route: it answers without starting a
+        // container, so this waits for the Worker and the image build, not for
+        // a cold container start.
+        waitUntilReady: () => waitForHttpServer(`${appletBuildUrl}/healthz`),
+        stopChild: stopProcessTree,
+        forwardOutput,
+        report: note,
+      });
+      appletBuild = supervisedAppletBuild;
+      await supervisedAppletBuild.start();
+    } else {
+      note(
+        "Docker is not running, so the Applet build service was not started and APPLET_BUILD reads [not connected].",
+      );
+    }
 
     const baseUrl = `http://127.0.0.1:${options.port}`;
     const supervisedWorker = superviseProcess({
@@ -853,6 +780,7 @@ export async function startHarness(
       baseUrl,
       ollamaUrl: ollama.url,
       frockAiUrl,
+      ...(appletBuild ? { appletBuildUrl } : {}),
       logFile,
       restarts: () => ({
         worker: supervisedWorker.restarts(),

@@ -1,5 +1,5 @@
 /**
- * The shared Computer host Worker (ADR 0004).
+ * The shared Computer host Worker.
  *
  * It supersedes the compatibility prototype that first held this script name.
  * The prototype proved the boundary with a single `/v1/computer/smoke` DTO;
@@ -14,7 +14,7 @@
  */
 
 import { Container, ContainerProxy } from "@cloudflare/containers";
-import { decodeComputerHostEffectRequestV1 } from "@frockbot/computer-core/host-protocol";
+import { decodeComputerHostEffectRequestV1 } from "@frockbot/computer/core/host-protocol";
 import {
   ComputerEffectJournal,
   shardCount,

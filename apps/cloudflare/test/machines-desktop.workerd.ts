@@ -25,17 +25,17 @@ import {
   decodeMachineResultReceiptV1,
   machineRoutePathV1,
   type MachineCommandV1,
-} from "@frockbot/machine-protocol";
+} from "@frockbot/core/machine-protocol";
 import {
   createMachineBackendContribution,
   type MachineBackendRouteContribution,
-} from "@frockbot/plugin-user-machine/backend";
+} from "@frockbot/app/machine/backend";
 import {
   MachineDeviceAgentV1,
   createMemoryMachineSecretStoreV1,
-} from "@frockbot/plugin-user-machine/device";
-import { createMachineDeviceRunnerV1 } from "@frockbot/plugin-user-machine/device-runner";
-import { MachineAgentDriverV1 } from "@frockbot/plugin-user-machine/testing";
+} from "@frockbot/app/machine/device";
+import { createMachineDeviceRunnerV1 } from "@frockbot/app/machine/device-runner";
+import { MachineAgentDriverV1 } from "@frockbot/app/machine/testing";
 
 const ORIGIN = "https://bot.frockbot.com";
 
@@ -235,7 +235,7 @@ function fakeHost(stdout: string) {
 
 describe("the desktop device agent against the real machine routes", () => {
   test("the shipped agent and the stub agent leave the same trace on the wire", async () => {
-    const stdout = " M packages/plugin-user-machine/src/desktop.ts\n";
+    const stdout = " M app/machine/desktop.ts\n";
 
     // ---- the shipped agent -------------------------------------------------
     const desktopUser = `machines-desktop-${crypto.randomUUID()}`;

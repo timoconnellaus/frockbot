@@ -1,7 +1,7 @@
 // Subagent dispatch, against real Bot Durable Objects.
 //
-// ADR 0017 splits one Bot across two objects: the Bot's own Durable Object is
-// the authority for a task, and a Subagent Durable Object — the same class, in
+// One Bot is split across two objects: the Bot's own Durable Object is the
+// authority for a task, and a Subagent Durable Object — the same class, in
 // the same namespace, named `<userId>:<botId>#task:<taskId>` — is only an
 // execution host for the one `subagent` Turn it was handed. Three claims, and
 // every one of them is about that split holding when something goes wrong:
@@ -17,8 +17,8 @@ import { evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { describe, expect, test } from "vitest";
 import { provisionBot } from "./provision-bot.ts";
 import { toolCallTriggerPrompt } from "./harness/miniflare.ts";
-import { subagentDurableObjectNameV1 } from "@frockbot/plugin-subagents/storage-keys";
-import type { TaskListViewV1 } from "@frockbot/plugin-subagents/shared";
+import { subagentDurableObjectNameV1 } from "@frockbot/app/subagents/storage-keys";
+import type { TaskListViewV1 } from "@frockbot/app/subagents/shared";
 
 interface Identity {
   userId: string;

@@ -1,7 +1,7 @@
 // The production HTTP path under the workload that used to wedge a Bot: a
 // long tool-driven Turn whose normalized prompt is about 80 KB on every step.
 import { runInDurableObject } from "cloudflare:test";
-import { SessionEventLog } from "@frockbot/kernel-do";
+import { SessionEventLog } from "@frockbot/core/durable";
 import { describe, expect, it } from "vitest";
 import {
   asUser,

@@ -12,7 +12,7 @@ import {
 import {
   APPLETS_UNAVAILABLE_MESSAGE_V1,
   BotTurnRefusedError,
-} from "@frockbot/kernel-do";
+} from "@frockbot/core/durable";
 
 function rpcBindingFor(state: BotStateBinding): UserBotStateBinding {
   return {
@@ -78,7 +78,6 @@ function rpcBindingFor(state: BotStateBinding): UserBotStateBinding {
       state.decideApproval(botId, approvalId, command),
     acknowledgeNotification: ({ botId, notificationId }) =>
       state.acknowledgeNotification(botId, notificationId),
-    reconcileRun: ({ botId, runId }) => state.reconcileRun(botId, runId),
     stopRun: ({ botId, command }) => state.stopRun(botId, command),
   };
 }
@@ -235,7 +234,6 @@ describe("user application Bot seam", () => {
       Promise.resolve({
         schemaVersion: 1,
         botId,
-        generationId: "generation-ui",
         contributions: [],
       });
     binding.runPackageUiTool = (request) => {
@@ -256,7 +254,6 @@ describe("user application Bot seam", () => {
     expect((await catalogResponse.json()) as Record<string, unknown>).toEqual({
       schemaVersion: 1,
       botId: "primary",
-      generationId: "generation-ui",
       artifactOrigin: "https://ui.app.example",
       contributions: [],
     });
@@ -264,7 +261,6 @@ describe("user application Bot seam", () => {
     const command = {
       schemaVersion: 1 as const,
       commandId: "command-1",
-      generationId: "generation-ui",
       packageId: "weather-page",
       name: "weather_lookup",
       input: { city: "Sydney" },
@@ -317,7 +313,6 @@ describe("user application Bot seam", () => {
         }),
       decideApproval: () => Promise.reject(new Error("unexpected")),
       acknowledgeNotification: () => Promise.resolve(),
-      reconcileRun: () => Promise.resolve(result),
       stopRun: () => Promise.reject(new Error("must not stop")),
     };
     const env: UserApplicationEnv = {
@@ -346,10 +341,6 @@ describe("user application Bot seam", () => {
   test("answers a refused admission 409, and a real fault 500", async () => {
     const refusals = [
       { thrown: "bot already has an active run", reason: "busy" },
-      {
-        thrown: 'run "run-1" requires reconciliation before another Turn',
-        reason: "reconciliation-required",
-      },
       { thrown: 'run "run-1" admission was fenced', reason: "fenced" },
       { thrown: 'run "run-1" already exists', reason: "duplicate" },
     ] as const;
@@ -397,14 +388,14 @@ describe("user application Bot seam", () => {
     // rewording the sentence can never turn a 409 into a 500 again.
     const typed = await post(
       new BotTurnRefusedError(
-        "reconciliation-required",
+        "busy",
         'run "run-1" is queued: the Bot owes an answer first',
       ),
     );
     expect(typed.status).toBe(409);
     expect(await typed.json<unknown>()).toMatchObject({
       status: "refused",
-      reason: "reconciliation-required",
+      reason: "busy",
     });
 
     // Anything the Bot did not refuse on purpose is still a fault.
@@ -432,7 +423,6 @@ describe("user application Bot seam", () => {
         fenceRunAdmission: unexpected,
         listNotifications: unexpected,
         acknowledgeNotification: unexpected,
-        reconcileRun: unexpected,
         stopRun: unexpected,
       } as unknown as UserBotStateBinding,
       DEPLOYMENT: { userId: "alice", applicationHash: "foundation-v1" },
@@ -453,10 +443,6 @@ describe("user application Bot seam", () => {
         method: "POST",
         body: "{}",
       }),
-      new Request(
-        "https://frockbot.test/api/bots/missing/turns/run-1/reconcile",
-        { method: "POST", body: "{}" },
-      ),
       new Request("https://frockbot.test/api/bots/missing/notifications"),
       new Request("https://frockbot.test/api/bots/missing/notifications", {
         method: "POST",
@@ -643,17 +629,12 @@ describe("user application Bot seam", () => {
     expect(calls).toBe(0);
   });
 
-  test("rejects inexact notification and reconciliation commands", async () => {
+  test("rejects inexact notification commands", async () => {
     let acknowledgements = 0;
-    let reconciliations = 0;
     const botState = {
       acknowledgeNotification: () => {
         acknowledgements += 1;
         return Promise.resolve();
-      },
-      reconcileRun: () => {
-        reconciliations += 1;
-        return Promise.reject(new Error("must not reconcile"));
       },
     } as unknown as BotStateBinding;
     const env: UserApplicationEnv = {
@@ -676,19 +657,11 @@ describe("user application Bot seam", () => {
           extra: true,
         }),
       }),
-      new Request(
-        "https://frockbot.test/api/bots/primary/turns/run-1/reconcile",
-        {
-          method: "POST",
-          body: JSON.stringify({ schemaVersion: 2, action: "resume" }),
-        },
-      ),
     ];
     for (const request of invalidRequests) {
       expect((await fetchUserApplication(request, env)).status).toBe(400);
     }
     expect(acknowledgements).toBe(0);
-    expect(reconciliations).toBe(0);
   });
 
   test("strictly decodes run-list pagination queries", async () => {
@@ -924,7 +897,6 @@ describe("run list failures", () => {
         }),
       decideApproval: () => Promise.reject(new Error("unexpected")),
       acknowledgeNotification: () => Promise.resolve(),
-      reconcileRun: () => Promise.reject(new Error("unexpected")),
       stopRun: () => Promise.reject(new Error("unexpected")),
     };
     const env: UserApplicationEnv = {

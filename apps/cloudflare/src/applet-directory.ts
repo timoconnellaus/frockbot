@@ -1,7 +1,7 @@
 // The User Durable Object's Applet directory.
 //
-// ADR 0022 decision 3: Applets are account-wide, so the User Durable Object —
-// already the authority for Package availability, Connections, and the Computer
+// Applets are account-wide, so the User Durable Object — already the
+// authority for Package availability, Connections, and the Computer
 // assignment — owns the list. It holds identity and pointers only: the display
 // name, the current generation, the tool declarations every Bot's Composition
 // copies, and the provenance of the creation. It never holds an Applet's code
@@ -21,11 +21,11 @@ import {
   APPLET_MAX_PER_USER_V1,
   type AppletDirectoryEntryV1,
   type AppletToolDeclarationV1,
-} from "@frockbot/kernel-do";
+} from "@frockbot/core/durable";
 import type {
   AppletProvenanceV1,
   AppletSummaryV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 
 /** The directory as a Bot isolate and the hosted client read it. */
 export interface AppletDirectoryViewV1 {
@@ -154,7 +154,7 @@ export class AppletDirectory {
     return { entry, revision };
   }
 
-  /** Mints the id in the ADR 0015 share shape and writes a `draft` entry. */
+  /** Mints the id in the shared id shape and writes a `draft` entry. */
   async create(input: {
     ownerId: string;
     displayName: string;

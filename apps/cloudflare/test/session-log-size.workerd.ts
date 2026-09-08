@@ -6,8 +6,8 @@ import { runInDurableObject } from "cloudflare:test";
 import {
   bootstrapGeneration,
   type CompositionGenerationV1,
-} from "@frockbot/kernel-composition/generation";
-import { Session, type SessionEvent } from "@frockbot/kernel-contracts";
+} from "@frockbot/core/durable";
+import { Session, type SessionEvent } from "@frockbot/core/contracts";
 import {
   BotDurableAuthority,
   SESSION_EVENT_PAGE_BYTES_V1,
@@ -17,7 +17,7 @@ import {
   sessionEventPayloadPrefixV1,
   type BotDurableAuthorityHooks,
   type StoredRunV1,
-} from "@frockbot/kernel-do";
+} from "@frockbot/core/durable";
 import { describe, expect, test } from "vitest";
 
 const SESSION_ID = "session-log-size-user:session-log-size-bot";
@@ -30,21 +30,11 @@ const codec = createStoredRunCodecV1<undefined>({
 });
 
 function bootstrap(): Promise<CompositionGenerationV1> {
-  return bootstrapGeneration(
-    [
-      {
-        packageId: "shell",
-        specifier: "@frockbot/plugin-shell",
-        version: "0.0.1",
-        manifest: { id: "shell", version: "0.0.1" },
-      },
-    ],
-    { createdAt: "2026-09-04T00:00:00.000Z" },
-  );
+  return bootstrapGeneration({ createdAt: "2026-09-04T00:00:00.000Z" });
 }
 
 function legacyEvents(): SessionEvent[] {
-  const session = new Session(SESSION_ID, () => {});
+  const session = new Session(SESSION_ID);
   session.appendBatch([
     { type: "turn/start", turn: 1 },
     { type: "step/start", turn: 1, step: 1 },

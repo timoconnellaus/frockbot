@@ -3,7 +3,7 @@ import {
   compatChatCompletionsUrlV1,
   createFrockAiGatewayHostV1,
 } from "./frock-ai.js";
-import { FrockAiTransportErrorV1 } from "@frockbot/plugin-provider-frock-ai/runtime";
+import { FrockAiTransportErrorV1 } from "@frockbot/providers/frock-ai/runtime";
 
 const ACCOUNT_ID = "account-under-test";
 const TOKEN = "gateway-token";

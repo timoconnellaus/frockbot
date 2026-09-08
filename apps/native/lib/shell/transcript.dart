@@ -1,0 +1,441 @@
+/// The thread, drawn.
+///
+/// Chat is the Bot's words. A tool receipt is not a word, so it is not here —
+/// a message that ran tools carries one quiet control that opens the run view,
+/// and the receipts live there.
+library;
+
+import 'package:flutter/material.dart';
+
+import '../flock/sheep.dart';
+import '../theme/frock_theme.dart';
+import '../theme/states.dart';
+import 'markdown.dart';
+import 'run_view.dart';
+import 'semantics.dart';
+import 'send_payload.dart';
+import 'transcript_model.dart';
+
+export 'transcript_model.dart';
+
+class TranscriptView extends StatefulWidget {
+  final List<TranscriptLine> lines;
+
+  /// The message the person has sent but the backend has not confirmed. It is
+  /// drawn at the end, from this device's clock, because there is nothing
+  /// durable to order it by yet.
+  final String? pendingText;
+  final bool loading;
+
+  /// Whether there is an older page to fetch.
+  final bool hasEarlier;
+  final ApprovalsController? approvals;
+  final Future<void> Function({bool older}) onRefresh;
+  final void Function(TranscriptLine line) onOpenRun;
+  final void Function(TranscriptLine line)? onRetryTurn;
+  final void Function(String url)? onOpenLink;
+  final VoidCallback? onOpenSettings;
+  final String storageKey;
+
+  /// A Turn the reader asked to be taken to — a search hit. It is brought into
+  /// view and marked, once. A Turn further back than the loaded page is simply
+  /// not here, and the thread says nothing rather than pretending to scroll.
+  final String? focusRunId;
+
+  /// The Bot's sheep background. Every avatar in the thread is this Bot's.
+  final String? background;
+  const TranscriptView({
+    super.key,
+    required this.lines,
+    required this.loading,
+    required this.hasEarlier,
+    required this.onRefresh,
+    required this.onOpenRun,
+    required this.storageKey,
+    this.pendingText,
+    this.approvals,
+    this.onRetryTurn,
+    this.onOpenLink,
+    this.onOpenSettings,
+    this.focusRunId,
+    this.background,
+  });
+
+  @override
+  State<TranscriptView> createState() => _TranscriptViewState();
+}
+
+class _TranscriptViewState extends State<TranscriptView> {
+  final GlobalKey focusKey = GlobalKey();
+  String? focused;
+
+  String? get pendingText => widget.pendingText;
+  bool get loading => widget.loading;
+  bool get hasEarlier => widget.hasEarlier;
+  ApprovalsController? get approvals => widget.approvals;
+  Future<void> Function({bool older}) get onRefresh => widget.onRefresh;
+  void Function(TranscriptLine line) get onOpenRun => widget.onOpenRun;
+  void Function(TranscriptLine line)? get onRetryTurn => widget.onRetryTurn;
+  void Function(String url)? get onOpenLink => widget.onOpenLink;
+  VoidCallback? get onOpenSettings => widget.onOpenSettings;
+  String get storageKey => widget.storageKey;
+
+  @override
+  Widget build(BuildContext context) {
+    final now = DateTime.now();
+    final ordered = orderTranscript(
+      widget.lines,
+      now.toUtc().toIso8601String(),
+    );
+    final drain = supersedeDrainState(ordered, now);
+    final target = widget.focusRunId;
+    var marked = false;
+    final rows = <Widget>[];
+    for (final line in ordered) {
+      final row = _row(context, line, drain);
+      if (row == null) continue;
+      if (target != null && !marked && line.runId == target) {
+        marked = true;
+        rows.add(
+          Container(
+            key: focusKey,
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.primary
+                  .withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: row,
+          ),
+        );
+        continue;
+      }
+      rows.add(row);
+    }
+    if (marked && focused != target) {
+      focused = target;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final box = focusKey.currentContext;
+        if (box != null) Scrollable.ensureVisible(box, alignment: 0.4);
+      });
+    }
+    if (pendingText != null) {
+      rows.add(
+        _Bubble(
+          id: 'pending',
+          mine: true,
+          pending: true,
+          child: SelectableText(pendingText!),
+        ),
+      );
+    }
+    if (rows.isEmpty) {
+      return loading
+          ? const FrockLoading(label: 'Loading your conversation')
+          : _EmptyThread(background: widget.background);
+    }
+    return identified(
+      ShellIds.transcript,
+      SelectionArea(
+        child: RefreshIndicator(
+          onRefresh: onRefresh,
+          child: ListView(
+            // The thread starts at the latest row. Earlier pages extend the
+            // far end, so prepending history keeps the viewport where it was.
+            reverse: true,
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            physics: const AlwaysScrollableScrollPhysics(),
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+            key: PageStorageKey(storageKey),
+            children: [
+              if (hasEarlier)
+                identified(
+                  ShellIds.transcriptEarlier,
+                  TextButton(
+                    onPressed: loading ? null : () => onRefresh(older: true),
+                    child: const Text('Earlier messages'),
+                  ),
+                ),
+              ...rows,
+            ].reversed.toList(),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// One line, or nothing where the line has nothing to say — a running Turn
+  /// before its first token is the animated row, not an empty bubble.
+  Widget? _row(
+    BuildContext context,
+    TranscriptLine line,
+    SupersedeDrainState drain,
+  ) {
+    if (line.role == LineRole.system) {
+      return _Announcement(text: line.text);
+    }
+    if (line.role == LineRole.user) {
+      return _Bubble(
+        id: line.id,
+        mine: true,
+        pending: line.pending,
+        child: SelectableText(line.text),
+      );
+    }
+    if (line.status == LineStatus.streaming && line.empty) {
+      // A plain running Turn is the animated row and no words. Two states earn
+      // words: a Stop the person asked for and is now waiting on, and a Turn
+      // still waiting behind the one it displaced.
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+        child: WorkingIndicator(
+          line: line,
+          background: widget.background,
+          label: line.stopRequested
+              ? 'Stopping…'
+              : line.pending
+              ? supersedeDrainLabel(drain) ?? 'Waiting…'
+              : null,
+        ),
+      );
+    }
+    final children = <Widget>[
+      for (final send in line.sends)
+        SendPayloadView(
+          send: send,
+          approvals: approvals,
+          onOpenLink: onOpenLink,
+          onOpenSettings: onOpenSettings,
+        ),
+      if (line.text.isNotEmpty)
+        ShellMarkdown(text: line.text, onOpenLink: onOpenLink),
+    ];
+    if (children.isEmpty && line.notice == null) {
+      // A Turn whose whole voice was its sends still ran tools. There is no
+      // bubble to hang the way in off, so the way in stands on its own.
+      if (line.tools.isEmpty) return null;
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(52, 0, 16, 6),
+        child: _WorkLink(line: line, onOpen: onOpenRun),
+      );
+    }
+    return _Bubble(
+      id: line.id,
+      mine: false,
+      background: widget.background,
+      pending: line.pending,
+      failed: line.status == LineStatus.error,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (final child in children) ...[
+            child,
+            if (child != children.last) const SizedBox(height: 8),
+          ],
+          if (line.notice != null) _Notice(line: line, onRetry: onRetryTurn),
+          if (line.tools.isNotEmpty) _WorkLink(line: line, onOpen: onOpenRun),
+        ],
+      ),
+    );
+  }
+}
+
+class _Bubble extends StatelessWidget {
+  final String id;
+  final bool mine;
+  final bool pending;
+  final bool failed;
+  final String? background;
+  final Widget child;
+  const _Bubble({
+    required this.id,
+    required this.mine,
+    required this.child,
+    this.pending = false,
+    this.failed = false,
+    this.background,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return identified(
+      ShellIds.message(id),
+      TweenAnimationBuilder<double>(
+        key: ValueKey(id),
+        tween: Tween(begin: 0, end: 1),
+        duration: FrockTheme.motion(context),
+        curve: Curves.easeOutCubic,
+        builder: (context, value, child) => Opacity(
+          opacity: (pending ? 0.55 : 0.7 + value * 0.3).clamp(0.0, 1.0),
+          child: Transform.translate(
+            offset: Offset(0, 6 * (1 - value)),
+            child: child,
+          ),
+        ),
+        child: Row(
+          mainAxisAlignment: mine
+              ? MainAxisAlignment.end
+              : MainAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (!mine) ...[
+              Padding(
+                padding: const EdgeInsets.only(left: 16, top: 10),
+                child: SheepAvatar(size: 28, background: background),
+              ),
+              const SizedBox(width: 8),
+            ],
+            Flexible(
+              child: Container(
+                constraints: const BoxConstraints(maxWidth: 720),
+                margin: EdgeInsets.fromLTRB(
+                  mine ? 56 : 0,
+                  6,
+                  mine ? 16 : 56,
+                  6,
+                ),
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: mine
+                      ? theme.colorScheme.primary.withValues(alpha: 0.16)
+                      : theme.colorScheme.surfaceContainerHighest,
+                  border: failed
+                      ? Border.all(color: theme.colorScheme.error)
+                      : null,
+                  borderRadius: BorderRadius.only(
+                    topLeft: const Radius.circular(20),
+                    topRight: const Radius.circular(20),
+                    bottomLeft: Radius.circular(mine ? 20 : 6),
+                    bottomRight: Radius.circular(mine ? 6 : 20),
+                  ),
+                ),
+                child: Semantics(label: mine ? 'You' : 'Bot', child: child),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Why a Turn ended where it did, and the way out of it. The invitation is the
+/// action beside the sentence, not words in it with nothing to press.
+class _Notice extends StatelessWidget {
+  final TranscriptLine line;
+  final void Function(TranscriptLine line)? onRetry;
+  const _Notice({required this.line, this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      // Wrapped, not a row: at large text the sentence and its action do not
+      // fit side by side on a phone, and clipping either is not an option.
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 4,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          Text(
+            line.notice!,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: line.status == LineStatus.error
+                  ? theme.colorScheme.error
+                  : theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+          if (line.retry == LineRetry.resendTurn && onRetry != null)
+            identified(
+              ShellIds.retryTurn(line.runId),
+              TextButton(
+                onPressed: () => onRetry!(line),
+                child: const Text('Try again'),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The one thing the thread says about a Turn's tools: that there were some.
+class _WorkLink extends StatelessWidget {
+  final TranscriptLine line;
+  final void Function(TranscriptLine line) onOpen;
+  const _WorkLink({required this.line, required this.onOpen});
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(top: 6),
+    child: Align(
+      alignment: Alignment.centerLeft,
+      child: identified(
+        ShellIds.openRun(line.runId),
+        TextButton.icon(
+          onPressed: () => onOpen(line),
+          icon: const Icon(Icons.build_outlined, size: 16),
+          label: Text(
+            line.tools.length == 1
+                ? 'Used 1 tool'
+                : 'Used ${line.tools.length} tools',
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+class _Announcement extends StatelessWidget {
+  final String text;
+  const _Announcement({required this.text});
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
+    child: Center(
+      child: Text(
+        text,
+        textAlign: TextAlign.center,
+        style: Theme.of(context).textTheme.bodySmall
+            ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
+      ),
+    ),
+  );
+}
+
+class _EmptyThread extends StatelessWidget {
+  final String? background;
+  const _EmptyThread({this.background});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return SingleChildScrollView(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SheepAvatar(size: 64, background: background),
+            const SizedBox(height: 24),
+            Text(
+              'What would you like to work on?',
+              style: theme.textTheme.headlineMedium,
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Ask a question, make a plan, or give your Bot something to do.',
+              style: theme.textTheme.bodyLarge?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

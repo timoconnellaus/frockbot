@@ -2,8 +2,8 @@ import {
   decodeBotDebugQueryV1,
   isBotDebugQueryRefusalV1,
   type BotDebugQueryV1,
-} from "@frockbot/plugin-shell/debug-protocol";
-import { decodeBotIdV1 } from "@frockbot/configuration-core";
+} from "@frockbot/app/shell/debug-protocol";
+import { decodeBotIdV1 } from "@frockbot/core/configuration";
 
 /**
  * The operator surface: `/api/debug/*`, authorized by a shared token rather
@@ -23,7 +23,6 @@ export interface DebugGatewaySurface {
     Array<{ id: string; email: string; name: string; createdAt: string }>
   >;
   listBots(userId: string): Promise<unknown>;
-  readUsage(userId: string): Promise<unknown>;
   snapshot(
     userId: string,
     botId: string,
@@ -175,7 +174,6 @@ export function createDebugRoute(
           routes: [
             "GET /api/debug/users",
             "GET /api/debug/bots?userId=<id>",
-            "GET /api/debug/usage?userId=<id>",
             "GET /api/debug/bots/<botId>?userId=<id>&limit=<n>&events=true&before=<cursor>",
             "GET /api/debug/bots/<botId>/runs/<runId>?userId=<id>",
             "POST /api/debug/users/<userId>/bots/<botId>/turns",
@@ -194,11 +192,6 @@ export function createDebugRoute(
         if (!userId) return jsonError(400, "userId is required");
         return Response.json(await surface.listBots(userId));
       }
-      if (path === "/usage") {
-        if (!userId) return jsonError(400, "userId is required");
-        return Response.json(await surface.readUsage(userId));
-      }
-
       const runMatch = path.match(/^\/bots\/([^/]+)\/runs\/([^/]+)$/);
       const botMatch = path.match(/^\/bots\/([^/]+)$/);
       if (!runMatch && !botMatch) return jsonError(404, "not found");

@@ -1,5 +1,7 @@
-import { decodeProtocol } from "@frockbot/protocol-schemas";
-import { nativeFallbackResponse } from "./native-fallback.js";
+import { decodeProtocol } from "@frockbot/core/protocol-schemas";
+import { settingsDocumentV1 } from "@frockbot/app/settings/document";
+import { connectionsDocumentV1 } from "@frockbot/app/settings/connections-document";
+import { pluginsDocumentV1 } from "@frockbot/app/settings/plugins-document";
 import { accountIsAdmitted } from "./account-admission.js";
 import { isNativeAuthPath, readNativeJsonBody } from "./native-auth.js";
 import { clientCompatibilityResponse } from "./client-compatibility.js";
@@ -14,16 +16,17 @@ import {
   decodeUserSettingsViewV1,
   isApplicationDeploymentHash,
   isPublicIdentifier,
-} from "@frockbot/configuration-core";
-import { DEPLOYMENT_HEADER_V1 } from "@frockbot/protocol";
+} from "@frockbot/core/configuration";
+import { DEPLOYMENT_HEADER_V1 } from "@frockbot/core/protocol";
 import {
   AppletViewerTokenError,
   verifyAppletViewerTokenV1,
-} from "@frockbot/kernel-do";
-import { isDeploymentAdminV1 } from "./admin-identities.js";
+} from "@frockbot/core/durable";
+import {
+  DEVELOPMENT_USER_ID,
+  isDeploymentAdminV1,
+} from "./admin-identities.js";
 import type {
-  CatalogGatewayDocument,
-  CatalogGatewayStore,
   GatewayDependencies,
   UserApplicationIdentity,
   WorkerCode,
@@ -93,7 +96,7 @@ export function packageUiGatewayOriginV1(url: URL): string {
  *
  * - `connect-src <gateway origin> <gateway ws origin>` lets an Applet's UI open
  *   its viewer socket back to the `AppletState` object on the gateway, which
- *   is the only endpoint it is given (ADR 0022 §4).
+ *   is the only endpoint it is given.
  * - `frame-src <artifact origin>` lets a page nest another page on the same
  *   anonymous origin — the Applets canvas page nesting the Applet's own UI.
  *   The nested frame is served by this very route, with this very policy.
@@ -248,92 +251,6 @@ function decodeBotPathSegment(value: string): string {
   }
 }
 
-const CATALOG_INDEX_PATH = "/catalog/v1/index";
-const CATALOG_ENTRY_PREFIX = "/catalog/v1/entry/";
-
-/**
- * A Catalog generation is immutable, so an explicitly pinned read can be cached
- * for as long as anything caches anything. The live read follows a pointer that
- * moves on every publish, so it is revalidated: the `etag` is the index's
- * content hash, which is exactly what a pinned reader compares.
- */
-function catalogCacheControl(pinned: boolean): string {
-  return pinned
-    ? "private, max-age=31536000, immutable"
-    : "private, max-age=60, must-revalidate";
-}
-
-function catalogDocumentResponse(
-  request: Request,
-  found: CatalogGatewayDocument,
-  pinned: boolean,
-): Response {
-  const etag = `"${found.hash}"`;
-  const headers = {
-    "content-type": "application/json; charset=utf-8",
-    "cache-control": catalogCacheControl(pinned),
-    etag,
-    "x-frockbot-catalog-generation": found.generation,
-    "x-content-type-options": "nosniff",
-  };
-  if (request.headers.get("if-none-match") === etag) {
-    return new Response(null, { status: 304, headers });
-  }
-  return new Response(found.document, { headers });
-}
-
-/**
- * `GET /catalog/v1/index` and `GET /catalog/v1/entry/:id`, authenticated and
- * read-only. The browser and the Bot Durable Object both read the Catalog
- * through these, so the bucket stays behind the gateway and there is exactly
- * one place a Catalog document is verified before anyone sees it.
- */
-async function routeCatalog(
-  catalog: CatalogGatewayStore | undefined,
-  request: Request,
-  url: URL,
-): Promise<Response> {
-  if (request.method !== "GET" && request.method !== "HEAD") {
-    return jsonError(405, "method not allowed");
-  }
-  if (!catalog) {
-    return jsonError(503, "Package Catalog is not configured");
-  }
-  const parameters = [...url.searchParams.keys()];
-  if (
-    parameters.some((key) => key !== "generation") ||
-    url.searchParams.getAll("generation").length > 1
-  ) {
-    return jsonError(400, "catalog query is invalid");
-  }
-  const generation = url.searchParams.get("generation") ?? undefined;
-  try {
-    if (url.pathname === CATALOG_INDEX_PATH) {
-      const found = await catalog.readIndexDocument(generation);
-      if (!found) return jsonError(404, "catalog generation was not found");
-      return catalogDocumentResponse(request, found, generation !== undefined);
-    }
-    let catalogId: string;
-    try {
-      catalogId = decodeURIComponent(
-        url.pathname.slice(CATALOG_ENTRY_PREFIX.length),
-      );
-    } catch {
-      return jsonError(400, "invalid catalog entry id");
-    }
-    const found = await catalog.readEntryDocument(catalogId, generation);
-    if (!found) return jsonError(404, "catalog entry was not found");
-    return catalogDocumentResponse(request, found, generation !== undefined);
-  } catch (error) {
-    // A generation that fails verification is a broken publish, and it is
-    // reported as one rather than served with a caveat.
-    return jsonError(
-      502,
-      error instanceof Error ? error.message : "catalog read failed",
-    );
-  }
-}
-
 interface DevelopmentIdentity {
   userId?: string;
   persist: boolean;
@@ -427,9 +344,6 @@ function withClientOrigin(response: Response, origin: string): Response {
   shared.headers.append("vary", "origin");
   return shared;
 }
-
-/** The composer's dictation socket. One per User; the gateway authenticates it. */
-export const VOICE_DICTATION_PATH = "/api/voice/dictation";
 
 const APPLET_SOCKET_PATH = /^\/api\/applets\/([^/]+)\/socket$/;
 
@@ -535,70 +449,6 @@ export function appletViewerTokenFromRequest(
     return tokens[0]!.slice("frockbot.viewer.".length);
   }
   return url.searchParams.get("token");
-}
-
-const WORKSPACE_SEED_PATH = /^\/api\/workspace-seed\/([^/]+)\/([^/]+)$/;
-
-/**
- * `PUT /api/workspace-seed/:userId/:botId`, bearer-authenticated by the seed
- * token, present only where `WORKSPACE_SEED_TOKEN` is set. See
- * `GatewayDependencies.workspaceSeed`.
- */
-async function routeWorkspaceSeed(
-  request: Request,
-  url: URL,
-  dependencies: GatewayDependencies,
-): Promise<Response> {
-  const seed = dependencies.workspaceSeed;
-  if (!seed) return jsonError(404, "not found");
-  if (request.method !== "PUT") return jsonError(405, "method not allowed");
-  const header = request.headers.get("authorization") ?? "";
-  const presented = header.toLowerCase().startsWith("bearer ")
-    ? header.slice("bearer ".length).trim()
-    : "";
-  if (presented.length === 0 || presented !== seed.token) {
-    return jsonError(401, "seed token is invalid");
-  }
-  const match = url.pathname.match(WORKSPACE_SEED_PATH)!;
-  let body: {
-    root?: unknown;
-    path?: unknown;
-    bytesBase64?: unknown;
-    mediaType?: unknown;
-  };
-  try {
-    body = (await request.json()) as typeof body;
-  } catch {
-    return jsonError(400, "seed body is not JSON");
-  }
-  if (
-    typeof body.path !== "string" ||
-    typeof body.bytesBase64 !== "string" ||
-    (body.mediaType !== undefined && typeof body.mediaType !== "string")
-  ) {
-    return jsonError(400, "seed body is invalid");
-  }
-  try {
-    return Response.json(
-      await seed.write(
-        decodeURIComponent(match[1]!),
-        decodeURIComponent(match[2]!),
-        {
-          root: body.root,
-          path: body.path,
-          bytesBase64: body.bytesBase64,
-          ...(body.mediaType === undefined
-            ? {}
-            : { mediaType: body.mediaType }),
-        },
-      ),
-    );
-  } catch (error) {
-    return jsonError(
-      400,
-      error instanceof Error ? error.message : "seed write failed",
-    );
-  }
 }
 
 /**
@@ -756,9 +606,6 @@ export function createGateway(dependencies: GatewayDependencies) {
     if (APPLET_SOCKET_PATH.test(url.pathname)) {
       return routeAppletSocket(request, url, dependencies);
     }
-    if (WORKSPACE_SEED_PATH.test(url.pathname)) {
-      return routeWorkspaceSeed(request, url, dependencies);
-    }
     if (url.pathname === "/sign-out") {
       return routeSignOut(request, url, dependencies);
     }
@@ -778,11 +625,19 @@ export function createGateway(dependencies: GatewayDependencies) {
       if (response) return response;
     }
 
-    const development = dependencies.allowDevelopmentIdentity
+    let development = dependencies.allowDevelopmentIdentity
       ? developmentIdentity(request)
       : { persist: false };
     const nativeIdentity = await dependencies.nativeAuth?.authenticate(request);
     if (nativeIdentity?.refusal) return nativeIdentity.refusal;
+    // The app signed in through the development door: the same identity the
+    // browser's "Continue as local developer" carries, with the same standing.
+    if (
+      dependencies.allowDevelopmentIdentity &&
+      nativeIdentity?.session?.user.id === DEVELOPMENT_USER_ID
+    ) {
+      development = { userId: DEVELOPMENT_USER_ID, persist: false };
+    }
     const session = nativeIdentity
       ? nativeIdentity.session
       : development.userId
@@ -825,86 +680,8 @@ export function createGateway(dependencies: GatewayDependencies) {
         );
       }
     }
-    if (
-      url.pathname === "/api/native/qualification-form" &&
-      dependencies.nativeAuth &&
-      dependencies.saveNativeForm
-    ) {
-      if (!nativeIdentity?.session)
-        return jsonError(401, "Please sign in again.");
-      if (request.method !== "POST")
-        return jsonError(405, "method not allowed");
-      try {
-        const result = await dependencies.saveNativeForm(
-          userId,
-          await readNativeJsonBody(request),
-        );
-        if (
-          !result ||
-          typeof result !== "object" ||
-          !("status" in result) ||
-          result.status !== "saved"
-        )
-          return jsonError(
-            409,
-            "Could not save this form. Reopen it and try again.",
-          );
-        return Response.json(result, {
-          headers: { "cache-control": "no-store" },
-        });
-      } catch {
-        return jsonError(
-          409,
-          "Could not save this form. Reopen it and try again.",
-        );
-      }
-    }
-    const nativeApplet = url.pathname.match(
-      /^\/api\/native\/applets\/([^/]+)\/bootstrap$/,
-    );
-    if (
-      nativeApplet &&
-      dependencies.nativeAuth &&
-      dependencies.nativeAppletBootstrap
-    ) {
-      if (!nativeIdentity?.session)
-        return jsonError(401, "Please sign in again.");
-      if (request.method !== "GET") return jsonError(405, "method not allowed");
-      const appletId = decodeURIComponent(nativeApplet[1]!);
-      const epoch = url.searchParams.get("epoch") ?? "";
-      if (
-        !/^[A-Za-z0-9][A-Za-z0-9_-]{0,95}\.[a-z0-9-]{1,64}$/.test(appletId) ||
-        !/^[A-Za-z0-9_-]{16,64}$/.test(epoch)
-      )
-        return jsonError(400, "Invalid Applet");
-      try {
-        return Response.json(
-          await dependencies.nativeAppletBootstrap(userId, appletId, epoch),
-          { headers: { "cache-control": "no-store" } },
-        );
-      } catch {
-        return jsonError(
-          503,
-          "This Applet is unavailable. Reopen it to try again.",
-        );
-      }
-    }
     if (request.method === "GET" && url.pathname === "/api/identity") {
       return Response.json({ schemaVersion: 1, userId, isAdmin });
-    }
-
-    // Dictation rides the authenticated session, not a minted token: the
-    // composer is a first-party surface on this very origin, so the cookie
-    // already in the request is the whole of the decision.
-    if (url.pathname === VOICE_DICTATION_PATH) {
-      if (request.method !== "GET") return jsonError(405, "method not allowed");
-      if (!dependencies.openVoiceDictation) {
-        return jsonError(503, "Dictation is not configured");
-      }
-      if (userId === PUBLIC_APPLICATION_USER_ID) {
-        return jsonError(401, "authentication required");
-      }
-      return dependencies.openVoiceDictation(userId, request);
     }
 
     const stateChannelMatch = url.pathname.match(
@@ -948,13 +725,6 @@ export function createGateway(dependencies: GatewayDependencies) {
           error instanceof Error ? error.message : "Bot-state channel failed",
         );
       }
-    }
-
-    if (
-      url.pathname === CATALOG_INDEX_PATH ||
-      url.pathname.startsWith(CATALOG_ENTRY_PREFIX)
-    ) {
-      return routeCatalog(dependencies.catalog, request, url);
     }
 
     for (const contribution of dependencies.backendContributions ?? []) {
@@ -1004,14 +774,40 @@ export function createGateway(dependencies: GatewayDependencies) {
     if (url.pathname === "/api/settings/connections") {
       if (request.method !== "GET") return jsonError(405, "method not allowed");
       try {
-        const frame = await dependencies
-          .userConfigurationFor(userId)
-          .readConnectionsFrame({ schemaVersion: 1, userId });
-        return Response.json(decodeProtocol("ConnectionsFrame", frame), {
-          headers: { "cache-control": "no-store" },
-        });
+        const frame = decodeProtocol(
+          "ConnectionsFrame",
+          await dependencies
+            .userConfigurationFor(userId)
+            .readConnectionsFrame({ schemaVersion: 1, userId }),
+        );
+        return Response.json(
+          url.searchParams.get("as") === "document"
+            ? connectionsDocumentV1(frame)
+            : frame,
+          { headers: { "cache-control": "no-store" } },
+        );
       } catch {
         return jsonError(503, "Connections are temporarily unavailable.");
+      }
+    }
+
+    if (url.pathname === "/api/settings/plugins") {
+      if (request.method !== "GET") return jsonError(405, "method not allowed");
+      try {
+        const frame = decodeProtocol(
+          "PluginsFrame",
+          await dependencies
+            .userConfigurationFor(userId)
+            .readPluginsFrame({ schemaVersion: 1, userId }),
+        );
+        return Response.json(
+          url.searchParams.get("as") === "document"
+            ? pluginsDocumentV1(frame)
+            : frame,
+          { headers: { "cache-control": "no-store" } },
+        );
+      } catch {
+        return jsonError(503, "Plugins are temporarily unavailable.");
       }
     }
 
@@ -1032,21 +828,28 @@ export function createGateway(dependencies: GatewayDependencies) {
               : development.userId
                 ? { name: "Local developer" }
                 : await dependencies.auth.profile?.(userId).catch(() => null);
+          const frame = decodeProtocol(
+            "SettingsFrame",
+            await owner.readSettingsFrame({
+              schemaVersion: 1,
+              userId,
+              home,
+              ...(identity?.name?.trim()
+                ? { identityName: identity.name.trim().slice(0, 100) }
+                : {}),
+              ...(identity?.email?.trim()
+                ? { identityEmail: identity.email.trim().slice(0, 320) }
+                : {}),
+            }),
+          );
+          // The frame is what this route produces; `as=document` asks for the
+          // same settings in the vocabulary the host renders every plugin
+          // view in. Nothing else about the route changes, so the client that
+          // wants a frame keeps getting one.
           return Response.json(
-            decodeProtocol(
-              "SettingsFrame",
-              await owner.readSettingsFrame({
-                schemaVersion: 1,
-                userId,
-                home,
-                ...(identity?.name?.trim()
-                  ? { identityName: identity.name.trim().slice(0, 100) }
-                  : {}),
-                ...(identity?.email?.trim()
-                  ? { identityEmail: identity.email.trim().slice(0, 320) }
-                  : {}),
-              }),
-            ),
+            url.searchParams.get("as") === "document"
+              ? settingsDocumentV1(frame)
+              : frame,
             { headers: { "cache-control": "no-store" } },
           );
         }
@@ -1269,12 +1072,6 @@ export function createGateway(dependencies: GatewayDependencies) {
       return jsonError(400, "invalid request URL");
     }
 
-    if (
-      dependencies.nativeAuth &&
-      url.pathname === "/native-fallback" &&
-      url.hostname === "ui.bot.frockbot.com"
-    )
-      return nativeFallbackResponse(request);
     if (dependencies.uiArtifactHosts?.includes(url.hostname)) {
       return servePackageUiArtifact(request, url, dependencies.artifacts);
     }
@@ -1292,7 +1089,7 @@ export function createGateway(dependencies: GatewayDependencies) {
     // opaque origin — and a page on the artifact host itself would send
     // `ui.<this host>`. Either is admitted here and nothing else: the page is
     // cookieless, so this guard protects nothing on that path, and the signed
-    // token in the URL is the whole of the decision (ADR 0022 §4).
+    // token in the URL is the whole of the decision.
     const appletSocketFromArtifactOrigin =
       APPLET_SOCKET_PATH.test(url.pathname) &&
       presentedOrigin !== null &&

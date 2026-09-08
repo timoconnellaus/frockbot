@@ -1,9 +1,7 @@
 /// <reference path="./env.d.ts" />
-import { decodeProtocol } from "@frockbot/protocol-schemas";
+import { decodeProtocol } from "@frockbot/core/protocol-schemas";
 
-import { foundationClientPlugins } from "@frockbot/application-foundation/client";
-import { foundationMobilePackages } from "@frockbot/application-foundation/mobile";
-import { startHostedMobileCapabilities } from "@frockbot/mobile/host";
+import { foundationClientPlugins } from "./client.js";
 import {
   decodeBotSettingsViewV1,
   decodeOperationReceiptV1,
@@ -13,11 +11,11 @@ import {
   type ConfigurationQueryV1,
   type RevokeConnectionCommandV1,
   type StartConnectionCommandV1,
-} from "@frockbot/configuration-core";
+} from "@frockbot/core/configuration";
 import {
   decodeConnectionCommandReceiptV1,
   type ConnectionCommandV1,
-} from "@frockbot/connection-core";
+} from "@frockbot/core/connection";
 import {
   ClientApplication,
   decodeAcknowledgement,
@@ -35,16 +33,11 @@ import {
   decodeClientTurnV1,
   decodeClientTurnRefusalV1,
   ClientTurnRefusedErrorV1,
-} from "@frockbot/plugin-shell/run-protocol";
-import { decodeClientSkillCatalogV1 } from "@frockbot/plugin-shell/skill-protocol";
-import type { SkillRefV1 } from "@frockbot/kernel-contracts";
-import {
-  DEPLOYMENT_HEADER_V1,
-  responseFromDesktopApiV1,
-} from "@frockbot/protocol";
+} from "@frockbot/app/shell/run-protocol";
+import { decodeClientSkillCatalogV1 } from "@frockbot/app/shell/skill-protocol";
+import type { SkillRefV1 } from "@frockbot/core/contracts";
+import { DEPLOYMENT_HEADER_V1 } from "@frockbot/core/protocol";
 import { BrowserBotStateChannel } from "./bot-state-channel.js";
-import { openVoiceDictationV1 } from "./voice-dictation.js";
-import { openVoiceAssistantV1 } from "./voice-assistant.js";
 
 /**
  * The application this page was served from, as the document itself records
@@ -94,15 +87,11 @@ async function apiRequest(
   method: "GET" | "POST" = "GET",
   body?: string,
 ): Promise<unknown> {
-  const response = window.frockbotDesktop
-    ? await window.frockbotDesktop
-        .request({ schemaVersion: 1, path, method, body })
-        .then(responseFromDesktopApiV1)
-    : await fetch(path, {
-        method,
-        headers: body ? { "content-type": "application/json" } : undefined,
-        body,
-      });
+  const response = await fetch(path, {
+    method,
+    headers: body ? { "content-type": "application/json" } : undefined,
+    body,
+  });
   observeDeploymentHeader(response);
   /*
    * Every read of a response goes through the shared reader: it classifies a
@@ -144,24 +133,12 @@ const application = new ClientApplication({
       ...(skills && skills.length > 0 ? { skills } : {}),
       ...(supersedes ? { supersedes } : {}),
     });
-    const response = window.frockbotDesktop
-      ? await Promise.race([
-          window.frockbotDesktop
-            .request({ schemaVersion: 1, path, method: "POST", body })
-            .then(responseFromDesktopApiV1),
-          new Promise<never>((_, reject) => {
-            const aborted = () =>
-              reject(new DOMException("Aborted", "AbortError"));
-            if (signal.aborted) aborted();
-            else signal.addEventListener("abort", aborted, { once: true });
-          }),
-        ])
-      : await fetch(path, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body,
-          signal,
-        });
+    const response = await fetch(path, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body,
+      signal,
+    });
     signal.throwIfAborted();
     observeDeploymentHeader(response);
     /*
@@ -279,15 +256,6 @@ const application = new ClientApplication({
     );
     return receipt.run;
   },
-  async reconcileRun(botId: string, runId: string) {
-    return decodeClientTurnV1(
-      await apiRequest(
-        `/api/bots/${encodeURIComponent(botId)}/turns/${encodeURIComponent(runId)}/reconcile`,
-        "POST",
-        JSON.stringify({ schemaVersion: 1, action: "resume" }),
-      ),
-    );
-  },
   async acknowledgeNotification(botId: string, notificationId: string) {
     decodeAcknowledgement(
       await apiRequest(
@@ -320,12 +288,6 @@ const application = new ClientApplication({
   },
   watchBotState(botId, observer) {
     return botStateChannel.watch(botId, observer);
-  },
-  openVoiceDictation(observer) {
-    return openVoiceDictationV1(observer);
-  },
-  openVoiceAssistant(deviceId, observer) {
-    return openVoiceAssistantV1(deviceId, observer);
   },
   async readAuthenticatedUserId() {
     return decodeAuthenticatedIdentity(await apiRequest("/api/identity"));
@@ -364,16 +326,7 @@ const application = new ClientApplication({
       ),
     );
   },
-  openExternalAuthorization(
-    url: string,
-    nativeReturnNonce?: string,
-  ): Promise<void> {
-    if (window.frockbotDesktop) {
-      return window.frockbotDesktop.openExternalAuthorization(
-        url,
-        nativeReturnNonce,
-      );
-    }
+  openExternalAuthorization(url: string): Promise<void> {
     window.location.assign(url);
     return Promise.resolve();
   },
@@ -391,14 +344,6 @@ const application = new ClientApplication({
 await application.install(() => () => botStateChannel.dispose());
 for (const plugin of foundationClientPlugins) await application.install(plugin);
 application.mount("#app");
-// Optional native Contributions never block the hosted product bootstrap.
-void startHostedMobileCapabilities(foundationMobilePackages).catch(
-  (error: unknown) =>
-    console.error(
-      "Optional mobile capabilities failed",
-      error instanceof Error ? error.message : "unknown failure",
-    ),
-);
 window.addEventListener("pagehide", () => application.dispose(), {
   once: true,
 });

@@ -1,6 +1,6 @@
 // The `WORKSPACE_FILES` seam, bound in production.
 //
-// `packages/plugin-shell/src/backend-skills.ts` reads one property off the Bot
+// `app/shell/backend-skills.ts` reads one property off the Bot
 // Durable Object's environment: a `WorkspaceFilesV1`. Until now nothing bound
 // it, so the Skills Package was never mounted and no deployed Turn could load
 // a Skill. This module is the binding: `WorkspaceFilesV1` over R2, with every
@@ -17,14 +17,14 @@
 import type {
   WorkspaceFilesV1,
   WorkspaceGenerationsV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import {
   createObjectWorkspaceFilesV1,
   workspaceObjectPrefixV1,
   type ObjectBucketV1,
   type ObjectHeadV1,
   type WorkspaceStoreSurfaceV1,
-} from "@frockbot/workspace-store";
+} from "@frockbot/core/workspace-store";
 
 function head(object: R2Object): ObjectHeadV1 {
   return {
@@ -56,8 +56,8 @@ export function createR2ObjectBucketV1(bucket: R2Bucket): ObjectBucketV1 {
       // `If-None-Match: *` is "create only if absent". `uploadedBefore` at the
       // epoch says the same thing in a second way, and is sent alongside so
       // the precondition holds even where a wildcard etag is compared
-      // literally. A create that silently overwrote would be last-writer-wins,
-      // which ADR 0013 forbids outright.
+      // literally. A create that silently overwrote would be
+      // last-writer-wins, which is forbidden outright.
       const conditional: R2Conditional | undefined =
         onlyIf === undefined
           ? undefined

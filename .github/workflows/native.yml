@@ -4,7 +4,7 @@ on:
   pull_request:
     paths:
       - "apps/native/**"
-      - "packages/protocol-schemas/**"
+      - "core/protocol-schemas/**"
       - "scripts/*protocol*"
       - "scripts/*native*"
       - ".github/workflows/native.yml"
@@ -55,3 +55,7 @@ jobs:
         if: steps.sdk.outputs.available == 'true'
         working-directory: apps/native
         run: flutter test --no-pub
+      - name: Build the web target
+        if: steps.sdk.outputs.available == 'true'
+        working-directory: apps/native
+        run: flutter build web --release --no-pub

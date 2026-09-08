@@ -1,4 +1,4 @@
-// Voice B0 end to end: Bot A asks Bot B, B runs an `agent` Turn, and B's
+// The agent lane end to end: Bot A asks Bot B, B runs an `agent` Turn, and B's
 // send_to_user text returns as A's `bot_message` tool result.
 import { describe, expect, it } from "vitest";
 import { TOOL_CALL_TRIGGER } from "../harness/miniflare.ts";

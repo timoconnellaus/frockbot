@@ -1,15 +1,15 @@
 // `computer_screenshot`'s two host operations, on the real wire.
 //
-// The unit suite in `packages/plugin-fly-sprite/src/screenshot.test.ts` proves
-// the script the provider builds against a double. What only exists here is
-// the pair travelling the v1 protocol over a workerd service binding: one
-// `exec` carrying the control guard and `scrot` under the tenant's display,
+// The unit suite in `computer/fly/screenshot.test.ts` proves the script the
+// provider builds against a double. What only exists here is the pair
+// travelling the v1 protocol over a workerd service binding: one `exec`
+// carrying the control guard and `scrot` under the tenant's display,
 // then one `file/read` bringing the PNG off the Computer — and both landing on
 // the same shard for one User, which is what makes a capture and its read-back
 // the same Computer.
 import { env } from "cloudflare:test";
 import { beforeAll, describe, expect, test } from "vitest";
-import { computerBotKey } from "@frockbot/plugin-fly-sprite";
+import { computerBotKey } from "@frockbot/computer/fly";
 import type {
   FakeComputerHostCall,
   FakeExecScript,

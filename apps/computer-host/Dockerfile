@@ -8,19 +8,21 @@ WORKDIR /app
 COPY apps/computer-host/container/package.json apps/computer-host/container/package-lock.json ./
 RUN npm ci --omit=dev
 
-# The two workspace packages the container imports. They ship TypeScript
-# sources and Node 24 strips the types, so there is no build step and no
-# second copy of the protocol or the Computer runtime.
+# The two subpaths of the `@frockbot/computer` module the container imports.
+# They ship TypeScript sources and Node 24 strips the types, so there is no
+# build step and no second copy of the protocol or the Computer runtime.
 #
-# They live outside `node_modules` and are reached through symlinks into it,
-# because Node refuses to strip types from a file under `node_modules`
+# The module lives outside `node_modules` and is reached through a symlink into
+# it, because Node refuses to strip types from a file under `node_modules`
 # (ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING) and resolves a symlink to its
 # real path before deciding. This is the same shape a workspace install has.
-COPY packages/computer-host-protocol ./packages/computer-host-protocol
-COPY packages/computer-host-runtime ./packages/computer-host-runtime
+# Only the manifest and the two subpath directories are copied; the exports map
+# resolves `@frockbot/computer/host-{protocol,runtime}` to them.
+COPY computer/package.json ./computer/package.json
+COPY computer/host-protocol ./computer/host-protocol
+COPY computer/host-runtime ./computer/host-runtime
 RUN mkdir -p node_modules/@frockbot \
-  && ln -s ../../packages/computer-host-protocol node_modules/@frockbot/computer-host-protocol \
-  && ln -s ../../packages/computer-host-runtime node_modules/@frockbot/computer-host-runtime
+  && ln -s ../../computer node_modules/@frockbot/computer
 
 COPY apps/computer-host/container ./container
 RUN chmod 755 container/entrypoint.sh

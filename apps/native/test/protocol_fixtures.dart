@@ -6,7 +6,7 @@ import '../lib/protocol/client_wire.generated.dart';
 
 void main() {
   final valid = jsonDecode(
-    File('packages/protocol-schemas/fixtures/valid.json').readAsStringSync(),
+    File('core/protocol-schemas/fixtures/valid.json').readAsStringSync(),
   ) as List;
   Map<String, dynamic> fixture(String name) =>
       valid.firstWhere((row) => row['schema'] == name)['value']
@@ -36,7 +36,7 @@ void main() {
   var count = 0;
   for (final validity in ['valid', 'invalid']) {
     final rows = jsonDecode(
-      File('packages/protocol-schemas/fixtures/$validity.json')
+      File('core/protocol-schemas/fixtures/$validity.json')
           .readAsStringSync(),
     ) as List;
     for (final row in rows) {

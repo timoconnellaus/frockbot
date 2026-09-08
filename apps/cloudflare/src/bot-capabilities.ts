@@ -4,35 +4,29 @@
 // every Package mounted for this Bot lists the same Connections and model.
 import { WorkerEntrypoint } from "cloudflare:workers";
 import type {
-  IsolateAppletsOutcomeV1,
   IsolateCapabilityListOutcomeV1,
   IsolateConnectionOutcomeV1,
   IsolateMemoryOutcomeV1,
   IsolateModelOutcomeV1,
-  IsolateNotificationOutcomeV1,
   IsolateScheduleOutcomeV1,
-  IsolateToolOutcomeV1,
   IsolateWorkspaceOutcomeV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import {
-  decodeIsolateAppletsRequestV1,
   decodeIsolateCapabilityListV1,
   decodeIsolateMemoryReadRequestV1,
   decodeIsolateMemoryWriteRequestV1,
   decodeIsolateModelInvocationV1,
-  decodeIsolateNotificationRequestV1,
   decodeIsolateScheduleRequestV1,
-  decodeIsolateToolRequestV1,
   decodeIsolateWorkspaceDeleteRequestV1,
   decodeIsolateWorkspaceListRequestV1,
   decodeIsolateWorkspacePathV1,
   decodeIsolateWorkspaceWriteRequestV1,
   decodeNormalizedModelRequestV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import {
   matchesAdmittedConnectionV1,
   type BotCapabilitiesPropsV1,
-} from "@frockbot/plugin-shell/backend-isolate";
+} from "@frockbot/app/isolates/capabilities";
 import type { BotState } from "./bot-state.js";
 
 function unavailable(reason: string): {
@@ -50,7 +44,6 @@ export interface BotCapabilitiesEnv {
 
 interface BotIsolateRpc {
   isolateInvokeModel(input: unknown): Promise<unknown>;
-  isolateInvokeTool(input: unknown): Promise<IsolateToolOutcomeV1>;
   isolateMemoryRead(input: unknown): Promise<IsolateMemoryOutcomeV1>;
   isolateMemoryWrite(input: unknown): Promise<IsolateMemoryOutcomeV1>;
   isolateMemoryForget(input: unknown): Promise<IsolateMemoryOutcomeV1>;
@@ -60,9 +53,7 @@ interface BotIsolateRpc {
   isolateWorkspaceWrite(input: unknown): Promise<IsolateWorkspaceOutcomeV1>;
   isolateWorkspaceDelete(input: unknown): Promise<IsolateWorkspaceOutcomeV1>;
   isolateConnection(input: unknown): Promise<IsolateConnectionOutcomeV1>;
-  isolateNotify(input: unknown): Promise<IsolateNotificationOutcomeV1>;
   isolateSchedule(input: unknown): Promise<IsolateScheduleOutcomeV1>;
-  isolateApplets(input: unknown): Promise<IsolateAppletsOutcomeV1>;
 }
 
 export class BotCapabilities extends WorkerEntrypoint<
@@ -97,10 +88,8 @@ export class BotCapabilities extends WorkerEntrypoint<
           status: "available",
           connections: this.ctx.props.connections,
           ...(this.ctx.props.model ? { model: this.ctx.props.model } : {}),
-          tools: true,
           memory: this.ctx.props.memory,
           workspace: this.ctx.props.workspace,
-          notify: true,
           schedule: true,
         }),
       );
@@ -136,16 +125,6 @@ export class BotCapabilities extends WorkerEntrypoint<
       );
     } catch {
       return unavailable("the model request could not be served");
-    }
-  }
-
-  async invokeTool(request: unknown): Promise<IsolateToolOutcomeV1> {
-    try {
-      return await this.rpc.isolateInvokeTool(
-        this.scope(decodeIsolateToolRequestV1(request)),
-      );
-    } catch {
-      return unavailable("the tool request could not be served");
     }
   }
 
@@ -250,38 +229,6 @@ export class BotCapabilities extends WorkerEntrypoint<
       return outcome;
     } catch {
       return unavailable("the Connection is unavailable");
-    }
-  }
-
-  async notify(request: unknown): Promise<IsolateNotificationOutcomeV1> {
-    try {
-      return await this.rpc.isolateNotify(
-        this.scope(decodeIsolateNotificationRequestV1(request)),
-      );
-    } catch {
-      return unavailable("notifications are unavailable");
-    }
-  }
-
-  /**
-   * The Applet capability (ADR 0022). Account-wide, so it carries no narrower
-   * grant than the rest of `env`: an Applet is the User's, and every Bot of
-   * that User sees the same directory.
-   */
-  async applets(request: unknown): Promise<IsolateAppletsOutcomeV1> {
-    try {
-      return await this.rpc.isolateApplets(
-        this.scope(decodeIsolateAppletsRequestV1(request)),
-      );
-    } catch (error) {
-      // The reason is the whole answer: "Applet owner id is invalid" tells an
-      // operator what broke, where a bare "unavailable" sent Bob round in
-      // circles for twenty steps.
-      const reason =
-        error instanceof Error && error.message.trim().length > 0
-          ? error.message.slice(0, 200)
-          : "Applets are unavailable";
-      return unavailable(reason);
     }
   }
 

@@ -1,0 +1,78 @@
+# @frockbot/applet-sdk
+
+The SDK a FrockBot Applet is written against: a schema-first Durable Object
+server, a TanStack DB client over one real-time socket, a precompiled component
+kit on the theme tokens, a linter, and the build pipeline the cloud build
+service runs.
+
+An Applet is authored with the `applet_*` tools, built by `apps/applet-build`,
+and mounted as a Durable Object facet from an immutable artifact. There is no
+CLI: nothing outside the service builds an Applet, and no Computer is involved
+at any point.
+
+## Entry points
+
+| Import                          | For                                                      |
+| ------------------------------- | -------------------------------------------------------- |
+| `@frockbot/applet-sdk/server`   | `Applet`, `table`, `t` — the Applet's `server.ts`        |
+| `@frockbot/applet-sdk/client`   | `createApplet`, `mount`, `newId` — the Applet's `ui.tsx` |
+| `@frockbot/applet-sdk/kit`      | the fourteen components (`src/kit/README.md`)            |
+| `@frockbot/applet-sdk/lint`     | the flat ESLint config and the five custom rules         |
+| `@frockbot/applet-sdk/protocol` | wire protocol v1, for the kernel and for tests           |
+| `@frockbot/applet-sdk/build`    | `runAppletBuildV1` — the five stages, for the service    |
+
+## The build
+
+`runAppletBuildV1(directory, { mode })` is five named stages over one
+directory: `descriptor`, `typecheck`, `lint`, `bundle`, `describe`. `check`
+stops after the linter; `build` goes on to the artifacts. A stage that fails
+stops the run and names itself, and every failure is a list of
+`{file, line, column, message, severity}`.
+
+`manifest.json`'s tool declarations are derived by mounting the built
+`server.js` in Miniflare and calling `health()` — the same question the kernel
+asks the facet before it admits a generation, so the manifest cannot disagree
+with the code.
+
+`template/` is the scaffold a new Applet starts as.
+`scripts/build-applets-assets.ts` turns it into `applets/template.generated.ts`,
+which `applet_create` writes through the Workspace.
+
+## What runs where
+
+`server.ts` becomes a single ESM file whose only import is `cloudflare:workers`,
+loaded by the kernel's `APPLETS` Worker Loader with no outbound network, and
+mounted as a facet under `AppletState`. `ui.tsx` becomes one self-contained HTML
+page served from the anonymous artifact origin into a sandboxed iframe, which
+receives its theme tokens and a short-lived viewer token through the host's
+`init` message and opens exactly one WebSocket back to the facet.
+
+The Cloudflare programming model is not hidden: an Applet is a Durable Object
+with SQLite and hibernating sockets. What the SDK does hide is every binding
+name — an author sees `tables`, `tools`, and `this.db`.
+
+## Wire protocol v1
+
+JSON frames, at most 64 KB each, decoded by `src/protocol/` at both ends;
+an unknown type, field, or table fails closed.
+
+| Direction       | Frame      | Carries                                                     |
+| --------------- | ---------- | ----------------------------------------------------------- |
+| server → client | `hello`    | contract, generationId, viewer, tables, revision, cursor    |
+| client → server | `hello`    | contract, optional `since` cursor for catch-up              |
+| server → client | `snapshot` | every row of every table, plus the cursor                   |
+| server → client | `changes`  | ordered row changes, optionally tagged with a client txn id |
+| client → server | `mutate`   | one client transaction: insert/update/delete                |
+| server → client | `ack`      | the resulting rows for that txn                             |
+| server → client | `reject`   | why the txn was refused (the client rolls back)             |
+
+## Tests
+
+```sh
+bun test test spike
+```
+
+Pure modules and the client are tested in `bun test`: the store runs against
+`bun:sqlite`, and `test/loopback.ts` joins the real protocol server to the real
+client transport through a pair of fake sockets. `test/build.test.ts` and
+`spike/` run the real pipeline and the built Applet in Miniflare.

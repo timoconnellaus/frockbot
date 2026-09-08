@@ -8,7 +8,7 @@ import { describe, expect, test } from "bun:test";
 import {
   computerHostEffectRequestWireV1,
   type ComputerHostEffectRequestV1,
-} from "@frockbot/computer-core/host-protocol";
+} from "@frockbot/computer/core/host-protocol";
 import { ComputerEffectJournal } from "./effect-journal.ts";
 
 const effect: ComputerHostEffectRequestV1 = {

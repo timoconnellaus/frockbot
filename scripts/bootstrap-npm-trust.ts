@@ -24,7 +24,7 @@
 // Naming packages narrows it further, and is the way back from a run that
 // published a placeholder but failed before trusting it:
 //
-//   bun scripts/bootstrap-npm-trust.ts @frockbot/plugin-applets --confirm
+//   bun scripts/bootstrap-npm-trust.ts @frockbot/applet-sdk --confirm
 
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -43,14 +43,19 @@ export type WorkspacePackage = {
   readonly directory: string;
 };
 
-/** Every publishable workspace under `packages/`, in a stable order. */
+/** Every publishable workspace, in a stable order. */
 export function readWorkspacePackages(root: string): WorkspacePackage[] {
-  const packages: WorkspacePackage[] = [];
-  for (const entry of readdirSync(join(root, "packages"), {
+  const directories = readdirSync(join(root, "packages"), {
     withFileTypes: true,
-  })) {
-    if (!entry.isDirectory()) continue;
-    const directory = join("packages", entry.name);
+  })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => join("packages", entry.name));
+  // The Applets SDK sits beside the module it authors for, and is the one
+  // package a release actually publishes.
+  directories.push(join("applets", "sdk"));
+
+  const packages: WorkspacePackage[] = [];
+  for (const directory of directories) {
     const manifestPath = join(root, directory, "package.json");
     let manifest: { name?: string };
     try {
@@ -208,7 +213,7 @@ export async function bootstrap(options: {
 
   for (const name of only) {
     if (!packages.some((entry) => entry.name === name)) {
-      throw new Error(`no workspace under packages/ is named ${name}`);
+      throw new Error(`no publishable workspace is named ${name}`);
     }
   }
 
@@ -227,7 +232,7 @@ export async function bootstrap(options: {
     work.push(entry);
   }
 
-  log(`${packages.length} workspace packages under packages/`);
+  log(`${packages.length} workspace packages`);
   if (work.length === 0) {
     log("npm has every one of them; nothing to bootstrap.");
     return { packages: packages.length, publishedCount: 0, trustedCount: 0 };

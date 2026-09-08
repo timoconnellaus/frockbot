@@ -1,8 +1,8 @@
 /**
  * The opt-in live check for the User-wide `desktop-gui` lease.
  *
- * ADR 0017 serializes `computerUse` subagents at the Computer host's own
- * `control` op: one screen on one Computer that serves all of a User's Bots, so
+ * `computerUse` subagents are serialized at the Computer host's own `control`
+ * op: one screen on one Computer that serves all of a User's Bots, so
  * a second `computerUse` task is refused and told who holds the desktop. The
  * fake host in `apps/cloudflare/test/computer-host-fake.ts` runs that rule
  * faithfully, and `subagents-roles.workerd.ts` proves the Bot Durable Objects
@@ -28,7 +28,7 @@ import {
   decodeComputerHostControlResultV1,
   decodeComputerHostProblemV1,
   type ComputerHostControlScopeV1,
-} from "@frockbot/computer-host-protocol";
+} from "@frockbot/computer/host-protocol";
 
 const SKIP_MESSAGE =
   "SPRITES_TOKEN is not set: skipping the live desktop-lease check.";

@@ -169,22 +169,20 @@ describe("the production secrets report", () => {
 
   test("an optional secret dropped from the environment is not revoked", () => {
     // The trap this module was rewritten for: an operator removes
-    // COMPOSIO_API_KEY from the production environment to disable Composio,
-    // ships a release, and the old key is still live and still authorized.
-    const { COMPOSIO_API_KEY: _dropped, ...rest } = complete;
-    const report = productionSecretsReportV1(rest, ["COMPOSIO_API_KEY"]);
+    // DEBUG_TOKEN from the production environment to close the debug routes,
+    // ships a release, and the old token is still live and still authorized.
+    const { DEBUG_TOKEN: _dropped, ...rest } = complete;
+    const report = productionSecretsReportV1(rest, ["DEBUG_TOKEN"]);
     expect(report.ok).toBe(true);
     expect(report.warnings[0]).toContain("the deployed Worker still holds it");
     expect(report.warnings[0]).toContain("does not revoke it");
     expect(report.warnings[0]).toContain(
-      "bun scripts/check-production-secrets.ts revoke COMPOSIO_API_KEY",
+      "bun scripts/check-production-secrets.ts revoke DEBUG_TOKEN",
     );
-    // And it does not claim Composio is off: it is running on the old key.
-    expect(report.warnings[0]).not.toContain(
-      "Composio Connections are unavailable",
-    );
-    expect(liveSecretPlanV1(["COMPOSIO_API_KEY"], rest).leftInPlace).toEqual([
-      "COMPOSIO_API_KEY",
+    // And it does not claim the routes are shut: they run on the old token.
+    expect(report.warnings[0]).not.toContain("the operator debug routes 404");
+    expect(liveSecretPlanV1(["DEBUG_TOKEN"], rest).leftInPlace).toEqual([
+      "DEBUG_TOKEN",
     ]);
   });
 
@@ -218,12 +216,6 @@ describe("the production secrets report", () => {
       NON_SECRET_WORKER_SETTINGS_V1.filter(
         (setting) => setting.forbiddenLive !== undefined,
       ).map((setting) => setting.name),
-    ).toEqual([
-      "COMPOSIO_TEST_URL",
-      "ALLOW_DEVELOPMENT_AUTH",
-      "WORKSPACE_SEED_TOKEN",
-      "VOICE_UPSTREAM_URL",
-      "VOICE_ASSISTANT_UPSTREAM_URL",
-    ]);
+    ).toEqual(["ALLOW_DEVELOPMENT_AUTH"]);
   });
 });

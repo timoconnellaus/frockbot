@@ -12,18 +12,12 @@ import {
   runInDurableObject,
 } from "cloudflare:test";
 import { describe, expect, test } from "vitest";
-import {
-  catalogContentHashV1,
-  catalogEntryKeyV1,
-  catalogIndexKeyV1,
-  CATALOG_POINTER_KEY_V1,
-} from "@frockbot/catalog-core";
 import type {
   TemplateImportListViewV1,
   TemplateImportRecordV1,
   TemplateShareReceiptV1,
-} from "@frockbot/plugin-bot-template/shared";
-import { templateImportRecordKeyV1 } from "@frockbot/plugin-bot-template/shared";
+} from "@frockbot/app/bot-template/shared";
+import { templateImportRecordKeyV1 } from "@frockbot/app/bot-template/shared";
 import { provisionBot } from "./provision-bot.ts";
 
 /**
@@ -32,9 +26,6 @@ import { provisionBot } from "./provision-bot.ts";
  * asks for it, which would leave the assertions reading a half-finished walk.
  */
 const HAND_FIRED_ALARM_DELAY_MS = 60_000;
-
-const CATALOG_PACKAGE = "importable";
-const GENERATION = "import-gen-1";
 
 interface TemplateRpc {
   executeTemplateCommand(input: unknown): Promise<TemplateShareReceiptV1>;
@@ -45,7 +36,7 @@ interface TemplateRpc {
 interface SettingsRpc {
   readConfiguration(input: unknown): Promise<{
     revision: number;
-    packages: { packageId: string; catalogId?: string }[];
+    packages: { packageId: string }[];
   }>;
 }
 
@@ -54,52 +45,6 @@ function user(userId: string): TemplateRpc & SettingsRpc {
   // methods are not represented by workers-types.
   return env.USER_CONFIGURATIONS.getByName(userId) as unknown as TemplateRpc &
     SettingsRpc;
-}
-
-/** One immutable generation holding the entry an imported template names. */
-async function seedCatalog(): Promise<void> {
-  const entry = {
-    schemaVersion: 1,
-    catalogId: CATALOG_PACKAGE,
-    packageId: CATALOG_PACKAGE,
-    displayName: "Importable",
-    description: "A Package a template can name.",
-    version: "0.0.1",
-    kind: "package",
-    manifestHash: "e".repeat(64),
-    servers: [],
-    setupFields: [],
-    skills: [],
-  };
-  const index = {
-    schemaVersion: 1,
-    generation: GENERATION,
-    entries: [
-      {
-        catalogId: entry.catalogId,
-        packageId: entry.packageId,
-        displayName: entry.displayName,
-        description: entry.description,
-        version: entry.version,
-        manifestHash: entry.manifestHash,
-        kind: entry.kind,
-      },
-    ],
-  };
-  const indexDocument = JSON.stringify(index);
-  await env.PACKAGE_CATALOG.put(
-    catalogEntryKeyV1(GENERATION, entry.catalogId),
-    JSON.stringify(entry),
-  );
-  await env.PACKAGE_CATALOG.put(catalogIndexKeyV1(GENERATION), indexDocument);
-  await env.PACKAGE_CATALOG.put(
-    CATALOG_POINTER_KEY_V1,
-    JSON.stringify({
-      schemaVersion: 1,
-      generation: GENERATION,
-      indexHash: await catalogContentHashV1(indexDocument),
-    }),
-  );
 }
 
 /** Export a Bot and publish the share, so there is something to import. */
@@ -159,12 +104,11 @@ async function apply(importerId: string): Promise<TemplateImportRecordV1> {
 }
 
 describe("importing a Bot template in workerd", () => {
-  test("plans against the importer's own pin and applies nothing", async () => {
-    await seedCatalog();
+  test("plans against this deployment's Packages and applies nothing", async () => {
     const ownerId = `tpl-owner-${crypto.randomUUID()}`;
     const importerId = `tpl-importer-${crypto.randomUUID()}`;
     const shareId = await publishedShare(ownerId, "budget");
-    // The importer must exist and be pinned before they can plan.
+    // The importer must exist before they can plan.
     await provisionBot({ userId: importerId, botId: "importer-home" });
 
     const planned = await plan(importerId, shareId);
@@ -181,7 +125,6 @@ describe("importing a Bot template in workerd", () => {
   });
 
   test("resumes after eviction with no second Bot and no duplicate install", async () => {
-    await seedCatalog();
     const ownerId = `tpl-owner-${crypto.randomUUID()}`;
     const importerId = `tpl-importer-${crypto.randomUUID()}`;
     const shareId = await publishedShare(ownerId, "budget");
@@ -220,7 +163,6 @@ describe("importing a Bot template in workerd", () => {
   });
 
   test("keeps the imported Bot on account-shaped configuration", async () => {
-    await seedCatalog();
     const ownerId = `tpl-owner-${crypto.randomUUID()}`;
     const importerId = `tpl-importer-${crypto.randomUUID()}`;
     const shareId = await publishedShare(ownerId, "budget");
@@ -249,7 +191,6 @@ describe("importing a Bot template in workerd", () => {
   });
 
   test("finishes from the alarm alone after an eviction at every step", async () => {
-    await seedCatalog();
     const ownerId = `tpl-owner-${crypto.randomUUID()}`;
     const importerId = `tpl-importer-${crypto.randomUUID()}`;
     const shareId = await publishedShare(ownerId, "budget");

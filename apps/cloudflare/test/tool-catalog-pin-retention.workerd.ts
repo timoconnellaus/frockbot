@@ -1,4 +1,4 @@
-// The Composio tool-catalog pins in real workerd SQLite, on the same Durable
+// External tool-catalog pins in real workerd SQLite, on the same Durable
 // Object storage the Bot's admission, event, and settlement writes share. A
 // User with one large Connection catalog used to leave a distinct ~1 MB value
 // behind on every Turn, forever: the object filled and the next ordinary write
@@ -13,7 +13,7 @@ import {
   TURN_TOOL_CATALOG_TURN_RETENTION_V1,
   turnToolCatalogPin,
   turnToolCatalogPinKeyV1,
-} from "@frockbot/plugin-shell/tool-catalog-pin";
+} from "@frockbot/app/shell/tool-catalog-pin";
 import { describe, expect, test } from "vitest";
 
 const CATALOG_BYTES = 900_000;

@@ -33,20 +33,20 @@
       "binding": "APPLETS",
     },
   ],
-  // One array: a second "services" key would silently replace this one, and
-  // the app would deploy with PACKAGE_BUNDLER unbound.
   "services": [
-    // Package bundling runs outside the Durable Object, in a Worker with no
-    // outbound bindings of its own (plan Step 3 / decision D4).
-    {
-      "binding": "PACKAGE_BUNDLER",
-      "service": "frockbot-cloudflare-bundler",
-    },
     // The shared Computer host (ADR 0004). It holds SPRITES_TOKEN and the
     // Sprites SDK; this Worker sends only an opaque credential reference.
     {
       "binding": "COMPUTER_HOST",
       "service": "frockbot-computer-host",
+    },
+    // The Applet build service (plan step 8). It type-checks, lints, bundles
+    // and boots an Applet's source and returns the artifacts; it holds no
+    // storage, so this Worker stays the only thing that writes R2 and the only
+    // thing that hash-verifies what came back.
+    {
+      "binding": "APPLET_BUILD",
+      "service": "frockbot-applet-build",
     },
   ],
   "r2_buckets": [
@@ -57,13 +57,6 @@
     {
       "binding": "MEMORY_FILES",
       "bucket_name": "frockbot-memory-files",
-    },
-    // The remote Package Catalog: immutable generations plus one mutable
-    // pointer, published by scripts/publish-catalog.ts and served read-only
-    // through /catalog/v1/*.
-    {
-      "binding": "PACKAGE_CATALOG",
-      "bucket_name": "frockbot-package-catalog",
     },
   ],
   "d1_databases": [
@@ -104,14 +97,6 @@
         "name": "APPLET_STATES",
         "class_name": "AppletState",
       },
-      // One voice transport per User, `idFromName(userId)` (voice plan D2).
-      // It holds the browser and provider sockets and no authority: the voice
-      // budget it spends lives in `UserConfiguration`, so an eviction here
-      // loses a live capture and nothing else.
-      {
-        "name": "VOICE_SESSIONS",
-        "class_name": "VoiceSession",
-      },
     ],
   },
   "migrations": [
@@ -135,6 +120,12 @@
       "tag": "v5",
       "new_sqlite_classes": ["VoiceSession"],
     },
+    // `v5` is immutable once applied, so the class it created is retired by a
+    // later tag rather than by editing it away.
+    {
+      "tag": "v6",
+      "deleted_classes": ["VoiceSession"],
+    },
   ],
   "vars": {
     // Android development upgrade track. macOS awaits its signed return gate.
@@ -151,12 +142,14 @@
     // The `flock-auto` dynamic route's target model is configured and deployed
     // in the Cloudflare AI Gateway dashboard, never selected in application code.
     "FROCK_AI_AUTO_ROUTE": "flock-auto",
-    // Comma-separated webview origins allowed to call /api/* cross-origin.
-    "ALLOWED_CLIENT_ORIGINS": "capacitor://localhost,frockbot://localhost",
     "UI_ARTIFACT_HOSTS": "ui.bot.frockbot.com",
   },
   "env": {
     "development": {
+      // Never deployed, and without an empty list `wrangler dev` inherits the
+      // top-level custom domain and rewrites every request URL to
+      // bot.frockbot.com — which the native auth origin check then refuses.
+      "routes": [],
       "worker_loaders": [
         {
           "binding": "USER_APPLICATIONS",
@@ -170,12 +163,12 @@
       ],
       "services": [
         {
-          "binding": "PACKAGE_BUNDLER",
-          "service": "frockbot-cloudflare-bundler",
-        },
-        {
           "binding": "COMPUTER_HOST",
           "service": "frockbot-computer-host",
+        },
+        {
+          "binding": "APPLET_BUILD",
+          "service": "frockbot-applet-build",
         },
       ],
       "r2_buckets": [
@@ -188,11 +181,6 @@
           "binding": "MEMORY_FILES",
           "bucket_name": "frockbot-memory-files-development",
           "remote": true,
-        },
-        {
-          "binding": "PACKAGE_CATALOG",
-          "bucket_name": "frockbot-package-catalog-development",
-          "remote": false,
         },
       ],
       "d1_databases": [
@@ -233,10 +221,6 @@
             "name": "APPLET_STATES",
             "class_name": "AppletState",
           },
-          {
-            "name": "VOICE_SESSIONS",
-            "class_name": "VoiceSession",
-          },
         ],
       },
       "vars": {
@@ -247,7 +231,6 @@
         // with the FROCK_AI_GATEWAY_TOKEN secret.
         "FROCK_AI_ACCOUNT_ID": "374784ce2915a597adcecf9bcb2c5ee6",
         "FROCK_AI_AUTO_ROUTE": "flock-auto",
-        "ALLOWED_CLIENT_ORIGINS": "capacitor://localhost,frockbot://localhost",
         "UI_ARTIFACT_HOSTS": "ui.localhost",
         // Placeholder only. Production supplies this as a secret.
         "FROCKBOT_ADMIN_EMAILS": "owner@example.com",
@@ -259,13 +242,12 @@
     // Vectorize index, and its own Durable Object namespaces, because a
     // Durable Object namespace is per-Worker and this is a different Worker.
     //
-    // `PACKAGE_BUNDLER` and `COMPUTER_HOST` are deliberately the production
-    // Workers. Both are stateless request handlers holding no per-user data —
-    // the bundler has no bindings at all, and the Computer host owns only the
-    // Sprites credential — so staging exercises the same host production does
-    // rather than paying for a second container deployment. The consequence is
-    // the same ordering constraint production has: a change to either Worker's
-    // contract ships with a tag, so staging sees it only once that tag lands.
+    // `COMPUTER_HOST` is deliberately the production Worker. It is a stateless
+    // request handler holding no per-user data — it owns only the Sprites
+    // credential — so staging exercises the same host production does rather
+    // than paying for a second container deployment. The consequence is the
+    // same ordering constraint production has: a change to the host's contract
+    // ships with a tag, so staging sees it only once that tag lands.
     "staging": {
       "name": "frockbot-cloudflare-staging",
       "routes": [
@@ -291,12 +273,12 @@
       ],
       "services": [
         {
-          "binding": "PACKAGE_BUNDLER",
-          "service": "frockbot-cloudflare-bundler",
-        },
-        {
           "binding": "COMPUTER_HOST",
           "service": "frockbot-computer-host",
+        },
+        {
+          "binding": "APPLET_BUILD",
+          "service": "frockbot-applet-build",
         },
       ],
       "r2_buckets": [
@@ -307,10 +289,6 @@
         {
           "binding": "MEMORY_FILES",
           "bucket_name": "frockbot-memory-files-staging",
-        },
-        {
-          "binding": "PACKAGE_CATALOG",
-          "bucket_name": "frockbot-package-catalog-staging",
         },
       ],
       // The staging deploy replaces `database_id` with the identifier of the
@@ -352,10 +330,6 @@
             "name": "APPLET_STATES",
             "class_name": "AppletState",
           },
-          {
-            "name": "VOICE_SESSIONS",
-            "class_name": "VoiceSession",
-          },
         ],
       },
       "vars": {
@@ -364,7 +338,6 @@
         // transport's account id is repeated here (cloudflare/ai#617). The
         // Gateway id and Auto route keep their code defaults.
         "FROCK_AI_ACCOUNT_ID": "374784ce2915a597adcecf9bcb2c5ee6",
-        "ALLOWED_CLIENT_ORIGINS": "capacitor://localhost,frockbot://localhost",
         "UI_ARTIFACT_HOSTS": "ui.staging-bot.frockbot.com",
       },
     },
@@ -399,18 +372,22 @@
           "binding": "APPLETS",
         },
       ],
-      // Declared as production declares them. Neither Worker runs beside the
-      // harness, so both report "not connected"; no spec authors a Package or
-      // uses a Computer, and a binding that is declared but unreachable is what
-      // production looks like when a dependency is down.
+      // Declared as production declares them. The Computer host does not run
+      // beside the harness, so `COMPUTER_HOST` reports "not connected" and no
+      // spec uses a Computer; a binding that is declared but unreachable is
+      // what production looks like when a dependency is down. The Applet build
+      // service does run beside it — `e2e/harness.ts` starts
+      // `apps/applet-build` under its own `wrangler dev` in the dev service
+      // registry — so `applets-publish.e2e.ts` compiles an Applet with the
+      // container production compiles it with.
       "services": [
-        {
-          "binding": "PACKAGE_BUNDLER",
-          "service": "frockbot-cloudflare-bundler",
-        },
         {
           "binding": "COMPUTER_HOST",
           "service": "frockbot-computer-host",
+        },
+        {
+          "binding": "APPLET_BUILD",
+          "service": "frockbot-applet-build",
         },
         {
           "binding": "AI",
@@ -429,11 +406,6 @@
         {
           "binding": "MEMORY_FILES",
           "bucket_name": "frockbot-memory-files-e2e",
-          "remote": false,
-        },
-        {
-          "binding": "PACKAGE_CATALOG",
-          "bucket_name": "frockbot-package-catalog",
           "remote": false,
         },
       ],
@@ -464,10 +436,6 @@
             "name": "APPLET_STATES",
             "class_name": "AppletState",
           },
-          {
-            "name": "VOICE_SESSIONS",
-            "class_name": "VoiceSession",
-          },
         ],
       },
       "vars": {
@@ -478,7 +446,6 @@
         // with the FROCK_AI_GATEWAY_TOKEN secret.
         "FROCK_AI_ACCOUNT_ID": "374784ce2915a597adcecf9bcb2c5ee6",
         "FROCK_AI_AUTO_ROUTE": "flock-auto",
-        "ALLOWED_CLIENT_ORIGINS": "capacitor://localhost,frockbot://localhost",
         "UI_ARTIFACT_HOSTS": "ui.localhost",
         // The canonical `development` identity is admin in this environment;
         // this placeholder also proves the configured-allowlist rule.

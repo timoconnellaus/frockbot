@@ -5,8 +5,7 @@
  * command whose output arrives in whatever chunks the test chooses, and a
  * filesystem that holds bytes. In particular it lets a test split one logical
  * write across several `data` events, because the transport under the real
- * thing gives no guarantee about chunk boundaries — the lesson ADR 0004
- * records.
+ * thing gives no guarantee about chunk boundaries.
  */
 
 import { EventEmitter } from "node:events";
@@ -26,7 +25,7 @@ import {
   TARGET_ID_FILE,
   VIEW_TENANT_SERVICE_PREFIX,
   WINDOW_LIVE_MARKER,
-} from "@frockbot/computer-host-runtime";
+} from "@frockbot/computer/host-runtime";
 import type {
   SpriteCommandHandle,
   SpriteDirentHandle,

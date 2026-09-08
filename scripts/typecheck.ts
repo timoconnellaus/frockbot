@@ -26,21 +26,34 @@ interface Target {
   dir: string;
 }
 
+const manifestPaths = [
+  "app/package.json",
+  "applets/package.json",
+  "applets/sdk/package.json",
+  "computer/package.json",
+  "core/package.json",
+  "frock-compose/package.json",
+  "providers/package.json",
+];
+for (const group of ["packages", "apps"]) {
+  manifestPaths.push(
+    ...new Bun.Glob(`${group}/*/package.json`).scanSync({
+      cwd: repoRoot,
+      onlyFiles: true,
+    }),
+  );
+}
+
 const targets: Target[] = [];
-for (const group of ["packages", "apps", "applications"]) {
-  for (const manifestPath of new Bun.Glob(`${group}/*/package.json`).scanSync({
-    cwd: repoRoot,
-    onlyFiles: true,
-  })) {
-    const manifest = JSON.parse(
-      readFileSync(join(repoRoot, manifestPath), "utf8"),
-    ) as { name?: string; scripts?: Record<string, string> };
-    if (!manifest.name || !manifest.scripts?.typecheck) continue;
-    targets.push({
-      name: manifest.name,
-      dir: join(repoRoot, manifestPath.replace(/\/package\.json$/, "")),
-    });
-  }
+for (const manifestPath of manifestPaths) {
+  const manifest = JSON.parse(
+    readFileSync(join(repoRoot, manifestPath), "utf8"),
+  ) as { name?: string; scripts?: Record<string, string> };
+  if (!manifest.name || !manifest.scripts?.typecheck) continue;
+  targets.push({
+    name: manifest.name,
+    dir: join(repoRoot, manifestPath.replace(/\/package\.json$/, "")),
+  });
 }
 targets.sort((a, b) => a.name.localeCompare(b.name));
 

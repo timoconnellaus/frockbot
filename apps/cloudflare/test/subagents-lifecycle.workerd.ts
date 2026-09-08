@@ -1,9 +1,9 @@
 // The subagent lifecycle, against real Bot Durable Objects.
 //
 // G1 proved the split: a task is admitted in the parent Bot Durable Object and
-// executed in a Subagent Durable Object of the same Bot (ADR 0017). This file
-// is about what happens to a task *after* it is dispatched, and every claim is
-// about durable state surviving the object that wrote it:
+// executed in a Subagent Durable Object of the same Bot. This file is about
+// what happens to a task *after* it is dispatched, and every claim is about
+// durable state surviving the object that wrote it:
 //
 //  * A child evicted mid-run resumes from its own cursor. Its Session is its
 //    own durable state, so recovery is the child's, and the parent is told the
@@ -20,11 +20,11 @@ import { evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { describe, expect, test } from "vitest";
 import { provisionBot } from "./provision-bot.ts";
 import { toolCallTriggerPrompt } from "./harness/miniflare.ts";
-import { subagentDurableObjectNameV1 } from "@frockbot/plugin-subagents/storage-keys";
+import { subagentDurableObjectNameV1 } from "@frockbot/app/subagents/storage-keys";
 import type {
   TaskListViewV1,
   TaskViewV1,
-} from "@frockbot/plugin-subagents/shared";
+} from "@frockbot/app/subagents/shared";
 import {
   hydrateStoredRunEventsV1,
   hydratedStoredRunsV1,

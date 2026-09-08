@@ -1,14 +1,15 @@
 import type {
   SettingsFrame,
   ConnectionsFrame,
+  PluginsFrame,
   SettingsChangeCommand,
-} from "@frockbot/protocol-schemas";
+} from "@frockbot/core/protocol-schemas";
 import {
   type BotIsolateEntrypoint,
   type BotIsolateEnv,
   type SessionEvent,
-} from "@frockbot/kernel-contracts";
-import type { MachineResultDeliveryV1 } from "@frockbot/plugin-user-machine/delivery";
+} from "@frockbot/core/contracts";
+import type { MachineResultDeliveryV1 } from "@frockbot/app/machine/delivery";
 import type { DebugGatewaySurface } from "./debug.js";
 import type {
   BotConfigurationExecuteRpcV1,
@@ -23,7 +24,7 @@ import type {
   UserConfigurationExecuteRpcV1,
   UserConfigurationReadRpcV1,
   UserSettingsViewV1,
-} from "@frockbot/configuration-core";
+} from "@frockbot/core/configuration";
 import type {
   ConnectionCommandReceiptV1,
   ConnectionCommandV1,
@@ -31,17 +32,8 @@ import type {
   CredentialLeaseV1,
   RevokeConnectionResult,
   StartConnectionResult,
-} from "@frockbot/connection-core";
-import type {
-  McpLifecycleReceiptV1,
-  McpMountOutcomeReportV1,
-  McpServerStatusViewV1,
-} from "@frockbot/plugin-mcp/records";
-import type {
-  McpAuthorizationCompletionRequestV1,
-  McpAuthorizationStartRequestV1,
-} from "@frockbot/plugin-mcp/backend";
-import type { MemoryVector, MemoryVectorMatch } from "@frockbot/plugin-memory";
+} from "@frockbot/core/connection";
+import type { MemoryVector, MemoryVectorMatch } from "@frockbot/app/memory";
 // Flock DTOs cross only the authenticated hosted/backend seam.
 import type {
   BotDirectoryViewV1,
@@ -54,20 +46,20 @@ import type {
   FlockReceiptV1,
   SheepIdentityViewV1,
   UpdateSheepCommandV1,
-} from "@frockbot/plugin-flock/shared";
+} from "@frockbot/app/flock/shared";
 import type {
   TemplateCommandV1,
   TemplateImportListViewV1,
   TemplateImportRecordV1,
   TemplateShareListViewV1,
   TemplateShareReceiptV1,
-} from "@frockbot/plugin-bot-template/shared";
-import type { TemplateVisibilityV1 } from "@frockbot/template-core";
+} from "@frockbot/app/bot-template/shared";
+import type { TemplateVisibilityV1 } from "@frockbot/core/template";
 import type {
   ApprovalDecisionCommandV1,
   ApprovalDecisionReceiptV1,
   ApprovalListViewV1,
-} from "@frockbot/plugin-shell/approvals";
+} from "@frockbot/app/shell/approvals";
 import type {
   RoutineCommandReceiptV1,
   RoutineCommandV1,
@@ -77,17 +69,11 @@ import type {
   RoutineListViewV1,
   RoutineRunDetailViewV1,
   RoutineRunListViewV1,
-} from "@frockbot/plugin-routines/shared";
+} from "@frockbot/app/routines/shared";
 import type {
   TaskListViewV1,
   TaskViewV1,
-} from "@frockbot/plugin-subagents/shared";
-import type {
-  PackagePublicationReceiptV1,
-  PackageRevisionHistoryV1,
-  PublishPackageCommandV1,
-  RollbackPackageCommandV1,
-} from "@frockbot/plugin-package-publisher/shared";
+} from "@frockbot/app/subagents/shared";
 import type {
   ClientConversationListV1,
   ClientConversationOutcomeV1,
@@ -98,9 +84,9 @@ import type {
   ClientRunStopCommandV1,
   ClientRunStopReceiptV1,
   ClientTurnV1,
-} from "@frockbot/plugin-shell/run-protocol";
-import type { ClientSkillCatalogV1 } from "@frockbot/plugin-shell/skill-protocol";
-import type { DeploymentPolicyV1 } from "@frockbot/plugin-admin/shared";
+} from "@frockbot/app/shell/run-protocol";
+import type { ClientSkillCatalogV1 } from "@frockbot/app/shell/skill-protocol";
+import type { DeploymentPolicyV1 } from "@frockbot/app/admin/shared";
 
 export interface BackendRouteContribution {
   packageId: string;
@@ -126,11 +112,7 @@ export interface UserApplicationIdentity {
 }
 
 export type StoredRunStatus =
-  | "running"
-  | "completed"
-  | "failed"
-  | "interrupted"
-  | "reconciliation-required";
+  "running" | "completed" | "failed" | "interrupted";
 
 export interface StoredRun {
   runId: string;
@@ -141,7 +123,7 @@ export interface StoredRun {
   status?: StoredRunStatus;
   responseText?: string;
   failure?: string;
-  phase?: "admitted" | "executing" | "reconciliation-required";
+  phase?: "admitted" | "executing";
   compositionGenerationId?: string;
   configurationSnapshot?: BotSettingsViewV1;
   previousEventCount?: number;
@@ -186,7 +168,6 @@ export interface BotStateBinding {
     command: ApprovalDecisionCommandV1,
   ): Promise<ApprovalDecisionReceiptV1>;
   acknowledgeNotification(botId: string, notificationId: string): Promise<void>;
-  reconcileRun(botId: string, runId: string): Promise<BotTurnResult>;
   stopRun(
     botId: string,
     command: ClientRunStopCommandV1,
@@ -269,11 +250,11 @@ export interface UserBotStateBinding {
   listPackageUi(input: {
     schemaVersion: 1;
     botId: string;
-  }): Promise<import("@frockbot/kernel-contracts").PackageIframeCompositionV1>;
+  }): Promise<import("@frockbot/core/contracts").PackageIframeCompositionV1>;
   runPackageUiTool(input: {
     schemaVersion: 1;
     botId: string;
-    command: import("@frockbot/kernel-contracts").PackageIframeToolCommandV1;
+    command: import("@frockbot/core/contracts").PackageIframeToolCommandV1;
   }): Promise<BotTurnResult>;
   readWorkspaceFileV1(input: {
     schemaVersion: 1;
@@ -282,9 +263,9 @@ export interface UserBotStateBinding {
   }): Promise<ClientWorkspaceFileV1>;
   /**
    * The User's Applets, and the two short-lived projections an open Applet
-   * needs (ADR 0022 §4). Account-wide, so they take no Bot: they sit on this
-   * User-scoped binding because it is the only door the hosted application has
-   * to the User Durable Object.
+   * needs. Account-wide, so they take no Bot: they sit on this User-scoped
+   * binding because it is the only door the hosted application has to the
+   * User Durable Object.
    */
   listApplets(input?: { schemaVersion: 1 }): Promise<unknown>;
   mintAppletViewerToken(input: {
@@ -319,13 +300,13 @@ export interface UserBotStateBinding {
     schemaVersion: 1;
     botId: string;
     appletId: string;
-  }): Promise<import("@frockbot/kernel-contracts").AppletSourceViewV1>;
-  /** The outcome last recorded for `applet check` or `applet build`. */
+  }): Promise<import("@frockbot/core/contracts").AppletSourceViewV1>;
+  /** The outcome last recorded for `applet_check`. */
   readAppletBuildV1(input: {
     schemaVersion: 1;
     botId: string;
     appletId: string;
-  }): Promise<import("@frockbot/kernel-contracts").AppletBuildViewV1>;
+  }): Promise<import("@frockbot/core/contracts").AppletBuildViewV1>;
   listNotifications(input: {
     schemaVersion: 1;
     botId: string;
@@ -345,11 +326,6 @@ export interface UserBotStateBinding {
     botId: string;
     notificationId: string;
   }): Promise<void>;
-  reconcileRun(input: {
-    schemaVersion: 1;
-    botId: string;
-    runId: string;
-  }): Promise<BotTurnResult>;
   stopRun(input: {
     schemaVersion: 1;
     botId: string;
@@ -365,7 +341,7 @@ export interface UserApplicationEnv {
 /**
  * The loader-side `WorkerCode`. `env` is generic because two kinds of isolate
  * are loaded from this Worker: a user application (`UserApplicationEnv`) and a
- * Bot Package (`BotIsolateEnv`, from `@frockbot/kernel-contracts`), which sees
+ * Bot Package (`BotIsolateEnv`, from `@frockbot/core/contracts`), which sees
  * only `IDENTITY` and the loopback `CAPABILITIES` service binding.
  */
 export interface WorkerCode<Env = UserApplicationEnv> {
@@ -410,33 +386,11 @@ export interface ApplicationArtifactStore {
   loadPackageUiArtifact?(contentHash: string): Promise<string | undefined>;
 }
 
-/** One verified Catalog object, as `/catalog/v1/*` serves it. */
-export interface CatalogGatewayDocument {
-  generation: string;
-  hash: string;
-  document: string;
-}
-
 /**
- * The read-only Catalog seam the gateway holds. Only the two documents the
- * routes serve: the gateway publishes the Catalog, it does not own it, and it
- * never writes to the bucket.
- */
-export interface CatalogGatewayStore {
-  readIndexDocument(
-    generation?: string,
-  ): Promise<CatalogGatewayDocument | undefined>;
-  readEntryDocument(
-    catalogId: string,
-    generation?: string,
-  ): Promise<CatalogGatewayDocument | undefined>;
-}
-
-/**
- * Bot-authored Package artifacts (`docs/plans/kernel-and-isolate.md` Step 3).
- * Content-addressed and immutable, stored at `packages/<contentHash>.mjs` in the
- * same `APPLICATION_ARTIFACTS` bucket. Unlike `ApplicationArtifactStore.load`,
- * the reader verifies the hash before the bytes are used.
+ * Bot-authored Package artifacts. Content-addressed and immutable, stored at
+ * `packages/<contentHash>.mjs` in the same `APPLICATION_ARTIFACTS` bucket.
+ * Unlike `ApplicationArtifactStore.load`, the reader verifies the hash before
+ * the bytes are used.
  */
 export interface PackageArtifactStore {
   putPackageArtifact(contentHash: string, module: string): Promise<void>;
@@ -444,58 +398,6 @@ export interface PackageArtifactStore {
     contentHash: string,
   ): Promise<{ contentHash: string; size: number } | undefined>;
   loadPackageArtifact(contentHash: string): Promise<string>;
-}
-
-/**
- * The `PACKAGE_BUNDLER` service binding (`apps/cloudflare-bundler`). Defined
- * here until `@frockbot/kernel-composition` owns `ArtifactRefV1` (Step 2); the
- * shapes are the plan's verbatim v1 DTOs and must stay in step with
- * `apps/cloudflare-bundler/src/contracts.ts`.
- */
-export interface ArtifactRefV1 {
-  contentHash: string;
-  size: number;
-  mediaType: "application/javascript";
-  bundlerVersion: string;
-}
-
-export interface UiArtifactRefV1 {
-  contentHash: string;
-  size: number;
-  mediaType: "text/html";
-  bundlerVersion: string;
-}
-
-export interface BundleRequestV1 {
-  schemaVersion: 1;
-  effectId: string;
-  target: "bot-isolate";
-  compatibilityDate: string;
-  entry: "package.ts";
-  sources: { path: string; text: string }[];
-  uiPages?: { id: string; html: string }[];
-}
-
-export type BundleResultV1 =
-  | {
-      schemaVersion: 1;
-      effectId: string;
-      status: "bundled";
-      artifact: ArtifactRefV1;
-      uiArtifacts?: { id: string; artifact: UiArtifactRefV1; html: string }[];
-      module: string;
-      diagnostics: string[];
-    }
-  | {
-      schemaVersion: 1;
-      effectId: string;
-      status: "failed";
-      failure: string;
-      diagnostics: string[];
-    };
-
-export interface BundlerBinding {
-  bundle(request: BundleRequestV1): Promise<BundleResultV1>;
 }
 
 export interface AuthSession {
@@ -566,14 +468,18 @@ export interface UserConfigurationBinding {
     schemaVersion: 1;
     userId: string;
   }): Promise<ConnectionsFrame>;
+  readPluginsFrame(request: {
+    schemaVersion: 1;
+    userId: string;
+  }): Promise<PluginsFrame>;
   readSettingsFrame(
     request: UserConfigurationReadRpcV1 & { home: "application" | "models" },
   ): Promise<SettingsFrame>;
   readSettingsOptions(
     request: UserConfigurationReadRpcV1 & {
-      query: import("@frockbot/protocol-schemas").SettingsOptionsQuery;
+      query: import("@frockbot/core/protocol-schemas").SettingsOptionsQuery;
     },
-  ): Promise<import("@frockbot/protocol-schemas").SettingsOptionsPage>;
+  ): Promise<import("@frockbot/core/protocol-schemas").SettingsOptionsPage>;
   changeSettings(
     request: UserConfigurationReadRpcV1 & {
       home: "application" | "models";
@@ -594,45 +500,6 @@ export interface UserConfigurationBinding {
     packageId: string;
     commandId: string;
   }): Promise<ConnectionCommandReceiptV1 | undefined>;
-  composioRequest(request: {
-    schemaVersion: 1;
-    userId: string;
-    command: unknown;
-  }): Promise<unknown>;
-  readMcpServers(request: {
-    schemaVersion: 1;
-    userId: string;
-  }): Promise<McpServerStatusViewV1>;
-  executeMcpCommand(request: {
-    schemaVersion: 1;
-    userId: string;
-    command: unknown;
-  }): Promise<McpLifecycleReceiptV1>;
-  recordMcpMountOutcome(request: {
-    schemaVersion: 1;
-    userId: string;
-    outcome: McpMountOutcomeReportV1;
-  }): Promise<void>;
-  /**
-   * The three `mcp-oauth` seams. Every outbound OAuth request and every token
-   * lives on the far side of them: the gateway signs a callback state and
-   * forwards, and holds nothing.
-   */
-  startMcpAuthorization(request: {
-    schemaVersion: 1;
-    userId: string;
-    start: McpAuthorizationStartRequestV1;
-  }): Promise<StartConnectionResult>;
-  completeMcpAuthorization(request: {
-    schemaVersion: 1;
-    userId: string;
-    completion: McpAuthorizationCompletionRequestV1;
-  }): Promise<ConnectionCompletionResult>;
-  revokeMcpAuthorization(request: {
-    schemaVersion: 1;
-    userId: string;
-    connectionId: string;
-  }): Promise<RevokeConnectionResult>;
   getConnection(request: {
     schemaVersion: 1;
     userId: string;
@@ -653,24 +520,6 @@ export interface UserConfigurationBinding {
     packageId: string;
     effectId: string;
   }): Promise<void>;
-  readPackageRevisions(request: {
-    schemaVersion: 1;
-    userId: string;
-  }): Promise<PackageRevisionHistoryV1>;
-  publishPackage(request: {
-    schemaVersion: 1;
-    userId: string;
-    command: PublishPackageCommandV1;
-  }): Promise<PackagePublicationReceiptV1>;
-  rollbackPackage(request: {
-    schemaVersion: 1;
-    userId: string;
-    command: RollbackPackageCommandV1;
-  }): Promise<PackagePublicationReceiptV1>;
-  activeApplicationHash(request: {
-    schemaVersion: 1;
-    userId: string;
-  }): Promise<string | undefined>;
   listTemplateShares(request: {
     schemaVersion: 1;
     userId: string;
@@ -823,12 +672,6 @@ export interface BotConfigurationBinding {
 export interface GatewayDependencies {
   /** Explicit Slice 2 prototype; absent until signed-target qualification. */
   nativeAuth?: import("./native-auth.js").NativeAuth;
-  saveNativeForm?(userId: string, command: unknown): Promise<unknown>;
-  nativeAppletBootstrap?(
-    userId: string,
-    appletId: string,
-    navigationEpoch: string,
-  ): Promise<unknown>;
   loader: WorkerLoader;
   artifacts: ApplicationArtifactStore;
   /** Dedicated anonymous hostnames that serve only immutable iframe pages. */
@@ -843,9 +686,9 @@ export interface GatewayDependencies {
   userConfigurationFor(userId: string): UserConfigurationBinding;
   botConfigurationFor(userId: string, botId: string): BotConfigurationBinding;
   /**
-   * The Applet viewer door (ADR 0022 §4). Both absent in a deployment without
-   * Applets, and `/api/applets/:id/socket` then reports itself unconfigured
-   * rather than the Worker failing to construct.
+   * The Applet viewer door. Both absent in a deployment without Applets, and
+   * `/api/applets/:id/socket` then reports itself unconfigured rather than the
+   * Worker failing to construct.
    */
   appletViewerSecret?: string;
   /**
@@ -856,13 +699,6 @@ export interface GatewayDependencies {
     userId: string,
     appletId: string,
   ): { fetch(request: Request): Promise<Response> };
-  /**
-   * The composer's dictation socket, handed to the per-User `VoiceSession`
-   * Durable Object after the gateway has authenticated the identity. Absent in
-   * a deployment without voice, and `/api/voice/dictation` then reports itself
-   * unconfigured rather than the Worker failing to construct.
-   */
-  openVoiceDictation?(userId: string, request: Request): Promise<Response>;
   /** Authenticated observer transport into the Bot Durable Object. */
   openBotStateChannel?(
     userId: string,
@@ -870,30 +706,8 @@ export interface GatewayDependencies {
     request: Request,
     context: { isAdmin: boolean; authMode: string },
   ): Promise<Response>;
-  /** Absent when the deployment publishes no Catalog; `/catalog/v1/*` then 503s. */
-  catalog?: CatalogGatewayStore;
   /** Absent, or with no token, when the deployment publishes no `/api/debug`. */
   debug?: DebugGatewaySurface;
-  /**
-   * The Workspace seed door, present only in an environment that sets
-   * `WORKSPACE_SEED_TOKEN`: an end-to-end run has no Computer, and this is how
-   * it lands the bytes `applet build` would have written, as the User, through
-   * the same store and generation record the sync uses. Production sets no
-   * token and the route does not exist.
-   */
-  workspaceSeed?: {
-    token: string;
-    write(
-      userId: string,
-      botId: string,
-      request: {
-        root: unknown;
-        path: string;
-        bytesBase64: string;
-        mediaType?: string;
-      },
-    ): Promise<unknown>;
-  };
   backendContributions?: readonly BackendRouteContribution[];
   /** Webview origins allowed to call `/api/*` cross-origin. */
   allowedClientOrigins?: string[];

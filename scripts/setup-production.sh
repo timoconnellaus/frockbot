@@ -200,7 +200,7 @@ finish() {
 # Replace the example below. Set TOTAL_STAGES to match the stages you write.
 # ──────────────────────────────────────────────────────────────────────────
 
-TOTAL_STAGES=7
+TOTAL_STAGES=6
 
 GITHUB_REPOSITORY="timoconnellaus/frockbot"
 GITHUB_ENVIRONMENT="production"
@@ -247,22 +247,6 @@ ask_secret CLOUDFLARE_API_TOKEN "Paste the Cloudflare API token:"
   exit 1
 }
 set_production_secret CLOUDFLARE_API_TOKEN "$CLOUDFLARE_API_TOKEN"
-
-stage "Cloudflare: Package Catalog bucket"
-say "Provision the R2 bucket that holds the remote Package Catalog."
-note "CI creates this bucket on every deploy too, so this stage is a no-op once deployed."
-CATALOG_BUCKET="frockbot-package-catalog"
-CATALOG_CONFIG="apps/cloudflare/wrangler.jsonc"
-if CLOUDFLARE_API_TOKEN="$CLOUDFLARE_API_TOKEN" \
-  bunx wrangler r2 bucket info "$CATALOG_BUCKET" --config "$CATALOG_CONFIG" >/dev/null 2>&1; then
-  note "$CATALOG_BUCKET already exists."
-elif CLOUDFLARE_API_TOKEN="$CLOUDFLARE_API_TOKEN" \
-  bunx wrangler r2 bucket create "$CATALOG_BUCKET" --config "$CATALOG_CONFIG" >/dev/null 2>&1; then
-  printf '  %s✓ created%s R2 bucket %s\n' "$GREEN" "$RESET" "$CATALOG_BUCKET"
-else
-  SKIPPED+=("R2 bucket $CATALOG_BUCKET (run this wizard from the repository root, or let CI create it)")
-  warn "could not create $CATALOG_BUCKET here; CI creates it on the next deploy"
-fi
 
 stage "Google: OAuth branding and web client"
 say "Configure the Google identity used by bot.frockbot.com."
@@ -369,18 +353,6 @@ else
   unset ROUTINE_HOOK_SECRET
 fi
 
-if awk '{print $1}' <<<"$PRODUCTION_SECRETS" | grep -qx FROCKBOT_AUTHORIZATION_STATE_SECRET; then
-  note "Preserving the existing FROCKBOT_AUTHORIZATION_STATE_SECRET so already-issued Connection callbacks keep verifying."
-else
-  say "Provision the secret every Routine webhook key is signed with."
-  FROCKBOT_AUTHORIZATION_STATE_SECRET="$(openssl rand -hex 32)"
-  [[ -n "$FROCKBOT_AUTHORIZATION_STATE_SECRET" ]] || {
-    warn "Routine hook secret generation failed"
-    exit 1
-  }
-  set_required_production_secret FROCKBOT_AUTHORIZATION_STATE_SECRET "$FROCKBOT_AUTHORIZATION_STATE_SECRET"
-  unset FROCKBOT_AUTHORIZATION_STATE_SECRET
-fi
 if awk '{print $1}' <<<"$PRODUCTION_SECRETS" | grep -qx MACHINE_TOKEN_SECRET; then
   note "Preserving the existing MACHINE_TOKEN_SECRET so enrolled machines keep their tokens."
 else

@@ -1,1 +1,1 @@
-export * from "@frockbot/plugin-shell/backend-recovery";
+export * from "@frockbot/app/shell/backend-recovery";

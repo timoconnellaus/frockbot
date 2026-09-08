@@ -1,23 +1,19 @@
-import { decodeConnectionTriggerCatalogV1 } from "@frockbot/connection-core";
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { BOT_STATE_CHANNEL_INTERNAL_PATH } from "./bot-state-channel.js";
 import {
   decodeMachineResultDeliveryV1,
   type MachineResultDeliveryV1,
-} from "@frockbot/plugin-user-machine/delivery";
+} from "@frockbot/app/machine/delivery";
 import {
   APPLET_ID_V1,
   decodePackageIframeToolCommandV1,
   type AppletBuildViewV1,
   type AppletSourceViewV1,
   type PackageIframeCompositionV1,
-} from "@frockbot/kernel-contracts";
-import type { ClientSkillCatalogV1 } from "@frockbot/plugin-shell/skill-protocol";
-import {
-  compileFoundationApplication,
-  createFoundationBackendContributions,
-} from "@frockbot/application-foundation/runtime";
-import { FIRST_PARTY_PACKAGE_ARTIFACTS_V1 } from "@frockbot/application-foundation/generated/applets-artifact";
+} from "@frockbot/core/contracts";
+import type { ClientSkillCatalogV1 } from "@frockbot/app/shell/skill-protocol";
+import { createFoundationBackendContributions } from "@frockbot/app/runtime";
+import { FIRST_PARTY_PACKAGE_ARTIFACTS_V1 } from "@frockbot/applets/pages";
 import {
   decodeBotLifecycleDirectoryViewV1,
   decodeBotLifecycleReceiptV1,
@@ -31,7 +27,7 @@ import {
   FLOCK_DIRECTORY_LIMIT,
   type BotIdentityDirectoryViewV1,
   type BotIdentityViewV1,
-} from "@frockbot/plugin-flock/shared";
+} from "@frockbot/app/flock/shared";
 import {
   decodeClientRunListQueryV1,
   decodeClientRunLookupQueryV1,
@@ -44,7 +40,7 @@ import {
   type ClientRunListV1,
   type ClientRunStopCommandV1,
   type ClientRunStopReceiptV1,
-} from "@frockbot/plugin-shell/run-protocol";
+} from "@frockbot/app/shell/run-protocol";
 import {
   decodeBotNotificationDirectoryViewV1,
   decodeBotUnreadDirectoryViewV1,
@@ -54,7 +50,7 @@ import {
   type BotUnreadDirectoryViewV1,
   type BotUnreadReceiptV1,
   type BotUnreadViewV1,
-} from "@frockbot/plugin-shell/unread";
+} from "@frockbot/app/shell/unread";
 import {
   decodeApprovalDecisionCommandV1,
   decodeApprovalDecisionReceiptV1,
@@ -62,14 +58,14 @@ import {
   type ApprovalDecisionCommandV1,
   type ApprovalDecisionReceiptV1,
   type ApprovalListViewV1,
-} from "@frockbot/plugin-shell/approvals";
+} from "@frockbot/app/shell/approvals";
 import {
   decodeCompositionCommandReceiptV1,
   decodeCompositionGenerationListViewV1,
   decodeCompositionGenerationViewV1,
   decodeBotIdV1,
   type BotSettingsViewV1,
-} from "@frockbot/configuration-core";
+} from "@frockbot/core/configuration";
 import {
   decodeRoutineCommandReceiptV1,
   decodeRoutineInboxReceiptV1,
@@ -77,17 +73,17 @@ import {
   decodeRoutineListViewV1,
   decodeRoutineRunDetailViewV1,
   decodeRoutineRunListViewV1,
-} from "@frockbot/plugin-routines/shared";
+} from "@frockbot/app/routines/shared";
 import {
   decodeComputerCommandResponse,
   decodeComputerProjectionV1,
   type ComputerCommandV1,
-} from "@frockbot/plugin-computer/protocol";
-import { ComputerBotNotFoundError } from "@frockbot/plugin-computer/backend";
+} from "@frockbot/computer/protocol";
+import { ComputerBotNotFoundError } from "@frockbot/computer/backend";
 import {
   decodeTaskListViewV1,
   decodeTaskViewV1,
-} from "@frockbot/plugin-subagents/shared";
+} from "@frockbot/app/subagents/shared";
 import {
   decodeMachineClaimReceiptV1,
   decodeMachineEnrollmentReceiptV1,
@@ -95,55 +91,49 @@ import {
   decodeMachinePairingOfferV1,
   decodeMachinePollResultV1,
   decodeMachineResultReceiptV1,
-} from "@frockbot/machine-protocol";
+} from "@frockbot/core/machine-protocol";
 import {
   decodeClientSearchRebuildReceiptV1,
   decodeSearchIndexResultsV1,
   type SearchQueryV1,
-} from "@frockbot/plugin-search";
+} from "@frockbot/app/search";
 import {
   decodeAuditRebuildReceiptV1,
   decodeClientAuditPageV1,
   type AuditQueryV1,
-} from "@frockbot/plugin-audit";
-import {
-  decodeUsageReportV1,
-  type UsageReportV1,
-} from "@frockbot/plugin-billing";
-import {
-  decodeMcpLifecycleReceiptV1,
-  decodeMcpServerStatusViewV1,
-} from "@frockbot/plugin-mcp/records";
+} from "@frockbot/app/audit";
 import {
   decodeTemplateImportListViewV1,
   decodeTemplateImportRecordV1,
   decodeTemplateShareListViewV1,
   decodeTemplateShareReceiptV1,
   type TemplateCommandV1,
-} from "@frockbot/plugin-bot-template/shared";
+} from "@frockbot/app/bot-template/shared";
 import {
   parseTemplateShareIdV1,
   type TemplateVisibilityV1,
-} from "@frockbot/template-core";
-import {
-  decodeRevokeConnectionResultV1,
-  decodeStartConnectionResultV1,
-} from "@frockbot/connection-core";
+} from "@frockbot/core/template";
 import {
   decodeDeploymentPolicyV1,
   type DeploymentPolicyV1,
   type SetSignupsCommandV1,
-} from "@frockbot/plugin-admin/shared";
+} from "@frockbot/app/admin/shared";
 import { gatewayAuth } from "./auth.js";
-import { createNativeAuth, nativeReturnUris } from "./native-auth.js";
+import {
+  createNativeAuth,
+  NATIVE_RETURN_DEVELOPMENT,
+  nativeReturnUris,
+} from "./native-auth.js";
 import { accountIsAdmitted } from "./account-admission.js";
-import { isDeploymentAdminV1 } from "./admin-identities.js";
+import {
+  DEVELOPMENT_USER_ID,
+  isDeploymentAdminV1,
+} from "./admin-identities.js";
 import type { DebugGatewaySurface } from "./debug.js";
-import type { BotDebugQueryV1 } from "@frockbot/plugin-shell/debug-protocol";
+import type { BotDebugQueryV1 } from "@frockbot/app/shell/debug-protocol";
 import { BotState, type OwnedBotTurnCommand } from "./bot-state.js";
 import type {
   ApplicationArtifactStore,
-  BundlerBinding,
   PackageArtifactStore,
   BotConfigurationBinding,
   BotNotificationIntent,
@@ -168,8 +158,6 @@ import {
   rpcPattern,
   rpcString,
 } from "./durable-rpc.js";
-import { createImmutablePlanRequestFactory } from "./immutable-application.js";
-import { R2PackageCatalog } from "./package-catalog.js";
 import { UserConfiguration } from "./user-configuration.js";
 import {
   DEPLOYMENT_POLICY_SINGLETON_NAME,
@@ -182,24 +170,16 @@ import {
   APPLETS_UNAVAILABLE_MESSAGE_V1,
   APPLET_VIEWER_TOKEN_TTL_MS,
   APPLET_VIEWER_UNCONFIGURED_DETAIL_V1,
-} from "@frockbot/kernel-do";
+} from "@frockbot/core/durable";
 import {
   decodeAppletGenerationV1,
   decodeAppletSummaryV1,
-} from "@frockbot/kernel-contracts";
+} from "@frockbot/core/contracts";
 import type { AppletState } from "./applet-state.js";
-import type { VoiceSession } from "./voice-session.js";
-import {
-  VOICE_ASSISTANT_INTERNAL_PATH,
-  VOICE_DICTATION_INTERNAL_PATH,
-} from "./voice-session.js";
 export { BotCapabilities } from "./bot-capabilities.js";
-// The Applet authority (ADR 0022): the Durable Object that owns one Applet
-// instance, and the loopback `CAPABILITIES` entrypoint its facet is handed.
+// The Applet authority: the Durable Object that owns one Applet instance,
+// and the loopback `CAPABILITIES` entrypoint its facet is handed.
 export { AppletCapabilities, AppletState } from "./applet-state.js";
-// The composer's dictation transport (voice plan D2): one object per User,
-// holding the browser leg and the provider leg and no authority at all.
-export { VoiceSession } from "./voice-session.js";
 export { BotState, DeploymentPolicy, UserConfiguration };
 
 interface Env {
@@ -212,9 +192,8 @@ interface Env {
   BOT_PACKAGES: BotPackageLoader;
   /**
    * Applet server artifacts, loaded from the Applet Durable Object and mounted
-   * as a facet (ADR 0022). Its own loader namespace: a loader id keeps the
-   * `env` it was first loaded with, and an Applet's `env` is not a Bot
-   * Package's.
+   * as a facet. Its own loader namespace: a loader id keeps the `env` it was
+   * first loaded with, and an Applet's `env` is not a Bot Package's.
    */
   APPLETS: WorkerLoader;
   /** One Durable Object per Applet instance, `idFromName("<userId>:<appletId>")`. */
@@ -228,16 +207,7 @@ interface Env {
   APPLET_VIEWER_SECRET?: string;
   APPLICATION_ARTIFACTS: R2Bucket;
   UI_ARTIFACT_HOSTS?: string;
-  // `apps/cloudflare-bundler`; the Bot Durable Object calls it after recording
-  // its authorship intent (plan Step 3, decision D4).
-  PACKAGE_BUNDLER: BundlerBinding;
   MEMORY_FILES: R2Bucket;
-  /**
-   * The remote Package Catalog. Optional so a deployment without one still
-   * boots: `/catalog/v1/*` then reports the Catalog as unconfigured rather
-   * than the Worker failing to construct.
-   */
-  PACKAGE_CATALOG?: R2Bucket;
   MEMORY_INDEX: VectorizeIndex;
   AI: Ai;
   FROCK_AI_GATEWAY_ID?: string;
@@ -255,28 +225,18 @@ interface Env {
   FLOCK_AI_GATEWAY_TOKEN?: string;
   BOT_STATES: DurableObjectNamespace<BotState>;
   USER_CONFIGURATIONS: DurableObjectNamespace<UserConfiguration>;
-  /** One voice transport per User, `idFromName(userId)` (voice plan D2). */
-  VOICE_SESSIONS: DurableObjectNamespace<VoiceSession>;
-  /**
-   * The direct OpenAI realtime key. Present, dictation takes the direct path;
-   * absent, it takes the AI Gateway's BYOK key. A Worker secret, so the
-   * release workflow's `--secrets-file` list carries the name or no release
-   * ever updates it (ADR 0025).
-   */
-  OPENAI_API_KEY?: string;
-  /**
-   * The Gemini key slice B will read the same way. Declared here so the
-   * release workflow can carry it before the code that uses it lands.
-   */
-  GEMINI_API_KEY?: string;
-  /** Local dictation stand-in; set by the end-to-end harness only. */
-  VOICE_UPSTREAM_URL?: string;
-  /** Local Gemini Live stand-in; set by the end-to-end harness only. */
-  VOICE_ASSISTANT_UPSTREAM_URL?: string;
   DEPLOYMENT_POLICY: DurableObjectNamespace<DeploymentPolicy>;
   COMPUTER_HOST: Fetcher;
   /** Shared secret presented on every Computer host call. */
   COMPUTER_HOST_TOKEN?: string;
+  /**
+   * The Applet build service. It is handed source and returns artifacts; this
+   * Worker keeps the R2 write and the hash verification, so the builder holds
+   * no authority of its own.
+   */
+  APPLET_BUILD: Fetcher;
+  /** Shared secret presented on every Applet build call. */
+  APPLET_BUILD_TOKEN?: string;
   AUTH_DB: D1Database;
   DEFAULT_APPLICATION_HASH: string;
   BETTER_AUTH_SECRET?: string;
@@ -295,20 +255,14 @@ interface Env {
   MACHINE_TOKEN_SECRET?: string;
   /**
    * Signs the callback `state` of every redirect-based Connection. Absent — or
-   * weak, or equal to `BETTER_AUTH_SECRET` — closes the `mcp-oauth` door: the
-   * routes answer 503 rather than trusting a forgeable identity.
+   * weak, or equal to `BETTER_AUTH_SECRET` — closes that door: the routes
+   * answer 503 rather than trusting a forgeable identity.
    */
-  FROCKBOT_AUTHORIZATION_STATE_SECRET?: string;
-  COMPOSIO_API_KEY?: string;
-  COMPOSIO_WEBHOOK_SECRET?: string;
-  COMPOSIO_TEST_URL?: string;
   ALLOW_DEVELOPMENT_AUTH?: string;
   FROCKBOT_ADMIN_EMAILS?: string;
   ALLOWED_CLIENT_ORIGINS?: string;
   /** Authorizes `/api/debug/*`. Absent disables the surface entirely. */
   DEBUG_TOKEN?: string;
-  /** Set only by the end-to-end harness; opens the Workspace seed door. */
-  WORKSPACE_SEED_TOKEN?: string;
 }
 
 /**
@@ -338,8 +292,6 @@ function debugSurface(env: Env): DebugGatewaySurface {
     },
     listBots: (userId) =>
       userConfigurationStub(env, userId).listBots({ schemaVersion: 1, userId }),
-    readUsage: (userId) =>
-      userUsageStub(env, userId).readUsage({ schemaVersion: 1, userId }),
     snapshot: (userId, botId, query) =>
       botStateStub(env, userId, botId).debugSnapshot(query),
     isAdminUser: async (userId) => {
@@ -376,16 +328,6 @@ interface UserScopedProps {
 }
 
 interface BotStateRpc extends BotConfigurationBinding {
-  listRoutineTriggers(input: unknown): Promise<unknown>;
-  writeUserWorkspaceFileV1(input: {
-    schemaVersion: 1;
-    userId: string;
-    botId: string;
-    root: unknown;
-    path: string;
-    bytesBase64: string;
-    mediaType?: string;
-  }): Promise<unknown>;
   readComputerPresence(): Promise<unknown>;
   executeComputerPresenceCommand(command: ComputerCommandV1): Promise<unknown>;
   run(command: OwnedBotTurnCommand): Promise<BotTurnResult>;
@@ -400,7 +342,7 @@ interface BotStateRpc extends BotConfigurationBinding {
   listSkills(): Promise<ClientSkillCatalogV1>;
   listPackageUi(): Promise<PackageIframeCompositionV1>;
   runPackageUiTool(
-    command: import("@frockbot/kernel-contracts").PackageIframeToolCommandV1,
+    command: import("@frockbot/core/contracts").PackageIframeToolCommandV1,
   ): Promise<BotTurnResult>;
   readWorkspaceFileV1(path: unknown): Promise<ClientWorkspaceFileV1>;
   readAppletSourceV1(appletId: string): Promise<AppletSourceViewV1>;
@@ -416,10 +358,6 @@ interface BotStateRpc extends BotConfigurationBinding {
   executeUnreadCommand(
     command: BotUnreadCommandV1,
   ): Promise<BotUnreadReceiptV1>;
-  reconcileRun(
-    identity: { userId: string; botId: string },
-    runId: string,
-  ): Promise<BotTurnResult>;
   stopRun(command: ClientRunStopCommandV1): Promise<ClientRunStopReceiptV1>;
 }
 
@@ -433,10 +371,6 @@ interface UserConfigurationRpc extends UserConfigurationBinding {
     schemaVersion: 1;
     userId: string;
   }): Promise<boolean>;
-  readVoiceAssistant(request: {
-    schemaVersion: 1;
-    userId: string;
-  }): Promise<unknown>;
 }
 
 type RpcBoundary<T> = {
@@ -448,9 +382,9 @@ type RpcBoundary<T> = {
 function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
   // The one place a Bot Durable Object is named, and therefore the one place
   // the name has to be beyond doubt. A Subagent Durable Object is the same
-  // class in this namespace under `<userId>:<botId>#task:<taskId>` (ADR 0017),
-  // so a `#` reaching here from a path segment would let a caller name an
-  // object the directory never minted. `decodeBotIdV1` rejects it — this
+  // class in this namespace under `<userId>:<botId>#task:<taskId>`, so a `#`
+  // reaching here from a path segment would let a caller name an object the
+  // directory never minted. `decodeBotIdV1` rejects it — this
   // restates the check where the id becomes an object rather than trusting
   // that every route above remembered to.
   const id = env.BOT_STATES.idFromName(
@@ -459,7 +393,6 @@ function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
   // SAFETY: Wrangler binds BOT_STATES to BotState; workers-types cannot infer its generated RPC surface.
   const rpc = env.BOT_STATES.get(id) as unknown as RpcBoundary<BotStateRpc>;
   return {
-    writeUserWorkspaceFileV1: (input) => rpc.writeUserWorkspaceFileV1(input),
     readComputerPresence: () =>
       rpc.readComputerPresence({ schemaVersion: 1, userId, botId }),
     executeComputerPresenceCommand: (command) =>
@@ -474,7 +407,6 @@ function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
     readConfiguration: (request) => rpc.readConfiguration(request),
     executeConfiguration: (request) => rpc.executeConfiguration(request),
     listRoutines: (request) => rpc.listRoutines(request),
-    listRoutineTriggers: (request) => rpc.listRoutineTriggers(request),
     listTasks: (request) => rpc.listTasks(request),
     readTask: (request) => rpc.readTask(request),
     stopTask: (request) => rpc.stopTask(request),
@@ -554,8 +486,6 @@ function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
         botId,
         notificationId,
       }),
-    reconcileRun: (identity, runId) =>
-      rpc.reconcileRun({ schemaVersion: 1, ...identity, runId }),
     stopRun: (command) =>
       rpc.stopRun({ schemaVersion: 1, userId, botId, command }),
     readFocusedApplet: (input) => rpc.readFocusedApplet(input),
@@ -601,6 +531,7 @@ function userConfigurationStub(env: Env, userId: string): UserConfigurationRpc {
     getBotRegistration: (request) => rpc.getBotRegistration(request),
     hasBot: (request) => rpc.hasBot(request),
     readConnectionsFrame: (request) => rpc.readConnectionsFrame(request),
+    readPluginsFrame: (request) => rpc.readPluginsFrame(request),
     readSettingsFrame: (request) => rpc.readSettingsFrame(request),
     readSettingsOptions: (request) => rpc.readSettingsOptions(request),
     changeSettings: (request) => rpc.changeSettings(request),
@@ -609,27 +540,14 @@ function userConfigurationStub(env: Env, userId: string): UserConfigurationRpc {
     executeConfiguration: (request) => rpc.executeConfiguration(request),
     executeConnection: (request) => rpc.executeConnection(request),
     lookupConnectionCommand: (request) => rpc.lookupConnectionCommand(request),
-    composioRequest: (request) => rpc.composioRequest(request),
-    readMcpServers: (request) => rpc.readMcpServers(request),
-    executeMcpCommand: (request) => rpc.executeMcpCommand(request),
-    recordMcpMountOutcome: (request) => rpc.recordMcpMountOutcome(request),
-    startMcpAuthorization: (request) => rpc.startMcpAuthorization(request),
-    completeMcpAuthorization: (request) =>
-      rpc.completeMcpAuthorization(request),
-    revokeMcpAuthorization: (request) => rpc.revokeMcpAuthorization(request),
     getConnection: (request) => rpc.getConnection(request),
     leaseModelCredential: (request) => rpc.leaseModelCredential(request),
     settleModelCredential: (request) => rpc.settleModelCredential(request),
-    readPackageRevisions: (request) => rpc.readPackageRevisions(request),
-    publishPackage: (request) => rpc.publishPackage(request),
-    rollbackPackage: (request) => rpc.rollbackPackage(request),
-    activeApplicationHash: (request) => rpc.activeApplicationHash(request),
     listTemplateShares: (request) => rpc.listTemplateShares(request),
     executeTemplateCommand: (request) => rpc.executeTemplateCommand(request),
     resolveTemplateShare: (request) => rpc.resolveTemplateShare(request),
     listTemplateImports: (request) => rpc.listTemplateImports(request),
     executeTemplateImport: (request) => rpc.executeTemplateImport(request),
-    readVoiceAssistant: (request) => rpc.readVoiceAssistant(request),
   };
 }
 
@@ -642,6 +560,44 @@ function deploymentPolicyStub(env: Env): DeploymentPolicyRpc {
   return env.DEPLOYMENT_POLICY.getByName(
     DEPLOYMENT_POLICY_SINGLETON_NAME,
   ) as unknown as DeploymentPolicyRpc;
+}
+
+/**
+ * Refuses account creation while signups are closed, so a closed deployment
+ * writes no `user` row. An existing account still signs in: better-auth only
+ * consults this when it is about to create one.
+ */
+function developmentAuthAllowed(env: Env): boolean {
+  return env.ALLOW_DEVELOPMENT_AUTH === "true";
+}
+
+/**
+ * Where the app may be sent back after sign-in. Production's App Links, plus
+ * the development scheme on a stack that allows development auth — the flag
+ * production's secret gate refuses.
+ */
+function nativeReturnUrisFor(env: Env): readonly string[] {
+  return [
+    ...nativeReturnUris(env.NATIVE_SLICE_2_AUTH),
+    ...(developmentAuthAllowed(env) ? [NATIVE_RETURN_DEVELOPMENT] : []),
+  ];
+}
+
+async function mayCreateAccount(env: Env, email: string): Promise<boolean> {
+  if (
+    isDeploymentAdminV1(
+      { id: email, email, mode: "better-auth" },
+      env.FROCKBOT_ADMIN_EMAILS,
+    )
+  ) {
+    return true;
+  }
+  const policy = decodeDeploymentPolicyV1(
+    rpcJsonSnapshot(
+      await deploymentPolicyStub(env).readPolicy({ schemaVersion: 1 }),
+    ),
+  );
+  return policy.signups.open;
 }
 
 /**
@@ -725,20 +681,10 @@ interface UserAuditRpc {
   rebuildAuditIndex(input: unknown): Promise<unknown>;
 }
 
-interface UserUsageRpc {
-  readUsage(input: unknown): Promise<unknown>;
-}
-
 function userAuditStub(env: Env, userId: string): UserAuditRpc {
   const id = env.USER_CONFIGURATIONS.idFromName(userId);
   // SAFETY: Wrangler binds USER_CONFIGURATIONS to UserConfiguration; workers-types cannot infer its generated Audit RPC surface.
   return env.USER_CONFIGURATIONS.get(id) as unknown as UserAuditRpc;
-}
-
-function userUsageStub(env: Env, userId: string): UserUsageRpc {
-  const id = env.USER_CONFIGURATIONS.idFromName(userId);
-  // SAFETY: Wrangler binds USER_CONFIGURATIONS to UserConfiguration; workers-types cannot infer its generated Usage RPC surface.
-  return env.USER_CONFIGURATIONS.get(id) as unknown as UserUsageRpc;
 }
 
 /** The User Durable Object's Applet directory, addressed by User. */
@@ -913,7 +859,7 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
       this.ctx.props.userId,
       request.botId as string,
     ).runPackageUiTool(
-      request.command as import("@frockbot/kernel-contracts").PackageIframeToolCommandV1,
+      request.command as import("@frockbot/core/contracts").PackageIframeToolCommandV1,
     );
   }
 
@@ -929,7 +875,7 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
     ).readWorkspaceFileV1(request.path);
   }
 
-  // --- Applets (ADR 0022) --------------------------------------------------
+  // --- Applets -------------------------------------------------------------
   //
   // A deployment with no `APPLET_VIEWER_SECRET` can sign nothing, so it says
   // so once, honestly, in two places at once: a final sentence for the person
@@ -984,42 +930,6 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
       expiresAt: expiresAt.toISOString(),
       appletId,
       generationId: state.generationId,
-    };
-  }
-
-  /** One generation read supplies both the native iframe artifact and its lease. */
-  async nativeAppletBootstrap(input: unknown) {
-    const request = decodeRpcEnvelopeV1(input, {
-      appletId: rpcString(129),
-      navigationEpoch: rpcIdentifier,
-    });
-    const userId = this.ctx.props.userId;
-    const appletId = request.appletId as string;
-    const navigationEpoch = request.navigationEpoch as string;
-    const secret = this.env.APPLET_VIEWER_SECRET;
-    if (!secret) throw appletsUnconfigured();
-    const state = await this.appletCurrentGeneration(userId, appletId);
-    const expiresAt = new Date(Date.now() + 120_000);
-    const artifactOrigin = "https://ui.bot.frockbot.com";
-    return {
-      schemaVersion: 1 as const,
-      appletId,
-      userId,
-      generationId: state.generationId,
-      navigationEpoch,
-      bootstrapUrl: `${artifactOrigin}/native-fallback?artifact=${state.uiContentHash}&epoch=${encodeURIComponent(navigationEpoch)}`,
-      artifactOrigin,
-      artifact: state.ui,
-      viewer: {
-        token: await mintAppletViewerTokenV1(secret, {
-          u: userId,
-          a: appletId,
-          g: state.generationId,
-          exp: Math.floor(expiresAt.getTime() / 1000),
-        }),
-        expiresAt: expiresAt.toISOString(),
-        socketUrl: `wss://bot.frockbot.com/api/applets/${encodeURIComponent(appletId)}/socket`,
-      },
     };
   }
 
@@ -1211,21 +1121,6 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
       request.botId as string,
     ).stopRun(request.command as ClientRunStopCommandV1);
   }
-
-  async reconcileRun(input: unknown): Promise<BotTurnResult> {
-    const request = decodeRpcEnvelopeV1(input, {
-      botId: rpcBotId,
-      runId: rpcIdentifier,
-    });
-    return botStateStub(
-      this.env,
-      this.ctx.props.userId,
-      request.botId as string,
-    ).reconcileRun(
-      { userId: this.ctx.props.userId, botId: request.botId as string },
-      request.runId as string,
-    );
-  }
 }
 
 function packageArtifactKey(contentHash: string): string {
@@ -1270,10 +1165,10 @@ class R2ApplicationArtifacts
   /**
    * A Package's page, from object storage or from this bundle.
    *
-   * A first-party artifact-backed member (ADR 0022 decision 8) is built at
-   * build time and its pages travel here, so the anonymous serving origin can
-   * answer for them with nothing seeded into the bucket. The digest decides in
-   * both cases; object storage wins when it holds the object.
+   * A first-party artifact-backed member is built at build time and its pages
+   * travel here, so the anonymous serving origin can answer for them with
+   * nothing seeded into the bucket. The digest decides in both cases; object
+   * storage wins when it holds the object.
    */
   async loadPackageUiArtifact(
     contentHash: string,
@@ -1320,13 +1215,10 @@ class R2ApplicationArtifacts
   async loadPackageArtifact(contentHash: string): Promise<string> {
     const key = packageArtifactKey(contentHash);
     const object = await this.bucket.get(key);
-    const bundled = object
-      ? undefined
-      : FIRST_PARTY_PACKAGE_ARTIFACTS_V1.get(key);
-    if (!object && bundled === undefined) {
+    if (!object) {
       throw new Error(`package artifact "${contentHash}" was not found`);
     }
-    const module = object ? await object.text() : bundled!;
+    const module = await object.text();
     if ((await sha256Hex(module)) !== contentHash) {
       throw new Error(
         `package artifact "${contentHash}" failed hash verification`,
@@ -1339,7 +1231,7 @@ class R2ApplicationArtifacts
 /**
  * Projects one Bot's durable settings onto the Flock identity DTO. The Bot
  * Durable Object stays the authority: this is a read-through view, so the
- * immutable registration seed (ADR 0006) never has to carry mutable identity.
+ * immutable registration seed never has to carry mutable identity.
  */
 function botIdentityView(
   botId: string,
@@ -1530,51 +1422,6 @@ async function openOwnedBotStateChannel(
 }
 
 /**
- * The composer's dictation socket, handed to this User's `VoiceSession`.
- *
- * The identity travels as a header rather than in the URL for the same reason
- * the Bot-state channel's does: the object trusts what the gateway
- * authenticated and nothing a caller could have written for itself.
- */
-function openVoiceDictation(
-  env: Env,
-  userId: string,
-  request: Request,
-): Promise<Response> {
-  const incoming = new URL(request.url);
-  const internal = new URL(
-    `${VOICE_DICTATION_INTERNAL_PATH}${incoming.search}`,
-    "https://voice-session.internal",
-  );
-  const headers = new Headers(request.headers);
-  headers.delete("x-frockbot-user-id");
-  headers.set("x-frockbot-user-id", userId);
-  const namespace = env.VOICE_SESSIONS;
-  return namespace
-    .get(namespace.idFromName(userId))
-    .fetch(new Request(internal, { method: "GET", headers }));
-}
-
-function openVoiceAssistant(
-  env: Env,
-  userId: string,
-  request: Request,
-): Promise<Response> {
-  const incoming = new URL(request.url);
-  const internal = new URL(
-    `${VOICE_ASSISTANT_INTERNAL_PATH}${incoming.search}`,
-    "https://voice-session.internal",
-  );
-  const headers = new Headers(request.headers);
-  headers.delete("x-frockbot-user-id");
-  headers.set("x-frockbot-user-id", userId);
-  const namespace = env.VOICE_SESSIONS;
-  return namespace
-    .get(namespace.idFromName(userId))
-    .fetch(new Request(internal, { method: "GET", headers }));
-}
-
-/**
  * One published template, for the unauthenticated `GET /templates/v1/:shareId`.
  *
  * The share id names its owner, so the route needs no index and no lookup
@@ -1624,563 +1471,445 @@ interface RuntimeExports {
   UserBotState(options: { props: UserScopedProps }): RpcBoundary<UserBotState>;
 }
 
-const createGatewayBackendContributions = createImmutablePlanRequestFactory(
-  compileFoundationApplication,
-  (application, env: Env) =>
-    createFoundationBackendContributions(application, {
-      backendHost: "gateway",
-      readDeploymentPolicy: async (): Promise<DeploymentPolicyV1> =>
-        decodeDeploymentPolicyV1(
-          rpcJsonSnapshot(
-            await deploymentPolicyStub(env).readPolicy({ schemaVersion: 1 }),
-          ),
-        ),
-      setDeploymentSignups: async (
-        command: SetSignupsCommandV1,
-        updatedBy: string,
-      ): Promise<DeploymentPolicyV1> =>
-        decodeDeploymentPolicyV1(
-          rpcJsonSnapshot(
-            await deploymentPolicyStub(env).setSignups({
-              schemaVersion: 1,
-              command,
-              updatedBy,
-            }),
-          ),
-        ),
-      listTemplateShares: async (userId: string) =>
-        decodeTemplateShareListViewV1(
-          rpcJsonSnapshot(
-            await userConfigurationStub(env, userId).listTemplateShares({
-              schemaVersion: 1,
-              userId,
-            }),
-          ),
-        ),
-      executeTemplateCommand: async (
-        userId: string,
-        command: TemplateCommandV1,
-      ) =>
-        decodeTemplateShareReceiptV1(
-          rpcJsonSnapshot(
-            await userConfigurationStub(env, userId).executeTemplateCommand({
-              schemaVersion: 1,
-              userId,
-              command,
-            }),
-          ),
-        ),
-      readPublishedTemplate: (shareId: string) =>
-        readPublishedTemplate(env, shareId),
-      listTemplateImports: async (userId: string) =>
-        decodeTemplateImportListViewV1(
-          rpcJsonSnapshot(
-            await userConfigurationStub(env, userId).listTemplateImports({
-              schemaVersion: 1,
-              userId,
-            }),
-          ),
-        ),
-      executeTemplateImport: async (
-        userId: string,
-        command: TemplateCommandV1,
-      ) =>
-        decodeTemplateImportRecordV1(
-          rpcJsonSnapshot(
-            await userConfigurationStub(env, userId).executeTemplateImport({
-              schemaVersion: 1,
-              userId,
-              command,
-            }),
-          ),
-        ),
-      listBots: async (userId) =>
-        decodeDirectoryViewV1(
-          rpcJsonSnapshot(
-            await userConfigurationStub(env, userId).listBots({
-              schemaVersion: 1,
-              userId,
-            }),
-          ),
-        ),
-      listBotLifecycles: async (userId: string) =>
-        decodeBotLifecycleDirectoryViewV1(
-          rpcJsonSnapshot(
-            await userConfigurationStub(env, userId).listBotLifecycles({
-              schemaVersion: 1,
-              userId,
-            }),
-          ),
-        ),
-      executeBotLifecycle: async (
-        userId: string,
-        command: BotLifecycleCommandV1,
-      ) =>
-        decodeBotLifecycleReceiptV1(
-          rpcJsonSnapshot(
-            await userConfigurationStub(env, userId).executeBotLifecycle({
-              schemaVersion: 1,
-              userId,
-              command,
-            }),
-          ),
-        ),
-      createBot: async (userId, command) =>
-        decodeFlockReceiptV1(
-          rpcJsonSnapshot(
-            await userConfigurationStub(env, userId).createBot({
-              schemaVersion: 1,
-              userId,
-              command,
-            }),
-          ),
-        ),
-      listBotIdentities: (userId: string) => listBotIdentities(env, userId),
-      readComputer: async (userId: string, botId: string) =>
-        decodeComputerProjectionV1(
-          rpcJsonSnapshot(
-            await (
-              await ownedComputerBotState(env, userId, botId)
-            ).readComputerPresence(),
-          ),
-        ),
-      executeComputerCommand: async (
-        userId: string,
-        botId: string,
-        command: ComputerCommandV1,
-      ) =>
-        decodeComputerCommandResponse(
-          rpcJsonSnapshot(
-            await (
-              await ownedComputerBotState(env, userId, botId)
-            ).executeComputerPresenceCommand(command),
-          ),
-        ),
-      searchTranscripts: async (userId: string, query: SearchQueryV1) =>
-        decodeSearchIndexResultsV1(
-          rpcJsonSnapshot(
-            await userSearchStub(env, userId).searchTranscripts({
-              schemaVersion: 1,
-              userId,
-              query,
-            }),
-          ),
-        ),
-      rebuildSearchIndex: async (userId: string) =>
-        decodeClientSearchRebuildReceiptV1(
-          rpcJsonSnapshot(
-            await userSearchStub(env, userId).rebuildSearchIndex({
-              schemaVersion: 1,
-              userId,
-            }),
-          ),
-        ),
-      readAudit: async (userId: string, query: AuditQueryV1) =>
-        decodeClientAuditPageV1(
-          rpcJsonSnapshot(
-            await userAuditStub(env, userId).readAuditEntries({
-              schemaVersion: 1,
-              userId,
-              ...(query.botId === undefined ? {} : { botId: query.botId }),
-              ...(query.kind === undefined ? {} : { kind: query.kind }),
-              ...(query.target === undefined ? {} : { target: query.target }),
-              ...(query.before === undefined ? {} : { before: query.before }),
-              ...(query.limit === undefined ? {} : { limit: query.limit }),
-            }),
-          ),
-        ),
-      readUsage: async (userId: string): Promise<UsageReportV1> =>
-        decodeUsageReportV1(
-          rpcJsonSnapshot(
-            await userUsageStub(env, userId).readUsage({
-              schemaVersion: 1,
-              userId,
-            }),
-          ),
-        ),
-      rebuildAuditIndex: async (userId: string) =>
-        decodeAuditRebuildReceiptV1(
-          rpcJsonSnapshot(
-            await userAuditStub(env, userId).rebuildAuditIndex({
-              schemaVersion: 1,
-              userId,
-            }),
-          ),
-        ),
-      listBotUnread: (userId: string) => listBotUnread(env, userId),
-      listBotNotifications: (userId: string) =>
-        listBotNotifications(env, userId),
-      executeBotUnreadCommand: (
-        userId: string,
-        botId: string,
-        command: BotUnreadCommandV1,
-      ) => executeBotUnreadCommand(env, userId, botId, command),
-      readSheep: async (userId, botId) =>
-        decodeSheepIdentityViewV1(
-          rpcJsonSnapshot(
-            await botStateStub(env, userId, botId).readSheep({
-              schemaVersion: 1,
-              userId,
-              botId,
-            }),
-          ),
-        ),
-      executeConnection: (userId, command) =>
-        userConfigurationStub(env, userId).executeConnection({
-          schemaVersion: 1,
-          userId,
-          command,
-        }),
-      composioRequest: async (userId, command) =>
+const createGatewayBackendContributions = (env: Env) =>
+  createFoundationBackendContributions({
+    backendHost: "gateway",
+    readDeploymentPolicy: async (): Promise<DeploymentPolicyV1> =>
+      decodeDeploymentPolicyV1(
         rpcJsonSnapshot(
-          await userConfigurationStub(env, userId).composioRequest({
+          await deploymentPolicyStub(env).readPolicy({ schemaVersion: 1 }),
+        ),
+      ),
+    setDeploymentSignups: async (
+      command: SetSignupsCommandV1,
+      updatedBy: string,
+    ): Promise<DeploymentPolicyV1> =>
+      decodeDeploymentPolicyV1(
+        rpcJsonSnapshot(
+          await deploymentPolicyStub(env).setSignups({
+            schemaVersion: 1,
+            command,
+            updatedBy,
+          }),
+        ),
+      ),
+    listTemplateShares: async (userId: string) =>
+      decodeTemplateShareListViewV1(
+        rpcJsonSnapshot(
+          await userConfigurationStub(env, userId).listTemplateShares({
+            schemaVersion: 1,
+            userId,
+          }),
+        ),
+      ),
+    executeTemplateCommand: async (
+      userId: string,
+      command: TemplateCommandV1,
+    ) =>
+      decodeTemplateShareReceiptV1(
+        rpcJsonSnapshot(
+          await userConfigurationStub(env, userId).executeTemplateCommand({
             schemaVersion: 1,
             userId,
             command,
           }),
         ),
-      readMcpServers: async (userId) =>
-        decodeMcpServerStatusViewV1(
-          rpcJsonSnapshot(
-            await userConfigurationStub(env, userId).readMcpServers({
-              schemaVersion: 1,
-              userId,
-            }),
-          ),
-        ),
-      executeMcpCommand: async (userId, command) =>
-        decodeMcpLifecycleReceiptV1(
-          rpcJsonSnapshot(
-            await userConfigurationStub(env, userId).executeMcpCommand({
-              schemaVersion: 1,
-              userId,
-              command,
-            }),
-          ),
-        ),
-      readVoiceAssistant: (userId) =>
-        userConfigurationStub(env, userId).readVoiceAssistant({
-          schemaVersion: 1,
-          userId,
-        }),
-      openVoiceAssistant: (userId, request) =>
-        openVoiceAssistant(env, userId, request),
-      // The `mcp-oauth` gateway seams. The Contribution reads the signing
-      // secret through `readSecret` and refuses to serve its routes at all
-      // when this deployment has none, so a Worker without the secret has no
-      // callback door rather than an unsigned one.
-      readSecret: (name: string) =>
-        name === "COMPOSIO_WEBHOOK_SECRET"
-          ? env.COMPOSIO_WEBHOOK_SECRET
-          : name === "COMPOSIO_TEST_URL"
-            ? env.ALLOW_DEVELOPMENT_AUTH === "true"
-              ? env.COMPOSIO_TEST_URL
-              : undefined
-            : name === "COMPOSIO_API_KEY"
-              ? env.COMPOSIO_API_KEY
-              : name === "FROCKBOT_AUTHORIZATION_STATE_SECRET"
-                ? env.FROCKBOT_AUTHORIZATION_STATE_SECRET
-                : name === "BETTER_AUTH_SECRET"
-                  ? env.BETTER_AUTH_SECRET
-                  : undefined,
-      ...(env.BETTER_AUTH_URL ? { callbackBaseUrl: env.BETTER_AUTH_URL } : {}),
-      startMcpAuthorization: async (userId, start) =>
-        decodeStartConnectionResultV1(
-          rpcJsonSnapshot(
-            await userConfigurationStub(env, userId).startMcpAuthorization({
-              schemaVersion: 1,
-              userId,
-              start,
-            }),
-          ),
-        ),
-      completeMcpAuthorization: async (userId, completion) =>
+      ),
+    readPublishedTemplate: (shareId: string) =>
+      readPublishedTemplate(env, shareId),
+    listTemplateImports: async (userId: string) =>
+      decodeTemplateImportListViewV1(
         rpcJsonSnapshot(
-          await userConfigurationStub(env, userId).completeMcpAuthorization({
+          await userConfigurationStub(env, userId).listTemplateImports({
             schemaVersion: 1,
             userId,
-            completion,
           }),
         ),
-      revokeMcpAuthorization: async (userId, connectionId) =>
-        decodeRevokeConnectionResultV1(
-          rpcJsonSnapshot(
-            await userConfigurationStub(env, userId).revokeMcpAuthorization({
-              schemaVersion: 1,
-              userId,
-              connectionId,
-            }),
-          ),
-        ),
-      lookupConnectionCommand: (userId, packageId, commandId) =>
-        userConfigurationStub(env, userId).lookupConnectionCommand({
-          schemaVersion: 1,
-          userId,
-          packageId,
-          commandId,
-        }),
-      listCompositionGenerations: async (userId, botId, query) =>
-        decodeCompositionGenerationListViewV1(
-          await botStateStub(env, userId, botId).listCompositionGenerations({
+      ),
+    executeTemplateImport: async (userId: string, command: TemplateCommandV1) =>
+      decodeTemplateImportRecordV1(
+        rpcJsonSnapshot(
+          await userConfigurationStub(env, userId).executeTemplateImport({
             schemaVersion: 1,
             userId,
-            botId,
+            command,
+          }),
+        ),
+      ),
+    listBots: async (userId) =>
+      decodeDirectoryViewV1(
+        rpcJsonSnapshot(
+          await userConfigurationStub(env, userId).listBots({
+            schemaVersion: 1,
+            userId,
+          }),
+        ),
+      ),
+    listBotLifecycles: async (userId: string) =>
+      decodeBotLifecycleDirectoryViewV1(
+        rpcJsonSnapshot(
+          await userConfigurationStub(env, userId).listBotLifecycles({
+            schemaVersion: 1,
+            userId,
+          }),
+        ),
+      ),
+    executeBotLifecycle: async (
+      userId: string,
+      command: BotLifecycleCommandV1,
+    ) =>
+      decodeBotLifecycleReceiptV1(
+        rpcJsonSnapshot(
+          await userConfigurationStub(env, userId).executeBotLifecycle({
+            schemaVersion: 1,
+            userId,
+            command,
+          }),
+        ),
+      ),
+    createBot: async (userId, command) =>
+      decodeFlockReceiptV1(
+        rpcJsonSnapshot(
+          await userConfigurationStub(env, userId).createBot({
+            schemaVersion: 1,
+            userId,
+            command,
+          }),
+        ),
+      ),
+    listBotIdentities: (userId: string) => listBotIdentities(env, userId),
+    readComputer: async (userId: string, botId: string) =>
+      decodeComputerProjectionV1(
+        rpcJsonSnapshot(
+          await (
+            await ownedComputerBotState(env, userId, botId)
+          ).readComputerPresence(),
+        ),
+      ),
+    executeComputerCommand: async (
+      userId: string,
+      botId: string,
+      command: ComputerCommandV1,
+    ) =>
+      decodeComputerCommandResponse(
+        rpcJsonSnapshot(
+          await (
+            await ownedComputerBotState(env, userId, botId)
+          ).executeComputerPresenceCommand(command),
+        ),
+      ),
+    searchTranscripts: async (userId: string, query: SearchQueryV1) =>
+      decodeSearchIndexResultsV1(
+        rpcJsonSnapshot(
+          await userSearchStub(env, userId).searchTranscripts({
+            schemaVersion: 1,
+            userId,
             query,
           }),
         ),
-      getCompositionGeneration: async (userId, botId, generationId) => {
-        const generation = await botStateStub(
-          env,
-          userId,
-          botId,
-        ).getCompositionGeneration({
-          schemaVersion: 1,
-          userId,
-          botId,
-          generationId,
-        });
-        return generation === undefined
-          ? undefined
-          : decodeCompositionGenerationViewV1(generation);
-      },
-      listTasks: async (userId, botId) =>
-        // Snapshotted first: a cross-object answer arrives as a live stub
-        // carrying `Symbol.dispose`, and an exact-keys decoder is right to
-        // refuse that.
-        decodeTaskListViewV1(
-          rpcJsonSnapshotV1(
-            await botStateStub(env, userId, botId).listTasks({
-              schemaVersion: 1,
-              userId,
-              botId,
-            }),
-          ),
+      ),
+    rebuildSearchIndex: async (userId: string) =>
+      decodeClientSearchRebuildReceiptV1(
+        rpcJsonSnapshot(
+          await userSearchStub(env, userId).rebuildSearchIndex({
+            schemaVersion: 1,
+            userId,
+          }),
         ),
-      readTask: async (userId, botId, taskId) =>
-        decodeTaskViewV1(
-          rpcJsonSnapshotV1(
-            await botStateStub(env, userId, botId).readTask({
-              schemaVersion: 1,
-              userId,
-              botId,
-              taskId,
-            }),
-          ),
+      ),
+    readAudit: async (userId: string, query: AuditQueryV1) =>
+      decodeClientAuditPageV1(
+        rpcJsonSnapshot(
+          await userAuditStub(env, userId).readAuditEntries({
+            schemaVersion: 1,
+            userId,
+            ...(query.botId === undefined ? {} : { botId: query.botId }),
+            ...(query.kind === undefined ? {} : { kind: query.kind }),
+            ...(query.target === undefined ? {} : { target: query.target }),
+            ...(query.before === undefined ? {} : { before: query.before }),
+            ...(query.limit === undefined ? {} : { limit: query.limit }),
+          }),
         ),
-      stopTask: async (userId, botId, taskId) =>
-        decodeTaskViewV1(
-          rpcJsonSnapshotV1(
-            await botStateStub(env, userId, botId).stopTask({
-              schemaVersion: 1,
-              userId,
-              botId,
-              taskId,
-            }),
-          ),
+      ),
+    rebuildAuditIndex: async (userId: string) =>
+      decodeAuditRebuildReceiptV1(
+        rpcJsonSnapshot(
+          await userAuditStub(env, userId).rebuildAuditIndex({
+            schemaVersion: 1,
+            userId,
+          }),
         ),
-      listTriggers: async (userId, botId) =>
-        decodeConnectionTriggerCatalogV1(
-          rpcJsonSnapshot(
-            await botStateStub(env, userId, botId).listRoutineTriggers({
-              schemaVersion: 1,
-              userId,
-              botId,
-            }),
-          ),
-        ),
-      listRoutines: async (userId, botId) =>
-        decodeRoutineListViewV1(
-          await botStateStub(env, userId, botId).listRoutines({
+      ),
+    listBotUnread: (userId: string) => listBotUnread(env, userId),
+    listBotNotifications: (userId: string) => listBotNotifications(env, userId),
+    executeBotUnreadCommand: (
+      userId: string,
+      botId: string,
+      command: BotUnreadCommandV1,
+    ) => executeBotUnreadCommand(env, userId, botId, command),
+    readSheep: async (userId, botId) =>
+      decodeSheepIdentityViewV1(
+        rpcJsonSnapshot(
+          await botStateStub(env, userId, botId).readSheep({
             schemaVersion: 1,
             userId,
             botId,
           }),
         ),
-      executeRoutineCommand: async (userId, botId, command) =>
-        decodeRoutineCommandReceiptV1(
-          await botStateStub(env, userId, botId).executeRoutineCommand({
-            schemaVersion: 1,
-            userId,
-            botId,
-            command,
-          }),
-        ),
-      // The secret the gateway verifies a presented machine token or pairing
-      // code against, before any Durable Object is addressed. It never leaves
-      // the Worker: what crosses to the User object is the token's claims and
-      // its digest, never the token.
-      ...(typeof env.MACHINE_TOKEN_SECRET === "string"
-        ? { machineTokenSecret: env.MACHINE_TOKEN_SECRET }
-        : {}),
-      createMachinePairing: async (userId, request) =>
-        decodeMachinePairingOfferV1(
-          rpcJsonSnapshot(
-            await userMachineStub(env, userId).createMachinePairing({
-              schemaVersion: 1,
-              userId,
-              ...(request.label === undefined ? {} : { label: request.label }),
-            }),
-          ),
-        ),
-      enrollMachine: async (userId, input) =>
-        decodeMachineEnrollmentReceiptV1(
-          rpcJsonSnapshot(
-            await userMachineStub(env, userId).enrollMachine({
-              schemaVersion: 1,
-              userId,
-              machineId: input.machineId,
-              enrollment: input.enrollment,
-            }),
-          ),
-        ),
-      pollMachine: async (userId, call) =>
-        decodeMachinePollResultV1(
-          rpcJsonSnapshot(
-            await userMachineStub(env, userId).pollMachine({
-              schemaVersion: 1,
-              userId,
-              machineId: call.machineId,
-              claims: call.claims,
-              tokenDigest: call.tokenDigest,
-              waitSeconds: call.waitSeconds,
-            }),
-          ),
-        ),
-      claimMachineCommand: async (userId, call) =>
-        decodeMachineClaimReceiptV1(
-          rpcJsonSnapshot(
-            await userMachineStub(env, userId).claimMachineCommand({
-              schemaVersion: 1,
-              userId,
-              machineId: call.machineId,
-              commandId: call.commandId,
-              claims: call.claims,
-              tokenDigest: call.tokenDigest,
-            }),
-          ),
-        ),
-      recordMachineResult: async (userId, call) => {
-        const receipt = decodeMachineResultReceiptV1(
-          rpcJsonSnapshot(
-            await userMachineStub(env, userId).recordMachineResult({
-              schemaVersion: 1,
-              userId,
-              machineId: call.machineId,
-              commandId: call.commandId,
-              claims: call.claims,
-              tokenDigest: call.tokenDigest,
-              result: call.result,
-            }),
-          ),
-        );
-        // The Bot that asked is told here rather than by the User Durable
-        // Object: a Durable Object holding a live reference to another one
-        // cannot be evicted while it does, and this registry is built to
-        // depend on neither presence nor residency. The outbox is durable, so
-        // the hand-off is not lost by being made from out here.
-        await deliverMachineResults(env, userId);
-        return receipt;
-      },
-      listMachines: async (userId) =>
-        decodeMachineListViewV1(
-          rpcJsonSnapshot(
-            await userMachineStub(env, userId).listMachines({
-              schemaVersion: 1,
-              userId,
-            }),
-          ),
-        ),
-      revokeMachine: async (userId, machineId) =>
-        decodeMachineListViewV1(
-          rpcJsonSnapshot(
-            await userMachineStub(env, userId).revokeMachine({
-              schemaVersion: 1,
-              userId,
-              machineId,
-            }),
-          ),
-        ),
-      // The secret the gateway verifies a presented webhook key against. It
-      // never leaves the Worker; a Bot only ever sees a digest.
-      ...(typeof env.ROUTINE_HOOK_SECRET === "string"
-        ? { routineHookSecret: env.ROUTINE_HOOK_SECRET }
-        : {}),
-      deliverRoutineHook: async (userId, botId, delivery) =>
-        botStateStub(env, userId, botId).deliverRoutineHook({
+      ),
+    executeConnection: (userId, command) =>
+      userConfigurationStub(env, userId).executeConnection({
+        schemaVersion: 1,
+        userId,
+        command,
+      }),
+    lookupConnectionCommand: (userId, packageId, commandId) =>
+      userConfigurationStub(env, userId).lookupConnectionCommand({
+        schemaVersion: 1,
+        userId,
+        packageId,
+        commandId,
+      }),
+    listCompositionGenerations: async (userId, botId, query) =>
+      decodeCompositionGenerationListViewV1(
+        await botStateStub(env, userId, botId).listCompositionGenerations({
           schemaVersion: 1,
           userId,
           botId,
-          delivery,
+          query,
         }),
-      listRoutineRuns: async (userId, botId, routineId) =>
-        decodeRoutineRunListViewV1(
-          await botStateStub(env, userId, botId).listRoutineRuns({
+      ),
+    getCompositionGeneration: async (userId, botId, generationId) => {
+      const generation = await botStateStub(
+        env,
+        userId,
+        botId,
+      ).getCompositionGeneration({
+        schemaVersion: 1,
+        userId,
+        botId,
+        generationId,
+      });
+      return generation === undefined
+        ? undefined
+        : decodeCompositionGenerationViewV1(generation);
+    },
+    listTasks: async (userId, botId) =>
+      // Snapshotted first: a cross-object answer arrives as a live stub
+      // carrying `Symbol.dispose`, and an exact-keys decoder is right to
+      // refuse that.
+      decodeTaskListViewV1(
+        rpcJsonSnapshotV1(
+          await botStateStub(env, userId, botId).listTasks({
             schemaVersion: 1,
             userId,
             botId,
-            routineId,
           }),
         ),
-      readRoutineRun: async (userId, botId, routineId, runId) =>
-        decodeRoutineRunDetailViewV1(
-          await botStateStub(env, userId, botId).readRoutineRun({
+      ),
+    readTask: async (userId, botId, taskId) =>
+      decodeTaskViewV1(
+        rpcJsonSnapshotV1(
+          await botStateStub(env, userId, botId).readTask({
             schemaVersion: 1,
             userId,
             botId,
-            routineId,
-            runId,
+            taskId,
           }),
         ),
-      listRoutineInbox: async (userId, botId) =>
-        decodeRoutineInboxViewV1(
-          await botStateStub(env, userId, botId).listRoutineInbox({
+      ),
+    stopTask: async (userId, botId, taskId) =>
+      decodeTaskViewV1(
+        rpcJsonSnapshotV1(
+          await botStateStub(env, userId, botId).stopTask({
             schemaVersion: 1,
             userId,
             botId,
+            taskId,
           }),
         ),
-      executeRoutineInboxCommand: async (userId, botId, command) =>
-        decodeRoutineInboxReceiptV1(
-          await botStateStub(env, userId, botId).executeRoutineInboxCommand({
-            schemaVersion: 1,
-            userId,
-            botId,
-            command,
-          }),
-        ),
-      revertComposition: async (userId, botId, command) =>
-        decodeCompositionCommandReceiptV1(
-          await botStateStub(env, userId, botId).revertComposition({
-            schemaVersion: 1,
-            userId,
-            botId,
-            command,
-          }),
-        ),
-      updateSheep: async (userId, botId, command) =>
-        decodeFlockReceiptV1(
-          rpcJsonSnapshot(
-            await botStateStub(env, userId, botId).updateSheep({
-              schemaVersion: 1,
-              userId,
-              botId,
-              command,
-            }),
-          ),
-        ),
-      read: (userId) =>
-        userConfigurationStub(env, userId).readPackageRevisions({
+      ),
+    listRoutines: async (userId, botId) =>
+      decodeRoutineListViewV1(
+        await botStateStub(env, userId, botId).listRoutines({
           schemaVersion: 1,
           userId,
+          botId,
         }),
-      rollback: (userId, command) =>
-        userConfigurationStub(env, userId).rollbackPackage({
+      ),
+    executeRoutineCommand: async (userId, botId, command) =>
+      decodeRoutineCommandReceiptV1(
+        await botStateStub(env, userId, botId).executeRoutineCommand({
           schemaVersion: 1,
           userId,
+          botId,
           command,
         }),
-    }),
-);
+      ),
+    // The secret the gateway verifies a presented machine token or pairing
+    // code against, before any Durable Object is addressed. It never leaves
+    // the Worker: what crosses to the User object is the token's claims and
+    // its digest, never the token.
+    ...(typeof env.MACHINE_TOKEN_SECRET === "string"
+      ? { machineTokenSecret: env.MACHINE_TOKEN_SECRET }
+      : {}),
+    createMachinePairing: async (userId, request) =>
+      decodeMachinePairingOfferV1(
+        rpcJsonSnapshot(
+          await userMachineStub(env, userId).createMachinePairing({
+            schemaVersion: 1,
+            userId,
+            ...(request.label === undefined ? {} : { label: request.label }),
+          }),
+        ),
+      ),
+    enrollMachine: async (userId, input) =>
+      decodeMachineEnrollmentReceiptV1(
+        rpcJsonSnapshot(
+          await userMachineStub(env, userId).enrollMachine({
+            schemaVersion: 1,
+            userId,
+            machineId: input.machineId,
+            enrollment: input.enrollment,
+          }),
+        ),
+      ),
+    pollMachine: async (userId, call) =>
+      decodeMachinePollResultV1(
+        rpcJsonSnapshot(
+          await userMachineStub(env, userId).pollMachine({
+            schemaVersion: 1,
+            userId,
+            machineId: call.machineId,
+            claims: call.claims,
+            tokenDigest: call.tokenDigest,
+            waitSeconds: call.waitSeconds,
+          }),
+        ),
+      ),
+    claimMachineCommand: async (userId, call) =>
+      decodeMachineClaimReceiptV1(
+        rpcJsonSnapshot(
+          await userMachineStub(env, userId).claimMachineCommand({
+            schemaVersion: 1,
+            userId,
+            machineId: call.machineId,
+            commandId: call.commandId,
+            claims: call.claims,
+            tokenDigest: call.tokenDigest,
+          }),
+        ),
+      ),
+    recordMachineResult: async (userId, call) => {
+      const receipt = decodeMachineResultReceiptV1(
+        rpcJsonSnapshot(
+          await userMachineStub(env, userId).recordMachineResult({
+            schemaVersion: 1,
+            userId,
+            machineId: call.machineId,
+            commandId: call.commandId,
+            claims: call.claims,
+            tokenDigest: call.tokenDigest,
+            result: call.result,
+          }),
+        ),
+      );
+      // The Bot that asked is told here rather than by the User Durable
+      // Object: a Durable Object holding a live reference to another one
+      // cannot be evicted while it does, and this registry is built to
+      // depend on neither presence nor residency. The outbox is durable, so
+      // the hand-off is not lost by being made from out here.
+      await deliverMachineResults(env, userId);
+      return receipt;
+    },
+    listMachines: async (userId) =>
+      decodeMachineListViewV1(
+        rpcJsonSnapshot(
+          await userMachineStub(env, userId).listMachines({
+            schemaVersion: 1,
+            userId,
+          }),
+        ),
+      ),
+    revokeMachine: async (userId, machineId) =>
+      decodeMachineListViewV1(
+        rpcJsonSnapshot(
+          await userMachineStub(env, userId).revokeMachine({
+            schemaVersion: 1,
+            userId,
+            machineId,
+          }),
+        ),
+      ),
+    // The secret the gateway verifies a presented webhook key against. It
+    // never leaves the Worker; a Bot only ever sees a digest.
+    ...(typeof env.ROUTINE_HOOK_SECRET === "string"
+      ? { routineHookSecret: env.ROUTINE_HOOK_SECRET }
+      : {}),
+    deliverRoutineHook: async (userId, botId, delivery) =>
+      botStateStub(env, userId, botId).deliverRoutineHook({
+        schemaVersion: 1,
+        userId,
+        botId,
+        delivery,
+      }),
+    listRoutineRuns: async (userId, botId, routineId) =>
+      decodeRoutineRunListViewV1(
+        await botStateStub(env, userId, botId).listRoutineRuns({
+          schemaVersion: 1,
+          userId,
+          botId,
+          routineId,
+        }),
+      ),
+    readRoutineRun: async (userId, botId, routineId, runId) =>
+      decodeRoutineRunDetailViewV1(
+        await botStateStub(env, userId, botId).readRoutineRun({
+          schemaVersion: 1,
+          userId,
+          botId,
+          routineId,
+          runId,
+        }),
+      ),
+    listRoutineInbox: async (userId, botId) =>
+      decodeRoutineInboxViewV1(
+        await botStateStub(env, userId, botId).listRoutineInbox({
+          schemaVersion: 1,
+          userId,
+          botId,
+        }),
+      ),
+    executeRoutineInboxCommand: async (userId, botId, command) =>
+      decodeRoutineInboxReceiptV1(
+        await botStateStub(env, userId, botId).executeRoutineInboxCommand({
+          schemaVersion: 1,
+          userId,
+          botId,
+          command,
+        }),
+      ),
+    revertComposition: async (userId, botId, command) =>
+      decodeCompositionCommandReceiptV1(
+        await botStateStub(env, userId, botId).revertComposition({
+          schemaVersion: 1,
+          userId,
+          botId,
+          command,
+        }),
+      ),
+    updateSheep: async (userId, botId, command) =>
+      decodeFlockReceiptV1(
+        rpcJsonSnapshot(
+          await botStateStub(env, userId, botId).updateSheep({
+            schemaVersion: 1,
+            userId,
+            botId,
+            command,
+          }),
+        ),
+      ),
+  });
 
 /**
  * The last net under every entry point, for the rejections no boundary caught.
@@ -2232,26 +1961,35 @@ export default {
           .split(",")
           .map((host) => host.trim())
           .filter(Boolean),
-        auth: gatewayAuth(env),
-        saveNativeForm: (userId, command) => {
-          const stub = env.USER_CONFIGURATIONS.get(
-            env.USER_CONFIGURATIONS.idFromName(userId),
-          );
-          // SAFETY: USER_CONFIGURATIONS is bound to the reviewed UserConfiguration class.
-          const rpc = stub as unknown as Pick<
-            UserConfiguration,
-            "saveNativeForm"
-          >;
-          return rpc.saveNativeForm({ schemaVersion: 1, userId, command });
-        },
-        ...(nativeReturnUris(env.NATIVE_SLICE_2_AUTH).length > 0 &&
-        env.BETTER_AUTH_SECRET
+        auth: gatewayAuth(env, {
+          mayCreateAccount: (email) => mayCreateAccount(env, email),
+        }),
+        ...(nativeReturnUrisFor(env).length > 0 && env.BETTER_AUTH_SECRET
           ? {
               nativeAuth: createNativeAuth({
                 secret: env.BETTER_AUTH_SECRET,
-                auth: gatewayAuth(env),
-                returnUris: nativeReturnUris(env.NATIVE_SLICE_2_AUTH),
+                auth: gatewayAuth(env, {
+                  mayCreateAccount: (email) => mayCreateAccount(env, email),
+                }),
+                returnUris: nativeReturnUrisFor(env),
+                // A development stack answers on whatever `BETTER_AUTH_URL`
+                // names — the emulator reaches the host as 10.0.2.2, never
+                // as the production origin — and signs the app in as the
+                // development identity in place of Google.
+                ...(developmentAuthAllowed(env)
+                  ? {
+                      ...(env.BETTER_AUTH_URL
+                        ? { origin: env.BETTER_AUTH_URL }
+                        : {}),
+                      developmentUserId: DEVELOPMENT_USER_ID,
+                    }
+                  : {}),
                 canIssueSession: async (userId) => {
+                  if (
+                    developmentAuthAllowed(env) &&
+                    userId === DEVELOPMENT_USER_ID
+                  )
+                    return true;
                   const identity = await env.AUTH_DB.prepare(
                     'select "id", "email" from "user" where "id" = ? limit 1',
                   )
@@ -2312,19 +2050,7 @@ export default {
         ...(env.FROCKBOT_ADMIN_EMAILS
           ? { adminEmails: env.FROCKBOT_ADMIN_EMAILS }
           : {}),
-        applicationHashFor: async (userId) =>
-          (await userConfigurationStub(env, userId).activeApplicationHash({
-            schemaVersion: 1,
-            userId,
-          })) ?? env.DEFAULT_APPLICATION_HASH,
-        nativeAppletBootstrap: (userId, appletId, navigationEpoch) =>
-          runtimeExports
-            .UserBotState({ props: { userId } })
-            .nativeAppletBootstrap({
-              schemaVersion: 1,
-              appletId,
-              navigationEpoch,
-            }),
+        applicationHashFor: async () => env.DEFAULT_APPLICATION_HASH,
         botStateFor: (userId) =>
           runtimeExports.UserBotState({ props: { userId } }),
         userConfigurationFor: (userId): UserConfigurationBinding =>
@@ -2338,29 +2064,10 @@ export default {
           env.APPLET_STATES.get(
             env.APPLET_STATES.idFromName(appletStateNameV1(userId, appletId)),
           ),
-        openVoiceDictation: (userId, request) =>
-          openVoiceDictation(env, userId, request),
         openBotStateChannel: (userId, botId, request, context) =>
           openOwnedBotStateChannel(env, userId, botId, request, context),
-        ...(env.PACKAGE_CATALOG
-          ? { catalog: new R2PackageCatalog(env.PACKAGE_CATALOG) }
-          : {}),
         backendContributions: [...mountedBackend.contributions],
         debug: debugSurface(env),
-        ...(env.WORKSPACE_SEED_TOKEN
-          ? {
-              workspaceSeed: {
-                token: env.WORKSPACE_SEED_TOKEN,
-                write: (userId, botId, request) =>
-                  botStateStub(env, userId, botId).writeUserWorkspaceFileV1({
-                    schemaVersion: 1,
-                    userId,
-                    botId,
-                    ...request,
-                  }),
-              },
-            }
-          : {}),
         allowedClientOrigins: allowedClientOrigins(env),
         allowDevelopmentIdentity: env.ALLOW_DEVELOPMENT_AUTH === "true",
       });

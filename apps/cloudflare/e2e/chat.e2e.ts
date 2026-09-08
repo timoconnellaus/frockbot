@@ -37,7 +37,7 @@ import {
 import {
   failureNoticeV1,
   RUN_FAILURE_COPY_V1,
-} from "@frockbot/plugin-shell/run-failure-copy";
+} from "@frockbot/app/shell/run-failure-copy";
 
 /*
  * The fake provider is one server shared by every spec in the shard, so a mode

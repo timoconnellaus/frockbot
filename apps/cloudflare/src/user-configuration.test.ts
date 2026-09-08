@@ -1,15 +1,15 @@
 import { describe, expect, mock, test } from "bun:test";
 import {
-  compileFoundationApplication,
-  isPlatformOwnedPackageV1,
-} from "@frockbot/application-foundation/runtime";
+  FOUNDATION_PACKAGES_V1,
+  FOUNDATION_PACKAGE_VERSION_V1,
+} from "@frockbot/app/runtime";
 import {
   decodeBotSettingsViewV1,
   migrateStoredBotSettingsV1,
   resolveEffectiveBotModelV1,
   type UserConfigurationCommandV1,
   type UserSettingsViewV1,
-} from "@frockbot/configuration-core";
+} from "@frockbot/core/configuration";
 import type { WorkerLoader } from "./contracts.js";
 import {
   LEGACY_DEFAULT_PACKAGES_MARKER_KEY,
@@ -101,7 +101,6 @@ function identity(userId: string): {
   ctx: (storage: unknown) => DurableObjectState;
   env: {
     USER_CONFIGURATIONS: DurableObjectNamespace;
-    VOICE_SESSIONS: DurableObjectNamespace;
     APPLICATION_ARTIFACTS: R2Bucket;
     USER_APPLICATIONS: WorkerLoader;
     BOT_STATES: DurableObjectNamespace;
@@ -119,12 +118,6 @@ function identity(userId: string): {
     env: {
       USER_CONFIGURATIONS: {
         idFromName: idFor,
-      } as unknown as DurableObjectNamespace,
-      VOICE_SESSIONS: {
-        idFromName: idFor,
-        get: () => {
-          throw new Error("no Voice session in this test");
-        },
       } as unknown as DurableObjectNamespace,
       // Publication bytes and the verification loader are not exercised here;
       // reaching either is a failure, not a fixture.
@@ -152,13 +145,13 @@ function identity(userId: string): {
 const credentialKeyring =
   '{"schemaVersion":1,"currentKeyId":"primary","keys":{"primary":"MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY"}}';
 
-async function executionPackages() {
-  return (await compileFoundationApplication()).packages.map((pkg) => ({
+function executionPackages() {
+  return FOUNDATION_PACKAGES_V1.map((pkg) => ({
     packageId: pkg.id,
-    version: pkg.version,
-    settings: pkg.manifest.configuration?.settings ?? [],
-    capabilities: pkg.manifest.configuration?.capabilities ?? [],
-    connectionTypes: pkg.manifest.configuration?.connectionTypes ?? [],
+    version: FOUNDATION_PACKAGE_VERSION_V1,
+    settings: [...(pkg.settings ?? [])],
+    capabilities: [...(pkg.capabilities ?? [])],
+    connectionTypes: [...(pkg.connectionTypes ?? [])],
   }));
 }
 
@@ -250,7 +243,7 @@ describe("UserConfiguration Connection routing", () => {
       ...bound.env,
       CREDENTIAL_KEYRING: credentialKeyring,
     });
-    const packages = await executionPackages();
+    const packages = executionPackages();
     const bot = decodeBotSettingsViewV1(
       migrateStoredBotSettingsV1(legacyBotSettingsRecordV1()),
     );
@@ -416,35 +409,17 @@ describe("UserConfiguration Connection routing", () => {
       CREDENTIAL_KEYRING: credentialKeyring,
     });
 
-    const plan = await compileFoundationApplication();
-    const packages = await executionPackages();
+    const packages = executionPackages();
     let user = await configuration.readConfiguration({
       schemaVersion: 1,
       view: 2,
       userId,
     });
-    const platformPackageIds = plan.packages
-      .filter((pkg) =>
-        isPlatformOwnedPackageV1(
-          pkg.manifest,
-          new Set(
-            plan.packages
-              .filter(
-                (candidate) =>
-                  candidate.manifest.defaultEnablement !== undefined ||
-                  (candidate.manifest.configuration?.connectionTypes.length ??
-                    0) > 0 ||
-                  (candidate.manifest.configuration?.capabilities.length ?? 0) >
-                    0,
-              )
-              .flatMap((candidate) => [
-                candidate.id,
-                ...Object.keys(candidate.manifest.dependencies),
-              ]),
-          ).has(pkg.id),
-        ),
-      )
-      .map((pkg) => pkg.id);
+    // Platform-owned Packages are the ones whose definition says so; every
+    // one of them is seeded installed on a first read.
+    const platformPackageIds = FOUNDATION_PACKAGES_V1.filter(
+      (pkg) => pkg.platformOwned,
+    ).map((pkg) => pkg.id);
     for (const packageId of platformPackageIds) {
       expect(user.packages).toContainEqual(
         expect.objectContaining({ packageId, state: "installed" }),
@@ -455,7 +430,6 @@ describe("UserConfiguration Connection routing", () => {
       "bot-template",
       "user-machine",
       "machine-messages",
-      "mcp",
       "routines",
       "subagents",
     ]) {

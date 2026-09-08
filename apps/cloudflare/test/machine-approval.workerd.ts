@@ -19,14 +19,14 @@ import {
   runInDurableObject,
 } from "cloudflare:test";
 import { describe, expect, test } from "vitest";
-import { machineTokenDigestV1 } from "@frockbot/machine-protocol";
+import { machineTokenDigestV1 } from "@frockbot/core/machine-protocol";
 import type {
   MachineCommandV1,
   MachineEnrollmentReceiptV1,
   MachinePairingOfferV1,
-} from "@frockbot/machine-protocol";
-import type { MachineIntentRecordV1 } from "@frockbot/plugin-user-machine/intent";
-import { machineIntentKeyV1 } from "@frockbot/plugin-user-machine/intent";
+} from "@frockbot/core/machine-protocol";
+import type { MachineIntentRecordV1 } from "@frockbot/app/machine/intent";
+import { machineIntentKeyV1 } from "@frockbot/app/machine/intent";
 import { provisionBot } from "./provision-bot.ts";
 import { toolCallTriggerPrompt } from "./harness/miniflare.ts";
 

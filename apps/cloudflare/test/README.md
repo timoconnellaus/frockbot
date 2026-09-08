@@ -53,7 +53,7 @@ either project.
 ## The Computer host fake
 
 `test/computer-host-fake.ts` stands in for the `COMPUTER_HOST` service binding
-in both projects. It runs `@frockbot/computer-host-protocol` verbatim — the
+in both projects. It runs `@frockbot/computer/host-protocol` verbatim — the
 same decoder at the seam, the same `problem()` refusals, the same NDJSON exec
 framing, the same token check — and the real host Worker's own
 `computerHostShardV1`, so a test can prove that every Bot of one User routes to
@@ -94,10 +94,7 @@ it is the only layer in which the shipped Vue client executes.
 
 `e2e/harness.ts` is the Playwright `webServer`: it runs `artifact:build`, seeds
 `dist/artifacts/foundation-v1.mjs` into the local `APPLICATION_ARTIFACTS`
-bucket, publishes one Package Catalog generation with
-`scripts/publish-catalog.ts` and seeds its pointer and index into
-`PACKAGE_CATALOG` (entry documents are read one row at a time and no spec opens
-one), starts a fake Ollama HTTP server on a loopback port, and starts
+bucket, starts a fake Ollama HTTP server on a loopback port, and starts
 `wrangler dev --env e2e`. That environment exists because `development` marks
 `MEMORY_FILES`, `MEMORY_INDEX` and `AI` remote, and a remote binding makes
 `wrangler dev` open a Cloudflare API session that a pull request has no

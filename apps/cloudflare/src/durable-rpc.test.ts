@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   decodeRevertCompositionCommandV1,
   MAX_COMPOSITION_GENERATION_PAGE_V1,
-} from "@frockbot/configuration-core";
+} from "@frockbot/core/configuration";
 import {
   decodeBotAgentRunRpcV1,
   decodeBotRunRpcV1,
@@ -173,21 +173,6 @@ describe("Durable Object RPC boundaries", () => {
       },
     } as const;
     expect(decodeBotAgentRunRpcV1(request)).toEqual(request);
-    expect(
-      decodeBotAgentRunRpcV1({
-        ...request,
-        command: {
-          ...request.command,
-          source: { kind: "voice", messageId: "voice-ask-1" },
-        },
-      }),
-    ).toEqual({
-      ...request,
-      command: {
-        ...request.command,
-        source: { kind: "voice", messageId: "voice-ask-1" },
-      },
-    });
     expect(() =>
       decodeBotAgentRunRpcV1({
         ...request,

@@ -4,7 +4,7 @@ import {
   decodeSetSignupsRequestV1,
   DeploymentPolicyConflictError,
   type DeploymentPolicyV1,
-} from "@frockbot/plugin-admin/shared";
+} from "@frockbot/app/admin/shared";
 import { DurableObject } from "cloudflare:workers";
 
 const POLICY_KEY = "deployment:policy:v1";

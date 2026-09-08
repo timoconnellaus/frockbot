@@ -3,7 +3,7 @@ import {
   computerHostOperationKindV1,
   decodeComputerHostHttpRequestV1,
   problem,
-} from "@frockbot/computer-host-protocol";
+} from "@frockbot/computer/host-protocol";
 
 export interface ComputerHostRouteConfiguration {
   /** The shared secret the app Worker presents and the container re-checks. */
@@ -38,8 +38,8 @@ export function fnv1aV1(key: string): number {
 /**
  * The container a User's Computer lives on.
  *
- * Keyed on **userId**, not botId. "One Computer serves all of a User's Bots"
- * (ADR 0012), and the `flock`-serialized takeover lease and the display-slot
+ * Keyed on **userId**, not botId. One Computer serves all of a User's Bots,
+ * and the `flock`-serialized takeover lease and the display-slot
  * registry live on that one Sprite — so every Bot of one User must reach it
  * through one container, or two containers would race on one box.
  */
@@ -121,7 +121,7 @@ export async function routeComputerHostRequestV1(
  * The container shard the superseded single-effect seam routes to.
  *
  * It keys on **botId** and names shards `shared-<n>`, which is wrong for a
- * Computer — ADR 0012 makes a Computer a property of its User — and is exactly
+ * Computer — a Computer is a property of its User — and is exactly
  * why `computerHostShardV1` exists. It is preserved verbatim because live
  * `ComputerEffectJournal` objects already resolved containers this way, and a
  * superseding deploy must not silently re-place them.
