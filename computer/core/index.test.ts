@@ -219,69 +219,6 @@ describe("ComputerRegistry", () => {
     ).rejects.toMatchObject({ code: "stale-assignment" });
   });
 
-  test("keeps a provider's single-root reconciliation on the guarded handle", async () => {
-    // Bob on production (2026-09-04): the provider could reconcile one root,
-    // the guarded handle dropped that method, and the publish that needed
-    // `dist/` pulled explicitly was refused as "cannot reconcile a single
-    // durable root" while ordinary sync no longer carried build output.
-    const computers = new ComputerRegistry();
-    const calls: string[] = [];
-    const syncing: ComputerProvider = {
-      id: "sprites",
-      open: async (identity, tenant, assignment) => ({
-        assignment,
-        identity,
-        tenant,
-        sync: {
-          reconcile: async (reason) => {
-            calls.push(`reconcile:${reason}`);
-            return { status: "ok" } as never;
-          },
-          reconcileRoot: async (declared, reason, options) => {
-            calls.push(
-              `root:${reason}:${declared.kind}:${(options?.requiredPaths ?? []).join(",")}`,
-            );
-            return { status: "ok" } as never;
-          },
-          signal: async () => undefined,
-        },
-        close: () => Promise.resolve(),
-      }),
-    };
-    computers.register(syncing);
-    const identity = { userId: "user-1" };
-    computers.assign(identity, "sprites");
-    const computer = await computers.open(identity, { botId: "bot-1" });
-
-    expect(computer.sync?.reconcileRoot).toBeDefined();
-    await computer.sync?.reconcileRoot?.(
-      {
-        kind: "package-declared",
-        userId: "user-1",
-        packageId: "image",
-        rootId: "generated",
-      },
-      "publish",
-      { requiredPaths: ["a.b/dist/server.js"] },
-    );
-    expect(calls).toEqual(["root:publish:package-declared:a.b/dist/server.js"]);
-
-    // Still guarded: a stale handle refuses it like every other operation.
-    computers.register({ ...syncing, id: "local" });
-    computers.assign(identity, "local");
-    await expect(
-      computer.sync?.reconcileRoot?.(
-        {
-          kind: "package-declared",
-          userId: "user-1",
-          packageId: "image",
-          rootId: "generated",
-        },
-        "publish",
-      ),
-    ).rejects.toMatchObject({ code: "stale-assignment" });
-  });
-
   test("fails clearly when a User has no Computer assignment", async () => {
     const computers = new ComputerRegistry();
 

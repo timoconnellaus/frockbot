@@ -70,8 +70,7 @@ Four classes in the app Worker, exported from `apps/cloudflare/src/index.ts:178-
 
 ### In `apps/computer-host`
 
-- `FlyHostContainer` — `apps/computer-host/src/index.ts:63`, `extends Container`, bound as both `COMPUTER_HOST_CONTAINER` and `FLY_HOST`.
-- `ComputerEffectJournal` — `apps/computer-host/src/effect-journal.ts:46`. A plain class, not a `DurableObject` subclass. One `effect` key implementing claim, collision and unresolved idempotency.
+- `FlyHostContainer` — `apps/computer-host/src/index.ts:47`, `extends Container`, bound as `COMPUTER_HOST_CONTAINER`. The class name is legacy and permanent: a Cloudflare container application is bound to one Durable Object class for its lifetime.
 
 ---
 
@@ -743,7 +742,7 @@ The facet's own SQLite inside the per-`<userId>:<appletId>` Durable Object, with
 
 ### What it is
 
-A persistent Linux desktop virtual machine per User, rented from Fly Sprites (`api.sprites.dev`, SDK `@fly/sprites@0.1.0`). `apps/computer-host` is a Worker that shards and authorizes, fronting a Cloudflare Container (`node:24-slim`, no desktop) that runs the Sprites SDK.
+A persistent Linux desktop virtual machine per User, rented from Fly Sprites (`api.sprites.dev`, SDK `@fly/sprites@0.1.0`). `apps/computer-host` is a Worker that shards and authorizes, fronting a Cloudflare Container (`node:24-slim`, no desktop) that runs the Sprites SDK. It serves the v1 protocol and nothing else: the prototype's `/v1/effects` route and its `ComputerEffectJournal` are gone, retired by migration `v5`.
 
 ### Provisioning
 

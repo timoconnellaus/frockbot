@@ -13,7 +13,6 @@ import type {
   ComputerAgentPluginConfig,
   ComputerProcessStorageV1,
 } from "@frockbot/computer/agent";
-import type { SharedComputerHostClient } from "@frockbot/computer/shared-provider";
 import type { AppletsRuntimeHostV1 } from "@frockbot/applets/feature";
 import type { BotTemplateRuntimeHostV1 } from "@frockbot/app/bot-template/agent";
 import type { FlockSelfRuntimeHostV1 } from "@frockbot/app/flock/agent";
@@ -41,13 +40,6 @@ export interface ShellComputerHostBindingV1 {
 export interface ShellHostedRuntimeHostV1 {
   userId: string;
   readSecret(name: string): string | undefined;
-  /**
-   * The shared Computer host seam: a non-authoritative backend host that
-   * journals each identified Computer effect so a retried effect replays its
-   * recorded outcome instead of executing twice. Supplied, the
-   * `shared-computer` provider is registered beside the in-worker provider.
-   */
-  computerHost?: SharedComputerHostClient;
   /**
    * The shared Computer host: the service binding the Bot
    * Durable Object reaches a Computer through, and the secret it presents.
