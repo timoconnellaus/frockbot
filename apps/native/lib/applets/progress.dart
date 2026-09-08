@@ -119,7 +119,8 @@ final _checkErrors = RegExp(r'^applet check: \d+ error', multiLine: true);
 /// Whether a shell command's output is the `applet` CLI reporting on itself.
 ///
 /// The client is never told what a `computer_exec` ran — the Turn projection
-/// carries the input of dynamic tool calls only. What it does carry is the
+/// carries a call's arguments only for a namespace the person connected
+/// themselves, never for a first-party tool. What it does carry is the
 /// result, and the CLI's output is a stated contract, so recognising it is
 /// reading a published shape rather than guessing at a command. Anything else
 /// looks like nothing here and is ignored, which is the right failure: no line
