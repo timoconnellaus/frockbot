@@ -293,17 +293,9 @@ test("a Turn that is running when the page reloads still delivers its reply", as
 // text that follows the send stays private. The fake provider's `streaming`
 // mode writes "PRIVATE MODEL SCRATCH" across a gap on the call after the
 // delivery, which is the window this watches.
-test("an explicit send appears while model text stays private", async ({
-  page,
-  userId,
-  ollamaBaseUrl,
-}) => {
-  await provisionThroughUi(page, {
-    userId,
-    apiKey: E2E_OLLAMA_GOOD_API_KEY,
-    apiBaseUrl: ollamaBaseUrl,
-    botName: "Streamer",
-  });
+test("an explicit send appears while model text stays private", async () => {
+  const { page, ollamaBaseUrl } = application();
+  await createBot(page, "Streamer");
 
   await setFakeOllamaChatMode(page, ollamaBaseUrl, "streaming");
   await beginTurn(page, "Say it as you think of it");
