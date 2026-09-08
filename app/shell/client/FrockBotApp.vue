@@ -1726,19 +1726,6 @@ function handleComposerKeydown(event: KeyboardEvent): void {
             </p>
           </div>
           <!--
-            Start a new conversation. Sits beside the composer because that is
-            where you are when you decide the last one is finished. Disabled
-            while a Turn is running: the Bot is still writing to it.
-          -->
-          <UiIconButton
-            icon="plus"
-            label="New conversation"
-            variant="ghost"
-            class="new-conversation-button"
-            :disabled="isRunning"
-            @click="web.startConversation()"
-          />
-          <!--
             The send slot. Stop takes it only while there is nothing to send.
           -->
           <UiIconButton

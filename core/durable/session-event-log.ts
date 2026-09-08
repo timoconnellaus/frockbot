@@ -604,10 +604,6 @@ export class SessionEventLog {
     await this.storage.delete(LATEST_EVENTS_KEY);
   }
 
-  async clearCurrent(sessionId: string): Promise<void> {
-    await this.rewrite(sessionId, []);
-  }
-
   private async storedEvent(
     sessionId: string,
     event: SessionEvent,

@@ -12,7 +12,6 @@ class LatchedTransport extends FakeTransport {
   Future<Map<String, dynamic>> page(
     String botId, {
     String? before,
-    String? conversationId,
   }) {
     final page = Completer<Map<String, dynamic>>();
     pages.add(page);

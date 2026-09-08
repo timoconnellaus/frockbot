@@ -10,6 +10,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../activity/controller.dart';
 import '../activity/page.dart';
@@ -37,6 +38,7 @@ import '../templates/page.dart';
 import '../view/sample_page.dart';
 import '../protocol/client_wire.generated.dart' as wire;
 import 'chat_pane.dart';
+import 'chat_header.dart';
 import 'desktop_layout.dart';
 import 'run_view.dart';
 import 'semantics.dart';
@@ -616,32 +618,137 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     });
   }
 
-  /// On the phone the region has no selector of its own, because it is not a
-  /// column: the entries are pages. This is the selector — the same labels the
-  /// wide layout puts in its segmented control, offered once and then opened.
-  Future<void> _choosePanel() async {
-    final keys = slots.keys(ShellSlot.rightPanel);
-    if (keys.length <= 1) {
-      _pushPanel(keys.isEmpty ? panelKey : keys.first);
-      return;
-    }
-    final chosen = await showModalBottomSheet<String>(
+  Future<void> _messageActions(TranscriptLine line) async {
+    final bot = selected;
+    if (bot == null) return;
+    final copyText = [
+      if (line.text.isNotEmpty) line.text,
+      for (final send in line.sends)
+        if (send.type == 'text' && send.payload?['text'] is String)
+          send.payload!['text'] as String,
+    ].join('\n\n');
+    final action = await showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
       builder: (context) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            for (final key in keys)
+            if (activity.unread[bot.botId.value]?.unread == true)
               ListTile(
-                title: Text(slots.labelOf(ShellSlot.rightPanel, key) ?? key),
-                onTap: () => Navigator.of(context).pop(key),
+                leading: const Icon(Icons.mark_chat_read_outlined),
+                title: const Text('Mark as read'),
+                enabled:
+                    !activity.saving && !activity.pending && !activity.loading,
+                onTap: () => Navigator.pop(context, 'read'),
               ),
+
+            if (copyText.isNotEmpty)
+              ListTile(
+                leading: const Icon(Icons.copy),
+                title: const Text('Copy'),
+                onTap: () => Navigator.pop(context, 'copy'),
+              ),
+
+            if (line.id.endsWith(':user') || line.id.contains(':send:'))
+              ListTile(
+                leading: const Icon(Icons.mark_chat_unread_outlined),
+                title: const Text('Mark unread from here'),
+                enabled:
+                    !activity.saving && !activity.pending && !activity.loading,
+                onTap: () => Navigator.pop(context, 'unread'),
+              ),
+            ListTile(
+              leading: const Icon(Icons.receipt_long_outlined),
+              title: const Text('Work details'),
+              onTap: () => Navigator.pop(context, 'work'),
+            ),
           ],
         ),
       ),
     );
-    if (chosen != null && mounted) _pushPanel(chosen);
+    if (!mounted || selected?.botId.value != bot.botId.value) return;
+    if (action == 'work') {
+      final lines = projectRuns(
+        widget.sessions.open(widget.userId, bot.botId.value).controller.runs,
+      );
+      _openRun(
+        lines.where((item) => item.runId == line.runId).lastOrNull ?? line,
+      );
+    }
+    if (action == 'copy') {
+      await Clipboard.setData(ClipboardData(text: copyText));
+    }
+    if (action == 'unread' || action == 'read') {
+      await activity.mark(
+        bot.botId.value,
+        read: action == 'read',
+        fromMessageId: action == 'unread' ? line.id : null,
+      );
+      if (mounted && activity.error != null) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(activity.error!)));
+      }
+    }
+  }
+
+  void _openApplets() {
+    final canvas = appletCanvas;
+    if (canvas == null) return;
+    _push(
+      Scaffold(
+        appBar: AppBar(title: const Text('Applets')),
+        body: ListenableBuilder(
+          listenable: canvas,
+          builder: (context, _) {
+            if (canvas.loading && canvas.directory.isEmpty) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            if (canvas.directory.isEmpty) {
+              return Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      canvas.failure == null
+                          ? 'Your Applets will appear here.'
+                          : 'Couldn’t load Applets.',
+                    ),
+                    TextButton(
+                      onPressed: canvas.retry,
+                      child: const Text('Refresh'),
+                    ),
+                  ],
+                ),
+              );
+            }
+            return ListView(
+              children: [
+                for (final applet in canvas.directory)
+                  ListTile(
+                    title: Text(applet.displayName),
+                    leading: const Icon(Icons.widgets_outlined),
+                    onTap: () async {
+                      await canvas.setFocus(applet.appletId);
+                      if (mounted && canvas.focusedId == applet.appletId) {
+                        _pushPanel('applet');
+                      } else if (mounted) {
+                        ScaffoldMessenger.of(this.context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'Couldn’t open this Applet. Try again.',
+                            ),
+                          ),
+                        );
+                      }
+                    },
+                  ),
+              ],
+            );
+          },
+        ),
+      ),
+    );
   }
 
   void _pushPanel(String key) {
@@ -815,70 +922,22 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     return ShellSlotScope(
       slots: slots,
       child: Scaffold(
-        appBar: AppBar(
-          leading: tier == ShellTier.single
-              ? identified(
-                  ShellIds.sidebarToggle,
-                  IconButton(
-                    tooltip: 'Your Bots',
-                    onPressed: () => setState(() => navOpen = !navOpen),
-                    icon: const Icon(Icons.menu),
-                  ),
-                )
-              : null,
-          title: Text(bot == null ? 'FrockBot' : _name(bot)),
-          actions: [
-            const SlotRegion(
-              ShellSlot.headerActions,
-              direction: Axis.horizontal,
-            ),
-            if (bot != null)
-              PopupMenuButton<String>(
-                tooltip: 'Conversation actions',
-                enabled: !activity.saving && !activity.pending,
-                onSelected: (value) =>
-                    activity.mark(bot.botId.value, read: value == 'read'),
-                itemBuilder: (_) => [
-                  if (activity.unread[bot.botId.value]?.lastActivityCursor !=
-                      null)
-                    const PopupMenuItem(
-                      value: 'read',
-                      child: Text('Mark as read'),
-                    ),
-                  const PopupMenuItem(
-                    value: 'unread',
-                    child: Text('Mark as unread'),
-                  ),
-                ],
+        appBar: bot == null
+            ? AppBar(title: const Text('FrockBot'))
+            : ChatHeader(
+                name: _name(bot),
+                textScale: MediaQuery.textScalerOf(context).scale(14) / 14,
+                background: _background(bot.botId.value),
+                onBots: tier == ShellTier.single
+                    ? () => setState(() => navOpen = !navOpen)
+                    : null,
+                onSettings: () => _openPanel('bot-settings'),
+                onComputer: computer?.available == true
+                    ? () => _openPanel('computer')
+                    : null,
+                onRoutines: () => _openPanel('routines'),
+                onApplets: appletCanvas == null ? null : _openApplets,
               ),
-            if (bot != null && appletCanvas != null)
-              identified(
-                AppletIds.chip,
-                IconButton(
-                  tooltip: 'Applets',
-                  icon: const Icon(Icons.widgets_outlined),
-                  onPressed: () => _openPanel('applet'),
-                ),
-              ),
-            if (bot != null && tier != ShellTier.triple)
-              identified(
-                ShellIds.botPanelToggle,
-                IconButton(
-                  tooltip: openRun == null ? 'Bot settings' : 'Work',
-                  onPressed: _rightPanel() == null
-                      ? null
-                      : tier == ShellTier.single && openRun == null
-                      ? () => unawaited(_choosePanel())
-                      : () => setState(() => panelOpen = !panelOpen),
-                  icon: Icon(
-                    openRun == null
-                        ? Icons.settings_outlined
-                        : Icons.view_sidebar_outlined,
-                  ),
-                ),
-              ),
-          ],
-        ),
         body: SafeArea(
           child: ShellLayout(
             navOpen: navOpen,
@@ -888,34 +947,50 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
               panelOpen = false;
             }),
             rightPanel: _rightPanel(),
-            sidebar: ShellSidebar(
-              bots: bots,
-              profiles: profiles,
-              unread: activity.unread,
-              archived: archived,
-              activeBotId: bot?.botId.value,
-              workingBotId: workingRunId == null ? null : bot?.botId.value,
-              loaded: loaded,
-              error: error,
-              showHidden: showHidden,
-              inboxCount: activity.notices.length,
-              onSelect: _select,
-              onCreateBot: () => unawaited(_createBot()),
-              onSearch: _openSearch,
-              onProfile: _openProfile,
-              onInbox: () => _push(
-                ActivityPage(controller: activity, openBot: _openBotFromInbox),
-              ),
-              onManage: () => _push(
-                BotRecoveryPage(
-                  api: widget.api,
-                  store: widget.store,
-                  userId: widget.userId,
-                  changed: load,
+            sidebar: Column(
+              children: [
+                const SlotRegion(
+                  ShellSlot.headerActions,
+                  direction: Axis.horizontal,
                 ),
-              ),
-              onToggleHidden: () => setState(() => showHidden = !showHidden),
-              onRetry: load,
+                Expanded(
+                  child: ShellSidebar(
+                    bots: bots,
+                    profiles: profiles,
+                    unread: activity.unread,
+                    archived: archived,
+                    activeBotId: bot?.botId.value,
+                    workingBotId: workingRunId == null
+                        ? null
+                        : bot?.botId.value,
+                    loaded: loaded,
+                    error: error,
+                    showHidden: showHidden,
+                    inboxCount: activity.notices.length,
+                    onSelect: _select,
+                    onCreateBot: () => unawaited(_createBot()),
+                    onSearch: _openSearch,
+                    onProfile: _openProfile,
+                    onInbox: () => _push(
+                      ActivityPage(
+                        controller: activity,
+                        openBot: _openBotFromInbox,
+                      ),
+                    ),
+                    onManage: () => _push(
+                      BotRecoveryPage(
+                        api: widget.api,
+                        store: widget.store,
+                        userId: widget.userId,
+                        changed: load,
+                      ),
+                    ),
+                    onToggleHidden: () =>
+                        setState(() => showHidden = !showHidden),
+                    onRetry: load,
+                  ),
+                ),
+              ],
             ),
             conversation: bot == null
                 ? NoConversation(
@@ -936,6 +1011,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                     botId: bot.botId.value,
                     onOpenRun: _openRun,
                     onOpenSettings: _openSettings,
+                    onMessageActions: (line) =>
+                        unawaited(_messageActions(line)),
+                    unreadFromMessageId:
+                        activity.unread[bot.botId.value]?.unreadFromMessageId,
                     background: _background(bot.botId.value),
                     onWorkingChanged: (runId) {
                       if (runId != workingRunId && mounted) {

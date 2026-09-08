@@ -292,98 +292,9 @@ export interface ClientRunListV1 {
   announcements?: ClientAnnouncementV1[];
 }
 
-/**
- * One conversation a Bot has had.
- *
- * A Bot holds one conversation at a time and keeps the ones before it: the
- * transcript shows the current one, and an earlier one is still readable.
- */
-export interface ClientConversationV1 {
-  schemaVersion: 1;
-  /** The Session id this conversation's Turns recorded. */
-  conversationId: string;
-  ordinal: number;
-  startedAt: string;
-  /** Absent while this is the conversation the Bot is on. */
-  endedAt?: string;
-}
-
-export interface ClientConversationListV1 {
-  schemaVersion: 1;
-  /** Newest first; the first entry is the conversation the Bot is on. */
-  conversations: ClientConversationV1[];
-}
-
-/**
- * The answer to "start a new conversation": the list, or the reason not now.
- *
- * A refusal is a value, not an exception. The request crosses a Durable Object
- * boundary and a Worker boundary to get here, and an exception that crosses
- * either is logged by workerd as `Uncaught Error` — the log then showed the
- * isolate going down with a broken pipe behind it. Carrying the refusal as
- * data means the only thing that reaches the client is the 409 it expects.
- */
-export type ClientConversationOutcomeV1 =
-  | ({ status: "started" } & ClientConversationListV1)
-  | { status: "refused"; schemaVersion: 1; reason: string };
-
-export function decodeClientConversationListV1(
-  input: unknown,
-): ClientConversationListV1 {
-  const list = record(input, "conversation list");
-  exactKeys(list, ["schemaVersion", "conversations"], "conversation list");
-  if (list.schemaVersion !== 1) {
-    throw new Error("conversation list.schemaVersion is invalid");
-  }
-  if (!Array.isArray(list.conversations)) {
-    throw new Error("conversation list.conversations is invalid");
-  }
-  return {
-    schemaVersion: 1,
-    conversations: list.conversations.map((entry) => {
-      const conversation = record(entry, "conversation");
-      exactKeys(
-        conversation,
-        ["schemaVersion", "conversationId", "ordinal", "startedAt", "endedAt"],
-        "conversation",
-      );
-      if (conversation.schemaVersion !== 1) {
-        throw new Error("conversation.schemaVersion is invalid");
-      }
-      if (
-        typeof conversation.ordinal !== "number" ||
-        !Number.isSafeInteger(conversation.ordinal) ||
-        conversation.ordinal < 1
-      ) {
-        throw new Error("conversation.ordinal is invalid");
-      }
-      return {
-        schemaVersion: 1 as const,
-        conversationId: string(
-          conversation,
-          "conversationId",
-          MAX_SESSION_ID_LENGTH,
-          "conversation",
-        ),
-        ordinal: conversation.ordinal,
-        startedAt: string(conversation, "startedAt", 64, "conversation"),
-        ...(conversation.endedAt === undefined
-          ? {}
-          : { endedAt: string(conversation, "endedAt", 64, "conversation") }),
-      };
-    }),
-  };
-}
-
 export interface ClientRunListQueryV1 {
   schemaVersion: 1;
   before?: string;
-  /**
-   * The conversation to read. Absent means the one the Bot is on now, which
-   * is what the transcript shows; an earlier conversation is named by the
-   * Session id `listConversations` gave for it.
-   */
-  conversationId?: string;
 }
 
 export interface ClientTurnCommandV1 {
@@ -1709,11 +1620,7 @@ export function decodeClientRunListQueryV1(
   input: unknown,
 ): ClientRunListQueryV1 {
   const query = record(input, "run list query");
-  exactKeys(
-    query,
-    ["schemaVersion", "before", "conversationId"],
-    "run list query",
-  );
+  exactKeys(query, ["schemaVersion", "before"], "run list query");
   if (query.schemaVersion !== 1) {
     throw new Error("run list query.schemaVersion is invalid");
   }
@@ -1728,19 +1635,9 @@ export function decodeClientRunListQueryV1(
       throw new Error("run list query.before is invalid");
     }
   }
-  const conversationId =
-    query.conversationId === undefined
-      ? undefined
-      : string(
-          query,
-          "conversationId",
-          MAX_SESSION_ID_LENGTH,
-          "run list query",
-        );
   return {
     schemaVersion: 1,
     ...(before ? { before } : {}),
-    ...(conversationId ? { conversationId } : {}),
   };
 }
 

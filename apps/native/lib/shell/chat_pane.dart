@@ -19,7 +19,6 @@ import '../acceptance_metrics.dart';
 import '../client/bot_sessions.dart';
 import '../client/chat_controller.dart';
 import '../client/transport.dart';
-import '../protocol/client_wire.generated.dart' as wire;
 import '../theme/states.dart';
 import 'composer.dart';
 import 'run_view.dart';
@@ -33,17 +32,13 @@ class ChatPane extends StatefulWidget {
   final Future<void> Function() onReconnect;
   final ApprovalsController? approvals;
   final SkillMenuController? skills;
-  final List<wire.Conversation> conversations;
-  final Future<void> Function(String? id)? onSelectConversation;
-
-  /// Puts this conversation down and starts the next. The Turns of the one
-  /// just ended stay on disk and stay readable from the picker.
-  final Future<void> Function()? onNewConversation;
 
   /// Opens the run view. The shell decides whether that is the right panel or
   /// a page, because that is a layout question and not this pane's.
   final void Function(TranscriptLine line)? onOpenRun;
   final VoidCallback? onOpenSettings;
+  final void Function(TranscriptLine)? onMessageActions;
+  final String? unreadFromMessageId;
   final void Function(String? runId)? onWorkingChanged;
 
   /// The Bot's sheep background, so its avatar is the same one everywhere.
@@ -54,11 +49,10 @@ class ChatPane extends StatefulWidget {
     required this.onReconnect,
     this.approvals,
     this.skills,
-    this.conversations = const [],
-    this.onSelectConversation,
-    this.onNewConversation,
     this.onOpenRun,
     this.onOpenSettings,
+    this.onMessageActions,
+    this.unreadFromMessageId,
     this.onWorkingChanged,
     this.background,
   });
@@ -120,35 +114,6 @@ class _ChatPaneState extends State<ChatPane> {
     await controller.send(text);
   }
 
-  bool _starting = false;
-
-  /// A Bot that is still on a Turn refuses, with its reason: the durable log
-  /// that Turn is appending to is not something a press may pull out from
-  /// under it. The refusal is said where the press was, and nothing is lost.
-  Future<void> _newConversation() async {
-    final start = widget.onNewConversation;
-    if (start == null || _starting) return;
-    setState(() => _starting = true);
-    try {
-      await start();
-    } on RequestFailure catch (failure) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(failure.message)));
-      }
-    } catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Couldn’t start a new conversation. Try again.'),
-          ),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _starting = false);
-    }
-  }
-
   Future<void> _refresh({bool older = false}) async {
     try {
       await controller.refresh(older: older);
@@ -187,55 +152,6 @@ class _ChatPaneState extends State<ChatPane> {
               ),
             ],
           ),
-        // The conversation this Bot is holding, the ones it has put down, and
-        // the way to start the next. A Bot with one conversation still gets
-        // the control: starting a second is how the first one becomes an
-        // earlier one.
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 4, 8, 0),
-          child: Row(
-            children: [
-              if (widget.conversations.length > 1)
-                Expanded(
-                  child: identified(
-                    ConversationIds.picker,
-                    DropdownButton<String>(
-                      isExpanded: true,
-                      value: c.conversationId,
-                      hint: const Text('Current conversation'),
-                      underline: const SizedBox.shrink(),
-                      items: [
-                        for (final conversation in widget.conversations)
-                          DropdownMenuItem(
-                            value: conversation.conversationId,
-                            child: identified(
-                              ConversationIds.option(
-                                conversation.conversationId,
-                              ),
-                              Text('Conversation ${conversation.ordinal}'),
-                            ),
-                          ),
-                      ],
-                      onChanged: _starting ? null : widget.onSelectConversation,
-                    ),
-                  ),
-                )
-              else
-                const Spacer(),
-              if (widget.onNewConversation != null)
-                identified(
-                  ConversationIds.newConversation,
-                  TextButton.icon(
-                    onPressed: _starting || !c.canSend
-                        ? null
-                        : _newConversation,
-                    icon: const Icon(Icons.add_comment_outlined, size: 18),
-                    label: const Text('New conversation'),
-                  ),
-                ),
-            ],
-          ),
-        ),
         Expanded(
           child: TranscriptView(
             background: widget.background,
@@ -247,12 +163,14 @@ class _ChatPaneState extends State<ChatPane> {
             loading: c.loading,
             hasEarlier: c.before != null,
             approvals: widget.approvals,
-            storageKey: 'history-${c.botId}-${c.conversationId}',
+            storageKey: 'history-${c.botId}',
             focusRunId: c.focusRunId,
             onRefresh: _refresh,
             onOpenRun: widget.onOpenRun ?? (_) {},
             onRetryTurn: c.canSend ? _retry : null,
             onOpenSettings: widget.onOpenSettings,
+            onMessageActions: widget.onMessageActions,
+            unreadFromMessageId: widget.unreadFromMessageId,
           ),
         ),
         if (c.error != null)
@@ -308,6 +226,8 @@ class ConversationView extends StatefulWidget {
   final String botId;
   final void Function(TranscriptLine line) onOpenRun;
   final VoidCallback? onOpenSettings;
+  final void Function(TranscriptLine)? onMessageActions;
+  final String? unreadFromMessageId;
   final void Function(String? runId)? onWorkingChanged;
   final String? background;
   const ConversationView({
@@ -319,6 +239,8 @@ class ConversationView extends StatefulWidget {
     required this.botId,
     required this.onOpenRun,
     this.onOpenSettings,
+    this.onMessageActions,
+    this.unreadFromMessageId,
     this.onWorkingChanged,
     this.background,
   });
@@ -374,17 +296,10 @@ class _ConversationViewState extends State<ConversationView>
     onReconnect: session.channel.connect,
     approvals: approvals,
     skills: skills,
-    conversations: session.conversations,
-    onSelectConversation: (id) async {
-      await session.controller.selectConversation(id);
-      if (mounted) setState(() {});
-    },
-    onNewConversation: () async {
-      await session.startConversation();
-      if (mounted) setState(() {});
-    },
     onOpenRun: widget.onOpenRun,
     onOpenSettings: widget.onOpenSettings,
+    onMessageActions: widget.onMessageActions,
+    unreadFromMessageId: widget.unreadFromMessageId,
     onWorkingChanged: widget.onWorkingChanged,
   );
 

@@ -55,22 +55,10 @@ import {
   BotTurnRecoveryRequiredError,
   BotTurnRefusedError,
 } from "./turn-errors.js";
-import {
-  botConversationBaseSessionIdV1,
-  ConversationBusyError,
-  conversationSessionIdV1,
-  decodeConversationRecordV1,
-  decodeStoredConversationV1,
-  firstConversationV1,
-  type ConversationRecordV1,
-  type StoredConversationV1,
-} from "./conversations.js";
+import { botConversationBaseSessionIdV1 } from "./conversations.js";
 import {
   ACTIVE_RUN_KEY,
   COMPOSITION_CURRENT_KEY,
-  CONVERSATION_INDEX_KEY,
-  CONVERSATION_KEY,
-  MAX_LISTED_CONVERSATIONS,
   MAX_PENDING_AGENT_RUNS_V1,
   PENDING_AGENT_RUN_PREFIX,
   PENDING_RUN_KEY,
@@ -273,7 +261,7 @@ export class BotDurableAuthority<Snapshot> {
   }
 
   async run(input: OwnedBotTurnCommand): Promise<BotTurnCompletion> {
-    const command = await this.conversationScopedCommand(input);
+    const command = input;
     await this.assertMatchingRunCommand(command);
     // Recovering whatever this object was left holding must never decide the
     // fate of a new command. `recoverActiveRun` executes the *previous* Turn
@@ -907,163 +895,10 @@ export class BotDurableAuthority<Snapshot> {
     return this.ctx.storage.get<string>(ACTIVE_RUN_KEY);
   }
 
-  /** The conversation this Bot's chat Session is on. */
-  async readConversation(): Promise<StoredConversationV1> {
-    return (
-      decodeStoredConversationV1(
-        await this.ctx.storage.get<unknown>(CONVERSATION_KEY),
-      ) ?? firstConversationV1(new Date().toISOString())
-    );
-  }
-
-  /**
-   * The conversations this Bot has had, newest first, the current one included.
-   *
-   * Ended conversations are listed from a bounded index rather than
-   * reconstructed from the run log: the run index is paged and a conversation
-   * with no surviving runs is still a conversation the User had.
-   */
-  async listConversations(
-    identity?: BotIdentity,
-  ): Promise<ConversationRecordV1[]> {
-    const known =
-      identity ?? (await this.ctx.storage.get<BotIdentity>(IDENTITY_KEY));
-    if (!known) return [];
-    const base = botConversationBaseSessionIdV1(known);
-    const current = await this.readConversation();
-    const ended = (
-      (await this.ctx.storage.get<unknown[]>(CONVERSATION_INDEX_KEY)) ?? []
-    ).flatMap((entry) => {
-      try {
-        return [decodeConversationRecordV1(entry)];
-      } catch {
-        // One unreadable record is skipped, never a list that throws: a
-        // conversation you cannot name must not hide the ones you can.
-        return [];
-      }
-    });
-    return [
-      {
-        schemaVersion: 1 as const,
-        sessionId: conversationSessionIdV1(base, current.ordinal),
-        ordinal: current.ordinal,
-        startedAt: current.startedAt,
-      },
-      ...ended,
-    ].sort((left, right) => right.ordinal - left.ordinal);
-  }
-
-  /**
-   * The Session id this Bot's chat Turns are recording right now, or
-   * `undefined` before the object has admitted anything and learned its
-   * identity. A reader that has to say which Turns are "this conversation"
-   * asks here rather than reconstructing the id.
-   */
+  /** The one conversational Session owned by this Bot. */
   async readConversationSessionId(): Promise<string | undefined> {
     const identity = await this.ctx.storage.get<BotIdentity>(IDENTITY_KEY);
-    if (!identity) return undefined;
-    const conversation = await this.readConversation();
-    return conversationSessionIdV1(
-      botConversationBaseSessionIdV1(identity),
-      conversation.ordinal,
-    );
-  }
-
-  /**
-   * Ends the current conversation and starts the next one.
-   *
-   * The durable event log the next Turn derives its request from is emptied,
-   * so history stops growing without bound; the runs of the conversation just
-   * ended keep their events and their Session id and stay readable. Refused
-   * while a Turn is admitted: the log a running Turn is appending to is not
-   * something a click may pull out from under it.
-   */
-  async startConversation(
-    identity: BotIdentity,
-  ): Promise<ConversationRecordV1> {
-    await this.assertIdentity(identity);
-    await this.recoverActiveRun();
-    const base = botConversationBaseSessionIdV1(identity);
-    return this.ctx.storage.transaction(async (transaction) => {
-      const active = await transaction.get<string>(ACTIVE_RUN_KEY);
-      const pending = await transaction.get<string>(PENDING_RUN_KEY);
-      const pendingAgent = await transaction.list<string>({
-        prefix: PENDING_AGENT_RUN_PREFIX,
-        limit: 1,
-      });
-      if (active || pending || pendingAgent.size > 0) {
-        // A typed refusal, not a bare Error: the Durable Object boundary turns
-        // this one case into a 409 value rather than letting it escape the
-        // object's entry frame as an uncaught exception.
-        throw new ConversationBusyError();
-      }
-      const current =
-        decodeStoredConversationV1(
-          await transaction.get<unknown>(CONVERSATION_KEY),
-        ) ?? firstConversationV1(new Date().toISOString());
-      const endedAt = new Date().toISOString();
-      const ended = (
-        (await transaction.get<unknown[]>(CONVERSATION_INDEX_KEY)) ?? []
-      ).flatMap((entry) => {
-        try {
-          return [decodeConversationRecordV1(entry)];
-        } catch {
-          return [];
-        }
-      });
-      const next: StoredConversationV1 = {
-        schemaVersion: 1,
-        ordinal: current.ordinal + 1,
-        startedAt: endedAt,
-      };
-      const currentSessionId = conversationSessionIdV1(base, current.ordinal);
-      const nextSessionId = conversationSessionIdV1(base, next.ordinal);
-      const eventLog = new SessionEventLog(transaction);
-      await eventLog.migrate(currentSessionId);
-      await eventLog.clearCurrent(nextSessionId);
-      await transaction.put({
-        [CONVERSATION_KEY]: next,
-        [CONVERSATION_INDEX_KEY]: [
-          {
-            schemaVersion: 1 as const,
-            sessionId: currentSessionId,
-            ordinal: current.ordinal,
-            startedAt: current.startedAt,
-            endedAt,
-          },
-          ...ended,
-        ]
-          .sort((left, right) => right.ordinal - left.ordinal)
-          .slice(0, MAX_LISTED_CONVERSATIONS),
-      });
-      return {
-        schemaVersion: 1 as const,
-        sessionId: nextSessionId,
-        ordinal: next.ordinal,
-        startedAt: next.startedAt,
-      };
-    });
-  }
-
-  /**
-   * The command as this object's durable conversation state addresses it.
-   *
-   * A client names the Bot's conversational Session by its base id and knows
-   * nothing about conversations; which conversation that is, is durable state
-   * here. Every other Session id — a Routine's `routine:<id>`, a subagent's —
-   * is left exactly as its producer wrote it.
-   */
-  private async conversationScopedCommand(
-    command: OwnedBotTurnCommand,
-  ): Promise<OwnedBotTurnCommand> {
-    const base = botConversationBaseSessionIdV1(command);
-    if (command.sessionId !== base) return command;
-    const conversation = await this.readConversation();
-    if (conversation.ordinal <= 1) return command;
-    return {
-      ...command,
-      sessionId: conversationSessionIdV1(base, conversation.ordinal),
-    };
+    return identity ? botConversationBaseSessionIdV1(identity) : undefined;
   }
 
   /** Durable run record, unchecked against its lookup key. */

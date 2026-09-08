@@ -56,13 +56,6 @@ declare const validators: {
   isTurnRefusal(value: unknown): value is ProtocolTypes["TurnRefusal"];
   isRunCursor(value: unknown): value is ProtocolTypes["RunCursor"];
   isPage(value: unknown): value is ProtocolTypes["Page"];
-  isConversation(value: unknown): value is ProtocolTypes["Conversation"];
-  isConversationList(
-    value: unknown,
-  ): value is ProtocolTypes["ConversationList"];
-  isConversationStartCommand(
-    value: unknown,
-  ): value is ProtocolTypes["ConversationStartCommand"];
   isConversationQuery(
     value: unknown,
   ): value is ProtocolTypes["ConversationQuery"];

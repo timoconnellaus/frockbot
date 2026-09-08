@@ -17,7 +17,6 @@ import {
   decodeSkillRefV1,
 } from "@frockbot/core/contracts";
 import {
-  decodeClientConversationListV1,
   decodeClientNotificationAcknowledgementCommandV1,
   decodeClientRunAdmissionFenceCommandV1,
   decodeClientRunListQueryV1,
@@ -57,7 +56,6 @@ const existing: Record<string, (value: unknown) => unknown> = {
   StopCommand: decodeClientRunStopCommandV1,
   StopReceipt: decodeClientRunStopReceiptV1,
   RunFenceCommand: decodeClientRunAdmissionFenceCommandV1,
-  ConversationList: decodeClientConversationListV1,
   ConversationProjection: decodeClientRunPageV1,
   ConversationQuery: decodeClientRunListQueryV1,
   RunLookup: decodeClientRunLookupV1,

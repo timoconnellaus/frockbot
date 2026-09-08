@@ -7,7 +7,6 @@ library;
 
 import 'package:flutter/material.dart';
 
-import '../flock/sheep.dart';
 import '../theme/frock_theme.dart';
 import '../theme/states.dart';
 import 'markdown.dart';
@@ -35,6 +34,8 @@ class TranscriptView extends StatefulWidget {
   final void Function(TranscriptLine line)? onRetryTurn;
   final void Function(String url)? onOpenLink;
   final VoidCallback? onOpenSettings;
+  final void Function(TranscriptLine)? onMessageActions;
+  final String? unreadFromMessageId;
   final String storageKey;
 
   /// A Turn the reader asked to be taken to — a search hit. It is brought into
@@ -57,6 +58,8 @@ class TranscriptView extends StatefulWidget {
     this.onRetryTurn,
     this.onOpenLink,
     this.onOpenSettings,
+    this.onMessageActions,
+    this.unreadFromMessageId,
     this.focusRunId,
     this.background,
   });
@@ -92,8 +95,23 @@ class _TranscriptViewState extends State<TranscriptView> {
     var marked = false;
     final rows = <Widget>[];
     for (final line in ordered) {
-      final row = _row(context, line, drain);
-      if (row == null) continue;
+      final content = _row(context, line, drain);
+      if (content == null) continue;
+      final row = GestureDetector(
+        onLongPress:
+            widget.onMessageActions == null || line.role == LineRole.system
+            ? null
+            : () => widget.onMessageActions!(line),
+        child: content,
+      );
+      if (line.id == widget.unreadFromMessageId) {
+        rows.add(
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 8),
+            child: Center(child: Text('Unread from here')),
+          ),
+        );
+      }
       if (target != null && !marked && line.runId == target) {
         marked = true;
         rows.add(
@@ -135,29 +153,27 @@ class _TranscriptViewState extends State<TranscriptView> {
     }
     return identified(
       ShellIds.transcript,
-      SelectionArea(
-        child: RefreshIndicator(
-          onRefresh: onRefresh,
-          child: ListView(
-            // The thread starts at the latest row. Earlier pages extend the
-            // far end, so prepending history keeps the viewport where it was.
-            reverse: true,
-            padding: const EdgeInsets.symmetric(vertical: 12),
-            physics: const AlwaysScrollableScrollPhysics(),
-            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-            key: PageStorageKey(storageKey),
-            children: [
-              if (hasEarlier)
-                identified(
-                  ShellIds.transcriptEarlier,
-                  TextButton(
-                    onPressed: loading ? null : () => onRefresh(older: true),
-                    child: const Text('Earlier messages'),
-                  ),
+      RefreshIndicator(
+        onRefresh: onRefresh,
+        child: ListView(
+          // The thread starts at the latest row. Earlier pages extend the
+          // far end, so prepending history keeps the viewport where it was.
+          reverse: true,
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          physics: const AlwaysScrollableScrollPhysics(),
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+          key: PageStorageKey(storageKey),
+          children: [
+            if (hasEarlier)
+              identified(
+                ShellIds.transcriptEarlier,
+                TextButton(
+                  onPressed: loading ? null : () => onRefresh(older: true),
+                  child: const Text('Earlier messages'),
                 ),
-              ...rows,
-            ].reversed.toList(),
-          ),
+              ),
+            ...rows,
+          ].reversed.toList(),
         ),
       ),
     );
@@ -178,7 +194,7 @@ class _TranscriptViewState extends State<TranscriptView> {
         id: line.id,
         mine: true,
         pending: line.pending,
-        child: SelectableText(line.text),
+        child: Text(line.text),
       );
     }
     if (line.status == LineStatus.streaming && line.empty) {
@@ -210,13 +226,7 @@ class _TranscriptViewState extends State<TranscriptView> {
         ShellMarkdown(text: line.text, onOpenLink: onOpenLink),
     ];
     if (children.isEmpty && line.notice == null) {
-      // A Turn whose whole voice was its sends still ran tools. There is no
-      // bubble to hang the way in off, so the way in stands on its own.
-      if (line.tools.isEmpty) return null;
-      return Padding(
-        padding: const EdgeInsets.fromLTRB(52, 0, 16, 6),
-        child: _WorkLink(line: line, onOpen: onOpenRun),
-      );
+      return null;
     }
     return _Bubble(
       id: line.id,
@@ -233,7 +243,6 @@ class _TranscriptViewState extends State<TranscriptView> {
             if (child != children.last) const SizedBox(height: 8),
           ],
           if (line.notice != null) _Notice(line: line, onRetry: onRetryTurn),
-          if (line.tools.isNotEmpty) _WorkLink(line: line, onOpen: onOpenRun),
         ],
       ),
     );
@@ -279,18 +288,11 @@ class _Bubble extends StatelessWidget {
               : MainAxisAlignment.start,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (!mine) ...[
-              Padding(
-                padding: const EdgeInsets.only(left: 16, top: 10),
-                child: SheepAvatar(size: 28, background: background),
-              ),
-              const SizedBox(width: 8),
-            ],
             Flexible(
               child: Container(
                 constraints: const BoxConstraints(maxWidth: 720),
                 margin: EdgeInsets.fromLTRB(
-                  mine ? 56 : 0,
+                  mine ? 56 : 16,
                   6,
                   mine ? 16 : 56,
                   6,
@@ -361,33 +363,6 @@ class _Notice extends StatelessWidget {
   }
 }
 
-/// The one thing the thread says about a Turn's tools: that there were some.
-class _WorkLink extends StatelessWidget {
-  final TranscriptLine line;
-  final void Function(TranscriptLine line) onOpen;
-  const _WorkLink({required this.line, required this.onOpen});
-
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(top: 6),
-    child: Align(
-      alignment: Alignment.centerLeft,
-      child: identified(
-        ShellIds.openRun(line.runId),
-        TextButton.icon(
-          onPressed: () => onOpen(line),
-          icon: const Icon(Icons.build_outlined, size: 16),
-          label: Text(
-            line.tools.length == 1
-                ? 'Used 1 tool'
-                : 'Used ${line.tools.length} tools',
-          ),
-        ),
-      ),
-    ),
-  );
-}
-
 class _Announcement extends StatelessWidget {
   final String text;
   const _Announcement({required this.text});
@@ -420,8 +395,6 @@ class _EmptyThread extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            SheepAvatar(size: 64, background: background),
-            const SizedBox(height: 24),
             Text(
               'What would you like to work on?',
               style: theme.textTheme.headlineMedium,

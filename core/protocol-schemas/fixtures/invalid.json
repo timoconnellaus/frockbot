@@ -475,21 +475,6 @@
     "value": null
   },
   {
-    "name": "Conversation wrong shape",
-    "schema": "Conversation",
-    "value": null
-  },
-  {
-    "name": "ConversationList wrong shape",
-    "schema": "ConversationList",
-    "value": null
-  },
-  {
-    "name": "ConversationStartCommand wrong shape",
-    "schema": "ConversationStartCommand",
-    "value": null
-  },
-  {
     "name": "ConversationQuery wrong shape",
     "schema": "ConversationQuery",
     "value": null
@@ -1593,6 +1578,17 @@
         }
       ],
       "unexpected": true
+    }
+  },
+  {
+    "name": "message unread boundary invalid",
+    "schema": "MarkReadCommand",
+    "value": {
+      "schemaVersion": 1,
+      "type": "bot/mark-unread",
+      "commandId": "message-mark-1",
+      "botId": "primary",
+      "fromMessageId": "routine:foreign:send:0"
     }
   }
 ]

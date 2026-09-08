@@ -115,7 +115,11 @@ class ActivityController extends ChangeNotifier {
     }
   }
 
-  Future<void> mark(String botId, {required bool read}) async {
+  Future<void> mark(
+    String botId, {
+    required bool read,
+    String? fromMessageId,
+  }) async {
     if (_disposed || saving || pending || loading) return;
     final cursor = unread[botId]?.lastActivityCursor?.value;
     if (read && cursor == null) return;
@@ -125,6 +129,7 @@ class ActivityController extends ChangeNotifier {
       'commandId': randomId(),
       'botId': botId,
       if (read) 'upToCursor': cursor,
+      if (!read && fromMessageId != null) 'fromMessageId': fromMessageId,
     });
     _pending = Map<String, dynamic>.from(command.toJson() as Map);
     await retry();
