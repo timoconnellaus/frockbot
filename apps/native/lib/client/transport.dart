@@ -205,7 +205,10 @@ class NativeApi {
 
 abstract interface class ChatTransport {
   Future<Map<String, dynamic>> page(String botId, {String? before});
-  Future<void> send(String botId, String id, String text);
+
+  /// Starts a Turn. [supersedes] names the run this client had observed, where
+  /// it had observed one; the intent itself goes on every send.
+  Future<void> send(String botId, String id, String text, {String? supersedes});
   Future<Map<String, dynamic>?> lookup(
     String botId,
     String id, {
@@ -235,7 +238,12 @@ class BackendChatTransport implements ChatTransport {
   }
 
   @override
-  Future<void> send(String botId, String id, String text) async {
+  Future<void> send(
+    String botId,
+    String id,
+    String text, {
+    String? supersedes,
+  }) async {
     if (utf8.encode(text).length > 32000) {
       throw const RequestFailure(
         'That message is too long. Please shorten it.',
@@ -246,6 +254,11 @@ class BackendChatTransport implements ChatTransport {
       'schemaVersion': 1,
       'commandId': id,
       'text': text,
+      // Present on every send: the field's presence is the intent, and its
+      // empty form says this client had observed no run to name.
+      'supersedes': supersedes == null
+          ? <String, Object?>{}
+          : {'runId': supersedes},
     });
     final response = wire.TurnResponse.fromJson(
       await api.request(path(botId), body: command.toJson(), limit: 256000),

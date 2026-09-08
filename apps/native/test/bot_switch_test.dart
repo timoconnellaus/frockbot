@@ -70,7 +70,12 @@ class LatchedPages implements ChatTransport {
   }
 
   @override
-  Future<void> send(String botId, String id, String text) async {}
+  Future<void> send(
+    String botId,
+    String id,
+    String text, {
+    String? supersedes,
+  }) async {}
   @override
   Future<Map<String, dynamic>?> lookup(
     String botId,

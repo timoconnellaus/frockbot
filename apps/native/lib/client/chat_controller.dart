@@ -8,6 +8,25 @@ import 'transport.dart';
 
 enum ConnectionState { connecting, connected, disconnected, paused }
 
+/// One message this client has accepted from the person and not yet found in
+/// the durable transcript. It carries its own words so a submission that never
+/// arrived can be handed back to the draft it came out of.
+class PendingSend {
+  final String id;
+  final String text;
+  const PendingSend(this.id, this.text);
+
+  Map<String, Object?> toJson() => {'id': id, 'text': text};
+
+  static PendingSend? decode(Object? value) {
+    if (value is! Map) return null;
+    final id = value['id'];
+    final text = value['text'];
+    if (id is! String || text is! String) return null;
+    return PendingSend(id, text);
+  }
+}
+
 class ChatController extends ChangeNotifier {
   final ChatTransport transport;
   final LocalStore store;
@@ -24,14 +43,27 @@ class ChatController extends ChangeNotifier {
   String get key => 'chat/$userId/$botId';
   String get pageKey => pageCacheKey(userId, botId);
   String draft = '';
-  String? pendingId;
-  String? pendingText;
+
+  /// Submissions this client has admitted locally and not yet confirmed, in
+  /// the order they were sent.
+  ///
+  /// A list rather than one slot because a person may send again while the Bot
+  /// is still working — the composer never closes over a running Turn — and
+  /// every submission has to be recoverable until it is either found in the
+  /// durable transcript or handed back to the draft. One slot would have let
+  /// the second send overwrite the first, which is exactly the case the
+  /// delivery check exists for.
+  List<PendingSend> pending = const [];
   String? stopId;
   String? stopTarget;
   String? before;
   String? error;
   bool ready = false;
-  bool sending = false;
+
+  /// How many submissions are still being delivered. A count rather than a
+  /// flag, because a second send starts while the first POST is still open.
+  int _inFlight = 0;
+  bool get sending => _inFlight > 0;
   bool stopping = false;
   bool checking = false;
   bool loading = false;
@@ -54,6 +86,7 @@ class ChatController extends ChangeNotifier {
       (a, b) =>
           (a['admittedAt'] as String).compareTo(b['admittedAt'] as String),
     );
+
   /// The Turn a Stop could reach: one the Bot is running now.
   ///
   /// A submission whose delivery is still unconfirmed is not one. There may be
@@ -72,7 +105,8 @@ class ChatController extends ChangeNotifier {
   /// The Turn this conversation is waiting on, admitted or not. The working
   /// row and the Bot's "busy" mark are about the wait, so they include a
   /// submission that has not been confirmed yet.
-  String? get activeRunId => runningRunId ?? pendingId;
+  String? get activeRunId =>
+      runningRunId ?? (pending.isEmpty ? null : pending.last.id);
 
   /// Whether there is anything a Stop could reach.
   ///
@@ -83,12 +117,26 @@ class ChatController extends ChangeNotifier {
   /// to stop a Turn that may never have existed is not one the product can
   /// keep. What that state offers is "Check message status".
   bool get stoppable =>
-      runningRunId != null || (pendingId != null && error == null);
+      runningRunId != null || (pending.isNotEmpty && error == null);
 
-  String? get visiblePendingText =>
-      pendingId == null || _runs.containsKey(pendingId) ? null : pendingText;
+  /// The words of a submission the transcript does not carry yet, so the
+  /// person sees what they wrote while it is being delivered. The newest, when
+  /// several are in flight: it is the one they are watching for.
+  String? get visiblePendingText {
+    for (final submission in pending.reversed) {
+      if (!_runs.containsKey(submission.id)) return submission.text;
+    }
+    return null;
+  }
 
-  bool get canSend => ready && !sending && pendingId == null;
+  /// Whether this client could start a Turn.
+  ///
+  /// Not gated on a Turn already running, and not on a submission still being
+  /// delivered. "Do this instead" is a thing a person means and the send route
+  /// admits it: every send carries supersede intent, and the Bot replaces what
+  /// it was doing. A composer that closed for the length of a Turn made the
+  /// supersede path unreachable from the one surface that has it.
+  bool get canSend => ready;
   void changed() {
     if (!_disposed) notifyListeners();
   }
@@ -98,8 +146,7 @@ class ChatController extends ChangeNotifier {
     jsonEncode({
       'version': 1,
       'draft': draft,
-      'pendingId': pendingId,
-      'pendingText': pendingText,
+      'pending': [for (final submission in pending) submission.toJson()],
       'stopId': stopId,
       'stopTarget': stopTarget,
     }),
@@ -111,8 +158,10 @@ class ChatController extends ChangeNotifier {
       throw const FormatException('Invalid draft');
     }
     draft = value['draft'] as String;
-    pendingId = value['pendingId'] as String?;
-    pendingText = value['pendingText'] as String?;
+    pending = [
+      for (final entry in (value['pending'] as List? ?? const []))
+        ?PendingSend.decode(entry),
+    ];
     stopId = value['stopId'] as String?;
     stopTarget = value['stopTarget'] as String?;
   }
@@ -156,7 +205,7 @@ class ChatController extends ChangeNotifier {
       ready = true;
       changed();
       await refresh();
-      if (pendingId != null) await checkDelivery();
+      if (pending.isNotEmpty) await checkDelivery();
       // A stored Stop is observed, never dispatched merely because the app opened.
     } catch (_) {
       error = 'Couldn’t restore this conversation. Please reconnect.';
@@ -182,7 +231,7 @@ class ChatController extends ChangeNotifier {
   Future<void> invalidate() async {
     await refresh();
     // An unrelated state event cannot fence a POST still being delivered.
-    if (pendingId != null && !sending) await checkDelivery();
+    if (pending.isNotEmpty && !sending) await checkDelivery();
   }
 
   Future<void> _refreshQueue = Future.value();
@@ -234,33 +283,36 @@ class ChatController extends ChangeNotifier {
 
   Future<void> send(String text) async {
     if (!canSend || text.trim().isEmpty) return;
-    sending = true;
+    _inFlight += 1;
     error = null;
-    final id = nextId();
-    pendingId = id;
-    pendingText = text;
+    final submission = PendingSend(nextId(), text);
+    // The intent goes with every send, and the run this client had observed
+    // rides along as provenance where there is one. Whether a Turn was showing
+    // as running is a race — the transcript is a poll behind — so gating the
+    // intent on what happened to be on screen would have the Bot refuse a
+    // message the person had every right to send.
+    final supersedes = runningRunId;
+    pending = [...pending, submission];
     changed();
     draft = '';
     try {
       await _persist(); // No transport call can precede this durable local write.
     } catch (_) {
+      _forget(submission);
       _restoreSubmission(text);
-      pendingId = null;
-      pendingText = null;
-      sending = false;
+      _inFlight -= 1;
       error = 'Couldn’t save your message. Please try again.';
       changed();
       return;
     }
     changed();
     try {
-      await transport.send(botId, id, text);
+      await transport.send(botId, submission.id, text, supersedes: supersedes);
       await checkDelivery();
     } on RequestFailure catch (failure) {
       if (failure.refused) {
+        _forget(submission);
         _restoreSubmission(text);
-        pendingId = null;
-        pendingText = null;
         await _persist();
         error = failure.message;
       } else {
@@ -271,7 +323,7 @@ class ChatController extends ChangeNotifier {
       error = 'Checking whether your message went through…';
       await checkDelivery();
     } finally {
-      sending = false;
+      _inFlight -= 1;
       changed();
     }
   }
@@ -280,40 +332,61 @@ class ChatController extends ChangeNotifier {
     draft = draft.isEmpty ? text : '$text\n\n$draft';
   }
 
+  void _forget(PendingSend submission) {
+    pending = [
+      for (final entry in pending)
+        if (entry.id != submission.id) entry,
+    ];
+  }
+
+  /// Finds out what became of every submission this client has not confirmed.
+  ///
+  /// Oldest first, over a snapshot of the list: a submission admitted while
+  /// this is running is left for the next call rather than checked before the
+  /// POST that carries it has had a chance to answer.
   Future<void> checkDelivery() async {
-    final id = pendingId;
-    if (id == null || checking) return;
+    if (checking || pending.isEmpty) return;
     checking = true;
     changed();
     try {
-      final observed = await transport.lookup(botId, id);
+      for (final submission in [...pending]) {
+        await _confirm(submission);
+      }
+    } finally {
+      checking = false;
+      changed();
+    }
+  }
+
+  /// One submission's fate: found in the durable transcript, or handed back to
+  /// the draft it came out of. A submission this cannot settle stays pending,
+  /// which is what "Check message status" offers to try again.
+  Future<void> _confirm(PendingSend submission) async {
+    try {
+      final observed = await transport.lookup(botId, submission.id);
       // A read alone cannot prove a delayed POST will never be admitted.
-      final run = observed ?? await transport.lookup(botId, id, fence: true);
+      final run =
+          observed ?? await transport.lookup(botId, submission.id, fence: true);
       final previousDraft = draft;
       if (run != null) {
         _put(run);
         error = null;
       } else {
-        _restoreSubmission(pendingText!);
+        _restoreSubmission(submission.text);
         error = 'Your message didn’t go through. You can send it again.';
       }
       final reconciledDraft = draft;
-      final savedText = pendingText;
-      pendingId = null;
-      pendingText = null;
+      final kept = pending;
+      _forget(submission);
       try {
         await _persist();
       } catch (_) {
-        pendingId = id;
-        pendingText = savedText;
+        pending = kept;
         if (draft == reconciledDraft) draft = previousDraft;
         rethrow;
       }
     } catch (_) {
       error = 'Couldn’t confirm your message. Reconnect or check again.';
-    } finally {
-      checking = false;
-      changed();
     }
   }
 

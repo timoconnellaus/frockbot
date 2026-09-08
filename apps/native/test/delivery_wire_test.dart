@@ -73,7 +73,7 @@ void main() {
       expect(failed.text, '');
       expect(failed.notice, 'The model finished without sending a reply.');
       expect(failed.retry, LineRetry.resendTurn);
-      controller.pendingId = 'send-1';
+      controller.pending = const [PendingSend('send-1', 'do it')];
       await controller.checkDelivery();
       expect(projectRuns(controller.runs).last.notice, failed.notice);
     } finally {

@@ -9,10 +9,7 @@ class LatchedTransport extends FakeTransport {
   final pages = <Completer<Map<String, dynamic>>>[];
   LatchedTransport(super.store);
   @override
-  Future<Map<String, dynamic>> page(
-    String botId, {
-    String? before,
-  }) {
+  Future<Map<String, dynamic>> page(String botId, {String? before}) {
     final page = Completer<Map<String, dynamic>>();
     pages.add(page);
     return page.future;
@@ -89,15 +86,19 @@ void main() {
         userId: 'user-1',
         botId: 'bot-1',
       );
-      controller.pendingId = 'send-1';
-      controller.pendingText = 'Hello';
+      controller.pending = const [PendingSend('send-1', 'Hello')];
       store.fail = true;
       await controller.checkDelivery();
-      expect(controller.pendingId, 'send-1');
-      expect(controller.canSend, isFalse);
+      // The submission is kept, so the next lookup asks about it again rather
+      // than losing what the person sent.
+      expect(controller.pending.single.id, 'send-1');
+      expect(
+        controller.error,
+        'Couldn’t confirm your message. Reconnect or check again.',
+      );
       store.fail = false;
       await controller.checkDelivery();
-      expect(controller.pendingId, isNull);
+      expect(controller.pending, isEmpty);
       expect(transport.calls, ['lookup:send-1', 'lookup:send-1']);
       controller.dispose();
     },

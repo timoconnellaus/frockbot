@@ -328,33 +328,39 @@ class SkillMenu extends StatelessWidget {
           border: Border.all(color: theme.colorScheme.outlineVariant),
           borderRadius: BorderRadius.circular(12),
         ),
-        child: ListView.builder(
-          shrinkWrap: true,
-          padding: const EdgeInsets.symmetric(vertical: 4),
-          itemCount: controller.candidates.length,
-          itemBuilder: (context, index) {
-            final candidate = controller.candidates[index];
-            return identified(
-              ShellIds.skillOption(candidate.entry.ref),
-              ListTile(
-                dense: true,
-                selected: index == controller.highlighted,
-                title: Text(candidate.entry.name),
-                subtitle: candidate.entry.description.isEmpty
-                    ? null
-                    : Text(
-                        candidate.entry.description,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                trailing: Text(
-                  candidate.entry.ref,
-                  style: theme.textTheme.bodySmall,
+        // The rows are `ListTile`s, which paint their selection and their ink
+        // on the nearest Material: without one of their own that is the
+        // surface behind the popover, and the box's own colour hides both.
+        child: Material(
+          type: MaterialType.transparency,
+          child: ListView.builder(
+            shrinkWrap: true,
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            itemCount: controller.candidates.length,
+            itemBuilder: (context, index) {
+              final candidate = controller.candidates[index];
+              return identified(
+                ShellIds.skillOption(candidate.entry.ref),
+                ListTile(
+                  dense: true,
+                  selected: index == controller.highlighted,
+                  title: Text(candidate.entry.name),
+                  subtitle: candidate.entry.description.isEmpty
+                      ? null
+                      : Text(
+                          candidate.entry.description,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                  trailing: Text(
+                    candidate.entry.ref,
+                    style: theme.textTheme.bodySmall,
+                  ),
+                  onTap: () => onChoose(candidate),
                 ),
-                onTap: () => onChoose(candidate),
-              ),
-            );
-          },
+              );
+            },
+          ),
         ),
       ),
     );

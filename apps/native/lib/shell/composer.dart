@@ -126,6 +126,21 @@ class _ComposerState extends State<Composer> {
     super.initState();
     widget.skills?.addListener(_changed);
     widget.focus.addListener(_changed);
+    widget.editor.addListener(_editorChanged);
+  }
+
+  /// The trigger is read off the controller, which every path that changes the
+  /// draft goes through.
+  ///
+  /// Reading it from `TextField.onChanged` alone was the defect: choosing a
+  /// Skill rewrites the field from Dart, which fires no `onChanged`, so the
+  /// popover's idea of the text stayed at the message the trigger had been in
+  /// — and the next `/` was read against stale text and opened nothing. The
+  /// controller notifies on the programmatic write and on the engine's, so
+  /// there is one source for both.
+  void _editorChanged() {
+    _refreshPopover();
+    if (mounted) setState(() {});
   }
 
   void _changed() {
@@ -136,6 +151,7 @@ class _ComposerState extends State<Composer> {
   void dispose() {
     widget.skills?.removeListener(_changed);
     widget.focus.removeListener(_changed);
+    widget.editor.removeListener(_editorChanged);
     super.dispose();
   }
 
@@ -288,11 +304,11 @@ class _ComposerState extends State<Composer> {
                             ),
                             counterText: '',
                           ),
+                          // The popover is re-read from the controller rather
+                          // than from here, so a rewrite from Dart arms it too.
                           onChanged: (value) {
                             AcceptanceMetrics.instance.inputChanged();
                             widget.onChanged(value);
-                            _refreshPopover();
-                            setState(() {});
                           },
                         ),
                       ),

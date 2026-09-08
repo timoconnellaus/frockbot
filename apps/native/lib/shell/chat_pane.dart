@@ -182,7 +182,7 @@ class _ChatPaneState extends State<ChatPane> {
               style: TextStyle(color: Theme.of(context).colorScheme.error),
             ),
           ),
-        if (c.pendingId != null && !c.sending)
+        if (c.pending.isNotEmpty && !c.sending)
           identified(
             ShellIds.checkDelivery,
             TextButton(

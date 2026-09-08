@@ -46,11 +46,7 @@ Map<String, dynamic> run({
   // fixture that carried one would be testing a shape the product cannot
   // receive.
   if (status != 'running')
-    'outcome': {
-      'type': status,
-      'message': ?failure,
-      'text': ?responseText,
-    },
+    'outcome': {'type': status, 'message': ?failure, 'text': ?responseText},
 };
 
 const haiku = 'Soft wool on green hills';
