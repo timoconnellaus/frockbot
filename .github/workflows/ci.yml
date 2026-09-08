@@ -199,9 +199,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
-    # The specs cannot overlap inside one run — they share a Worker and a fake
-    # provider whose chat mode a spec changes — so the parallelism is across
-    # runners, not workers. Each shard is a whole runner with its own harness:
+    # The specs may overlap now — every test takes a fresh identity and its own
+    # scoped provider endpoint — but a runner has two cores, so the parallelism
+    # that pays here is still across runners rather than across workers within
+    # one. Each shard is a whole runner with its own harness:
     # its own ports, its own `--persist-to` directory, its own artifact build.
     # Playwright keeps a spec file whole within a shard, since `fullyParallel`
     # is off and the file is therefore one indivisible group.
