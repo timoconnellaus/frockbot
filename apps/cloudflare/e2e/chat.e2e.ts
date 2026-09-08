@@ -677,7 +677,14 @@ test("a send the server refuses for size keeps the draft and says why", async ({
   // negative number.
   await composer.click();
   await composer.fill("x".repeat(TURN_TEXT_MAX_CHARACTERS_V1 + 10));
-  await expect(sem(page, "chat-composer")).toContainText("-10 characters left");
+  // Read off the conversation rather than the field's own node: the count is
+  // a line under the composer row, and which semantics node the engine merges
+  // it onto is its business rather than this spec's.
+  await expect
+    .poll(() => spokenText(sem(page, "shell-conversation")), {
+      timeout: 60_000,
+    })
+    .toContain("-10 characters left");
   await expect.poll(() => pressDisabled(sem(page, "send-button"))).toBe(true);
   await composer.fill("");
 
