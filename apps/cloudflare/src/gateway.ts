@@ -2,7 +2,6 @@ import { decodeProtocol } from "@frockbot/core/protocol-schemas";
 import { settingsDocumentV1 } from "@frockbot/app/settings/document";
 import { connectionsDocumentV1 } from "@frockbot/app/settings/connections-document";
 import { pluginsDocumentV1 } from "@frockbot/app/settings/plugins-document";
-import { nativeFallbackResponse } from "./native-fallback.js";
 import { accountIsAdmitted } from "./account-admission.js";
 import { isNativeAuthPath, readNativeJsonBody } from "./native-auth.js";
 import { clientCompatibilityResponse } from "./client-compatibility.js";
@@ -681,36 +680,6 @@ export function createGateway(dependencies: GatewayDependencies) {
         );
       }
     }
-    const nativeApplet = url.pathname.match(
-      /^\/api\/native\/applets\/([^/]+)\/bootstrap$/,
-    );
-    if (
-      nativeApplet &&
-      dependencies.nativeAuth &&
-      dependencies.nativeAppletBootstrap
-    ) {
-      if (!nativeIdentity?.session)
-        return jsonError(401, "Please sign in again.");
-      if (request.method !== "GET") return jsonError(405, "method not allowed");
-      const appletId = decodeURIComponent(nativeApplet[1]!);
-      const epoch = url.searchParams.get("epoch") ?? "";
-      if (
-        !/^[A-Za-z0-9][A-Za-z0-9_-]{0,95}\.[a-z0-9-]{1,64}$/.test(appletId) ||
-        !/^[A-Za-z0-9_-]{16,64}$/.test(epoch)
-      )
-        return jsonError(400, "Invalid Applet");
-      try {
-        return Response.json(
-          await dependencies.nativeAppletBootstrap(userId, appletId, epoch),
-          { headers: { "cache-control": "no-store" } },
-        );
-      } catch {
-        return jsonError(
-          503,
-          "This Applet is unavailable. Reopen it to try again.",
-        );
-      }
-    }
     if (request.method === "GET" && url.pathname === "/api/identity") {
       return Response.json({ schemaVersion: 1, userId, isAdmin });
     }
@@ -1103,12 +1072,6 @@ export function createGateway(dependencies: GatewayDependencies) {
       return jsonError(400, "invalid request URL");
     }
 
-    if (
-      dependencies.nativeAuth &&
-      url.pathname === "/native-fallback" &&
-      url.hostname === "ui.bot.frockbot.com"
-    )
-      return nativeFallbackResponse(request);
     if (dependencies.uiArtifactHosts?.includes(url.hostname)) {
       return servePackageUiArtifact(request, url, dependencies.artifacts);
     }
