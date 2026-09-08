@@ -17,6 +17,7 @@ import {
   expect,
   action,
   createBot,
+  answerFields,
   documentField,
   group,
   openApplication,
@@ -36,35 +37,18 @@ test.use({ timezoneId: "Australia/Sydney" });
 /**
  * Answer the editor's fields, and leave them answered.
  *
- * Not `answerFields`, and the difference is one gesture: that helper clicks
- * each field first, and inside the right panel the click never lands — the
- * document's semantics nodes overlap, so the node above the field takes the
- * pointer and Playwright retries until the test times out. Filling reaches the
- * field without a pointer at all.
- *
- * The read-back is the other half. A fill that lands while the previous
- * field's editing session is still closing is dropped — the input goes back to
- * empty and the required key it was answering refuses the action, which reads
- * exactly like the product refusing the form — so every field is read back
- * after the last is typed, and typed again where it did not stick.
+ * `answerFields` types through the editing session rather than filling: a
+ * `fill` writes the element's value and not the widget's, so the document's
+ * required key could refuse a form this side had read back as answered. The
+ * click that helper once made is gone with it — inside the right panel the
+ * document's semantics nodes overlap and the node above the field took the
+ * pointer — and `focus()` names the element with no geometry at all.
  */
 async function answer(
   page: Page,
   values: Record<string, string>,
 ): Promise<void> {
-  const fields = Object.entries(values);
-  for (let attempt = 0; attempt < 4; attempt += 1) {
-    let missing = false;
-    for (const [id, value] of fields) {
-      const input = documentField(page, id);
-      if ((await input.inputValue()) === value) continue;
-      missing = true;
-      await input.fill(value);
-      await expect(input).toHaveValue(value);
-    }
-    if (!missing) return;
-  }
-  throw new Error("the editor would not hold what this spec typed into it");
+  await answerFields(page, values);
 }
 
 /**
@@ -130,9 +114,15 @@ test("a refused schedule is said out loud, and the form keeps what to correct", 
   // Nothing was stored, and the form is still open with the value to correct.
   await expect(group(page, "Blursday brief")).toHaveCount(0);
   await expect(document).toHaveAttribute("aria-label", /No Routines yet/u);
-  await expect(documentField(page, "routine.schedule")).toHaveValue(
-    "every Blursday",
-  );
+  // Focused before it is read. Flutter mirrors a field's text into the DOM
+  // input only while it is holding an editing session open on it, and it puts
+  // the text nowhere in the semantics tree at all — so a settled field reads
+  // back empty from the browser whatever it is showing a person. Focusing is
+  // what opens the session, and costs nothing: the reader's next act on a form
+  // they are being asked to correct is to put the caret in it.
+  const schedule = documentField(page, "routine.schedule");
+  await schedule.focus();
+  await expect(schedule).toHaveValue("every Blursday");
 
   // Correcting it saves, and the Routine is on the surface.
   await answer(page, { "routine.schedule": "0 9 * * *" });

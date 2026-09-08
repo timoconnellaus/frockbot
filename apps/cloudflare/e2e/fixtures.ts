@@ -278,7 +278,12 @@ export async function answerInputs(
       // `focus()` names the element and involves no geometry at all.
       await input.focus();
       await input.press("ControlOrMeta+a");
-      await input.pressSequentially(value);
+      // Emptying a field is a keystroke of its own: selecting everything and
+      // then typing nothing leaves the selection standing and the text where
+      // it was, so a spec that put a field back to blank found its next answer
+      // typed onto the end of the old one.
+      if (value.length === 0) await input.press("Backspace");
+      else await input.pressSequentially(value);
     }
     // A second pass over every field once the last one is typed, because what
     // a stray edit empties is the field *before* the one being typed. A plain
@@ -753,7 +758,10 @@ export async function expectReadyToSend(page: Page): Promise<void> {
   await expect
     .poll(() => pressDisabled(sem(page, "send-button")), { timeout: 60_000 })
     .toBe(false);
-  await composer.fill(draft);
+  // Put back through the same path it was typed through. A `fill` here writes
+  // the element and not the widget, so the question this asked would be left
+  // in the composer for the next spec to find its own message typed onto.
+  await answerInputs([[composer, draft]]);
 }
 
 /** The message composer's own input. */

@@ -38,7 +38,7 @@ Map<String, dynamic> run({
     'outcome': {
       'type': 'failed',
       'message': failure,
-      if (responseText != null) 'text': responseText,
+      'text': ?responseText,
     },
 };
 
