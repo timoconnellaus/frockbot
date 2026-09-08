@@ -171,14 +171,36 @@ function scriptedToolCalls(
   return calls;
 }
 
+/**
+ * The endpoint root one test's Connection points at.
+ *
+ * A path under the fake server's origin rather than the origin itself, so the
+ * chat mode a spec switches on — `unauthorized`, `slow`, `streaming` — belongs
+ * to that spec alone and the specs can run in parallel. An Ollama-compatible
+ * endpoint behind a path prefix is a shape the product already supports:
+ * `decodeOllamaApiBaseUrl` keeps the pathname, and every call composes onto it.
+ */
+export function e2eOllamaEndpointV1(serverUrl: string, scope: string): string {
+  return `${serverUrl.replace(/\/+$/, "")}/s/${encodeURIComponent(scope)}`;
+}
+
 export function startFakeOllama(port: number): Promise<{
   url: string;
   close(): Promise<void>;
 }> {
-  let chatMode: FakeOllamaChatMode = "ok";
+  // Keyed by the scope in the endpoint the request arrived on. A request that
+  // names no scope — nothing in the suite sends one — reads the shared default.
+  const chatModes = new Map<string, FakeOllamaChatMode>();
 
   const server: Server = createHttpServer((request, response) => {
-    const url = new URL(request.url ?? "/", `http://127.0.0.1:${port}`);
+    const raw = new URL(request.url ?? "/", `http://127.0.0.1:${port}`);
+    const scoped = /^\/s\/([^/]+)(\/.*)?$/.exec(raw.pathname);
+    const scope = scoped ? decodeURIComponent(scoped[1]) : "";
+    const url = new URL(
+      `${scoped ? (scoped[2] ?? "/") : raw.pathname}${raw.search}`,
+      `http://127.0.0.1:${port}`,
+    );
+    const chatMode = chatModes.get(scope) ?? "ok";
     const header = request.headers.authorization ?? "";
     const key = header.toLowerCase().startsWith("bearer ")
       ? header.slice(7)
@@ -199,13 +221,14 @@ export function startFakeOllama(port: number): Promise<{
             }
           ).mode,
         );
-        chatMode =
+        const mode: FakeOllamaChatMode =
           requested === "unauthorized" ||
           requested === "slow" ||
           requested === "streaming"
             ? requested
             : "ok";
-        json(200, { mode: chatMode });
+        chatModes.set(scope, mode);
+        json(200, { mode });
       });
       return;
     }

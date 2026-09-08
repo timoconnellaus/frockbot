@@ -14,7 +14,15 @@
  * same hash from `dist/flutter-web.json`.
  */
 import { createHash } from "node:crypto";
-import { cp, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  cp,
+  mkdir,
+  readdir,
+  readFile,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -65,15 +73,106 @@ async function emittedFiles(directory: string): Promise<string[]> {
     .sort();
 }
 
+const BUILD_FLAGS = [
+  "--release",
+  "--pwa-strategy=none",
+  "--no-web-resources-cdn",
+];
+
+/**
+ * The Dart sources, the assets, and the page template the build reads.
+ *
+ * `build/` and `.dart_tool/` are the build's own outputs, and the platform
+ * directories belong to the phone builds; nothing under them reaches the web
+ * bundle.
+ */
+const SOURCE_ROOTS = ["lib", "web", "assets", "vendor"];
+const SOURCE_FILES = ["pubspec.yaml", "pubspec.lock"];
+
+async function sourceFingerprint(): Promise<string> {
+  const digest = createHash("sha256");
+  // The flags and this script are part of what the output is: a change to
+  // either produces a different bundle from the same Dart.
+  digest.update(BUILD_FLAGS.join(" "));
+  digest.update(await readFile(fileURLToPath(import.meta.url)));
+  // The toolchain too — a Flutter upgrade rewrites the engine even though no
+  // file in this repository moved.
+  const version = Bun.spawnSync({
+    cmd: ["flutter", "--version", "--machine"],
+    cwd: nativeRoot,
+  });
+  digest.update(version.stdout);
+
+  const paths: string[] = [];
+  for (const directory of SOURCE_ROOTS) {
+    const absolute = resolve(nativeRoot, directory);
+    const there = await stat(absolute).catch(() => undefined);
+    if (!there?.isDirectory()) continue;
+    for (const entry of await readdir(absolute, {
+      withFileTypes: true,
+      recursive: true,
+    })) {
+      if (!entry.isFile()) continue;
+      paths.push(join(entry.parentPath, entry.name));
+    }
+  }
+  for (const file of SOURCE_FILES) paths.push(resolve(nativeRoot, file));
+  paths.sort();
+  for (const path of paths) {
+    digest.update(relative(nativeRoot, path).replaceAll("\\", "/"));
+    digest.update(await readFile(path).catch(() => Buffer.alloc(0)));
+  }
+  return digest.digest("hex");
+}
+
+/**
+ * Whether the staged bundle was built from exactly these sources.
+ *
+ * `flutter build web --release` is not incremental — dart2js runs whole, for
+ * about a minute, whether or not a line changed — and the browser end-to-end
+ * harness builds the client before every run. Fingerprinting the inputs turns
+ * the second run of an unchanged tree into a no-op. `FROCKBOT_FORCE_CLIENT_BUILD`
+ * builds anyway.
+ */
+async function stagedIsCurrent(fingerprint: string): Promise<boolean> {
+  if (process.env.FROCKBOT_FORCE_CLIENT_BUILD) return false;
+  const manifest = await readFile(
+    resolve(root, "dist/flutter-web.json"),
+    "utf8",
+  ).catch(() => undefined);
+  if (!manifest) return false;
+  let parsed: { sourceHash?: unknown; buildHash?: unknown; files?: unknown };
+  try {
+    parsed = JSON.parse(manifest) as typeof parsed;
+  } catch {
+    return false;
+  }
+  if (parsed.sourceHash !== fingerprint) return false;
+  if (typeof parsed.buildHash !== "string" || !Array.isArray(parsed.files)) {
+    return false;
+  }
+  // The manifest is only a promise about `dist/web`; a half-deleted staging
+  // directory has to rebuild rather than serve a document naming files that
+  // are not there.
+  const staged = resolve(assetsRoot, payloadPrefix, parsed.buildHash);
+  for (const path of parsed.files as string[]) {
+    if (!(await stat(resolve(staged, path)).catch(() => undefined))) {
+      return false;
+    }
+  }
+  return true;
+}
+
+const fingerprint = await sourceFingerprint();
+if (await stagedIsCurrent(fingerprint)) {
+  process.stdout.write(
+    "The Flutter web client is already built from these sources; skipping.\n",
+  );
+  process.exit(0);
+}
+
 Bun.spawnSync({
-  cmd: [
-    "flutter",
-    "build",
-    "web",
-    "--release",
-    "--pwa-strategy=none",
-    "--no-web-resources-cdn",
-  ],
+  cmd: ["flutter", "build", "web", ...BUILD_FLAGS],
   cwd: nativeRoot,
   stdout: "inherit",
   stderr: "inherit",
@@ -117,7 +216,7 @@ await writeFile(
 );
 await writeFile(
   resolve(root, "dist/flutter-web.json"),
-  `${JSON.stringify({ schemaVersion: 1, buildHash, files }, null, 2)}\n`,
+  `${JSON.stringify({ schemaVersion: 1, buildHash, sourceHash: fingerprint, files }, null, 2)}\n`,
 );
 
 process.stdout.write(
