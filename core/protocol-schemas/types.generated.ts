@@ -183,26 +183,7 @@ export type TurnRefusal = {
 export type RunCursor = string;
 export type Page =
   { truncated: false } | { truncated: true; nextCursor: RunCursor };
-export type Conversation = {
-  schemaVersion: 1;
-  conversationId: string;
-  ordinal: number;
-  startedAt: Instant;
-  endedAt?: Instant;
-};
-export type ConversationList = {
-  schemaVersion: 1;
-  conversations: Array<Conversation>;
-};
-export type ConversationStartCommand = {
-  schemaVersion: 1;
-  commandId: Identifier;
-};
-export type ConversationQuery = {
-  schemaVersion: 1;
-  before?: RunCursor;
-  conversationId?: string;
-};
+export type ConversationQuery = { schemaVersion: 1; before?: RunCursor };
 export type SendPayload =
   | { type: "text"; text: string }
   | { type: "attachment"; url: string; name?: string; mediaType?: string }
@@ -412,6 +393,7 @@ export type UnreadView = {
     role: "assistant" | "user";
   };
   working?: boolean;
+  unreadFromMessageId?: string;
 };
 export type MarkReadCommand =
   | {
@@ -426,6 +408,7 @@ export type MarkReadCommand =
       type: "bot/mark-unread";
       commandId: Identifier;
       botId: BotId;
+      fromMessageId?: string;
     };
 export type SettingField = {
   id: Identifier;
@@ -826,9 +809,6 @@ export interface ProtocolTypes {
   TurnRefusal: TurnRefusal;
   RunCursor: RunCursor;
   Page: Page;
-  Conversation: Conversation;
-  ConversationList: ConversationList;
-  ConversationStartCommand: ConversationStartCommand;
   ConversationQuery: ConversationQuery;
   SendPayload: SendPayload;
   RunEvent: RunEvent;

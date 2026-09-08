@@ -175,11 +175,7 @@ class NativeApi {
 }
 
 abstract interface class ChatTransport {
-  Future<Map<String, dynamic>> page(
-    String botId, {
-    String? before,
-    String? conversationId,
-  });
+  Future<Map<String, dynamic>> page(String botId, {String? before});
   Future<void> send(String botId, String id, String text);
   Future<Map<String, dynamic>?> lookup(
     String botId,
@@ -194,14 +190,8 @@ class BackendChatTransport implements ChatTransport {
   BackendChatTransport(this.api);
   String path(String bot) => '/api/bots/${Uri.encodeComponent(bot)}/turns';
   @override
-  Future<Map<String, dynamic>> page(
-    String botId, {
-    String? before,
-    String? conversationId,
-  }) async {
-    final query = Uri(
-      queryParameters: {'before': ?before, 'conversationId': ?conversationId},
-    ).query;
+  Future<Map<String, dynamic>> page(String botId, {String? before}) async {
+    final query = Uri(queryParameters: {'before': ?before}).query;
     return wire.ConversationProjection.fromJson(
           await api.request(
             '${path(botId)}${query.isEmpty ? '' : '?$query'}',

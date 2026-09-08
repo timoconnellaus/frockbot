@@ -2023,33 +2023,6 @@ export class BotState extends DurableObject<BotStateEnv> {
     return revertComposition(shell.state, identity, command);
   }
 
-  async listConversations(input: unknown) {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      botId: rpcBotId,
-    });
-    const identity = {
-      userId: request.userId as string,
-      botId: request.botId as string,
-    };
-    const { shell } = await this.materialized(identity);
-    await shell.validateIdentity(identity);
-    return shell.listConversations();
-  }
-
-  async startConversation(input: unknown) {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      botId: rpcBotId,
-    });
-    const identity = {
-      userId: request.userId as string,
-      botId: request.botId as string,
-    };
-    const { shell } = await this.materialized(identity);
-    return shell.startConversation(identity);
-  }
-
   async listRuns(input: unknown) {
     const request = decodeRpcEnvelopeV1(input, {
       userId: rpcIdentifier,

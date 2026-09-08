@@ -264,14 +264,6 @@ abstract final class SearchIds {
   static String hit(String runId) => 'search-hit-$runId';
 }
 
-/// Conversations: the one a Bot is holding, and the ones it has put down.
-abstract final class ConversationIds {
-  static const newConversation = 'new-conversation';
-  static const picker = 'conversation-picker';
-
-  static String option(String conversationId) => 'conversation-$conversationId';
-}
-
 /// Applets: what a Bot built, and what it is doing to it now.
 ///
 /// The names follow what `applets.e2e.ts` and `applets-shell.e2e.ts` select on

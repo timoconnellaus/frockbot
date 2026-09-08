@@ -6,6 +6,7 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/protocol/client_wire.generated.dart' as wire;
+import 'package:frockbot_native/flock/sheep.dart';
 import 'package:frockbot_native/shell/desktop_layout.dart';
 import 'package:frockbot_native/shell/markdown.dart';
 import 'package:frockbot_native/shell/run_view.dart';
@@ -580,7 +581,7 @@ void main() {
   });
 
   group('a Turn\'s receipts live on the run view, not in the thread', () {
-    testWidgets('the thread offers a way in and names no tool', (
+    testWidgets('message long hold opens actions without tool counts', (
       tester,
     ) async {
       TranscriptLine? opened;
@@ -612,15 +613,18 @@ void main() {
             hasEarlier: false,
             storageKey: 'test',
             onRefresh: ({bool older = false}) async {},
-            onOpenRun: (line) => opened = line,
+            onOpenRun: (_) {},
+            onMessageActions: (line) => opened = line,
           ),
         ),
       );
       await tester.pumpAndSettle();
 
       expect(find.text('workspace_write'), findsNothing);
-      await tester.tap(byIdentifier(ShellIds.openRun('run-a')));
-      expect(opened?.tools.single.name, 'workspace_write');
+      expect(find.text('Used 1 tool'), findsNothing);
+      expect(find.byType(SheepAvatar), findsNothing);
+      await tester.longPress(find.text('do it'));
+      expect(opened?.runId, 'run-a');
     });
 
     testWidgets('the run view names them', (tester) async {
