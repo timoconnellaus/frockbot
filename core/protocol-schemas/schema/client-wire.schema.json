@@ -2392,7 +2392,7 @@
           "type": "string",
           "minLength": 8,
           "maxLength": 2048,
-          "pattern": "^wss://[^\\s/@?#]+/[^\\s#]*$"
+          "pattern": "^(?:wss://[^\\s/@?#]+|ws://(?:127\\.0\\.0\\.1|10\\.0\\.2\\.2|localhost)(?::[0-9]+)?)/[^\\s#]*$"
         }
       },
       "required": ["token", "expiresAt", "socketUrl"],
@@ -2437,53 +2437,6 @@
         }
       },
       "required": ["contentHash", "size", "mediaType", "bundlerVersion"],
-      "additionalProperties": false
-    },
-    "FallbackBootstrap": {
-      "type": "object",
-      "properties": {
-        "schemaVersion": {
-          "const": 1
-        },
-        "appletId": {
-          "type": "string",
-          "minLength": 3,
-          "maxLength": 129,
-          "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]{0,95}\\.[a-z0-9-]{1,64}$"
-        },
-        "userId": {
-          "$ref": "#/$defs/Identifier"
-        },
-        "generationId": {
-          "$ref": "#/$defs/GenerationId"
-        },
-        "navigationEpoch": {
-          "$ref": "#/$defs/Identifier"
-        },
-        "bootstrapUrl": {
-          "$ref": "#/$defs/HttpsUrl"
-        },
-        "artifactOrigin": {
-          "$ref": "#/$defs/HttpsUrl"
-        },
-        "artifact": {
-          "$ref": "#/$defs/WebArtifact"
-        },
-        "viewer": {
-          "$ref": "#/$defs/AppletViewerToken"
-        }
-      },
-      "required": [
-        "schemaVersion",
-        "appletId",
-        "userId",
-        "generationId",
-        "navigationEpoch",
-        "bootstrapUrl",
-        "artifactOrigin",
-        "artifact",
-        "viewer"
-      ],
       "additionalProperties": false
     },
     "ActionValueSchema": {

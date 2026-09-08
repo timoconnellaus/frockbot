@@ -933,42 +933,6 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
     };
   }
 
-  /** One generation read supplies both the native iframe artifact and its lease. */
-  async nativeAppletBootstrap(input: unknown) {
-    const request = decodeRpcEnvelopeV1(input, {
-      appletId: rpcString(129),
-      navigationEpoch: rpcIdentifier,
-    });
-    const userId = this.ctx.props.userId;
-    const appletId = request.appletId as string;
-    const navigationEpoch = request.navigationEpoch as string;
-    const secret = this.env.APPLET_VIEWER_SECRET;
-    if (!secret) throw appletsUnconfigured();
-    const state = await this.appletCurrentGeneration(userId, appletId);
-    const expiresAt = new Date(Date.now() + 120_000);
-    const artifactOrigin = "https://ui.bot.frockbot.com";
-    return {
-      schemaVersion: 1 as const,
-      appletId,
-      userId,
-      generationId: state.generationId,
-      navigationEpoch,
-      bootstrapUrl: `${artifactOrigin}/native-fallback?artifact=${state.uiContentHash}&epoch=${encodeURIComponent(navigationEpoch)}`,
-      artifactOrigin,
-      artifact: state.ui,
-      viewer: {
-        token: await mintAppletViewerTokenV1(secret, {
-          u: userId,
-          a: appletId,
-          g: state.generationId,
-          exp: Math.floor(expiresAt.getTime() / 1000),
-        }),
-        expiresAt: expiresAt.toISOString(),
-        socketUrl: `wss://bot.frockbot.com/api/applets/${encodeURIComponent(appletId)}/socket`,
-      },
-    };
-  }
-
   /** The current generation's UI artifact, for the canvas to nest. */
   async readAppletUi(input: unknown): Promise<{
     appletId: string;
@@ -2087,14 +2051,6 @@ export default {
           ? { adminEmails: env.FROCKBOT_ADMIN_EMAILS }
           : {}),
         applicationHashFor: async () => env.DEFAULT_APPLICATION_HASH,
-        nativeAppletBootstrap: (userId, appletId, navigationEpoch) =>
-          runtimeExports
-            .UserBotState({ props: { userId } })
-            .nativeAppletBootstrap({
-              schemaVersion: 1,
-              appletId,
-              navigationEpoch,
-            }),
         botStateFor: (userId) =>
           runtimeExports.UserBotState({ props: { userId } }),
         userConfigurationFor: (userId): UserConfigurationBinding =>

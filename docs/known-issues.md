@@ -46,7 +46,7 @@ at the cited location. Items the re-orientation already removes are marked; see
 
 21. **Applet `canWrite` is inert.** _Verified._ `applet-sdk/src/server/applet.ts:287-293` reads `x-applet-viewer` and `x-applet-can-write`, defaulting to `canWrite: true`; neither the gateway nor `AppletState` ever sets them. Not an active hole — Applets are account-wide with no cross-User sharing, so every viewer is the owner and `true` is the right answer today. The defect is that an Applet author can write `if (!peer.viewer.canWrite)` and that guard can never fire. Either derive it from the viewer token or drop the concept until sharing exists; shipping a knob nothing populates is the thing to avoid.
 
-22. **`apps/cloudflare/src/native-fallback.ts:1` hardcodes `ARTIFACT_ORIGIN = "https://ui.bot.frockbot.com"`**, so staging cannot serve the native Applet page.
+22. ~~**`apps/cloudflare/src/native-fallback.ts:1` hardcodes `ARTIFACT_ORIGIN`**, so staging cannot serve the native Applet page.~~ **Gone with step 9.** The bootstrap page, its gateway route, the `/api/native/applets/:id/bootstrap` route and the `FallbackBootstrap` wire type are deleted: the phone frames the Applet's own page on the origin the `/api/applets/:id/ui` read names, which is derived from the request rather than hardcoded.
 
 23. ~~**`@frockbot/applet-sdk` is not published to npm**; the Computer installs dist-tag `latest` and writes `.sdk-unavailable` on failure.~~ **Gone with step 8.** No Computer installs the SDK: the build service's image copies it out of the repository, and the Sprite's `applets` provisioning phase, its `applet` shim and its two doctor checks are deleted.
 

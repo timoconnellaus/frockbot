@@ -272,6 +272,60 @@ abstract final class ConversationIds {
   static String option(String conversationId) => 'conversation-$conversationId';
 }
 
+/// Applets: what a Bot built, and what it is doing to it now.
+///
+/// The names follow what `applets.e2e.ts` and `applets-shell.e2e.ts` select on
+/// — the canvas region, its progress line, the App/Code toggle, one file
+/// button and the failure's retry — so both specs can be rewritten against
+/// Flutter Web with the same intent rather than re-derived from the widgets.
+/// The chip that opens the canvas is the Vue header's `Applet: <name>` button.
+abstract final class AppletIds {
+  static const canvas = 'applet-canvas';
+  static const chip = 'applet-chip';
+  static const progress = 'applet-canvas-progress';
+  static const failure = 'applet-canvas-failure';
+  static const retry = 'applet-canvas-retry';
+  static const tabs = 'applet-canvas-tabs';
+  static const close = 'applet-canvas-close';
+  static const source = 'applet-canvas-source';
+  static const directory = 'applet-directory';
+
+  /// A file button in the code view, by the path it opens. Paths carry dots
+  /// and slashes, which a selector reads perfectly well and a slug would lose.
+  static String file(String path) => 'applet-file-$path';
+}
+
+/// The Computer: whether it is there, what it is doing, and who is driving.
+///
+/// The names follow what `computer-presence.e2e.ts` selects on — the card, its
+/// live/snapshot line, the full-window viewer, Take control and the
+/// confirmation it opens, Release control and Reconnect.
+abstract final class ComputerIds {
+  static const card = 'computer-card';
+  static const status = 'computer-screen-status';
+  static const progress = 'computer-progress';
+  static const viewer = 'computer-viewer';
+  static const phase = 'computer-phase';
+  static const takeControl = 'computer-take-control';
+  static const takeControlConfirm = 'computer-take-control-confirm';
+  static const releaseControl = 'computer-release-control';
+  static const reconnect = 'computer-reconnect';
+}
+
+/// Package pages: a first-party or Bot-authored page, and the control that
+/// opens it.
+///
+/// The names follow what `package-iframe-ui.e2e.ts` selects on — the framed
+/// page and its attribution. An entry is named by the Package and the entry
+/// the manifest declared, because that pair is what a spec means when it says
+/// "the Applets button".
+abstract final class PackageIds {
+  static String entry(String packageId, String entryId) =>
+      'package-entry-$packageId-$entryId';
+  static String page(String packageId, String pageId) =>
+      'package-page-$packageId-$pageId';
+}
+
 /// Admin: the deployment's own surface, reachable only by an admin.
 abstract final class AdminIds {
   static const refresh = 'admin-refresh';

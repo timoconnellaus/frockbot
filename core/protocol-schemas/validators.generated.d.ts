@@ -95,9 +95,6 @@ declare const validators: {
     value: unknown,
   ): value is ProtocolTypes["ImmutableArtifact"];
   isWebArtifact(value: unknown): value is ProtocolTypes["WebArtifact"];
-  isFallbackBootstrap(
-    value: unknown,
-  ): value is ProtocolTypes["FallbackBootstrap"];
   isActionValueSchema(
     value: unknown,
   ): value is ProtocolTypes["ActionValueSchema"];

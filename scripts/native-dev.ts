@@ -191,6 +191,17 @@ function ensureDevVars(): Map<string, string> {
     writeFileSync(buildVars, `APPLET_BUILD_TOKEN=${buildToken}\n`);
     say("wrote apps/applet-build/.dev.vars");
   }
+
+  // What signs an Applet viewer token. Without it the token route answers a
+  // definitive 503 and the canvas is right to say Applets do not work here —
+  // which is a true sentence about a stack that could publish an Applet and
+  // then never open it. Minted like the build token: local, uncommitted.
+  if (!vars.get("APPLET_VIEWER_SECRET")) {
+    const secret = randomBytes(32).toString("hex");
+    appendFileSync(target, `\nAPPLET_VIEWER_SECRET=${secret}\n`);
+    vars.set("APPLET_VIEWER_SECRET", secret);
+    say("minted APPLET_VIEWER_SECRET into apps/cloudflare/.dev.vars");
+  }
   return vars;
 }
 
