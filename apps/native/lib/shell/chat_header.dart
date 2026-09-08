@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../flock/sheep.dart';
 import 'semantics.dart';
+import 'chat_icons.dart';
 
 typedef ChatApplet = ({String label, VoidCallback onOpen});
 
@@ -48,7 +49,7 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
             IconButton(
               tooltip: 'Your Bots',
               onPressed: onBots,
-              icon: const Icon(Icons.menu, size: 20),
+              icon: const ChatIcon(ChatIconKind.menu, size: 20),
             ),
           ),
     titleSpacing: 4,
@@ -62,17 +63,17 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
             style: Theme.of(context).textTheme.titleMedium
-                ?.copyWith(fontWeight: FontWeight.w600),
+                ?.copyWith(fontWeight: FontWeight.w500),
           ),
         ),
       ],
     ),
     actions: [
-      _destination('Computer', Icons.desktop_windows_outlined, onComputer),
-      _destination('Routines', Icons.schedule, onRoutines),
+      _destination('Computer', ChatIconKind.computer, onComputer),
+      _destination('Routines', ChatIconKind.routines, onRoutines),
       identified(
         ShellIds.botPanelToggle,
-        _destination('Bot settings', Icons.settings_outlined, onSettings),
+        _destination('Bot settings', ChatIconKind.settings, onSettings),
       ),
       const SizedBox(width: 4),
     ],
@@ -101,7 +102,7 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
                         message: applet.label,
                         child: TextButton.icon(
                           onPressed: applet.onOpen,
-                          icon: const Icon(Icons.widgets_outlined, size: 16),
+                          icon: const ChatIcon(ChatIconKind.applet, size: 16),
                           label: Text(
                             applet.label,
                             maxLines: 1,
@@ -132,11 +133,11 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
     padding: const EdgeInsets.symmetric(horizontal: 10),
   );
 
-  Widget _destination(String label, IconData icon, VoidCallback? open) =>
+  Widget _destination(String label, ChatIconKind icon, VoidCallback? open) =>
       IconButton(
         tooltip: label,
         onPressed: open,
-        icon: Icon(icon, size: 19),
+        icon: ChatIcon(icon),
         style: IconButton.styleFrom(
           minimumSize: const Size(40, 48),
           maximumSize: const Size(40, 48),

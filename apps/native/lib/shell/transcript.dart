@@ -315,7 +315,9 @@ class _Bubble extends StatelessWidget {
                   ),
                 ),
                 child: DefaultTextStyle.merge(
-                  style: theme.textTheme.bodyLarge,
+                  style: theme.textTheme.bodyLarge?.copyWith(
+                    fontWeight: FontWeight.w300,
+                  ),
                   child: Semantics(label: mine ? 'You' : 'Bot', child: child),
                 ),
               ),

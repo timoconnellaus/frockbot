@@ -13,6 +13,7 @@ import 'package:flutter/services.dart';
 
 import '../acceptance_metrics.dart';
 import 'semantics.dart';
+import 'chat_icons.dart';
 import 'skill_menu.dart';
 
 /// The composer's copy of the send route's size rule.
@@ -267,7 +268,9 @@ class _ComposerState extends State<Composer> {
                           key: const ValueKey('composer'),
                           controller: widget.editor,
                           focusNode: widget.focus,
-                          style: theme.textTheme.bodyLarge,
+                          style: theme.textTheme.bodyLarge?.copyWith(
+                            fontWeight: FontWeight.w300,
+                          ),
                           minLines: 1,
                           maxLines: 6,
                           keyboardType: TextInputType.multiline,
@@ -310,7 +313,7 @@ class _ComposerState extends State<Composer> {
                           borderRadius: BorderRadius.circular(11),
                         ),
                       ),
-                      icon: const Icon(Icons.arrow_upward_rounded, size: 19),
+                      icon: const ChatIcon(ChatIconKind.send),
                     ),
                   ),
                 ),
