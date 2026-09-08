@@ -11,7 +11,7 @@ import {
   DOCTOR_SCRIPT,
   SCRATCH_ROOT,
   SHIMS_ROOT,
-} from "@frockbot/computer/host-runtime";
+} from "./runtime.js";
 import { FlySpriteComputer } from "./computer.ts";
 import { FakeComputerHost } from "./host-double.ts";
 import { FLY_WORKSPACE_LAYOUT } from "./provider.ts";

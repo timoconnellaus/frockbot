@@ -35,9 +35,9 @@ import { createHash } from "node:crypto";
 import {
   ComputerError,
   workspaceMountPathV1,
-  type ComputerWorkspace,
   type WorkspaceLayoutV1,
 } from "@frockbot/computer/core";
+import { type ComputerWorkspace } from "@frockbot/computer/core/host";
 import {
   WORKSPACE_MAX_FILE_BYTES,
   WORKSPACE_MAX_LIST_ENTRIES,

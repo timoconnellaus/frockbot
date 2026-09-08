@@ -1,4 +1,4 @@
-// A Durable Object that drives `ComputerHostClient` the way the Bot Durable
+// A Durable Object that drives `FlyHostTransportV1` the way the Bot Durable
 // Object will.
 //
 // The client is exercised from inside a real Durable Object, against real
@@ -16,7 +16,7 @@
 // cancellation it says the effect is unresolved rather than lost.
 import { DurableObject } from "cloudflare:workers";
 import { ComputerError } from "@frockbot/computer/core";
-import { ComputerHostClient } from "@frockbot/computer/fly/host-client";
+import { FlyHostTransportV1 } from "@frockbot/computer/fly/host-client";
 
 interface ProbeEnv {
   COMPUTER_HOST: Fetcher;
@@ -77,9 +77,9 @@ function refusal(error: unknown): ProbeExecOutput {
   };
 }
 
-export class ComputerHostClientProbe extends DurableObject<ProbeEnv> {
-  private client(userId: string, botId: string): ComputerHostClient {
-    return new ComputerHostClient({
+export class FlyHostTransportProbeV1 extends DurableObject<ProbeEnv> {
+  private client(userId: string, botId: string): FlyHostTransportV1 {
+    return new FlyHostTransportV1({
       fetcher: this.env.COMPUTER_HOST,
       hostToken: this.env.COMPUTER_HOST_TOKEN,
       identity: { userId },
@@ -169,7 +169,7 @@ export class ComputerHostClientProbe extends DurableObject<ProbeEnv> {
     effectId: string;
     userId?: string;
     botId?: string;
-  }): Promise<{ ok: boolean; spriteName?: string; code?: string }> {
+  }): Promise<{ ok: boolean; instanceId?: string; code?: string }> {
     const userId = input.userId ?? "user-probe";
     const botId = input.botId ?? "bot-probe";
     try {
@@ -179,7 +179,7 @@ export class ComputerHostClientProbe extends DurableObject<ProbeEnv> {
         // a service binding preserves the streamed open body in workerd.
         onProgress: () => undefined,
       });
-      return { ok: true, spriteName: result.spriteName };
+      return { ok: true, instanceId: result.instanceId };
     } catch (error) {
       const refused = refusal(error);
       return { ok: false, ...(refused.code ? { code: refused.code } : {}) };
@@ -221,7 +221,7 @@ export class ComputerHostClientProbe extends DurableObject<ProbeEnv> {
     effectId: string;
     script: string;
   }): Promise<ProbeExecOutput> {
-    const client = new ComputerHostClient({
+    const client = new FlyHostTransportV1({
       fetcher: this.env.COMPUTER_HOST,
       hostToken: "not-the-host-token",
       identity: { userId: "user-probe" },

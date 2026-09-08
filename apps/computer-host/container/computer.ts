@@ -69,7 +69,7 @@ import {
   WINDOW_LIVE_MARKER,
   WORKSPACE_SYNC_SERVICE,
   WORKSPACES_ROOT,
-} from "@frockbot/computer/host-runtime";
+} from "@frockbot/computer/fly/runtime";
 import {
   COMPUTER_HOST_STREAM_MEDIA_TYPE,
   computerHostProblemV1,
@@ -1068,7 +1068,7 @@ export class ComputerHost {
     const result: ComputerHostOpenResultV1 = {
       version: 1,
       effectId: request.effectId,
-      spriteName: record.spriteName,
+      instanceId: record.spriteName,
       directory: `${DATA_ROOT}/agents/${botKey}`,
       ...(display ? { display } : {}),
       generation: record.generation,

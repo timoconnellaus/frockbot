@@ -31,7 +31,7 @@ The SDK puts a command's argv **and** its environment into the request URL, and 
 | `container/server.ts`                                              | Node HTTP glue. Owns cancellation: `req.on("close")` aborts the effect.                             |
 | `container/fake-sprites.ts`                                        | The fake `SpritesClient` the tests drive, including chunk-split output.                             |
 | [`@frockbot/computer/host-protocol`](../../computer/host-protocol) | The v1 DTOs and decoders both sides import.                                                         |
-| [`@frockbot/computer/host-runtime`](../../computer/host-runtime)   | The Computer's on-Sprite layout and shell scripts, shared with `@frockbot/computer/fly`.            |
+| [`@frockbot/computer/fly/runtime`](../../computer/fly/runtime.ts)  | The Computer's on-Sprite layout and shell scripts, shared with the rest of `computer/fly`.          |
 
 ## Checks
 

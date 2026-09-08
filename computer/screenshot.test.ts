@@ -6,18 +6,23 @@
 // as their writer, the root is bounded, and the model gets a reference it can
 // resolve rather than a picture of a path.
 import { describe, expect, test } from "bun:test";
+import { ComputerError, computerBotPathKeyV1 } from "@frockbot/computer/core";
 import {
-  ComputerError,
-  computerBotPathKeyV1,
-  type ComputerHandle,
-  type ComputerProvider,
-} from "@frockbot/computer/core";
+  type ComputerHostCapabilitiesV1,
+  type ComputerHostSessionV1,
+  type ComputerHostV1,
+} from "@frockbot/computer/core/host";
 import {
   type AgentRuntimeHarness,
   createAgentRuntimeHarness,
 } from "@frockbot/app/testkit";
 import { createComputerAgentFeature, pngDimensionsV1 } from "./agent.js";
 import { FakeWorkspace } from "./workspace-fixture.js";
+
+/** A host that offers nothing beyond the operations under test. */
+const TEST_HOST_CAPABILITIES: ComputerHostCapabilitiesV1 = {
+  viewerFrameOrigins: [],
+};
 
 /** A 4x3 PNG: a real signature and a real IHDR, and nothing after it. */
 function png(width = 4, height = 3): Uint8Array {
@@ -37,14 +42,16 @@ function providerWith(
     display: string;
     capturedAt: string;
   }>,
-): ComputerProvider {
+): ComputerHostV1 {
   return {
     id: "fixture",
-    open: (identity, tenant, assignment): Promise<ComputerHandle> =>
+    capabilities: TEST_HOST_CAPABILITIES,
+    open: (identity, tenant, assignment): Promise<ComputerHostSessionV1> =>
       Promise.resolve({
         assignment,
         identity,
         tenant,
+        capabilities: TEST_HOST_CAPABILITIES,
         workspace,
         screenshot: { capture: () => capture() },
         exec: {
@@ -62,7 +69,7 @@ function providerWith(
 }
 
 async function mount(
-  provider: ComputerProvider,
+  provider: ComputerHostV1,
   writer = true,
   projectionFiles?: {
     invalidate(botId: string, kind: "screenshots" | "doctor"): void;
@@ -200,11 +207,13 @@ describe("computer_screenshot", () => {
     const workspace = new FakeWorkspace();
     const harness = await mount({
       id: "fixture",
+      capabilities: TEST_HOST_CAPABILITIES,
       open: (identity, tenant, assignment) =>
         Promise.resolve({
           assignment,
           identity,
           tenant,
+          capabilities: TEST_HOST_CAPABILITIES,
           workspace,
           close: () => Promise.resolve(),
         }),

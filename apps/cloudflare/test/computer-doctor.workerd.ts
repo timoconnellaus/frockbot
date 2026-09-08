@@ -1,7 +1,7 @@
 // `computer_doctor`'s one host operation, on the real wire.
 //
 // The unit suite in `computer/fly/doctor.test.ts` proves the script the
-// provider builds against a double, and `computer/host-runtime/runtime.test.ts`
+// provider builds against a double, and `computer/fly/runtime.test.ts`
 // runs the real `box-doctor.sh` and reads its log. What only exists here is the
 // exec travelling the v1 protocol over a workerd service binding, the report
 // being decoded at the provider seam, and both the run and the tenant it names

@@ -10,6 +10,12 @@ import { dirname, resolve } from "node:path";
 // Two facts are checked: no source file outside the host imports the SDK, and
 // no manifest outside the host declares it as a dependency (a manifest entry is
 // how the SDK creeps back into a workerd bundle's resolution graph).
+//
+// Rule 2 is the narrowing this step is for. Fly is one implementation of
+// `ComputerHostV1` and lives entirely in `computer/fly`; a file that imports it
+// has bound itself to Fly, so only the implementation, the host app, and the
+// two places that register the host may. Everything else reaches the Computer
+// through `@frockbot/computer/core/host` and the tools above it.
 
 const repoRoot = resolve(import.meta.dirname, "..");
 const forbiddenPackage = "@fly/sprites";
@@ -65,6 +71,44 @@ for (const path of scan(
     if (!isForbidden(specifier)) continue;
     failures.push(
       `${path}:${line}: imports "${specifier}"; the Fly Sprites SDK lives only in ${hostRoot}** (ADR 0004) — reach the Computer through the COMPUTER_HOST service binding instead`,
+    );
+  }
+}
+
+// The Fly implementation's own module, and the only files admitted to it.
+const flyModule = "@frockbot/computer/fly";
+const flyImporters = [
+  "computer/fly/",
+  "apps/computer-host/",
+  // The two registration sites. Cut 3 hands the host in from the shell and
+  // takes both off this list.
+  "app/runtime.ts",
+  "apps/cloudflare/src/bot-state.ts",
+  // The workerd rig that proves this implementation runs where the Bot runs.
+  // Cut 3 rebuilds it on the in-memory host and takes this entry off too.
+  "apps/cloudflare/test/",
+];
+
+function mayImportFly(path: string): boolean {
+  return flyImporters.some((allowed) =>
+    allowed.endsWith("/") ? path.startsWith(allowed) : path === allowed,
+  );
+}
+
+function isFlyModule(specifier: string): boolean {
+  return specifier === flyModule || specifier.startsWith(`${flyModule}/`);
+}
+
+for (const path of scan(
+  "{app,applets,apps,computer,core,providers,scripts}/**/*.{ts,tsx,mts,cts,js,mjs,cjs}",
+)) {
+  if (mayImportFly(path)) continue;
+  const source = readFileSync(resolve(repoRoot, path), "utf8");
+  if (!source.includes(flyModule)) continue;
+  for (const { specifier, line } of specifiersOf(source)) {
+    if (!isFlyModule(specifier)) continue;
+    failures.push(
+      `${path}:${line}: imports "${specifier}"; Fly is one implementation of ComputerHostV1 and is importable only from computer/fly/**, apps/computer-host/** and the two registration sites — depend on @frockbot/computer/core/host instead`,
     );
   }
 }

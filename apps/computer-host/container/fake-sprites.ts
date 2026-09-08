@@ -25,7 +25,7 @@ import {
   TARGET_ID_FILE,
   VIEW_TENANT_SERVICE_PREFIX,
   WINDOW_LIVE_MARKER,
-} from "@frockbot/computer/host-runtime";
+} from "@frockbot/computer/fly/runtime";
 import type {
   SpriteCommandHandle,
   SpriteDirentHandle,

@@ -3,6 +3,7 @@ import {
   appletUiArtifactOriginV1,
 } from "@frockbot/applets/preview";
 import {
+  COMPUTER_HOST_CAPABILITIES_V1,
   FOUNDATION_PACKAGES_V1,
   FOUNDATION_PACKAGE_VERSION_V1,
 } from "@frockbot/app/runtime";
@@ -144,6 +145,11 @@ function appHtml(
 </html>`;
 }
 
+/** The Computer host's viewer origins, as `frame-src` sources. */
+const viewerFrameOrigins = COMPUTER_HOST_CAPABILITIES_V1.viewerFrameOrigins
+  .map((origin) => ` ${origin}`)
+  .join("");
+
 function withSecurityHeaders(
   response: Response,
   artifactOrigin: string,
@@ -155,8 +161,10 @@ function withSecurityHeaders(
   secured.headers.set(
     "content-security-policy",
     // Package pages use the anonymous artifact origin. The expanded Computer
-    // viewer frames the Sprite's own noVNC page; both are optional projections
-    // and neither becomes an authority in the hosted client. An
+    // viewer frames a page the Computer host serves, so the origins come from
+    // the host rather than from a literal here — get this wrong and the
+    // desktop frames blank with no error in the app. Both are optional
+    // projections and neither becomes an authority in the hosted client. An
     // Applet's own UI is another page on the same artifact origin, nested by
     // the Applets canvas page, so the origin already named here covers it.
     //
@@ -177,7 +185,7 @@ function withSecurityHeaders(
     // `base-uri 'self'` rather than `'none'` because the document sets a
     // `<base href>` of its own to the content-addressed directory every engine
     // URL is relative to.
-    `default-src 'self'; script-src 'self' 'wasm-unsafe-eval' ${INSIGHTS_SCRIPT_ORIGIN}; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob:; connect-src 'self' ${INSIGHTS_REPORT_ORIGIN} ${applicationUrl.protocol === "https:" ? "wss:" : "ws:"}//${applicationUrl.host}; frame-src ${artifactOrigin} https://*.sprites.app; frame-ancestors 'none'; base-uri 'self'`,
+    `default-src 'self'; script-src 'self' 'wasm-unsafe-eval' ${INSIGHTS_SCRIPT_ORIGIN}; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob:; connect-src 'self' ${INSIGHTS_REPORT_ORIGIN} ${applicationUrl.protocol === "https:" ? "wss:" : "ws:"}//${applicationUrl.host}; frame-src ${artifactOrigin}${viewerFrameOrigins}; frame-ancestors 'none'; base-uri 'self'`,
   );
   return secured;
 }

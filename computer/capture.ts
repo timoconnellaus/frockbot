@@ -1,8 +1,8 @@
+import { ComputerError } from "@frockbot/computer/core";
 import {
-  ComputerError,
-  type ComputerHandle,
+  type ComputerHostSessionV1,
   type ComputerScreenshotV1,
-} from "@frockbot/computer/core";
+} from "@frockbot/computer/core/host";
 import type {
   WorkspaceFilesV1,
   WorkspaceGenerationV1,
@@ -117,7 +117,7 @@ async function pruneComputerScreenshotsV1(
  * retention.
  */
 export async function fileComputerScreenshotV1(input: {
-  computer: ComputerHandle;
+  computer: ComputerHostSessionV1;
   workspace: WorkspaceFilesV1;
   path: WorkspacePathV1;
   writer: WorkspaceWriterV1;

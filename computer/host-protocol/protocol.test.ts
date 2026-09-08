@@ -80,7 +80,7 @@ describe("envelope", () => {
     expect(() =>
       decodeComputerHostRequestV1("open", {
         ...request({ kind: "open" }),
-        spriteName: "frockbot-elsewhere",
+        instanceId: "frockbot-elsewhere",
       }),
     ).toThrow(/unknown field/);
   });
@@ -448,7 +448,7 @@ describe("results", () => {
     const result = {
       version: 1 as const,
       effectId: "effect-1",
-      spriteName: "frockbot-0123456789ab",
+      instanceId: "frockbot-0123456789ab",
       directory: "agent-data/agents/bot-1",
       display: ":100",
       generation: 3,
@@ -470,7 +470,7 @@ describe("results", () => {
       decodeComputerHostOpenResultV1({
         version: 1,
         effectId: "effect-1",
-        spriteName: "frockbot-0123456789ab",
+        instanceId: "frockbot-0123456789ab",
         directory: "agent-data/agents/bot-1",
         generation: 3,
         provisioning,
@@ -657,7 +657,7 @@ describe("open frames", () => {
   const result = {
     version: 1 as const,
     effectId: "effect-1",
-    spriteName: "frockbot-0123456789ab",
+    instanceId: "frockbot-0123456789ab",
     directory: "agent-data/agents/bot-1",
     generation: 1,
     provisioning: {

@@ -8,11 +8,13 @@ import {
   computerBotPathKeyV1,
   COMPUTER_UNCONFIGURED_MESSAGE_V1,
   ComputerError,
+} from "@frockbot/computer/core";
+import {
   decodeComputerDoctorReportV1,
   type ComputerConnectionProgressV1,
   type ComputerControlLease,
-  type ComputerHandle,
-} from "@frockbot/computer/core";
+  type ComputerHostSessionV1,
+} from "@frockbot/computer/core/host";
 import type {
   WorkspaceFilesV1,
   WorkspaceRootV1,
@@ -90,7 +92,7 @@ export interface ComputerBotBackendHost {
     userId: string,
     botId: string,
     effectId: string,
-  ): Promise<ComputerHandle>;
+  ): Promise<ComputerHostSessionV1>;
   now?(): Date;
   newId?(): string;
 }
@@ -679,7 +681,7 @@ export class ComputerBotBackendContribution {
   private async withComputer<T>(
     userId: string,
     command: ComputerCommandV1,
-    run: (computer: ComputerHandle) => Promise<T>,
+    run: (computer: ComputerHostSessionV1) => Promise<T>,
   ): Promise<T> {
     const computer = await this.host.openComputer(
       userId,

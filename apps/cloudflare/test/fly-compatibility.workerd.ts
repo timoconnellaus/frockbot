@@ -27,7 +27,7 @@ describe("Fly provider Workerd compatibility", () => {
     ).mountProvider();
 
     expect(result).toEqual({
-      providerId: "fly-sprite",
+      providerId: "computer-host",
       generation: 1,
     });
   });

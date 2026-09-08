@@ -34,11 +34,11 @@ describe("the audit preview", () => {
     const preview = auditPreviewV1("shell", "computer_exec", {
       command: "printenv",
       env: { OPENAI_API_KEY: "sk-abcdefghijklmnopqrst" },
-      credentialRef: "sprites:user:alice",
+      credentialRef: "computer:user:alice",
     });
     expect(preview).toBe("printenv");
     expect(preview).not.toContain("credentialRef");
-    expect(preview).not.toContain("sprites:user:alice");
+    expect(preview).not.toContain("computer:user:alice");
   });
 
   test("shows a browser action and its url, and an MCP call's shape only", () => {

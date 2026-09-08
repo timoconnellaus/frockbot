@@ -23,7 +23,7 @@ import {
   MAX_STORAGE_OUTPUT,
 } from "./computer.ts";
 import { FakeComputerHost, type FakeComputerRunV1 } from "./host-double.ts";
-import { FLY_WORKSPACE_LAYOUT, FlySpriteComputerProvider } from "./provider.ts";
+import { FLY_WORKSPACE_LAYOUT, FlySpriteComputerHostV1 } from "./provider.ts";
 import { FlyComputerWorkspace, WORKSPACE_CHUNK_BYTES_V1 } from "./workspace.ts";
 
 const USER = "owner";
@@ -354,7 +354,7 @@ async function openWorkspace(
 ) {
   const injected = generations === "none" ? undefined : generations;
   const { host, factory } = hostFor(disk);
-  const provider = new FlySpriteComputerProvider(
+  const provider = new FlySpriteComputerHostV1(
     new FlySpriteComputer({
       identity: { userId: "workspace-user" },
       host: factory,
@@ -366,7 +366,7 @@ async function openWorkspace(
   const computer = await provider.open(
     { userId: USER },
     { botId },
-    { providerId: "fly-sprite", generation: 1 },
+    { providerId: "computer-host", generation: 1 },
   );
   const workspace = computer.workspace;
   if (!workspace) throw new Error("The Fly provider must expose a Workspace");

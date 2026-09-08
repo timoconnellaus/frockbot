@@ -71,8 +71,8 @@ script an answer (exit codes, chunk splits, hangs, 429s), `calls` to read back
 what the host was sent, `file`/`files` to seed and inspect the file map. The
 real host serves none of those routes and the client never calls them.
 
-`test/computer-host-client.workerd.ts` drives `ComputerHostClient` against it
-from inside `ComputerHostClientProbe`, a Durable Object that records each
+`test/computer-host-client.workerd.ts` drives `FlyHostTransportV1` against it
+from inside `FlyHostTransportProbeV1`, a Durable Object that records each
 effect's intent and outcome in real Durable Object storage.
 
 ## Shared harness

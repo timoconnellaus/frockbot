@@ -8,11 +8,12 @@
 // and a sync that cannot run is a recorded outcome rather than a failed Turn.
 import { describe, expect, test } from "bun:test";
 import {
+  type ComputerHostCapabilitiesV1,
+  type ComputerHostSessionV1,
+  type ComputerHostV1,
   computerSyncSummaryV1,
-  type ComputerHandle,
-  type ComputerProvider,
   type ComputerSyncSummaryV1,
-} from "@frockbot/computer/core";
+} from "@frockbot/computer/core/host";
 import { createAgentLoop } from "@frockbot/core/agent-loop";
 import type {
   LlmProvider,
@@ -22,6 +23,11 @@ import type {
 import { createAgentRuntimeHarness } from "@frockbot/app/testkit";
 import { createComputerAgentFeature } from "./agent.js";
 
+/** A host that offers nothing beyond the operations under test. */
+const TEST_HOST_CAPABILITIES: ComputerHostCapabilitiesV1 = {
+  viewerFrameOrigins: [],
+};
+
 const COMPOSITION = {
   generationId: "1970-01-01T00:00:00.000Z:0123456789abcdef",
   artifactSetHash: "a".repeat(64),
@@ -29,7 +35,7 @@ const COMPOSITION = {
 
 interface SyncFixture {
   calls: string[];
-  provider: ComputerProvider;
+  provider: ComputerHostV1;
   /** The change signal the on-Computer watcher reports; move it to force a sync. */
   signal: { value: string | undefined };
   /** What every `reconcile` answers. */
@@ -41,14 +47,16 @@ function fixture(
 ): SyncFixture {
   const calls: string[] = [];
   const signal = { value: "signal-1" as string | undefined };
-  const provider: ComputerProvider = {
+  const provider: ComputerHostV1 = {
     id: "recording",
+    capabilities: TEST_HOST_CAPABILITIES,
     open: (identity, tenant, assignment) => {
       calls.push(`open:${tenant.botId}`);
       return Promise.resolve({
         assignment,
         identity,
         tenant,
+        capabilities: TEST_HOST_CAPABILITIES,
         sync: {
           reconcile: async (reason) => {
             calls.push(`sync:${reason}`);
@@ -113,7 +121,7 @@ function modelRunning(
 }
 
 async function runTurn(
-  provider: ComputerProvider,
+  provider: ComputerHostV1,
   model: LlmProvider,
 ): Promise<SessionEvent[]> {
   const runtime = createAgentRuntimeHarness();

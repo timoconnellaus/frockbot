@@ -1,26 +1,36 @@
 import { describe, expect, test } from "bun:test";
 import {
   ComputerError,
-  ComputerRegistry,
   computerIdentityKeyV1,
-  decodeComputerDoctorReportV1,
   workspaceMountPathV1,
-  type ComputerHandle,
-  type ComputerProvider,
   type WorkspaceLayoutV1,
   normalizeComputerPath,
 } from "./core.js";
+import {
+  ComputerRegistry,
+  decodeComputerDoctorReportV1,
+  type ComputerHostCapabilitiesV1,
+  type ComputerHostSessionV1,
+  type ComputerHostV1,
+} from "./host.js";
 
-function provider(id: string, opened: string[]): ComputerProvider {
+/** A host that offers nothing beyond the operations under test. */
+const TEST_HOST_CAPABILITIES: ComputerHostCapabilitiesV1 = {
+  viewerFrameOrigins: [],
+};
+
+function provider(id: string, opened: string[]): ComputerHostV1 {
   return {
     id,
-    async open(identity, tenant, assignment): Promise<ComputerHandle> {
+    capabilities: TEST_HOST_CAPABILITIES,
+    async open(identity, tenant, assignment): Promise<ComputerHostSessionV1> {
       opened.push(
         `${identity.userId}:${tenant.botId}:${assignment.generation}`,
       );
       return {
         assignment,
         identity,
+        capabilities: TEST_HOST_CAPABILITIES,
         tenant: {
           botId: tenant.botId,
           directory: `agents/${tenant.botId}`,
@@ -187,12 +197,14 @@ describe("ComputerRegistry", () => {
 
   test("rejects operations through a stale handle after provider reassignment", async () => {
     const computers = new ComputerRegistry();
-    const executable = (id: string): ComputerProvider => ({
+    const executable = (id: string): ComputerHostV1 => ({
       id,
+      capabilities: TEST_HOST_CAPABILITIES,
       open: async (identity, tenant, assignment) => ({
         assignment,
         identity,
         tenant,
+        capabilities: TEST_HOST_CAPABILITIES,
         exec: {
           execute: async () => ({
             exitCode: 0,

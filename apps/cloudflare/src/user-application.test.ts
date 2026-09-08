@@ -13,6 +13,7 @@ import {
   APPLETS_UNAVAILABLE_MESSAGE_V1,
   BotTurnRefusedError,
 } from "@frockbot/core/durable";
+import { COMPUTER_HOST_CAPABILITIES_V1 } from "@frockbot/app/runtime";
 
 function rpcBindingFor(state: BotStateBinding): UserBotStateBinding {
   return {
@@ -172,11 +173,15 @@ describe("user application security headers", () => {
     // directory the engine's URLs are relative to.
     expect(policy.get("base-uri")).toEqual(["'self'"]);
     // Package pages use the anonymous UI origin; the expanded Computer viewer
-    // frames the Sprite's own noVNC page.
+    // frames a page the Computer host serves, and the policy names whatever
+    // origins that host declared rather than a literal of its own.
     expect(policy.get("frame-src")).toEqual([
       "https://ui.app.example",
-      "https://*.sprites.app",
+      ...COMPUTER_HOST_CAPABILITIES_V1.viewerFrameOrigins,
     ]);
+    expect(
+      COMPUTER_HOST_CAPABILITIES_V1.viewerFrameOrigins.length,
+    ).toBeGreaterThan(0);
     expect(policy.get("frame-ancestors")).toEqual(["'none'"]);
   });
 

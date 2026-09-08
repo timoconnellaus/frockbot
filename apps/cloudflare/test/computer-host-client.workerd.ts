@@ -1,4 +1,4 @@
-// `ComputerHostClient` in real workerd, from inside a real Durable Object,
+// `FlyHostTransportV1` in real workerd, from inside a real Durable Object,
 // against the fake Computer host on a real service binding.
 //
 // The unit tests in `computer/fly/host-client.test.ts` prove the client's logic
@@ -6,7 +6,7 @@
 // exist here: that a workerd `Fetcher` behaves the way the
 // client assumes when a body streams and when a request aborts, and that a
 // Computer effect leaves a durable record a recovery could read. Both are
-// asserted through `ComputerHostClientProbe`, whose storage is real Durable
+// asserted through `FlyHostTransportProbeV1`, whose storage is real Durable
 // Object storage.
 import { env, runInDurableObject } from "cloudflare:test";
 import { beforeEach, describe, expect, test } from "vitest";
@@ -14,7 +14,7 @@ import type {
   FakeComputerHostCall,
   FakeExecScript,
 } from "./computer-host-fake.ts";
-import type { ComputerHostClientProbe } from "./computer-host-probe.ts";
+import type { FlyHostTransportProbeV1 } from "./computer-host-probe.ts";
 
 const HOST = "http://computer-host.internal";
 
@@ -50,7 +50,7 @@ async function calls(): Promise<FakeComputerHostCall[]> {
 
 async function effects(
   name?: string,
-): Promise<Awaited<ReturnType<ComputerHostClientProbe["effects"]>>> {
+): Promise<Awaited<ReturnType<FlyHostTransportProbeV1["effects"]>>> {
   return probe(name).effects();
 }
 
@@ -282,7 +282,7 @@ describe("the Durable Object's Computer host client", () => {
       userId: "user-open",
     });
     expect(opened.ok).toBe(true);
-    expect(opened.spriteName).toMatch(/^frockbot-fake-/);
+    expect(opened.instanceId).toMatch(/^frockbot-fake-/);
     expect((await calls())[0]?.stream).toBe(true);
   });
 

@@ -39,23 +39,17 @@ import {
   type WorkspaceRootV1,
   type WorkspaceWriterV1,
 } from "@frockbot/core/contracts";
+import { computerBotPathKeyV1, ComputerError } from "@frockbot/computer/core";
 import {
-  computerBotPathKeyV1,
-  ComputerError,
   type ComputerDoctorReportV1,
   type ComputerBackgroundStateV1,
   type ComputerBrowserAction,
-  type ComputerHandle,
+  type ComputerHostSessionV1,
   type ComputerRegistry,
   computerSyncSummaryV1,
   type ComputerSyncReasonV1,
   type ComputerSyncSummaryV1,
-} from "@frockbot/computer/core";
-import {
-  computerGuiRefusalV1,
-  SCRATCH_ROOT,
-  shellGuiCommandV1,
-} from "@frockbot/computer/host-runtime";
+} from "@frockbot/computer/core/host";
 import {
   computerProcessStatusV1,
   COMPUTER_PROCESS_COMMAND_MAX,
@@ -527,7 +521,7 @@ class ComputerTurnSync {
    * again only when the on-Computer watcher says something changed.
    */
   async beforeUse(
-    computer: ComputerHandle,
+    computer: ComputerHostSessionV1,
     sessionId: string,
     signal: AbortSignal,
   ): Promise<void> {
@@ -567,7 +561,10 @@ class ComputerTurnSync {
   }
 
   /** Push after a Turn that used the Computer, and only then. */
-  async afterTurn(computer: ComputerHandle, sessionId: string): Promise<void> {
+  async afterTurn(
+    computer: ComputerHostSessionV1,
+    sessionId: string,
+  ): Promise<void> {
     this.#used = false;
     const sync = computer.sync;
     if (!sync) return;
@@ -602,8 +599,8 @@ class ComputerTurnSync {
 }
 
 async function useComputer<T>(
-  computer: ComputerHandle,
-  run: (computer: ComputerHandle) => Promise<T>,
+  computer: ComputerHostSessionV1,
+  run: (computer: ComputerHostSessionV1) => Promise<T>,
 ): Promise<T> {
   try {
     return await run(computer);
@@ -631,6 +628,13 @@ export function createComputerAgentFeature(
     // One Computer per User: the assignment is keyed by the User,
     // and the Bot attaches to it as a tenant.
     const identity = { userId };
+    // What the host this Bot will open is, read once, from the registry
+    // rather than from a host's own module: the tools describe the Computer
+    // and refuse a command before any Computer has been woken to ask.
+    const capabilities = runtime.computers.capabilities(defaultProviderId);
+    const scratchName = capabilities?.scratchPath
+      ? `${capabilities.scratchPath} (also $FROCKBOT_SCRATCH)`
+      : "$FROCKBOT_SCRATCH";
     const turnSync = new ComputerTurnSync(runtime.sessions);
     const controlPrompt = config.controlRecords
       ? new ComputerControlPromptProjection(config.controlRecords)
@@ -681,7 +685,7 @@ export function createComputerAgentFeature(
       return computer;
     };
     const closePreviewTabs = async (
-      computer: ComputerHandle,
+      computer: ComputerHostSessionV1,
       origins: readonly string[],
       effectId: string,
       signal?: AbortSignal,
@@ -717,7 +721,7 @@ export function createComputerAgentFeature(
         "Pass cwd as an absolute path to run the command in that directory instead of the home directory.",
         "With background:true the command keeps running after this call returns and after this Turn ends, and you get a processId to check later.",
         "A background process runs only while the Computer is awake. Nothing keeps it awake for you: if the Computer hibernates first, the outcome is reported as unknown, with whatever log was durable at the time.",
-        `${SCRATCH_ROOT} (also $FROCKBOT_SCRATCH) is scratch shared with your User's other Bots: it survives hibernation but is not durable and never reaches storage, so keep nothing there you cannot lose.`,
+        `${scratchName} is scratch shared with your User's other Bots: it survives hibernation but is not durable and never reaches storage, so keep nothing there you cannot lose.`,
         "The Computer's GUI is never driven from the shell; use computer_browser and computer_screenshot instead of launching or poking at a browser yourself.",
       ].join(" "),
       inputSchema: {
@@ -748,16 +752,14 @@ export function createComputerAgentFeature(
         if (!decoded) {
           return { content: execInputRefusalV1(input), isError: true };
         }
-        // "The GUI is never driven from the shell" (parity row 33), refused at
-        // the seam where the model can be told why. This is policy and not a
-        // boundary — a regex over a shell string is defeatable, and the
-        // Computer is the User's trust boundary anyway — so it is paired with
-        // a PATH shim on the Computer that prints the same sentence, and both
-        // exist to make the sanctioned surface the easy one.
-        const guiCommand = shellGuiCommandV1(decoded.command);
-        if (guiCommand) {
-          return { content: computerGuiRefusalV1(guiCommand), isError: true };
-        }
+        // "The GUI is never driven from the shell" (parity row 33), refused
+        // before the Computer is woken, in the words of the host that shims
+        // the same commands on its own PATH. Policy and not a boundary — a
+        // regex over a shell string is defeatable, and the Computer is the
+        // User's trust boundary anyway — so both exist only to make the
+        // sanctioned surface the easy one.
+        const refusal = capabilities?.refuseGuiCommand?.(decoded.command);
+        if (refusal) return { content: refusal, isError: true };
         if (decoded.background) {
           return processes
             ? // A launch carries a command and not a directory, so the
@@ -847,7 +849,7 @@ export function createComputerAgentFeature(
      * could not be written.
      */
     const mirrorLog = async (
-      computer: ComputerHandle,
+      computer: ComputerHostSessionV1,
       context: ToolExecutionContext,
       record: ComputerProcessRecordV1,
       status: ComputerProcessStatusV1,
@@ -1140,7 +1142,7 @@ export function createComputerAgentFeature(
      * photograph of the screen is a courtesy to the person watching.
      */
     const fileProgressCapture = async (
-      computer: ComputerHandle,
+      computer: ComputerHostSessionV1,
       botId: string,
       context: ToolExecutionContext,
     ): Promise<void> => {
@@ -1324,7 +1326,7 @@ export function createComputerAgentFeature(
      * the last answer, readable while the Computer sleeps.
      */
     const fileDoctorReport = async (
-      computer: ComputerHandle,
+      computer: ComputerHostSessionV1,
       botId: string,
       report: ComputerDoctorReportV1,
     ): Promise<string | undefined> => {
@@ -1372,7 +1374,7 @@ export function createComputerAgentFeature(
      */
     let selfChecked = false;
     const selfCheck = async (
-      computer: ComputerHandle,
+      computer: ComputerHostSessionV1,
       botId: string,
       signal: AbortSignal,
     ): Promise<void> => {
