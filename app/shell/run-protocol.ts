@@ -555,6 +555,37 @@ interface ProjectionUnitV1 {
 export const UNRECORDED_TOOL_RESULT_TEXT_V1 =
   "No result was recorded for this tool call.";
 
+/** The wrapper every namespaced tool call is journalled and projected under. */
+const CALL_DYNAMIC_TOOL_NAME_V1 = "call_dynamic_tool";
+
+/** The first-party namespace, whose tools are presented under their bare name. */
+const FROCKBOT_NAMESPACE_V1 = "frockbot";
+
+/**
+ * The tool a projected call actually named.
+ *
+ * The projection keeps the wrapper on the wire because that is what the
+ * journal recorded, and the wrapper's input names the tool: every presenter of
+ * a projected call resolves it the same way, the Flutter transcript included
+ * (`apps/native/lib/shell/transcript_model.dart`). A reader that skips this
+ * step shows every first-party tool under one indistinguishable name.
+ */
+export function clientToolCallNameV1(call: {
+  name: string;
+  input?: unknown;
+}): string {
+  if (call.name !== CALL_DYNAMIC_TOOL_NAME_V1) return call.name;
+  const input = call.input;
+  if (typeof input !== "object" || input === null) return call.name;
+  const { namespace, toolName } = input as Record<string, unknown>;
+  if (typeof namespace !== "string" || typeof toolName !== "string") {
+    return call.name;
+  }
+  return namespace === FROCKBOT_NAMESPACE_V1
+    ? toolName
+    : `${namespace}/${toolName}`;
+}
+
 function dynamicToolCallInput(
   value: unknown,
 ): ClientDynamicToolCallInputV1 | undefined {
@@ -633,7 +664,7 @@ function projectionUnits(
       }
       callCount += 1;
       const dynamicInput =
-        event.name === "call_dynamic_tool"
+        event.name === CALL_DYNAMIC_TOOL_NAME_V1
           ? dynamicToolCallInput(event.input)
           : undefined;
       const call: ClientToolCallV1 = {
@@ -1199,7 +1230,7 @@ function decodeEvent(value: unknown): ClientRunEventV1 | undefined {
     const input = Object.hasOwn(call, "input")
       ? decodeDynamicToolCallInput(call.input)
       : undefined;
-    if (input && name !== "call_dynamic_tool") {
+    if (input && name !== CALL_DYNAMIC_TOOL_NAME_V1) {
       throw new Error(
         "run event.call.input is valid only for a dynamic tool call",
       );

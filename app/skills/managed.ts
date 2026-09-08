@@ -171,6 +171,10 @@ into a recipe you can follow later without them.
 
 The Skill is visible to you on your next Turn, not this one. Do not claim to
 have run it in the Turn that wrote it — mentioning a Skill is not running it.
+
+Every reply is a \`send_to_user\` call: use disposition:"continue" while you
+still have work to do, and disposition:"finish" on the send that ends your
+reply.
 `;
 
 /**

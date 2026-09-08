@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { initializeBotSettingsV1 } from "@frockbot/core/configuration";
+import type { StoredRun } from "@frockbot/app/shell/backend-contracts";
+import { projectClientRunV1 } from "@frockbot/app/shell/run-protocol";
 import {
   isSettledSearchRunV1,
   searchRowsFromClientRunV1,
@@ -57,6 +60,64 @@ describe("the settled-run projection", () => {
       "assistant",
     ]);
     expect(rows[1]!.body).toBe("shell\nok");
+  });
+
+  test("indexes the tool a namespaced call actually ran, not its wrapper", () => {
+    const at = "2026-08-31T00:00:00.000Z";
+    const dynamicRun = (namespace: string, toolName: string): StoredRun => ({
+      runId: "run-dynamic",
+      commandFingerprint: "fingerprint",
+      sessionId: "user:session",
+      acceptedAt: at,
+      input: "run the tests",
+      events: [
+        {
+          type: "tool/call",
+          seq: 0,
+          timestamp: at,
+          turn: 1,
+          step: 1,
+          occurrenceId: "tool:1:1:0",
+          name: "call_dynamic_tool",
+          input: { namespace, toolName, arguments: { command: "npm test" } },
+        },
+        {
+          type: "tool/result",
+          seq: 1,
+          timestamp: at,
+          turn: 1,
+          step: 1,
+          occurrenceId: "tool:1:1:0",
+          name: "call_dynamic_tool",
+          content: "ok",
+          isError: false,
+          status: "completed",
+        },
+      ],
+      effectAdmissions: [],
+      status: "completed",
+      responseText: "Tests pass.",
+      phase: "executing",
+      compositionGenerationId: "generation-1",
+      configurationSnapshot: initializeBotSettingsV1("primary"),
+      previousEventCount: 0,
+    });
+
+    const firstParty = searchRowsFromClientRunV1(
+      "bot-a",
+      projectClientRunV1(dynamicRun("frockbot", "computer_exec")),
+    );
+    expect(firstParty.find((entry) => entry.kind === "tool")?.body).toBe(
+      "computer_exec\nok",
+    );
+
+    const external = searchRowsFromClientRunV1(
+      "bot-a",
+      projectClientRunV1(dynamicRun("user-Github--acme", "search_issues")),
+    );
+    expect(external.find((entry) => entry.kind === "tool")?.body).toBe(
+      "user-Github--acme/search_issues\nok",
+    );
   });
 
   test("projects nothing for a run that has not settled", () => {
