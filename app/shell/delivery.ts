@@ -53,6 +53,18 @@ export const conversationDeliveryHooksV1: LoopHooksV1 = {
     return {
       ...request,
       system: `${request.system}\n\nYour previous step ended without delivering a reply. Your assistant text is private. Call \`send_to_user\` now with the answer, result, or blocker. Do not repeat work you have already done.`,
+      // Some providers continue the trailing assistant message even when the
+      // system prompt changes. A labelled runtime instruction makes this a
+      // new model step; it is recorded in the request, never as User input.
+      messages: [
+        ...request.messages,
+        {
+          role: "user",
+          content:
+            '[FrockBot runtime: delivery repair]\nYour previous response was not delivered. Call send_to_user now with the answer, result, or blocker for the original request. For text, use {"payload":{"type":"text","text":"your reply"}}. Do not answer in plain text or repeat completed work.',
+        },
+      ],
+      tools: request.tools.filter((tool) => tool.name === "send_to_user"),
     };
   },
   async stepContinuation(agent, _decision, turn, _step, _signal, next) {

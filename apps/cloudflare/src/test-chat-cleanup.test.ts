@@ -63,8 +63,13 @@ function fixture(
   return { values, storage };
 }
 
-test("only the three authorized test Bots are cleaned, without decoding retired event types", async () => {
-  for (const bot of ["bob-daff7ee3", "native-qa-20260905", "test-n5jJuqCi"]) {
+test("only the authorized test Bots are cleaned, without decoding retired event types", async () => {
+  for (const bot of [
+    "bob-daff7ee3",
+    "native-qa-20260905",
+    "test-n5jJuqCi",
+    "test-99860758",
+  ]) {
     const { values, storage } = fixture(bot);
     await cleanIncidentTestChatsV1(storage);
     expect(values.has("run:old")).toBe(false);

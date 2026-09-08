@@ -1,9 +1,15 @@
 /** One-time cleanup explicitly authorized by the owner for this incident.
- * Remove after the three receipts have been verified in the release.
+ * Remove after the receipts have been verified in the release.
  * There is deliberately no route, configuration knob, or caller-supplied scope.
  */
 const OWNER = "vgpqfaCcwnPlzjYdb2mIfNcOW1YV0SkG";
-const BOTS = new Set(["bob-daff7ee3", "native-qa-20260905", "test-n5jJuqCi"]);
+const BOTS = new Set([
+  "bob-daff7ee3",
+  "native-qa-20260905",
+  "test-n5jJuqCi",
+  // Its retired events also prevent rebuilding the account's search index.
+  "test-99860758",
+]);
 const RECEIPT = "maintenance:chat-reset:2026-09-08";
 const PREFIXES = [
   "run:",
