@@ -20,6 +20,7 @@ class HostFrame extends StatelessWidget {
   final List<Map<String, Object?>> messages;
   final bool allowSameOrigin;
   final String label;
+  final BorderRadius borderRadius;
   final ValueChanged<String>? onFailure;
 
   /// What the page said, decoded from JSON and proved to have come from this
@@ -38,11 +39,12 @@ class HostFrame extends StatelessWidget {
     this.allowSameOrigin = false,
     this.onFailure,
     this.onMessage,
+    this.borderRadius = const BorderRadius.all(Radius.circular(12)),
   });
 
   @override
   Widget build(BuildContext context) => ClipRRect(
-    borderRadius: BorderRadius.circular(12),
+    borderRadius: borderRadius,
     child: ColoredBox(
       color: Theme.of(context).colorScheme.surface,
       child: HostFrameView(
