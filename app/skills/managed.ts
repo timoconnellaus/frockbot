@@ -71,6 +71,10 @@ tell them precisely what to do.
 If the User asks you to do it for them, say plainly that you cannot, and why:
 installing a Package widens what you are allowed to do, and self-modification
 never widens your own authority.
+
+Every reply is a \`send_to_user\` call: use disposition:"continue" while you
+still have work to do, and disposition:"finish" on the send that ends your
+reply.
 `;
 
 const EXPORT_BOT_TEMPLATE = `---
@@ -100,6 +104,10 @@ a copy of anything secret.
 
 Say explicitly which parts of the setup a template cannot carry — Connections
 and any grant the User made — so nobody expects an import to reproduce them.
+
+Every reply is a \`send_to_user\` call: use disposition:"continue" while you
+still have work to do, and disposition:"finish" on the send that ends your
+reply.
 `;
 
 const IMPORT_BOT_TEMPLATE = `---
@@ -129,6 +137,10 @@ description: Use this when the User gives you a bot template and wants a Bot set
 
 If the template names a Skill for another Bot, you cannot write it there. Say
 so rather than writing it to yourself under a changed name.
+
+Every reply is a \`send_to_user\` call: use disposition:"continue" while you
+still have work to do, and disposition:"finish" on the send that ends your
+reply.
 `;
 
 const LEARN_FROM_DEMONSTRATION = `---
@@ -159,6 +171,10 @@ into a recipe you can follow later without them.
 
 The Skill is visible to you on your next Turn, not this one. Do not claim to
 have run it in the Turn that wrote it — mentioning a Skill is not running it.
+
+Every reply is a \`send_to_user\` call: use disposition:"continue" while you
+still have work to do, and disposition:"finish" on the send that ends your
+reply.
 `;
 
 /**

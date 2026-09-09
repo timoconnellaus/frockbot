@@ -75,12 +75,14 @@ describe("a Turn through the gateway, the loaded artifact and the Bot", () => {
       }>;
     }>(userId, botId, "turn-command-503");
     const events = stored?.events ?? [];
+    // Two calls, not three: the first is rejected and retried, and the second
+    // answers with a `send_to_user` that finishes the Turn.
     expect(
       events.filter((event) => event.type === "model/request"),
-    ).toHaveLength(3);
+    ).toHaveLength(2);
     expect(
       events.filter((event) => event.type === "assistant/message"),
-    ).toHaveLength(2);
+    ).toHaveLength(1);
     const retries = events.filter((event) => event.type === "model/retry");
     expect(retries).toHaveLength(1);
     expect(retries[0]).toMatchObject({ classification: "transient" });

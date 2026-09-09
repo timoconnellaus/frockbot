@@ -4,33 +4,53 @@ import { turnTypesByTurnV1 } from "./history.js";
 export const UNSENT_REPLY_REASON_V1 =
   "The model finished without sending a reply. Try again.";
 
-function isSend(name: string): boolean {
-  return name === "send_to_user" || name === "send_message";
-}
-
-/** Derived from the journal, so eviction cannot reset the repair budget. */
+/**
+ * Two independent facts about the Turn, deliberately not one.
+ *
+ * `required` is the final reply still owed to the user: only a finish send
+ * (or a widget/approval, which end the Turn themselves) clears it, so an
+ * interim update never completes the Turn.
+ *
+ * `attempts` counts undelivered model steps *since the last successful send*,
+ * and `repair` says the most recent step was one of them. A send of either
+ * disposition proves the model can reach the user, so it clears both and the
+ * next step gets its full toolset back instead of being locked to the reply
+ * tool for the rest of the Turn.
+ *
+ * The disposition is already durable in tool/call; tie it to a successful send.
+ */
 function delivery(events: readonly SessionEvent[], turn: number) {
-  let required = true;
   let attempts = 0;
+  let repair = false;
+  const finalCalls = new Set<string>();
   for (const event of events) {
     if (!("turn" in event) || event.turn !== turn) continue;
-    if (event.type === "send/to-user") {
-      // A question or approval hands control to the User. A later call in
-      // the same batch must not make delivery repair reopen that Turn.
-      if (event.payload.type === "widget" || event.payload.type === "approval")
-        return { required: false, attempts };
-      required = false;
+    if (event.type === "tool/call" && event.name === "send_to_user") {
+      const input = event.input;
+      if (
+        input &&
+        typeof input === "object" &&
+        "disposition" in input &&
+        input.disposition === "finish"
+      )
+        finalCalls.add(event.occurrenceId);
     }
-    // An acknowledgement before doing work does not deliver its result.
-    if (event.type === "tool/call" && !isSend(event.name)) required = true;
-    if (
-      event.type === "assistant/message" &&
-      event.toolCalls.length === 0 &&
-      required
-    )
+    if (event.type === "send/to-user") {
+      if (
+        finalCalls.has(event.occurrenceId) ||
+        event.payload.type === "widget" ||
+        event.payload.type === "approval"
+      )
+        return { required: false, attempts: 0, repair: false };
+      attempts = 0;
+      repair = false;
+    }
+    if (event.type === "assistant/message" && event.toolCalls.length === 0) {
       attempts++;
+      repair = true;
+    } else if (event.type === "assistant/message") repair = false;
   }
-  return { required, attempts };
+  return { required: true, attempts, repair };
 }
 
 function conversational(events: readonly SessionEvent[], turn: number) {
@@ -49,7 +69,9 @@ export const conversationDeliveryHooksV1: LoopHooksV1 = {
     )
       return request;
     const state = delivery(agent.session.events, start.turn);
-    if (!state.required || state.attempts === 0) return request;
+    // Repair the step that failed to deliver, not the rest of the Turn: a Bot
+    // that has already spoken keeps every tool it needs to finish the work.
+    if (!state.required || !state.repair) return request;
     return {
       ...request,
       system: `${request.system}\n\nYour previous step ended without delivering a reply. Your assistant text is private. Call \`send_to_user\` now with the answer, result, or blocker. Do not repeat work you have already done.`,
@@ -61,7 +83,7 @@ export const conversationDeliveryHooksV1: LoopHooksV1 = {
         {
           role: "user",
           content:
-            '[FrockBot runtime: delivery repair]\nYour previous response was not delivered. Call send_to_user now with the answer, result, or blocker for the original request. For text, use {"payload":{"type":"text","text":"your reply"}}. Do not answer in plain text or repeat completed work.',
+            '[FrockBot runtime: delivery repair]\nYour previous response was not delivered. Call send_to_user now with the answer, result, or blocker for the original request. For text, use {"disposition":"finish","payload":{"type":"text","text":"your reply"}}. Do not answer in plain text or repeat completed work.',
         },
       ],
       tools: request.tools.filter((tool) => tool.name === "send_to_user"),
@@ -71,11 +93,9 @@ export const conversationDeliveryHooksV1: LoopHooksV1 = {
     const decision = await next();
     if (!conversational(agent.session.events, turn)) return decision;
     const state = delivery(agent.session.events, turn);
-    // Repair is a final delivery step. Once it succeeds, another model call
-    // can only repeat the answer or reopen work the Turn already finished.
-    if (state.attempts > 0 && !state.required) return { kind: "stop" };
+    // This also runs on replay after a send/result or step/end was flushed.
+    if (!state.required) return { kind: "stop" };
     if (decision.kind !== "stop") return decision;
-    if (!state.required) return decision;
     if (state.attempts >= 2) throw new Error(UNSENT_REPLY_REASON_V1);
     return { kind: "continue" };
   },

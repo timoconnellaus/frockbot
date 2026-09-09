@@ -282,7 +282,7 @@ describe("what the row is allowed to claim", () => {
         call("tool:1:1:0", "call_dynamic_tool", {
           namespace: "frockbot",
           toolName: "package_author",
-          input: { packageId: "acme", path: "src/index.ts" },
+          arguments: { packageId: "acme", path: "src/index.ts" },
         }),
         result("tool:1:1:0", { content: "written" }),
       ]),
@@ -298,5 +298,30 @@ describe("what the row is allowed to claim", () => {
       outcome: "ok",
     });
     expect(entries[0]?.preview).toContain("acme");
+  });
+
+  test("a machine command called through its namespace still names the machine", async () => {
+    const entries = await auditEntriesFromStoredRunV1(
+      "foreman",
+      run([
+        call("tool:1:1:0", "call_dynamic_tool", {
+          namespace: "frockbot",
+          toolName: "machine_exec",
+          arguments: { command: "rm -rf ~/x", machineId: "994dc2ee-1" },
+        }),
+        result("tool:1:1:0", { content: "done" }),
+      ]),
+    );
+
+    // The machine tools moved into the `frockbot` namespace, so their
+    // arguments arrive inside the wrapper. Reading the wrapper for `machineId`
+    // filed a command that ran on the User's Mac against the Computer, and
+    // `GET /api/audit?target=machine:<id>` never showed it.
+    expect(entries[0]).toMatchObject({
+      toolName: "machine_exec",
+      kind: "shell",
+      target: "machine:994dc2ee-1",
+    });
+    expect(entries[0]?.preview).toContain("rm -rf ~/x");
   });
 });

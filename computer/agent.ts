@@ -705,6 +705,7 @@ export function createComputerAgentFeature(
 
     const execTool: ToolDefinition = {
       name: "computer_exec",
+      namespace: "frockbot",
       // The desktop half of the Computer: the shell, the screen, and the
       // processes a shell left running. Offered to an `executor` subagent,
       // which has the full work toolset, and to a `computerUse` one, whose
@@ -1202,6 +1203,7 @@ export function createComputerAgentFeature(
      */
     const screenshotTool: ToolDefinition = {
       name: "computer_screenshot",
+      namespace: "frockbot",
       // The desktop half of the Computer: the shell, the screen, and the
       // processes a shell left running. Offered to an `executor` subagent,
       // which has the full work toolset, and to a `computerUse` one, whose
@@ -1400,6 +1402,7 @@ export function createComputerAgentFeature(
      */
     const doctorTool: ToolDefinition = {
       name: "computer_doctor",
+      namespace: "frockbot",
       idempotent: true,
       // The desktop half of the Computer: the shell, the screen, and the
       // processes a shell left running. Offered to an `executor` subagent,
@@ -1472,6 +1475,7 @@ export function createComputerAgentFeature(
      */
     const processCheckTool: ToolDefinition = {
       name: "computer_process_check",
+      namespace: "frockbot",
       idempotent: true,
       // The desktop half of the Computer: the shell, the screen, and the
       // processes a shell left running. Offered to an `executor` subagent,
@@ -1502,6 +1506,7 @@ export function createComputerAgentFeature(
 
     const processLogsTool: ToolDefinition = {
       name: "computer_process_logs",
+      namespace: "frockbot",
       idempotent: true,
       // The desktop half of the Computer: the shell, the screen, and the
       // processes a shell left running. Offered to an `executor` subagent,
@@ -1541,6 +1546,7 @@ export function createComputerAgentFeature(
 
     const processStopTool: ToolDefinition = {
       name: "computer_process_stop",
+      namespace: "frockbot",
       // The desktop half of the Computer: the shell, the screen, and the
       // processes a shell left running. Offered to an `executor` subagent,
       // which has the full work toolset, and to a `computerUse` one, whose
@@ -1571,6 +1577,7 @@ export function createComputerAgentFeature(
 
     const browserTool: ToolDefinition = {
       name: "computer_browser",
+      namespace: "frockbot",
       // Page-level browser control, which `browserUse` exists for.
       admission: {
         turnTypes: ["chat", "automation", "subagent"],

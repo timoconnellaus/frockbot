@@ -432,6 +432,7 @@ export const SKILL_LOAD_INPUT_REFUSAL =
 export function createSkillLoadTool(catalog: SkillCatalog): ToolDefinition {
   return {
     name: "skill_load",
+    namespace: "frockbot",
     // A general work tool: the full toolset an `executor` subagent gets, and
     // not part of the narrow reach of `browserUse`, `computerUse`, or the two
     // video roles. See `@frockbot/app/subagents` `SUBAGENT_TOOL_REACH_V1`.
@@ -517,6 +518,7 @@ export function createSkillWriteTool(
   const quota = host.quota ?? SKILL_QUOTA_DEFAULTS_V1;
   return {
     name: "skill_write",
+    namespace: "frockbot",
     // A general work tool: the full toolset an `executor` subagent gets, and
     // not part of the narrow reach of `browserUse`, `computerUse`, or the two
     // video roles. See `@frockbot/app/subagents` `SUBAGENT_TOOL_REACH_V1`.

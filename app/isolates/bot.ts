@@ -36,6 +36,7 @@ import {
   type BotSettingsViewV1,
 } from "@frockbot/core/configuration";
 import type { BotIdentity } from "@frockbot/core/durable";
+import { frockbotToolCallV1 } from "@frockbot/core/tools";
 import { memoryScopeRootV1 } from "@frockbot/app/memory/roots";
 import {
   readBotSettingsV1,
@@ -344,11 +345,14 @@ async function invokeBotToolForIsolateV1(
     });
     await session.flush();
   }
-  const call = {
+  // The journal keeps the Package's own call — the tool it named and the input
+  // it gave — and the registry is reached the way a first-party tool is now
+  // reached at all: through the `frockbot` namespace.
+  const call = frockbotToolCallV1({
     id: request.callId,
     name: request.name,
     input: request.input,
-  };
+  });
   const context = {
     botId: input.botId,
     agentId: input.botId,

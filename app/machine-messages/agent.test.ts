@@ -1,3 +1,4 @@
+import { frockbotToolCall, discoverFrockbotTools } from "@frockbot/app/testkit";
 // The seven Messages tools: what they refuse, what they queue, and the one of
 // them that asks a person first.
 import { describe, expect, test } from "bun:test";
@@ -150,7 +151,7 @@ async function invoke(
   input: unknown,
   turnType: TurnTypeV1 = "chat",
 ) {
-  const call: ToolCall = { id: "call-1", name, input };
+  const call: ToolCall = frockbotToolCall(name, input, "call-1");
   const context = contextFor(turnType);
   const preparation = await harness.runtime.tools.prepare(call, context);
   if (preparation.kind === "denied") return preparation.result;
@@ -161,12 +162,14 @@ describe("admission", () => {
   test("all seven tools are chat-only, and the ceiling is the manifest's", async () => {
     const harness = await mount();
     try {
-      const names = (turnType: TurnTypeV1) =>
-        harness.runtime.tools.schemas({ turnType }).map((tool) => tool.name);
+      const names = async (turnType: TurnTypeV1) =>
+        (await discoverFrockbotTools(harness.runtime.tools, { turnType })).map(
+          (tool) => tool.name,
+        );
       for (const tool of MACHINE_MESSAGES_TOOL_NAMES_V1) {
-        expect(names("chat")).toContain(tool);
+        expect(await names("chat")).toContain(tool);
         for (const turnType of ["automation", "subagent"] as const) {
-          expect(names(turnType)).not.toContain(tool);
+          expect(await names(turnType)).not.toContain(tool);
         }
       }
       expect(machineMessagesAdmissionCeilingV1()).toEqual(["chat"]);

@@ -1,3 +1,4 @@
+import { frockbotToolCall, discoverFrockbotTools } from "@frockbot/app/testkit";
 // The machine tools: what they admit, what they refuse, and the one thing they
 // never do — run anything.
 import { describe, expect, test } from "bun:test";
@@ -145,7 +146,7 @@ async function invoke(
   input: unknown,
   turnType: TurnTypeV1 = "chat",
 ) {
-  const call: ToolCall = { id: "call-1", name, input };
+  const call: ToolCall = frockbotToolCall(name, input, "call-1");
   const context = contextFor(turnType);
   const preparation = await harness.runtime.tools.prepare(call, context);
   if (preparation.kind === "denied") return preparation.result;
@@ -163,18 +164,20 @@ describe("machine tool admission", () => {
   test("the registry tools are on every turn type and control is chat only", async () => {
     const harness = await mount();
     try {
-      const names = (turnType: TurnTypeV1) =>
-        harness.runtime.tools.schemas({ turnType }).map((tool) => tool.name);
+      const names = async (turnType: TurnTypeV1) =>
+        (await discoverFrockbotTools(harness.runtime.tools, { turnType })).map(
+          (tool) => tool.name,
+        );
       for (const turnType of ["chat", "automation", "subagent"] as const) {
-        expect(names(turnType)).toContain(MACHINE_LIST_TOOL_V1);
-        expect(names(turnType)).toContain(MACHINE_COMMAND_CHECK_TOOL_V1);
+        expect(await names(turnType)).toContain(MACHINE_LIST_TOOL_V1);
+        expect(await names(turnType)).toContain(MACHINE_COMMAND_CHECK_TOOL_V1);
       }
       for (const tool of CONTROL_TOOLS) {
-        expect(names("chat")).toContain(tool);
+        expect(await names("chat")).toContain(tool);
         // Row 49 ships `partial`: an automation Turn has no voice to ask an
         // approval with, so it does not get a tool that needs one.
-        expect(names("automation")).not.toContain(tool);
-        expect(names("subagent")).not.toContain(tool);
+        expect(await names("automation")).not.toContain(tool);
+        expect(await names("subagent")).not.toContain(tool);
       }
     } finally {
       await harness.dispose();
@@ -196,12 +199,12 @@ describe("machine tool admission", () => {
   test("a Turn with no writer gets the registry and nothing that reaches a laptop", async () => {
     const harness = await mount({ writer: false });
     try {
-      const names = harness.runtime.tools
-        .schemas({ turnType: "chat" })
-        .map((tool) => tool.name);
+      const names = (
+        await discoverFrockbotTools(harness.runtime.tools, { turnType: "chat" })
+      ).map((tool) => tool.name);
       expect(names).toEqual([
-        MACHINE_LIST_TOOL_V1,
         MACHINE_COMMAND_CHECK_TOOL_V1,
+        MACHINE_LIST_TOOL_V1,
         "get_dynamic_tools",
         "call_dynamic_tool",
       ]);

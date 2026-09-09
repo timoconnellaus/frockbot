@@ -11,8 +11,7 @@
 // must see while the share is private: 404.
 import { SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
-import { TOOL_CALL_TRIGGER } from "../harness/miniflare.ts";
-import { dynamicToolInputV1 } from "../dynamic-tools.ts";
+import { frockbotToolCallPrompt } from "../harness/miniflare.ts";
 import {
   asUser,
   expectOkJson,
@@ -42,12 +41,12 @@ async function writeSkill(userId: string, botId: string): Promise<void> {
     await postAsUser(userId, `/api/bots/${botId}/turns`, {
       schemaVersion: 1,
       commandId: "template-skill-write",
-      text: `${TOOL_CALL_TRIGGER}skill_write:${JSON.stringify({
+      text: frockbotToolCallPrompt("skill_write", {
         name: "Reconcile ledger",
         description: "Use this when reconciling the ledger.",
         body: SKILL_BODY,
         slug: SKILL_SLUG,
-      })}`,
+      }),
     }),
   )) as {
     events: Array<{ type: string; content?: string; isError?: boolean }>;
@@ -91,12 +90,7 @@ describe("exporting a Bot as a shareable template", () => {
       await postAsUser(userId, `/api/bots/${botId}/turns`, {
         schemaVersion: 1,
         commandId: "template-export-1",
-        text: `${TOOL_CALL_TRIGGER}call_dynamic_tool:${JSON.stringify(
-          dynamicToolInputV1({
-            namespace: "frockbot",
-            toolName: "bot_export_template",
-          }),
-        )}`,
+        text: frockbotToolCallPrompt("bot_export_template"),
       }),
     )) as {
       events: Array<{

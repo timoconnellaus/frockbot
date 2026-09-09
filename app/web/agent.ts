@@ -434,6 +434,7 @@ export function createWebFetchToolDefinitionV1(
 ): ToolDefinition {
   return {
     name: WEB_FETCH_TOOL_NAME_V1,
+    namespace: "frockbot",
     // A general work tool: the reach an `executor` subagent has, and not the
     // narrow reach of `browserUse`, `computerUse`, or the two video roles.
     admission: { subagentRoles: ["executor"] },

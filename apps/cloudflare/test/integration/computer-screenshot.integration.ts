@@ -16,7 +16,10 @@ import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { computerBotKey } from "@frockbot/computer/fly";
 import type { FakeExecScript } from "../computer-host-fake.ts";
-import { TOOL_CALL_TRIGGER } from "../harness/miniflare.ts";
+import {
+  callsFrockbotTool,
+  frockbotToolCallPrompt,
+} from "../harness/miniflare.ts";
 import {
   asUser,
   expectOkJson,
@@ -96,14 +99,12 @@ describe("a Turn whose model asks for a screenshot", () => {
       await postAsUser(userId, `/api/bots/${BOT_ID}/turns`, {
         schemaVersion: 1,
         commandId: "computer-screenshot-1",
-        text: `${TOOL_CALL_TRIGGER}computer_screenshot:{}`,
+        text: frockbotToolCallPrompt("computer_screenshot"),
       }),
     )) as ClientTurn;
 
-    const call = turn.events.find(
-      (event) =>
-        event.type === "tool/call" &&
-        event.call?.name === "computer_screenshot",
+    const call = turn.events.find((event) =>
+      callsFrockbotTool(event, "computer_screenshot"),
     );
     expect(call, "the Turn made no computer_screenshot call").toBeDefined();
     const result = turn.events.find(

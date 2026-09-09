@@ -6,7 +6,7 @@
 // reaching the Bot object's Applet authority and the Workspace.
 import { env } from "cloudflare:workers";
 import { describe, expect, test } from "vitest";
-import { toolCallTriggerPrompt } from "./harness/miniflare.ts";
+import { frockbotToolCallPrompt } from "./harness/miniflare.ts";
 import { provisionBot } from "./provision-bot.ts";
 
 function suffix(): string {
@@ -65,7 +65,7 @@ describe("the Applets feature inside a real Bot", () => {
         runId: `run-list-${id}`,
         sessionId,
         acceptedAt: new Date().toISOString(),
-        text: toolCallTriggerPrompt(["applet_list", {}]),
+        text: frockbotToolCallPrompt("applet_list"),
       },
     });
 
@@ -80,10 +80,9 @@ describe("the Applets feature inside a real Bot", () => {
         runId: `run-create-${id}`,
         sessionId,
         acceptedAt: new Date().toISOString(),
-        text: toolCallTriggerPrompt([
-          "applet_create",
-          { displayName: "Weekly Todos" },
-        ]),
+        text: frockbotToolCallPrompt("applet_create", {
+          displayName: "Weekly Todos",
+        }),
       },
     });
 
@@ -107,7 +106,7 @@ describe("the Applets feature inside a real Bot", () => {
         runId: `run-list-again-${id}`,
         sessionId,
         acceptedAt: new Date().toISOString(),
-        text: toolCallTriggerPrompt(["applet_list", {}]),
+        text: frockbotToolCallPrompt("applet_list"),
       },
     });
     const relisted = toolResult(again as never);

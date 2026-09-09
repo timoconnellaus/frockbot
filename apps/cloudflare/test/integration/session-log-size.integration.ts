@@ -19,9 +19,10 @@ useApplicationArtifact();
 const HISTORY_TEXT_BYTES = 29_000;
 const MODEL_STEPS = 60;
 // This proves a storage bound, not a latency bound. Sixty real model steps
-// finish in about 40 seconds locally but can cross Vitest's 60-second default
-// on a loaded CI runner.
-const SIXTY_STEP_TIMEOUT_MS = 120_000;
+// finish in about 40 seconds on a fast machine but have taken two minutes on a
+// loaded one, so the cap is well clear of Vitest's 60-second default rather
+// than a measurement of the run.
+const SIXTY_STEP_TIMEOUT_MS = 180_000;
 
 describe("a sixty-step Turn through the production gateway", () => {
   it(
@@ -49,8 +50,8 @@ describe("a sixty-step Turn through the production gateway", () => {
         schemaVersion: 1,
         commandId: runId,
         text: `${repeatedToolCallPrompt(
-          // Reserve the final two steps for send_to_user and its completion.
-          MODEL_STEPS - 2,
+          // Reserve the final step for the send_to_user that finishes the Turn.
+          MODEL_STEPS - 1,
           "get_dynamic_tools",
           {},
         )}\n${"p".repeat(HISTORY_TEXT_BYTES)}`,

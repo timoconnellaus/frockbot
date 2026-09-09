@@ -79,6 +79,21 @@ describe("the transcript index", () => {
     ).toHaveLength(1);
   });
 
+  test("finds a namespaced tool by its displayed name and by its bare name", () => {
+    const { index: store } = index();
+    store.insert([
+      row({ seq: 0, kind: "tool", body: "frockbot/computer_exec\nok" }),
+    ]);
+    const find = (query: string) =>
+      store.query({ schemaVersion: 1, query, kinds: ["tool"] }, NO_ARCHIVED)
+        .hits;
+    // The spelling the Work view puts in front of a person, copied verbatim.
+    expect(find("frockbot/computer_exec")).toHaveLength(1);
+    // And the tool's own name, which is what someone types from memory.
+    expect(find("computer_exec")).toHaveLength(1);
+    expect(find("machine_exec")).toHaveLength(0);
+  });
+
   test("hides an archived Bot's rows unless they are opted in", () => {
     const { index: store } = index();
     store.insert([row({ botId: "bot-archived" })]);

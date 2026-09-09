@@ -21,7 +21,7 @@ import { env } from "cloudflare:workers";
 import { runInDurableObject } from "cloudflare:test";
 import { describe, expect, test } from "vitest";
 import { provisionBot, provisionSiblingBot } from "./provision-bot.ts";
-import { toolCallTriggerPrompt } from "./harness/miniflare.ts";
+import { frockbotToolCallPrompt } from "./harness/miniflare.ts";
 import { subagentDurableObjectNameV1 } from "@frockbot/app/subagents/storage-keys";
 import { taskDesktopLeaseOwnerV1 } from "@frockbot/app/subagents/records";
 import type { TaskListViewV1 } from "@frockbot/app/subagents/shared";
@@ -124,7 +124,7 @@ async function dispatch(
   runId: string,
   call: { description: string; prompt: string; type?: string },
 ): Promise<{ runId: string; events: unknown[] }> {
-  return turn(identity, runId, toolCallTriggerPrompt(["Task", call]));
+  return turn(identity, runId, frockbotToolCallPrompt("Task", call));
 }
 
 /** Drives the child's alarm until the parent's record is terminal. */
@@ -220,7 +220,7 @@ describe("subagent roles and the shared desktop", () => {
     // the role does not admit: exactly the case defence in depth is for.
     await dispatch(identity, "dispatch-browser", {
       description: "Read one page",
-      prompt: toolCallTriggerPrompt(["computer_exec", { command: "whoami" }]),
+      prompt: frockbotToolCallPrompt("computer_exec", { command: "whoami" }),
       type: "browserUse",
     });
     const taskId = (await tasks(identity)).tasks[0]!.taskId;
@@ -302,7 +302,7 @@ describe("subagent roles and the shared desktop", () => {
     const stopped = await turn(
       first,
       "stop-gui",
-      toolCallTriggerPrompt(["task_stop", { taskId: holder }]),
+      frockbotToolCallPrompt("task_stop", { taskId: holder }),
     );
     expect(results(stopped)[0]?.isError).toBe(false);
 
@@ -348,10 +348,10 @@ describe("subagent roles and the shared desktop", () => {
     const queued = await turn(
       identity,
       "message-turn",
-      toolCallTriggerPrompt([
-        "task_message",
-        { taskId, message: "stop at chapter three" },
-      ]),
+      frockbotToolCallPrompt("task_message", {
+        taskId,
+        message: "stop at chapter three",
+      }),
     );
     expect(results(queued)[0]?.isError).toBe(false);
     expect(results(queued)[0]?.content).toContain("1 are waiting");
@@ -371,7 +371,7 @@ describe("subagent roles and the shared desktop", () => {
     const checked = await turn(
       identity,
       "check-turn",
-      toolCallTriggerPrompt(["task_check", { taskId }]),
+      frockbotToolCallPrompt("task_check", { taskId }),
     );
     expect(results(checked)[0]?.content).not.toContain("are waiting");
   });

@@ -1,5 +1,11 @@
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, renameSync, rmSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+} from "node:fs";
 import { resolve, join } from "node:path";
 
 export const categories: Record<string, string[][]> = {
@@ -24,6 +30,7 @@ export const categories: Record<string, string[][]> = {
       "@frockbot/cloudflare",
       "test:e2e",
       "--forbid-only",
+      "--retries=2",
     ],
   ],
   build: [["bun", "run", "build"]],
@@ -79,6 +86,7 @@ export async function validate(
       `Validation already running. If interrupted, remove ${lock} and retry.`,
     );
   }
+  const registry = mkdtempSync(join(cache, "registry-"));
   try {
     for (const name of names) {
       if (snapshot(root) !== sha)
@@ -112,6 +120,8 @@ export async function validate(
       for (const command of categories[name]!) {
         const child = Bun.spawn(command, {
           cwd: root,
+          // Wrangler otherwise shares service discovery across all worktrees.
+          env: { ...process.env, WRANGLER_REGISTRY_PATH: registry },
           stdin: "inherit",
           stdout: "inherit",
           stderr: "inherit",
@@ -138,6 +148,7 @@ export async function validate(
     if (snapshot(root) !== sha)
       throw new Error("Commit changed during validation");
   } finally {
+    rmSync(registry, { recursive: true, force: true });
     rmSync(lock, { recursive: true, force: true });
   }
 }

@@ -19,7 +19,7 @@ import { describe, expect, it } from "vitest";
 import { machineRoutePathV1 } from "@frockbot/core/machine-protocol";
 import { MachineAgentDriverV1 } from "@frockbot/app/machine/testing";
 import type { AuditEntryV1 } from "@frockbot/app/audit";
-import { toolCallTriggerPrompt } from "../harness/miniflare.ts";
+import { frockbotToolCallPrompt } from "../harness/miniflare.ts";
 import {
   asUser,
   expectOkJson,
@@ -126,10 +126,10 @@ describe("running a command on a registered machine", () => {
       userId,
       botId,
       "machine-exec-ask",
-      toolCallTriggerPrompt([
-        "machine_exec",
-        { machineId: offer.machineId, command: COMMAND },
-      ]),
+      frockbotToolCallPrompt("machine_exec", {
+        machineId: offer.machineId,
+        command: COMMAND,
+      }),
     );
     // The card is rendered in the transcript, and the Turn that sent it is
     // over: the Bot has nothing left to do until a person answers.
@@ -177,10 +177,9 @@ describe("running a command on a registered machine", () => {
       userId,
       botId,
       "machine-exec-next",
-      toolCallTriggerPrompt([
-        "machine_command_check",
-        { commandId: approvalId },
-      ]),
+      frockbotToolCallPrompt("machine_command_check", {
+        commandId: approvalId,
+      }),
     );
     const texts = requestTexts(await storedRun(userId, botId, next.runId));
     expect(
@@ -240,10 +239,10 @@ describe("running a command on a registered machine", () => {
       userId,
       botId,
       "machine-deny-ask",
-      toolCallTriggerPrompt([
-        "machine_exec",
-        { machineId: offer.machineId, command: "rm -rf /" },
-      ]),
+      frockbotToolCallPrompt("machine_exec", {
+        machineId: offer.machineId,
+        command: "rm -rf /",
+      }),
     );
     const approvalId = asked.events.find(
       (event) =>
@@ -265,10 +264,9 @@ describe("running a command on a registered machine", () => {
       userId,
       botId,
       "machine-deny-check",
-      toolCallTriggerPrompt([
-        "machine_command_check",
-        { commandId: approvalId },
-      ]),
+      frockbotToolCallPrompt("machine_command_check", {
+        commandId: approvalId,
+      }),
     );
     const read = checked.events.find((event) => event.type === "tool/result");
     expect(read?.content).toContain("was denied by the user");

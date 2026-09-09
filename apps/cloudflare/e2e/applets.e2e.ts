@@ -33,7 +33,10 @@ import {
   E2E_CONNECTION_LABEL,
   E2E_MODEL_LABEL,
 } from "./fixtures.ts";
-import { E2E_OLLAMA_GOOD_API_KEY, e2eToolCallPrompt } from "./harness.ts";
+import {
+  E2E_OLLAMA_GOOD_API_KEY,
+  e2eFrockbotToolCallPrompt,
+} from "./harness.ts";
 
 const PHONE = { width: 390, height: 844 } as const;
 const DESKTOP = { width: 1280, height: 800 } as const;
@@ -140,7 +143,7 @@ async function runTool(
   // Turn that calls no tool at all — which is what "the directory never held
   // the Applet" looked like from here.
   await answerInputs([
-    [composer, `${text}\n${e2eToolCallPrompt(name, input)}`],
+    [composer, `${text}\n${e2eFrockbotToolCallPrompt(name, input)}`],
   ]);
   await press(sem(page, "send-button"));
   // The composer keeps the draft until the submission is accepted, so an empty

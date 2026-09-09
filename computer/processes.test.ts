@@ -1,3 +1,4 @@
+import { frockbotToolCall, discoverFrockbotTools } from "@frockbot/app/testkit";
 // `computer_exec{background:true}` and the three process tools, as a Turn
 // drives them.
 //
@@ -150,7 +151,7 @@ async function call(
     signal: new AbortController().signal,
   };
   const prepared = await harness.tools.prepare(
-    { id: crypto.randomUUID(), name, input },
+    frockbotToolCall(name, input, crypto.randomUUID()),
     context,
   );
   if (prepared.kind !== "ready") throw new Error(prepared.result.content);
@@ -235,7 +236,9 @@ describe("computer_exec with background:true", () => {
     expect(computer.calls).toEqual([]);
     // And the tools that read a process are not offered either.
     expect(
-      harness.tools.schemas({ turnType: "chat" }).map((tool) => tool.name),
+      (await discoverFrockbotTools(harness.tools, { turnType: "chat" })).map(
+        (tool) => tool.name,
+      ),
     ).not.toContain("computer_process_check");
     await harness.dispose();
   });
@@ -348,19 +351,21 @@ describe("checking a background process", () => {
 describe("the process tools' admission", () => {
   test("offers check and logs on an automation turn, beside computer_exec", async () => {
     const harness = await mount(fakeComputer(), storage());
-    const named = (turnType: "chat" | "automation") =>
-      harness.tools.schemas({ turnType }).map((tool) => tool.name);
+    const named = async (turnType: "chat" | "automation") =>
+      (await discoverFrockbotTools(harness.tools, { turnType })).map(
+        (tool) => tool.name,
+      );
 
     // A Routine has to be able to collect the outcome of a job a chat Turn
     // started, so these two declare their turn types rather than inheriting
     // whatever the default happens to be.
-    expect(named("automation")).toContain("computer_process_check");
-    expect(named("automation")).toContain("computer_process_logs");
+    expect(await named("automation")).toContain("computer_process_check");
+    expect(await named("automation")).toContain("computer_process_logs");
     // `stop` is admitted wherever `computer_exec` is: ending a process is no
     // narrower than starting one.
-    expect(named("automation")).toContain("computer_exec");
-    expect(named("automation")).toContain("computer_process_stop");
-    expect(named("chat")).toContain("computer_process_stop");
+    expect(await named("automation")).toContain("computer_exec");
+    expect(await named("automation")).toContain("computer_process_stop");
+    expect(await named("chat")).toContain("computer_process_stop");
     await harness.dispose();
   });
 });
@@ -368,29 +373,32 @@ describe("the process tools' admission", () => {
 describe("the Computer tools' subagent roles", () => {
   test("browserUse gets the browser and nothing else on the box", async () => {
     const harness = await mount(fakeComputer(), storage());
-    const named = (subagentRole: string) =>
-      harness.tools
-        .schemas({ turnType: "subagent", subagentRole })
-        .map((tool) => tool.name);
+    const named = async (subagentRole: string) =>
+      (
+        await discoverFrockbotTools(harness.tools, {
+          turnType: "subagent",
+          subagentRole,
+        })
+      ).map((tool) => tool.name);
 
     // `browserUse` is page-level Chrome: the browser, and not the shell, the
     // screen, or the processes a shell left behind.
-    expect(named("browserUse")).toEqual([
+    expect(await named("browserUse")).toEqual([
       "computer_browser",
       "get_dynamic_tools",
       "call_dynamic_tool",
     ]);
-    expect(named("browserUse")).not.toContain("computer_exec");
-    expect(named("computerUse")).toContain("computer_exec");
-    expect(named("computerUse")).toContain("computer_screenshot");
-    expect(named("computerUse")).toContain("computer_browser");
-    expect(named("executor")).toContain("computer_exec");
+    expect(await named("browserUse")).not.toContain("computer_exec");
+    expect(await named("computerUse")).toContain("computer_exec");
+    expect(await named("computerUse")).toContain("computer_screenshot");
+    expect(await named("computerUse")).toContain("computer_browser");
+    expect(await named("executor")).toContain("computer_exec");
     // The two video roles have no Computer at all.
-    expect(named("watchVideo")).toEqual([
+    expect(await named("watchVideo")).toEqual([
       "get_dynamic_tools",
       "call_dynamic_tool",
     ]);
-    expect(named("videoReview")).toEqual([
+    expect(await named("videoReview")).toEqual([
       "get_dynamic_tools",
       "call_dynamic_tool",
     ]);

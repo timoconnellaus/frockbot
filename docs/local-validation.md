@@ -18,6 +18,10 @@ Dependencies must be installed from the committed lockfile (`bun install
 --frozen-lockfile`). Receipts assume the installed dependencies and local test
 environment remain intact; after changing either, rerun with `--force`.
 
+Each run isolates Wrangler service discovery so concurrent worktrees cannot
+replace one another’s local services. Browser checks allow the same two retries
+as the previous CI suite and reject focused `.only` tests.
+
 An interrupted validation can leave `.local-validation/running`. Once the
 process has stopped, remove that directory and retry. Failed checks remove their
 previous receipt. The hook validates the outgoing commit, including peeled tag

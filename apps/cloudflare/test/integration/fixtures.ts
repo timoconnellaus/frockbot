@@ -36,6 +36,9 @@ export {
  * only has to name the tools and their input.
  */
 export {
+  callsFrockbotTool,
+  frockbotToolCall,
+  frockbotToolCallPrompt,
   repeatedToolCallPrompt,
   toolCallTriggerPrompt,
 } from "../harness/miniflare.ts";

@@ -19,7 +19,7 @@ import { env } from "cloudflare:workers";
 import { evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { describe, expect, test } from "vitest";
 import { provisionBot } from "./provision-bot.ts";
-import { toolCallTriggerPrompt } from "./harness/miniflare.ts";
+import { frockbotToolCallPrompt } from "./harness/miniflare.ts";
 import { subagentDurableObjectNameV1 } from "@frockbot/app/subagents/storage-keys";
 import type {
   TaskListViewV1,
@@ -107,7 +107,7 @@ async function dispatch(
   runId: string,
   call: { description: string; prompt: string },
 ): Promise<{ runId: string; events: unknown[] }> {
-  return turn(identity, runId, toolCallTriggerPrompt(["Task", call]));
+  return turn(identity, runId, frockbotToolCallPrompt("Task", call));
 }
 
 /** Drive the child's alarm until the parent's record is terminal. */
@@ -246,7 +246,7 @@ describe("the subagent lifecycle across two Durable Objects", () => {
     const stopping = await turn(
       identity,
       "stop-turn",
-      toolCallTriggerPrompt(["task_stop", { taskId }]),
+      frockbotToolCallPrompt("task_stop", { taskId }),
     );
     const results = (
       stopping.events as Array<{

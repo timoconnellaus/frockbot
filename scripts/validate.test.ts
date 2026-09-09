@@ -111,3 +111,24 @@ test("remote main advancement blocks even a conflict-free branch", () => {
   expect(() => requireCurrentMain(local, "origin")).not.toThrow();
   expect(() => requireCurrentMain(local, join(remote, "missing"))).toThrow();
 });
+
+test("validation gives each run its own local service registry", async () => {
+  const root = fixture();
+  categories.probe = [
+    [
+      process.execPath,
+      "-e",
+      'await Bun.write(".local-validation/registry-path", process.env.WRANGLER_REGISTRY_PATH!)',
+    ],
+  ];
+  await validate(root, ["probe"]);
+  const first = readFileSync(
+    join(root, ".local-validation/registry-path"),
+    "utf8",
+  );
+  expect(first.startsWith(join(root, ".local-validation"))).toBe(true);
+  await validate(root, ["probe"], true);
+  expect(
+    readFileSync(join(root, ".local-validation/registry-path"), "utf8"),
+  ).not.toBe(first);
+});

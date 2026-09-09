@@ -338,6 +338,32 @@ interface ResolvedDynamicCall {
   registered: RegisteredTool;
 }
 
+/**
+ * The call a first-party tool is reached by, named rather than discovered.
+ *
+ * Every first-party tool but the Shell's own send and hand-off is registered
+ * in the `frockbot` namespace, so the registry only knows it under the
+ * `call_dynamic_tool` envelope. A model gets there through discovery; the
+ * dispatch sites inside the Bot — a page's direct tool, a Package's
+ * `schedule` grant — already know the tool they mean, and build the same
+ * envelope here so they cannot drift from it one at a time.
+ */
+export function frockbotToolCallV1(call: {
+  id: string;
+  name: string;
+  input: unknown;
+}): ToolCall {
+  return {
+    id: call.id,
+    name: CALL_DYNAMIC_TOOL_NAME,
+    input: {
+      namespace: FROCKBOT_TOOL_NAMESPACE,
+      toolName: call.name,
+      arguments: call.input ?? {},
+    },
+  };
+}
+
 export class ToolRegistry implements ToolExecution {
   private nativeDefinitions = new Map<string, RegisteredTool>();
   private dynamicDefinitions = new Map<string, Map<string, RegisteredTool>>();
@@ -376,7 +402,13 @@ export class ToolRegistry implements ToolExecution {
     systemPrompt?.register({
       id: "dynamic-tool-catalog",
       order: 70,
-      render: (context) => this.renderDynamicToolCatalog(context.turnType),
+      render: (context) =>
+        this.renderDynamicToolCatalog({
+          turnType: context.turnType,
+          ...(context.subagentRole === undefined
+            ? {}
+            : { subagentRole: context.subagentRole }),
+        }),
     });
   }
 
@@ -920,8 +952,11 @@ export class ToolRegistry implements ToolExecution {
     };
   }
 
-  private renderDynamicToolCatalog(turnType: TurnTypeV1): string {
-    const namespaces = this.availableNamespaces({ turnType });
+  private renderDynamicToolCatalog(admission: {
+    turnType: TurnTypeV1;
+    subagentRole?: string;
+  }): string {
+    const namespaces = this.availableNamespaces(admission);
     if (namespaces.length === 0) return "";
     const entries = namespaces.map((namespace) => {
       const attributes = [

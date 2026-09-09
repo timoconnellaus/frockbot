@@ -1,3 +1,4 @@
+import { frockbotToolCall, discoverFrockbotTools } from "@frockbot/app/testkit";
 import { describe, expect, test } from "bun:test";
 import type { ToolExecutionContext } from "@frockbot/core/contracts";
 import { createAgentRuntimeHarness } from "@frockbot/app/testkit";
@@ -249,7 +250,9 @@ describe("the web-fetch Capability enablement", () => {
     for (const turnType of ["chat", "automation", "subagent"] as const) {
       expect({
         turnType,
-        names: runtime.tools.schemas({ turnType }).map((schema) => schema.name),
+        names: (await discoverFrockbotTools(runtime.tools, { turnType })).map(
+          (schema) => schema.name,
+        ),
       }).toEqual({
         turnType,
         names: ["web_fetch", "get_dynamic_tools", "call_dynamic_tool"],

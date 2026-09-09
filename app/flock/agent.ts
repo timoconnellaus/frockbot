@@ -400,6 +400,7 @@ export function createBotUpdateTool(
 ): ToolDefinition {
   return {
     name: "bot_update",
+    namespace: "frockbot",
     description:
       "Change your own name, description, title, sidebar visibility, or update notifications. Only the fields you pass change; everything else stays exactly as it is. Renaming yourself is announced in the conversation. This cannot archive or delete you — only your User can do that.",
     inputSchema: BOT_UPDATE_SCHEMA as unknown as Record<string, unknown>,
@@ -533,6 +534,7 @@ export function createBotCreateTool(
 ): ToolDefinition {
   return {
     name: "bot_create",
+    namespace: "frockbot",
     description:
       "Create a new Bot in your User's flock, with a name and an optional description that becomes its profile. It starts with no capabilities of its own beyond what your User's own create gives a new Bot, and follows your User's default model. There is no matching delete: only your User can remove a Bot.",
     inputSchema: BOT_CREATE_SCHEMA as unknown as Record<string, unknown>,
@@ -620,6 +622,7 @@ export function createBotMessageTool(
 ): ToolDefinition {
   return {
     name: BOT_MESSAGE_TOOL_V1,
+    namespace: "frockbot",
     description:
       "Ask one of your User's other Bots a question. Use a target_id from <teammates>. The other Bot runs an agent Turn and its send_to_user-style reply is returned here as this tool result. Do not message yourself or fan out speculatively.",
     inputSchema: BOT_MESSAGE_SCHEMA as unknown as Record<string, unknown>,
@@ -702,7 +705,7 @@ export function createInboundAgentPromptSectionV1(
     order: 93,
     render: (context) => {
       if (context.turnType !== "agent" || !host.inboundAgent) return "";
-      return `Bot ${promptText(host.inboundAgent.fromBotName)} (${promptText(host.inboundAgent.fromBotId)}) asked you the current question. Answer it directly with send_to_user; that answer returns to the asking Bot.`;
+      return `Bot ${promptText(host.inboundAgent.fromBotName)} (${promptText(host.inboundAgent.fromBotId)}) asked you the current question. Answer it directly with a send_to_user call carrying disposition:"finish"; that answer returns to the asking Bot.`;
     },
   };
 }

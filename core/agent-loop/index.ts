@@ -435,13 +435,15 @@ class LoopAgent implements Agent, LoopRuntime {
           // policy before eviction. Re-evaluate that decision from the durable
           // journal instead of treating zero tool calls as a terminal Turn.
           if (
-            latestAssistant.toolCalls.length === 0 &&
-            (await this.#stepShouldStop(
+            await this.#stepShouldStop(
               openTurn,
               latestStep,
-              { kind: "stop" },
+              {
+                kind:
+                  latestAssistant.toolCalls.length === 0 ? "stop" : "continue",
+              },
               signal,
-            ))
+            )
           ) {
             return { kind: "settled", outcome };
           }

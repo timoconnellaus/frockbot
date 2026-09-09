@@ -4,8 +4,8 @@
 // request:
 //
 //   1. with the feature off, the seven tools are not in the catalog at all —
-//      the recorded `model/request.tools` is the proof, because that is what
-//      the Bot was actually told it could do;
+//      what a real `get_dynamic_tools` over the `frockbot` namespace answers is
+//      the proof, because that is how the Bot finds out what it can do;
 //   2. the User turns it on from the settings surface, and they appear;
 //   3. `machine_messages_check_permissions` round-trips over the machine
 //      routes, and what the Mac reports is what the gate then believes;
@@ -18,7 +18,11 @@ import { describe, expect, it } from "vitest";
 import { machineRoutePathV1 } from "@frockbot/core/machine-protocol";
 import type { MachineCommandV1 } from "@frockbot/core/machine-protocol";
 import { MachineAgentDriverV1 } from "@frockbot/app/machine/testing";
-import { toolCallTriggerPrompt } from "../harness/miniflare.ts";
+import {
+  frockbotToolCallPrompt,
+  toolCallTriggerPrompt,
+} from "../harness/miniflare.ts";
+import { decodeDiscoveredCatalogV1 } from "../dynamic-tools.ts";
 import {
   asUser,
   expectOkJson,
@@ -26,7 +30,6 @@ import {
   ORIGIN,
   postAsUser,
   provisionThroughGateway,
-  readStoredRunWithEventsV1,
   useApplicationArtifact,
 } from "./fixtures.ts";
 
@@ -40,7 +43,6 @@ interface TurnView {
     content?: string;
     isError?: boolean;
     payload?: { type?: string; approvalId?: string; action?: string };
-    request?: { tools?: Array<{ name: string }> };
   }>;
 }
 
@@ -50,19 +52,6 @@ const PERMISSIONS = {
   automation: true,
   checkedAt: "2026-09-01T00:00:00.000Z",
 } as const;
-
-/** Every tool name the Bot durably recorded offering the model on one run. */
-async function offeredTools(
-  userId: string,
-  botId: string,
-  runId: string,
-): Promise<string[]> {
-  const run = await readStoredRunWithEventsV1<TurnView>(userId, botId, runId);
-  expect(run).toBeDefined();
-  return run!.events
-    .filter((event) => event.type === "model/request")
-    .flatMap((event) => (event.request?.tools ?? []).map((tool) => tool.name));
-}
 
 function toolResults(turn: TurnView): Array<{
   content?: string;
@@ -82,9 +71,37 @@ async function turn(
     await postAsUser(userId, `/api/bots/${botId}/turns`, {
       schemaVersion: 1,
       commandId,
-      text: toolCallTriggerPrompt([tool, input]),
+      text: frockbotToolCallPrompt(tool, input),
     }),
   )) as TurnView;
+}
+
+/**
+ * The machine tools the Bot can reach on one Turn, read the way the model
+ * reads them: a real `get_dynamic_tools` search. First-party tools are
+ * discovered on demand rather than listed by name in the request, so what
+ * discovery answers — not the offered schemas — is what the Bot can do.
+ */
+async function discoverableMachineTools(
+  userId: string,
+  botId: string,
+  commandId: string,
+): Promise<string[]> {
+  const discovery = (await expectOkJson(
+    await postAsUser(userId, `/api/bots/${botId}/turns`, {
+      schemaVersion: 1,
+      commandId,
+      text: toolCallTriggerPrompt([
+        "get_dynamic_tools",
+        { pattern: "^machine_" },
+      ]),
+    }),
+  )) as TurnView;
+  const result = toolResults(discovery)[0];
+  expect(result?.isError).toBe(false);
+  return decodeDiscoveredCatalogV1(result!.content!).namespaces.flatMap(
+    (namespace) => namespace.tools.map((tool) => tool.tool),
+  );
 }
 
 /** The User turns the feature on, through the settings routes they would use. */
@@ -170,19 +187,16 @@ describe("Messages.app on a registered Mac", () => {
     });
     await device.enroll(offer.code);
 
-    // 1. Off by default. The Bot is not told the tools exist, so it cannot be
+    // 1. Off by default. The Bot cannot discover the tools, so it cannot be
     //    talked into trying one — which is what a feature gate is for.
-    const before = await turn(
+    const before = await discoverableMachineTools(
       userId,
       botId,
       "messages-before",
-      "machine_list",
-      {},
     );
-    const offeredBefore = await offeredTools(userId, botId, before.runId);
-    expect(offeredBefore).toContain("machine_list");
+    expect(before).toContain("machine_list");
     expect(
-      offeredBefore.filter((name) => name.startsWith("machine_messages_")),
+      before.filter((name) => name.startsWith("machine_messages_")),
     ).toEqual([]);
 
     // 2. The User turns it on.
@@ -197,7 +211,11 @@ describe("Messages.app on a registered Mac", () => {
       "machine_messages_check_permissions",
       { machineId: offer.machineId },
     );
-    const offeredAfter = await offeredTools(userId, botId, checked.runId);
+    const after = await discoverableMachineTools(
+      userId,
+      botId,
+      "messages-after",
+    );
     for (const name of [
       "machine_messages_check_permissions",
       "machine_messages_find_chats",
@@ -207,7 +225,7 @@ describe("Messages.app on a registered Mac", () => {
       "machine_messages_fetch_attachment",
       "machine_messages_send",
     ]) {
-      expect(offeredAfter).toContain(name);
+      expect(after).toContain(name);
     }
     expect(toolResults(checked)[0]?.isError).toBe(false);
     const answeredCheck = await device.runOnce();

@@ -4,12 +4,15 @@
 //
 // Nothing here calls a tool directly. The stubbed model answers with a
 // `tool_calls` stream when a Turn's user message carries
-// {@link TOOL_CALL_TRIGGER}, so the Agent loop inside the Bot Durable Object
+// {@link frockbotToolCallPrompt}, so the Agent loop inside the Bot Durable Object
 // prepares, admits, journals and executes each call exactly as it would for a
 // real model, and every assertion is on the durable `tool/result` a browser
 // reads back.
 import { describe, expect, it } from "vitest";
-import { TOOL_CALL_TRIGGER } from "../harness/miniflare.ts";
+import {
+  callsFrockbotTool,
+  frockbotToolCallPrompt,
+} from "../harness/miniflare.ts";
 import {
   asUser,
   expectOkJson,
@@ -46,18 +49,14 @@ async function turnCalling(
     await postAsUser(userId, `/api/bots/${botId}/turns`, {
       schemaVersion: 1,
       commandId,
-      text: `${TOOL_CALL_TRIGGER}${name}:${JSON.stringify(input)}`,
+      text: frockbotToolCallPrompt(name, input),
     }),
   )) as ClientTurn;
 }
 
 /** The durable result of the named call, error or not. */
 function toolOutcome(turn: ClientTurn, name: string): ToolOutcome {
-  const call = turn.events.find(
-    (event) =>
-      event.type === "tool/call" &&
-      (event as { call: { name: string } }).call.name === name,
-  );
+  const call = turn.events.find((event) => callsFrockbotTool(event, name));
   expect(call, `the Turn made no ${name} call`).toBeDefined();
   const callId = (call as { call: { id: string } }).call.id;
   const result = turn.events.find(

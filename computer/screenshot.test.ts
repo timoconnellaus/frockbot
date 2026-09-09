@@ -1,3 +1,4 @@
+import { frockbotToolCall, discoverFrockbotTools } from "@frockbot/app/testkit";
 // `computer_screenshot`: parity row 25.
 //
 // The subject is what the tool *files*, not what `scrot` produced. Three rules
@@ -111,7 +112,7 @@ async function executeTool(
     signal: new AbortController().signal,
   };
   const prepared = await harness.tools.prepare(
-    { id: crypto.randomUUID(), name, input },
+    frockbotToolCall(name, input, crypto.randomUUID()),
     context,
   );
   if (prepared.kind !== "ready") throw new Error(prepared.result.content);
@@ -259,7 +260,9 @@ describe("computer_screenshot", () => {
     );
 
     expect(
-      harness.tools.schemas({ turnType: "chat" }).map((schema) => schema.name),
+      (await discoverFrockbotTools(harness.tools, { turnType: "chat" })).map(
+        (schema) => schema.name,
+      ),
     ).not.toContain("computer_screenshot");
     await harness.dispose();
   });

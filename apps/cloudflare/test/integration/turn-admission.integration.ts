@@ -176,6 +176,7 @@ describe("turn admission through the gateway and the Bot", () => {
       toolCallTriggerPrompt([
         "send_to_user",
         {
+          disposition: "finish",
           payload: {
             type: "widget",
             widget: { prompt: "Which day?", options: ["Tuesday", "Thursday"] },
@@ -247,9 +248,24 @@ describe("turn admission through the gateway and the Bot", () => {
       userId,
       botId,
       toolCallTriggerPrompt(
-        ["send_to_user", { payload: { type: "text", text: "On it." } }],
-        ["send_to_user", { payload: { type: "text", text: "Looking now." } }],
-        ["send_to_user", { payload: { type: "text", text: "Booked." } }],
+        [
+          "send_to_user",
+          {
+            disposition: "continue",
+            payload: { type: "text", text: "On it." },
+          },
+        ],
+        [
+          "send_to_user",
+          {
+            disposition: "continue",
+            payload: { type: "text", text: "Looking now." },
+          },
+        ],
+        [
+          "send_to_user",
+          { disposition: "finish", payload: { type: "text", text: "Booked." } },
+        ],
       ),
       "admission-stack-1",
     );
@@ -283,10 +299,14 @@ describe("turn admission through the gateway and the Bot", () => {
       userId,
       botId,
       toolCallTriggerPrompt(
-        ["send_message", { payload: { type: "text", text: "Booked." } }],
+        [
+          "send_to_user",
+          { disposition: "finish", payload: { type: "text", text: "Booked." } },
+        ],
         [
           "send_to_user",
           {
+            disposition: "finish",
             payload: {
               type: "widget",
               widget: { prompt: "Anything else?", options: ["No"] },
@@ -319,8 +339,21 @@ describe("turn admission through the gateway and the Bot", () => {
       userId,
       botId,
       toolCallTriggerPrompt(
-        ["send_to_user", { payload: { type: "text", text: "On it." } }],
-        ["computer_exec", { command: `echo ${marker}` }],
+        [
+          "send_to_user",
+          {
+            disposition: "continue",
+            payload: { type: "text", text: "On it." },
+          },
+        ],
+        [
+          "call_dynamic_tool",
+          {
+            namespace: "frockbot",
+            toolName: "computer_exec",
+            arguments: { command: `echo ${marker}` },
+          },
+        ],
       ),
       "admission-ack-1",
     );
@@ -338,7 +371,7 @@ describe("turn admission through the gateway and the Bot", () => {
     // the transcript draws it.
     const exec = turn.events.find(
       (event) =>
-        event.type === "tool/call" && event.call?.name === "computer_exec",
+        event.type === "tool/call" && event.call?.name === "call_dynamic_tool",
     );
     expect(exec?.call?.id).toBeDefined();
     const execResult = turn.events.findIndex(
