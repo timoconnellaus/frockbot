@@ -496,9 +496,11 @@ selector over them, and `ViewSurfacePage`'s `chrome` flag is off inside it
 because the region already carries the title. On the phone each entry is a page.
 
 **The rest of PR 8.** The completions badge is `RoutineInboxBadge` in the
-`header-actions` region: a Routine firing has no `send_to_user` and its Turn is
-filtered out of the visible transcript, so a count is the only place a
-completion becomes visible. "Mark all read" means the
+`header-actions` region: a silent Routine firing is filtered out of the visible
+transcript, so a count is the only place that completion becomes visible. A
+firing that spoke — an explicit `send_to_user`, or the message a broken firing
+commits in its place — is an ordinary message in the conversation instead; see
+[notifications](notifications.md). "Mark all read" means the
 entries the document carried — an empty `entryIds` on the wire acknowledges
 everything, including a firing that landed a second ago and has never been on
 screen.
