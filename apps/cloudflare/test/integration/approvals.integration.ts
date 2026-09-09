@@ -6,8 +6,9 @@
 // decision and answers a replay with the same body; and the Bot's next
 // conversational Turn is run on a model request that carries the answer.
 //
-// A Bot with notifications off is checked too, because an approval is not an
-// update: muting silences chatter, not a question that has stopped the Bot.
+// A Bot with notifications off is checked too: an approval is an ordinary
+// message, so mute silences its alert while the card still raises the unread
+// badge the conversation clears.
 import {
   env,
   runDurableObjectAlarm,
@@ -242,25 +243,53 @@ describe("approval cards through the gateway", () => {
     ).toBe(false);
   });
 
-  it("notifies a muted Bot's User anyway, and expires a card nobody answered", async () => {
+  it("badges a muted Bot's User without waking them, and expires a card nobody answered", async () => {
     const userId = freshUserId("approvals-muted");
     const botId = "approvals-muted-bot";
-    // A new Bot's notifications are off. That is the mute, and it gates
-    // updates — not a question the Bot has stopped on.
     await provisionThroughGateway({ userId, botId });
+    // Mute the Bot. An approval is a message like any other: it is counted,
+    // and it wakes nobody.
+    const settings = (await expectOkJson(
+      await asUser(userId, `/api/bots/${botId}/settings`),
+    )) as { revision: number };
+    await expectOkJson(
+      await postAsUser(userId, `/api/bots/${botId}/settings`, {
+        schemaVersion: 1,
+        type: "bot/update-notifications",
+        commandId: `mute-${botId}`,
+        expectedRevision: settings.revision,
+        botId,
+        notifications: { enabled: false },
+      }),
+    );
 
-    await askForApproval(userId, botId, "ap-muted");
+    const asked = await askForApproval(userId, botId, "ap-muted");
 
     const notifications = (await expectOkJson(
       await asUser(userId, `/api/bots/${botId}/notifications`),
     )) as {
       notifications: Array<{ notificationId: string; urgency?: string }>;
     };
-    expect(
-      notifications.notifications.find(
-        (intent) => intent.notificationId === "approval:ap-muted",
-      ),
-    ).toMatchObject({ urgency: "critical" });
+    expect(notifications.notifications).toEqual([]);
+
+    // The card is still unread, named by the message the transcript drew, so
+    // opening the conversation clears it.
+    const directory = (await expectOkJson(
+      await asUser(userId, "/api/bots/unread"),
+    )) as {
+      unread: Array<{
+        botId: string;
+        count: number;
+        unread: boolean;
+        lastMessageId?: string;
+      }>;
+    };
+    const badged = directory.unread.find((view) => view.botId === botId);
+    expect(badged).toMatchObject({
+      count: 1,
+      unread: true,
+      lastMessageId: `${asked.runId}:send:0`,
+    });
 
     // Nobody clicks. The deadline arrives, and the Bot's own alarm answers.
     await runInDurableObject(

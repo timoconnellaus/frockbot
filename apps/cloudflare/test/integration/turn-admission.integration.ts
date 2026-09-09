@@ -191,6 +191,10 @@ describe("turn admission through the gateway and the Bot", () => {
     ).toEqual([
       {
         type: "send/to-user",
+        // The send's durable ordinal, which is how the client names the
+        // message this Turn produced (`<runId>:send:<ordinal>`) and how a read
+        // it sends back names the same one.
+        ordinal: 0,
         payload: {
           type: "widget",
           widget: { prompt: "Which day?", options: ["Tuesday", "Thursday"] },
