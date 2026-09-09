@@ -119,6 +119,34 @@ void main() {
     },
   );
 
+  test('names each send by the ordinal the cloud minted, not its position', () {
+    // A Turn that outgrew the wire budget arrives with its earliest sends
+    // dropped and a truncation marker in their place. The read the cloud can
+    // match is `run-a:send:7`, which is what the surviving line has to be
+    // called however few sends this client received.
+    final lines = projectRuns([
+      run(
+        runId: 'run-a',
+        input: 'Long turn',
+        events: [
+          {'type': 'run/events-truncated', 'omittedInteractions': 7},
+          {
+            'type': 'send/to-user',
+            'payload': {'type': 'text', 'text': 'Last'},
+            'ordinal': 7,
+          },
+        ],
+      ),
+    ]);
+
+    expect(
+      lines
+          .where((line) => line.role == LineRole.assistant && !line.empty)
+          .map((line) => line.id),
+      ['run-a:send:7'],
+    );
+  });
+
   group('the order a thread is drawn in', () {
     /*
      * The production sweep: a message is sent, and while its reply is

@@ -152,11 +152,14 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         !panelOpen &&
         openRun == null &&
         ModalRoute.of(context)?.isCurrent == true;
-    push.reading(viewing && messageId != null ? botId : null);
     final view = activity.unread[botId];
-    if (!viewing ||
-        messageId == null ||
-        view?.lastMessageId != messageId ||
+    // Presence is only claimed for the message the cloud says is the latest and
+    // this device is actually showing. Claiming it for anything else asks the
+    // server to hold an alert back for a message nobody is looking at.
+    final showingLatest =
+        viewing && messageId != null && view?.lastMessageId == messageId;
+    push.reading(showingLatest ? botId : null);
+    if (!showingLatest ||
         ((view?.count ?? 0) == 0 && view?.manuallyUnread != true) ||
         (view?.manuallyUnread == true && clearManualForBot != botId)) {
       return;

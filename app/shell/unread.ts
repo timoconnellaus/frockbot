@@ -6,7 +6,8 @@ import {
   canonicalCommandFingerprintV1,
   isPublicIdentifier,
 } from "@frockbot/core/configuration";
-import type { BotIdentity } from "@frockbot/core/durable";
+import { NOTIFICATION_PREFIX, type BotIdentity } from "@frockbot/core/durable";
+import { PUSH_READ_KEY } from "@frockbot/app/notifications/storage-keys";
 import type { ShellBotStateV1 } from "./backend-state.js";
 import { runWorkingV1 } from "./reads.js";
 import { isVisibleRunV1 } from "./run-protocol.js";
@@ -451,14 +452,6 @@ export function projectBotUnreadViewV1(
   state: UnreadStateV1,
   cursors: readonly string[],
   lastMessage?: SidebarMessagePreviewV1,
-  /**
-   * Unacknowledged Routine failures. An automation Turn deliberately does not
-   * advance the activity cursor, so a Routine failing every minute badged
-   * nothing at all — the one Bot the User most needed to look at was the one
-   * the sidebar stayed quiet about. A failure is the Bot addressing its User,
-   * so it counts here even though the firing that produced it does not.
-   */
-  _automationFailures = 0,
   /** True while a Turn of this Bot's is running. Drawn as the row's ring. */
   working = false,
 ): BotUnreadViewV1 {
@@ -847,7 +840,6 @@ export async function readUnread(
     unreadState,
     [...messages.keys()].map((key) => key.slice(MESSAGE_PREFIX.length)),
     await sidebarPreview(state, storedPreview, index),
-    0,
     await runWorkingV1(state, index[0]?.runId),
   );
 }
@@ -953,9 +945,9 @@ export async function executeUnreadCommand(
       };
     }
     if (command.type === "bot/mark-read") {
-      await transaction.put("shell:push-read", { cursor: next.lastSeenCursor });
+      await transaction.put(PUSH_READ_KEY, { cursor: next.lastSeenCursor });
       const notices = await transaction.list<{ notificationId: string }>({
-        prefix: "notification:",
+        prefix: NOTIFICATION_PREFIX,
       });
       for (const [key, notice] of notices) {
         if (

@@ -24,4 +24,6 @@ The one-time, repeatable `notification-state-cleanup.ts` cleanup removes disposa
 
 Android native Firebase changes require a full Shorebird release through `scripts/native-update.py release`, followed by publishing and `adb install -r`; they cannot ship as a Dart-only patch. Deploy the backend before installing the message-cursor client.
 
+Read cursors are message cursors, which the `1.1.0` build cannot decode, so this release raises both the app version and `minimumNativeVersion` to `1.2.0`: an install that is not upgraded is told to update rather than left with a broken sidebar. The release name comes from `apps/native/pubspec.yaml`, so the APK and the gate cannot disagree. A read command an older build left behind is discarded on load instead of retried.
+
 Check real-device delivery with the conversation focused, another Bot selected, the app backgrounded, and the process stopped normally. Verify bursts, notification navigation, mute, notification permission denied, read-on-another-device, logout, and offline catch-up. Android force-stop is a separate OS state: FCM delivery resumes after the user opens the app again.

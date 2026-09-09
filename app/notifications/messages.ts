@@ -2,6 +2,7 @@ import type { SessionEvent } from "@frockbot/core/contracts";
 import type { BotSettingsViewV1 } from "@frockbot/core/configuration";
 import type { StoredRunV1 } from "@frockbot/core/durable";
 import { BOT_CONFIGURATION_KEY } from "../settings/bot.js";
+import { PUSH_OUTBOX_PREFIX } from "./storage-keys.js";
 import {
   MESSAGE_PREFIX,
   MESSAGE_SEQUENCE_KEY,
@@ -11,8 +12,6 @@ import {
   advanceUnreadActivityV1,
 } from "../shell/unread.js";
 
-export const PUSH_OUTBOX_PREFIX = "shell:push:";
-export const PUSH_READ_KEY = "shell:push-read";
 export interface MessageNotice {
   notificationId: string;
   messageId: string;

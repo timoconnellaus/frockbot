@@ -239,14 +239,15 @@ describe("the unread projection", () => {
     expect(view).toMatchObject({ count: 0, capped: false, unread: false });
   });
 
-  test("does not add a second category count to message unread", () => {
+  test("counts only the messages the person has not seen", () => {
     const state = advanceUnreadActivityV1(emptyUnreadStateV1(), {
       cursor: cursor(2),
       at: "2026-08-31T00:02:00.000Z",
     });
-    expect(
-      projectBotUnreadViewV1("alpha", state, index(2), undefined, 7),
-    ).toMatchObject({ count: 2, unread: true });
+    expect(projectBotUnreadViewV1("alpha", state, index(2))).toMatchObject({
+      count: 2,
+      unread: true,
+    });
   });
 
   test("carries the already-bounded latest message without deriving it", () => {

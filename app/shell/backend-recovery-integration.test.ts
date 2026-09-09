@@ -19,7 +19,8 @@ import {
   readUnread,
   UNREAD_STATE_KEY,
 } from "./unread.js";
-import { messageRecords, PUSH_READ_KEY } from "../notifications/messages.js";
+import { messageRecords } from "../notifications/messages.js";
+import { PUSH_READ_KEY } from "../notifications/storage-keys.js";
 import { createShellBotBackendContribution } from "./backend.js";
 import {
   botTurnCommandFingerprintV1,

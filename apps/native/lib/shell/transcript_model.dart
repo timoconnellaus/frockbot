@@ -243,18 +243,26 @@ const knownFailureCopy = <String>{
       : (notice: copy, retry: false);
 }
 
-List<SendPayloadLine> _sendsFrom(List<Object?> events) {
-  final sends = <SendPayloadLine>[];
+/// Each send with the ordinal the cloud names it by.
+///
+/// The ordinal counts the Turn's durable sends, and the projection drops old
+/// ones when a Turn outgrows the wire budget, so the position in this list is
+/// not the message's identity. A read the cloud can match has to carry the
+/// ordinal the cloud minted.
+List<({SendPayloadLine send, int ordinal})> _sendsFrom(List<Object?> events) {
+  final sends = <({SendPayloadLine send, int ordinal})>[];
   for (final event in events) {
     if (event is! Map || event['type'] != 'send/to-user') continue;
     final payload = event['payload'];
-    sends.add(
-      SendPayloadLine(
+    final ordinal = event['ordinal'];
+    sends.add((
+      send: SendPayloadLine(
         payload is Map && payload['type'] is String
             ? Map<String, Object?>.from(payload)
             : null,
       ),
-    );
+      ordinal: ordinal is int ? ordinal : sends.length,
+    ));
   }
   return sends;
 }
@@ -343,13 +351,13 @@ List<TranscriptLine> projectRuns(List<Map<String, dynamic>> runs) {
     for (var index = 0; index < sends.length; index++) {
       lines.add(
         TranscriptLine(
-          id: '$runId:send:$index',
+          id: '$runId:send:${sends[index].ordinal}',
           runId: runId,
           role: LineRole.assistant,
           text: '',
           at: admittedAt,
           status: LineStatus.completed,
-          sends: [sends[index]],
+          sends: [sends[index].send],
         ),
       );
     }

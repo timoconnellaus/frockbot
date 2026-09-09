@@ -1074,7 +1074,11 @@ describe("client run protocol v1", () => {
     // Version 3 carries agent-origin markers; older bodies still decode.
     expect(projected.schemaVersion).toBe(3);
     expect(projected.events).toEqual([
-      { type: "send/to-user", payload: { type: "text", text: "On it." } },
+      {
+        type: "send/to-user",
+        payload: { type: "text", text: "On it." },
+        ordinal: 0,
+      },
       { type: "tool/call", call: { id: "tool-1", name: "lookup" } },
       {
         type: "tool/result",
@@ -1088,6 +1092,7 @@ describe("client run protocol v1", () => {
           type: "widget",
           widget: { prompt: "Which day?", options: ["Tue", "Thu"] },
         },
+        ordinal: 1,
       },
       { type: "wake/parent", message: "Paid." },
     ]);
@@ -1125,7 +1130,14 @@ describe("client run protocol v1", () => {
     expect(projected.events.at(-1)).toEqual({
       type: "send/to-user",
       payload: { type: "text", text: "send-599" },
+      ordinal: 599,
     });
+    // The ordinal names the durable send, so a read of the newest message is
+    // still `<runId>:send:599` after 89 earlier sends were dropped — its
+    // position in this projection is 510.
+    expect(
+      projected.events.filter((event) => event.type === "send/to-user")[0],
+    ).toMatchObject({ ordinal: 89 });
     expect(
       decodeClientRunListV1({
         schemaVersion: 1,

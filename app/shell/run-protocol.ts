@@ -250,6 +250,13 @@ export type ClientRunEventV1 =
   | {
       type: "send/to-user";
       payload: SendToUserPayloadV1;
+      /**
+       * Which of the Turn's sends this is, counted over the Turn's durable
+       * events. The message the cloud names is `<runId>:send:<ordinal>`, and
+       * truncation drops sends from the projection, so a position in this
+       * list is not that identity — this is.
+       */
+      ordinal: number;
     }
   /**
    * A child Turn's hand-off to its parent. Projected because it is durable
@@ -684,6 +691,7 @@ function projectionUnits(
   const units: ProjectionUnitV1[] = [];
   const byOccurrence = new Map<string, ProjectionUnitV1>();
   let callCount = 0;
+  let sendCount = 0;
   let projectedIncompleteSync = false;
   for (const event of events) {
     if (event.type === "tool/call") {
@@ -742,9 +750,12 @@ function projectionUnits(
       unit.droppable = true;
     } else if (event.type === "send/to-user") {
       units.push({
-        events: [{ type: "send/to-user", payload: event.payload }],
+        events: [
+          { type: "send/to-user", payload: event.payload, ordinal: sendCount },
+        ],
         droppable: true,
       });
+      sendCount += 1;
     } else if (event.type === "wake/parent") {
       units.push({
         events: [
@@ -1307,10 +1318,15 @@ function decodeEvent(value: unknown): ClientRunEventV1 | undefined {
     };
   }
   if (event.type === "send/to-user") {
-    exactKeys(event, ["type", "payload"], "run event");
+    exactKeys(event, ["type", "payload", "ordinal"], "run event");
+    const ordinal = event.ordinal;
+    if (!Number.isSafeInteger(ordinal) || (ordinal as number) < 0) {
+      throw new Error("run event.ordinal must be a non-negative safe integer");
+    }
     return {
       type: "send/to-user",
       payload: decodeSendToUserPayloadV1(event.payload, "run event.payload"),
+      ordinal: ordinal as number,
     };
   }
   if (event.type === "wake/parent") {

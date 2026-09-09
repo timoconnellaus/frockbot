@@ -56,7 +56,7 @@ export async function registerPushDevice(
 ): Promise<void> {
   const key = DEVICE_PREFIX + value.deviceId;
   if (value.remove) {
-    await storage.delete(key);
+    await forgetDevice(storage, key, value.deviceId);
     return;
   }
   const devices = await storage.list<PushDevice>({ prefix: DEVICE_PREFIX });
@@ -65,13 +65,36 @@ export async function registerPushDevice(
       now - device.updatedAt >
       (device.token ? 30 * 86400_000 : PRESENCE_MS * 4)
     ) {
-      await storage.delete(oldKey);
+      await forgetDevice(storage, oldKey, device.deviceId);
       devices.delete(oldKey);
     }
   if (!devices.has(key) && devices.size >= 32)
     throw new Error("Too many registered devices");
   // A refreshed token replaces the installation's old token, never adds another recipient.
   await storage.put(key, { ...value, updatedAt: now });
+}
+
+/**
+ * A device and everything written about it. The delivery receipts are keyed by
+ * the device id, so they have to go with it: an install that is replaced or
+ * expires would otherwise leave one row per Bot and kind behind for ever.
+ */
+async function forgetDevice(
+  storage: DurableObjectStorage,
+  key: string,
+  deviceId: string,
+): Promise<void> {
+  await storage.delete(key);
+  await forgetDeliveries(storage, deviceId);
+}
+
+async function forgetDeliveries(
+  storage: DurableObjectStorage,
+  deviceId: string,
+): Promise<void> {
+  const receipts = await storage.list<unknown>({ prefix: DELIVERY_PREFIX });
+  for (const receiptKey of receipts.keys())
+    if (receiptKey.endsWith(`:${deviceId}`)) await storage.delete(receiptKey);
 }
 
 export class RetryablePushError extends Error {}
@@ -89,14 +112,23 @@ function base64url(bytes: Uint8Array): string {
     .replace(/\//g, "_");
 }
 
-export async function sendFcm(
-  secret: string,
-  token: string,
-  data: Record<string, string>,
-  notify: boolean,
-  request: typeof fetch = fetch,
-): Promise<"sent" | "unregistered"> {
-  const account = JSON.parse(secret) as ServiceAccount;
+/**
+ * The minted access token, reused until it is nearly expired.
+ *
+ * The assertion buys an hour; signing and exchanging one per device per message
+ * turned a burst into a run of RSA signings and round trips to Google for no
+ * gain. A token that stops being accepted is dropped and re-minted rather than
+ * cached into a permanent failure.
+ */
+const accessTokens = new Map<string, { token: string; expiresAt: number }>();
+const ACCESS_TOKEN_MARGIN_MS = 300_000;
+
+async function accessToken(
+  account: ServiceAccount,
+  request: typeof fetch,
+): Promise<string> {
+  const cached = accessTokens.get(account.client_email);
+  if (cached && cached.expiresAt > Date.now()) return cached.token;
   const now = Math.floor(Date.now() / 1000);
   const header = base64url(
     encoder.encode(JSON.stringify({ alg: "RS256", typ: "JWT" })),
@@ -140,13 +172,37 @@ export async function sendFcm(
   });
   if (!auth.ok)
     throw new RetryablePushError(`Push authorization failed (${auth.status})`);
-  const access = (await auth.json()) as { access_token: string };
+  const access = (await auth.json()) as {
+    access_token: string;
+    expires_in?: number;
+  };
+  accessTokens.set(account.client_email, {
+    token: access.access_token,
+    expiresAt:
+      Date.now() +
+      Math.max(
+        60_000,
+        (access.expires_in ?? 3600) * 1000 - ACCESS_TOKEN_MARGIN_MS,
+      ),
+  });
+  return access.access_token;
+}
+
+export async function sendFcm(
+  secret: string,
+  token: string,
+  data: Record<string, string>,
+  notify: boolean,
+  request: typeof fetch = fetch,
+): Promise<"sent" | "unregistered"> {
+  const account = JSON.parse(secret) as ServiceAccount;
+  const bearer = await accessToken(account, request);
   const result = await request(
     `https://fcm.googleapis.com/v1/projects/${encodeURIComponent(account.project_id)}/messages:send`,
     {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${access.access_token}`,
+        Authorization: `Bearer ${bearer}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
@@ -169,6 +225,12 @@ export async function sendFcm(
       )
     )
       return "unregistered";
+  }
+  if (result.status === 401 || result.status === 403) {
+    accessTokens.delete(account.client_email);
+    throw new RetryablePushError(
+      `Push authorization was rejected (${result.status})`,
+    );
   }
   if (result.status === 429 || result.status >= 500)
     throw new RetryablePushError(
@@ -194,7 +256,7 @@ export async function deliverPush(
       now - device.updatedAt >
       (device.token ? 30 * 86400_000 : PRESENCE_MS * 4)
     ) {
-      await storage.delete(key);
+      await forgetDevice(storage, key, device.deviceId);
       devices.delete(key);
     }
   }
@@ -266,11 +328,18 @@ export async function deliverPush(
         },
         notify,
       );
-      if (result === "unregistered")
-        await storage.transaction(async (tx) => {
-          if ((await tx.get<PushDevice>(deviceKey))?.token === device.token)
-            await tx.delete(deviceKey);
+      if (result === "unregistered") {
+        const removed = await storage.transaction(async (tx) => {
+          if ((await tx.get<PushDevice>(deviceKey))?.token !== device.token)
+            return false;
+          await tx.delete(deviceKey);
+          return true;
         });
+        if (removed) {
+          await forgetDeliveries(storage, device.deviceId);
+          continue;
+        }
+      }
       await finishDelivery(storage, key, update.cursor, result, now);
     } catch (error) {
       if (error instanceof RetryablePushError) {

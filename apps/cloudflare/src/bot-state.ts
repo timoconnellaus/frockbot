@@ -1,9 +1,9 @@
 import { cleanNotificationTestState } from "./notification-state-cleanup.js";
+import type { MessageNotice } from "@frockbot/app/notifications/messages";
 import {
   PUSH_OUTBOX_PREFIX,
   PUSH_READ_KEY,
-  type MessageNotice,
-} from "@frockbot/app/notifications/messages";
+} from "@frockbot/app/notifications/storage-keys";
 import {
   UNREAD_STATE_KEY,
   optionalUnreadStateV1,

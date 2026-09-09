@@ -79,7 +79,10 @@ object PushNotifications {
         while (seen.length() > 200) seen.remove(0)
         store.edit().putString("seen:$botId", seen.toString()).commit()
         changed("activity")
-        if (data["notify"] != "true" || (focused() && readingBot == botId)) return
+        // Only the persisted read cursor above discards an alert. Local focus is
+        // a lease the server already honours by holding delivery back, and a
+        // stale one here would lose a message that did arrive.
+        if (data["notify"] != "true") return
         val newest = store.getString("newest:$botId", "")!!
         val alert = cursor > newest
         if (alert) store.edit().putString("newest:$botId", cursor).commit()

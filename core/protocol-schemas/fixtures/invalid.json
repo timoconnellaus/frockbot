@@ -1595,5 +1595,17 @@
     "name": "MessageCursor rejects a run cursor",
     "schema": "MessageCursor",
     "value": "run-00000000000000000001"
+  },
+  {
+    "name": "RunEvent rejects a negative send ordinal",
+    "schema": "RunEvent",
+    "value": {
+      "type": "send/to-user",
+      "payload": {
+        "type": "text",
+        "text": "Done"
+      },
+      "ordinal": -1
+    }
   }
 ]

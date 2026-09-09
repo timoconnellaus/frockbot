@@ -192,7 +192,8 @@
     "./web/definition": "./web/definition.ts",
     "./web/ssrf": "./web/ssrf.ts",
     "./package.json": "./package.json",
-    "./notifications/messages": "./notifications/messages.ts"
+    "./notifications/messages": "./notifications/messages.ts",
+    "./notifications/storage-keys": "./notifications/storage-keys.ts"
   },
   "scripts": {
     "test": "bun test .",

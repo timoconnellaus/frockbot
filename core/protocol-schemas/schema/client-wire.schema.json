@@ -1028,6 +1028,10 @@
             },
             "payload": {
               "$ref": "#/$defs/SendPayload"
+            },
+            "ordinal": {
+              "type": "integer",
+              "minimum": 0
             }
           },
           "required": ["type", "payload"],
@@ -3866,7 +3870,7 @@
   "x-frockbot-compatibility": {
     "protocolMin": 1,
     "protocolMax": 1,
-    "minimumNativeVersion": "1.1.0",
+    "minimumNativeVersion": "1.2.0",
     "catalogs": []
   }
 }

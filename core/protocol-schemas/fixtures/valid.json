@@ -63,7 +63,7 @@
     "value": {
       "schemaVersion": 1,
       "protocolVersion": 1,
-      "nativeVersion": "1.1.0",
+      "nativeVersion": "1.2.0",
       "catalogs": []
     }
   },
@@ -74,7 +74,7 @@
       "schemaVersion": 1,
       "protocolMin": 1,
       "protocolMax": 1,
-      "minimumNativeVersion": "1.1.0",
+      "minimumNativeVersion": "1.2.0",
       "catalogs": []
     }
   },
@@ -382,7 +382,8 @@
       "payload": {
         "type": "text",
         "text": "1.1.0"
-      }
+      },
+      "ordinal": 3
     }
   },
   {
