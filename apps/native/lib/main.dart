@@ -21,12 +21,14 @@ import 'client/bot_sessions.dart';
 import 'client/identity.dart';
 import 'client/plain_store.dart';
 import 'client/transport.dart';
+import 'orientation.dart';
 import 'shell/app_shell.dart';
 import 'theme/frock_theme.dart';
 import 'protocol/client_wire.generated.dart' as wire;
 
-void main() {
+Future<void> main() async {
   final binding = WidgetsFlutterBinding.ensureInitialized();
+  await setMobileOrientation();
   // The browser draws to a canvas, so the accessibility tree is the only DOM
   // there is: without it a screen reader sees an empty page and a browser test
   // has nothing to select. The engine builds it lazily, behind a hidden
