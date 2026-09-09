@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 
 import '../protocol/client_wire.generated.dart' as wire;
 import '../shell/semantics.dart';
@@ -48,21 +49,16 @@ class ViewCardGroups extends StatelessWidget {
                     MediaQuery.textScalerOf(context).scale(14) <= 21
                 ? 2
                 : 1;
-            final width = (constraints.maxWidth - 12 * (columns - 1)) / columns;
-            return Wrap(
-              spacing: 12,
-              runSpacing: 12,
+            return _EqualHeightCards(
+              columns: columns,
               children: [
                 for (final card in batch)
-                  SizedBox(
-                    width: width,
-                    child: Card(
-                      key: ValueKey(card['title']),
-                      margin: EdgeInsets.zero,
-                      child: Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: ViewNodeView(node: card),
-                      ),
+                  Card(
+                    key: ValueKey(card['title']),
+                    margin: EdgeInsets.zero,
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: _CapabilityCard(node: card),
                     ),
                   ),
               ],
@@ -93,6 +89,176 @@ class ViewCardGroups extends StatelessWidget {
       children: sections,
     );
   }
+}
+
+class _CapabilityCard extends StatelessWidget {
+  final Map<String, Object?> node;
+  const _CapabilityCard({required this.node});
+
+  @override
+  Widget build(BuildContext context) {
+    final children = (node['children'] as List)
+        .map((child) => (child as Map).cast<String, Object?>())
+        .toList();
+    final actions = children
+        .where((child) => child['type'] == 'group')
+        .expand(
+          (group) => (group['children'] as List).map(
+            (action) => (action as Map).cast<String, Object?>(),
+          ),
+        );
+    final toggle = actions
+        .where(
+          (action) =>
+              action['actionId'] == 'set-package-enabled' ||
+              action['actionId'] == 'install-package',
+        )
+        .firstOrNull;
+    final settings = actions
+        .where((action) => action['actionId'] == 'open-home')
+        .firstOrNull;
+    final scope = ViewScope.of(context);
+    final schema = scope.actions[toggle?['actionId']];
+    final enabled =
+        toggle?['actionId'] == 'set-package-enabled' &&
+        (toggle?['input'] as Map?)?['enabled'] == false;
+    return identified(
+      viewGroupIdentifierV1(node['title'] as String),
+      Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.only(top: 10),
+                      child: Text(
+                        node['title'] as String,
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  if (toggle != null)
+                    identified(
+                      viewActionIdentifierV1(toggle['actionId'] as String),
+                      Semantics(
+                        label: node['title'] as String,
+                        child: Switch(
+                          value: enabled,
+                          onChanged:
+                              schema == null ||
+                                  scope.controller.busy ||
+                                  scope.controller.pending != null
+                              ? null
+                              : (_) => scope.controller.submit(toggle, schema),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              for (final child in children.where(
+                (child) => child['type'] != 'group',
+              ))
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: ViewNodeView(node: child),
+                ),
+            ],
+          ),
+          if (settings != null) ...[
+            const SizedBox(height: 8),
+            ViewActionNode(node: settings),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// Measure the tallest card at its actual width, including scaled text, so
+/// every row shares a height without clipping longer descriptions.
+class _EqualHeightCards extends MultiChildRenderObjectWidget {
+  final int columns;
+  const _EqualHeightCards({required this.columns, required super.children});
+
+  @override
+  RenderObject createRenderObject(BuildContext context) => _CardGrid(columns);
+
+  @override
+  void updateRenderObject(
+    BuildContext context,
+    covariant _CardGrid renderObject,
+  ) {
+    if (renderObject.columns != columns) {
+      renderObject.columns = columns;
+      renderObject.markNeedsLayout();
+    }
+  }
+}
+
+class _CardParentData extends ContainerBoxParentData<RenderBox> {}
+
+class _CardGrid extends RenderBox
+    with
+        ContainerRenderObjectMixin<
+          RenderBox,
+          ContainerBoxParentData<RenderBox>
+        >,
+        RenderBoxContainerDefaultsMixin<
+          RenderBox,
+          ContainerBoxParentData<RenderBox>
+        > {
+  int columns;
+  _CardGrid(this.columns);
+
+  @override
+  void setupParentData(RenderBox child) {
+    child.parentData = _CardParentData();
+  }
+
+  @override
+  void performLayout() {
+    final width = (constraints.maxWidth - 12 * (columns - 1)) / columns;
+    var height = 0.0;
+    var child = firstChild;
+    while (child != null) {
+      child.layout(BoxConstraints.tightFor(width: width), parentUsesSize: true);
+      if (child.size.height > height) height = child.size.height;
+      child = childAfter(child);
+    }
+    var index = 0;
+    child = firstChild;
+    while (child != null) {
+      child.layout(BoxConstraints.tightFor(width: width, height: height));
+      (child.parentData as ContainerBoxParentData<RenderBox>).offset = Offset(
+        (index % columns) * (width + 12),
+        (index ~/ columns) * (height + 12),
+      );
+      index++;
+      child = childAfter(child);
+    }
+    final rows = (childCount / columns).ceil();
+    size = constraints.constrain(
+      Size(constraints.maxWidth, rows == 0 ? 0 : rows * (height + 12) - 12),
+    );
+  }
+
+  @override
+  void paint(PaintingContext context, Offset offset) =>
+      defaultPaint(context, offset);
+
+  @override
+  bool hitTestChildren(BoxHitTestResult result, {required Offset position}) =>
+      defaultHitTestChildren(result, position: position);
 }
 
 class ViewTextNode extends StatelessWidget {

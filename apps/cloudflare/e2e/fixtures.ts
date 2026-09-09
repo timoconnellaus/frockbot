@@ -763,16 +763,9 @@ export async function enablePackage(page: Page, title: string): Promise<void> {
   await openProfileSurface(page, "profile-capabilities", "plugins-document");
   const search = page.getByRole("textbox").first();
   await search.fill(title);
-  const row = page
-    .locator('[flt-semantics-identifier^="view-group-"]')
-    .filter({ hasText: title })
-    .first();
-  const off = row.getByText("Turn off", { exact: true });
-  if (!(await off.count())) {
-    const add = action(row, "install-package");
-    await press((await add.count()) ? add : action(row, "set-package-enabled"));
-  }
-  await expect(row).toContainText("· On", { timeout: 30_000 });
+  const toggle = page.getByRole("switch", { name: title, exact: true });
+  if (!(await toggle.isChecked())) await press(toggle);
+  await expect(toggle).toBeChecked({ timeout: 30_000 });
   await closeOverlay(page);
 }
 

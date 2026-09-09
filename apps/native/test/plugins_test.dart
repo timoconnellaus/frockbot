@@ -164,7 +164,8 @@ void main() {
           final children = ((document['root'] as Map)['children'] as List);
           children.add(<String, Object>{
             ...(children.last as Map).cast<String, Object>(),
-            'title': 'Another feature',
+            'title':
+                'Another feature with a much longer title that needs more room',
           });
           await tester.pumpWidget(
             MaterialApp(
@@ -184,7 +185,11 @@ void main() {
           );
           await tester.pumpAndSettle();
           expect(find.byType(Card), findsNWidgets(2));
-          expect(find.text('Turn off'), findsNWidgets(2));
+          expect(find.byType(Switch), findsNWidgets(2));
+          expect(
+            tester.getSize(find.byType(Card).first),
+            tester.getSize(find.byType(Card).last),
+          );
           expect(find.text('Details & controls'), findsNothing);
           final cards = tester.getTopLeft(find.byType(Card).first);
           final second = tester.getTopLeft(find.byType(Card).last);
@@ -200,7 +205,7 @@ void main() {
     }
   }
 
-  testWidgets('turning a plugin off sends one command and reads back', (
+  testWidgets('capability switch sends one command and reads back', (
     tester,
   ) async {
     final store = MemoryStore();
@@ -224,16 +229,21 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         theme: FrockTheme.theme(Brightness.dark),
-        home: PluginsPage(api: api, store: store, userId: 'tim'),
+        home: PluginsPage(
+          api: api,
+          store: store,
+          userId: 'tim',
+          capabilities: true,
+        ),
       ),
     );
     await tester.pumpAndSettle();
     expect(find.text('1 installed'), findsOneWidget);
-    await tester.tap(find.text('Turn off'));
+    await tester.tap(find.byType(Switch));
     await tester.pumpAndSettle();
     expect(sent.single['type'], 'user/set-package-enabled');
     expect(sent.single['expectedRevision'], 1);
-    expect(find.text('Turn on'), findsOneWidget);
+    expect(tester.widget<Switch>(find.byType(Switch)).value, isFalse);
   });
 
   testWidgets('Plugins recovers from offline without raw backend detail', (

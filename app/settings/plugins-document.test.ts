@@ -102,8 +102,8 @@ test("Mac Messages availability is not presented as permission to use it", () =>
   expect(
     walk(document.root).some(
       (node) =>
-        node.type === "group" &&
-        node.title === "Messages on your Mac · Available — needs Mac setup",
+        node.type === "text" &&
+        node.text.includes("Setup and your approval are required"),
     ),
   ).toBe(true);
 });

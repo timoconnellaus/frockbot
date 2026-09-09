@@ -68,9 +68,9 @@ function press(
 function pluginNode(plugin: Plugin, capabilities: boolean): ViewNode {
   const controls: ViewNode[] = [];
   const home = HOME_LABELS[plugin.home];
-  if (home && plugin.state === "installed") {
+  if (home && (capabilities || plugin.state === "installed")) {
     controls.push(
-      press("open-home", `Set up in ${home}`, {
+      press("open-home", capabilities ? "Settings" : `Set up in ${home}`, {
         kind: "open-home",
         home: plugin.home,
         packageId: plugin.packageId,
@@ -98,11 +98,10 @@ function pluginNode(plugin: Plugin, capabilities: boolean): ViewNode {
   return {
     type: "group",
     orientation: "column",
-    title: `${plugin.displayName.slice(0, 150)} · ${plugin.packageId === "machine-messages" && plugin.state === "installed" ? "Available — needs Mac setup" : STATE_LABELS[plugin.state]}`,
+    title: capabilities
+      ? plugin.displayName.slice(0, 150)
+      : `${plugin.displayName.slice(0, 150)} · ${plugin.packageId === "machine-messages" && plugin.state === "installed" ? "Available — needs Mac setup" : STATE_LABELS[plugin.state]}`,
     children: [
-      // What it offers and whether it is on are one line, not two: a list of
-      // twenty rows is read down the titles, and a row that spends four lines
-      // saying two short things pushes the next title off the screen.
       {
         type: "text",
         text: (

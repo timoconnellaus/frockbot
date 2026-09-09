@@ -34,3 +34,5 @@ Bot chooser. Add Bot also offers the template route. Import keeps its preview
 and explicit apply step. Your computers distinguishes paired personal devices
 from the hosted Computer and preserves per-action approval. Site
 administration labels the actual setting as Allow new signups.
+
+Capability cards share the height of the tallest visible card. Each has an on/off switch in its top-right corner and a Settings button when configuration is available. Text enlargement increases the shared height instead of clipping descriptions.
