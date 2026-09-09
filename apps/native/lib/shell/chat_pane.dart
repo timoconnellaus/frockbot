@@ -91,8 +91,6 @@ class _ChatPaneState extends State<ChatPane> {
   }
 
   Future<void> _send() async {
-    final value = editor.value;
-    if (value.composing.isValid && !value.composing.isCollapsed) return;
     if (!controller.canSend || editor.text.trim().isEmpty) return;
     unawaited(HapticFeedback.lightImpact());
     await controller.send(editor.text);
