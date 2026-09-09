@@ -38,16 +38,32 @@ class UpdatesTest(unittest.TestCase):
         self.assertEqual(updates.latest(), previous)
 
     def test_dev_package_is_rejected(self):
-        with patch.object(updates, "run", return_value="package: name='com.frockbot.mobile.dev' versionCode='60' versionName='1.1.0'"):
+        with patch.object(updates, "build_tool", lambda name: Path(name)), \
+                patch.object(updates, "run", return_value="package: name='com.frockbot.mobile.dev' versionCode='60' versionName='1.1.0'"):
             with self.assertRaisesRegex(RuntimeError, "normal FrockBot"):
                 updates.inspect_apk(Path("dev.apk"))
 
     def test_different_signer_is_rejected(self):
         outputs = ["package: name='com.frockbot.mobile' versionCode='60' versionName='1.1.0'",
                    "Signer #1 certificate SHA-256 digest: deadbeef"]
-        with patch.object(updates, "run", side_effect=outputs):
+        with patch.object(updates, "build_tool", lambda name: Path(name)), \
+                patch.object(updates, "run", side_effect=outputs):
             with self.assertRaisesRegex(RuntimeError, "signer differs"):
                 updates.inspect_apk(Path("wrong-key.apk"))
+
+    def test_newest_build_tools_version_is_used(self):
+        sdk = updates.STATE / "sdk"
+        for version in ("9.0.0", "36.0.0", "35.0.1"):
+            tool = sdk / "build-tools" / version / "aapt"
+            tool.parent.mkdir(parents=True)
+            tool.write_text("")
+        with patch.dict(os.environ, {"ANDROID_HOME": str(sdk)}):
+            self.assertEqual(updates.build_tool("aapt"), sdk / "build-tools/36.0.0/aapt")
+
+    def test_missing_build_tools_are_reported_clearly(self):
+        with patch.dict(os.environ, {"ANDROID_HOME": str(updates.STATE / "empty-sdk")}):
+            with self.assertRaisesRegex(RuntimeError, "No Android build-tools aapt"):
+                updates.build_tool("aapt")
 
     def test_download_and_no_directory_access(self):
         (updates.STATE / "release.apk").write_bytes(b"complete apk")
@@ -67,6 +83,11 @@ class UpdatesTest(unittest.TestCase):
                     urlopen(url + route)
                 self.assertEqual(result.exception.code, 404)
                 result.exception.close()
+            (updates.STATE / "release.apk").unlink()
+            with self.assertRaises(HTTPError) as result:
+                urlopen(url + "/frockbot.apk")
+            self.assertEqual(result.exception.code, 503)
+            result.exception.close()
             (updates.STATE / "latest.json").unlink()
             with self.assertRaises(HTTPError) as result:
                 urlopen(url + "/frockbot.apk")

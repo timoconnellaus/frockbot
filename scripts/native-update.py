@@ -46,14 +46,22 @@ def run(args, *, binary=False, **kwargs):
     return subprocess.check_output([str(a) for a in args], text=not binary, **kwargs)
 
 
-def inspect_apk(apk):
+def build_tool(name):
     sdk = Path(os.environ.get("ANDROID_HOME", Path.home() / "Library/Android/sdk"))
-    tools = sorted((sdk / "build-tools").glob("*/aapt"))[-1].parent
-    badging = run([tools / "aapt", "dump", "badging", apk])
+    versions = [d for d in (sdk / "build-tools").glob("*") if (d / name).is_file()]
+    if not versions:
+        raise RuntimeError(f"No Android build-tools {name} under {sdk}. Install the Android SDK build-tools "
+                           "or point ANDROID_HOME at an installation that has them.")
+    newest = max(versions, key=lambda d: [int(part) if part.isdigit() else -1 for part in d.name.split(".")])
+    return newest / name
+
+
+def inspect_apk(apk):
+    badging = run([build_tool("aapt"), "dump", "badging", apk])
     match = re.search(r"package: name='([^']+)' versionCode='(\d+)' versionName='([^']+)'", badging)
     if not match or match[1] != PACKAGE:
         raise RuntimeError("Only the normal FrockBot APK may be published here; Dev is a separate app.")
-    cert = run([tools / "apksigner", "verify", "--print-certs", apk])
+    cert = run([build_tool("apksigner"), "verify", "--print-certs", apk])
     signers = re.findall(r"Signer #\d+ certificate SHA-256 digest: ([a-fA-F0-9]+)", cert)
     if [s.lower() for s in signers] != [SIGNER]:
         raise RuntimeError("APK signer differs from the existing phone install.")
@@ -287,7 +295,11 @@ class Downloads(BaseHTTPRequestHandler):
                 self.send_error(503, "No APK published yet")
                 return
             if route == "/frockbot.apk":
-                with (STATE / metadata["file"]).open("rb") as apk:
+                path = STATE / metadata["file"]
+                if not path.is_file():
+                    self.send_error(503, "No APK published yet")
+                    return
+                with path.open("rb") as apk:
                     self.send_response(200)
                     self.send_header("Content-Type", "application/vnd.android.package-archive")
                     self.send_header("Content-Length", str(os.fstat(apk.fileno()).st_size))
