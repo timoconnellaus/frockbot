@@ -12,6 +12,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../orientation.dart';
 import '../shell/semantics.dart';
 import '../theme/states.dart';
 import '../view/embed.dart';
@@ -320,11 +321,13 @@ class _ComputerViewerPageState extends State<ComputerViewerPage> {
   @override
   void initState() {
     super.initState();
+    unawaited(setMobileOrientation(computerOpen: true));
     controller.addListener(_repaint);
   }
 
   @override
   void dispose() {
+    unawaited(setMobileOrientation());
     controller.removeListener(_repaint);
     super.dispose();
   }
