@@ -107,3 +107,23 @@ test("Mac Messages availability is not presented as permission to use it", () =>
     ),
   ).toBe(true);
 });
+
+test("capability cards keep their purpose and controls visible without disclosures", () => {
+  const document = pluginsDocumentV1(
+    frame([{ ...ollama, packageId: "web", displayName: "Web", home: "none" }]),
+    true,
+  );
+  const nodes = walk(document.root);
+  expect(nodes.some((node) => node.type === "group" && node.collapsed)).toBe(
+    false,
+  );
+  expect(
+    nodes.some((node) => node.type === "action" && node.label === "Turn off"),
+  ).toBe(true);
+  expect(
+    nodes.some(
+      (node) =>
+        node.type === "text" && node.text.startsWith("Read public web pages"),
+    ),
+  ).toBe(true);
+});

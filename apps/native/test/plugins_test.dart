@@ -150,6 +150,56 @@ void main() {
     controller.dispose();
   });
 
+  for (final width in [375.0, 900.0]) {
+    for (final scale in [1.0, 2.0]) {
+      testWidgets(
+        'capabilities show readable cards and visible controls at $width / $scale',
+        (tester) async {
+          tester.view.physicalSize = Size(width, 1000);
+          tester.view.devicePixelRatio = 1;
+          addTearDown(tester.view.resetPhysicalSize);
+          addTearDown(tester.view.resetDevicePixelRatio);
+          final store = MemoryStore();
+          final document = pluginsDocument();
+          final children = ((document['root'] as Map)['children'] as List);
+          children.add(<String, Object>{
+            ...(children.last as Map).cast<String, Object>(),
+            'title': 'Another feature',
+          });
+          await tester.pumpWidget(
+            MaterialApp(
+              theme: FrockTheme.theme(Brightness.dark),
+              builder: (context, child) => MediaQuery(
+                data: MediaQuery.of(context)
+                    .copyWith(textScaler: TextScaler.linear(scale)),
+                child: child!,
+              ),
+              home: PluginsPage(
+                api: SettingsApi(store, (_, _) async => document),
+                store: store,
+                userId: 'tim',
+                capabilities: true,
+              ),
+            ),
+          );
+          await tester.pumpAndSettle();
+          expect(find.byType(Card), findsNWidgets(2));
+          expect(find.text('Turn off'), findsNWidgets(2));
+          expect(find.text('Details & controls'), findsNothing);
+          final cards = tester.getTopLeft(find.byType(Card).first);
+          final second = tester.getTopLeft(find.byType(Card).last);
+          if (width >= 900 && scale == 1) {
+            expect(second.dy, cards.dy);
+            expect(second.dx, greaterThan(cards.dx));
+          } else {
+            expect(second.dy, greaterThan(cards.dy));
+          }
+          expect(tester.takeException(), isNull);
+        },
+      );
+    }
+  }
+
   testWidgets('turning a plugin off sends one command and reads back', (
     tester,
   ) async {

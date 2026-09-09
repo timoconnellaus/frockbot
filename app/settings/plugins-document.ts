@@ -65,7 +65,7 @@ function press(
   };
 }
 
-function pluginNode(plugin: Plugin): ViewNode {
+function pluginNode(plugin: Plugin, capabilities: boolean): ViewNode {
   const controls: ViewNode[] = [];
   const home = HOME_LABELS[plugin.home];
   if (home && plugin.state === "installed") {
@@ -108,18 +108,27 @@ function pluginNode(plugin: Plugin): ViewNode {
         text: (
           CAPABILITY_DESCRIPTIONS[plugin.packageId] ?? plugin.summary
         ).slice(0, 4000),
-        style: "status",
+        style: capabilities ? "body" : "status",
       },
       ...(plugin.failure
         ? [{ type: "text", text: plugin.failure } as ViewNode]
         : []),
       {
         type: "group",
-        orientation: "column",
-        title: "Details & controls",
-        collapsed: true,
+        orientation: capabilities ? "row" : "column",
+        ...(capabilities
+          ? {}
+          : { title: "Details & controls", collapsed: true }),
         children: [
-          { type: "text", text: `Version ${plugin.version}`, style: "status" },
+          ...(capabilities
+            ? []
+            : [
+                {
+                  type: "text" as const,
+                  text: `Version ${plugin.version}`,
+                  style: "status" as const,
+                },
+              ]),
           ...controls,
         ],
       },
@@ -138,13 +147,15 @@ export function pluginsDocumentV1(
   const children: ViewNode[] = [
     {
       type: "text",
-      text: `${installed} installed`,
+      text: capabilities
+        ? "Available to all your Bots"
+        : `${installed} installed`,
       style: "status",
     },
     {
       type: "text",
       text: capabilities
-        ? "Optional built-in features for all your Bots. Open a feature to see what it does and manage it."
+        ? "Choose which extra abilities your Bots can use. Each card explains what the feature does."
         : "Extensions add new abilities to your Bots. Open an extension for its description and controls. Models and built-in features have their own settings.",
     },
   ];
@@ -152,7 +163,7 @@ export function pluginsDocumentV1(
   let nodes = 4;
   let complete = true;
   for (const plugin of frame.plugins) {
-    const node = pluginNode(plugin);
+    const node = pluginNode(plugin, capabilities);
     const cost = 7 + (plugin.failure ? 1 : 0);
     if (nodes + cost > NODE_LIMIT) {
       complete = false;

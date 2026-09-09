@@ -18,8 +18,9 @@ catalog contains built-in definitions, so the extension list is empty. It
 says so rather than presenting deployment infrastructure as installable
 plugins. This page does not introduce an extension marketplace or remove
 Bot-authored composition controls. Optional built-in features remain in Bot
-capabilities, including per-Bot model overrides, search, web, routines, image
-generation, Mac Messages, and helper agents. Core identity, history, memory,
+capabilities, including per-Bot model overrides, web, routines, image
+generation, Mac Messages, and helper agents. Capabilities use cards with visible controls, two columns on wide screens and
+one column on phones or with large text. Core identity, history, search, memory,
 computer infrastructure and site administration are not plugin switches.
 
 Activity & history starts with all Bots from Profile. A visible Bot filter

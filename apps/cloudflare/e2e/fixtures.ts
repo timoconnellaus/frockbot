@@ -767,7 +767,6 @@ export async function enablePackage(page: Page, title: string): Promise<void> {
     .locator('[flt-semantics-identifier^="view-group-"]')
     .filter({ hasText: title })
     .first();
-  await press(row.getByText("Details & controls"));
   const off = row.getByText("Turn off", { exact: true });
   if (!(await off.count())) {
     const add = action(row, "install-package");

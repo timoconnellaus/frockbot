@@ -34,6 +34,7 @@ class ViewSurfacePage extends StatefulWidget {
   final String documentId;
   final String refreshId;
   final Map<String, ViewFieldBuilder> fields;
+  final bool cardGroups;
 
   /// Set where the surface is a region rather than a page — the right panel
   /// has no back gesture, so the way out is a control the panel draws.
@@ -63,6 +64,7 @@ class ViewSurfacePage extends StatefulWidget {
     required this.documentId,
     required this.refreshId,
     this.fields = const {},
+    this.cardGroups = false,
     this.onClose,
     this.chrome = true,
     this.banner,
@@ -194,6 +196,7 @@ class _ViewSurfacePageState extends State<ViewSurfacePage>
                           document: document,
                           controller: view,
                           fields: widget.fields,
+                          cardGroups: widget.cardGroups,
                         ),
                       ),
                     ),

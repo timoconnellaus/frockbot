@@ -25,6 +25,76 @@ class ViewNodeView extends StatelessWidget {
   };
 }
 
+/// The host can present top-level groups as cards without changing the
+/// document, its action targets, or the shared renderer inside each card.
+class ViewCardGroups extends StatelessWidget {
+  final Map<String, Object?> node;
+  const ViewCardGroups({super.key, required this.node});
+
+  @override
+  Widget build(BuildContext context) {
+    if (node['type'] != 'group') return ViewNodeView(node: node);
+    final sections = <Widget>[];
+    var cards = <Map<String, Object?>>[];
+    void flush() {
+      if (cards.isEmpty) return;
+      final batch = cards;
+      cards = [];
+      sections.add(
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final columns =
+                constraints.maxWidth >= 600 &&
+                    MediaQuery.textScalerOf(context).scale(14) <= 21
+                ? 2
+                : 1;
+            final width = (constraints.maxWidth - 12 * (columns - 1)) / columns;
+            return Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                for (final card in batch)
+                  SizedBox(
+                    width: width,
+                    child: Card(
+                      key: ValueKey(card['title']),
+                      margin: EdgeInsets.zero,
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: ViewNodeView(node: card),
+                      ),
+                    ),
+                  ),
+              ],
+            );
+          },
+        ),
+      );
+    }
+
+    for (final raw in (node['children'] as List)) {
+      final child = (raw as Map).cast<String, Object?>();
+      if (child['type'] == 'group' && child['title'] != null) {
+        cards.add(child);
+      } else {
+        flush();
+        sections.add(
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: ViewNodeView(node: child),
+          ),
+        );
+      }
+    }
+    flush();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: sections,
+    );
+  }
+}
+
 class ViewTextNode extends StatelessWidget {
   final Map<String, Object?> node;
   const ViewTextNode({super.key, required this.node});

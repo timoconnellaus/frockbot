@@ -7,7 +7,6 @@ export const BUILT_IN_PACKAGE_IDS = new Set(
 export const CAPABILITY_DESCRIPTIONS: Record<string, string> = {
   "custom-models":
     "Choose a different model for an individual Bot in its settings.",
-  search: "Find past messages and work across your Bots.",
   "machine-messages":
     "Read and send Messages through your Mac. Setup and your approval are required.",
   web: "Read public web pages to help answer your questions.",

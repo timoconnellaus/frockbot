@@ -175,6 +175,7 @@ class PluginsPage extends StatelessWidget {
     );
     return ViewSurfacePage(
       title: capabilities ? 'Bot capabilities' : 'Plugins',
+      cardGroups: capabilities,
       store: store,
       userId: userId,
       documentId: PluginIds.document,
