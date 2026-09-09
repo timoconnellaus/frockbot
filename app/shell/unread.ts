@@ -137,13 +137,27 @@ function optionalTimestamp(
   return candidate;
 }
 
+/**
+ * The one grammar a message boundary is held to, shared by the writer and the
+ * reader. A durable unread record that names a message this rejects can never
+ * be decoded again, so nothing may write one: `visibleMessageRecordsV1` asks
+ * this before it stores an id, and every read asks it after.
+ *
+ * The length is comfortably past the longest id there is — a run id is bounded
+ * at 128 by the stored-run codec, and a send ordinal adds a handful of
+ * characters — so no legal message fails it.
+ */
+export function isMessageBoundaryV1(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length <= 200 &&
+    /^[-a-zA-Z0-9._]+:(?:user|send:(?:0|[1-9][0-9]*))(?![\s\S])/.test(value)
+  );
+}
+
 function messageBoundary(value: unknown): string | undefined {
   if (value === undefined) return undefined;
-  if (
-    typeof value !== "string" ||
-    value.length > 200 ||
-    !/^[-a-zA-Z0-9._]+:(?:user|send:(?:0|[1-9][0-9]*))(?![\s\S])/.test(value)
-  ) {
+  if (!isMessageBoundaryV1(value)) {
     throw new UnreadDecodeError("unread message boundary is invalid");
   }
   return value;

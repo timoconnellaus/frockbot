@@ -307,7 +307,7 @@ export function decodeRoutineRunEntryV1(value: unknown): RoutineRunEntryV1 {
   }
   return {
     schemaVersion: 1,
-    entryId: routineText(candidate.entryId, 128, "Routine run entryId"),
+    entryId: routineText(candidate.entryId, 256, "Routine run entryId"),
     routineId: candidate.routineId,
     runId: routineText(candidate.runId, 256, "Routine run runId"),
     fireId: routineText(candidate.fireId, 256, "Routine run fireId"),

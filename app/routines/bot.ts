@@ -44,7 +44,10 @@ import {
   routineFailureMessageKeyV1,
   routineKeyV1,
 } from "@frockbot/app/routines/storage-keys";
-import { visibleMessageRecordsV1 } from "@frockbot/app/notifications/messages";
+import {
+  messageIdV1,
+  visibleMessageRecordsV1,
+} from "@frockbot/app/notifications/messages";
 import {
   ROUTINE_RUN_EVENT_MAX,
   type RoutineInboxEntryViewV1,
@@ -578,6 +581,14 @@ async function runOneFiring(
  * *alerting* only — a muted Bot still counts the failure as unread, and nobody
  * is woken for it.
  *
+ * The message is one a person can actually read. It takes the next send
+ * ordinal on the firing's own run — past whatever the Turn had already said
+ * before it broke, so no two messages of that run share an id — and the run
+ * carries it into the transcript, where opening the conversation clears the
+ * badge it raised. A firing that never reached a run has no conversation to
+ * be read in, so it raises the alert alone rather than a count nothing can
+ * clear.
+ *
  * The firing keys the receipt, so a firing settled twice is one message.
  */
 async function notifyFailedFiring(
@@ -590,6 +601,22 @@ async function notifyFailedFiring(
   const settings = await readBotSettingsV1(state, identity);
   const receiptKey = routineFailureMessageKeyV1(fire.fireId);
   const createdAt = state.now().toISOString();
+  const body = routineFailureSentenceV1(outcome.summary).slice(0, 240);
+  const run = await state.authority.readStoredRun(fire.fireId);
+  if (!run) {
+    if (!settings.notifications.enabled) return;
+    await state.authority.recordNotification({
+      notificationId: notificationIdV1("routine-failed", fire.fireId),
+      runId: fire.fireId,
+      createdAt,
+      title: `${settings.profile.name} could not run a Routine`,
+      body,
+    });
+    return;
+  }
+  const ordinal = run.events.filter(
+    (event) => event.type === "send/to-user",
+  ).length;
   await state.ctx.storage.transaction(async (transaction) => {
     if (await transaction.get(receiptKey)) return;
     const records = await visibleMessageRecordsV1({
@@ -597,16 +624,15 @@ async function notifyFailedFiring(
       read: (key) => transaction.get(key),
       messages: [
         {
-          // The firing's first and only message. A firing that failed sent
-          // nothing, so nothing else claims this id, and the unread boundary
-          // grammar every message is held to admits it.
-          messageId: `${fire.fireId}:send:0`,
+          messageId: messageIdV1(fire.fireId, ordinal),
           runId: fire.fireId,
           createdAt,
           // The same sentence the inbox entry carries. A message is the one
           // surface a person reads without asking for it, so it is the last
           // place a kernel invariant belongs.
-          body: routineFailureSentenceV1(outcome.summary).slice(0, 240),
+          body,
+          automation: true,
+          projectedSendOrdinal: ordinal,
         },
       ],
     });

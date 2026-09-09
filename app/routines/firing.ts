@@ -174,7 +174,7 @@ export function decodeRoutineFireV1(value: unknown): RoutineFireV1 {
       "Routine firing cue",
     ),
     mintedAt: routineTimestamp(candidate.mintedAt, "Routine firing mintedAt"),
-    entryId: routineText(candidate.entryId, 128, "Routine firing entryId"),
+    entryId: routineText(candidate.entryId, 256, "Routine firing entryId"),
     ...(candidate.dueAt === undefined
       ? {}
       : { dueAt: epoch(candidate.dueAt, "Routine firing dueAt") }),
@@ -195,6 +195,31 @@ export function routineSessionIdV1(routineId: string): string {
 }
 
 /**
+ * Longest fire id there is, because a fire id *is* a run id: the stored run
+ * codec holds one to the public-identifier grammar and the transcript
+ * projection truncates at the same 128. A longer one could never be admitted
+ * at all — the Turn failed before it started — and every identity derived from
+ * it, the message a person reads the firing under and the unread boundary that
+ * clears it, was out of grammar with it.
+ */
+export const ROUTINE_FIRE_ID_MAX_LENGTH = 128;
+
+/**
+ * A stable digest of the whole id, so shortening one keeps it that firing's
+ * own: a scheduled occurrence and a delivery of the same long-named Routine
+ * share a truncated prefix, and sharing an id would make the kernel refuse the
+ * second as a replay of the first.
+ */
+function fireIdDigestV1(value: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(16).padStart(8, "0");
+}
+
+/**
  * The run id one firing is admitted under. It is derived, not random: a
  * scheduled occurrence names its own due time and a delivered one names its
  * delivery, so a retry after eviction reuses the id and the kernel's own
@@ -206,7 +231,10 @@ export function routineFireIdV1(
   discriminator: string,
 ): string {
   const sanitized = discriminator.replace(/[^a-zA-Z0-9._-]/g, "-").slice(0, 80);
-  return `rf-${routineId}-${sanitized}`.slice(0, 250);
+  const full = `rf-${routineId}-${sanitized}`;
+  if (full.length <= ROUTINE_FIRE_ID_MAX_LENGTH) return full;
+  const digest = fireIdDigestV1(full);
+  return `${full.slice(0, ROUTINE_FIRE_ID_MAX_LENGTH - digest.length - 1)}-${digest}`;
 }
 
 /**

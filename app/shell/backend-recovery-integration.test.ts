@@ -1687,56 +1687,48 @@ describe("Bot recovery", () => {
   }
 
   /**
-   * A Routine that breaks is a message, not a directory row: the device reads
-   * the push outbox and the badge reads the message index, so a failure filed
-   * anywhere else is a failure nobody is told about.
+   * A firing refused before it was ever admitted — no model to mount, the
+   * object already busy — leaves no Turn, and a Turn is what the conversation
+   * draws. It is told the way a Turn that could not finish is told: an alert,
+   * and the durable inbox row behind it. A badge is raised only for a message
+   * the conversation can show, because a badge for a message that is not in
+   * the thread is one that opening the thread cannot clear.
    */
-  test("a failed firing reaches the person as an ordinary message, once", async () => {
+  test("a firing that never reached a Turn alerts, and badges nothing", async () => {
     const { storage, contribution, identity } = await firedRoutineBot({
       notifications: true,
     });
 
-    const messages = await storage.list<{ body: string; notify: boolean }>({
-      prefix: MESSAGE_PREFIX,
-    });
-    expect(messages.size).toBe(1);
-    const [cursor, notice] = [...messages.entries()][0]!;
-    expect(notice.notify).toBe(true);
-    expect(notice.body.length).toBeGreaterThan(0);
-    const outbox = await storage.list({ prefix: PUSH_OUTBOX_PREFIX });
-    expect([...outbox.keys()]).toEqual([
-      `${PUSH_OUTBOX_PREFIX}${cursor.slice(MESSAGE_PREFIX.length)}`,
-    ]);
+    expect((await storage.list({ prefix: MESSAGE_PREFIX })).size).toBe(0);
+    expect((await storage.list({ prefix: PUSH_OUTBOX_PREFIX })).size).toBe(0);
     expect(await readUnread(contribution.state, identity)).toMatchObject({
-      count: 1,
+      count: 0,
+      unread: false,
     });
-    expect(
-      await storage.get(`notification:${cursor.slice(MESSAGE_PREFIX.length)}`),
-    ).toBeDefined();
+    const intents = await contribution.listNotifications();
+    expect(intents).toHaveLength(1);
+    expect(intents[0]!.body.length).toBeGreaterThan(0);
+    // And it is the Routines panel, not the transcript, that holds the record.
+    expect((await storage.list({ prefix: "routine-inbox:" })).size).toBe(1);
+    expect((await contribution.listRuns()).runs).toEqual([]);
 
-    // Settling again owes no second message for a firing already told.
+    // Settling again owes no second alert for a firing already told.
     await settleScheduledWork(contribution.state);
-    expect((await storage.list({ prefix: MESSAGE_PREFIX })).size).toBe(1);
+    expect(await contribution.listNotifications()).toHaveLength(1);
   });
 
-  test("a muted Bot still counts a failed firing unread and alerts nobody", async () => {
+  test("a muted Bot is woken by nothing a firing does", async () => {
     const { storage, contribution, identity } = await firedRoutineBot({
       notifications: false,
     });
 
-    const messages = await storage.list<{ notify: boolean }>({
-      prefix: MESSAGE_PREFIX,
-    });
-    expect(messages.size).toBe(1);
-    expect([...messages.values()][0]!.notify).toBe(false);
+    expect(await contribution.listNotifications()).toEqual([]);
+    expect((await storage.list({ prefix: MESSAGE_PREFIX })).size).toBe(0);
     expect(await readUnread(contribution.state, identity)).toMatchObject({
-      count: 1,
+      count: 0,
     });
-    const cursor = [...messages.keys()][0]!.slice(MESSAGE_PREFIX.length);
-    expect(await storage.get(`notification:${cursor}`)).toBeUndefined();
-    // The outbox still carries it: the device clears its badge from the same
-    // delivery that declines to raise a notification.
-    expect((await storage.list({ prefix: PUSH_OUTBOX_PREFIX })).size).toBe(1);
+    // The durable record a person opens the panel to read is written either way.
+    expect((await storage.list({ prefix: "routine-inbox:" })).size).toBe(1);
   });
 
   test("a Routine's Turn joins the transcript only when it spoke, and a silent one is never opened", async () => {

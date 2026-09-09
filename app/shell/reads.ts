@@ -7,6 +7,7 @@ import {
   type SessionEvent,
 } from "@frockbot/core/contracts";
 import { sentAutomationRunKeyV1 } from "@frockbot/app/notifications/storage-keys";
+import { optionalProjectedSendV1 } from "@frockbot/app/notifications/messages";
 import type { StoredRunStatus } from "./backend-contracts.js";
 import type { ShellBotStateV1 } from "./backend-state.js";
 import {
@@ -145,6 +146,38 @@ export async function projectAnnouncementPage(state: ShellBotStateV1) {
   );
 }
 
+/**
+ * One run, with the message its journal could not hold.
+ *
+ * A Routine firing that failed still owes the person the sentence saying so,
+ * and it is an ordinary message: minted in the index, counted unread, pushed.
+ * The run it belongs to had already ended when it was minted, so there is no
+ * send event to project — the durable marker beside the message carries it,
+ * and this puts it back where the transcript draws messages, under the exact
+ * ordinal the message was named by.
+ */
+function withProjectedSendV1(
+  run: ClientRunV1,
+  send: { ordinal: number; text: string } | undefined,
+): ClientRunV1 {
+  if (!send) return run;
+  const claimed = run.events.some(
+    (event) => event.type === "send/to-user" && event.ordinal === send.ordinal,
+  );
+  if (claimed) return run;
+  return {
+    ...run,
+    events: [
+      ...run.events,
+      {
+        type: "send/to-user",
+        payload: { type: "text", text: send.text },
+        ordinal: send.ordinal,
+      },
+    ],
+  };
+}
+
 export async function listRuns(
   state: ShellBotStateV1,
   input: unknown = { schemaVersion: 1 },
@@ -233,12 +266,15 @@ export async function listRuns(
       // marker written beside its message is that fact as one keyed read. A
       // Routine that fires every minute and says nothing is the ordinary case,
       // and hydrating each silent journal to discard it was the scan's cost.
-      const spoke =
-        header?.run.admission?.turnType !== "automation"
-          ? true
-          : (await state.ctx.storage.get(
+      const marker =
+        header?.run.admission?.turnType === "automation"
+          ? await state.ctx.storage.get<unknown>(
               sentAutomationRunKeyV1(candidate.runId),
-            )) !== undefined;
+            )
+          : undefined;
+      const spoke =
+        header?.run.admission?.turnType !== "automation" ||
+        marker !== undefined;
       if (
         !header ||
         !spoke ||
@@ -250,11 +286,17 @@ export async function listRuns(
         continue;
       }
       const stored = await state.authority.hydrateRunForDisplay(header);
-      if (!isVisibleRunV1(stored.run)) {
+      // The marker is the durable fact that this firing contributed a message.
+      // A firing that broke before it could say anything has no send event to
+      // derive that from, and its message is projected below.
+      if (!isVisibleRunV1(stored.run) && marker === undefined) {
         scanCursor = candidate.cursor;
         continue;
       }
-      const projected = projectClientRunOrDegradedV1(stored.run);
+      const projected = withProjectedSendV1(
+        projectClientRunOrDegradedV1(stored.run),
+        optionalProjectedSendV1(marker),
+      );
       const tentative = [
         ...selected.values(),
         { cursor: candidate.cursor, run: projected },

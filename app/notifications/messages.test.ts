@@ -2,9 +2,14 @@ import { describe, expect, test } from "bun:test";
 import { initializeBotSettingsV1 } from "@frockbot/core/configuration";
 import type { SessionEvent } from "@frockbot/core/contracts";
 import type { StoredRunV1 } from "@frockbot/core/durable";
-import { messageRecords } from "./messages.js";
-import { PUSH_OUTBOX_PREFIX } from "./storage-keys.js";
 import {
+  messageRecords,
+  optionalProjectedSendV1,
+  visibleMessageRecordsV1,
+} from "./messages.js";
+import { PUSH_OUTBOX_PREFIX, sentAutomationRunKeyV1 } from "./storage-keys.js";
+import {
+  decodeUnreadStateV1,
   MESSAGE_PREFIX,
   MESSAGE_SEQUENCE_KEY,
   SIDEBAR_PREVIEW_KEY,
@@ -159,5 +164,60 @@ describe("message-time unread and notification records", () => {
     expect(
       await messageRecords({ run: subagent, events: [event], read: reader() }),
     ).toEqual({});
+  });
+});
+
+describe("a message whose run has no send event to carry it", () => {
+  const settings = {
+    ...initializeBotSettingsV1("primary"),
+    profile: { name: "Primary" },
+    notifications: { enabled: true },
+  };
+
+  test("is projected into its run at the ordinal it was named by", async () => {
+    const records = await visibleMessageRecordsV1({
+      settings,
+      read: reader(),
+      messages: [
+        {
+          messageId: "rf-brief-1:send:2",
+          runId: "rf-brief-1",
+          createdAt: "2026-09-01T00:00:00.000Z",
+          body: "It stopped without saying why.",
+          automation: true,
+          projectedSendOrdinal: 2,
+        },
+      ],
+    });
+
+    // The transcript reads the message back off this marker, so the id the
+    // device renders is the id the unread record names.
+    expect(
+      optionalProjectedSendV1(records[sentAutomationRunKeyV1("rf-brief-1")]),
+    ).toEqual({ ordinal: 2, text: "It stopped without saying why." });
+    expect(records[UNREAD_STATE_KEY]).toMatchObject({
+      lastMessageId: "rf-brief-1:send:2",
+    });
+  });
+
+  test("never leaves an unread record that cannot be read back", async () => {
+    // An id outside the boundary grammar would make every later unread read —
+    // and every event commit, which performs one — throw for ever.
+    const records = await visibleMessageRecordsV1({
+      settings,
+      read: reader(),
+      messages: [
+        {
+          messageId: `${"r".repeat(240)}:send:0`,
+          runId: "r".repeat(240),
+          createdAt: "2026-09-01T00:00:00.000Z",
+          body: "Too long to name",
+        },
+      ],
+    });
+
+    const state = decodeUnreadStateV1(records[UNREAD_STATE_KEY]);
+    expect(state.lastMessageId).toBeUndefined();
+    expect(state.lastActivityCursor).toBe("message-00000000000000000001");
   });
 });

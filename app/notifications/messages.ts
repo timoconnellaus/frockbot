@@ -10,7 +10,20 @@ import {
   SIDEBAR_PREVIEW_KEY,
   optionalUnreadStateV1,
   advanceUnreadActivityV1,
+  isMessageBoundaryV1,
 } from "../shell/unread.js";
+
+/**
+ * What one user-visible message is called, everywhere.
+ *
+ * The ordinal counts the run's own durable sends, so the id survives a page
+ * that drops older sends and a client that renders only some of them: the
+ * transcript names the same message the unread boundary does, which is what
+ * makes opening the conversation able to clear the badge that message raised.
+ */
+export function messageIdV1(runId: string, ordinal: number): string {
+  return `${runId}:send:${ordinal}`;
+}
 
 export interface MessageNotice {
   notificationId: string;
@@ -49,6 +62,46 @@ export interface VisibleMessageDraftV1 {
   body: string;
   /** Whether the run this message belongs to was admitted as an automation. */
   automation?: boolean;
+  /**
+   * The ordinal of a message whose run could not journal a send of its own,
+   * because the run had already ended when the message was minted. The
+   * transcript projects the run with this send appended at that ordinal, so
+   * the message a person is badged for is one they can see, and one the read
+   * boundary they send back names.
+   */
+  projectedSendOrdinal?: number;
+}
+
+/**
+ * What one automation run left beside the message it contributed.
+ *
+ * Written in the same transaction as the message. Its presence is the fact
+ * the transcript scan needs — this firing spoke, so it belongs in the
+ * conversation — and `send`, when there is one, is the message itself for a
+ * run whose journal has no send event to project.
+ */
+export interface SentAutomationRunV1 {
+  schemaVersion: 1;
+  at: string;
+  send?: { ordinal: number; text: string };
+}
+
+/** A display read: an unrecognisable marker projects no send, never throws. */
+export function optionalProjectedSendV1(
+  value: unknown,
+): { ordinal: number; text: string } | undefined {
+  const send = (value as SentAutomationRunV1 | undefined)?.send;
+  if (
+    !send ||
+    typeof send !== "object" ||
+    !Number.isSafeInteger(send.ordinal) ||
+    send.ordinal < 0 ||
+    typeof send.text !== "string" ||
+    send.text.length === 0
+  ) {
+    return undefined;
+  }
+  return { ordinal: send.ordinal, text: send.text };
 }
 
 /**
@@ -87,14 +140,27 @@ export async function visibleMessageRecordsV1(input: {
       records[sentAutomationRunKeyV1(message.runId)] = {
         schemaVersion: 1,
         at: message.createdAt,
-      };
+        ...(message.projectedSendOrdinal === undefined
+          ? {}
+          : {
+              send: {
+                ordinal: message.projectedSendOrdinal,
+                text: message.body,
+              },
+            }),
+      } satisfies SentAutomationRunV1;
     }
     unread = {
       ...advanceUnreadActivityV1(unread, {
         cursor,
         at: message.createdAt,
       }),
-      lastMessageId: message.messageId,
+      // The boundary the reader decodes is the boundary the writer is held to.
+      // An id outside the grammar would make the record undecodable for ever,
+      // taking every later unread read and every event commit with it.
+      ...(isMessageBoundaryV1(message.messageId)
+        ? { lastMessageId: message.messageId }
+        : {}),
     };
     records[SIDEBAR_PREVIEW_KEY] = {
       schemaVersion: 1,
@@ -132,9 +198,10 @@ export async function messageRecords(input: {
     settings,
     read: input.read,
     messages: sends.map((event) => ({
-      messageId: `${input.run.runId}:send:${allSends.findIndex(
-        (candidate) => candidate.seq === event.seq,
-      )}`,
+      messageId: messageIdV1(
+        input.run.runId,
+        allSends.findIndex((candidate) => candidate.seq === event.seq),
+      ),
       runId: input.run.runId,
       createdAt: event.timestamp,
       body: messagePreview(event.payload as unknown as Record<string, unknown>),

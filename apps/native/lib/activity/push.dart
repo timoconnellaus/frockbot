@@ -135,20 +135,30 @@ class PushController {
     unawaited(register());
   }
 
+  /// The read cursor each Bot has already been told about, so a repaint that
+  /// changed nothing costs no platform round trip. Scoped to this controller,
+  /// which is scoped to the signed-in account, and recorded only once the
+  /// channel has answered: a call that threw was never delivered.
+  final Map<String, String> _syncedRead = {};
+
   Future<void> syncRead() async {
     if (!platformReady || disposed) return;
     for (final view in activity.unread.values) {
-      if (view.lastSeenCursor != null) {
-        await channel.invokeMethod<void>('read', {
-          'botId': view.botId.value,
-          'cursor': view.lastSeenCursor!.value,
-        });
-      }
+      final cursor = view.lastSeenCursor?.value;
+      if (cursor == null) continue;
+      final botId = view.botId.value;
+      if (_syncedRead[botId] == cursor) continue;
+      await channel.invokeMethod<void>('read', {
+        'botId': botId,
+        'cursor': cursor,
+      });
+      _syncedRead[botId] = cursor;
     }
   }
 
   Future<void> logout() async {
     readingBot = null;
+    _syncedRead.clear();
     timer?.cancel();
     timer = null;
     if (platformReady) await channel.invokeMethod<void>('logout');

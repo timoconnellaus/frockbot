@@ -164,4 +164,63 @@ void main() {
       api.close();
     },
   );
+
+  test('a read cursor is published once, and again only when it moves', () async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    final channel = const MethodChannel('frockbot/push');
+    final reads = <Map<Object?, Object?>>[];
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+          if (call.method == 'configure') return 'token-12345678901234567890';
+          if (call.method == 'focus') return true;
+          if (call.method == 'read') {
+            reads.add(call.arguments as Map<Object?, Object?>);
+          }
+          return null;
+        });
+    final store = MemoryStore();
+    final api = SettingsApi(store, (path, body) async => {'ok': true});
+    final activity = ActivityController(api, store, 'tim');
+    void seen(String cursor) {
+      activity.unread['alpha'] = wire.UnreadView.fromJson({
+        'schemaVersion': 1,
+        'botId': 'alpha',
+        'count': 0,
+        'capped': false,
+        'unread': false,
+        'manuallyUnread': false,
+        'lastSeenCursor': cursor,
+      });
+    }
+
+    seen('message-00000000000000000002');
+    final push = PushController(api, store, 'tim', activity, channel: channel);
+    await push.start();
+
+    // The activity poll repaints every few seconds; the platform hears about
+    // a cursor once.
+    await push.syncRead();
+    await push.syncRead();
+    await push.syncRead();
+    expect(reads, hasLength(1));
+    expect(reads.single['cursor'], 'message-00000000000000000002');
+
+    // And hears again the moment the person reads something newer.
+    seen('message-00000000000000000005');
+    await push.syncRead();
+    expect(reads, hasLength(2));
+    expect(reads.last['cursor'], 'message-00000000000000000005');
+
+    // Signing out forgets it: the next account starts from nothing claimed.
+    await push.logout();
+    await push.syncRead();
+    expect(reads, hasLength(3));
+
+    push.dispose();
+    activity.dispose();
+    api.close();
+    debugDefaultTargetPlatformOverride = null;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, null);
+  });
 }
