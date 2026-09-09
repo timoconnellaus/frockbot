@@ -36,6 +36,7 @@ Map<String, dynamic> running() => {
 class FakeTransport implements ChatTransport {
   final MemoryStore store;
   final calls = <String>[];
+  final sentTexts = <String>[];
   final superseded = <String?>[];
   final completion = Completer<void>();
   Map<String, dynamic>? observed;
@@ -59,6 +60,7 @@ class FakeTransport implements ChatTransport {
       id,
     );
     calls.add('send:$id');
+    sentTexts.add(text);
     superseded.add(supersedes);
     await completion.future;
     if (loseReply) throw const RequestFailure('lost');
@@ -270,7 +272,7 @@ void main() {
       c.dispose();
     },
   );
-  testWidgets('tapping Send submits text while the mobile IME is composing', (
+  testWidgets('Send admits composed Gboard text without needing a newline', (
     tester,
   ) async {
     final store = MemoryStore();
@@ -280,7 +282,7 @@ void main() {
       store: store,
       userId: 'user-1',
       botId: 'bot-1',
-      nextId: () => 'send-1',
+      nextId: () => 'send-${transport.calls.length + 1}',
     );
     await controller.initialize();
     controller.connection = ConnectionState.connected;
@@ -303,17 +305,68 @@ void main() {
     );
     await tester.pump();
 
+    bool? pendingWhenCompositionFirstEnded;
+    final editor = tester.widget<TextField>(composer).controller!;
+    editor.addListener(() {
+      if (!editor.value.composing.isValid &&
+          pendingWhenCompositionFirstEnded == null) {
+        pendingWhenCompositionFirstEnded = controller.pending.isNotEmpty;
+      }
+    });
+
     await tester.tap(find.byKey(const ValueKey('send')));
     await tester.pump();
 
     expect(transport.calls, ['send:send-1']);
-    expect(tester.widget<TextField>(composer).controller!.text, isEmpty);
+    expect(transport.sentTexts, ['Hello']);
+    expect(pendingWhenCompositionFirstEnded, isTrue);
+    expect(editor.text, isEmpty);
     expect(jsonDecode(store.values[controller.key]!)['draft'], '');
 
     // A second tap on the same composer must not re-send the same words.
     await tester.tap(find.byKey(const ValueKey('send')));
     await tester.pump();
     expect(transport.calls, ['send:send-1']);
+
+    // Committing with Enter and then deleting that newline must not be a
+    // prerequisite for Send. Gboard resumes composing the last word after the
+    // deletion, which is the exact sequence seen on the physical phone.
+    tester.testTextInput.updateEditingValue(
+      const TextEditingValue(
+        text: 'Hello\n',
+        selection: TextSelection.collapsed(offset: 6),
+      ),
+    );
+    await tester.pump();
+    tester.testTextInput.updateEditingValue(
+      const TextEditingValue(
+        text: 'Hello',
+        selection: TextSelection.collapsed(offset: 5),
+        composing: TextRange(start: 0, end: 5),
+      ),
+    );
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('send')));
+    await tester.pump();
+    expect(transport.calls, ['send:send-1', 'send:send-2']);
+    expect(transport.sentTexts, ['Hello', 'Hello']);
+    expect(editor.text, isEmpty);
+
+    // Real multiline content is preserved; only the IME composing metadata is
+    // reconciled after the full text has entered the send path.
+    tester.testTextInput.updateEditingValue(
+      const TextEditingValue(
+        text: 'Hello\nworld',
+        selection: TextSelection.collapsed(offset: 11),
+        composing: TextRange(start: 6, end: 11),
+      ),
+    );
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('send')));
+    await tester.pump();
+    expect(transport.calls, ['send:send-1', 'send:send-2', 'send:send-3']);
+    expect(transport.sentTexts, ['Hello', 'Hello', 'Hello\nworld']);
+    expect(editor.text, isEmpty);
 
     transport.completion.complete();
     await tester.pumpAndSettle();
