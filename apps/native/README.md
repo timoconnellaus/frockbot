@@ -1,6 +1,6 @@
 # FrockBot client
 
-The one FrockBot client, over the existing cloud commands. Its web build is what `bot.frockbot.com` serves, staged into the app Worker's static assets by `apps/cloudflare/build-flutter-web.ts`. The Android and macOS builds are unqualified: they do not claim Slice 2 acceptance, and [the evidence and remaining gates](../../docs/plans/native-acceptance-2026-09-05.md) say what is missing.
+The one FrockBot client, over the existing cloud commands. Its web build is what `bot.frockbot.com` serves, staged into the app Worker's static assets by `apps/cloudflare/build-flutter-web.ts`. The Android and macOS builds are unqualified: they do not claim Slice 2 acceptance, and [`qualification.json`](qualification.json) records the evidence and what is still missing.
 
 Use Flutter **3.47.0 / Dart 3.13.0**, framework `4cf24164269a5ebf0c16a028a00727d0e77bbb05`, from `/Users/tim/repos/flutter/bin/flutter`. Do not upgrade it. `pubspec.lock` pins WebView **4.14.1**, Android WebView adapter **4.14.1**, WebKit adapter **3.26.1**, and secure storage **11.0.0**.
 
@@ -93,7 +93,7 @@ The phone holds a PKCE bearer token in the platform keystore and sends it as a h
 
 ## Backend and auth
 
-Production enables Android qualification transport with `NATIVE_SLICE_2_AUTH=android`; `android,macos` additionally permits the macOS return after its signing gate passes. Wait for the orchestrator’s release and HTTP 200 from the association endpoint before device auth. See the [rollout ledger](../../docs/plans/native-acceptance-2026-09-05-slice3.md). The anonymous fallback bootstrap is on `https://ui.bot.frockbot.com`.
+Production enables Android qualification transport with `NATIVE_SLICE_2_AUTH=android`; `android,macos` additionally permits the macOS return after its signing gate passes. Wait for the orchestrator’s release and HTTP 200 from the association endpoint before device auth. The `acceptance` block of [`qualification.json`](qualification.json) records how far that rollout got. The anonymous fallback bootstrap is on `https://ui.bot.frockbot.com`.
 
 The app persists PKCE state/verifier before opening the system browser. The gateway uses the existing Better Auth Google web client, returns to an exact HTTPS app link, and exchanges the single-use code under the User Durable Object. The seven-day native session is OS-protected and bound to its client protocol/version/catalog hello. Logout revokes it. Send and Stop persist stable ids before dispatch; uncertain sends use lookup then an admission fence; the Bot state channel advances a protected cursor only after the corresponding projection is applied. Disconnect/disposal does not cancel work.
 
