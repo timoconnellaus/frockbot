@@ -993,7 +993,15 @@ export function projectClientRunV1(
         : status === "cancelled"
           ? ({
               type: "cancelled",
-              message: CANCELLED_RUN_MESSAGE,
+              // Same rule as `failed`: a firing stopped before it could speak
+              // is told as an ordinary message, and the outcome then says that
+              // message word for word so the thread draws the one event once.
+              // A Turn a person stopped in the conversation carries no
+              // projected send and still reads "You stopped this."
+              message: truncateWireString(
+                spoken ?? CANCELLED_RUN_MESSAGE,
+                MAX_FAILURE_BYTES,
+              ),
             } satisfies ClientRunOutcomeV1)
           : status === "superseded"
             ? ({

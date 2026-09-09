@@ -1015,6 +1015,33 @@ describe("client run protocol v1", () => {
     });
   });
 
+  test("a stopped firing's outcome says the message it was told in", () => {
+    // The firing was told it was stopped as an ordinary message; the outcome
+    // repeats it word for word so the thread draws the one event once, while a
+    // Turn a person stopped in the conversation still reads the stock line.
+    const projected = projectClientRunV1(storedRun([], "cancelled"), {
+      ordinal: 0,
+      text: '"Morning brief" was stopped: You stopped this.',
+    });
+
+    expect(projected.outcome).toEqual({
+      type: "cancelled",
+      message: '"Morning brief" was stopped: You stopped this.',
+    });
+    expect(projected.status).toBe("cancelled");
+    expect(projected.events.at(-1)).toMatchObject({
+      type: "send/to-user",
+      payload: {
+        type: "text",
+        text: '"Morning brief" was stopped: You stopped this.',
+      },
+    });
+    expect(projectClientRunV1(storedRun([], "cancelled")).outcome).toEqual({
+      type: "cancelled",
+      message: "You stopped this.",
+    });
+  });
+
   test("a projected message a run already journalled is not drawn twice", () => {
     const spoke = storedRun(
       [

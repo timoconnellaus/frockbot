@@ -70,8 +70,22 @@ export async function registerPushDevice(
     }
   if (!devices.has(key) && devices.size >= 32)
     throw new Error("Too many registered devices");
-  // A refreshed token replaces the installation's old token, never adds another recipient.
-  await storage.put(key, { ...value, updatedAt: now });
+  // A refreshed token replaces the installation's old token, never adds
+  // another recipient. A registration that carries no token is a presence
+  // update — the device says which Bot it is reading, from the first frame,
+  // before the FCM token has been fetched — so it keeps the token already
+  // registered rather than erasing the only address the Bot can reach. Every
+  // other field is stated afresh: an omitted `activeBotId` means this device
+  // is no longer reading anything, and merging it would suppress its alerts.
+  const token = value.token ?? devices.get(key)?.token;
+  await storage.put(key, {
+    deviceId: value.deviceId,
+    ...(token === undefined ? {} : { token }),
+    ...(value.activeBotId === undefined
+      ? {}
+      : { activeBotId: value.activeBotId }),
+    updatedAt: now,
+  } satisfies PushDevice);
 }
 
 /**

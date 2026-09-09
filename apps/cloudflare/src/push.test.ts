@@ -5,6 +5,7 @@ import {
   registerPushDevice,
   RetryablePushError,
   sendFcm,
+  type PushDevice,
   type PushUpdate,
 } from "./push.js";
 
@@ -109,6 +110,41 @@ describe("push device registry", () => {
       300,
     );
     expect(await durable.list({ prefix: "push:device:" })).toEqual(new Map());
+  });
+
+  test("a presence update keeps the token and still lets go of the Bot", async () => {
+    // The app registers its token once, then says which Bot it is reading from
+    // the first frame of every launch — before the FCM token has been fetched
+    // back. That tokenless registration used to erase the only address the Bot
+    // could reach, and the alerts raised in that window were dropped outright.
+    const durable = storage();
+    const now = Date.now();
+    await registerPushDevice(
+      durable,
+      { deviceId: "phone-1", token: TOKEN_A, activeBotId: "primary" },
+      now - 1_000,
+    );
+    await registerPushDevice(durable, { deviceId: "phone-1" }, now);
+
+    expect(await durable.get<PushDevice>("push:device:phone-1")).toEqual({
+      deviceId: "phone-1",
+      token: TOKEN_A,
+      updatedAt: now,
+    });
+    const sends: string[] = [];
+    await deliverPush(
+      durable,
+      "user-1",
+      message(),
+      SECRET,
+      async (_secret, token) => {
+        sends.push(token);
+        return "sent";
+      },
+    );
+
+    // Reachable, and no longer reading the Bot, so the alert is not held back.
+    expect(sends).toEqual([TOKEN_A]);
   });
 });
 

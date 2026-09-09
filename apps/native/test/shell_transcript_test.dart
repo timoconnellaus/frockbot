@@ -185,6 +185,39 @@ void main() {
       expect(closing.empty, isTrue);
     });
 
+    test('says a stopped firing once too', () {
+      // A firing stopped before it could speak is told the same way, and its
+      // message already says the person stopped it.
+      const stopped = '"Morning brief" was stopped: You stopped this.';
+      final lines = projectRuns([
+        run(
+          runId: 'rf-brief',
+          status: 'cancelled',
+          failure: stopped,
+          events: [
+            {
+              'type': 'send/to-user',
+              'payload': {'type': 'text', 'text': stopped},
+              'ordinal': 0,
+            },
+          ],
+        ),
+      ]);
+      expect(thread(lines), ['assistant: $stopped']);
+      final closing = lines.firstWhere(
+        (line) => line.id == 'rf-brief:assistant',
+      );
+      expect(closing.status, LineStatus.aborted);
+      expect(closing.notice, isNull);
+    });
+
+    test('leaves an ordinary stopped Turn saying it was stopped', () {
+      final lines = projectRuns([
+        run(runId: 'run-a', input: 'Hello', status: 'cancelled'),
+      ]);
+      expect(thread(lines), ['user: Hello', 'assistant: You stopped this.']);
+    });
+
     test('leaves an ordinary broken reply saying why it broke', () {
       // The suppression is only for the message that already is the failure. A
       // reply that spoke and then broke keeps the reason under what it said.

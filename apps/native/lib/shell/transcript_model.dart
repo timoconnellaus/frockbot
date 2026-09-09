@@ -377,6 +377,15 @@ List<TranscriptLine> projectRuns(List<Map<String, dynamic>> runs) {
     // Only explicit sends carry the Bot's voice; outcome text is private.
     const text = '';
     final outcome = run['outcome'] as Map?;
+    // Whether the outcome's words have already been said to the person. A
+    // firing that broke or was stopped before it could speak is told as an
+    // ordinary message, and the cloud projects that message onto the run and
+    // makes the outcome say the same words; drawing them again as a notice
+    // underneath would be the one event said twice.
+    final outcomeMessage = outcome?['message'];
+    final spoken =
+        outcomeMessage is String &&
+        sends.any((send) => send.send.payload?['text'] == outcomeMessage);
     switch (status) {
       case 'running':
         lines.add(
@@ -418,7 +427,7 @@ List<TranscriptLine> projectRuns(List<Map<String, dynamic>> runs) {
             text: text,
             at: admittedAt,
             status: LineStatus.aborted,
-            notice: 'You stopped this.',
+            notice: spoken ? null : 'You stopped this.',
             tools: tools,
           ),
         );
@@ -434,10 +443,6 @@ List<TranscriptLine> projectRuns(List<Map<String, dynamic>> runs) {
         // same words; drawing them again underneath would be the one event
         // said twice. The row stays — it is where the Turn's tools hang, and
         // the run is still `failed` — it just says nothing of its own.
-        final message = outcome?['message'];
-        final spoken =
-            message is String &&
-            sends.any((send) => send.send.payload?['text'] == message);
         final failure = failureNotice(outcome?['message'] as String?);
         lines.add(
           TranscriptLine(
