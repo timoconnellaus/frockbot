@@ -29,3 +29,7 @@ apps/native/android/.gradle/
 apps/native/android/build/
 apps/native/android/local.properties
 apps/native/android/.kotlin/
+
+.local-validation/
+
+.eval-results/

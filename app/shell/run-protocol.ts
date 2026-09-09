@@ -1,5 +1,6 @@
 import { sentTextV1 } from "./sent-text.js";
 import {
+  APPLET_ID_V1,
   decodeSendToUserPayloadV1,
   decodeSkillRefsV1,
   type SendToUserPayloadV1,
@@ -555,6 +556,60 @@ interface ProjectionUnitV1 {
 export const UNRECORDED_TOOL_RESULT_TEXT_V1 =
   "No result was recorded for this tool call.";
 
+/** The wrapper every namespaced tool call is journalled and projected under. */
+const CALL_DYNAMIC_TOOL_NAME_V1 = "call_dynamic_tool";
+
+/** The first-party namespace, whose tool arguments stay inside the Bot. */
+const FROCKBOT_NAMESPACE_V1 = "frockbot";
+
+/**
+ * The name a projected call is shown under.
+ *
+ * The projection keeps the wrapper on the wire because that is what the
+ * journal recorded, and the wrapper's input names the tool. This is the
+ * spelling the Flutter transcript already puts in front of a person
+ * (`_presentedToolCall` in `apps/native/lib/shell/transcript_model.dart`), so
+ * a name copied out of the Work view is the name the search index holds. The
+ * audit classifier answers a different question — which tool ran, regardless
+ * of how it is displayed — and strips the first-party namespace instead.
+ */
+export function clientToolCallNameV1(call: {
+  name: string;
+  input?: unknown;
+}): string {
+  if (call.name !== CALL_DYNAMIC_TOOL_NAME_V1) return call.name;
+  const input = call.input;
+  if (typeof input !== "object" || input === null) return call.name;
+  const { namespace, toolName } = input as Record<string, unknown>;
+  if (typeof namespace !== "string" || typeof toolName !== "string") {
+    return call.name;
+  }
+  return `${namespace}/${toolName}`;
+}
+
+const APPLET_ATTRIBUTION_TOOLS = new Set([
+  "applet_files",
+  "applet_read_file",
+  "applet_write_file",
+  "applet_check",
+  "applet_publish",
+  "applet_revert",
+  "applet_delete",
+  "applet_focus",
+  "applet_generations",
+]);
+
+function appletAttribution(input: Record<string, unknown>): string | undefined {
+  if (!APPLET_ATTRIBUTION_TOOLS.has(String(input.toolName))) return undefined;
+  const args = input.arguments;
+  if (!args || typeof args !== "object" || Array.isArray(args))
+    return undefined;
+  const id = (args as Record<string, unknown>).appletId;
+  return typeof id === "string" && APPLET_ID_V1.test(id)
+    ? JSON.stringify({ appletId: id })
+    : undefined;
+}
+
 function dynamicToolCallInput(
   value: unknown,
 ): ClientDynamicToolCallInputV1 | undefined {
@@ -568,9 +623,15 @@ function dynamicToolCallInput(
   ) {
     return undefined;
   }
-  const argumentsJson = Object.hasOwn(input, "arguments")
-    ? JSON.stringify(input.arguments)
-    : undefined;
+  // The canvas needs attribution so another Applet's publish cannot advance
+  // its progress. Source, commands and all other first-party arguments stay
+  // inside the Bot; connected external tools retain their existing input.
+  const argumentsJson =
+    input.namespace === FROCKBOT_NAMESPACE_V1
+      ? appletAttribution(input)
+      : Object.hasOwn(input, "arguments")
+        ? JSON.stringify(input.arguments)
+        : undefined;
   return {
     namespace: truncateWireString(input.namespace, MAX_EVENT_NAME_BYTES),
     toolName: truncateWireString(input.toolName, MAX_EVENT_NAME_BYTES),
@@ -633,7 +694,7 @@ function projectionUnits(
       }
       callCount += 1;
       const dynamicInput =
-        event.name === "call_dynamic_tool"
+        event.name === CALL_DYNAMIC_TOOL_NAME_V1
           ? dynamicToolCallInput(event.input)
           : undefined;
       const call: ClientToolCallV1 = {
@@ -1199,7 +1260,7 @@ function decodeEvent(value: unknown): ClientRunEventV1 | undefined {
     const input = Object.hasOwn(call, "input")
       ? decodeDynamicToolCallInput(call.input)
       : undefined;
-    if (input && name !== "call_dynamic_tool") {
+    if (input && name !== CALL_DYNAMIC_TOOL_NAME_V1) {
       throw new Error(
         "run event.call.input is valid only for a dynamic tool call",
       );

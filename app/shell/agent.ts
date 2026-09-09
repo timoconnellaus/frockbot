@@ -1,32 +1,5 @@
-// The Shell's runtime Contribution: the Bot's voice to its User, and a child
-// Turn's hand-off to its parent.
-//
-// Two tools, and no authority of its own:
-//
-//  0. One prompt section, `conversation`: when to speak and when not to. It
-//     is contributed beside the tool so the section and the tool description
-//     cannot drift into telling the model two different things.
-//
-//  1. `send_to_user` (legacy alias `send_message`) — parity register row 57b.
-//     One tool carrying the typed payload union, admitted on chat turns only,
-//     recording each send as `send/to-user` on the durable log. Row 57c: a
-//     `widget` payload ends the Turn; row 53's `approval` payload is the only
-//     other one that does, and for the same reason — the Bot has nothing left
-//     to do until a person answers.
-//  3. One `agent/message-window` handler, which is where the transcript seam is: a
-//     chat Turn's request carries only chat Turns, and an automation Turn's
-//     carries its own Turn and a pointer to the parent it may not read. See
-//     `history.ts`.
-//
-//  2. `wake_parent` — row 40 / §2.13. One required `message`, a complete
-//     hand-off, admitted on automation and subagent turns only, and always
-//     ending the Turn. Delivering the hand-off into the parent's next
-//     conversational Turn is a later slice; this records it durably.
-//
-// It lives in `plugin-shell` because the Shell already owns the run DTO and
-// the WebUI that renders a send, so there is no cross-Package seam to cross.
-// Nothing here reaches the kernel: admission is a declaration the tool
-// registry enforces, and `endsTurn` is a boolean the Agent loop carries.
+// The Shell owns reply delivery and conversation completion. Final sends end
+// the Turn; interim sends continue work; background Turns hand off to a parent.
 import { packageAdmissionCeilingV1 } from "@frockbot/core/contracts";
 import {
   decodeSendToUserPayloadV1,
@@ -58,8 +31,6 @@ import { conversationDeliveryHooksV1 } from "./delivery.js";
 import { shellDefinitionV1 } from "./definition.js";
 
 export const SEND_TO_USER_TOOL_V1 = "send_to_user";
-/** `SAND_LEGACY_SEND_MESSAGE_TOOL_NAME`: an alias, not a second tool. */
-export const SEND_MESSAGE_ALIAS_V1 = "send_message";
 export const WAKE_PARENT_TOOL_V1 = "wake_parent";
 
 /** The manifest Capability each tool is contributed under. */
@@ -170,13 +141,13 @@ export function stepBudgetPromptTextV1(context: {
   if (remaining === 0) {
     return [
       "<step_budget>",
-      `This is the last step of this reply; after it the reply is stopped automatically. Do nothing except call \`${SEND_TO_USER_TOOL_V1}\` once with a short status for the person: what is finished, what is not, and what they can do next.`,
+      `This is the last step of this reply; after it the reply is stopped automatically. Do nothing except call \`${SEND_TO_USER_TOOL_V1}\` once with disposition:"finish" and a short status for the person: what is finished, what is not, and what they can do next.`,
       "</step_budget>",
     ].join("\n");
   }
   return [
     "<step_budget>",
-    `This reply has ${remaining} ${remaining === 1 ? "step" : "steps"} left after this one before it is stopped automatically. Do not start new work. Call \`${SEND_TO_USER_TOOL_V1}\` now with a short status for the person: what is finished, what is not, and what they can do next.`,
+    `This reply has ${remaining} ${remaining === 1 ? "step" : "steps"} left after this one before it is stopped automatically. Do not start new work. Call \`${SEND_TO_USER_TOOL_V1}\` now with disposition:"finish" and a short status for the person: what is finished, what is not, and what they can do next.`,
     "</step_budget>",
   ].join("\n");
 }
@@ -193,7 +164,7 @@ export function timeBudgetPromptTextV1(context: {
   }
   return [
     "<time_budget>",
-    `This Turn has fewer than 2 minutes left before it is stopped automatically. Do not start new work. Call \`${SEND_TO_USER_TOOL_V1}\` now with a short status for the person: what is finished, what is not, and what they can do next.`,
+    `This Turn has fewer than 2 minutes left before it is stopped automatically. Do not start new work. Call \`${SEND_TO_USER_TOOL_V1}\` now with disposition:"finish" and a short status for the person: what is finished, what is not, and what they can do next.`,
     "</time_budget>",
   ].join("\n");
 }
@@ -210,7 +181,7 @@ export const CONVERSATION_PROMPT_TEXT_V1 = [
   "After that, send only on a real beat: the result, a decision only the user can make, or a blocker you cannot get past.",
   "Never narrate what you are doing, what you are about to do, or which tool you are using.",
   "Never leave a question or a request hanging: before you stop, the user must have the answer, the result, or the reason there isn't one.",
-  "When the work is finished, send the result itself, not an account of how you got it.",
+  'Use disposition:"continue" for an interim update. When the work is finished, call send_to_user with disposition:"finish" and the result itself. For a greeting, immediately call send_to_user({"disposition":"finish","payload":{"type":"text","text":"Hi! How can I help?"}}). Even a greeting must be a tool call, never a plain assistant reply. Finish ends the Turn immediately; never send another reply for the same result.',
   "Keep every message short — a line or two, no preamble and no sign-off.",
   "Don't say the same thing twice.",
 ].join("\n");
@@ -223,6 +194,7 @@ const SEND_TO_USER_DESCRIPTION = [
   "call it to narrate a step or a tool, and never end your Turn leaving the",
   "user's question unanswered. Each call is one message; keep it short.",
   "The payload is one of:",
+  'payload.type is required on every send. A complete greeting call is {"disposition":"finish","payload":{"type":"text","text":"Hi! How can I help?"}}.',
   '{"type":"text","text":"…"}',
   '{"type":"attachment","url":"https://…","name":"…","mediaType":"…"}',
   '{"type":"widget","widget":{"prompt":"…","helpText":"…","options":["…"],"allowCustom":false,"dismissOnMoveOn":false}}',
@@ -233,18 +205,120 @@ const SEND_TO_USER_DESCRIPTION = [
   "their answer arrives as a new Turn. An approval asks the user to allow one",
   "action you must not take without them; it also ends your Turn, and their",
   "decision — or its expiry — reaches you as input on a later Turn.",
-  "Every other payload leaves the Turn running.",
+  'Set disposition to "finish" for the answer, result, or blocker: this ends the Turn immediately. Use "continue" only for an interim update before more work. Widgets and approvals always end the Turn.',
 ].join(" ");
 
 const SEND_TO_USER_INPUT_SCHEMA = {
   type: "object",
   properties: {
+    disposition: {
+      type: "string",
+      enum: ["finish", "continue"],
+      description:
+        "finish ends this Turn after delivery; continue sends an interim update and keeps working.",
+    },
     payload: {
       type: "object",
       description: "One typed send payload, as described by this tool.",
+      required: ["type"],
+      properties: {
+        type: {
+          type: "string",
+          enum: [
+            "text",
+            "attachment",
+            "widget",
+            "secret-request",
+            "agent-card",
+            "approval",
+          ],
+        },
+      },
+      oneOf: [
+        {
+          type: "object",
+          properties: {
+            type: { const: "text" },
+            text: { type: "string", minLength: 1 },
+          },
+          required: ["type", "text"],
+          additionalProperties: false,
+        },
+        {
+          type: "object",
+          properties: {
+            type: { const: "attachment" },
+            url: { type: "string" },
+            name: { type: "string" },
+            mediaType: { type: "string" },
+          },
+          required: ["type", "url"],
+          additionalProperties: false,
+        },
+        {
+          type: "object",
+          properties: {
+            type: { const: "widget" },
+            widget: {
+              type: "object",
+              properties: {
+                prompt: { type: "string" },
+                helpText: { type: "string" },
+                options: {
+                  type: "array",
+                  items: { type: "string" },
+                  minItems: 1,
+                  maxItems: 6,
+                  uniqueItems: true,
+                },
+                allowCustom: { type: "boolean" },
+                dismissOnMoveOn: { type: "boolean" },
+              },
+              required: ["prompt", "options"],
+              additionalProperties: false,
+            },
+          },
+          required: ["type", "widget"],
+          additionalProperties: false,
+        },
+        {
+          type: "object",
+          properties: {
+            type: { const: "secret-request" },
+            prompt: { type: "string" },
+            secretName: { type: "string" },
+          },
+          required: ["type", "prompt", "secretName"],
+          additionalProperties: false,
+        },
+        {
+          type: "object",
+          properties: {
+            type: { const: "agent-card" },
+            agentId: { type: "string" },
+            title: { type: "string" },
+            body: { type: "string" },
+          },
+          required: ["type", "agentId", "title"],
+          additionalProperties: false,
+        },
+        {
+          type: "object",
+          properties: {
+            type: { const: "approval" },
+            approvalId: { type: "string" },
+            action: { type: "string" },
+            rationale: { type: "string" },
+            risk: { type: "string", enum: ["low", "medium", "high"] },
+            expiresInSeconds: { type: "integer", minimum: 1 },
+          },
+          required: ["type", "approvalId", "action", "risk"],
+          additionalProperties: false,
+        },
+      ],
     },
   },
-  required: ["payload"],
+  required: ["disposition", "payload"],
   additionalProperties: false,
 } as const;
 
@@ -267,6 +341,14 @@ function createSendToUserTool(
       context: ToolExecutionContext,
     ): Promise<ToolExecutionResult> => {
       const record = input as Record<string, unknown>;
+      if (
+        record.disposition !== "finish" &&
+        record.disposition !== "continue"
+      ) {
+        return refusal(
+          `${name} requires disposition: "finish" for the final reply or "continue" for an interim update.`,
+        );
+      }
       let payload: SendToUserPayloadV1;
       try {
         payload = decodeSendToUserPayloadV1(record.payload, `${name}.payload`);
@@ -289,20 +371,28 @@ function createSendToUserTool(
           `${name} was refused: ${error instanceof Error ? error.message : String(error)}`,
         );
       }
-      session.append({
-        type: "send/to-user",
-        ...position,
-        occurrenceId: context.effectId,
-        payload,
-      });
-      await session.flush();
+      if (
+        !session.events.some(
+          (event) =>
+            event.type === "send/to-user" &&
+            event.occurrenceId === context.effectId,
+        )
+      ) {
+        session.append({
+          type: "send/to-user",
+          ...position,
+          occurrenceId: context.effectId,
+          payload,
+        });
+        await session.flush();
+      }
       return {
         content: sendAcknowledgement(payload),
         isError: false,
-        // Row 57c: a widget ends the Turn, and row 53's approval card is the
-        // only other payload that does. The decision is per result, so the
-        // same tool leaves a text send running.
-        ...(payload.type === "widget" || payload.type === "approval"
+        // User decisions always hand control back, even if labelled interim.
+        ...(record.disposition === "finish" ||
+        payload.type === "widget" ||
+        payload.type === "approval"
           ? { endsTurn: true }
           : {}),
       };
@@ -380,9 +470,10 @@ function createWakeParentTool(sessions: {
 export const WAKE_PARENT_MESSAGE_LIMIT_V1 = 32_000;
 
 /**
- * The Shell's runtime Contribution. Registers the user-facing send tool, its
- * legacy alias, and the parent hand-off, each bounded by the turn types its
- * manifest Capability declares.
+ * The Shell's runtime Contribution. Registers `send_to_user`, the Bot's voice
+ * to its User, and `wake_parent`, a background Turn's hand-off to the
+ * conversation that started it, each bounded by the turn types its manifest
+ * Capability declares.
  */
 export const shellAgentFeature: RuntimeFeatureV1<AgentRuntimeV1> = (
   runtime,
@@ -411,10 +502,6 @@ export const shellAgentFeature: RuntimeFeatureV1<AgentRuntimeV1> = (
     }),
     runtime.tools.register(
       createSendToUserTool(SEND_TO_USER_TOOL_V1, runtime.sessions),
-      userVoice ? { admissionCeiling: userVoice } : undefined,
-    ),
-    runtime.tools.register(
-      createSendToUserTool(SEND_MESSAGE_ALIAS_V1, runtime.sessions),
       userVoice ? { admissionCeiling: userVoice } : undefined,
     ),
     runtime.tools.register(

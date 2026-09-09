@@ -54,7 +54,7 @@ These hold regardless of how the code is organised.
 
 ## Working here
 
-- `bun run typecheck` and `bun test` both pass before a commit. The pre-commit hook runs them.
+- Pre-commit formats staged files. Before pushing, `bun run validate` must pass; pre-push runs missing categories and reuses passes only for the exact commit with a clean code checkout. Use `bun run validate:<category>` to record individual passes. See [`docs/local-validation.md`](docs/local-validation.md) for cache and CI operation.
 - Merging integrates; tagging ships. Reaching `main` deploys nothing.
 - If you open a PR or push a tag, watch it to a terminal state with `bun scripts/ci-watch.ts` and fix what it finds.
 - Prefer deleting code to adding a flag. Git history is the archive — this repo documents how things are now, not how they came to be.

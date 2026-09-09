@@ -192,6 +192,7 @@ describe("Bot recovery on this application", () => {
                         function: {
                           name: "send_to_user",
                           arguments: JSON.stringify({
+                            disposition: "finish",
                             payload: {
                               type: "widget",
                               widget: {

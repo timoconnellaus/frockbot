@@ -46,10 +46,7 @@ async function* foundationStream(
   signal.throwIfAborted();
   const latest = request.messages.at(-1);
   if (request.tools.some((tool) => tool.name === "send_to_user")) {
-    if (
-      latest?.role === "tool" &&
-      (latest.name === "send_to_user" || latest.name === "send_message")
-    ) {
+    if (latest?.role === "tool" && latest.name === "send_to_user") {
       yield { type: "finish", reason: "completed" };
       return;
     }
@@ -69,7 +66,7 @@ async function* foundationStream(
       call: {
         id: `send-${request.requestId}`,
         name: "send_to_user",
-        input: { payload: { type: "text", text } },
+        input: { disposition: "finish", payload: { type: "text", text } },
       },
     };
     yield { type: "finish", reason: "tool-calls" };

@@ -39,6 +39,7 @@ class FrockAiGatewayFake extends RpcTarget {
                 function: {
                   name: "send_to_user",
                   arguments: JSON.stringify({
+                    disposition: "finish",
                     payload: {
                       type: "text",
                       text: "Reply from the Frock AI stub.",

@@ -141,6 +141,25 @@ export function e2eToolCallPrompt(name: string, input: unknown = {}): string {
   return `${E2E_TOOL_CALL_TRIGGER}${name}:${JSON.stringify(input)}`;
 }
 
+/**
+ * One scripted call to a first-party tool, as a model reaches it.
+ *
+ * Every first-party tool but the Shell's own `send_to_user` and `wake_parent`
+ * lives in the `frockbot` namespace, so it is discovered and then called
+ * through `call_dynamic_tool`; a script that names one bare is an unknown
+ * tool, exactly as it would be in production.
+ */
+export function e2eFrockbotToolCallPrompt(
+  name: string,
+  input: unknown = {},
+): string {
+  return e2eToolCallPrompt("call_dynamic_tool", {
+    namespace: "frockbot",
+    toolName: name,
+    arguments: input,
+  });
+}
+
 function scriptedToolCalls(
   body: string,
 ): Array<{ name: string; arguments: string }> {
@@ -309,9 +328,7 @@ export function startFakeOllama(port: number): Promise<{
           );
           const sent = sinceUser.some((message) =>
             message.tool_calls?.some(
-              (call) =>
-                call.function?.name === "send_to_user" ||
-                call.function?.name === "send_message",
+              (call) => call.function?.name === "send_to_user",
             ),
           );
           if (
@@ -322,6 +339,7 @@ export function startFakeOllama(port: number): Promise<{
             calls.push({
               name: "send_to_user",
               arguments: JSON.stringify({
+                disposition: "finish",
                 payload: { type: "text", text: E2E_ASSISTANT_REPLY },
               }),
             });

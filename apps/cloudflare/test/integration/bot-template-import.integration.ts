@@ -10,7 +10,7 @@
 // is user B; and the imported webhook Routine is present but disabled.
 import { env, runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
-import { TOOL_CALL_TRIGGER } from "../harness/miniflare.ts";
+import { frockbotToolCallPrompt } from "../harness/miniflare.ts";
 import {
   asUser,
   expectOkJson,
@@ -63,12 +63,12 @@ async function buildSourceBot(userId: string, botId: string): Promise<string> {
     await postAsUser(userId, `/api/bots/${botId}/turns`, {
       schemaVersion: 1,
       commandId: "import-skill-write",
-      text: `${TOOL_CALL_TRIGGER}skill_write:${JSON.stringify({
+      text: frockbotToolCallPrompt("skill_write", {
         name: "Reconcile ledger",
         description: "Use this when reconciling the ledger.",
         body: SKILL_BODY,
         slug: SKILL_SLUG,
-      })}`,
+      }),
     }),
   )) as { events: { type: string; isError?: boolean; content?: string }[] };
   const result = written.events.find((event) => event.type === "tool/result");

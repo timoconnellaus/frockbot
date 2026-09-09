@@ -12,7 +12,7 @@
 // real model, and the assertion is on the durable `tool/result`.
 import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
-import { TOOL_CALL_TRIGGER } from "../harness/miniflare.ts";
+import { frockbotToolCallPrompt } from "../harness/miniflare.ts";
 import {
   asUser,
   expectJson,
@@ -20,7 +20,6 @@ import {
   freshUserId,
   postAsUser,
   provisionThroughGateway,
-  toolCallTriggerPrompt,
   useApplicationArtifact,
 } from "./fixtures.ts";
 
@@ -110,10 +109,10 @@ async function searchResults(
     await postAsUser(userId, `/api/bots/${botId}/turns`, {
       schemaVersion: 1,
       commandId,
-      text: `${TOOL_CALL_TRIGGER}web_search:${JSON.stringify({
+      text: frockbotToolCallPrompt("web_search", {
         query: "frockbot parity",
         max_results: maxResults,
-      })}`,
+      }),
     }),
   )) as ClientTurn;
   const result = turn.events.find((event) => event.type === "tool/result") as
@@ -200,10 +199,9 @@ describe("the Image Package's `image.model` setting", () => {
       await postAsUser(userId, `/api/bots/${botId}/turns`, {
         schemaVersion: 1,
         commandId: `image-with-setting-${botId}`,
-        text: toolCallTriggerPrompt([
-          "generate_image",
-          { prompt: "a red barn at dusk" },
-        ]),
+        text: frockbotToolCallPrompt("generate_image", {
+          prompt: "a red barn at dusk",
+        }),
       }),
     )) as ClientTurn;
     const result = turn.events.find((event) => event.type === "tool/result") as

@@ -33,6 +33,7 @@ import {
   appletBuildAvailableV1,
   E2E_DEBUG_TOKEN,
   E2E_OLLAMA_GOOD_API_KEY,
+  e2eFrockbotToolCallPrompt,
   e2eToolCallPrompt,
 } from "./harness.ts";
 
@@ -95,7 +96,7 @@ async function runTool(
 ): Promise<void> {
   // The Applets tools are first-party registrations, so the scripted model
   // calls them by name.
-  await sendMessage(page, `${text}\n${e2eToolCallPrompt(name, input)}`);
+  await sendMessage(page, `${text}\n${e2eFrockbotToolCallPrompt(name, input)}`);
 }
 
 async function appletIdNamed(page: Page, displayName: string): Promise<string> {

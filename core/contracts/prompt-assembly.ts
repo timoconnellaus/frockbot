@@ -13,6 +13,13 @@ export interface PromptAssemblyContext {
    */
   turnType: TurnTypeV1;
   /**
+   * The role a `subagent` Turn was admitted under. A section that renders what
+   * the Turn may do must apply the same role ceiling tool admission does, or
+   * the prompt advertises tools the registry will refuse. Absent on every
+   * other turn type, and on a host with no Turn to speak of.
+   */
+  subagentRole?: string;
+  /**
    * Where this request sits in the Turn's step budget: `current` is the step
    * being assembled (1-based) and `max` the last step the loop will run. A
    * section can tell the model it is about to be stopped, which is how a

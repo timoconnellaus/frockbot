@@ -139,13 +139,45 @@ describe("the classifier table", () => {
       auditKindForToolV1("call_dynamic_tool", {
         namespace: "frockbot",
         toolName: "package_author",
-        input: { packageId: "acme" },
+        arguments: { packageId: "acme" },
       }),
       // `package_author` writes the Workspace, not the Computer.
     ).toEqual({ kind: "file", target: "workspace" });
     // A wrapper that names nothing resolvable stays the wrapper, and the
     // wrapper is not an audited effect.
     expect(auditKindForToolV1("call_dynamic_tool", {})).toBeUndefined();
+  });
+
+  test("a namespaced call is classified on the arguments the tool was given", () => {
+    // The machine and Computer tools are registered in the `frockbot`
+    // namespace, so their arguments arrive one level in. Reading the wrapper
+    // for `machineId` said a command that ran on the User's Mac ran in the
+    // Computer sandbox — and no `target=machine:<id>` row existed for it.
+    expect(
+      auditKindForToolV1("call_dynamic_tool", {
+        namespace: "frockbot",
+        toolName: "machine_exec",
+        arguments: { machineId: "994dc2ee-1", command: "rm -rf ~/x" },
+      }),
+    ).toEqual({ kind: "shell", target: "machine:994dc2ee-1" });
+    // A background command is a process whichever way it was called.
+    expect(
+      auditKindForToolV1("call_dynamic_tool", {
+        namespace: "frockbot",
+        toolName: "computer_exec",
+        arguments: { command: "sleep 60", background: true },
+      }),
+    ).toEqual({ kind: "process", target: "computer" });
+    // The envelope's own `machineId` is not the call's: a Computer tool stays
+    // audited against the Computer.
+    expect(
+      auditKindForToolV1("call_dynamic_tool", {
+        namespace: "frockbot",
+        toolName: "computer_exec",
+        machineId: "994dc2ee-1",
+        arguments: { command: "ls" },
+      }),
+    ).toEqual({ kind: "shell", target: "computer" });
   });
 
   test("an MCP tool whose own name contains __ still names its server", () => {

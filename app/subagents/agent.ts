@@ -437,6 +437,7 @@ export function createTaskTool(
 ): ToolDefinition {
   return {
     name: TASK_TOOL_V1,
+    namespace: "frockbot",
     description: TASK_DESCRIPTION,
     inputSchema: structuredClone(TASK_INPUT_SCHEMA) as unknown as Record<
       string,
@@ -688,6 +689,7 @@ export function createTaskCheckTool(
 ): ToolDefinition {
   return {
     name: TASK_CHECK_TOOL_V1,
+    namespace: "frockbot",
     description: [
       "Read the current state of one subagent you dispatched.",
       "It answers with the task's status and its last summary.",
@@ -751,6 +753,7 @@ export function createTaskMessageTool(
 ): ToolDefinition {
   return {
     name: TASK_MESSAGE_TOOL_V1,
+    namespace: "frockbot",
     description: [
       "Send one message to a subagent that is still running.",
       "It is queued and read by the subagent; it is refused if the subagent is not running.",
@@ -813,6 +816,7 @@ export function createTaskStopTool(
 ): ToolDefinition {
   return {
     name: TASK_STOP_TOOL_V1,
+    namespace: "frockbot",
     description: [
       "Stop a subagent you dispatched. The cancellation is durable and final:",
       "the subagent ends, its slot is released, and it cannot be restarted —",
@@ -868,6 +872,7 @@ export function createTaskResumeTool(
 ): ToolDefinition {
   return {
     name: TASK_RESUME_TOOL_V1,
+    namespace: "frockbot",
     description: [
       "Give a finished subagent a new instruction, in the same subagent it ran in before,",
       "so it keeps everything it already learned. It is refused while the subagent is still running,",

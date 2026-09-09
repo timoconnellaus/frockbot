@@ -107,8 +107,12 @@ function modelRunning(
           type: "tool-call",
           call: {
             id: `call-${issued}`,
-            name: "computer_exec",
-            input: { command },
+            name: "call_dynamic_tool",
+            input: {
+              namespace: "frockbot",
+              toolName: "computer_exec",
+              arguments: { command },
+            },
           },
         };
         yield { type: "finish", reason: "tool-calls" };

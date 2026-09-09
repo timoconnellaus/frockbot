@@ -585,7 +585,7 @@ export function createAppletsFeature(
 ): RuntimeFeatureV1<{ tools: ToolRegistration }> {
   return (runtime) => {
     const disposers = appletTools(host).map((definition) =>
-      runtime.tools.register(definition),
+      runtime.tools.register({ ...definition, namespace: "frockbot" }),
     );
     return () => {
       for (const dispose of disposers.toReversed()) dispose();

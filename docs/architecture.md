@@ -152,7 +152,7 @@ A Turn writes a `turn/end` on every path but one: a `ModelOutcomeSettlementRequi
 
 ### Model request — `requestModelV1`
 
-Validates the settled tool-occurrence journal, assembles the system prompt through `ctx.systemPrompt.assemble` (session, provider, model, turn type, step budget, deadline), then builds one request: `session.deriveMessages()` through `agent/message-window`, `ctx.tools.schemas({turnType, subagentRole})` through `agent/tool-exposure`, and the assembled `NormalizedModelRequest` through `agent/request`. Per dispatch it journals `model/request`, flushes, calls `admitEffect` — a `false` throws `EffectAdmissionFencedError` — and consumes the stream.
+Validates the settled tool-occurrence journal, assembles the system prompt through `ctx.systemPrompt.assemble` (session, provider, model, turn type, subagent role, step budget, deadline), then builds one request: `session.deriveMessages()` through `agent/message-window`, `ctx.tools.schemas({turnType, subagentRole})` through `agent/tool-exposure`, and the assembled `NormalizedModelRequest` through `agent/request`. Per dispatch it journals `model/request`, flushes, calls `admitEffect` — a `false` throws `EffectAdmissionFencedError` — and consumes the stream.
 
 On failure it flushes, releases the request id through `notifyModelOutcome`, and classifies: a `StructuredOutputValidationError` is terminal; a cancellation rethrows and lets the Turn settle; anything else is a retry candidate under `nextModelRetryV1`, classified `unknown` when the provider offered no classification of its own. The `agent/request-error` waterfall may refuse a planned retry or substitute a provider-owned fallback — a fallback is a different call and takes a new key.
 
@@ -167,6 +167,9 @@ Sequential, not parallel. Per occurrence: validate the journal, skip if a result
 - An occurrence with an intent and no result is dispatched again under the same effect id.
 - A throw that is not a cancellation becomes an error result. For a tool not declared `idempotent` the content says the outcome is uncertain, because the loop does not know whether the work happened and does not try to find out.
 - A result carrying `endsTurn: true` closes the Turn unless the `agent/step-continuation` waterfall overrides it.
+- `send_to_user` requires `disposition: "finish" | "continue"`. A final answer ends the Turn immediately; an interim update leaves a final reply owed. Widgets and approvals always end the Turn. The Shell derives completion from the durable tool input and matching send occurrence, including after eviction.
+- Chat/agent requests expose only `send_to_user`, `get_dynamic_tools`, and `call_dynamic_tool` initially. Specialist first-party tools live in the `frockbot` namespace: names are listed in the prompt, schemas are read on demand, and execution retains the same admission and authority checks. Background Turns expose `wake_parent` in place of user delivery.
+- A provider that emits private text instead of a final send gets one bounded delivery-repair step. No provider-specific forced-tool option is assumed.
 
 ### Usage accounting
 
@@ -873,17 +876,20 @@ Admin is membership of the comma-separated `FROCKBOT_ADMIN_EMAILS` secret (`apps
 6. **Flutter** — `apps/native/test/*.dart` (14 files) plus `integration_test/settings_screens.dart`, which is a screenshot runner.
 7. **Gate scripts** — run under `typecheck`: `scripts/check-client-protocol.ts`, `scripts/check-layer-imports.ts`, `scripts/check-computer-host-imports.ts`, `scripts/generate-isolate-context-catalog.ts --check`, `scripts/build-applets-assets.ts --check` (the SDK scaffold, the Applets Skill and the two page HTMLs, as strings the Worker bundle can carry), then `scripts/typecheck.ts`.
 
-### `.github/workflows/ci.yml`
+### Local validation and PR CI
 
-Triggers: push to `main`, all pull requests, `workflow_dispatch`.
+Pre-commit formats staged files. `scripts/validate.ts` runs format, typecheck,
+unit, runtime, integration, browser and build categories before pushing. Each
+successful category records a receipt for the exact commit and toolchain in
+`.local-validation/`; a clean code checkout is required before and after checks.
+Each run has an isolated Wrangler service registry. Pre-push fetches remote
+main before and after validation and rejects stale branches or new merge commits.
+See [local validation](local-validation.md) for commands and cache recovery.
 
-- `changes` (:17) — classifies documentation-only runs through `scripts/docs-only.sh`, so ruleset-required checks report `skipped` rather than remaining pending.
-- `docs` (:83) — install plus `format:check`.
-- `validate` (:110) — Bun 1.3.6: `format:check`, `typecheck`, `bun test`, app `test:workerd`, app `test:integration`, computer-host `test` and `test:workerd`, Applet build service `test` and `test:workerd`, then the pinned Flutter SDK and `bun run build`, whose first step builds the web client.
-- `e2e` (:189) — 4-shard matrix, `fail-fast: false`, Chromium install, `bun run test:e2e --shard=N/4`; uploads blob reports, failure diagnostics and wrangler logs.
-- `e2e-gate` (:318) — aggregates the matrix into the ruleset-required check `Browser end-to-end`.
-- `e2e-report` (:346) — merges blob reports into HTML on failure.
-- `deploy-staging` (:367) — push to `main`, `needs: [validate, e2e]`, environment `staging`. Validates required env names, creates missing staging R2 buckets, the Vectorize index and D1, rewrites `wrangler.jsonc` in place to inject the staging `database_id` and replace `foundation-v1` with the artifact sha256, applies D1 migrations, uploads the artifact to R2, then `wrangler deploy --env staging --secrets-file`.
+`.github/workflows/pr-gate.yml` checks branch ancestry without running tests.
+Main requires `PR gate` and strict branch freshness at merge time.
+`.github/workflows/ci.yml` retains the full suite for manual dispatch only;
+its push-only staging deployment is paused.
 
 ### `.github/workflows/release.yml`
 
@@ -897,10 +903,11 @@ Trigger: push of a tag matching `v*.*.*`.
 
 ### `.github/workflows/auto-merge.yml`
 
-On pull request `opened`, `reopened` and `ready_for_review`. Skips drafts and forks; runs `gh pr merge --auto --merge`. The branch ruleset on `main`, requiring `Validate` and `Browser end-to-end`, is what holds the merge.
+On pull request `opened`, `reopened` and `ready_for_review`. Skips drafts and forks; runs `gh pr merge --auto --merge`. The branch ruleset on `main`, requiring `PR gate` and strict branch freshness, is what holds the merge.
 
 ### `.github/workflows/native.yml`
 
-On pull requests touching `apps/native/**`, `core/protocol-schemas/**`, `scripts/*protocol*`, `scripts/*native*` or itself. Advisory (`continue-on-error: true`). Runs `scripts/check-native-pins.py`, installs the pinned SDK, fails unless its `frameworkRevision` is `4cf24164269a5ebf0c16a028a00727d0e77bbb05`, then `flutter pub get --enforce-lockfile`, `flutter analyze`, `flutter test` and `flutter build web --release`. The web client is a required check elsewhere — `ci.yml`'s `validate` builds it — so this job is the device's analysis, not the client's gate.
+Manual dispatch only. The advisory job retains native pin checking, analysis,
+tests and web build checks for explicit qualification runs.
 
 ---

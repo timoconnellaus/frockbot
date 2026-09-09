@@ -687,6 +687,101 @@ describe("client run protocol v1", () => {
     );
   });
 
+  test("keeps a first-party tool's arguments out of the projection", () => {
+    const projected = projectClientTurnV1({
+      runId: "run-first-party-tool",
+      text: "",
+      events: [
+        event({
+          type: "tool/call",
+          seq: 0,
+          timestamp,
+          turn: 1,
+          step: 1,
+          occurrenceId: "tool:1:1:0",
+          name: "call_dynamic_tool",
+          input: {
+            namespace: "frockbot",
+            toolName: "computer_exec",
+            arguments: { command: "cat ~/.aws/credentials" },
+          },
+        }),
+      ],
+    });
+
+    // The client is still told which tool ran — only what it was given stays
+    // inside the Bot, exactly as it did while these tools were native.
+    expect(projected.events[0]).toEqual({
+      type: "tool/call",
+      call: {
+        id: "tool-1",
+        name: "call_dynamic_tool",
+        input: { namespace: "frockbot", toolName: "computer_exec" },
+      },
+    });
+    expect(JSON.stringify(projected)).not.toContain("credentials");
+    expect(decodeClientTurnV1(structuredClone(projected)).events[0]).toEqual(
+      projected.events[0],
+    );
+  });
+
+  test.each([
+    ["applet_publish", "owner.applet-one", '{"appletId":"owner.applet-one"}'],
+    [
+      "applet_write_file",
+      "owner.applet-two",
+      '{"appletId":"owner.applet-two"}',
+    ],
+    ["applet_check", "../invalid", undefined],
+    ["applet_check", 42, undefined],
+    ["computer_exec", "owner.applet-one", undefined],
+    ["applet_create", "owner.applet-one", undefined],
+  ])(
+    "projects only safe Applet attribution for %s (%s)",
+    (toolName, appletId, argumentsJson) => {
+      const projected = projectClientTurnV1({
+        runId: "run-applet-attribution",
+        text: "",
+        events: [
+          event({
+            type: "tool/call",
+            seq: 0,
+            timestamp,
+            turn: 1,
+            step: 1,
+            occurrenceId: "tool:1:1:0",
+            name: "call_dynamic_tool",
+            input: {
+              namespace: "frockbot",
+              toolName,
+              arguments: {
+                appletId,
+                text: "private-source",
+                command: "private-command",
+              },
+            },
+          }),
+        ],
+      });
+      expect(projected.events[0]).toEqual({
+        type: "tool/call",
+        call: {
+          id: "tool-1",
+          name: "call_dynamic_tool",
+          input: {
+            namespace: "frockbot",
+            toolName,
+            ...(argumentsJson === undefined ? {} : { argumentsJson }),
+          },
+        },
+      });
+      expect(JSON.stringify(projected)).not.toContain("private-");
+      expect(decodeClientTurnV1(structuredClone(projected)).events[0]).toEqual(
+        projected.events[0],
+      );
+    },
+  );
+
   test("projects only bounded user-visible run state", () => {
     const stored = {
       runId: "run-1",

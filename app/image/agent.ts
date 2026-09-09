@@ -321,6 +321,7 @@ export function createGenerateImageTool(
 ): ToolDefinition {
   return {
     name: "generate_image",
+    namespace: "frockbot",
     // A general work tool: the full toolset an `executor` subagent gets, and
     // not part of the narrow reach of `browserUse`, `computerUse`, or the two
     // video roles. See `@frockbot/app/subagents` `SUBAGENT_TOOL_REACH_V1`.

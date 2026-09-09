@@ -16,7 +16,7 @@
 //  3. Bot B can invoke it from the composer, and Bot A's own root is untouched
 //     — nothing was copied anywhere.
 import { describe, expect, it } from "vitest";
-import { TOOL_CALL_TRIGGER } from "../harness/miniflare.ts";
+import { frockbotToolCallPrompt } from "../harness/miniflare.ts";
 import {
   expectOkJson,
   freshUserId,
@@ -76,13 +76,13 @@ describe("a Skill in the User's shared instruction root", () => {
       await postAsUser(userId, `/api/bots/${author}/turns`, {
         schemaVersion: 1,
         commandId: "user-skill-write",
-        text: `${TOOL_CALL_TRIGGER}skill_write:${JSON.stringify({
+        text: frockbotToolCallPrompt("skill_write", {
           name: SKILL_NAME,
           description: "Use this when assembling the weekday standup.",
           body: SKILL_BODY,
           slug: SKILL_SLUG,
           scope: "user",
-        })}`,
+        }),
       }),
     )) as {
       events: Array<{ type: string; content?: string; isError?: boolean }>;

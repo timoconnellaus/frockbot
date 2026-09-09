@@ -9,6 +9,7 @@ import {
 } from "@frockbot/core/contracts";
 import {
   CALL_DYNAMIC_TOOL_NAME,
+  frockbotToolCallV1,
   FROCKBOT_NAMESPACE_USE_INSTRUCTIONS,
   GET_DYNAMIC_TOOLS_NAME,
   ToolRegistry,
@@ -527,6 +528,32 @@ describe("progressive tool disclosure", () => {
     ).toEqual({ content: "inner failure", isError: true });
   });
 
+  test("reaches a first-party tool the way the Bot's own dispatch sites do", async () => {
+    // A page's direct tool and a Package's `schedule` grant already know the
+    // tool they mean, and reached it by bare name — which a namespaced tool is
+    // not registered under, so the registry answered a Package isolate with a
+    // refusal addressed to a model. They build the same envelope now.
+    const { tools } = toolsFixture();
+    tools.register(dynamicTool("frockbot", "routine_manage"));
+
+    const bare = {
+      id: "call-1",
+      name: "routine_manage",
+      input: { value: "x" },
+    };
+    expect(await tools.prepare(bare, contextFor(bare))).toMatchObject({
+      kind: "denied",
+    });
+
+    const call = frockbotToolCallV1(bare);
+    const preparation = await tools.prepare(call, contextFor(call));
+    if (preparation.kind === "denied") throw new Error("was denied");
+    expect(await tools.executePrepared(preparation, contextFor(call))).toEqual({
+      content: '{"value":"x"}',
+      isError: false,
+    });
+  });
+
   test("renders an escaped prompt catalog and omits the block when empty", async () => {
     const { tools, systemPrompt } = toolsFixture();
     expect(
@@ -564,6 +591,36 @@ describe("progressive tool disclosure", () => {
         "</dynamic_tool_catalog>",
       ].join("\n"),
     );
+  });
+
+  test("the prompt catalog applies the same subagent-role ceiling as admission", async () => {
+    const { tools, systemPrompt } = toolsFixture();
+    tools.register({
+      ...dynamicTool("frockbot", "computer_exec"),
+      admission: { turnTypes: ["subagent"], subagentRoles: ["computerUse"] },
+    });
+    tools.register({
+      ...dynamicTool("frockbot", "memory_write"),
+      admission: { turnTypes: ["subagent"] },
+    });
+
+    const catalogFor = async (subagentRole?: string) =>
+      (
+        await systemPrompt.assemble({
+          sessionId: "session",
+          provider: "provider",
+          model: "model",
+          turnType: "subagent",
+          ...(subagentRole === undefined ? {} : { subagentRole }),
+        })
+      ).text;
+
+    expect(await catalogFor("computerUse")).toContain(
+      'tools="computer_exec, memory_write"',
+    );
+    const videoReview = await catalogFor("videoReview");
+    expect(videoReview).toContain('tools="memory_write"');
+    expect(videoReview).not.toContain("computer_exec");
   });
 
   test("rejects duplicate namespace/tool identities but permits the same bare name elsewhere", async () => {

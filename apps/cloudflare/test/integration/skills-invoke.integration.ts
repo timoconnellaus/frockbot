@@ -13,7 +13,7 @@
 // a reason instead of being dropped.
 import { env, runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
-import { TOOL_CALL_TRIGGER } from "../harness/miniflare.ts";
+import { frockbotToolCallPrompt } from "../harness/miniflare.ts";
 import {
   asUser,
   expectOkJson,
@@ -48,12 +48,12 @@ async function writeSkill(userId: string, botId: string): Promise<void> {
     await postAsUser(userId, `/api/bots/${botId}/turns`, {
       schemaVersion: 1,
       commandId: "skill-write-1",
-      text: `${TOOL_CALL_TRIGGER}skill_write:${JSON.stringify({
+      text: frockbotToolCallPrompt("skill_write", {
         name: "Daily standup",
         description: "Use this when assembling the weekday standup.",
         body: SKILL_BODY,
         slug: SKILL_SLUG,
-      })}`,
+      }),
     }),
   )) as {
     events: Array<{ type: string; content?: string; isError?: boolean }>;

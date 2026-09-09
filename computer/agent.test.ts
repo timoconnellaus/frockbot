@@ -1,3 +1,4 @@
+import { frockbotToolCall, discoverFrockbotTools } from "@frockbot/app/testkit";
 import { describe, expect, test } from "bun:test";
 import { ComputerError } from "@frockbot/computer/core";
 import {
@@ -35,7 +36,7 @@ async function execute(
     signal: new AbortController().signal,
   };
   const prepared = await harness.tools.prepare(
-    { id: crypto.randomUUID(), name, input },
+    frockbotToolCall(name, input, crypto.randomUUID()),
     context,
   );
   if (prepared.kind !== "ready") throw new Error(prepared.result.content);

@@ -107,15 +107,20 @@ Five layers, each answering a different question. The first four run in CI; the 
 | **e2e**         | `bun run --filter @frockbot/cloudflare test:e2e`         | `e2e/**/*.e2e.ts` — real Chromium against `wrangler dev`; the only layer in which the shipped client runs.                     |
 | **live**        | `bun run --filter @frockbot/computer-host test:live`     | The production container image against a real disposable Fly Sprite. Needs Docker and `SPRITES_TOKEN`; deleted in `finally`.   |
 
-The suffixes matter: root `bun test` matches `*.test.ts` and `*.spec.ts` and neither `*.workerd.ts`, `*.integration.ts`, nor `*.e2e.ts`, so the pre-commit hook never starts a runtime project. A commit that touches only documentation — anything under `docs/` or a Markdown file at the repository root — runs Prettier and nothing else, locally and in CI: `scripts/docs-only.sh` is the one definition both the hook and CI's `Classify changes` job use, so such a pull request needs only the `Check documentation` job before it merges. There is no live Sprite probe inside the workerd project any more — the old `computer-compatibility.workerd.ts` live path went away with the Sprites SDK when it moved to the Computer host. `apps/computer-host/live-test.ts` is the only thing in the repository that touches a real Sprite. `apps/cloudflare/test/README.md` documents each runtime project in full.
+Root `bun test` covers unit tests; runtime, integration and browser tests use
+separate suffixes and commands. Pre-commit formats staged files. Pre-push runs
+`bun run validate`, reusing successful categories for the exact commit and a
+clean code checkout. Run `bun run validate unit integration` to populate selected
+receipts while working. [Local validation](docs/local-validation.md) explains
+cache rules, worktree isolation and restoring automatic CI.
 
 ## Releases
 
-Merging integrates; tagging ships. A pull request is queued to merge itself as soon as CI is green (`auto-merge.yml`), so `main` stays continuously integrated and nothing about landing a change touches production. Production moves only when a maintainer pushes a version tag.
+Merging integrates; tagging ships. A pull request is queued to merge itself once the lightweight PR gate passes (`auto-merge.yml`), so `main` stays continuously integrated and nothing about landing a change touches production. Production moves only when a maintainer pushes a version tag.
 
 Pushing a valid SemVer tag such as `v0.1.0` or `v0.1.0-rc.1` (build metadata such as `+build.1` is rejected because npm does not accept it in package versions) validates the monorepo, publishes `applets/sdk` to npm with the tag's version — the one workspace whose manifest declares `frockbot.npm` — creates a GitHub release with generated notes, and then deploys production. Prereleases use npm's `next` dist-tag rather than `latest`. Application workspaces remain private.
 
-Auto-merge waits on the branch ruleset for `main`, which requires the `Validate` and `Browser end-to-end` checks. That ruleset is what holds a queued pull request back; without it GitHub has nothing to wait for and would merge on open. **Allow auto-merge** must also be enabled in the repository's settings.
+Auto-merge waits on the branch ruleset for `main`, which requires `PR gate` and an up-to-date branch. That ruleset is what holds a queued pull request back; without it GitHub has nothing to wait for and would merge on open. **Allow auto-merge** must also be enabled in the repository's settings.
 
 One pull request cannot queue itself: GitHub refuses to let `GITHUB_TOKEN` auto-merge anything that edits `.github/workflows/`, since that needs a `workflows` scope the Actions token cannot hold. A pull request that changes CI is merged by hand and the workflow logs a warning saying so.
 
@@ -157,7 +162,7 @@ A failure in the publish step reporting a 404 from the token exchange means the 
 
 ## Staging deployment
 
-Staging follows the branch as production follows the tag. Every push to `main` that passes `validate` and the browser end-to-end job runs `ci.yml`'s `deploy-staging`, which deploys `apps/cloudflare` to `https://staging-bot.frockbot.com` through the GitHub `staging` environment. It is the same Worker code production runs, in Wrangler's `staging` environment, with none of production's data.
+Automatic staging deployment is paused while validation runs locally. Heavy CI and native qualification are manual-only; production still ships through version tags. See [local validation](docs/local-validation.md) to restore automatic CI and staging.
 
 Staging isolates everything that holds state or identity — its own D1 database `frockbot-auth-staging`, its own R2 buckets, its own Vectorize index, its own secrets, and its own Durable Object namespaces, which come free because a namespace belongs to the Worker that declares it. It shares the stateless `frockbot-computer-host` Worker, which owns only the Sprites credential, so staging exercises the same host production does instead of paying for a second container deployment. The consequence is production's ordering constraint — a change to the host's contract ships with a tag, so staging sees it only once that tag lands.
 

@@ -1,3 +1,4 @@
+import { frockbotToolCall, discoverFrockbotTools } from "@frockbot/app/testkit";
 // `computer_doctor` (parity row 27) and the GUI policy at the exec seam (row
 // 33).
 //
@@ -111,7 +112,7 @@ async function call(
 ) {
   const execution = context(effectId);
   const prepared = await harness.tools.prepare(
-    { id: crypto.randomUUID(), name, input },
+    frockbotToolCall(name, input, crypto.randomUUID()),
     execution,
   );
   if (prepared.kind !== "ready") return prepared.result;
@@ -169,9 +170,9 @@ describe("computer_doctor", () => {
     const harness = await mount(state.host);
 
     for (const turnType of ["chat", "automation", "subagent"] as const) {
-      const names = harness.tools
-        .schemas({ turnType })
-        .map((schema) => schema.name);
+      const names = (
+        await discoverFrockbotTools(harness.tools, { turnType })
+      ).map((schema) => schema.name);
       expect(names, turnType).toContain("computer_doctor");
     }
   });
@@ -225,9 +226,9 @@ describe("the GUI is never driven from the shell", () => {
   test("says where the host's shared scratch is, and that it is not durable", async () => {
     const state = fixture();
     const harness = await mount(state.host);
-    const description = harness.tools
-      .schemas({ turnType: "chat" })
-      .find((schema) => schema.name === "computer_exec")?.description;
+    const description = (
+      await discoverFrockbotTools(harness.tools, { turnType: "chat" })
+    ).find((schema) => schema.name === "computer_exec")?.description;
 
     expect(description).toContain(FAKE_SCRATCH_ROOT);
     expect(description).not.toContain("/workspace");

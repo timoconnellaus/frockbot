@@ -9,6 +9,7 @@
 // Projection happens after settlement, never before it, so a failed index
 // write loses nothing: the run is already durable in the Bot Durable Object,
 // and `rebuildSearchIndex` reconstructs every row this call would have made.
+import { clientToolCallNameV1 } from "@frockbot/app/shell/run-protocol";
 import { boundSearchBodyV1, type SearchRowV1 } from "./shared.js";
 
 /**
@@ -43,7 +44,17 @@ export interface SearchProjectableRunV1 {
     | "reconciliation-required";
   events: readonly {
     type: string;
-    call?: { id: string; name: string };
+    call?: {
+      id: string;
+      name: string;
+      /**
+       * The dynamic envelope's identity, when the call was journalled under the
+       * `call_dynamic_tool` wrapper. The row indexes the tool the Bot actually
+       * ran, so a `kinds=tool` search for `computer_exec` finds the Turn that
+       * ran it rather than one wrapper name shared by every first-party tool.
+       */
+      input?: unknown;
+    };
     callId?: string;
     content?: string;
   }[];
@@ -119,7 +130,8 @@ export function searchRowsFromClientRunV1(
   for (const event of run.events) {
     if (event.type !== "tool/call" || !event.call) continue;
     const result = results.get(event.call.id);
-    push("tool", result ? `${event.call.name}\n${result}` : event.call.name);
+    const name = clientToolCallNameV1(event.call);
+    push("tool", result ? `${name}\n${result}` : name);
   }
   const answer = run.status === "completed" ? assistantText(run) : undefined;
   if (answer) push("assistant", answer);

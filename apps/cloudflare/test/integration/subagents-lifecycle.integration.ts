@@ -17,10 +17,10 @@ import {
   botStateStubV1,
   expectOkJson,
   freshUserId,
+  frockbotToolCallPrompt,
   postAsUser,
   provisionThroughGateway,
   readStoredRunWithEventsV1,
-  toolCallTriggerPrompt,
   useApplicationArtifact,
 } from "./fixtures.ts";
 import { subagentDurableObjectNameV1 } from "@frockbot/app/subagents/storage-keys";
@@ -82,10 +82,10 @@ async function dispatch(
     await postAsUser(userId, `/api/bots/${botId}/turns`, {
       schemaVersion: 1,
       commandId,
-      text: toolCallTriggerPrompt([
-        "Task",
-        { description: "Read the release notes", prompt: CHILD_PROMPT },
-      ]),
+      text: frockbotToolCallPrompt("Task", {
+        description: "Read the release notes",
+        prompt: CHILD_PROMPT,
+      }),
     }),
   );
   const list = (await expectOkJson(

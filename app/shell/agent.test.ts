@@ -1,6 +1,7 @@
 // The Shell's runtime Contribution: what it admits, what it records, and what
 // ends a Turn.
 import { describe, expect, test } from "bun:test";
+import Ajv from "ajv";
 import {
   type Session,
   type ToolCall,
@@ -18,7 +19,6 @@ import {
   shellAdmissionCeilingV1,
   shellAgentFeature,
   PARENT_HANDOFF_CAPABILITY_V1,
-  SEND_MESSAGE_ALIAS_V1,
   SEND_TO_USER_TOOL_V1,
   TIME_BUDGET_WARNING_MS_V1,
   USER_VOICE_CAPABILITY_V1,
@@ -66,7 +66,10 @@ async function invoke(
   turnType: TurnTypeV1,
   toolCall: ToolCall,
 ) {
-  const context = contextFor(turnType);
+  const context = {
+    ...contextFor(turnType),
+    effectId: `tool:4:2:${mounted.session.events.filter((e) => e.type === "send/to-user").length}`,
+  };
   const preparation = await mounted.root.tools.prepare(toolCall, context);
   if (preparation.kind === "denied") return preparation.result;
   return mounted.root.tools.executePrepared(preparation, context);
@@ -90,10 +93,8 @@ describe("the Shell's tool admission", () => {
         .map((tool) => tool.name);
 
       expect(chat).toContain(SEND_TO_USER_TOOL_V1);
-      expect(chat).toContain(SEND_MESSAGE_ALIAS_V1);
       expect(chat).not.toContain(WAKE_PARENT_TOOL_V1);
       expect(agent).toContain(SEND_TO_USER_TOOL_V1);
-      expect(agent).toContain(SEND_MESSAGE_ALIAS_V1);
       expect(agent).not.toContain(WAKE_PARENT_TOOL_V1);
       expect(automation).toEqual([
         WAKE_PARENT_TOOL_V1,
@@ -127,7 +128,6 @@ describe("the Shell's tool admission", () => {
         // Shell's user-facing tools are chat-only, and the hand-off is the only
         // thing any subagent role is offered here.
         expect(names).not.toContain(SEND_TO_USER_TOOL_V1);
-        expect(names).not.toContain(SEND_MESSAGE_ALIAS_V1);
         expect(names).toEqual([
           WAKE_PARENT_TOOL_V1,
           "get_dynamic_tools",
@@ -160,14 +160,17 @@ describe("the Shell's tool admission", () => {
     }
   });
 
-  test("denies send_to_user and its alias on an automation turn", async () => {
+  test("denies send_to_user on an automation turn", async () => {
     const mounted = await mount();
     try {
-      for (const name of [SEND_TO_USER_TOOL_V1, SEND_MESSAGE_ALIAS_V1]) {
+      for (const name of [SEND_TO_USER_TOOL_V1]) {
         const result = await invoke(
           mounted,
           "automation",
-          call(name, { payload: { type: "text", text: "hi" } }),
+          call(name, {
+            disposition: "continue",
+            payload: { type: "text", text: "hi" },
+          }),
         );
 
         expect(result).toEqual({
@@ -204,6 +207,7 @@ describe("send_to_user", () => {
         mounted,
         "chat",
         call(SEND_TO_USER_TOOL_V1, {
+          disposition: "continue",
           payload: { type: "text", text: "Booked for Tuesday." },
         }),
       );
@@ -223,13 +227,14 @@ describe("send_to_user", () => {
     }
   });
 
-  test("ends the Turn on a widget and an approval, and on nothing else", async () => {
+  test("widgets and approvals end the Turn even when marked as interim", async () => {
     const mounted = await mount();
     try {
       const widget = await invoke(
         mounted,
         "chat",
         call(SEND_TO_USER_TOOL_V1, {
+          disposition: "continue",
           payload: {
             type: "widget",
             widget: { prompt: "Which day?", options: ["Tue", "Thu"] },
@@ -240,6 +245,7 @@ describe("send_to_user", () => {
         mounted,
         "chat",
         call(SEND_TO_USER_TOOL_V1, {
+          disposition: "continue",
           payload: { type: "attachment", url: "https://files.example/a.pdf" },
         }),
       );
@@ -251,6 +257,7 @@ describe("send_to_user", () => {
         mounted,
         "chat",
         call(SEND_TO_USER_TOOL_V1, {
+          disposition: "continue",
           payload: {
             type: "approval",
             approvalId: "ap-1",
@@ -263,6 +270,7 @@ describe("send_to_user", () => {
         mounted,
         "chat",
         call(SEND_TO_USER_TOOL_V1, {
+          disposition: "continue",
           payload: { type: "text", text: "On it." },
         }),
       );
@@ -270,6 +278,7 @@ describe("send_to_user", () => {
         mounted,
         "chat",
         call(SEND_TO_USER_TOOL_V1, {
+          disposition: "continue",
           payload: {
             type: "secret-request",
             prompt: "Your API key",
@@ -281,6 +290,7 @@ describe("send_to_user", () => {
         mounted,
         "chat",
         call(SEND_TO_USER_TOOL_V1, {
+          disposition: "continue",
           payload: { type: "agent-card", agentId: "bot-2", title: "School" },
         }),
       );
@@ -316,7 +326,10 @@ describe("send_to_user", () => {
       const result = await invoke(
         mounted,
         "chat",
-        call(SEND_TO_USER_TOOL_V1, { payload: { type: "shout", text: "hi" } }),
+        call(SEND_TO_USER_TOOL_V1, {
+          disposition: "continue",
+          payload: { type: "shout", text: "hi" },
+        }),
       );
 
       expect(result.isError).toBe(true);
@@ -325,26 +338,6 @@ describe("send_to_user", () => {
       expect(
         mounted.session.events.some((event) => event.type === "send/to-user"),
       ).toBe(false);
-    } finally {
-      await mounted.dispose();
-    }
-  });
-
-  test("records the alias under its own name and the same event", async () => {
-    const mounted = await mount();
-    try {
-      const result = await invoke(
-        mounted,
-        "chat",
-        call(SEND_MESSAGE_ALIAS_V1, {
-          payload: { type: "text", text: "Legacy." },
-        }),
-      );
-
-      expect(result.isError).toBe(false);
-      expect(
-        mounted.session.events.find((event) => event.type === "send/to-user"),
-      ).toMatchObject({ payload: { type: "text", text: "Legacy." } });
     } finally {
       await mounted.dispose();
     }
@@ -443,6 +436,25 @@ describe("the conversation prompt section", () => {
         .schemas({ turnType: "chat" })
         .find((tool) => tool.name === SEND_TO_USER_TOOL_V1);
       const description = schema?.description ?? "";
+      const validate = new Ajv({ strict: false }).compile(schema!.inputSchema);
+      expect(
+        validate({
+          disposition: "finish",
+          payload: { type: "text", text: "Hi!" },
+        }),
+      ).toBe(true);
+      expect(
+        validate({ disposition: "finish", payload: { text: "Hi!" } }),
+      ).toBe(false);
+      expect(
+        validate({ disposition: "finish", payload: { type: "text" } }),
+      ).toBe(false);
+      expect(
+        validate({
+          disposition: "finish",
+          payload: { type: "invented", text: "Hi!" },
+        }),
+      ).toBe(false);
 
       expect(description).toContain("only way to say anything the user sees");
       // When to call it, not only what it does.
@@ -509,7 +521,7 @@ describe("the acknowledgement reaches the user", () => {
           turn: 3,
           step: 2,
           requestId: "request-2",
-          toolNames: [SEND_MESSAGE_ALIAS_V1],
+          toolNames: [SEND_TO_USER_TOOL_V1],
         },
       );
 
@@ -595,6 +607,7 @@ describe("the acknowledgement reaches the user", () => {
         mounted,
         "chat",
         call(SEND_TO_USER_TOOL_V1, {
+          disposition: "continue",
           payload: { type: "text", text: "On it." },
         }),
       );
@@ -619,4 +632,22 @@ describe("the acknowledgement reaches the user", () => {
       await mounted.dispose();
     }
   });
+});
+
+test("a send without an explicit disposition is refused before delivery", async () => {
+  const mounted = await mount();
+  try {
+    const result = await invoke(
+      mounted,
+      "chat",
+      call(SEND_TO_USER_TOOL_V1, { payload: { type: "text", text: "Hi" } }),
+    );
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("disposition");
+    expect(mounted.session.events.some((e) => e.type === "send/to-user")).toBe(
+      false,
+    );
+  } finally {
+    await mounted.dispose();
+  }
 });

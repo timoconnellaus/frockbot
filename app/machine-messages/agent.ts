@@ -199,6 +199,7 @@ function createMessagesReadTool(config: {
   const { name, host } = config;
   return {
     name,
+    namespace: "frockbot",
     description: config.description,
     inputSchema: config.inputSchema,
     admission: { turnTypes: ["chat"] },

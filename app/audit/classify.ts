@@ -122,10 +122,17 @@ export function resolveDynamicToolNameV1(name: string, input: unknown): string {
   return namespace === "frockbot" ? toolName : `${namespace}/${toolName}`;
 }
 
-/** The arguments the wrapped tool was actually given. */
+/**
+ * The arguments the wrapped tool was actually given.
+ *
+ * `arguments` is the envelope's own key — see `CALL_DYNAMIC_TOOL_SCHEMA` and
+ * `resolveDynamicCall`, which dispatch the inner tool on exactly this field.
+ * Reading anything else hands the classifier the wrapper's `{namespace,
+ * toolName}` and it answers about a call nobody made.
+ */
 export function dynamicToolInputV1(input: unknown): unknown {
   if (!isObject(input)) return input;
-  return Object.hasOwn(input, "input") ? input.input : input;
+  return Object.hasOwn(input, "arguments") ? input.arguments : {};
 }
 
 /** Whether a tool reaches the User's registered machine rather than the Computer. */
@@ -175,8 +182,12 @@ export function auditKindForToolV1(
   // and have the audit row say it ran on the User's laptop. A Computer tool is
   // audited against the Computer, whatever its arguments claim.
   const resolved = resolveDynamicToolNameV1(name, input);
+  // A namespaced call names its tool and carries its arguments one level in:
+  // the target a command ran on, and whether it ran in the background, are
+  // read off the call the tool was actually given, not off its wrapper.
+  const args = resolved === name ? input : dynamicToolInputV1(input);
   const onMachine = isMachineToolV1(resolved)
-    ? (machineTarget(input) ?? AUDIT_TARGET_COMPUTER_V1)
+    ? (machineTarget(args) ?? AUDIT_TARGET_COMPUTER_V1)
     : AUDIT_TARGET_COMPUTER_V1;
   const onComputer = onMachine;
   name = resolved;
@@ -186,7 +197,7 @@ export function auditKindForToolV1(
     // rather than a command that ended with the call. GrokBot draws the same
     // line, as `shellKind: foreground | background` on its own audit line.
     const background =
-      isObject(input) && input.background === true ? "process" : "shell";
+      isObject(args) && args.background === true ? "process" : "shell";
     return { kind: background, target: onComputer };
   }
   if (name === MACHINE_SHELL_TOOL) {

@@ -1685,11 +1685,9 @@ describe("Cloudflare user application gateway", () => {
           type: "tool/call",
           call: expect.objectContaining({
             name: "call_dynamic_tool",
-            input: {
-              namespace: "frockbot",
-              toolName: "echo",
-              argumentsJson: '{"text":"hello workers"}',
-            },
+            // A first-party tool names itself to the client and nothing more:
+            // its arguments never leave the Bot.
+            input: { namespace: "frockbot", toolName: "echo" },
           }),
         }),
         expect.objectContaining({

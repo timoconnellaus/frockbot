@@ -28,7 +28,7 @@ import type {
 import type { MachineIntentRecordV1 } from "@frockbot/app/machine/intent";
 import { machineIntentKeyV1 } from "@frockbot/app/machine/intent";
 import { provisionBot } from "./provision-bot.ts";
-import { toolCallTriggerPrompt } from "./harness/miniflare.ts";
+import { frockbotToolCallPrompt } from "./harness/miniflare.ts";
 
 /**
  * How far ahead a test arms an alarm it is about to fire by hand.
@@ -143,10 +143,10 @@ async function askToRun(
       runId,
       sessionId: `${identity.userId}:${identity.botId}`,
       acceptedAt: new Date().toISOString(),
-      text: toolCallTriggerPrompt([
-        "machine_exec",
-        { machineId, command: "git status --short" },
-      ]),
+      text: frockbotToolCallPrompt("machine_exec", {
+        machineId,
+        command: "git status --short",
+      }),
     },
   });
   return turn.runId;
