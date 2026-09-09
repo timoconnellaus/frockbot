@@ -407,4 +407,65 @@ describe("BotState mount failures", () => {
     await expect(state.readSheep(identity)).resolves.toBeDefined();
     expect(attempts).toBe(2);
   });
+
+  /**
+   * The outbox is listed once per pass and each delivery is a round trip, so a
+   * message committed during one used to sit until the next alarm — up to
+   * thirty seconds — which is the ordinary shape of a Turn that sends twice.
+   */
+  test("delivers a message committed while a drain is already in flight", async () => {
+    const storage = new MemoryStorage();
+    const notice = (sequence: number) => ({
+      notificationId: `message-${String(sequence).padStart(20, "0")}`,
+      messageId: `run-1:send:${sequence - 1}`,
+      runId: "run-1",
+      createdAt: "2026-09-01T00:00:00.000Z",
+      title: "Primary",
+      body: `message ${sequence}`,
+      notify: true,
+    });
+    await storage.put({
+      identity: { userId: "user-1", botId: "primary" },
+      [`shell:push:${notice(1).notificationId}`]: notice(1),
+    });
+    const delivered: string[] = [];
+    const env = {
+      USER_CONFIGURATIONS: {
+        idFromName: () => "user-configuration-id",
+        get: () => ({
+          deliverPush: async (input: { update: { cursor: string } }) => {
+            delivered.push(input.update.cursor);
+            // The second `send_to_user` of the same Turn commits while the
+            // first is still being delivered.
+            if (delivered.length === 1) {
+              await storage.put(
+                `shell:push:${notice(2).notificationId}`,
+                notice(2),
+              );
+            }
+          },
+        }),
+      },
+      MEMORY_FILES: memoryFiles(),
+      MEMORY_INDEX: memoryIndex(),
+    } as unknown as BotStateEnv;
+    const state = new BotState(
+      {
+        storage,
+        blockConcurrencyWhile: (body: () => Promise<unknown>) => body(),
+        waitUntil: () => {},
+      } as unknown as DurableObjectState,
+      env,
+    );
+
+    await state.alarm();
+
+    expect(delivered).toEqual([
+      notice(1).notificationId,
+      notice(2).notificationId,
+    ]);
+    expect(
+      [...storage.values.keys()].filter((key) => key.startsWith("shell:push:")),
+    ).toEqual([]);
+  });
 });

@@ -1034,7 +1034,7 @@
               "minimum": 0
             }
           },
-          "required": ["type", "payload"],
+          "required": ["type", "payload", "ordinal"],
           "additionalProperties": false
         },
         {

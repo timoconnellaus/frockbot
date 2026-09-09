@@ -79,19 +79,38 @@ class _TranscriptViewState extends State<TranscriptView> {
     scroll.addListener(_reportRead);
   }
 
+  /// The lines the cached newest-send id was derived from. `_reportRead` runs
+  /// on every scroll frame, and ordering the whole thread again each time is a
+  /// sort per frame of a fling; the transcript only changes when the projection
+  /// hands down a new list.
+  List<TranscriptLine>? _latestSendSource;
+  String? _latestSendId;
+
+  String? _newestSendId(List<TranscriptLine> ordered) {
+    _latestSendSource = widget.lines;
+    _latestSendId = null;
+    for (final line in ordered) {
+      if (line.role == LineRole.assistant && line.id.contains(':send:')) {
+        _latestSendId = line.id;
+      }
+    }
+    return _latestSendId;
+  }
+
   void _reportRead() {
     if (!mounted) return;
     final atLatest = scroll.hasClients && scroll.position.pixels <= 8;
-    final sends =
-        orderTranscript(widget.lines, DateTime.now().toUtc().toIso8601String())
-            .where(
-              (line) =>
-                  line.role == LineRole.assistant && line.id.contains(':send:'),
-            )
-            .toList();
+    final newest = identical(_latestSendSource, widget.lines)
+        ? _latestSendId
+        : _newestSendId(
+            orderTranscript(
+              widget.lines,
+              DateTime.now().toUtc().toIso8601String(),
+            ),
+          );
     widget.onReadLatest?.call(
-      atLatest && sends.isNotEmpty && ModalRoute.of(context)?.isCurrent == true
-          ? sends.last.id
+      atLatest && newest != null && ModalRoute.of(context)?.isCurrent == true
+          ? newest
           : null,
     );
   }
@@ -123,6 +142,7 @@ class _TranscriptViewState extends State<TranscriptView> {
       widget.lines,
       now.toUtc().toIso8601String(),
     );
+    _newestSendId(ordered);
     final drain = supersedeDrainState(ordered, now);
     final target = widget.focusRunId;
     var marked = false;

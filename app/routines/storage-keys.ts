@@ -172,6 +172,18 @@ export function routineDeliveryKeyV1(deliveryId: string): string {
   return `${ROUTINE_DELIVERY_PREFIX}${deliveryId}`;
 }
 
+/**
+ * One firing whose failure has already been told to the person, keyed by the
+ * firing. The alarm may settle the same firing more than once — a retry, a
+ * reap — and a broken Routine owes exactly one message per firing, not one per
+ * attempt to settle it.
+ */
+export const ROUTINE_FAILURE_MESSAGE_PREFIX = "routine-failed-message:";
+
+export function routineFailureMessageKeyV1(fireId: string): string {
+  return `${ROUTINE_FAILURE_MESSAGE_PREFIX}${fireId}`;
+}
+
 /** One `RoutineInboxEntryV1`, newest first. */
 export const ROUTINE_INBOX_PREFIX = "routine-inbox:";
 /** The inbox's monotonic sequence. Read by key, because the terminal seam cannot list. */

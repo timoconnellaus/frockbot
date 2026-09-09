@@ -6,6 +6,7 @@ import {
   decodeSessionEvent,
   type SessionEvent,
 } from "@frockbot/core/contracts";
+import { sentAutomationRunKeyV1 } from "@frockbot/app/notifications/storage-keys";
 import type { StoredRunStatus } from "./backend-contracts.js";
 import type { ShellBotStateV1 } from "./backend-state.js";
 import {
@@ -228,8 +229,19 @@ export async function listRuns(
       const header = await state.authority.readRunHeaderForDisplay(
         candidate.runId,
       );
+      // An automation Turn is in the transcript only if it spoke, and the
+      // marker written beside its message is that fact as one keyed read. A
+      // Routine that fires every minute and says nothing is the ordinary case,
+      // and hydrating each silent journal to discard it was the scan's cost.
+      const spoke =
+        header?.run.admission?.turnType !== "automation"
+          ? true
+          : (await state.ctx.storage.get(
+              sentAutomationRunKeyV1(candidate.runId),
+            )) !== undefined;
       if (
         !header ||
+        !spoke ||
         (header.run.admission?.turnType !== "automation" &&
           !isVisibleRunV1(header.run)) ||
         !inConversation(header.run)

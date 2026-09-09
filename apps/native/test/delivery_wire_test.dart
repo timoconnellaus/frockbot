@@ -27,6 +27,7 @@ class WireApi extends NativeApi {
         {
           'type': 'send/to-user',
           'payload': {'type': 'text', 'text': 'Hi!'},
+          'ordinal': 0,
         },
       ],
       'outcome': status == 'completed'
@@ -187,24 +188,21 @@ void main() {
       await Future<void>.delayed(Duration.zero);
 
       expect(
-        supersedeDrainState(
-          projectRuns(controller.runs),
-          DateTime.now(),
-        ),
+        supersedeDrainState(projectRuns(controller.runs), DateTime.now()),
         SupersedeDrainState.stopping,
       );
     } finally {
       controller.dispose();
     }
   });
-
 }
 
 /// A transport whose send never answers, which is what superseding a running
 /// Turn looks like from the client: the route holds the POST open until the
 /// Turn it replaced has settled.
 class HeldSendTransport implements ChatTransport {
-  HeldSendTransport({List<Map<String, dynamic>>? runs}) : runs = runs ?? _oneRunning;
+  HeldSendTransport({List<Map<String, dynamic>>? runs})
+    : runs = runs ?? _oneRunning;
 
   static const _oneRunning = [
     {

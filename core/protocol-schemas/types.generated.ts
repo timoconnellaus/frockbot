@@ -208,7 +208,7 @@ export type SendPayload =
       expiresInSeconds?: number;
     };
 export type RunEvent =
-  | { type: "send/to-user"; payload: SendPayload; ordinal?: number }
+  | { type: "send/to-user"; payload: SendPayload; ordinal: number }
   | {
       type: "tool/call";
       call: {

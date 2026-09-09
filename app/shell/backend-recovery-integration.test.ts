@@ -20,7 +20,18 @@ import {
   UNREAD_STATE_KEY,
 } from "./unread.js";
 import { messageRecords } from "../notifications/messages.js";
-import { PUSH_READ_KEY } from "../notifications/storage-keys.js";
+import {
+  executeRoutineCommand,
+  listRoutines,
+  settleScheduledWork,
+} from "../routines/bot.js";
+import { decodeRoutineCommandV1 } from "../routines/shared.js";
+import { BOT_CONFIGURATION_KEY } from "../settings/bot.js";
+import {
+  PUSH_OUTBOX_PREFIX,
+  PUSH_READ_KEY,
+  sentAutomationRunKeyV1,
+} from "../notifications/storage-keys.js";
 import { createShellBotBackendContribution } from "./backend.js";
 import {
   botTurnCommandFingerprintV1,
@@ -1627,6 +1638,189 @@ describe("Bot recovery", () => {
     });
 
     expect(page.runs.map((run) => run.runId)).toEqual(["run-chat"]);
+  });
+
+  async function firedRoutineBot(options: { notifications: boolean }) {
+    const storage = new MemoryStorage();
+    const contribution = createShellBotBackendContribution({
+      ...shellTestApplicationV1(),
+      state: { storage } as unknown as DurableObjectState,
+      env: {} as never,
+    });
+    const identity = { userId: "user", botId: "primary" };
+    await contribution.materializeSettings(identity, { name: "Housework" });
+    if (!options.notifications) {
+      const settings = await contribution.getSettings(identity);
+      await storage.put(BOT_CONFIGURATION_KEY, {
+        ...settings,
+        notifications: { enabled: false },
+      });
+    }
+    await executeRoutineCommand(
+      contribution.state,
+      identity,
+      decodeRoutineCommandV1({
+        schemaVersion: 1,
+        type: "routine/create",
+        commandId: "create-1",
+        botId: "primary",
+        name: "Morning brief",
+        prompt: "Summarize overnight email.",
+        schedule: "0 7 * * *",
+      }),
+    );
+    const routineId = (await listRoutines(contribution.state, identity))
+      .routines[0]!.routineId;
+    await executeRoutineCommand(
+      contribution.state,
+      identity,
+      decodeRoutineCommandV1({
+        schemaVersion: 1,
+        type: "routine/run",
+        commandId: "run-1",
+        botId: "primary",
+        routineId,
+      }),
+    );
+    await settleScheduledWork(contribution.state);
+    return { storage, contribution, identity };
+  }
+
+  /**
+   * A Routine that breaks is a message, not a directory row: the device reads
+   * the push outbox and the badge reads the message index, so a failure filed
+   * anywhere else is a failure nobody is told about.
+   */
+  test("a failed firing reaches the person as an ordinary message, once", async () => {
+    const { storage, contribution, identity } = await firedRoutineBot({
+      notifications: true,
+    });
+
+    const messages = await storage.list<{ body: string; notify: boolean }>({
+      prefix: MESSAGE_PREFIX,
+    });
+    expect(messages.size).toBe(1);
+    const [cursor, notice] = [...messages.entries()][0]!;
+    expect(notice.notify).toBe(true);
+    expect(notice.body.length).toBeGreaterThan(0);
+    const outbox = await storage.list({ prefix: PUSH_OUTBOX_PREFIX });
+    expect([...outbox.keys()]).toEqual([
+      `${PUSH_OUTBOX_PREFIX}${cursor.slice(MESSAGE_PREFIX.length)}`,
+    ]);
+    expect(await readUnread(contribution.state, identity)).toMatchObject({
+      count: 1,
+    });
+    expect(
+      await storage.get(`notification:${cursor.slice(MESSAGE_PREFIX.length)}`),
+    ).toBeDefined();
+
+    // Settling again owes no second message for a firing already told.
+    await settleScheduledWork(contribution.state);
+    expect((await storage.list({ prefix: MESSAGE_PREFIX })).size).toBe(1);
+  });
+
+  test("a muted Bot still counts a failed firing unread and alerts nobody", async () => {
+    const { storage, contribution, identity } = await firedRoutineBot({
+      notifications: false,
+    });
+
+    const messages = await storage.list<{ notify: boolean }>({
+      prefix: MESSAGE_PREFIX,
+    });
+    expect(messages.size).toBe(1);
+    expect([...messages.values()][0]!.notify).toBe(false);
+    expect(await readUnread(contribution.state, identity)).toMatchObject({
+      count: 1,
+    });
+    const cursor = [...messages.keys()][0]!.slice(MESSAGE_PREFIX.length);
+    expect(await storage.get(`notification:${cursor}`)).toBeUndefined();
+    // The outbox still carries it: the device clears its badge from the same
+    // delivery that declines to raise a notification.
+    expect((await storage.list({ prefix: PUSH_OUTBOX_PREFIX })).size).toBe(1);
+  });
+
+  test("a Routine's Turn joins the transcript only when it spoke, and a silent one is never opened", async () => {
+    const storage = new MemoryStorage();
+    await storage.put("identity", { userId: "user", botId: "primary" });
+    const baseTime = Date.parse("2026-09-01T00:00:00.000Z");
+    const firings = ["run-silent-0", "run-silent-1", "run-spoke"];
+    for (const [index, runId] of firings.entries()) {
+      const acceptedAt = new Date(baseTime + index * 1_000).toISOString();
+      const sessionId = `routine:${runId}`;
+      const spoke = runId === "run-spoke";
+      const events: SessionEvent[] = spoke
+        ? [
+            {
+              type: "send/to-user",
+              seq: 0,
+              timestamp: acceptedAt,
+              turn: 1,
+              step: 1,
+              occurrenceId: `tool:1:1:0`,
+              payload: { type: "text", text: "the report" },
+            },
+          ]
+        : [
+            {
+              type: "turn/end",
+              seq: 0,
+              timestamp: acceptedAt,
+              turn: 1,
+              outcome: "completed",
+            },
+          ];
+      await new SessionEventLog(storage).rewrite(sessionId, events);
+      const run = {
+        runId,
+        commandFingerprint: `fingerprint-${index}`,
+        sessionId,
+        acceptedAt,
+        input: "the cue",
+        events: [],
+        eventRange: { startSeq: 0, endSeq: events.length },
+        effectAdmissions: [],
+        status: "completed",
+        phase: "executing",
+        compositionGenerationId: "test-composition-generation",
+        configurationSnapshot: initializeBotSettingsV1("primary"),
+        previousEventCount: 0,
+        responseText: "done",
+        admission: { schemaVersion: 1, turnType: "automation" },
+      } satisfies StoredRun;
+      await storage.put({
+        [`run:${runId}`]: run,
+        [`run-index:${acceptedAt}:${runId}`]: runId,
+      });
+      if (spoke) {
+        const records = await messageRecords({
+          run,
+          events,
+          read: (key) => storage.get(key),
+        });
+        await storage.put(records);
+      }
+    }
+    const contribution = createShellBotBackendContribution({
+      ...shellTestApplicationV1(),
+      state: { storage } as unknown as DurableObjectState,
+      env: {} as never,
+    });
+    storage.gets.length = 0;
+
+    const page = await contribution.listRuns({ schemaVersion: 1 });
+
+    expect(page.runs.map((run) => run.runId)).toEqual(["run-spoke"]);
+    // The Routine that said nothing is filtered off its record and its marker
+    // alone: opening its journal would start at the Session log's index.
+    for (const silent of ["run-silent-0", "run-silent-1"]) {
+      expect(storage.gets).toContain(sentAutomationRunKeyV1(silent));
+      expect(storage.gets).not.toContain(
+        sessionEventLogIndexKeyV1(`routine:${silent}`),
+      );
+    }
+    expect(storage.gets).toContain(
+      sessionEventLogIndexKeyV1("routine:run-spoke"),
+    );
   });
 
   test("offers a continuation when a scanned page selects nothing", async () => {

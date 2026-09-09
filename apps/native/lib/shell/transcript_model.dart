@@ -255,13 +255,19 @@ List<({SendPayloadLine send, int ordinal})> _sendsFrom(List<Object?> events) {
     if (event is! Map || event['type'] != 'send/to-user') continue;
     final payload = event['payload'];
     final ordinal = event['ordinal'];
+    // The ordinal is the message's durable identity, and the wire gate makes
+    // every server that can reach this build emit it. A send without one is
+    // unidentifiable — it cannot be read, marked unread, or matched to a
+    // notification — so it is dropped rather than given a position that shifts
+    // under it the moment the page it sits on changes.
+    if (ordinal is! int || ordinal < 0) continue;
     sends.add((
       send: SendPayloadLine(
         payload is Map && payload['type'] is String
             ? Map<String, Object?>.from(payload)
             : null,
       ),
-      ordinal: ordinal is int ? ordinal : sends.length,
+      ordinal: ordinal,
     ));
   }
   return sends;
@@ -336,17 +342,23 @@ List<TranscriptLine> projectRuns(List<Map<String, dynamic>> runs) {
     final status = run['status'] as String?;
     final queued = run['queued'] == true;
     final admittedAt = run['admittedAt'] as String?;
-    lines.add(
-      TranscriptLine(
-        id: '$runId:user',
-        runId: runId,
-        role: LineRole.user,
-        text: (run['input'] as String?) ?? '',
-        at: admittedAt,
-        status: LineStatus.completed,
-        pending: status == 'running' && queued,
-      ),
-    );
+    final input = (run['input'] as String?) ?? '';
+    // A Routine's Turn is projected with no input at all: nobody typed it. A
+    // chat Turn cannot be admitted empty, so an empty input means there is no
+    // person's message to draw above the Bot's — not an empty one.
+    if (input.isNotEmpty) {
+      lines.add(
+        TranscriptLine(
+          id: '$runId:user',
+          runId: runId,
+          role: LineRole.user,
+          text: input,
+          at: admittedAt,
+          status: LineStatus.completed,
+          pending: status == 'running' && queued,
+        ),
+      );
+    }
     final sends = _sendsFrom(events);
     for (var index = 0; index < sends.length; index++) {
       lines.add(

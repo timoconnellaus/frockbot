@@ -1,6 +1,7 @@
 import { cleanNotificationTestState } from "./notification-state-cleanup.js";
 import type { MessageNotice } from "@frockbot/app/notifications/messages";
 import {
+  PUSH_OUTBOX_DRAIN_LIMIT,
   PUSH_OUTBOX_PREFIX,
   PUSH_READ_KEY,
 } from "@frockbot/app/notifications/storage-keys";
@@ -1564,21 +1565,44 @@ export class BotState extends DurableObject<BotStateEnv> {
   }
 
   private pushDrain?: Promise<void>;
+  /**
+   * A commit landed while a drain was already in flight.
+   *
+   * The drain lists the outbox once and then awaits a delivery per entry, so an
+   * entry written after that listing — the second `send_to_user` of one Turn is
+   * the ordinary case — is invisible to it. Without this the second
+   * notification waits for the next alarm. A pass that delivered anything is
+   * followed by another, and this flag closes the last gap: a commit that
+   * lands after the final, empty listing. Neither can spin, because a pass
+   * that delivers nothing ends the drain and every delivered entry is deleted.
+   */
+  private pushDrainAgain = false;
   private drainPush(): Promise<void> {
-    if (this.pushDrain) return this.pushDrain;
-    this.pushDrain = this.flushPush()
+    if (this.pushDrain) {
+      this.pushDrainAgain = true;
+      return this.pushDrain;
+    }
+    this.pushDrain = (async () => {
+      let delivered = 0;
+      do {
+        this.pushDrainAgain = false;
+        delivered = await this.flushPush();
+      } while (this.pushDrainAgain || delivered > 0);
+    })()
       .catch(() => {
         console.error(JSON.stringify({ event: "push-outbox-pending" }));
       })
       .finally(() => {
         this.pushDrain = undefined;
+        this.pushDrainAgain = false;
       });
     return this.pushDrain;
   }
 
-  private async flushPush(): Promise<void> {
+  /** How many outbox entries this pass delivered. Zero ends the drain. */
+  private async flushPush(): Promise<number> {
     const identity = await this.ctx.storage.get<BotIdentity>(IDENTITY_KEY);
-    if (!identity) return;
+    if (!identity) return 0;
     const rpc = this.env.USER_CONFIGURATIONS.get(
       this.env.USER_CONFIGURATIONS.idFromName(identity.userId),
     ) as unknown as {
@@ -1586,14 +1610,18 @@ export class BotState extends DurableObject<BotStateEnv> {
     };
     const entries = await this.ctx.storage.list<MessageNotice>({
       prefix: PUSH_OUTBOX_PREFIX,
-      limit: 100,
+      limit: PUSH_OUTBOX_DRAIN_LIMIT,
     });
-    const unread = optionalUnreadStateV1(
-      await this.ctx.storage.get(UNREAD_STATE_KEY),
-    );
+    // Both are read per entry rather than once for the pass. Every delivery is
+    // an await on another object, and a Bot muted or a conversation read during
+    // one of them must decide the next entry: a hoisted snapshot would alert
+    // for a Bot that is already silenced.
     for (const [key, notice] of entries) {
       const settings = await this.ctx.storage.get<BotSettingsViewV1>(
         BOT_CONFIGURATION_KEY,
+      );
+      const unread = optionalUnreadStateV1(
+        await this.ctx.storage.get(UNREAD_STATE_KEY),
       );
       await rpc.deliverPush({
         userId: identity.userId,
@@ -1626,6 +1654,7 @@ export class BotState extends DurableObject<BotStateEnv> {
           await tx.delete(PUSH_READ_KEY);
       });
     }
+    return entries.size;
   }
 
   /** The Bot's unread projection; the Bot Durable Object derives the count. */

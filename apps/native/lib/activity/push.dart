@@ -35,6 +35,7 @@ class PushController {
   Future<void> start() async {
     windowFocus.start((active) {
       focused = active && windowFocus.focused;
+      _renewWhileFocused();
       unawaited(register());
       if (active) unawaited(activity.load());
     });
@@ -52,6 +53,7 @@ class PushController {
         if (call.method == 'activity') await activity.load();
         if (call.method == 'focus') {
           focused = call.arguments == true;
+          _renewWhileFocused();
           await register();
           if (focused) await activity.load();
         }
@@ -78,6 +80,22 @@ class PushController {
     if (disposed) return;
     await register();
     if (disposed) return;
+    _renewWhileFocused();
+  }
+
+  /// The presence lease is a claim a focused device makes, and every focus and
+  /// lifecycle transition registers directly. Renewing it while the app is away
+  /// renews nothing — `register` claims no Bot when it is not focused — and
+  /// cost an HTTPS round trip and a Durable Object write every five seconds for
+  /// the life of the process. The renewal runs only while there is a lease to
+  /// hold open.
+  void _renewWhileFocused() {
+    if (disposed || focused == (timer != null)) return;
+    if (!focused) {
+      timer?.cancel();
+      timer = null;
+      return;
+    }
     timer = Timer.periodic(
       const Duration(seconds: 5),
       (_) => unawaited(register()),
@@ -104,6 +122,7 @@ class PushController {
 
   void lifecycle(bool active) {
     focused = active && windowFocus.focused;
+    _renewWhileFocused();
     unawaited(register());
   }
 
@@ -131,6 +150,7 @@ class PushController {
   Future<void> logout() async {
     readingBot = null;
     timer?.cancel();
+    timer = null;
     if (platformReady) await channel.invokeMethod<void>('logout');
     await register(remove: true);
   }

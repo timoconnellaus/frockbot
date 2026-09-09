@@ -937,7 +937,8 @@
               "payload": {
                 "type": "text",
                 "text": "Done"
-              }
+              },
+              "ordinal": 0
             }
           ],
           "outcome": {

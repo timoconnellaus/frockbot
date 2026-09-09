@@ -36,6 +36,7 @@ Map<String, dynamic> run({
       {
         'type': 'send/to-user',
         'payload': {'type': 'text', 'text': sentText},
+        'ordinal': 0,
       },
     ...events,
   ],
@@ -409,6 +410,48 @@ void main() {
   });
 
   group('what a Turn is projected as', () {
+    test('a Routine that spoke draws its message and no empty bubble', () {
+      final lines = projectRuns([
+        run(runId: 'run-routine', input: '', sentText: 'The report is ready.'),
+      ]);
+
+      // A Routine's Turn is projected with no input: nobody typed it, and an
+      // empty right-aligned pill above every Routine message is a bubble the
+      // person did not send.
+      expect(
+        [for (final row in lines) row.id],
+        ['run-routine:send:0', 'run-routine:assistant'],
+      );
+    });
+
+    test(
+      'a send with no durable ordinal is dropped rather than positioned',
+      () {
+        final lines = projectRuns([
+          run(
+            runId: 'run-a',
+            input: 'do it',
+            events: [
+              {
+                'type': 'send/to-user',
+                'payload': {'type': 'text', 'text': 'Unidentifiable.'},
+              },
+              {
+                'type': 'send/to-user',
+                'payload': {'type': 'text', 'text': 'Done.'},
+                'ordinal': 4,
+              },
+            ],
+          ),
+        ]);
+
+        expect(
+          [for (final row in lines) row.id],
+          ['run-a:user', 'run-a:send:4', 'run-a:assistant'],
+        );
+      },
+    );
+
     test('draws one bubble per send, in the order the Bot sent them', () {
       final lines = projectRuns([
         run(
@@ -419,10 +462,12 @@ void main() {
             {
               'type': 'send/to-user',
               'payload': {'type': 'text', 'text': 'On it.'},
+              'ordinal': 0,
             },
             {
               'type': 'send/to-user',
               'payload': {'type': 'text', 'text': 'Done.'},
+              'ordinal': 1,
             },
           ],
         ),

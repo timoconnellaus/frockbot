@@ -6,6 +6,10 @@ Clients mark the latest displayed message read only while the app/window is focu
 
 Android uses Firebase Cloud Messaging's native Android SDK and `NotificationCompat.MessagingStyle`. New messages update the Bot's existing expandable notification; other Bots have their own notifications. Swiping away the notification leaves the conversation unread. Tapping opens that Bot. Read updates remove the corresponding messages from notifications on other devices. Notification permission, sound, vibration, lock-screen visibility and launcher badges use Android's controls. The in-app unread count does not depend on launcher behavior.
 
+A Routine that fails is told the same way: the firing commits one ordinary message through the same index, unread cursor and outbox, keyed by the firing so a settlement retry adds no second message. A muted Bot still counts it unread and raises no alert.
+
+Because only a Routine Turn that spoke belongs in the transcript, that fact is recorded beside the message it committed. The transcript scan filters a silent firing off its run record and that marker, without opening its journal.
+
 A short-lived device presence record can defer a push while another device is reading. Only a durable read receipt can discard the alert. If presence becomes stale without a read, the Bot's durable outbox retries delivery. The outbox shares the Bot's alarm and also drains immediately after messages and read commands. Alarm retry can take up to roughly 30 seconds after a stale presence lease.
 
 Each User holds a bounded device registry. Tokens rotate under a stable installation ID; logout unregisters the device and clears local notification state. Read signals have a 24-hour delivery lifetime, and app resume reconciles read state again. Push messages carry stable message cursors; Android ignores duplicates and already-read messages and does not re-alert for an older out-of-order message.

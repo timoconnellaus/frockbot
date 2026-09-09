@@ -82,37 +82,86 @@ void main() {
         .setMockMethodCallHandler(channel, null);
   });
 
-  test('disposing during platform configuration starts no registration heartbeat', () async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.android;
-    final channel = const MethodChannel('frockbot/push');
-    final configured = Completer<String?>();
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(channel, (call) {
-          if (call.method == 'configure') return configured.future;
-          return Future<Object?>.value(false);
-        });
-    final store = MemoryStore();
-    final registrations = <Object?>[];
-    final api = SettingsApi(store, (path, body) async {
-      if (path == '/api/push/device') registrations.add(body);
-      return {'ok': true};
-    });
-    final activity = ActivityController(api, store, 'tim');
-    final push = PushController(api, store, 'tim', activity, channel: channel);
+  test(
+    'disposing during platform configuration starts no registration heartbeat',
+    () async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      final channel = const MethodChannel('frockbot/push');
+      final configured = Completer<String?>();
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) {
+            if (call.method == 'configure') return configured.future;
+            return Future<Object?>.value(false);
+          });
+      final store = MemoryStore();
+      final registrations = <Object?>[];
+      final api = SettingsApi(store, (path, body) async {
+        if (path == '/api/push/device') registrations.add(body);
+        return {'ok': true};
+      });
+      final activity = ActivityController(api, store, 'tim');
+      final push = PushController(
+        api,
+        store,
+        'tim',
+        activity,
+        channel: channel,
+      );
 
-    final starting = push.start();
-    await Future<void>.delayed(Duration.zero);
-    push.dispose();
-    configured.complete('token-12345678901234567890');
-    await starting;
+      final starting = push.start();
+      await Future<void>.delayed(Duration.zero);
+      push.dispose();
+      configured.complete('token-12345678901234567890');
+      await starting;
 
-    expect(push.timer, isNull);
-    expect(registrations, isEmpty);
+      expect(push.timer, isNull);
+      expect(registrations, isEmpty);
 
-    activity.dispose();
-    api.close();
-    debugDefaultTargetPlatformOverride = null;
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(channel, null);
-  });
+      activity.dispose();
+      api.close();
+      debugDefaultTargetPlatformOverride = null;
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, null);
+    },
+  );
+
+  test(
+    'the presence lease is renewed while focused and not while away',
+    () async {
+      final store = MemoryStore();
+      final registrations = <Map<String, dynamic>>[];
+      final api = SettingsApi(store, (path, body) async {
+        if (path == '/api/push/device') {
+          registrations.add(Map<String, dynamic>.from(body as Map));
+          return {'ok': true};
+        }
+        throw StateError(path);
+      });
+      final activity = ActivityController(api, store, 'tim');
+      final push = PushController(api, store, 'tim', activity);
+      push.reading('alpha');
+      await push.start();
+
+      // Focused, the device claims a Bot and holds the lease open.
+      expect(push.timer, isNotNull);
+      expect(registrations.last['activeBotId'], 'alpha');
+
+      // Away, it claims nothing — and there is nothing left to renew, so no
+      // renewal runs for the life of the backgrounded process.
+      push.lifecycle(false);
+      await push.register();
+      expect(push.timer, isNull);
+      expect(registrations.last.containsKey('activeBotId'), isFalse);
+
+      // Coming back registers immediately and reopens the renewal.
+      push.lifecycle(true);
+      await push.register();
+      expect(push.timer, isNotNull);
+      expect(registrations.last['activeBotId'], 'alpha');
+
+      push.dispose();
+      activity.dispose();
+      api.close();
+    },
+  );
 }
