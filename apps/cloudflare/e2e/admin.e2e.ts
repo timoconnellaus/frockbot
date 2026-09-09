@@ -59,7 +59,7 @@ test("an admin changes the durable signup policy", async ({ page }) => {
   // this test does not take a fresh `userId` the way every other one does.
   await openApplication(page, "development");
   await openProfileMenu(page);
-  await expect(sem(page, "profile-name")).toContainText("FrockBot user");
+  await expect(sem(page, "profile-name")).toContainText("Local developer");
   await settle(page);
   await tap(page, "profile-admin").click();
   await expect(sem(page, "admin-signups")).toBeVisible({
