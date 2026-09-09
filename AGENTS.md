@@ -55,7 +55,9 @@ These hold regardless of how the code is organised.
 ## Working here
 
 - Pre-commit formats staged files. Before pushing, `bun run validate` must pass; pre-push runs missing categories and reuses passes only for the exact commit with a clean code checkout. Use `bun run validate:<category>` to record individual passes. See [`docs/local-validation.md`](docs/local-validation.md) for cache and CI operation.
+- Documentation-only exception: when the outgoing changes contain no code, configuration, or runtime-behavior changes, skip code tests and use `git push --no-verify` without asking. Inspect the diff and check Markdown formatting first; Markdown used as a runtime prompt counts as code.
 - Merging integrates; tagging ships. Reaching `main` deploys nothing.
+- When completing an Android app update, use wireless ADB to install the update automatically when Tim's paired phone is reachable; this is authorized without asking again. Otherwise, publish the APK for download. Include the clickable [FrockBot APK download link](https://tims-m5-macbook-pro.tail34be3c.ts.net:8443/frockbot.apk) in the final response every time, stating whether it serves the new build or an older one. Verify the installed or published version before calling the update ready.
 - If you open a PR or push a tag, watch it to a terminal state with `bun scripts/ci-watch.ts` and fix what it finds.
 - Prefer deleting code to adding a flag. Git history is the archive — this repo documents how things are now, not how they came to be.
 - Comment why, not what. Most code needs no comment.
