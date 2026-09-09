@@ -40,6 +40,9 @@ APK_OUTPUT = NATIVE / "build/app/outputs/flutter-apk/app-release.apk"
 EMBEDDED_YAML = "assets/flutter_assets/shorebird.yaml"
 VERSION_FLOOR_ENV = "FROCKBOT_ANDROID_VERSION_FLOOR"
 FORBIDDEN_PATCH_FLAGS = ("--allow-native-diffs", "--allow-asset-diffs")
+INTENT_IDENTITY_KEYS = ("versionCode", "package", "appId", "buildName", "buildNumber", "releaseVersion",
+                        "flutterVersion", "targetPlatform", "signerSha256", "publicKeySha256", "gitHead",
+                        "workingTreeDirty", "intentCreatedAt")
 
 
 def run(args, *, binary=False, **kwargs):
@@ -178,6 +181,57 @@ def source():
             "workingTreeDirty": bool(run(["git", "status", "--porcelain"], cwd=ROOT).strip())}
 
 
+def release_record(intent, metadata):
+    return {
+        **intent,
+        "file": metadata["file"], "apkSha256": metadata["sha256"],
+        "createdAt": metadata["publishedAt"], "patches": [],
+    }
+
+
+def load_pending_intent(path):
+    intent = json.loads(path.read_text())
+    missing = [key for key in INTENT_IDENTITY_KEYS if key not in intent]
+    if missing:
+        raise RuntimeError(f"{path} predates full release-identity recording (missing {', '.join(missing)}); a "
+                           "release cannot be recovered from it. Check `shorebird releases list`, then delete it "
+                           "once you know whether that release uploaded.")
+    return intent
+
+
+def recover_published_release(intent, metadata, current_source, der):
+    expected = {
+        "package": PACKAGE, "appId": app_id(), "buildName": BUILD_NAME,
+        "buildNumber": intent["versionCode"], "releaseVersion": f"{BUILD_NAME}+{intent['versionCode']}",
+        "flutterVersion": FLUTTER_VERSION, "targetPlatform": TARGET_PLATFORM,
+        "signerSha256": SIGNER,
+        "publicKeySha256": hashlib.sha256(der).hexdigest(), **current_source,
+    }
+    mismatches = [name for name, value in expected.items() if intent.get(name) != value]
+    if mismatches:
+        raise RuntimeError(f"Pending release identity differs from the current release: {', '.join(mismatches)}.")
+    apk = STATE / metadata.get("file", "")
+    if not apk.is_file():
+        raise RuntimeError("Pending release matches latest.json, but its published APK is missing.")
+    inspect_release(apk, der)
+    inspected = inspect_apk(apk)
+    if inspected["versionCode"] != intent["buildNumber"] or inspected["versionName"] != intent["buildName"]:
+        raise RuntimeError("Published APK version differs from its pending release identity.")
+    with apk.open("rb") as source_file:
+        digest = hashlib.file_digest(source_file, "sha256").hexdigest()
+    published_expected = {
+        **inspected, "sha256": digest, "bytes": apk.stat().st_size,
+        "file": f"frockbot-{inspected['versionCode']}-{digest}.apk", **current_source,
+    }
+    mismatches = [name for name, value in published_expected.items() if metadata.get(name) != value]
+    if mismatches:
+        raise RuntimeError(f"Published release identity differs from its pending intent: {', '.join(mismatches)}.")
+    record = release_record(intent, metadata)
+    record.pop("versionCode")
+    write_atomic(STATE / "baseline.json", json.dumps(record, indent=2) + "\n")
+    return record
+
+
 def release(floor=0, build_number=None):
     current_source = source()
     if current_source["workingTreeDirty"]:
@@ -188,18 +242,22 @@ def release(floor=0, build_number=None):
     previous = latest()
     floor = max(floor, previous["versionCode"] if previous else 0)
     pending = STATE / "pending-release.json"
-    intent = json.loads(pending.read_text()) if pending.exists() else None
+    intent = load_pending_intent(pending) if pending.exists() else None
     if intent:
         if intent["gitHead"] != current_source["gitHead"]:
             raise RuntimeError("The pending release belongs to another commit; reconcile it before uploading.")
         # An earlier upload may have reached Shorebird. Only that exact version is retried.
         if build_number not in (None, intent["versionCode"]):
-            raise RuntimeError(f"Release {intent['releaseVersion']} is pending from {intent['createdAt']}. "
+            raise RuntimeError(f"Release {intent['releaseVersion']} is pending from {intent['intentCreatedAt']}. "
                                f"Retry with --build-number {intent['versionCode']}, or check `shorebird releases "
                                f"list` and delete {pending} once you know it never uploaded.")
         version = intent["versionCode"]
     else:
         version = build_number or max(int(time.time()), floor + 1)
+    if intent and previous and previous.get("versionCode") == version:
+        record = recover_published_release(intent, previous, current_source, der)
+        pending.unlink()
+        return record
     if version <= floor:
         raise RuntimeError(f"versionCode {version} does not advance past the floor {floor}.")
     if version > 2100000000:
@@ -208,9 +266,15 @@ def release(floor=0, build_number=None):
             f"--target-platform={TARGET_PLATFORM}", f"--build-name={BUILD_NAME}", f"--build-number={version}",
             f"--public-key-path={PUBLIC_KEY}"]
     if not intent:
-        write_atomic(pending, json.dumps({"versionCode": version, "releaseVersion": f"{BUILD_NAME}+{version}",
-                                          "createdAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                                          **source()}, indent=2) + "\n")
+        intent = {
+            "versionCode": version, "package": PACKAGE, "appId": app_id(), "buildName": BUILD_NAME,
+            "buildNumber": version, "releaseVersion": f"{BUILD_NAME}+{version}", "versionFloor": floor,
+            "flutterVersion": FLUTTER_VERSION, "targetPlatform": TARGET_PLATFORM, "shorebirdCli": version_cli,
+            "signerSha256": SIGNER, "publicKeyPath": str(PUBLIC_KEY),
+            "publicKeySha256": hashlib.sha256(der).hexdigest(), "releaseArgs": args[1:],
+            "intentCreatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), **current_source,
+        }
+        write_atomic(pending, json.dumps(intent, indent=2) + "\n")
     env = {**os.environ, VERSION_FLOOR_ENV: str(floor)}
     subprocess.run(args, cwd=NATIVE, env=env, check=True)
     inspect_release(APK_OUTPUT, der)
@@ -218,21 +282,20 @@ def release(floor=0, build_number=None):
     if metadata["versionCode"] != version or metadata["versionName"] != BUILD_NAME:
         raise RuntimeError(f"Built {metadata['versionName']}+{metadata['versionCode']}, expected {BUILD_NAME}+{version}.")
     metadata = publish(APK_OUTPUT, floor)
-    record = {
-        "package": PACKAGE, "appId": app_id(), "buildName": BUILD_NAME, "buildNumber": version,
-        "releaseVersion": f"{BUILD_NAME}+{version}", "versionFloor": floor,
-        "flutterVersion": FLUTTER_VERSION, "targetPlatform": TARGET_PLATFORM, "shorebirdCli": version_cli,
-        "signerSha256": SIGNER, "publicKeyPath": str(PUBLIC_KEY), "publicKeySha256": hashlib.sha256(der).hexdigest(),
-        "file": metadata["file"], "apkSha256": metadata["sha256"], "gitHead": metadata["gitHead"],
-        "workingTreeDirty": metadata["workingTreeDirty"], "releaseArgs": args[1:],
-        "createdAt": metadata["publishedAt"], "patches": [],
-    }
+    # A retry may run a different CLI or checkout than the intent recorded; the build just made these true.
+    built_with = {"shorebirdCli": version_cli, "publicKeyPath": str(PUBLIC_KEY), "releaseArgs": args[1:],
+                  "versionFloor": floor, "publicKeySha256": hashlib.sha256(der).hexdigest()}
+    record = release_record({**intent, **built_with}, metadata)
+    record.pop("versionCode")
     write_atomic(STATE / "baseline.json", json.dumps(record, indent=2) + "\n")
     pending.unlink()
     return record
 
 
 def patch(track="staging"):
+    pending_release = STATE / "pending-release.json"
+    if pending_release.exists():
+        raise RuntimeError(f"A release is still pending. Finish or reconcile it before uploading a patch: {pending_release}")
     current_source = source()
     if current_source["workingTreeDirty"]:
         raise RuntimeError("Commit the reviewed changes before uploading a patch.")
@@ -375,7 +438,10 @@ def main(argv=None):
         ThreadingHTTPServer(("127.0.0.1", 18743), Downloads).serve_forever()
         return
     with (STATE / "publish.lock").open("w") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise RuntimeError("Another Android release, patch, or publication is already running.") from error
         if args.command in ("build", "release"):
             release(args.version_floor, args.build_number)
         elif args.command == "patch":
