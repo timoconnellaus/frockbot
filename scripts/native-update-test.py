@@ -166,6 +166,7 @@ class ShorebirdHarness(unittest.TestCase):
         self.signer = SIGNER
         self.built = None
         self.failure = None
+        self.cli_version = "1.6.120"
         self.patches = [
             patch.object(updates, "STATE", self.state), patch.object(updates, "PUBLIC_KEY", self.public),
             patch.object(updates, "SHOREBIRD_YAML", self.yaml), patch.object(updates, "APK_OUTPUT", self.apk),
@@ -188,7 +189,7 @@ class ShorebirdHarness(unittest.TestCase):
         if args[:2] == ["git", "status"]:
             return self.dirty
         if args[1:] == ["--version"]:
-            return "Shorebird 1.6.120 • git@github.com:shorebirdtech/shorebird.git\n"
+            return f"Shorebird {self.cli_version} • git@github.com:shorebirdtech/shorebird.git\n"
         if args[:3] == ["openssl", "rsa", "-pubin"]:
             return PUBLIC_DER
         if args[:2] == ["openssl", "rsa"]:
@@ -283,6 +284,32 @@ class ReleaseTest(ShorebirdHarness):
         self.assertIn(f"--build-number={NOW}", self.shorebird()[-1][0])
         self.assertEqual(updates.latest()["versionCode"], NOW)
         self.assertFalse((self.state / "pending-release.json").exists())
+
+    def test_retry_after_a_cli_upgrade_records_the_cli_that_built_the_release(self):
+        self.failure = True
+        with self.assertRaises(subprocess.CalledProcessError):
+            updates.release()
+        self.assertEqual(json.loads((self.state / "pending-release.json").read_text())["shorebirdCli"], "1.6.120")
+        self.failure = None
+        self.cli_version = "1.7.0"
+        record = updates.release()
+        self.assertEqual(record["shorebirdCli"], "1.7.0")
+        self.assertEqual(record["releaseArgs"], self.shorebird()[-1][0][1:])
+        self.assertEqual(self.baseline(), record)
+        (self.state / "shorebird-private.pem").write_text("private\n")
+        updates.patch()
+        self.assertEqual(self.baseline()["patches"][-1]["track"], "staging")
+
+    def test_a_pending_intent_without_identity_fails_with_a_reconcile_message(self):
+        (self.state / "pending-release.json").write_text(json.dumps(
+            {"versionCode": NOW, "releaseVersion": f"1.1.0+{NOW}", "createdAt": "2026-01-01T00:00:00Z",
+             "gitHead": self.head, "workingTreeDirty": False}))
+        with self.assertRaisesRegex(RuntimeError, "predates full release-identity recording"):
+            updates.release()
+        with self.assertRaisesRegex(RuntimeError, "predates full release-identity recording"):
+            updates.release(build_number=NOW + 1)
+        self.assertEqual(self.commands, [])
+        self.assertTrue((self.state / "pending-release.json").exists())
 
     def test_release_intent_records_recovery_identity_before_upload(self):
         original = self.fake_command

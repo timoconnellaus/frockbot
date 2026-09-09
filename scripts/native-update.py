@@ -40,6 +40,9 @@ APK_OUTPUT = NATIVE / "build/app/outputs/flutter-apk/app-release.apk"
 EMBEDDED_YAML = "assets/flutter_assets/shorebird.yaml"
 VERSION_FLOOR_ENV = "FROCKBOT_ANDROID_VERSION_FLOOR"
 FORBIDDEN_PATCH_FLAGS = ("--allow-native-diffs", "--allow-asset-diffs")
+INTENT_IDENTITY_KEYS = ("versionCode", "package", "appId", "buildName", "buildNumber", "releaseVersion",
+                        "flutterVersion", "targetPlatform", "signerSha256", "publicKeySha256", "gitHead",
+                        "workingTreeDirty", "intentCreatedAt")
 
 
 def run(args, *, binary=False, **kwargs):
@@ -186,9 +189,17 @@ def release_record(intent, metadata):
     }
 
 
+def load_pending_intent(path):
+    intent = json.loads(path.read_text())
+    missing = [key for key in INTENT_IDENTITY_KEYS if key not in intent]
+    if missing:
+        raise RuntimeError(f"{path} predates full release-identity recording (missing {', '.join(missing)}); a "
+                           "release cannot be recovered from it. Check `shorebird releases list`, then delete it "
+                           "once you know whether that release uploaded.")
+    return intent
+
+
 def recover_published_release(intent, metadata, current_source, der):
-    if "versionCode" not in intent:
-        raise RuntimeError("Pending release identity is incomplete: versionCode.")
     expected = {
         "package": PACKAGE, "appId": app_id(), "buildName": BUILD_NAME,
         "buildNumber": intent["versionCode"], "releaseVersion": f"{BUILD_NAME}+{intent['versionCode']}",
@@ -231,7 +242,7 @@ def release(floor=0, build_number=None):
     previous = latest()
     floor = max(floor, previous["versionCode"] if previous else 0)
     pending = STATE / "pending-release.json"
-    intent = json.loads(pending.read_text()) if pending.exists() else None
+    intent = load_pending_intent(pending) if pending.exists() else None
     if intent:
         if intent["gitHead"] != current_source["gitHead"]:
             raise RuntimeError("The pending release belongs to another commit; reconcile it before uploading.")
@@ -271,7 +282,10 @@ def release(floor=0, build_number=None):
     if metadata["versionCode"] != version or metadata["versionName"] != BUILD_NAME:
         raise RuntimeError(f"Built {metadata['versionName']}+{metadata['versionCode']}, expected {BUILD_NAME}+{version}.")
     metadata = publish(APK_OUTPUT, floor)
-    record = release_record(intent, metadata)
+    # A retry may run a different CLI or checkout than the intent recorded; the build just made these true.
+    built_with = {"shorebirdCli": version_cli, "publicKeyPath": str(PUBLIC_KEY), "releaseArgs": args[1:],
+                  "versionFloor": floor, "publicKeySha256": hashlib.sha256(der).hexdigest()}
+    record = release_record({**intent, **built_with}, metadata)
     record.pop("versionCode")
     write_atomic(STATE / "baseline.json", json.dumps(record, indent=2) + "\n")
     pending.unlink()
