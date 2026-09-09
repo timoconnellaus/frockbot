@@ -153,7 +153,7 @@ export const NON_SECRET_WORKER_SETTINGS_V1: readonly NonSecretWorkerSettingV1[] 
   [
     {
       name: "NATIVE_SLICE_2_AUTH",
-      why: "Qualification gate; not enabled by the production configuration.",
+      why: "Native sign-in targets; production enables Android and macOS.",
     },
     {
       name: "DEFAULT_APPLICATION_HASH",
