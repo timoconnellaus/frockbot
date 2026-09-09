@@ -295,10 +295,7 @@ test("a Bot creates an Applet, the canvas shows its source, and the surface list
     page.locator('[flt-semantics-identifier^="applet-choice-"]'),
   ).toHaveCount(0);
   await expect(
-    page.getByRole("group", {
-      name: "No Applets yet. Ask a Bot to build one.",
-      exact: true,
-    }),
+    page.getByText("No Applets yet. Ask a Bot to build one.", { exact: true }),
   ).toBeVisible();
 });
 
