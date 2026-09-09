@@ -619,6 +619,7 @@ jobs:
           MACHINE_TOKEN_SECRET: ${{ secrets.MACHINE_TOKEN_SECRET }}
           # Required by `production-secrets.ts`; without it staging answers
           # 503 for every Applet.
+          FCM_SERVICE_ACCOUNT: ${{ secrets.FCM_SERVICE_ACCOUNT }}
           APPLET_VIEWER_SECRET: ${{ secrets.APPLET_VIEWER_SECRET }}
           DEBUG_TOKEN: ${{ secrets.DEBUG_TOKEN }}
         shell: bash
@@ -641,6 +642,7 @@ jobs:
             'ROUTINE_HOOK_SECRET',
             'MACHINE_TOKEN_SECRET',
             'APPLET_VIEWER_SECRET',
+            'FCM_SERVICE_ACCOUNT',
           ];
           const optional = ['DEBUG_TOKEN'].filter((name) => process.env[name]);
           console.log(

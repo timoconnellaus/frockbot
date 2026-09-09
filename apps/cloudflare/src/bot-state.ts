@@ -1,3 +1,14 @@
+import { cleanNotificationTestState } from "./notification-state-cleanup.js";
+import {
+  PUSH_OUTBOX_PREFIX,
+  PUSH_READ_KEY,
+  type MessageNotice,
+} from "@frockbot/app/notifications/messages";
+import {
+  UNREAD_STATE_KEY,
+  optionalUnreadStateV1,
+} from "@frockbot/app/shell/unread";
+import type { PushUpdate } from "./push.js";
 import { cleanIncidentTestChatsV1 } from "./test-chat-cleanup.js";
 import { DurableObject } from "cloudflare:workers";
 import {
@@ -26,9 +37,14 @@ import {
   decodeCompositionGenerationIdV1,
   decodeRevertCompositionCommandV1,
   MAX_COMPOSITION_GENERATION_PAGE_V1,
+  type BotSettingsViewV1,
   type RevertCompositionCommandV1,
 } from "@frockbot/core/configuration";
-import { BotDurableAuthority } from "@frockbot/core/durable";
+import {
+  BotDurableAuthority,
+  IDENTITY_KEY,
+  type BotIdentity,
+} from "@frockbot/core/durable";
 import type {
   OwnedBotTurnCommand,
   ShellBotBackendContribution,
@@ -88,6 +104,7 @@ import {
   readRoutineRun,
 } from "@frockbot/app/routines/bot";
 import {
+  BOT_CONFIGURATION_KEY,
   executeConfiguration,
   readConfiguration,
   resolveConfiguration,
@@ -430,9 +447,10 @@ export class BotState extends DurableObject<BotStateEnv> {
   ) {
     super(ctx, env);
     // Runs before any request or alarm can mount the old conversation.
-    this.ctx.blockConcurrencyWhile(() =>
-      cleanIncidentTestChatsV1(this.ctx.storage),
-    );
+    this.ctx.blockConcurrencyWhile(async () => {
+      await cleanIncidentTestChatsV1(this.ctx.storage);
+      await cleanNotificationTestState(this.ctx.storage);
+    });
     this.outboundFetch = dependencies.outboundFetch;
     // The surfaces are built per identity in `bindSurfaces`, not here: they
     // carry the `owner` guard, and a Durable Object learns which User it
@@ -501,6 +519,7 @@ export class BotState extends DurableObject<BotStateEnv> {
             state: this.ctx,
             env: this.backendEnv,
             outboundFetch: this.outboundFetch,
+            messagesCommitted: () => this.ctx.waitUntil(this.drainPush()),
             // The Durable Object owns the kernel authority; the Shell
             // Package supplies only its configuration and Composition
             // hooks.
@@ -533,10 +552,16 @@ export class BotState extends DurableObject<BotStateEnv> {
               // about a second instead of at the next projection poll.
               this.stateChannel.noticeComputer();
             },
-            scheduledDeadlines: (transaction) =>
-              mountedContributions
+            scheduledDeadlines: async (transaction) => [
+              ...((await mountedContributions
                 .get(computerBotContribution)
-                ?.scheduledDeadlines(transaction) ?? Promise.resolve([]),
+                ?.scheduledDeadlines(transaction)) ?? []),
+              ...((
+                await transaction.list({ prefix: PUSH_OUTBOX_PREFIX, limit: 1 })
+              ).size || (await transaction.get(PUSH_READ_KEY))
+                ? [Date.now() + 30_000]
+                : []),
+            ],
             scheduledWorkInFlight: () =>
               mountedContributions
                 .get(computerBotContribution)
@@ -1538,6 +1563,71 @@ export class BotState extends DurableObject<BotStateEnv> {
     );
   }
 
+  private pushDrain?: Promise<void>;
+  private drainPush(): Promise<void> {
+    if (this.pushDrain) return this.pushDrain;
+    this.pushDrain = this.flushPush()
+      .catch(() => {
+        console.error(JSON.stringify({ event: "push-outbox-pending" }));
+      })
+      .finally(() => {
+        this.pushDrain = undefined;
+      });
+    return this.pushDrain;
+  }
+
+  private async flushPush(): Promise<void> {
+    const identity = await this.ctx.storage.get<BotIdentity>(IDENTITY_KEY);
+    if (!identity) return;
+    const rpc = this.env.USER_CONFIGURATIONS.get(
+      this.env.USER_CONFIGURATIONS.idFromName(identity.userId),
+    ) as unknown as {
+      deliverPush(input: { userId: string; update: PushUpdate }): Promise<void>;
+    };
+    const entries = await this.ctx.storage.list<MessageNotice>({
+      prefix: PUSH_OUTBOX_PREFIX,
+      limit: 100,
+    });
+    const unread = optionalUnreadStateV1(
+      await this.ctx.storage.get(UNREAD_STATE_KEY),
+    );
+    for (const [key, notice] of entries) {
+      const settings = await this.ctx.storage.get<BotSettingsViewV1>(
+        BOT_CONFIGURATION_KEY,
+      );
+      await rpc.deliverPush({
+        userId: identity.userId,
+        update: {
+          botId: identity.botId,
+          kind: "message",
+          cursor: notice.notificationId,
+          title: notice.title,
+          body: notice.body,
+          notify:
+            notice.notify &&
+            settings?.notifications.enabled !== false &&
+            (unread.lastSeenCursor === undefined ||
+              notice.notificationId > unread.lastSeenCursor),
+        },
+      });
+      await this.ctx.storage.delete(key);
+    }
+    const read = await this.ctx.storage.get<{ cursor: string }>(PUSH_READ_KEY);
+    if (read) {
+      await rpc.deliverPush({
+        userId: identity.userId,
+        update: { botId: identity.botId, kind: "read", cursor: read.cursor },
+      });
+      await this.ctx.storage.transaction(async (tx) => {
+        if (
+          (await tx.get<{ cursor: string }>(PUSH_READ_KEY))?.cursor ===
+          read.cursor
+        )
+          await tx.delete(PUSH_READ_KEY);
+      });
+    }
+  }
+
   /** The Bot's unread projection; the Bot Durable Object derives the count. */
   async readUnread(input: unknown) {
     const identity = decodeBotIdentityRpcV1(input);
@@ -1557,11 +1647,13 @@ export class BotState extends DurableObject<BotStateEnv> {
       botId: request.botId as string,
     };
     const { shell } = await this.materialized(identity);
-    return executeUnreadCommand(
+    const receipt = await executeUnreadCommand(
       shell.state,
       identity,
       request.command as BotUnreadCommandV1,
     );
+    this.ctx.waitUntil(this.drainPush());
+    return receipt;
   }
 
   /** The Bot's approvals, newest first, pending and decided alike. */
@@ -2075,6 +2167,7 @@ export class BotState extends DurableObject<BotStateEnv> {
   }
 
   async alarm(): Promise<void> {
+    await this.drainPush();
     const purgeValue = await this.ctx.storage.get<unknown>(
       MEMORY_VECTOR_PURGE_JOURNAL_KEY_V1,
     );

@@ -2055,7 +2055,7 @@
           "type": "boolean"
         },
         "lastActivityCursor": {
-          "$ref": "#/$defs/RunCursor"
+          "$ref": "#/$defs/MessageCursor"
         },
         "lastActivityAt": {
           "$ref": "#/$defs/Instant"
@@ -2091,6 +2091,13 @@
           "minLength": 1,
           "maxLength": 200,
           "pattern": "^[-a-zA-Z0-9._]+:(?:user|send:(?:0|[1-9][0-9]*))(?![\\s\\S])"
+        },
+        "lastSeenCursor": {
+          "$ref": "#/$defs/MessageCursor"
+        },
+        "lastMessageId": {
+          "type": "string",
+          "maxLength": 200
         }
       },
       "required": [
@@ -2121,7 +2128,7 @@
               "$ref": "#/$defs/BotId"
             },
             "upToCursor": {
-              "$ref": "#/$defs/RunCursor"
+              "$ref": "#/$defs/MessageCursor"
             }
           },
           "required": [
@@ -3848,6 +3855,12 @@
         "generations"
       ],
       "additionalProperties": false
+    },
+    "MessageCursor": {
+      "type": "string",
+      "pattern": "^message-[0-9]{20}$",
+      "minLength": 28,
+      "maxLength": 28
     }
   },
   "x-frockbot-compatibility": {

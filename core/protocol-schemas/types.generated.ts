@@ -383,7 +383,7 @@ export type UnreadView = {
   capped: boolean;
   unread: boolean;
   manuallyUnread: boolean;
-  lastActivityCursor?: RunCursor;
+  lastActivityCursor?: MessageCursor;
   lastActivityAt?: Instant;
   lastViewedAt?: Instant;
   lastMessage?: {
@@ -394,6 +394,8 @@ export type UnreadView = {
   };
   working?: boolean;
   unreadFromMessageId?: string;
+  lastSeenCursor?: MessageCursor;
+  lastMessageId?: string;
 };
 export type MarkReadCommand =
   | {
@@ -401,7 +403,7 @@ export type MarkReadCommand =
       type: "bot/mark-read";
       commandId: Identifier;
       botId: BotId;
-      upToCursor: RunCursor;
+      upToCursor: MessageCursor;
     }
   | {
       schemaVersion: 1;
@@ -766,6 +768,7 @@ export type SetupHistory = {
   }>;
   cursor?: string;
 };
+export type MessageCursor = string;
 export interface ProtocolTypes {
   Identifier: Identifier;
   BotId: BotId;
@@ -852,4 +855,5 @@ export interface ProtocolTypes {
   BotLifecycleDirectory: BotLifecycleDirectory;
   AuditPage: AuditPage;
   SetupHistory: SetupHistory;
+  MessageCursor: MessageCursor;
 }

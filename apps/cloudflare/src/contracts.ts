@@ -660,6 +660,7 @@ export interface BotConfigurationBinding {
 }
 
 export interface GatewayDependencies {
+  registerPush?(userId: string, registration: unknown): Promise<unknown>;
   /** Explicit Slice 2 prototype; absent until signed-target qualification. */
   nativeAuth?: import("./native-auth.js").NativeAuth;
   loader: WorkerLoader;

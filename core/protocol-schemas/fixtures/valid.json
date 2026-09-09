@@ -527,7 +527,7 @@
       "type": "bot/mark-read",
       "commandId": "command-1",
       "botId": "default",
-      "upToCursor": "run-index:2026-09-05T00:00:00.000Z:run-1"
+      "upToCursor": "message-00000000000000000001"
     }
   },
   {
@@ -1304,5 +1304,10 @@
       "botId": "primary",
       "fromMessageId": "run-1:send:0"
     }
+  },
+  {
+    "name": "MessageCursor valid",
+    "schema": "MessageCursor",
+    "value": "message-00000000000000000001"
   }
 ]

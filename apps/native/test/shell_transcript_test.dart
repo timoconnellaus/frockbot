@@ -3,7 +3,8 @@
 library;
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/shell/transcript_model.dart';
+import 'package:flutter/material.dart';
+import 'package:frockbot_native/shell/transcript.dart';
 
 /// How the thread reads, one line per row, in the order it is drawn.
 List<String> thread(List<TranscriptLine> lines) => [
@@ -70,6 +71,54 @@ TranscriptLine line({
 );
 
 void main() {
+  testWidgets(
+    'reports read only while the newest delivered message is displayed',
+    (tester) async {
+      final reports = <String?>[];
+      final lines = [
+        TranscriptLine(
+          id: 'run-old:send:0',
+          runId: 'run-old',
+          role: LineRole.assistant,
+          text: 'Old',
+          status: LineStatus.completed,
+        ),
+        TranscriptLine(
+          id: 'run-new:send:0',
+          runId: 'run-new',
+          role: LineRole.assistant,
+          text: 'New',
+          status: LineStatus.completed,
+        ),
+      ];
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SizedBox(
+              height: 80,
+              child: TranscriptView(
+                lines: lines,
+                loading: false,
+                hasEarlier: false,
+                onRefresh: ({older = false}) async {},
+                onOpenRun: (_) {},
+                onReadLatest: reports.add,
+                storageKey: 'read-test',
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(reports, contains('run-new:send:0'));
+
+      final scrollable = tester.state<ScrollableState>(find.byType(Scrollable));
+      scrollable.position.jumpTo(scrollable.position.maxScrollExtent);
+      await tester.pump();
+      expect(reports.last, isNull);
+    },
+  );
+
   group('the order a thread is drawn in', () {
     /*
      * The production sweep: a message is sent, and while its reply is

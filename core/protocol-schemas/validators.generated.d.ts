@@ -132,5 +132,6 @@ declare const validators: {
   ): value is ProtocolTypes["BotLifecycleDirectory"];
   isAuditPage(value: unknown): value is ProtocolTypes["AuditPage"];
   isSetupHistory(value: unknown): value is ProtocolTypes["SetupHistory"];
+  isMessageCursor(value: unknown): value is ProtocolTypes["MessageCursor"];
 };
 export default validators;

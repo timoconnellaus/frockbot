@@ -1,34 +1,22 @@
 import { sentTextV1 } from "./sent-text.js";
-/**
- * Per-Bot unread state (parity register row 56).
- *
- * The Bot Durable Object is the authority: unread is derived from the Bot's own
- * admission index and its terminal settlements, which only that object can see.
- * The durable record is a pair of cursors into that index rather than a
- * counter, because a counter increments non-idempotently and double-counts on
- * recovery or replay, while `max()` over a cursor is idempotent — "Recovery
- * never silently duplicates" applied to a badge.
- *
- * The count is derived, never stored: it is the number of admission-index
- * entries strictly after `lastSeenCursor` and at or before `lastActivityCursor`.
- * Only a settled chat Turn advances `lastActivityCursor`, so an in-flight Turn
- * and an automation Turn (slice E, whose outcome reaches the User through its
- * own inbox entry) contribute nothing to the badge.
+/** Cloud-owned message read cursors. Each explicit send advances activity;
+ * reading is a separate authenticated, monotonic command shared by all devices.
  */
 import {
   canonicalCommandFingerprintV1,
   isPublicIdentifier,
 } from "@frockbot/core/configuration";
 import type { BotIdentity } from "@frockbot/core/durable";
-import { decodeRoutineInboxEntryV1 } from "@frockbot/app/routines/inbox";
-import {
-  ROUTINE_INBOX_LIMIT,
-  ROUTINE_INBOX_PREFIX,
-} from "@frockbot/app/routines/storage-keys";
 import type { ShellBotStateV1 } from "./backend-state.js";
 import { runWorkingV1 } from "./reads.js";
 import { isVisibleRunV1 } from "./run-protocol.js";
-import { decodeRunCursorV1 } from "./run-cursor.js";
+export function decodeMessageCursor(value: string): string {
+  if (!/^message-[0-9]{20}$/.test(value))
+    throw new UnreadDecodeError("message cursor is invalid");
+  return value;
+}
+export const MESSAGE_PREFIX = "shell:message:";
+export const MESSAGE_SEQUENCE_KEY = "shell:message-sequence";
 
 /** The single durable key the whole record lives under. */
 export const UNREAD_STATE_KEY = "shell:unread";
@@ -55,11 +43,12 @@ export class UnreadDecodeError extends Error {
 /** The durable record. One key, one schema version, no derived fields. */
 export interface UnreadStateV1 {
   schemaVersion: 1;
-  /** Newest settled chat Turn, as an admission-index cursor. */
+  /** Newest sent message, as an message cursor. */
   lastActivityCursor?: string;
+  lastMessageId?: string;
   /** When that Turn settled. */
   lastActivityAt?: string;
-  /** How far the User has read, as an admission-index cursor. */
+  /** How far the User has read, as an message cursor. */
   lastSeenCursor?: string;
   /** When the User last read it. */
   lastViewedAt?: string;
@@ -123,7 +112,7 @@ function optionalCursor(
     throw new UnreadDecodeError(`${label} ${key} is invalid`);
   }
   try {
-    return decodeRunCursorV1(candidate);
+    return decodeMessageCursor(candidate);
   } catch {
     throw new UnreadDecodeError(`${label} ${key} is invalid`);
   }
@@ -167,8 +156,9 @@ export function decodeUnreadStateV1(input: unknown): UnreadStateV1 {
     ["schemaVersion", "manuallyUnread"],
     [
       "lastActivityCursor",
-      "lastActivityAt",
+      "lastMessageId",
       "lastSeenCursor",
+      "lastActivityAt",
       "lastViewedAt",
       "unreadFromMessageId",
     ],
@@ -211,6 +201,9 @@ export function decodeUnreadStateV1(input: unknown): UnreadStateV1 {
       ? {}
       : { unreadFromMessageId: messageBoundary(value.unreadFromMessageId) }),
     ...(lastActivityCursor === undefined ? {} : { lastActivityCursor }),
+    ...(value.lastMessageId === undefined
+      ? {}
+      : { lastMessageId: messageBoundary(value.lastMessageId) }),
     ...(lastActivityAt === undefined ? {} : { lastActivityAt }),
     ...(lastSeenCursor === undefined ? {} : { lastSeenCursor }),
     ...(lastViewedAt === undefined ? {} : { lastViewedAt }),
@@ -318,7 +311,7 @@ export interface SidebarPreviewRunV1 {
  * projection existed left one behind — and the row then claimed "No messages
  * yet" over a full conversation. A read cannot write the record it is missing,
  * so it derives the same line from the runs that are already durable. Runs
- * arrive newest-first and the walk stops at the first settled chat Turn with
+ * arrive newest-first and the walk stops at the first sent message with
  * text, which is exactly the line the settlement would have stored.
  */
 export function sidebarMessagePreviewFromRunsV1(
@@ -353,7 +346,7 @@ function settlementTimestampV1(run: SidebarPreviewRunV1): string {
 }
 
 /**
- * Records a settled chat Turn. Monotonic: a cursor that is not newer than the
+ * Records a sent message. Monotonic: a cursor that is not newer than the
  * one already recorded leaves the record byte-for-byte unchanged, so a
  * recovered Turn settling a second time cannot move the badge.
  */
@@ -361,7 +354,7 @@ export function advanceUnreadActivityV1(
   current: UnreadStateV1,
   activity: { cursor: string; at: string },
 ): UnreadStateV1 {
-  const cursor = decodeRunCursorV1(activity.cursor);
+  const cursor = decodeMessageCursor(activity.cursor);
   if (
     current.lastActivityCursor !== undefined &&
     current.lastActivityCursor >= cursor
@@ -384,7 +377,7 @@ export function markUnreadReadV1(
   current: UnreadStateV1,
   input: { upToCursor: string; at: string },
 ): UnreadStateV1 {
-  const cursor = decodeRunCursorV1(input.upToCursor);
+  const cursor = decodeMessageCursor(input.upToCursor);
   const lastSeenCursor =
     current.lastSeenCursor !== undefined && current.lastSeenCursor > cursor
       ? current.lastSeenCursor
@@ -410,13 +403,13 @@ export function markUnreadV1(current: UnreadStateV1): UnreadStateV1 {
 }
 
 /**
- * The projection the sidebar renders. `count` is derived from the admission
+ * The projection the sidebar renders. `count` is derived from the message
  * index every read; nothing here is stored.
  */
 export interface BotUnreadViewV1 {
   schemaVersion: 1;
   botId: string;
-  /** Settled chat Turns since `lastSeenCursor`, capped at {@link UNREAD_COUNT_CAP}. */
+  /** Sent messages since `lastSeenCursor`, capped at {@link UNREAD_COUNT_CAP}. */
   count: number;
   /** True when the real count is above the cap — the "99+" case. */
   capped: boolean;
@@ -425,7 +418,9 @@ export interface BotUnreadViewV1 {
   manuallyUnread: boolean;
   unreadFromMessageId?: string;
   /** What a `bot/mark-read` should name as `upToCursor`. */
+  lastSeenCursor?: string;
   lastActivityCursor?: string;
+  lastMessageId?: string;
   lastActivityAt?: string;
   lastViewedAt?: string;
   /** Latest settled assistant/user line, projected for the sidebar only. */
@@ -447,7 +442,7 @@ export interface BotUnreadDirectoryViewV1 {
 }
 
 /**
- * Counts admission-index cursors in `(lastSeenCursor, lastActivityCursor]`.
+ * Counts message cursors in `(lastSeenCursor, lastActivityCursor]`.
  * `cursors` is the newest-first index page; it only has to be one longer than
  * the cap for the cap to be exact.
  */
@@ -463,12 +458,12 @@ export function projectBotUnreadViewV1(
    * the sidebar stayed quiet about. A failure is the Bot addressing its User,
    * so it counts here even though the firing that produced it does not.
    */
-  automationFailures = 0,
+  _automationFailures = 0,
   /** True while a Turn of this Bot's is running. Drawn as the row's ring. */
   working = false,
 ): BotUnreadViewV1 {
   const ceiling = state.lastActivityCursor;
-  let counted = Math.max(0, automationFailures);
+  let counted = 0;
   if (ceiling !== undefined) {
     for (const cursor of cursors) {
       if (cursor > ceiling) continue;
@@ -494,6 +489,12 @@ export function projectBotUnreadViewV1(
     ...(state.unreadFromMessageId === undefined
       ? {}
       : { unreadFromMessageId: state.unreadFromMessageId }),
+    ...(state.lastMessageId === undefined
+      ? {}
+      : { lastMessageId: state.lastMessageId }),
+    ...(state.lastSeenCursor === undefined
+      ? {}
+      : { lastSeenCursor: state.lastSeenCursor }),
     ...(state.lastActivityCursor === undefined
       ? {}
       : { lastActivityCursor: state.lastActivityCursor }),
@@ -594,6 +595,8 @@ function decodeBotUnreadViewV1(input: unknown): BotUnreadViewV1 {
     ["schemaVersion", "botId", "count", "capped", "unread", "manuallyUnread"],
     [
       "lastActivityCursor",
+      "lastMessageId",
+      "lastSeenCursor",
       "lastActivityAt",
       "lastViewedAt",
       "lastMessage",
@@ -647,7 +650,19 @@ function decodeBotUnreadViewV1(input: unknown): BotUnreadViewV1 {
     ...(value.unreadFromMessageId === undefined
       ? {}
       : { unreadFromMessageId: messageBoundary(value.unreadFromMessageId) }),
+    ...(value.lastSeenCursor === undefined
+      ? {}
+      : {
+          lastSeenCursor: optionalCursor(
+            value,
+            "lastSeenCursor",
+            "unread view",
+          ),
+        }),
     ...(lastActivityCursor === undefined ? {} : { lastActivityCursor }),
+    ...(value.lastMessageId === undefined
+      ? {}
+      : { lastMessageId: messageBoundary(value.lastMessageId) }),
     ...(lastActivityAt === undefined ? {} : { lastActivityAt }),
     ...(lastViewedAt === undefined ? {} : { lastViewedAt }),
     ...(lastMessage === undefined ? {} : { lastMessage }),
@@ -822,37 +837,24 @@ export async function readUnread(
   const index = await state.authority.listRunIndex({
     limit: UNREAD_COUNT_CAP + 1,
   });
-  // Counted straight off the keys rather than through `RoutineInboxStore`:
-  // its `list()` trims the inbox, and the unread fan-out is a read every
-  // sidebar poll makes for every Bot — it must not write, least of all into
-  // an object that is running a Turn. An undecodable row is skipped, because
-  // a badge is never worth failing a read for.
-  const stored = await state.ctx.storage.list<unknown>({
-    prefix: ROUTINE_INBOX_PREFIX,
-    limit: ROUTINE_INBOX_LIMIT,
+  const messages = await state.ctx.storage.list<unknown>({
+    prefix: MESSAGE_PREFIX,
+    reverse: true,
+    limit: UNREAD_COUNT_CAP + 1,
   });
-  let failures = 0;
-  for (const value of stored.values()) {
-    try {
-      const entry = decodeRoutineInboxEntryV1(value);
-      if (entry.failure === true && !entry.acknowledged) failures += 1;
-    } catch {
-      continue;
-    }
-  }
   return projectBotUnreadViewV1(
     identity.botId,
     unreadState,
-    index.map((entry) => entry.cursor),
+    [...messages.keys()].map((key) => key.slice(MESSAGE_PREFIX.length)),
     await sidebarPreview(state, storedPreview, index),
-    failures,
+    0,
     await runWorkingV1(state, index[0]?.runId),
   );
 }
 
 /**
  * How many stored runs a read will open to recover a missing preview. The
- * newest settled chat Turn is almost always the first entry; the bound is what
+ * newest sent message is almost always the first entry; the bound is what
  * keeps a Bot whose recent Turns are all automations from turning one sidebar
  * read into a scan of its whole history.
  */
@@ -917,7 +919,8 @@ export async function executeUnreadCommand(
       const sessionId = await state.authority.readConversationSessionId();
       if (
         !run ||
-        run.sessionId !== sessionId ||
+        (run.admission?.turnType !== "automation" &&
+          run.sessionId !== sessionId) ||
         !isVisibleRunV1(run) ||
         (kind === "send" &&
           Number(position) >=
@@ -936,6 +939,9 @@ export async function executeUnreadCommand(
       if (!command.upToCursor) {
         throw new Error("bot/mark-read requires upToCursor");
       }
+      if (!(await transaction.get(`${MESSAGE_PREFIX}${command.upToCursor}`))) {
+        throw new Error("Read cursor does not name a message in this Bot");
+      }
       next = markUnreadReadV1(current, {
         upToCursor: command.upToCursor,
         at: new Date().toISOString(),
@@ -946,16 +952,35 @@ export async function executeUnreadCommand(
         unreadFromMessageId: command.fromMessageId,
       };
     }
+    if (command.type === "bot/mark-read") {
+      await transaction.put("shell:push-read", { cursor: next.lastSeenCursor });
+      const notices = await transaction.list<{ notificationId: string }>({
+        prefix: "notification:",
+      });
+      for (const [key, notice] of notices) {
+        if (
+          notice.notificationId.startsWith("message-") &&
+          notice.notificationId <= next.lastSeenCursor!
+        )
+          await transaction.delete(key);
+      }
+    }
     await transaction.put({
       [UNREAD_STATE_KEY]: next,
       [receiptKey]: { commandFingerprint: fingerprint, state: next },
     });
+    await state.authority.refreshRecoveryAlarm(transaction);
     return {
       state: next,
       preview: await transaction.get<unknown>(SIDEBAR_PREVIEW_KEY),
     };
   });
   const index = await state.authority.listRunIndex({
+    limit: UNREAD_COUNT_CAP + 1,
+  });
+  const messages = await state.ctx.storage.list<unknown>({
+    prefix: MESSAGE_PREFIX,
+    reverse: true,
     limit: UNREAD_COUNT_CAP + 1,
   });
   return {
@@ -965,7 +990,7 @@ export async function executeUnreadCommand(
     unread: projectBotUnreadViewV1(
       identity.botId,
       stored.state,
-      index.map((entry) => entry.cursor),
+      [...messages.keys()].map((key) => key.slice(MESSAGE_PREFIX.length)),
       // The open Bot is the one that gets marked read, so this receipt is the
       // sidebar row it renders from: it owes the same derived preview the
       // fan-out gives every other Bot.

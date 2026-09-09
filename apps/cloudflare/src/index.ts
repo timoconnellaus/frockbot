@@ -181,6 +181,7 @@ export { AppletCapabilities, AppletState } from "./applet-state.js";
 export { BotState, DeploymentPolicy, UserConfiguration };
 
 interface Env {
+  FCM_SERVICE_ACCOUNT?: string;
   /** Explicit qualification gate; not enabled by the production configuration. */
   NATIVE_SLICE_2_AUTH?: string;
   USER_APPLICATIONS: WorkerLoader;
@@ -1932,6 +1933,10 @@ export default {
           .split(",")
           .map((host) => host.trim())
           .filter(Boolean),
+        registerPush: (userId, registration) =>
+          env.USER_CONFIGURATIONS.get(
+            env.USER_CONFIGURATIONS.idFromName(userId),
+          ).registerPush({ userId, registration }),
         auth: gatewayAuth(env, {
           mayCreateAccount: (email) => mayCreateAccount(env, email),
         }),

@@ -156,7 +156,11 @@ export async function listRuns(
   // A record nobody can decode has no trustworthy session id, and a
   // transcript that hid it would be back to silently losing the Turn. An
   // unknown session belongs to the conversation being read.
-  const inConversation = (run: { sessionId?: string }) =>
+  const inConversation = (run: {
+    sessionId?: string;
+    admission?: { turnType?: string };
+  }) =>
+    run.admission?.turnType === "automation" ||
     conversationId === undefined ||
     run.sessionId === undefined ||
     run.sessionId === conversationId;
@@ -226,13 +230,18 @@ export async function listRuns(
       );
       if (
         !header ||
-        !isVisibleRunV1(header.run) ||
+        (header.run.admission?.turnType !== "automation" &&
+          !isVisibleRunV1(header.run)) ||
         !inConversation(header.run)
       ) {
         scanCursor = candidate.cursor;
         continue;
       }
       const stored = await state.authority.hydrateRunForDisplay(header);
+      if (!isVisibleRunV1(stored.run)) {
+        scanCursor = candidate.cursor;
+        continue;
+      }
       const projected = projectClientRunOrDegradedV1(stored.run);
       const tentative = [
         ...selected.values(),

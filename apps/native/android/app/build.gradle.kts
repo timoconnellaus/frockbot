@@ -2,6 +2,7 @@ import java.util.Base64
 
 plugins {
     id("com.android.application")
+    id("com.google.gms.google-services") version "4.5.0"
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
@@ -9,6 +10,11 @@ plugins {
 // One build switch controls both Dart transport and the separate Android identity.
 val localDevelopment = (project.findProperty("dart-defines") as? String).orEmpty().split(",").any {
     runCatching { String(Base64.getDecoder().decode(it)) == "FROCKBOT_LOCAL_DEV=true" }.getOrDefault(false)
+}
+
+// The isolated development package has no production Firebase registration.
+tasks.matching { it.name.endsWith("GoogleServices") }.configureEach {
+    onlyIf { !localDevelopment }
 }
 
 val existingDebugKey = file(System.getenv("FROCKBOT_ANDROID_KEYSTORE") ?: "${System.getProperty("user.home")}/.android/debug.keystore")
@@ -75,4 +81,10 @@ kotlin {
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    implementation(platform("com.google.firebase:firebase-bom:34.18.0"))
+    implementation("com.google.firebase:firebase-messaging")
+    implementation("androidx.core:core-ktx:1.17.0")
 }

@@ -1590,5 +1590,10 @@
       "botId": "primary",
       "fromMessageId": "routine:foreign:send:0"
     }
+  },
+  {
+    "name": "MessageCursor rejects a run cursor",
+    "schema": "MessageCursor",
+    "value": "run-00000000000000000001"
   }
 ]

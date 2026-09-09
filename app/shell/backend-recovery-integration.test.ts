@@ -13,7 +13,13 @@ import {
   SessionEventLog,
   sessionEventLogIndexKeyV1,
 } from "@frockbot/core/durable";
-import { executeUnreadCommand, readUnread } from "./unread.js";
+import {
+  executeUnreadCommand,
+  MESSAGE_PREFIX,
+  readUnread,
+  UNREAD_STATE_KEY,
+} from "./unread.js";
+import { messageRecords, PUSH_READ_KEY } from "../notifications/messages.js";
 import { createShellBotBackendContribution } from "./backend.js";
 import {
   botTurnCommandFingerprintV1,
@@ -292,7 +298,7 @@ describe("Bot recovery", () => {
     expect(await storage.get<StoredRun>(`run:${run.runId}`)).toEqual(run);
   });
 
-  test("atomically restores the admitted notification intent after eviction", async () => {
+  test("preserves the message notification committed atomically before eviction", async () => {
     const storage = new MemoryStorage();
     const admittedSettings = {
       ...initializeBotSettingsV1("primary"),
@@ -374,12 +380,18 @@ describe("Bot recovery", () => {
       configurationSnapshot: admittedSettings,
       previousEventCount: 0,
     } satisfies StoredRun;
+    const committedMessageRecords = await messageRecords({
+      run,
+      events: [events[3]!],
+      read: <T>(key: string) => storage.get<T>(key),
+    });
     await storage.put({
       "active-run": run.runId,
       "run:run-1": run,
       "run-index:2026-08-28T00:00:00.000Z:run-1": run.runId,
       "latest-events": events,
       "bot-configuration": currentSettings,
+      ...committedMessageRecords,
     });
 
     const recovered = createShellBotBackendContribution({
@@ -403,9 +415,9 @@ describe("Bot recovery", () => {
     const notifications = await recovered.listNotifications();
     expect(notifications).toEqual([
       expect.objectContaining({
-        notificationId: "run-1",
+        notificationId: "message-00000000000000000001",
         runId: "run-1",
-        title: "Admitted Bot replied",
+        title: "Admitted Bot",
         body: "Durable reply",
       }),
     ]);
@@ -1489,6 +1501,85 @@ describe("Bot recovery", () => {
         fromMessageId: "run-chat:send:0",
       }),
     ).rejects.toThrow();
+  });
+
+  test("mark-read requires this Bot's message, advances monotonically, and queues cross-device clearing", async () => {
+    const storage = new MemoryStorage();
+    await writeRunHistory(storage, [
+      { runId: "run-chat", sessionId: "user:primary" },
+    ]);
+    const firstCursor = "message-00000000000000000001";
+    const secondCursor = "message-00000000000000000002";
+    await storage.put({
+      [`${MESSAGE_PREFIX}${firstCursor}`]: { messageId: "run-chat:send:0" },
+      [`${MESSAGE_PREFIX}${secondCursor}`]: { messageId: "run-chat:send:1" },
+      [UNREAD_STATE_KEY]: {
+        schemaVersion: 1,
+        manuallyUnread: false,
+        lastActivityCursor: secondCursor,
+        lastActivityAt: "2026-09-01T00:00:02.000Z",
+      },
+      [`notification:${firstCursor}`]: {
+        notificationId: firstCursor,
+        runId: "run-chat",
+        createdAt: "2026-09-01T00:00:01.000Z",
+        title: "Primary",
+        body: "one",
+      },
+      [`notification:${secondCursor}`]: {
+        notificationId: secondCursor,
+        runId: "run-chat",
+        createdAt: "2026-09-01T00:00:02.000Z",
+        title: "Primary",
+        body: "two",
+      },
+    });
+    const make = () =>
+      createShellBotBackendContribution({
+        ...shellTestApplicationV1(),
+        state: { storage } as unknown as DurableObjectState,
+        env: {} as never,
+      });
+    const identity = { userId: "user", botId: "primary" };
+
+    const readSecond = await executeUnreadCommand(make().state, identity, {
+      schemaVersion: 1,
+      type: "bot/mark-read",
+      commandId: "read-second",
+      botId: "primary",
+      upToCursor: secondCursor,
+    });
+    expect(readSecond.unread).toMatchObject({
+      count: 0,
+      lastSeenCursor: secondCursor,
+    });
+    expect(await storage.get<{ cursor: string }>(PUSH_READ_KEY)).toEqual({
+      cursor: secondCursor,
+    });
+    expect(await storage.get(`notification:${firstCursor}`)).toBeUndefined();
+    expect(await storage.get(`notification:${secondCursor}`)).toBeUndefined();
+
+    const stale = await executeUnreadCommand(make().state, identity, {
+      schemaVersion: 1,
+      type: "bot/mark-read",
+      commandId: "read-first-late",
+      botId: "primary",
+      upToCursor: firstCursor,
+    });
+    expect(stale.unread.lastSeenCursor).toBe(secondCursor);
+    expect(await storage.get<{ cursor: string }>(PUSH_READ_KEY)).toEqual({
+      cursor: secondCursor,
+    });
+
+    await expect(
+      executeUnreadCommand(make().state, identity, {
+        schemaVersion: 1,
+        type: "bot/mark-read",
+        commandId: "read-future",
+        botId: "primary",
+        upToCursor: "message-00000000000000000003",
+      }),
+    ).rejects.toThrow("does not name a message");
   });
 
   test("reaches the chat buried under other sessions", async () => {

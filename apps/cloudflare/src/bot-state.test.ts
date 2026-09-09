@@ -183,6 +183,7 @@ describe("BotState Ollama execution", () => {
       readConfiguration: () => Promise.resolve(structuredClone(user)),
       listBots: () =>
         Promise.resolve({ schemaVersion: 1 as const, revision: 0, bots: [] }),
+      deliverPush: () => Promise.resolve(),
       getConnection: () =>
         Promise.resolve(structuredClone(user.connections[0])),
       leaseModelCredential: (input: unknown) => {
@@ -278,6 +279,7 @@ describe("BotState Ollama execution", () => {
         {
           storage,
           blockConcurrencyWhile: (body: () => Promise<unknown>) => body(),
+          waitUntil: () => {},
         } as unknown as DurableObjectState,
         env,
         {

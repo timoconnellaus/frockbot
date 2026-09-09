@@ -687,6 +687,20 @@ export function createGateway(dependencies: GatewayDependencies) {
       return Response.json({ schemaVersion: 1, userId, isAdmin });
     }
 
+    if (url.pathname === "/api/push/device") {
+      if (request.method !== "POST")
+        return jsonError(405, "method not allowed");
+      if (!dependencies.registerPush)
+        return jsonError(503, "Push is unavailable");
+      try {
+        const registration = await readNativeJsonBody(request);
+        return Response.json(
+          await dependencies.registerPush(userId, registration),
+        );
+      } catch {
+        return jsonError(400, "Push registration failed");
+      }
+    }
     const stateChannelMatch = url.pathname.match(
       /^\/api\/bots\/([^/]+)\/state-channel$/,
     );

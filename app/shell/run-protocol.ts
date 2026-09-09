@@ -948,7 +948,10 @@ export function projectClientRunV1(run: StoredRun): ClientRunV1 {
     schemaVersion: 3,
     runId: truncate(run.runId, MAX_RUN_ID_LENGTH),
     admittedAt: truncate(run.acceptedAt, MAX_TIMESTAMP_LENGTH),
-    input: truncateWireString(run.input, MAX_INPUT_BYTES),
+    input:
+      run.admission?.turnType === "automation"
+        ? ""
+        : truncateWireString(run.input, MAX_INPUT_BYTES),
     status,
     events: visibleEvents(run.events, status),
     ...(run.stopRequestedAt
@@ -981,9 +984,15 @@ function lookupState(
  */
 export function isVisibleRunV1(run: {
   admission?: { turnType?: string };
+  events?: readonly { type: string }[];
 }): boolean {
   const type = run.admission?.turnType ?? "chat";
-  return type === "chat" || type === "agent";
+  return (
+    type === "chat" ||
+    type === "agent" ||
+    (type === "automation" &&
+      run.events?.some((event) => event.type === "send/to-user") === true)
+  );
 }
 
 export function projectClientRunLookupV1(

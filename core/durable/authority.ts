@@ -120,6 +120,12 @@ export interface BotDurableAuthorityHooks<Snapshot> {
   executeTurn(
     input: BotTurnExecutionInput<Snapshot>,
   ): Promise<BotTurnCompletion>;
+  eventRecords?(input: {
+    run: StoredRunV1<Snapshot>;
+    events: readonly SessionEvent[];
+    read<T>(key: string): Promise<T | undefined>;
+  }): Promise<Record<string, unknown>>;
+  eventsCommitted?(): void;
   /** Notification policy; `undefined` records no notification. */
   notification(
     snapshot: Snapshot,
@@ -1572,8 +1578,17 @@ export class BotDurableAuthority<Snapshot> {
         ]),
       } satisfies StoredRunV1<Snapshot>);
       await eventLog.append(run.sessionId, durableEvents);
+      const records = await this.hooks.eventRecords?.({
+        run: next,
+        events: durableEvents,
+        read: <T>(key: string) => transaction.get<T>(key),
+      });
+      if (records && Object.keys(records).length)
+        await transaction.put(records);
       await transaction.put(key, structuredClone(storedRunRecordV2(next)));
+      await this.refreshRecoveryAlarm(transaction);
     });
+    this.hooks.eventsCommitted?.();
   }
 
   /**

@@ -110,6 +110,7 @@ export interface ShellBotBackendHost extends ShellApplicationV1 {
     botId: string,
   ): Promise<void>;
   outboundFetch?: typeof fetch;
+  messagesCommitted?(): void;
   /** Supplied by the Durable Object; defaults to the kernel implementation. */
   createAuthority?: CreateBotDurableAuthority;
   /**

@@ -264,6 +264,7 @@ describe("production setup", () => {
         "5c1b7b0e5b0b4d1a9e6f3c2d8a7b6e5f4d3c2b1a0f9e8d7c6b5a4938271605f4",
       MACHINE_TOKEN_SECRET:
         "9f2c4a6e8d0b1357913579bdf02468ace13579bdf02468ace13579bdf02468ac",
+      FCM_SERVICE_ACCOUNT: '{"project_id":"frockbot-test"}',
       // Required since 2026-09-05: without it every published Applet answers
       // 503, which is what production did until the manifest was added.
       APPLET_VIEWER_SECRET:

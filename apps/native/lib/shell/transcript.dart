@@ -36,6 +36,7 @@ class TranscriptView extends StatefulWidget {
   final VoidCallback? onOpenSettings;
   final void Function(TranscriptLine)? onMessageActions;
   final String? unreadFromMessageId;
+  final void Function(String?)? onReadLatest;
   final String storageKey;
 
   /// A Turn the reader asked to be taken to — a search hit. It is brought into
@@ -60,6 +61,7 @@ class TranscriptView extends StatefulWidget {
     this.onOpenSettings,
     this.onMessageActions,
     this.unreadFromMessageId,
+    this.onReadLatest,
     this.focusRunId,
     this.background,
   });
@@ -70,6 +72,36 @@ class TranscriptView extends StatefulWidget {
 
 class _TranscriptViewState extends State<TranscriptView> {
   final GlobalKey focusKey = GlobalKey();
+  final ScrollController scroll = ScrollController();
+  @override
+  void initState() {
+    super.initState();
+    scroll.addListener(_reportRead);
+  }
+
+  void _reportRead() {
+    if (!mounted) return;
+    final atLatest = scroll.hasClients && scroll.position.pixels <= 8;
+    final sends =
+        orderTranscript(widget.lines, DateTime.now().toUtc().toIso8601String())
+            .where(
+              (line) =>
+                  line.role == LineRole.assistant && line.id.contains(':send:'),
+            )
+            .toList();
+    widget.onReadLatest?.call(
+      atLatest && sends.isNotEmpty && ModalRoute.of(context)?.isCurrent == true
+          ? sends.last.id
+          : null,
+    );
+  }
+
+  @override
+  void dispose() {
+    scroll.dispose();
+    super.dispose();
+  }
+
   String? focused;
 
   String? get pendingText => widget.pendingText;
@@ -85,6 +117,7 @@ class _TranscriptViewState extends State<TranscriptView> {
 
   @override
   Widget build(BuildContext context) {
+    WidgetsBinding.instance.addPostFrameCallback((_) => _reportRead());
     final now = DateTime.now();
     final ordered = orderTranscript(
       widget.lines,
@@ -156,6 +189,7 @@ class _TranscriptViewState extends State<TranscriptView> {
       RefreshIndicator(
         onRefresh: onRefresh,
         child: ListView(
+          controller: scroll,
           // The thread starts at the latest row. Earlier pages extend the
           // far end, so prepending history keeps the viewport where it was.
           reverse: true,

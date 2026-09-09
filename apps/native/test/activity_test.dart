@@ -5,11 +5,57 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/activity/page.dart';
 import 'package:frockbot_native/theme/frock_theme.dart';
 import 'package:frockbot_native/activity/controller.dart';
+import 'package:frockbot_native/protocol/client_wire.generated.dart' as wire;
 
 import 'settings_test.dart' show SettingsApi;
 import 'widget_test.dart' show MemoryStore;
 
 void main() {
+  test('read and manual unread commands carry the authoritative message boundaries', () async {
+    final store = MemoryStore();
+    final commands = <Map<String, dynamic>>[];
+    final api = SettingsApi(store, (path, body) async {
+      final command = Map<String, dynamic>.from(body as Map);
+      commands.add(command);
+      return {
+        'schemaVersion': 1,
+        'commandId': command['commandId'],
+        'status': 'applied',
+        'unread': {
+          'schemaVersion': 1,
+          'botId': 'alpha',
+          'count': command['type'] == 'bot/mark-read' ? 0 : 1,
+          'capped': false,
+          'unread': command['type'] != 'bot/mark-read',
+          'manuallyUnread': command['type'] == 'bot/mark-unread',
+          'lastActivityCursor': 'message-00000000000000000002',
+          'lastActivityAt': '2026-09-05T10:00:00.000Z',
+        },
+      };
+    });
+    final controller = ActivityController(api, store, 'tim');
+    controller.unread['alpha'] = wire.UnreadView.fromJson({
+      'schemaVersion': 1,
+      'botId': 'alpha',
+      'count': 2,
+      'capped': false,
+      'unread': true,
+      'manuallyUnread': false,
+      'lastActivityCursor': 'message-00000000000000000002',
+      'lastActivityAt': '2026-09-05T10:00:00.000Z',
+    });
+
+    await controller.mark('alpha', read: true);
+    await controller.mark('alpha', read: false, fromMessageId: 'run-1:send:0');
+
+    expect(commands[0]['upToCursor'], 'message-00000000000000000002');
+    expect(commands[0].containsKey('fromMessageId'), isFalse);
+    expect(commands[1]['fromMessageId'], 'run-1:send:0');
+    expect(commands[1].containsKey('upToCursor'), isFalse);
+    controller.dispose();
+    api.close();
+  });
+
   test(
     'a lost read receipt retries the persisted command after client restart',
     () async {
