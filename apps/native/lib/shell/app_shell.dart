@@ -913,6 +913,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                     ? () => setState(() => navOpen = !navOpen)
                     : null,
                 onSettings: () => _openPanel('bot-settings'),
+                computerRunning: computer?.available == true &&
+                    computer!.state.running,
                 onComputer: computer?.available == true
                     ? () => _openPanel('computer')
                     : null,

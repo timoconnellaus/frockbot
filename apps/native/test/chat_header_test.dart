@@ -1,12 +1,45 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/shell/chat_header.dart';
+import 'package:frockbot_native/shell/chat_icons.dart';
 import 'package:frockbot_native/shell/semantics.dart';
 import 'package:frockbot_native/theme/frock_theme.dart';
 
 import 'shell_layout_test.dart' show byIdentifier;
 
 void main() {
+  testWidgets('computer turns blue when running and resets when stopped', (
+    tester,
+  ) async {
+    for (final running in [false, true, false]) {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: FrockTheme.theme(Brightness.dark),
+          home: Scaffold(
+            appBar: ChatHeader(
+              name: 'Bot',
+              computerRunning: running,
+              onComputer: () {},
+              onSettings: () {},
+              onRoutines: () {},
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final icon = find.descendant(
+        of: find.byTooltip('Computer'),
+        matching: find.byType(ChatIcon),
+      );
+      final color = IconTheme.of(tester.element(icon)).color;
+      if (running) {
+        expect(color, Colors.blue);
+      } else {
+        expect(color, isNot(Colors.blue));
+      }
+    }
+  });
+
   testWidgets(
     'empty directory takes no row; directory failure stays repairable',
     (tester) async {

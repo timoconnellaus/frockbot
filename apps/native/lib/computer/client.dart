@@ -59,6 +59,7 @@ class ComputerProgress {
   final int total;
   final String? provisioningLabel;
   final bool resumed;
+  final String? provisioningKind;
   final List<ComputerStep> steps;
   const ComputerProgress({
     required this.kind,
@@ -66,6 +67,7 @@ class ComputerProgress {
     required this.total,
     required this.steps,
     this.provisioningLabel,
+    this.provisioningKind,
     this.resumed = false,
   });
 
@@ -111,6 +113,9 @@ class ComputerProjection {
     this.screenshots = const [],
   });
 
+  bool get running =>
+      const {'ready', 'taking-control', 'human-control'}.contains(phase);
+
   static const unknown = ComputerProjection(
     phase: 'unconfigured',
     message: 'No computer',
@@ -138,6 +143,8 @@ class ComputerProjection {
               index: (progress['index']! as num).toInt(),
               total: (progress['total']! as num).toInt(),
               resumed: (progress['provisioning'] as Map?)?['resumed'] == true,
+              provisioningKind:
+                  (progress['provisioning'] as Map?)?['kind'] as String?,
               provisioningLabel:
                   (progress['provisioning'] as Map?)?['label'] as String?,
               steps: [
@@ -165,8 +172,14 @@ class ComputerProjection {
 /// What the opening card and overlay call this run.
 String computerOpeningHeadingV1(ComputerProjection state) {
   final progress = state.progress;
-  if (progress == null) return 'Preparing computer…';
-  if (progress.kind == 'update') return 'Updating your computer';
+  if (state.phase == 'updating' ||
+      progress?.kind == 'update' ||
+      progress?.provisioningKind == 'update') {
+    return 'Updating your computer';
+  }
+  if (progress == null || progress.provisioningKind != 'provision') {
+    return 'Preparing computer…';
+  }
   if (progress.resumed) return 'Resuming computer setup';
   return 'Setting up your computer for the first time';
 }
@@ -175,7 +188,11 @@ String computerOpeningHeadingV1(ComputerProjection state) {
 /// card makes a promise about.
 bool computerColdProvisionV1(ComputerProjection state) {
   final progress = state.progress;
-  return progress != null && progress.kind == 'connect' && !progress.resumed;
+  return state.phase != 'updating' &&
+      progress != null &&
+      progress.kind == 'connect' &&
+      progress.provisioningKind == 'provision' &&
+      !progress.resumed;
 }
 
 /// How long the card keeps streaming after the Bot's Turn settles.

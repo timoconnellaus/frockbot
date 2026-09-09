@@ -60,7 +60,7 @@ void main() {
       );
     });
 
-    test('a provisioning run names itself, and only a cold one promises', () {
+    test('waking an existing computer does not claim first-time setup', () {
       final cold = ComputerProjection.fromJson(
         projection(
           phase: 'provisioning',
@@ -84,14 +84,51 @@ void main() {
           },
         ),
       );
-      expect(
-        computerOpeningHeadingV1(cold),
-        'Setting up your computer for the first time',
-      );
-      expect(computerColdProvisionV1(cold), isTrue);
+      expect(computerOpeningHeadingV1(cold), 'Preparing computer…');
+      expect(computerColdProvisionV1(cold), isFalse);
       expect(cold.progress!.fraction, 0.25);
       expect(cold.progress!.activeLabel, 'Booting');
     });
+  });
+
+  test('setup copy follows the provider operation', () {
+    for (final kind in ['provision', 'update']) {
+      for (final resumed in [false, true]) {
+        final state = ComputerProjection.fromJson(
+          projection(
+            phase: 'provisioning',
+            progress: {
+              'kind': 'connect',
+              'index': 1,
+              'total': 4,
+              'steps': <Object?>[],
+              'provisioning': {'kind': kind, 'resumed': resumed},
+            },
+          ),
+        );
+        expect(
+          computerOpeningHeadingV1(state),
+          kind == 'update'
+              ? 'Updating your computer'
+              : resumed
+              ? 'Resuming computer setup'
+              : 'Setting up your computer for the first time',
+        );
+        expect(computerColdProvisionV1(state), kind == 'provision' && !resumed);
+      }
+    }
+  });
+
+  test('running status does not depend on opening a viewer', () {
+    for (final phase in computerPhasesV1) {
+      final state = ComputerProjection.fromJson(
+        projection(phase: phase, viewer: false),
+      );
+      expect(
+        state.running,
+        ['ready', 'taking-control', 'human-control'].contains(phase),
+      );
+    }
   });
 
   group('live while working', () {
@@ -345,11 +382,8 @@ void main() {
         ),
       );
       await tester.pump();
-      expect(
-        find.text('Setting up your computer for the first time'),
-        findsOneWidget,
-      );
-      expect(find.text(computerColdProvisionExpectationV1), findsOneWidget);
+      expect(find.text('Preparing computer…'), findsOneWidget);
+      expect(find.text(computerColdProvisionExpectationV1), findsNothing);
       expect(find.text('Booting'), findsOneWidget);
       await close(tester, controller);
     });
