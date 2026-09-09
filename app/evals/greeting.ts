@@ -3,6 +3,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { createAgentLoop } from "@frockbot/core/agent-loop";
 import type { SessionEvent } from "@frockbot/core/contracts";
 import { createAgentRuntimeHarness } from "@frockbot/app/testkit";
+import { AGENT_LOOP_MAX_STEPS_V1 } from "@frockbot/app/agent-runtime";
 import { foundationBaseRuntimePackagesV1 } from "@frockbot/app/runtime";
 import { OpenAICompatibleProvider } from "@frockbot/providers/openai-compatible";
 
@@ -61,12 +62,17 @@ if (import.meta.main) {
     const root = createAgentRuntimeHarness();
     for (const pkg of foundationBaseRuntimePackagesV1())
       await root.mount(pkg.feature);
+    let modelCalls = 0;
     root.llm.register({
       id: "greeting-eval",
-      stream: (request, signal) => transport.stream(request, signal),
+      stream: (request, signal) => {
+        if (++modelCalls > 3)
+          throw new Error("Greeting exceeded three model calls");
+        return transport.stream(request, signal);
+      },
     });
     const loop = createAgentLoop(root, {
-      maxSteps: 3,
+      maxSteps: AGENT_LOOP_MAX_STEPS_V1,
       composition: {
         generationId: "1970-01-01T00:00:00.000Z:0123456789abcdef",
         artifactSetHash: "a".repeat(64),

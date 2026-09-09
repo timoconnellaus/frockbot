@@ -37,7 +37,7 @@ import {
  */
 // Long tool-driven Turns remain bounded, while a sixty-step workflow can
 // complete instead of being interrupted at the former fifty-step ceiling.
-const AGENT_LOOP_MAX_STEPS_V1 = 64;
+export const AGENT_LOOP_MAX_STEPS_V1 = 64;
 
 export { FOUNDATION_MODEL, FOUNDATION_PROVIDER };
 

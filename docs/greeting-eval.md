@@ -13,6 +13,9 @@ The eval mounts the production base runtime packages, including identity and
 the Shell's conversation prompt, and uses the real agent loop and shared
 OpenAI-compatible transport used by Ollama. It represents a fresh base Bot,
 without account-specific instructions, skills, or connected tools.
+It shares the production step budget, so normal greetings do not receive an
+artificial end-of-budget instruction. The eval independently caps paid model
+calls at three per trial without changing the prompt.
 
 Each run sends `Hi`. Passing requires one model call, exactly one tool call
 (`send_to_user` with `disposition: finish`), one nonempty text greeting no longer
