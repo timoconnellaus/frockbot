@@ -22,7 +22,7 @@ Use `scripts/native-acceptance.sh inventory` to record the installed version and
 
 `scripts/native-update.py` ships the phone app. A **release** is a full Shorebird APK build; a **patch** is a signed Dart code push against that release. Native code, assets, native plugin dependencies, the engine, the Shorebird `app_id` or the patch key all need a release. Pure-Dart dependency changes may be patched if Shorebird accepts the resulting diff. Shorebird detects native and asset differences and the script never passes `--allow-native-diffs` or `--allow-asset-diffs`.
 
-The Shorebird CLI (1.6.120, logged in to Tim's account) comes from `NATIVE_SHOREBIRD` or `PATH`. The script fails rather than falling back to stock Flutter: a stock build carries no patch key and can never be patched. Shorebird builds with its own Flutter `3.47.0`; the stock development pin above is unchanged. The Android SDK needs command-line tools with `apkanalyzer` even for an APK artifact. Gradle takes the version floor from `FROCKBOT_ANDROID_VERSION_FLOOR`, which the script sets for every build.
+The Shorebird CLI (1.6.120, logged in to Tim's account) comes from `NATIVE_SHOREBIRD` or `PATH`. The script fails rather than falling back to stock Flutter: a stock build carries no patch key and can never be patched. Shorebird builds with its own Flutter `3.47.0`; the stock development pin above is unchanged. The Android SDK needs command-line tools with `apkanalyzer` even for an APK artifact, plus build-tools: the script inspects the built APK with the newest `aapt`/`apksigner` under `ANDROID_HOME`, and names the missing tool rather than guessing when there are none. Gradle takes the version floor from `FROCKBOT_ANDROID_VERSION_FLOOR`, which the script sets for every build.
 
 Keys: `apps/native/shorebird-public-key.pem` is baked into every release. The matching RSA private key lives at ignored `.native-build/updates/shorebird-private.pem` or wherever `NATIVE_SHOREBIRD_PRIVATE_KEY` points; it is never committed. The APK signer is the existing debug keystore the installed app already trusts. Before uploading a patch the script confirms with `openssl` that the two keys are a pair.
 
@@ -57,9 +57,21 @@ shorebird preview --device-id emulator-5554 --platform android --app-id fab29f02
 shorebird patches promote --release-version 1.1.0+<code> --patch-number <n>                                       # to stable after it works
 ```
 
-The emulator has shown a signed staging patch download and restart, an offline boot and a remote rollback; a patch signed with the wrong private key is rejected by the CLI before upload. After promotion, launch the installed app on the phone twice and confirm the change is live. The APK download route stays the fallback for a phone that cannot pick up a patch.
+The emulator has shown a signed staging patch download and restart, an offline boot and a remote rollback; a patch signed with the wrong private key is rejected by the CLI before upload. The evidence and what stays unqualified are in the [qualification ledger](../../docs/research/shorebird-qualification-2026-09-09.md). After promotion, launch the installed app on the phone twice and confirm the change is live. The APK download route stays the fallback for a phone that cannot pick up a patch.
 
 The application retains `com.frockbot.mobile`. Compile SDK 37 is required by secure storage 11; minSdk 24 and targetSdk 36 remain unchanged. Its API-28+ WebView directory is separate from Capacitor's retained directory, and cookies are disabled before the first WebView. API 24–27 isolation remains unqualified. The acceptance build checks only a random continuity sentinel; same-User/Bot re-auth is a separate device check.
+
+## APK download service
+
+The same script serves the published APK over Tailscale on port 8443, reading `latest.json` from the state directory:
+
+```sh
+python3 scripts/native-update.py setup   # one-off: launchd agent plus `tailscale serve` on 8443
+bun run native:serve                     # run the server in the foreground
+python3 scripts/native-update.py publish --apk <path>   # publish an already-built APK
+```
+
+`setup` refuses to take over port 8443 from another service, refuses a public Funnel, and refuses a launchd agent pointing at another checkout. The routes are `/frockbot.apk`, `/latest.json` and `/health`; the first two answer 503 until a published APK is actually present on disk. Publishing rejects any APK that is not the normal package with the existing signer, or whose versionCode does not advance the download track.
 
 ## macOS
 
