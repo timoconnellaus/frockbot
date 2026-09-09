@@ -1,4 +1,5 @@
 import base64
+import hashlib
 import importlib.util
 import json
 import os
@@ -28,6 +29,11 @@ class UpdatesTest(unittest.TestCase):
     def tearDown(self):
         self.state.stop()
         self.directory.cleanup()
+
+    def test_lock_contention_has_an_actionable_error(self):
+        with patch.object(updates.fcntl, "flock", side_effect=BlockingIOError):
+            with self.assertRaisesRegex(RuntimeError, "already running"):
+                updates.main(["build"])
 
     def test_rejected_release_keeps_previous_download(self):
         previous = {"versionCode": 50, "file": "old.apk"}
@@ -278,6 +284,109 @@ class ReleaseTest(ShorebirdHarness):
         self.assertEqual(updates.latest()["versionCode"], NOW)
         self.assertFalse((self.state / "pending-release.json").exists())
 
+    def test_release_intent_records_recovery_identity_before_upload(self):
+        original = self.fake_command
+        captured = {}
+        def capture_intent(args, **kwargs):
+            captured.update(json.loads((self.state / "pending-release.json").read_text()))
+            return original(args, **kwargs)
+        with patch.object(updates.subprocess, "run", capture_intent):
+            updates.release()
+        self.assertEqual(captured["package"], "com.frockbot.mobile")
+        self.assertEqual(captured["appId"], APP_ID)
+        self.assertEqual(captured["buildName"], "1.1.0")
+        self.assertEqual(captured["buildNumber"], NOW)
+        self.assertEqual(captured["releaseVersion"], f"1.1.0+{NOW}")
+        self.assertEqual(captured["versionFloor"], 0)
+        self.assertEqual(captured["shorebirdCli"], "1.6.120")
+        self.assertEqual(captured["signerSha256"], SIGNER)
+        self.assertEqual(captured["publicKeySha256"], hashlib.sha256(PUBLIC_DER).hexdigest())
+        self.assertEqual(captured["gitHead"], self.head)
+
+    def test_retry_finalizes_published_release_after_baseline_write_failure(self):
+        original = updates.write_atomic
+        fail_once = True
+        def fail_baseline(path, text):
+            nonlocal fail_once
+            if fail_once and Path(path).name == "baseline.json":
+                fail_once = False
+                raise OSError("baseline unavailable")
+            return original(path, text)
+        with patch.object(updates, "write_atomic", fail_baseline):
+            with self.assertRaisesRegex(OSError, "baseline unavailable"):
+                updates.release()
+            self.assertEqual(len(self.shorebird()), 1)
+            self.assertEqual(updates.latest()["versionCode"], NOW)
+            self.assertTrue((self.state / "pending-release.json").exists())
+            self.assertFalse((self.state / "baseline.json").exists())
+            record = updates.release()
+        self.assertEqual(len(self.shorebird()), 1)
+        self.assertEqual(record, self.baseline())
+        self.assertEqual(record["buildNumber"], NOW)
+        self.assertEqual(record["apkSha256"], updates.latest()["sha256"])
+        self.assertFalse((self.state / "pending-release.json").exists())
+
+    def test_retry_rejects_mismatched_published_release_identity(self):
+        original = updates.write_atomic
+        fail_once = True
+        def fail_baseline(path, text):
+            nonlocal fail_once
+            if fail_once and Path(path).name == "baseline.json":
+                fail_once = False
+                raise OSError("baseline unavailable")
+            return original(path, text)
+        with patch.object(updates, "write_atomic", fail_baseline):
+            with self.assertRaisesRegex(OSError, "baseline unavailable"):
+                updates.release()
+        published = updates.latest()
+        published["signerSha256"] = "0" * 64
+        (self.state / "latest.json").write_text(json.dumps(published))
+        with self.assertRaisesRegex(RuntimeError, "Published release identity.*signerSha256"):
+            updates.release()
+        self.assertEqual(len(self.shorebird()), 1)
+        self.assertTrue((self.state / "pending-release.json").exists())
+        self.assertFalse((self.state / "baseline.json").exists())
+
+    def test_retry_rejects_published_apk_with_a_different_actual_version(self):
+        original = updates.write_atomic
+        fail_once = True
+        def fail_baseline(path, text):
+            nonlocal fail_once
+            if fail_once and Path(path).name == "baseline.json":
+                fail_once = False
+                raise OSError("baseline unavailable")
+            return original(path, text)
+        with patch.object(updates, "write_atomic", fail_baseline):
+            with self.assertRaisesRegex(OSError, "baseline unavailable"):
+                updates.release()
+        self.built += 1
+        with self.assertRaisesRegex(RuntimeError, "Published APK version differs"):
+            updates.release()
+        self.assertEqual(len(self.shorebird()), 1)
+        self.assertTrue((self.state / "pending-release.json").exists())
+        self.assertFalse((self.state / "baseline.json").exists())
+
+    def test_retry_accepts_the_same_public_key_from_another_checkout_path(self):
+        original = updates.write_atomic
+        fail_once = True
+        def fail_baseline(path, text):
+            nonlocal fail_once
+            if fail_once and Path(path).name == "baseline.json":
+                fail_once = False
+                raise OSError("baseline unavailable")
+            return original(path, text)
+        with patch.object(updates, "write_atomic", fail_baseline):
+            with self.assertRaisesRegex(OSError, "baseline unavailable"):
+                updates.release()
+        relocated = self.state / "another-checkout/shorebird-public-key.pem"
+        relocated.parent.mkdir()
+        relocated.write_text(self.public.read_text())
+        with patch.object(updates, "PUBLIC_KEY", relocated):
+            record = updates.release()
+        self.assertEqual(len(self.shorebird()), 1)
+        self.assertEqual(record, self.baseline())
+        self.assertFalse((self.state / "pending-release.json").exists())
+
     def test_pending_release_rejects_a_different_explicit_version(self):
         self.failure = True
         with self.assertRaises(subprocess.CalledProcessError):
@@ -359,6 +468,15 @@ class PatchTest(ShorebirdHarness):
         self.assertEqual(self.baseline()["patches"], [record])
         self.assertEqual(self.baseline()["buildNumber"], NOW)
         self.assertEqual(updates.latest()["versionCode"], NOW + 9)
+
+    def test_patch_refuses_an_unresolved_release_before_calling_shorebird(self):
+        (self.state / "pending-release.json").write_text(json.dumps({"releaseVersion": f"1.1.0+{NOW}"}))
+        self.commands.clear()
+        with self.assertRaisesRegex(RuntimeError, "Finish or reconcile it before uploading a patch"):
+            updates.patch()
+        self.assertEqual(self.commands, [])
+        self.assertTrue((self.state / "pending-release.json").exists())
+        self.assertEqual(self.baseline()["patches"], [])
 
     def test_patch_never_overrides_native_or_asset_diffs(self):
         updates.patch()
