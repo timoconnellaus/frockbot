@@ -199,12 +199,29 @@ void main() {
     });
   });
 
+  test('account-wide activity opens the Bot named by the entry', () async {
+    final opened = <String>[];
+    final controller = AuditController(
+      SettingsApi(MemoryStore(), (_, _) async => null),
+      openRun: (runId, botId) async => opened.add('$botId/$runId'),
+    );
+    await controller.dispatch({
+      'commandId': 'open-1',
+      'input': {'kind': 'open-run', 'botId': 'bot-2', 'runId': 'run-2'},
+    });
+    expect(opened, ['bot-2/run-2']);
+    controller.dispose();
+  });
+
   testWidgets('a filter re-reads, and a page reads from its own cursor', (
     tester,
   ) async {
     final store = MemoryStore();
     final read = <String>[];
     final api = SettingsApi(store, (path, body) async {
+      if (path == "/api/bots") {
+        return {"schemaVersion": 1, "revision": 0, "bots": []};
+      }
       read.add(path);
       return auditDocument(
         revision: read.length,

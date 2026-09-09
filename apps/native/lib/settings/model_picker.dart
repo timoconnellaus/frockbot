@@ -92,6 +92,7 @@ class _ModelPickerState extends State<ModelPicker> {
                     TextField(
                       decoration: const InputDecoration(
                         labelText: 'Search models',
+                        counterText: '',
                         prefixIcon: Icon(Icons.search_rounded),
                       ),
                       maxLength: 100,
@@ -134,7 +135,15 @@ class _ModelPickerState extends State<ModelPicker> {
                             return identified(
                               SettingsIds.modelOption(choice.label),
                               ListTile(
-                                title: Text(choice.label),
+                                title: Text(choice.label.split(' · ').first),
+                                subtitle: Text(
+                                  choice.value.value == null
+                                      ? 'FrockBot chooses the model. No setup needed.'
+                                      : choice.label
+                                            .split(' · ')
+                                            .skip(1)
+                                            .join(' · '),
+                                ),
                                 selected: selected,
                                 leading: Icon(
                                   choice.value.value == null
@@ -150,7 +159,10 @@ class _ModelPickerState extends State<ModelPicker> {
                           },
                         ),
                 ),
-                if (!busy && !failed && page != null)
+                if (!busy &&
+                    !failed &&
+                    page != null &&
+                    (previous.isNotEmpty || page!.nextCursor != null))
                   Padding(
                     padding: const EdgeInsets.all(16),
                     // Two controls that stack rather than overflow: a phone at

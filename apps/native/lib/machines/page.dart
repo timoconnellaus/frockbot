@@ -159,7 +159,7 @@ class _MachinesPageState extends State<MachinesPage> {
 
   @override
   Widget build(BuildContext context) => ViewSurfacePage(
-    title: 'Registered machines',
+    title: 'Your computers',
     store: widget.store,
     userId: widget.userId,
     documentId: MachineIds.document,

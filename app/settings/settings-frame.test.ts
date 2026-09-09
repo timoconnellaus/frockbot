@@ -128,7 +128,7 @@ test("disabled, revoked and wrong-version providers disappear while saved choice
   ]);
   expect(platform.sections).toHaveLength(1);
   expect(platform.sections[0]!.fields[0]!.choices![0]!.label).toBe(
-    "Example AI · Auto",
+    "Automatic — recommended",
   );
 });
 

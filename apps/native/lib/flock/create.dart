@@ -22,6 +22,7 @@ import 'package:flutter/material.dart';
 import '../client/transport.dart';
 import '../protocol/client_wire.generated.dart' as wire;
 import '../shell/semantics.dart';
+import '../templates/page.dart';
 
 import 'sheep.dart';
 
@@ -246,6 +247,21 @@ class _CreateBotSheetState extends State<CreateBotSheet> {
                         ),
                       ],
                     ),
+                  ),
+                  TextButton.icon(
+                    icon: const Icon(Icons.inventory_2_outlined),
+                    label: const Text('Use a template instead'),
+                    onPressed: state.busy
+                        ? null
+                        : () => Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                              builder: (_) => TemplatesPage(
+                                api: state.api,
+                                store: state.store,
+                                userId: state.userId,
+                              ),
+                            ),
+                          ),
                   ),
                   const SizedBox(height: 16),
                   Center(

@@ -159,6 +159,7 @@ class ViewFieldNode extends StatelessWidget {
       labelText: field.label,
       helperText: field.hint,
       helperMaxLines: 4,
+      counterText: '',
     );
     if (field.kind == 'boolean') {
       return SwitchListTile(

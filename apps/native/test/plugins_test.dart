@@ -125,6 +125,31 @@ void main() {
     });
   });
 
+  test('search filters visible purposes while preserving authoritative action targets', () async {
+    final controller = PluginsController(
+      SettingsApi(MemoryStore(), (_, _) async => pluginsDocument()),
+      'tim',
+    );
+    await controller.load();
+    controller.search('no such plugin');
+    var root = (controller.document!.toJson() as Map)['root'] as Map;
+    expect(
+      (root['children'] as List).where(
+        (node) => (node as Map)['type'] == 'group',
+      ),
+      isEmpty,
+    );
+    controller.search('models');
+    root = (controller.document!.toJson() as Map)['root'] as Map;
+    expect(
+      (root['children'] as List).where(
+        (node) => (node as Map)['type'] == 'group',
+      ),
+      hasLength(1),
+    );
+    controller.dispose();
+  });
+
   testWidgets('turning a plugin off sends one command and reads back', (
     tester,
   ) async {

@@ -138,7 +138,7 @@ export function machinesDocumentV1(view: MachineListViewV1): ViewDocument {
       children: [
         {
           type: "text",
-          text: "A registered machine is a computer running the FrockBot desktop app. A Bot can read its files and run commands on it only while that app is open, and only after you approve each action.",
+          text: "Your computers are devices running the FrockBot desktop app. Each is separate from your Bot’s hosted Computer. A Bot can read its files and run commands on it only while that app is open, and only after you approve each action.",
         },
         // The count is the summary that sits under the title.
         // With nothing registered there is nothing to summarise, and the list
@@ -149,8 +149,8 @@ export function machinesDocumentV1(view: MachineListViewV1): ViewDocument {
         {
           type: "group",
           orientation: "column",
-          title: "Register a machine",
-          collapsed: true,
+          title: "Connect a computer",
+          collapsed: view.machines.length > 0,
           children: [
             {
               type: "field",
@@ -177,7 +177,7 @@ export function machinesDocumentV1(view: MachineListViewV1): ViewDocument {
           ],
         },
         ...(view.machines.length === 0
-          ? [status("No machines are registered yet.")]
+          ? [status("No computers are connected yet.")]
           : view.machines.map((machine) =>
               machineNode(machine, view.serverTime),
             )),

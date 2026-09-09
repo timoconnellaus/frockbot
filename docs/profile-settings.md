@@ -1,0 +1,35 @@
+# Profile and account settings
+
+Profile groups personal details, Bot abilities, and activity/sharing. Site
+administration is visible only to administrators; Refresh is a page action,
+not an account destination. Personal details reads the same resolved name as
+the Profile header. The optional contact email does not change sign-in.
+
+Models owns the account default and provider accounts. Automatic is the
+recommended zero-setup choice. Connecting or managing a provider opens its
+account page inside the app. API keys remain write-only. Custom server
+addresses and provider-specific settings are collapsed under Advanced.
+Image generation is a separate Models destination with readable model names.
+Connected apps excludes model providers and links to Messages on your Mac.
+
+Plugins lists extensions, with visible purpose and status, search, and
+collapsed version/configuration/enablement controls. The current deployment
+catalog contains built-in definitions, so the extension list is empty. It
+says so rather than presenting deployment infrastructure as installable
+plugins. This page does not introduce an extension marketplace or remove
+Bot-authored composition controls. Optional built-in features remain in Bot
+capabilities, including per-Bot model overrides, search, web, routines, image
+generation, Mac Messages, and helper agents. Core identity, history, memory,
+computer infrastructure and site administration are not plugin switches.
+
+Activity & history starts with all Bots from Profile. A visible Bot filter
+and plain activity-type labels narrow it. Each activity link carries its Bot
+and run, so it works without a previously selected conversation. Unknown
+outcomes remain explicit. Rebuilding retained history is an advanced action;
+it never re-executes the recorded effects.
+
+Templates starts at Use a template when no Bot is selected. Sharing offers a
+Bot chooser. Add Bot also offers the template route. Import keeps its preview
+and explicit apply step. Your computers distinguishes paired personal devices
+from the hosted Computer and preserves per-action approval. Site
+administration labels the actual setting as Allow new signups.

@@ -25,6 +25,14 @@ import {
 import type { PackageSettingDefinition } from "@frockbot/core/contracts";
 import type { AvailableUserPackage } from "./user.js";
 
+const IMAGE_MODEL_LABELS: Record<string, string> = {
+  "@cf/black-forest-labs/flux-1-schnell": "FLUX.1 Schnell",
+  "@cf/black-forest-labs/flux-2-klein-4b": "FLUX.2 Klein",
+  "@cf/stabilityai/stable-diffusion-xl-base-1.0": "Stable Diffusion XL",
+  "@cf/bytedance/stable-diffusion-xl-lightning":
+    "Stable Diffusion XL Lightning",
+};
+
 function field(
   definition: PackageSettingDefinition,
   value: unknown,
@@ -62,7 +70,7 @@ function field(
     ...(schema.enum
       ? {
           choices: schema.enum.map((value) => ({
-            label: String(value),
+            label: IMAGE_MODEL_LABELS[String(value)] ?? String(value),
             value,
           })),
         }
@@ -101,7 +109,7 @@ export function applicationSettingsFrame(
           kind: "text",
           value: settings.profile.email ?? identity?.email ?? "",
           editable: true,
-          hint: "Optional",
+          hint: "Optional contact email. This does not change your sign-in account.",
           maxLength: 320,
         },
       ],
@@ -213,14 +221,7 @@ function* modelChoices(
   settings: UserSettingsViewV1,
   catalog: readonly AvailableUserPackage[],
 ): Generator<SettingChoice> {
-  const platform = settings.connections.find(
-    (connection) =>
-      connection.connectionId === settings.platformModel?.connectionId,
-  );
-  const label =
-    catalog.find((pkg) => pkg.packageId === platform?.packageId)?.displayName ??
-    "Platform";
-  yield { label: `${label} · Auto`.slice(0, 200), value: null };
+  yield { label: "Automatic — recommended", value: null };
   const packages = catalog.map((pkg) => ({
     ...pkg,
     settings: [...(pkg.settings ?? [])],
@@ -325,7 +326,7 @@ export function modelsSettingsFrame(
           editable: true,
           choices,
           choiceSource: "account-models",
-          hint: "Used by all your Bots. Auto follows the platform model.",
+          hint: "Default for Bots without their own model choice. Automatic lets FrockBot choose; no setup needed.",
         },
       ],
     },
@@ -388,8 +389,8 @@ export function modelsSettingsFrame(
                     : "choose-provider",
                 label:
                   installed?.state === "installed"
-                    ? "Manage account"
-                    : "Choose provider",
+                    ? "Manage provider"
+                    : "Connect provider",
               },
             ],
           }),

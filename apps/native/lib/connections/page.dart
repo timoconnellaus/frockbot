@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../client/transport.dart';
 import '../shell/semantics.dart';
+import '../settings/page.dart';
 import '../view/surface.dart';
 import 'controller.dart';
 
@@ -18,6 +19,8 @@ class ConnectionsPage extends StatelessWidget {
   final NativeApi api;
   final LocalStore store;
   final String userId;
+  final bool models;
+  final String? packageId;
   final Future<bool> Function(Uri)? openBrowser;
 
   const ConnectionsPage({
@@ -26,15 +29,44 @@ class ConnectionsPage extends StatelessWidget {
     required this.store,
     required this.userId,
     this.openBrowser,
+    this.models = false,
+    this.packageId,
   });
 
   @override
   Widget build(BuildContext context) => ViewSurfacePage(
-    title: 'Connectors',
+    title: models ? 'Provider accounts' : 'Connected apps',
+    banner: models
+        ? null
+        : (context) => ListTile(
+            leading: const Icon(Icons.message_outlined),
+            title: const Text('Messages on your Mac'),
+            subtitle: const Text(
+              'Allow access to Messages through a connected Mac',
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => SettingsPage(
+                  api: api,
+                  store: store,
+                  userId: userId,
+                  section: 'package.machine-messages',
+                  title: 'Messages on your Mac',
+                ),
+              ),
+            ),
+          ),
     store: store,
     userId: userId,
     documentId: ConnectorIds.document,
     refreshId: ConnectorIds.refresh,
-    controller: ConnectionsController(api, userId, openBrowser: openBrowser),
+    controller: ConnectionsController(
+      api,
+      userId,
+      openBrowser: openBrowser,
+      models: models,
+      packageId: packageId,
+    ),
   );
 }

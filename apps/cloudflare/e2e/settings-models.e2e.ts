@@ -1,6 +1,7 @@
 import type { Locator, Page } from "@playwright/test";
 import {
   chooseDefaultModel,
+  chooseOllamaProvider,
   closeOverlay,
   connectOllama,
   E2E_CONNECTION_LABEL,
@@ -105,25 +106,10 @@ async function openModels(page: Page): Promise<void> {
  * is scoped to its group rather than named, because its id carries the
  * section's index in the document and a spec has no business knowing that.
  */
-async function chooseOllamaProvider(page: Page): Promise<void> {
-  await openModels(page);
-  const section = group(page, "Ollama Cloud");
-  await expect(section).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
-  await section
-    .locator(
-      '[flt-semantics-identifier^="view-action-section-"] [flt-tappable]',
-    )
-    .first()
-    .click();
-  await expect(section.getByText("Manage account")).toBeVisible({
-    timeout: 60_000,
-  });
-  await closeOverlay(page);
-}
 
 /** Account Settings, which is the only surface carrying the Models link. */
 async function openSettings(page: Page): Promise<void> {
-  await openProfileSurface(page, "profile-settings", "settings-models");
+  await openProfileSurface(page, "profile-settings", "settings-document");
 }
 
 test("Models chooses the account default with the Bot override Package disabled", async ({

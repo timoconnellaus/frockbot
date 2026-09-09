@@ -356,7 +356,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.textContaining('synthetic backend'), findsNothing);
-    expect(find.text('Connectors couldn’t load'), findsOneWidget);
+    expect(find.text('Connected apps couldn’t load'), findsOneWidget);
     offline = false;
     await tester.tap(find.text('Try again'));
     await tester.pumpAndSettle();

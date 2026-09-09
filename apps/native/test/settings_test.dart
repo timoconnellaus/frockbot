@@ -237,7 +237,8 @@ void main() {
         );
         await tester.pumpAndSettle();
         expect(find.text('Your profile'), findsOneWidget);
-        expect(find.text('Models'), findsOneWidget);
+        expect(find.text('Personal details'), findsOneWidget);
+        expect(find.text('Models'), findsNothing);
         await tester.enterText(find.byType(TextFormField).first, 'Timothy');
         await tester.tap(find.text('Save profile'));
         await tester.pumpAndSettle();
@@ -296,7 +297,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Frock AI · Auto'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Llama 3 · Work'));
+    await tester.tap(find.text('Llama 3'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Save profile'));
     await tester.pumpAndSettle();
@@ -353,7 +354,7 @@ void main() {
       calls[0].complete(page('Stale model', 'old'));
       await tester.pumpAndSettle();
       expect(find.text('Stale model'), findsNothing);
-      await tester.tap(find.text('Frock AI · Auto'));
+      await tester.tap(find.text('Frock AI'));
       await tester.pumpAndSettle();
       expect(selected, isNotNull);
       expect(selected!.value.value, isNull);

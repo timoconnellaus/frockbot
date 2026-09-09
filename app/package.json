@@ -122,6 +122,7 @@
     "./settings/backend": "./settings/backend.ts",
     "./settings/bot": "./settings/bot.ts",
     "./settings/definition": "./settings/definition.ts",
+    "./settings/catalog-copy": "./settings/catalog-copy.ts",
     "./settings/connections-document": "./settings/connections-document.ts",
     "./settings/document": "./settings/settings-document.ts",
     "./settings/plugins-document": "./settings/plugins-document.ts",

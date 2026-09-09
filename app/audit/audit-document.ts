@@ -52,6 +52,13 @@ export interface AuditFrameV1 {
 }
 
 const NODE_LIMIT = 512;
+const KIND_LABELS: Record<AuditKindV1, string> = {
+  shell: "Commands",
+  browser: "Browser",
+  mcp: "Connected services",
+  file: "Files",
+  process: "Processes",
+};
 const IDENTIFIER: ActionValueSchema = { type: "string", maxLength: 128 };
 const KIND: ActionValueSchema = {
   type: "string",
@@ -68,7 +75,7 @@ const OUTCOMES: Record<AuditEntryV1["outcome"], string> = {
 
 /** Where the effect ran, in words rather than in the wire shape. */
 export function auditTargetLabelV1(target: string): string {
-  if (target === AUDIT_TARGET_COMPUTER_V1) return "This Computer";
+  if (target === AUDIT_TARGET_COMPUTER_V1) return "Hosted Computer";
   // Memory and Skills are files in the Workspace, not on the Computer.
   if (target === AUDIT_TARGET_WORKSPACE_V1) return "Workspace";
   if (target.startsWith(AUDIT_TARGET_MACHINE_PREFIX_V1)) {
@@ -152,8 +159,9 @@ function press(
   };
 }
 
-function entryNode(entry: AuditEntryV1): ViewNode {
+function entryNode(entry: AuditEntryV1, allBots: boolean): ViewNode {
   const facts = [
+    ...(allBots ? [`Bot: ${entry.botId}`] : []),
     OUTCOMES[entry.outcome],
     entry.toolName,
     auditTargetLabelV1(entry.target),
@@ -174,9 +182,10 @@ function entryNode(entry: AuditEntryV1): ViewNode {
             },
           ]
         : []),
-      press("open-run", "Open the Turn", {
+      press("open-run", "View activity details", {
         kind: "open-run",
         runId: entry.runId,
+        botId: entry.botId,
       }),
     ],
   };
@@ -192,7 +201,7 @@ export function auditDocumentV1(frame: AuditFrameV1): ViewDocument {
     ),
     {
       type: "text",
-      text: "Every shell command, browser action, remote tool call and file write this Bot has made. Command details aren’t stored.",
+      text: `${frame.botId ? "This Bot" : "All your Bots"} · Recorded computer actions, connected service calls and file changes. Command details aren’t stored.`,
     },
     // One action per kind rather than a `list`: a `list` row carries no input,
     // so a row could not say which kind it means, and the whole of a filter is
@@ -210,7 +219,7 @@ export function auditDocumentV1(frame: AuditFrameV1): ViewDocument {
         ...AUDIT_KINDS_V1.map((auditKind) =>
           press(
             "filter-kind",
-            auditKind,
+            KIND_LABELS[auditKind],
             { kind: "filter-kind", auditKind },
             frame.kind === auditKind ? "primary" : undefined,
           ),
@@ -240,7 +249,7 @@ export function auditDocumentV1(frame: AuditFrameV1): ViewDocument {
       break;
     }
     nodes += cost;
-    children.push(entryNode(entry));
+    children.push(entryNode(entry, !frame.botId));
   }
   if (frame.entries.length === 0) {
     children.push({
@@ -263,7 +272,18 @@ export function auditDocumentV1(frame: AuditFrameV1): ViewDocument {
       ),
     );
   }
-  children.push(press("rebuild", "Rebuild", { kind: "rebuild" }));
+  children.push({
+    type: "group",
+    orientation: "column",
+    title: "Advanced — repair history",
+    collapsed: true,
+    children: [
+      status(
+        "Rebuild the activity list from retained records if entries appear to be missing. This does not repeat any actions.",
+      ),
+      press("rebuild", "Rebuild history", { kind: "rebuild" }),
+    ],
+  });
 
   return decodeProtocol("ViewDocument", {
     schemaVersion: 1,
@@ -308,8 +328,8 @@ export function auditDocumentV1(frame: AuditFrameV1): ViewDocument {
         id: "open-run",
         schema: {
           type: "object",
-          properties: { kind: KIND, runId: IDENTIFIER },
-          required: ["kind", "runId"],
+          properties: { kind: KIND, runId: IDENTIFIER, botId: IDENTIFIER },
+          required: ["kind", "runId", "botId"],
           additionalProperties: false,
         },
       },

@@ -613,7 +613,7 @@ export async function openConnectors(page: Page): Promise<void> {
 
 /** Open account Settings. */
 export async function openSettings(page: Page): Promise<void> {
-  await openProfileSurface(page, "profile-settings", "settings-models");
+  await openProfileSurface(page, "profile-settings", "settings-document");
 }
 
 /**
@@ -756,34 +756,24 @@ export async function press(scope: Locator): Promise<void> {
  * from a stale position and the list oscillates past the row forever.
  */
 export async function enablePackage(page: Page, title: string): Promise<void> {
-  await openPlugins(page);
-  const row = group(page, title);
-  const button = action(row, "set-package-enabled");
-  const surface = await sem(page, "plugins-document").boundingBox();
-  if (!surface) throw new Error("the Plugins document has no box");
-  await page.mouse.move(
-    surface.x + surface.width / 2,
-    surface.y + surface.height / 2,
-  );
-  // Down the list, then back up. One pass is not enough on a loaded machine:
-  // the engine rebuilds the tree a frame or two behind the paint, and a wheel
-  // that lands in that gap walks past the row — which then sits above a loop
-  // that has run out of list to scroll. The second pass costs nothing when the
-  // first one finds it.
-  let found = false;
-  for (const direction of [1, -1]) {
-    for (let step = 0; step < 60 && !found; step += 1) {
-      if ((await button.count()) > 0) {
-        found = true;
-        break;
-      }
-      await page.mouse.wheel(0, 240 * direction);
-      await page.waitForTimeout(200);
-    }
+  if (title === "Ollama Cloud") {
+    await chooseOllamaProvider(page);
+    return;
   }
-  if (!found) throw new Error(`the ${title} row never came into view`);
-  await press(button);
-  await expect(row.getByText("Turn off")).toBeVisible({ timeout: 30_000 });
+  await openProfileSurface(page, "profile-capabilities", "plugins-document");
+  const search = page.getByRole("textbox").first();
+  await search.fill(title);
+  const row = page
+    .locator('[flt-semantics-identifier^="view-group-"]')
+    .filter({ hasText: title })
+    .first();
+  await press(row.getByText("Details & controls"));
+  const off = row.getByText("Turn off", { exact: true });
+  if (!(await off.count())) {
+    const add = action(row, "install-package");
+    await press((await add.count()) ? add : action(row, "set-package-enabled"));
+  }
+  await expect(row).toContainText("· On", { timeout: 30_000 });
   await closeOverlay(page);
 }
 
@@ -805,16 +795,17 @@ export async function chooseOllamaProvider(page: Page): Promise<void> {
   await openModels(page);
   const section = group(page, "Ollama Cloud");
   await expect(section).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
-  if ((await section.getByText("Manage account").count()) === 0) {
-    // The action id carries the section's index in the document, so it is
-    // matched by prefix inside the provider's own group rather than by a
-    // number that moves when another provider sorts above it.
+  if (!(await section.getByText("Manage provider").count())) {
     await press(
       section
         .locator('[flt-semantics-identifier^="view-action-section-"]')
         .first(),
     );
-    await expect(section.getByText("Manage account")).toBeVisible({
+    await expect(sem(page, "connections-document")).toBeVisible({
+      timeout: 60_000,
+    });
+    await page.goBack();
+    await expect(section.getByText("Manage provider")).toBeVisible({
       timeout: 60_000,
     });
   }
@@ -846,12 +837,22 @@ export async function connectOllama(
   page: Page,
   options: { apiKey: string; apiBaseUrl: string; label?: string },
 ): Promise<void> {
-  await openConnectors(page);
+  await openModels(page);
+  await press(
+    group(page, "Ollama Cloud")
+      .locator('[flt-semantics-identifier^="view-action-section-"]')
+      .first(),
+  );
+  await expect(sem(page, "connections-document")).toBeVisible({
+    timeout: 60_000,
+  });
   const provider = group(page, "Ollama Cloud");
   await expect(provider).toBeVisible({ timeout: 60_000 });
+  await press(provider.getByText("Connect account", { exact: true }));
+  await press(provider.getByText("Advanced — custom server", { exact: true }));
   await answerInputs([
     [
-      provider.locator('input[aria-label="Connection label"]'),
+      provider.locator('input[aria-label="Account name"]'),
       options.label ?? E2E_CONNECTION_LABEL,
     ],
     [provider.locator('input[aria-label="API base URL"]'), options.apiBaseUrl],

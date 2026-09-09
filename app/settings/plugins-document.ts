@@ -8,6 +8,8 @@
 // off and points at the surface that configures it. Nothing a Package declares
 // is edited here.
 
+import { CAPABILITY_DESCRIPTIONS } from "./catalog-copy.js";
+
 import {
   decodeProtocol,
   type ActionValueSchema,
@@ -35,9 +37,9 @@ const KIND: ActionValueSchema = {
 type Plugin = PluginsFrame["plugins"][number];
 
 const HOME_LABELS: Record<Plugin["home"], string | undefined> = {
-  models: "Connectors",
-  connections: "Connectors",
-  "user-settings": "Settings",
+  models: "Models",
+  connections: "Connected apps",
+  "user-settings": "Feature settings",
   none: undefined,
 };
 
@@ -71,6 +73,7 @@ function pluginNode(plugin: Plugin): ViewNode {
       press("open-home", `Set up in ${home}`, {
         kind: "open-home",
         home: plugin.home,
+        packageId: plugin.packageId,
       }),
     );
   }
@@ -95,29 +98,40 @@ function pluginNode(plugin: Plugin): ViewNode {
   return {
     type: "group",
     orientation: "column",
-    title: plugin.displayName,
+    title: `${plugin.displayName.slice(0, 150)} · ${plugin.packageId === "machine-messages" && plugin.state === "installed" ? "Available — needs Mac setup" : STATE_LABELS[plugin.state]}`,
     children: [
       // What it offers and whether it is on are one line, not two: a list of
       // twenty rows is read down the titles, and a row that spends four lines
       // saying two short things pushes the next title off the screen.
       {
         type: "text",
-        text: `${plugin.summary} · ${STATE_LABELS[plugin.state]}`.slice(
-          0,
-          4000,
-        ),
+        text: (
+          CAPABILITY_DESCRIPTIONS[plugin.packageId] ?? plugin.summary
+        ).slice(0, 4000),
         style: "status",
       },
       ...(plugin.failure
         ? [{ type: "text", text: plugin.failure } as ViewNode]
         : []),
-      { type: "group", orientation: "row", children: controls },
+      {
+        type: "group",
+        orientation: "column",
+        title: "Details & controls",
+        collapsed: true,
+        children: [
+          { type: "text", text: `Version ${plugin.version}`, style: "status" },
+          ...controls,
+        ],
+      },
     ],
   };
 }
 
 /** A `PluginsFrame` as a `ViewDocument`. */
-export function pluginsDocumentV1(frame: PluginsFrame): ViewDocument {
+export function pluginsDocumentV1(
+  frame: PluginsFrame,
+  capabilities = false,
+): ViewDocument {
   const installed = frame.plugins.filter(
     (plugin) => plugin.state !== "not-installed",
   ).length;
@@ -129,7 +143,9 @@ export function pluginsDocumentV1(frame: PluginsFrame): ViewDocument {
     },
     {
       type: "text",
-      text: "Turn plugins on and off for your Bots. Set one up where it belongs: accounts and model providers in Connectors.",
+      text: capabilities
+        ? "Optional built-in features for all your Bots. Open a feature to see what it does and manage it."
+        : "Extensions add new abilities to your Bots. Open an extension for its description and controls. Models and built-in features have their own settings.",
     },
   ];
   // The root, the two lines above and the overflow status the tail may need.
@@ -137,7 +153,7 @@ export function pluginsDocumentV1(frame: PluginsFrame): ViewDocument {
   let complete = true;
   for (const plugin of frame.plugins) {
     const node = pluginNode(plugin);
-    const cost = 4 + (plugin.failure ? 1 : 0);
+    const cost = 7 + (plugin.failure ? 1 : 0);
     if (nodes + cost > NODE_LIMIT) {
       complete = false;
       break;
@@ -155,7 +171,7 @@ export function pluginsDocumentV1(frame: PluginsFrame): ViewDocument {
   if (frame.plugins.length === 0) {
     children.push({
       type: "text",
-      text: "This deployment ships no plugins.",
+      text: "No extensions are available yet. Your Bots already include memory, skills, routines and a hosted Computer. Model providers are in Models; optional features are in Bot capabilities.",
     });
   }
   return decodeProtocol("ViewDocument", {
@@ -196,6 +212,7 @@ export function pluginsDocumentV1(frame: PluginsFrame): ViewDocument {
           type: "object",
           properties: {
             kind: KIND,
+            packageId: IDENTIFIER,
             home: {
               type: "string",
               enum: ["models", "connections", "user-settings", "none"],

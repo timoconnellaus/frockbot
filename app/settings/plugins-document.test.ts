@@ -35,7 +35,7 @@ test("an installed plugin offers the way off and the surface that sets it up", (
   const actions = walk(document.root).filter((node) => node.type === "action");
   expect(
     actions.map((node) => (node.type === "action" ? node.label : "")),
-  ).toEqual(["Set up in Connectors", "Turn off"]);
+  ).toEqual(["Set up in Models", "Turn off"]);
   expect(
     actions.map((node) => (node.type === "action" ? node.input?.kind : "")),
   ).toEqual(["open-home", "set-package-enabled"]);
@@ -71,7 +71,7 @@ test("a failed installation carries its reason on its own row", () => {
   ).toBe(true);
   expect(
     walk(document.root).some(
-      (node) => node.type === "text" && node.text === "Models · Failed",
+      (node) => node.type === "group" && node.title === "Ollama Cloud · Failed",
     ),
   ).toBe(true);
 });
@@ -82,7 +82,28 @@ test("a deployment that ships no plugins says so", () => {
     walk(document.root).some(
       (node) =>
         node.type === "text" &&
-        node.text === "This deployment ships no plugins.",
+        node.text.startsWith("No extensions are available yet."),
+    ),
+  ).toBe(true);
+});
+
+test("Mac Messages availability is not presented as permission to use it", () => {
+  const document = pluginsDocumentV1(
+    frame([
+      {
+        ...ollama,
+        packageId: "machine-messages",
+        displayName: "Messages on your Mac",
+        home: "user-settings",
+      },
+    ]),
+    true,
+  );
+  expect(
+    walk(document.root).some(
+      (node) =>
+        node.type === "group" &&
+        node.title === "Messages on your Mac · Available — needs Mac setup",
     ),
   ).toBe(true);
 });

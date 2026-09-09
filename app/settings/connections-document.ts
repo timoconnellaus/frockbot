@@ -215,7 +215,19 @@ function accountNode(account: Account): ViewNode {
     text(account.label, "label"),
     ...(account.detail ? [text(account.detail, "status")] : []),
     ...(account.failure ? [text(account.failure)] : []),
-    { type: "group", orientation: "row", children: controls },
+    {
+      type: "group",
+      orientation: "column",
+      title: "Manage connection",
+      collapsed: true,
+      children: [
+        text(
+          "Turning off or disconnecting makes this connection unavailable to every Bot using it. Choose another default model first if needed.",
+          "status",
+        ),
+        { type: "group", orientation: "row", children: controls },
+      ],
+    },
   ]);
 }
 
@@ -265,12 +277,12 @@ function providerNode(
       ...setting,
       id: `c${index}.s.${setting.id}`,
     }));
-    children.push(
+    const form: ViewNode[] = [
       {
         type: "field",
         field: {
           id: label,
-          label: "Connection label",
+          label: "Account name",
           kind: "text",
           value: provider.displayName,
           editable: true,
@@ -279,7 +291,24 @@ function providerNode(
         },
       },
       { type: "field", field: secretField(key, "API key") },
-      ...settings.map((field): ViewNode => ({ type: "field", field })),
+      ...(settings.length
+        ? [
+            {
+              type: "group" as const,
+              orientation: "column" as const,
+              title: "Advanced — custom server",
+              collapsed: true,
+              children: settings.map((field): ViewNode => ({
+                type: "field",
+                field,
+              })),
+            },
+          ]
+        : []),
+      text(
+        "Your API provider may bill you for usage. The key stays on the server and is never shown to your Bots.",
+        "status",
+      ),
       press(
         id,
         provider.connected === 0 ? "Connect account" : "Add another account",
@@ -290,7 +319,15 @@ function providerNode(
         },
         "primary",
       ),
-    );
+    ];
+    children.push({
+      type: "group",
+      orientation: "column",
+      title:
+        provider.connected === 0 ? "Connect account" : "Add another account",
+      collapsed: true,
+      children: form,
+    });
     actions.push({
       id,
       schema: {
@@ -392,22 +429,34 @@ function section(
  * connect a thing, and which of the two homes a Package declares is not a
  * question they asked.
  */
-export function connectionsDocumentV1(frame: ConnectionsFrame): ViewDocument {
+export function connectionsDocumentV1(
+  frame: ConnectionsFrame,
+  kind: "model" | "connector" = "connector",
+  packageId?: string,
+): ViewDocument {
+  frame = {
+    ...frame,
+    providers: frame.providers.filter(
+      (provider) =>
+        provider.kind === kind &&
+        (!packageId || provider.packageId === packageId),
+    ),
+  };
   const shared = accountActions();
   const providers = section(
-    "Provider accounts",
+    "Your providers",
     "model",
     frame,
     ACTION_LIMIT - shared.length,
   );
   const connectors = section(
-    "Connectors",
+    "Connected apps",
     "connector",
     frame,
     ACTION_LIMIT - shared.length - providers.actions.length,
   );
   const children: ViewNode[] = [];
-  if (frame.modelInUse) {
+  if (kind === "model" && frame.modelInUse) {
     children.push(column("Model in use", [text(frame.modelInUse, "status")]));
   }
   if (providers.node) children.push(providers.node);
@@ -415,7 +464,9 @@ export function connectionsDocumentV1(frame: ConnectionsFrame): ViewDocument {
   if (!providers.node && !connectors.node) {
     children.push(
       text(
-        "Your connectors will appear here once a plugin that offers one is turned on in Plugins.",
+        kind === "model"
+          ? "Connect a provider from Models to use its models here."
+          : "No connected apps yet. Available services will appear here. Connections you authorize are available to all your Bots.",
       ),
     );
   }

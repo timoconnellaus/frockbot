@@ -14,11 +14,12 @@ class SettingsController extends ChangeNotifier {
   final NativeApi api;
   final String userId;
   final String home;
+  final String? section;
   wire.ViewDocument? document;
   bool busy = false;
   bool _closed = false;
   String? message;
-  SettingsController(this.api, this.userId, this.home);
+  SettingsController(this.api, this.userId, this.home, {this.section});
 
   String get surfaceId => 'settings-$home';
 
@@ -33,7 +34,12 @@ class SettingsController extends ChangeNotifier {
     _changed();
     try {
       final next = wire.ViewDocument.fromJson(
-        await api.request('/api/settings/$home?as=document'),
+        await api.request(
+          Uri(
+            path: '/api/settings/$home',
+            queryParameters: {'as': 'document', 'section': ?section},
+          ).toString(),
+        ),
       );
       if (next.surfaceId.value != surfaceId) {
         throw const FormatException('Settings surface mismatch');
