@@ -513,6 +513,10 @@ void main() {
       expect(editor.text, 'Hello');
       expect(controller.draft, 'Hello');
 
+      // The keyboard is still up on the restored words, so typing has to carry
+      // on after them rather than at an offset the IME picks for itself.
+      expect(editor.selection, const TextSelection.collapsed(offset: 5));
+
       await tester.pumpWidget(const SizedBox());
       controller.dispose();
     },
