@@ -14,9 +14,18 @@ function event(overrides: Record<string, unknown>): Record<string, unknown> {
 }
 
 describe("the send payload codec", () => {
+  test("applet cards accept only an applet id, never a URL or credentials", () => {
+    for (const payload of [
+      { type: "applet", appletId: "https://evil.test" },
+      { type: "applet", appletId: "alice.todo", token: "secret" },
+      { type: "applet", appletId: "../todo" },
+    ])
+      expect(() => decodeSendToUserPayloadV1(payload)).toThrow();
+  });
   test("round-trips every declared payload type", () => {
     const payloads: SendToUserPayloadV1[] = [
       { type: "text", text: "Booked." },
+      { type: "applet", appletId: "alice.todo" },
       {
         type: "attachment",
         url: "https://files.example/receipt.pdf",

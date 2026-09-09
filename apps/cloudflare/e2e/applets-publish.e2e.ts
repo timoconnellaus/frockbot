@@ -162,6 +162,9 @@ async function openCanvas(page: Page): Promise<void> {
   const canvas = canvasOf(page);
   if (await canvas.isVisible().catch(() => false)) return;
   await press(sem(page, "applet-chip"));
+  await press(
+    page.locator('[flt-semantics-identifier^="applet-choice-"]').first(),
+  );
   await expect(canvas).toBeVisible({ timeout: 60_000 });
 }
 
@@ -399,6 +402,9 @@ test("a Bot writes, checks and publishes an Applet, and its tool reaches the Bot
   await expect(chip).toBeVisible({ timeout: 60_000 });
   await shot(page, "phone-chip");
   await press(chip);
+  await press(
+    page.locator('[flt-semantics-identifier^="applet-choice-"]').first(),
+  );
   await expect(canvasOf(page)).toBeVisible({ timeout: 60_000 });
   await expect(appletUi(page).getByText("Buy milk")).toBeVisible({
     timeout: 60_000,

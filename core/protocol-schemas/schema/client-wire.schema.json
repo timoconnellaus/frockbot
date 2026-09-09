@@ -1015,6 +1015,22 @@
           },
           "required": ["type", "approvalId", "action", "risk"],
           "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "applet"
+            },
+            "appletId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 129,
+              "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]{0,95}\\.[a-z0-9-]{1,64}$"
+            }
+          },
+          "required": ["type", "appletId"],
+          "additionalProperties": false
         }
       ]
     },

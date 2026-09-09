@@ -349,6 +349,9 @@ function fileState(page: Page, path: string): Locator {
 /** The canvas, opened from the header control that is the whole of its entry. */
 async function openCanvas(page: Page) {
   await press(sem(page, "applet-chip"));
+  await press(
+    page.locator('[flt-semantics-identifier^="applet-choice-"]').first(),
+  );
   const canvas = sem(page, "applet-canvas");
   await expect(canvas).toBeVisible({ timeout: 60_000 });
   return canvas;

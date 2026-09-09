@@ -87,7 +87,7 @@ class AppletCanvasController extends ChangeNotifier {
       final focus = await applets.focus(botId);
       if (epoch != _epoch) return;
       directory = listed;
-      focusedId = focus;
+      focusedId = listed.any((entry) => entry.appletId == focus) ? focus : null;
       _changed();
       failure = null;
       _attempt = 0;

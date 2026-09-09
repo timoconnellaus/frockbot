@@ -683,11 +683,15 @@ function userAuditStub(env: Env, userId: string): UserAuditRpc {
 function userAppletDirectoryStub(
   env: Env,
   userId: string,
-): { listApplets(input: unknown): Promise<unknown> } {
+): {
+  listApplets(input: unknown): Promise<unknown>;
+  deleteApplet(input: unknown): Promise<unknown>;
+} {
   const id = env.USER_CONFIGURATIONS.idFromName(userId);
   // SAFETY: Wrangler binds USER_CONFIGURATIONS to UserConfiguration; workers-types cannot infer its generated Applet directory RPC surface.
   return env.USER_CONFIGURATIONS.get(id) as unknown as {
     listApplets(input: unknown): Promise<unknown>;
+    deleteApplet(input: unknown): Promise<unknown>;
   };
 }
 
@@ -860,6 +864,18 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
   // entrypoint the hosted application already holds. The application Worker
   // reaches the User Durable Object only through here; it never gets a
   // namespace of its own.
+
+  async deleteApplet(input: unknown): Promise<unknown> {
+    const request = decodeRpcEnvelopeV1(input, { appletId: rpcString(129) });
+    const userId = this.ctx.props.userId;
+    return rpcJsonSnapshot(
+      await userAppletDirectoryStub(this.env, userId).deleteApplet({
+        schemaVersion: 1,
+        userId,
+        appletId: request.appletId,
+      }),
+    );
+  }
 
   async listApplets(_input?: unknown): Promise<unknown> {
     const userId = this.ctx.props.userId;

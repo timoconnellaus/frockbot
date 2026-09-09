@@ -7,8 +7,6 @@ import '../flock/sheep.dart';
 import 'semantics.dart';
 import 'chat_icons.dart';
 
-typedef ChatApplet = ({String label, VoidCallback onOpen});
-
 class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
   final String name;
   final double textScale;
@@ -18,9 +16,8 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
   final VoidCallback? onComputer;
   final bool computerRunning;
   final VoidCallback onRoutines;
-  final List<ChatApplet> applets;
-  final VoidCallback? onRetryApplets;
   final ConnectionState connection;
+  final VoidCallback? onApplets;
 
   const ChatHeader({
     super.key,
@@ -32,18 +29,13 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
     this.onComputer,
     this.computerRunning = false,
     required this.onRoutines,
-    this.applets = const [],
-    this.onRetryApplets,
     this.connection = ConnectionState.initializing,
+    this.onApplets,
   });
 
   double get _toolbarHeight => 56 * textScale.clamp(1, 3);
-  double get _appletHeight => 38 * textScale.clamp(1, 3);
-  bool get _hasApplets => applets.isNotEmpty || onRetryApplets != null;
-
   @override
-  Size get preferredSize =>
-      Size.fromHeight(_toolbarHeight + (_hasApplets ? _appletHeight : 0));
+  Size get preferredSize => Size.fromHeight(_toolbarHeight);
 
   @override
   Widget build(BuildContext context) => AppBar(
@@ -87,6 +79,10 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
       ],
     ),
     actions: [
+      identified(
+        AppletIds.chip,
+        _destination('Applets', ChatIconKind.applet, onApplets),
+      ),
       _destination(
         'Computer',
         ChatIconKind.computer,
@@ -100,78 +96,6 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
       ),
       const SizedBox(width: 4),
     ],
-    bottom: !_hasApplets
-        ? null
-        : PreferredSize(
-            preferredSize: Size.fromHeight(_appletHeight),
-            child: Container(
-              height: _appletHeight,
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surface,
-                border: Border(
-                  bottom: BorderSide(
-                    color: Theme.of(context).colorScheme.outlineVariant,
-                  ),
-                ),
-              ),
-              padding: const EdgeInsets.fromLTRB(12, 0, 12, 3),
-              child: ListView(
-                scrollDirection: Axis.horizontal,
-                children: [
-                  // The header's entry to the Applets, named as one thing: how
-                  // many buttons are in it is the header's business, and what
-                  // a reader means by "open the Applets" is the first of them.
-                  // The failure's Retry is outside it deliberately — pressing
-                  // the entry has to mean opening an Applet, never asking for
-                  // the list again.
-                  if (applets.isNotEmpty)
-                    identified(
-                      AppletIds.chip,
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          for (final applet in applets)
-                            ConstrainedBox(
-                              constraints: const BoxConstraints(maxWidth: 240),
-                              child: Tooltip(
-                                message: applet.label,
-                                child: TextButton.icon(
-                                  onPressed: applet.onOpen,
-                                  icon: const ChatIcon(
-                                    ChatIconKind.applet,
-                                    size: 16,
-                                  ),
-                                  label: Text(
-                                    applet.label,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                  style: _appletStyle(context),
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                  if (onRetryApplets != null)
-                    TextButton.icon(
-                      onPressed: onRetryApplets,
-                      icon: const Icon(Icons.refresh, size: 16),
-                      label: const Text('Couldn’t load Applets · Retry'),
-                      style: _appletStyle(context),
-                    ),
-                ],
-              ),
-            ),
-          ),
-  );
-
-  ButtonStyle _appletStyle(BuildContext context) => TextButton.styleFrom(
-    foregroundColor: Theme.of(context).colorScheme.onSurfaceVariant,
-    textStyle: Theme.of(context).textTheme.bodySmall,
-    minimumSize: const Size(40, 34),
-    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-    padding: const EdgeInsets.symmetric(horizontal: 10),
   );
 
   Widget _destination(

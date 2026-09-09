@@ -192,6 +192,9 @@ function fileState(page: Page, path: string): Locator {
 /** The canvas, opened from the header control that is the whole of its entry. */
 async function openCanvas(page: Page): Promise<Locator> {
   await press(sem(page, "applet-chip"));
+  await press(
+    page.locator('[flt-semantics-identifier^="applet-choice-"]').first(),
+  );
   const canvas = sem(page, "applet-canvas");
   await expect(canvas).toBeVisible({ timeout: 60_000 });
   return canvas;
@@ -286,11 +289,14 @@ test("a Bot creates an Applet, the canvas shows its source, and the surface list
     { appletId: await appletIdFromSurface(page) },
     async () => !(await directoryHolds(page, "Weekly Todos")),
   );
-  // The header's Applet strip *is* the Applets this Bot holds — one entry per
-  // Applet — so a Bot with none has nothing left to press, and there is no
-  // canvas to open behind it either.
-  await expect(sem(page, "applet-chip")).toHaveCount(0, { timeout: 60_000 });
-  await expect(named(page.locator("body"), "Weekly Todos")).toHaveCount(0);
+  await expect(sem(page, "applet-chip")).toBeVisible();
+  await press(sem(page, "applet-chip"));
+  await expect(
+    page.locator('[flt-semantics-identifier^="applet-choice-"]'),
+  ).toHaveCount(0);
+  await expect(
+    named(page.locator("body"), "No Applets yet. Ask a Bot to build one."),
+  ).toBeVisible();
 });
 
 /** The Applet's id, read from the directory the Package itself renders. */

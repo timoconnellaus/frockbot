@@ -16,6 +16,7 @@ import 'package:flutter/material.dart' hide ConnectionState;
 import 'package:flutter/services.dart';
 
 import '../acceptance_metrics.dart';
+import '../applets/chat_card.dart';
 import '../client/bot_sessions.dart';
 import '../client/chat_controller.dart';
 import '../client/transport.dart';
@@ -333,18 +334,21 @@ class _ConversationViewState extends State<ConversationView>
   }
 
   @override
-  Widget build(BuildContext context) => ChatPane(
-    background: widget.background,
-    controller: session.controller,
-    onReconnect: session.channel.connect,
-    approvals: approvals,
-    skills: skills,
-    onOpenRun: widget.onOpenRun,
-    onOpenSettings: widget.onOpenSettings,
-    onMessageActions: widget.onMessageActions,
-    unreadFromMessageId: widget.unreadFromMessageId,
-    onReadLatest: widget.onReadLatest,
-    onWorkingChanged: widget.onWorkingChanged,
+  Widget build(BuildContext context) => AppletChatScope(
+    api: widget.api,
+    child: ChatPane(
+      background: widget.background,
+      controller: session.controller,
+      onReconnect: session.channel.connect,
+      approvals: approvals,
+      skills: skills,
+      onOpenRun: widget.onOpenRun,
+      onOpenSettings: widget.onOpenSettings,
+      onMessageActions: widget.onMessageActions,
+      unreadFromMessageId: widget.unreadFromMessageId,
+      onReadLatest: widget.onReadLatest,
+      onWorkingChanged: widget.onWorkingChanged,
+    ),
   );
 
   @override
