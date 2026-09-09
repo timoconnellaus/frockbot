@@ -83,22 +83,28 @@ class _AppletPickerState extends State<AppletPicker> {
                     child: const Text('Couldn’t load Applets · Retry'),
                   ),
                 for (final applet in controller.directory)
-                  identified(
-                    'applet-choice-${applet.appletId}',
-                    ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: Text(applet.displayName),
-                      onTap: deleting == null
-                          ? () => Navigator.pop(context, applet.appletId)
-                          : null,
-                      trailing: IconButton(
+                  Row(
+                    children: [
+                      Expanded(
+                        child: identified(
+                          'applet-choice-${applet.appletId}',
+                          ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: Text(applet.displayName),
+                            onTap: deleting == null
+                                ? () => Navigator.pop(context, applet.appletId)
+                                : null,
+                          ),
+                        ),
+                      ),
+                      IconButton(
                         tooltip: 'Delete ${applet.displayName}',
                         onPressed: deleting == null
                             ? () => remove(applet.appletId, applet.displayName)
                             : null,
                         icon: const Icon(Icons.delete_outline),
                       ),
-                    ),
+                    ],
                   ),
               ],
             ),
