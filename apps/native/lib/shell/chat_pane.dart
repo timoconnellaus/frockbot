@@ -94,13 +94,17 @@ class _ChatPaneState extends State<ChatPane> {
     if (!controller.canSend || editor.text.trim().isEmpty) return;
     final text = editor.text;
     unawaited(HapticFeedback.lightImpact());
-    // Gboard may restore a composing range when the framework changes it. Put
-    // the person's explicit intent into the controller before touching that
-    // IME-owned state, so its reconciliation cannot turn Send into a no-op.
-    // Ending composition afterwards lets `_update` mirror the cleared draft
-    // into the field and prevents a second tap from sending the same words.
+    // The person's explicit intent goes into the controller first, and the
+    // composer is emptied in the same synchronous step. Android IMEs keep a
+    // composing range over the word still being typed and re-establish one
+    // over whatever text they can still see, so leaving the words on screen
+    // until `_update` mirrors the cleared draft — a mirror its guard skips
+    // for a live composing range — is what left them there for a second tap
+    // to send again as a new Turn. Nothing an IME does afterwards can put a
+    // Turn's words back into a send this had already emptied; a refused send
+    // hands them back through the draft.
     final sending = controller.send(text);
-    editor.clearComposing();
+    editor.clear();
     await sending;
     if (mounted) focus.requestFocus();
   }
