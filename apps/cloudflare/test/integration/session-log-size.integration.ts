@@ -18,11 +18,11 @@ useApplicationArtifact();
 
 const HISTORY_TEXT_BYTES = 29_000;
 const MODEL_STEPS = 60;
-// This proves a storage bound, not a latency bound. Sixty real model steps
-// finish in about 40 seconds on a fast machine but have taken two minutes on a
-// loaded one, so the cap is well clear of Vitest's 60-second default rather
-// than a measurement of the run.
-const SIXTY_STEP_TIMEOUT_MS = 180_000;
+// This proves a storage bound, not a latency bound. Sixty sequential model
+// steps finish in about 40 seconds on a fast machine but full-suite overhead
+// has pushed them just past three minutes, so the cap is deliberately not a
+// measurement of the run.
+const SIXTY_STEP_TIMEOUT_MS = 240_000;
 
 describe("a sixty-step Turn through the production gateway", () => {
   it(
