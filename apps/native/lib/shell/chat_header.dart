@@ -13,6 +13,7 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
   final VoidCallback? onBots;
   final VoidCallback onSettings;
   final VoidCallback? onComputer;
+  final bool computerRunning;
   final VoidCallback onRoutines;
   final List<ChatApplet> applets;
   final VoidCallback? onRetryApplets;
@@ -25,6 +26,7 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
     this.onBots,
     required this.onSettings,
     this.onComputer,
+    this.computerRunning = false,
     required this.onRoutines,
     this.applets = const [],
     this.onRetryApplets,
@@ -69,7 +71,12 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
       ],
     ),
     actions: [
-      _destination('Computer', ChatIconKind.computer, onComputer),
+      _destination(
+        'Computer',
+        ChatIconKind.computer,
+        onComputer,
+        color: computerRunning ? Colors.blue : null,
+      ),
       _destination('Routines', ChatIconKind.routines, onRoutines),
       identified(
         ShellIds.botPanelToggle,
@@ -151,16 +158,21 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
     padding: const EdgeInsets.symmetric(horizontal: 10),
   );
 
-  Widget _destination(String label, ChatIconKind icon, VoidCallback? open) =>
-      IconButton(
-        tooltip: label,
-        onPressed: open,
-        icon: ChatIcon(icon),
-        style: IconButton.styleFrom(
-          minimumSize: const Size(40, 48),
-          maximumSize: const Size(40, 48),
-          padding: EdgeInsets.zero,
-          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-        ),
-      );
+  Widget _destination(
+    String label,
+    ChatIconKind icon,
+    VoidCallback? open, {
+    Color? color,
+  }) => IconButton(
+    tooltip: label,
+    color: color,
+    onPressed: open,
+    icon: ChatIcon(icon),
+    style: IconButton.styleFrom(
+      minimumSize: const Size(40, 48),
+      maximumSize: const Size(40, 48),
+      padding: EdgeInsets.zero,
+      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    ),
+  );
 }
