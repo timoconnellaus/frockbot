@@ -41,6 +41,13 @@ function bot(userId: string, botId: string) {
 }
 
 interface ApprovalRpc {
+  readConfiguration(input: unknown): Promise<{ revision: number }>;
+  executeConfiguration(input: unknown): Promise<unknown>;
+  readUnread(input: unknown): Promise<{
+    count: number;
+    unread: boolean;
+    lastMessageId?: string;
+  }>;
   run(command: unknown): Promise<{ runId: string }>;
   listApprovals(input: unknown): Promise<{
     pending: number;
@@ -290,25 +297,37 @@ describe("a pending decision's durable life in Workerd", () => {
     });
   });
 
-  test("a muted Bot is still told a decision is waiting, at critical urgency", async () => {
+  test("a muted approval is unread without raising an alert", async () => {
     const suffix = crypto.randomUUID();
     const identity = {
       userId: `muted-${suffix}`,
       botId: `muted-bot-${suffix}`,
     };
-    // A new Bot's notifications are off, which is the muted case exactly.
     await provisionBot(identity);
-    await askForApproval(identity, "ap-muted");
+    const request = { schemaVersion: 1, ...identity };
+    const configuration = await rpc(identity).readConfiguration(request);
+    await rpc(identity).executeConfiguration({
+      ...request,
+      command: {
+        schemaVersion: 1,
+        type: "bot/update-notifications",
+        commandId: `mute-${suffix}`,
+        expectedRevision: configuration.revision,
+        botId: identity.botId,
+        notifications: { enabled: false },
+      },
+    });
+    const runId = await askForApproval(identity, "ap-muted");
 
     const notifications = await rpc(identity).listNotifications({
       schemaVersion: 1,
       ...identity,
     });
-    // Muting silences chatter, not a question that has stopped the Bot.
-    expect(
-      notifications.find(
-        (intent) => intent.notificationId === "approval:ap-muted",
-      ),
-    ).toMatchObject({ urgency: "critical" });
+    expect(notifications).toEqual([]);
+    expect(await rpc(identity).readUnread(request)).toMatchObject({
+      unread: true,
+      count: 1,
+      lastMessageId: `${runId}:send:0`,
+    });
   });
 });

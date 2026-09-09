@@ -101,9 +101,9 @@ test("an existing Bot drops its old unread state and starts counting messages", 
     ...identity,
     query: { schemaVersion: 1 },
   });
-  expect(
-    history.runs.map((run) => (run as { runId: string }).runId),
-  ).toContain(`run-before-${suffix}`);
+  expect(history.runs.map((run) => (run as { runId: string }).runId)).toContain(
+    `run-before-${suffix}`,
+  );
 
   // The badge the person sees after the deployment is empty, not seven.
   expect(await rpc.readUnread(identity)).toMatchObject({
