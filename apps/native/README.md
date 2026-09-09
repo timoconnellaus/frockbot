@@ -75,7 +75,7 @@ python3 scripts/native-update.py publish --apk <path>   # publish an already-bui
 
 ## macOS
 
-Build with `flutter build macos --release`. The app is configured for Apple team `Q444L76529`, bundle `com.frockbot.mobile`, the default protected Keychain group, and the exact associated return domain. A matching provisioning profile is required. Xcode currently reports no signed-in account/profile. A `CODE_SIGNING_ALLOWED=NO` build plus ad-hoc local signing proves only renderer compilation/launch, never verified links or production credential protection. iOS is not a target in this slice.
+Build with `flutter build macos --release`. The app is configured for Apple team `Q444L76529`, bundle `com.frockbot.mobile`, the default protected Keychain group, and the exact associated return domain. A matching provisioning profile is required. The signed macOS release build was verified on Tim’s registered Mac with the matching Apple Development identity and provisioning profile. A `CODE_SIGNING_ALLOWED=NO` build plus ad-hoc local signing proves only renderer compilation/launch, never verified links or production credential protection. iOS is not a target in this slice.
 
 ## Web
 
@@ -93,7 +93,7 @@ The phone holds a PKCE bearer token in the platform keystore and sends it as a h
 
 ## Backend and auth
 
-Production enables Android qualification transport with `NATIVE_SLICE_2_AUTH=android`; `android,macos` additionally permits the macOS return after its signing gate passes. Wait for the orchestrator’s release and HTTP 200 from the association endpoint before device auth. The `acceptance` block of [`qualification.json`](qualification.json) records how far that rollout got. The anonymous fallback bootstrap is on `https://ui.bot.frockbot.com`.
+Production enables Android and macOS sign-in with `NATIVE_SLICE_2_AUTH=android,macos`. Wait for the orchestrator’s release and HTTP 200 from the association endpoint before device auth. The `acceptance` block of [`qualification.json`](qualification.json) records how far that rollout got. The anonymous fallback bootstrap is on `https://ui.bot.frockbot.com`.
 
 The app persists PKCE state/verifier before opening the system browser. The gateway uses the existing Better Auth Google web client, returns to an exact HTTPS app link, and exchanges the single-use code under the User Durable Object. The seven-day native session is OS-protected and bound to its client protocol/version/catalog hello. Logout revokes it. Send and Stop persist stable ids before dispatch; uncertain sends use lookup then an admission fence; the Bot state channel advances a protected cursor only after the corresponding projection is applied. Disconnect/disposal does not cancel work.
 
