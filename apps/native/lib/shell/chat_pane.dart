@@ -80,9 +80,17 @@ class _ChatPaneState extends State<ChatPane> {
     if (mounted) setState(() {});
   }
 
+  /// Mirrors the controller's draft into the composer. A live composing range
+  /// holds the mirror off, because overwriting the word an IME is still
+  /// composing would take it out of the person's hands. An empty composer has
+  /// no such word to protect even when an IME has laid a range over it, so
+  /// words handed back to the draft — a refused send, a durable write that
+  /// failed — reach the screen there rather than sitting where only the next
+  /// keystroke's `saveDraft` can reach them.
   void _update() {
     if (!mounted) return;
-    if (editor.text != controller.draft && !editor.value.composing.isValid) {
+    if (editor.text != controller.draft &&
+        (editor.text.isEmpty || !editor.value.composing.isValid)) {
       editor.text = controller.draft;
     }
     setState(() {});
@@ -103,6 +111,13 @@ class _ChatPaneState extends State<ChatPane> {
     // to send again as a new Turn. Nothing an IME does afterwards can put a
     // Turn's words back into a send this had already emptied; a refused send
     // hands them back through the draft.
+    //
+    // The two steps are in this order and not the other one. `send` announces
+    // the submission while the draft still holds these words and only empties
+    // it afterwards, so clearing first would have `_update` read a composer
+    // that disagrees with the draft and write the words straight back in.
+    // Starting the send and clearing before the first await leaves no rebuild
+    // in between.
     final sending = controller.send(text);
     editor.clear();
     await sending;

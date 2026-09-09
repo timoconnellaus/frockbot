@@ -452,6 +452,71 @@ void main() {
       controller.dispose();
     },
   );
+  testWidgets(
+    'a send that could not be saved hands the words back to the composer even '
+    'with an IME range over it',
+    (tester) async {
+      final store = GatedStore();
+      final transport = FakeTransport(store);
+      final controller = ChatController(
+        transport: transport,
+        store: store,
+        userId: 'user-1',
+        botId: 'bot-1',
+        nextId: () => 'send-1',
+      );
+      await controller.initialize();
+      controller.connection = ConnectionState.connected;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ChatPane(controller: controller, onReconnect: () async {}),
+          ),
+        ),
+      );
+      final composer = find.byKey(const ValueKey('composer'));
+      await tester.tap(composer);
+      await tester.pump();
+      tester.testTextInput.updateEditingValue(
+        const TextEditingValue(
+          text: 'Hello',
+          selection: TextSelection.collapsed(offset: 5),
+          composing: TextRange(start: 0, end: 5),
+        ),
+      );
+      await tester.pump();
+      final editor = tester.widget<TextField>(composer).controller!;
+
+      final persisting = Completer<void>();
+      store.gate = persisting;
+      await tester.tap(find.byKey(const ValueKey('send')));
+      await tester.pump();
+      expect(editor.text, isEmpty);
+
+      // The IME lays a composing range over the emptied composer, as Gboard
+      // does over whatever it can still see. Nothing here changes the text,
+      // so this range is all the pane has to go on when the words come back.
+      tester.testTextInput.updateEditingValue(
+        editor.value.copyWith(composing: const TextRange(start: 0, end: 0)),
+      );
+      await tester.pump();
+
+      // The durable write fails, so the send is refused before it reaches the
+      // transport and the words are handed back to the draft.
+      store.fail = true;
+      store.gate = null;
+      persisting.complete();
+      await tester.pump();
+      await tester.pump();
+
+      expect(transport.calls, isEmpty);
+      expect(editor.text, 'Hello');
+      expect(controller.draft, 'Hello');
+
+      await tester.pumpWidget(const SizedBox());
+      controller.dispose();
+    },
+  );
   testWidgets('send clears the draft and reconciles the pending bubble by ID', (
     tester,
   ) async {
