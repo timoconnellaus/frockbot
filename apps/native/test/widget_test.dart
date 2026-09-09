@@ -25,6 +25,18 @@ class MemoryStore implements LocalStore {
   }
 }
 
+/// A store whose durable write can be held open, so a test can act inside the
+/// window a send spends waiting on it.
+class GatedStore extends MemoryStore {
+  Completer<void>? gate;
+  @override
+  Future<void> write(String key, String value) async {
+    final held = gate;
+    if (held != null) await held.future;
+    await super.write(key, value);
+  }
+}
+
 Map<String, dynamic> running() => {
   'runId': 'send-1',
   'admittedAt': '2026-09-05T01:00:00Z',
@@ -36,6 +48,7 @@ Map<String, dynamic> running() => {
 class FakeTransport implements ChatTransport {
   final MemoryStore store;
   final calls = <String>[];
+  final sentTexts = <String>[];
   final superseded = <String?>[];
   final completion = Completer<void>();
   Map<String, dynamic>? observed;
@@ -59,6 +72,7 @@ class FakeTransport implements ChatTransport {
       id,
     );
     calls.add('send:$id');
+    sentTexts.add(text);
     superseded.add(supersedes);
     await completion.future;
     if (loseReply) throw const RequestFailure('lost');
@@ -270,17 +284,18 @@ void main() {
       c.dispose();
     },
   );
-  testWidgets('tapping Send submits text while the mobile IME is composing', (
+  testWidgets('Send admits composed Gboard text without needing a newline', (
     tester,
   ) async {
     final store = MemoryStore();
     final transport = FakeTransport(store);
+    var sends = 0;
     final controller = ChatController(
       transport: transport,
       store: store,
       userId: 'user-1',
       botId: 'bot-1',
-      nextId: () => 'send-1',
+      nextId: () => 'send-${sends += 1}',
     );
     await controller.initialize();
     controller.connection = ConnectionState.connected;
@@ -303,11 +318,14 @@ void main() {
     );
     await tester.pump();
 
+    final editor = tester.widget<TextField>(composer).controller!;
+
     await tester.tap(find.byKey(const ValueKey('send')));
     await tester.pump();
 
     expect(transport.calls, ['send:send-1']);
-    expect(tester.widget<TextField>(composer).controller!.text, isEmpty);
+    expect(transport.sentTexts, ['Hello']);
+    expect(editor.text, isEmpty);
     expect(jsonDecode(store.values[controller.key]!)['draft'], '');
 
     // A second tap on the same composer must not re-send the same words.
@@ -315,11 +333,194 @@ void main() {
     await tester.pump();
     expect(transport.calls, ['send:send-1']);
 
+    // Committing with Enter and then deleting that newline must not be a
+    // prerequisite for Send. Gboard resumes composing the last word after the
+    // deletion, which is the exact sequence seen on the physical phone.
+    tester.testTextInput.updateEditingValue(
+      const TextEditingValue(
+        text: 'Hello\n',
+        selection: TextSelection.collapsed(offset: 6),
+      ),
+    );
+    await tester.pump();
+    tester.testTextInput.updateEditingValue(
+      const TextEditingValue(
+        text: 'Hello',
+        selection: TextSelection.collapsed(offset: 5),
+        composing: TextRange(start: 0, end: 5),
+      ),
+    );
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('send')));
+    await tester.pump();
+    expect(transport.calls, ['send:send-1', 'send:send-2']);
+    expect(transport.sentTexts, ['Hello', 'Hello']);
+    expect(editor.text, isEmpty);
+
+    // Real multiline content is preserved; only the IME composing metadata is
+    // reconciled after the full text has entered the send path.
+    tester.testTextInput.updateEditingValue(
+      const TextEditingValue(
+        text: 'Hello\nworld',
+        selection: TextSelection.collapsed(offset: 11),
+        composing: TextRange(start: 6, end: 11),
+      ),
+    );
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('send')));
+    await tester.pump();
+    expect(transport.calls, ['send:send-1', 'send:send-2', 'send:send-3']);
+    expect(transport.sentTexts, ['Hello', 'Hello', 'Hello\nworld']);
+    expect(editor.text, isEmpty);
+
     transport.completion.complete();
     await tester.pumpAndSettle();
     await tester.pumpWidget(const SizedBox());
     controller.dispose();
   });
+  testWidgets(
+    'an IME resuming composition mid-send cannot leave the words to be sent twice',
+    (tester) async {
+      final store = GatedStore();
+      final transport = FakeTransport(store);
+      var sends = 0;
+      final controller = ChatController(
+        transport: transport,
+        store: store,
+        userId: 'user-1',
+        botId: 'bot-1',
+        nextId: () => 'send-${sends += 1}',
+      );
+      await controller.initialize();
+      controller.connection = ConnectionState.connected;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ChatPane(controller: controller, onReconnect: () async {}),
+          ),
+        ),
+      );
+      final composer = find.byKey(const ValueKey('composer'));
+      await tester.tap(composer);
+      await tester.pump();
+      tester.testTextInput.updateEditingValue(
+        const TextEditingValue(
+          text: 'Hello',
+          selection: TextSelection.collapsed(offset: 5),
+          composing: TextRange(start: 0, end: 5),
+        ),
+      );
+      await tester.pump();
+      final editor = tester.widget<TextField>(composer).controller!;
+
+      // Hold the durable write open: everything below happens inside the
+      // window the send spends waiting on it.
+      final persisting = Completer<void>();
+      store.gate = persisting;
+      await tester.tap(find.byKey(const ValueKey('send')));
+      await tester.pump();
+
+      // The IME re-establishes a composing range over the composer as it
+      // stands, without changing its text, so no `onChanged` follows it and
+      // `_update`'s composing guard is the only thing that can see it. On a
+      // composer Send has already emptied there is nothing left for that
+      // guard to strand; on one Send left full, these are the words a second
+      // tap sent again.
+      tester.testTextInput.updateEditingValue(
+        editor.value.copyWith(
+          composing: TextRange(start: 0, end: editor.text.length),
+        ),
+      );
+      await tester.pump();
+
+      store.gate = null;
+      persisting.complete();
+      await tester.pump();
+      await tester.pump();
+
+      expect(editor.text, isEmpty);
+      expect(jsonDecode(store.values[controller.key]!)['draft'], '');
+
+      await tester.tap(find.byKey(const ValueKey('send')));
+      await tester.pump();
+      expect(transport.calls, ['send:send-1']);
+      expect(transport.sentTexts, ['Hello']);
+
+      transport.completion.complete();
+      await tester.pumpAndSettle();
+      await tester.pumpWidget(const SizedBox());
+      controller.dispose();
+    },
+  );
+  testWidgets(
+    'a send that could not be saved hands the words back to the composer even '
+    'with an IME range over it',
+    (tester) async {
+      final store = GatedStore();
+      final transport = FakeTransport(store);
+      final controller = ChatController(
+        transport: transport,
+        store: store,
+        userId: 'user-1',
+        botId: 'bot-1',
+        nextId: () => 'send-1',
+      );
+      await controller.initialize();
+      controller.connection = ConnectionState.connected;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ChatPane(controller: controller, onReconnect: () async {}),
+          ),
+        ),
+      );
+      final composer = find.byKey(const ValueKey('composer'));
+      await tester.tap(composer);
+      await tester.pump();
+      tester.testTextInput.updateEditingValue(
+        const TextEditingValue(
+          text: 'Hello',
+          selection: TextSelection.collapsed(offset: 5),
+          composing: TextRange(start: 0, end: 5),
+        ),
+      );
+      await tester.pump();
+      final editor = tester.widget<TextField>(composer).controller!;
+
+      final persisting = Completer<void>();
+      store.gate = persisting;
+      await tester.tap(find.byKey(const ValueKey('send')));
+      await tester.pump();
+      expect(editor.text, isEmpty);
+
+      // The IME lays a composing range over the emptied composer, as Gboard
+      // does over whatever it can still see. Nothing here changes the text,
+      // so this range is all the pane has to go on when the words come back.
+      tester.testTextInput.updateEditingValue(
+        editor.value.copyWith(composing: const TextRange(start: 0, end: 0)),
+      );
+      await tester.pump();
+
+      // The durable write fails, so the send is refused before it reaches the
+      // transport and the words are handed back to the draft.
+      store.fail = true;
+      store.gate = null;
+      persisting.complete();
+      await tester.pump();
+      await tester.pump();
+
+      expect(transport.calls, isEmpty);
+      expect(editor.text, 'Hello');
+      expect(controller.draft, 'Hello');
+
+      // The keyboard is still up on the restored words, so typing has to carry
+      // on after them rather than at an offset the IME picks for itself.
+      expect(editor.selection, const TextSelection.collapsed(offset: 5));
+
+      await tester.pumpWidget(const SizedBox());
+      controller.dispose();
+    },
+  );
   testWidgets('send clears the draft and reconciles the pending bubble by ID', (
     tester,
   ) async {
