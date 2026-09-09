@@ -37,15 +37,6 @@ class GatedStore extends MemoryStore {
   }
 }
 
-/// The range an Android IME composes over when it resumes composition: the
-/// last word of the text it can still see, and nothing at all when there is
-/// no such word.
-TextRange composingLastWord(String text) {
-  final start = text.lastIndexOf(RegExp(r'\s')) + 1;
-  if (start == text.length) return TextRange.empty;
-  return TextRange(start: start, end: text.length);
-}
-
 Map<String, dynamic> running() => {
   'runId': 'send-1',
   'admittedAt': '2026-09-05T01:00:00Z',
@@ -429,10 +420,16 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('send')));
       await tester.pump();
 
-      // Gboard resumes composing over the last word of the text it can still
-      // see, with the same text, so no `onChanged` follows it.
+      // The IME re-establishes a composing range over the composer as it
+      // stands, without changing its text, so no `onChanged` follows it and
+      // `_update`'s composing guard is the only thing that can see it. On a
+      // composer Send has already emptied there is nothing left for that
+      // guard to strand; on one Send left full, these are the words a second
+      // tap sent again.
       tester.testTextInput.updateEditingValue(
-        editor.value.copyWith(composing: composingLastWord(editor.text)),
+        editor.value.copyWith(
+          composing: TextRange(start: 0, end: editor.text.length),
+        ),
       );
       await tester.pump();
 
