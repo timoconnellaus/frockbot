@@ -30,6 +30,7 @@ export const categories: Record<string, string[][]> = {
       "@frockbot/cloudflare",
       "test:e2e",
       "--forbid-only",
+      "--workers=1",
       "--retries=2",
     ],
   ],

@@ -536,12 +536,14 @@ test("a message sent mid-Turn lands above the working sheep, unlabelled", async 
             everyLineAbove: lines.every(
               (line) => line.getBoundingClientRect().top < rowTop,
             ),
-            lines: lines.length,
+            userLines: lines.filter((line) =>
+              line.getAttribute("flt-semantics-identifier")?.endsWith(":user"),
+            ).length,
           };
         }),
       { timeout: 90_000 },
     )
-    .toEqual({ everyLineAbove: true, lines: 3 });
+    .toEqual({ everyLineAbove: true, userLines: 2 });
 
   // The superseded Turn is not labelled: the message above explains itself.
   await expect(sem(page, "chat-transcript")).not.toContainText(

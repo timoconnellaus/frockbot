@@ -1,6 +1,7 @@
 // The Shell's runtime Contribution: what it admits, what it records, and what
 // ends a Turn.
 import { describe, expect, test } from "bun:test";
+import Ajv from "ajv";
 import {
   type Session,
   type ToolCall,
@@ -435,6 +436,25 @@ describe("the conversation prompt section", () => {
         .schemas({ turnType: "chat" })
         .find((tool) => tool.name === SEND_TO_USER_TOOL_V1);
       const description = schema?.description ?? "";
+      const validate = new Ajv({ strict: false }).compile(schema!.inputSchema);
+      expect(
+        validate({
+          disposition: "finish",
+          payload: { type: "text", text: "Hi!" },
+        }),
+      ).toBe(true);
+      expect(
+        validate({ disposition: "finish", payload: { text: "Hi!" } }),
+      ).toBe(false);
+      expect(
+        validate({ disposition: "finish", payload: { type: "text" } }),
+      ).toBe(false);
+      expect(
+        validate({
+          disposition: "finish",
+          payload: { type: "invented", text: "Hi!" },
+        }),
+      ).toBe(false);
 
       expect(description).toContain("only way to say anything the user sees");
       // When to call it, not only what it does.

@@ -25,3 +25,5 @@ wrangler-logs/
 .lavish/
 
 .local-validation/
+
+.eval-results/

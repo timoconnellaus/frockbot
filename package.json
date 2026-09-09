@@ -45,7 +45,8 @@
     "validate:e2e": "bun scripts/validate.ts e2e",
     "validate:typecheck": "bun scripts/validate.ts typecheck",
     "validate:format": "bun scripts/validate.ts format",
-    "validate:build": "bun scripts/validate.ts build"
+    "validate:build": "bun scripts/validate.ts build",
+    "eval:greeting": "bun scripts/eval-greeting.ts"
   },
   "devDependencies": {
     "@types/bun": "1.4.0",

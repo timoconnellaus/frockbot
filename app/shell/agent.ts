@@ -194,6 +194,7 @@ const SEND_TO_USER_DESCRIPTION = [
   "call it to narrate a step or a tool, and never end your Turn leaving the",
   "user's question unanswered. Each call is one message; keep it short.",
   "The payload is one of:",
+  'payload.type is required on every send. A complete greeting call is {"disposition":"finish","payload":{"type":"text","text":"Hi! How can I help?"}}.',
   '{"type":"text","text":"…"}',
   '{"type":"attachment","url":"https://…","name":"…","mediaType":"…"}',
   '{"type":"widget","widget":{"prompt":"…","helpText":"…","options":["…"],"allowCustom":false,"dismissOnMoveOn":false}}',
@@ -219,6 +220,102 @@ const SEND_TO_USER_INPUT_SCHEMA = {
     payload: {
       type: "object",
       description: "One typed send payload, as described by this tool.",
+      required: ["type"],
+      properties: {
+        type: {
+          type: "string",
+          enum: [
+            "text",
+            "attachment",
+            "widget",
+            "secret-request",
+            "agent-card",
+            "approval",
+          ],
+        },
+      },
+      oneOf: [
+        {
+          type: "object",
+          properties: {
+            type: { const: "text" },
+            text: { type: "string", minLength: 1 },
+          },
+          required: ["type", "text"],
+          additionalProperties: false,
+        },
+        {
+          type: "object",
+          properties: {
+            type: { const: "attachment" },
+            url: { type: "string" },
+            name: { type: "string" },
+            mediaType: { type: "string" },
+          },
+          required: ["type", "url"],
+          additionalProperties: false,
+        },
+        {
+          type: "object",
+          properties: {
+            type: { const: "widget" },
+            widget: {
+              type: "object",
+              properties: {
+                prompt: { type: "string" },
+                helpText: { type: "string" },
+                options: {
+                  type: "array",
+                  items: { type: "string" },
+                  minItems: 1,
+                  maxItems: 6,
+                  uniqueItems: true,
+                },
+                allowCustom: { type: "boolean" },
+                dismissOnMoveOn: { type: "boolean" },
+              },
+              required: ["prompt", "options"],
+              additionalProperties: false,
+            },
+          },
+          required: ["type", "widget"],
+          additionalProperties: false,
+        },
+        {
+          type: "object",
+          properties: {
+            type: { const: "secret-request" },
+            prompt: { type: "string" },
+            secretName: { type: "string" },
+          },
+          required: ["type", "prompt", "secretName"],
+          additionalProperties: false,
+        },
+        {
+          type: "object",
+          properties: {
+            type: { const: "agent-card" },
+            agentId: { type: "string" },
+            title: { type: "string" },
+            body: { type: "string" },
+          },
+          required: ["type", "agentId", "title"],
+          additionalProperties: false,
+        },
+        {
+          type: "object",
+          properties: {
+            type: { const: "approval" },
+            approvalId: { type: "string" },
+            action: { type: "string" },
+            rationale: { type: "string" },
+            risk: { type: "string", enum: ["low", "medium", "high"] },
+            expiresInSeconds: { type: "integer", minimum: 1 },
+          },
+          required: ["type", "approvalId", "action", "risk"],
+          additionalProperties: false,
+        },
+      ],
     },
   },
   required: ["disposition", "payload"],
