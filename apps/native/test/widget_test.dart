@@ -307,6 +307,14 @@ void main() {
     await tester.pump();
 
     expect(transport.calls, ['send:send-1']);
+    expect(tester.widget<TextField>(composer).controller!.text, isEmpty);
+    expect(jsonDecode(store.values[controller.key]!)['draft'], '');
+
+    // A second tap on the same composer must not re-send the same words.
+    await tester.tap(find.byKey(const ValueKey('send')));
+    await tester.pump();
+    expect(transport.calls, ['send:send-1']);
+
     transport.completion.complete();
     await tester.pumpAndSettle();
     await tester.pumpWidget(const SizedBox());

@@ -92,8 +92,10 @@ class _ChatPaneState extends State<ChatPane> {
 
   Future<void> _send() async {
     if (!controller.canSend || editor.text.trim().isEmpty) return;
+    final text = editor.text;
     unawaited(HapticFeedback.lightImpact());
-    await controller.send(editor.text);
+    editor.value = editor.value.copyWith(composing: TextRange.empty);
+    await controller.send(text);
     if (mounted) focus.requestFocus();
   }
 
