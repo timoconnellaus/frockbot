@@ -45,6 +45,7 @@ interface UnreadView {
   count: number;
   unread: boolean;
   lastMessageId?: string;
+  unreadFromMessageId?: string;
   lastActivityCursor?: string;
   lastSeenCursor?: string;
 }
@@ -97,7 +98,13 @@ async function setNotifications(
  * has settled `failed` and released its lock. The provider rejects every model
  * call for this account, so the automation Turn cannot finish.
  */
-async function failedFiring(userId: string, botId: string): Promise<string> {
+async function failedFiring(
+  userId: string,
+  botId: string,
+  // Refuses the firing's Turn before admission, so the firing settles with no
+  // durable run at all — the pre-admission failure, which used to reach nobody.
+  options: { fenceAdmission?: boolean } = {},
+): Promise<string> {
   await expectOkJson(
     await postAsUser(userId, `/api/bots/${botId}/routines`, {
       schemaVersion: 1,
@@ -124,6 +131,15 @@ async function failedFiring(userId: string, botId: string): Promise<string> {
       dueAt,
     });
   });
+  if (options.fenceAdmission) {
+    await expectOkJson(
+      await postAsUser(
+        userId,
+        `/api/bots/${botId}/turns/rf-brief-${dueAt}/fence`,
+        { schemaVersion: 1, action: "fence-admission" },
+      ),
+    );
+  }
   let fireId: string | undefined;
   await vi.waitFor(
     async () => {
@@ -216,6 +232,71 @@ describe("a Routine firing that fails", () => {
 
     // And the message stays in the conversation after it has been read.
     expect(renderedMessages(await transcript(userId, botId))).toEqual(messages);
+
+    // UNREADING IT. The conversation offers "mark unread from here" on this
+    // message, so the boundary the device posts back is the id it rendered —
+    // and the cloud has to recognise it, or the action is one that can only
+    // ever fail on exactly the message this change added.
+    await expectOkJson(
+      await postAsUser(userId, `/api/bots/${botId}/unread`, {
+        schemaVersion: 1,
+        type: "bot/mark-unread",
+        commandId: `unread-${botId}`,
+        botId,
+        fromMessageId: messages[0]!.messageId,
+      }),
+    );
+    const reraised = await unreadView(userId, botId);
+    expect(reraised.unread).toBe(true);
+    expect(reraised.unreadFromMessageId).toBe(messages[0]!.messageId);
+    // Manual unread wakes nobody: it raises no alert of its own, and the one
+    // the message raised was cleared by the read before it.
+    expect(await notificationIds(userId)).toEqual([]);
+  });
+
+  it("is the same message when the firing never reached a run", async () => {
+    const userId = freshUserId("routine-unadmitted-message");
+    const botId = "routine-unadmitted-bot";
+    await provisionThroughGateway({
+      userId,
+      botId,
+      apiKey: OLLAMA_REVOKED_API_KEY,
+    });
+    await setNotifications(userId, botId, true);
+
+    const fireId = await failedFiring(userId, botId, { fenceAdmission: true });
+
+    // The Turn was refused before admission, so nothing ran: the record the
+    // conversation draws is the firing's own failure and no journal at all.
+    const stored = await listStoredRunsWithEventsV1<
+      RunProbe & { events: unknown[] }
+    >(userId, botId);
+    const refused = stored.find((run) => run.runId === fireId);
+    expect(refused?.events).toEqual([]);
+
+    // It is an ordinary message all the same: drawn in the conversation,
+    // counted unread, and alerted for exactly once.
+    const messages = renderedMessages(await transcript(userId, botId));
+    expect(messages.map((message) => message.messageId)).toEqual([
+      `${fireId}:send:0`,
+    ]);
+    expect(messages[0]!.text).toBeTruthy();
+    const badged = await unreadView(userId, botId);
+    expect(badged.count).toBe(1);
+    expect(badged.lastMessageId).toBe(`${fireId}:send:0`);
+    expect(await notificationIds(userId)).toHaveLength(1);
+
+    // Reading the conversation clears the badge it raised.
+    await expectOkJson(
+      await postAsUser(userId, `/api/bots/${botId}/unread`, {
+        schemaVersion: 1,
+        type: "bot/mark-read",
+        commandId: `read-${botId}`,
+        botId,
+        upToCursor: badged.lastActivityCursor,
+      }),
+    );
+    expect((await unreadView(userId, botId)).count).toBe(0);
   });
 
   it("stays readable when the Bot is muted, and wakes nobody", async () => {

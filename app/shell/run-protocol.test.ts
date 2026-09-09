@@ -991,6 +991,56 @@ describe("client run protocol v1", () => {
     ).toBeLessThanOrEqual(8_000);
   });
 
+  test("a firing's projected message is budgeted with the rest of its run", () => {
+    // A firing that ran 256 tool interactions fills the wire cap exactly, and
+    // then fails: the message saying so has no send event in the journal and
+    // is projected back in. Appending it to a page that was already at the cap
+    // put the run over the client's `maxItems`, which fails the decode of the
+    // whole transcript rather than losing one row.
+    const projected = projectClientRunV1(storedRun(toolEvents(256), "failed"), {
+      ordinal: 0,
+      text: "The Routine could not run.",
+    });
+
+    expect(projected.events.length).toBeLessThanOrEqual(512);
+    // The newest thing the person is waiting on is the message itself, and it
+    // keeps the ordinal it was named by; truncation drops history instead.
+    expect(projected.events.at(-1)).toEqual({
+      type: "send/to-user",
+      payload: { type: "text", text: "The Routine could not run." },
+      ordinal: 0,
+    });
+    expect(projected.events[0]).toMatchObject({
+      type: "run/events-truncated",
+    });
+  });
+
+  test("a projected message a run already journalled is not drawn twice", () => {
+    const spoke = storedRun(
+      [
+        event({
+          type: "send/to-user",
+          seq: 0,
+          timestamp,
+          turn: 1,
+          step: 1,
+          occurrenceId: "send:1:1:0",
+          payload: { type: "text", text: "the Routine's own answer" },
+        }),
+      ],
+      "failed",
+    );
+
+    const projected = projectClientRunV1(spoke, {
+      ordinal: 0,
+      text: "the Routine's own answer",
+    });
+
+    expect(
+      projected.events.filter((entry) => entry.type === "send/to-user"),
+    ).toHaveLength(1);
+  });
+
   test("uses the full boundary without splitting an interaction", () => {
     const atBoundary = projectClientRunListV1([storedRun(toolEvents(256))])
       .runs[0];

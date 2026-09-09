@@ -1688,33 +1688,68 @@ describe("Bot recovery", () => {
 
   /**
    * A firing refused before it was ever admitted — no model to mount, the
-   * object already busy — leaves no Turn, and a Turn is what the conversation
-   * draws. It is told the way a Turn that could not finish is told: an alert,
-   * and the durable inbox row behind it. A badge is raised only for a message
-   * the conversation can show, because a badge for a message that is not in
-   * the thread is one that opening the thread cannot clear.
+   * object already busy — records no Turn of its own, and a Turn is what the
+   * conversation is made of. It is still the same message every other thing a
+   * person is told is: the terminal record admission never wrote is written in
+   * its place, and the failure is drawn in the thread, counted unread, and
+   * cleared by reading it. Telling it through the Routines panel alone left a
+   * broken Routine reaching nobody's device at all.
    */
-  test("a firing that never reached a Turn alerts, and badges nothing", async () => {
+  test("a firing that never reached a Turn is still a message in the conversation", async () => {
     const { storage, contribution, identity } = await firedRoutineBot({
       notifications: true,
     });
 
-    expect((await storage.list({ prefix: MESSAGE_PREFIX })).size).toBe(0);
-    expect((await storage.list({ prefix: PUSH_OUTBOX_PREFIX })).size).toBe(0);
-    expect(await readUnread(contribution.state, identity)).toMatchObject({
-      count: 0,
-      unread: false,
-    });
+    const runs = (await contribution.listRuns()).runs;
+    expect(runs).toHaveLength(1);
+    const firing = runs[0]!;
+    expect(firing.status).toBe("failed");
+    const sends = firing.events.filter(
+      (event) => event.type === "send/to-user",
+    );
+    expect(sends).toHaveLength(1);
+    expect(sends[0]).toMatchObject({ ordinal: 0 });
+
+    // One message, one outbox entry the device drains, one alert.
+    expect((await storage.list({ prefix: MESSAGE_PREFIX })).size).toBe(1);
+    expect((await storage.list({ prefix: PUSH_OUTBOX_PREFIX })).size).toBe(1);
     const intents = await contribution.listNotifications();
     expect(intents).toHaveLength(1);
     expect(intents[0]!.body.length).toBeGreaterThan(0);
-    // And it is the Routines panel, not the transcript, that holds the record.
-    expect((await storage.list({ prefix: "routine-inbox:" })).size).toBe(1);
-    expect((await contribution.listRuns()).runs).toEqual([]);
 
-    // Settling again owes no second alert for a firing already told.
+    // The badge names the message the transcript drew, so opening the thread
+    // is what clears it.
+    expect(await readUnread(contribution.state, identity)).toMatchObject({
+      count: 1,
+      unread: true,
+      lastMessageId: `${firing.runId}:send:0`,
+    });
+
+    // The durable record the Routines panel holds is written either way.
+    expect((await storage.list({ prefix: "routine-inbox:" })).size).toBe(1);
+
+    // The conversation offers "mark unread from here" on this message, and the
+    // boundary it posts back is the id it drew — validated against the marker
+    // beside the message, because this run's journal holds no send at all.
+    const receipt = await executeUnreadCommand(contribution.state, identity, {
+      schemaVersion: 1,
+      type: "bot/mark-unread",
+      commandId: "unread-firing",
+      botId: identity.botId,
+      fromMessageId: `${firing.runId}:send:0`,
+    });
+    expect(receipt.unread).toMatchObject({
+      unreadFromMessageId: `${firing.runId}:send:0`,
+      manuallyUnread: true,
+    });
+
+    // Settling again owes no second message for a firing already told.
     await settleScheduledWork(contribution.state);
+    expect((await storage.list({ prefix: MESSAGE_PREFIX })).size).toBe(1);
     expect(await contribution.listNotifications()).toHaveLength(1);
+    expect(await readUnread(contribution.state, identity)).toMatchObject({
+      count: 1,
+    });
   });
 
   test("a muted Bot is woken by nothing a firing does", async () => {
@@ -1722,10 +1757,12 @@ describe("Bot recovery", () => {
       notifications: false,
     });
 
+    // Mute is the mute on alerting alone: the message is still there to read,
+    // and it is still counted.
     expect(await contribution.listNotifications()).toEqual([]);
-    expect((await storage.list({ prefix: MESSAGE_PREFIX })).size).toBe(0);
+    expect((await storage.list({ prefix: MESSAGE_PREFIX })).size).toBe(1);
     expect(await readUnread(contribution.state, identity)).toMatchObject({
-      count: 0,
+      count: 1,
     });
     // The durable record a person opens the panel to read is written either way.
     expect((await storage.list({ prefix: "routine-inbox:" })).size).toBe(1);

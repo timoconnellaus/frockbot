@@ -7,7 +7,11 @@ import {
   isPublicIdentifier,
 } from "@frockbot/core/configuration";
 import { NOTIFICATION_PREFIX, type BotIdentity } from "@frockbot/core/durable";
-import { PUSH_READ_KEY } from "@frockbot/app/notifications/storage-keys";
+import {
+  optionalProjectedSendV1,
+  PUSH_READ_KEY,
+  sentAutomationRunKeyV1,
+} from "@frockbot/app/notifications/storage-keys";
 import type { ShellBotStateV1 } from "./backend-state.js";
 import { runWorkingV1 } from "./reads.js";
 import { isVisibleRunV1 } from "./run-protocol.js";
@@ -923,15 +927,32 @@ export async function executeUnreadCommand(
       const [runId, kind, position] = command.fromMessageId.split(":");
       const run = await state.authority.readRun(runId!);
       const sessionId = await state.authority.readConversationSessionId();
-      if (
-        !run ||
-        (run.admission?.turnType !== "automation" &&
-          run.sessionId !== sessionId) ||
-        !isVisibleRunV1(run) ||
-        (kind === "send" &&
-          Number(position) >=
-            run.events.filter((event) => event.type === "send/to-user").length)
-      ) {
+      // A firing that broke before it could speak has no send event in its
+      // journal: the marker beside its message carries it, and that is what
+      // the transcript draws the message from. The boundary a person sends
+      // back names the message they were shown, so it is validated against
+      // the same fact rather than against a journal that never held it.
+      const projected = optionalProjectedSendV1(
+        await transaction.get<unknown>(sentAutomationRunKeyV1(runId!)),
+      );
+      const projects =
+        kind === "send" &&
+        projected !== undefined &&
+        Number(position) === projected.ordinal;
+      const inChat =
+        run === undefined
+          ? projects
+          : run.admission?.turnType === "automation" ||
+            run.sessionId === sessionId;
+      const drawn =
+        projects ||
+        (run !== undefined &&
+          isVisibleRunV1(run) &&
+          (kind !== "send" ||
+            Number(position) <
+              run.events.filter((event) => event.type === "send/to-user")
+                .length));
+      if (!inChat || !drawn) {
         throw new Error(
           "Unread boundary does not name a message in this Bot’s chat",
         );

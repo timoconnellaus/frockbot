@@ -32,3 +32,35 @@ export const SENT_AUTOMATION_RUN_PREFIX = "shell:sent-run:";
 export function sentAutomationRunKeyV1(runId: string): string {
   return `${SENT_AUTOMATION_RUN_PREFIX}${runId}`;
 }
+
+/**
+ * What one automation run left beside the message it contributed.
+ *
+ * Written in the same transaction as the message. Its presence is the fact
+ * the transcript scan needs — this firing spoke, so it belongs in the
+ * conversation — and `send`, when there is one, is the message itself for a
+ * run whose journal has no send event to project.
+ */
+export interface SentAutomationRunV1 {
+  schemaVersion: 1;
+  at: string;
+  send?: { ordinal: number; text: string };
+}
+
+/** A display read: an unrecognisable marker projects no send, never throws. */
+export function optionalProjectedSendV1(
+  value: unknown,
+): { ordinal: number; text: string } | undefined {
+  const send = (value as SentAutomationRunV1 | undefined)?.send;
+  if (
+    !send ||
+    typeof send !== "object" ||
+    !Number.isSafeInteger(send.ordinal) ||
+    send.ordinal < 0 ||
+    typeof send.text !== "string" ||
+    send.text.length === 0
+  ) {
+    return undefined;
+  }
+  return { ordinal: send.ordinal, text: send.text };
+}

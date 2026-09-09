@@ -6,8 +6,10 @@ import {
   decodeSessionEvent,
   type SessionEvent,
 } from "@frockbot/core/contracts";
-import { sentAutomationRunKeyV1 } from "@frockbot/app/notifications/storage-keys";
-import { optionalProjectedSendV1 } from "@frockbot/app/notifications/messages";
+import {
+  optionalProjectedSendV1,
+  sentAutomationRunKeyV1,
+} from "@frockbot/app/notifications/storage-keys";
 import type { StoredRunStatus } from "./backend-contracts.js";
 import type { ShellBotStateV1 } from "./backend-state.js";
 import {
@@ -146,38 +148,6 @@ export async function projectAnnouncementPage(state: ShellBotStateV1) {
   );
 }
 
-/**
- * One run, with the message its journal could not hold.
- *
- * A Routine firing that failed still owes the person the sentence saying so,
- * and it is an ordinary message: minted in the index, counted unread, pushed.
- * The run it belongs to had already ended when it was minted, so there is no
- * send event to project — the durable marker beside the message carries it,
- * and this puts it back where the transcript draws messages, under the exact
- * ordinal the message was named by.
- */
-function withProjectedSendV1(
-  run: ClientRunV1,
-  send: { ordinal: number; text: string } | undefined,
-): ClientRunV1 {
-  if (!send) return run;
-  const claimed = run.events.some(
-    (event) => event.type === "send/to-user" && event.ordinal === send.ordinal,
-  );
-  if (claimed) return run;
-  return {
-    ...run,
-    events: [
-      ...run.events,
-      {
-        type: "send/to-user",
-        payload: { type: "text", text: send.text },
-        ordinal: send.ordinal,
-      },
-    ],
-  };
-}
-
 export async function listRuns(
   state: ShellBotStateV1,
   input: unknown = { schemaVersion: 1 },
@@ -293,8 +263,11 @@ export async function listRuns(
         scanCursor = candidate.cursor;
         continue;
       }
-      const projected = withProjectedSendV1(
-        projectClientRunOrDegradedV1(stored.run),
+      // The message the firing's journal could not hold is projected with the
+      // run rather than appended to it, so it is budgeted with everything else
+      // the page carries.
+      const projected = projectClientRunOrDegradedV1(
+        stored.run,
         optionalProjectedSendV1(marker),
       );
       const tentative = [

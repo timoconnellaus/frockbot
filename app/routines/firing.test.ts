@@ -39,6 +39,25 @@ describe("the id a firing is admitted under", () => {
     );
   });
 
+  test("two long-named firings that a weak digest confused stay apart", () => {
+    // These two are a real collision under a 32-bit digest: the shortened ids
+    // were identical, so the kernel refused the second firing as a replay of
+    // the first and work a person asked for was silently dropped.
+    const left = routineFireIdV1(
+      LONG_ROUTINE_ID,
+      "manual-cd2d7b379cbdcdfd8260c5c2abea8c15",
+    );
+    const right = routineFireIdV1(
+      LONG_ROUTINE_ID,
+      "manual-a5051f84e3b2aac4503ae5d4040d81b5",
+    );
+    expect(left).not.toBe(right);
+    for (const id of [left, right]) {
+      expect(isPublicIdentifier(id)).toBe(true);
+      expect(id.length).toBeLessThanOrEqual(ROUTINE_FIRE_ID_MAX_LENGTH);
+    }
+  });
+
   test("the same occurrence mints the same id, so a retry is a replay", () => {
     expect(routineFireIdV1(LONG_ROUTINE_ID, LONG_DISCRIMINATOR)).toBe(
       routineFireIdV1(LONG_ROUTINE_ID, LONG_DISCRIMINATOR),

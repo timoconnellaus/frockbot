@@ -915,8 +915,53 @@ function runStatus(run: StoredRun): ClientRunStatusV1 {
   return requireStoredRunV1(run).status;
 }
 
-export function projectClientRunV1(run: StoredRun): ClientRunV1 {
+/**
+ * The message a run could not journal, put back where the transcript draws
+ * messages.
+ *
+ * A Routine firing that failed still owes the person the sentence saying so,
+ * and it is minted as an ordinary message after the run has already ended — so
+ * there is no send event in the journal and the durable marker beside the
+ * message carries it instead. It is appended to the journal the projection is
+ * budgeted over rather than to the finished projection, so it is truncated
+ * with everything else instead of pushing the run past the wire limit; and it
+ * is appended last, so its ordinal is the one the message was named by and
+ * truncation, which drops oldest first, never drops it.
+ */
+export interface ProjectedSendV1 {
+  ordinal: number;
+  text: string;
+}
+
+function withProjectedSendV1(
+  run: StoredRun,
+  send: ProjectedSendV1 | undefined,
+): readonly SessionEvent[] {
+  const events = run.events;
+  if (!send) return events;
+  const sends = events.filter((event) => event.type === "send/to-user").length;
+  if (sends > send.ordinal) return events;
+  const last = events.at(-1);
+  return [
+    ...events,
+    {
+      type: "send/to-user",
+      seq: (last?.seq ?? -1) + 1,
+      timestamp: last?.timestamp ?? run.acceptedAt,
+      turn: 0,
+      step: 0,
+      occurrenceId: `projected:${send.ordinal}`,
+      payload: { type: "text", text: send.text },
+    } satisfies SessionEvent,
+  ];
+}
+
+export function projectClientRunV1(
+  run: StoredRun,
+  projectedSend?: ProjectedSendV1,
+): ClientRunV1 {
   const status = runStatus(run);
+  const events = withProjectedSendV1(run, projectedSend);
   const outcome =
     status === "completed"
       ? ({
@@ -964,7 +1009,7 @@ export function projectClientRunV1(run: StoredRun): ClientRunV1 {
         ? ""
         : truncateWireString(run.input, MAX_INPUT_BYTES),
     status,
-    events: visibleEvents(run.events, status),
+    events: visibleEvents(events, status),
     ...(run.stopRequestedAt
       ? {
           stopRequestedAt: truncate(run.stopRequestedAt, MAX_TIMESTAMP_LENGTH),
@@ -1063,9 +1108,10 @@ export function projectClientTurnV1(result: BotTurnCompletion): ClientTurnV1 {
  */
 export function projectClientRunOrDegradedV1(
   run: StoredRun | UnreadableStoredRunV1,
+  projectedSend?: ProjectedSendV1,
 ): ClientRunV1 {
   try {
-    return projectClientRunV1(run as StoredRun);
+    return projectClientRunV1(run as StoredRun, projectedSend);
   } catch {
     const admittedAt =
       typeof run.acceptedAt === "string" &&
@@ -1078,7 +1124,17 @@ export function projectClientRunOrDegradedV1(
       admittedAt,
       input: typeof run.input === "string" ? run.input : "",
       status: "failed",
-      events: [],
+      // A record nobody can read still owes the person the message minted
+      // beside it: the marker is the message, not a reading of the journal.
+      events: projectedSend
+        ? [
+            {
+              type: "send/to-user",
+              payload: { type: "text", text: projectedSend.text },
+              ordinal: projectedSend.ordinal,
+            },
+          ]
+        : [],
       outcome: {
         type: "failed",
         message: "This Turn's record could not be read.",
@@ -1090,9 +1146,10 @@ export function projectClientRunOrDegradedV1(
 export function projectClientRunListV1(
   runs: readonly StoredRun[],
 ): ClientRunListV1 {
-  return createClientRunListV1(runs.map(projectClientRunV1), {
-    truncated: false,
-  });
+  return createClientRunListV1(
+    runs.map((run) => projectClientRunV1(run)),
+    { truncated: false },
+  );
 }
 
 export function createClientRunListV1(

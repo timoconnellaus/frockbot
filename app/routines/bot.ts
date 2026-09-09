@@ -585,9 +585,10 @@ async function runOneFiring(
  * ordinal on the firing's own run — past whatever the Turn had already said
  * before it broke, so no two messages of that run share an id — and the run
  * carries it into the transcript, where opening the conversation clears the
- * badge it raised. A firing that never reached a run has no conversation to
- * be read in, so it raises the alert alone rather than a count nothing can
- * clear.
+ * badge it raised. A firing refused before admission recorded no run at all,
+ * and a message needs one to belong to, so the terminal record admission did
+ * not write is written first: the failure is then the same message with the
+ * same badge, read the same way, rather than a second kind of thing.
  *
  * The firing keys the receipt, so a firing settled twice is one message.
  */
@@ -602,21 +603,16 @@ async function notifyFailedFiring(
   const receiptKey = routineFailureMessageKeyV1(fire.fireId);
   const createdAt = state.now().toISOString();
   const body = routineFailureSentenceV1(outcome.summary).slice(0, 240);
-  const run = await state.authority.readStoredRun(fire.fireId);
-  if (!run) {
-    if (!settings.notifications.enabled) return;
-    await state.authority.recordNotification({
-      notificationId: notificationIdV1("routine-failed", fire.fireId),
-      runId: fire.fireId,
-      createdAt,
-      title: `${settings.profile.name} could not run a Routine`,
-      body,
-    });
-    return;
-  }
-  const ordinal = run.events.filter(
-    (event) => event.type === "send/to-user",
-  ).length;
+  const run =
+    (await state.authority.readStoredRun(fire.fireId)) ??
+    (await state.authority.recordUnadmittedFailure({
+      command: routineTurnCommandV1(identity, fire, createdAt),
+      failure: outcome.summary ?? "the firing recorded no run",
+      snapshot: settings,
+    }));
+  const ordinal =
+    run?.events.filter((event) => event.type === "send/to-user").length ?? 0;
+  let committed = false;
   await state.ctx.storage.transaction(async (transaction) => {
     if (await transaction.get(receiptKey)) return;
     const records = await visibleMessageRecordsV1({
@@ -647,7 +643,12 @@ async function notifyFailedFiring(
       notificationId: notificationIdV1("routine-failed", fire.fireId),
       at: createdAt,
     });
+    committed = true;
   });
+  // The message is written here rather than through the Turn's own settlement,
+  // so the drain that a committed message wakes is asked for here too: a
+  // broken Routine reaches the device now, not on whatever alarm comes next.
+  if (committed) state.messagesCommitted();
 }
 
 /** Every Routine this Bot holds. Bot-scoped: the caller proved membership. */

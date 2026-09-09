@@ -2,12 +2,12 @@ import { describe, expect, test } from "bun:test";
 import { initializeBotSettingsV1 } from "@frockbot/core/configuration";
 import type { SessionEvent } from "@frockbot/core/contracts";
 import type { StoredRunV1 } from "@frockbot/core/durable";
+import { messageRecords, visibleMessageRecordsV1 } from "./messages.js";
 import {
-  messageRecords,
   optionalProjectedSendV1,
-  visibleMessageRecordsV1,
-} from "./messages.js";
-import { PUSH_OUTBOX_PREFIX, sentAutomationRunKeyV1 } from "./storage-keys.js";
+  PUSH_OUTBOX_PREFIX,
+  sentAutomationRunKeyV1,
+} from "./storage-keys.js";
 import {
   decodeUnreadStateV1,
   MESSAGE_PREFIX,
