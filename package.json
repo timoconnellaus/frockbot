@@ -37,7 +37,15 @@
     "format:check": "prettier --check .",
     "lint-staged": "lint-staged",
     "prepare": "husky",
-    "generate:protocol": "bun scripts/generate-typescript-protocol.ts && bun scripts/generate-dart-protocol.ts"
+    "generate:protocol": "bun scripts/generate-typescript-protocol.ts && bun scripts/generate-dart-protocol.ts",
+    "validate": "bun scripts/validate.ts",
+    "validate:unit": "bun scripts/validate.ts unit",
+    "validate:integration": "bun scripts/validate.ts integration",
+    "validate:runtime": "bun scripts/validate.ts runtime",
+    "validate:e2e": "bun scripts/validate.ts e2e",
+    "validate:typecheck": "bun scripts/validate.ts typecheck",
+    "validate:format": "bun scripts/validate.ts format",
+    "validate:build": "bun scripts/validate.ts build"
   },
   "devDependencies": {
     "@types/bun": "1.4.0",

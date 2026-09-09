@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # Reads changed paths, one per line, on stdin and exits 0 when every one of
 # them is documentation, 1 otherwise. This is the single definition of
-# "documentation only" that both the pre-commit hook and CI's `Classify
-# changes` job use, so the two can never disagree about what a change is.
+# "documentation only" used by the manual CI workflow.
 #
 # Documentation is `docs/**` and the Markdown files at the repository root.
 # Markdown anywhere else is deliberately code: a Package may ship a Skill or a

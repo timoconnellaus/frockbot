@@ -23,3 +23,5 @@ wrangler-logs/
 .native-build/
 .native-dev/
 .lavish/
+
+.local-validation/

@@ -1,0 +1,31 @@
+name: PR gate
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    name: PR gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Require a branch based on current main
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          git merge-base --is-ancestor "$BASE_SHA" HEAD || {
+            echo 'Rebase onto main, validate locally, and push again.'
+            exit 1
+          }
+          if test -n "$(git rev-list --merges "$BASE_SHA"..HEAD)"; then
+            echo 'Rebase the PR branch instead of merging main into it.'
+            exit 1
+          fi

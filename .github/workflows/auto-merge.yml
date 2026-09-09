@@ -5,7 +5,7 @@ name: Auto-merge
 # `release.yml`, which is what actually ships production.
 #
 # This only queues the merge. What holds it back is the branch ruleset on main
-# requiring the `Validate` and `Browser end-to-end` checks: GitHub merges the
+# requiring the `PR gate` check and strict up-to-date branches: GitHub merges the
 # pull request when they pass, and leaves it open when they do not. Without
 # that ruleset auto-merge has nothing to wait for and a pull request would
 # merge the moment it opened, so the ruleset is load-bearing, not decoration.

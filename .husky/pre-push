@@ -1,0 +1,1 @@
+bun scripts/validate.ts --pre-push "$1"
