@@ -54,7 +54,7 @@ import {
   type RoutineRunDetailViewV1,
 } from "@frockbot/app/routines/shared";
 import type { RoutineInboxEntryV1 } from "@frockbot/app/routines/inbox";
-import { routineFailureSentenceV1 } from "@frockbot/app/routines/inbox";
+import { routineFailureMessageV1 } from "@frockbot/app/routines/inbox";
 import { RoutineNotFoundError } from "@frockbot/app/routines/store";
 import type {
   RoutineCommandReceiptV1,
@@ -570,6 +570,27 @@ async function runOneFiring(
 }
 
 /**
+ * The name a message about a Routine calls it by.
+ *
+ * Falls back to the id when the record is gone or unreadable, for the same
+ * reason the scheduler's does: a message naming a Routine badly is worth more
+ * than one that names nothing, and a broken record must not cost the person
+ * the only thing telling them their automation has stopped.
+ */
+async function routineMessageNameV1(
+  state: ShellBotStateV1,
+  routineId: string,
+): Promise<string> {
+  const stored = await state.ctx.storage.get<unknown>(routineKeyV1(routineId));
+  if (stored === undefined) return routineId;
+  try {
+    return decodeRoutineRecordV1(stored).name;
+  } catch {
+    return routineId;
+  }
+}
+
+/**
  * Tell the person that a firing did not work.
  *
  * The scheduler has already written the durable completion-inbox entry in the
@@ -602,7 +623,6 @@ async function notifyFailedFiring(
   const settings = await readBotSettingsV1(state, identity);
   const receiptKey = routineFailureMessageKeyV1(fire.fireId);
   const createdAt = state.now().toISOString();
-  const body = routineFailureSentenceV1(outcome.summary).slice(0, 240);
   const run =
     (await state.authority.readStoredRun(fire.fireId)) ??
     (await state.authority.recordUnadmittedFailure({
@@ -610,6 +630,16 @@ async function notifyFailedFiring(
       failure: outcome.summary ?? "the firing recorded no run",
       snapshot: settings,
     }));
+  const body = routineFailureMessageV1({
+    routineName: await routineMessageNameV1(state, fire.routineId),
+    cancelled: outcome.status === "cancelled",
+    ...(run?.failure === undefined
+      ? outcome.summary === undefined
+        ? {}
+        : { failure: outcome.summary }
+      : { failure: run.failure }),
+    ...(run?.events === undefined ? {} : { events: run.events }),
+  }).slice(0, 240);
   const ordinal =
     run?.events.filter((event) => event.type === "send/to-user").length ?? 0;
   let committed = false;
@@ -623,9 +653,9 @@ async function notifyFailedFiring(
           messageId: messageIdV1(fire.fireId, ordinal),
           runId: fire.fireId,
           createdAt,
-          // The same sentence the inbox entry carries. A message is the one
-          // surface a person reads without asking for it, so it is the last
-          // place a kernel invariant belongs.
+          // Names the Routine and says why in the product's own words. A
+          // message is the one surface a person reads without asking for it,
+          // so it is the last place a kernel diagnostic belongs.
           body,
           automation: true,
           projectedSendOrdinal: ordinal,

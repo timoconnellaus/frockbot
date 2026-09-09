@@ -148,6 +148,67 @@ void main() {
     );
   });
 
+  group('a firing that broke before it could speak', () {
+    // The cloud tells the person as an ordinary message and projects it onto
+    // the run in place of the send the firing never made. Drawing the outcome's
+    // generic line underneath would be the same event said twice.
+    const said = '"Morning brief" did not run: The model couldn\'t finish '
+        'its reply. Try again.';
+    Map<String, dynamic> brokenFiring() => run(
+      runId: 'rf-brief',
+      status: 'failed',
+      // The cloud's notice for this run is the message it sent, word for word.
+      failure: said,
+      events: [
+        {
+          'type': 'send/to-user',
+          'payload': {'type': 'text', 'text': said},
+          'ordinal': 0,
+        },
+      ],
+    );
+
+    test('says what happened once', () {
+      final lines = projectRuns([brokenFiring()]);
+      expect(thread(lines), ['assistant: $said']);
+      // Nothing to press: the Turn nobody typed cannot be sent again.
+      expect(lines.where((line) => line.retry != null), isEmpty);
+    });
+
+    test('still draws the row the Turn hangs its work on', () {
+      // The message is drawn, the notice is not, and the run is still failed.
+      final closing = projectRuns([
+        brokenFiring(),
+      ]).firstWhere((line) => line.id == 'rf-brief:assistant');
+      expect(closing.status, LineStatus.error);
+      expect(closing.notice, isNull);
+      expect(closing.empty, isTrue);
+    });
+
+    test('leaves an ordinary broken reply saying why it broke', () {
+      // The suppression is only for the message that already is the failure. A
+      // reply that spoke and then broke keeps the reason under what it said.
+      final lines = projectRuns([
+        run(
+          runId: 'run-a',
+          input: 'Hello',
+          status: 'failed',
+          failure: "This Bot couldn't finish its reply. Try again.",
+          sentText: 'Half an answer',
+        ),
+      ]);
+      expect(thread(lines), [
+        'user: Hello',
+        'assistant: Half an answer',
+        "assistant: This Bot couldn't finish its reply.",
+      ]);
+      expect(
+        lines.where((line) => line.retry == LineRetry.resendTurn),
+        isNotEmpty,
+      );
+    });
+  });
+
   group('the order a thread is drawn in', () {
     /*
      * The production sweep: a message is sent, and while its reply is

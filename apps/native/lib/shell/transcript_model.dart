@@ -427,6 +427,17 @@ List<TranscriptLine> projectRuns(List<Map<String, dynamic>> runs) {
         // provider diagnostic and never crosses the wire at all. Reading a
         // field the wire does not carry made every failed Turn say the one
         // generic line, whatever had actually gone wrong.
+        //
+        // Unless the person has already been sent it. A firing that broke
+        // before it could speak is told as an ordinary message, and the cloud
+        // projects that message onto the run and makes the outcome say the
+        // same words; drawing them again underneath would be the one event
+        // said twice. The row stays — it is where the Turn's tools hang, and
+        // the run is still `failed` — it just says nothing of its own.
+        final message = outcome?['message'];
+        final spoken =
+            message is String &&
+            sends.any((send) => send.send.payload?['text'] == message);
         final failure = failureNotice(outcome?['message'] as String?);
         lines.add(
           TranscriptLine(
@@ -438,8 +449,8 @@ List<TranscriptLine> projectRuns(List<Map<String, dynamic>> runs) {
             text: text,
             at: admittedAt,
             status: LineStatus.error,
-            notice: failure.notice,
-            retry: failure.retry ? LineRetry.resendTurn : null,
+            notice: spoken ? null : failure.notice,
+            retry: !spoken && failure.retry ? LineRetry.resendTurn : null,
             tools: tools,
           ),
         );

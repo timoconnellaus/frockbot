@@ -24,6 +24,8 @@
 // and the `machine-result` variant is the registered machine's. Each new
 // producer widens this union rather than opening a second queue: two queues
 // would mean two drains, two receipts, and two chances to double-deliver.
+import type { SessionEvent } from "@frockbot/core/contracts";
+import { runFailureCopyV1 } from "../shell/run-failure-copy.js";
 import {
   isRoutineIdV1,
   RoutineDecodeError,
@@ -94,6 +96,36 @@ export function routineFailureSentenceV1(summary: string | undefined): string {
   }
   return text;
 }
+
+/**
+ * The message a person is *sent* when a firing did not work.
+ *
+ * The inbox entry is read in a list of Routines, where the row's own context
+ * says which automation it belongs to. A message is not: it arrives as a
+ * notification and sits in the conversation among ordinary replies, so it has
+ * to name the Routine itself — otherwise a broken automation reads as the Bot
+ * saying something unprompted.
+ *
+ * The sentence under the name is the product's own failure copy, the same one
+ * the transcript puts under a chat Turn that broke. A message is the one
+ * surface a person reads without asking for it, and `runFailureCopyV1` is
+ * where the rule that a provider's diagnostic never reaches a bubble lives;
+ * the diagnostic stays on the run-log row, which is where an operator looks.
+ */
+export function routineFailureMessageV1(input: {
+  routineName: string;
+  cancelled?: boolean;
+  failure?: string;
+  events?: readonly SessionEvent[];
+}): string {
+  const verb = input.cancelled ? "was stopped" : "did not run";
+  const copy = runFailureCopyV1({
+    ...(input.failure === undefined ? {} : { failure: input.failure }),
+    ...(input.events === undefined ? {} : { events: input.events }),
+  });
+  return `"${input.routineName}" ${verb}: ${copy}`;
+}
+
 /** Longest title a pending wake carries. */
 export const ROUTINE_WAKE_TITLE_MAX = 200;
 

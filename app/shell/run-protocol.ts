@@ -936,13 +936,13 @@ export interface ProjectedSendV1 {
 function withProjectedSendV1(
   run: StoredRun,
   send: ProjectedSendV1 | undefined,
-): readonly SessionEvent[] {
+): { events: readonly SessionEvent[]; spoken?: string } {
   const events = run.events;
-  if (!send) return events;
+  if (!send) return { events };
   const sends = events.filter((event) => event.type === "send/to-user").length;
-  if (sends > send.ordinal) return events;
+  if (sends > send.ordinal) return { events };
   const last = events.at(-1);
-  return [
+  const appended: readonly SessionEvent[] = [
     ...events,
     {
       type: "send/to-user",
@@ -954,6 +954,7 @@ function withProjectedSendV1(
       payload: { type: "text", text: send.text },
     } satisfies SessionEvent,
   ];
+  return { events: appended, spoken: send.text };
 }
 
 export function projectClientRunV1(
@@ -961,7 +962,7 @@ export function projectClientRunV1(
   projectedSend?: ProjectedSendV1,
 ): ClientRunV1 {
   const status = runStatus(run);
-  const events = withProjectedSendV1(run, projectedSend);
+  const { events, spoken } = withProjectedSendV1(run, projectedSend);
   const outcome =
     status === "completed"
       ? ({
@@ -974,8 +975,18 @@ export function projectClientRunV1(
             // The stored `failure` is a diagnostic and stays one: it is what
             // the debug surface reads. What crosses to a chat bubble is the
             // sentence written for the person — see `runFailureCopyV1`.
+            //
+            // Unless the person has already been sent that sentence. A firing
+            // that broke before it could speak is told as an ordinary message,
+            // projected back onto the run above; the notice is then the same
+            // event as the message, and saying it here in different words
+            // makes the thread draw the failure twice. The wire cannot carry a
+            // new field for this — the shipped client validates run events
+            // against an exact-key schema — so the notice *is* the message,
+            // word for word, and the thread draws a repeat once.
             message: truncateWireString(
-              runFailureCopyV1({ failure: run.failure, events: run.events }),
+              spoken ??
+                runFailureCopyV1({ failure: run.failure, events: run.events }),
               MAX_FAILURE_BYTES,
             ),
           } satisfies ClientRunOutcomeV1)
@@ -1137,7 +1148,10 @@ export function projectClientRunOrDegradedV1(
         : [],
       outcome: {
         type: "failed",
-        message: "This Turn's record could not be read.",
+        // The message the marker carries is what the person was told, so it is
+        // also what this Turn's notice says: an unreadable record is a fact
+        // for the debug surface, not a second thing to tell them.
+        message: projectedSend?.text ?? "This Turn's record could not be read.",
       },
     };
   }

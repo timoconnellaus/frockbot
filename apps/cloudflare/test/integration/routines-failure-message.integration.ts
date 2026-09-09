@@ -38,6 +38,7 @@ interface ClientRun {
     ordinal?: number;
     payload?: { type: string; text?: string };
   }>;
+  outcome?: { type: string; message?: string };
 }
 
 interface UnreadView {
@@ -202,6 +203,17 @@ describe("a Routine firing that fails", () => {
     expect(messages[0]!.text).toBeTruthy();
     expect(messages[0]!.text).not.toContain("401");
     expect(messages[0]!.text).not.toContain("model-error");
+    // It says which automation broke: a message arrives among ordinary
+    // replies, where an unattributed sentence reads as the Bot speaking up.
+    expect(messages[0]!.text).toContain('"Morning brief"');
+    expect(messages[0]!.text).toContain("did not run");
+    // And the Turn's own notice is that same message, word for word, which is
+    // what lets the thread draw the failure once instead of drawing the
+    // message with a second generic line underneath it.
+    expect(failed!.outcome).toEqual({
+      type: "failed",
+      message: messages[0]!.text,
+    });
 
     // THE BADGE names exactly the message the transcript drew. This is the
     // whole contract: the device only claims a read when the id the cloud
