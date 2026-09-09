@@ -94,6 +94,12 @@ class _ChatPaneState extends State<ChatPane> {
     if (!controller.canSend || editor.text.trim().isEmpty) return;
     final text = editor.text;
     unawaited(HapticFeedback.lightImpact());
+    // Android IMEs commonly hold a non-collapsed composing range over the word
+    // still being typed, and an explicit Send means the whole line goes now.
+    // Ending composition here is what lets `_update` mirror the cleared draft
+    // back into the composer: its guard skips a live composing range, so
+    // without this the words would stay on screen and a second tap would send
+    // them again as a new Turn.
     editor.value = editor.value.copyWith(composing: TextRange.empty);
     await controller.send(text);
     if (mounted) focus.requestFocus();
