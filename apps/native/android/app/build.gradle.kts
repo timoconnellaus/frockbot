@@ -13,9 +13,10 @@ val localDevelopment = (project.findProperty("dart-defines") as? String).orEmpty
 
 val existingDebugKey = file(System.getenv("FROCKBOT_ANDROID_KEYSTORE") ?: "${System.getProperty("user.home")}/.android/debug.keystore")
 check(existingDebugKey.isFile) { "Existing Android signing key is required. Never generate a replacement." }
-val installedCode = System.getenv("FROCKBOT_INSTALLED_VERSION_CODE")?.toIntOrNull()
-    ?: error("Read the installed Pixel versionCode with scripts/native-acceptance.sh before building.")
-check(flutter.versionCode > installedCode) { "The build must upgrade the installed versionCode." }
+val versionFloor = (System.getenv("FROCKBOT_ANDROID_VERSION_FLOOR")
+    ?: System.getenv("FROCKBOT_INSTALLED_VERSION_CODE"))?.toIntOrNull()
+    ?: error("Use scripts/native-update.py to select the release or patch baseline.")
+check(flutter.versionCode > versionFloor) { "The build must exceed the release's version floor." }
 
 android {
     namespace = "com.frockbot.mobile"

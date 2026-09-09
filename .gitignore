@@ -27,3 +27,6 @@ wrangler-logs/
 .local-validation/
 
 .eval-results/
+
+# Python delivery helper cache
+__pycache__/

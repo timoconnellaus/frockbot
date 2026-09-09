@@ -55,5 +55,13 @@
       "backgroundOsDelivery": "not-implemented-or-qualified",
       "supportedDistribution": "not-promoted"
     }
+  },
+  "shorebird": {
+    "cli": "1.6.120",
+    "flutter": "3.47.0",
+    "frameworkRevision": "cac7b89dba52c1b8086d211de9a86ad2219ea8ac",
+    "engineRevision": "5a91274d10582c35d6df695511e327879664e35c",
+    "status": "signed-patch-offline-and-rollback-verified-on-android-emulator",
+    "ledger": "docs/research/shorebird-qualification-2026-09-09.md"
   }
 }
