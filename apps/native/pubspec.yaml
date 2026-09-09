@@ -33,6 +33,7 @@ flutter:
   uses-material-design: true
   assets:
     - assets/sheep/
+    - shorebird.yaml
   fonts:
     - family: Manrope
       fonts:
