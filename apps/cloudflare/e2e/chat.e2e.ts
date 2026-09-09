@@ -76,6 +76,22 @@ function says(text: string): string {
   });
 }
 
+/**
+ * The same, as an interim update rather than the reply that ends the Turn.
+ *
+ * `disposition: "finish"` hands the Turn back the moment the send is
+ * delivered, so a spec that needs the Bot to still be working *after* it has
+ * spoken — a bubble beside the working row, or the model's own text on the
+ * call that follows a delivery — has to script the send it makes as the
+ * interim update it is.
+ */
+function saysWhileWorking(text: string): string {
+  return e2eToolCallPrompt("send_to_user", {
+    disposition: "continue",
+    payload: { type: "text", text },
+  });
+}
+
 /** Every bubble the Bot sent, in the order it sent them. */
 function sends(page: Page): Locator {
   return sem(page, "chat-transcript").locator(
@@ -299,7 +315,13 @@ test("an explicit send appears while model text stays private", async () => {
   await createBot(page, "Streamer");
 
   await setFakeOllamaChatMode(page, ollamaBaseUrl, "streaming");
-  await beginTurn(page, "Say it as you think of it");
+  // The send is scripted as an interim update: a `finish` send ends the Turn
+  // on delivery, and the window this test is about is the model call that
+  // comes *after* a send — which is where the fake writes its private text.
+  await beginTurn(
+    page,
+    `Say it as you think of it\n${saysWhileWorking(E2E_ASSISTANT_REPLY)}`,
+  );
 
   // Latched rather than asserted at one instant: the Turn settles on its own
   // schedule, and the claim is that the delivered send was drawn while the
@@ -408,7 +430,7 @@ test("the working avatar sits below the bubbles and never shifts them", async ()
   // is drawn when the first call returns, and the second call is still open
   // behind it, which is a bubble and the working row on screen together.
   await setFakeOllamaChatMode(page, ollamaBaseUrl, "slow");
-  await beginTurn(page, `say it slowly\n${says("Half a thought")}`);
+  await beginTurn(page, `say it slowly\n${saysWhileWorking("Half a thought")}`);
 
   // Latched rather than asserted at an instant: the geometry is read the first
   // time a bubble and the working row are both drawn, whenever that happens.
