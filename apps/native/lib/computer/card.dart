@@ -9,11 +9,13 @@
 library;
 
 import 'dart:async';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
 import '../orientation.dart';
 import '../shell/semantics.dart';
+import '../theme/frock_theme.dart';
 import '../theme/states.dart';
 import '../view/embed.dart';
 import '../view/host_frame.dart';
@@ -30,16 +32,21 @@ class ComputerViewerFrame extends StatelessWidget {
   /// The one client-visible input fence. The card never asks for control, so
   /// its URL is always the view-only one.
   final bool controlling;
+  final bool fullscreen;
   const ComputerViewerFrame({
     super.key,
     required this.viewerUrl,
     this.controlling = false,
+    this.fullscreen = false,
   });
 
   @override
   Widget build(BuildContext context) {
     final url = viewerUrlForControlV1(viewerUrl, controlling);
     return HostFrame(
+      borderRadius: fullscreen
+          ? BorderRadius.zero
+          : const BorderRadius.all(Radius.circular(12)),
       url: url,
       label: controlling ? 'Computer' : 'Computer, live',
       identity: url,
@@ -315,25 +322,72 @@ class ComputerViewerPage extends StatefulWidget {
   State<ComputerViewerPage> createState() => _ComputerViewerPageState();
 }
 
-class _ComputerViewerPageState extends State<ComputerViewerPage> {
+class _ComputerViewerPageState extends State<ComputerViewerPage>
+    with WidgetsBindingObserver {
   ComputerController get controller => widget.controller;
+  ui.FlutterView? _view;
+  bool _landscape = false;
+  bool _wasLandscape = false;
+  bool _closing = false;
+  bool _showTakeControl = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     unawaited(setMobileOrientation(computerOpen: true));
     controller.addListener(_repaint);
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    unawaited(setComputerFullscreen(false));
     unawaited(setMobileOrientation());
     controller.removeListener(_repaint);
     super.dispose();
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _view = View.of(context);
+    _updateOrientation();
+  }
+
+  @override
+  void didChangeMetrics() => _updateOrientation();
+
+  void _updateOrientation() {
+    if (!isNativeMobile || _view == null || _closing) return;
+    // Keyboard insets change the available layout, not the device orientation.
+    final size = _view!.physicalSize;
+    if (size.isEmpty) return;
+    final landscape = size.width > size.height;
+    if (_landscape != landscape) {
+      setState(() => _landscape = landscape);
+      unawaited(setComputerFullscreen(landscape));
+    }
+    if (landscape) {
+      _wasLandscape = true;
+    } else if (_wasLandscape) {
+      _closing = true;
+      final route = ModalRoute.of(context)!;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !route.isActive) return;
+        final navigator = Navigator.of(context);
+        navigator.popUntil((candidate) => candidate == route);
+        navigator.pop();
+      });
+    }
+  }
+
   void _repaint() {
-    if (mounted) setState(() {});
+    if (mounted) {
+      setState(() {
+        if (controller.state.phase == 'human-control') _showTakeControl = false;
+      });
+    }
   }
 
   /// Take control opens local confirmation and cannot reach the Bot until the
@@ -371,93 +425,175 @@ class _ComputerViewerPageState extends State<ComputerViewerPage> {
     // The one sentence this window has: what the Computer said, or what
     // refused to say it.
     final said = controller.failure ?? state.message;
-    final human = controller.takingControl || state.phase == 'human-control';
+    final human = state.phase == 'human-control';
     final opening = state.phase == 'provisioning' || state.phase == 'updating';
     final url = state.viewerUrl;
+    final actions = <Widget>[
+      if (human)
+        identified(
+          ComputerIds.releaseControl,
+          TextButton(
+            onPressed: controller.busy
+                ? null
+                : () => unawaited(controller.releaseControl()),
+            child: const Text('Release control'),
+          ),
+        )
+      else if (state.phase == 'disconnected')
+        identified(
+          ComputerIds.reconnect,
+          TextButton(
+            onPressed: controller.busy
+                ? null
+                : () => unawaited(controller.command('connect')),
+            child: const Text('Reconnect'),
+          ),
+        )
+      else if (url != null && !opening)
+        identified(
+          ComputerIds.takeControl,
+          TextButton(
+            onPressed: controller.busy || state.phase == 'taking-control'
+                ? null
+                : () => unawaited(_confirmTakeControl()),
+            child: Text(
+              state.phase == 'taking-control' ? 'Pausing Bot…' : 'Take control',
+            ),
+          ),
+        ),
+    ];
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Computer'),
-        actions: [
+      appBar: _landscape
+          ? null
+          : AppBar(
+              title: const Text('Computer'),
+              actions: actions,
+              // What the Computer is doing, under the chrome rather than inside it:
+              // an app bar is a few words wide on a phone, and the phase is a
+              // sentence.
+              bottom: PreferredSize(
+                preferredSize: const Size.fromHeight(28),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: identified(
+                      ComputerIds.phase,
+                      Text(
+                        said,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          identified(
+            ComputerIds.viewer,
+            SafeArea(
+              left: !_landscape,
+              top: !_landscape,
+              right: !_landscape,
+              bottom: !_landscape,
+              child: url == null || opening
+                  ? opening
+                        ? Center(
+                            child: Padding(
+                              padding: const EdgeInsets.all(24),
+                              child: ConstrainedBox(
+                                constraints: const BoxConstraints(
+                                  maxWidth: 420,
+                                ),
+                                child: ComputerOpening(state: state),
+                              ),
+                            ),
+                          )
+                        : FrockEmptyState(
+                            icon: Icons.desktop_windows_outlined,
+                            title: 'No computer',
+                            detail: said,
+                            action: 'Try again',
+                            onAction: () => unawaited(controller.read()),
+                          )
+                  : ComputerViewerFrame(
+                      viewerUrl: url,
+                      controlling: human,
+                      fullscreen: _landscape,
+                    ),
+            ),
+          ),
+          if (url != null && !opening && !human)
+            SafeArea(
+              left: !_landscape,
+              top: !_landscape,
+              right: !_landscape,
+              bottom: !_landscape,
+              child: Semantics(
+                label: 'Show Computer controls',
+                button: true,
+                child: GestureDetector(
+                  key: const ValueKey('computer-view-only-tap'),
+                  behavior: HitTestBehavior.opaque,
+                  onTap: controller.busy
+                      ? null
+                      : () => setState(
+                          () => _showTakeControl = !_showTakeControl,
+                        ),
+                ),
+              ),
+            ),
+          if (_showTakeControl && url != null && !opening && !human)
+            Center(
+              child: SafeArea(
+                child: Material(
+                  color: Theme.of(context).colorScheme.surface,
+                  borderRadius: BorderRadius.circular(16),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          controller.failure ??
+                              'Pause the Bot and use its computer.',
+                        ),
+                        const SizedBox(height: 12),
+                        FilledButton(
+                          key: const ValueKey('computer-tap-take-control'),
+                          onPressed:
+                              controller.busy || state.phase == 'taking-control'
+                              ? null
+                              : () => unawaited(controller.takeControl()),
+                          child: Text(
+                            controller.busy || state.phase == 'taking-control'
+                                ? 'Pausing Bot…'
+                                : 'Take control',
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
           if (human)
-            identified(
-              ComputerIds.releaseControl,
-              TextButton(
-                onPressed: controller.busy
-                    ? null
-                    : () => unawaited(controller.releaseControl()),
-                child: const Text('Release control'),
-              ),
-            )
-          else if (state.phase == 'disconnected')
-            identified(
-              ComputerIds.reconnect,
-              TextButton(
-                onPressed: controller.busy
-                    ? null
-                    : () => unawaited(controller.command('connect')),
-                child: const Text('Reconnect'),
-              ),
-            )
-          else if (url != null && !opening)
-            identified(
-              ComputerIds.takeControl,
-              TextButton(
-                onPressed: controller.busy || state.phase == 'taking-control'
-                    ? null
-                    : () => unawaited(_confirmTakeControl()),
-                child: Text(
-                  state.phase == 'taking-control'
-                      ? 'Pausing Bot…'
-                      : 'Take control',
+            IgnorePointer(
+              child: Semantics(
+                label: 'You are controlling the computer',
+                child: DecoratedBox(
+                  key: const ValueKey('computer-control-border'),
+                  decoration: BoxDecoration(
+                    border: Border.all(color: FrockTheme.accent, width: 3),
+                  ),
                 ),
               ),
             ),
         ],
-        // What the Computer is doing, under the chrome rather than inside it:
-        // an app bar is a few words wide on a phone, and the phase is a
-        // sentence.
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(28),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: identified(
-                ComputerIds.phase,
-                Text(
-                  said,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-      body: identified(
-        ComputerIds.viewer,
-        SafeArea(
-          child: url == null || opening
-              ? opening
-                    ? Center(
-                        child: Padding(
-                          padding: const EdgeInsets.all(24),
-                          child: ConstrainedBox(
-                            constraints: const BoxConstraints(maxWidth: 420),
-                            child: ComputerOpening(state: state),
-                          ),
-                        ),
-                      )
-                    : FrockEmptyState(
-                        icon: Icons.desktop_windows_outlined,
-                        title: 'No computer',
-                        detail: said,
-                        action: 'Try again',
-                        onAction: () => unawaited(controller.read()),
-                      )
-              : ComputerViewerFrame(viewerUrl: url, controlling: human),
-        ),
       ),
     );
   }
