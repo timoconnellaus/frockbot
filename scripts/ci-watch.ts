@@ -185,12 +185,16 @@ export async function releaseReport(
   gh: GitHubJson,
   tag: string,
 ): Promise<WatchReport> {
+  const mac = tag.startsWith("mac-v");
+  const requiredJobs = mac
+    ? ["Qualify Mac desktop", "Create Mac release draft"]
+    : PRODUCTION_JOBS;
   const runs = list(
     await gh([
       "run",
       "list",
       "--workflow",
-      "release.yml",
+      mac ? "mac-release.yml" : "release.yml",
       "--json",
       "databaseId,headBranch,status,conclusion,url",
       "--limit",
@@ -255,19 +259,44 @@ export async function releaseReport(
   // A completed, unfailed run still has to have deployed. A release that
   // published packages and never ran the deploy jobs looks like a success
   // everywhere except production.
-  const deployed = PRODUCTION_JOBS.filter((name) =>
+  const deployed = requiredJobs.filter((name) =>
     jobs.some(
       (job) =>
         text(job.name) === name &&
         text(job.conclusion).toUpperCase() === "SUCCESS",
     ),
   );
-  if (deployed.length < PRODUCTION_JOBS.length) {
-    const missing = PRODUCTION_JOBS.filter((name) => !deployed.includes(name));
+  if (deployed.length < requiredJobs.length) {
+    const missing = requiredJobs.filter((name) => !deployed.includes(name));
     return {
       status: "failed",
-      summary: `${tag} completed without deploying production`,
+      summary: mac
+        ? `${tag} completed without Mac qualification`
+        : `${tag} completed without deploying production`,
       detail: [`no successful run of: ${missing.join(", ")}`, url],
+    };
+  }
+  if (mac) {
+    const release = record(
+      await gh(["release", "view", tag, "--json", "isDraft,url,assets"]),
+      "Mac release",
+    );
+    const archive = list(release.assets)
+      .map((asset) => record(asset, "release asset"))
+      .find(
+        (asset) =>
+          text(asset.name) === "FrockBot-macos.zip" && Number(asset.size) > 0,
+      );
+    if (release.isDraft !== false || !archive)
+      return {
+        status: "pending",
+        summary: `${tag} qualified; awaiting the published signed Mac download`,
+        detail: [text(release.url) || url],
+      };
+    return {
+      status: "passed",
+      summary: `${tag} Mac download published`,
+      detail: [text(release.url) || url],
     };
   }
   return {

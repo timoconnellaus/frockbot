@@ -29,6 +29,7 @@ import '../connections/page.dart';
 import '../flock/create.dart';
 import '../flock/lifecycle.dart';
 import '../machines/page.dart';
+import '../machines/mac_messages.dart';
 import '../packages/catalog.dart';
 import '../packages/frame.dart';
 import '../plugins/page.dart';
@@ -129,6 +130,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    unawaited(macMessages.configure(widget.userId));
     WidgetsBinding.instance.addObserver(this);
     activity.addListener(_repaint);
     widget.botLinks.addListener(_followBotLink);
@@ -1383,6 +1385,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    unawaited(macMessages.stop(widget.userId));
     WidgetsBinding.instance.removeObserver(this);
     widget.botLinks.removeListener(_followBotLink);
     _activityTimer?.cancel();

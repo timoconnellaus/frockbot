@@ -105,7 +105,7 @@ function machineNode(machine: MachineListEntryV1, now: string): ViewNode {
       ...(machine.revokedAt
         ? [
             status(
-              "This machine's key is retired. Pair it again from the FrockBot desktop app to bring it back.",
+              "This machine's key is retired. Pair it again from the FrockBot Mac app to bring it back.",
             ),
           ]
         : [
@@ -140,6 +140,10 @@ export function machinesDocumentV1(view: MachineListViewV1): ViewDocument {
           type: "text",
           text: "Your computers are devices running the FrockBot desktop app. Each is separate from your Bot’s hosted Computer. A Bot can read its files and run commands on it only while that app is open, and only after you approve each action.",
         },
+        {
+          type: "text",
+          text: "The Mac app is distributed directly, outside the Mac App Store. It connects Messages on your Mac while open. Your phone and web app control the connection remotely; they do not read the Mac’s Messages database. Requested message content is shared with FrockBot and your Bots’ AI providers only after you enable Messages sharing. Each send requires your approval.",
+        },
         // The count is the summary that sits under the title.
         // With nothing registered there is nothing to summarise, and the list
         // below already says so once.
@@ -165,7 +169,7 @@ export function machinesDocumentV1(view: MachineListViewV1): ViewDocument {
               },
             },
             status(
-              "You get a code here, once, and paste it into the FrockBot desktop app on the machine you want to register.",
+              "You get a code here, once, and paste it into the FrockBot Mac app on the machine you want to register.",
             ),
             {
               type: "action",

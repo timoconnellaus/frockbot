@@ -144,7 +144,13 @@ describe("permissions", () => {
         fullDiskAccess: false,
       }),
     ).toBe(false);
-    // Reading is Full Disk Access; sending additionally needs Automation.
+    // Reading and sending use independent macOS permissions.
+    expect(
+      machineMessagesPermittedV1(send, {
+        ...permissions,
+        fullDiskAccess: false,
+      }),
+    ).toBe(true);
     expect(
       machineMessagesPermittedV1(send, { ...permissions, automation: false }),
     ).toBe(false);

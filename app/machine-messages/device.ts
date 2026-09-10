@@ -4,10 +4,10 @@
 // `chat.db`, the Apple-epoch arithmetic, the row shapes, the AppleScript a send
 // composes, and every classification decision — which outcome a missing
 // attachment gets, what a denied permission answers, what `truncated` means —
-// all live here, in a Package, under `bun test`. What is left for
-// `apps/desktop/src/main` is three verbs it cannot avoid being Node for:
-// opening a SQLite file read-only, running `osascript`, and reading bytes off a
-// disk.
+// all live here, in a Package, under `bun test`. What is left for the bundled
+// `apps/mac-messages` helper is three verbs it cannot avoid running on the Mac
+// for: opening a SQLite file read-only, handing an AppleScript to the app host
+// that owns Automation consent, and reading bytes off a disk.
 //
 // Two rules this file exists to hold:
 //
@@ -44,9 +44,9 @@ export interface MachineMessagesQueryRequestV1 {
 /**
  * The only authority a Messages call has over the Mac.
  *
- * Four verbs, and none of them takes a decision. `apps/desktop` implements it
- * with `node:sqlite`, `osascript` and `node:fs`; a plain object implements it
- * in a test, which is why every line above it runs in CI.
+ * Four verbs, and none of them takes a decision. `apps/mac-messages` implements
+ * it with `bun:sqlite`, `node:fs` and the Swift host's Apple Events; a plain
+ * object implements it in a test, which is why every line above it runs in CI.
  */
 export interface MachineMessagesDeviceSeamV1 {
   /** Whether macOS has granted Full Disk Access and Automation, right now. */
@@ -341,9 +341,6 @@ export function createMachineMessagesDeviceRunnerV1(
       if (call.kind === "check-permissions") {
         return ok({ kind: "permissions", permissions });
       }
-      if (!permissions.fullDiskAccess) {
-        return refuse(MACHINE_MESSAGES_FULL_DISK_REFUSAL_V1);
-      }
       if (call.kind === "send") {
         if (!permissions.automation) {
           return refuse(MACHINE_MESSAGES_AUTOMATION_REFUSAL_V1);
@@ -353,6 +350,9 @@ export function createMachineMessagesDeviceRunnerV1(
           signal,
         );
         return ok({ kind: "sent", to: call.to, at: at() });
+      }
+      if (!permissions.fullDiskAccess) {
+        return refuse(MACHINE_MESSAGES_FULL_DISK_REFUSAL_V1);
       }
       const rows = await options.seam.query(
         machineMessagesQueryV1(call),

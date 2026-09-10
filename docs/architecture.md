@@ -14,7 +14,7 @@ Five Workers, two container images, one Flutter client — on the web and on the
 | `apps/computer-host` | `frockbot-computer-host` | `apps/computer-host/wrangler.jsonc` | No routes; reached only through the app's `COMPUTER_HOST` service binding. Fronts a Cloudflare Container built from `apps/computer-host/Dockerfile` (`node:24-slim`, `instance_type: basic`, `max_instances: 3`).                                                                                                                  |
 | `apps/applet-build`  | `frockbot-applet-build`  | `apps/applet-build/wrangler.jsonc`  | No routes; reached only through the app's `APPLET_BUILD` service binding. Fronts a Cloudflare Container built from `apps/applet-build/Dockerfile` (`node:24-slim`, `instance_type: standard`, `max_instances: 3`, no egress) that runs the Applets SDK's build pipeline. `applet_check` and `applet_publish` are its only callers. |
 | `apps/marketing`     | `frockbot-marketing`     | `apps/marketing/wrangler.jsonc`     | `frockbot.com` and `www.frockbot.com`. Static `ASSETS` from `./public` with `run_worker_first: true`; the Worker is a canonical-host redirect plus security headers (`apps/marketing/src/index.ts:1-31`).                                                                                                                          |
-| `apps/native`        | `frockbot_native`        | `apps/native/pubspec.yaml`          | The client. Its web build ships as the app Worker's `assets` payload, so `bot.frockbot.com` is deployed by `apps/cloudflare`. The Android and macOS builds are not deployed by CI.                                                                                                                                                 |
+| `apps/native`        | `frockbot_native`        | `apps/native/pubspec.yaml`          | The client. Its web build ships as the app Worker's `assets` payload, so `bot.frockbot.com` is deployed by `apps/cloudflare`. Neither the Android nor the macOS build is deployed by CI; the macOS build is qualified by `.github/workflows/mac-release.yml` and distributed as a signed download from a `mac-v*` GitHub release.  |
 
 Named environments on the app Worker (`apps/cloudflare/wrangler.jsonc`):
 
@@ -925,5 +925,15 @@ On pull request `opened`, `reopened` and `ready_for_review`. Skips drafts and fo
 
 Manual dispatch only. The advisory job retains native pin checking, analysis,
 tests and web build checks for explicit qualification runs.
+
+### `.github/workflows/mac-release.yml`
+
+On pull requests touching the Mac desktop path and on push of a tag matching
+`mac-v*.*.*`. `qualify` runs on macOS: the `@frockbot/mac-messages` typecheck,
+the machine and Messages test files, `scripts/mac-release-test.py`, the Flutter
+Mac Messages test, and an unsigned `scripts/mac-release.py` build. On a tag,
+`draft` creates a draft GitHub release only; the signed, notarized archive is
+built and uploaded by hand. Mac tags ship independently of the `v*.*.*` cloud
+release. See [the Mac release guide](../apps/native/macos/README.md).
 
 ---
