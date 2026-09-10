@@ -42,7 +42,8 @@ Future<void> main() async {
 
 class FrockBotApp extends StatefulWidget {
   final LocalStore? store;
-  const FrockBotApp({super.key, this.store});
+  final NativeApi? api;
+  const FrockBotApp({super.key, this.store, this.api});
   @override
   State<FrockBotApp> createState() => _FrockBotAppState();
 }
@@ -51,7 +52,7 @@ class _FrockBotAppState extends State<FrockBotApp> {
   final navigatorKey = GlobalKey<NavigatorState>();
   final botLinks = ValueNotifier<String?>(null);
   late final LocalStore store = widget.store ?? nativeStore();
-  late final NativeApi api = NativeApi(store);
+  late final NativeApi api = widget.api ?? NativeApi(store);
   late final SignIn auth = signInV1(api, store);
   late final BotSessions sessions = BotSessions(api: api, store: store);
   StreamSubscription<Uri>? links;
@@ -129,10 +130,21 @@ class _FrockBotAppState extends State<FrockBotApp> {
         });
       }
     } on RequestFailure catch (failure) {
-      // Nobody is signed in yet, which is what the sign-in door is for. Saying
-      // so as an error is the first thing a new person would read.
-      final unauthenticated = failure.status == 401 && userId == null;
-      if (mounted && !unauthenticated) {
+      if (failure.status == 401) {
+        // A bearer may expire or be revoked while the cached shell is still
+        // perfectly readable. Keeping that shell open makes every transcript
+        // read and state-channel reconnect look like a network outage, with no
+        // route back to authentication.
+        await store.delete('session');
+        api.adoptSession(null);
+        sessions.clear();
+        if (mounted) {
+          setState(() {
+            userId = null;
+            error = null;
+          });
+        }
+      } else if (mounted) {
         setState(() => error = failure.message);
       }
     } catch (_) {
