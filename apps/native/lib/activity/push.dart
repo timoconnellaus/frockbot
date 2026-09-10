@@ -86,7 +86,7 @@ class PushController {
   /// The presence lease is a claim a focused device makes, and every focus and
   /// lifecycle transition registers directly. Renewing it while the app is away
   /// renews nothing — `register` claims no Bot when it is not focused — and
-  /// cost an HTTPS round trip and a Durable Object write every five seconds for
+  /// cost an HTTPS round trip and a Durable Object write every six seconds for
   /// the life of the process. The renewal runs only while there is a lease to
   /// hold open.
   void _renewWhileFocused() {
@@ -96,8 +96,10 @@ class PushController {
       timer = null;
       return;
     }
+    // Renew twice within the 15-second lease without hitting the dev proxy's
+    // five-second keep-alive race: cloudflare/workers-sdk#15452.
     timer = Timer.periodic(
-      const Duration(seconds: 5),
+      const Duration(seconds: 6),
       (_) => unawaited(register()),
     );
   }

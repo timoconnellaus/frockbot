@@ -125,9 +125,13 @@ void main() {
     },
   );
 
-  test(
+  testWidgets(
     'the presence lease is renewed while focused and not while away',
-    () async {
+    (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+      addTearDown(() {
+        debugDefaultTargetPlatformOverride = null;
+      });
       final store = MemoryStore();
       final registrations = <Map<String, dynamic>>[];
       final api = SettingsApi(store, (path, body) async {
@@ -139,11 +143,24 @@ void main() {
       });
       final activity = ActivityController(api, store, 'tim');
       final push = PushController(api, store, 'tim', activity);
+      var cleanedUp = false;
+      addTearDown(() {
+        if (cleanedUp) return;
+        push.dispose();
+        activity.dispose();
+        api.close();
+      });
       push.reading('alpha');
       await push.start();
 
       // Focused, the device claims a Bot and holds the lease open.
       expect(push.timer, isNotNull);
+      expect(registrations.last['activeBotId'], 'alpha');
+      final initialRegistrations = registrations.length;
+      await tester.pump(const Duration(seconds: 5));
+      expect(registrations, hasLength(initialRegistrations));
+      await tester.pump(const Duration(seconds: 1));
+      expect(registrations, hasLength(initialRegistrations + 1));
       expect(registrations.last['activeBotId'], 'alpha');
 
       // Away, it claims nothing — and there is nothing left to renew, so no
@@ -152,6 +169,9 @@ void main() {
       await push.register();
       expect(push.timer, isNull);
       expect(registrations.last.containsKey('activeBotId'), isFalse);
+      final awayRegistrations = registrations.length;
+      await tester.pump(const Duration(seconds: 18));
+      expect(registrations, hasLength(awayRegistrations));
 
       // Coming back registers immediately and reopens the renewal.
       push.lifecycle(true);
@@ -159,9 +179,11 @@ void main() {
       expect(push.timer, isNotNull);
       expect(registrations.last['activeBotId'], 'alpha');
 
+      cleanedUp = true;
       push.dispose();
       activity.dispose();
       api.close();
+      debugDefaultTargetPlatformOverride = null;
     },
   );
 
