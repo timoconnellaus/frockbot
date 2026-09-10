@@ -486,6 +486,27 @@ void main() {
       expect(opened, 1);
     });
 
+    // An Applet send that lost its id must degrade like any other payload the
+    // client cannot draw, not blow up the whole transcript entry.
+    testWidgets('an applet send without a usable id says so', (tester) async {
+      for (final payload in <Map<String, Object?>>[
+        {'type': 'applet'},
+        {'type': 'applet', 'appletId': null},
+        {'type': 'applet', 'appletId': 7},
+        {'type': 'applet', 'appletId': ''},
+      ]) {
+        await tester.pumpWidget(send(payload));
+        await tester.pumpAndSettle();
+
+        expect(tester.takeException(), isNull);
+        expect(
+          find.text('This client cannot display that message.'),
+          findsOneWidget,
+          reason: 'payload $payload',
+        );
+      }
+    });
+
     // A Turn's history has to render on a client older than the Bot that
     // produced it.
     testWidgets('a payload this build cannot draw says so', (tester) async {

@@ -178,10 +178,11 @@ class SendPayloadView extends StatelessWidget {
       case 'secret-request':
         return _SecretRequest(payload: payload, onOpenSettings: onOpenSettings);
       case 'applet':
-        return AppletChatCard(
-          key: ValueKey(payload['appletId']),
-          appletId: payload['appletId'] as String,
-        );
+        final appletId = payload['appletId'];
+        if (appletId is! String || appletId.isEmpty) {
+          return const _Unsupported();
+        }
+        return AppletChatCard(key: ValueKey(appletId), appletId: appletId);
       case 'agent-card':
         return _Card(
           title: '${payload['title'] ?? payload['agentId']}',
