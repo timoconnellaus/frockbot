@@ -68,7 +68,9 @@ async function openSettings(page: Page): Promise<void> {
     await openProfileMenu(page);
     await settle(page);
     await tap(page, "profile-settings").click();
-    await expect(sem(page, "settings-models")).toBeVisible({ timeout: 20_000 });
+    await expect(sem(page, "settings-document")).toBeVisible({
+      timeout: 20_000,
+    });
   }).toPass({ timeout: 120_000 });
   await settle(page);
 }

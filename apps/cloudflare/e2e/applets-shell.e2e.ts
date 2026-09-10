@@ -26,7 +26,7 @@ import {
   expectReadyToSend,
   group,
   openApplication,
-  openPlugins,
+  enablePackage,
   press,
   sem,
   E2E_CONNECTION_LABEL,
@@ -278,13 +278,6 @@ async function expectNoHorizontalOverflow(page: Page): Promise<void> {
 }
 
 /** Turn a Package on from its Plugins row. */
-async function enablePackage(page: Page, title: string): Promise<void> {
-  await openPlugins(page);
-  const row = group(page, title);
-  await press(action(row, "set-package-enabled"));
-  await expect(row.getByText("Turn off")).toBeVisible({ timeout: 30_000 });
-  await closeOverlay(page);
-}
 
 /**
  * A Bot whose Turns reach the fake provider, by the path a person walks.

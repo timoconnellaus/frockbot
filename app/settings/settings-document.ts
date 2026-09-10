@@ -240,7 +240,30 @@ function projectSection(
       type: "group",
       orientation: "column",
       title: section.label,
-      children,
+      children: section.id.startsWith("provider.")
+        ? [
+            ...children.filter(
+              (node) =>
+                node.type === "text" ||
+                (node.type === "action" && node.input?.kind),
+            ),
+            ...(section.fields.length
+              ? [
+                  {
+                    type: "group" as const,
+                    orientation: "column" as const,
+                    title: "Advanced settings",
+                    collapsed: true,
+                    children: children.filter(
+                      (node) =>
+                        node.type !== "text" &&
+                        !(node.type === "action" && node.input?.kind),
+                    ),
+                  },
+                ]
+              : []),
+          ]
+        : children,
     },
     actions,
   };
@@ -278,6 +301,12 @@ export function settingsDocumentV1(frame: SettingsFrame): ViewDocument {
     actions.push(...projected.actions);
   }
   if (!complete) children.push(statusNode(OVERFLOW_V1));
+  if (frame.sections.length === 0)
+    children.push(
+      statusNode(
+        "This feature is turned off. Enable it in Bot capabilities to see its settings.",
+      ),
+    );
   return decodeProtocol("ViewDocument", {
     schemaVersion: 1,
     surfaceId: `settings-${frame.home}`,

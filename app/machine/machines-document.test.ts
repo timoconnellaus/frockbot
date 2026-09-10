@@ -117,13 +117,14 @@ test("an empty registry says so once, and does not summarise nothing", () => {
     (node) => node.type === "text",
   );
   expect(
-    nodes.filter((node) => node.type === "text" && /machines/u.test(node.text))
-      .length,
+    nodes.filter(
+      (node) => node.type === "text" && /No computers/u.test(node.text),
+    ).length,
   ).toBe(1);
   expect(
     nodes.some(
       (node) =>
-        node.type === "text" && node.text === "No machines are registered yet.",
+        node.type === "text" && node.text === "No computers are connected yet.",
     ),
   ).toBe(true);
 });

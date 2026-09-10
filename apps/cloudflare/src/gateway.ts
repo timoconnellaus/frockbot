@@ -1,5 +1,9 @@
 import { decodeProtocol } from "@frockbot/core/protocol-schemas";
 import { settingsDocumentV1 } from "@frockbot/app/settings/document";
+import {
+  BUILT_IN_PACKAGE_IDS,
+  capabilityIsOfferedV1,
+} from "@frockbot/app/settings/catalog-copy";
 import { connectionsDocumentV1 } from "@frockbot/app/settings/connections-document";
 import { pluginsDocumentV1 } from "@frockbot/app/settings/plugins-document";
 import { accountIsAdmitted } from "./account-admission.js";
@@ -799,7 +803,13 @@ export function createGateway(dependencies: GatewayDependencies) {
         );
         return Response.json(
           url.searchParams.get("as") === "document"
-            ? connectionsDocumentV1(frame)
+            ? connectionsDocumentV1(
+                frame,
+                url.searchParams.get("kind") === "model"
+                  ? "model"
+                  : "connector",
+                url.searchParams.get("packageId") ?? undefined,
+              )
             : frame,
           { headers: { "cache-control": "no-store" } },
         );
@@ -808,7 +818,10 @@ export function createGateway(dependencies: GatewayDependencies) {
       }
     }
 
-    if (url.pathname === "/api/settings/plugins") {
+    if (
+      url.pathname === "/api/settings/plugins" ||
+      url.pathname === "/api/settings/capabilities"
+    ) {
       if (request.method !== "GET") return jsonError(405, "method not allowed");
       try {
         const frame = decodeProtocol(
@@ -817,10 +830,19 @@ export function createGateway(dependencies: GatewayDependencies) {
             .userConfigurationFor(userId)
             .readPluginsFrame({ schemaVersion: 1, userId }),
         );
+        const capabilities = url.pathname.endsWith("capabilities");
+        const visible = {
+          ...frame,
+          plugins: frame.plugins.filter((plugin) =>
+            capabilities
+              ? capabilityIsOfferedV1(plugin)
+              : !BUILT_IN_PACKAGE_IDS.has(plugin.packageId),
+          ),
+        };
         return Response.json(
           url.searchParams.get("as") === "document"
-            ? pluginsDocumentV1(frame)
-            : frame,
+            ? pluginsDocumentV1(visible, capabilities)
+            : visible,
           { headers: { "cache-control": "no-store" } },
         );
       } catch {
@@ -865,7 +887,18 @@ export function createGateway(dependencies: GatewayDependencies) {
           // wants a frame keeps getting one.
           return Response.json(
             url.searchParams.get("as") === "document"
-              ? settingsDocumentV1(frame)
+              ? settingsDocumentV1(
+                  home === "application"
+                    ? {
+                        ...frame,
+                        sections: frame.sections.filter(
+                          (section) =>
+                            section.id ===
+                            (url.searchParams.get("section") ?? "profile"),
+                        ),
+                      }
+                    : frame,
+                )
               : frame,
             { headers: { "cache-control": "no-store" } },
           );

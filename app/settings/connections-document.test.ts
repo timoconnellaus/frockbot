@@ -6,6 +6,10 @@ import {
 } from "@frockbot/core/protocol-schemas";
 import { connectionsDocumentV1 } from "./connections-document.js";
 
+function modelDocument(frame: ConnectionsFrame) {
+  return connectionsDocumentV1(frame, "model");
+}
+
 function frame(input: Partial<ConnectionsFrame>): ConnectionsFrame {
   return decodeProtocol("ConnectionsFrame", {
     schemaVersion: 1,
@@ -45,7 +49,7 @@ function walk(node: ViewNode): ViewNode[] {
 }
 
 test("a provider that takes a key asks for one as a secret field", () => {
-  const document = connectionsDocumentV1(frame({ providers: [ollama] }));
+  const document = modelDocument(frame({ providers: [ollama] }));
   const nodes = walk(document.root);
   const key = nodes.find(
     (node) => node.type === "field" && node.field.kind === "secret",
@@ -63,7 +67,7 @@ test("a provider that takes a key asks for one as a secret field", () => {
 });
 
 test("every action names the Connection command it means", () => {
-  const document = connectionsDocumentV1(
+  const document = modelDocument(
     frame({
       providers: [{ ...ollama, connected: 1, mayConnect: false }],
       accounts: [
@@ -89,7 +93,7 @@ test("every action names the Connection command it means", () => {
 });
 
 test("the platform's own account offers nothing to press", () => {
-  const document = connectionsDocumentV1(
+  const document = modelDocument(
     frame({
       accounts: [
         {
@@ -143,9 +147,7 @@ test("a Connection Type with no credential is turned on rather than connected", 
 });
 
 test("the model in use is its own card, and an empty deployment says so", () => {
-  const withModel = connectionsDocumentV1(
-    frame({ modelInUse: "Auto · Frock AI" }),
-  );
+  const withModel = modelDocument(frame({ modelInUse: "Auto · Frock AI" }));
   expect(
     walk(withModel.root).some(
       (node) => node.type === "text" && node.text === "Auto · Frock AI",
@@ -153,15 +155,16 @@ test("the model in use is its own card, and an empty deployment says so", () => 
   ).toBe(true);
   expect(
     walk(withModel.root).some(
-      (node) => node.type === "text" && node.text.startsWith("Your connectors"),
+      (node) =>
+        node.type === "text" && node.text.startsWith("Connect a provider"),
     ),
   ).toBe(true);
-  expect(withModel.surfaceId).toBe("connections");
+  expect(withModel.surfaceId).toBe("model-accounts");
   expect(withModel.revision).toBe(7);
 });
 
 test("providers past the action budget are dropped whole, and said so", () => {
-  const document = connectionsDocumentV1(
+  const document = modelDocument(
     frame({
       providers: Array.from({ length: 40 }, (_unused, index) => ({
         ...ollama,
@@ -177,4 +180,36 @@ test("providers past the action budget are dropped whole, and said so", () => {
         node.type === "text" && node.text.startsWith("The rest of these"),
     ),
   ).toBe(true);
+});
+
+test("Connected apps excludes model providers and account setup targets only the chosen provider", () => {
+  const mixed = frame({
+    providers: [
+      ollama,
+      { ...ollama, packageId: "second", displayName: "Second" },
+      {
+        ...ollama,
+        packageId: "notes",
+        displayName: "Notes",
+        kind: "connector",
+      },
+    ],
+  });
+  const apps = walk(connectionsDocumentV1(mixed).root);
+  expect(
+    apps.some((node) => node.type === "group" && node.title === "Ollama Cloud"),
+  ).toBe(false);
+  expect(
+    apps.some((node) => node.type === "group" && node.title === "Notes"),
+  ).toBe(true);
+  const model = walk(
+    connectionsDocumentV1(mixed, "model", ollama.packageId).root,
+  );
+  expect(
+    model.some((node) => node.type === "group" && node.title === "Second"),
+  ).toBe(false);
+  const connect = model.find(
+    (node) => node.type === "group" && node.title === "Connect account",
+  );
+  expect(connect?.type === "group" && connect.collapsed).toBe(true);
 });

@@ -1099,193 +1099,257 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           SettingsIds.profileMenu,
           SafeArea(
             child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  identified(
-                    SettingsIds.profileName,
-                    ListTile(
-                      leading: const CircleAvatar(
-                        child: Icon(Icons.person_outline),
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 680),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      identified(
+                        SettingsIds.profileName,
+                        ListTile(
+                          leading: const CircleAvatar(
+                            child: Icon(Icons.person_outline),
+                          ),
+                          title: FutureBuilder<String>(
+                            future: _displayName(),
+                            builder: (context, answer) =>
+                                Text(answer.data ?? widget.userId),
+                          ),
+                          subtitle: const Text('Signed in'),
+                        ),
                       ),
-                      title: FutureBuilder<String>(
-                        future: _displayName(),
-                        builder: (context, answer) =>
-                            Text(answer.data ?? widget.userId),
+                      const Divider(height: 1),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 20, 16, 4),
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            'Account',
+                            style: Theme.of(context).textTheme.titleSmall,
+                          ),
+                        ),
                       ),
-                      subtitle: const Text('Signed in'),
-                    ),
-                  ),
-                  const Divider(height: 1),
-                  identified(
-                    SettingsIds.profileSettings,
-                    ListTile(
-                      leading: const Icon(Icons.settings_outlined),
-                      title: const Text('Settings'),
-                      onTap: () {
-                        _openSettings();
-                      },
-                    ),
-                  ),
-                  identified(
-                    SettingsIds.profileModels,
-                    ListTile(
-                      leading: const Icon(Icons.auto_awesome_rounded),
-                      title: const Text('Models'),
-                      onTap: () {
-                        _push(
-                          SettingsPage(
-                            api: widget.api,
-                            store: widget.store,
-                            userId: widget.userId,
-                            home: 'models',
+                      identified(
+                        SettingsIds.profileSettings,
+                        ListTile(
+                          leading: const Icon(Icons.settings_outlined),
+                          title: const Text('Personal details'),
+                          subtitle: const Text(
+                            'Your name and optional contact email',
                           ),
-                        );
-                      },
-                    ),
-                  ),
-                  identified(
-                    SettingsIds.profileConnections,
-                    ListTile(
-                      leading: const Icon(Icons.link_outlined),
-                      title: const Text('Connectors'),
-                      onTap: () {
-                        _push(
-                          ConnectionsPage(
-                            api: widget.api,
-                            store: widget.store,
-                            userId: widget.userId,
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                  identified(
-                    AuditIds.recoveryEntry,
-                    ListTile(
-                      leading: const Icon(Icons.history_rounded),
-                      title: const Text('Audit log'),
-                      subtitle: const Text('Every effect your Bots performed'),
-                      onTap: () {
-                        _push(
-                          AuditPage(
-                            api: widget.api,
-                            store: widget.store,
-                            userId: widget.userId,
-                            botId: selected?.botId.value,
-                            botName: selected == null ? null : _name(selected!),
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                  identified(
-                    TemplateIds.profileEntry,
-                    ListTile(
-                      leading: const Icon(Icons.inventory_2_outlined),
-                      title: const Text('Bot templates'),
-                      subtitle: const Text(
-                        'Pack a Bot up, or unpack one someone sent you',
+                          onTap: () {
+                            _openSettings();
+                          },
+                        ),
                       ),
-                      onTap: () {
-                        _push(
-                          TemplatesPage(
-                            api: widget.api,
-                            store: widget.store,
-                            userId: widget.userId,
-                            botId: selected?.botId.value,
-                            botName: selected == null ? null : _name(selected!),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 20, 16, 4),
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            'Your Bots’ abilities',
+                            style: Theme.of(context).textTheme.titleSmall,
                           ),
-                        );
-                      },
-                    ),
-                  ),
-                  identified(
-                    MachineIds.profileEntry,
-                    ListTile(
-                      leading: const Icon(Icons.computer_outlined),
-                      title: const Text('Registered machines'),
-                      subtitle: const Text(
-                        'Computers a Bot may reach, with your approval',
+                        ),
                       ),
-                      onTap: () {
-                        _push(
-                          MachinesPage(
-                            api: widget.api,
-                            store: widget.store,
-                            userId: widget.userId,
+                      identified(
+                        SettingsIds.profileModels,
+                        ListTile(
+                          leading: const Icon(Icons.auto_awesome_rounded),
+                          title: const Text('Models'),
+                          subtitle: const Text(
+                            'Choose a model or connect a provider',
                           ),
-                        );
-                      },
-                    ),
-                  ),
-                  identified(
-                    PluginIds.profileEntry,
-                    ListTile(
-                      leading: const Icon(Icons.extension_outlined),
-                      title: const Text('Plugins'),
-                      onTap: () {
-                        _push(
-                          PluginsPage(
-                            api: widget.api,
-                            store: widget.store,
-                            userId: widget.userId,
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                  // Admin belongs to the deployment, not to the account, so the
-                  // entry is here only for someone the gateway already answers it
-                  // for. A non-admin is not offered a door that refuses them.
-                  if (isAdmin)
-                    identified(
-                      AdminIds.profileEntry,
-                      ListTile(
-                        leading: const Icon(Icons.shield_outlined),
-                        title: const Text('Admin'),
-                        onTap: () {
-                          _push(AdminPage(api: widget.api));
-                        },
+                          onTap: () {
+                            _push(
+                              SettingsPage(
+                                api: widget.api,
+                                store: widget.store,
+                                userId: widget.userId,
+                                home: 'models',
+                              ),
+                            );
+                          },
+                        ),
                       ),
-                    ),
-                  // A development build can look at the ViewNode renderer before a
-                  // plugin produces a document; the shipped app has no such door.
-                  if (developmentAuth)
-                    ListTile(
-                      leading: const Icon(Icons.dashboard_customize_outlined),
-                      title: const Text('View sample'),
-                      onTap: () {
-                        _push(
-                          ViewSamplePage(
-                            store: widget.store,
-                            userId: widget.userId,
-                          ),
-                        );
-                      },
-                    ),
-                  ListTile(
-                    leading: const Icon(Icons.refresh),
-                    title: const Text('Refresh'),
-                    onTap: () {
-                      unawaited(load());
-                    },
-                  ),
-                  if (!localDevelopment)
-                    identified(
-                      SettingsIds.profileSignOut,
-                      ListTile(
-                        leading: const Icon(Icons.logout),
-                        title: const Text('Sign out'),
-                        onTap: () {
-                          Navigator.of(context).pop();
-                          unawaited(
-                            push.logout().then((_) => widget.onSignOut()),
-                          );
-                        },
+                      identified(
+                        SettingsIds.profileConnections,
+                        ListTile(
+                          leading: const Icon(Icons.link_outlined),
+                          title: const Text('Connected apps'),
+                          subtitle: const Text('Services your Bots can use'),
+                          onTap: () {
+                            _push(
+                              ConnectionsPage(
+                                api: widget.api,
+                                store: widget.store,
+                                userId: widget.userId,
+                              ),
+                            );
+                          },
+                        ),
                       ),
-                    ),
-                ],
+                      identified(
+                        MachineIds.profileEntry,
+                        ListTile(
+                          leading: const Icon(Icons.computer_outlined),
+                          title: const Text('Your computers'),
+                          subtitle: const Text(
+                            'Computers a Bot may reach, with your approval',
+                          ),
+                          onTap: () {
+                            _push(
+                              MachinesPage(
+                                api: widget.api,
+                                store: widget.store,
+                                userId: widget.userId,
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                      identified(
+                        PluginIds.profileEntry,
+                        ListTile(
+                          leading: const Icon(Icons.extension_outlined),
+                          title: const Text('Plugins'),
+                          subtitle: const Text(
+                            'Extensions that add new abilities',
+                          ),
+                          onTap: () {
+                            _push(
+                              PluginsPage(
+                                api: widget.api,
+                                store: widget.store,
+                                userId: widget.userId,
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                      identified(
+                        'profile-capabilities',
+                        ListTile(
+                          leading: const Icon(Icons.tune_outlined),
+                          title: const Text('Bot capabilities'),
+                          subtitle: const Text(
+                            'Manage optional built-in features for all your Bots',
+                          ),
+                          onTap: () => _push(
+                            PluginsPage(
+                              api: widget.api,
+                              store: widget.store,
+                              userId: widget.userId,
+                              capabilities: true,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const Divider(),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 20, 16, 4),
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            'Activity & sharing',
+                            style: Theme.of(context).textTheme.titleSmall,
+                          ),
+                        ),
+                      ),
+                      identified(
+                        AuditIds.recoveryEntry,
+                        ListTile(
+                          leading: const Icon(Icons.history_rounded),
+                          title: const Text('Activity & history'),
+                          subtitle: const Text('Actions across all your Bots'),
+                          onTap: () {
+                            _push(
+                              AuditPage(
+                                api: widget.api,
+                                store: widget.store,
+                                userId: widget.userId,
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                      identified(
+                        TemplateIds.profileEntry,
+                        ListTile(
+                          leading: const Icon(Icons.inventory_2_outlined),
+                          title: const Text('Bot templates'),
+                          subtitle: const Text(
+                            'Create a Bot from a template, or share one of yours',
+                          ),
+                          onTap: () {
+                            _push(
+                              TemplatesPage(
+                                api: widget.api,
+                                store: widget.store,
+                                userId: widget.userId,
+                                botId: selected?.botId.value,
+                                botName: selected == null
+                                    ? null
+                                    : _name(selected!),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                      const Divider(),
+                      // Admin belongs to the deployment, not to the account, so the
+                      // entry is here only for someone the gateway already answers it
+                      // for. A non-admin is not offered a door that refuses them.
+                      if (isAdmin)
+                        identified(
+                          AdminIds.profileEntry,
+                          ListTile(
+                            leading: const Icon(Icons.shield_outlined),
+                            title: const Text('Site administration'),
+                            subtitle: const Text(
+                              'Manage who can join this site',
+                            ),
+                            onTap: () {
+                              _push(AdminPage(api: widget.api));
+                            },
+                          ),
+                        ),
+                      // A development build can look at the ViewNode renderer before a
+                      // plugin produces a document; the shipped app has no such door.
+                      if (developmentAuth)
+                        ListTile(
+                          leading: const Icon(
+                            Icons.dashboard_customize_outlined,
+                          ),
+                          title: const Text('View sample'),
+                          onTap: () {
+                            _push(
+                              ViewSamplePage(
+                                store: widget.store,
+                                userId: widget.userId,
+                              ),
+                            );
+                          },
+                        ),
+                      const Divider(),
+                      if (!localDevelopment)
+                        identified(
+                          SettingsIds.profileSignOut,
+                          ListTile(
+                            leading: const Icon(Icons.logout),
+                            title: const Text('Sign out'),
+                            onTap: () {
+                              Navigator.of(context).pop();
+                              unawaited(
+                                push.logout().then((_) => widget.onSignOut()),
+                              );
+                            },
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
               ),
             ),
           ),
@@ -1299,8 +1363,16 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   Future<String> _displayName() async {
     try {
       final settings =
-          (await widget.api.request('/api/settings?view=2'))! as Map;
-      final name = (settings['profile'] as Map?)?['name'];
+          (await widget.api.request('/api/settings/application'))! as Map;
+      final sections = settings['sections'] as List;
+      final profile = sections
+          .cast<Map>()
+          .where((section) => section['id'] == 'profile')
+          .firstOrNull;
+      final name = (profile?['fields'] as List?)
+          ?.cast<Map>()
+          .where((field) => field['id'] == 'name')
+          .firstOrNull?['value'];
       if (name is String && name.trim().isNotEmpty) return name.trim();
     } catch (_) {
       // Nothing is lost but the name.

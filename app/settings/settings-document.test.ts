@@ -160,12 +160,18 @@ test("a section action carries its kind, and a resettable field gets its own act
   const section = group(document, 0);
   expect(section.children.map((node) => node.type)).toEqual([
     "text",
+    "action",
+    "group",
+  ]);
+  const [, manage, advanced] = section.children;
+  if (advanced?.type !== "group") throw new Error("expected advanced settings");
+  expect(advanced.collapsed).toBe(true);
+  expect(advanced.children.map((node) => node.type)).toEqual([
     "field",
     "action",
     "action",
-    "action",
   ]);
-  const [, , , manage, unset] = section.children;
+  const unset = advanced.children[2];
   if (manage?.type !== "action" || unset?.type !== "action")
     throw new Error("expected actions");
   expect(manage.input).toEqual({

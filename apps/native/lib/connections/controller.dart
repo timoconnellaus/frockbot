@@ -15,13 +15,21 @@ import 'document.dart';
 class ConnectionsController extends ViewSurfaceController {
   final NativeApi api;
   final String userId;
+  final bool models;
+  final String? packageId;
   final Future<bool> Function(Uri)? openBrowser;
   wire.ViewDocument? _document;
   bool _busy = false;
   bool _closed = false;
   String? _message;
 
-  ConnectionsController(this.api, this.userId, {this.openBrowser});
+  ConnectionsController(
+    this.api,
+    this.userId, {
+    this.openBrowser,
+    this.models = false,
+    this.packageId,
+  });
 
   @override
   wire.ViewDocument? get document => _document;
@@ -30,7 +38,7 @@ class ConnectionsController extends ViewSurfaceController {
   @override
   String? get message => _message;
   @override
-  String get surfaceId => 'connections';
+  String get surfaceId => models ? 'model-accounts' : 'connections';
 
   void _changed() {
     if (!_closed) notifyListeners();
@@ -44,7 +52,16 @@ class ConnectionsController extends ViewSurfaceController {
     _changed();
     try {
       final next = wire.ViewDocument.fromJson(
-        await api.request('/api/settings/connections?as=document'),
+        await api.request(
+          Uri(
+            path: '/api/settings/connections',
+            queryParameters: {
+              'as': 'document',
+              if (models) 'kind': 'model',
+              'packageId': ?packageId,
+            },
+          ).toString(),
+        ),
       );
       if (next.surfaceId.value != surfaceId) {
         throw const FormatException('Connectors surface mismatch');

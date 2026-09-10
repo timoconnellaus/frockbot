@@ -8,6 +8,8 @@
 // off and points at the surface that configures it. Nothing a Package declares
 // is edited here.
 
+import { CAPABILITY_DESCRIPTIONS } from "./catalog-copy.js";
+
 import {
   decodeProtocol,
   type ActionValueSchema,
@@ -35,9 +37,9 @@ const KIND: ActionValueSchema = {
 type Plugin = PluginsFrame["plugins"][number];
 
 const HOME_LABELS: Record<Plugin["home"], string | undefined> = {
-  models: "Connectors",
-  connections: "Connectors",
-  "user-settings": "Settings",
+  models: "Models",
+  connections: "Connected apps",
+  "user-settings": "Feature settings",
   none: undefined,
 };
 
@@ -47,6 +49,18 @@ const STATE_LABELS: Record<Plugin["state"], string> = {
   disabled: "Off",
   failed: "Failed",
 };
+
+/**
+ * On, but not yet usable: Messages runs on a Mac this account has paired, so
+ * the switch being on is only half of what the person has to do. The line says
+ * so wherever the Package is drawn, because "On" alone would be a promise the
+ * capability cannot keep on its own.
+ */
+function setupPending(plugin: Plugin): boolean {
+  return (
+    plugin.packageId === "machine-messages" && plugin.state === "installed"
+  );
+}
 
 function press(
   actionId: string,
@@ -63,14 +77,15 @@ function press(
   };
 }
 
-function pluginNode(plugin: Plugin): ViewNode {
+function pluginNode(plugin: Plugin, capabilities: boolean): ViewNode {
   const controls: ViewNode[] = [];
   const home = HOME_LABELS[plugin.home];
-  if (home && plugin.state === "installed") {
+  if (home && (capabilities || plugin.state === "installed")) {
     controls.push(
-      press("open-home", `Set up in ${home}`, {
+      press("open-home", capabilities ? "Settings" : `Set up in ${home}`, {
         kind: "open-home",
         home: plugin.home,
+        packageId: plugin.packageId,
       }),
     );
   }
@@ -95,49 +110,72 @@ function pluginNode(plugin: Plugin): ViewNode {
   return {
     type: "group",
     orientation: "column",
-    title: plugin.displayName,
+    title: capabilities
+      ? `${plugin.displayName.slice(0, 150)}${setupPending(plugin) ? " · Needs Mac setup" : ""}`
+      : `${plugin.displayName.slice(0, 150)} · ${setupPending(plugin) ? "Available — needs Mac setup" : STATE_LABELS[plugin.state]}`,
     children: [
-      // What it offers and whether it is on are one line, not two: a list of
-      // twenty rows is read down the titles, and a row that spends four lines
-      // saying two short things pushes the next title off the screen.
       {
         type: "text",
-        text: `${plugin.summary} · ${STATE_LABELS[plugin.state]}`.slice(
-          0,
-          4000,
-        ),
-        style: "status",
+        text: (
+          CAPABILITY_DESCRIPTIONS[plugin.packageId] ?? plugin.summary
+        ).slice(0, 4000),
+        style: capabilities ? "body" : "status",
       },
       ...(plugin.failure
         ? [{ type: "text", text: plugin.failure } as ViewNode]
         : []),
-      { type: "group", orientation: "row", children: controls },
+      {
+        type: "group",
+        orientation: capabilities ? "row" : "column",
+        ...(capabilities
+          ? {}
+          : { title: "Details & controls", collapsed: true }),
+        children: [
+          ...(capabilities
+            ? []
+            : [
+                {
+                  type: "text" as const,
+                  text: `Version ${plugin.version}`,
+                  style: "status" as const,
+                },
+              ]),
+          ...controls,
+        ],
+      },
     ],
   };
 }
 
 /** A `PluginsFrame` as a `ViewDocument`. */
-export function pluginsDocumentV1(frame: PluginsFrame): ViewDocument {
+export function pluginsDocumentV1(
+  frame: PluginsFrame,
+  capabilities = false,
+): ViewDocument {
   const installed = frame.plugins.filter(
     (plugin) => plugin.state !== "not-installed",
   ).length;
   const children: ViewNode[] = [
     {
       type: "text",
-      text: `${installed} installed`,
+      text: capabilities
+        ? "Available to all your Bots"
+        : `${installed} installed`,
       style: "status",
     },
     {
       type: "text",
-      text: "Turn plugins on and off for your Bots. Set one up where it belongs: accounts and model providers in Connectors.",
+      text: capabilities
+        ? "Choose which extra abilities your Bots can use. Each card explains what the feature does."
+        : "Extensions add new abilities to your Bots. Open an extension for its description and controls. Models and built-in features have their own settings.",
     },
   ];
   // The root, the two lines above and the overflow status the tail may need.
   let nodes = 4;
   let complete = true;
   for (const plugin of frame.plugins) {
-    const node = pluginNode(plugin);
-    const cost = 4 + (plugin.failure ? 1 : 0);
+    const node = pluginNode(plugin, capabilities);
+    const cost = 7 + (plugin.failure ? 1 : 0);
     if (nodes + cost > NODE_LIMIT) {
       complete = false;
       break;
@@ -155,12 +193,12 @@ export function pluginsDocumentV1(frame: PluginsFrame): ViewDocument {
   if (frame.plugins.length === 0) {
     children.push({
       type: "text",
-      text: "This deployment ships no plugins.",
+      text: "No extensions are available yet. Your Bots already include memory, skills, routines and a hosted Computer. Model providers are in Models; optional features are in Bot capabilities.",
     });
   }
   return decodeProtocol("ViewDocument", {
     schemaVersion: 1,
-    surfaceId: "plugins",
+    surfaceId: capabilities ? "capabilities" : "plugins",
     revision: frame.revision,
     root: { type: "group", orientation: "column", children },
     actions: [
@@ -196,6 +234,7 @@ export function pluginsDocumentV1(frame: PluginsFrame): ViewDocument {
           type: "object",
           properties: {
             kind: KIND,
+            packageId: IDENTIFIER,
             home: {
               type: "string",
               enum: ["models", "connections", "user-settings", "none"],

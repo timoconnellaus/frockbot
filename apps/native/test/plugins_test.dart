@@ -13,9 +13,10 @@ import 'widget_test.dart' show MemoryStore;
 Map<String, Object?> pluginsDocument({
   int revision = 1,
   String state = 'installed',
+  String surfaceId = 'plugins',
 }) => {
   'schemaVersion': 1,
-  'surfaceId': 'plugins',
+  'surfaceId': surfaceId,
   'revision': revision,
   'root': {
     'type': 'group',
@@ -125,7 +126,87 @@ void main() {
     });
   });
 
-  testWidgets('turning a plugin off sends one command and reads back', (
+  test('search filters visible purposes while preserving authoritative action targets', () async {
+    final controller = PluginsController(
+      SettingsApi(MemoryStore(), (_, _) async => pluginsDocument()),
+      'tim',
+    );
+    await controller.load();
+    controller.search('no such plugin');
+    var root = (controller.document!.toJson() as Map)['root'] as Map;
+    expect(
+      (root['children'] as List).where(
+        (node) => (node as Map)['type'] == 'group',
+      ),
+      isEmpty,
+    );
+    controller.search('models');
+    root = (controller.document!.toJson() as Map)['root'] as Map;
+    expect(
+      (root['children'] as List).where(
+        (node) => (node as Map)['type'] == 'group',
+      ),
+      hasLength(1),
+    );
+    controller.dispose();
+  });
+
+  for (final width in [375.0, 900.0]) {
+    for (final scale in [1.0, 2.0]) {
+      testWidgets(
+        'capabilities show readable cards and visible controls at $width / $scale',
+        (tester) async {
+          tester.view.physicalSize = Size(width, 1000);
+          tester.view.devicePixelRatio = 1;
+          addTearDown(tester.view.resetPhysicalSize);
+          addTearDown(tester.view.resetDevicePixelRatio);
+          final store = MemoryStore();
+          final document = pluginsDocument(surfaceId: 'capabilities');
+          final children = ((document['root'] as Map)['children'] as List);
+          children.add(<String, Object>{
+            ...(children.last as Map).cast<String, Object>(),
+            'title':
+                'Another feature with a much longer title that needs more room',
+          });
+          await tester.pumpWidget(
+            MaterialApp(
+              theme: FrockTheme.theme(Brightness.dark),
+              builder: (context, child) => MediaQuery(
+                data: MediaQuery.of(context)
+                    .copyWith(textScaler: TextScaler.linear(scale)),
+                child: child!,
+              ),
+              home: PluginsPage(
+                api: SettingsApi(store, (_, _) async => document),
+                store: store,
+                userId: 'tim',
+                capabilities: true,
+              ),
+            ),
+          );
+          await tester.pumpAndSettle();
+          expect(find.byType(Card), findsNWidgets(2));
+          expect(find.byType(Switch), findsNWidgets(2));
+          expect(
+            tester.getSize(find.byType(Card).first),
+            tester.getSize(find.byType(Card).last),
+          );
+          expect(find.text('Details & controls'), findsNothing);
+          final cards = tester.getTopLeft(find.byType(Card).first);
+          final second = tester.getTopLeft(find.byType(Card).last);
+          if (width >= 900 && scale == 1) {
+            expect(second.dy, cards.dy);
+            expect(second.dx, greaterThan(cards.dx));
+          } else {
+            expect(second.dy, greaterThan(cards.dy));
+          }
+          expect(tester.takeException(), isNull);
+        },
+      );
+    }
+  }
+
+  testWidgets('capability switch sends one command and reads back', (
     tester,
   ) async {
     final store = MemoryStore();
@@ -134,7 +215,11 @@ void main() {
     var revision = 1;
     final api = SettingsApi(store, (path, body) async {
       if (body == null) {
-        return pluginsDocument(revision: revision, state: state);
+        return pluginsDocument(
+          revision: revision,
+          state: state,
+          surfaceId: 'capabilities',
+        );
       }
       sent.add((body as Map).cast<String, Object?>());
       state = 'disabled';
@@ -149,16 +234,21 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         theme: FrockTheme.theme(Brightness.dark),
-        home: PluginsPage(api: api, store: store, userId: 'tim'),
+        home: PluginsPage(
+          api: api,
+          store: store,
+          userId: 'tim',
+          capabilities: true,
+        ),
       ),
     );
     await tester.pumpAndSettle();
     expect(find.text('1 installed'), findsOneWidget);
-    await tester.tap(find.text('Turn off'));
+    await tester.tap(find.byType(Switch));
     await tester.pumpAndSettle();
     expect(sent.single['type'], 'user/set-package-enabled');
     expect(sent.single['expectedRevision'], 1);
-    expect(find.text('Turn on'), findsOneWidget);
+    expect(tester.widget<Switch>(find.byType(Switch)).value, isFalse);
   });
 
   testWidgets('Plugins recovers from offline without raw backend detail', (

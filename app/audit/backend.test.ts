@@ -104,6 +104,25 @@ function host(
       return page;
     },
     rebuildAuditIndex: async () => RECEIPT,
+    listBots: async () => ({
+      schemaVersion: 1 as const,
+      revision: 1,
+      bots: [
+        {
+          schemaVersion: 1 as const,
+          botId: "foreman",
+          registeredAt: "2026-08-31T00:00:00.000Z",
+          initialName: "Foreman",
+          sheep: {
+            schemaVersion: 1 as const,
+            background: "b",
+            upper: "u",
+            middle: "m",
+            lower: "l",
+          },
+        },
+      ],
+    }),
     ...overrides,
   };
 }
@@ -207,6 +226,17 @@ describe("the audit gateway route", () => {
     const page = get("/api/audit?botId=foreman");
     const plain = await route.route(page.request, page.url, context);
     expect(await plain!.json<{ total: number }>()).toMatchObject({ total: 1 });
+  });
+
+  test("the account-wide document names each Bot rather than its id", async () => {
+    const route = createAuditBackendContribution(host());
+    const { request, url: target } = get("/api/audit?as=document");
+    const response = await route.route(request, target, context);
+    expect(response?.status).toBe(200);
+    const document = await response!.json<{ root: unknown }>();
+    const text = JSON.stringify(document.root);
+    expect(text).toContain("Bot: Foreman");
+    expect(text).not.toContain("Bot: foreman");
   });
 
   test("turns an unexpected failure into a 500, not a leaked stack", async () => {

@@ -202,28 +202,21 @@ class TemplatesPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) => DefaultTabController(
     length: 2,
+    initialIndex: botId == null ? 1 : 0,
     child: Scaffold(
       appBar: AppBar(
         title: const Text('Bot templates'),
         bottom: const TabBar(
           tabs: [
-            Tab(text: 'Share'),
-            Tab(text: 'Import'),
+            Tab(text: 'Share a Bot'),
+            Tab(text: 'Use a template'),
           ],
         ),
       ),
       body: TabBarView(
         children: [
           if (botId == null)
-            Builder(
-              builder: (context) => FrockEmptyState(
-                icon: Icons.inventory_2_outlined,
-                title: 'No Bot open',
-                detail: 'Open a Bot to pack its profile, Skills, Routines and plugins into a template.',
-                action: 'Back',
-                onAction: Navigator.of(context).pop,
-              ),
-            )
+            _ChooseTemplateBot(api: api, store: store, userId: userId)
           else
             ViewSurfacePage(
               title: 'Share ${botName ?? 'this Bot'}',
@@ -255,5 +248,71 @@ class TemplatesPage extends StatelessWidget {
         ],
       ),
     ),
+  );
+}
+
+class _ChooseTemplateBot extends StatefulWidget {
+  final NativeApi api;
+  final LocalStore store;
+  final String userId;
+  const _ChooseTemplateBot({
+    required this.api,
+    required this.store,
+    required this.userId,
+  });
+  @override
+  State<_ChooseTemplateBot> createState() => _ChooseTemplateBotState();
+}
+
+class _ChooseTemplateBotState extends State<_ChooseTemplateBot> {
+  late Future<wire.BotDirectory> directory = _load();
+  Future<wire.BotDirectory> _load() async =>
+      wire.BotDirectory.fromJson(await widget.api.request('/api/bots'));
+  @override
+  Widget build(BuildContext context) => FutureBuilder<wire.BotDirectory>(
+    future: directory,
+    builder: (context, result) {
+      if (result.hasError) {
+        return FrockEmptyState(
+          icon: Icons.cloud_off,
+          title: 'Bots couldn’t load',
+          detail: 'Check your connection and try again.',
+          action: 'Try again',
+          onAction: () => setState(() => directory = _load()),
+        );
+      }
+      if (!result.hasData) {
+        return const FrockLoading(label: 'Loading your Bots');
+      }
+      if (result.data!.bots.isEmpty) {
+        return const Center(
+          child: Text('Create a Bot first, then share it as a template.'),
+        );
+      }
+      return ListView(
+        padding: const EdgeInsets.all(20),
+        children: [
+          const Text(
+            'Choose a Bot to share its instructions, skills and routines.',
+          ),
+          for (final bot in result.data!.bots)
+            ListTile(
+              title: Text(bot.initialName),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => TemplatesPage(
+                    api: widget.api,
+                    store: widget.store,
+                    userId: widget.userId,
+                    botId: bot.botId.value,
+                    botName: bot.initialName,
+                  ),
+                ),
+              ),
+            ),
+        ],
+      );
+    },
   );
 }

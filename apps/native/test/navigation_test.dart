@@ -132,7 +132,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(identifiedBy(SettingsIds.profileSettings));
     await tester.pumpAndSettle();
-    expect(find.text('Settings'), findsOneWidget);
+    expect(find.text('Personal details'), findsOneWidget);
     await tester.pageBack();
     await tester.pumpAndSettle();
     expect(identifiedBy(SettingsIds.profileMenu), findsOneWidget);

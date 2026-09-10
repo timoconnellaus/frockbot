@@ -12,16 +12,53 @@ import 'document.dart';
 class PluginsController extends ViewSurfaceController {
   final NativeApi api;
   final String userId;
+  final bool capabilities;
 
   /// Where a row's "Set up in …" goes. Navigation is not a command, so the
   /// host answers it itself rather than sending it anywhere.
-  final void Function(String home)? openHome;
+  final void Function(String home, String? packageId)? openHome;
   wire.ViewDocument? _document;
+  wire.ViewDocument? _all;
+  String _query = '';
+  void search(String query) {
+    _query = query.trim().toLowerCase();
+    final raw = _all?.toJson();
+    if (raw is! Map) return;
+    final root = raw['root'] as Map;
+    root['children'] = (root['children'] as List).where((node) {
+      if (node is! Map || node['type'] != 'group' || _query.isEmpty) {
+        return true;
+      }
+      return [
+        node['title'],
+        ...(node['children'] as List).whereType<Map>().map(
+          (child) => child['text'] ?? '',
+        ),
+      ].join(' ').toLowerCase().contains(_query);
+    }).toList();
+    if (_query.isNotEmpty &&
+        !(root['children'] as List).any(
+          (node) => (node as Map)['type'] == 'group',
+        )) {
+      (root['children'] as List).add({
+        'type': 'text',
+        'text': 'No matches. Try a different name or purpose.',
+      });
+    }
+    _document = wire.ViewDocument.fromJson(raw);
+    _changed();
+  }
+
   bool _busy = false;
   bool _closed = false;
   String? _message;
 
-  PluginsController(this.api, this.userId, {this.openHome});
+  PluginsController(
+    this.api,
+    this.userId, {
+    this.openHome,
+    this.capabilities = false,
+  });
 
   @override
   wire.ViewDocument? get document => _document;
@@ -30,7 +67,7 @@ class PluginsController extends ViewSurfaceController {
   @override
   String? get message => _message;
   @override
-  String get surfaceId => 'plugins';
+  String get surfaceId => capabilities ? 'capabilities' : 'plugins';
 
   void _changed() {
     if (!_closed) notifyListeners();
@@ -44,12 +81,15 @@ class PluginsController extends ViewSurfaceController {
     _changed();
     try {
       final next = wire.ViewDocument.fromJson(
-        await api.request('/api/settings/plugins?as=document'),
+        await api.request(
+          '/api/settings/${capabilities ? 'capabilities' : 'plugins'}?as=document',
+        ),
       );
       if (next.surfaceId.value != surfaceId) {
         throw const FormatException('Plugins surface mismatch');
       }
-      _document = next;
+      _all = next;
+      search(_query);
     } catch (_) {
       _message =
           'Couldn’t load your plugins. Check your connection and try again.';
@@ -62,7 +102,10 @@ class PluginsController extends ViewSurfaceController {
   @override
   Future<Map<String, Object?>> dispatch(Map<String, Object?> command) async {
     if (pluginActionKindV1(command) == 'open-home') {
-      openHome?.call(pluginHomeV1(command) ?? 'none');
+      openHome?.call(
+        pluginHomeV1(command) ?? 'none',
+        (command['input'] as Map?)?['packageId'] as String?,
+      );
       return {'commandId': command['commandId'], 'status': 'applied'};
     }
     final answer = await api.request(
@@ -88,21 +131,34 @@ class PluginsPage extends StatelessWidget {
   final NativeApi api;
   final LocalStore store;
   final String userId;
+  final bool capabilities;
 
   const PluginsPage({
     super.key,
     required this.api,
     required this.store,
     required this.userId,
+    this.capabilities = false,
   });
 
-  void _openHome(BuildContext context, String home) {
+  void _openHome(BuildContext context, String home, String? packageId) {
     final page = switch (home) {
       // A model provider's accounts and a connector Package's are one surface
       // in this client, so both homes land on Connectors.
-      'models' ||
+      'models' => SettingsPage(
+        api: api,
+        store: store,
+        userId: userId,
+        home: 'models',
+      ),
       'connections' => ConnectionsPage(api: api, store: store, userId: userId),
-      'user-settings' => SettingsPage(api: api, store: store, userId: userId),
+      'user-settings' => SettingsPage(
+        api: api,
+        store: store,
+        userId: userId,
+        section: packageId == null ? null : 'package.$packageId',
+        title: 'Feature settings',
+      ),
       _ => null,
     };
     if (page == null) return;
@@ -110,16 +166,31 @@ class PluginsPage extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) => ViewSurfacePage(
-    title: 'Plugins',
-    store: store,
-    userId: userId,
-    documentId: PluginIds.document,
-    refreshId: PluginIds.refresh,
-    controller: PluginsController(
+  Widget build(BuildContext context) {
+    final controller = PluginsController(
       api,
       userId,
-      openHome: (home) => _openHome(context, home),
-    ),
-  );
+      capabilities: capabilities,
+      openHome: (home, packageId) => _openHome(context, home, packageId),
+    );
+    return ViewSurfacePage(
+      title: capabilities ? 'Bot capabilities' : 'Plugins',
+      cardGroups: capabilities,
+      store: store,
+      userId: userId,
+      documentId: PluginIds.document,
+      refreshId: PluginIds.refresh,
+      controller: controller,
+      banner: (_) => Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: TextField(
+          decoration: InputDecoration(
+            prefixIcon: const Icon(Icons.search),
+            hintText: capabilities ? 'Find a feature' : 'Find a plugin',
+          ),
+          onChanged: controller.search,
+        ),
+      ),
+    );
+  }
 }

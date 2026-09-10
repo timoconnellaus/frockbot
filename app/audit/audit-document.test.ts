@@ -52,7 +52,7 @@ test("an entry says what happened, where and when, and opens its Turn", () => {
     (node) => node.type === "text" && node.text.startsWith("Completed"),
   );
   expect(facts?.type === "text" && facts.text).toBe(
-    "Completed · shell_exec · This Computer · 3 Sep 2026, 11:00pm UTC · 42 ms",
+    "Completed · shell_exec · Hosted Computer · 3 Sep 2026, 11:00pm UTC · 42 ms",
   );
   const open = nodes.find(
     (node) => node.type === "action" && node.actionId === "open-run",
@@ -60,6 +60,7 @@ test("an entry says what happened, where and when, and opens its Turn", () => {
   expect(open?.type === "action" && open.input).toEqual({
     kind: "open-run",
     runId: "run-1",
+    botId: "bot-1",
   });
   expect(document.surfaceId).toBe("audit");
 });
@@ -86,7 +87,14 @@ test("the kind in force is the primary filter, and every kind is offered", () =>
   );
   expect(
     filters.map((node) => (node.type === "action" ? node.label : "")),
-  ).toEqual(["All", "shell", "browser", "mcp", "file", "process"]);
+  ).toEqual([
+    "All",
+    "Commands",
+    "Browser",
+    "Connected services",
+    "Files",
+    "Processes",
+  ]);
   const primary = filters.filter(
     (node) => node.type === "action" && node.style === "primary",
   );
@@ -140,7 +148,7 @@ test("an empty log says so", () => {
 });
 
 test("a target reads as a place, not as the wire", () => {
-  expect(auditTargetLabelV1("computer")).toBe("This Computer");
+  expect(auditTargetLabelV1("computer")).toBe("Hosted Computer");
   expect(auditTargetLabelV1("workspace")).toBe("Workspace");
   expect(auditTargetLabelV1("machine:laptop")).toBe("Machine laptop");
   expect(auditTargetLabelV1("remote:example.com")).toBe("example.com");
@@ -167,4 +175,33 @@ test("more entries than the renderer's budget stop, and the document says so", (
       (node) => node.type === "text" && node.text.includes("needs a newer app"),
     ),
   ).toBe(true);
+});
+
+test("account-wide history carries each Bot through its activity link", () => {
+  const document = auditDocumentV1(
+    frame({
+      botId: "",
+      entries: [shell, { ...shell, botId: "bot-2", runId: "run-2" }],
+    }),
+  );
+  const links = walk(document.root).filter(
+    (node) => node.type === "action" && node.actionId === "open-run",
+  );
+  expect(
+    links.map((node) => node.type === "action" && node.input?.botId),
+  ).toEqual(["bot-1", "bot-2"]);
+});
+test("a full account-wide history page with unknown outcomes remains renderable", () => {
+  const document = auditDocumentV1(
+    frame({
+      botId: "",
+      total: 100,
+      entries: Array.from({ length: 100 }, (_, i) => ({
+        ...shell,
+        runId: `run-${i}`,
+        outcome: "unknown",
+      })),
+    }),
+  );
+  expect(walk(document.root).length).toBeLessThanOrEqual(512);
 });

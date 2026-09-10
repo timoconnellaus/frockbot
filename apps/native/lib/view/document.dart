@@ -49,11 +49,13 @@ class ViewDocumentView extends StatefulWidget {
   final ViewController controller;
   final Map<String, ViewFrameBuilder> frames;
   final Map<String, ViewFieldBuilder> fields;
+  final bool cardGroups;
   ViewDocumentView({
     super.key,
     required this.document,
     required this.controller,
     this.fields = const {},
+    this.cardGroups = false,
     Map<String, ViewFrameBuilder>? frames,
   }) : frames = frames ?? hostViewFramesV1;
 
@@ -123,7 +125,14 @@ class _ViewDocumentViewState extends State<ViewDocumentView> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           mainAxisSize: MainAxisSize.min,
           children: [
-            ViewNodeView(node: (json['root']! as Map).cast<String, Object?>()),
+            if (widget.cardGroups)
+              ViewCardGroups(
+                node: (json['root']! as Map).cast<String, Object?>(),
+              )
+            else
+              ViewNodeView(
+                node: (json['root']! as Map).cast<String, Object?>(),
+              ),
             if (widget.controller.message case final String message)
               Padding(
                 padding: const EdgeInsets.only(top: 16),

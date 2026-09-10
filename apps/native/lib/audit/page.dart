@@ -26,11 +26,11 @@ class AuditController extends ViewSurfaceController {
   final NativeApi api;
 
   /// The Bot whose effects are read. Absent reads every Bot this account has.
-  final String? botId;
+  String? botId;
 
   /// Opens a Turn in the Work view. Navigation is not a command, so the host
   /// answers it rather than sending it anywhere.
-  final Future<void> Function(String runId)? openRun;
+  final Future<void> Function(String runId, String? targetBotId)? openRun;
 
   wire.ViewDocument? _document;
   bool _busy = false;
@@ -40,6 +40,12 @@ class AuditController extends ViewSurfaceController {
   String? _before;
 
   AuditController(this.api, {this.botId, this.openRun});
+
+  Future<void> filterBot(String? next) async {
+    botId = next;
+    _before = null;
+    await load();
+  }
 
   @override
   wire.ViewDocument? get document => _document;
@@ -83,7 +89,10 @@ class AuditController extends ViewSurfaceController {
   Future<Map<String, Object?>> dispatch(Map<String, Object?> command) async {
     final kind = auditActionKindV1(command);
     if (kind == 'open-run') {
-      await openRun?.call(auditRunIdV1(command) ?? '');
+      await openRun?.call(
+        auditRunIdV1(command) ?? '',
+        (command['input'] as Map?)?['botId'] as String? ?? botId,
+      );
       return {'commandId': command['commandId'], 'status': 'applied'};
     }
     if (kind == 'filter-kind' || kind == 'load-more') {
@@ -131,10 +140,14 @@ class AuditPage extends StatelessWidget {
   /// The Turn behind an audited effect, drawn on the same Work view a message
   /// in the thread opens. A run the Bot no longer holds says so rather than
   /// opening an empty surface.
-  Future<void> _openRun(BuildContext context, String runId) async {
-    if (botId == null || runId.isEmpty) return;
+  Future<void> _openRun(
+    BuildContext context,
+    String runId,
+    String? targetBotId,
+  ) async {
+    if (targetBotId == null || runId.isEmpty) return;
     try {
-      final run = await BackendChatTransport(api).lookup(botId!, runId);
+      final run = await BackendChatTransport(api).lookup(targetBotId, runId);
       if (!context.mounted) return;
       if (run == null) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -155,16 +168,79 @@ class AuditPage extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) => ViewSurfacePage(
-    title: botName == null ? 'Audit log' : 'Audit · $botName',
-    store: store,
-    userId: userId,
-    documentId: AuditIds.document,
-    refreshId: AuditIds.refresh,
-    controller: AuditController(
+  Widget build(BuildContext context) {
+    final controller = AuditController(
       api,
       botId: botId,
-      openRun: (runId) => _openRun(context, runId),
-    ),
+      openRun: (runId, targetBotId) => _openRun(context, runId, targetBotId),
+    );
+    return ViewSurfacePage(
+      title: botName == null ? 'Activity & history' : 'Activity · $botName',
+      store: store,
+      userId: userId,
+      documentId: AuditIds.document,
+      refreshId: AuditIds.refresh,
+      controller: controller,
+      banner: (_) => _AuditBotFilter(
+        api: api,
+        selected: botId,
+        busy: controller.busy,
+        onChanged: controller.filterBot,
+      ),
+    );
+  }
+}
+
+class _AuditBotFilter extends StatefulWidget {
+  final NativeApi api;
+  final String? selected;
+  final bool busy;
+  final Future<void> Function(String?) onChanged;
+  const _AuditBotFilter({
+    required this.api,
+    this.selected,
+    this.busy = false,
+    required this.onChanged,
+  });
+  @override
+  State<_AuditBotFilter> createState() => _AuditBotFilterState();
+}
+
+class _AuditBotFilterState extends State<_AuditBotFilter> {
+  late String selected = widget.selected ?? '';
+  late final directory = widget.api
+      .request('/api/bots')
+      .then(wire.BotDirectory.fromJson);
+  @override
+  Widget build(BuildContext context) => FutureBuilder<wire.BotDirectory>(
+    future: directory,
+    builder: (context, result) {
+      final bots = result.data?.bots ?? <wire.BotRegistration>[];
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: DropdownButtonFormField<String>(
+          initialValue: selected,
+          decoration: const InputDecoration(labelText: 'Show activity for'),
+          items: [
+            const DropdownMenuItem(value: '', child: Text('All Bots')),
+            if (selected.isNotEmpty &&
+                !bots.any((bot) => bot.botId.value == selected))
+              DropdownMenuItem(value: selected, child: Text(selected)),
+            for (final bot in bots)
+              DropdownMenuItem(
+                value: bot.botId.value,
+                child: Text(bot.initialName),
+              ),
+          ],
+          onChanged: widget.busy
+              ? null
+              : (value) async {
+                  if (value == null) return;
+                  setState(() => selected = value);
+                  await widget.onChanged(value.isEmpty ? null : value);
+                },
+        ),
+      );
+    },
   );
 }

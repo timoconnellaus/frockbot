@@ -103,10 +103,14 @@ function shareNode(
       status(
         revoked
           ? `Revoked ${agoV1(share.revokedAt!, now)} · packed ${agoV1(share.createdAt, now)}`
-          : `Packed ${agoV1(share.createdAt, now)} · ${share.hash.slice(0, 12)}`,
+          : `Created ${agoV1(share.createdAt, now)}`,
       ),
       ...(revoked
-        ? [status("This link no longer reads. Pack the Bot again to share it.")]
+        ? [
+            status(
+              "This link no longer reads. Create a new link to share this Bot again.",
+            ),
+          ]
         : [
             {
               type: "field" as const,
@@ -186,12 +190,12 @@ export function templateSharesDocumentV1(
       children: [
         {
           type: "text",
-          text: "Packing a Bot copies its profile, its Skills, its Routines and the plugins it needs. Its Memory, its credentials, its connected accounts and its Computer files stay yours.",
+          text: "Sharing creates a template of this Bot’s profile, skills, routines and required plugins. Conversations, memory, account connections, credentials and Computer files are not included.",
         },
         {
           type: "action",
           actionId: "pack-template",
-          label: "Pack this Bot",
+          label: "Create share link",
           style: "primary",
           input: { kind: "pack-template" },
         },

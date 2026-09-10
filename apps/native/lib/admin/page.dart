@@ -110,7 +110,7 @@ class _AdminPageState extends State<AdminPage> {
     final signups = ((current?['signups'] as Map?) ?? const {})['open'] == true;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Admin'),
+        title: const Text('Site administration'),
         actions: [
           identified(
             AdminIds.refresh,
@@ -149,7 +149,7 @@ class _AdminPageState extends State<AdminPage> {
                             AdminIds.signups,
                             SwitchListTile(
                               contentPadding: EdgeInsets.zero,
-                              title: const Text('Signups are open'),
+                              title: const Text('Allow new signups'),
                               subtitle: Text(
                                 signups
                                     ? 'Anyone with the link can create an account.'
@@ -161,7 +161,9 @@ class _AdminPageState extends State<AdminPage> {
                           ),
                           const SizedBox(height: 12),
                           Text(
-                            'Last changed by ${current['updatedBy'] ?? 'someone'}.',
+                            current['updatedBy'] == 'deployment-default'
+                                ? 'Default setting'
+                                : 'Last changed by ${current['updatedBy'] ?? 'an administrator'}.',
                             style: Theme.of(context).textTheme.bodySmall,
                           ),
                           if (message != null)

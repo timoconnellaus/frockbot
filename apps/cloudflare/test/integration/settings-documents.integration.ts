@@ -61,10 +61,10 @@ describe("the Connectors document", () => {
     await installProvider(userId);
 
     const document = (await expectOkJson(
-      await asUser(userId, "/api/settings/connections?as=document"),
+      await asUser(userId, "/api/settings/connections?as=document&kind=model"),
     )) as Document;
 
-    expect(document.surfaceId).toBe("connections");
+    expect(document.surfaceId).toBe("model-accounts");
     const secret = walk(document.root).find(
       (node) => node.type === "field" && node.field?.kind === "secret",
     );
@@ -93,7 +93,7 @@ describe("the Connectors document", () => {
 
     const answer = await asUser(
       userId,
-      "/api/settings/connections?as=document",
+      "/api/settings/connections?as=document&kind=model",
     );
     const body = await answer.text();
     expect(answer.status).toBe(200);
@@ -114,16 +114,16 @@ describe("the Connectors document", () => {
   });
 });
 
-describe("the Plugins document", () => {
-  it("names every plugin's enablement and the surface that configures it", async () => {
-    const userId = freshUserId("plugins-doc");
+describe("the Capabilities document", () => {
+  it("names every capability's enablement and the surface that configures it", async () => {
+    const userId = freshUserId("capabilities-doc");
     await installProvider(userId);
 
     const document = (await expectOkJson(
-      await asUser(userId, "/api/settings/plugins?as=document"),
+      await asUser(userId, "/api/settings/capabilities?as=document"),
     )) as Document;
 
-    expect(document.surfaceId).toBe("plugins");
+    expect(document.surfaceId).toBe("capabilities");
     const kinds = new Set(
       walk(document.root)
         .filter((node) => node.type === "action")
@@ -136,9 +136,9 @@ describe("the Plugins document", () => {
   });
 
   it("answers the frame itself without the document parameter", async () => {
-    const userId = freshUserId("plugins-frame");
+    const userId = freshUserId("capabilities-frame");
     const frame = (await expectOkJson(
-      await asUser(userId, "/api/settings/plugins"),
+      await asUser(userId, "/api/settings/capabilities"),
     )) as { schemaVersion: number; plugins: { packageId: string }[] };
     expect(frame.schemaVersion).toBe(1);
     expect(frame.plugins.length).toBeGreaterThan(0);

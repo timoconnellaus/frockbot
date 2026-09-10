@@ -1,4 +1,8 @@
 import type {
+  PluginsFrame,
+  SettingsFrame,
+} from "@frockbot/core/protocol-schemas";
+import type {
   ApprovalDecisionReceiptV1,
   ApprovalListViewV1,
 } from "@frockbot/app/shell/approvals";
@@ -463,11 +467,11 @@ class MemoryConfiguration
   async readConnectionsFrame(): Promise<never> {
     throw new Error("Connections frame not configured in this fixture");
   }
-  async readPluginsFrame(): Promise<never> {
+  async readPluginsFrame(): Promise<PluginsFrame> {
     throw new Error("Plugins frame not configured in this fixture");
   }
 
-  async readSettingsFrame(): Promise<never> {
+  async readSettingsFrame(): Promise<SettingsFrame> {
     throw new Error("Settings frame not configured in this fixture");
   }
   async changeSettings(): Promise<never> {
@@ -2675,4 +2679,94 @@ test("native compatibility refusal precedes authentication and application routi
   expect(await response.text()).toBe(
     "Update the app to continue using FrockBot.",
   );
+});
+
+test("Profile settings separate personal details, optional capabilities, and genuine extensions", async () => {
+  const { gateway, configurations } = createTestGateway();
+  const owner = new MemoryConfiguration();
+  owner.readSettingsFrame = async () => ({
+    schemaVersion: 1,
+    home: "application",
+    ownerId: "alice",
+    revision: 1,
+    sections: [
+      { id: "profile", label: "Your profile", fields: [] },
+      { id: "package.image", label: "Image generation", fields: [] },
+    ],
+  });
+  owner.readPluginsFrame = async () => ({
+    schemaVersion: 1,
+    ownerId: "alice",
+    revision: 1,
+    plugins: [
+      { packageId: "admin", displayName: "Deployment administration" },
+      { packageId: "image", displayName: "Image generation" },
+      { packageId: "third-party", displayName: "An extension" },
+    ].map((item) => ({
+      ...item,
+      version: "1",
+      summary: "A feature",
+      state: "installed" as const,
+      home: "none" as const,
+    })),
+  });
+  configurations.set("alice", owner);
+  const read = async (path: string) => {
+    const response = await gateway(request(path, "alice"));
+    expect(response.status).toBe(200);
+    return response.json();
+  };
+  expect(await read("/api/settings/application?as=document")).toMatchObject({
+    root: { children: [{ title: "Your profile" }] },
+  });
+  expect(
+    await read("/api/settings/application?as=document&section=package.image"),
+  ).toMatchObject({ root: { children: [{ title: "Image generation" }] } });
+  expect(await read("/api/settings/plugins")).toMatchObject({
+    plugins: [{ packageId: "third-party" }],
+  });
+  expect(await read("/api/settings/capabilities")).toMatchObject({
+    plugins: [{ packageId: "image" }],
+  });
+});
+
+test("a built-in turned off before Plugins stopped listing it can still be turned back on", async () => {
+  const { gateway, configurations } = createTestGateway();
+  const owner = new MemoryConfiguration();
+  owner.readPluginsFrame = async () => ({
+    schemaVersion: 1,
+    ownerId: "alice",
+    revision: 1,
+    plugins: [
+      {
+        packageId: "user-machine",
+        displayName: "Your Mac",
+        state: "disabled" as const,
+        home: "none" as const,
+      },
+      {
+        packageId: "provider-anthropic",
+        displayName: "Anthropic",
+        state: "disabled" as const,
+        home: "models" as const,
+      },
+      {
+        packageId: "search",
+        displayName: "Search",
+        state: "installed" as const,
+        home: "none" as const,
+      },
+    ].map((item) => ({ ...item, version: "1", summary: "A feature" })),
+  });
+  configurations.set("alice", owner);
+  const response = await gateway(
+    request("/api/settings/capabilities", "alice"),
+  );
+  expect(response.status).toBe(200);
+  const frame = (await response.json()) as PluginsFrame;
+  // The Package the User turned off, and only that one: an enabled built-in is
+  // not an optional capability, and a provider is connected in Models.
+  expect(frame.plugins.map((plugin) => plugin.packageId)).toEqual([
+    "user-machine",
+  ]);
 });

@@ -10,7 +10,7 @@ export const machineMessagesDefinitionV1: PackageDefinitionV1 = {
       scopes: ["user"],
       schema: {
         type: "boolean",
-        title: "Messages.app tools",
+        title: "Allow Messages access",
         description:
           "Let a bot read and send iMessages through Messages.app on a registered Mac of yours. Off by default. Reading needs Full Disk Access and sending needs Automation rights, both granted on the Mac itself; sending always asks you to approve it first.",
       },

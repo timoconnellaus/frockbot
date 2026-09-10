@@ -2,10 +2,10 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../client/transport.dart';
 import '../connections/page.dart';
+import '../plugins/page.dart';
 import '../protocol/client_wire.generated.dart' as wire;
 import '../shell/lifecycle.dart';
 import '../shell/semantics.dart';
@@ -29,12 +29,16 @@ class SettingsPage extends StatefulWidget {
   final LocalStore store;
   final String userId;
   final String home;
+  final String? section;
+  final String? title;
   const SettingsPage({
     super.key,
     required this.api,
     required this.store,
     required this.userId,
     this.home = 'application',
+    this.section,
+    this.title,
   });
   @override
   State<SettingsPage> createState() => _SettingsPageState();
@@ -46,6 +50,7 @@ class _SettingsPageState extends State<SettingsPage>
     widget.api,
     widget.userId,
     widget.home,
+    section: widget.section,
   );
   ViewController? view;
   int? shown;
@@ -115,50 +120,40 @@ class _SettingsPageState extends State<SettingsPage>
 
   Future<Map<String, Object?>> _dispatch(Map<String, Object?> command) async {
     if (viewActionKindV1(command) == manageProviderKindV1) {
-      await _manageProvider();
+      await _manageProvider(
+        (command['input'] as Map?)?['sectionId'] as String?,
+      );
       return {'commandId': command['commandId'], 'status': 'applied'};
     }
     final receipt = await state.dispatch(command);
     if (receipt['status'] == 'applied') {
       reloadWanted = true;
       saved = 'Saved.';
+      if (viewActionKindV1(command) == 'choose-provider') {
+        await _manageProvider(
+          (command['input'] as Map?)?['sectionId'] as String?,
+        );
+      }
     }
     return receipt;
   }
 
-  /// Provider account setup is the hosted web flow, in the system browser. The
-  /// destination is checked against the origin this app talks to, so a
-  /// tampered answer cannot send a person somewhere else wearing our name.
-  Future<void> _manageProvider() async {
+  Future<void> _manageProvider(String? sectionId) async {
     if (handingOff) return;
     setState(() => handingOff = true);
     try {
-      final result = wire.AuthStartView.fromJson(
-        await widget.api.request(
-          '/api/auth/native/settings',
-          body: {'schemaVersion': 1, 'home': 'models'},
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => ConnectionsPage(
+            api: widget.api,
+            store: widget.store,
+            userId: widget.userId,
+            models: true,
+            packageId: sectionId?.replaceFirst('provider.', ''),
+          ),
         ),
       );
-      final uri = Uri.parse(result.authorizationUrl.value as String);
-      if (uri.origin != hostedOrigin ||
-          uri.path != '/native/settings' ||
-          uri.userInfo.isNotEmpty ||
-          uri.fragment.isNotEmpty) {
-        throw const FormatException('Invalid authorization destination');
-      }
-      if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
-        throw const FormatException('Browser unavailable');
-      }
-    } catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Couldn’t open account setup. Check your connection and try again.',
-            ),
-          ),
-        );
-      }
+      reloadWanted = true;
     } finally {
       if (mounted) setState(() => handingOff = false);
     }
@@ -210,7 +205,10 @@ class _SettingsPageState extends State<SettingsPage>
     final controller = view;
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.home == 'models' ? 'Models' : 'Settings'),
+        title: Text(
+          widget.title ??
+              (widget.home == 'models' ? 'Models' : 'Personal details'),
+        ),
         actions: [
           identified(
             SettingsIds.refresh,
@@ -248,7 +246,6 @@ class _SettingsPageState extends State<SettingsPage>
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            if (widget.home == 'application') ..._homeLinks(),
                             if (saved != null)
                               Padding(
                                 padding: const EdgeInsets.only(bottom: 8),
@@ -268,6 +265,25 @@ class _SettingsPageState extends State<SettingsPage>
                                 fields: {'account-models': _modelField},
                               ),
                             ),
+                            if (widget.home == 'models') ..._homeLinks(),
+                            if (widget.section != null)
+                              TextButton(
+                                onPressed: () => Navigator.of(context)
+                                    .push(
+                                      MaterialPageRoute<void>(
+                                        builder: (_) => PluginsPage(
+                                          api: widget.api,
+                                          store: widget.store,
+                                          userId: widget.userId,
+                                          capabilities: true,
+                                        ),
+                                      ),
+                                    )
+                                    .then((_) => state.load()),
+                                child: const Text(
+                                  'Manage this feature in Bot capabilities',
+                                ),
+                              ),
                           ],
                         ),
                       ),
@@ -280,43 +296,19 @@ class _SettingsPageState extends State<SettingsPage>
   }
 
   List<Widget> _homeLinks() => [
-    identified(
-      SettingsIds.modelsLink,
-      Card(
-        child: ListTile(
-          leading: const Icon(Icons.auto_awesome_rounded),
-          title: const Text('Models'),
-          subtitle: const Text('Your default model and provider accounts'),
-          trailing: const Icon(Icons.chevron_right_rounded),
-          onTap: () => Navigator.of(context).push(
-            MaterialPageRoute<void>(
-              builder: (_) => SettingsPage(
-                api: widget.api,
-                store: widget.store,
-                userId: widget.userId,
-                home: 'models',
-              ),
-            ),
-          ),
-        ),
-      ),
-    ),
-    identified(
-      SettingsIds.connectorsLink,
-      Card(
-        child: ListTile(
-          leading: const Icon(Icons.hub_outlined),
-          title: const Text('Connectors'),
-          subtitle: const Text('Accounts and services for every Bot'),
-          trailing: const Icon(Icons.chevron_right_rounded),
-          onTap: () => Navigator.of(context).push(
-            MaterialPageRoute<void>(
-              builder: (_) => ConnectionsPage(
-                api: widget.api,
-                store: widget.store,
-                userId: widget.userId,
-              ),
-            ),
+    ListTile(
+      leading: const Icon(Icons.image_outlined),
+      title: const Text('Image generation'),
+      subtitle: const Text('Choose the model used to create images'),
+      trailing: const Icon(Icons.chevron_right),
+      onTap: () => Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => SettingsPage(
+            api: widget.api,
+            store: widget.store,
+            userId: widget.userId,
+            section: 'package.image',
+            title: 'Image generation',
           ),
         ),
       ),
