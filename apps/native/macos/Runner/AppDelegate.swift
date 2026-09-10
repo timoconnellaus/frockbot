@@ -66,6 +66,8 @@ final class MacMessagesBridge {
   private var input: FileHandle?
   private var output: FileHandle?
   private var buffer = Data()
+  private var reader: Task<Void, Never>?
+  private var chunkFeed: AsyncStream<Data>.Continuation?
 
   private var snapshot: [String: Any] {
     [
@@ -150,11 +152,15 @@ final class MacMessagesBridge {
     child.standardError = FileHandle.nullDevice
     input = incoming.fileHandleForWriting
     output = outgoing.fileHandleForReading
-    output?.readabilityHandler = { [weak self] handle in
-      let data = handle.availableData
-      Task { @MainActor in
-        guard self?.process === child else { return }
-        self?.receive(data)
+    var made: AsyncStream<Data>.Continuation!
+    let chunks = AsyncStream<Data> { made = $0 }
+    let continuation: AsyncStream<Data>.Continuation = made
+    chunkFeed = continuation
+    output?.readabilityHandler = { handle in continuation.yield(handle.availableData) }
+    reader = Task { @MainActor [weak self] in
+      for await data in chunks {
+        guard let self, self.process === child else { return }
+        self.receive(data)
       }
     }
     child.terminationHandler = { [weak self] _ in
@@ -182,6 +188,10 @@ final class MacMessagesBridge {
     let child = process
     process = nil
     output?.readabilityHandler = nil
+    chunkFeed?.finish()
+    chunkFeed = nil
+    reader?.cancel()
+    reader = nil
     try? input?.close()
     try? output?.close()
     input = nil

@@ -98,9 +98,6 @@ async function command(input: Record<string, unknown>) {
     } finally {
       agent.start();
     }
-  } else if (input.type === "unpair") {
-    if (!agent) throw new Error("Start Mac Messages first");
-    await agent.unpair();
   } else {
     throw new Error("Unknown Mac Messages command");
   }

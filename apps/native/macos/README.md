@@ -77,11 +77,11 @@ failures must never result in an unsigned public release.
 Push `mac-v1.1.0` on that same commit. The Mac release workflow qualifies the
 universal app and creates a draft. Watch the tag to completion with
 `bun scripts/ci-watch.ts`. Upload the verified ZIP to that draft, verify its
-checksum and name, and publish it. The website's Mac download points to that
-explicit release, so cloud releases cannot accidentally replace the download.
-Update that link with each Mac release. Do not deploy the new website link until
-the signed asset is public. Cloud tags (`v*`) and Mac tags (`mac-v*`) ship
-independently; merging alone ships neither.
+checksum and name, and publish it. Only once that asset is public does the
+website gain a Mac download button, pointing at that explicit release so cloud
+releases cannot accidentally replace it. Update that link with each Mac release.
+Cloud tags (`v*`) and Mac tags (`mac-v*`) ship independently; merging alone ships
+neither.
 
 Before calling a release ready, verify the installed signature, Gatekeeper,
 associated-domain sign-in, pairing, consent withdrawal, restart recovery and

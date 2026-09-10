@@ -142,7 +142,7 @@ export function machinesDocumentV1(view: MachineListViewV1): ViewDocument {
         },
         {
           type: "text",
-          text: "Download FrockBot for Mac from frockbot.com. The Mac app is distributed directly, outside the Mac App Store. It connects Messages on your Mac while open. Your phone and web app control the connection remotely; they do not read the Mac’s Messages database. Requested message content is shared with FrockBot and your Bots’ AI providers only after you enable Messages sharing. Each send requires your approval.",
+          text: "The Mac app is distributed directly, outside the Mac App Store. It connects Messages on your Mac while open. Your phone and web app control the connection remotely; they do not read the Mac’s Messages database. Requested message content is shared with FrockBot and your Bots’ AI providers only after you enable Messages sharing. Each send requires your approval.",
         },
         // The count is the summary that sits under the title.
         // With nothing registered there is nothing to summarise, and the list
