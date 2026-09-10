@@ -572,42 +572,44 @@ void main() {
     },
   );
 
-  testWidgets('a focus newer than the listing is re-read before it is dropped', (
-    tester,
-  ) async {
-    var listings = 0;
-    final api = SettingsApi(MemoryStore(), (path, body) async {
-      if (path == '/api/applets') {
-        listings++;
-        // The Turn created the Applet between this canvas read's listing and
-        // its focus read, so the first listing cannot know about it.
-        return {
-          'schemaVersion': 1,
-          'applets': [if (listings > 1) applet(generationId: 'g1').toJson()],
-        };
-      }
-      if (path.endsWith('/focus')) return {'appletId': 'todo.applet'};
-      if (path.endsWith('/source')) return sourceView(['ui.tsx']);
-      if (path.endsWith('/build')) return {'status': 'unknown'};
-      if (path.endsWith('/ui')) {
-        return {
-          'uiUrl': 'https://ui.example/applet.html',
-          'generationId': 'g1',
-        };
-      }
-      if (path.endsWith('/token')) {
-        return {
-          'token': 'viewer-token',
-          'expiresAt': '2027-01-01T00:00:00.000Z',
-          'socketUrl': 'wss://bot.frockbot.com/api/applets/todo.applet/socket',
-        };
-      }
-      throw StateError(path);
-    });
-    final controller = AppletCanvasController(api, 'bot-1');
-    await controller.load();
-    expect(controller.focusedId, 'todo.applet');
-    expect(controller.focused?.displayName, 'Weekly Todos');
-    controller.dispose();
-  });
+  testWidgets(
+    'a focus newer than the listing is re-read before it is dropped',
+    (tester) async {
+      var listings = 0;
+      final api = SettingsApi(MemoryStore(), (path, body) async {
+        if (path == '/api/applets') {
+          listings++;
+          // The Turn created the Applet between this canvas read's listing and
+          // its focus read, so the first listing cannot know about it.
+          return {
+            'schemaVersion': 1,
+            'applets': [if (listings > 1) applet(generationId: 'g1').toJson()],
+          };
+        }
+        if (path.endsWith('/focus')) return {'appletId': 'todo.applet'};
+        if (path.endsWith('/source')) return sourceView(['ui.tsx']);
+        if (path.endsWith('/build')) return {'status': 'unknown'};
+        if (path.endsWith('/ui')) {
+          return {
+            'uiUrl': 'https://ui.example/applet.html',
+            'generationId': 'g1',
+          };
+        }
+        if (path.endsWith('/token')) {
+          return {
+            'token': 'viewer-token',
+            'expiresAt': '2027-01-01T00:00:00.000Z',
+            'socketUrl':
+                'wss://bot.frockbot.com/api/applets/todo.applet/socket',
+          };
+        }
+        throw StateError(path);
+      });
+      final controller = AppletCanvasController(api, 'bot-1');
+      await controller.load();
+      expect(controller.focusedId, 'todo.applet');
+      expect(controller.focused?.displayName, 'Weekly Todos');
+      controller.dispose();
+    },
+  );
 }

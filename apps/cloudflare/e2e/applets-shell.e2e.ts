@@ -29,10 +29,11 @@ import {
   enablePackage,
   press,
   sem,
+  sendMessage,
   E2E_CONNECTION_LABEL,
   E2E_MODEL_LABEL,
 } from "./fixtures.ts";
-import { E2E_OLLAMA_GOOD_API_KEY } from "./harness.ts";
+import { E2E_OLLAMA_GOOD_API_KEY, e2eToolCallPrompt } from "./harness.ts";
 
 const LIST_HASH = "b".repeat(64);
 const CANVAS_HASH = "c".repeat(64);
@@ -95,6 +96,8 @@ addEventListener('message', (event) => {
 interface AppletStubs {
   /** Turns the Applet from a draft into a published one, as a publish would. */
   publish(): void;
+  /** Whether the delete route has been asked to remove the Applet. */
+  deleted(): boolean;
 }
 
 async function installAppletRoutes(
@@ -109,6 +112,7 @@ async function installAppletRoutes(
   const port = new URL(baseURL).port;
   const artifactOrigin = `http://ui.localhost:${port}`;
   let published = false;
+  let removed = false;
   let focused: string | null = APPLET_ID;
 
   const summary = () => ({
@@ -181,9 +185,21 @@ async function installAppletRoutes(
   await page.route("**/api/applets", (route) =>
     route.fulfill({
       contentType: "application/json",
-      body: JSON.stringify({ schemaVersion: 1, applets: [summary()] }),
+      body: JSON.stringify({
+        schemaVersion: 1,
+        applets: removed ? [] : [summary()],
+      }),
     }),
   );
+  // A delete is permanent: the directory stops listing the Applet, which is
+  // the whole of what a person sees afterwards.
+  await page.route(/\/api\/applets\/[^/]+\/delete$/, (route) => {
+    removed = true;
+    route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ schemaVersion: 1, status: "deleted" }),
+    });
+  });
   await page.route(/\/api\/bots\/[^/]+\/applets\/focus$/, async (route) => {
     if (route.request().method() === "POST") {
       const body = route.request().postDataJSON() as { appletId: unknown };
@@ -263,6 +279,9 @@ async function installAppletRoutes(
   return {
     publish() {
       published = true;
+    },
+    deleted() {
+      return removed;
     },
   };
 }
@@ -490,4 +509,87 @@ test("the canvas is a full-height sheet on a phone with a composer chip", async 
   await press(sem(page, "applet-canvas-close"));
   await expect(sem(page, "applet-canvas")).toHaveCount(0);
   await expect(chip).toBeVisible();
+});
+
+test("the Applets button picks one, a Bot embeds one as a live card, and a delete is confirmed", async ({
+  page,
+  userId,
+  ollamaBaseUrl,
+  baseURL,
+}, testInfo) => {
+  const stubs = await installAppletRoutes(page, testInfo, baseURL);
+  // The card is a published Applet embedded in the thread, so this spec never
+  // sees the draft state the other two are about.
+  stubs.publish();
+  await provision(page, {
+    userId,
+    apiBaseUrl: ollamaBaseUrl,
+    botName: "Builder",
+  });
+  await page.setViewportSize(DESKTOP);
+
+  // One Applets control, before Computer and Routines, and what it opens is a
+  // choice rather than an Applet: the Bot's Applets, by name.
+  const chip = sem(page, "applet-chip");
+  await expect(chip).toBeVisible({ timeout: 60_000 });
+  await press(chip);
+  const choice = page.locator(
+    `[flt-semantics-identifier="applet-choice-${APPLET_ID}"]`,
+  );
+  await expect(choice).toBeVisible({ timeout: 60_000 });
+  await page.screenshot({ path: testInfo.outputPath("applets-picker.png") });
+  await press(page.getByRole("button", { name: "Close", exact: true }));
+  await expect(choice).toHaveCount(0);
+
+  // A Bot embeds the Applet in chat. The card is live in the thread — its own
+  // viewer credential, not the Session's focus — so the Applet's page runs
+  // inside the conversation.
+  await sendMessage(
+    page,
+    `Here is the todo list.\n${e2eToolCallPrompt("send_to_user", {
+      disposition: "finish",
+      payload: { type: "applet", appletId: APPLET_ID },
+    })}`,
+    { replies: 1 },
+  );
+  const cardFrame = page.frameLocator('iframe[title="Applet"]');
+  await expect(cardFrame.getByText("live:generation-2")).toBeVisible({
+    timeout: 60_000,
+  });
+  // Embedding a card leaves the canvas closed: a card is not a focus change.
+  await expect(sem(page, "applet-canvas")).toHaveCount(0);
+  await page.screenshot({ path: testInfo.outputPath("applets-chat-card.png") });
+
+  // Deleting is permanent, so it asks first, and answering no deletes nothing.
+  await press(chip);
+  await expect(choice).toBeVisible({ timeout: 60_000 });
+  await press(page.getByRole("button", { name: "Delete Todo", exact: true }));
+  await expect(page.getByText("Delete Todo?", { exact: true })).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("applets-confirm.png") });
+  await press(page.getByRole("button", { name: "Cancel", exact: true }));
+  expect(stubs.deleted()).toBe(false);
+  await expect(choice).toBeVisible();
+
+  await press(page.getByRole("button", { name: "Delete Todo", exact: true }));
+  await expect(page.getByText("Delete Todo?", { exact: true })).toBeVisible();
+  await press(page.getByRole("button", { name: "Delete", exact: true }));
+  await expect(choice).toHaveCount(0, { timeout: 60_000 });
+  await expect(
+    page.getByText("No Applets yet. Ask a Bot to build one.", { exact: true }),
+  ).toBeVisible();
+  expect(stubs.deleted()).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath("applets-deleted.png") });
+
+  // The card that was live is a card for an Applet that no longer exists. Its
+  // own refresh is what finds that out, and what it does about it is say so
+  // and take the frame down rather than keep a deleted Applet on screen.
+  await press(page.getByRole("button", { name: "Close", exact: true }));
+  // The card's own words reach the accessibility tree on the container the
+  // engine merged them into, so this reads the label rather than a text node.
+  await expect(
+    page.locator(
+      '[aria-label*="This Applet has been deleted or is unavailable."]',
+    ),
+  ).toBeVisible({ timeout: 90_000 });
+  await page.screenshot({ path: testInfo.outputPath("applets-card-gone.png") });
 });
