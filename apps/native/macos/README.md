@@ -79,7 +79,9 @@ universal app and creates a draft. Watch the tag to completion with
 `bun scripts/ci-watch.ts`. Upload the verified ZIP to that draft, verify its
 checksum and name, and publish it. Only once that asset is public does the
 website gain a Mac download button, pointing at that explicit release so cloud
-releases cannot accidentally replace it. Update that link with each Mac release.
+releases cannot accidentally replace it. That button lives in
+`apps/marketing/public/index.html` and currently points at `mac-v1.1.0`; update
+its link with each Mac release.
 Cloud tags (`v*`) and Mac tags (`mac-v*`) ship independently; merging alone ships
 neither.
 
