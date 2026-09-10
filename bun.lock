@@ -128,6 +128,16 @@
         "wrangler": "4.129.0",
       },
     },
+    "apps/mac-messages": {
+      "name": "@frockbot/mac-messages",
+      "dependencies": {
+        "@frockbot/app": "workspace:*",
+        "@frockbot/core": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "1.4.0",
+      },
+    },
     "apps/marketing": {
       "name": "@frockbot/marketing",
       "version": "0.0.1",
@@ -340,6 +350,8 @@
     "@frockbot/core": ["@frockbot/core@workspace:core"],
 
     "@frockbot/frock-compose": ["@frockbot/frock-compose@workspace:frock-compose"],
+
+    "@frockbot/mac-messages": ["@frockbot/mac-messages@workspace:apps/mac-messages"],
 
     "@frockbot/marketing": ["@frockbot/marketing@workspace:apps/marketing"],
 

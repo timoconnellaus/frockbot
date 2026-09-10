@@ -162,7 +162,7 @@ export function machineMessagesPermissionRefusalV1(
   if (!permissions) {
     return `macOS permissions for Messages on "${label}" have not been checked. Call ${MESSAGES_CHECK_PERMISSIONS_TOOL_V1} first — until the machine reports them, nothing here may read or send.`;
   }
-  if (!permissions.fullDiskAccess) {
+  if (call.kind !== "send" && !permissions.fullDiskAccess) {
     return `"${label}" has not granted FrockBot Full Disk Access, so its Messages history cannot be read. The user grants it in System Settings › Privacy & Security › Full Disk Access, then restarts FrockBot on that Mac and calls ${MESSAGES_CHECK_PERMISSIONS_TOOL_V1} again.`;
   }
   if (call.kind === "send" && !permissions.automation) {

@@ -1,0 +1,15 @@
+{
+  "name": "@frockbot/mac-messages",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@frockbot/app": "workspace:*",
+    "@frockbot/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.0"
+  }
+}

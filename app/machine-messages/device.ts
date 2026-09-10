@@ -341,9 +341,6 @@ export function createMachineMessagesDeviceRunnerV1(
       if (call.kind === "check-permissions") {
         return ok({ kind: "permissions", permissions });
       }
-      if (!permissions.fullDiskAccess) {
-        return refuse(MACHINE_MESSAGES_FULL_DISK_REFUSAL_V1);
-      }
       if (call.kind === "send") {
         if (!permissions.automation) {
           return refuse(MACHINE_MESSAGES_AUTOMATION_REFUSAL_V1);
@@ -353,6 +350,9 @@ export function createMachineMessagesDeviceRunnerV1(
           signal,
         );
         return ok({ kind: "sent", to: call.to, at: at() });
+      }
+      if (!permissions.fullDiskAccess) {
+        return refuse(MACHINE_MESSAGES_FULL_DISK_REFUSAL_V1);
       }
       const rows = await options.seam.query(
         machineMessagesQueryV1(call),

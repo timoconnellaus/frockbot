@@ -14,12 +14,14 @@ import {
  */
 function fakeGitHub(responses: {
   pr?: unknown;
+  release?: unknown;
   runs?: unknown;
   run?: unknown;
 }): GitHubJson & { calls: string[][] } {
   const calls: string[][] = [];
   const gh = (args: readonly string[]) => {
     calls.push([...args]);
+    if (args[0] === "release") return Promise.resolve(responses.release);
     if (args[0] === "pr") return Promise.resolve(responses.pr);
     if (args[1] === "list") return Promise.resolve(responses.runs ?? []);
     return Promise.resolve(responses.run ?? { jobs: [] });
@@ -331,5 +333,48 @@ describe("output", () => {
         detail: ["why", "url"],
       }),
     ).toBe("failed: broke\n  why\n  url");
+  });
+});
+
+describe("Mac direct release", () => {
+  const runs = [
+    {
+      databaseId: 8,
+      headBranch: "mac-v1.1.0",
+      status: "completed",
+      conclusion: "success",
+      url: "run",
+    },
+  ];
+  const run = {
+    jobs: ["Qualify Mac desktop", "Create Mac release draft"].map((name) => ({
+      name,
+      conclusion: "SUCCESS",
+    })),
+  };
+  test("a draft is not a shipped download", async () => {
+    const gh = fakeGitHub({
+      runs,
+      run,
+      release: { isDraft: true, assets: [], url: "draft" },
+    });
+    expect((await releaseReport(gh, "mac-v1.1.0")).status).toBe("pending");
+    expect(gh.calls[0]).toContain("mac-release.yml");
+  });
+  test("publication requires the Mac archive, not a development ZIP", async () => {
+    const release = {
+      isDraft: false,
+      assets: [{ name: "FrockBot-macos-development.zip", size: 500 }],
+      url: "release",
+    };
+    expect(
+      (await releaseReport(fakeGitHub({ runs, run, release }), "mac-v1.1.0"))
+        .status,
+    ).toBe("pending");
+    release.assets = [{ name: "FrockBot-macos.zip", size: 500 }];
+    expect(
+      (await releaseReport(fakeGitHub({ runs, run, release }), "mac-v1.1.0"))
+        .status,
+    ).toBe("passed");
   });
 });

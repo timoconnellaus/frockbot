@@ -602,7 +602,7 @@ export function machineMessagesPermittedV1(
   if (call.kind === "check-permissions") return true;
   if (!permissions) return false;
   return call.kind === "send"
-    ? permissions.fullDiskAccess && permissions.automation
+    ? permissions.automation
     : permissions.fullDiskAccess;
 }
 

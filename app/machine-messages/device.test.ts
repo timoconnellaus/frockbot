@@ -238,6 +238,16 @@ describe("the runner", () => {
     expect(recorded.queries).toEqual([]);
   });
 
+  test("sending needs Automation but not access to message history", async () => {
+    const { seam, recorded } = seamFor({
+      permissions: { fullDiskAccess: false, automation: true },
+    });
+    const report = await run({ kind: "send", to: "+61", text: "hi" }, seam);
+    expect(report.outcome).toBe("ok");
+    expect(recorded.sent).toHaveLength(1);
+    expect(recorded.queries).toEqual([]);
+  });
+
   test("no Automation refuses a send, and sends nothing", async () => {
     const { seam, recorded } = seamFor({
       permissions: { fullDiskAccess: true, automation: false },

@@ -12,7 +12,7 @@ export const machineMessagesDefinitionV1: PackageDefinitionV1 = {
         type: "boolean",
         title: "Allow Messages access",
         description:
-          "Let a bot read and send iMessages through Messages.app on a registered Mac of yours. Off by default. Reading needs Full Disk Access and sending needs Automation rights, both granted on the Mac itself; sending always asks you to approve it first.",
+          "Allow your Bots to read and send Messages through the directly downloaded FrockBot Mac app on your Mac. Requested message content, contacts and attachments are shared with FrockBot’s cloud and the AI providers used by your Bots. Off by default; enable only if you consent to that sharing. You must also consent in the Mac app and grant Full Disk Access and Automation on the Mac. Each send requires your approval of the recipient and exact text. Disable this setting or quit the Mac app to stop future access; this does not delete content already shared.",
       },
     },
   ],
