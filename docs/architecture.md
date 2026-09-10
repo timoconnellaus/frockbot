@@ -383,6 +383,14 @@ Screens (no router; `MaterialApp(home:)` plus `Navigator.push`):
 - `AppletCanvas` — `lib/applets/canvas.dart`: the Applet directory, its focus,
   the building states and the live Applet, in the `right-panel` slot beside Bot
   settings and a page on the phone
+- `AppletPicker` — `lib/applets/picker.dart`: the account's Applets as a
+  dialog behind the header's one Applets entry — a row opens an Applet on the
+  canvas, and a row's delete asks for confirmation before it destroys the
+  Applet's data and versions for every Bot
+- `AppletChatCard` — `lib/applets/chat_card.dart`: a live Applet embedded in
+  the thread, from a `send_to_user` payload of type `applet`. It keeps its
+  in-progress state while scrolled off-screen and suspends its refresh until
+  it is visible again
 - `ComputerCard` → `ComputerViewerPage` — `lib/computer/card.dart`: the Bot's
   screen, live or as its last capture, and the full-window viewer it opens
 - `PackagePageFrame` — `lib/packages/frame.dart`: a first-party or Bot-authored
@@ -519,8 +527,10 @@ compaction bounds model context; there is no conversation creation or switching
 API. Older extra conversations are no longer exposed. The owner accepted their
 removal without migration on 2026-09-08.
 
-The native header has two rows: Bot identity and direct Bot settings above,
-Computer, Routines and the account-wide Applets directory below. Bot messages
+The native header is one row: Bot identity and direct Bot settings, then
+Applets, Computer and Routines as destinations. Applets is one entry rather
+than a strip of per-Bot Applet buttons — it opens the account-wide directory as
+a picker, so a header holding many Applets is still one control. Bot messages
 have no avatar or tool-count row; the in-chat avatar is reserved for the working
 indicator and its comet trails. Message long-press opens work details or records
 “Mark unread from here”. That boundary names a validated chat message in the
@@ -741,7 +751,7 @@ Source is the durable root, in R2 through the Workspace store, keyed by `workspa
 
 ### Persistence
 
-The facet's own SQLite inside the per-`<userId>:<appletId>` Durable Object, with additive `ALTER TABLE` migration and a 2000-row `_applet_changes` log (`applets/sdk/src/server/store.ts:32-80`). Data is account-wide and shared across viewers, survives publish and revert, and is destroyed only by `applet_delete`.
+The facet's own SQLite inside the per-`<userId>:<appletId>` Durable Object, with additive `ALTER TABLE` migration and a 2000-row `_applet_changes` log (`applets/sdk/src/server/store.ts:32-80`). Data is account-wide and shared across viewers, survives publish and revert, and is destroyed only by a deletion: the Bot's `applet_delete`, or the User's own from the Applets picker over `POST /api/applets/<appletId>/delete`. Both reach the same `UserConfiguration.deleteApplet` — the directory entry is marked deleted and the Applet's Durable Object state is destroyed. An id the directory does not list is an `AppletUnavailableError` (`apps/cloudflare/src/applet-directory.ts`), recognised by its `name` and answered as a 404 rather than a retryable failure, so deleting an Applet that is already gone settles instead of failing forever.
 
 ---
 

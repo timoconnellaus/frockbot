@@ -126,6 +126,28 @@ describe("the Applets tools", () => {
     ]);
   });
 
+  test("applet_delete delegates to the authority and reports failures honestly", async () => {
+    const deleted: string[] = [];
+    const { call } = harness({
+      delete: async ({ appletId }) => {
+        deleted.push(appletId);
+        return { status: "deleted" };
+      },
+    });
+    expect((await call("applet_delete", { appletId: APPLET })).isError).toBe(
+      false,
+    );
+    expect(deleted).toEqual([APPLET]);
+    const failing = harness({
+      delete: async () => {
+        throw new Error("Deletion failed");
+      },
+    });
+    expect(
+      (await failing.call("applet_delete", { appletId: APPLET })).isError,
+    ).toBe(true);
+  });
+
   test("applet_files lists the source paths and their sizes", async () => {
     const { call } = harness();
     const result = await call("applet_files", { appletId: APPLET });

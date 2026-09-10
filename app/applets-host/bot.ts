@@ -238,20 +238,59 @@ function appletUserDirectory(
   };
 }
 
-/** The Session's focused Applet, as the shell and its route read it. */
+/**
+ * The Session's focused Applet, as the shell and its route read it.
+ *
+ * Focus lives in this Bot's storage, but what it points at is the User's. A
+ * deletion — the Bot's own tool, or the User's own Applets list — reaches only
+ * the User's directory, so a focus can outlive its Applet in any Bot that is
+ * not the one that asked. It is settled on the read, where the directory is
+ * already reachable: an id the directory no longer lists is cleared durably,
+ * so nothing downstream inherits a pointer to an Applet that is gone. A
+ * directory that cannot be read says nothing about the Applet, and leaves the
+ * focus exactly as it was.
+ */
 export async function readFocusedApplet(
   state: ShellBotStateV1,
   identity: BotIdentity,
 ): Promise<FocusedAppletV1> {
   await state.authority.validateIdentity(identity);
   const stored = await state.ctx.storage.get<unknown>(APPLET_FOCUSED_KEY);
-  return stored === undefined
-    ? {
-        schemaVersion: 1,
-        appletId: null,
-        changedAt: new Date(0).toISOString(),
-      }
-    : decodeFocusedAppletV1(stored);
+  if (stored === undefined)
+    return {
+      schemaVersion: 1,
+      appletId: null,
+      changedAt: new Date(0).toISOString(),
+    };
+  const focused = decodeFocusedAppletV1(stored);
+  if (focused.appletId === null) return focused;
+  let listed;
+  try {
+    listed = await appletUserDirectory(state, identity).list();
+  } catch {
+    return focused;
+  }
+  if (listed.applets.some((applet) => applet.appletId === focused.appletId))
+    return focused;
+  // The directory read is a call to another Durable Object, and this one's
+  // input gate is open across it. A focus the User set while it was in flight
+  // is about an Applet this listing says nothing about, so the clear applies
+  // only to the record it was decided against.
+  const latest = await state.ctx.storage.get<unknown>(APPLET_FOCUSED_KEY);
+  if (latest === undefined) return focused;
+  const current = decodeFocusedAppletV1(latest);
+  if (
+    current.appletId !== focused.appletId ||
+    current.changedAt !== focused.changedAt
+  )
+    return current;
+  const cleared = decodeFocusedAppletV1({
+    schemaVersion: 1,
+    appletId: null,
+    changedAt: new Date().toISOString(),
+  });
+  await state.ctx.storage.put({ [APPLET_FOCUSED_KEY]: cleared });
+  return cleared;
 }
 
 export async function setFocusedApplet(

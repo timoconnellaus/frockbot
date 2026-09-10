@@ -257,6 +257,7 @@ export interface UserBotStateBinding {
    * binding because it is the only door the hosted application has to the
    * User Durable Object.
    */
+  deleteApplet(input: { schemaVersion: 1; appletId: string }): Promise<unknown>;
   listApplets(input?: { schemaVersion: 1 }): Promise<unknown>;
   mintAppletViewerToken(input: {
     schemaVersion: 1;

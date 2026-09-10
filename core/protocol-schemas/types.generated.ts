@@ -206,7 +206,8 @@ export type SendPayload =
       rationale?: string;
       risk: "low" | "medium" | "high";
       expiresInSeconds?: number;
-    };
+    }
+  | { type: "applet"; appletId: string };
 export type RunEvent =
   | { type: "send/to-user"; payload: SendPayload; ordinal: number }
   | {

@@ -98,30 +98,6 @@ void main() {
     }
   });
 
-  testWidgets(
-    'empty directory takes no row; directory failure stays repairable',
-    (tester) async {
-      Future<void> show({VoidCallback? retry}) => tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            appBar: ChatHeader(
-              name: 'Frock',
-              onSettings: () {},
-              onRoutines: () {},
-              onRetryApplets: retry,
-            ),
-          ),
-        ),
-      );
-      await show();
-      expect(tester.widget<AppBar>(find.byType(AppBar)).bottom, isNull);
-      var retried = false;
-      await show(retry: () => retried = true);
-      await tester.tap(find.text('Couldn’t load Applets · Retry'));
-      expect(retried, isTrue);
-    },
-  );
-
   for (final width in [320.0, 390.0]) {
     for (final scale in [0.85, 1.0, 2.0, 3.0]) {
       testWidgets(
@@ -146,12 +122,7 @@ void main() {
                     onSettings: () => opened.add('Settings'),
                     onComputer: () => opened.add('Computer'),
                     onRoutines: () => opened.add('Routines'),
-                    applets: [
-                      (
-                        label: 'Project notes with a long name',
-                        onOpen: () => opened.add('Applet'),
-                      ),
-                    ],
+                    onApplets: () => opened.add('Applet'),
                   ),
                 ),
               ),
@@ -163,12 +134,14 @@ void main() {
           for (final name in ['Computer', 'Routines']) {
             await tester.tap(find.byTooltip(name));
           }
-          // The Applet strip is the header's named entry to the canvas, which
-          // is the gesture the Applet specs make at every width.
           expect(byIdentifier(AppletIds.chip), findsOneWidget);
-          await tester.tap(find.text('Project notes with a long name'));
+          await tester.tap(find.byTooltip('Applets'));
           expect(opened, ['Settings', 'Computer', 'Routines', 'Applet']);
-          expect(find.text('Applets'), findsNothing);
+          expect(tester.widget<AppBar>(find.byType(AppBar)).bottom, isNull);
+          expect(
+            tester.getCenter(find.byTooltip('Applets')).dx,
+            lessThan(tester.getCenter(find.byTooltip('Computer')).dx),
+          );
           expect(
             tester.getCenter(find.byTooltip('Computer')).dy,
             tester.getCenter(find.byTooltip('Bot settings')).dy,

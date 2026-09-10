@@ -461,6 +461,35 @@ function createUserApplicationRoute() {
         );
       }
     }
+    const appletDeleteMatch = url.pathname.match(
+      /^\/api\/applets\/([^/]+)\/delete$/,
+    );
+    if (appletDeleteMatch) {
+      if (request.method !== "POST")
+        return jsonError(405, "method not allowed");
+      let appletId: string;
+      try {
+        appletId = decodeURIComponent(appletDeleteMatch[1]);
+        if (!APPLET_ID_V1.test(appletId)) throw new Error("invalid id");
+      } catch {
+        return jsonError(400, "invalid applet id");
+      }
+      try {
+        await env.BOT_STATE.deleteApplet({ schemaVersion: 1, appletId });
+        return Response.json({ schemaVersion: 1, status: "deleted" });
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Could not delete Applet";
+        // An id the directory does not list is a settled answer, not a blip:
+        // the Applet is already gone. Saying 503 made a second delete — two
+        // windows, or a Bot that deleted it mid-dialog — a failure that
+        // retrying could never clear. The directory names that answer, so the
+        // classification reads the name and never the message text.
+        const gone =
+          error instanceof Error && error.name === "AppletUnavailableError";
+        return jsonError(gone ? 404 : 503, message);
+      }
+    }
     const appletTokenMatch = url.pathname.match(
       /^\/api\/applets\/([^/]+)\/token$/,
     );

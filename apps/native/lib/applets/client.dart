@@ -153,6 +153,13 @@ class AppletsApi {
   Future<List<wire.AppletSummary>> list() async =>
       wire.AppletDirectory.fromJson(await api.request('/api/applets')).applets;
 
+  Future<void> delete(String appletId) async {
+    await api.request(
+      '/api/applets/${_applet(appletId)}/delete',
+      body: {'schemaVersion': 1},
+    );
+  }
+
   Future<AppletUi> ui(String appletId) async => AppletUi.fromJson(
     await api.request('/api/applets/${_applet(appletId)}/ui'),
   );

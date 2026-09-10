@@ -150,7 +150,12 @@ class _TranscriptViewState extends State<TranscriptView> {
     for (final line in ordered) {
       final content = _row(context, line, drain);
       if (content == null) continue;
+      // The key belongs on the list child itself. A row that carries one can
+      // be found again after the thread grows, so a live Applet card kept
+      // alive off-screen moves with its line instead of being rebuilt against
+      // whichever line has taken over its index.
       final row = GestureDetector(
+        key: ValueKey('row:${line.id}'),
         onLongPress:
             widget.onMessageActions == null || line.role == LineRole.system
             ? null
@@ -159,9 +164,10 @@ class _TranscriptViewState extends State<TranscriptView> {
       );
       if (line.id == widget.unreadFromMessageId) {
         rows.add(
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 8),
-            child: Center(child: Text('Unread from here')),
+          Padding(
+            key: ValueKey('unread:${line.id}'),
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: const Center(child: Text('Unread from here')),
           ),
         );
       }
@@ -192,6 +198,7 @@ class _TranscriptViewState extends State<TranscriptView> {
     if (pendingText != null) {
       rows.add(
         _Bubble(
+          key: const ValueKey('row:pending'),
           id: 'pending',
           mine: true,
           pending: true,
@@ -219,11 +226,14 @@ class _TranscriptViewState extends State<TranscriptView> {
           key: PageStorageKey(storageKey),
           children: [
             if (hasEarlier)
-              identified(
-                ShellIds.transcriptEarlier,
-                TextButton(
-                  onPressed: loading ? null : () => onRefresh(older: true),
-                  child: const Text('Earlier messages'),
+              KeyedSubtree(
+                key: const ValueKey('row:earlier'),
+                child: identified(
+                  ShellIds.transcriptEarlier,
+                  TextButton(
+                    onPressed: loading ? null : () => onRefresh(older: true),
+                    child: const Text('Earlier messages'),
+                  ),
                 ),
               ),
             ...rows,
@@ -311,6 +321,7 @@ class _Bubble extends StatelessWidget {
   final String? background;
   final Widget child;
   const _Bubble({
+    super.key,
     required this.id,
     required this.mine,
     required this.child,

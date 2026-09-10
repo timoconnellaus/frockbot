@@ -3,6 +3,9 @@
 import { describe, expect, test } from "bun:test";
 import Ajv from "ajv";
 import {
+  decodeSendToUserPayloadV1,
+  SEND_TO_USER_PAYLOAD_TYPES_V1,
+  type SendToUserPayloadV1,
   type Session,
   type ToolCall,
   type ToolExecutionContext,
@@ -427,6 +430,53 @@ describe("the conversation prompt section", () => {
     expect(CONVERSATION_PROMPT_TEXT_V1.split("\n").length).toBeLessThanOrEqual(
       12,
     );
+  });
+
+  test("the tool contract admits every payload type the decoder accepts", async () => {
+    // The model is handed this schema as the tool's contract, and a strict
+    // provider will not let it produce a branch the schema omits. So every
+    // declared payload type must have one.
+    const samples: Record<SendToUserPayloadV1["type"], SendToUserPayloadV1> = {
+      text: { type: "text", text: "Booked." },
+      attachment: { type: "attachment", url: "https://files.test/a.pdf" },
+      applet: { type: "applet", appletId: "user-1.todo" },
+      widget: {
+        type: "widget",
+        widget: { prompt: "Which one?", options: ["Tuesday"] },
+      },
+      "secret-request": {
+        type: "secret-request",
+        prompt: "Your API key",
+        secretName: "api_key",
+      },
+      "agent-card": { type: "agent-card", agentId: "bot-2", title: "School" },
+      approval: {
+        type: "approval",
+        approvalId: "ap-1",
+        action: "Delete it",
+        risk: "high",
+      },
+    };
+    const mounted = await mount();
+    try {
+      const schema = mounted.root.tools
+        .schemas({ turnType: "chat" })
+        .find((tool) => tool.name === SEND_TO_USER_TOOL_V1);
+      const validate = new Ajv({ strict: false }).compile(schema!.inputSchema);
+      for (const type of SEND_TO_USER_PAYLOAD_TYPES_V1) {
+        const payload = samples[type];
+        expect(decodeSendToUserPayloadV1(payload)).toEqual(payload);
+        expect(validate({ disposition: "finish", payload })).toBe(true);
+      }
+      expect(
+        validate({
+          disposition: "finish",
+          payload: { type: "applet", appletId: "user-1.todo", token: "x" },
+        }),
+      ).toBe(false);
+    } finally {
+      await mounted.dispose();
+    }
   });
 
   test("matches what the send tool's own description tells the model", async () => {

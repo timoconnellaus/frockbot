@@ -248,6 +248,7 @@ class MemoryBotState implements BotStateBinding {
 function rpcBindingFor(state: BotStateBinding): UserBotStateBinding {
   return {
     assertRegistered: () => Promise.resolve(),
+    deleteApplet: () => Promise.resolve({ status: "deleted" }),
     listApplets: () =>
       Promise.resolve({ schemaVersion: 1, revision: 0, applets: [] }),
     mintAppletViewerToken: () =>

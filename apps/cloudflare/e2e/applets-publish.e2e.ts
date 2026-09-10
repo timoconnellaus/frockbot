@@ -25,6 +25,8 @@ import {
   test,
   expect,
   press,
+  answerInputs,
+  composerInput,
   provisionThroughUi,
   sem,
   sendMessage,
@@ -162,6 +164,9 @@ async function openCanvas(page: Page): Promise<void> {
   const canvas = canvasOf(page);
   if (await canvas.isVisible().catch(() => false)) return;
   await press(sem(page, "applet-chip"));
+  await press(
+    page.locator('[flt-semantics-identifier^="applet-choice-"]').first(),
+  );
   await expect(canvas).toBeVisible({ timeout: 60_000 });
 }
 
@@ -370,10 +375,15 @@ test("a Bot writes, checks and publishes an Applet, and its tool reaches the Bot
   // name in this Bot's catalog (not under a Package namespace), so the
   // scripted model calls it directly. The Turn that published proposed the
   // generation carrying it, and this next Turn runs on it.
-  await sendMessage(
-    page,
-    `Add a todo to call mum.\n${e2eToolCallPrompt("add_todo", { title: "Call mum" })}`,
-  );
+  // Older bubbles can leave Flutter's visible semantics tree as this long
+  // thread scrolls. The synchronized todo below proves this send was handled.
+  await answerInputs([
+    [
+      composerInput(page),
+      `Add a todo to call mum.\n${e2eToolCallPrompt("add_todo", { title: "Call mum" })}`,
+    ],
+  ]);
+  await press(sem(page, "send-button"));
   await expect(secondUi.getByText("Call mum")).toBeVisible({ timeout: 60_000 });
   await expect(ui.getByText("Call mum")).toBeVisible({ timeout: 60_000 });
   // That Turn wrote no source, so the canvas stayed where the User was. A Turn
@@ -399,6 +409,9 @@ test("a Bot writes, checks and publishes an Applet, and its tool reaches the Bot
   await expect(chip).toBeVisible({ timeout: 60_000 });
   await shot(page, "phone-chip");
   await press(chip);
+  await press(
+    page.locator('[flt-semantics-identifier^="applet-choice-"]').first(),
+  );
   await expect(canvasOf(page)).toBeVisible({ timeout: 60_000 });
   await expect(appletUi(page).getByText("Buy milk")).toBeVisible({
     timeout: 60_000,

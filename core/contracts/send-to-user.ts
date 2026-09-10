@@ -1,3 +1,5 @@
+import { APPLET_ID_V1 } from "./applets.js";
+
 // The typed payload a user-facing send carries.
 //
 // Parity register row 57b: GrokBot has exactly one voice to the user in chat,
@@ -34,6 +36,7 @@ export interface SendToUserWidgetV1 {
 export type SendToUserPayloadV1 =
   | { type: "text"; text: string }
   | { type: "attachment"; url: string; name?: string; mediaType?: string }
+  | { type: "applet"; appletId: string }
   | { type: "widget"; widget: SendToUserWidgetV1 }
   | { type: "secret-request"; prompt: string; secretName: string }
   | { type: "agent-card"; agentId: string; title: string; body?: string }
@@ -57,7 +60,15 @@ export const SEND_TO_USER_APPROVAL_RISKS_V1: readonly SendToUserApprovalRiskV1[]
   ["low", "medium", "high"];
 
 export const SEND_TO_USER_PAYLOAD_TYPES_V1: readonly SendToUserPayloadV1["type"][] =
-  ["text", "attachment", "widget", "secret-request", "agent-card", "approval"];
+  [
+    "text",
+    "attachment",
+    "widget",
+    "secret-request",
+    "agent-card",
+    "applet",
+    "approval",
+  ];
 
 /**
  * Bounds, so a payload cannot be the way a Turn writes an unbounded record
@@ -309,6 +320,17 @@ export function decodeSendToUserPayloadV1(
           ? {}
           : { expiresInSeconds: payload.expiresInSeconds }),
       };
+    }
+    case "applet": {
+      exactPayloadKeys(payload, ["type", "appletId"], label);
+      const appletId = boundedString(
+        payload.appletId,
+        129,
+        `${label}.appletId`,
+      );
+      if (!APPLET_ID_V1.test(appletId))
+        throw new Error(`${label}.appletId is invalid`);
+      return { type: "applet", appletId };
     }
     case "agent-card": {
       exactPayloadKeys(payload, ["type", "agentId", "title", "body"], label);

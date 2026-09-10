@@ -27,6 +27,18 @@ import type {
   AppletSummaryV1,
 } from "@frockbot/core/contracts";
 
+/**
+ * An id the directory does not list, or lists as deleted. It is a settled
+ * answer rather than a blip, and callers across the Durable Object hops
+ * recognise it by `name` — never by the wording of its message.
+ */
+export class AppletUnavailableError extends Error {
+  override readonly name = "AppletUnavailableError";
+  constructor(appletId: string) {
+    super(`Applet "${appletId}" is unavailable`);
+  }
+}
+
 /** The directory as a Bot isolate and the hosted client read it. */
 export interface AppletDirectoryViewV1 {
   schemaVersion: 1;
@@ -194,7 +206,7 @@ export class AppletDirectory {
   }): Promise<AppletSummaryV1> {
     const entry = await this.entry(input.appletId);
     if (!entry || entry.status === "deleted") {
-      throw new Error(`Applet "${input.appletId}" is unavailable`);
+      throw new AppletUnavailableError(input.appletId);
     }
     const updated = decodeAppletDirectoryEntryV1({
       ...entry,
@@ -213,7 +225,7 @@ export class AppletDirectory {
    */
   async markDeleted(appletId: string): Promise<AppletSummaryV1> {
     const entry = await this.entry(appletId);
-    if (!entry) throw new Error(`Applet "${appletId}" is unavailable`);
+    if (!entry) throw new AppletUnavailableError(appletId);
     const updated = decodeAppletDirectoryEntryV1({
       ...entry,
       tools: [],

@@ -51,6 +51,12 @@ class AppletCanvasController extends ChangeNotifier {
   AppletBuild? build;
   AppletViewer? viewer;
   AppletCanvasFailure? failure;
+
+  /// Why the Applet *directory* could not be read, which is a different thing
+  /// from why the focused Applet's detail could not be: the picker lists the
+  /// directory and nothing else, so a token or source read that failed is not
+  /// its failure to report.
+  AppletCanvasFailure? directoryFailure;
   bool loading = true;
   bool loaded = false;
   bool _closed = false;
@@ -82,13 +88,29 @@ class AppletCanvasController extends ChangeNotifier {
       loading = true;
       _changed();
     }
+    var read = false;
     try {
-      final listed = await applets.list();
-      final focus = await applets.focus(botId);
+      var listed = await applets.list();
       if (epoch != _epoch) return;
       directory = listed;
-      focusedId = focus;
+      directoryFailure = null;
+      read = true;
       _changed();
+      // The directory is the User's and the focus is one Bot's. Only the read
+      // above says whether the Applets could be listed; everything past here
+      // is about the focused Applet, and fails as one.
+      final focus = await applets.focus(botId);
+      if (epoch != _epoch) return;
+      if (focus != null && !listed.any((entry) => entry.appletId == focus)) {
+        // The listing was read before the focus, so an Applet the Turn created
+        // and focused in between cannot be in it. The route already clears a
+        // focus its own directory read no longer lists, so a focus this listing
+        // has never heard of is a stale listing rather than a stale focus.
+        listed = await applets.list();
+        if (epoch != _epoch) return;
+        directory = listed;
+      }
+      focusedId = listed.any((entry) => entry.appletId == focus) ? focus : null;
       failure = null;
       _attempt = 0;
       await _readFocused(epoch);
@@ -97,6 +119,7 @@ class AppletCanvasController extends ChangeNotifier {
     } catch (error) {
       if (epoch != _epoch) return;
       failure = appletCanvasFailureV1(error);
+      if (!read) directoryFailure = failure;
       _scheduleRetry();
     } finally {
       if (epoch == _epoch) {

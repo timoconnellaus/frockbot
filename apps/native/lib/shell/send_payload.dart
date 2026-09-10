@@ -20,6 +20,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 
 import '../client/transport.dart';
+import '../applets/chat_card.dart';
 import 'markdown.dart';
 import 'semantics.dart';
 import 'transcript_model.dart';
@@ -176,6 +177,12 @@ class SendPayloadView extends StatelessWidget {
         );
       case 'secret-request':
         return _SecretRequest(payload: payload, onOpenSettings: onOpenSettings);
+      case 'applet':
+        final appletId = payload['appletId'];
+        if (appletId is! String || appletId.isEmpty) {
+          return const _Unsupported();
+        }
+        return AppletChatCard(key: ValueKey(appletId), appletId: appletId);
       case 'agent-card':
         return _Card(
           title: '${payload['title'] ?? payload['agentId']}',

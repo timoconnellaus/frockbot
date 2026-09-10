@@ -17,6 +17,7 @@ import '../activity/push.dart';
 import '../activity/page.dart';
 import '../admin/page.dart';
 import '../applets/canvas.dart';
+import '../applets/picker.dart';
 import '../audit/page.dart';
 import '../client/auth.dart' show developmentAuth;
 import '../client/bot_sessions.dart';
@@ -951,16 +952,16 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                     ? () => _openPanel('computer')
                     : null,
                 onRoutines: () => _openPanel('routines'),
-                applets: [
-                  for (final applet in appletCanvas?.directory ?? const [])
-                    (
-                      label: applet.displayName,
-                      onOpen: () => unawaited(_openApplet(applet.appletId)),
-                    ),
-                ],
-                onRetryApplets: appletCanvas?.failure == null
+                onApplets: appletCanvas == null
                     ? null
-                    : () => unawaited(appletCanvas!.retry()),
+                    : () async {
+                        final id = await showDialog<String>(
+                          context: context,
+                          builder: (_) =>
+                              AppletPicker(controller: appletCanvas!),
+                        );
+                        if (id != null && mounted) await _openApplet(id);
+                      },
               ),
         navOpen: navOpen,
         panelOpen: panelOpen,

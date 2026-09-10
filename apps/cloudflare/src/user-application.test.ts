@@ -14,10 +14,12 @@ import {
   BotTurnRefusedError,
 } from "@frockbot/core/durable";
 import { COMPUTER_HOST_CAPABILITIES_V1 } from "./computer-host.js";
+import { AppletUnavailableError } from "./applet-directory.js";
 
 function rpcBindingFor(state: BotStateBinding): UserBotStateBinding {
   return {
     assertRegistered: () => Promise.resolve(),
+    deleteApplet: () => Promise.resolve({ status: "deleted" }),
     listApplets: () =>
       Promise.resolve({ schemaVersion: 1, revision: 0, applets: [] }),
     mintAppletViewerToken: () =>
@@ -1000,5 +1002,113 @@ describe("the Applet viewer token route", () => {
     expect(body.socketUrl).toBe(
       "wss://frockbot.test/api/applets/alice.todo/socket",
     );
+  });
+});
+
+describe("Applet deletion", () => {
+  test("POST uses the scoped authority; GET and malformed ids cannot delete", async () => {
+    const calls: unknown[] = [];
+    const env: UserApplicationEnv = {
+      BOT_STATE: {
+        ...rpcBindingFor({} as BotStateBinding),
+        deleteApplet: async (input) => {
+          calls.push(input);
+          return { status: "deleted" };
+        },
+      },
+      DEPLOYMENT: { userId: "alice", applicationHash: "foundation-v1" },
+    };
+    const app = createUserApplication();
+    expect(
+      (
+        await app(
+          new Request("https://frockbot.test/api/applets/alice.todo/delete"),
+          env,
+        )
+      ).status,
+    ).toBe(405);
+    expect(
+      (
+        await app(
+          new Request("https://frockbot.test/api/applets/invalid/delete", {
+            method: "POST",
+          }),
+          env,
+        )
+      ).status,
+    ).toBe(400);
+    expect(calls).toEqual([]);
+    const response = await app(
+      new Request("https://frockbot.test/api/applets/alice.todo/delete", {
+        method: "POST",
+      }),
+      env,
+    );
+    expect(response.status).toBe(200);
+    expect(calls).toEqual([{ schemaVersion: 1, appletId: "alice.todo" }]);
+    expect((await response.json()) as unknown).toEqual({
+      schemaVersion: 1,
+      status: "deleted",
+    });
+  });
+
+  test("an Applet the directory no longer holds answers 404, not a retryable 503", async () => {
+    const env: UserApplicationEnv = {
+      BOT_STATE: {
+        ...rpcBindingFor({} as BotStateBinding),
+        deleteApplet: async () => {
+          throw new AppletUnavailableError("alice.todo");
+        },
+      },
+      DEPLOYMENT: { userId: "alice", applicationHash: "foundation-v1" },
+    };
+    const app = createUserApplication();
+    const response = await app(
+      new Request("https://frockbot.test/api/applets/alice.todo/delete", {
+        method: "POST",
+      }),
+      env,
+    );
+    expect(response.status).toBe(404);
+  });
+
+  test("a failure that merely reads as unavailable stays a retryable 503", async () => {
+    const env: UserApplicationEnv = {
+      BOT_STATE: {
+        ...rpcBindingFor({} as BotStateBinding),
+        deleteApplet: async () => {
+          throw new Error("the Applet Durable Object is unavailable");
+        },
+      },
+      DEPLOYMENT: { userId: "alice", applicationHash: "foundation-v1" },
+    };
+    const app = createUserApplication();
+    const response = await app(
+      new Request("https://frockbot.test/api/applets/alice.todo/delete", {
+        method: "POST",
+      }),
+      env,
+    );
+    expect(response.status).toBe(503);
+  });
+
+  test("a delete that might still work stays a 503", async () => {
+    const env: UserApplicationEnv = {
+      BOT_STATE: {
+        ...rpcBindingFor({} as BotStateBinding),
+        deleteApplet: async () => {
+          throw new Error("Network connection lost");
+        },
+      },
+      DEPLOYMENT: { userId: "alice", applicationHash: "foundation-v1" },
+    };
+    const app = createUserApplication();
+    const response = await app(
+      new Request("https://frockbot.test/api/applets/alice.todo/delete", {
+        method: "POST",
+      }),
+      env,
+    );
+    expect(response.status).toBe(503);
   });
 });
