@@ -24,6 +24,8 @@ class BotStateChannel {
   bool _dirty = false;
   bool _flushing = false;
   bool _hasSynchronized = false;
+  bool _offline = false;
+  ConnectionState? _reported;
   String? _cursor;
   BotStateChannel({
     required this.api,
@@ -43,8 +45,10 @@ class BotStateChannel {
     final old = _socket;
     _socket = null;
     if (reportProgress) {
-      status(
-        !_hasSynchronized && _attempt == 0
+      _report(
+        _offline
+            ? ConnectionState.disconnected
+            : !_hasSynchronized && _attempt == 0
             ? ConnectionState.initializing
             : ConnectionState.reconnecting,
       );
@@ -84,7 +88,8 @@ class BotStateChannel {
                   _deadline?.cancel();
                   _attempt = 0;
                   _hasSynchronized = true;
-                  status(ConnectionState.connected);
+                  _offline = false;
+                  _report(ConnectionState.connected);
                   return;
                 }
                 if (frame['type'] == 'state/event' &&
@@ -139,6 +144,15 @@ class BotStateChannel {
     }());
   }
 
+  /// The status a listener already holds is not worth repeating: an offline
+  /// banner that survives a retry must not be torn down and rebuilt for a
+  /// state it never left.
+  void _report(ConnectionState state) {
+    if (_reported == state) return;
+    _reported = state;
+    status(state);
+  }
+
   void _failed(int epoch) {
     if (epoch != _epoch || _disposed) return;
     ++_epoch;
@@ -146,7 +160,8 @@ class BotStateChannel {
     final socket = _socket;
     _socket = null;
     unawaited(socket?.sink.close());
-    status(_paused ? ConnectionState.paused : ConnectionState.disconnected);
+    if (!_paused) _offline = true;
+    _report(_paused ? ConnectionState.paused : ConnectionState.disconnected);
     if (!_paused) {
       final seconds = (1 << _attempt.clamp(0, 5)).clamp(1, 30);
       _attempt++;
@@ -166,7 +181,12 @@ class BotStateChannel {
     _failed(_epoch);
   }
 
+  /// Only a channel the app actually stopped has anything to resume. The
+  /// lifecycle reports `inactive` for a notification banner or the app
+  /// switcher and reports it again on the way back, so a live socket would
+  /// otherwise be torn down and rebuilt for a trip the person never took.
   void resume() {
+    if (!_paused) return;
     _paused = false;
     unawaited(connect());
   }
