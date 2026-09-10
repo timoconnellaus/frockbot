@@ -22,7 +22,8 @@ class AppletChatCard extends StatefulWidget {
   State<AppletChatCard> createState() => _AppletChatCardState();
 }
 
-class _AppletChatCardState extends State<AppletChatCard> {
+class _AppletChatCardState extends State<AppletChatCard>
+    with AutomaticKeepAliveClientMixin {
   AppletsApi? api;
   AppletViewer? viewer;
   String title = 'Applet';
@@ -112,33 +113,41 @@ class _AppletChatCardState extends State<AppletChatCard> {
     }
   }
 
+  /// A card is a live Applet, not a picture of one: scrolling it past the
+  /// viewport must not dispose the frame and lose an interaction in progress.
   @override
-  Widget build(BuildContext context) => Card(
-    clipBehavior: Clip.antiAlias,
-    child: Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Padding(
-          padding: const EdgeInsets.all(12),
-          child: Text(title, style: Theme.of(context).textTheme.titleMedium),
-        ),
-        if (viewer != null) ...[
-          SizedBox(height: 400, child: AppletViewerFrame(viewer: viewer!)),
-          // A refresh that keeps failing leaves the frame up but its credential
-          // ageing out, so the card says what went wrong and offers the retry
-          // that re-mints it rather than dying silently.
-          if (error != null) _failure(error!),
-        ] else if (error != null || api == null)
-          _failure(error ?? 'Applets are unavailable.')
-        else
-          const SizedBox(
-            height: 100,
-            child: Center(child: CircularProgressIndicator()),
+  bool get wantKeepAlive => true;
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Text(title, style: Theme.of(context).textTheme.titleMedium),
           ),
-      ],
-    ),
-  );
+          if (viewer != null) ...[
+            SizedBox(height: 400, child: AppletViewerFrame(viewer: viewer!)),
+            // A refresh that keeps failing leaves the frame up but its credential
+            // ageing out, so the card says what went wrong and offers the retry
+            // that re-mints it rather than dying silently.
+            if (error != null) _failure(error!),
+          ] else if (error != null || api == null)
+            _failure(error ?? 'Applets are unavailable.')
+          else
+            const SizedBox(
+              height: 100,
+              child: Center(child: CircularProgressIndicator()),
+            ),
+        ],
+      ),
+    );
+  }
 
   Widget _failure(String message) => Padding(
     padding: const EdgeInsets.all(12),

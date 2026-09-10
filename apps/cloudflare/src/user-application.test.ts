@@ -14,6 +14,7 @@ import {
   BotTurnRefusedError,
 } from "@frockbot/core/durable";
 import { COMPUTER_HOST_CAPABILITIES_V1 } from "./computer-host.js";
+import { AppletUnavailableError } from "./applet-directory.js";
 
 function rpcBindingFor(state: BotStateBinding): UserBotStateBinding {
   return {
@@ -1056,7 +1057,7 @@ describe("Applet deletion", () => {
       BOT_STATE: {
         ...rpcBindingFor({} as BotStateBinding),
         deleteApplet: async () => {
-          throw new Error('Applet "alice.todo" is unavailable');
+          throw new AppletUnavailableError("alice.todo");
         },
       },
       DEPLOYMENT: { userId: "alice", applicationHash: "foundation-v1" },
@@ -1069,6 +1070,26 @@ describe("Applet deletion", () => {
       env,
     );
     expect(response.status).toBe(404);
+  });
+
+  test("a failure that merely reads as unavailable stays a retryable 503", async () => {
+    const env: UserApplicationEnv = {
+      BOT_STATE: {
+        ...rpcBindingFor({} as BotStateBinding),
+        deleteApplet: async () => {
+          throw new Error("the Applet Durable Object is unavailable");
+        },
+      },
+      DEPLOYMENT: { userId: "alice", applicationHash: "foundation-v1" },
+    };
+    const app = createUserApplication();
+    const response = await app(
+      new Request("https://frockbot.test/api/applets/alice.todo/delete", {
+        method: "POST",
+      }),
+      env,
+    );
+    expect(response.status).toBe(503);
   });
 
   test("a delete that might still work stays a 503", async () => {

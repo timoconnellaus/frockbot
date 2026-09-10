@@ -221,6 +221,70 @@ void main() {
   });
 
   testWidgets(
+    'a live card keeps its viewer when scrolled out of the viewport',
+    (tester) async {
+      var tokens = 0;
+      final api = SettingsApi(MemoryStore(), (path, body) async {
+        if (path == '/api/applets') {
+          return {
+            'schemaVersion': 1,
+            'applets': [applet(generationId: 'g1').toJson()],
+          };
+        }
+        if (path.endsWith('/ui')) {
+          return {
+            'uiUrl': 'https://ui.example/applet.html',
+            'generationId': 'g1',
+          };
+        }
+        if (path.endsWith('/token')) {
+          tokens++;
+          return {
+            'token': 'viewer-token',
+            'expiresAt': '2027-01-01T00:00:00.000Z',
+            'socketUrl':
+                'wss://bot.frockbot.com/api/applets/todo.applet/socket',
+          };
+        }
+        throw StateError(path);
+      });
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: AppletChatScope(
+              api: api,
+              child: ListView(
+                children: const [
+                  AppletChatCard(appletId: 'todo.applet'),
+                  SizedBox(height: 4000, child: Text('below')),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(AppletViewerFrame), findsOneWidget);
+      expect(tokens, 1);
+      // Well past the card and its cache extent: an ordinary card would be
+      // unmounted here, taking a half-finished interaction with it.
+      await tester.drag(find.byType(ListView), const Offset(0, -3000));
+      await tester.pumpAndSettle();
+      expect(
+        find.byType(AppletViewerFrame, skipOffstage: false),
+        findsOneWidget,
+      );
+      await tester.drag(find.byType(ListView), const Offset(0, 3000));
+      await tester.pumpAndSettle();
+      expect(find.byType(AppletViewerFrame), findsOneWidget);
+      // A remount would have re-listed, re-read the UI and minted a second
+      // viewer credential; the held one is still the only one.
+      expect(tokens, 1);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets(
     'a directory that read fine renders when only the focus read fails',
     (tester) async {
       final api = SettingsApi(MemoryStore(), (path, body) async {
