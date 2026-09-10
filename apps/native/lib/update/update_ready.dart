@@ -22,7 +22,13 @@ enum MobileUpdateStatus { upToDate, outdated, restartRequired, unavailable }
 /// seam without loading Shorebird's native updater or restarting their host.
 abstract interface class MobileUpdateService {
   Future<MobileUpdateStatus> check();
-  Future<void> download();
+
+  /// Fetches the available patch and reports whether one is now staged on
+  /// disk for the next engine. Shorebird treats an already-running automatic
+  /// download as a benign no-op, so returning normally is not by itself proof
+  /// that a patch is waiting.
+  Future<bool> download();
+
   Future<bool> restart();
 }
 
@@ -49,7 +55,14 @@ class ShorebirdMobileUpdateService implements MobileUpdateService {
   }
 
   @override
-  Future<void> download() => updater.update();
+  Future<bool> download() async {
+    await updater.update();
+    final (current, next) = await (
+      updater.readCurrentPatch(),
+      updater.readNextPatch(),
+    ).wait;
+    return current?.number != next?.number;
+  }
 
   @override
   Future<bool> restart() async {
@@ -77,9 +90,10 @@ class MobileUpdateController extends ChangeNotifier {
 
   static Future<void> _nothing() async {}
 
-  /// Checks once at a time. A successful download is itself enough evidence
-  /// that the next engine should boot the patch; a second network request
-  /// could fail after the durable download and incorrectly hide the action.
+  /// Checks once at a time. The header only appears once a patch is actually
+  /// staged on disk, which the download reports directly rather than being
+  /// re-derived by a second network request that could fail afterwards and
+  /// incorrectly hide the action.
   Future<void> check() {
     final running = _checking;
     if (running != null) return running;
@@ -94,10 +108,11 @@ class MobileUpdateController extends ChangeNotifier {
   Future<void> _check() async {
     try {
       final status = await service.check();
-      if (status == MobileUpdateStatus.outdated) await service.download();
-      final ready =
-          status == MobileUpdateStatus.restartRequired ||
-          status == MobileUpdateStatus.outdated;
+      final ready = switch (status) {
+        MobileUpdateStatus.restartRequired => true,
+        MobileUpdateStatus.outdated => await service.download(),
+        MobileUpdateStatus.upToDate || MobileUpdateStatus.unavailable => false,
+      };
       if (ready && !_disposed) {
         restartRequired = true;
         notifyListeners();
@@ -156,7 +171,16 @@ class _UpdateReadyFrameState extends State<UpdateReadyFrame>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     widget.controller.addListener(_changed);
-    unawaited(widget.controller.check());
+    _checkAfterFrame(widget.controller);
+  }
+
+  /// The first probe reaches Shorebird's native updater, which can block on
+  /// the automatic updater thread's config lock, so it never runs inside a
+  /// build.
+  void _checkAfterFrame(MobileUpdateController controller) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(controller.check());
+    });
   }
 
   @override
@@ -165,7 +189,7 @@ class _UpdateReadyFrameState extends State<UpdateReadyFrame>
     if (oldWidget.controller == widget.controller) return;
     oldWidget.controller.removeListener(_changed);
     widget.controller.addListener(_changed);
-    unawaited(widget.controller.check());
+    _checkAfterFrame(widget.controller);
   }
 
   void _changed() {

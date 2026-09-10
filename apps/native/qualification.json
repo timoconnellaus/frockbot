@@ -62,6 +62,9 @@
     "frameworkRevision": "cac7b89dba52c1b8086d211de9a86ad2219ea8ac",
     "engineRevision": "5a91274d10582c35d6df695511e327879664e35c",
     "status": "signed-patch-offline-and-rollback-verified-on-android-emulator",
+    "codePush": "2.0.7",
+    "restartApp": "1.9.1",
+    "baseline": "requires-new-release-restart-app-native-plugin-added",
     "ledger": "docs/research/shorebird-qualification-2026-09-09.md"
   }
 }

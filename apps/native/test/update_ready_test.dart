@@ -17,6 +17,7 @@ class FakeUpdateService implements MobileUpdateService {
   final List<String> events;
   Completer<void>? checkGate;
   bool restartSucceeds;
+  bool downloadStages;
   int checks = 0;
   int downloads = 0;
   int restarts = 0;
@@ -25,6 +26,7 @@ class FakeUpdateService implements MobileUpdateService {
     this.statuses = const [MobileUpdateStatus.upToDate],
     this.events = const [],
     this.restartSucceeds = true,
+    this.downloadStages = true,
   });
 
   @override
@@ -35,8 +37,9 @@ class FakeUpdateService implements MobileUpdateService {
   }
 
   @override
-  Future<void> download() async {
+  Future<bool> download() async {
     downloads++;
+    return downloadStages;
   }
 
   @override
@@ -75,6 +78,20 @@ void main() {
     expect(service.checks, 1);
     expect(service.downloads, 1);
     expect(controller.restartRequired, isTrue);
+  });
+
+  test('a download that stages no patch leaves the header hidden', () async {
+    final service = FakeUpdateService(
+      statuses: const [MobileUpdateStatus.outdated],
+      downloadStages: false,
+    );
+    final controller = MobileUpdateController(service: service);
+    addTearDown(controller.dispose);
+
+    await controller.check();
+
+    expect(service.downloads, 1);
+    expect(controller.restartRequired, isFalse);
   });
 
   test('a downloaded patch is ready without another download', () async {
