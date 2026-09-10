@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/applets/canvas.dart';
 import 'package:frockbot_native/applets/chat_card.dart';
 import 'package:frockbot_native/applets/picker.dart';
+import 'package:frockbot_native/client/transport.dart';
 
 import 'applets_test.dart' show applet;
 import 'settings_test.dart' show SettingsApi;
@@ -111,4 +112,96 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     },
   );
+
+  testWidgets('a failed directory read offers a retry instead of the empty state', (
+    tester,
+  ) async {
+    var down = true;
+    final api = SettingsApi(MemoryStore(), (path, body) async {
+      if (down) throw const RequestFailure('applets are unavailable', 503);
+      if (path == '/api/applets') {
+        return {
+          'schemaVersion': 1,
+          'applets': [applet().toJson()],
+        };
+      }
+      if (path.endsWith('/focus')) return {'appletId': null};
+      throw StateError(path);
+    });
+    final controller = AppletCanvasController(api, 'bot-1');
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: AppletPicker(controller: controller)),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('No Applets yet. Ask a Bot to build one.'), findsNothing);
+    expect(find.text('Couldn\u2019t load Applets \u00b7 Retry'), findsOneWidget);
+    down = false;
+    await tester.tap(find.text('Couldn\u2019t load Applets \u00b7 Retry'));
+    await tester.pumpAndSettle();
+    expect(find.text('Weekly Todos'), findsOneWidget);
+    expect(find.text('No Applets yet. Ask a Bot to build one.'), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+    controller.dispose();
+  });
+
+  testWidgets('a live card keeps its frame through a failed refresh', (
+    tester,
+  ) async {
+    var down = false;
+    var tokens = 0;
+    final api = SettingsApi(MemoryStore(), (path, body) async {
+      if (down) throw const RequestFailure('FrockBot didn\u2019t answer');
+      if (path == '/api/applets') {
+        return {
+          'schemaVersion': 1,
+          'applets': [applet(generationId: 'g1').toJson()],
+        };
+      }
+      if (path.endsWith('/ui')) {
+        return {
+          'uiUrl': 'https://ui.example/applet.html',
+          'generationId': 'g1',
+        };
+      }
+      if (path.endsWith('/token')) {
+        tokens++;
+        return {
+          'token': 'viewer-token',
+          'expiresAt': '2027-01-01T00:00:00.000Z',
+          'socketUrl': 'wss://bot.frockbot.com/api/applets/todo.applet/socket',
+        };
+      }
+      throw StateError(path);
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AppletChatScope(
+            api: api,
+            child: const AppletChatCard(appletId: 'todo.applet'),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byType(AppletViewerFrame), findsOneWidget);
+    expect(tokens, 1);
+    down = true;
+    await tester.pump(const Duration(seconds: 30));
+    await tester.pumpAndSettle();
+    expect(find.byType(AppletViewerFrame), findsOneWidget);
+    expect(find.text('Retry'), findsNothing);
+    expect(
+      find.text('This Applet has been deleted or is unavailable.'),
+      findsNothing,
+    );
+    down = false;
+    await tester.pump(const Duration(seconds: 30));
+    await tester.pumpAndSettle();
+    expect(find.byType(AppletViewerFrame), findsOneWidget);
+    expect(tokens, 1);
+    await tester.pumpWidget(const SizedBox());
+  });
 }

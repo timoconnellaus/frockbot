@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../client/transport.dart';
 import 'canvas.dart';
 import 'client.dart';
+import 'failure.dart';
 
 class AppletChatScope extends InheritedWidget {
   final NativeApi api;
@@ -75,7 +76,11 @@ class _AppletChatCardState extends State<AppletChatCard> {
       if (!mounted || read != epoch) return;
       final generationId = ui.generationId;
       if (generationId == null) {
-        throw const FormatException('Applet has no published generation');
+        setState(() {
+          viewer = null;
+          error = 'This Applet hasn’t been published yet.';
+        });
+        return;
       }
       if (!appletViewerStillCurrentV1(
         held: viewer,
@@ -94,14 +99,16 @@ class _AppletChatCardState extends State<AppletChatCard> {
         );
       }
       setState(() => error = null);
-    } catch (_) {
-      if (mounted && read == epoch) {
-        setState(() {
-          viewer = null;
-          error =
-              'This Applet couldn’t be opened. It may not be published yet.';
-        });
-      }
+    } catch (failure) {
+      if (!mounted || read != epoch) return;
+      // A refresh that could not reach the read says nothing about the Applet
+      // itself, so a running frame keeps running; only an answer about this
+      // Applet — gone from the directory, or nothing published — takes it down.
+      final classified = appletCanvasFailureV1(failure);
+      setState(() {
+        if (classified.kind == AppletFailureKind.unpublished) viewer = null;
+        if (viewer == null) error = classified.message;
+      });
     }
   }
 

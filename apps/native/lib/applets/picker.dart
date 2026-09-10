@@ -75,7 +75,9 @@ class _AppletPickerState extends State<AppletPicker> {
                 if (error != null) Text(error!),
                 if (controller.loading && controller.directory.isEmpty)
                   const LinearProgressIndicator(),
-                if (!controller.loading && controller.directory.isEmpty)
+                if (!controller.loading &&
+                    controller.failure == null &&
+                    controller.directory.isEmpty)
                   const Text('No Applets yet. Ask a Bot to build one.'),
                 if (controller.failure != null)
                   TextButton(
