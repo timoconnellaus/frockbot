@@ -10,7 +10,7 @@ import 'transport.dart';
 /// Bot directory, observer cursors, drafts and cached transcripts. It holds one
 /// JSON document read once at startup, so a switch between Bots reads from
 /// memory instead of the platform keystore.
-class PlainStore implements SnapshotStore {
+class PlainStore implements SnapshotStore, CheckpointStore {
   final Future<Directory> Function() location;
   final String name;
   final Map<String, String> _values = {};
@@ -90,11 +90,14 @@ class PlainStore implements SnapshotStore {
     _writes = next.catchError((Object _) {});
     return next;
   }
+
+  @override
+  Future<void> checkpoint() => _writes;
 }
 
 /// Routes each key to the store that suits it and migrates values written by
 /// the released shape that kept everything in the keystore.
-class SplitStore implements SnapshotStore {
+class SplitStore implements SnapshotStore, CheckpointStore {
   static const migrationKey = 'store.migrated.v1';
   final LocalStore secrets;
   final PlainStore plain;
@@ -161,6 +164,12 @@ class SplitStore implements SnapshotStore {
     await migrate();
     await plain.delete(key);
     if (!_migrated) await secrets.delete(key);
+  }
+
+  @override
+  Future<void> checkpoint() async {
+    await migrate();
+    await Future.wait([checkpointStore(secrets), plain.checkpoint()]);
   }
 }
 

@@ -37,6 +37,8 @@ abstract final class ShellIds {
   static const runViewClose = 'run-view-close';
   static const reconnect = 'reconnect-button';
   static const checkDelivery = 'check-delivery';
+  static const updateReady = 'update-ready';
+  static const updateRestart = 'update-restart';
 
   static String sidebarBot(String botId) => 'sidebar-bot-$botId';
   static String sidebarPinned(String botId) => 'sidebar-pinned-$botId';

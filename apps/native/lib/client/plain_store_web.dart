@@ -11,7 +11,7 @@ import 'store.dart';
 /// written and a write is durable when it returns, which is what the callers
 /// that must persist before dispatching require. Its budget is a few megabytes
 /// per origin, the same order as the phone document's 4 MiB read bound.
-class WebStore implements SnapshotStore {
+class WebStore implements SnapshotStore, CheckpointStore {
   static const prefix = 'frockbot.native.v1.';
   final web.Storage storage;
   WebStore({web.Storage? storage})
@@ -32,6 +32,9 @@ class WebStore implements SnapshotStore {
 
   @override
   Future<void> delete(String key) async => storage.removeItem('$prefix$key');
+
+  @override
+  Future<void> checkpoint() async {}
 }
 
 LocalStore nativeStore() => WebStore();
