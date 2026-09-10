@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'canvas.dart';
+import '../client/transport.dart';
 import '../shell/semantics.dart';
 
 class AppletPicker extends StatefulWidget {
@@ -48,7 +49,13 @@ class _AppletPickerState extends State<AppletPicker> {
     });
     try {
       final controller = widget.controller;
-      await controller.applets.delete(id);
+      try {
+        await controller.applets.delete(id);
+      } on RequestFailure catch (failure) {
+        // An Applet the backend no longer has is the outcome this row asked
+        // for. Only a delete that might still succeed is worth retrying.
+        if (failure.status != 404) rethrow;
+      }
       await controller.load();
     } catch (_) {
       if (mounted) {

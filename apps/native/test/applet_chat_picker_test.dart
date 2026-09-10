@@ -113,38 +113,48 @@ void main() {
     },
   );
 
-  testWidgets('a failed directory read offers a retry instead of the empty state', (
-    tester,
-  ) async {
-    var down = true;
-    final api = SettingsApi(MemoryStore(), (path, body) async {
-      if (down) throw const RequestFailure('applets are unavailable', 503);
-      if (path == '/api/applets') {
-        return {
-          'schemaVersion': 1,
-          'applets': [applet().toJson()],
-        };
-      }
-      if (path.endsWith('/focus')) return {'appletId': null};
-      throw StateError(path);
-    });
-    final controller = AppletCanvasController(api, 'bot-1');
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(body: AppletPicker(controller: controller)),
-      ),
-    );
-    await tester.pumpAndSettle();
-    expect(find.text('No Applets yet. Ask a Bot to build one.'), findsNothing);
-    expect(find.text('Couldn\u2019t load Applets \u00b7 Retry'), findsOneWidget);
-    down = false;
-    await tester.tap(find.text('Couldn\u2019t load Applets \u00b7 Retry'));
-    await tester.pumpAndSettle();
-    expect(find.text('Weekly Todos'), findsOneWidget);
-    expect(find.text('No Applets yet. Ask a Bot to build one.'), findsNothing);
-    await tester.pumpWidget(const SizedBox());
-    controller.dispose();
-  });
+  testWidgets(
+    'a failed directory read offers a retry instead of the empty state',
+    (tester) async {
+      var down = true;
+      final api = SettingsApi(MemoryStore(), (path, body) async {
+        if (down) throw const RequestFailure('applets are unavailable', 503);
+        if (path == '/api/applets') {
+          return {
+            'schemaVersion': 1,
+            'applets': [applet().toJson()],
+          };
+        }
+        if (path.endsWith('/focus')) return {'appletId': null};
+        throw StateError(path);
+      });
+      final controller = AppletCanvasController(api, 'bot-1');
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(body: AppletPicker(controller: controller)),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.text('No Applets yet. Ask a Bot to build one.'),
+        findsNothing,
+      );
+      expect(
+        find.text('Couldn\u2019t load Applets \u00b7 Retry'),
+        findsOneWidget,
+      );
+      down = false;
+      await tester.tap(find.text('Couldn\u2019t load Applets \u00b7 Retry'));
+      await tester.pumpAndSettle();
+      expect(find.text('Weekly Todos'), findsOneWidget);
+      expect(
+        find.text('No Applets yet. Ask a Bot to build one.'),
+        findsNothing,
+      );
+      await tester.pumpWidget(const SizedBox());
+      controller.dispose();
+    },
+  );
 
   testWidgets('a live card keeps its frame through a failed refresh', (
     tester,
@@ -208,6 +218,88 @@ void main() {
     expect(find.text('FrockBot didn\u2019t answer.'), findsNothing);
     expect(tokens, 1);
     await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets(
+    'a directory that read fine renders when only the focus read fails',
+    (tester) async {
+      final api = SettingsApi(MemoryStore(), (path, body) async {
+        if (path == '/api/applets') {
+          return {
+            'schemaVersion': 1,
+            'applets': [applet().toJson()],
+          };
+        }
+        // The Applets listed fine; the per-Bot focus route is the one that is
+        // down, and it says nothing about whether the User has Applets.
+        if (path.endsWith('/focus')) {
+          throw const RequestFailure('applets are unavailable', 503);
+        }
+        throw StateError(path);
+      });
+      final controller = AppletCanvasController(api, 'bot-1');
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(body: AppletPicker(controller: controller)),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Weekly Todos'), findsOneWidget);
+      expect(
+        find.text('Couldn\u2019t load Applets \u00b7 Retry'),
+        findsNothing,
+      );
+      expect(
+        find.text('No Applets yet. Ask a Bot to build one.'),
+        findsNothing,
+      );
+      await tester.pumpWidget(const SizedBox());
+      controller.dispose();
+    },
+  );
+
+  testWidgets('deleting an Applet that is already gone is not a failure', (
+    tester,
+  ) async {
+    var deleted = false;
+    final api = SettingsApi(MemoryStore(), (path, body) async {
+      if (path == '/api/applets') {
+        return {
+          'schemaVersion': 1,
+          'applets': [if (!deleted) applet().toJson()],
+        };
+      }
+      if (path.endsWith('/focus')) return {'appletId': null};
+      if (path.endsWith('/delete')) {
+        // Another window already deleted it, so the route answers with the
+        // settled truth that there is no such Applet.
+        deleted = true;
+        throw const RequestFailure('Applet "todo.applet" is unavailable', 404);
+      }
+      throw StateError(path);
+    });
+    final controller = AppletCanvasController(api, 'bot-1');
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: AppletPicker(controller: controller)),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Delete Weekly Todos'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Delete'));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Couldn\u2019t delete this Applet. Try again.'),
+      findsNothing,
+    );
+    expect(find.text('Weekly Todos'), findsNothing);
+    expect(
+      find.text('No Applets yet. Ask a Bot to build one.'),
+      findsOneWidget,
+    );
+    await tester.pumpWidget(const SizedBox());
+    controller.dispose();
   });
 
   testWidgets('a focused Applet that will not open is not a picker failure', (

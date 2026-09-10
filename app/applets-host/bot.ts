@@ -272,6 +272,18 @@ export async function readFocusedApplet(
   }
   if (listed.applets.some((applet) => applet.appletId === focused.appletId))
     return focused;
+  // The directory read is a call to another Durable Object, and this one's
+  // input gate is open across it. A focus the User set while it was in flight
+  // is about an Applet this listing says nothing about, so the clear applies
+  // only to the record it was decided against.
+  const latest = await state.ctx.storage.get<unknown>(APPLET_FOCUSED_KEY);
+  if (latest === undefined) return focused;
+  const current = decodeFocusedAppletV1(latest);
+  if (
+    current.appletId !== focused.appletId ||
+    current.changedAt !== focused.changedAt
+  )
+    return current;
   const cleared = decodeFocusedAppletV1({
     schemaVersion: 1,
     appletId: null,

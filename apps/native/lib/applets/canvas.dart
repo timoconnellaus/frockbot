@@ -91,13 +91,17 @@ class AppletCanvasController extends ChangeNotifier {
     var read = false;
     try {
       final listed = await applets.list();
-      final focus = await applets.focus(botId);
       if (epoch != _epoch) return;
       directory = listed;
-      focusedId = listed.any((entry) => entry.appletId == focus) ? focus : null;
       directoryFailure = null;
       read = true;
       _changed();
+      // The directory is the User's and the focus is one Bot's. Only the read
+      // above says whether the Applets could be listed; everything past here
+      // is about the focused Applet, and fails as one.
+      final focus = await applets.focus(botId);
+      if (epoch != _epoch) return;
+      focusedId = listed.any((entry) => entry.appletId == focus) ? focus : null;
       failure = null;
       _attempt = 0;
       await _readFocused(epoch);

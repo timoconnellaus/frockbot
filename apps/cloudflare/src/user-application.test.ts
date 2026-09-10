@@ -1050,4 +1050,44 @@ describe("Applet deletion", () => {
       status: "deleted",
     });
   });
+
+  test("an Applet the directory no longer holds answers 404, not a retryable 503", async () => {
+    const env: UserApplicationEnv = {
+      BOT_STATE: {
+        ...rpcBindingFor({} as BotStateBinding),
+        deleteApplet: async () => {
+          throw new Error('Applet "alice.todo" is unavailable');
+        },
+      },
+      DEPLOYMENT: { userId: "alice", applicationHash: "foundation-v1" },
+    };
+    const app = createUserApplication();
+    const response = await app(
+      new Request("https://frockbot.test/api/applets/alice.todo/delete", {
+        method: "POST",
+      }),
+      env,
+    );
+    expect(response.status).toBe(404);
+  });
+
+  test("a delete that might still work stays a 503", async () => {
+    const env: UserApplicationEnv = {
+      BOT_STATE: {
+        ...rpcBindingFor({} as BotStateBinding),
+        deleteApplet: async () => {
+          throw new Error("Network connection lost");
+        },
+      },
+      DEPLOYMENT: { userId: "alice", applicationHash: "foundation-v1" },
+    };
+    const app = createUserApplication();
+    const response = await app(
+      new Request("https://frockbot.test/api/applets/alice.todo/delete", {
+        method: "POST",
+      }),
+      env,
+    );
+    expect(response.status).toBe(503);
+  });
 });

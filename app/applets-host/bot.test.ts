@@ -19,18 +19,24 @@ function summary(appletId: string) {
   };
 }
 
-function harness(options: { applets?: string[]; unreachable?: boolean }) {
+function harness(options: {
+  applets?: string[];
+  unreachable?: boolean;
+  duringList?: () => Promise<void>;
+}) {
   const values = new Map<string, unknown>();
   let listed = 0;
   const rpc = {
-    listApplets: () => {
+    listApplets: async () => {
       listed += 1;
-      return options.unreachable
-        ? Promise.reject(new Error("the directory is unavailable"))
-        : Promise.resolve({
-            revision: 1,
-            applets: (options.applets ?? []).map(summary),
-          });
+      if (options.unreachable) throw new Error("the directory is unavailable");
+      // The Bot's input gate is open across this call, so anything the
+      // harness does here is what another request did while it was in flight.
+      await options.duringList?.();
+      return {
+        revision: 1,
+        applets: (options.applets ?? []).map(summary),
+      };
     },
   };
   const state = {
@@ -96,6 +102,26 @@ describe("the focused Applet", () => {
       appletId: null,
     });
     expect(offline.reads()).toBe(0);
+  });
+
+  test("a focus set while the directory read was in flight is not overwritten", async () => {
+    // The panel polls the focus route, so a read is usually in flight when the
+    // User picks an Applet. The stale id the read is clearing says nothing
+    // about the one the User just chose.
+    const NEXT = `${IDENTITY.userId}.${"b".repeat(32)}`;
+    const picked = harness({
+      applets: [NEXT],
+      duringList: async () => {
+        await setFocusedApplet(picked.state, IDENTITY, NEXT);
+      },
+    });
+    await setFocusedApplet(picked.state, IDENTITY, APPLET);
+    expect(await readFocusedApplet(picked.state, IDENTITY)).toMatchObject({
+      appletId: NEXT,
+    });
+    expect(picked.values.get(APPLET_FOCUSED_KEY)).toMatchObject({
+      appletId: NEXT,
+    });
   });
 
   test("a directory that cannot be read leaves the focus alone", async () => {

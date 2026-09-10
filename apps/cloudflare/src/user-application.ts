@@ -478,10 +478,13 @@ function createUserApplicationRoute() {
         await env.BOT_STATE.deleteApplet({ schemaVersion: 1, appletId });
         return Response.json({ schemaVersion: 1, status: "deleted" });
       } catch (error) {
-        return jsonError(
-          503,
-          error instanceof Error ? error.message : "Could not delete Applet",
-        );
+        const message =
+          error instanceof Error ? error.message : "Could not delete Applet";
+        // An id the directory does not list is a settled answer, not a blip:
+        // the Applet is already gone. Saying 503 made a second delete — two
+        // windows, or a Bot that deleted it mid-dialog — a failure that
+        // retrying could never clear.
+        return jsonError(message.includes("unavailable") ? 404 : 503, message);
       }
     }
     const appletTokenMatch = url.pathname.match(
