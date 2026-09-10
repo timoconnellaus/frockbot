@@ -37,7 +37,12 @@ jobs:
         with:
           flutter-version: 3.47.0
           channel: stable
-      - run: flutter pub get --enforce-lockfile
+      # Plain `pub get`, as `ci.yml` resolves it. `--enforce-lockfile` belongs
+      # to `native.yml`, which owns the pins; asking for it here fails on a
+      # freshly downloaded SDK, whose own unresolved workspace drags
+      # `flutter_tools` (and its exact `petitparser`) into the app resolution,
+      # where the lockfile has no entry to satisfy.
+      - run: flutter pub get
         working-directory: apps/native
       - run: flutter test --no-pub test/mac_messages_test.dart
         working-directory: apps/native
