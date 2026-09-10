@@ -90,7 +90,7 @@ Run `bun run update:desktop` from the checkout being released. It checks the cli
 
 The app uses Apple team `Q444L76529`, bundle `com.frockbot.mobile`, the default protected Keychain group, and the exact associated return domain. A matching Apple Development identity and provisioning profile are required. Run the updater for native-client and minimum-supported-version changes. Android-only APK releases and Shorebird patches do not need a desktop rebuild. A `CODE_SIGNING_ALLOWED=NO` build plus ad-hoc local signing proves only renderer compilation/launch, never verified links or production credential protection. iOS is not a target in this slice.
 
-The main Mac app is a direct website download, with Messages built into Registered machines. Build, signing, notarization and associated-domain requirements are in [the Mac release guide](macos/README.md). The bundle remains `com.frockbot.mobile`; public distribution requires Developer ID signing and a matching profile. Development builds do not prove verified sign-in or distribution readiness. iOS is not a target in this slice.
+The main Mac app is distributed directly rather than through the Mac App Store, with Messages built into Registered machines; the website links a download only once a signed, notarized release is published. Build, signing, notarization and associated-domain requirements are in [the Mac release guide](macos/README.md). The bundle remains `com.frockbot.mobile`; public distribution requires Developer ID signing and a matching profile. Development builds do not prove verified sign-in or distribution readiness. iOS is not a target in this slice.
 
 ## Web
 

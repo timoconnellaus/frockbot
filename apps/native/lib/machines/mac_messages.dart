@@ -32,8 +32,9 @@ class MacMessagesController extends ChangeNotifier {
   void _adopt(Object? value) {
     if (value is! Map ||
         value['userId'] != _userId ||
-        value['origin'] != hostedOrigin)
+        value['origin'] != hostedOrigin) {
       return;
+    }
     consent = value['consent'] == true;
     paired = value['paired'] == true;
     busy = value['busy'] == true;
