@@ -7,10 +7,12 @@
 /// what disabled Try again for the exact case it exists for.
 library;
 
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../acceptance_metrics.dart';
+import '../voice/footer.dart' show VoiceDictationBars;
 import 'semantics.dart';
 import 'chat_icons.dart';
 import 'skill_menu.dart';
@@ -103,6 +105,20 @@ class Composer extends StatefulWidget {
   /// Absent where no catalog has been read — a composer with no popover
   /// rather than a broken one.
   final SkillMenuController? skills;
+
+  /// Starts dictating into this composer. Absent on a client that has no
+  /// microphone at all; the button is shown whenever it is present, even on a
+  /// deployment without the keys, which answers the press in one line.
+  final VoidCallback? onDictate;
+
+  /// Commits the dictation into the editable draft. It never sends.
+  final VoidCallback? onStopDictation;
+
+  /// Whether this composer's Bot is the one being dictated into.
+  final bool dictating;
+
+  /// The capture level, 0..1, which is what the bars are drawn from.
+  final ValueListenable<double>? dictationLevel;
   const Composer({
     super.key,
     required this.editor,
@@ -114,6 +130,10 @@ class Composer extends StatefulWidget {
     required this.onStop,
     required this.onChanged,
     required this.skills,
+    this.onDictate,
+    this.onStopDictation,
+    this.dictating = false,
+    this.dictationLevel,
   });
 
   @override
@@ -170,6 +190,7 @@ class _ComposerState extends State<Composer> {
     final theme = Theme.of(context);
     final text = widget.editor.text;
     final canSend = widget.ready && draftSendable(text.trim());
+    final dictatable = widget.onDictate != null && text.trim().isEmpty;
     final skills = widget.skills;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -303,23 +324,68 @@ class _ComposerState extends State<Composer> {
                     ),
                   ),
                 ),
-                identified(
-                  ShellIds.sendButton,
-                  Padding(
-                    padding: const EdgeInsets.all(3),
-                    child: IconButton.filled(
-                      key: const ValueKey('send'),
-                      tooltip: 'Send',
-                      onPressed: canSend ? widget.onSend : null,
-                      style: IconButton.styleFrom(
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(11),
+                // Dictating: what the person needs is the level and a way to
+                // stop, so the bars and Stop take the corner. Nothing here
+                // sends — Stop flushes into the draft and Send stays theirs.
+                if (widget.dictating) ...[
+                  if (widget.dictationLevel case final level?)
+                    VoiceDictationBars(level: level),
+                  identified(
+                    VoiceIds.composerDictationStop,
+                    Padding(
+                      padding: const EdgeInsets.all(3),
+                      child: IconButton.filledTonal(
+                        key: const ValueKey('dictation-stop'),
+                        tooltip: 'Stop dictation',
+                        onPressed: widget.onStopDictation,
+                        style: IconButton.styleFrom(
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(11),
+                          ),
                         ),
+                        icon: const Icon(Icons.stop_rounded, size: 20),
                       ),
-                      icon: const ChatIcon(ChatIconKind.send),
                     ),
                   ),
-                ),
+                ]
+                // An empty draft has nothing to send, so the corner offers
+                // the other way to fill it.
+                else if (dictatable)
+                  identified(
+                    VoiceIds.composerDictate,
+                    Padding(
+                      padding: const EdgeInsets.all(3),
+                      child: IconButton.filled(
+                        key: const ValueKey('dictate'),
+                        tooltip: 'Dictate message',
+                        onPressed: widget.onDictate,
+                        style: IconButton.styleFrom(
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(11),
+                          ),
+                        ),
+                        icon: const Icon(Icons.mic_none, size: 20),
+                      ),
+                    ),
+                  )
+                else
+                  identified(
+                    ShellIds.sendButton,
+                    Padding(
+                      padding: const EdgeInsets.all(3),
+                      child: IconButton.filled(
+                        key: const ValueKey('send'),
+                        tooltip: 'Send',
+                        onPressed: canSend ? widget.onSend : null,
+                        style: IconButton.styleFrom(
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(11),
+                          ),
+                        ),
+                        icon: const ChatIcon(ChatIconKind.send),
+                      ),
+                    ),
+                  ),
               ],
             ),
           ),

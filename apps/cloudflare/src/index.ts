@@ -146,6 +146,17 @@ import type {
   ClientWorkspaceFileV1,
 } from "./contracts.js";
 import { createGateway } from "./gateway.js";
+import { getAgentByName } from "agents";
+import {
+  VOICE_ASSISTANT_DEVICE_HEADER,
+  VOICE_ASSISTANT_INTERNAL_PATH,
+  VOICE_ASSISTANT_USER_HEADER,
+  VoiceAssistant,
+  voiceAssistantConfiguredV1,
+} from "./voice-assistant.js";
+import { openVoiceDictationRelayV1 } from "./voice-dictation.js";
+import { voiceDictationConfiguredV1 } from "@frockbot/app/voice/dictation-upstream";
+import type { VoiceGatewayDependencies } from "./contracts.js";
 import {
   decodeRpcEnvelopeV1,
   rpcAppletIdOrNull,
@@ -182,6 +193,8 @@ export { BotCapabilities } from "./bot-capabilities.js";
 // and the loopback `CAPABILITIES` entrypoint its facet is handed.
 export { AppletCapabilities, AppletState } from "./applet-state.js";
 export { BotState, DeploymentPolicy, UserConfiguration };
+// The account-wide voice session (docs/voice.md): the one Agents SDK object.
+export { VoiceAssistant };
 
 interface Env {
   FCM_SERVICE_ACCOUNT?: string;
@@ -228,6 +241,16 @@ interface Env {
   BOT_STATES: DurableObjectNamespace<BotState>;
   USER_CONFIGURATIONS: DurableObjectNamespace<UserConfiguration>;
   DEPLOYMENT_POLICY: DurableObjectNamespace<DeploymentPolicy>;
+  /** One voice session object per User, `idFromName(userId)` (docs/voice.md). */
+  VOICE_ASSISTANTS: DurableObjectNamespace<VoiceAssistant>;
+  /** The composer's dictation upstream. Absent closes dictation, visibly. */
+  OPENAI_API_KEY?: string;
+  /** The voice session's speech. Absent closes the assistant, visibly. */
+  ELEVENLABS_API_KEY?: string;
+  /** The ElevenLabs voice the assistant speaks with; George when unset. */
+  ELEVENLABS_VOICE_ID?: string;
+  /** A local dictation stand-in for the test harness; never set in production. */
+  VOICE_DICTATION_UPSTREAM_URL?: string;
   COMPUTER_HOST: Fetcher;
   /** Shared secret presented on every Computer host call. */
   COMPUTER_HOST_TOKEN?: string;
@@ -1439,6 +1462,66 @@ async function ownedComputerBotState(
   return botStateStub(env, userId, botId);
 }
 
+/** The voice doors the gateway opens once it has proved the identity. */
+function voiceGatewayDependencies(env: Env): VoiceGatewayDependencies {
+  return {
+    capabilities: () => ({
+      dictation: voiceDictationConfiguredV1(env),
+      assistant: voiceAssistantConfiguredV1(env),
+    }),
+    openDictation: async (userId, request) => {
+      // The account's voice object holds the dictation lease: one capture
+      // at a time and a booked window of seconds, decided before the provider
+      // is opened.
+      const stub = await getAgentByName(env.VOICE_ASSISTANTS, userId);
+      const leaseId = crypto.randomUUID();
+      const call = (input: Record<string, unknown>) =>
+        stub.dictationLease({ schemaVersion: 1, userId, leaseId, ...input });
+      return openVoiceDictationRelayV1(request, {
+        env,
+        lease: {
+          acquire: async () => {
+            const answer = await call({ action: "acquire" });
+            return answer.status === "acquired"
+              ? { status: "acquired" }
+              : {
+                  status: "refused",
+                  reason:
+                    answer.status === "refused"
+                      ? answer.reason
+                      : "Dictation is unavailable right now.",
+                };
+          },
+          renew: async () => {
+            const answer = await call({ action: "renew" });
+            return answer.status === "renewed" && answer.ok;
+          },
+          release: async (activeSeconds) => {
+            await call({ action: "release", activeSeconds });
+          },
+        },
+      });
+    },
+    openAssistant: async (userId, deviceKey, request, context) => {
+      const incoming = new URL(request.url);
+      const internal = new URL(
+        `${VOICE_ASSISTANT_INTERNAL_PATH}${incoming.search}`,
+        "https://voice-assistant.internal",
+      );
+      const headers = new Headers(request.headers);
+      headers.delete(VOICE_ASSISTANT_USER_HEADER);
+      headers.set(VOICE_ASSISTANT_USER_HEADER, userId);
+      headers.set(VOICE_ASSISTANT_DEVICE_HEADER, deviceKey);
+      headers.set("x-frockbot-auth-session-v1", context.authMode);
+      headers.set("x-frockbot-is-admin-v1", String(context.isAdmin));
+      // Named for the User and reached only through this door: there is no
+      // `/agents/*` route, so an object nobody signed in as is never opened.
+      const stub = await getAgentByName(env.VOICE_ASSISTANTS, userId);
+      return stub.fetch(new Request(internal, { method: "GET", headers }));
+    },
+  };
+}
+
 async function openOwnedBotStateChannel(
   env: Env,
   userId: string,
@@ -2145,6 +2228,7 @@ export default {
           ),
         openBotStateChannel: (userId, botId, request, context) =>
           openOwnedBotStateChannel(env, userId, botId, request, context),
+        voice: voiceGatewayDependencies(env),
         backendContributions: [...mountedBackend.contributions],
         debug: debugSurface(env),
         allowedClientOrigins: allowedClientOrigins(env),

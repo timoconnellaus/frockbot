@@ -954,6 +954,7 @@ function createTestGateway(
     adminEmails?: string;
   },
   openBotStateChannel?: NonNullable<GatewayDependencies["openBotStateChannel"]>,
+  voice?: GatewayDependencies["voice"],
 ) {
   const loader = new DirectWorkerLoader();
   const states = new Map<string, MemoryBotState>();
@@ -989,6 +990,7 @@ function createTestGateway(
       return configurationFor(userId);
     },
     ...(openBotStateChannel ? { openBotStateChannel } : {}),
+    ...(voice ? { voice } : {}),
     backendContributions: [
       createFlockBackendContribution({
         listBots: (userId) => configurationFor(userId).listBots(),
@@ -2770,4 +2772,135 @@ test("a built-in turned off before Plugins stopped listing it can still be turne
   expect(frame.plugins.map((plugin) => plugin.packageId)).toEqual([
     "user-machine",
   ]);
+});
+
+describe("voice gateway routes", () => {
+  const voice = (
+    calls: string[],
+  ): NonNullable<GatewayDependencies["voice"]> => ({
+    capabilities: () => ({ dictation: true, assistant: false }),
+    openDictation: (userId) => {
+      calls.push(`dictation:${userId}`);
+      return Promise.resolve(Response.json({ opened: "dictation" }));
+    },
+    openAssistant: (userId, deviceKey, _request, context) => {
+      calls.push(`assistant:${userId}:${deviceKey}:${context.authMode}`);
+      return Promise.resolve(Response.json({ opened: "assistant" }));
+    },
+  });
+
+  test("the capability probe answers false for everything when voice is absent", async () => {
+    const { gateway } = createTestGateway();
+    const response = await gateway(request("/api/voice/capabilities", "alice"));
+    expect(response.status).toBe(200);
+    expect((await response.json()) as unknown).toEqual({
+      schemaVersion: 1,
+      dictation: false,
+      assistant: false,
+    });
+  });
+
+  test("the capability probe reports what the deployment has, and needs a signed-in User", async () => {
+    const calls: string[] = [];
+    const { gateway } = createTestGateway(
+      undefined,
+      undefined,
+      true,
+      undefined,
+      undefined,
+      undefined,
+      voice(calls),
+    );
+    const response = await gateway(request("/api/voice/capabilities", "alice"));
+    expect((await response.json()) as unknown).toEqual({
+      schemaVersion: 1,
+      dictation: true,
+      assistant: false,
+    });
+    const anonymous = await gateway(
+      new Request("https://frockbot.test/api/voice/capabilities"),
+    );
+    expect(anonymous.status).toBe(401);
+  });
+
+  test("refuses an unauthenticated upgrade before it reaches a voice door", async () => {
+    const calls: string[] = [];
+    const { gateway } = createTestGateway(
+      undefined,
+      unauthenticatedAuth,
+      false,
+      undefined,
+      undefined,
+      undefined,
+      voice(calls),
+    );
+    for (const path of ["/api/voice/dictation", "/api/voice/assistant"]) {
+      const response = await gateway(
+        new Request(`https://frockbot.test${path}`, {
+          headers: { upgrade: "websocket" },
+        }),
+      );
+      expect(response.status).toBe(401);
+    }
+    expect(calls).toEqual([]);
+  });
+
+  test("forwards the proved identity and a sanitized device key", async () => {
+    const calls: string[] = [];
+    const { gateway } = createTestGateway(
+      undefined,
+      undefined,
+      true,
+      undefined,
+      undefined,
+      undefined,
+      voice(calls),
+    );
+    const dictation = await gateway(
+      request("/api/voice/dictation", "alice", {
+        headers: { upgrade: "websocket" },
+      }),
+    );
+    expect(dictation.status).toBe(200);
+    const assistant = await gateway(
+      request("/api/voice/assistant?version=1&device=phone.1", "alice", {
+        headers: { upgrade: "websocket" },
+      }),
+    );
+    expect(assistant.status).toBe(200);
+    const forged = await gateway(
+      request("/api/voice/assistant?device=../../etc", "alice", {
+        headers: { upgrade: "websocket" },
+      }),
+    );
+    expect(forged.status).toBe(200);
+    expect(calls).toEqual([
+      "dictation:alice",
+      "assistant:alice:phone.1:development",
+      "assistant:alice:unknown:development",
+    ]);
+  });
+
+  test("a plain GET on a voice socket path is told to upgrade; no voice means 503", async () => {
+    const calls: string[] = [];
+    const { gateway } = createTestGateway(
+      undefined,
+      undefined,
+      true,
+      undefined,
+      undefined,
+      undefined,
+      voice(calls),
+    );
+    const plain = await gateway(request("/api/voice/assistant", "alice"));
+    expect(plain.status).toBe(426);
+    const { gateway: without } = createTestGateway();
+    const missing = await without(
+      request("/api/voice/dictation", "alice", {
+        headers: { upgrade: "websocket" },
+      }),
+    );
+    expect(missing.status).toBe(503);
+    expect(calls).toEqual([]);
+  });
 });

@@ -75,6 +75,12 @@ export default defineConfig({
             className: "DeploymentPolicy",
             useSQLite: true,
           },
+          // The voice session object is an Agents SDK class and keeps its
+          // conversation history in SQLite, as `new_sqlite_classes` v7 says.
+          VOICE_ASSISTANTS: {
+            className: "WorkerdVoiceAssistant",
+            useSQLite: true,
+          },
         },
         bindings: {
           BETTER_AUTH_URL: "https://bot.frockbot.com",

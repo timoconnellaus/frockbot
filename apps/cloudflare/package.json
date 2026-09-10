@@ -24,6 +24,7 @@
     "@frockbot/core": "workspace:*",
     "@frockbot/providers": "workspace:*",
     "agents": "0.22.0",
+    "ai": "^7.0.0",
     "better-auth": "1.7.2"
   },
   "devDependencies": {

@@ -273,6 +273,10 @@ describe("production setup", () => {
       // `applet_publish` both call the build service with it.
       APPLET_BUILD_TOKEN:
         "8b7a6959483726150e9d8c7b6a5948372615f0e9d8c7b6a5948372615f0e9d8c",
+      // Required with voice (docs/voice.md): the hosted product must dictate
+      // and speak with no User configuration, so neither key is optional.
+      OPENAI_API_KEY: "sk-production-openai",
+      ELEVENLABS_API_KEY: "elevenlabs-production",
     };
     const validConfiguration = Bun.spawnSync(
       ["bash", "-c", validation?.run ?? ""],

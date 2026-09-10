@@ -6,6 +6,11 @@ import 'package:flutter/services.dart';
 /// Native text/touch sizes follow platform accessibility instead of CSS pixels.
 abstract final class FrockTheme {
   static const accent = Color(0xffec386b);
+
+  /// The pale pink secondary actions are written in. The voice footer's AI
+  /// row uses it so the two rows read as one family: the person is the
+  /// primary voice, the Bot answers underneath it.
+  static const accentSoft = Color(0xfff59ab6);
   static const window = Color(0xff1f1e24);
   static const surface = Color(0xff211f26);
   static const raised = Color(0xff2c2a33);

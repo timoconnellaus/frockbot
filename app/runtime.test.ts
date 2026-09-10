@@ -28,6 +28,7 @@ describe("foundation application", () => {
       "routines",
       "credentials",
       "web",
+      "voice",
       "provider-ollama-cloud",
       "provider-flock-ai",
       "provider-anthropic",
@@ -181,6 +182,7 @@ describe("foundation application", () => {
       "settings",
       "shell",
       "ui-theme",
+      "voice",
     ]);
     // Audit has no User control either, but it is not a default installation:
     // it is statically mounted rather than repaired into enablement state.

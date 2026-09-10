@@ -101,6 +101,8 @@ export default defineConfig({
             className: "DeploymentPolicy",
             useSQLite: true,
           },
+          // The voice session object, `new_sqlite_classes` v7.
+          VOICE_ASSISTANTS: { className: "VoiceAssistant", useSQLite: true },
         },
         bindings: {
           BETTER_AUTH_URL: "https://bot.frockbot.com",

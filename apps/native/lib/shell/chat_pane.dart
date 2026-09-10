@@ -12,6 +12,7 @@ library;
 
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart' hide ConnectionState;
 import 'package:flutter/services.dart';
 
@@ -44,6 +45,13 @@ class ChatPane extends StatefulWidget {
   final void Function(String?)? onReadLatest;
   final void Function(String? runId)? onWorkingChanged;
 
+  /// Dictation, which the shell owns because a capture outlives this pane:
+  /// switching Bots must flush into the Bot the capture started on.
+  final VoidCallback? onDictate;
+  final VoidCallback? onStopDictation;
+  final bool dictating;
+  final ValueListenable<double>? dictationLevel;
+
   /// The Bot's sheep background, so its avatar is the same one everywhere.
   final String? background;
   const ChatPane({
@@ -58,6 +66,10 @@ class ChatPane extends StatefulWidget {
     this.unreadFromMessageId,
     this.onReadLatest,
     this.onWorkingChanged,
+    this.onDictate,
+    this.onStopDictation,
+    this.dictating = false,
+    this.dictationLevel,
     this.background,
   });
 
@@ -232,6 +244,10 @@ class _ChatPaneState extends State<ChatPane> {
           onStop: c.stop,
           onChanged: (value) => unawaited(c.saveDraft(value)),
           skills: skills,
+          onDictate: widget.onDictate,
+          onStopDictation: widget.onStopDictation,
+          dictating: widget.dictating,
+          dictationLevel: widget.dictationLevel,
         ),
       ],
     );
@@ -261,6 +277,10 @@ class ConversationView extends StatefulWidget {
   final void Function(String?)? onReadLatest;
   final void Function(String? runId)? onWorkingChanged;
   final void Function(String botId, ConnectionState state)? onConnectionChanged;
+  final VoidCallback? onDictate;
+  final VoidCallback? onStopDictation;
+  final bool dictating;
+  final ValueListenable<double>? dictationLevel;
   final String? background;
   const ConversationView({
     super.key,
@@ -276,6 +296,10 @@ class ConversationView extends StatefulWidget {
     this.onReadLatest,
     this.onWorkingChanged,
     this.onConnectionChanged,
+    this.onDictate,
+    this.onStopDictation,
+    this.dictating = false,
+    this.dictationLevel,
     this.background,
   });
 
@@ -348,6 +372,10 @@ class _ConversationViewState extends State<ConversationView>
       unreadFromMessageId: widget.unreadFromMessageId,
       onReadLatest: widget.onReadLatest,
       onWorkingChanged: widget.onWorkingChanged,
+      onDictate: widget.onDictate,
+      onStopDictation: widget.onStopDictation,
+      dictating: widget.dictating,
+      dictationLevel: widget.dictationLevel,
     ),
   );
 

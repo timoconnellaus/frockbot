@@ -35,6 +35,12 @@ import type {
   UserApplicationIdentity,
   WorkerCode,
 } from "./contracts.js";
+import {
+  VOICE_ASSISTANT_PATH_V1,
+  VOICE_CAPABILITIES_PATH_V1,
+  VOICE_DICTATION_PATH_V1,
+  type VoiceCapabilitiesV1,
+} from "@frockbot/app/voice/shared";
 import { createDebugRoute } from "./debug.js";
 import { INSIGHTS_REPORT_ORIGIN, INSIGHTS_SCRIPT_ORIGIN } from "./insights.js";
 import {
@@ -705,6 +711,49 @@ export function createGateway(dependencies: GatewayDependencies) {
         return jsonError(400, "Push registration failed");
       }
     }
+
+    if (url.pathname === VOICE_CAPABILITIES_PATH_V1) {
+      if (request.method !== "GET") return jsonError(405, "method not allowed");
+      const capabilities = dependencies.voice?.capabilities() ?? {
+        dictation: false,
+        assistant: false,
+      };
+      return Response.json(
+        { schemaVersion: 1, ...capabilities } satisfies VoiceCapabilitiesV1,
+        { headers: { "cache-control": "no-store" } },
+      );
+    }
+    if (
+      url.pathname === VOICE_DICTATION_PATH_V1 ||
+      url.pathname === VOICE_ASSISTANT_PATH_V1
+    ) {
+      if (request.method !== "GET") return jsonError(405, "method not allowed");
+      if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
+        return jsonError(426, "expected a WebSocket upgrade");
+      }
+      if (userId === PUBLIC_APPLICATION_USER_ID) {
+        return jsonError(401, "authentication required");
+      }
+      if (!dependencies.voice) return jsonError(503, "Voice is unavailable");
+      try {
+        if (url.pathname === VOICE_DICTATION_PATH_V1) {
+          return await dependencies.voice.openDictation(userId, request);
+        }
+        const deviceKey = (url.searchParams.get("device") ?? "").slice(0, 64);
+        return await dependencies.voice.openAssistant(
+          userId,
+          /^[A-Za-z0-9._-]{1,64}$/.test(deviceKey) ? deviceKey : "unknown",
+          request,
+          { isAdmin, authMode },
+        );
+      } catch (error) {
+        return jsonError(
+          500,
+          error instanceof Error ? error.message : "Voice failed to open",
+        );
+      }
+    }
+
     const stateChannelMatch = url.pathname.match(
       /^\/api\/bots\/([^/]+)\/state-channel$/,
     );

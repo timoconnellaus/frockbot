@@ -28,6 +28,7 @@ import { shellDefinitionV1 } from "@frockbot/app/shell/definition";
 import { subagentsDefinitionV1 } from "@frockbot/app/subagents/definition";
 import { uiThemeDefinitionV1 } from "@frockbot/app/ui-theme/definition";
 import { userMachineDefinitionV1 } from "@frockbot/app/machine/definition";
+import { voiceDefinitionV1 } from "@frockbot/app/voice/definition";
 import { webDefinitionV1 } from "@frockbot/app/web/definition";
 
 /**
@@ -53,6 +54,7 @@ export const FOUNDATION_PACKAGES_V1: readonly PackageDefinitionV1[] = [
   routinesDefinitionV1,
   credentialsDefinitionV1,
   webDefinitionV1,
+  voiceDefinitionV1,
   providerOllamaCloudDefinitionV1,
   providerFlockAiDefinitionV1,
   providerAnthropicDefinitionV1,

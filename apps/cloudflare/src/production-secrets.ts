@@ -118,6 +118,14 @@ export const REQUIRED_PRODUCTION_SECRETS_V1: readonly ProductionSecretV1[] = [
     name: "APPLET_VIEWER_SECRET",
     why: "Signs the viewer token an open Applet's page presents. Absent, every published Applet answers 503.",
   },
+  {
+    name: "OPENAI_API_KEY",
+    why: "Opens the composer's realtime dictation session. Absent, the microphone button answers that voice is not set up.",
+  },
+  {
+    name: "ELEVENLABS_API_KEY",
+    why: "Speaks the account-wide voice session's replies. Absent, the voice session refuses to start.",
+  },
 ];
 
 /**
@@ -169,6 +177,16 @@ export const NON_SECRET_WORKER_SETTINGS_V1: readonly NonSecretWorkerSettingV1[] 
       why: "Admits a cross-origin client; no deployment configures one, since the web app is same-origin and the native app sends no `Origin`.",
     },
     { name: "FROCK_AI_GATEWAY_ID", why: "A `vars` entry." },
+    {
+      name: "ELEVENLABS_VOICE_ID",
+      why: "An optional `vars` entry naming the assistant's voice; George when unset.",
+    },
+    {
+      name: "VOICE_DICTATION_UPSTREAM_URL",
+      why: "Points dictation at a local stand-in; set by the test harness only.",
+      forbiddenLive:
+        "every dictation session would be sent to that host instead of the speech provider",
+    },
     { name: "FROCK_AI_AUTO_ROUTE", why: "A `vars` entry." },
     { name: "FROCK_AI_ACCOUNT_ID", why: "A `vars` entry." },
     {

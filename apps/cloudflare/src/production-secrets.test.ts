@@ -75,6 +75,14 @@ describe("the production secrets manifest", () => {
     expect(named.length).toBe(new Set(named).size);
   });
 
+  test("requires both voice provider keys, so the hosted product needs no User setup", () => {
+    const required = REQUIRED_PRODUCTION_SECRETS_V1.map(
+      (secret) => secret.name,
+    );
+    expect(required).toContain("OPENAI_API_KEY");
+    expect(required).toContain("ELEVENLABS_API_KEY");
+  });
+
   test("requires the Applet viewer secret", () => {
     // The regression this manifest was written for: absent, every published
     // Applet answered 503 in production for weeks.
@@ -225,6 +233,6 @@ describe("the production secrets report", () => {
       NON_SECRET_WORKER_SETTINGS_V1.filter(
         (setting) => setting.forbiddenLive !== undefined,
       ).map((setting) => setting.name),
-    ).toEqual(["ALLOW_DEVELOPMENT_AUTH"]);
+    ).toEqual(["VOICE_DICTATION_UPSTREAM_URL", "ALLOW_DEVELOPMENT_AUTH"]);
   });
 });

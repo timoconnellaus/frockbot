@@ -489,6 +489,11 @@ jobs:
           FCM_SERVICE_ACCOUNT: ${{ secrets.FCM_SERVICE_ACCOUNT }}
           APPLET_VIEWER_SECRET: ${{ secrets.APPLET_VIEWER_SECRET }}
           DEBUG_TOKEN: ${{ secrets.DEBUG_TOKEN }}
+          # Voice (docs/voice.md). Required for a production release; carried
+          # here when present so staging speaks as soon as the secrets exist,
+          # and never blocks a merge before they do.
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
         shell: bash
         run: |
           secrets_file="$RUNNER_TEMP/frockbot-staging.env"
@@ -511,7 +516,11 @@ jobs:
             'APPLET_VIEWER_SECRET',
             'FCM_SERVICE_ACCOUNT',
           ];
-          const optional = ['DEBUG_TOKEN'].filter((name) => process.env[name]);
+          const optional = [
+            'DEBUG_TOKEN',
+            'OPENAI_API_KEY',
+            'ELEVENLABS_API_KEY',
+          ].filter((name) => process.env[name]);
           console.log(
             JSON.stringify(
               Object.fromEntries(

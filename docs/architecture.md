@@ -37,7 +37,7 @@ Deploy paths:
 
 ## 2. Durable Objects
 
-Four classes in the app Worker, exported from `apps/cloudflare/src/index.ts:181-184`. `core/durable` defines no Durable Object class; it is the storage and authority library `BotState` delegates to.
+Five classes in the app Worker, exported from `apps/cloudflare/src/index.ts`. `core/durable` defines no Durable Object class; it is the storage and authority library `BotState` delegates to. Four are hand-rolled; the fifth, `VoiceAssistant`, is the one Cloudflare Agents SDK class.
 
 ### `BotState` — `apps/cloudflare/src/bot-state.ts:369`
 
@@ -67,6 +67,15 @@ Four classes in the app Worker, exported from `apps/cloudflare/src/index.ts:181-
 
 - Binding `DEPLOYMENT_POLICY`; singleton `getByName("frockbot-deployment-policy")` (`apps/cloudflare/src/index.ts:642`).
 - One key, `deployment:policy:v1`, holding the signups-open flag under revision compare-and-swap. Two RPCs. No fetch, no alarm.
+
+### `VoiceAssistant` — `apps/cloudflare/src/voice-assistant.ts`
+
+- Binding `VOICE_ASSISTANTS`; one object per User, reached with `getAgentByName(env.VOICE_ASSISTANTS, userId)` and only through the gateway's `GET /api/voice/assistant` upgrade (there is no `/agents/*` route). Migration `v7`, `new_sqlite_classes`.
+- `withVoice(Agent)` from `@cloudflare/voice` 0.4.0 over `agents` 0.22.0: the wire protocol, the per-call transcriber session, sentence chunking and streaming TTS are the SDK's. Providers: Workers AI Flux STT wrapped in `app/voice/sleeping-transcriber.ts` (closes the upstream when the room is quiet), the Frock AI gateway for the chat model (`app/voice/assistant.ts`, a bounded tool loop with `list_bots`, `bot_status`, `ask_bot`, `cancel_bot`, `recall_project`), and ElevenLabs Flash v2.5 TTS as PCM 24 kHz.
+- Durable state is the ledger in `app/voice/ledger.ts` over the object's key-value storage: the live call, each spoken turn under its idempotency key, each Bot delegation under the run id the Bot fences on, and the day's meters. A delegation is an ordinary user-lane `run` on the target `BotState` plus a scheduled `checkDelegation` look-up, so it survives this object's eviction. The SDK's own `cf_voice_messages` table is capped at 40 rows.
+- Full contract, protocol and limits: `docs/voice.md`.
+
+The composer's dictation relay (`apps/cloudflare/src/voice-dictation.ts`) is not a Durable Object: a Worker-level socket pair to OpenAI Realtime transcription, admitting nothing durable.
 
 ### In `apps/computer-host`
 
@@ -314,6 +323,13 @@ session, the `?bot=` deep link, which it hands to the shell through a
 update header above every screen (`lib/update/update_ready.dart`; the patch
 delivery it serves is [`apps/native/README.md`](../apps/native/README.md)).
 Everything a person looks at is `lib/shell/`.
+
+Voice is shell-owned chrome shared by web, Android and macOS: the composer
+microphone starts dictation into the selected Bot's draft, while the sidebar
+waveform opens an account-wide session rendered in a footer below the complete
+shell layout. Capture and playback live under `apps/native/lib/voice/`; the
+authenticated gateway sockets and durable voice ledger are described in
+[`docs/voice.md`](voice.md).
 
 **The shell layout.** `lib/shell/desktop_layout.dart` has three tiers at two
 widths. Above 980 points the shell is three columns — the Bot list, the
@@ -844,13 +860,13 @@ Bindings are declared in `apps/cloudflare/wrangler.jsonc`.
 
 D1 schema: `apps/cloudflare/migrations/` holds one file, `0001_better_auth.sql`, defining `user`, `session`, `account` and `verification` with their indexes. All other product state lives in Durable Objects.
 
-Durable Object storage is key-value in every class. SQLite is used only inside `UserConfiguration`, and only by the search and audit stores. Each class is declared in a `new_sqlite_classes` migration; `VoiceSession`'s v5 entry is retired by the `deleted_classes` v6 entry that follows it.
+Durable Object storage is key-value in every hand-rolled class. SQLite is used inside `UserConfiguration`, by the search and audit stores, and inside `VoiceAssistant`, by the Agents SDK's own conversation and schedule tables. Each class is declared in a `new_sqlite_classes` migration; `VoiceSession`'s v5 entry is retired by the `deleted_classes` v6 entry that follows it, and `VoiceAssistant` is a new name under v7.
 
 Not used anywhere in the repository: KV namespaces, Queues, Workflows, Hyperdrive, Browser Rendering, Analytics Engine, Pipelines. Containers appear only in `apps/computer-host`.
 
 Top-level vars: `NATIVE_SLICE_2_AUTH`, `DEFAULT_APPLICATION_HASH`, `FROCK_AI_GATEWAY_ID`, `FROCK_AI_ACCOUNT_ID`, `FROCK_AI_AUTO_ROUTE`, `UI_ARTIFACT_HOSTS`. `ALLOWED_CLIENT_ORIGINS` is read but set nowhere: the web app is same-origin and the Flutter app sends no `Origin`.
 
-Secrets are declared in `apps/cloudflare/src/production-secrets.ts`. Required (`:60-103`): `FROCKBOT_AUTHORIZATION_STATE_SECRET`, `BETTER_AUTH_URL`, `BETTER_AUTH_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `SPRITES_TOKEN`, `COMPUTER_HOST_TOKEN`, `CREDENTIAL_KEYRING`, `ROUTINE_HOOK_SECRET`, `MACHINE_TOKEN_SECRET`, `APPLET_BUILD_TOKEN`, `APPLET_VIEWER_SECRET`. Optional: `FROCKBOT_ADMIN_EMAILS`, `DEBUG_TOKEN`, `FROCK_AI_GATEWAY_TOKEN`.
+Secrets are declared in `apps/cloudflare/src/production-secrets.ts`. Required: `BETTER_AUTH_URL`, `BETTER_AUTH_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `SPRITES_TOKEN`, `COMPUTER_HOST_TOKEN`, `CREDENTIAL_KEYRING`, `ROUTINE_HOOK_SECRET`, `MACHINE_TOKEN_SECRET`, `APPLET_BUILD_TOKEN`, `APPLET_VIEWER_SECRET`, `OPENAI_API_KEY` (composer dictation), `ELEVENLABS_API_KEY` (the voice session's speech). Optional: `FROCKBOT_ADMIN_EMAILS`, `DEBUG_TOKEN`, `FROCK_AI_GATEWAY_TOKEN`. `ELEVENLABS_VOICE_ID` is an optional var; `VOICE_DICTATION_UPSTREAM_URL` is a harness-only door the release gate refuses to find live.
 
 ---
 

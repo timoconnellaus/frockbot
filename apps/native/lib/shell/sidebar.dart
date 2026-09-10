@@ -186,6 +186,12 @@ class ShellSidebar extends StatelessWidget {
   final VoidCallback onProfile;
   final VoidCallback onInbox;
   final VoidCallback onManage;
+
+  /// Opens the voice footer and starts the call, in the one gesture.
+  final VoidCallback onVoice;
+
+  /// Whether a call is live, which is what the control's pressed state says.
+  final bool voiceActive;
   final VoidCallback onToggleHidden;
   final Future<void> Function() onRetry;
   const ShellSidebar({
@@ -205,6 +211,8 @@ class ShellSidebar extends StatelessWidget {
     required this.onProfile,
     required this.onInbox,
     required this.onManage,
+    required this.onVoice,
+    required this.voiceActive,
     required this.onToggleHidden,
     required this.onRetry,
     this.error,
@@ -248,6 +256,8 @@ class ShellSidebar extends StatelessWidget {
           onCreateBot: onCreateBot,
           onSearch: onSearch,
           onManage: onManage,
+          onVoice: onVoice,
+          voiceActive: voiceActive,
         ),
         Expanded(
           child: ListView(
@@ -416,10 +426,18 @@ class _Header extends StatelessWidget {
   final VoidCallback onCreateBot;
   final VoidCallback onSearch;
   final VoidCallback onManage;
+
+  /// Starts the continuous voice session. One gesture: the footer opens and
+  /// the call starts, because a footer that opens and then waits to be
+  /// started again is two gestures for one intention.
+  final VoidCallback onVoice;
+  final bool voiceActive;
   const _Header({
     required this.onCreateBot,
     required this.onSearch,
     required this.onManage,
+    required this.onVoice,
+    required this.voiceActive,
   });
 
   @override
@@ -439,6 +457,17 @@ class _Header extends StatelessWidget {
             tooltip: 'Search',
             onPressed: onSearch,
             icon: const Icon(Icons.search),
+          ),
+        ),
+        identified(
+          VoiceIds.sidebarStart,
+          IconButton(
+            tooltip: voiceActive
+                ? 'Voice session active'
+                : 'Start voice session',
+            isSelected: voiceActive,
+            onPressed: onVoice,
+            icon: const Icon(Icons.graphic_eq),
           ),
         ),
         identified(

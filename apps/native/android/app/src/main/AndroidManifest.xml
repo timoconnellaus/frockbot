@@ -1,6 +1,12 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <!-- Voice: composer dictation and the continuous voice session both
+         capture from the microphone. MODIFY_AUDIO_SETTINGS is what lets the
+         recorder put the audio manager into communication mode, which is
+         where Android attaches its echo canceller. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>
     <application
         android:label="${appLabel}"
         android:name="com.frockbot.mobile.FrockBotApplication"

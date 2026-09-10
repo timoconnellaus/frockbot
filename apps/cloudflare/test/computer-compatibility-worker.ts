@@ -62,6 +62,7 @@ import { notificationIdV1 } from "@frockbot/app/shell/notification-id";
 import type { BotSettingsViewV1 } from "@frockbot/core/configuration";
 import { UserConfiguration } from "../src/user-configuration.ts";
 export { DeploymentPolicy } from "../src/deployment-policy.ts";
+export { WorkerdVoiceAssistant } from "./voice-assistant-probe.ts";
 
 interface ComputerCompatibilityEnv {
   /** The shared Computer host. The implementation reaches a Computer here. */

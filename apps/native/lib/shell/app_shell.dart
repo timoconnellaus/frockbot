@@ -40,6 +40,15 @@ import '../settings/bot_settings.dart';
 import '../settings/page.dart';
 import '../templates/page.dart';
 import '../view/sample_page.dart';
+import '../voice/assistant.dart';
+import '../voice/capabilities.dart';
+import '../voice/capture.dart';
+import '../voice/dictation.dart';
+import '../voice/footer.dart';
+import '../voice/mic_ownership.dart';
+import '../voice/player.dart';
+import '../voice/protocol.dart' show voiceUnavailableMessage;
+import '../voice/socket.dart';
 import '../protocol/client_wire.generated.dart' as wire;
 import 'chat_pane.dart';
 import 'chat_header.dart';
@@ -123,6 +132,24 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// and its Routines — and shows one, because a column is a place to read one
   /// thing rather than a stack of everything a feature registered.
   String panelKey = 'bot-settings';
+
+  /// Voice. The footer and both captures live here rather than in the pane
+  /// because they outlive it: a call survives a Bot switch, a page and a
+  /// drawer, and a dictation that was interrupted by a switch must still
+  /// flush into the Bot it started on.
+  ///
+  /// The controllers are built on first use. Constructing them touches the
+  /// microphone plugin, and a shell that has never been asked for voice must
+  /// not ask a device for anything.
+  late final VoiceCapabilityProbe voiceProbe = VoiceCapabilityProbe(widget.api);
+  final MicOwnership microphone = MicOwnership();
+
+  /// One capture for both features. The microphone has one owner at a time,
+  /// which [microphone] enforces, so there is one device object.
+  RecordVoiceCapture? voiceCapture;
+  AssistantSessionController? voiceSession;
+  DictationController? dictation;
+  bool footerOpen = false;
   bool showHidden = false;
   bool isAdmin = false;
   TranscriptLine? openRun;
@@ -132,6 +159,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     super.initState();
     unawaited(macMessages.configure(widget.userId));
     WidgetsBinding.instance.addObserver(this);
+    microphone.assistantLive = () => voiceSession?.active == true;
+    microphone.holdAssistant = (held) async =>
+        voiceSession?.holdMicrophone(held);
+    microphone.dictationActive = () => dictation?.active == true;
+    microphone.stopDictation = _stopDictation;
     activity.addListener(_repaint);
     widget.botLinks.addListener(_followBotLink);
     // A lifecycle command nobody has an answer for is adopted here rather than
@@ -188,10 +220,107 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     push.lifecycle(resumed);
     _activityTimer?.cancel();
     _activityTimer = null;
-    if (appIsAwayV1(state)) return;
+    if (appIsAwayV1(state)) {
+      // Voice is foreground-only by decision. Leaving the app ends capture,
+      // playback and the call; in-app navigation does not.
+      unawaited(_endVoice());
+      unawaited(_stopDictation());
+      return;
+    }
     unawaited(activity.load());
     _startPolling();
   }
+
+  /// Opens the footer and starts the call in the one gesture.
+  Future<void> _startVoice() async {
+    await voiceProbe.load();
+    if (!mounted) return;
+    if (!voiceProbe.assistantAvailable) {
+      _say(voiceUnavailableMessage);
+      return;
+    }
+    if (voiceSession?.active == true) return;
+    await microphone.acquireForAssistant();
+    if (!mounted) return;
+    voiceSession?.dispose();
+    final session = AssistantSessionController(
+      openSocket: assistantSocketOpenerV1(widget.api),
+      capture: voiceCapture ??= RecordVoiceCapture(),
+      player: PcmVoicePlayer(),
+    );
+    setState(() {
+      voiceSession = session;
+      footerOpen = true;
+    });
+    await session.start();
+  }
+
+  /// Ends capture, playback and the call, and takes the footer away. It
+  /// navigates nowhere.
+  Future<void> _endVoice() async {
+    final session = voiceSession;
+    if (session == null) return;
+    await session.end();
+    session.dispose();
+    microphone.releaseAssistant();
+    if (!mounted) {
+      voiceSession = null;
+      return;
+    }
+    setState(() {
+      voiceSession = null;
+      footerOpen = false;
+    });
+  }
+
+  Future<void> _dictate() async {
+    final bot = selected;
+    if (bot == null) return;
+    await voiceProbe.load();
+    if (!mounted) return;
+    if (!voiceProbe.dictationAvailable) {
+      _say(voiceUnavailableMessage);
+      return;
+    }
+    if (dictation?.active == true) return;
+    await microphone.acquireForDictation();
+    if (!mounted) return;
+    final controller = dictation ??= DictationController(
+      openSocket: dictationSocketOpenerV1(widget.api),
+      capture: voiceCapture ??= RecordVoiceCapture(),
+      onDraft: _writeDictatedDraft,
+      readDraft: _readDictatedDraft,
+    )..addListener(_repaint);
+    await controller.start(bot.botId.value);
+    if (!mounted) return;
+    final failure = controller.error;
+    if (failure != null) _say(failure);
+  }
+
+  Future<void> _stopDictation() async {
+    final controller = dictation;
+    if (controller == null || !controller.active) return;
+    await controller.stop();
+    await microphone.releaseDictation();
+    if (mounted) setState(() {});
+  }
+
+  /// The draft of the Bot a capture is bound to, so the words land beside
+  /// anything the person typed rather than over it.
+  String _readDictatedDraft(Object context) =>
+      widget.sessions.open(widget.userId, context as String).controller.draft;
+
+  /// Writes the dictated draft into the Bot the capture started on, whichever
+  /// Bot happens to be open by now.
+  void _writeDictatedDraft(Object context, String text) {
+    final session = widget.sessions.open(widget.userId, context as String);
+    unawaited(session.controller.saveDraft(text));
+    session.controller.changed();
+  }
+
+  void _say(String message) =>
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(message)));
 
   /// Whether this account administers the deployment. The gateway is the
   /// authority; this only decides whether the door is offered at all.
@@ -343,6 +472,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     final bot = bots.where((bot) => bot.botId.value == botId).firstOrNull;
     if (bot == null) return;
     final switching = selected?.botId.value != botId;
+    // A capture belongs to the Bot it started on. Switching away commits it
+    // there rather than carrying the words into the new Bot's composer.
+    if (dictation?.active == true && dictation?.context != botId) {
+      unawaited(_stopDictation());
+    }
     // The switch is the person's; remembering it is bookkeeping and never
     // delays the pane behind a store write.
     setState(() {
@@ -925,142 +1059,163 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     final tier = shellTierForWidth(MediaQuery.sizeOf(context).width);
     final bot = selected;
+    final session = voiceSession;
     return ShellSlotScope(
       slots: slots,
-      child: ShellLayout(
-        header: bot == null
-            ? AppBar(
-                title: const Text('FrockBot'),
-                leading: tier == ShellTier.single
-                    ? IconButton(
-                        tooltip: 'Your Bots',
-                        onPressed: () => setState(() => navOpen = true),
-                        icon: const Icon(Icons.menu),
-                      )
-                    : null,
-              )
-            : ChatHeader(
-                name: _name(bot),
-                connection: selectedConnection,
-                textScale: MediaQuery.textScalerOf(context).scale(14) / 14,
-                background: _background(bot.botId.value),
-                onBots: tier == ShellTier.single
-                    ? () => setState(() => navOpen = !navOpen)
-                    : null,
-                onSettings: () => _openPanel('bot-settings'),
-                computerRunning:
-                    computer?.available == true && computer!.state.running,
-                onComputer: computer?.available == true
-                    ? () => _openPanel('computer')
-                    : null,
-                onRoutines: () => _openPanel('routines'),
-                onApplets: appletCanvas == null
-                    ? null
-                    : () async {
-                        final id = await showDialog<String>(
-                          context: context,
-                          builder: (_) =>
-                              AppletPicker(controller: appletCanvas!),
-                        );
-                        if (id != null && mounted) await _openApplet(id);
+      // The footer is drawn below the whole three-tier layout, so it survives
+      // a Bot switch, a page and a drawer, and the app above it stays usable.
+      // It is trust chrome, not a slot: a plugin can neither remove it nor
+      // put anything beside it.
+      child: Column(
+        children: [
+          Expanded(
+            child: ShellLayout(
+              header: bot == null
+                  ? AppBar(
+                      title: const Text('FrockBot'),
+                      leading: tier == ShellTier.single
+                          ? IconButton(
+                              tooltip: 'Your Bots',
+                              onPressed: () => setState(() => navOpen = true),
+                              icon: const Icon(Icons.menu),
+                            )
+                          : null,
+                    )
+                  : ChatHeader(
+                      name: _name(bot),
+                      connection: selectedConnection,
+                      textScale:
+                          MediaQuery.textScalerOf(context).scale(14) / 14,
+                      background: _background(bot.botId.value),
+                      onBots: tier == ShellTier.single
+                          ? () => setState(() => navOpen = !navOpen)
+                          : null,
+                      onSettings: () => _openPanel('bot-settings'),
+                      computerRunning:
+                          computer?.available == true && computer!.state.running,
+                      onComputer: computer?.available == true
+                          ? () => _openPanel('computer')
+                          : null,
+                      onRoutines: () => _openPanel('routines'),
+                      onApplets: appletCanvas == null
+                          ? null
+                          : () async {
+                              final id = await showDialog<String>(
+                                context: context,
+                                builder: (_) =>
+                                    AppletPicker(controller: appletCanvas!),
+                              );
+                              if (id != null && mounted) await _openApplet(id);
+                            },
+                    ),
+              navOpen: navOpen,
+              panelOpen: panelOpen,
+              onDismiss: () => setState(() {
+                navOpen = false;
+                panelOpen = false;
+              }),
+              rightPanel: _rightPanel(),
+              sidebar: Column(
+                children: [
+                  const SlotRegion(
+                    ShellSlot.headerActions,
+                    direction: Axis.horizontal,
+                  ),
+                  Expanded(
+                    child: ShellSidebar(
+                      bots: bots,
+                      profiles: profiles,
+                      unread: activity.unread,
+                      archived: archived,
+                      activeBotId: bot?.botId.value,
+                      workingBotId: workingRunId == null
+                          ? null
+                          : bot?.botId.value,
+                      loaded: loaded,
+                      error: error,
+                      showHidden: showHidden,
+                      inboxCount: activity.notices.length,
+                      onSelect: _select,
+                      onCreateBot: () => unawaited(_createBot()),
+                      onSearch: _openSearch,
+                      onProfile: _openProfile,
+                      onInbox: () => _push(
+                        ActivityPage(
+                          controller: activity,
+                          openBot: _openBotFromInbox,
+                        ),
+                      ),
+                      onVoice: () => unawaited(_startVoice()),
+                      voiceActive: footerOpen,
+                      onManage: () => _push(
+                        BotRecoveryPage(
+                          api: widget.api,
+                          store: widget.store,
+                          userId: widget.userId,
+                          changed: load,
+                        ),
+                      ),
+                      onToggleHidden: () =>
+                          setState(() => showHidden = !showHidden),
+                      onRetry: load,
+                    ),
+                  ),
+                ],
+              ),
+              conversation: bot == null
+                  ? NoConversation(
+                      empty: bots.isEmpty,
+                      failure: bots.isEmpty ? error : null,
+                      action: bots.isEmpty || tier != ShellTier.single
+                          ? 'Refresh Bots'
+                          : 'Your Bots',
+                      onAction: bots.isEmpty || tier != ShellTier.single
+                          ? () => unawaited(load())
+                          : () => setState(() => navOpen = true),
+                    )
+                  : ConversationView(
+                      key: ValueKey('${widget.userId}:${bot.botId.value}'),
+                      sessions: widget.sessions,
+                      api: widget.api,
+                      store: widget.store,
+                      userId: widget.userId,
+                      botId: bot.botId.value,
+                      onOpenRun: _openRun,
+                      onOpenSettings: _openSettings,
+                      onMessageActions: (line) =>
+                          unawaited(_messageActions(line)),
+                      onReadLatest: (messageId) =>
+                          _readLatest(bot.botId.value, messageId),
+                      unreadFromMessageId:
+                          activity.unread[bot.botId.value]?.unreadFromMessageId,
+                      background: _background(bot.botId.value),
+                      onDictate: () => unawaited(_dictate()),
+                      onStopDictation: () => unawaited(_stopDictation()),
+                      dictating:
+                          dictation?.active == true &&
+                          dictation?.context == bot.botId.value,
+                      dictationLevel: dictation?.level,
+                      onWorkingChanged: (runId) {
+                        if (runId == workingRunId || !mounted) return;
+                        final settled = workingRunId != null && runId == null;
+                        setState(() => workingRunId = runId);
+                        final canvas = appletCanvas;
+                        if (settled && canvas != null) unawaited(canvas.load());
                       },
-              ),
-        navOpen: navOpen,
-        panelOpen: panelOpen,
-        onDismiss: () => setState(() {
-          navOpen = false;
-          panelOpen = false;
-        }),
-        rightPanel: _rightPanel(),
-        sidebar: Column(
-          children: [
-            const SlotRegion(
-              ShellSlot.headerActions,
-              direction: Axis.horizontal,
+                      onConnectionChanged: (botId, state) {
+                        if (!mounted ||
+                            selected?.botId.value != botId ||
+                            selectedConnection == state) {
+                          return;
+                        }
+                        setState(() => selectedConnection = state);
+                      },
+                    ),
             ),
-            Expanded(
-              child: ShellSidebar(
-                bots: bots,
-                profiles: profiles,
-                unread: activity.unread,
-                archived: archived,
-                activeBotId: bot?.botId.value,
-                workingBotId: workingRunId == null ? null : bot?.botId.value,
-                loaded: loaded,
-                error: error,
-                showHidden: showHidden,
-                inboxCount: activity.notices.length,
-                onSelect: _select,
-                onCreateBot: () => unawaited(_createBot()),
-                onSearch: _openSearch,
-                onProfile: _openProfile,
-                onInbox: () => _push(
-                  ActivityPage(
-                    controller: activity,
-                    openBot: _openBotFromInbox,
-                  ),
-                ),
-                onManage: () => _push(
-                  BotRecoveryPage(
-                    api: widget.api,
-                    store: widget.store,
-                    userId: widget.userId,
-                    changed: load,
-                  ),
-                ),
-                onToggleHidden: () => setState(() => showHidden = !showHidden),
-                onRetry: load,
-              ),
-            ),
-          ],
-        ),
-        conversation: bot == null
-            ? NoConversation(
-                empty: bots.isEmpty,
-                failure: bots.isEmpty ? error : null,
-                action: bots.isEmpty || tier != ShellTier.single
-                    ? 'Refresh Bots'
-                    : 'Your Bots',
-                onAction: bots.isEmpty || tier != ShellTier.single
-                    ? () => unawaited(load())
-                    : () => setState(() => navOpen = true),
-              )
-            : ConversationView(
-                key: ValueKey('${widget.userId}:${bot.botId.value}'),
-                sessions: widget.sessions,
-                api: widget.api,
-                store: widget.store,
-                userId: widget.userId,
-                botId: bot.botId.value,
-                onOpenRun: _openRun,
-                onOpenSettings: _openSettings,
-                onMessageActions: (line) => unawaited(_messageActions(line)),
-                onReadLatest: (messageId) =>
-                    _readLatest(bot.botId.value, messageId),
-                unreadFromMessageId:
-                    activity.unread[bot.botId.value]?.unreadFromMessageId,
-                background: _background(bot.botId.value),
-                onWorkingChanged: (runId) {
-                  if (runId == workingRunId || !mounted) return;
-                  final settled = workingRunId != null && runId == null;
-                  setState(() => workingRunId = runId);
-                  // A Turn is how an Applet comes into existence, and the
-                  // header names the Applets the Bot holds — so the directory
-                  // is re-read when the Turn that may have changed it ends.
-                  // Read on adoption alone, a Bot that had just made its first
-                  // Applet had no way to it until the page was reloaded.
-                  final canvas = appletCanvas;
-                  if (settled && canvas != null) unawaited(canvas.load());
-                },
-                onConnectionChanged: (botId, state) {
-                  if (!mounted ||
-                      selected?.botId.value != botId ||
-                      selectedConnection == state) {
-                    return;
-                  }
-                  setState(() => selectedConnection = state);
-                },
-              ),
+          ),
+          if (footerOpen && session != null)
+            VoiceFooter(session: session, onEnd: () => unawaited(_endVoice())),
+        ],
       ),
     );
   }
@@ -1398,6 +1553,12 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     appletCanvas?.dispose();
     computer?.dispose();
     slots.dispose();
+    voiceSession?.dispose();
+    dictation?.removeListener(_repaint);
+    dictation?.dispose();
+    unawaited(voiceCapture?.dispose() ?? Future<void>.value());
+    microphone.dispose();
+    voiceProbe.dispose();
     super.dispose();
   }
 }
