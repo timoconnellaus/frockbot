@@ -24,6 +24,7 @@ import 'client/transport.dart';
 import 'orientation.dart';
 import 'shell/app_shell.dart';
 import 'theme/frock_theme.dart';
+import 'update/update_ready.dart';
 import 'protocol/client_wire.generated.dart' as wire;
 
 Future<void> main() async {
@@ -43,7 +44,8 @@ Future<void> main() async {
 class FrockBotApp extends StatefulWidget {
   final LocalStore? store;
   final NativeApi? api;
-  const FrockBotApp({super.key, this.store, this.api});
+  final MobileUpdateService? updateService;
+  const FrockBotApp({super.key, this.store, this.api, this.updateService});
   @override
   State<FrockBotApp> createState() => _FrockBotAppState();
 }
@@ -55,6 +57,10 @@ class _FrockBotAppState extends State<FrockBotApp> {
   late final NativeApi api = widget.api ?? NativeApi(store);
   late final SignIn auth = signInV1(api, store);
   late final BotSessions sessions = BotSessions(api: api, store: store);
+  late final MobileUpdateController updates = MobileUpdateController(
+    service: widget.updateService ?? ShorebirdMobileUpdateService(),
+    beforeRestart: () => checkpointStore(store),
+  );
   StreamSubscription<Uri>? links;
   String? userId = localDevelopment ? 'development' : null;
   String? error;
@@ -220,6 +226,8 @@ class _FrockBotAppState extends State<FrockBotApp> {
     theme: FrockTheme.theme(Brightness.light),
     darkTheme: FrockTheme.theme(Brightness.dark),
     themeMode: ThemeMode.dark,
+    builder: (context, child) =>
+        UpdateReadyFrame(controller: updates, child: child!),
     home: userId == null
         ? SignInPage(
             busy: busy,
@@ -244,6 +252,7 @@ class _FrockBotAppState extends State<FrockBotApp> {
     botLinks.dispose();
     sessions.clear();
     api.close();
+    updates.dispose();
     super.dispose();
   }
 }

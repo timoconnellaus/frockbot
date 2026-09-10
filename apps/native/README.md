@@ -22,6 +22,16 @@ Use `scripts/native-acceptance.sh inventory` to record the installed version and
 
 `scripts/native-update.py` ships the phone app. A **release** is a full Shorebird APK build; a **patch** is a signed Dart code push against that release. Native code, assets, native plugin dependencies, the engine, the Shorebird `app_id` or the patch key all need a release. Pure-Dart dependency changes may be patched if Shorebird accepts the resulting diff. Shorebird detects native and asset differences and the script never passes `--allow-native-diffs` or `--allow-asset-diffs`.
 
+The client also checks for a patch on cold start and whenever it returns from
+the background. A completed download is offered in the blue update header;
+restart first checkpoints the local document and then asks `restart_app` for
+an Android process restart or an iOS Flutter-engine replacement. Introducing
+that native plugin requires a full Shorebird release before this flow can be
+delivered; later Dart-only changes to the flow may be patches against that
+baseline. This repository still has no iOS Runner, so an eventual iOS target
+must configure `RestartAppPlugin.configureEngineRestart` in its AppDelegate
+and qualify the new-engine path before claiming iOS delivery.
+
 The Shorebird CLI (1.6.120, logged in to Tim's account) comes from `NATIVE_SHOREBIRD` or `PATH`. The script fails rather than falling back to stock Flutter: a stock build carries no patch key and can never be patched. Shorebird builds with its own Flutter `3.47.0`; the stock development pin above is unchanged. The Android SDK needs command-line tools with `apkanalyzer` even for an APK artifact, plus build-tools: the script inspects the built APK with the newest `aapt`/`apksigner` under `ANDROID_HOME`, and names the missing tool rather than guessing when there are none. Gradle takes the version floor from `FROCKBOT_ANDROID_VERSION_FLOOR`, which the script sets for every build.
 
 Keys: `apps/native/shorebird-public-key.pem` is baked into every release. The matching RSA private key lives at ignored `.native-build/updates/shorebird-private.pem` or wherever `NATIVE_SHOREBIRD_PRIVATE_KEY` points; it is never committed. The APK signer is the existing debug keystore the installed app already trusts. Before uploading a patch the script confirms with `openssl` that the two keys are a pair.

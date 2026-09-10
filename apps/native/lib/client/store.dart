@@ -6,6 +6,18 @@ abstract interface class LocalStore {
   Future<void> delete(String key);
 }
 
+/// A store that can put every accepted write behind a durable boundary before
+/// the process goes away. Ordinary callers rely on each write's own future;
+/// process-level transitions need one place to wait for all of them.
+abstract interface class CheckpointStore implements LocalStore {
+  Future<void> checkpoint();
+}
+
+Future<void> checkpointStore(LocalStore store) => switch (store) {
+  CheckpointStore checkpoint => checkpoint.checkpoint(),
+  _ => Future.value(),
+};
+
 /// A store whose values are resident in memory, so the first frame after a
 /// switch is painted without awaiting the platform.
 abstract interface class SnapshotStore implements LocalStore {
@@ -23,7 +35,7 @@ abstract interface class EnumerableStore implements LocalStore {
   Future<Map<String, String>> readAll();
 }
 
-class ProtectedStore implements LocalStore, EnumerableStore {
+class ProtectedStore implements LocalStore, EnumerableStore, CheckpointStore {
   final FlutterSecureStorage _storage = const FlutterSecureStorage();
   Future<void> _writes = Future.value();
   Future<void> _enqueue(Future<void> Function() operation) {
@@ -55,4 +67,7 @@ class ProtectedStore implements LocalStore, EnumerableStore {
           entry.key.substring(prefix.length): entry.value,
     };
   }
+
+  @override
+  Future<void> checkpoint() => _writes;
 }
