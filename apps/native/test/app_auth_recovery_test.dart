@@ -30,10 +30,8 @@ http.Response refused() =>
     http.Response(jsonEncode({'error': 'Unauthorized'}), 401);
 
 /// A gateway that refuses every read this client authenticates.
-NativeApi rejecting(MemoryStore store) => NativeApi(
-  store,
-  client: MockClient((request) async => refused()),
-);
+NativeApi rejecting(MemoryStore store) =>
+    NativeApi(store, client: MockClient((request) async => refused()));
 
 /// A gateway that knows the account but refuses everything the shell then
 /// reads, which is a bearer revoked while the app is resident.
@@ -42,11 +40,7 @@ NativeApi rejectingAfterIdentity(MemoryStore store) => NativeApi(
   client: MockClient((request) async {
     if (request.url.path == '/api/identity') {
       return http.Response(
-        jsonEncode({
-          'schemaVersion': 1,
-          'userId': 'user-1',
-          'isAdmin': false,
-        }),
+        jsonEncode({'schemaVersion': 1, 'userId': 'user-1', 'isAdmin': false}),
         200,
         headers: {'content-type': 'application/json'},
       );
@@ -87,9 +81,7 @@ void main() {
       final store = MemoryStore();
       store.values['session'] = savedSession();
 
-      await tester.pumpWidget(
-        FrockBotApp(store: store, api: rejecting(store)),
-      );
+      await tester.pumpWidget(FrockBotApp(store: store, api: rejecting(store)));
       await answer(tester);
 
       expect(find.byKey(const ValueKey('sign-in')), findsOneWidget);
