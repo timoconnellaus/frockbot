@@ -48,6 +48,12 @@ export interface AuditFrameV1 {
   indexState: AuditIndexStateV1;
   /** The kind the reader is filtered to, or nothing for every kind. */
   kind?: AuditKindV1;
+  /**
+   * Display names by Bot id, for the account-wide read. An entry names the
+   * Bot that made it, and a Bot is a name to the person reading — the same
+   * name the filter above the list offers.
+   */
+  botNames?: Record<string, string>;
   nextCursor?: string;
 }
 
@@ -159,9 +165,15 @@ function press(
   };
 }
 
-function entryNode(entry: AuditEntryV1, allBots: boolean): ViewNode {
+function entryNode(
+  entry: AuditEntryV1,
+  allBots: boolean,
+  botNames: Record<string, string>,
+): ViewNode {
   const facts = [
-    ...(allBots ? [`Bot: ${entry.botId}`] : []),
+    ...(allBots
+      ? [`Bot: ${(botNames[entry.botId] ?? entry.botId).slice(0, 200)}`]
+      : []),
     OUTCOMES[entry.outcome],
     entry.toolName,
     auditTargetLabelV1(entry.target),
@@ -249,7 +261,7 @@ export function auditDocumentV1(frame: AuditFrameV1): ViewDocument {
       break;
     }
     nodes += cost;
-    children.push(entryNode(entry, !frame.botId));
+    children.push(entryNode(entry, !frame.botId, frame.botNames ?? {}));
   }
   if (frame.entries.length === 0) {
     children.push({

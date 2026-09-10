@@ -50,6 +50,18 @@ const STATE_LABELS: Record<Plugin["state"], string> = {
   failed: "Failed",
 };
 
+/**
+ * On, but not yet usable: Messages runs on a Mac this account has paired, so
+ * the switch being on is only half of what the person has to do. The line says
+ * so wherever the Package is drawn, because "On" alone would be a promise the
+ * capability cannot keep on its own.
+ */
+function setupPending(plugin: Plugin): boolean {
+  return (
+    plugin.packageId === "machine-messages" && plugin.state === "installed"
+  );
+}
+
 function press(
   actionId: string,
   label: string,
@@ -99,8 +111,8 @@ function pluginNode(plugin: Plugin, capabilities: boolean): ViewNode {
     type: "group",
     orientation: "column",
     title: capabilities
-      ? plugin.displayName.slice(0, 150)
-      : `${plugin.displayName.slice(0, 150)} · ${plugin.packageId === "machine-messages" && plugin.state === "installed" ? "Available — needs Mac setup" : STATE_LABELS[plugin.state]}`,
+      ? `${plugin.displayName.slice(0, 150)}${setupPending(plugin) ? " · Needs Mac setup" : ""}`
+      : `${plugin.displayName.slice(0, 150)} · ${setupPending(plugin) ? "Available — needs Mac setup" : STATE_LABELS[plugin.state]}`,
     children: [
       {
         type: "text",
@@ -186,7 +198,7 @@ export function pluginsDocumentV1(
   }
   return decodeProtocol("ViewDocument", {
     schemaVersion: 1,
-    surfaceId: "plugins",
+    surfaceId: capabilities ? "capabilities" : "plugins",
     revision: frame.revision,
     root: { type: "group", orientation: "column", children },
     actions: [

@@ -106,6 +106,15 @@ test("Mac Messages availability is not presented as permission to use it", () =>
         node.text.includes("Setup and your approval are required"),
     ),
   ).toBe(true);
+  // On is not usable: the card says the Mac is still owed, where a person
+  // reading the switch would otherwise read it as done.
+  expect(
+    walk(document.root).some(
+      (node) =>
+        node.type === "group" &&
+        node.title === "Messages on your Mac · Needs Mac setup",
+    ),
+  ).toBe(true);
 });
 
 test("capability cards keep their purpose and controls visible without disclosures", () => {

@@ -67,7 +67,7 @@ class PluginsController extends ViewSurfaceController {
   @override
   String? get message => _message;
   @override
-  String get surfaceId => 'plugins';
+  String get surfaceId => capabilities ? 'capabilities' : 'plugins';
 
   void _changed() {
     if (!_closed) notifyListeners();

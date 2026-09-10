@@ -38,7 +38,7 @@ class ConnectionsController extends ViewSurfaceController {
   @override
   String? get message => _message;
   @override
-  String get surfaceId => 'connections';
+  String get surfaceId => models ? 'model-accounts' : 'connections';
 
   void _changed() {
     if (!_closed) notifyListeners();

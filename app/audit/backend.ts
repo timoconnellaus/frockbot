@@ -24,11 +24,19 @@ import {
   type ClientAuditPageV1,
 } from "./shared.js";
 import { auditDocumentV1 } from "./audit-document.js";
+import type { BotDirectoryViewV1 } from "@frockbot/app/flock/shared";
 import { defineGatewayContribution } from "@frockbot/core/contracts/contributions";
 
 export interface AuditGatewayHost {
   readAudit(userId: string, query: AuditQueryV1): Promise<ClientAuditPageV1>;
   rebuildAuditIndex(userId: string): Promise<AuditRebuildReceiptV1>;
+  /**
+   * The Bot directory, for the account-wide document alone. An entry is
+   * stored against a Bot id, and an id is not what a person reading their own
+   * history is looking at; the same directory names the filter above the list,
+   * so both agree by construction.
+   */
+  listBots(userId: string): Promise<BotDirectoryViewV1>;
 }
 
 export interface AuditBackendRouteContribution {
@@ -146,10 +154,20 @@ export function createAuditBackendContribution(
         if (url.searchParams.get("as") !== "document") {
           return Response.json(page);
         }
+        const botNames =
+          query.botId === undefined
+            ? Object.fromEntries(
+                (await host.listBots(userId)).bots.map((bot) => [
+                  bot.botId,
+                  bot.initialName,
+                ]),
+              )
+            : undefined;
         return Response.json(
           auditDocumentV1({
             schemaVersion: 1,
             botId: query.botId ?? "",
+            ...(botNames === undefined ? {} : { botNames }),
             entries: page.entries,
             total: page.total,
             indexState: page.indexState,

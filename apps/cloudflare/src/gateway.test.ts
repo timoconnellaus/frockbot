@@ -2729,3 +2729,44 @@ test("Profile settings separate personal details, optional capabilities, and gen
     plugins: [{ packageId: "image" }],
   });
 });
+
+test("a built-in turned off before Plugins stopped listing it can still be turned back on", async () => {
+  const { gateway, configurations } = createTestGateway();
+  const owner = new MemoryConfiguration();
+  owner.readPluginsFrame = async () => ({
+    schemaVersion: 1,
+    ownerId: "alice",
+    revision: 1,
+    plugins: [
+      {
+        packageId: "user-machine",
+        displayName: "Your Mac",
+        state: "disabled" as const,
+        home: "none" as const,
+      },
+      {
+        packageId: "provider-anthropic",
+        displayName: "Anthropic",
+        state: "disabled" as const,
+        home: "models" as const,
+      },
+      {
+        packageId: "search",
+        displayName: "Search",
+        state: "installed" as const,
+        home: "none" as const,
+      },
+    ].map((item) => ({ ...item, version: "1", summary: "A feature" })),
+  });
+  configurations.set("alice", owner);
+  const response = await gateway(
+    request("/api/settings/capabilities", "alice"),
+  );
+  expect(response.status).toBe(200);
+  const frame = (await response.json()) as PluginsFrame;
+  // The Package the User turned off, and only that one: an enabled built-in is
+  // not an optional capability, and a provider is connected in Models.
+  expect(frame.plugins.map((plugin) => plugin.packageId)).toEqual([
+    "user-machine",
+  ]);
+});

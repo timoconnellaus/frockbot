@@ -64,7 +64,7 @@ describe("the Connectors document", () => {
       await asUser(userId, "/api/settings/connections?as=document&kind=model"),
     )) as Document;
 
-    expect(document.surfaceId).toBe("connections");
+    expect(document.surfaceId).toBe("model-accounts");
     const secret = walk(document.root).find(
       (node) => node.type === "field" && node.field?.kind === "secret",
     );
@@ -123,7 +123,7 @@ describe("the Capabilities document", () => {
       await asUser(userId, "/api/settings/capabilities?as=document"),
     )) as Document;
 
-    expect(document.surfaceId).toBe("plugins");
+    expect(document.surfaceId).toBe("capabilities");
     const kinds = new Set(
       walk(document.root)
         .filter((node) => node.type === "action")

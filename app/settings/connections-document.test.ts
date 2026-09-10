@@ -159,7 +159,7 @@ test("the model in use is its own card, and an empty deployment says so", () => 
         node.type === "text" && node.text.startsWith("Connect a provider"),
     ),
   ).toBe(true);
-  expect(withModel.surfaceId).toBe("connections");
+  expect(withModel.surfaceId).toBe("model-accounts");
   expect(withModel.revision).toBe(7);
 });
 

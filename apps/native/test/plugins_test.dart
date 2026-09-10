@@ -13,9 +13,10 @@ import 'widget_test.dart' show MemoryStore;
 Map<String, Object?> pluginsDocument({
   int revision = 1,
   String state = 'installed',
+  String surfaceId = 'plugins',
 }) => {
   'schemaVersion': 1,
-  'surfaceId': 'plugins',
+  'surfaceId': surfaceId,
   'revision': revision,
   'root': {
     'type': 'group',
@@ -160,7 +161,7 @@ void main() {
           addTearDown(tester.view.resetPhysicalSize);
           addTearDown(tester.view.resetDevicePixelRatio);
           final store = MemoryStore();
-          final document = pluginsDocument();
+          final document = pluginsDocument(surfaceId: 'capabilities');
           final children = ((document['root'] as Map)['children'] as List);
           children.add(<String, Object>{
             ...(children.last as Map).cast<String, Object>(),
@@ -214,7 +215,11 @@ void main() {
     var revision = 1;
     final api = SettingsApi(store, (path, body) async {
       if (body == null) {
-        return pluginsDocument(revision: revision, state: state);
+        return pluginsDocument(
+          revision: revision,
+          state: state,
+          surfaceId: 'capabilities',
+        );
       }
       sent.add((body as Map).cast<String, Object?>());
       state = 'disabled';

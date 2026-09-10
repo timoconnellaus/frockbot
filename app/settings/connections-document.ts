@@ -424,10 +424,9 @@ function section(
 /**
  * A `ConnectionsFrame` as a `ViewDocument`.
  *
- * The account surfaces the web app splits between Models and Connectors are
- * one document here: a person opening Connectors is looking for the place to
- * connect a thing, and which of the two homes a Package declares is not a
- * question they asked.
+ * One document per home: a model provider's accounts are read from Models and
+ * a connector Package's from Connected apps, so `kind` decides both which
+ * providers the frame carries and which single section the document draws.
  */
 export function connectionsDocumentV1(
   frame: ConnectionsFrame,
@@ -443,25 +442,19 @@ export function connectionsDocumentV1(
     ),
   };
   const shared = accountActions();
-  const providers = section(
-    "Your providers",
-    "model",
+  const offered = section(
+    kind === "model" ? "Your providers" : "Connected apps",
+    kind,
     frame,
     ACTION_LIMIT - shared.length,
-  );
-  const connectors = section(
-    "Connected apps",
-    "connector",
-    frame,
-    ACTION_LIMIT - shared.length - providers.actions.length,
   );
   const children: ViewNode[] = [];
   if (kind === "model" && frame.modelInUse) {
     children.push(column("Model in use", [text(frame.modelInUse, "status")]));
   }
-  if (providers.node) children.push(providers.node);
-  if (connectors.node) children.push(connectors.node);
-  if (!providers.node && !connectors.node) {
+  if (offered.node) {
+    children.push(offered.node);
+  } else {
     children.push(
       text(
         kind === "model"
@@ -472,9 +465,9 @@ export function connectionsDocumentV1(
   }
   return decodeProtocol("ViewDocument", {
     schemaVersion: 1,
-    surfaceId: "connections",
+    surfaceId: kind === "model" ? "model-accounts" : "connections",
     revision: frame.revision,
     root: { type: "group", orientation: "column", children },
-    actions: [...shared, ...providers.actions, ...connectors.actions],
+    actions: [...shared, ...offered.actions],
   });
 }
