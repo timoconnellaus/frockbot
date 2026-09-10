@@ -1,5 +1,8 @@
-import 'package:flutter/material.dart';
+import 'dart:async';
 
+import 'package:flutter/material.dart' hide ConnectionState;
+
+import '../client/chat_controller.dart';
 import '../flock/sheep.dart';
 import 'semantics.dart';
 import 'chat_icons.dart';
@@ -17,6 +20,7 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
   final VoidCallback onRoutines;
   final List<ChatApplet> applets;
   final VoidCallback? onRetryApplets;
+  final ConnectionState connection;
 
   const ChatHeader({
     super.key,
@@ -30,6 +34,7 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
     required this.onRoutines,
     this.applets = const [],
     this.onRetryApplets,
+    this.connection = ConnectionState.initializing,
   });
 
   double get _toolbarHeight => 56 * textScale.clamp(1, 3);
@@ -57,7 +62,18 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
     titleSpacing: 4,
     title: Row(
       children: [
-        SheepAvatar(size: 28, background: background),
+        Stack(
+          clipBehavior: Clip.none,
+          children: [
+            SheepAvatar(size: 28, background: background),
+            if (connection == ConnectionState.reconnecting)
+              const Positioned(
+                right: -1,
+                bottom: -1,
+                child: _DelayedConnectionDot(),
+              ),
+          ],
+        ),
         const SizedBox(width: 8),
         Expanded(
           child: Text(
@@ -175,4 +191,91 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
     ),
   );
+}
+
+class _DelayedConnectionDot extends StatefulWidget {
+  const _DelayedConnectionDot();
+
+  @override
+  State<_DelayedConnectionDot> createState() => _DelayedConnectionDotState();
+}
+
+class _DelayedConnectionDotState extends State<_DelayedConnectionDot>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController pulse = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1100),
+    value: 1,
+  );
+  late final Animation<double> opacity = Tween(
+    begin: 0.55,
+    end: 1.0,
+  ).animate(CurvedAnimation(parent: pulse, curve: Curves.easeInOut));
+  Timer? delay;
+  bool visible = false;
+
+  @override
+  void initState() {
+    super.initState();
+    delay = Timer(const Duration(milliseconds: 1500), () {
+      if (!mounted) return;
+      setState(() => visible = true);
+      _syncMotion();
+    });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _syncMotion();
+  }
+
+  void _syncMotion() {
+    if (!visible) return;
+    if (MediaQuery.disableAnimationsOf(context)) {
+      pulse
+        ..stop()
+        ..value = 1;
+    } else if (!pulse.isAnimating) {
+      pulse.repeat(reverse: true);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!visible) return const SizedBox.shrink();
+    final scheme = Theme.of(context).colorScheme;
+    return Semantics(
+      container: true,
+      liveRegion: true,
+      label: 'Updating conversation',
+      child: Tooltip(
+        message: 'Updating conversation',
+        excludeFromSemantics: true,
+        child: FadeTransition(
+          key: const ValueKey('conversation-update'),
+          opacity: opacity,
+          child: Container(
+            width: 9,
+            height: 9,
+            decoration: BoxDecoration(
+              color: Color.alphaBlend(
+                scheme.primary.withValues(alpha: 0.68),
+                scheme.surface,
+              ),
+              shape: BoxShape.circle,
+              border: Border.all(color: scheme.surface, width: 1.5),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    delay?.cancel();
+    pulse.dispose();
+    super.dispose();
+  }
 }

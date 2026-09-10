@@ -137,6 +137,9 @@ void main() {
       ],
     });
     store.values['selection.user-1'] = 'bot-one';
+    store.values[pageCacheKey('user-1', 'bot-two')] = encodePageCache([
+      run('cached-run', 'Cached Clementine conversation'),
+    ], null);
     await tester.pumpWidget(FrockBotApp(store: store));
     await tester.pump();
     await tester.pump();
@@ -147,6 +150,7 @@ void main() {
     expect(latch.isCompleted, isFalse);
     expect(store.values['selection.user-1'], 'bot-one');
     expect(find.widgetWithText(AppBar, 'Clementine'), findsOneWidget);
+    expect(find.text('Cached Clementine conversation'), findsOneWidget);
     latch.complete();
     await tester.pump();
     expect(store.values['selection.user-1'], 'bot-two');

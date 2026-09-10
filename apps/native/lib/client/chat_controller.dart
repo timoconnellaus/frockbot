@@ -6,7 +6,18 @@ import 'package:flutter/foundation.dart';
 import 'page_cache.dart';
 import 'transport.dart';
 
-enum ConnectionState { connecting, connected, disconnected, paused }
+enum ConnectionState {
+  /// The first observer handshake for this Bot. Cached Bot state is already
+  /// safe to show, so this is ordinary setup rather than a failure surface.
+  initializing,
+  connected,
+
+  /// An explicit reconnect or foreground resume is in flight after the Bot
+  /// has already needed recovery.
+  reconnecting,
+  disconnected,
+  paused,
+}
 
 /// One message this client has accepted from the person and not yet found in
 /// the durable transcript. It carries its own words so a submission that never
@@ -68,7 +79,7 @@ class ChatController extends ChangeNotifier {
   bool checking = false;
   bool loading = false;
   bool _disposed = false;
-  ConnectionState connection = ConnectionState.connecting;
+  ConnectionState connection = ConnectionState.initializing;
 
   /// The conversation's own announcements — a rename, a compaction — as the
   /// newest page carried them. They belong to the Session rather than to a

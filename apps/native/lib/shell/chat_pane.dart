@@ -162,10 +162,10 @@ class _ChatPaneState extends State<ChatPane> {
     final c = controller;
     return Column(
       children: [
-        if (c.connection != ConnectionState.connected)
+        if (c.connection == ConnectionState.disconnected ||
+            c.connection == ConnectionState.paused)
           MaterialBanner(
             content: Text(switch (c.connection) {
-              ConnectionState.connecting => 'Connecting…',
               ConnectionState.paused => 'Conversation paused on this device.',
               _ => 'You’re offline. Your Bot can keep working.',
             }),
@@ -259,6 +259,7 @@ class ConversationView extends StatefulWidget {
   final String? unreadFromMessageId;
   final void Function(String?)? onReadLatest;
   final void Function(String? runId)? onWorkingChanged;
+  final void Function(String botId, ConnectionState state)? onConnectionChanged;
   final String? background;
   const ConversationView({
     super.key,
@@ -273,6 +274,7 @@ class ConversationView extends StatefulWidget {
     this.unreadFromMessageId,
     this.onReadLatest,
     this.onWorkingChanged,
+    this.onConnectionChanged,
     this.background,
   });
 
@@ -302,14 +304,24 @@ class _ConversationViewState extends State<ConversationView>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     session.controller.addListener(_repaint);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _reportConnection();
+    });
     unawaited(session.start());
     unawaited(approvals.load());
     unawaited(skills.load());
   }
 
   void _repaint() {
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    setState(() {});
+    _reportConnection();
   }
+
+  void _reportConnection() => widget.onConnectionChanged?.call(
+    widget.botId,
+    session.controller.connection,
+  );
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
