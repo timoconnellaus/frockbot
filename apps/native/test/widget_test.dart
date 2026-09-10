@@ -126,6 +126,55 @@ class PagedTransport extends FakeTransport {
 }
 
 void main() {
+  testWidgets('initial Bot synchronization is quiet until it actually fails', (
+    tester,
+  ) async {
+    final store = MemoryStore();
+    final controller = ChatController(
+      transport: FakeTransport(store),
+      store: store,
+      userId: 'user-1',
+      botId: 'bot-1',
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: FrockTheme.theme(Brightness.dark),
+        home: Scaffold(
+          body: ChatPane(controller: controller, onReconnect: () async {}),
+        ),
+      ),
+    );
+
+    expect(controller.connection, ConnectionState.initializing);
+    expect(find.byType(MaterialBanner), findsNothing);
+    expect(find.text('Connecting…'), findsNothing);
+    expect(find.byKey(const ValueKey('reconnect')), findsNothing);
+
+    controller.connection = ConnectionState.disconnected;
+    controller.changed();
+    await tester.pump();
+    expect(find.byType(MaterialBanner), findsOneWidget);
+    expect(
+      find.text('You’re offline. Your Bot can keep working.'),
+      findsOneWidget,
+    );
+    expect(find.byKey(const ValueKey('reconnect')), findsOneWidget);
+
+    controller.connection = ConnectionState.reconnecting;
+    controller.changed();
+    await tester.pump();
+    expect(find.byType(MaterialBanner), findsNothing);
+
+    controller.connection = ConnectionState.paused;
+    controller.changed();
+    await tester.pump();
+    expect(find.byType(MaterialBanner), findsOneWidget);
+    expect(find.text('Conversation paused on this device.'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox());
+    controller.dispose();
+  });
+
   testWidgets(
     'chat opens on the latest row and earlier pages preserve the reading position',
     (tester) async {

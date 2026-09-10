@@ -23,6 +23,9 @@ class BotStateChannel {
   bool _disposed = false;
   bool _dirty = false;
   bool _flushing = false;
+  bool _hasSynchronized = false;
+  bool _offline = false;
+  ConnectionState? _reported;
   String? _cursor;
   BotStateChannel({
     required this.api,
@@ -32,15 +35,26 @@ class BotStateChannel {
     required this.invalidate,
     required this.status,
   });
-  Future<void> connect() async {
+  Future<void> connect() => _connect(reportProgress: true);
+
+  Future<void> _connect({required bool reportProgress}) async {
     if (_disposed || _paused) return;
     final epoch = ++_epoch;
     _retry?.cancel();
     _deadline?.cancel();
     final old = _socket;
     _socket = null;
+    if (reportProgress) {
+      _report(
+        _offline
+            ? ConnectionState.disconnected
+            : !_hasSynchronized && _attempt == 0
+            ? ConnectionState.initializing
+            : ConnectionState.reconnecting,
+      );
+    }
     await old?.sink.close();
-    status(ConnectionState.connecting);
+    if (epoch != _epoch || _disposed || _paused) return;
     _dirty = false;
     try {
       final saved = await store.read(key);
@@ -73,7 +87,9 @@ class BotStateChannel {
                   }
                   _deadline?.cancel();
                   _attempt = 0;
-                  status(ConnectionState.connected);
+                  _hasSynchronized = true;
+                  _offline = false;
+                  _report(ConnectionState.connected);
                   return;
                 }
                 if (frame['type'] == 'state/event' &&
@@ -128,6 +144,15 @@ class BotStateChannel {
     }());
   }
 
+  /// The status a listener already holds is not worth repeating: an offline
+  /// banner that survives a retry must not be torn down and rebuilt for a
+  /// state it never left.
+  void _report(ConnectionState state) {
+    if (_reported == state) return;
+    _reported = state;
+    status(state);
+  }
+
   void _failed(int epoch) {
     if (epoch != _epoch || _disposed) return;
     ++_epoch;
@@ -135,11 +160,18 @@ class BotStateChannel {
     final socket = _socket;
     _socket = null;
     unawaited(socket?.sink.close());
-    status(_paused ? ConnectionState.paused : ConnectionState.disconnected);
+    if (!_paused) _offline = true;
+    _report(_paused ? ConnectionState.paused : ConnectionState.disconnected);
     if (!_paused) {
       final seconds = (1 << _attempt.clamp(0, 5)).clamp(1, 30);
       _attempt++;
-      _retry = Timer(Duration(seconds: seconds), connect);
+      // Keep the actionable offline state stable while an automatic attempt
+      // runs. A successful ready frame clears it; another failure leaves it in
+      // place instead of making the banner flicker on every backoff cycle.
+      _retry = Timer(
+        Duration(seconds: seconds),
+        () => unawaited(_connect(reportProgress: false)),
+      );
     }
   }
 
@@ -149,7 +181,12 @@ class BotStateChannel {
     _failed(_epoch);
   }
 
+  /// Only a channel the app actually stopped has anything to resume. The
+  /// lifecycle reports `inactive` for a notification banner or the app
+  /// switcher and reports it again on the way back, so a live socket would
+  /// otherwise be torn down and rebuilt for a trip the person never took.
   void resume() {
+    if (!_paused) return;
     _paused = false;
     unawaited(connect());
   }

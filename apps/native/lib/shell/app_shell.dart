@@ -9,7 +9,7 @@ library;
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide ConnectionState;
 import 'package:flutter/services.dart';
 
 import '../activity/controller.dart';
@@ -20,6 +20,7 @@ import '../applets/canvas.dart';
 import '../audit/page.dart';
 import '../client/auth.dart' show developmentAuth;
 import '../client/bot_sessions.dart';
+import '../client/chat_controller.dart' show ConnectionState;
 import '../client/transport.dart';
 import '../computer/card.dart';
 import '../computer/client.dart';
@@ -101,6 +102,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   Set<String> archived = {};
   wire.BotRegistration? selected;
   String? workingRunId;
+  ConnectionState selectedConnection = ConnectionState.initializing;
   BotSettingsController? botSettings;
   RoutineInboxController? routineInbox;
 
@@ -337,10 +339,12 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     push.reading(null);
     final bot = bots.where((bot) => bot.botId.value == botId).firstOrNull;
     if (bot == null) return;
+    final switching = selected?.botId.value != botId;
     // The switch is the person's; remembering it is bookkeeping and never
     // delays the pane behind a store write.
     setState(() {
       selected = bot;
+      if (switching) selectedConnection = ConnectionState.initializing;
       navOpen = false;
       openRun = null;
       panelOpen = false;
@@ -934,6 +938,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
               )
             : ChatHeader(
                 name: _name(bot),
+                connection: selectedConnection,
                 textScale: MediaQuery.textScalerOf(context).scale(14) / 14,
                 background: _background(bot.botId.value),
                 onBots: tier == ShellTier.single
@@ -1043,6 +1048,14 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                   // Applet had no way to it until the page was reloaded.
                   final canvas = appletCanvas;
                   if (settled && canvas != null) unawaited(canvas.load());
+                },
+                onConnectionChanged: (botId, state) {
+                  if (!mounted ||
+                      selected?.botId.value != botId ||
+                      selectedConnection == state) {
+                    return;
+                  }
+                  setState(() => selectedConnection = state);
                 },
               ),
       ),

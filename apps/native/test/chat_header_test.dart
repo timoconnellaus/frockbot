@@ -1,5 +1,6 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide ConnectionState;
 import 'package:flutter_test/flutter_test.dart';
+import 'package:frockbot_native/client/chat_controller.dart';
 import 'package:frockbot_native/shell/chat_header.dart';
 import 'package:frockbot_native/shell/chat_icons.dart';
 import 'package:frockbot_native/shell/semantics.dart';
@@ -8,6 +9,63 @@ import 'package:frockbot_native/theme/frock_theme.dart';
 import 'shell_layout_test.dart' show byIdentifier;
 
 void main() {
+  testWidgets(
+    'only slow recovery adds an accessible dot to the fixed header avatar',
+    (tester) async {
+      Widget header(ConnectionState connection, {bool reducedMotion = false}) =>
+          MaterialApp(
+            theme: FrockTheme.theme(Brightness.dark),
+            home: MediaQuery(
+              data: MediaQueryData(disableAnimations: reducedMotion),
+              child: Scaffold(
+                appBar: ChatHeader(
+                  name: 'Rosemary',
+                  connection: connection,
+                  onSettings: () {},
+                  onRoutines: () {},
+                ),
+              ),
+            ),
+          );
+
+      await tester.pumpWidget(header(ConnectionState.initializing));
+      await tester.pump(const Duration(seconds: 2));
+      expect(find.byTooltip('Updating conversation'), findsNothing);
+
+      await tester.pumpWidget(header(ConnectionState.reconnecting));
+      expect(find.byTooltip('Updating conversation'), findsNothing);
+      await tester.pump(const Duration(milliseconds: 1499));
+      expect(find.byTooltip('Updating conversation'), findsNothing);
+      await tester.pump(const Duration(milliseconds: 1));
+      expect(find.byTooltip('Updating conversation'), findsOneWidget);
+      expect(find.bySemanticsLabel('Updating conversation'), findsOneWidget);
+      expect(find.byKey(const ValueKey('conversation-update')), findsOneWidget);
+      expect(find.text('Updating'), findsNothing);
+      expect(find.byType(MaterialBanner), findsNothing);
+      expect(
+        tester.widget<AppBar>(find.byType(AppBar)).preferredSize.height,
+        56,
+      );
+
+      await tester.pumpWidget(header(ConnectionState.connected));
+      expect(find.byTooltip('Updating conversation'), findsNothing);
+      expect(find.byKey(const ValueKey('conversation-update')), findsNothing);
+
+      await tester.pumpWidget(
+        header(ConnectionState.reconnecting, reducedMotion: true),
+      );
+      await tester.pump(const Duration(milliseconds: 1500));
+      final fade = tester.widget<FadeTransition>(
+        find.byKey(const ValueKey('conversation-update')),
+      );
+      expect(fade.opacity.value, 1);
+      await tester.pump(const Duration(milliseconds: 550));
+      expect(fade.opacity.value, 1);
+
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
   testWidgets('computer turns blue when running and resets when stopped', (
     tester,
   ) async {
@@ -83,6 +141,7 @@ void main() {
                   appBar: ChatHeader(
                     name: 'My very long research assistant',
                     textScale: scale,
+                    connection: ConnectionState.reconnecting,
                     onBots: () => opened.add('Bots'),
                     onSettings: () => opened.add('Settings'),
                     onComputer: () => opened.add('Computer'),
