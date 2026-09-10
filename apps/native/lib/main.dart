@@ -42,7 +42,8 @@ Future<void> main() async {
 
 class FrockBotApp extends StatefulWidget {
   final LocalStore? store;
-  const FrockBotApp({super.key, this.store});
+  final NativeApi? api;
+  const FrockBotApp({super.key, this.store, this.api});
   @override
   State<FrockBotApp> createState() => _FrockBotAppState();
 }
@@ -51,7 +52,7 @@ class _FrockBotAppState extends State<FrockBotApp> {
   final navigatorKey = GlobalKey<NavigatorState>();
   final botLinks = ValueNotifier<String?>(null);
   late final LocalStore store = widget.store ?? nativeStore();
-  late final NativeApi api = NativeApi(store);
+  late final NativeApi api = widget.api ?? NativeApi(store);
   late final SignIn auth = signInV1(api, store);
   late final BotSessions sessions = BotSessions(api: api, store: store);
   StreamSubscription<Uri>? links;
@@ -63,6 +64,7 @@ class _FrockBotAppState extends State<FrockBotApp> {
   @override
   void initState() {
     super.initState();
+    api.onSessionRejected = (message) => unawaited(forget(message));
     links = AppLinks().uriLinkStream.listen(
       (uri) => unawaited(accept(uri)),
       onError: (Object _) {
@@ -129,10 +131,9 @@ class _FrockBotAppState extends State<FrockBotApp> {
         });
       }
     } on RequestFailure catch (failure) {
-      // Nobody is signed in yet, which is what the sign-in door is for. Saying
-      // so as an error is the first thing a new person would read.
-      final unauthenticated = failure.status == 401 && userId == null;
-      if (mounted && !unauthenticated) {
+      if (failure.status == 401) {
+        await forget(failure.message);
+      } else if (mounted) {
         setState(() => error = failure.message);
       }
     } catch (_) {
@@ -141,6 +142,38 @@ class _FrockBotAppState extends State<FrockBotApp> {
       }
     } finally {
       if (mounted) setState(() => busy = false);
+    }
+  }
+
+  /// Ends a session the gateway has stopped accepting.
+  ///
+  /// A bearer may expire or be revoked while the cached shell is still
+  /// perfectly readable. Keeping that shell open makes every transcript read
+  /// and state-channel reconnect look like a network outage, with no route
+  /// back to authentication. The rejected token is forgotten in memory first,
+  /// so a keystore that refuses the durable delete cannot hold the shell open,
+  /// and the refusal's own sentence says why sign-in is being asked for again
+  /// — where there was a session to lose, rather than to someone who has yet
+  /// to sign in at all.
+  Future<void> forget(String message) =>
+      forgetting ??= _forget(message).whenComplete(() => forgetting = null);
+  Future<void>? forgetting;
+
+  Future<void> _forget(String message) async {
+    final signedIn = userId != null;
+    api.adoptSession(null);
+    sessions.clear();
+    if (mounted) {
+      setState(() {
+        userId = null;
+        error = signedIn ? message : null;
+      });
+    }
+    try {
+      await store.delete('session');
+    } catch (_) {
+      // The token is already forgotten in memory; a keystore that cannot
+      // delete it will hand back nothing this client will adopt again.
     }
   }
 

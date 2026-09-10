@@ -80,9 +80,15 @@ class RequestFailure implements Exception {
 class NativeApi {
   final LocalStore store;
   final AuthCredential credential;
-  final http.Client _client = httpClientV1();
-  NativeApi(this.store, {AuthCredential? credential})
-    : credential = credential ?? authCredentialV1(store);
+  final http.Client _client;
+  NativeApi(this.store, {AuthCredential? credential, http.Client? client})
+    : credential = credential ?? authCredentialV1(store),
+      _client = client ?? httpClientV1();
+
+  /// Told when a request this client authenticated with its own bearer was
+  /// refused as unauthenticated. The token is the one thing a retry cannot
+  /// mend, so the session it belongs to is over wherever the refusal landed.
+  void Function(String message)? onSessionRejected;
 
   /// Learn of a session sign-in, sign-out or restore just established, so the
   /// next request does not wait on the platform keystore.
@@ -115,14 +121,13 @@ class NativeApi {
         body == null ? 'GET' : 'POST',
         Uri.parse('$hostedOrigin$path'),
       )..followRedirects = false;
-      request.headers.addAll(
-        authenticated
-            ? await headers()
-            : {
-                'content-type': 'application/json',
-                'x-frockbot-client': jsonEncode(clientHello),
-              },
-      );
+      final sent = authenticated
+          ? await headers()
+          : {
+              'content-type': 'application/json',
+              'x-frockbot-client': jsonEncode(clientHello),
+            };
+      request.headers.addAll(sent);
       if (body != null) request.bodyBytes = utf8.encode(jsonEncode(body));
       final response = await _client
           .send(request)
@@ -156,6 +161,13 @@ class NativeApi {
           409 => 'That action could not be completed. Refresh and try again.',
           _ => 'FrockBot couldn’t complete that request. Please try again.',
         };
+        // A sign-in route answering 401 is refusing that exchange, not this
+        // client's session, and the sign-in door already reads its sentence.
+        if (response.statusCode == 401 &&
+            sent.containsKey('authorization') &&
+            !path.startsWith('/api/auth/native/')) {
+          onSessionRejected?.call(message);
+        }
         throw RequestFailure(message, response.statusCode);
       }
       return decodeBoundedJson(utf8.decode(bytes), maxBytes: limit);
