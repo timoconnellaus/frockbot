@@ -23,9 +23,10 @@ Use `scripts/native-acceptance.sh inventory` to record the installed version and
 `scripts/native-update.py` ships the phone app. A **release** is a full Shorebird APK build; a **patch** is a signed Dart code push against that release. Native code, assets, native plugin dependencies, the engine, the Shorebird `app_id` or the patch key all need a release. Pure-Dart dependency changes may be patched if Shorebird accepts the resulting diff. Shorebird detects native and asset differences and the script never passes `--allow-native-diffs` or `--allow-asset-diffs`.
 
 The client also checks for a patch on cold start and whenever it returns from
-the background. A completed download is offered in the blue update header;
-restart first checkpoints the local document and then asks `restart_app` for
-an Android process restart or an iOS Flutter-engine replacement. Introducing
+the background. A patch staged on disk for the next engine — downloaded by this
+launch or already waiting from an earlier one — is offered in the blue update
+header; restart first checkpoints the local document and then asks `restart_app`
+for an Android process restart or an iOS Flutter-engine replacement. Introducing
 that native plugin requires a full Shorebird release before this flow can be
 delivered; later Dart-only changes to the flow may be patches against that
 baseline. This repository still has no iOS Runner, so an eventual iOS target

@@ -5,7 +5,9 @@ library;
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/shell/semantics.dart';
 import 'package:frockbot_native/client/plain_store.dart';
@@ -225,6 +227,48 @@ void main() {
       tester.widget<FilledButton>(find.byType(FilledButton)).enabled,
       isTrue,
     );
+  });
+
+  /// The relaunch has to be a native one: a full process restart on Android
+  /// and a new Flutter engine on iOS. This drives the real service down to the
+  /// `restart_app` platform boundary and reads the mode the plugin is asked for.
+  group('the native relaunch asked of the platform', () {
+    const channel = MethodChannel('restart');
+    late List<MethodCall> calls;
+
+    setUp(() {
+      calls = <MethodCall>[];
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+            calls.add(call);
+            return {'success': true, 'mode': (call.arguments as Map)['mode']};
+          });
+    });
+
+    tearDown(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, null);
+      debugDefaultTargetPlatformOverride = null;
+    });
+
+    test('is a full process restart on Android', () async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      expect(await ShorebirdMobileUpdateService().restart(), isTrue);
+      expect(calls.single.method, 'restartApp');
+      expect((calls.single.arguments as Map)['mode'], 'process');
+    });
+
+    test('is a Flutter engine replacement on iOS', () async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      expect(await ShorebirdMobileUpdateService().restart(), isTrue);
+      expect((calls.single.arguments as Map)['mode'], 'flutterEngine');
+    });
+
+    test('is refused off mobile instead of restarting the host', () async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+      expect(await ShorebirdMobileUpdateService().restart(), isFalse);
+      expect(calls, isEmpty);
+    });
   });
 
   test('the restart checkpoint commits an accepted draft write', () async {
