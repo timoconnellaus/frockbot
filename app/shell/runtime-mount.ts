@@ -318,7 +318,7 @@ export async function agentRuntime(
       ...(turn
         ? {
             routines: {
-              ...createBotRoutinesHost(identity, turn, state.routines),
+              ...createBotRoutinesHost(identity, turn),
               list: () => listRoutines(state, identity),
               execute: (command, writer) =>
                 executeRoutineCommand(state, identity, command, writer),

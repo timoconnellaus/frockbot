@@ -139,6 +139,30 @@ describe("decodeBotTemplateV1", () => {
     ).toThrow(/bounded array/);
   });
 
+  it("reads a routine published with the retired timezone and drops it", () => {
+    const decoded = decodeBotTemplateV1(
+      template({
+        routines: [
+          {
+            slug: "daily",
+            name: "Daily",
+            prompt: "Check the ledger.",
+            schedule: "0 9 * * *",
+            timezone: "Australia/Sydney",
+            triggerKind: "cron",
+          },
+        ],
+      } as unknown as Partial<BotTemplateV1>),
+    );
+    expect(decoded.routines[0]).toEqual({
+      slug: "daily",
+      name: "Daily",
+      prompt: "Check the ledger.",
+      schedule: "0 9 * * *",
+      triggerKind: "cron",
+    });
+  });
+
   it("refuses a webhook routine that also carries a schedule", () => {
     expect(() =>
       decodeBotTemplateV1(

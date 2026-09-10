@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import type { UserSettingsViewV1 } from "@frockbot/core/configuration";
+import { isProtocolValue } from "@frockbot/core/protocol-schemas";
 import {
   applicationSettingsFrame,
   applicationSettingsCommand,
@@ -333,6 +334,12 @@ test("Profile owns the timezone used by Routines", () => {
   });
   const timezone = profile.fields[2]!;
   expect(timezone.choices!.length).toBeGreaterThan(400);
+  // The catalog is whatever this runtime's ICU build holds, and the wire bounds
+  // how many choices one field may carry: an over-long catalog would fail the
+  // whole Settings document on the client, not just this row.
+  expect(
+    isProtocolValue("SettingField", JSON.parse(JSON.stringify(timezone))),
+  ).toBe(true);
   expect(timezone.choices).toContainEqual({
     label: "Australia / Sydney",
     value: "Australia/Sydney",

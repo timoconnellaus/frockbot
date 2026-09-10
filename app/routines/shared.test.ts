@@ -92,12 +92,16 @@ describe("routineCommandFingerprintV1", () => {
 describe("RoutineViewV1", () => {
   test("carries no key material, and round-trips through its codec", async () => {
     const store = new RoutineStore(createMemoryRoutineStorageV1());
-    const receipt = await store.execute(decodeRoutineCommandV1(CREATE), {
-      kind: "bot",
-      botId: "scout",
-      sessionId: "tim:scout",
-      turnId: "turn-1",
-    });
+    const receipt = await store.execute(
+      decodeRoutineCommandV1(CREATE),
+      {
+        kind: "bot",
+        botId: "scout",
+        sessionId: "tim:scout",
+        turnId: "turn-1",
+      },
+      "UTC",
+    );
     if (receipt.status !== "applied") throw new Error("unreachable");
     const view = receipt.routine;
     // The Bot writer's Session and Turn travel with it: they are provenance,
@@ -115,9 +119,9 @@ describe("RoutineViewV1", () => {
 
     const record = await store.read(view.routineId);
     expect(record?.createdBy).toMatchObject({ sessionId: "tim:scout" });
-    expect(routineViewV1(record!)).toEqual(view);
+    expect(routineViewV1(record!, "UTC")).toEqual(view);
 
-    const listed = await store.list("scout");
+    const listed = await store.list("scout", undefined, "UTC");
     expect(decodeRoutineListViewV1(JSON.parse(JSON.stringify(listed)))).toEqual(
       listed,
     );

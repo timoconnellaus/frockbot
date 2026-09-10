@@ -213,7 +213,11 @@ export function decodeRoutineRecordV1(value: unknown): RoutineRecordV1 {
       "createdAt",
       "updatedAt",
     ],
-    ["schedule", "trigger", "lastRunAt"],
+    // `timezone` is retired and ignored: the account owns the zone now. A
+    // record written by the previous release still carries it, and a stored
+    // Routine that cannot be decoded is a Routine that disappears from the
+    // list and never fires again.
+    ["schedule", "trigger", "lastRunAt", "timezone"],
     "Routine record",
   );
   if (candidate.schemaVersion !== 1) {

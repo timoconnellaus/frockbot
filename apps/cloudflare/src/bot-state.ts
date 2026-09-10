@@ -1,5 +1,4 @@
 import { cleanNotificationTestState } from "./notification-state-cleanup.js";
-import { cleanRoutineTimezoneTestStateV1 } from "./routine-timezone-cleanup.js";
 import type { MessageNotice } from "@frockbot/app/notifications/messages";
 import {
   PUSH_OUTBOX_DRAIN_LIMIT,
@@ -446,27 +445,38 @@ export class BotState extends DurableObject<BotStateEnv> {
       }>
     | undefined;
 
+  /**
+   * Adopt the User's Profile timezone before a Routine is listed or written.
+   *
+   * Best effort: the projection already holds a zone, and a User object that
+   * cannot be read is a "next run" column computed under the zone last
+   * projected — never a Routines list that refuses to open.
+   */
   private async syncRoutineTimezone(
     identity: BotIdentity,
     shell: ShellBotBackendContribution,
   ): Promise<void> {
-    const rpc = this.env.USER_CONFIGURATIONS.get(
-      this.env.USER_CONFIGURATIONS.idFromName(identity.userId),
-    ) as unknown as { readConfiguration(input: unknown): Promise<unknown> };
-    const user = decodeUserSettingsViewV1(
-      rpcJsonSnapshotV1(
-        await rpc.readConfiguration({
-          schemaVersion: 1,
-          userId: identity.userId,
-          view: 2,
-        }),
-      ),
-    );
-    await projectRoutineAccountTimezoneV1(
-      shell.state,
-      userTimezoneV1(user.profile),
-      user.revision,
-    );
+    try {
+      const rpc = this.env.USER_CONFIGURATIONS.get(
+        this.env.USER_CONFIGURATIONS.idFromName(identity.userId),
+      ) as unknown as { readConfiguration(input: unknown): Promise<unknown> };
+      const user = decodeUserSettingsViewV1(
+        rpcJsonSnapshotV1(
+          await rpc.readConfiguration({
+            schemaVersion: 1,
+            userId: identity.userId,
+            view: 2,
+          }),
+        ),
+      );
+      await projectRoutineAccountTimezoneV1(
+        shell.state,
+        userTimezoneV1(user.profile),
+        user.revision,
+      );
+    } catch {
+      // Left at the zone last projected, which the next Turn refreshes.
+    }
   }
 
   constructor(
@@ -479,7 +489,6 @@ export class BotState extends DurableObject<BotStateEnv> {
     this.ctx.blockConcurrencyWhile(async () => {
       await cleanIncidentTestChatsV1(this.ctx.storage);
       await cleanNotificationTestState(this.ctx.storage);
-      await cleanRoutineTimezoneTestStateV1(this.ctx.storage);
     });
     this.outboundFetch = dependencies.outboundFetch;
     // The surfaces are built per identity in `bindSurfaces`, not here: they

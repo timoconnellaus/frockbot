@@ -148,8 +148,6 @@ export interface RoutineFiringSeamV1 {
 }
 
 export interface RoutineStoreOptionsV1 {
-  /** Account timezone projection for direct embeddings and deterministic tests. */
-  accountTimezone?: string;
   /** Injected so a test can pin a clock; production passes nothing. */
   now?(): Date;
   /** Injected so a test can pin an id; production passes nothing. */
@@ -183,7 +181,7 @@ function writerView(writer: RoutineWriterV1): RoutineWriterViewV1 {
  */
 export function routineViewV1(
   record: RoutineRecordV1,
-  timezone = "UTC",
+  timezone: string,
   nextRunAt?: string,
   hookKeyVersion?: number,
 ): RoutineViewV1 {
@@ -248,7 +246,6 @@ export async function appendRoutineRunEntryV1(
 
 export class RoutineStore {
   readonly #storage: RoutineStorageV1;
-  readonly #accountTimezone: string;
   readonly #now: () => Date;
   readonly #newRoutineId: () => string;
   readonly #firings: RoutineFiringSeamV1 | undefined;
@@ -256,7 +253,6 @@ export class RoutineStore {
 
   constructor(storage: RoutineStorageV1, options: RoutineStoreOptionsV1 = {}) {
     this.#storage = storage;
-    this.#accountTimezone = options.accountTimezone ?? "UTC";
     this.#now = options.now ?? (() => new Date());
     this.#newRoutineId = options.newRoutineId ?? (() => crypto.randomUUID());
     this.#firings = options.firings;
@@ -270,8 +266,8 @@ export class RoutineStore {
    */
   async list(
     botId: string,
-    nextRuns?: ReadonlyMap<string, string>,
-    timezone = this.#accountTimezone,
+    nextRuns: ReadonlyMap<string, string> | undefined,
+    timezone: string,
   ): Promise<RoutineListViewV1> {
     const stored = await this.#storage.list<unknown>({
       prefix: ROUTINE_PREFIX,
@@ -476,7 +472,7 @@ export class RoutineStore {
   async execute(
     command: RoutineCommandV1,
     writer: RoutineWriterV1,
-    timezone = this.#accountTimezone,
+    timezone: string,
   ): Promise<RoutineCommandReceiptV1> {
     const fingerprint = routineCommandFingerprintV1(command);
     // A refused command is returned out of the transaction rather than thrown

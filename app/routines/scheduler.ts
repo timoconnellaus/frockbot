@@ -144,8 +144,9 @@ function queued(value: unknown): QueuedFiringV1 | undefined {
 }
 
 /**
- * A Routine's clock, computed if it has never been written or if the Routine's
- * timing has been rewritten since it was.
+ * A Routine's clock, computed if it has never been written, if the Routine's
+ * timing has been rewritten since it was, or if the account zone it was read
+ * under has moved.
  *
  * The anchor is the record's `updatedAt`: editing a schedule is a new anchor, so
  * `@every 15m` restarts from the edit rather than inheriting a due time the old
@@ -155,6 +156,7 @@ export function routineScheduleStateV1(
   record: RoutineRecordV1,
   stored: RoutineScheduleStateV1 | undefined,
   normalized: NormalizedScheduleV1,
+  now: Date,
 ): RoutineScheduleStateV1 {
   if (
     stored &&
@@ -163,13 +165,28 @@ export function routineScheduleStateV1(
   )
     return stored;
   const anchor = new Date(record.updatedAt);
-  const next = nextRoutineRunV1(normalized, anchor, anchor);
+  // A clock computed for the first time counts from the record's own anchor, so
+  // a Routine whose object was evicted still owes the occurrence it slept
+  // through. A clock rebuilt only because the account zone moved counts from
+  // now instead: every occurrence before this moment was already dealt with
+  // under the old zone, and re-deriving them from an anchor months back would
+  // coalesce them into one firing nobody missed. The backoff and the hold are
+  // carried over: moving zone is not an answer to a Routine that keeps failing.
+  const rezoned = stored !== undefined && stored.anchor === record.updatedAt;
+  const from = rezoned && now.getTime() > anchor.getTime() ? now : anchor;
+  const next = nextRoutineRunV1(normalized, from, anchor);
   return {
     schemaVersion: 1,
     routineId: record.routineId,
     anchor: record.updatedAt,
     timezone: normalized.timezone,
-    dueAt: (next ?? anchor).getTime(),
+    dueAt: (next ?? from).getTime(),
+    ...(rezoned && stored.consecutiveFailures !== undefined
+      ? { consecutiveFailures: stored.consecutiveFailures }
+      : {}),
+    ...(rezoned && stored.deferredUntil !== undefined
+      ? { deferredUntil: stored.deferredUntil }
+      : {}),
   };
 }
 
@@ -221,7 +238,7 @@ export class RoutineScheduler {
    */
   async deadlines(
     reads: RoutineStorageWritesV1,
-    timezone = "UTC",
+    timezone: string,
   ): Promise<number[]> {
     const deadlines: number[] = [];
     for (const { record, state } of await this.#clocks(reads, timezone)) {
@@ -261,7 +278,7 @@ export class RoutineScheduler {
    * `dueAt` exactly where it is, so the debt survives the Turn that displaced
    * it.
    */
-  async defer(writes: RoutineStorageWritesV1, timezone = "UTC"): Promise<void> {
+  async defer(writes: RoutineStorageWritesV1, timezone: string): Promise<void> {
     const deferredUntil = this.#now().getTime() + ROUTINE_DEFERRAL_MS;
     for (const { record, state } of await this.#clocks(writes, timezone)) {
       await writes.put(routineScheduleKeyV1(record.routineId), {
@@ -277,7 +294,7 @@ export class RoutineScheduler {
    */
   async settle(
     execute: RoutineFireExecutorV1,
-    timezone = "UTC",
+    timezone: string,
   ): Promise<void> {
     await this.reapExpiredFirings();
     for (let drained = 0; drained < ROUTINE_SETTLE_BATCH; drained += 1) {
@@ -452,7 +469,7 @@ export class RoutineScheduler {
   }
 
   /** When each scheduled Routine is next owed a firing, for the "next run" row. */
-  async nextRuns(timezone = "UTC"): Promise<Map<string, string>> {
+  async nextRuns(timezone: string): Promise<Map<string, string>> {
     const next = new Map<string, string>();
     for (const { record, state } of await this.#clocks(
       this.#storage,
@@ -511,6 +528,7 @@ export class RoutineScheduler {
             ? undefined
             : decodeRoutineScheduleStateV1(persisted),
           normalized,
+          this.#now(),
         ),
       });
     }

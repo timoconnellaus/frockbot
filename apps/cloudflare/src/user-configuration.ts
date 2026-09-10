@@ -172,25 +172,48 @@ interface UserConfigurationEnv {
 const SEARCH_REBUILD_BOT_LIMIT = 200;
 
 export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
+  /** This User's Profile timezone, for deciding whether a save moved it. */
+  private async routineTimezone(userId: string): Promise<string> {
+    return userTimezoneV1(
+      (await (await this.settingsContribution()).read(userId)).profile,
+    );
+  }
+
+  /**
+   * Push a moved Profile timezone to every Bot, so an alarm that fires without
+   * a Turn already holds it.
+   *
+   * A Bot that cannot be reached is left behind rather than failing the save
+   * that already committed: the mount re-projects the zone on the next Turn,
+   * and reporting a conflict for a change that succeeded is the worse answer.
+   */
   private async propagateRoutineTimezone(
     userId: string,
-    timezone: string,
-    revision: number,
+    before: string,
   ): Promise<void> {
+    const settings = await (await this.settingsContribution()).read(userId);
+    const timezone = userTimezoneV1(settings.profile);
+    if (timezone === before) return;
     const directory = await (await this.flockContribution()).listBots();
-    for (const bot of directory.bots) {
-      const id = this.env.BOT_STATES.idFromName(`${userId}:${bot.botId}`);
-      const rpc = this.env.BOT_STATES.get(id) as unknown as {
-        refreshRoutineTimezone(input: unknown): Promise<unknown>;
-      };
-      await rpc.refreshRoutineTimezone({
-        schemaVersion: 1,
-        userId,
-        botId: bot.botId,
-        timezone,
-        revision,
-      });
-    }
+    await Promise.all(
+      directory.bots.map(async (bot) => {
+        const id = this.env.BOT_STATES.idFromName(`${userId}:${bot.botId}`);
+        const rpc = this.env.BOT_STATES.get(id) as unknown as {
+          refreshRoutineTimezone(input: unknown): Promise<unknown>;
+        };
+        try {
+          await rpc.refreshRoutineTimezone({
+            schemaVersion: 1,
+            userId,
+            botId: bot.botId,
+            timezone,
+            revision: settings.revision,
+          });
+        } catch {
+          // Left to the next mount, which projects the zone on every Turn.
+        }
+      }),
+    );
   }
 
   async registerPush(input: { userId: string; registration: unknown }) {
@@ -578,6 +601,12 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
       ),
     });
     await this.assertUserIdentity(request.userId as string);
+    const command = request.command as { sectionId?: string };
+    const profileSave =
+      request.home === "application" && command.sectionId === "profile";
+    const before = profileSave
+      ? await this.routineTimezone(request.userId as string)
+      : undefined;
     const receipt = await (
       await this.settingsContribution()
     ).changeSettings(
@@ -585,20 +614,8 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
       request.home as "application" | "models",
       request.command,
     );
-    const command = request.command as { sectionId?: string };
-    if (
-      receipt.status === "applied" &&
-      request.home === "application" &&
-      command.sectionId === "profile"
-    ) {
-      const settings = await (
-        await this.settingsContribution()
-      ).read(request.userId as string);
-      await this.propagateRoutineTimezone(
-        request.userId as string,
-        userTimezoneV1(settings.profile),
-        settings.revision,
-      );
+    if (receipt.status === "applied" && before !== undefined) {
+      await this.propagateRoutineTimezone(request.userId as string, before);
     }
     return receipt;
   }
@@ -606,21 +623,15 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
   async executeConfiguration(input: unknown) {
     const request = decodeUserConfigurationExecuteRpcV1(input);
     await this.assertUserIdentity(request.userId);
+    const before =
+      request.command.type === "user/update-profile"
+        ? await this.routineTimezone(request.userId)
+        : undefined;
     const receipt = await (
       await this.settingsContribution()
     ).executeConfiguration(request);
-    if (
-      receipt.status === "applied" &&
-      request.command.type === "user/update-profile"
-    ) {
-      const settings = await (
-        await this.settingsContribution()
-      ).read(request.userId);
-      await this.propagateRoutineTimezone(
-        request.userId,
-        userTimezoneV1(settings.profile),
-        settings.revision,
-      );
+    if (receipt.status === "applied" && before !== undefined) {
+      await this.propagateRoutineTimezone(request.userId, before);
     }
     return receipt;
   }

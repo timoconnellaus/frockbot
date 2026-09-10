@@ -244,14 +244,23 @@ export function userTimezoneV1(profile: UserSettingsViewV1["profile"]): string {
   return profile.timezone ?? "UTC";
 }
 
-/** True when this runtime recognizes the supplied IANA time-zone name. */
+/**
+ * True when this runtime recognizes the supplied value as a named IANA zone.
+ *
+ * `Intl` also accepts a bare UTC offset — `+05:00` resolves to `+05:00` — and an
+ * offset is not a zone: it has no rules, so it cannot say when a daily Routine
+ * runs across a DST boundary. The resolved name is what is judged, which keeps
+ * every real alias (`US/Eastern`) while refusing the crafted offset.
+ */
 export function isUserTimezoneV1(value: unknown): value is string {
   if (typeof value !== "string" || value.length === 0 || value.length > 64) {
     return false;
   }
   try {
-    new Intl.DateTimeFormat("en-US", { timeZone: value });
-    return true;
+    const resolved = new Intl.DateTimeFormat("en-US", {
+      timeZone: value,
+    }).resolvedOptions().timeZone;
+    return !/^[+-]/.test(resolved);
   } catch {
     return false;
   }

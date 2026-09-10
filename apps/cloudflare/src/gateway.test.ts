@@ -740,7 +740,11 @@ class MemoryConfiguration
   listRoutines(
     request: Parameters<BotConfigurationBinding["listRoutines"]>[0],
   ) {
-    return this.routineStore(request.botId).list(request.botId);
+    return this.routineStore(request.botId).list(
+      request.botId,
+      undefined,
+      "UTC",
+    );
   }
 
   listTasks(request: Parameters<BotConfigurationBinding["listTasks"]>[0]) {
@@ -767,9 +771,11 @@ class MemoryConfiguration
   executeRoutineCommand(
     request: Parameters<BotConfigurationBinding["executeRoutineCommand"]>[0],
   ) {
-    return this.routineStore(request.botId).execute(request.command, {
-      kind: "user",
-    });
+    return this.routineStore(request.botId).execute(
+      request.command,
+      { kind: "user" },
+      "UTC",
+    );
   }
 
   listRoutineRuns(

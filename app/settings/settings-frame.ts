@@ -34,12 +34,23 @@ const IMAGE_MODEL_LABELS: Record<string, string> = {
     "Stable Diffusion XL Lightning",
 };
 
-const PROFILE_TIMEZONES_V1 = Object.freeze([
-  "UTC",
-  ...Intl.supportedValuesOf("timeZone").filter(
-    (timezone) => timezone !== "UTC",
-  ),
-]);
+/**
+ * Most choices one setting field may carry on the wire (`SettingField.choices`
+ * in the client schema). The zone catalog comes from the host ICU build and
+ * grows with tzdata, and a catalog one entry over the bound would fail the
+ * whole Settings document rather than one row.
+ */
+const MAX_SETTING_CHOICES_V1 = 600;
+
+const PROFILE_TIMEZONES_V1 = Object.freeze(
+  [
+    "UTC",
+    ...Intl.supportedValuesOf("timeZone").filter(
+      (timezone) => timezone !== "UTC",
+    ),
+    // One slot is left for a saved selection the catalog does not name.
+  ].slice(0, MAX_SETTING_CHOICES_V1 - 1),
+);
 
 function timezoneLabelV1(timezone: string): string {
   return timezone

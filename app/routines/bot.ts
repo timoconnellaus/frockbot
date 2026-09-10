@@ -44,7 +44,6 @@ import {
   ROUTINE_ACCOUNT_TIMEZONE_KEY,
   routineFailureMessageKeyV1,
   routineKeyV1,
-  ROUTINE_SCHEDULE_PREFIX,
 } from "@frockbot/app/routines/storage-keys";
 import { isRoutineTimezoneV1 } from "@frockbot/app/routines/cron";
 import {
@@ -147,9 +146,12 @@ export async function routineAccountTimezoneV1(reads: {
 }
 
 /**
- * Adopt the User authority's current timezone and rebuild every derived clock.
- * Routine definitions remain untouched: the projection is account state, and
- * schedule deadlines are disposable computations of that state.
+ * Adopt the User authority's current timezone and re-arm the alarm under it.
+ *
+ * Nothing derived is discarded here. A stored clock records the zone it was
+ * computed in, so it recomputes itself exactly when the zone it names has
+ * moved; deleting clocks outright threw away every backoff and hold on any
+ * settings change, whether or not the zone was one of them.
  */
 export async function projectRoutineAccountTimezoneV1(
   state: ShellBotStateV1,
@@ -176,10 +178,6 @@ export async function projectRoutineAccountTimezoneV1(
       revision,
       timezone,
     } satisfies RoutineAccountTimezoneProjectionV1);
-    const clocks = await transaction.list<unknown>({
-      prefix: ROUTINE_SCHEDULE_PREFIX,
-    });
-    for (const key of clocks.keys()) await transaction.delete(key);
     await state.authority.refreshRecoveryAlarm(transaction);
   });
 }
@@ -321,15 +319,17 @@ export function routineFireOutcomeV1(
 }
 
 /**
- * The Routines seam one admitted Turn runs under. A Turn is required: a Bot
- * writes a Routine only inside a Turn whose Session and Turn its provenance can
- * name, exactly as it writes a Skill or authors a Package.
+ * The provenance half of the Routines seam one admitted Turn runs under. A Turn
+ * is required: a Bot writes a Routine only inside a Turn whose Session and Turn
+ * its provenance can name, exactly as it writes a Skill or authors a Package.
+ *
+ * Reading and writing are the caller's: both need the account zone the Bot is
+ * projected under, which is storage the mount already holds.
  */
 export function createBotRoutinesHost(
   identity: BotRoutinesIdentity,
   turn: BotRoutinesTurn,
-  store: RoutineStore,
-): RoutinesRuntimeHostV1 {
+): Omit<RoutinesRuntimeHostV1, "list" | "execute"> {
   return {
     botId: identity.botId,
     writer: {
@@ -337,8 +337,6 @@ export function createBotRoutinesHost(
       turnId: turn.turnId,
       runId: turn.runId,
     },
-    list: () => store.list(identity.botId),
-    execute: (command, writer) => store.execute(command, writer),
   };
 }
 

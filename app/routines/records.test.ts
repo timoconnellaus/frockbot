@@ -51,6 +51,15 @@ describe("RoutineRecordV1", () => {
     );
   });
 
+  test("reads a record written with the retired timezone field and drops it", () => {
+    const decoded = decodeRoutineRecordV1({
+      ...base,
+      timezone: "Australia/Sydney",
+    });
+    expect(decoded).not.toHaveProperty("timezone");
+    expect(decoded.routineId).toBe("morning-brief");
+  });
+
   test("refuses an oversized prompt", () => {
     expect(() =>
       decodeRoutineRecordV1({
@@ -64,9 +73,6 @@ describe("RoutineRecordV1", () => {
     expect(() => decodeRoutineRecordV1({ ...base, extra: 1 })).toThrow(
       /unknown field "extra"/,
     );
-    expect(() =>
-      decodeRoutineRecordV1({ ...base, timezone: "Australia/Sydney" }),
-    ).toThrow(/unknown field "timezone"/);
     const { name: _name, ...missing } = base;
     expect(() => decodeRoutineRecordV1(missing)).toThrow(/is missing "name"/);
     expect(() => decodeRoutineRecordV1({ ...base, schemaVersion: 2 })).toThrow(

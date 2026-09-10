@@ -13,10 +13,10 @@ const BOT: RoutineWriterV1 = {
   turnId: "turn-7",
 };
 
+const ZONE = "Australia/Sydney";
+
 function store(): RoutineStore {
-  return new RoutineStore(createMemoryRoutineStorageV1(), {
-    accountTimezone: "Australia/Sydney",
-  });
+  return new RoutineStore(createMemoryRoutineStorageV1());
 }
 
 function create(
@@ -40,7 +40,7 @@ function create(
 describe("RoutineStore.execute", () => {
   test("creates a Routine, records its writer, and lists it", async () => {
     const routines = store();
-    const receipt = await routines.execute(create(), USER);
+    const receipt = await routines.execute(create(), USER, ZONE);
     expect(receipt).toMatchObject({ status: "applied" });
     if (receipt.status !== "applied") throw new Error("unreachable");
     expect(receipt.routine).toMatchObject({
@@ -50,13 +50,13 @@ describe("RoutineStore.execute", () => {
       createdBy: { kind: "user" },
       updatedBy: { kind: "user" },
     });
-    const listed = await routines.list("scout");
+    const listed = await routines.list("scout", undefined, ZONE);
     expect(listed.routines).toHaveLength(1);
   });
 
   test("records a Bot writer as the Bot, naming the Turn that wrote it", async () => {
     const routines = store();
-    const receipt = await routines.execute(create(), BOT);
+    const receipt = await routines.execute(create(), BOT, ZONE);
     if (receipt.status !== "applied") throw new Error("unreachable");
     // Provenance that cannot answer "which Turn?" is not provenance: the view
     // used to carry the Bot id alone, so a Routine a Bot wrote could not be
@@ -73,18 +73,20 @@ describe("RoutineStore.execute", () => {
 
   test("replays one command id and refuses a reused id with new bytes", async () => {
     const routines = store();
-    const first = await routines.execute(create(), USER);
-    const replay = await routines.execute(create(), USER);
+    const first = await routines.execute(create(), USER, ZONE);
+    const replay = await routines.execute(create(), USER, ZONE);
     expect(replay).toEqual(first);
-    expect((await routines.list("scout")).routines).toHaveLength(1);
+    expect(
+      (await routines.list("scout", undefined, ZONE)).routines,
+    ).toHaveLength(1);
     await expect(
-      routines.execute(create({ name: "Something else" }), USER),
+      routines.execute(create({ name: "Something else" }), USER, ZONE),
     ).rejects.toThrow(/was reused for a different command/);
   });
 
   test("updates only the fields the command carries", async () => {
     const routines = store();
-    await routines.execute(create(), USER);
+    await routines.execute(create(), USER, ZONE);
     const receipt = await routines.execute(
       {
         schemaVersion: 1,
@@ -95,6 +97,7 @@ describe("RoutineStore.execute", () => {
         prompt: "Summarize overnight email and calendar.",
       },
       BOT,
+      ZONE,
     );
     if (receipt.status !== "applied") throw new Error("unreachable");
     expect(receipt.routine).toMatchObject({
@@ -108,7 +111,7 @@ describe("RoutineStore.execute", () => {
 
   test("naming a trigger on an update clears the schedule, and the reverse", async () => {
     const routines = store();
-    await routines.execute(create(), USER);
+    await routines.execute(create(), USER, ZONE);
     const toWebhook = await routines.execute(
       {
         schemaVersion: 1,
@@ -119,6 +122,7 @@ describe("RoutineStore.execute", () => {
         trigger: { kind: "webhook" },
       },
       USER,
+      ZONE,
     );
     if (toWebhook.status !== "applied") throw new Error("unreachable");
     expect(toWebhook.routine.schedule).toBeUndefined();
@@ -134,6 +138,7 @@ describe("RoutineStore.execute", () => {
         schedule: "@daily",
       },
       USER,
+      ZONE,
     );
     if (back.status !== "applied") throw new Error("unreachable");
     expect(back.routine.trigger).toBeUndefined();
@@ -142,7 +147,7 @@ describe("RoutineStore.execute", () => {
 
   test("pause and resume move only `enabled`", async () => {
     const routines = store();
-    await routines.execute(create(), USER);
+    await routines.execute(create(), USER, ZONE);
     const paused = await routines.execute(
       {
         schemaVersion: 1,
@@ -152,6 +157,7 @@ describe("RoutineStore.execute", () => {
         routineId: "brief",
       },
       USER,
+      ZONE,
     );
     if (paused.status !== "applied") throw new Error("unreachable");
     expect(paused.routine.enabled).toBe(false);
@@ -164,6 +170,7 @@ describe("RoutineStore.execute", () => {
         routineId: "brief",
       },
       USER,
+      ZONE,
     );
     if (resumed.status !== "applied") throw new Error("unreachable");
     expect(resumed.routine.enabled).toBe(true);
@@ -171,7 +178,7 @@ describe("RoutineStore.execute", () => {
 
   test("delete removes the record and its run log", async () => {
     const routines = store();
-    await routines.execute(create(), USER);
+    await routines.execute(create(), USER, ZONE);
     await routines.recordRun(runEntry(1));
     const receipt = await routines.execute(
       {
@@ -182,9 +189,12 @@ describe("RoutineStore.execute", () => {
         routineId: "brief",
       },
       USER,
+      ZONE,
     );
     expect(receipt).toMatchObject({ status: "deleted", routineId: "brief" });
-    expect((await routines.list("scout")).routines).toHaveLength(0);
+    expect(
+      (await routines.list("scout", undefined, ZONE)).routines,
+    ).toHaveLength(0);
     await expect(routines.listRuns("scout", "brief")).rejects.toThrow(
       RoutineNotFoundError,
     );
@@ -193,12 +203,14 @@ describe("RoutineStore.execute", () => {
   test("refuses a write whose cron or account time zone cannot be parsed", async () => {
     const routines = store();
     await expect(
-      routines.execute(create({ schedule: "not a cron" }), USER),
+      routines.execute(create({ schedule: "not a cron" }), USER, ZONE),
     ).rejects.toThrow(/five fields/);
     await expect(
       routines.execute(create({ commandId: "cmd-tz" }), USER, "Mars/Olympus"),
     ).rejects.toThrow(/not an IANA time zone/);
-    expect((await routines.list("scout")).routines).toHaveLength(0);
+    expect(
+      (await routines.list("scout", undefined, ZONE)).routines,
+    ).toHaveLength(0);
   });
 
   test("acting on an unknown Routine is not found", async () => {
@@ -213,6 +225,7 @@ describe("RoutineStore.execute", () => {
           routineId: "missing",
         },
         USER,
+        ZONE,
       ),
     ).rejects.toThrow(RoutineNotFoundError);
   });
@@ -234,13 +247,13 @@ function runEntry(seq: number): RoutineRunEntryV1 {
 describe("RoutineStore run log", () => {
   test("is empty until something fires", async () => {
     const routines = store();
-    await routines.execute(create(), USER);
+    await routines.execute(create(), USER, ZONE);
     expect((await routines.listRuns("scout", "brief")).entries).toEqual([]);
   });
 
   test("keeps the newest entries first and trims to its bound", async () => {
     const routines = store();
-    await routines.execute(create(), USER);
+    await routines.execute(create(), USER, ZONE);
     for (let seq = 1; seq <= ROUTINE_RUN_LOG_LIMIT + 10; seq += 1) {
       await routines.recordRun(runEntry(seq));
     }
@@ -252,7 +265,7 @@ describe("RoutineStore run log", () => {
 
   test("settling a firing rewrites its entry rather than appending a second", async () => {
     const routines = store();
-    await routines.execute(create(), USER);
+    await routines.execute(create(), USER, ZONE);
     await routines.recordRun({ ...runEntry(1), status: "running" });
     await routines.recordRun({
       ...runEntry(1),
@@ -276,21 +289,24 @@ describe("a schedule that never comes around", () => {
   test("is refused at write time, and nothing is stored", async () => {
     const routines = store();
     await expect(
-      routines.execute(create({ schedule: "0 0 30 2 *" }), USER),
+      routines.execute(create({ schedule: "0 0 30 2 *" }), USER, ZONE),
     ).rejects.toThrow(/never comes around again/u);
     await expect(
       routines.execute(
         create({ commandId: "cmd-2", schedule: "0 0 31 4 *" }),
         USER,
+        ZONE,
       ),
     ).rejects.toThrow(/never comes around again/u);
-    expect((await routines.list("scout")).routines).toHaveLength(0);
+    expect(
+      (await routines.list("scout", undefined, ZONE)).routines,
+    ).toHaveLength(0);
   });
 
   test("names the expression and the zone, so the field can be corrected", async () => {
     const routines = store();
     const refusal = await routines
-      .execute(create({ schedule: "0 0 30 2 *" }), USER)
+      .execute(create({ schedule: "0 0 30 2 *" }), USER, ZONE)
       .catch((error: unknown) => error);
     expect((refusal as Error).message).toContain("0 0 30 2 *");
     expect((refusal as Error).message).toContain("Australia/Sydney");
@@ -300,7 +316,7 @@ describe("a schedule that never comes around", () => {
     const routines = store();
     // February the 29th happens; it is simply not every year.
     await expect(
-      routines.execute(create({ schedule: "0 0 29 2 *" }), USER),
+      routines.execute(create({ schedule: "0 0 29 2 *" }), USER, ZONE),
     ).resolves.toMatchObject({ status: "applied" });
   });
 });

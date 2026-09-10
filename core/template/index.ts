@@ -341,7 +341,10 @@ function decodeTemplateRoutineV1(value: unknown): TemplateRoutineV1 {
     value,
     "template routine",
     ["slug", "name", "prompt"],
-    ["schedule", "triggerKind"],
+    // `timezone` is retired and ignored: the account owns the zone now. A
+    // document published by the previous release still carries one, and it is
+    // read rather than refused.
+    ["schedule", "triggerKind", "timezone"],
   );
   if (
     routine.triggerKind !== undefined &&
