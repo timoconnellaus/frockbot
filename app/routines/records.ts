@@ -54,7 +54,6 @@ export interface RoutineRecordV1 {
   prompt: string;
   schedule?: string;
   trigger?: RoutineTriggerV1;
-  timezone: string;
   enabled: boolean;
   createdBy: RoutineWriterV1;
   updatedBy: RoutineWriterV1;
@@ -208,7 +207,6 @@ export function decodeRoutineRecordV1(value: unknown): RoutineRecordV1 {
       "routineId",
       "name",
       "prompt",
-      "timezone",
       "enabled",
       "createdBy",
       "updatedBy",
@@ -235,11 +233,6 @@ export function decodeRoutineRecordV1(value: unknown): RoutineRecordV1 {
       candidate.prompt,
       ROUTINE_PROMPT_MAX_LENGTH,
       "Routine prompt",
-    ),
-    timezone: routineText(
-      candidate.timezone,
-      ROUTINE_TIMEZONE_MAX,
-      "Routine timezone",
     ),
     enabled: candidate.enabled,
     createdBy: decodeRoutineWriterV1(candidate.createdBy, "Routine createdBy"),

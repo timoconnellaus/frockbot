@@ -6,6 +6,7 @@ import {
   ConfigurationConflictError,
   modelBindingFailureV1,
   resolveEffectiveBotModelV1,
+  userTimezoneV1,
   modelRuntimeLabel,
   MAX_PACKAGE_SETTING_TEXT_V1,
   type ConnectionView,
@@ -112,6 +113,16 @@ export function applicationSettingsFrame(
           hint: "Optional contact email. This does not change your sign-in account.",
           maxLength: 320,
         },
+        {
+          id: "timezone",
+          label: "Time zone",
+          kind: "text",
+          value: userTimezoneV1(settings.profile),
+          editable: true,
+          required: true,
+          hint: "Your Routines use this IANA time zone, such as Australia/Sydney.",
+          maxLength: 64,
+        },
       ],
     },
   ];
@@ -186,7 +197,7 @@ export function applicationSettingsCommand(
         typeof command.values.email !== "string") ||
       command.unset?.length ||
       Object.keys(command.values).some(
-        (key) => key !== "name" && key !== "email",
+        (key) => key !== "name" && key !== "email" && key !== "timezone",
       )
     )
       throw new ConfigurationDecodeError("Invalid profile fields");
@@ -196,6 +207,7 @@ export function applicationSettingsCommand(
       profile: {
         name: command.values.name,
         ...(command.values.email ? { email: command.values.email } : {}),
+        timezone: command.values.timezone,
       },
     });
   }

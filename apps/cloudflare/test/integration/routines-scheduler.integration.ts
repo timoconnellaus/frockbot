@@ -80,7 +80,6 @@ describe("a Routine firing, from the command to the admitted Turn", () => {
         name: "Minute brief",
         prompt: "Summarize overnight email.",
         schedule: "* * * * *",
-        timezone: "UTC",
       }),
     );
 
@@ -159,7 +158,6 @@ describe("a Routine firing, from the command to the admitted Turn", () => {
         name: "Webhook brief",
         prompt: "Summarize overnight email.",
         trigger: { kind: "webhook" },
-        timezone: "UTC",
       }),
     );
 

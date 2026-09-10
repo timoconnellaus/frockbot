@@ -8,9 +8,9 @@
 // whose schedule cannot be parsed is never written, so the scheduler can assume
 // every stored schedule is parseable.
 //
-// `croner` owns 5-field cron and IANA timezones. It does not understand
-// GrokBot's `CRON_TZ=` prefix, its `@shorthand` aliases, or `@every <duration>`,
-// so this module owns exactly that normalization and hands the rest over.
+// `croner` owns 5-field cron and IANA timezones. It does not understand the
+// `@shorthand` aliases or `@every <duration>`, so this module owns exactly that
+// normalization and hands the rest over.
 import { Cron } from "croner";
 
 /** Longest schedule string a command may carry. */
@@ -93,11 +93,10 @@ function parseEveryDuration(rest: string): number {
 }
 
 /**
- * Normalize and validate a schedule string against the Routine's timezone.
+ * Normalize and validate a schedule string against the User's timezone.
  *
- * A `CRON_TZ=` prefix wins over the record's `timezone`, matching GrokBot,
- * because it is written into the schedule the user typed. Both are validated;
- * neither is guessed.
+ * The timezone comes from the User's Profile. A schedule cannot override it:
+ * timezone configuration is account-shaped rather than Routine-shaped.
  */
 export function normalizeRoutineScheduleV1(
   schedule: string,
@@ -121,18 +120,7 @@ export function normalizeRoutineScheduleV1(
     );
   }
   let body = raw;
-  let zone = timezone;
-  const prefix = /^CRON_TZ=(\S+)\s+(.*)$/.exec(body);
-  if (prefix) {
-    const declared = prefix[1]!;
-    if (!isRoutineTimezoneV1(declared)) {
-      throw new RoutineScheduleError(
-        `CRON_TZ="${declared}" is not an IANA time zone`,
-      );
-    }
-    zone = declared;
-    body = prefix[2]!.trim();
-  }
+  const zone = timezone;
   if (body.length === 0) {
     throw new RoutineScheduleError("schedule must not be empty");
   }

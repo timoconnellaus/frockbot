@@ -227,7 +227,7 @@ export function isChosenUserName(name: string | undefined): name is string {
 export interface UserSettingsViewV1 {
   schemaVersion: 1;
   revision: number;
-  profile: { name: string; email?: string };
+  profile: { name: string; email?: string; timezone?: string };
   packages: PackageInstallationView[];
   connections: ConnectionView[];
   /**
@@ -237,6 +237,24 @@ export interface UserSettingsViewV1 {
   platformModel?: ModelBindingV1;
   /** Permanent account choice; the legacy browser projection omits this field. */
   accountModel?: ModelBindingV1;
+}
+
+/** The account zone used wherever the User supplies no more specific clock. */
+export function userTimezoneV1(profile: UserSettingsViewV1["profile"]): string {
+  return profile.timezone ?? "UTC";
+}
+
+/** True when this runtime recognizes the supplied IANA time-zone name. */
+export function isUserTimezoneV1(value: unknown): value is string {
+  if (typeof value !== "string" || value.length === 0 || value.length > 64) {
+    return false;
+  }
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: value });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export interface BotSettingsViewV1 {
@@ -1254,14 +1272,25 @@ export function decodeConfigurationCommandV1(
         command.profile,
         "profile",
         ["name"],
-        ["email"],
+        ["email", "timezone"],
       );
+      if (
+        profile.timezone !== undefined &&
+        !isUserTimezoneV1(profile.timezone)
+      ) {
+        throw new ConfigurationDecodeError(
+          "profile.timezone is not an IANA time zone",
+        );
+      }
       return {
         ...commandMeta(command),
         type: value.type,
         profile: {
           name: text(profile.name, "profile.name", 100),
           email: optionalText(profile.email, "profile.email", 320),
+          ...(profile.timezone === undefined
+            ? {}
+            : { timezone: profile.timezone }),
         },
       };
     }
@@ -2237,7 +2266,17 @@ export function decodeUserSettingsViewV1(input: unknown): UserSettingsViewV1 {
     ["platformModel", "accountModel"],
   );
   schemaVersion(value);
-  const profile = exactRecord(value.profile, "profile", ["name"], ["email"]);
+  const profile = exactRecord(
+    value.profile,
+    "profile",
+    ["name"],
+    ["email", "timezone"],
+  );
+  if (profile.timezone !== undefined && !isUserTimezoneV1(profile.timezone)) {
+    throw new ConfigurationDecodeError(
+      "profile.timezone is not an IANA time zone",
+    );
+  }
   if (
     !Array.isArray(value.packages) ||
     !Array.isArray(value.connections) ||
@@ -2253,6 +2292,7 @@ export function decodeUserSettingsViewV1(input: unknown): UserSettingsViewV1 {
     profile: {
       name: text(profile.name, "profile.name", 100),
       email: optionalText(profile.email, "profile.email", 320),
+      ...(profile.timezone === undefined ? {} : { timezone: profile.timezone }),
     },
     packages: value.packages.map(packageInstallation),
     connections: value.connections.map(connectionView),

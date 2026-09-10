@@ -68,7 +68,6 @@ async function createWebhookRoutine(
       name: "On delivery",
       prompt: ROUTINE_PROMPT,
       trigger: { kind: "webhook" },
-      timezone: "Australia/Sydney",
     }),
   );
 }

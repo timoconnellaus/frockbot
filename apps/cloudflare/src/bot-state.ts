@@ -1,4 +1,5 @@
 import { cleanNotificationTestState } from "./notification-state-cleanup.js";
+import { cleanRoutineTimezoneTestStateV1 } from "./routine-timezone-cleanup.js";
 import type { MessageNotice } from "@frockbot/app/notifications/messages";
 import {
   PUSH_OUTBOX_DRAIN_LIMIT,
@@ -35,9 +36,11 @@ import type { ShellComputerHostOptionsV1 } from "@frockbot/app/shell/backend-run
 import {
   decodeBotConfigurationExecuteRpcV1,
   decodeBotConfigurationReadRpcV1,
+  decodeUserSettingsViewV1,
   decodeCompositionGenerationIdV1,
   decodeRevertCompositionCommandV1,
   MAX_COMPOSITION_GENERATION_PAGE_V1,
+  userTimezoneV1,
   type BotSettingsViewV1,
   type RevertCompositionCommandV1,
 } from "@frockbot/core/configuration";
@@ -102,6 +105,7 @@ import {
   listRoutineInbox,
   listRoutineRuns,
   listRoutines,
+  projectRoutineAccountTimezoneV1,
   readRoutineRun,
 } from "@frockbot/app/routines/bot";
 import {
@@ -265,6 +269,7 @@ import {
   rpcDecoded,
   rpcIdentifier,
   rpcInteger,
+  rpcJsonSnapshotV1,
   rpcObject,
   rpcPattern,
   rpcString,
@@ -441,6 +446,29 @@ export class BotState extends DurableObject<BotStateEnv> {
       }>
     | undefined;
 
+  private async syncRoutineTimezone(
+    identity: BotIdentity,
+    shell: ShellBotBackendContribution,
+  ): Promise<void> {
+    const rpc = this.env.USER_CONFIGURATIONS.get(
+      this.env.USER_CONFIGURATIONS.idFromName(identity.userId),
+    ) as unknown as { readConfiguration(input: unknown): Promise<unknown> };
+    const user = decodeUserSettingsViewV1(
+      rpcJsonSnapshotV1(
+        await rpc.readConfiguration({
+          schemaVersion: 1,
+          userId: identity.userId,
+          view: 2,
+        }),
+      ),
+    );
+    await projectRoutineAccountTimezoneV1(
+      shell.state,
+      userTimezoneV1(user.profile),
+      user.revision,
+    );
+  }
+
   constructor(
     ctx: DurableObjectState,
     env: BotStateEnv,
@@ -451,6 +479,7 @@ export class BotState extends DurableObject<BotStateEnv> {
     this.ctx.blockConcurrencyWhile(async () => {
       await cleanIncidentTestChatsV1(this.ctx.storage);
       await cleanNotificationTestState(this.ctx.storage);
+      await cleanRoutineTimezoneTestStateV1(this.ctx.storage);
     });
     this.outboundFetch = dependencies.outboundFetch;
     // The surfaces are built per identity in `bindSurfaces`, not here: they
@@ -1903,6 +1932,7 @@ export class BotState extends DurableObject<BotStateEnv> {
     };
     const { shell } = await this.materialized(identity);
     await shell.validateIdentity(identity);
+    await this.syncRoutineTimezone(identity, shell);
     return listRoutines(shell.state, identity);
   }
 
@@ -1919,11 +1949,34 @@ export class BotState extends DurableObject<BotStateEnv> {
     };
     const { shell } = await this.materialized(identity);
     await shell.validateIdentity(identity);
+    await this.syncRoutineTimezone(identity, shell);
     return executeRoutineCommand(
       shell.state,
       identity,
       request.command as RoutineCommandV1,
     );
+  }
+
+  /** Adopt a Profile timezone pushed by this User's authoritative object. */
+  async refreshRoutineTimezone(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      timezone: rpcString(64),
+      revision: rpcInteger({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { shell } = await this.materialized(identity);
+    await shell.validateIdentity(identity);
+    await projectRoutineAccountTimezoneV1(
+      shell.state,
+      request.timezone as string,
+      request.revision as number,
+    );
+    return { schemaVersion: 1 as const, status: "applied" as const };
   }
 
   /**

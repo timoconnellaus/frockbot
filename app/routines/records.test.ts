@@ -13,7 +13,6 @@ const base = {
   name: "Morning brief",
   prompt: "Summarize overnight email.",
   schedule: "0 7 * * *",
-  timezone: "Australia/Sydney",
   enabled: true,
   createdBy: { kind: "user" },
   updatedBy: { kind: "user" },
@@ -65,6 +64,9 @@ describe("RoutineRecordV1", () => {
     expect(() => decodeRoutineRecordV1({ ...base, extra: 1 })).toThrow(
       /unknown field "extra"/,
     );
+    expect(() =>
+      decodeRoutineRecordV1({ ...base, timezone: "Australia/Sydney" }),
+    ).toThrow(/unknown field "timezone"/);
     const { name: _name, ...missing } = base;
     expect(() => decodeRoutineRecordV1(missing)).toThrow(/is missing "name"/);
     expect(() => decodeRoutineRecordV1({ ...base, schemaVersion: 2 })).toThrow(

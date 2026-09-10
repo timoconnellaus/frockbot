@@ -197,7 +197,7 @@ describe("skills", () => {
 });
 
 describe("routines", () => {
-  it("carries a cron Routine with its schedule and time zone", () => {
+  it("carries a cron Routine without account-specific timezone state", () => {
     const { template } = buildBotTemplateV1(
       source({
         routines: [
@@ -217,7 +217,6 @@ describe("routines", () => {
         name: "Morning ledger",
         prompt: "Reconcile yesterday.",
         schedule: "0 9 * * *",
-        timezone: "Australia/Sydney",
         triggerKind: "cron",
       },
     ]);
@@ -242,7 +241,6 @@ describe("routines", () => {
         slug: "on-delivery",
         name: "On delivery",
         prompt: "Handle the payload.",
-        timezone: "UTC",
         triggerKind: "webhook",
       },
     ]);

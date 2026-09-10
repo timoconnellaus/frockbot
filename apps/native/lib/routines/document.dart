@@ -28,7 +28,6 @@ const routineEditorFieldsV1 = (
   prompt: 'routine.prompt',
   timing: 'routine.timing',
   schedule: 'routine.schedule',
-  timezone: 'routine.timezone',
 );
 
 /// The kind an action names, or nothing when it names none.
@@ -116,7 +115,6 @@ bool routineSaveIsNoOpV1(
     routineEditorFieldsV1.prompt,
     routineEditorFieldsV1.timing,
     routineEditorFieldsV1.schedule,
-    routineEditorFieldsV1.timezone,
   ]) {
     if (input.containsKey(id) && input[id] != seeds[id]) return false;
   }
@@ -185,8 +183,6 @@ Map<String, Object?> _saveCommandV1(
   if (!webhook && schedule.isEmpty) {
     throw const FormatException('Give this Routine a schedule.');
   }
-  final timezone = (input[routineEditorFieldsV1.timezone] as String? ?? '')
-      .trim();
   final routineId = routineIdV1(command);
   return {
     'schemaVersion': 1,
@@ -197,7 +193,6 @@ Map<String, Object?> _saveCommandV1(
     'name': name,
     'prompt': prompt,
     if (webhook) 'trigger': {'kind': 'webhook'} else 'schedule': schedule,
-    if (timezone.isNotEmpty) 'timezone': timezone,
   };
 }
 

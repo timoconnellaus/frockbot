@@ -26,7 +26,7 @@ const CONTEXT = {
 
 function host(): RoutinesRuntimeHostV1 & { store: RoutineStore } {
   const store = new RoutineStore(createMemoryRoutineStorageV1(), {
-    defaultTimezone: "Australia/Sydney",
+    accountTimezone: "Australia/Sydney",
   });
   return {
     botId: "scout",
@@ -176,6 +176,15 @@ describe("routine_manage", () => {
       false,
     );
     expect(tool.validate?.({ action: "pause", secret: "x" })).toBe(false);
+    expect(
+      tool.validate?.({
+        action: "create",
+        name: "Brief",
+        prompt: "Do it",
+        schedule: "@daily",
+        timezone: "Australia/Sydney",
+      }),
+    ).toBe(false);
     expect(tool.validate?.({ action: "pause", routineId: "brief" })).toBe(true);
   });
 });
@@ -195,7 +204,6 @@ describe("a Routine the User created", () => {
         name: "Minute ping",
         prompt: "Say ping.",
         schedule: "@every 1m",
-        timezone: "UTC",
       },
       { kind: "user" },
     );

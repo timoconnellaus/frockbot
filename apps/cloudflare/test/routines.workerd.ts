@@ -73,7 +73,6 @@ describe("Routines in Workerd", () => {
         name: "Morning brief",
         prompt: "Summarize overnight email.",
         schedule: "0 7 * * *",
-        timezone: "Australia/Sydney",
       },
     });
     expect(created).toMatchObject({ status: "applied" });
@@ -159,7 +158,6 @@ describe("Routines in Workerd", () => {
       name: "Morning brief",
       prompt: "Summarize overnight email.",
       schedule: "@daily",
-      timezone: "UTC",
     };
 
     const first = await routines(
@@ -200,7 +198,6 @@ describe("Routines in Workerd", () => {
           name: "Broken",
           prompt: "Never runs.",
           schedule: "not a cron",
-          timezone: "UTC",
         },
       });
     } catch (error) {
@@ -313,7 +310,6 @@ describe("the Routine scheduler on the Bot Durable Object's one alarm", () => {
       name: "Hourly brief",
       prompt: "Summarize overnight email.",
       schedule: "0 * * * *",
-      timezone: "UTC",
     });
 
     const armed = await armedAlarm(identity);
@@ -351,7 +347,6 @@ describe("the Routine scheduler on the Bot Durable Object's one alarm", () => {
       name: "Hourly brief",
       prompt: "Summarize overnight email.",
       schedule: "0 * * * *",
-      timezone: "UTC",
     });
     await backdate(identity, "brief", Date.now() - 3 * 60 * 60_000);
 
@@ -407,7 +402,6 @@ describe("the Routine scheduler on the Bot Durable Object's one alarm", () => {
       name: "Nightly",
       prompt: "Summarize the day.",
       schedule: "0 23 * * *",
-      timezone: "UTC",
     });
     const afterOne = await armedAlarm(identity);
 
@@ -418,7 +412,6 @@ describe("the Routine scheduler on the Bot Durable Object's one alarm", () => {
       name: "Hourly",
       prompt: "Check the queue.",
       schedule: "0 * * * *",
-      timezone: "UTC",
     });
     const afterTwo = await armedAlarm(identity);
 
@@ -457,7 +450,6 @@ describe("the Routine scheduler on the Bot Durable Object's one alarm", () => {
       name: "Webhook brief",
       prompt: "Summarize overnight email.",
       trigger: { kind: "webhook" },
-      timezone: "UTC",
     });
 
     const receipt = await routines(
@@ -515,7 +507,6 @@ describe("the webhook door against a real Bot Durable Object", () => {
         name: "Delivered brief",
         prompt: "Summarize the payload.",
         trigger: { kind: "webhook" },
-        timezone: "UTC",
       },
     })) as unknown as { hook?: { token: string; keyVersion: number } };
     expect(receipt.hook?.keyVersion).toBe(1);

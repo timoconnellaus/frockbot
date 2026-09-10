@@ -61,6 +61,9 @@ describe("decodeRoutineCommandV1", () => {
     expect(() => decodeRoutineCommandV1({ ...CREATE, sneaky: true })).toThrow(
       /unknown field "sneaky"/,
     );
+    expect(() =>
+      decodeRoutineCommandV1({ ...CREATE, timezone: "Australia/Sydney" }),
+    ).toThrow(/unknown field "timezone"/);
   });
 
   test("refuses an unknown type and an unsupported version", () => {

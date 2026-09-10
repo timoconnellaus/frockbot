@@ -216,7 +216,6 @@ describe("deleting a Bot in Workerd", () => {
           name: "Morning brief",
           prompt: "Summarize overnight email.",
           schedule: "0 7 * * *",
-          timezone: "Australia/Sydney",
         },
       }),
     ).toMatchObject({ status: "applied" });

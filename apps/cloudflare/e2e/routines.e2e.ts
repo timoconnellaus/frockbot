@@ -88,13 +88,6 @@ test("a refused schedule is said out loud, and the form keeps what to correct", 
   const document = await openRoutines(page);
   await openEditor(page);
 
-  // A schedule is meant in a zone, and the phone has no IANA zone to send: the
-  // form starts from the zone this Bot's Routines already use, and says which
-  // that is, rather than from the browser's — which this document never learns.
-  await expect(sem(page, "view-field-routine.timezone")).toContainText(
-    "Starting from UTC",
-  );
-
   await answer(page, {
     "routine.name": "Blursday brief",
     "routine.prompt": "Summarise overnight email.",

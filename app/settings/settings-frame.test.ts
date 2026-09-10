@@ -184,6 +184,7 @@ test("identity prefills an unsaved profile while saved fields remain authoritati
   expect(hinted.sections[0]!.fields.map((f) => f.value)).toEqual([
     "Timothy",
     "tim@example.test",
+    "UTC",
   ]);
   expect(user.profile).toEqual({ name: "FrockBot user" });
   user.profile = { name: "Tim", email: "chosen@example.test" };
@@ -192,7 +193,7 @@ test("identity prefills an unsaved profile while saved fields remain authoritati
       name: "Timothy",
       email: "tim@example.test",
     }).sections[0]!.fields.map((f) => f.value),
-  ).toEqual(["Tim", "chosen@example.test"]);
+  ).toEqual(["Tim", "chosen@example.test", "UTC"]);
 });
 
 test("the released model reader retains the account fallback without the removed control", async () => {
@@ -309,4 +310,35 @@ test("resetting an Application setting omits the empty patch at the owner seam",
       unset: ["limit"],
     }),
   ).toMatchObject({ type: "user/set-package-settings", unset: ["limit"] });
+});
+
+test("Profile owns the timezone used by Routines", () => {
+  const user = settings();
+  user.profile.timezone = "Australia/Sydney";
+  expect(
+    applicationSettingsFrame("tim", user, [provider]).sections[0],
+  ).toMatchObject({
+    id: "profile",
+    fields: [
+      { id: "name", value: "Tim" },
+      { id: "email", value: "" },
+      { id: "timezone", value: "Australia/Sydney" },
+    ],
+  });
+  expect(
+    applicationSettingsCommand({
+      schemaVersion: 1,
+      ownerId: "tim",
+      commandId: "save-profile",
+      expectedRevision: 8,
+      sectionId: "profile",
+      values: {
+        name: "Tim",
+        timezone: "Pacific/Auckland",
+      },
+    }),
+  ).toMatchObject({
+    type: "user/update-profile",
+    profile: { name: "Tim", timezone: "Pacific/Auckland" },
+  });
 });

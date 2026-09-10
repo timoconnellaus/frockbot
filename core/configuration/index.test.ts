@@ -621,6 +621,11 @@ describe("configuration DTO seam", () => {
       },
       {
         ...meta,
+        type: "user/update-profile",
+        profile: { name: "Alice", timezone: "Mars/Olympus" },
+      },
+      {
+        ...meta,
         type: "user/set-platform-model",
         model: {
           connectionId: "provider-1",

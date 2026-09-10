@@ -123,7 +123,6 @@ function template(overrides: Partial<BotTemplateV1> = {}): BotTemplateV1 {
         slug: "on-delivery",
         name: "On delivery",
         prompt: "Handle it.",
-        timezone: "UTC",
         triggerKind: "webhook",
       },
     ],

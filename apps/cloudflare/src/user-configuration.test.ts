@@ -11,6 +11,7 @@ import {
   type UserSettingsViewV1,
 } from "@frockbot/core/configuration";
 import type { WorkerLoader } from "./contracts.js";
+import { randomSheepRecipeV1 } from "@frockbot/app/flock/shared";
 import {
   LEGACY_DEFAULT_PACKAGES_MARKER_KEY,
   LEGACY_OLLAMA_CONNECTION_ID,
@@ -156,6 +157,66 @@ function executionPackages() {
 }
 
 describe("UserConfiguration Connection routing", () => {
+  test("a Profile timezone update is projected to every owned Bot", async () => {
+    const userId = "timezone-user";
+    const storage = new MemoryStorage();
+    await storage.put("flock:directory:v1", {
+      schemaVersion: 1,
+      revision: 1,
+      bots: [
+        {
+          schemaVersion: 1,
+          botId: "scout",
+          registeredAt: "2026-09-10T00:00:00.000Z",
+          initialName: "Scout",
+          sheep: randomSheepRecipeV1(() => 0),
+        },
+      ],
+    });
+    const projected: unknown[] = [];
+    const bound = identity(userId);
+    bound.env.BOT_STATES = {
+      ...bound.env.BOT_STATES,
+      get: () => ({
+        refreshRoutineTimezone(input: unknown) {
+          projected.push(input);
+          return Promise.resolve({ schemaVersion: 1, status: "applied" });
+        },
+      }),
+    } as unknown as DurableObjectNamespace;
+    const configuration = new UserConfiguration(bound.ctx(storage), {
+      ...bound.env,
+      CREDENTIAL_KEYRING: credentialKeyring,
+    });
+    const current = await configuration.readConfiguration({
+      schemaVersion: 1,
+      view: 2,
+      userId,
+    });
+
+    await configuration.executeConfiguration({
+      schemaVersion: 1,
+      userId,
+      command: {
+        schemaVersion: 1,
+        type: "user/update-profile",
+        commandId: "set-timezone",
+        expectedRevision: current.revision,
+        profile: { name: "Tim", timezone: "Australia/Sydney" },
+      },
+    });
+
+    expect(projected).toEqual([
+      {
+        schemaVersion: 1,
+        userId,
+        botId: "scout",
+        timezone: "Australia/Sydney",
+        revision: current.revision + 1,
+      },
+    ]);
+  });
+
   test("reports provisioning without pinning a first-time User", async () => {
     const bound = identity("new-user");
     const configuration = new UserConfiguration(

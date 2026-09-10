@@ -56,7 +56,7 @@ function harness(options: {
   const store = new RoutineStore(storage, {
     now: time.now,
     firings: scheduler,
-    defaultTimezone: "UTC",
+    accountTimezone: "UTC",
   });
   const create: RoutineCommandV1 = {
     schemaVersion: 1,
@@ -66,7 +66,6 @@ function harness(options: {
     routineId: "brief",
     name: "Morning brief",
     prompt: "Summarize overnight email.",
-    timezone: "UTC",
     ...(options.schedule === undefined
       ? { trigger: { kind: "webhook" as const } }
       : { schedule: options.schedule }),
@@ -185,6 +184,20 @@ describe("RoutineScheduler deadlines", () => {
     );
     expect(await scheduler.deadlines(storage)).toEqual([
       Date.parse("2026-01-01T06:00:00.000Z"),
+    ]);
+  });
+
+  test("recomputes an existing Routine when the account timezone changes", async () => {
+    const { storage, scheduler, store, create } = harness({
+      start: "2026-01-01T09:00:30.000Z",
+      schedule: "0 9 * * *",
+    });
+    await store.execute(create, USER, "UTC");
+    await scheduler.defer(storage, "UTC");
+    expect((await state(storage)).timezone).toBe("UTC");
+
+    expect(await scheduler.deadlines(storage, "Australia/Sydney")).toEqual([
+      Date.parse("2026-01-01T22:00:00.000Z"),
     ]);
   });
 });

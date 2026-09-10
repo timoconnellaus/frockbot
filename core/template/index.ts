@@ -84,7 +84,6 @@ export interface TemplateRoutineV1 {
   name: string;
   prompt: string;
   schedule?: string;
-  timezone: string;
   triggerKind?: "webhook" | "cron";
 }
 
@@ -341,7 +340,7 @@ function decodeTemplateRoutineV1(value: unknown): TemplateRoutineV1 {
   const routine = exactRecord(
     value,
     "template routine",
-    ["slug", "name", "prompt", "timezone"],
+    ["slug", "name", "prompt"],
     ["schedule", "triggerKind"],
   );
   if (
@@ -370,7 +369,6 @@ function decodeTemplateRoutineV1(value: unknown): TemplateRoutineV1 {
       MAX_TEMPLATE_ROUTINE_PROMPT_BYTES_V1,
     ),
     ...(schedule === undefined ? {} : { schedule }),
-    timezone: text(routine.timezone, "template routine timezone", 64),
     ...(routine.triggerKind === undefined
       ? {}
       : { triggerKind: routine.triggerKind }),
@@ -488,7 +486,6 @@ export function canonicalBotTemplateDocumentV1(
       name: routine.name,
       prompt: routine.prompt,
       ...(routine.schedule === undefined ? {} : { schedule: routine.schedule }),
-      timezone: routine.timezone,
       ...(routine.triggerKind === undefined
         ? {}
         : { triggerKind: routine.triggerKind }),

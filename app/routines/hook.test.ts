@@ -192,7 +192,6 @@ function harness() {
     name: "Delivered brief",
     prompt: "Summarize the payload.",
     trigger: { kind: "webhook" },
-    timezone: "UTC",
   };
   return { storage, scheduler, store, create };
 }

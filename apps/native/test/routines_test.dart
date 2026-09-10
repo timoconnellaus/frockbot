@@ -482,7 +482,6 @@ void main() {
             'routine.prompt': 'Summarise overnight email.',
             'routine.timing': 'schedule',
             'routine.schedule': ' 0 9 * * * ',
-            'routine.timezone': 'Australia/Sydney',
           }),
           'bot-1',
         ),
@@ -494,7 +493,6 @@ void main() {
           'name': 'Morning brief',
           'prompt': 'Summarise overnight email.',
           'schedule': '0 9 * * *',
-          'timezone': 'Australia/Sydney',
         },
       );
     });
@@ -507,7 +505,6 @@ void main() {
           'routine.prompt': 'Summarise the day.',
           'routine.timing': 'schedule',
           'routine.schedule': '0 18 * * *',
-          'routine.timezone': 'UTC',
         }),
         'bot-1',
       );
@@ -523,7 +520,6 @@ void main() {
           'routine.prompt': 'Do the thing.',
           'routine.timing': 'webhook',
           'routine.schedule': '0 9 * * *',
-          'routine.timezone': 'UTC',
         }),
         'bot-1',
       );
@@ -534,14 +530,22 @@ void main() {
     test('a refusal said before anything is sent', () {
       expect(
         () => routineCommandV1(
-          save({'routine.name': '  ', 'routine.prompt': 'x', 'routine.timing': 'schedule'}),
+          save({
+            'routine.name': '  ',
+            'routine.prompt': 'x',
+            'routine.timing': 'schedule',
+          }),
           'bot-1',
         ),
         throwsFormatException,
       );
       expect(
         () => routineCommandV1(
-          save({'routine.name': 'x', 'routine.prompt': ' ', 'routine.timing': 'schedule'}),
+          save({
+            'routine.name': 'x',
+            'routine.prompt': ' ',
+            'routine.timing': 'schedule',
+          }),
           'bot-1',
         ),
         throwsFormatException,
@@ -572,7 +576,6 @@ void main() {
             ('routine.prompt', 'Summarise overnight email.'),
             ('routine.timing', 'schedule'),
             ('routine.schedule', '0 9 * * *'),
-            ('routine.timezone', 'Australia/Sydney'),
           ])
             {
               'type': 'field',
@@ -592,7 +595,6 @@ void main() {
         'routine.prompt': 'Summarise overnight email.',
         'routine.timing': 'schedule',
         'routine.schedule': '0 9 * * *',
-        'routine.timezone': 'Australia/Sydney',
       });
       expect(routineSaveIsNoOpV1(untouched, seeds), isTrue);
       final edited = save({
@@ -601,7 +603,6 @@ void main() {
         'routine.prompt': 'Summarise overnight email.',
         'routine.timing': 'webhook',
         'routine.schedule': '0 9 * * *',
-        'routine.timezone': 'Australia/Sydney',
       });
       expect(routineSaveIsNoOpV1(edited, seeds), isFalse);
       // A create names no Routine, so it is never a no-op.

@@ -29,6 +29,7 @@ import {
 } from "@frockbot/core/connection";
 import {
   decodeBotSettingsViewV1,
+  userTimezoneV1,
   type UserSettingsViewV1,
   decodeUserConfigurationExecuteRpcV1,
   decodeUserConfigurationReadRpcV1,
@@ -171,6 +172,27 @@ interface UserConfigurationEnv {
 const SEARCH_REBUILD_BOT_LIMIT = 200;
 
 export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
+  private async propagateRoutineTimezone(
+    userId: string,
+    timezone: string,
+    revision: number,
+  ): Promise<void> {
+    const directory = await (await this.flockContribution()).listBots();
+    for (const bot of directory.bots) {
+      const id = this.env.BOT_STATES.idFromName(`${userId}:${bot.botId}`);
+      const rpc = this.env.BOT_STATES.get(id) as unknown as {
+        refreshRoutineTimezone(input: unknown): Promise<unknown>;
+      };
+      await rpc.refreshRoutineTimezone({
+        schemaVersion: 1,
+        userId,
+        botId: bot.botId,
+        timezone,
+        revision,
+      });
+    }
+  }
+
   async registerPush(input: { userId: string; registration: unknown }) {
     await this.assertUserIdentity(input.userId);
     await registerPushDevice(
@@ -556,17 +578,51 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
       ),
     });
     await this.assertUserIdentity(request.userId as string);
-    return (await this.settingsContribution()).changeSettings(
+    const receipt = await (
+      await this.settingsContribution()
+    ).changeSettings(
       request.userId as string,
       request.home as "application" | "models",
       request.command,
     );
+    const command = request.command as { sectionId?: string };
+    if (
+      receipt.status === "applied" &&
+      request.home === "application" &&
+      command.sectionId === "profile"
+    ) {
+      const settings = await (
+        await this.settingsContribution()
+      ).read(request.userId as string);
+      await this.propagateRoutineTimezone(
+        request.userId as string,
+        userTimezoneV1(settings.profile),
+        settings.revision,
+      );
+    }
+    return receipt;
   }
 
   async executeConfiguration(input: unknown) {
     const request = decodeUserConfigurationExecuteRpcV1(input);
     await this.assertUserIdentity(request.userId);
-    return (await this.settingsContribution()).executeConfiguration(request);
+    const receipt = await (
+      await this.settingsContribution()
+    ).executeConfiguration(request);
+    if (
+      receipt.status === "applied" &&
+      request.command.type === "user/update-profile"
+    ) {
+      const settings = await (
+        await this.settingsContribution()
+      ).read(request.userId);
+      await this.propagateRoutineTimezone(
+        request.userId,
+        userTimezoneV1(settings.profile),
+        settings.revision,
+      );
+    }
+    return receipt;
   }
 
   async executeConnection(input: unknown) {

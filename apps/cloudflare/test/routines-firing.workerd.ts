@@ -74,7 +74,6 @@ async function createFiringRoutine(identity: {
       // hand-off travels in it.
       prompt: toolCallTriggerPrompt(["wake_parent", { message: HANDOFF }]),
       trigger: { kind: "webhook" },
-      timezone: "UTC",
     },
   });
   expect(receipt).toMatchObject({ status: "applied" });

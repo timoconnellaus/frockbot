@@ -15,7 +15,7 @@ const BOT: RoutineWriterV1 = {
 
 function store(): RoutineStore {
   return new RoutineStore(createMemoryRoutineStorageV1(), {
-    defaultTimezone: "Australia/Sydney",
+    accountTimezone: "Australia/Sydney",
   });
 }
 
@@ -190,16 +190,13 @@ describe("RoutineStore.execute", () => {
     );
   });
 
-  test("refuses a write whose cron or time zone cannot be parsed", async () => {
+  test("refuses a write whose cron or account time zone cannot be parsed", async () => {
     const routines = store();
     await expect(
       routines.execute(create({ schedule: "not a cron" }), USER),
     ).rejects.toThrow(/five fields/);
     await expect(
-      routines.execute(
-        create({ commandId: "cmd-tz", timezone: "Mars/Olympus" }),
-        USER,
-      ),
+      routines.execute(create({ commandId: "cmd-tz" }), USER, "Mars/Olympus"),
     ).rejects.toThrow(/not an IANA time zone/);
     expect((await routines.list("scout")).routines).toHaveLength(0);
   });
