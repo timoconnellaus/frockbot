@@ -107,7 +107,7 @@ class _AppletChatCardState extends State<AppletChatCard> {
       final classified = appletCanvasFailureV1(failure);
       setState(() {
         if (classified.kind == AppletFailureKind.unpublished) viewer = null;
-        if (viewer == null) error = classified.message;
+        error = classified.message;
       });
     }
   }
@@ -123,23 +123,29 @@ class _AppletChatCardState extends State<AppletChatCard> {
           padding: const EdgeInsets.all(12),
           child: Text(title, style: Theme.of(context).textTheme.titleMedium),
         ),
-        if (viewer != null)
-          SizedBox(height: 400, child: AppletViewerFrame(viewer: viewer!))
-        else if (error != null || api == null)
-          Padding(
-            padding: const EdgeInsets.all(12),
-            child: Column(
-              children: [
-                Text(error ?? 'Applets are unavailable.'),
-                TextButton(onPressed: load, child: const Text('Retry')),
-              ],
-            ),
-          )
+        if (viewer != null) ...[
+          SizedBox(height: 400, child: AppletViewerFrame(viewer: viewer!)),
+          // A refresh that keeps failing leaves the frame up but its credential
+          // ageing out, so the card says what went wrong and offers the retry
+          // that re-mints it rather than dying silently.
+          if (error != null) _failure(error!),
+        ] else if (error != null || api == null)
+          _failure(error ?? 'Applets are unavailable.')
         else
           const SizedBox(
             height: 100,
             child: Center(child: CircularProgressIndicator()),
           ),
+      ],
+    ),
+  );
+
+  Widget _failure(String message) => Padding(
+    padding: const EdgeInsets.all(12),
+    child: Column(
+      children: [
+        Text(message),
+        TextButton(onPressed: load, child: const Text('Retry')),
       ],
     ),
   );

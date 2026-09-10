@@ -192,16 +192,50 @@ void main() {
     await tester.pump(const Duration(seconds: 30));
     await tester.pumpAndSettle();
     expect(find.byType(AppletViewerFrame), findsOneWidget);
-    expect(find.text('Retry'), findsNothing);
+    // The frame stays up, and the card says why it stopped refreshing and
+    // offers the read that re-mints its credential.
+    expect(find.text('FrockBot didn\u2019t answer.'), findsOneWidget);
+    expect(find.text('Retry'), findsOneWidget);
     expect(
       find.text('This Applet has been deleted or is unavailable.'),
       findsNothing,
     );
     down = false;
-    await tester.pump(const Duration(seconds: 30));
+    await tester.tap(find.text('Retry'));
     await tester.pumpAndSettle();
     expect(find.byType(AppletViewerFrame), findsOneWidget);
+    expect(find.text('Retry'), findsNothing);
+    expect(find.text('FrockBot didn\u2019t answer.'), findsNothing);
     expect(tokens, 1);
     await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('a focused Applet that will not open is not a picker failure', (
+    tester,
+  ) async {
+    final api = SettingsApi(MemoryStore(), (path, body) async {
+      if (path == '/api/applets') {
+        return {
+          'schemaVersion': 1,
+          'applets': [applet(generationId: 'g1').toJson()],
+        };
+      }
+      if (path.endsWith('/focus')) return {'appletId': 'todo.applet'};
+      // The directory read answered; only this Applet's own detail is down.
+      throw const RequestFailure('applets are unavailable', 503);
+    });
+    final controller = AppletCanvasController(api, 'bot-1');
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: AppletPicker(controller: controller)),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(controller.failure, isNotNull);
+    expect(find.text('Weekly Todos'), findsOneWidget);
+    expect(find.text('Couldn\u2019t load Applets \u00b7 Retry'), findsNothing);
+    expect(find.text('No Applets yet. Ask a Bot to build one.'), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+    controller.dispose();
   });
 }

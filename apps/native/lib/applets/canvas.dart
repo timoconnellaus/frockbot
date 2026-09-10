@@ -51,6 +51,12 @@ class AppletCanvasController extends ChangeNotifier {
   AppletBuild? build;
   AppletViewer? viewer;
   AppletCanvasFailure? failure;
+
+  /// Why the Applet *directory* could not be read, which is a different thing
+  /// from why the focused Applet's detail could not be: the picker lists the
+  /// directory and nothing else, so a token or source read that failed is not
+  /// its failure to report.
+  AppletCanvasFailure? directoryFailure;
   bool loading = true;
   bool loaded = false;
   bool _closed = false;
@@ -82,12 +88,15 @@ class AppletCanvasController extends ChangeNotifier {
       loading = true;
       _changed();
     }
+    var read = false;
     try {
       final listed = await applets.list();
       final focus = await applets.focus(botId);
       if (epoch != _epoch) return;
       directory = listed;
       focusedId = listed.any((entry) => entry.appletId == focus) ? focus : null;
+      directoryFailure = null;
+      read = true;
       _changed();
       failure = null;
       _attempt = 0;
@@ -97,6 +106,7 @@ class AppletCanvasController extends ChangeNotifier {
     } catch (error) {
       if (epoch != _epoch) return;
       failure = appletCanvasFailureV1(error);
+      if (!read) directoryFailure = failure;
       _scheduleRetry();
     } finally {
       if (epoch == _epoch) {

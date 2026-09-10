@@ -3,6 +3,7 @@
 import { packageAdmissionCeilingV1 } from "@frockbot/core/contracts";
 import {
   decodeSendToUserPayloadV1,
+  SEND_TO_USER_PAYLOAD_TYPES_V1,
   decodeTurnTypeV1,
   type SendToUserPayloadV1,
   type Session,
@@ -227,14 +228,7 @@ const SEND_TO_USER_INPUT_SCHEMA = {
       properties: {
         type: {
           type: "string",
-          enum: [
-            "text",
-            "attachment",
-            "widget",
-            "secret-request",
-            "agent-card",
-            "approval",
-          ],
+          enum: SEND_TO_USER_PAYLOAD_TYPES_V1,
         },
       },
       oneOf: [
@@ -292,6 +286,15 @@ const SEND_TO_USER_INPUT_SCHEMA = {
             secretName: { type: "string" },
           },
           required: ["type", "prompt", "secretName"],
+          additionalProperties: false,
+        },
+        {
+          type: "object",
+          properties: {
+            type: { const: "applet" },
+            appletId: { type: "string" },
+          },
+          required: ["type", "appletId"],
           additionalProperties: false,
         },
         {
