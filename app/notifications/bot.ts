@@ -1,19 +1,11 @@
-import { sentTextV1 } from "@frockbot/app/shell/sent-text";
 // What a Bot tells the person who is not looking at it: the notification
 // intents a settled Turn produces, and the durable records that settlement
 // writes beside them.
 
 import type { SessionEvent } from "@frockbot/core/contracts";
 import type { BotSettingsViewV1 } from "@frockbot/core/configuration";
-import { routineHandoffTextV1 } from "@frockbot/app/routines/inbox";
-import {
-  approvalNotificationBodyV1,
-  approvalNotificationIdV1,
-  approvalSendsV1,
-} from "@frockbot/app/shell/approvals";
 import type {
   BotNotificationIntent,
-  BotTurnCompletion,
   StoredRun,
 } from "@frockbot/app/shell/backend-contracts";
 import type { ShellBotStateV1 } from "@frockbot/app/shell/backend-state";
@@ -35,58 +27,6 @@ export async function acknowledgeNotification(
   notificationId: string,
 ): Promise<void> {
   return state.authority.acknowledgeNotification(notificationId);
-}
-
-/** What a settled Turn tells the person who was not watching it. */
-export function createNotification(
-  settings: BotSettingsViewV1,
-  result: BotTurnCompletion,
-): BotNotificationIntent | undefined {
-  // An approval is not an update, and `notifications.enabled` is the mute on
-  // updates. A question that has stopped the Bot outranks it: the intent is
-  // recorded at `critical` whatever the Bot's notification policy says,
-  // exactly as a secret request would be. Muting silences chatter, not a
-  // decision the Bot is waiting on.
-  const [asked] = approvalSendsV1(result.events);
-  if (asked) {
-    return {
-      notificationId: approvalNotificationIdV1(asked.approvalId),
-      runId: result.runId,
-      createdAt: new Date().toISOString(),
-      title: `${settings.profile.name} needs your approval`,
-      body: approvalNotificationBodyV1(asked),
-      urgency: "critical",
-    };
-  }
-  if (!settings.notifications.enabled) return undefined;
-  const automation = result.events.some(
-    (event) => event.type === "turn/admission" && event.turnType !== "chat",
-  );
-  if (automation) {
-    const handoff = routineHandoffTextV1(result.events);
-    // A firing that handed off is the only automation Turn that says
-    // anything to a person here. A silent completion lands in the inbox and
-    // notifies nobody: "persisted silently, arriving later as an
-    // `automation_completion_inbox` row".
-    if (handoff === undefined) return undefined;
-    return {
-      notificationId: notificationIdV1("routine-wake", result.runId),
-      runId: result.runId,
-      createdAt: new Date().toISOString(),
-      title: `${settings.profile.name} finished a Routine`,
-      body: handoff.slice(0, 240),
-    };
-  }
-  const text = sentTextV1(result.events);
-  if (!result.events.some((event) => event.type === "send/to-user"))
-    return undefined;
-  return {
-    notificationId: result.runId,
-    runId: result.runId,
-    createdAt: new Date().toISOString(),
-    title: `${settings.profile.name} replied`,
-    body: text.slice(0, 240),
-  };
 }
 
 /**

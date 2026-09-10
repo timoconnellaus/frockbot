@@ -154,6 +154,59 @@ void main() {
     await tester.pump();
   });
 
+  test('a cached page written before send ordinals existed is discarded', () {
+    final store = LatchedStore();
+    // The shape the previous release wrote: a send with no ordinal, whose
+    // identity would otherwise fall back to its position in the page.
+    store.values[pageCacheKey('user-1', 'bot-1')] = jsonEncode({
+      'version': 1,
+      'runs': [
+        {
+          'runId': 'run-1',
+          'input': 'Earlier message',
+          'admittedAt': '2026-09-05T12:19:00.000Z',
+          'status': 'completed',
+          'events': [
+            {
+              'type': 'send/to-user',
+              'payload': {'type': 'text', 'text': 'Hi'},
+            },
+          ],
+        },
+      ],
+      'before': null,
+    });
+
+    expect(
+      decodePageCache(store.values[pageCacheKey('user-1', 'bot-1')]),
+      isNull,
+    );
+
+    // And a page of this shape carrying a send with no ordinal is discarded
+    // whole rather than painted with an unstable message identity.
+    expect(
+      decodePageCache(
+        jsonEncode({
+          'version': pageCacheVersion,
+          'runs': [
+            {
+              'runId': 'run-1',
+              'admittedAt': '2026-09-05T12:19:00.000Z',
+              'events': [
+                {
+                  'type': 'send/to-user',
+                  'payload': {'type': 'text', 'text': 'Hi'},
+                },
+              ],
+            },
+          ],
+          'before': null,
+        }),
+      ),
+      isNull,
+    );
+  });
+
   test('a cached transcript is on screen before the first page resolves', () {
     final store = LatchedStore();
     store.values[pageCacheKey('user-1', 'bot-1')] = encodePageCache([

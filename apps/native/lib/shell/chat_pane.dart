@@ -40,6 +40,7 @@ class ChatPane extends StatefulWidget {
   final VoidCallback? onOpenSettings;
   final void Function(TranscriptLine)? onMessageActions;
   final String? unreadFromMessageId;
+  final void Function(String?)? onReadLatest;
   final void Function(String? runId)? onWorkingChanged;
 
   /// The Bot's sheep background, so its avatar is the same one everywhere.
@@ -54,6 +55,7 @@ class ChatPane extends StatefulWidget {
     this.onOpenSettings,
     this.onMessageActions,
     this.unreadFromMessageId,
+    this.onReadLatest,
     this.onWorkingChanged,
     this.background,
   });
@@ -197,6 +199,7 @@ class _ChatPaneState extends State<ChatPane> {
             onOpenSettings: widget.onOpenSettings,
             onMessageActions: widget.onMessageActions,
             unreadFromMessageId: widget.unreadFromMessageId,
+            onReadLatest: widget.onReadLatest,
           ),
         ),
         if (c.error != null)
@@ -254,6 +257,7 @@ class ConversationView extends StatefulWidget {
   final VoidCallback? onOpenSettings;
   final void Function(TranscriptLine)? onMessageActions;
   final String? unreadFromMessageId;
+  final void Function(String?)? onReadLatest;
   final void Function(String? runId)? onWorkingChanged;
   final String? background;
   const ConversationView({
@@ -267,6 +271,7 @@ class ConversationView extends StatefulWidget {
     this.onOpenSettings,
     this.onMessageActions,
     this.unreadFromMessageId,
+    this.onReadLatest,
     this.onWorkingChanged,
     this.background,
   });
@@ -326,6 +331,7 @@ class _ConversationViewState extends State<ConversationView>
     onOpenSettings: widget.onOpenSettings,
     onMessageActions: widget.onMessageActions,
     unreadFromMessageId: widget.unreadFromMessageId,
+    onReadLatest: widget.onReadLatest,
     onWorkingChanged: widget.onWorkingChanged,
   );
 

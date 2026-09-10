@@ -991,6 +991,83 @@ describe("client run protocol v1", () => {
     ).toBeLessThanOrEqual(8_000);
   });
 
+  test("a firing's projected message is budgeted with the rest of its run", () => {
+    // A firing that ran 256 tool interactions fills the wire cap exactly, and
+    // then fails: the message saying so has no send event in the journal and
+    // is projected back in. Appending it to a page that was already at the cap
+    // put the run over the client's `maxItems`, which fails the decode of the
+    // whole transcript rather than losing one row.
+    const projected = projectClientRunV1(storedRun(toolEvents(256), "failed"), {
+      ordinal: 0,
+      text: "The Routine could not run.",
+    });
+
+    expect(projected.events.length).toBeLessThanOrEqual(512);
+    // The newest thing the person is waiting on is the message itself, and it
+    // keeps the ordinal it was named by; truncation drops history instead.
+    expect(projected.events.at(-1)).toEqual({
+      type: "send/to-user",
+      payload: { type: "text", text: "The Routine could not run." },
+      ordinal: 0,
+    });
+    expect(projected.events[0]).toMatchObject({
+      type: "run/events-truncated",
+    });
+  });
+
+  test("a stopped firing's outcome says the message it was told in", () => {
+    // The firing was told it was stopped as an ordinary message; the outcome
+    // repeats it word for word so the thread draws the one event once, while a
+    // Turn a person stopped in the conversation still reads the stock line.
+    const projected = projectClientRunV1(storedRun([], "cancelled"), {
+      ordinal: 0,
+      text: '"Morning brief" was stopped: You stopped this.',
+    });
+
+    expect(projected.outcome).toEqual({
+      type: "cancelled",
+      message: '"Morning brief" was stopped: You stopped this.',
+    });
+    expect(projected.status).toBe("cancelled");
+    expect(projected.events.at(-1)).toMatchObject({
+      type: "send/to-user",
+      payload: {
+        type: "text",
+        text: '"Morning brief" was stopped: You stopped this.',
+      },
+    });
+    expect(projectClientRunV1(storedRun([], "cancelled")).outcome).toEqual({
+      type: "cancelled",
+      message: "You stopped this.",
+    });
+  });
+
+  test("a projected message a run already journalled is not drawn twice", () => {
+    const spoke = storedRun(
+      [
+        event({
+          type: "send/to-user",
+          seq: 0,
+          timestamp,
+          turn: 1,
+          step: 1,
+          occurrenceId: "send:1:1:0",
+          payload: { type: "text", text: "the Routine's own answer" },
+        }),
+      ],
+      "failed",
+    );
+
+    const projected = projectClientRunV1(spoke, {
+      ordinal: 0,
+      text: "the Routine's own answer",
+    });
+
+    expect(
+      projected.events.filter((entry) => entry.type === "send/to-user"),
+    ).toHaveLength(1);
+  });
+
   test("uses the full boundary without splitting an interaction", () => {
     const atBoundary = projectClientRunListV1([storedRun(toolEvents(256))])
       .runs[0];
@@ -1074,7 +1151,11 @@ describe("client run protocol v1", () => {
     // Version 3 carries agent-origin markers; older bodies still decode.
     expect(projected.schemaVersion).toBe(3);
     expect(projected.events).toEqual([
-      { type: "send/to-user", payload: { type: "text", text: "On it." } },
+      {
+        type: "send/to-user",
+        payload: { type: "text", text: "On it." },
+        ordinal: 0,
+      },
       { type: "tool/call", call: { id: "tool-1", name: "lookup" } },
       {
         type: "tool/result",
@@ -1088,6 +1169,7 @@ describe("client run protocol v1", () => {
           type: "widget",
           widget: { prompt: "Which day?", options: ["Tue", "Thu"] },
         },
+        ordinal: 1,
       },
       { type: "wake/parent", message: "Paid." },
     ]);
@@ -1125,7 +1207,14 @@ describe("client run protocol v1", () => {
     expect(projected.events.at(-1)).toEqual({
       type: "send/to-user",
       payload: { type: "text", text: "send-599" },
+      ordinal: 599,
     });
+    // The ordinal names the durable send, so a read of the newest message is
+    // still `<runId>:send:599` after 89 earlier sends were dropped — its
+    // position in this projection is 510.
+    expect(
+      projected.events.filter((event) => event.type === "send/to-user")[0],
+    ).toMatchObject({ ordinal: 89 });
     expect(
       decodeClientRunListV1({
         schemaVersion: 1,

@@ -3,7 +3,8 @@
 library;
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/shell/transcript_model.dart';
+import 'package:flutter/material.dart';
+import 'package:frockbot_native/shell/transcript.dart';
 
 /// How the thread reads, one line per row, in the order it is drawn.
 List<String> thread(List<TranscriptLine> lines) => [
@@ -35,6 +36,7 @@ Map<String, dynamic> run({
       {
         'type': 'send/to-user',
         'payload': {'type': 'text', 'text': sentText},
+        'ordinal': 0,
       },
     ...events,
   ],
@@ -70,6 +72,176 @@ TranscriptLine line({
 );
 
 void main() {
+  testWidgets(
+    'reports read only while the newest delivered message is displayed',
+    (tester) async {
+      final reports = <String?>[];
+      final lines = [
+        TranscriptLine(
+          id: 'run-old:send:0',
+          runId: 'run-old',
+          role: LineRole.assistant,
+          text: 'Old',
+          status: LineStatus.completed,
+        ),
+        TranscriptLine(
+          id: 'run-new:send:0',
+          runId: 'run-new',
+          role: LineRole.assistant,
+          text: 'New',
+          status: LineStatus.completed,
+        ),
+      ];
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SizedBox(
+              height: 80,
+              child: TranscriptView(
+                lines: lines,
+                loading: false,
+                hasEarlier: false,
+                onRefresh: ({older = false}) async {},
+                onOpenRun: (_) {},
+                onReadLatest: reports.add,
+                storageKey: 'read-test',
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(reports, contains('run-new:send:0'));
+
+      final scrollable = tester.state<ScrollableState>(find.byType(Scrollable));
+      scrollable.position.jumpTo(scrollable.position.maxScrollExtent);
+      await tester.pump();
+      expect(reports.last, isNull);
+    },
+  );
+
+  test('names each send by the ordinal the cloud minted, not its position', () {
+    // A Turn that outgrew the wire budget arrives with its earliest sends
+    // dropped and a truncation marker in their place. The read the cloud can
+    // match is `run-a:send:7`, which is what the surviving line has to be
+    // called however few sends this client received.
+    final lines = projectRuns([
+      run(
+        runId: 'run-a',
+        input: 'Long turn',
+        events: [
+          {'type': 'run/events-truncated', 'omittedInteractions': 7},
+          {
+            'type': 'send/to-user',
+            'payload': {'type': 'text', 'text': 'Last'},
+            'ordinal': 7,
+          },
+        ],
+      ),
+    ]);
+
+    expect(
+      lines
+          .where((line) => line.role == LineRole.assistant && !line.empty)
+          .map((line) => line.id),
+      ['run-a:send:7'],
+    );
+  });
+
+  group('a firing that broke before it could speak', () {
+    // The cloud tells the person as an ordinary message and projects it onto
+    // the run in place of the send the firing never made. Drawing the outcome's
+    // generic line underneath would be the same event said twice.
+    const said = '"Morning brief" did not run: The model couldn\'t finish '
+        'its reply. Try again.';
+    Map<String, dynamic> brokenFiring() => run(
+      runId: 'rf-brief',
+      status: 'failed',
+      // The cloud's notice for this run is the message it sent, word for word.
+      failure: said,
+      events: [
+        {
+          'type': 'send/to-user',
+          'payload': {'type': 'text', 'text': said},
+          'ordinal': 0,
+        },
+      ],
+    );
+
+    test('says what happened once', () {
+      final lines = projectRuns([brokenFiring()]);
+      expect(thread(lines), ['assistant: $said']);
+      // Nothing to press: the Turn nobody typed cannot be sent again.
+      expect(lines.where((line) => line.retry != null), isEmpty);
+    });
+
+    test('still draws the row the Turn hangs its work on', () {
+      // The message is drawn, the notice is not, and the run is still failed.
+      final closing = projectRuns([
+        brokenFiring(),
+      ]).firstWhere((line) => line.id == 'rf-brief:assistant');
+      expect(closing.status, LineStatus.error);
+      expect(closing.notice, isNull);
+      expect(closing.empty, isTrue);
+    });
+
+    test('says a stopped firing once too', () {
+      // A firing stopped before it could speak is told the same way, and its
+      // message already says the person stopped it.
+      const stopped = '"Morning brief" was stopped: You stopped this.';
+      final lines = projectRuns([
+        run(
+          runId: 'rf-brief',
+          status: 'cancelled',
+          failure: stopped,
+          events: [
+            {
+              'type': 'send/to-user',
+              'payload': {'type': 'text', 'text': stopped},
+              'ordinal': 0,
+            },
+          ],
+        ),
+      ]);
+      expect(thread(lines), ['assistant: $stopped']);
+      final closing = lines.firstWhere(
+        (line) => line.id == 'rf-brief:assistant',
+      );
+      expect(closing.status, LineStatus.aborted);
+      expect(closing.notice, isNull);
+    });
+
+    test('leaves an ordinary stopped Turn saying it was stopped', () {
+      final lines = projectRuns([
+        run(runId: 'run-a', input: 'Hello', status: 'cancelled'),
+      ]);
+      expect(thread(lines), ['user: Hello', 'assistant: You stopped this.']);
+    });
+
+    test('leaves an ordinary broken reply saying why it broke', () {
+      // The suppression is only for the message that already is the failure. A
+      // reply that spoke and then broke keeps the reason under what it said.
+      final lines = projectRuns([
+        run(
+          runId: 'run-a',
+          input: 'Hello',
+          status: 'failed',
+          failure: "This Bot couldn't finish its reply. Try again.",
+          sentText: 'Half an answer',
+        ),
+      ]);
+      expect(thread(lines), [
+        'user: Hello',
+        'assistant: Half an answer',
+        "assistant: This Bot couldn't finish its reply.",
+      ]);
+      expect(
+        lines.where((line) => line.retry == LineRetry.resendTurn),
+        isNotEmpty,
+      );
+    });
+  });
+
   group('the order a thread is drawn in', () {
     /*
      * The production sweep: a message is sent, and while its reply is
@@ -332,6 +504,48 @@ void main() {
   });
 
   group('what a Turn is projected as', () {
+    test('a Routine that spoke draws its message and no empty bubble', () {
+      final lines = projectRuns([
+        run(runId: 'run-routine', input: '', sentText: 'The report is ready.'),
+      ]);
+
+      // A Routine's Turn is projected with no input: nobody typed it, and an
+      // empty right-aligned pill above every Routine message is a bubble the
+      // person did not send.
+      expect(
+        [for (final row in lines) row.id],
+        ['run-routine:send:0', 'run-routine:assistant'],
+      );
+    });
+
+    test(
+      'a send with no durable ordinal is dropped rather than positioned',
+      () {
+        final lines = projectRuns([
+          run(
+            runId: 'run-a',
+            input: 'do it',
+            events: [
+              {
+                'type': 'send/to-user',
+                'payload': {'type': 'text', 'text': 'Unidentifiable.'},
+              },
+              {
+                'type': 'send/to-user',
+                'payload': {'type': 'text', 'text': 'Done.'},
+                'ordinal': 4,
+              },
+            ],
+          ),
+        ]);
+
+        expect(
+          [for (final row in lines) row.id],
+          ['run-a:user', 'run-a:send:4', 'run-a:assistant'],
+        );
+      },
+    );
+
     test('draws one bubble per send, in the order the Bot sent them', () {
       final lines = projectRuns([
         run(
@@ -342,10 +556,12 @@ void main() {
             {
               'type': 'send/to-user',
               'payload': {'type': 'text', 'text': 'On it.'},
+              'ordinal': 0,
             },
             {
               'type': 'send/to-user',
               'payload': {'type': 'text', 'text': 'Done.'},
+              'ordinal': 1,
             },
           ],
         ),

@@ -49,9 +49,7 @@ class ActivityController extends ChangeNotifier {
     _notify();
     try {
       final saved = await store.read(_key);
-      if (saved != null) {
-        _pending = Map<String, dynamic>.from(jsonDecode(saved) as Map);
-      }
+      if (saved != null) await _restore(saved);
       final views = wire.UnreadDirectory.fromJson(
         await api.request('/api/bots/unread'),
       );
@@ -135,13 +133,50 @@ class ActivityController extends ChangeNotifier {
     await retry();
   }
 
+  /// A command this build cannot speak is dropped, never retried for ever.
+  ///
+  /// Read state is disposable: the cloud is authoritative and the next glance
+  /// at the conversation marks it again. A command left behind by an older
+  /// build — one naming a cursor this build no longer accepts — would fail to
+  /// decode on every attempt, and `pending` gates marking, manual unread and
+  /// acknowledgement alike, so keeping it would disable all three on that
+  /// install until its data was cleared.
+  Future<void> _discardPending() async {
+    _pending = null;
+    try {
+      await store.delete(_key);
+    } catch (_) {
+      /* The next write replaces it; nothing here is authoritative. */
+    }
+  }
+
+  Future<void> _restore(String saved) async {
+    try {
+      final command = wire.MarkReadCommand.fromJson(
+        Map<String, dynamic>.from(jsonDecode(saved) as Map),
+      );
+      _pending = Map<String, dynamic>.from(command.toJson() as Map);
+    } catch (_) {
+      await _discardPending();
+    }
+  }
+
   Future<void> retry() async {
     if (_disposed || saving || _pending == null) return;
+    final Map<String, dynamic> body;
+    try {
+      body = Map<String, dynamic>.from(
+        wire.MarkReadCommand.fromJson(_pending).toJson() as Map,
+      );
+    } catch (_) {
+      await _discardPending();
+      error = 'Couldn’t confirm the read status. Check it before making another change.';
+      _notify();
+      return;
+    }
     saving = true;
     _notify();
     try {
-      final command = wire.MarkReadCommand.fromJson(_pending);
-      final body = Map<String, dynamic>.from(command.toJson() as Map);
       await store.write(_key, jsonEncode(body));
       if (_disposed) return;
       final receipt = wire.MarkReadReceipt.fromJson(

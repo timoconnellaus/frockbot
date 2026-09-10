@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
+import type { SessionEvent } from "@frockbot/core/contracts";
+import { STEP_LIMIT_REASON_V1 } from "@frockbot/core/agent-loop";
+import { RUN_FAILURE_COPY_V1 } from "../shell/run-failure-copy.js";
 import {
+  routineFailureMessageV1,
   decodePendingBotInputV1,
   decodeRoutineInboxEntryV1,
   pendingBotInputPreambleV1,
@@ -593,5 +597,74 @@ describe("inbox retention", () => {
       "fresh 1",
       "fresh 0",
     ]);
+  });
+});
+
+describe("the message a failed firing sends", () => {
+  const turnEnd = (outcome: string): SessionEvent =>
+    ({
+      type: "turn/end",
+      turn: 1,
+      outcome,
+      seq: 1,
+      timestamp: NOW,
+    }) as unknown as SessionEvent;
+
+  // The message arrives as a notification and sits among ordinary replies, so
+  // it has to say which automation broke; without the name it reads as the Bot
+  // saying something unprompted.
+  test("names the Routine it is about", () => {
+    expect(
+      routineFailureMessageV1({
+        routineName: "Morning brief",
+        failure: "Bot turn ended with outcome model-error: 401 from provider",
+        events: [turnEnd("model-error")],
+      }),
+    ).toBe(
+      `"Morning brief" did not run: ${RUN_FAILURE_COPY_V1["model-error"]}`,
+    );
+  });
+
+  // The regression: a superseded firing's summary is an invariant addressed to
+  // this codebase, and it reached the person's conversation verbatim.
+  test("never repeats the kernel's own words", () => {
+    const message = routineFailureMessageV1({
+      routineName: "Morning brief",
+      failure: "the firing's run is superseded",
+    });
+    expect(message).not.toContain("superseded");
+    expect(message).toBe(
+      `"Morning brief" did not run: This Bot couldn't finish its reply. Try again.`,
+    );
+  });
+
+  // A sentence the kernel wrote for a person says something the outcome alone
+  // cannot, and it is carried through under the Routine's name.
+  test("keeps the sentence the kernel wrote for the person", () => {
+    const message = routineFailureMessageV1({
+      routineName: "Morning brief",
+      failure: `Bot turn ended with outcome interrupted: ${STEP_LIMIT_REASON_V1}`,
+      events: [turnEnd("interrupted")],
+    });
+    expect(message).toBe(
+      `"Morning brief" did not run: ${STEP_LIMIT_REASON_V1}`,
+    );
+  });
+
+  test("says a stopped firing was stopped", () => {
+    expect(
+      routineFailureMessageV1({
+        routineName: "Morning brief",
+        cancelled: true,
+        events: [turnEnd("cancelled")],
+      }),
+    ).toBe(`"Morning brief" was stopped: ${RUN_FAILURE_COPY_V1.cancelled}`);
+  });
+
+  // A record that is gone leaves the id, which still names one automation.
+  test("falls back to whatever name it was given", () => {
+    expect(
+      routineFailureMessageV1({ routineName: "brief" }).startsWith('"brief" '),
+    ).toBe(true);
   });
 });

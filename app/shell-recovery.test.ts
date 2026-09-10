@@ -272,6 +272,7 @@ describe("Bot recovery on this application", () => {
           dismissOnMoveOn: false,
         },
       },
+      ordinal: 0,
     });
     expect(second.events.some((event) => event.type === "send/to-user")).toBe(
       true,

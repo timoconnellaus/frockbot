@@ -361,6 +361,7 @@ jobs:
           CREDENTIAL_KEYRING: ${{ secrets.CREDENTIAL_KEYRING }}
           ROUTINE_HOOK_SECRET: ${{ secrets.ROUTINE_HOOK_SECRET }}
           MACHINE_TOKEN_SECRET: ${{ secrets.MACHINE_TOKEN_SECRET }}
+          FCM_SERVICE_ACCOUNT: ${{ secrets.FCM_SERVICE_ACCOUNT }}
           APPLET_VIEWER_SECRET: ${{ secrets.APPLET_VIEWER_SECRET }}
           APPLET_BUILD_TOKEN: ${{ secrets.APPLET_BUILD_TOKEN }}
           DEBUG_TOKEN: ${{ secrets.DEBUG_TOKEN }}
@@ -535,6 +536,7 @@ jobs:
           # Absent, every published Applet answers 503 — which is exactly what
           # production did, unnoticed, from the day the Applet authority
           # shipped until 2026-09-05.
+          FCM_SERVICE_ACCOUNT: ${{ secrets.FCM_SERVICE_ACCOUNT }}
           APPLET_VIEWER_SECRET: ${{ secrets.APPLET_VIEWER_SECRET }}
           # Required: the same shared secret the Applet build Worker and its
           # container check. A Turn's applet_check and applet_publish both call

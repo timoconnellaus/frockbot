@@ -250,6 +250,13 @@ export type ClientRunEventV1 =
   | {
       type: "send/to-user";
       payload: SendToUserPayloadV1;
+      /**
+       * Which of the Turn's sends this is, counted over the Turn's durable
+       * events. The message the cloud names is `<runId>:send:<ordinal>`, and
+       * truncation drops sends from the projection, so a position in this
+       * list is not that identity — this is.
+       */
+      ordinal: number;
     }
   /**
    * A child Turn's hand-off to its parent. Projected because it is durable
@@ -684,6 +691,7 @@ function projectionUnits(
   const units: ProjectionUnitV1[] = [];
   const byOccurrence = new Map<string, ProjectionUnitV1>();
   let callCount = 0;
+  let sendCount = 0;
   let projectedIncompleteSync = false;
   for (const event of events) {
     if (event.type === "tool/call") {
@@ -742,9 +750,12 @@ function projectionUnits(
       unit.droppable = true;
     } else if (event.type === "send/to-user") {
       units.push({
-        events: [{ type: "send/to-user", payload: event.payload }],
+        events: [
+          { type: "send/to-user", payload: event.payload, ordinal: sendCount },
+        ],
         droppable: true,
       });
+      sendCount += 1;
     } else if (event.type === "wake/parent") {
       units.push({
         events: [
@@ -904,8 +915,54 @@ function runStatus(run: StoredRun): ClientRunStatusV1 {
   return requireStoredRunV1(run).status;
 }
 
-export function projectClientRunV1(run: StoredRun): ClientRunV1 {
+/**
+ * The message a run could not journal, put back where the transcript draws
+ * messages.
+ *
+ * A Routine firing that failed still owes the person the sentence saying so,
+ * and it is minted as an ordinary message after the run has already ended — so
+ * there is no send event in the journal and the durable marker beside the
+ * message carries it instead. It is appended to the journal the projection is
+ * budgeted over rather than to the finished projection, so it is truncated
+ * with everything else instead of pushing the run past the wire limit; and it
+ * is appended last, so its ordinal is the one the message was named by and
+ * truncation, which drops oldest first, never drops it.
+ */
+export interface ProjectedSendV1 {
+  ordinal: number;
+  text: string;
+}
+
+function withProjectedSendV1(
+  run: StoredRun,
+  send: ProjectedSendV1 | undefined,
+): { events: readonly SessionEvent[]; spoken?: string } {
+  const events = run.events;
+  if (!send) return { events };
+  const sends = events.filter((event) => event.type === "send/to-user").length;
+  if (sends > send.ordinal) return { events };
+  const last = events.at(-1);
+  const appended: readonly SessionEvent[] = [
+    ...events,
+    {
+      type: "send/to-user",
+      seq: (last?.seq ?? -1) + 1,
+      timestamp: last?.timestamp ?? run.acceptedAt,
+      turn: 0,
+      step: 0,
+      occurrenceId: `projected:${send.ordinal}`,
+      payload: { type: "text", text: send.text },
+    } satisfies SessionEvent,
+  ];
+  return { events: appended, spoken: send.text };
+}
+
+export function projectClientRunV1(
+  run: StoredRun,
+  projectedSend?: ProjectedSendV1,
+): ClientRunV1 {
   const status = runStatus(run);
+  const { events, spoken } = withProjectedSendV1(run, projectedSend);
   const outcome =
     status === "completed"
       ? ({
@@ -918,15 +975,33 @@ export function projectClientRunV1(run: StoredRun): ClientRunV1 {
             // The stored `failure` is a diagnostic and stays one: it is what
             // the debug surface reads. What crosses to a chat bubble is the
             // sentence written for the person — see `runFailureCopyV1`.
+            //
+            // Unless the person has already been sent that sentence. A firing
+            // that broke before it could speak is told as an ordinary message,
+            // projected back onto the run above; the notice is then the same
+            // event as the message, and saying it here in different words
+            // makes the thread draw the failure twice. The wire cannot carry a
+            // new field for this — the shipped client validates run events
+            // against an exact-key schema — so the notice *is* the message,
+            // word for word, and the thread draws a repeat once.
             message: truncateWireString(
-              runFailureCopyV1({ failure: run.failure, events: run.events }),
+              spoken ??
+                runFailureCopyV1({ failure: run.failure, events: run.events }),
               MAX_FAILURE_BYTES,
             ),
           } satisfies ClientRunOutcomeV1)
         : status === "cancelled"
           ? ({
               type: "cancelled",
-              message: CANCELLED_RUN_MESSAGE,
+              // Same rule as `failed`: a firing stopped before it could speak
+              // is told as an ordinary message, and the outcome then says that
+              // message word for word so the thread draws the one event once.
+              // A Turn a person stopped in the conversation carries no
+              // projected send and still reads "You stopped this."
+              message: truncateWireString(
+                spoken ?? CANCELLED_RUN_MESSAGE,
+                MAX_FAILURE_BYTES,
+              ),
             } satisfies ClientRunOutcomeV1)
           : status === "superseded"
             ? ({
@@ -948,9 +1023,12 @@ export function projectClientRunV1(run: StoredRun): ClientRunV1 {
     schemaVersion: 3,
     runId: truncate(run.runId, MAX_RUN_ID_LENGTH),
     admittedAt: truncate(run.acceptedAt, MAX_TIMESTAMP_LENGTH),
-    input: truncateWireString(run.input, MAX_INPUT_BYTES),
+    input:
+      run.admission?.turnType === "automation"
+        ? ""
+        : truncateWireString(run.input, MAX_INPUT_BYTES),
     status,
-    events: visibleEvents(run.events, status),
+    events: visibleEvents(events, status),
     ...(run.stopRequestedAt
       ? {
           stopRequestedAt: truncate(run.stopRequestedAt, MAX_TIMESTAMP_LENGTH),
@@ -981,9 +1059,15 @@ function lookupState(
  */
 export function isVisibleRunV1(run: {
   admission?: { turnType?: string };
+  events?: readonly { type: string }[];
 }): boolean {
   const type = run.admission?.turnType ?? "chat";
-  return type === "chat" || type === "agent";
+  return (
+    type === "chat" ||
+    type === "agent" ||
+    (type === "automation" &&
+      run.events?.some((event) => event.type === "send/to-user") === true)
+  );
 }
 
 export function projectClientRunLookupV1(
@@ -1043,9 +1127,10 @@ export function projectClientTurnV1(result: BotTurnCompletion): ClientTurnV1 {
  */
 export function projectClientRunOrDegradedV1(
   run: StoredRun | UnreadableStoredRunV1,
+  projectedSend?: ProjectedSendV1,
 ): ClientRunV1 {
   try {
-    return projectClientRunV1(run as StoredRun);
+    return projectClientRunV1(run as StoredRun, projectedSend);
   } catch {
     const admittedAt =
       typeof run.acceptedAt === "string" &&
@@ -1058,10 +1143,23 @@ export function projectClientRunOrDegradedV1(
       admittedAt,
       input: typeof run.input === "string" ? run.input : "",
       status: "failed",
-      events: [],
+      // A record nobody can read still owes the person the message minted
+      // beside it: the marker is the message, not a reading of the journal.
+      events: projectedSend
+        ? [
+            {
+              type: "send/to-user",
+              payload: { type: "text", text: projectedSend.text },
+              ordinal: projectedSend.ordinal,
+            },
+          ]
+        : [],
       outcome: {
         type: "failed",
-        message: "This Turn's record could not be read.",
+        // The message the marker carries is what the person was told, so it is
+        // also what this Turn's notice says: an unreadable record is a fact
+        // for the debug surface, not a second thing to tell them.
+        message: projectedSend?.text ?? "This Turn's record could not be read.",
       },
     };
   }
@@ -1070,9 +1168,10 @@ export function projectClientRunOrDegradedV1(
 export function projectClientRunListV1(
   runs: readonly StoredRun[],
 ): ClientRunListV1 {
-  return createClientRunListV1(runs.map(projectClientRunV1), {
-    truncated: false,
-  });
+  return createClientRunListV1(
+    runs.map((run) => projectClientRunV1(run)),
+    { truncated: false },
+  );
 }
 
 export function createClientRunListV1(
@@ -1298,10 +1397,15 @@ function decodeEvent(value: unknown): ClientRunEventV1 | undefined {
     };
   }
   if (event.type === "send/to-user") {
-    exactKeys(event, ["type", "payload"], "run event");
+    exactKeys(event, ["type", "payload", "ordinal"], "run event");
+    const ordinal = event.ordinal;
+    if (!Number.isSafeInteger(ordinal) || (ordinal as number) < 0) {
+      throw new Error("run event.ordinal must be a non-negative safe integer");
+    }
     return {
       type: "send/to-user",
       payload: decodeSendToUserPayloadV1(event.payload, "run event.payload"),
+      ordinal: ordinal as number,
     };
   }
   if (event.type === "wake/parent") {

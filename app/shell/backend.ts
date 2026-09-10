@@ -5,6 +5,7 @@
 // that owns the answer, and the handful of methods below are the forwards the
 // Durable Object and the recovery tests still reach through the object.
 
+import { messageRecords } from "@frockbot/app/notifications/messages";
 import { defineBotBackendContribution } from "@frockbot/core/contracts/contributions";
 import type { SessionEvent } from "@frockbot/core/contracts";
 import type { BotIdentity, OwnedBotTurnCommand } from "@frockbot/core/durable";
@@ -13,7 +14,6 @@ import type { BotSettingsViewV1 } from "@frockbot/core/configuration";
 import {
   acknowledgeNotification,
   createFailureNotification,
-  createNotification,
   listNotifications,
   supersededPackageRecords,
   terminalPackageRecords,
@@ -70,7 +70,9 @@ export class ShellBotBackendContribution {
       admittedSnapshot: (transaction, resolved) =>
         admittedBotSettingsV1(transaction, resolved),
       executeTurn: (input) => executeTurn(state, input),
-      notification: (snapshot, result) => createNotification(snapshot, result),
+      eventRecords: messageRecords,
+      eventsCommitted: () => host.messagesCommitted?.(),
+      notification: () => undefined,
       failureNotification: (snapshot, failed) =>
         createFailureNotification(snapshot, failed),
       terminalRecords: (input) => terminalPackageRecords(input),

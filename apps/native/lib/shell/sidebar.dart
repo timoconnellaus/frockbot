@@ -159,7 +159,8 @@ String formatSidebarMessageTime(String at, [DateTime? clock]) {
 
 /// How many unread a badge says, or nothing where the row shows no badge.
 String? unreadBadgeLabel(wire.UnreadView? view) {
-  if (view == null || !view.unread || view.count == 0) return null;
+  if (view == null || !view.unread) return null;
+  if (view.count == 0) return view.manuallyUnread ? "•" : null;
   return view.capped ? '${view.count}+' : '${view.count}';
 }
 

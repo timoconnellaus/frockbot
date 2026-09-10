@@ -13,7 +13,25 @@ import {
   SessionEventLog,
   sessionEventLogIndexKeyV1,
 } from "@frockbot/core/durable";
-import { executeUnreadCommand, readUnread } from "./unread.js";
+import {
+  executeUnreadCommand,
+  MESSAGE_PREFIX,
+  readUnread,
+  UNREAD_STATE_KEY,
+} from "./unread.js";
+import { messageRecords } from "../notifications/messages.js";
+import {
+  executeRoutineCommand,
+  listRoutines,
+  settleScheduledWork,
+} from "../routines/bot.js";
+import { decodeRoutineCommandV1 } from "../routines/shared.js";
+import { BOT_CONFIGURATION_KEY } from "../settings/bot.js";
+import {
+  PUSH_OUTBOX_PREFIX,
+  PUSH_READ_KEY,
+  sentAutomationRunKeyV1,
+} from "../notifications/storage-keys.js";
 import { createShellBotBackendContribution } from "./backend.js";
 import {
   botTurnCommandFingerprintV1,
@@ -292,7 +310,7 @@ describe("Bot recovery", () => {
     expect(await storage.get<StoredRun>(`run:${run.runId}`)).toEqual(run);
   });
 
-  test("atomically restores the admitted notification intent after eviction", async () => {
+  test("preserves the message notification committed atomically before eviction", async () => {
     const storage = new MemoryStorage();
     const admittedSettings = {
       ...initializeBotSettingsV1("primary"),
@@ -374,12 +392,18 @@ describe("Bot recovery", () => {
       configurationSnapshot: admittedSettings,
       previousEventCount: 0,
     } satisfies StoredRun;
+    const committedMessageRecords = await messageRecords({
+      run,
+      events: [events[3]!],
+      read: <T>(key: string) => storage.get<T>(key),
+    });
     await storage.put({
       "active-run": run.runId,
       "run:run-1": run,
       "run-index:2026-08-28T00:00:00.000Z:run-1": run.runId,
       "latest-events": events,
       "bot-configuration": currentSettings,
+      ...committedMessageRecords,
     });
 
     const recovered = createShellBotBackendContribution({
@@ -403,9 +427,9 @@ describe("Bot recovery", () => {
     const notifications = await recovered.listNotifications();
     expect(notifications).toEqual([
       expect.objectContaining({
-        notificationId: "run-1",
+        notificationId: "message-00000000000000000001",
         runId: "run-1",
-        title: "Admitted Bot replied",
+        title: "Admitted Bot",
         body: "Durable reply",
       }),
     ]);
@@ -1491,6 +1515,85 @@ describe("Bot recovery", () => {
     ).rejects.toThrow();
   });
 
+  test("mark-read requires this Bot's message, advances monotonically, and queues cross-device clearing", async () => {
+    const storage = new MemoryStorage();
+    await writeRunHistory(storage, [
+      { runId: "run-chat", sessionId: "user:primary" },
+    ]);
+    const firstCursor = "message-00000000000000000001";
+    const secondCursor = "message-00000000000000000002";
+    await storage.put({
+      [`${MESSAGE_PREFIX}${firstCursor}`]: { messageId: "run-chat:send:0" },
+      [`${MESSAGE_PREFIX}${secondCursor}`]: { messageId: "run-chat:send:1" },
+      [UNREAD_STATE_KEY]: {
+        schemaVersion: 1,
+        manuallyUnread: false,
+        lastActivityCursor: secondCursor,
+        lastActivityAt: "2026-09-01T00:00:02.000Z",
+      },
+      [`notification:${firstCursor}`]: {
+        notificationId: firstCursor,
+        runId: "run-chat",
+        createdAt: "2026-09-01T00:00:01.000Z",
+        title: "Primary",
+        body: "one",
+      },
+      [`notification:${secondCursor}`]: {
+        notificationId: secondCursor,
+        runId: "run-chat",
+        createdAt: "2026-09-01T00:00:02.000Z",
+        title: "Primary",
+        body: "two",
+      },
+    });
+    const make = () =>
+      createShellBotBackendContribution({
+        ...shellTestApplicationV1(),
+        state: { storage } as unknown as DurableObjectState,
+        env: {} as never,
+      });
+    const identity = { userId: "user", botId: "primary" };
+
+    const readSecond = await executeUnreadCommand(make().state, identity, {
+      schemaVersion: 1,
+      type: "bot/mark-read",
+      commandId: "read-second",
+      botId: "primary",
+      upToCursor: secondCursor,
+    });
+    expect(readSecond.unread).toMatchObject({
+      count: 0,
+      lastSeenCursor: secondCursor,
+    });
+    expect(await storage.get<{ cursor: string }>(PUSH_READ_KEY)).toEqual({
+      cursor: secondCursor,
+    });
+    expect(await storage.get(`notification:${firstCursor}`)).toBeUndefined();
+    expect(await storage.get(`notification:${secondCursor}`)).toBeUndefined();
+
+    const stale = await executeUnreadCommand(make().state, identity, {
+      schemaVersion: 1,
+      type: "bot/mark-read",
+      commandId: "read-first-late",
+      botId: "primary",
+      upToCursor: firstCursor,
+    });
+    expect(stale.unread.lastSeenCursor).toBe(secondCursor);
+    expect(await storage.get<{ cursor: string }>(PUSH_READ_KEY)).toEqual({
+      cursor: secondCursor,
+    });
+
+    await expect(
+      executeUnreadCommand(make().state, identity, {
+        schemaVersion: 1,
+        type: "bot/mark-read",
+        commandId: "read-future",
+        botId: "primary",
+        upToCursor: "message-00000000000000000003",
+      }),
+    ).rejects.toThrow("does not name a message");
+  });
+
   test("reaches the chat buried under other sessions", async () => {
     const storage = new MemoryStorage();
     await writeRunHistory(storage, [
@@ -1535,6 +1638,218 @@ describe("Bot recovery", () => {
     });
 
     expect(page.runs.map((run) => run.runId)).toEqual(["run-chat"]);
+  });
+
+  async function firedRoutineBot(options: { notifications: boolean }) {
+    const storage = new MemoryStorage();
+    const contribution = createShellBotBackendContribution({
+      ...shellTestApplicationV1(),
+      state: { storage } as unknown as DurableObjectState,
+      env: {} as never,
+    });
+    const identity = { userId: "user", botId: "primary" };
+    await contribution.materializeSettings(identity, { name: "Housework" });
+    if (!options.notifications) {
+      const settings = await contribution.getSettings(identity);
+      await storage.put(BOT_CONFIGURATION_KEY, {
+        ...settings,
+        notifications: { enabled: false },
+      });
+    }
+    await executeRoutineCommand(
+      contribution.state,
+      identity,
+      decodeRoutineCommandV1({
+        schemaVersion: 1,
+        type: "routine/create",
+        commandId: "create-1",
+        botId: "primary",
+        name: "Morning brief",
+        prompt: "Summarize overnight email.",
+        schedule: "0 7 * * *",
+      }),
+    );
+    const routineId = (await listRoutines(contribution.state, identity))
+      .routines[0]!.routineId;
+    await executeRoutineCommand(
+      contribution.state,
+      identity,
+      decodeRoutineCommandV1({
+        schemaVersion: 1,
+        type: "routine/run",
+        commandId: "run-1",
+        botId: "primary",
+        routineId,
+      }),
+    );
+    await settleScheduledWork(contribution.state);
+    return { storage, contribution, identity };
+  }
+
+  /**
+   * A firing refused before it was ever admitted — no model to mount, the
+   * object already busy — records no Turn of its own, and a Turn is what the
+   * conversation is made of. It is still the same message every other thing a
+   * person is told is: the terminal record admission never wrote is written in
+   * its place, and the failure is drawn in the thread, counted unread, and
+   * cleared by reading it. Telling it through the Routines panel alone left a
+   * broken Routine reaching nobody's device at all.
+   */
+  test("a firing that never reached a Turn is still a message in the conversation", async () => {
+    const { storage, contribution, identity } = await firedRoutineBot({
+      notifications: true,
+    });
+
+    const runs = (await contribution.listRuns()).runs;
+    expect(runs).toHaveLength(1);
+    const firing = runs[0]!;
+    expect(firing.status).toBe("failed");
+    const sends = firing.events.filter(
+      (event) => event.type === "send/to-user",
+    );
+    expect(sends).toHaveLength(1);
+    expect(sends[0]).toMatchObject({ ordinal: 0 });
+
+    // One message, one outbox entry the device drains, one alert.
+    expect((await storage.list({ prefix: MESSAGE_PREFIX })).size).toBe(1);
+    expect((await storage.list({ prefix: PUSH_OUTBOX_PREFIX })).size).toBe(1);
+    const intents = await contribution.listNotifications();
+    expect(intents).toHaveLength(1);
+    expect(intents[0]!.body.length).toBeGreaterThan(0);
+
+    // The badge names the message the transcript drew, so opening the thread
+    // is what clears it.
+    expect(await readUnread(contribution.state, identity)).toMatchObject({
+      count: 1,
+      unread: true,
+      lastMessageId: `${firing.runId}:send:0`,
+    });
+
+    // The durable record the Routines panel holds is written either way.
+    expect((await storage.list({ prefix: "routine-inbox:" })).size).toBe(1);
+
+    // The conversation offers "mark unread from here" on this message, and the
+    // boundary it posts back is the id it drew — validated against the marker
+    // beside the message, because this run's journal holds no send at all.
+    const receipt = await executeUnreadCommand(contribution.state, identity, {
+      schemaVersion: 1,
+      type: "bot/mark-unread",
+      commandId: "unread-firing",
+      botId: identity.botId,
+      fromMessageId: `${firing.runId}:send:0`,
+    });
+    expect(receipt.unread).toMatchObject({
+      unreadFromMessageId: `${firing.runId}:send:0`,
+      manuallyUnread: true,
+    });
+
+    // Settling again owes no second message for a firing already told.
+    await settleScheduledWork(contribution.state);
+    expect((await storage.list({ prefix: MESSAGE_PREFIX })).size).toBe(1);
+    expect(await contribution.listNotifications()).toHaveLength(1);
+    expect(await readUnread(contribution.state, identity)).toMatchObject({
+      count: 1,
+    });
+  });
+
+  test("a muted Bot is woken by nothing a firing does", async () => {
+    const { storage, contribution, identity } = await firedRoutineBot({
+      notifications: false,
+    });
+
+    // Mute is the mute on alerting alone: the message is still there to read,
+    // and it is still counted.
+    expect(await contribution.listNotifications()).toEqual([]);
+    expect((await storage.list({ prefix: MESSAGE_PREFIX })).size).toBe(1);
+    expect(await readUnread(contribution.state, identity)).toMatchObject({
+      count: 1,
+    });
+    // The durable record a person opens the panel to read is written either way.
+    expect((await storage.list({ prefix: "routine-inbox:" })).size).toBe(1);
+  });
+
+  test("a Routine's Turn joins the transcript only when it spoke, and a silent one is never opened", async () => {
+    const storage = new MemoryStorage();
+    await storage.put("identity", { userId: "user", botId: "primary" });
+    const baseTime = Date.parse("2026-09-01T00:00:00.000Z");
+    const firings = ["run-silent-0", "run-silent-1", "run-spoke"];
+    for (const [index, runId] of firings.entries()) {
+      const acceptedAt = new Date(baseTime + index * 1_000).toISOString();
+      const sessionId = `routine:${runId}`;
+      const spoke = runId === "run-spoke";
+      const events: SessionEvent[] = spoke
+        ? [
+            {
+              type: "send/to-user",
+              seq: 0,
+              timestamp: acceptedAt,
+              turn: 1,
+              step: 1,
+              occurrenceId: `tool:1:1:0`,
+              payload: { type: "text", text: "the report" },
+            },
+          ]
+        : [
+            {
+              type: "turn/end",
+              seq: 0,
+              timestamp: acceptedAt,
+              turn: 1,
+              outcome: "completed",
+            },
+          ];
+      await new SessionEventLog(storage).rewrite(sessionId, events);
+      const run = {
+        runId,
+        commandFingerprint: `fingerprint-${index}`,
+        sessionId,
+        acceptedAt,
+        input: "the cue",
+        events: [],
+        eventRange: { startSeq: 0, endSeq: events.length },
+        effectAdmissions: [],
+        status: "completed",
+        phase: "executing",
+        compositionGenerationId: "test-composition-generation",
+        configurationSnapshot: initializeBotSettingsV1("primary"),
+        previousEventCount: 0,
+        responseText: "done",
+        admission: { schemaVersion: 1, turnType: "automation" },
+      } satisfies StoredRun;
+      await storage.put({
+        [`run:${runId}`]: run,
+        [`run-index:${acceptedAt}:${runId}`]: runId,
+      });
+      if (spoke) {
+        const records = await messageRecords({
+          run,
+          events,
+          read: (key) => storage.get(key),
+        });
+        await storage.put(records);
+      }
+    }
+    const contribution = createShellBotBackendContribution({
+      ...shellTestApplicationV1(),
+      state: { storage } as unknown as DurableObjectState,
+      env: {} as never,
+    });
+    storage.gets.length = 0;
+
+    const page = await contribution.listRuns({ schemaVersion: 1 });
+
+    expect(page.runs.map((run) => run.runId)).toEqual(["run-spoke"]);
+    // The Routine that said nothing is filtered off its record and its marker
+    // alone: opening its journal would start at the Session log's index.
+    for (const silent of ["run-silent-0", "run-silent-1"]) {
+      expect(storage.gets).toContain(sentAutomationRunKeyV1(silent));
+      expect(storage.gets).not.toContain(
+        sessionEventLogIndexKeyV1(`routine:${silent}`),
+      );
+    }
+    expect(storage.gets).toContain(
+      sessionEventLogIndexKeyV1("routine:run-spoke"),
+    );
   });
 
   test("offers a continuation when a scanned page selects nothing", async () => {

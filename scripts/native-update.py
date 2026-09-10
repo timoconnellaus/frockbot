@@ -31,7 +31,6 @@ STATE = Path(os.environ.get("NATIVE_UPDATE_STATE", ROOT / ".native-build/updates
 NATIVE = ROOT / "apps/native"
 PACKAGE = "com.frockbot.mobile"
 SIGNER = "61e6479f9c5755154c1f939cde48e8a757eff3136e54ed1dda5f61e78b3c1e37"
-BUILD_NAME = "1.1.0"
 FLUTTER_VERSION = "3.47.0"
 TARGET_PLATFORM = "android-arm64"
 PUBLIC_KEY = NATIVE / "shorebird-public-key.pem"
@@ -43,6 +42,18 @@ FORBIDDEN_PATCH_FLAGS = ("--allow-native-diffs", "--allow-asset-diffs")
 INTENT_IDENTITY_KEYS = ("versionCode", "package", "appId", "buildName", "buildNumber", "releaseVersion",
                         "flutterVersion", "targetPlatform", "signerSha256", "publicKeySha256", "gitHead",
                         "workingTreeDirty", "intentCreatedAt")
+
+
+def build_name():
+    """The release's version name, read from the app that will carry it.
+
+    A second copy here silently released the previous version name after a
+    pubspec bump: the APK said one thing and the compatibility gate another.
+    """
+    match = re.search(r"^version:\s*(\d+\.\d+\.\d+)\+\d+\s*$", (NATIVE / "pubspec.yaml").read_text(), re.M)
+    if not match:
+        raise RuntimeError("apps/native/pubspec.yaml has no `version: <name>+<code>` line to release.")
+    return match[1]
 
 
 def run(args, *, binary=False, **kwargs):
@@ -201,8 +212,8 @@ def load_pending_intent(path):
 
 def recover_published_release(intent, metadata, current_source, der):
     expected = {
-        "package": PACKAGE, "appId": app_id(), "buildName": BUILD_NAME,
-        "buildNumber": intent["versionCode"], "releaseVersion": f"{BUILD_NAME}+{intent['versionCode']}",
+        "package": PACKAGE, "appId": app_id(), "buildName": build_name(),
+        "buildNumber": intent["versionCode"], "releaseVersion": f"{build_name()}+{intent['versionCode']}",
         "flutterVersion": FLUTTER_VERSION, "targetPlatform": TARGET_PLATFORM,
         "signerSha256": SIGNER,
         "publicKeySha256": hashlib.sha256(der).hexdigest(), **current_source,
@@ -263,12 +274,12 @@ def release(floor=0, build_number=None):
     if version > 2100000000:
         raise RuntimeError("Android versionCode limit reached.")
     args = [cli, "release", "android", f"--flutter-version={FLUTTER_VERSION}", "--artifact=apk",
-            f"--target-platform={TARGET_PLATFORM}", f"--build-name={BUILD_NAME}", f"--build-number={version}",
+            f"--target-platform={TARGET_PLATFORM}", f"--build-name={build_name()}", f"--build-number={version}",
             f"--public-key-path={PUBLIC_KEY}"]
     if not intent:
         intent = {
-            "versionCode": version, "package": PACKAGE, "appId": app_id(), "buildName": BUILD_NAME,
-            "buildNumber": version, "releaseVersion": f"{BUILD_NAME}+{version}", "versionFloor": floor,
+            "versionCode": version, "package": PACKAGE, "appId": app_id(), "buildName": build_name(),
+            "buildNumber": version, "releaseVersion": f"{build_name()}+{version}", "versionFloor": floor,
             "flutterVersion": FLUTTER_VERSION, "targetPlatform": TARGET_PLATFORM, "shorebirdCli": version_cli,
             "signerSha256": SIGNER, "publicKeyPath": str(PUBLIC_KEY),
             "publicKeySha256": hashlib.sha256(der).hexdigest(), "releaseArgs": args[1:],
@@ -279,8 +290,8 @@ def release(floor=0, build_number=None):
     subprocess.run(args, cwd=NATIVE, env=env, check=True)
     inspect_release(APK_OUTPUT, der)
     metadata = inspect_apk(APK_OUTPUT)
-    if metadata["versionCode"] != version or metadata["versionName"] != BUILD_NAME:
-        raise RuntimeError(f"Built {metadata['versionName']}+{metadata['versionCode']}, expected {BUILD_NAME}+{version}.")
+    if metadata["versionCode"] != version or metadata["versionName"] != build_name():
+        raise RuntimeError(f"Built {metadata['versionName']}+{metadata['versionCode']}, expected {build_name()}+{version}.")
     metadata = publish(APK_OUTPUT, floor)
     # A retry may run a different CLI or checkout than the intent recorded; the build just made these true.
     built_with = {"shorebirdCli": version_cli, "publicKeyPath": str(PUBLIC_KEY), "releaseArgs": args[1:],

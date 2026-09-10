@@ -86,7 +86,7 @@ describe("per-Bot unread in Workerd", () => {
     // A muted Bot: `notifications.enabled` is false on every new Bot, and the
     // badge advanced anyway.
     expect(settled).toMatchObject({ count: 2, capped: false, unread: true });
-    expect(settled.lastActivityCursor).toContain("run-index:");
+    expect(settled.lastActivityCursor).toMatch(/^message-[0-9]{20}$/);
     expect(settled.lastMessage).toMatchObject({
       text: "Ollama reply",
       role: "assistant",

@@ -19,7 +19,7 @@ import {
 const hello = {
   schemaVersion: 1,
   protocolVersion: 1,
-  nativeVersion: "1.1.0",
+  nativeVersion: "1.2.0",
   catalogs: [],
 };
 const verifier = "a".repeat(64);
@@ -304,7 +304,7 @@ describe("native system browser exchange", () => {
     for (const value of [
       "",
       JSON.stringify({ ...hello, nativeVersion: "1.0.0" }),
-      JSON.stringify({ ...hello, nativeVersion: "1.2.0" }),
+      JSON.stringify({ ...hello, nativeVersion: "1.3.0" }),
     ]) {
       const result = await g.auth.authenticate(
         g.request("/api/bots/bot-1/state-channel", undefined, {
@@ -742,7 +742,7 @@ test("a device that signed out gives its slot back", () => {
   const hello = {
     schemaVersion: 1 as const,
     protocolVersion: 1 as const,
-    nativeVersion: "1.1.0",
+    nativeVersion: "1.2.0",
     catalogs: [],
   };
   const sign = (sessionId: string, action: "issue" | "revoke") =>

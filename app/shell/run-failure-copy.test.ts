@@ -156,6 +156,55 @@ describe("runFailureCopyV1", () => {
     assertPlainV1(projected.outcome.message);
     expect(projected.outcome.message).toBe(RUN_FAILURE_COPY_V1.interrupted);
   });
+
+  // A firing that broke before it could speak is told to the person as an
+  // ordinary message, and the run is projected with that message in place of
+  // the send it never journalled. The client would otherwise draw the outcome's
+  // generic line under it as well — the same event, said twice — so the send
+  // says what it stands for.
+  test("says the failure once when it was already sent as a message", () => {
+    const said = '"Morning brief" did not run: something plain';
+    const projected = projectClientRunV1(
+      failedRun("the firing's run is superseded", [turnEnd("interrupted")]),
+      { ordinal: 0, text: said },
+    );
+    const sends = projected.events.filter(
+      (event) => event.type === "send/to-user",
+    );
+    expect(sends).toHaveLength(1);
+    expect(sends[0]).toMatchObject({
+      ordinal: 0,
+      payload: { type: "text", text: said },
+    });
+    // The notice is the message, word for word, which is what lets the thread
+    // draw the two as the one event. The run is still failed: the status is
+    // durable and is not softened.
+    expect(projected.outcome).toEqual({ type: "failed", message: said });
+    expect(projected.status).toBe("failed");
+  });
+
+  // Only when there is a message to repeat. A Turn that spoke and then broke
+  // still says why it stopped, in the product's own words.
+  test("still says why an ordinary reply broke", () => {
+    const projected = projectClientRunV1(
+      failedRun("Bot turn ended with outcome interrupted", [
+        {
+          type: "send/to-user",
+          seq: (seq += 1),
+          timestamp: TIMESTAMP,
+          turn: 1,
+          step: 1,
+          occurrenceId: "send:1",
+          payload: { type: "text", text: "Half an answer" },
+        } as unknown as SessionEvent,
+        turnEnd("interrupted"),
+      ]),
+    );
+    expect(projected.outcome).toMatchObject({
+      type: "failed",
+      message: RUN_FAILURE_COPY_V1.interrupted,
+    });
+  });
 });
 
 test("a reply that ran out of steps says so in plain words", () => {

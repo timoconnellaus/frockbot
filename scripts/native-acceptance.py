@@ -111,7 +111,8 @@ def install():
     environment["FROCKBOT_INSTALLED_VERSION_CODE"] = str(version)
     environment["ANDROID_USER_HOME"] = str(ROOT / ".native-build/android-user")
     flutter = os.environ.get("NATIVE_FLUTTER", "/Users/tim/repos/flutter/bin/flutter")
-    subprocess.run([flutter, "build", "apk", "--release", "--build-name=1.1.0",
+    build_name = re.search(r"^version:\s*(\d+\.\d+\.\d+)\+\d+\s*$", (ROOT / "apps/native/pubspec.yaml").read_text(), re.M)[1]
+    subprocess.run([flutter, "build", "apk", "--release", f"--build-name={build_name}",
                     f"--build-number={version + 1}", "--dart-define=NATIVE_ACCEPTANCE=true"],
                    cwd=ROOT / "apps/native", env=environment, check=True)
     apk = ROOT / "apps/native/build/app/outputs/flutter-apk/app-release.apk"

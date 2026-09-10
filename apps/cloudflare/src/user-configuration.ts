@@ -1,3 +1,10 @@
+import { isPublicIdentifier } from "@frockbot/core/configuration";
+import {
+  decodePushRegistration,
+  registerPushDevice,
+  deliverPush,
+  type PushUpdate,
+} from "./push.js";
 import { decodeProtocol } from "@frockbot/core/protocol-schemas";
 import { DurableObject } from "cloudflare:workers";
 import {
@@ -120,6 +127,7 @@ const MEMORY_PROJECT_ID = /^[a-z0-9][a-z0-9-]{0,127}$/;
 const USER_IDENTITY_KEY = "user:identity";
 
 interface UserConfigurationEnv {
+  FCM_SERVICE_ACCOUNT?: string;
   ALLOW_DEVELOPMENT_AUTH?: string;
   BETTER_AUTH_URL?: string;
   CREDENTIAL_KEYRING?: string;
@@ -154,6 +162,31 @@ interface UserConfigurationEnv {
 const SEARCH_REBUILD_BOT_LIMIT = 200;
 
 export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
+  async registerPush(input: { userId: string; registration: unknown }) {
+    await this.assertUserIdentity(input.userId);
+    await registerPushDevice(
+      this.ctx.storage,
+      decodePushRegistration(input.registration),
+    );
+    return { ok: true };
+  }
+
+  async deliverPush(input: { userId: string; update: PushUpdate }) {
+    await this.assertUserIdentity(input.userId);
+    if (
+      !isPublicIdentifier(input.update.botId) ||
+      !/^message-[0-9]{20}$/.test(input.update.cursor) ||
+      !["message", "read"].includes(input.update.kind)
+    )
+      throw new Error("Invalid push update");
+    await deliverPush(
+      this.ctx.storage,
+      input.userId,
+      input.update,
+      this.env.FCM_SERVICE_ACCOUNT,
+    );
+  }
+
   async nativeSession(input: unknown) {
     try {
       const operation = decodeNativeSessionOperation(input);

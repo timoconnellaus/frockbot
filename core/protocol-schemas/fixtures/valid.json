@@ -63,7 +63,7 @@
     "value": {
       "schemaVersion": 1,
       "protocolVersion": 1,
-      "nativeVersion": "1.1.0",
+      "nativeVersion": "1.2.0",
       "catalogs": []
     }
   },
@@ -74,7 +74,7 @@
       "schemaVersion": 1,
       "protocolMin": 1,
       "protocolMax": 1,
-      "minimumNativeVersion": "1.1.0",
+      "minimumNativeVersion": "1.2.0",
       "catalogs": []
     }
   },
@@ -382,7 +382,8 @@
       "payload": {
         "type": "text",
         "text": "1.1.0"
-      }
+      },
+      "ordinal": 3
     }
   },
   {
@@ -527,7 +528,7 @@
       "type": "bot/mark-read",
       "commandId": "command-1",
       "botId": "default",
-      "upToCursor": "run-index:2026-09-05T00:00:00.000Z:run-1"
+      "upToCursor": "message-00000000000000000001"
     }
   },
   {
@@ -936,7 +937,8 @@
               "payload": {
                 "type": "text",
                 "text": "Done"
-              }
+              },
+              "ordinal": 0
             }
           ],
           "outcome": {
@@ -1304,5 +1306,10 @@
       "botId": "primary",
       "fromMessageId": "run-1:send:0"
     }
+  },
+  {
+    "name": "MessageCursor valid",
+    "schema": "MessageCursor",
+    "value": "message-00000000000000000001"
   }
 ]

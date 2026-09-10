@@ -10,7 +10,7 @@ import {
   shellTerminalRecordsV1,
   supersededTurnRecordsV1,
 } from "./terminal-records.js";
-import { SIDEBAR_PREVIEW_KEY, UNREAD_STATE_KEY } from "./unread.js";
+import { UNREAD_STATE_KEY } from "./unread.js";
 import { approvalKeyV1, decodeApprovalRecordV1 } from "./approvals.js";
 import { decodeRoutineInboxEntryV1 } from "@frockbot/app/routines/inbox";
 import {
@@ -49,7 +49,7 @@ function keysUnder(records: Record<string, unknown>, prefix: string): string[] {
 }
 
 describe("the settling transaction's records", () => {
-  test("a chat Turn that asked for approval writes unread and the decision, once each", async () => {
+  test("a chat Turn settlement records the approval without counting the Turn as unread", async () => {
     const durable = store();
 
     const records = await shellTerminalRecordsV1({
@@ -66,26 +66,11 @@ describe("the settling transaction's records", () => {
       read: durable.read,
     });
 
-    expect(Object.keys(records).sort()).toEqual([
-      approvalKeyV1("ap-1"),
-      SIDEBAR_PREVIEW_KEY,
-      UNREAD_STATE_KEY,
-    ]);
+    expect(Object.keys(records)).toEqual([approvalKeyV1("ap-1")]);
     expect(
       decodeApprovalRecordV1(records[approvalKeyV1("ap-1")]),
     ).toMatchObject({ decision: "pending", runId: "run-1", createdAt: NOW });
-    // One settlement, one instant: the unread record is stamped with the same
-    // `now` the approval is.
-    expect(records[UNREAD_STATE_KEY]).toMatchObject({
-      lastActivityCursor: CURSOR,
-      lastActivityAt: NOW,
-    });
-    expect(records[SIDEBAR_PREVIEW_KEY]).toEqual({
-      schemaVersion: 1,
-      text: "Please delete it",
-      at: NOW,
-      role: "user",
-    });
+    expect(records[UNREAD_STATE_KEY]).toBeUndefined();
   });
 
   test("one automation Turn contributes exactly one inbox entry and one wake", async () => {

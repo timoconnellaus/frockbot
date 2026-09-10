@@ -110,6 +110,7 @@ export interface ShellBotBackendHost extends ShellApplicationV1 {
     botId: string,
   ): Promise<void>;
   outboundFetch?: typeof fetch;
+  messagesCommitted?(): void;
   /** Supplied by the Durable Object; defaults to the kernel implementation. */
   createAuthority?: CreateBotDurableAuthority;
   /**
@@ -252,6 +253,13 @@ export class ShellBotStateV1 {
   readonly configurationActivities = new Map<string, ConfigurationActivityV1>();
   readonly subagentBinding: SubagentDurableBindingV1 | undefined;
   readonly outboundFetch: typeof fetch | undefined;
+  /**
+   * What the shell does when a user-visible message has been committed: drain
+   * the push outbox. The kernel calls it for every message a Turn's settlement
+   * writes; a message written outside a Turn — a Routine firing that broke —
+   * owes the same call, or its notification waits for the next alarm.
+   */
+  readonly messagesCommitted: () => void;
   readonly lifecycleAdmission: ShellBotBackendHost["assertLifecycleActive"];
   readonly invalidateComputerProjectionFile: ShellBotBackendHost["invalidateComputerProjectionFile"];
   /** This deployment's Computer host, handed in by the shell. */
@@ -281,6 +289,7 @@ export class ShellBotStateV1 {
     };
     this.lifecycleAdmission = host.assertLifecycleActive;
     this.outboundFetch = host.outboundFetch;
+    this.messagesCommitted = () => host.messagesCommitted?.();
     this.invalidateComputerProjectionFile =
       host.invalidateComputerProjectionFile;
     this.computerHost = host.computerHost;

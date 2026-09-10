@@ -36,6 +36,7 @@ class TranscriptView extends StatefulWidget {
   final VoidCallback? onOpenSettings;
   final void Function(TranscriptLine)? onMessageActions;
   final String? unreadFromMessageId;
+  final void Function(String?)? onReadLatest;
   final String storageKey;
 
   /// A Turn the reader asked to be taken to — a search hit. It is brought into
@@ -60,6 +61,7 @@ class TranscriptView extends StatefulWidget {
     this.onOpenSettings,
     this.onMessageActions,
     this.unreadFromMessageId,
+    this.onReadLatest,
     this.focusRunId,
     this.background,
   });
@@ -70,6 +72,55 @@ class TranscriptView extends StatefulWidget {
 
 class _TranscriptViewState extends State<TranscriptView> {
   final GlobalKey focusKey = GlobalKey();
+  final ScrollController scroll = ScrollController();
+  @override
+  void initState() {
+    super.initState();
+    scroll.addListener(_reportRead);
+  }
+
+  /// The lines the cached newest-send id was derived from. `_reportRead` runs
+  /// on every scroll frame, and ordering the whole thread again each time is a
+  /// sort per frame of a fling; the transcript only changes when the projection
+  /// hands down a new list.
+  List<TranscriptLine>? _latestSendSource;
+  String? _latestSendId;
+
+  String? _newestSendId(List<TranscriptLine> ordered) {
+    _latestSendSource = widget.lines;
+    _latestSendId = null;
+    for (final line in ordered) {
+      if (line.role == LineRole.assistant && line.id.contains(':send:')) {
+        _latestSendId = line.id;
+      }
+    }
+    return _latestSendId;
+  }
+
+  void _reportRead() {
+    if (!mounted) return;
+    final atLatest = scroll.hasClients && scroll.position.pixels <= 8;
+    final newest = identical(_latestSendSource, widget.lines)
+        ? _latestSendId
+        : _newestSendId(
+            orderTranscript(
+              widget.lines,
+              DateTime.now().toUtc().toIso8601String(),
+            ),
+          );
+    widget.onReadLatest?.call(
+      atLatest && newest != null && ModalRoute.of(context)?.isCurrent == true
+          ? newest
+          : null,
+    );
+  }
+
+  @override
+  void dispose() {
+    scroll.dispose();
+    super.dispose();
+  }
+
   String? focused;
 
   String? get pendingText => widget.pendingText;
@@ -85,11 +136,13 @@ class _TranscriptViewState extends State<TranscriptView> {
 
   @override
   Widget build(BuildContext context) {
+    WidgetsBinding.instance.addPostFrameCallback((_) => _reportRead());
     final now = DateTime.now();
     final ordered = orderTranscript(
       widget.lines,
       now.toUtc().toIso8601String(),
     );
+    _newestSendId(ordered);
     final drain = supersedeDrainState(ordered, now);
     final target = widget.focusRunId;
     var marked = false;
@@ -156,6 +209,7 @@ class _TranscriptViewState extends State<TranscriptView> {
       RefreshIndicator(
         onRefresh: onRefresh,
         child: ListView(
+          controller: scroll,
           // The thread starts at the latest row. Earlier pages extend the
           // far end, so prepending history keeps the viewport where it was.
           reverse: true,

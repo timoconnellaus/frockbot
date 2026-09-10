@@ -571,7 +571,7 @@ export function decodeRoutineRunEntryViewV1(
   }
   return {
     schemaVersion: 1,
-    entryId: routineText(candidate.entryId, 128, "Routine run entryId"),
+    entryId: routineText(candidate.entryId, 256, "Routine run entryId"),
     runId: routineText(candidate.runId, 256, "Routine run runId"),
     trigger,
     status,

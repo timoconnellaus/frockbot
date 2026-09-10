@@ -66,6 +66,10 @@ export interface NonSecretWorkerSettingV1 extends ProductionSecretV1 {
  */
 export const REQUIRED_PRODUCTION_SECRETS_V1: readonly ProductionSecretV1[] = [
   {
+    name: "FCM_SERVICE_ACCOUNT",
+    why: "Authorizes Firebase push delivery to registered Android devices.",
+  },
+  {
     name: "BETTER_AUTH_URL",
     why: "The deployment's own origin; every sign-in redirect is built from it.",
   },

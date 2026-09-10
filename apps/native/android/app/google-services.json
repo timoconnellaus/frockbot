@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1000912991305",
+    "project_id": "frock-bot",
+    "storage_bucket": "frock-bot.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1000912991305:android:b077f9b45facaa89b07b98",
+        "android_client_info": {
+          "package_name": "com.frockbot.mobile"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCmhTf4H5sLSfZPyTBaUtPa_8fYpzqW3lw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

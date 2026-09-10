@@ -6,6 +6,10 @@ import {
   decodeSessionEvent,
   type SessionEvent,
 } from "@frockbot/core/contracts";
+import {
+  optionalProjectedSendV1,
+  sentAutomationRunKeyV1,
+} from "@frockbot/app/notifications/storage-keys";
 import type { StoredRunStatus } from "./backend-contracts.js";
 import type { ShellBotStateV1 } from "./backend-state.js";
 import {
@@ -156,7 +160,11 @@ export async function listRuns(
   // A record nobody can decode has no trustworthy session id, and a
   // transcript that hid it would be back to silently losing the Turn. An
   // unknown session belongs to the conversation being read.
-  const inConversation = (run: { sessionId?: string }) =>
+  const inConversation = (run: {
+    sessionId?: string;
+    admission?: { turnType?: string };
+  }) =>
+    run.admission?.turnType === "automation" ||
     conversationId === undefined ||
     run.sessionId === undefined ||
     run.sessionId === conversationId;
@@ -224,16 +232,44 @@ export async function listRuns(
       const header = await state.authority.readRunHeaderForDisplay(
         candidate.runId,
       );
+      // An automation Turn is in the transcript only if it spoke, and the
+      // marker written beside its message is that fact as one keyed read. A
+      // Routine that fires every minute and says nothing is the ordinary case,
+      // and hydrating each silent journal to discard it was the scan's cost.
+      const marker =
+        header?.run.admission?.turnType === "automation"
+          ? await state.ctx.storage.get<unknown>(
+              sentAutomationRunKeyV1(candidate.runId),
+            )
+          : undefined;
+      const spoke =
+        header?.run.admission?.turnType !== "automation" ||
+        marker !== undefined;
       if (
         !header ||
-        !isVisibleRunV1(header.run) ||
+        !spoke ||
+        (header.run.admission?.turnType !== "automation" &&
+          !isVisibleRunV1(header.run)) ||
         !inConversation(header.run)
       ) {
         scanCursor = candidate.cursor;
         continue;
       }
       const stored = await state.authority.hydrateRunForDisplay(header);
-      const projected = projectClientRunOrDegradedV1(stored.run);
+      // The marker is the durable fact that this firing contributed a message.
+      // A firing that broke before it could say anything has no send event to
+      // derive that from, and its message is projected below.
+      if (!isVisibleRunV1(stored.run) && marker === undefined) {
+        scanCursor = candidate.cursor;
+        continue;
+      }
+      // The message the firing's journal could not hold is projected with the
+      // run rather than appended to it, so it is budgeted with everything else
+      // the page carries.
+      const projected = projectClientRunOrDegradedV1(
+        stored.run,
+        optionalProjectedSendV1(marker),
+      );
       const tentative = [
         ...selected.values(),
         { cursor: candidate.cursor, run: projected },

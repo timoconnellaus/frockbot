@@ -1,5 +1,8 @@
 import { env } from "cloudflare:test";
-import { decodeProtocol } from "@frockbot/core/protocol-schemas";
+import {
+  decodeProtocol,
+  MINIMUM_NATIVE_VERSION,
+} from "@frockbot/core/protocol-schemas";
 import { createNativeAuth, NATIVE_RETURN_ANDROID } from "../src/native-auth.ts";
 
 export async function nativeHeaders(userId: string) {
@@ -28,7 +31,9 @@ export async function nativeHeaders(userId: string) {
   const hello = {
     schemaVersion: 1,
     protocolVersion: 1,
-    nativeVersion: "1.1.0",
+    // The build the gateway currently accepts. Hard-coding a version made
+    // every native test refuse itself the moment the minimum moved.
+    nativeVersion: MINIMUM_NATIVE_VERSION,
     catalogs: [],
   };
   const verifier = "v".repeat(64);

@@ -243,18 +243,32 @@ const knownFailureCopy = <String>{
       : (notice: copy, retry: false);
 }
 
-List<SendPayloadLine> _sendsFrom(List<Object?> events) {
-  final sends = <SendPayloadLine>[];
+/// Each send with the ordinal the cloud names it by.
+///
+/// The ordinal counts the Turn's durable sends, and the projection drops old
+/// ones when a Turn outgrows the wire budget, so the position in this list is
+/// not the message's identity. A read the cloud can match has to carry the
+/// ordinal the cloud minted.
+List<({SendPayloadLine send, int ordinal})> _sendsFrom(List<Object?> events) {
+  final sends = <({SendPayloadLine send, int ordinal})>[];
   for (final event in events) {
     if (event is! Map || event['type'] != 'send/to-user') continue;
     final payload = event['payload'];
-    sends.add(
-      SendPayloadLine(
+    final ordinal = event['ordinal'];
+    // The ordinal is the message's durable identity, and the wire gate makes
+    // every server that can reach this build emit it. A send without one is
+    // unidentifiable — it cannot be read, marked unread, or matched to a
+    // notification — so it is dropped rather than given a position that shifts
+    // under it the moment the page it sits on changes.
+    if (ordinal is! int || ordinal < 0) continue;
+    sends.add((
+      send: SendPayloadLine(
         payload is Map && payload['type'] is String
             ? Map<String, Object?>.from(payload)
             : null,
       ),
-    );
+      ordinal: ordinal,
+    ));
   }
   return sends;
 }
@@ -328,28 +342,34 @@ List<TranscriptLine> projectRuns(List<Map<String, dynamic>> runs) {
     final status = run['status'] as String?;
     final queued = run['queued'] == true;
     final admittedAt = run['admittedAt'] as String?;
-    lines.add(
-      TranscriptLine(
-        id: '$runId:user',
-        runId: runId,
-        role: LineRole.user,
-        text: (run['input'] as String?) ?? '',
-        at: admittedAt,
-        status: LineStatus.completed,
-        pending: status == 'running' && queued,
-      ),
-    );
+    final input = (run['input'] as String?) ?? '';
+    // A Routine's Turn is projected with no input at all: nobody typed it. A
+    // chat Turn cannot be admitted empty, so an empty input means there is no
+    // person's message to draw above the Bot's — not an empty one.
+    if (input.isNotEmpty) {
+      lines.add(
+        TranscriptLine(
+          id: '$runId:user',
+          runId: runId,
+          role: LineRole.user,
+          text: input,
+          at: admittedAt,
+          status: LineStatus.completed,
+          pending: status == 'running' && queued,
+        ),
+      );
+    }
     final sends = _sendsFrom(events);
     for (var index = 0; index < sends.length; index++) {
       lines.add(
         TranscriptLine(
-          id: '$runId:send:$index',
+          id: '$runId:send:${sends[index].ordinal}',
           runId: runId,
           role: LineRole.assistant,
           text: '',
           at: admittedAt,
           status: LineStatus.completed,
-          sends: [sends[index]],
+          sends: [sends[index].send],
         ),
       );
     }
@@ -357,6 +377,15 @@ List<TranscriptLine> projectRuns(List<Map<String, dynamic>> runs) {
     // Only explicit sends carry the Bot's voice; outcome text is private.
     const text = '';
     final outcome = run['outcome'] as Map?;
+    // Whether the outcome's words have already been said to the person. A
+    // firing that broke or was stopped before it could speak is told as an
+    // ordinary message, and the cloud projects that message onto the run and
+    // makes the outcome say the same words; drawing them again as a notice
+    // underneath would be the one event said twice.
+    final outcomeMessage = outcome?['message'];
+    final spoken =
+        outcomeMessage is String &&
+        sends.any((send) => send.send.payload?['text'] == outcomeMessage);
     switch (status) {
       case 'running':
         lines.add(
@@ -398,7 +427,7 @@ List<TranscriptLine> projectRuns(List<Map<String, dynamic>> runs) {
             text: text,
             at: admittedAt,
             status: LineStatus.aborted,
-            notice: 'You stopped this.',
+            notice: spoken ? null : 'You stopped this.',
             tools: tools,
           ),
         );
@@ -407,6 +436,13 @@ List<TranscriptLine> projectRuns(List<Map<String, dynamic>> runs) {
         // provider diagnostic and never crosses the wire at all. Reading a
         // field the wire does not carry made every failed Turn say the one
         // generic line, whatever had actually gone wrong.
+        //
+        // Unless the person has already been sent it. A firing that broke
+        // before it could speak is told as an ordinary message, and the cloud
+        // projects that message onto the run and makes the outcome say the
+        // same words; drawing them again underneath would be the one event
+        // said twice. The row stays — it is where the Turn's tools hang, and
+        // the run is still `failed` — it just says nothing of its own.
         final failure = failureNotice(outcome?['message'] as String?);
         lines.add(
           TranscriptLine(
@@ -418,8 +454,8 @@ List<TranscriptLine> projectRuns(List<Map<String, dynamic>> runs) {
             text: text,
             at: admittedAt,
             status: LineStatus.error,
-            notice: failure.notice,
-            retry: failure.retry ? LineRetry.resendTurn : null,
+            notice: spoken ? null : failure.notice,
+            retry: !spoken && failure.retry ? LineRetry.resendTurn : null,
             tools: tools,
           ),
         );

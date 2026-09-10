@@ -28,22 +28,21 @@ import {
 const BOT = "alpha";
 const OTHER = "beta";
 
-/** A cursor in the exact shape the Bot's admission index writes. */
-function cursor(minute: number): string {
-  const at = new Date(Date.UTC(2026, 8, 4, 0, minute, 0)).toISOString();
-  return `run-index:${at}:run-${minute}`;
+/** A cursor in the exact shape the Bot's message index writes. */
+function cursor(sequence: number): string {
+  return `message-${String(sequence).padStart(20, "0")}`;
 }
 
 function at(minute: number): string {
   return new Date(Date.UTC(2026, 8, 4, 0, minute, 0)).toISOString();
 }
 
-/** Newest-first, exactly as the Bot's run index returns it. */
+/** Newest-first, exactly as the Bot's message index returns it. */
 function index(minutes: readonly number[]): string[] {
   return [...minutes].sort((a, b) => b - a).map(cursor);
 }
 
-/** One settled chat Turn landing on the Bot's durable unread record. */
+/** One committed user-visible message landing on the Bot's unread record. */
 function settle(state: UnreadStateV1, minute: number): UnreadStateV1 {
   return advanceUnreadActivityV1(state, {
     cursor: cursor(minute),

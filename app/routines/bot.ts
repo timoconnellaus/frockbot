@@ -40,14 +40,21 @@ import {
   type RoutineTerminalRecordsV1,
 } from "@frockbot/app/routines/inbox-store";
 import { decodeRoutineRecordV1 } from "@frockbot/app/routines/records";
-import { routineKeyV1 } from "@frockbot/app/routines/storage-keys";
+import {
+  routineFailureMessageKeyV1,
+  routineKeyV1,
+} from "@frockbot/app/routines/storage-keys";
+import {
+  messageIdV1,
+  visibleMessageRecordsV1,
+} from "@frockbot/app/notifications/messages";
 import {
   ROUTINE_RUN_EVENT_MAX,
   type RoutineInboxEntryViewV1,
   type RoutineRunDetailViewV1,
 } from "@frockbot/app/routines/shared";
 import type { RoutineInboxEntryV1 } from "@frockbot/app/routines/inbox";
-import { routineFailureSentenceV1 } from "@frockbot/app/routines/inbox";
+import { routineFailureMessageV1 } from "@frockbot/app/routines/inbox";
 import { RoutineNotFoundError } from "@frockbot/app/routines/store";
 import type {
   RoutineCommandReceiptV1,
@@ -563,14 +570,48 @@ async function runOneFiring(
 }
 
 /**
+ * The name a message about a Routine calls it by.
+ *
+ * Falls back to the id when the record is gone or unreadable, for the same
+ * reason the scheduler's does: a message naming a Routine badly is worth more
+ * than one that names nothing, and a broken record must not cost the person
+ * the only thing telling them their automation has stopped.
+ */
+async function routineMessageNameV1(
+  state: ShellBotStateV1,
+  routineId: string,
+): Promise<string> {
+  const stored = await state.ctx.storage.get<unknown>(routineKeyV1(routineId));
+  if (stored === undefined) return routineId;
+  try {
+    return decodeRoutineRecordV1(stored).name;
+  } catch {
+    return routineId;
+  }
+}
+
+/**
  * Tell the person that a firing did not work.
  *
  * The scheduler has already written the durable completion-inbox entry in the
- * transaction that settled the firing; this is the delivery half — the same
- * seam a hand-off uses, so a Routine that breaks reaches the same place a
- * Routine that finishes does instead of only a `failed` row nobody opens.
- * `notifications.enabled` is honoured: it is the mute on updates, and a broken
- * Routine is an update, not a decision the Bot is waiting on.
+ * transaction that settled the firing; this is the delivery half. It is an
+ * ordinary message: a Routine's result, an approval and a reply are one kind of
+ * thing, and a Routine that breaks is told through the same index, the same
+ * unread cursor and the same push outbox rather than through a directory entry
+ * nothing on the device reads. `notifications.enabled` is the mute on
+ * *alerting* only — a muted Bot still counts the failure as unread, and nobody
+ * is woken for it.
+ *
+ * The message is one a person can actually read. It takes the next send
+ * ordinal on the firing's own run — past whatever the Turn had already said
+ * before it broke, so no two messages of that run share an id — and the run
+ * carries it into the transcript, where opening the conversation clears the
+ * badge it raised. A firing refused before admission recorded no run at all,
+ * and a message needs one to belong to, so the terminal record admission did
+ * not write is written first: the failure is then the same message with the
+ * same badge, read the same way, rather than a second kind of thing.
+ *
+ * The firing keys the receipt, so a firing settled twice is one message.
  */
 async function notifyFailedFiring(
   state: ShellBotStateV1,
@@ -580,19 +621,64 @@ async function notifyFailedFiring(
 ): Promise<void> {
   if (outcome.status === "ok") return;
   const settings = await readBotSettingsV1(state, identity);
-  if (!settings.notifications.enabled) return;
-  await state.authority.recordNotification({
-    // The same id shape the completion path uses, so one firing is one intent
-    // however many times the alarm retries it.
-    notificationId: notificationIdV1("routine-failed", fire.fireId),
-    runId: fire.fireId,
-    createdAt: new Date().toISOString(),
-    title: `${settings.profile.name} could not run a Routine`,
-    // The same sentence the inbox entry carries. A notification is the one
-    // surface a person reads without asking for it, so it is the last place a
-    // kernel invariant belongs.
-    body: routineFailureSentenceV1(outcome.summary).slice(0, 240),
+  const receiptKey = routineFailureMessageKeyV1(fire.fireId);
+  const createdAt = state.now().toISOString();
+  const run =
+    (await state.authority.readStoredRun(fire.fireId)) ??
+    (await state.authority.recordUnadmittedFailure({
+      command: routineTurnCommandV1(identity, fire, createdAt),
+      failure: outcome.summary ?? "the firing recorded no run",
+      snapshot: settings,
+    }));
+  const body = routineFailureMessageV1({
+    routineName: await routineMessageNameV1(state, fire.routineId),
+    cancelled: outcome.status === "cancelled",
+    ...(run?.failure === undefined
+      ? outcome.summary === undefined
+        ? {}
+        : { failure: outcome.summary }
+      : { failure: run.failure }),
+    ...(run?.events === undefined ? {} : { events: run.events }),
+  }).slice(0, 240);
+  const ordinal =
+    run?.events.filter((event) => event.type === "send/to-user").length ?? 0;
+  let committed = false;
+  await state.ctx.storage.transaction(async (transaction) => {
+    if (await transaction.get(receiptKey)) return;
+    const records = await visibleMessageRecordsV1({
+      settings,
+      read: (key) => transaction.get(key),
+      messages: [
+        {
+          messageId: messageIdV1(fire.fireId, ordinal),
+          runId: fire.fireId,
+          createdAt,
+          // Names the Routine and says why in the product's own words. A
+          // message is the one surface a person reads without asking for it,
+          // so it is the last place a kernel diagnostic belongs.
+          body,
+          automation: true,
+          projectedSendOrdinal: ordinal,
+        },
+      ],
+    });
+    for (const [key, value] of Object.entries(records)) {
+      await transaction.put(key, value);
+    }
+    await transaction.put(receiptKey, {
+      schemaVersion: 1,
+      // The directory id the failure used to be filed under, kept so the
+      // internal hand-off between the settling transaction and this one is
+      // still one identity per firing.
+      notificationId: notificationIdV1("routine-failed", fire.fireId),
+      at: createdAt,
+    });
+    committed = true;
   });
+  // The message is written here rather than through the Turn's own settlement,
+  // so the drain that a committed message wakes is asked for here too: a
+  // broken Routine reaches the device now, not on whatever alarm comes next.
+  if (committed) state.messagesCommitted();
 }
 
 /** Every Routine this Bot holds. Bot-scoped: the caller proved membership. */

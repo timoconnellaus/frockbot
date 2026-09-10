@@ -9,7 +9,9 @@ The current vertical slice includes:
 - a durable User-owned Bot directory with Bot-owned settings, sessions, and composable sheep identities;
 - account-wide Package enablement and User-owned Connections;
 - provider-neutral durable User settings independent of external integrations;
-- streamed text, journaled tool calls, durable recovery, and lifecycle cleanup.
+- streamed text, journaled tool calls, durable recovery, and lifecycle cleanup;
+- message-cursor unread state and Android push notifications, described in
+  [`docs/notifications.md`](docs/notifications.md).
 
 See [`docs/architecture.md`](docs/architecture.md).
 
@@ -186,6 +188,7 @@ Configure these GitHub `staging` environment values. They are the production set
 | Secret   | `CREDENTIAL_KEYRING`    | Versioned AES-GCM keyring; generate a fresh one, never production's             |
 | Secret   | `ROUTINE_HOOK_SECRET`   | HMAC secret for Routine webhook keys; generate it                               |
 | Secret   | `MACHINE_TOKEN_SECRET`  | HMAC secret for machine tokens and pairing codes; generate it                   |
+| Secret   | `FCM_SERVICE_ACCOUNT`   | Firebase service-account JSON authorizing Android push delivery                 |
 
 The three generated secrets are `openssl rand -hex 32`, and `CREDENTIAL_KEYRING` is the same JSON keyring `scripts/setup-production.sh` builds. `COMPUTER_HOST_TOKEN` is the exception that must be copied from production rather than generated, because the host it authenticates against is production's.
 
@@ -214,21 +217,22 @@ The same Wrangler file declares Cloudflare's `AI` binding for production and dev
 
 Configure these GitHub `production` environment values:
 
-| Type     | Name                        | Purpose                                                                                 |
-| -------- | --------------------------- | --------------------------------------------------------------------------------------- |
-| Secret   | `CLOUDFLARE_API_TOKEN`      | Cloudflare token permitted to edit Workers, D1, and R2 for the target account           |
-| Secret   | `CLOUDFLARE_ACCOUNT_ID`     | Cloudflare account containing the production resources                                  |
-| Variable | `CLOUDFLARE_D1_DATABASE_ID` | Immutable ID of `frockbot-auth`                                                         |
-| Variable | `BETTER_AUTH_URL`           | Set to `https://bot.frockbot.com`                                                       |
-| Secret   | `BETTER_AUTH_SECRET`        | Better Auth secret with at least 32 random characters                                   |
-| Secret   | `GOOGLE_CLIENT_ID`          | Google Web application OAuth client ID                                                  |
-| Secret   | `GOOGLE_CLIENT_SECRET`      | Google Web application OAuth client secret                                              |
-| Secret   | `FROCKBOT_ADMIN_EMAILS`     | Comma-separated owner emails allowed to administer deployment policy (optional; warns)  |
-| Secret   | `SPRITES_TOKEN`             | Fly Sprites token used only by the backend Computer provider                            |
-| Secret   | `COMPUTER_HOST_TOKEN`       | Shared secret the app Worker presents to the Computer host; generate it                 |
-| Secret   | `CREDENTIAL_KEYRING`        | Versioned AES-GCM keyring for per-User Connection credentials                           |
-| Secret   | `ROUTINE_HOOK_SECRET`       | HMAC secret every Routine webhook key is signed with; generate it                       |
-| Secret   | `MACHINE_TOKEN_SECRET`      | HMAC secret every registered-machine token and pairing code is signed with; generate it |
+| Type     | Name                        | Purpose                                                                                                               |
+| -------- | --------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| Secret   | `CLOUDFLARE_API_TOKEN`      | Cloudflare token permitted to edit Workers, D1, and R2 for the target account                                         |
+| Secret   | `CLOUDFLARE_ACCOUNT_ID`     | Cloudflare account containing the production resources                                                                |
+| Variable | `CLOUDFLARE_D1_DATABASE_ID` | Immutable ID of `frockbot-auth`                                                                                       |
+| Variable | `BETTER_AUTH_URL`           | Set to `https://bot.frockbot.com`                                                                                     |
+| Secret   | `BETTER_AUTH_SECRET`        | Better Auth secret with at least 32 random characters                                                                 |
+| Secret   | `GOOGLE_CLIENT_ID`          | Google Web application OAuth client ID                                                                                |
+| Secret   | `GOOGLE_CLIENT_SECRET`      | Google Web application OAuth client secret                                                                            |
+| Secret   | `FROCKBOT_ADMIN_EMAILS`     | Comma-separated owner emails allowed to administer deployment policy (optional; warns)                                |
+| Secret   | `SPRITES_TOKEN`             | Fly Sprites token used only by the backend Computer provider                                                          |
+| Secret   | `COMPUTER_HOST_TOKEN`       | Shared secret the app Worker presents to the Computer host; generate it                                               |
+| Secret   | `CREDENTIAL_KEYRING`        | Versioned AES-GCM keyring for per-User Connection credentials                                                         |
+| Secret   | `ROUTINE_HOOK_SECRET`       | HMAC secret every Routine webhook key is signed with; generate it                                                     |
+| Secret   | `MACHINE_TOKEN_SECRET`      | HMAC secret every registered-machine token and pairing code is signed with; generate it                               |
+| Secret   | `FCM_SERVICE_ACCOUNT`       | Firebase service-account JSON authorizing Android push delivery; see [`docs/notifications.md`](docs/notifications.md) |
 
 New signups are closed by default. Set `FROCKBOT_ADMIN_EMAILS` to one or more comma-separated email addresses in the GitHub `production` environment; those identities can open **Admin** from the profile menu and change the durable signup policy. The allowlist stays in the gateway and only an `isAdmin` boolean reaches the client. Existing Users continue to sign in while signups are closed.
 
@@ -263,7 +267,7 @@ app/              The product: `runtime.ts`, the Contribution tables, and one di
   machine/        Registered-machine enrollment and pairing
   machine-messages/ Message delivery to and from a User's registered machines
   memory/         Bot, User and Project Markdown memory over the Workspace store
-  notifications/  What a settled Turn tells the person who was not watching it
+  notifications/  User-visible messages, their unread cursors, and the push outbox
   routines/       Durable Routines, the alarm scheduler, and the webhook door
   search/         Per-User transcript index, search route, and overlay
   settings/       Bot, Package, and User settings surfaces
@@ -311,6 +315,7 @@ providers/
 docs/
   architecture.md   Current system shape
   grokbot-parity.md The GrokBot capabilities FrockBot must match
+  notifications.md  Messages, unread state and Android notifications
   plan.md           The current plan
 ```
 

@@ -23,13 +23,6 @@
  * One settlement also gets one `now`. Three producers each reading their own
  * clock would stamp one transaction with three different instants.
  */
-import {
-  advanceUnreadActivityV1,
-  optionalUnreadStateV1,
-  sidebarMessagePreviewForTurnV1,
-  SIDEBAR_PREVIEW_KEY,
-  UNREAD_STATE_KEY,
-} from "./unread.js";
 import { enqueuePendingBotInputV1 } from "@frockbot/app/routines/inbox-store";
 import type { PendingBotInputV1 } from "@frockbot/app/routines/inbox";
 import { approvalTerminalRecordsV1 } from "./approvals.js";
@@ -67,29 +60,6 @@ export interface ShellTerminalInputV1 {
  * never the badge. Only a chat Turn advances it; an automation Turn reaches
  * the User through its own inbox entry.
  */
-async function unreadRecordsV1(
-  input: ShellTerminalInputV1,
-): Promise<Record<string, unknown>> {
-  if ((input.run.admission?.turnType ?? "chat") !== "chat") return {};
-  const current = optionalUnreadStateV1(
-    await input.read<unknown>(UNREAD_STATE_KEY),
-  );
-  const next = advanceUnreadActivityV1(current, {
-    cursor: input.cursor,
-    at: input.now,
-  });
-  const preview = sidebarMessagePreviewForTurnV1(input.run, input.now);
-  return {
-    [UNREAD_STATE_KEY]: next,
-    // `advanceUnreadActivityV1` returns the current object for a replay or an
-    // older settlement. The preview follows that same monotonic decision, so
-    // recovery cannot replace a newer row with an older Turn.
-    ...(next === current || preview === undefined
-      ? {}
-      : { [SIDEBAR_PREVIEW_KEY]: preview }),
-  };
-}
-
 /**
  * The completion-inbox entry and pending wake an automation Turn contributes.
  * Nothing for a conversational one, so a chat Turn's settlement is
@@ -129,7 +99,6 @@ async function approvalRecordsV1(
 
 /** The producers, in the order they are composed. Each is called once. */
 const SHELL_TERMINAL_PRODUCERS_V1 = [
-  unreadRecordsV1,
   routineRecordsV1,
   approvalRecordsV1,
 ] as const;

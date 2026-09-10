@@ -19,6 +19,9 @@ spec = importlib.util.spec_from_file_location("updates", Path(__file__).with_nam
 updates = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(updates)
 
+# The release name is the app's, so the expectations follow the pubspec bump.
+BUILD_NAME = updates.build_name()
+
 
 class UpdatesTest(unittest.TestCase):
     def setUp(self):
@@ -45,12 +48,12 @@ class UpdatesTest(unittest.TestCase):
 
     def test_dev_package_is_rejected(self):
         with patch.object(updates, "build_tool", lambda name: Path(name)), \
-                patch.object(updates, "run", return_value="package: name='com.frockbot.mobile.dev' versionCode='60' versionName='1.1.0'"):
+                patch.object(updates, "run", return_value=f"package: name='com.frockbot.mobile.dev' versionCode='60' versionName='{BUILD_NAME}'"):
             with self.assertRaisesRegex(RuntimeError, "normal FrockBot"):
                 updates.inspect_apk(Path("dev.apk"))
 
     def test_different_signer_is_rejected(self):
-        outputs = ["package: name='com.frockbot.mobile' versionCode='60' versionName='1.1.0'",
+        outputs = [f"package: name='com.frockbot.mobile' versionCode='60' versionName='{BUILD_NAME}'",
                    "Signer #1 certificate SHA-256 digest: deadbeef"]
         with patch.object(updates, "build_tool", lambda name: Path(name)), \
                 patch.object(updates, "run", side_effect=outputs):
@@ -195,7 +198,7 @@ class ShorebirdHarness(unittest.TestCase):
         if args[:2] == ["openssl", "rsa"]:
             return self.private_der
         if args[1:3] == ["dump", "badging"]:
-            return f"package: name='com.frockbot.mobile' versionCode='{self.built}' versionName='1.1.0'"
+            return f"package: name='com.frockbot.mobile' versionCode='{self.built}' versionName='{BUILD_NAME}'"
         if args[1:2] == ["verify"]:
             return f"Signer #1 certificate SHA-256 digest: {self.signer}"
         raise AssertionError(f"unexpected command {args}")
@@ -226,12 +229,12 @@ class ReleaseTest(ShorebirdHarness):
         (args, kwargs), = self.shorebird()
         self.assertEqual(args, [
             str(self.cli), "release", "android", "--flutter-version=3.47.0", "--artifact=apk",
-            "--target-platform=android-arm64", "--build-name=1.1.0", f"--build-number={NOW}",
+            "--target-platform=android-arm64", f"--build-name={BUILD_NAME}", f"--build-number={NOW}",
             f"--public-key-path={self.public}"])
         self.assertEqual(kwargs["cwd"], updates.NATIVE)
         self.assertEqual(kwargs["env"]["FROCKBOT_ANDROID_VERSION_FLOOR"], "0")
         self.assertTrue(kwargs["check"])
-        self.assertEqual(record["releaseVersion"], f"1.1.0+{NOW}")
+        self.assertEqual(record["releaseVersion"], f"{BUILD_NAME}+{NOW}")
         self.assertEqual(record["appId"], APP_ID)
         self.assertEqual(record["shorebirdCli"], "1.6.120")
         self.assertEqual(record["signerSha256"], SIGNER)
@@ -302,7 +305,7 @@ class ReleaseTest(ShorebirdHarness):
 
     def test_a_pending_intent_without_identity_fails_with_a_reconcile_message(self):
         (self.state / "pending-release.json").write_text(json.dumps(
-            {"versionCode": NOW, "releaseVersion": f"1.1.0+{NOW}", "createdAt": "2026-01-01T00:00:00Z",
+            {"versionCode": NOW, "releaseVersion": f"{BUILD_NAME}+{NOW}", "createdAt": "2026-01-01T00:00:00Z",
              "gitHead": self.head, "workingTreeDirty": False}))
         with self.assertRaisesRegex(RuntimeError, "predates full release-identity recording"):
             updates.release()
@@ -321,9 +324,9 @@ class ReleaseTest(ShorebirdHarness):
             updates.release()
         self.assertEqual(captured["package"], "com.frockbot.mobile")
         self.assertEqual(captured["appId"], APP_ID)
-        self.assertEqual(captured["buildName"], "1.1.0")
+        self.assertEqual(captured["buildName"], BUILD_NAME)
         self.assertEqual(captured["buildNumber"], NOW)
-        self.assertEqual(captured["releaseVersion"], f"1.1.0+{NOW}")
+        self.assertEqual(captured["releaseVersion"], f"{BUILD_NAME}+{NOW}")
         self.assertEqual(captured["versionFloor"], 0)
         self.assertEqual(captured["shorebirdCli"], "1.6.120")
         self.assertEqual(captured["signerSha256"], SIGNER)
@@ -485,7 +488,7 @@ class PatchTest(ShorebirdHarness):
         record = updates.patch()
         (args, kwargs), = self.shorebird()
         self.assertEqual(args, [
-            str(self.cli), "patch", "android", f"--release-version=1.1.0+{NOW}", "--build-name=1.1.0",
+            str(self.cli), "patch", "android", f"--release-version={BUILD_NAME}+{NOW}", f"--build-name={BUILD_NAME}",
             f"--build-number={NOW}", "--track=staging", f"--private-key-path={self.key}",
             f"--public-key-path={self.public}", "--", "--target-platform=android-arm64"])
         self.assertEqual(kwargs["cwd"], updates.NATIVE)
@@ -497,7 +500,7 @@ class PatchTest(ShorebirdHarness):
         self.assertEqual(updates.latest()["versionCode"], NOW + 9)
 
     def test_patch_refuses_an_unresolved_release_before_calling_shorebird(self):
-        (self.state / "pending-release.json").write_text(json.dumps({"releaseVersion": f"1.1.0+{NOW}"}))
+        (self.state / "pending-release.json").write_text(json.dumps({"releaseVersion": f"{BUILD_NAME}+{NOW}"}))
         self.commands.clear()
         with self.assertRaisesRegex(RuntimeError, "Finish or reconcile it before uploading a patch"):
             updates.patch()

@@ -120,6 +120,12 @@ export interface BotDurableAuthorityHooks<Snapshot> {
   executeTurn(
     input: BotTurnExecutionInput<Snapshot>,
   ): Promise<BotTurnCompletion>;
+  eventRecords?(input: {
+    run: StoredRunV1<Snapshot>;
+    events: readonly SessionEvent[];
+    read<T>(key: string): Promise<T | undefined>;
+  }): Promise<Record<string, unknown>>;
+  eventsCommitted?(): void;
   /** Notification policy; `undefined` records no notification. */
   notification(
     snapshot: Snapshot,
@@ -187,6 +193,13 @@ export const SUPERSEDED_TURN_REASON_V1 = "superseded by a new user message";
 
 /** How many times a queued Turn retries the object before giving up. */
 const MAX_QUEUED_RUN_START_ATTEMPTS = 8;
+
+/**
+ * The Composition generation a run that was never admitted names. Admission is
+ * what pins a generation, so a record written in its place pinned none, and it
+ * says so rather than naming one it did not run on.
+ */
+const UNADMITTED_RUN_GENERATION_V1 = "unadmitted";
 
 /**
  * The failure a discarded Turn is settled with when recovery finds it.
@@ -786,6 +799,63 @@ export class BotDurableAuthority<Snapshot> {
       `${NOTIFICATION_PREFIX}${intent.notificationId}`,
       structuredClone(intent),
     );
+  }
+
+  /**
+   * The terminal record of a Turn that was refused before it was ever
+   * admitted.
+   *
+   * Admission is where a Turn becomes durable, so a command refused *by* it —
+   * a fenced run, a Composition that would not resolve — left nothing behind
+   * at all. For a person's message that is right: they are told the send
+   * failed and can send it again. For a Routine firing there is nobody to tell
+   * and nothing to retry, and the firing's own failure message needs a run to
+   * belong to, because a run is what the conversation is made of.
+   *
+   * It is an honest record, not a simulated Turn: no session events, no
+   * journal, no Composition pin, `failed` from the moment it is written. An
+   * existing record for the same id is left exactly as it is — this only ever
+   * fills the gap where admission wrote none.
+   */
+  async recordUnadmittedFailure(input: {
+    command: OwnedBotTurnCommand;
+    failure: string;
+    snapshot: Snapshot;
+  }): Promise<StoredRunV1<Snapshot> | undefined> {
+    const { command } = input;
+    const key = `${RUN_PREFIX}${command.runId}`;
+    return this.ctx.storage.transaction(async (transaction) => {
+      if ((await transaction.get<unknown>(key)) !== undefined) {
+        return this.codec.optional(await transaction.get<unknown>(key));
+      }
+      const run = this.codec.require({
+        runId: command.runId,
+        commandFingerprint: botTurnCommandFingerprintV1(command),
+        sessionId: command.sessionId,
+        acceptedAt: command.acceptedAt,
+        input: command.text,
+        events: [],
+        eventRange: { startSeq: 0, endSeq: 0 },
+        effectAdmissions: [],
+        status: "failed",
+        phase: "admitted",
+        failure: input.failure,
+        compositionGenerationId: UNADMITTED_RUN_GENERATION_V1,
+        configurationSnapshot: structuredClone(input.snapshot),
+        previousEventCount: 0,
+        ...storedRunAdmissionV1(
+          command.turnType,
+          command.origin,
+          command.subagentRole,
+          command.lane,
+        ),
+      } satisfies StoredRunV1<Snapshot>);
+      await transaction.put({
+        [key]: structuredClone(storedRunRecordV2(run)),
+        [runIndexKey(command.acceptedAt, command.runId)]: command.runId,
+      });
+      return run;
+    });
   }
 
   /**
@@ -1572,8 +1642,17 @@ export class BotDurableAuthority<Snapshot> {
         ]),
       } satisfies StoredRunV1<Snapshot>);
       await eventLog.append(run.sessionId, durableEvents);
+      const records = await this.hooks.eventRecords?.({
+        run: next,
+        events: durableEvents,
+        read: <T>(key: string) => transaction.get<T>(key),
+      });
+      if (records && Object.keys(records).length)
+        await transaction.put(records);
       await transaction.put(key, structuredClone(storedRunRecordV2(next)));
+      await this.refreshRecoveryAlarm(transaction);
     });
+    this.hooks.eventsCommitted?.();
   }
 
   /**

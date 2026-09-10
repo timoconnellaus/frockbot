@@ -13,6 +13,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../activity/controller.dart';
+import '../activity/push.dart';
 import '../activity/page.dart';
 import '../admin/page.dart';
 import '../applets/canvas.dart';
@@ -86,6 +87,14 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     widget.store,
     widget.userId,
   );
+  late final PushController push = PushController(
+    widget.api,
+    widget.store,
+    widget.userId,
+    activity,
+  );
+  String? clearManualForBot;
+  bool resumed = true;
   Timer? _activityTimer;
   List<wire.BotRegistration> bots = [];
   Map<String, SidebarProfile> profiles = {};
@@ -119,7 +128,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     activity.addListener(_repaint);
-    activity.addListener(_markWhatIsBeingRead);
     widget.botLinks.addListener(_followBotLink);
     // A lifecycle command nobody has an answer for is adopted here rather than
     // when the danger zone happens to be opened: it is the account's, and it
@@ -127,10 +135,38 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     unawaited(lifecycle.restore());
     unawaited(load());
     _startPolling();
+    unawaited(push.start());
   }
 
   void _repaint() {
     if (mounted) setState(() {});
+    unawaited(push.syncRead());
+  }
+
+  void _readLatest(String botId, String? messageId) {
+    if (!mounted) return;
+    final viewing =
+        resumed &&
+        push.focused &&
+        !navOpen &&
+        !panelOpen &&
+        openRun == null &&
+        ModalRoute.of(context)?.isCurrent == true;
+    final view = activity.unread[botId];
+    // Presence is only claimed for the message the cloud says is the latest and
+    // this device is actually showing. Claiming it for anything else asks the
+    // server to hold an alert back for a message nobody is looking at.
+    final showingLatest =
+        viewing && messageId != null && view?.lastMessageId == messageId;
+    push.reading(showingLatest ? botId : null);
+    if (!showingLatest ||
+        ((view?.count ?? 0) == 0 && view?.manuallyUnread != true) ||
+        (view?.manuallyUnread == true && clearManualForBot != botId)) {
+      return;
+    }
+    if (activity.loading || activity.saving || activity.pending) return;
+    clearManualForBot = null;
+    unawaited(activity.mark(botId, read: true));
   }
 
   void _startPolling() {
@@ -143,6 +179,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    resumed = state == AppLifecycleState.resumed;
+    push.lifecycle(resumed);
     _activityTimer?.cancel();
     _activityTimer = null;
     if (appIsAwayV1(state)) return;
@@ -247,6 +285,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     if (!mounted || saved == null) return;
     final bot = bots.where((bot) => bot.botId.value == saved).firstOrNull;
     if (bot == null) return;
+    clearManualForBot = bot.botId.value;
     setState(() => selected = bot);
     _adoptBotPanels(bot.botId.value);
   }
@@ -294,6 +333,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   }
 
   void _select(String botId) {
+    clearManualForBot = botId;
+    push.reading(null);
     final bot = bots.where((bot) => bot.botId.value == botId).firstOrNull;
     if (bot == null) return;
     // The switch is the person's; remembering it is bookkeeping and never
@@ -304,27 +345,12 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       openRun = null;
       panelOpen = false;
     });
-    _markWhatIsBeingRead();
     _adoptBotPanels(botId);
     unawaited(
       widget.store
           .write('selection.${widget.userId}', botId)
           .catchError((Object _) {}),
     );
-  }
-
-  /// A conversation on screen has been read.
-  ///
-  /// The badge counts what the person has not seen, so the Bot they are looking
-  /// at must never raise one: opening it clears what is there, and a reply that
-  /// arrives while it is open is read as it lands. Marking is idempotent and
-  /// declines when there is nothing to mark, so this is safe to call on every
-  /// selection and on every poll.
-  void _markWhatIsBeingRead() {
-    final botId = selected?.botId.value;
-    if (botId == null) return;
-    if (activity.unread[botId]?.lastActivityCursor == null) return;
-    unawaited(activity.mark(botId, read: true));
   }
 
   /// The Bot's own settings and its Routines are features in the `right-panel`
@@ -540,6 +566,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   }
 
   void _push(Widget page) {
+    push.reading(null);
     setState(() => navOpen = false);
     Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => page));
   }
@@ -913,8 +940,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                     ? () => setState(() => navOpen = !navOpen)
                     : null,
                 onSettings: () => _openPanel('bot-settings'),
-                computerRunning: computer?.available == true &&
-                    computer!.state.running,
+                computerRunning:
+                    computer?.available == true && computer!.state.running,
                 onComputer: computer?.available == true
                     ? () => _openPanel('computer')
                     : null,
@@ -1000,6 +1027,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                 onOpenRun: _openRun,
                 onOpenSettings: _openSettings,
                 onMessageActions: (line) => unawaited(_messageActions(line)),
+                onReadLatest: (messageId) =>
+                    _readLatest(bot.botId.value, messageId),
                 unreadFromMessageId:
                     activity.unread[bot.botId.value]?.unreadFromMessageId,
                 background: _background(bot.botId.value),
@@ -1237,7 +1266,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                         title: const Text('Sign out'),
                         onTap: () {
                           Navigator.of(context).pop();
-                          unawaited(widget.onSignOut());
+                          unawaited(
+                            push.logout().then((_) => widget.onSignOut()),
+                          );
                         },
                       ),
                     ),
@@ -1270,9 +1301,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     widget.botLinks.removeListener(_followBotLink);
     _activityTimer?.cancel();
     activity.removeListener(_repaint);
-    activity.removeListener(_markWhatIsBeingRead);
     activity.dispose();
     lifecycle.dispose();
+    push.dispose();
     botSettings?.dispose();
     routineInbox?.dispose();
     appletCanvas?.dispose();
