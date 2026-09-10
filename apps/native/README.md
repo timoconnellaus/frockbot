@@ -75,7 +75,9 @@ python3 scripts/native-update.py publish --apk <path>   # publish an already-bui
 
 ## macOS
 
-Build with `flutter build macos --release`. The app is configured for Apple team `Q444L76529`, bundle `com.frockbot.mobile`, the default protected Keychain group, and the exact associated return domain. A matching provisioning profile is required. The signed macOS release build was verified on Tim’s registered Mac with the matching Apple Development identity and provisioning profile. A `CODE_SIGNING_ALLOWED=NO` build plus ad-hoc local signing proves only renderer compilation/launch, never verified links or production credential protection. iOS is not a target in this slice.
+Run `bun run update:desktop` from the checkout being released. It checks the client protocol against the server compatibility range, builds the pinned version as a signed release, verifies the bundle identifier, version, build number, signature and Apple team, then safely replaces and opens `/Users/tim/Applications/FrockBot.app`. The previous bundle is restored if installation verification fails; credentials and app data live outside the bundle and are preserved. `--dry-run` checks source versions and prerequisites without building or installing.
+
+The app uses Apple team `Q444L76529`, bundle `com.frockbot.mobile`, the default protected Keychain group, and the exact associated return domain. A matching Apple Development identity and provisioning profile are required. Run the updater for native-client and minimum-supported-version changes. Android-only APK releases and Shorebird patches do not need a desktop rebuild. A `CODE_SIGNING_ALLOWED=NO` build plus ad-hoc local signing proves only renderer compilation/launch, never verified links or production credential protection. iOS is not a target in this slice.
 
 ## Web
 

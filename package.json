@@ -28,6 +28,7 @@
     "native:release": "python3 scripts/native-update.py release",
     "native:patch": "python3 scripts/native-update.py patch",
     "native:serve": "python3 scripts/native-update.py serve",
+    "update:desktop": "python3 scripts/native-desktop-update.py",
     "test:native-update": "python3 scripts/native-update-test.py",
     "dogfood:stop": "./scripts/dogfood/dev-stack.sh stop",
     "dev:cloudflare": "bun run --filter @frockbot/cloudflare dev",
