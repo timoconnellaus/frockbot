@@ -2229,7 +2229,7 @@
         "choices": {
           "type": "array",
           "minItems": 0,
-          "maxItems": 100,
+          "maxItems": 600,
           "items": {
             "$ref": "#/$defs/SettingChoice"
           }

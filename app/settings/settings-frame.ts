@@ -34,6 +34,30 @@ const IMAGE_MODEL_LABELS: Record<string, string> = {
     "Stable Diffusion XL Lightning",
 };
 
+const PROFILE_TIMEZONES_V1 = Object.freeze([
+  "UTC",
+  ...Intl.supportedValuesOf("timeZone").filter(
+    (timezone) => timezone !== "UTC",
+  ),
+]);
+
+function timezoneLabelV1(timezone: string): string {
+  return timezone
+    .split("/")
+    .map((part) => part.replaceAll("_", " "))
+    .join(" / ");
+}
+
+function timezoneChoicesV1(current: string): SettingChoice[] {
+  const timezones = PROFILE_TIMEZONES_V1.includes(current)
+    ? PROFILE_TIMEZONES_V1
+    : [...PROFILE_TIMEZONES_V1, current];
+  return timezones.map((timezone) => ({
+    label: timezoneLabelV1(timezone),
+    value: timezone,
+  }));
+}
+
 function field(
   definition: PackageSettingDefinition,
   value: unknown,
@@ -116,12 +140,12 @@ export function applicationSettingsFrame(
         {
           id: "timezone",
           label: "Time zone",
-          kind: "text",
+          kind: "select",
           value: userTimezoneV1(settings.profile),
           editable: true,
           required: true,
-          hint: "Your Routines use this IANA time zone, such as Australia/Sydney.",
-          maxLength: 64,
+          hint: "Your Routines use this time zone.",
+          choices: timezoneChoicesV1(userTimezoneV1(settings.profile)),
         },
       ],
     },

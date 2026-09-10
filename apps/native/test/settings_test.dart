@@ -43,6 +43,23 @@ Map<String, Object?> document({int revision = 1, Object? model}) => {
           {
             'type': 'field',
             'field': {
+              'id': 'j0.timezone',
+              'label': 'Time zone',
+              'kind': 'select',
+              'value': '"Australia/Sydney"',
+              'editable': true,
+              'required': true,
+              'hint': 'Your Routines use this time zone.',
+              'choices': [
+                {'label': 'UTC', 'value': '"UTC"'},
+                {'label': 'Australia / Sydney', 'value': '"Australia/Sydney"'},
+                {'label': 'Pacific / Auckland', 'value': '"Pacific/Auckland"'},
+              ],
+            },
+          },
+          {
+            'type': 'field',
+            'field': {
               'id': 'j0.account-model',
               'label': 'Model',
               'kind': 'select',
@@ -73,9 +90,10 @@ Map<String, Object?> document({int revision = 1, Object? model}) => {
         'properties': {
           'sectionId': {'type': 'string', 'maxLength': 256},
           'f0.name': {'type': 'string', 'maxLength': 100},
+          'j0.timezone': {'type': 'string', 'maxLength': 8000},
           'j0.account-model': {'type': 'string', 'maxLength': 8000},
         },
-        'required': ['sectionId', 'f0.name'],
+        'required': ['sectionId', 'f0.name', 'j0.timezone'],
         'additionalProperties': false,
       },
     },
@@ -108,6 +126,7 @@ void main() {
             'input': {
               'sectionId': 'profile',
               'f0.name': 'Timothy',
+              'j0.timezone': '"Pacific/Auckland"',
               'j0.account-model': '{"connectionId":"work"}',
             },
           },
@@ -120,6 +139,7 @@ void main() {
           'sectionId': 'profile',
           'values': {
             'name': 'Timothy',
+            'timezone': 'Pacific/Auckland',
             'account-model': {'connectionId': 'work'},
           },
         },
@@ -239,6 +259,7 @@ void main() {
         expect(find.text('Your profile'), findsOneWidget);
         expect(find.text('Personal details'), findsOneWidget);
         expect(find.text('Models'), findsNothing);
+        expect(find.text('Australia / Sydney'), findsOneWidget);
         await tester.enterText(find.byType(TextFormField).first, 'Timothy');
         await tester.tap(find.text('Save profile'));
         await tester.pumpAndSettle();
@@ -246,6 +267,7 @@ void main() {
         expect(commands.first['sectionId'], 'profile');
         expect(commands.first['values'], {
           'name': 'Timothy',
+          'timezone': 'Australia/Sydney',
           'account-model': null,
         });
         expect(commands.first['expectedRevision'], 1);
@@ -303,8 +325,44 @@ void main() {
     await tester.pumpAndSettle();
     expect(commands.single['values'], {
       'name': 'Tim',
+      'timezone': 'Australia/Sydney',
       'account-model': {'connectionId': 'work', 'providerModelId': 'llama3'},
     });
+  });
+
+  testWidgets('the profile time zone is a dropdown and its choice travels', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(390, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final store = MemoryStore();
+    final commands = <Map<String, Object?>>[];
+    final api = SettingsApi(store, (_, body) async {
+      if (body == null) return document();
+      final command = Map<String, Object?>.from(body as Map);
+      commands.add(command);
+      return {
+        'schemaVersion': 1,
+        'commandId': command['commandId'],
+        'revision': 2,
+        'status': 'applied',
+      };
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: FrockTheme.theme(Brightness.dark),
+        home: SettingsPage(api: api, store: store, userId: 'tim'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Australia / Sydney'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Pacific / Auckland').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Save profile'));
+    await tester.pumpAndSettle();
+    expect((commands.single['values'] as Map)['timezone'], 'Pacific/Auckland');
   });
 
   testWidgets(

@@ -22,4 +22,21 @@ void main() {
       });
     }
   }
+
+  test('a settings select carries the full bounded time-zone catalog', () {
+    Map<String, Object?> field(int count) => {
+      'id': 'timezone',
+      'label': 'Time zone',
+      'kind': 'select',
+      'value': 'UTC',
+      'editable': true,
+      'choices': [
+        for (var i = 0; i < count; i++)
+          {'label': 'Zone $i', 'value': 'Area/Zone_$i'},
+      ],
+    };
+
+    expect(isProtocolValue('SettingField', field(445)), isTrue);
+    expect(isProtocolValue('SettingField', field(601)), isFalse);
+  });
 }

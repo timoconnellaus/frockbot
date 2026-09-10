@@ -164,6 +164,15 @@ test("the same settings come back as a ViewDocument the renderer can save throug
     "SettingsFrame",
     await (await asUser(userId, "/api/settings/application")).json(),
   );
+  const timezone = frame.sections[0]!.fields.find(
+    (field) => field.id === "timezone",
+  )!;
+  expect(timezone).toMatchObject({
+    kind: "select",
+    value: "UTC",
+    required: true,
+  });
+  expect(timezone.choices!.length).toBeGreaterThan(400);
   const document = decodeProtocol(
     "ViewDocument",
     await (
@@ -177,6 +186,7 @@ test("the same settings come back as a ViewDocument the renderer can save throug
     "sectionId",
     "f0.name",
     "f0.email",
+    "j0.timezone",
   ]);
   // The action the renderer assembles is the command this route already takes.
   const receipt = decodeProtocol(
@@ -188,7 +198,7 @@ test("the same settings come back as a ViewDocument the renderer can save throug
         expectedRevision: document.revision,
         sectionId: "profile",
         ownerId: userId,
-        values: { name: "Rendered" },
+        values: { name: "Rendered", timezone: "Australia/Sydney" },
       })
     ).json(),
   );
@@ -200,4 +210,15 @@ test("the same settings come back as a ViewDocument the renderer can save throug
     ).json(),
   );
   expect(next.revision).toBe(document.revision + 1);
+  const root = next.root;
+  if (root.type !== "group") throw new Error("settings root must be a group");
+  const profile = root.children[0]!;
+  if (profile.type !== "group") throw new Error("profile must be a group");
+  const savedTimezone = profile.children.find(
+    (node) => node.type === "field" && node.field.id === "j0.timezone",
+  );
+  expect(savedTimezone).toMatchObject({
+    type: "field",
+    field: { value: '"Australia/Sydney"' },
+  });
 });

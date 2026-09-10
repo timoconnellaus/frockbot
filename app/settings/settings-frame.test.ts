@@ -315,16 +315,31 @@ test("resetting an Application setting omits the empty patch at the owner seam",
 test("Profile owns the timezone used by Routines", () => {
   const user = settings();
   user.profile.timezone = "Australia/Sydney";
-  expect(
-    applicationSettingsFrame("tim", user, [provider]).sections[0],
-  ).toMatchObject({
+  const profile = applicationSettingsFrame("tim", user, [provider])
+    .sections[0]!;
+  expect(profile).toMatchObject({
     id: "profile",
     fields: [
       { id: "name", value: "Tim" },
       { id: "email", value: "" },
-      { id: "timezone", value: "Australia/Sydney" },
+      {
+        id: "timezone",
+        kind: "select",
+        value: "Australia/Sydney",
+        required: true,
+        hint: "Your Routines use this time zone.",
+      },
     ],
   });
+  const timezone = profile.fields[2]!;
+  expect(timezone.choices!.length).toBeGreaterThan(400);
+  expect(timezone.choices).toContainEqual({
+    label: "Australia / Sydney",
+    value: "Australia/Sydney",
+  });
+  expect(new Set(timezone.choices!.map((choice) => choice.value)).size).toBe(
+    timezone.choices!.length,
+  );
   expect(
     applicationSettingsCommand({
       schemaVersion: 1,
@@ -340,5 +355,32 @@ test("Profile owns the timezone used by Routines", () => {
   ).toMatchObject({
     type: "user/update-profile",
     profile: { name: "Tim", timezone: "Pacific/Auckland" },
+  });
+  expect(() =>
+    applicationSettingsCommand({
+      schemaVersion: 1,
+      ownerId: "tim",
+      commandId: "save-invalid-profile",
+      expectedRevision: 8,
+      sectionId: "profile",
+      values: { name: "Tim", timezone: "Sydney-ish" },
+    }),
+  ).toThrow("profile.timezone is not an IANA time zone");
+});
+
+test("Profile defaults to UTC and keeps a valid stored alias selectable", () => {
+  const user = settings();
+  let timezone = applicationSettingsFrame("tim", user, [provider]).sections[0]!
+    .fields[2]!;
+  expect(timezone.value).toBe("UTC");
+  expect(timezone.choices![0]).toEqual({ label: "UTC", value: "UTC" });
+
+  user.profile.timezone = "US/Eastern";
+  timezone = applicationSettingsFrame("tim", user, [provider]).sections[0]!
+    .fields[2]!;
+  expect(timezone.value).toBe("US/Eastern");
+  expect(timezone.choices).toContainEqual({
+    label: "US / Eastern",
+    value: "US/Eastern",
   });
 });
