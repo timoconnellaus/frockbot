@@ -144,6 +144,37 @@ function queued(value: unknown): QueuedFiringV1 | undefined {
 }
 
 /**
+ * The clock as it was written, or `undefined` when nothing can be read of it.
+ *
+ * A clock written before the account owned the zone names none. It is adopted
+ * under the account's zone rather than discarded: the occurrence it already
+ * owes is still the right one, where discarding it would re-derive a due time
+ * from an anchor in the past and fire every Routine in the deployment at once.
+ * A clock that cannot be read at all is absent, never a throw — `#clocks` is
+ * reached from every alarm refresh and every Turn settlement.
+ */
+function storedRoutineClockV1(
+  persisted: unknown,
+  timezone: string,
+): RoutineScheduleStateV1 | undefined {
+  if (persisted === undefined) return undefined;
+  const zoneless =
+    persisted !== null &&
+    typeof persisted === "object" &&
+    !Array.isArray(persisted) &&
+    (persisted as Record<string, unknown>).timezone === undefined;
+  try {
+    return decodeRoutineScheduleStateV1(
+      zoneless
+        ? { ...(persisted as Record<string, unknown>), timezone }
+        : persisted,
+    );
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * A Routine's clock, computed if it has never been written, if the Routine's
  * timing has been rewritten since it was, or if the account zone it was read
  * under has moved.
@@ -516,21 +547,34 @@ export class RoutineScheduler {
         continue;
       }
       if (!record.enabled || record.schedule === undefined) continue;
-      const normalized = normalizeRoutineScheduleV1(record.schedule, timezone);
-      const persisted = await reads.get<unknown>(
-        routineScheduleKeyV1(record.routineId),
+      let normalized: NormalizedScheduleV1;
+      try {
+        normalized = normalizeRoutineScheduleV1(record.schedule, timezone);
+      } catch {
+        // A schedule stored under a syntax this deploy no longer understands —
+        // GrokBot's retired `CRON_TZ=` prefix, say — costs that one Routine its
+        // firing, for the same reason an unreadable record does: it must never
+        // cost the object its alarm.
+        continue;
+      }
+      const persisted = storedRoutineClockV1(
+        await reads.get<unknown>(routineScheduleKeyV1(record.routineId)),
+        timezone,
       );
-      clocks.push({
+      const state = routineScheduleStateV1(
         record,
-        state: routineScheduleStateV1(
-          record,
-          persisted === undefined
-            ? undefined
-            : decodeRoutineScheduleStateV1(persisted),
-          normalized,
-          this.#now(),
-        ),
-      });
+        persisted,
+        normalized,
+        this.#now(),
+      );
+      // A clock rebuilt against a clock that was already written is written
+      // back here. Rebuilding for a zone move reads `now`, so leaving it in
+      // memory would recompute a later `dueAt` on every evaluation and the
+      // Routine would never come due at all.
+      if (persisted !== undefined && state !== persisted) {
+        await reads.put(routineScheduleKeyV1(record.routineId), state);
+      }
+      clocks.push({ record, state });
     }
     return clocks;
   }

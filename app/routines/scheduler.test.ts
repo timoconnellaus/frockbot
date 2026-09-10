@@ -232,6 +232,101 @@ describe("RoutineScheduler deadlines", () => {
     }, "Australia/Sydney");
     expect(fired).toEqual([]);
   });
+
+  test("a zone change persists a clock the next alarm can actually claim", async () => {
+    const { storage, time, scheduler, store, create } = harness({
+      start: "2026-01-01T09:00:30.000Z",
+      schedule: "0 9 * * *",
+    });
+    await store.execute(create, USER, "UTC");
+    await scheduler.defer(storage, "UTC");
+
+    expect(await scheduler.deadlines(storage, "Australia/Sydney")).toEqual([
+      Date.parse("2026-01-01T22:00:00.000Z"),
+    ]);
+    // The rebuild reads the current moment, so it is written down. Left in
+    // memory it would be recomputed from a later "now" on every evaluation and
+    // the Routine would be permanently one occurrence away from firing.
+    expect(await state(storage)).toMatchObject({
+      timezone: "Australia/Sydney",
+      dueAt: Date.parse("2026-01-01T22:00:00.000Z"),
+    });
+
+    time.set("2026-01-01T22:00:00.000Z");
+    const fired: RoutineFireV1[] = [];
+    await scheduler.settle(async (fire) => {
+      fired.push(fire);
+      return { status: "ok", summary: "done" };
+    }, "Australia/Sydney");
+    expect(fired).toHaveLength(1);
+    expect(fired[0]).toMatchObject({
+      trigger: "cron",
+      dueAt: Date.parse("2026-01-01T22:00:00.000Z"),
+    });
+  });
+
+  test("a clock written before the account owned the zone keeps its debt", async () => {
+    const { storage, time, scheduler, store, create } = harness({
+      start: "2026-01-01T00:00:00.000Z",
+      schedule: "0 9 * * *",
+    });
+    await store.execute(create, USER, "UTC");
+    // The shape the previous release wrote: no `timezone`, because the zone
+    // was the Routine's own field.
+    await storage.put(routineScheduleKeyV1("brief"), {
+      schemaVersion: 1,
+      routineId: "brief",
+      anchor: "2026-01-01T00:00:00.000Z",
+      dueAt: Date.parse("2026-01-05T09:00:00.000Z"),
+    });
+
+    expect(await scheduler.deadlines(storage, "UTC")).toEqual([
+      Date.parse("2026-01-05T09:00:00.000Z"),
+    ]);
+    expect(await drain(scheduler)).toEqual([]);
+
+    time.set("2026-01-05T09:00:00.000Z");
+    const fired = await drain(scheduler);
+    expect(fired).toHaveLength(1);
+    expect(fired[0]).toMatchObject({
+      dueAt: Date.parse("2026-01-05T09:00:00.000Z"),
+    });
+  });
+
+  test("a clock or a schedule this deploy cannot read costs one Routine, not the alarm", async () => {
+    const { storage, time, scheduler, store, create } = harness({
+      start: "2026-01-01T00:00:00.000Z",
+      schedule: "0 9 * * *",
+    });
+    await store.execute(create, USER, "UTC");
+    await store.execute(
+      { ...create, commandId: "cmd-create-2", routineId: "digest" },
+      USER,
+      "UTC",
+    );
+
+    // A schedule stored under the retired `CRON_TZ=` prefix, and a clock
+    // written by a deploy this one cannot read back.
+    const stored = await storage.get<Record<string, unknown>>(
+      routineKeyV1("brief"),
+    );
+    await storage.put(routineKeyV1("brief"), {
+      ...stored,
+      schedule: "CRON_TZ=Australia/Sydney 0 9 * * *",
+    });
+    await storage.put(routineScheduleKeyV1("digest"), { schemaVersion: 9 });
+
+    // The unreadable Routine contributes no deadline; the healthy one still
+    // arms the alarm and still fires.
+    expect(await scheduler.deadlines(storage, "UTC")).toEqual([
+      Date.parse("2026-01-01T09:00:00.000Z"),
+    ]);
+
+    time.set("2026-01-01T09:00:00.000Z");
+    const fired = await drain(scheduler);
+    expect(fired).toHaveLength(1);
+    expect(fired[0]).toMatchObject({ routineId: "digest" });
+  });
 });
 
 describe("RoutineScheduler settle", () => {
