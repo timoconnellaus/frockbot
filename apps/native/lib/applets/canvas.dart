@@ -90,7 +90,7 @@ class AppletCanvasController extends ChangeNotifier {
     }
     var read = false;
     try {
-      final listed = await applets.list();
+      var listed = await applets.list();
       if (epoch != _epoch) return;
       directory = listed;
       directoryFailure = null;
@@ -101,6 +101,15 @@ class AppletCanvasController extends ChangeNotifier {
       // is about the focused Applet, and fails as one.
       final focus = await applets.focus(botId);
       if (epoch != _epoch) return;
+      if (focus != null && !listed.any((entry) => entry.appletId == focus)) {
+        // The listing was read before the focus, so an Applet the Turn created
+        // and focused in between cannot be in it. The route already clears a
+        // focus its own directory read no longer lists, so a focus this listing
+        // has never heard of is a stale listing rather than a stale focus.
+        listed = await applets.list();
+        if (epoch != _epoch) return;
+        directory = listed;
+      }
       focusedId = listed.any((entry) => entry.appletId == focus) ? focus : null;
       failure = null;
       _attempt = 0;

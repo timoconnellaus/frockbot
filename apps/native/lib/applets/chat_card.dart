@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 
 import '../client/transport.dart';
 import 'canvas.dart';
@@ -30,6 +31,9 @@ class _AppletChatCardState extends State<AppletChatCard>
   String? error;
   Timer? refresh;
   int epoch = 0;
+  bool missedWhileHidden = false;
+  bool checking = false;
+  ScrollPosition? scrolling;
 
   @override
   void didChangeDependencies() {
@@ -41,8 +45,53 @@ class _AppletChatCardState extends State<AppletChatCard>
       api = AppletsApi(transport);
       load();
       refresh?.cancel();
-      refresh = Timer.periodic(const Duration(seconds: 30), (_) => load());
+      refresh = Timer.periodic(const Duration(seconds: 30), (_) => _tick());
     }
+    final position = Scrollable.maybeOf(context)?.position;
+    if (position != scrolling) {
+      scrolling?.removeListener(_scrolled);
+      scrolling = position;
+      position?.addListener(_scrolled);
+    }
+  }
+
+  /// Being kept alive is not a reason to keep reading. A card the User has
+  /// scrolled past holds its frame and its interaction, but a hidden frame
+  /// has nothing to show and nobody waiting on it, so the refresh waits with
+  /// it and the card catches up the moment it is on screen again.
+  void _tick() {
+    if (!hidden) {
+      load();
+      return;
+    }
+    missedWhileHidden = true;
+  }
+
+  /// A kept-alive child is held outside the sliver's laid-out list, which is
+  /// exactly what the sliver records on its parent data.
+  bool get hidden {
+    RenderObject? node = context.findRenderObject();
+    while (node != null) {
+      final data = node.parentData;
+      if (data is SliverMultiBoxAdaptorParentData) return data.keptAlive;
+      node = node.parent;
+    }
+    return false;
+  }
+
+  /// The scroll that hid the card is the one that brings it back, so it is
+  /// where the card looks. Whether it is hidden is settled by that frame's
+  /// layout rather than by the offset the notification carries, so the answer
+  /// is read once the frame it belongs to is done.
+  void _scrolled() {
+    if (!missedWhileHidden || checking) return;
+    checking = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      checking = false;
+      if (!mounted || !missedWhileHidden || hidden) return;
+      missedWhileHidden = false;
+      load();
+    });
   }
 
   @override
@@ -163,6 +212,7 @@ class _AppletChatCardState extends State<AppletChatCard>
   void dispose() {
     epoch++;
     refresh?.cancel();
+    scrolling?.removeListener(_scrolled);
     super.dispose();
   }
 }

@@ -5,7 +5,9 @@ import 'package:frockbot_native/applets/chat_card.dart';
 import 'package:frockbot_native/applets/picker.dart';
 import 'package:frockbot_native/client/transport.dart';
 
-import 'applets_test.dart' show applet;
+import 'package:frockbot_native/shell/transcript.dart';
+
+import 'applets_test.dart' show applet, sourceView;
 import 'settings_test.dart' show SettingsApi;
 import 'widget_test.dart' show MemoryStore;
 
@@ -392,6 +394,220 @@ void main() {
     expect(find.text('Couldn\u2019t load Applets \u00b7 Retry'), findsNothing);
     expect(find.text('No Applets yet. Ask a Bot to build one.'), findsNothing);
     await tester.pumpWidget(const SizedBox());
+    controller.dispose();
+  });
+
+  testWidgets(
+    'an off-screen card stops refreshing and catches up when it returns',
+    (tester) async {
+      var reads = 0;
+      final api = SettingsApi(MemoryStore(), (path, body) async {
+        if (path == '/api/applets') {
+          reads++;
+          return {
+            'schemaVersion': 1,
+            'applets': [applet(generationId: 'g1').toJson()],
+          };
+        }
+        if (path.endsWith('/ui')) {
+          return {
+            'uiUrl': 'https://ui.example/applet.html',
+            'generationId': 'g1',
+          };
+        }
+        if (path.endsWith('/token')) {
+          return {
+            'token': 'viewer-token',
+            'expiresAt': '2027-01-01T00:00:00.000Z',
+            'socketUrl':
+                'wss://bot.frockbot.com/api/applets/todo.applet/socket',
+          };
+        }
+        throw StateError(path);
+      });
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: AppletChatScope(
+              api: api,
+              child: ListView(
+                children: const [
+                  AppletChatCard(appletId: 'todo.applet'),
+                  SizedBox(height: 4000, child: Text('below')),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(reads, 1);
+      // On screen, the card refreshes on its cadence.
+      await tester.pump(const Duration(seconds: 30));
+      await tester.pumpAndSettle();
+      expect(reads, 2);
+      await tester.drag(find.byType(ListView), const Offset(0, -3000));
+      await tester.pumpAndSettle();
+      final hidden = reads;
+      await tester.pump(const Duration(seconds: 30));
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(seconds: 30));
+      await tester.pumpAndSettle();
+      // Nothing is looking at the frame, so nothing is read for it.
+      expect(reads, hidden);
+      await tester.drag(find.byType(ListView), const Offset(0, 3000));
+      await tester.pumpAndSettle();
+      // Back on screen, the card catches up rather than waiting out the
+      // remainder of a cadence it spent hidden.
+      expect(reads, hidden + 1);
+      expect(find.byType(AppletViewerFrame), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets(
+    'a live card in the thread survives a message arriving while it is off-screen',
+    (tester) async {
+      var tokens = 0;
+      final api = SettingsApi(MemoryStore(), (path, body) async {
+        if (path == '/api/applets') {
+          return {
+            'schemaVersion': 1,
+            'applets': [applet(generationId: 'g1').toJson()],
+          };
+        }
+        if (path.endsWith('/ui')) {
+          return {
+            'uiUrl': 'https://ui.example/applet.html',
+            'generationId': 'g1',
+          };
+        }
+        if (path.endsWith('/token')) {
+          tokens++;
+          return {
+            'token': 'viewer-token',
+            'expiresAt': '2027-01-01T00:00:00.000Z',
+            'socketUrl':
+                'wss://bot.frockbot.com/api/applets/todo.applet/socket',
+          };
+        }
+        throw StateError(path);
+      });
+      TranscriptLine chatter(int index) => TranscriptLine(
+        id: 'chatter-$index',
+        runId: 'chatter-$index',
+        role: index.isEven ? LineRole.user : LineRole.assistant,
+        text: 'Message $index',
+        at: '2026-09-05T01:${index.toString().padLeft(2, '0')}:00.000Z',
+        status: LineStatus.completed,
+      );
+      final card = TranscriptLine(
+        id: 'card',
+        runId: 'card',
+        role: LineRole.assistant,
+        text: '',
+        at: '2026-09-05T02:00:00.000Z',
+        status: LineStatus.completed,
+        sends: const [
+          SendPayloadLine({'type': 'applet', 'appletId': 'todo.applet'}),
+        ],
+      );
+      final lines = <TranscriptLine>[
+        for (var index = 0; index < 40; index++) chatter(index),
+        card,
+      ];
+      Widget thread(List<TranscriptLine> rows) => MaterialApp(
+        home: Scaffold(
+          body: AppletChatScope(
+            api: api,
+            child: SizedBox(
+              height: 500,
+              child: TranscriptView(
+                lines: rows,
+                loading: false,
+                hasEarlier: false,
+                onRefresh: ({older = false}) async {},
+                onOpenRun: (_) {},
+                storageKey: 'card-thread',
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpWidget(thread(lines));
+      await tester.pumpAndSettle();
+      expect(find.byType(AppletViewerFrame), findsOneWidget);
+      expect(tokens, 1);
+      // The User scrolls back through the thread; the card leaves the viewport
+      // with an interaction half-finished inside it.
+      final scrollable = tester.state<ScrollableState>(
+        find.byType(Scrollable).first,
+      );
+      scrollable.position.jumpTo(2000);
+      await tester.pumpAndSettle();
+      // The Bot says one more thing. In a reversed thread every row shifts by
+      // one, and a card found only by its index would be rebuilt as its
+      // neighbour.
+      await tester.pumpWidget(
+        thread([
+          ...lines,
+          TranscriptLine(
+            id: 'later',
+            runId: 'later',
+            role: LineRole.assistant,
+            text: 'One more thing',
+            at: '2026-09-05T03:00:00.000Z',
+            status: LineStatus.completed,
+          ),
+        ]),
+      );
+      await tester.pumpAndSettle();
+      scrollable.position.jumpTo(0);
+      await tester.pumpAndSettle();
+      expect(find.byType(AppletViewerFrame), findsOneWidget);
+      // A rebuilt card would have minted a second viewer credential and lost
+      // whatever was in the frame; the held one is still the only one.
+      expect(tokens, 1);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets('a focus newer than the listing is re-read before it is dropped', (
+    tester,
+  ) async {
+    var listings = 0;
+    final api = SettingsApi(MemoryStore(), (path, body) async {
+      if (path == '/api/applets') {
+        listings++;
+        // The Turn created the Applet between this canvas read's listing and
+        // its focus read, so the first listing cannot know about it.
+        return {
+          'schemaVersion': 1,
+          'applets': [if (listings > 1) applet(generationId: 'g1').toJson()],
+        };
+      }
+      if (path.endsWith('/focus')) return {'appletId': 'todo.applet'};
+      if (path.endsWith('/source')) return sourceView(['ui.tsx']);
+      if (path.endsWith('/build')) return {'status': 'unknown'};
+      if (path.endsWith('/ui')) {
+        return {
+          'uiUrl': 'https://ui.example/applet.html',
+          'generationId': 'g1',
+        };
+      }
+      if (path.endsWith('/token')) {
+        return {
+          'token': 'viewer-token',
+          'expiresAt': '2027-01-01T00:00:00.000Z',
+          'socketUrl': 'wss://bot.frockbot.com/api/applets/todo.applet/socket',
+        };
+      }
+      throw StateError(path);
+    });
+    final controller = AppletCanvasController(api, 'bot-1');
+    await controller.load();
+    expect(controller.focusedId, 'todo.applet');
+    expect(controller.focused?.displayName, 'Weekly Todos');
     controller.dispose();
   });
 }
