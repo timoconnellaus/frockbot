@@ -45,6 +45,17 @@ export function requestOrigin(url: URL): string {
   return `${url.protocol}//${host}${url.port ? `:${url.port}` : ""}`;
 }
 
+// Supported app versions can reuse a session; its protocol and catalogs stay bound.
+function sameClient(a: ClientHello, b: ClientHello): boolean {
+  const shape = (h: ClientHello) =>
+    JSON.stringify({
+      schemaVersion: h.schemaVersion,
+      protocolVersion: h.protocolVersion,
+      catalogs: h.catalogs.map((c) => `${c.id}:${c.digest}`).sort(),
+    });
+  return shape(a) === shape(b);
+}
+
 export function isNativeAuthPath(path: string): boolean {
   return (
     path.startsWith("/api/auth/native/") ||
@@ -353,14 +364,8 @@ export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
       try {
         const claims = await verify(bearer.slice(7 + PREFIX.length), "session");
         if (claims.kind !== "session") return { session: null };
-        if (JSON.stringify(hello(request)) !== JSON.stringify(claims.hello))
-          return {
-            session: null,
-            refusal: new Response(
-              "Update the app to continue using FrockBot.",
-              { status: 426, headers: NO_STORE },
-            ),
-          };
+        // The app recovers a rejected session through sign-in; 426 asks for an update.
+        if (!sameClient(hello(request), claims.hello)) return { session: null };
         const record = await options.session(
           claims.userId,
           operation(claims, "read"),
@@ -611,6 +616,9 @@ export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
           url.pathname === "/api/auth/native/revoke" &&
           request.method === "POST"
         ) {
+          // This route is also called without the gateway's compatibility gate.
+          const invalid = clientCompatibilityResponse(request, url);
+          if (invalid) return invalid;
           const bearer = request.headers.get("authorization") ?? "";
           if (!bearer.startsWith(`Bearer ${PREFIX}`)) return error(401);
           const claims = await verify(
@@ -621,10 +629,12 @@ export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
           const command = await readNativeJsonBody(request);
           if (
             !isProtocolValue("SessionRevokeCommand", command) ||
-            command.sessionId !== claims.sessionId ||
-            JSON.stringify(hello(request)) !== JSON.stringify(claims.hello)
+            command.sessionId !== claims.sessionId
           )
             return error();
+          // A 401 lets the app discard the unusable session and finish signing out.
+          if (!sameClient(hello(request), claims.hello))
+            return error(401, "Please sign in again.");
           await options.session(claims.userId, operation(claims, "revoke"));
           return Response.json(
             { schemaVersion: 1, status: "signed-out" },

@@ -108,10 +108,40 @@ function fixture(overrides: Partial<NativeAuthOptions> = {}) {
     start,
     authorize,
     values,
+    storage,
+    now: () => time,
     advance: (ms: number) => {
       time += ms;
     },
   };
+}
+
+const SECRET = "test-only-secret-that-is-not-a-credential";
+
+/**
+ * A bearer as the Worker signs one, so a test can hold a session that was
+ * issued to a version of the app this deployment no longer accepts.
+ */
+async function mintSessionToken(claims: {
+  userId: string;
+  sessionId: string;
+  hello: unknown;
+  expires: number;
+}): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(`frockbot-native-v1:${SECRET}`),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const payload = Buffer.from(
+    JSON.stringify({ kind: "session", ...claims }),
+  ).toString("base64url");
+  const signature = Buffer.from(
+    await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payload)),
+  ).toString("base64url");
+  return `frockbot-native.${payload}.${signature}`;
 }
 
 describe("native system browser exchange", () => {
@@ -304,7 +334,7 @@ describe("native system browser exchange", () => {
     for (const value of [
       "",
       JSON.stringify({ ...hello, nativeVersion: "1.0.0" }),
-      JSON.stringify({ ...hello, nativeVersion: "1.3.0" }),
+      JSON.stringify({ ...hello, protocolVersion: 2 }),
     ]) {
       const result = await g.auth.authenticate(
         g.request("/api/bots/bot-1/state-channel", undefined, {
@@ -314,6 +344,190 @@ describe("native system browser exchange", () => {
       );
       expect(result?.refusal?.status).toBe(426);
     }
+  });
+
+  test("a session issued to an app this deployment no longer accepts survives the update that made it supported", async () => {
+    const f = fixture();
+    // The phone's real case: the sign-in was issued to 1.1.0, the deployment
+    // has since raised its minimum to 1.2.0, and the app has updated itself.
+    const historical = { ...hello, nativeVersion: "1.1.0" };
+    const expires = f.now() + 7 * 86400_000;
+    const token = await mintSessionToken({
+      userId: "user-1",
+      sessionId: "historical-1",
+      hello: historical,
+      expires,
+    });
+    nativeSessionOperation(
+      f.storage,
+      {
+        schemaVersion: 1,
+        userId: "user-1",
+        sessionId: "historical-1",
+        hello: historical,
+        expiresAt: expires,
+        action: "issue",
+      },
+      f.now(),
+    );
+    const headers = { authorization: `Bearer ${token}` };
+    expect(
+      (
+        await f.auth.authenticate(
+          f.request("/api/identity", undefined, headers),
+        )
+      )?.session?.user.id,
+    ).toBe("user-1");
+    const signOut = {
+      schemaVersion: 1,
+      commandId: "sign-out-1",
+      action: "sign-out",
+      sessionId: "historical-1",
+    };
+    // Revoking states the compatibility gate itself, and holds the same scope:
+    // an unsupported app is told to update, a changed catalog set is refused as
+    // a rejected session — the only refusal the app finishes signing out on —
+    // a malformed command is still a 400, and the updated app signs out.
+    expect(
+      (
+        await f.auth.route(
+          f.request("/api/auth/native/revoke", signOut, {
+            ...headers,
+            "x-frockbot-client": JSON.stringify({
+              ...hello,
+              nativeVersion: "1.0.0",
+            }),
+          }),
+        )
+      )?.status,
+    ).toBe(426);
+    expect(
+      (
+        await f.auth.route(
+          f.request("/api/auth/native/revoke", signOut, {
+            ...headers,
+            "x-frockbot-client": JSON.stringify({
+              ...hello,
+              catalogs: [{ id: "tools", digest: "a".repeat(64) }],
+            }),
+          }),
+        )
+      )?.status,
+    ).toBe(401);
+    expect(
+      (
+        await f.auth.route(
+          f.request(
+            "/api/auth/native/revoke",
+            { ...signOut, sessionId: "someone-else" },
+            headers,
+          ),
+        )
+      )?.status,
+    ).toBe(400);
+    expect(
+      (
+        await f.auth.route(
+          f.request("/api/auth/native/revoke", signOut, headers),
+        )
+      )?.status,
+    ).toBe(200);
+    expect(
+      (
+        await f.auth.authenticate(
+          f.request("/api/identity", undefined, headers),
+        )
+      )?.session,
+    ).toBeNull();
+  });
+
+  test("only the version may change under a session; protocol and catalogs gain no authority", async () => {
+    const f = fixture();
+    const session = decodeProtocol(
+      "AuthSessionView",
+      await (await f.auth.route(
+        f.request("/api/auth/native/exchange", await f.authorize()),
+      ))!.json(),
+    );
+    const headers = { authorization: `Bearer ${session.sessionToken}` };
+    const authenticate = (changed: unknown) =>
+      f.auth.authenticate(
+        f.request("/api/identity", undefined, {
+          ...headers,
+          "x-frockbot-client": JSON.stringify(changed),
+        }),
+      );
+    // A newer supported version is still exactly this User's session.
+    const updated = await authenticate({ ...hello, nativeVersion: "1.3.0" });
+    expect(updated?.refusal).toBeUndefined();
+    expect(updated?.session?.user.id).toBe("user-1");
+    // A different catalog set is a different client: it takes a new sign-in,
+    // and it is refused as a rejected session rather than as an old app.
+    const recatalogued = await authenticate({
+      ...hello,
+      catalogs: [{ id: "tools", digest: "a".repeat(64) }],
+    });
+    expect(recatalogued?.refusal).toBeUndefined();
+    expect(recatalogued?.session).toBeNull();
+    // The order the app lists its catalogs in is not part of the agreement.
+    const catalogs = [
+      { id: "tools", digest: "a".repeat(64) },
+      { id: "models", digest: "b".repeat(64) },
+    ];
+    const expires = f.now() + 7 * 86400_000;
+    const pinned = await mintSessionToken({
+      userId: "user-1",
+      sessionId: "pinned-1",
+      hello: { ...hello, catalogs },
+      expires,
+    });
+    nativeSessionOperation(
+      f.storage,
+      {
+        schemaVersion: 1,
+        userId: "user-1",
+        sessionId: "pinned-1",
+        hello: { ...hello, catalogs },
+        expiresAt: expires,
+        action: "issue",
+      },
+      f.now(),
+    );
+    const reordered = await f.auth.authenticate(
+      f.request("/api/identity", undefined, {
+        authorization: `Bearer ${pinned}`,
+        "x-frockbot-client": JSON.stringify({
+          ...hello,
+          nativeVersion: "1.3.0",
+          catalogs: [...catalogs].reverse(),
+        }),
+      }),
+    );
+    expect(reordered?.session?.user.id).toBe("user-1");
+    // A forged bearer, an expired one and a revoked one still fail closed, and
+    // as a rejected session rather than as an unsupported client.
+    const forged = await mintSessionToken({
+      userId: "user-1",
+      sessionId: "forged-1",
+      hello,
+      expires: f.now() + 86400_000,
+    });
+    const tampered = `${session.sessionToken.slice(0, -4)}zzzz`;
+    for (const bearer of [tampered, forged]) {
+      const result = await f.auth.authenticate(
+        f.request("/api/identity", undefined, {
+          authorization: `Bearer ${bearer}`,
+        }),
+      );
+      expect(result?.refusal).toBeUndefined();
+      expect(result?.session).toBeNull();
+    }
+    f.advance(8 * 86400_000);
+    const expired = await f.auth.authenticate(
+      f.request("/api/identity", undefined, headers),
+    );
+    expect(expired?.refusal).toBeUndefined();
+    expect(expired?.session).toBeNull();
   });
 });
 
