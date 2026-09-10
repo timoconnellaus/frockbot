@@ -30,6 +30,7 @@ interface FakeUpstream {
 function fakeUpstream(
   options: {
     refuse?: boolean;
+    raceBeforeStopAck?: boolean;
     onCommit?: "answer" | "silent" | "empty" | "fail";
     answerDelayMs?: number;
   } = {},
@@ -100,6 +101,11 @@ function fakeUpstream(
         };
         if (frame.type === "session.update") {
           sessionUpdates.push(frame);
+          if (sessionUpdates.length === 2 && options.raceBeforeStopAck) {
+            const id = newItem();
+            complete(id, "earlier turn");
+          }
+          emit({ type: "session.updated" });
           return;
         }
         if (frame.type === "input_audio_buffer.append") {
@@ -109,6 +115,7 @@ function fakeUpstream(
           emit({
             type: "conversation.item.input_audio_transcription.delta",
             delta: `d${bytes.charCodeAt(0)}`,
+            item_id: `item_${items + 1}`,
           });
           return;
         }
@@ -273,14 +280,14 @@ describe("the dictation relay", () => {
     upstream.gate.resolve();
     await opened.waitFor((f) => f.type === "ready", "ready");
     await opened.waitFor(
-      (f) => f.type === "delta" && f.text === "d2",
+      (f) => f.type === "delta" && f.text === "d1d2",
       "second delta",
     );
     expect(upstream.sessionUpdates).toHaveLength(1);
     expect(upstream.appended).toEqual([1, 2]);
     opened.socket.send(pcm(3));
     await opened.waitFor(
-      (f) => f.type === "delta" && f.text === "d3",
+      (f) => f.type === "delta" && f.text === "d1d2d3",
       "third delta",
     );
     expect(upstream.appended).toEqual([1, 2, 3]);
@@ -290,6 +297,17 @@ describe("the dictation relay", () => {
     expect(opened.segments()).toEqual(["heard 1,2,3"]);
     expect(opened.frames.at(-1)).toEqual({ schemaVersion: 1, type: "final" });
     expect(await opened.closed).toBe(1000);
+  });
+
+  test("an automatic commit racing Stop cannot finalize before the explicit commit", async () => {
+    const upstream = fakeUpstream({ raceBeforeStopAck: true });
+    const opened = openRelay(upstream);
+    await ready(upstream, opened);
+    opened.socket.send(pcm(9));
+    opened.socket.send(stop);
+    await opened.waitFor((f) => f.type === "final", "final");
+    expect(upstream.commits).toBe(1);
+    expect(opened.segments()).toEqual(["earlier turn", "heard 9"]);
   });
 
   test("a stop before the upstream is ready still commits what was captured", async () => {
@@ -316,10 +334,13 @@ describe("the dictation relay", () => {
     await opened.waitFor((f) => f.type === "delta" && f.text === "d1", "d1");
     upstream.vadCommit();
     opened.socket.send(pcm(2));
-    await opened.waitFor((f) => f.type === "delta" && f.text === "d2", "d2");
+    await opened.waitFor((f) => f.type === "delta" && f.text === "d1 d2", "d2");
     upstream.vadCommit();
     opened.socket.send(pcm(3));
-    await opened.waitFor((f) => f.type === "delta" && f.text === "d3", "d3");
+    await opened.waitFor(
+      (f) => f.type === "delta" && f.text === "d1 d2 d3",
+      "d3",
+    );
     opened.socket.send(stop);
     await opened.waitFor((f) => f.type === "final", "final");
     expect(upstream.commits).toBe(1);

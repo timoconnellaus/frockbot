@@ -305,12 +305,12 @@ rather than opening a new one. Raw audio is never stored anywhere.
 
 ## Credentials
 
-| Name                           | Where             | Required | What it enables                                                               |
-| ------------------------------ | ----------------- | -------- | ----------------------------------------------------------------------------- |
-| `OPENAI_API_KEY`               | Worker secret     | optional | Composer dictation. Absent: starting dictation reports that voice is unavailable. |
+| Name                           | Where             | Required | What it enables                                                                                      |
+| ------------------------------ | ----------------- | -------- | ---------------------------------------------------------------------------------------------------- |
+| `OPENAI_API_KEY`               | Worker secret     | optional | Composer dictation. Absent: starting dictation reports that voice is unavailable.                    |
 | `ELEVENLABS_API_KEY`           | Worker secret     | optional | The continuous voice session's speech. Absent: starting a session reports that voice is unavailable. |
-| `ELEVENLABS_VOICE_ID`          | Worker var        | optional | Voice id; default is ElevenLabs "George" (`JBFqnCBsd6RMkjVDRZzb`).            |
-| `VOICE_DICTATION_UPSTREAM_URL` | test harness only | —        | Points dictation at a local fake; never set in production.                    |
+| `ELEVENLABS_VOICE_ID`          | Worker var        | optional | Voice id; default is ElevenLabs "George" (`JBFqnCBsd6RMkjVDRZzb`).                                   |
+| `VOICE_DICTATION_UPSTREAM_URL` | test harness only | —        | Points dictation at a local fake; never set in production.                                           |
 
 Declared in `apps/cloudflare/src/production-secrets.ts`, carried by the release
 workflow, listed in `.dev.vars.example`. Workers AI Flux STT uses the existing
@@ -378,3 +378,24 @@ and macOS TCC prompts; acoustic echo cancellation between a device's speaker
 and its microphone; the composer's microphone button and capture animation
 in a browser (no backend was running under the Vite dev server, so no Bot and
 no composer rendered). The live steps are in `docs/voice-live-checklist.md`.
+
+### Final review refinements
+
+The relay waits for the initial `session.updated` before draining opening audio.
+On Stop it disables automatic turn detection and waits for that update before
+committing; an earlier automatic commit cannot acknowledge the final commit.
+Incremental OpenAI deltas are accumulated per item before publishing the
+composer's cumulative interim text. Regression tests cover configuration
+acknowledgment, repeated deltas and an automatic commit racing Stop.
+
+Client regression tests also cover Stop during a pending microphone permission,
+dictation failure returning microphone ownership through the shell, and stale
+server state never undoing a local mute or temporary dictation hold.
+
+Independent integration verification (2026-09-10): all 13 package typechecks,
+3,989 Bun tests, 26 voice Worker tests and 578 Flutter tests passed. Flutter
+analyze passed. The Android debug APK built with versionName 1.2.0 and
+versionCode 1789019500 using the existing signer. It has not been installed
+or released: real provider/audio verification still requires secure access
+to the platform OpenAI and ElevenLabs keys. The published production
+GitHub secret-name list was also checked and contains neither name.

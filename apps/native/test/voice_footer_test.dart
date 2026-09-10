@@ -36,8 +36,7 @@ Future<void> mount(
       home: Column(
         children: [
           const Expanded(child: SizedBox.expand()),
-          if (footer)
-            VoiceFooter(session: controller, onEnd: onEnd ?? () {}),
+          if (footer) VoiceFooter(session: controller, onEnd: onEnd ?? () {}),
         ],
       ),
     ),

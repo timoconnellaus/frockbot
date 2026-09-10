@@ -174,6 +174,8 @@ function runRelay(
   let stopping = false;
   /** The relay's own commit after `stop` has been sent, and then answered. */
   let commitSent = false;
+  let disablingVad = false;
+  let connectTimer: ReturnType<typeof setTimeout> | undefined;
   let stopCommitSettled = false;
   let leaseHeld = false;
   let pending: ArrayBuffer[] = [];
@@ -188,6 +190,7 @@ function runRelay(
   const answered = new Map<string, string>();
   const delivered = new Set<string>();
   const outstanding = new Set<string>();
+  const partials = new Map<string, string>();
 
   const after = (ms: number, run: () => void) => {
     const timer = setTimeout(() => {
@@ -251,12 +254,19 @@ function runRelay(
     while (committedOrder.length > 0) {
       const head = committedOrder[0]!;
       const text = answered.get(head);
-      if (text === undefined) return;
+      if (text === undefined) break;
       committedOrder.shift();
       answered.delete(head);
       delivered.add(head);
+      partials.delete(head);
       if (text) send(client, { schemaVersion: 1, type: "segment", text });
     }
+    if (partials.size > 0)
+      send(client, {
+        schemaVersion: 1,
+        type: "delta",
+        text: [...partials.values()].join(" "),
+      });
   };
 
   const stopIsComplete = () =>
@@ -270,9 +280,21 @@ function runRelay(
     const event = translateVoiceDictationUpstreamFrameV1(raw);
     if (!event) return;
     switch (event.kind) {
-      case "delta":
-        send(client, { schemaVersion: 1, type: "delta", text: event.text });
+      case "session-updated":
+        if (!upstreamReady) acceptSession();
+        else if (disablingVad && stopping) commit();
         return;
+      case "delta": {
+        const id = event.itemId ?? "uncommitted";
+        if (delivered.has(id)) return;
+        partials.set(id, (partials.get(id) ?? "") + event.text);
+        send(client, {
+          schemaVersion: 1,
+          type: "delta",
+          text: [...partials.values()].join(" "),
+        });
+        return;
+      }
       case "committed":
         if (!delivered.has(event.itemId)) {
           if (!committedOrder.includes(event.itemId)) {
@@ -280,10 +302,8 @@ function runRelay(
           }
           if (!answered.has(event.itemId)) outstanding.add(event.itemId);
         }
-        // A commit acknowledged after the relay's own was sent settles it:
-        // the upstream has taken what it held. (A turn-detection commit in
-        // the same instant is indistinguishable; the item it names is still
-        // tracked to completion before `final`.)
+        // VAD was disabled and acknowledged before the explicit commit,
+        // so an earlier automatic commit cannot be mistaken for this one.
         if (stopping && commitSent) stopCommitSettled = true;
         flushSegments();
         return;
@@ -380,7 +400,7 @@ function runRelay(
         });
       renew();
     }
-    const connectTimer = after(connectTimeoutMs, () =>
+    connectTimer = after(connectTimeoutMs, () =>
       fail("Dictation didn't start in time. Try again.", "timeout"),
     );
     let socket: WebSocket;
@@ -422,8 +442,13 @@ function runRelay(
         fail("Dictation stopped: the speech service failed.", "upstream");
     });
     socket.send(JSON.stringify(voiceDictationSessionUpdateV1()));
-    clearTimeout(connectTimer);
-    timers.delete(connectTimer);
+  };
+
+  const acceptSession = () => {
+    if (connectTimer !== undefined) {
+      clearTimeout(connectTimer);
+      timers.delete(connectTimer);
+    }
     upstreamReady = true;
     const held = pending;
     pending = [];
@@ -444,7 +469,7 @@ function runRelay(
         "limit",
       ),
     );
-    if (stopping) commit();
+    if (stopping) requestCommit();
   };
 
   const stop = () => {
@@ -460,7 +485,28 @@ function runRelay(
         "timeout",
       );
     });
-    if (upstream && upstreamReady) commit();
+    if (upstream && upstreamReady) requestCommit();
+  };
+
+  const requestCommit = () => {
+    if (disablingVad) return;
+    disablingVad = true;
+    try {
+      upstream!.send(
+        JSON.stringify({
+          type: "session.update",
+          session: {
+            type: "transcription",
+            audio: { input: { turn_detection: null } },
+          },
+        }),
+      );
+    } catch {
+      fail(
+        "Dictation could not finish. What arrived is in your draft.",
+        "upstream",
+      );
+    }
   };
 
   const commit = () => {

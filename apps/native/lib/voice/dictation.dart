@@ -99,6 +99,9 @@ class DictationController extends ChangeNotifier {
   /// Reads the draft as it stands, so a segment that lands after the person
   /// typed goes beside their words rather than over them.
   final DictationDraftReader readDraft;
+
+  /// Returns a borrowed microphone after capture and socket teardown.
+  final Future<void> Function()? onFinished;
   final Duration connectTimeout;
   final Duration finalTimeout;
 
@@ -107,6 +110,7 @@ class DictationController extends ChangeNotifier {
     required this.capture,
     required this.onDraft,
     required this.readDraft,
+    this.onFinished,
     this.connectTimeout = voiceDictationConnectTimeoutV1,
     this.finalTimeout = voiceDictationFinalTimeoutV1,
   });
@@ -194,6 +198,11 @@ class DictationController extends ChangeNotifier {
       );
       if (generation != _generation || _disposed) {
         await capture.stop();
+        return;
+      }
+      if (_stopRequested) {
+        await capture.stop();
+        await _finish(null);
         return;
       }
       _frames = frames.listen(_onFrame, onError: (Object _) {});
@@ -340,6 +349,7 @@ class DictationController extends ChangeNotifier {
     _generation++;
     await _teardown();
     _set(DictationState.done);
+    await onFinished?.call();
   }
 
   Future<void> _fail(String message) async {
@@ -349,6 +359,7 @@ class DictationController extends ChangeNotifier {
     // A socket that failed keeps whatever text already arrived.
     _publish();
     _set(DictationState.error);
+    await onFinished?.call();
     _finished?.complete();
     _finished = null;
   }
@@ -360,6 +371,7 @@ class DictationController extends ChangeNotifier {
     await _teardown();
     _publish();
     _set(failure == null ? DictationState.done : DictationState.error);
+    await onFinished?.call();
     if (_finished?.isCompleted == false) _finished!.complete();
     _finished = null;
   }

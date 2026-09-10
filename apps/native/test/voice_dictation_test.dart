@@ -264,6 +264,28 @@ void main() {
     harness.controller.dispose();
   });
 
+  test(
+    'Stop before permission resolves never subscribes to late audio',
+    () async {
+      final harness = Harness();
+      harness.capture.permission = Completer<void>();
+      final started = harness.controller.start('bot-a');
+      await settle();
+      final stopped = harness.controller.stop();
+      await settle();
+      harness.capture.permission!.complete();
+      await started;
+      await stopped;
+      expect(harness.capture.active, isFalse);
+      expect(harness.controller.state, DictationState.done);
+      expect(harness.socket.texts, isEmpty);
+      harness.capture.emit(AudioFrame(pcmFrame(0.05), 0.05, 0));
+      await settle();
+      expect(harness.socket.binaries, isEmpty);
+      harness.controller.dispose();
+    },
+  );
+
   group('the start fence', () {
     test(
       'cancelling at the permission prompt stops the late capture',

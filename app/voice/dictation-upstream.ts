@@ -127,6 +127,7 @@ export const VOICE_DICTATION_UPSTREAM_REFUSAL_MESSAGE_V1 =
 export type VoiceDictationUpstreamEventV1 =
   | { kind: "delta"; text: string; itemId?: string }
   | { kind: "committed"; itemId: string }
+  | { kind: "session-updated" }
   | { kind: "completed"; text: string; itemId?: string }
   | { kind: "failed"; message: string; itemId?: string }
   | { kind: "error"; message: string; emptyBuffer: boolean };
@@ -149,6 +150,7 @@ export function translateVoiceDictationUpstreamFrameV1(
   const event = value as Record<string, unknown>;
   const type = typeof event.type === "string" ? event.type : "";
   const itemId = typeof event.item_id === "string" ? event.item_id : undefined;
+  if (type === "session.updated") return { kind: "session-updated" };
   if (type === "conversation.item.input_audio_transcription.delta") {
     const text = typeof event.delta === "string" ? event.delta : "";
     if (!text) return undefined;

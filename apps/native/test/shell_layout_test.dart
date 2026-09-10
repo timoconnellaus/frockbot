@@ -362,8 +362,8 @@ void main() {
             onProfile: () {},
             onInbox: () {},
             onManage: () {},
-      onVoice: () {},
-      voiceActive: false,
+            onVoice: () {},
+            voiceActive: false,
             onToggleHidden: () {},
             onRetry: () async {},
           ),
@@ -404,8 +404,8 @@ void main() {
             onProfile: () {},
             onInbox: () {},
             onManage: () {},
-      onVoice: () {},
-      voiceActive: false,
+            onVoice: () {},
+            voiceActive: false,
             onToggleHidden: () {},
             onRetry: () async {
               retries++;

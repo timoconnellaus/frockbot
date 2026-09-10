@@ -290,6 +290,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       capture: voiceCapture ??= RecordVoiceCapture(),
       onDraft: _writeDictatedDraft,
       readDraft: _readDictatedDraft,
+      onFinished: microphone.releaseDictation,
     )..addListener(_repaint);
     await controller.start(bot.botId.value);
     if (!mounted) return;
@@ -301,7 +302,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     final controller = dictation;
     if (controller == null || !controller.active) return;
     await controller.stop();
-    await microphone.releaseDictation();
     if (mounted) setState(() {});
   }
 
@@ -1092,7 +1092,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                           : null,
                       onSettings: () => _openPanel('bot-settings'),
                       computerRunning:
-                          computer?.available == true && computer!.state.running,
+                          computer?.available == true &&
+                          computer!.state.running,
                       onComputer: computer?.available == true
                           ? () => _openPanel('computer')
                           : null,

@@ -152,10 +152,8 @@ void main() {
 
     test('the SDK vocabulary', () {
       expect(
-        round<AssistantWelcomeV1>({
-          'type': 'welcome',
-          'protocol_version': 1,
-        })!.protocolVersion,
+        round<AssistantWelcomeV1>({'type': 'welcome', 'protocol_version': 1})!
+            .protocolVersion,
         1,
       );
       for (final entry in {
@@ -165,10 +163,8 @@ void main() {
         'speaking': VoiceStatusV1.speaking,
       }.entries) {
         expect(
-          round<AssistantStatusV1>({
-            'type': 'status',
-            'status': entry.key,
-          })!.status,
+          round<AssistantStatusV1>({'type': 'status', 'status': entry.key})!
+              .status,
           entry.value,
         );
       }

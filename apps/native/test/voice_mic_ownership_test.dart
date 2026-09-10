@@ -162,6 +162,65 @@ void main() {
   // The blocker this covers: one device, two features. Dictation used to stop
   // the call's capture and never give it back, leaving a session that looked
   // live and heard nothing. This is the shell's own wiring, end to end.
+  for (final terminal in ['error', 'final', 'connect failure']) {
+    test(
+      'dictation $terminal returns the device without pressing Stop',
+      () async {
+        final device = FakeVoiceCapture();
+        final microphone = MicOwnership();
+        final callSocket = FakeVoiceSocket();
+        final dictationSocket = FakeVoiceSocket();
+        final drafts = ComposerDraftStore();
+        final call = AssistantSessionController(
+          openSocket: () async => callSocket,
+          capture: device,
+          player: FakeVoicePlayer(),
+        );
+        final dictation = DictationController(
+          openSocket: () async {
+            if (terminal == 'connect failure') throw StateError('offline');
+            return dictationSocket;
+          },
+          capture: device,
+          onDraft: drafts.setDraft,
+          readDraft: drafts.draftFor,
+          onFinished: microphone.releaseDictation,
+        );
+        microphone.assistantLive = () => call.active;
+        microphone.holdAssistant = call.holdMicrophone;
+        microphone.dictationActive = () => dictation.active;
+        await call.start();
+        await settle();
+        callSocket.deliver('{"type":"welcome","protocol_version":1}');
+        callSocket.deliver('{"type":"status","status":"listening"}');
+        await settle();
+        await microphone.acquireForDictation();
+        await dictation.start('bot-a');
+        await settle();
+        if (terminal != 'connect failure') {
+          expect(call.muted, isTrue);
+          dictationSocket.deliver(
+            '{"schemaVersion":1,"type":"$terminal","message":"stopped"}',
+          );
+          await settle();
+        }
+        expect(dictation.active, isFalse);
+        expect(call.muted, isFalse);
+        expect(device.active, isTrue);
+        expect(microphone.owner, MicOwner.assistant);
+        final heard = callSocket.binaries.length;
+        for (var i = 0; i < 8; i++) {
+          device.emit(AudioFrame(pcmFrame(0.08), 0.08, i * 40));
+        }
+        await settle();
+        expect(callSocket.binaries.length, greaterThan(heard));
+        await call.end();
+        dictation.dispose();
+        call.dispose();
+      },
+    );
+  }
+
   test('a call is deaf for the loan and hears again after it', () async {
     final device = FakeVoiceCapture();
     final drafts = ComposerDraftStore();

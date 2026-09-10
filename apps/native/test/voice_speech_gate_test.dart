@@ -105,7 +105,11 @@ void main() {
       while (at - openedAt < 600) {
         final decision = gate.offer(pcmFrame(_quiet), _quiet, at);
         at += 40;
-        expect(decision.open, isTrue, reason: '${at - openedAt} ms into the pause');
+        expect(
+          decision.open,
+          isTrue,
+          reason: '${at - openedAt} ms into the pause',
+        );
         expect(decision.emit, hasLength(1));
       }
 

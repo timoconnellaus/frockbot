@@ -129,7 +129,7 @@ describe("the dictation upstream", () => {
       translateVoiceDictationUpstreamFrameV1(
         JSON.stringify({ type: "session.updated" }),
       ),
-    ).toBeUndefined();
+    ).toEqual({ kind: "session-updated" });
     expect(translateVoiceDictationUpstreamFrameV1("{")).toBeUndefined();
   });
 });
