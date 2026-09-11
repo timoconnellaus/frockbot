@@ -56,7 +56,8 @@ describe("the Connected apps gateway routes", () => {
       CONTEXT,
     );
     expect(response?.status).toBe(200);
-    expect(await response!.json()).toEqual({
+    const body: unknown = await response!.json();
+    expect(body).toEqual({
       schemaVersion: 1,
       status: "authorization-required",
       connectionId: "connection-1",
@@ -125,7 +126,8 @@ describe("the Connected apps gateway routes", () => {
       }),
       CONTEXT,
     );
-    expect(await response!.json()).toEqual({
+    const body: unknown = await response!.json();
+    expect(body).toEqual({
       schemaVersion: 1,
       status: "revoked",
     });
