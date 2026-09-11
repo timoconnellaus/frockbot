@@ -596,17 +596,37 @@ test("gateway serves public associations and exact returns without loading the a
     returnUris: [NATIVE_RETURN_ANDROID, NATIVE_RETURN_MACOS],
   });
   const macReturn = await gateway(mac.auth).fetch(
-    mac.request("/native/return/macos?code=abc&state=xyz"),
+    mac.request("/native/return/macos?code=code-9f3a&state=state-7c1d"),
   );
   expect(macReturn.status).toBe(200);
   expect(macReturn.headers.get("content-type")).toContain("text/html");
   expect(macReturn.headers.get("cache-control")).toBe("no-store");
+  expect(macReturn.headers.get("content-security-policy")).toContain(
+    "script-src 'unsafe-inline'",
+  );
   const page = await macReturn.text();
   expect(page).toContain(
     `${NATIVE_MACOS_SCHEME}://bot.frockbot.com/native/return/macos`,
   );
-  expect(page).not.toContain("abc");
-  expect(page).not.toContain("xyz");
+  expect(page).not.toContain("code-9f3a");
+  expect(page).not.toContain("state-7c1d");
+  // Android's verified App Link already opened the app; the page it leaves
+  // behind is the same branded page, carrying no script and no scheme link.
+  const androidReturn = await gateway(mac.auth).fetch(
+    mac.request("/native/return/android?code=code-9f3a&state=state-7c1d"),
+  );
+  expect(androidReturn.status).toBe(200);
+  expect(androidReturn.headers.get("content-type")).toContain("text/html");
+  expect(androidReturn.headers.get("cache-control")).toBe("no-store");
+  expect(androidReturn.headers.get("content-security-policy")).not.toContain(
+    "script-src",
+  );
+  const androidPage = await androidReturn.text();
+  expect(androidPage).toContain("Return to FrockBot to finish signing in");
+  expect(androidPage).not.toContain("<script");
+  expect(androidPage).not.toContain(`${NATIVE_MACOS_SCHEME}://`);
+  expect(androidPage).not.toContain("code-9f3a");
+  expect(androidPage).not.toContain("state-7c1d");
   for (const target of [
     NATIVE_RETURN_MACOS,
     `${NATIVE_RETURN_ANDROID}/extra`,
