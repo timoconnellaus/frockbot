@@ -109,11 +109,12 @@ describe("the object-storage Workspace store in Workerd", () => {
     };
     // The Bot's own root first, then the managed set the Skills Package
     // compiles into its artifact — those are not Workspace files at all, and
-    // this test is about the store.
+    // this test is about the store. The Applets Skill is not among them: this
+    // account's Applets switch is off, as every account's is until an admin
+    // turns it on, and the Skill goes where the `applet_*` tools go.
     expect(payload.skills.map((skill) => skill.path)).toEqual([
       SKILL_PATH,
       "managed/add-connector/SKILL.md",
-      "managed/applets/SKILL.md",
       "managed/export-bot-template/SKILL.md",
       "managed/import-bot-template/SKILL.md",
       "managed/learn-from-demonstration/SKILL.md",
