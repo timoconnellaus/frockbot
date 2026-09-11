@@ -30,7 +30,7 @@ No Fly configuration exists in the repository. Fly Sprites are rented at runtime
 
 Deploy paths:
 
-- `.github/workflows/ci.yml:387` `deploy-staging` — on push to `main`, deploys the app Worker to `staging`.
+- `.github/workflows/main.yml:268` `deploy-staging` — on push to `main`, deploys the app Worker to `staging`; opt-in through the repository variable `DEPLOY_STAGING`, and skipped while it is unset.
 - `.github/workflows/release.yml` — on tag `v*.*.*`, deploys marketing (:273), the computer host (:465), the Applet build service (:493) and the app Worker (:519).
 
 ---
@@ -931,8 +931,7 @@ See [local validation](local-validation.md) for commands and cache recovery.
 
 `.github/workflows/pr-gate.yml` checks branch ancestry without running tests.
 Main requires `PR gate` and strict branch freshness at merge time.
-`.github/workflows/ci.yml` retains the full suite for manual dispatch only;
-its push-only staging deployment is paused.
+`.github/workflows/ci.yml` retains the full suite for manual dispatch only.
 
 ### `.github/workflows/release.yml`
 
