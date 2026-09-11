@@ -80,6 +80,13 @@ export interface SkillsRuntimeHostV1 {
   files?: WorkspaceFilesV1;
   writer?: SkillWriterIdentityV1;
   quota?: SkillQuotaConfigV1;
+  /**
+   * Managed Skills this Bot is not offered, by slug. A managed Skill is a
+   * Package's own reference, and the host knows which Packages this Bot's
+   * account may reach; a Skill that teaches tools the Turn does not have
+   * would tell the model they were there.
+   */
+  withheldManagedSlugs?: readonly string[];
 }
 
 export async function sha256HexV1(text: string): Promise<string> {
@@ -134,15 +141,21 @@ export type SkillInvocationOutcomeV1 =
 export class SkillCatalog {
   #owner: SkillOwnerV1;
   #reads: WorkspaceReadsV1;
+  #withheldManagedSlugs: readonly string[];
   #catalog: SkillCatalogV1;
   #turn: number | undefined;
   #invoked: InvokedSkillV1[] = [];
   #invokedTurn: number | undefined;
   #step: { turn: number; step: number } | undefined;
 
-  constructor(owner: SkillOwnerV1, reads: WorkspaceReadsV1) {
+  constructor(
+    owner: SkillOwnerV1,
+    reads: WorkspaceReadsV1,
+    withheldManagedSlugs: readonly string[] = [],
+  ) {
     this.#owner = owner;
     this.#reads = reads;
+    this.#withheldManagedSlugs = withheldManagedSlugs;
     this.#catalog = emptySkillCatalogV1(owner);
   }
 
@@ -156,7 +169,9 @@ export class SkillCatalog {
 
   /** Loads the Turn's Skills and records the injection in the session log. */
   async refresh(turn: number, session: Session): Promise<SkillCatalogV1> {
-    this.#catalog = await loadFullSkillCatalogV1(this.#reads, this.#owner);
+    this.#catalog = await loadFullSkillCatalogV1(this.#reads, this.#owner, {
+      withheldManagedSlugs: this.#withheldManagedSlugs,
+    });
     this.#turn = turn;
     session.append({
       type: "skill/injected",
@@ -636,7 +651,11 @@ export function createSkillsRuntimeFeature(
   host: SkillsRuntimeHostV1,
 ): RuntimeFeatureV1<AgentRuntimeV1> {
   return (runtime) => {
-    const catalog = new SkillCatalog(host.owner, host.reads);
+    const catalog = new SkillCatalog(
+      host.owner,
+      host.reads,
+      host.withheldManagedSlugs ?? [],
+    );
     const disposers: Array<() => void> = [];
     disposers.push(
       runtime.systemPrompt.register({

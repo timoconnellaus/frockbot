@@ -31,6 +31,8 @@ import {
   APPLETS_SKILL_SLUG_V1,
 } from "./managed-applets.generated.js";
 
+export { APPLETS_SKILL_SLUG_V1 };
+
 /** The directory prefix a managed Skill's synthetic path carries. */
 export const MANAGED_SKILL_PATH_PREFIX = "managed";
 

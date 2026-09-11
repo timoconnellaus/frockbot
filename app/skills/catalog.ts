@@ -45,7 +45,7 @@ import {
   type WorkspaceInstructionRootV1,
   type WorkspaceReadsV1,
 } from "@frockbot/core/contracts";
-import { loadManagedSkillsV1 } from "./managed.js";
+import { loadManagedSkillsV1, MANAGED_SKILL_DOCUMENTS_V1 } from "./managed.js";
 import {
   SKILL_FILE_NAME,
   isSkillDocumentPathV1,
@@ -527,11 +527,21 @@ export function assembleSkillCatalogV1(
  * same predicate. A User-global root that holds nothing contributes an empty
  * source rather than being skipped: it was read, and saying so is what makes a
  * missing Skill a fact about the root instead of a fact about the loader.
+ *
+ * `withheldManagedSlugs` names the managed Skills this Bot is not offered. A
+ * withheld Skill is not a refusal — nothing about the document was wrong — so
+ * it is left out of the managed source before loading and appears nowhere in
+ * the catalog, exactly as a tool the host did not mount appears nowhere in
+ * the Turn.
  */
 export async function loadFullSkillCatalogV1(
   reads: WorkspaceReadsV1,
   owner: SkillOwnerV1,
-  options: { managed?: boolean; caps?: SkillCatalogCapsV1 } = {},
+  options: {
+    managed?: boolean;
+    withheldManagedSlugs?: readonly string[];
+    caps?: SkillCatalogCapsV1;
+  } = {},
 ): Promise<SkillCatalogV1> {
   const sources: SkillCatalogSourcesV1 = {};
   for (const { source, root } of skillInstructionRootsV1(owner)) {
@@ -539,7 +549,12 @@ export async function loadFullSkillCatalogV1(
     sources[source] = { skills: loaded.skills, refusals: loaded.refusals };
   }
   if (options.managed !== false) {
-    sources.managed = await loadManagedSkillsV1();
+    const withheld = options.withheldManagedSlugs ?? [];
+    sources.managed = await loadManagedSkillsV1(
+      MANAGED_SKILL_DOCUMENTS_V1.filter(
+        (document) => !withheld.includes(document.slug),
+      ),
+    );
   }
   return assembleSkillCatalogV1(owner, sources, options.caps);
 }
