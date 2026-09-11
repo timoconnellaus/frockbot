@@ -172,9 +172,7 @@ class _ConnectionsPageState extends State<ConnectionsPage>
           .where(
             (account) =>
                 account['packageId'] == provider['packageId'] &&
-                (account['connectionTypeId'] == null ||
-                    account['connectionTypeId'] ==
-                        provider['connectionTypeId']),
+                account['connectionTypeId'] == provider['connectionTypeId'],
           )
           .toList();
 
@@ -604,18 +602,34 @@ class _ProviderRowState extends State<_ProviderRow> {
         (a) =>
             a['state'] == 'failed' || a['state'] == 'reconciliation-required',
       );
-      return _Pill(
-        label: failed
-            ? 'Needs attention'
-            : widget.accounts.length == 1
-            ? (ready == 1 ? 'Connected' : 'Connecting…')
-            : '${widget.accounts.length} accounts',
-        icon: failed
-            ? Icons.error_outline
-            : ready > 0
-            ? Icons.check_rounded
-            : Icons.hourglass_top_rounded,
-      );
+      if (failed) {
+        return const _Pill(label: 'Needs attention', icon: Icons.error_outline);
+      }
+      if (widget.accounts.length > 1) {
+        return _Pill(
+          label: '${widget.accounts.length} accounts',
+          icon: ready > 0 ? Icons.check_rounded : Icons.hourglass_top_rounded,
+        );
+      }
+      switch (widget.accounts.single['state']) {
+        case 'ready':
+          return const _Pill(label: 'Connected', icon: Icons.check_rounded);
+        case 'disabled':
+          return const _Pill(
+            label: 'Turned off',
+            icon: Icons.pause_circle_outline,
+          );
+        case 'revoking':
+          return const _Pill(
+            label: 'Disconnecting…',
+            icon: Icons.hourglass_top_rounded,
+          );
+        default:
+          return const _Pill(
+            label: 'Connecting…',
+            icon: Icons.hourglass_top_rounded,
+          );
+      }
     }
     if (!mayConnect) return null;
     return _Pill(

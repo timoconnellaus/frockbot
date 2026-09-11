@@ -1,21 +1,19 @@
 /// The Connection command one view action means.
 ///
-/// The server projects a `ConnectionsFrame` as a `ViewDocument`
-/// (`connectionsDocumentV1`), and this is the other end of that projection:
-/// the two conventions it encodes, read back.
+/// This is the request vocabulary for the host-drawn Connectors page: the page
+/// assembles an action from a `ConnectionsFrame` row, and this turns it back
+/// into the command the existing routes already take. Two conventions:
 ///
 /// - Every action's declared input names a `kind` from the closed vocabulary
-///   below, because an action id is opaque to the renderer and the command a
-///   press means is not derivable from the label a person reads.
+///   below, because an action id is opaque and the command a press means is
+///   not derivable from the label a person reads.
 /// - A connect form's field ids are `c<provider>.label`, `c<provider>.key` and
 ///   `c<provider>.s.<setting>`, so two Packages that named a setting the same
 ///   thing do not collide and the host knows which part of the create command
 ///   each answered value is.
 ///
-/// The renderer never learns any of this. It assembles the input the document
-/// declared; Connectors is what turns it back into the command the existing
-/// routes already take — and the key, which is the one value that never
-/// travels back, goes out on that command and nowhere else.
+/// The key is the one value that never travels back: it goes out on the create
+/// command and nowhere else.
 library;
 
 /// The action kinds a Connectors press can mean.

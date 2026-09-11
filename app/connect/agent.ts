@@ -210,7 +210,7 @@ export async function executeConnectTool(
     // after fixing the call; anything else may have gone through.
     const refused =
       error instanceof ComposioRequestError &&
-      [400, 401, 403, 404, 422].includes(error.status);
+      [400, 403, 404, 422].includes(error.status);
     if (error instanceof ComposioRequestError && error.status === 401) {
       return {
         content: "The account needs reconnecting before this app can be used.",

@@ -32,6 +32,9 @@ class MemoryStorage implements Transaction {
       for (const [k, v] of Object.entries(keyOrEntries)) this.values.set(k, v);
     return Promise.resolve();
   }
+  delete(key: string): Promise<boolean> {
+    return Promise.resolve(this.values.delete(key));
+  }
   async transaction<T>(callback: (storage: Transaction) => Promise<T>) {
     return callback(this);
   }

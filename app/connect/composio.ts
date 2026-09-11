@@ -152,25 +152,12 @@ export function decodeConnectedAccountSummaryV1(
   };
 }
 
-/**
- * A tool's input schema as the provider publishes it. Modern tools carry a
- * JSON-schema object; the older shape is a bare map of parameter name to
- * schema-with-`required`, which is folded into one.
- */
+/** A tool's input schema as the provider publishes it: a JSON-schema object. */
 function inputSchemaOf(parameters: Record<string, unknown>) {
-  if (parameters.type === "object") return parameters;
-  return {
-    type: "object",
-    properties: Object.fromEntries(
-      Object.entries(parameters).map(([key, value]) => {
-        const { required: _, ...schema } = asRecord(value);
-        return [key, schema];
-      }),
-    ),
-    required: Object.entries(parameters)
-      .filter(([, value]) => asRecord(value).required === true)
-      .map(([key]) => key),
-  };
+  if (parameters.type !== "object") {
+    throw new Error("The service returned an invalid tool schema");
+  }
+  return parameters;
 }
 
 export class ComposioClient {

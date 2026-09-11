@@ -71,7 +71,7 @@ interface StoredAuthConfig {
 }
 
 export interface ConnectUserBackendHost {
-  storage: UserSettingsStorage;
+  storage: UserSettingsStorage & { delete(key: string): Promise<boolean> };
   settings: UserSettingsBackendContribution;
   /** The deployment's provider key. Absent, nothing can be connected. */
   apiKey?: string;
@@ -422,6 +422,7 @@ export class ConnectUserBackendContribution {
         failure: undefined,
       } as ConnectionView,
     );
+    await this.host.storage.delete(`${POLL_PREFIX}${connection.connectionId}`);
     return receipt("applied");
   }
 
@@ -499,6 +500,7 @@ export class ConnectUserBackendContribution {
       current.generation,
       next,
     );
+    await this.host.storage.delete(`${POLL_PREFIX}${connection.connectionId}`);
   }
 }
 

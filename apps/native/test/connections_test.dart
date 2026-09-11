@@ -314,6 +314,32 @@ void main() {
     expect(find.text('Disconnect'), findsOneWidget);
   });
 
+  testWidgets('a turned-off account reads as turned off, not connecting', (
+    tester,
+  ) async {
+    final store = MemoryStore();
+    final api = SettingsApi(
+      store,
+      (_, _) async => connectionsFrame(
+        accounts: [
+          {
+            'id': 'conn-1',
+            'label': 'Gmail',
+            'state': 'disabled',
+            'packageId': 'connect',
+            'connectionTypeId': 'connect-gmail',
+            'kind': 'connector',
+            'authorization': 'grant',
+          },
+        ],
+      ),
+    );
+    await tester.pumpWidget(page(api, store));
+    await tester.pumpAndSettle();
+    expect(find.text('Turned off'), findsOneWidget);
+    expect(find.text('Connecting…'), findsNothing);
+  });
+
   testWidgets('Connectors recovers from offline without raw backend detail', (
     tester,
   ) async {

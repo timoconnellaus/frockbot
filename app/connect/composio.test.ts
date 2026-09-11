@@ -119,7 +119,7 @@ describe("the provider client", () => {
     ).toBe(true);
   });
 
-  test("lists only the important tools of one app and folds the old schema shape", async () => {
+  test("lists only the important tools of one app", async () => {
     const { client: c, recorded } = client(() =>
       Response.json({
         items: [
@@ -142,8 +142,9 @@ describe("the provider client", () => {
             version: "20250930_00",
             toolkit: { slug: "gmail" },
             input_parameters: {
-              query: { type: "string", required: true },
-              limit: { type: "integer", required: false },
+              type: "object",
+              properties: { query: { type: "string" } },
+              required: ["query"],
             },
           },
         ],
@@ -161,9 +162,31 @@ describe("the provider client", () => {
     ]);
     expect(tools[1]?.inputSchema).toEqual({
       type: "object",
-      properties: { query: { type: "string" }, limit: { type: "integer" } },
+      properties: { query: { type: "string" } },
       required: ["query"],
     });
+  });
+
+  test("refuses a tool whose input schema is not an object schema", async () => {
+    const { client: c } = client(() =>
+      Response.json({
+        items: [
+          {
+            slug: "GMAIL_FETCH_EMAILS",
+            description: "Fetches.",
+            version: "20250930_00",
+            toolkit: { slug: "gmail" },
+            input_parameters: {
+              query: { type: "string", required: true },
+            },
+          },
+        ],
+        next_cursor: null,
+      }),
+    );
+    await expect(c.listImportantTools("gmail")).rejects.toThrow(
+      "invalid tool schema",
+    );
   });
 
   test("refuses a tool listed under another app", async () => {
