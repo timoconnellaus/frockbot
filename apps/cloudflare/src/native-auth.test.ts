@@ -7,6 +7,7 @@ import {
   NATIVE_RETURN_ANDROID,
   NATIVE_RETURN_DEVELOPMENT,
   NATIVE_RETURN_MACOS,
+  NATIVE_MACOS_SCHEME,
   nativeReturnUris,
   type NativeAuthOptions,
 } from "./native-auth.js";
@@ -591,6 +592,21 @@ test("gateway serves public associations and exact returns without loading the a
   expect(
     await (await disabled.fetch(f.request("/api/auth/get-session"))).text(),
   ).toBe("browser auth");
+  const mac = fixture({
+    returnUris: [NATIVE_RETURN_ANDROID, NATIVE_RETURN_MACOS],
+  });
+  const macReturn = await gateway(mac.auth).fetch(
+    mac.request("/native/return/macos?code=abc&state=xyz"),
+  );
+  expect(macReturn.status).toBe(200);
+  expect(macReturn.headers.get("content-type")).toContain("text/html");
+  expect(macReturn.headers.get("cache-control")).toBe("no-store");
+  const page = await macReturn.text();
+  expect(page).toContain(
+    `${NATIVE_MACOS_SCHEME}://bot.frockbot.com/native/return/macos`,
+  );
+  expect(page).not.toContain("abc");
+  expect(page).not.toContain("xyz");
   for (const target of [
     NATIVE_RETURN_MACOS,
     `${NATIVE_RETURN_ANDROID}/extra`,

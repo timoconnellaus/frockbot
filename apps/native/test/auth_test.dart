@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/client/auth.dart';
@@ -64,6 +65,40 @@ void main() {
     api.close();
   });
   test(
+    'the Mac return arrives on the custom scheme and exchanges once',
+    () async {
+      final store = MemoryStore();
+      final api = ExchangeApi(store);
+      final auth = NativeSignIn(api, store);
+      final state = List.filled(64, 'a').join();
+      await store.write(
+        'sign-in',
+        jsonEncode({
+          'version': 1,
+          'state': state,
+          'verifier': List.filled(64, 'b').join(),
+          'returnUri': auth.returnUri,
+          'exchangeId': 'exchange-1',
+          'createdAt': DateTime.now().toUtc().toIso8601String(),
+        }),
+      );
+      final hosted = Uri.parse(auth.returnUri).replace(
+        queryParameters: {'state': state, 'code': List.filled(80, 'c').join()},
+      );
+      final scheme = hosted.replace(scheme: NativeSignIn.macosScheme);
+      expect(await auth.accept(scheme), isTrue);
+      expect(await auth.accept(hosted), isFalse);
+      expect(api.requests, hasLength(1));
+      expect(
+        (api.requests.single as Map<String, dynamic>)['returnUri'],
+        auth.returnUri,
+      );
+      expect(jsonDecode(store.values['session']!)['userId'], 'user-1');
+      api.close();
+    },
+    skip: !Platform.isMacOS,
+  );
+  test(
     'wrong state, unverified return and duplicate query cannot dispatch',
     () async {
       final store = MemoryStore();
@@ -80,6 +115,20 @@ void main() {
       expect(
         await auth.accept(
           Uri.parse('https://evil.test/native/return/macos?state=expected'),
+        ),
+        isFalse,
+      );
+      // The custom scheme carries only the scheme; another host or path on it
+      // is not the hosted return.
+      expect(
+        await auth.accept(
+          Uri.parse('frockbot://evil.test/native/return/macos?state=expected'),
+        ),
+        isFalse,
+      );
+      expect(
+        await auth.accept(
+          Uri.parse('frockbot://bot.frockbot.com/other?state=expected'),
         ),
         isFalse,
       );

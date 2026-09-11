@@ -2,11 +2,22 @@ import Carbon
 import Cocoa
 import FlutterMacOS
 import Security
+import app_links
 
 @main
 class AppDelegate: FlutterAppDelegate {
   override func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
     true
+  }
+  // A Universal Link arrives as a browsing activity, which the app_links plugin
+  // cannot observe on its own; the custom scheme it handles itself.
+  override func application(
+    _ application: NSApplication, continue userActivity: NSUserActivity,
+    restorationHandler: @escaping ([any NSUserActivityRestoring]) -> Void
+  ) -> Bool {
+    guard let url = AppLinks.shared.getUniversalLink(userActivity) else { return false }
+    AppLinks.shared.handleLink(link: url.absoluteString)
+    return false
   }
   override func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool { true }
   override func applicationWillTerminate(_ notification: Notification) {

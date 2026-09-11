@@ -891,7 +891,7 @@ Session storage is D1 `AUTH_DB`. There is no `cookieCache` and no `secondaryStor
 
 1. `POST /api/auth/native/start` (unauthenticated) mints an HMAC-signed 5-minute claim; `returnUri` is checked against a deployment-fixed allowlist (`apps/cloudflare/src/native-auth.ts:27-32`).
 2. The app opens `/native/authorize` in the external browser. That route checks for a cookie session and otherwise runs Google sign-in with `callbackURL=/native/complete`.
-3. Completion 302s to the Android App Link `bot.frockbot.com/native/return/android?code=&state=`.
+3. Completion 302s to the Android App Link `bot.frockbot.com/native/return/android?code=&state=`, or on the Mac to `bot.frockbot.com/native/return/macos`. That page hands the same `code` and `state` to the app's `frockbot://` scheme (`macosReturnPage`), because only Safari dispatches a Universal Link and only on the user's own click; the app checks the host and path of a scheme return exactly as it checks the verified link (`NativeSignIn.canonical`), and the exchange still names the https return URI.
 4. `POST /api/auth/native/exchange` verifies `SHA-256(verifier)`, the state, the return URI and a byte-exact ClientHello, applies signup policy, commits in the User Durable Object, and returns `Bearer frockbot-native.<claims>.<sig>` with a 7-day lifetime.
 
 The token is stored in the platform keystore through `flutter_secure_storage` (`apps/native/lib/client/store.dart:38`).
