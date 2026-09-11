@@ -434,6 +434,12 @@ async function composioStub(request: Request, url: URL): Promise<Response> {
       composioAccounts.delete(id);
       return Response.json({ success: true });
     }
+    // Notion is the unreachable app: the read never answers inside a settings
+    // read's patience, which is how a test sees what a slow provider does to
+    // the rest of the page.
+    if (stored.toolkit === "notion") {
+      await new Promise((resolve) => setTimeout(resolve, 20_000));
+    }
     // The person "finished" or "abandoned" the sign-in between the link and
     // this read, depending on the app.
     if (stored.status === "INITIATED") {
