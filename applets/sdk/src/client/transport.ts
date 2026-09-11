@@ -9,10 +9,12 @@
 
 import {
   APPLET_CONTRACT_VERSION,
+  APPLET_PROTOCOL_VERSION,
   decodeServerFrame,
   encodeFrame,
   type AppletChangeV1,
   type AppletMutationV1,
+  type AppletSnapshotTablesV1,
   type AppletViewerV1,
 } from "../protocol/index.js";
 
@@ -23,7 +25,15 @@ export interface AppletInitV1 {
   token: string;
   generationId: string;
   tokenTransport?: "subprotocol-v1";
+  /**
+   * Report each hop of the open path — socket open, hello, ready — to the
+   * host, for the timing log it keeps behind its own flag. Off by default.
+   */
+  timing?: boolean;
 }
+
+/** The hops a page reports when the host asked for timing. */
+export type AppletTimingHop = "socket-open" | "hello" | "ready";
 
 export type AppletStatus =
   "idle" | "connecting" | "ready" | "reconnecting" | "closed";
@@ -69,6 +79,8 @@ export interface AppletTransportOptions {
   maximumBackoffMs?: number;
   /** Scheduler seam so tests do not wait in real time. */
   schedule?: (closure: () => void, delayMs: number) => unknown;
+  /** Where a timing hop goes when `init.timing` is set; the page posts to its host. */
+  onTiming?: (hop: AppletTimingHop) => void;
 }
 
 class RejectedMutation extends Error {}
@@ -78,8 +90,11 @@ function defaultSocketFactory(url: string, protocols?: string[]): AppletSocket {
 }
 
 export class AppletTransport {
-  #options: Required<Omit<AppletTransportOptions, "socketFactory">> & {
+  #options: Required<
+    Omit<AppletTransportOptions, "socketFactory" | "onTiming">
+  > & {
     socketFactory: AppletSocketFactory;
+    onTiming: ((hop: AppletTimingHop) => void) | undefined;
   };
   #socket?: AppletSocket;
   #init?: AppletInitV1;
@@ -117,6 +132,13 @@ export class AppletTransport {
    */
   #retrySeq = 0;
   #pendingRetryId = 0;
+  /**
+   * Whether this socket has sent its own `hello`. A v2 socket that opened with
+   * no cursor sends none: the server's `hello` carries the snapshot, and only
+   * a hello that arrives without one — a server that could not fit it, or one
+   * that speaks v1 — is answered.
+   */
+  #helloSent = false;
 
   constructor(options: AppletTransportOptions = {}) {
     this.#options = {
@@ -125,6 +147,7 @@ export class AppletTransport {
       maximumBackoffMs: options.maximumBackoffMs ?? 8_000,
       schedule:
         options.schedule ?? ((closure, delay) => setTimeout(closure, delay)),
+      onTiming: options.onTiming,
     };
   }
 
@@ -189,6 +212,12 @@ export class AppletTransport {
       status: this.#attempt === 0 ? "connecting" : "reconnecting",
     });
     const url = new URL(this.#init.socketUrl);
+    // The version this page speaks and, on a reconnect, the cursor it will
+    // resume from, both settled before the first frame so the server's hello
+    // can carry the snapshot exactly when one is needed.
+    url.searchParams.set("v", String(APPLET_PROTOCOL_VERSION));
+    const since = this.#lastChangeId === 0 ? undefined : this.#lastChangeId;
+    if (since !== undefined) url.searchParams.set("since", String(since));
     const protocols =
       this.#init.tokenTransport === "subprotocol-v1"
         ? ["frockbot.applet.v1", `frockbot.viewer.${this.#init.token}`]
@@ -196,8 +225,14 @@ export class AppletTransport {
     if (!protocols) url.searchParams.set("token", this.#init.token);
     const socket = this.#options.socketFactory(url.toString(), protocols);
     this.#socket = socket;
+    this.#helloSent = false;
     socket.onopen = () => {
-      if (this.#currentSocketId === id) this.#handshake();
+      if (this.#currentSocketId !== id) return;
+      this.#timing("socket-open");
+      // A resume asks for its catch-up at once, crossing the server's hello
+      // on the wire as it always has. A first connection waits: the hello on
+      // its way carries the snapshot.
+      if (since !== undefined) this.#handshake();
     };
     socket.onmessage = (event) => {
       if (this.#currentSocketId === id) this.#receive(event.data);
@@ -208,12 +243,17 @@ export class AppletTransport {
 
   #handshake(): void {
     const since = this.#lastChangeId === 0 ? undefined : this.#lastChangeId;
+    this.#helloSent = true;
     this.#write({
-      v: 1,
+      v: APPLET_PROTOCOL_VERSION,
       type: "hello",
       contract: APPLET_CONTRACT_VERSION,
       ...(since === undefined ? {} : { since }),
     });
+  }
+
+  #timing(hop: AppletTimingHop): void {
+    if (this.#init?.timing) this.#options.onTiming?.(hop);
   }
 
   /**
@@ -256,6 +296,7 @@ export class AppletTransport {
     }
 
     if (frame.type === "hello") {
+      this.#timing("hello");
       const changedGeneration =
         this.#state.generationId !== null &&
         this.#state.generationId !== frame.generationId;
@@ -268,28 +309,30 @@ export class AppletTransport {
         this.#lastChangeId = 0;
         this.#synced = false;
         this.#buffer = [];
-        this.#write({ v: 1, type: "hello", contract: APPLET_CONTRACT_VERSION });
+      }
+      if (frame.snapshot) {
+        // The whole state came with the greeting: render on it, and send
+        // nothing back. A hello for a new generation carries that
+        // generation's rows, so the reset above is what it needs.
+        this.#snapshot(frame.lastChangeId, frame.snapshot);
+        return;
+      }
+      if (changedGeneration || !this.#helloSent) {
+        // Nothing came with the greeting: a server that could not fit the
+        // snapshot, one that speaks v1, or new code over the same storage.
+        // Ask, as v1 always did.
+        this.#helloSent = true;
+        this.#write({
+          v: APPLET_PROTOCOL_VERSION,
+          type: "hello",
+          contract: APPLET_CONTRACT_VERSION,
+        });
       }
       return;
     }
 
     if (frame.type === "snapshot") {
-      this.#lastChangeId = frame.lastChangeId;
-      for (const [name, sink] of this.#sinks) {
-        // `truncate` only has meaning inside an open sync transaction.
-        sink.begin();
-        sink.truncate();
-        for (const row of frame.tables[name] ?? [])
-          sink.write({ type: "insert", value: row });
-        sink.commit();
-        sink.markReady();
-      }
-      this.#synced = true;
-      this.#attempt = 0;
-      this.#setState({ status: "ready" });
-      const buffered = this.#buffer;
-      this.#buffer = [];
-      if (buffered.length > 0) this.#apply(buffered);
+      this.#snapshot(frame.lastChangeId, frame.tables);
       return;
     }
 
@@ -302,6 +345,7 @@ export class AppletTransport {
         this.#attempt = 0;
         this.#setState({ status: "ready" });
         for (const sink of this.#sinks.values()) sink.markReady();
+        this.#timing("ready");
       }
       this.#apply(frame.changes);
       return;
@@ -319,6 +363,27 @@ export class AppletTransport {
 
     this.#pending.get(frame.txnId)?.reject(new RejectedMutation(frame.reason));
     this.#pending.delete(frame.txnId);
+  }
+
+  /** The whole state, from a `snapshot` frame or a v2 hello: replace and mark ready. */
+  #snapshot(lastChangeId: number, tables: AppletSnapshotTablesV1): void {
+    this.#lastChangeId = lastChangeId;
+    for (const [name, sink] of this.#sinks) {
+      // `truncate` only has meaning inside an open sync transaction.
+      sink.begin();
+      sink.truncate();
+      for (const row of tables[name] ?? [])
+        sink.write({ type: "insert", value: row });
+      sink.commit();
+      sink.markReady();
+    }
+    this.#synced = true;
+    this.#attempt = 0;
+    this.#setState({ status: "ready" });
+    this.#timing("ready");
+    const buffered = this.#buffer;
+    this.#buffer = [];
+    if (buffered.length > 0) this.#apply(buffered);
   }
 
   #apply(changes: AppletChangeV1[]): void {
@@ -366,7 +431,12 @@ export class AppletTransport {
       this.#resyncQueued = false;
       if (!this.#socket) return;
       this.#synced = false;
-      this.#write({ v: 1, type: "hello", contract: APPLET_CONTRACT_VERSION });
+      this.#helloSent = true;
+      this.#write({
+        v: APPLET_PROTOCOL_VERSION,
+        type: "hello",
+        contract: APPLET_CONTRACT_VERSION,
+      });
     });
   }
 
@@ -379,7 +449,12 @@ export class AppletTransport {
     return new Promise<AppletChangeV1[]>((resolve, reject) => {
       this.#pending.set(txnId, { resolve, reject });
       try {
-        this.#write({ v: 1, type: "mutate", txnId, mutations });
+        this.#write({
+          v: APPLET_PROTOCOL_VERSION,
+          type: "mutate",
+          txnId,
+          mutations,
+        });
       } catch (error) {
         this.#pending.delete(txnId);
         reject(error instanceof Error ? error : new Error(String(error)));

@@ -64,6 +64,143 @@ function fail(socket: RecordedSocket): void {
   socket.onclose?.({});
 }
 
+/** The server's hello, in the version the socket opened with. */
+function hello(
+  socket: RecordedSocket,
+  options: { snapshot?: Record<string, Array<Record<string, unknown>>> } = {},
+): void {
+  socket.onmessage?.({
+    data: JSON.stringify({
+      v: 2,
+      type: "hello",
+      contract: 1,
+      generationId: "gen-1",
+      viewer: { id: "v", canWrite: true },
+      tables: ["todos"],
+      schemaRevision: 1,
+      lastChangeId: 7,
+      ...options,
+    }),
+  });
+}
+
+/** The socket opens and the server greets it. */
+function greeting(
+  socket: RecordedSocket,
+  options: { snapshot?: Record<string, Array<Record<string, unknown>>> } = {},
+): void {
+  socket.onopen?.({});
+  hello(socket, options);
+}
+
+describe("the v2 handshake", () => {
+  it("opens with the version and no cursor, and renders on the hello alone", () => {
+    const { sockets, transport, connect } = harness();
+    const sent: string[] = [];
+    const rows: unknown[] = [];
+    let ready = 0;
+    transport.registerTable("todos", {
+      begin() {},
+      write: (message) => rows.push(message.value),
+      commit() {},
+      markReady: () => ready++,
+      truncate() {},
+    });
+    connect();
+    const socket = sockets[0]!;
+    socket.send = (data) => sent.push(data);
+    const url = new URL(socket.url);
+    expect(url.searchParams.get("v")).toBe("2");
+    expect(url.searchParams.has("since")).toBe(false);
+
+    greeting(socket, { snapshot: { todos: [{ id: "a" }] } });
+
+    // No hello of its own: the greeting was the whole handshake.
+    expect(sent).toEqual([]);
+    expect(rows).toEqual([{ id: "a" }]);
+    expect(ready).toBe(1);
+    expect(transport.state.status).toBe("ready");
+    transport.close();
+  });
+
+  it("asks for the snapshot when the hello came without one", () => {
+    const { sockets, transport, connect } = harness();
+    const sent: string[] = [];
+    connect();
+    const socket = sockets[0]!;
+    socket.send = (data) => sent.push(data);
+
+    greeting(socket);
+
+    expect(sent.map((frame) => JSON.parse(frame) as object)).toEqual([
+      { v: 2, type: "hello", contract: 1 },
+    ]);
+    expect(transport.state.status).toBe("connecting");
+    transport.close();
+  });
+
+  it("resumes with the cursor on the URL and its own hello, as v1 did", () => {
+    const { sockets, transport, runTimers, connect } = harness();
+    connect();
+    const first = sockets[0]!;
+    greeting(first, { snapshot: { todos: [] } });
+    expect(transport.state.status).toBe("ready");
+
+    fail(first);
+    runTimers();
+    const second = sockets[1]!;
+    const sent: string[] = [];
+    second.send = (data) => sent.push(data);
+    expect(new URL(second.url).searchParams.get("since")).toBe("7");
+    second.onopen?.({});
+    expect(sent.map((frame) => JSON.parse(frame) as object)).toEqual([
+      { v: 2, type: "hello", contract: 1, since: 7 },
+    ]);
+    // The server's plain hello for a resume is not answered a second time.
+    hello(second);
+    expect(sent).toHaveLength(1);
+    transport.close();
+  });
+
+  it("reports each hop to the host only when asked", () => {
+    const hops: string[] = [];
+    const sockets: RecordedSocket[] = [];
+    const transport = new AppletTransport({
+      socketFactory: (url) => {
+        const socket: RecordedSocket = {
+          url,
+          closed: false,
+          send() {},
+          close() {},
+          onopen: null,
+          onmessage: null,
+          onclose: null,
+          onerror: null,
+        };
+        sockets.push(socket);
+        return socket;
+      },
+      onTiming: (hop) => hops.push(hop),
+    });
+    transport.connect({
+      socketUrl: "wss://applet.example/api/applets/review/socket",
+      token: "t",
+      generationId: "gen-1",
+    });
+    greeting(sockets[0]!, { snapshot: {} });
+    expect(hops).toEqual([]);
+    transport.connect({
+      socketUrl: "wss://applet.example/api/applets/review/socket",
+      token: "t",
+      generationId: "gen-1",
+      timing: true,
+    });
+    greeting(sockets[1]!, { snapshot: {} });
+    expect(hops).toEqual(["socket-open", "hello", "ready"]);
+    transport.close();
+  });
+});
+
 describe("reconnection", () => {
   it("one socket error followed by close opens only one replacement", () => {
     const { sockets, transport, runTimers, connect } = harness();
@@ -145,7 +282,12 @@ it("native viewer credentials stay out of URLs through token renewal", () => {
   };
   transport.connect({ ...init, token: "synthetic-one" });
   transport.connect({ ...init, token: "synthetic-two" });
-  expect(sockets.map((s) => s.url)).toEqual([init.socketUrl, init.socketUrl]);
+  // The URL names the protocol and nothing of the credential.
+  expect(sockets.map((s) => s.url)).toEqual([
+    `${init.socketUrl}?v=2`,
+    `${init.socketUrl}?v=2`,
+  ]);
+  for (const socket of sockets) expect(socket.url).not.toContain("synthetic");
   expect(sockets[0]!.protocols).toEqual([
     "frockbot.applet.v1",
     "frockbot.viewer.synthetic-one",

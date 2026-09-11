@@ -15,8 +15,10 @@ import type {
 
 import {
   APPLET_CONTRACT_VERSION,
+  appletHandshakeFromUrlV1,
   encodeFrame,
   type AppletChangeV1,
+  type AppletProtocolVersion,
   type AppletViewerV1,
 } from "../protocol/index.js";
 import {
@@ -111,6 +113,8 @@ interface ViewerAttachment {
   viewer: AppletViewerV1;
   /** Set once the socket has been sent its snapshot or catch-up. */
   synced: boolean;
+  /** The protocol the page opened with; absent on a socket accepted before v2. */
+  protocol?: AppletProtocolVersion;
 }
 
 /**
@@ -293,6 +297,10 @@ export abstract class Applet<
           url.searchParams.get("canWrite") ??
           "true") !== "false",
     };
+    // The page's version and, on a reconnect, its cursor, both settled by the
+    // URL before the first frame. The kernel forwards the upgrade with the
+    // viewer token removed and everything else the page put there kept.
+    const handshake = appletHandshakeFromUrlV1(url);
     const pair = new WebSocketPair();
     const client = pair[0];
     const server = pair[1];
@@ -300,8 +308,9 @@ export abstract class Applet<
     server.serializeAttachment({
       viewer,
       synced: false,
+      protocol: handshake.protocol,
     } satisfies ViewerAttachment);
-    this.#protocol().greet(this.#peer(server));
+    this.#protocol().greet(this.#peer(server), handshake);
     return new Response(null, {
       status: 101,
       webSocket: client,
@@ -363,6 +372,7 @@ export abstract class Applet<
     }) as ViewerAttachment;
     return {
       viewer: attachment.viewer,
+      protocol: attachment.protocol ?? 1,
       get synced() {
         return attachment.synced;
       },

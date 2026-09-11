@@ -52,6 +52,44 @@ describe("connection", () => {
     expect(applet.tables.todos).toBe(todos);
   });
 
+  it("renders on the server's hello, with no hello of its own", async () => {
+    const server = new LoopbackApplet(tables);
+    server.store.insert("todos", { title: "milk", createdAt: NOW });
+    const { todos } = await connected(server);
+    const socket = server.sockets[0]!;
+    const received = socket.received.map(
+      (frame) => JSON.parse(frame) as { type: string; snapshot?: unknown },
+    );
+    expect(received.map((frame) => frame.type)).toEqual(["hello"]);
+    expect(received[0]?.snapshot).toBeDefined();
+    expect(socket.sent).toEqual([]);
+    expect(titles(todos.toArray)).toEqual(["milk"]);
+  });
+
+  it("is spoken to in v1 when it opened as v1", async () => {
+    const server = new LoopbackApplet(tables);
+    server.store.insert("todos", { title: "milk", createdAt: NOW });
+    // A page built before v2: the same transport, but its URL names no
+    // version, so the server greets it the old way and it asks as it did.
+    const socket = server.open("ws://applet/socket");
+    const frames: Array<{ v: number; type: string }> = [];
+    socket.onmessage = (event) =>
+      frames.push(
+        JSON.parse(String(event.data)) as { v: number; type: string },
+      );
+    await flush();
+    expect(frames.map((frame) => [frame.v, frame.type])).toEqual([
+      [1, "hello"],
+    ]);
+    expect("snapshot" in frames[0]!).toBe(false);
+    socket.send(JSON.stringify({ v: 1, type: "hello", contract: 1 }));
+    await flush();
+    expect(frames.map((frame) => [frame.v, frame.type])).toEqual([
+      [1, "hello"],
+      [1, "snapshot"],
+    ]);
+  });
+
   it("returns the same collection for the same table", async () => {
     const { applet } = await connected();
     expect(applet.tables.todos).toBe(applet.tables.todos);
