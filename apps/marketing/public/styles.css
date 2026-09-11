@@ -365,9 +365,12 @@
   .hero-copy {
     position: absolute;
     z-index: 2;
-    top: 74px;
+    top: 44px;
     left: 0;
     width: 610px;
+  }
+  .hero-eyebrow {
+    margin: 0 0 14px;
   }
   .eyebrow {
     display: inline-flex;

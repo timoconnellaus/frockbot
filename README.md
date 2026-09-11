@@ -4,6 +4,8 @@
 
 # FrockBot
 
+> **FrockBot is in beta.** Expect rough edges and breaking changes while it settles.
+
 FrockBot is an experimental application for persistent conversational bots. The hosted WebUI and cloud backend provide the product path.
 
 The current vertical slice includes:
