@@ -81,6 +81,7 @@ import {
   createUserWorkspaceGenerationsV1,
   type UserMemoryRpc,
 } from "./memory.js";
+import { fetchVoiceUpstreamSocketV1 } from "./voice-dictation.js";
 import { createDurableWorkspaceFilesV1 } from "./workspace.js";
 import { rpcJsonSnapshotV1 } from "./durable-rpc.js";
 
@@ -198,25 +199,14 @@ interface DelegationCheckPayload {
 }
 
 /**
- * Opens the transcription upstream with a `fetch` upgrade, the way a Worker
- * must, and presents it as the plain socket the adapter drives.
+ * Presents the transcription upstream, opened with the `fetch` upgrade the
+ * dictation relay already owns, as the plain socket the adapter drives.
  */
 async function openVoiceUpstreamSocket(
   url: string,
   headers: Record<string, string>,
 ): Promise<VoiceRealtimeSocketV1> {
-  const target = new URL(url);
-  target.protocol = "https:";
-  const response = await fetch(target, {
-    headers: { ...headers, upgrade: "websocket" },
-  });
-  const socket = response.webSocket;
-  if (response.status !== 101 || !socket) {
-    throw new Error(
-      `the speech service refused the upgrade (${response.status})`,
-    );
-  }
-  socket.accept();
+  const socket = await fetchVoiceUpstreamSocketV1(url, headers);
   return {
     send: (data: string) => socket.send(data),
     close: () => {
@@ -536,7 +526,7 @@ export class VoiceAssistant extends VoiceAgentBase<
     // The SDK calls `createSession` once per call; the wrapper session is
     // what sleep and wake act on.
     return {
-      createSession: (options) => {
+      createSession: (options = {}) => {
         const session = sleeping.createSession({
           ...options,
           onFatalError: (error) => {

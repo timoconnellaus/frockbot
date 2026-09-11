@@ -77,7 +77,7 @@ export interface VoiceDictationRelayOptions {
 }
 
 /** Opens the upstream with a `fetch` upgrade, the way a Worker must. */
-async function fetchUpstreamSocket(
+export async function fetchVoiceUpstreamSocketV1(
   url: string,
   headers: Record<string, string>,
 ): Promise<WebSocket> {
@@ -168,7 +168,7 @@ function runRelay(
   const maxCaptureMs = options.maxCaptureMs ?? VOICE_DICTATION_MAX_MS_V1;
   const leaseRenewMs =
     options.leaseRenewMs ?? VOICE_DICTATION_LEASE_RENEW_MS_V1;
-  const connectUpstream = options.connectUpstream ?? fetchUpstreamSocket;
+  const connectUpstream = options.connectUpstream ?? fetchVoiceUpstreamSocketV1;
   const now = options.now ?? (() => Date.now());
 
   let started = false;
