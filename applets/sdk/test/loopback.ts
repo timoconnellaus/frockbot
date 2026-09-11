@@ -5,7 +5,11 @@
  * that passes is a test against the code the Durable Object runs.
  */
 
-import { encodeFrame, type AppletChangeV1 } from "../src/protocol/index.js";
+import {
+  appletHandshakeFromUrlV1,
+  encodeFrame,
+  type AppletChangeV1,
+} from "../src/protocol/index.js";
 import type {
   AppletSocket,
   AppletSocketFactory,
@@ -50,9 +54,13 @@ class FakeSocket implements AppletSocket {
     queueMicrotask(() => this.onclose?.({}));
   }
 
+  /** Every frame the server delivered, oldest first. */
+  readonly received: string[] = [];
+
   /** Server -> client. */
   deliver(data: string): void {
     if (this.closed) return;
+    this.received.push(data);
     queueMicrotask(() => this.onmessage?.({ data }));
   }
 
@@ -78,10 +86,15 @@ export class LoopbackApplet {
   }
 
   get socketFactory(): AppletSocketFactory {
-    return () => this.open();
+    return (url) => this.open(url);
   }
 
-  open(): AppletSocket {
+  /**
+   * Accept one socket the way `Applet.fetch` does: the page's protocol and
+   * cursor are read off the URL, and the greeting follows from them.
+   */
+  open(url = "ws://applet/socket"): AppletSocket {
+    const handshake = appletHandshakeFromUrlV1(new URL(url));
     const socket = new FakeSocket((data) => {
       const peer = this.peers.get(socket);
       if (peer) this.protocol().receive(peer, data);
@@ -91,6 +104,7 @@ export class LoopbackApplet {
         id: `viewer-${this.sockets.length + 1}`,
         canWrite: this.canWrite,
       },
+      protocol: handshake.protocol,
       synced: false,
       send: (frame) => socket.deliver(encodeFrame(frame)),
       close: () => socket.drop(),
@@ -98,7 +112,7 @@ export class LoopbackApplet {
     this.sockets.push(socket);
     this.peers.set(socket, peer);
     queueMicrotask(() => socket.onopen?.({}));
-    this.protocol().greet(peer);
+    this.protocol().greet(peer, handshake);
     return socket;
   }
 

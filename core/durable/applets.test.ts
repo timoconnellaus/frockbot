@@ -190,6 +190,14 @@ describe("Applet durable records", () => {
     expect(() =>
       decodeAppletMountInputV1({ ...input, loaderId: "no" }),
     ).toThrow();
+    // The etag an activation recorded rides along; an input written before
+    // etags were recorded decodes without one and hashes in full on its next
+    // mount.
+    const pinned = { ...input, serverEtag: '"0123456789abcdef"' };
+    expect(decodeAppletMountInputV1(pinned)).toEqual(pinned as never);
+    expect(() =>
+      decodeAppletMountInputV1({ ...input, serverEtag: "" }),
+    ).toThrow();
   });
 
   test("a trial names the candidate, and the previous generation only when there is one", () => {

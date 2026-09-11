@@ -70,11 +70,11 @@ Seven changes, landed as four pull requests in the order below.
 4. **Warm the mount from the open endpoint.** `AppletState.open` starts the
    mount in the background (`ctx.waitUntil`) when the facet is not resident,
    so the isolate and the schema are ready before the socket arrives. The
-   loaded worker stub is cached per Durable Object instance by loader id, and
-   the artifact read moves inside the loader callback, so a resident isolate
-   costs no R2 read at all. The per-mount SHA-256 over the whole bundle is
-   replaced by the content-addressed key plus the R2 etag recorded at the
-   activation that did verify the hash (see below).
+   loaded worker stub is cached per Durable Object instance by loader id, so
+   every socket and tool call after the first in an instance costs no R2 read
+   and no hash. The per-mount SHA-256 over the whole bundle is replaced by the
+   content-addressed key plus the R2 etag recorded at the activation that did
+   verify the hash (see below).
 5. **Edge cache the UI artifact.** `servePackageUiArtifact` consults the
    Workers Cache API before R2. The cache key is the request URL, which is the
    hash. A hit is served from the edge with the same `immutable`, `etag`,
@@ -107,9 +107,9 @@ what was hashed:
   still reads the artifact and verifies the full hash. That activation records
   the R2 object's `etag` in the durable mount input beside the hash.
 - Every later mount of that input reads the object and compares its `etag`
-  (and size) to the recorded one. R2's etag identifies one stored object
-  version: an object rewritten under the same key, by anyone, has a different
-  etag. A match therefore proves the bytes are the ones the activation hashed.
+  to the recorded one. R2's etag identifies one stored object version: an
+  object rewritten under the same key, by anyone, has a different etag. A
+  match therefore proves the bytes are the ones the activation hashed.
 - A mismatch, or a mount input recorded before this change and so carrying no
   etag, falls back to the full hash and then records the etag. Nothing is
   refused that would have passed before, and nothing is loaded that was never

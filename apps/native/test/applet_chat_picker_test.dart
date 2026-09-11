@@ -7,7 +7,7 @@ import 'package:frockbot_native/client/transport.dart';
 
 import 'package:frockbot_native/shell/transcript.dart';
 
-import 'applets_test.dart' show applet, sourceView;
+import 'applets_test.dart' show applet;
 import 'settings_test.dart' show SettingsApi;
 import 'widget_test.dart' show MemoryStore;
 

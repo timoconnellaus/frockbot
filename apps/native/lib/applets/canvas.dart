@@ -40,20 +40,6 @@ const appletCanvasPollV1 = Duration(seconds: 6);
 /// A read that takes longer than this stops spinning and offers a retry.
 const appletCanvasLoadTimeoutV1 = Duration(seconds: 8);
 
-/// `--dart-define=FROCKBOT_APPLET_TIMING=true` prints one line per hop of
-/// the open path, so a slow open can be read hop by hop rather than guessed
-/// at. Off, it costs a constant-folded branch.
-const appletTimingLogV1 = bool.fromEnvironment('FROCKBOT_APPLET_TIMING');
-
-/// One hop of the open path, in milliseconds since the open began.
-void appletTimingV1(String hop, Stopwatch since, {String detail = ''}) {
-  if (!appletTimingLogV1) return;
-  debugPrint(
-    'applet-timing $hop ${since.elapsedMilliseconds}ms'
-    '${detail.isEmpty ? '' : ' $detail'}',
-  );
-}
-
 class AppletCanvasController extends ChangeNotifier {
   final AppletsApi applets;
   final String botId;
@@ -83,9 +69,6 @@ class AppletCanvasController extends ChangeNotifier {
   int _attempt = 0;
   int _epoch = 0;
   Timer? _retry;
-
-  /// When the open began, for the timing log.
-  final Stopwatch _opened = Stopwatch();
 
   wire.AppletSummary? get focused =>
       directory.where((applet) => applet.appletId == focusedId).firstOrNull;
@@ -125,7 +108,7 @@ class AppletCanvasController extends ChangeNotifier {
   Future<void> _load({required bool? code}) async {
     final epoch = ++_epoch;
     _retry?.cancel();
-    _opened
+    appletOpenClockV1
       ..reset()
       ..start();
     // A skeleton is for an empty panel. The canvas re-reads on a cadence while
@@ -171,7 +154,7 @@ class AppletCanvasController extends ChangeNotifier {
   Future<void> _open(int epoch) async {
     final opened = await applets.open(botId);
     if (epoch != _epoch) return;
-    appletTimingV1('open-endpoint', _opened);
+    appletTimingV1('open-endpoint');
     directory = opened.applets;
     directoryFailure = null;
     failure = null;
@@ -209,7 +192,7 @@ class AppletCanvasController extends ChangeNotifier {
       generationId: generationId,
     )) {
       viewer = AppletViewer.fromOpen(focus);
-      appletTimingV1('viewer-set', _opened, detail: generationId);
+      appletTimingV1('viewer-set', detail: generationId);
     }
     _changed();
   }
@@ -224,7 +207,7 @@ class AppletCanvasController extends ChangeNotifier {
     if (epoch != _epoch || focusedId != appletId) return;
     source = results[0] as AppletSource;
     build = results[1] as AppletBuild;
-    appletTimingV1('code-read', _opened);
+    appletTimingV1('code-read');
   }
 
   /// A network that might come back is retried on a widening backoff; a
@@ -312,7 +295,21 @@ class AppletViewerFrame extends StatelessWidget {
     // connected with one that is about to expire.
     identity: '${viewer.generationId}|${viewer.uiUrl}|${viewer.token}',
     messages: [viewer.init(packageThemeTokensV1(context))],
+    // The frame's own hops, only while the log is on: the page is listened
+    // to for nothing at all otherwise.
+    onLoaded: appletTimingLogV1 ? () => appletTimingV1('frame-loaded') : null,
+    onMessage: appletTimingLogV1 ? _pageTiming : null,
   );
+
+  /// What the page reports of its open path: `socket-open`, `hello`,
+  /// `ready` and `first-render`, on the host's clock.
+  static void _pageTiming(Map<String, Object?> message) {
+    if (message['type'] != 'applet/timing') return;
+    final hop = message['hop'];
+    if (hop is String && RegExp(r'^[a-z-]{1,32}$').hasMatch(hop)) {
+      appletTimingV1('page-$hop');
+    }
+  }
 }
 
 class AppletCanvas extends StatefulWidget {

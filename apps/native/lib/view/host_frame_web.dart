@@ -29,6 +29,7 @@ class HostFrameView extends StatefulWidget {
   final bool allowSameOrigin;
   final String label;
   final ValueChanged<String>? onFailure;
+  final VoidCallback? onLoaded;
 
   /// What the page said, once it is known to have come from this frame.
   final ValueChanged<Map<String, Object?>>? onMessage;
@@ -39,6 +40,7 @@ class HostFrameView extends StatefulWidget {
     this.messages = const [],
     this.allowSameOrigin = false,
     this.onFailure,
+    this.onLoaded,
     this.onMessage,
   });
 
@@ -77,6 +79,7 @@ class _HostFrameViewState extends State<HostFrameView> {
       'load',
       ((web.Event _) {
         _loaded = true;
+        widget.onLoaded?.call();
         _deliver();
       }).toJS,
     );
