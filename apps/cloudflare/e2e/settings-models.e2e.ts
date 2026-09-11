@@ -2,12 +2,10 @@ import type { Locator, Page } from "@playwright/test";
 import {
   chooseDefaultModel,
   chooseOllamaProvider,
-  closeOverlay,
   connectOllama,
   E2E_CONNECTION_LABEL,
   E2E_MODEL_LABEL,
   expect,
-  group,
   field,
   openApplication,
   openProfileMenu,
@@ -96,16 +94,6 @@ async function openProfileSurface(
 async function openModels(page: Page): Promise<void> {
   await openProfileSurface(page, "profile-models", "settings-model-field");
 }
-
-/**
- * Choose Ollama Cloud as a provider for this account.
- *
- * Connectors offers a provider's connect form only once that provider's own
- * Package is installed, and Ollama Cloud is not a row in Plugins: it is
- * offered on Models, as the action beside the provider's own name. That action
- * is scoped to its group rather than named, because its id carries the
- * section's index in the document and a spec has no business knowing that.
- */
 
 /** Account Settings, which is the only surface carrying the Models link. */
 async function openSettings(page: Page): Promise<void> {
