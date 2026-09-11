@@ -164,7 +164,7 @@ final class MacMessagesBridge {
       }
     }
     child.terminationHandler = { [weak self] _ in
-      Task { @MainActor in
+      Task { @MainActor [weak self] in
         guard let self, self.process === child else { return }
         self.stop()
         self.error = "The FrockBot stopped. Reopen it to reconnect."
