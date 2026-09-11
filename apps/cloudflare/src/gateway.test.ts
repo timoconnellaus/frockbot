@@ -254,6 +254,8 @@ function rpcBindingFor(state: BotStateBinding): UserBotStateBinding {
     mintAppletViewerToken: () =>
       Promise.reject(new Error("Applet is unavailable")),
     readAppletUi: () => Promise.reject(new Error("Applet is unavailable")),
+    openFocusedApplet: () =>
+      Promise.resolve({ schemaVersion: 1 as const, applets: [] }),
     readFocusedApplet: () =>
       Promise.resolve({
         schemaVersion: 1,

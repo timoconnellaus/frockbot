@@ -160,6 +160,37 @@ export interface AppletFocusViewV1 {
   appletId: string | null;
 }
 
+/**
+ * The focused Applet as the canvas opens it, in one answer.
+ *
+ * The viewer fields travel together or not at all: an Applet with nothing
+ * published has an `appletId` and nothing else, which is the building state.
+ * `token` is the same short-lived credential `AppletViewerTokenV1` carries,
+ * minted against `generationId`, and `uiUrl` is the anonymous artifact page
+ * for that generation.
+ */
+export type AppletOpenFocusV1 =
+  | { appletId: string }
+  | {
+      appletId: string;
+      generationId: string;
+      uiUrl: string;
+      token: string;
+      socketUrl: string;
+      expiresAt: string;
+    };
+
+/**
+ * `GET /api/bots/:bot/applets/open`: everything the canvas needs to put the
+ * frame up, read once. The directory rides along for the picker and the
+ * header, and `focused` is absent when the Session has no Applet open.
+ */
+export interface AppletOpenViewV1 {
+  schemaVersion: 1;
+  applets: AppletSummaryV1[];
+  focused?: AppletOpenFocusV1;
+}
+
 /** The Applets the User owns, as a client reads them. */
 export interface AppletListViewV1 {
   schemaVersion: 1;
@@ -938,4 +969,78 @@ export function decodeAppletViewerTokenV1(
     expiresAt: timestamp(value.expiresAt, `${label}.expiresAt`),
     socketUrl,
   };
+}
+
+function absoluteUrl(
+  value: unknown,
+  label: string,
+  protocols: readonly string[],
+): string {
+  const text = boundedString(value, label, 2_048);
+  let parsed: URL;
+  try {
+    parsed = new URL(text);
+  } catch {
+    throw new Error(`${label} is invalid`);
+  }
+  if (!protocols.includes(parsed.protocol))
+    throw new Error(`${label} is invalid`);
+  return text;
+}
+
+export function decodeAppletOpenFocusV1(
+  input: unknown,
+  label = "Applet open focus",
+): AppletOpenFocusV1 {
+  const value = record(input, label);
+  const viewerKeys = [
+    "generationId",
+    "uiUrl",
+    "token",
+    "socketUrl",
+    "expiresAt",
+  ] as const;
+  const present = viewerKeys.filter((key) => value[key] !== undefined);
+  if (present.length === 0) {
+    exactKeys(value, ["appletId"], [], label);
+    return { appletId: appletId(value.appletId, `${label}.appletId`) };
+  }
+  // Half a viewer is not a building state and not an open one: refuse it.
+  exactKeys(value, ["appletId", ...viewerKeys], [], label);
+  return {
+    appletId: appletId(value.appletId, `${label}.appletId`),
+    generationId: boundedString(
+      value.generationId,
+      `${label}.generationId`,
+      128,
+    ),
+    uiUrl: absoluteUrl(value.uiUrl, `${label}.uiUrl`, ["http:", "https:"]),
+    token: boundedString(value.token, `${label}.token`, 1_024),
+    socketUrl: absoluteUrl(value.socketUrl, `${label}.socketUrl`, [
+      "ws:",
+      "wss:",
+      "http:",
+      "https:",
+    ]),
+    expiresAt: timestamp(value.expiresAt, `${label}.expiresAt`),
+  };
+}
+
+export function decodeAppletOpenViewV1(
+  input: unknown,
+  label = "Applet open",
+): AppletOpenViewV1 {
+  const value = record(input, label);
+  exactKeys(value, ["schemaVersion", "applets"], ["focused"], label);
+  if (value.schemaVersion !== 1)
+    throw new Error(`${label} version is unsupported`);
+  const { applets } = decodeAppletListViewV1(
+    { schemaVersion: 1, applets: value.applets },
+    label,
+  );
+  if (value.focused === undefined) return { schemaVersion: 1, applets };
+  const focused = decodeAppletOpenFocusV1(value.focused, `${label}.focused`);
+  if (!applets.some((applet) => applet.appletId === focused.appletId))
+    throw new Error(`${label}.focused names an Applet the directory does not`);
+  return { schemaVersion: 1, applets, focused };
 }

@@ -51,20 +51,28 @@ The Cloudflare programming model is not hidden: an Applet is a Durable Object
 with SQLite and hibernating sockets. What the SDK does hide is every binding
 name — an author sees `tables`, `tools`, and `this.db`.
 
-## Wire protocol v1
+## Wire protocol
 
 JSON frames, at most 64 KB each, decoded by `src/protocol/` at both ends;
-an unknown type, field, or table fails closed.
+an unknown type, field, or table fails closed. Two versions are spoken on the
+same server, told apart by the socket URL: a page built against v2 opens with
+`v=2`, and a page built before it opens with nothing and is spoken to in v1.
 
-| Direction       | Frame      | Carries                                                     |
-| --------------- | ---------- | ----------------------------------------------------------- |
-| server → client | `hello`    | contract, generationId, viewer, tables, revision, cursor    |
-| client → server | `hello`    | contract, optional `since` cursor for catch-up              |
-| server → client | `snapshot` | every row of every table, plus the cursor                   |
-| server → client | `changes`  | ordered row changes, optionally tagged with a client txn id |
-| client → server | `mutate`   | one client transaction: insert/update/delete                |
-| server → client | `ack`      | the resulting rows for that txn                             |
-| server → client | `reject`   | why the txn was refused (the client rolls back)             |
+| Direction       | Frame      | Carries                                                                                     |
+| --------------- | ---------- | ------------------------------------------------------------------------------------------- |
+| server → client | `hello`    | contract, generationId, viewer, tables, revision, cursor — and in v2, the `snapshot` itself |
+| client → server | `hello`    | contract, optional `since` cursor for catch-up; in v2 only on a resume or when asked        |
+| server → client | `snapshot` | every row of every table, plus the cursor                                                   |
+| server → client | `changes`  | ordered row changes, optionally tagged with a client txn id                                 |
+| client → server | `mutate`   | one client transaction: insert/update/delete                                                |
+| server → client | `ack`      | the resulting rows for that txn                                                             |
+| server → client | `reject`   | why the txn was refused (the client rolls back)                                             |
+
+A v2 page's first render waits on one frame: the server's `hello` carries the
+snapshot when the URL named no `since` cursor, and the page marks its
+collections ready on it. A reconnect puts `since` on the URL, gets a plain
+`hello`, and asks for `changes` as v1 does. A snapshot that would not fit the
+frame is left out of the hello and the v1 exchange follows.
 
 ## Tests
 

@@ -54,11 +54,17 @@ class AppletCanvasController extends ChangeNotifier {
 
   /// Why the Applet *directory* could not be read, which is a different thing
   /// from why the focused Applet's detail could not be: the picker lists the
-  /// directory and nothing else, so a token or source read that failed is not
-  /// its failure to report.
+  /// directory and nothing else, so a source read that failed is not its
+  /// failure to report.
   AppletCanvasFailure? directoryFailure;
   bool loading = true;
   bool loaded = false;
+
+  /// Whether the reader is looking at the code. The source and the last build
+  /// are the code view's content and nothing else's, so they are read when
+  /// this is true or when there is no live Applet to look at instead — and
+  /// never before the viewer is known.
+  bool codeView = false;
   bool _closed = false;
   int _attempt = 0;
   int _epoch = 0;
@@ -67,13 +73,44 @@ class AppletCanvasController extends ChangeNotifier {
   wire.AppletSummary? get focused =>
       directory.where((applet) => applet.appletId == focusedId).firstOrNull;
 
+  /// Whether the code view has anything to draw yet for the focused Applet.
+  bool get codeRead => source != null && source?.appletId == focusedId;
+
   void _changed() {
     if (!_closed) notifyListeners();
   }
 
-  Future<void> load() async {
+  /// The full read: the open route first, so the frame has its page and its
+  /// credential before anything else is asked for, then the code when the
+  /// code is what is on screen.
+  Future<void> load() => _load(code: null);
+
+  /// The read a running Turn repeats: the open route alone. The building
+  /// state is the one exception — an Applet with nothing published has only
+  /// its code to show, so the code is read behind the open answer.
+  Future<void> poll() => _load(code: false);
+
+  /// The code, on demand: the reader opened the Code tab.
+  Future<void> readCode() async {
+    final epoch = _epoch;
+    try {
+      await _readCode(epoch);
+    } catch (error) {
+      if (epoch != _epoch) return;
+      failure = appletCanvasFailureV1(error);
+    } finally {
+      if (epoch == _epoch) _changed();
+    }
+  }
+
+  /// `code` says whether the code view's reads follow the open read: `null`
+  /// lets the view decide, `false` reads them only for an unpublished Applet.
+  Future<void> _load({required bool? code}) async {
     final epoch = ++_epoch;
     _retry?.cancel();
+    appletOpenClockV1
+      ..reset()
+      ..start();
     // A skeleton is for an empty panel. The canvas re-reads on a cadence while
     // a Turn runs, and showing the loading state on each of those replaced a
     // live Applet — mid-use, mid-scroll — with grey bars twice a minute.
@@ -90,31 +127,15 @@ class AppletCanvasController extends ChangeNotifier {
     }
     var read = false;
     try {
-      var listed = await applets.list();
+      await _open(epoch);
       if (epoch != _epoch) return;
-      directory = listed;
-      directoryFailure = null;
       read = true;
-      _changed();
-      // The directory is the User's and the focus is one Bot's. Only the read
-      // above says whether the Applets could be listed; everything past here
-      // is about the focused Applet, and fails as one.
-      final focus = await applets.focus(botId);
-      if (epoch != _epoch) return;
-      if (focus != null && !listed.any((entry) => entry.appletId == focus)) {
-        // The listing was read before the focus, so an Applet the Turn created
-        // and focused in between cannot be in it. The route already clears a
-        // focus its own directory read no longer lists, so a focus this listing
-        // has never heard of is a stale listing rather than a stale focus.
-        listed = await applets.list();
+      // The viewer is set and the frame is loading. Everything past here is
+      // the code view's, and waits on nothing the frame needs.
+      if (focusedId != null && (viewer == null || (code ?? codeView))) {
+        await _readCode(epoch);
         if (epoch != _epoch) return;
-        directory = listed;
       }
-      focusedId = listed.any((entry) => entry.appletId == focus) ? focus : null;
-      failure = null;
-      _attempt = 0;
-      await _readFocused(epoch);
-      if (epoch != _epoch) return;
       loaded = true;
     } catch (error) {
       if (epoch != _epoch) return;
@@ -129,59 +150,64 @@ class AppletCanvasController extends ChangeNotifier {
     }
   }
 
-  Future<void> _readFocused(int epoch) async {
-    final appletId = focusedId;
-    if (appletId == null) {
+  /// The one request the frame waits on.
+  Future<void> _open(int epoch) async {
+    final opened = await applets.open(botId);
+    if (epoch != _epoch) return;
+    appletTimingV1('open-endpoint');
+    directory = opened.applets;
+    directoryFailure = null;
+    failure = null;
+    _attempt = 0;
+    final focus = opened.focused;
+    focusedId = focus?.appletId;
+    if (focus == null) {
       source = null;
       build = null;
       viewer = null;
+      _changed();
       return;
     }
     // Whatever is held belongs to whichever Applet it was read for. A focus
     // that has moved is a different Applet, and drawing the last one's live
     // page under this one's name is worse than drawing nothing.
-    if (viewer?.appletId != appletId) viewer = null;
-    if (source?.appletId != appletId) source = null;
-    source = await applets.source(botId, appletId);
-    build = await applets.build(botId, appletId);
-    if (epoch != _epoch) return;
-    // An Applet with nothing published has no UI to read, and the route says
-    // so with a 404. That is the building state rather than a failed canvas.
-    final AppletUi ui;
-    try {
-      ui = await applets.ui(appletId);
-    } on RequestFailure catch (failure) {
-      if (failure.status == 404) {
-        viewer = null;
-        return;
-      }
-      rethrow;
+    if (viewer?.appletId != focus.appletId) viewer = null;
+    if (source?.appletId != focus.appletId) {
+      source = null;
+      build = null;
     }
-    final generationId = ui.generationId;
+    final generationId = focus.generationId?.value;
     if (generationId == null) {
+      // Nothing published: the building state, and the code is the content.
       viewer = null;
+      _changed();
       return;
     }
     // The published generation is what the open Applet *is*: while it is
-    // unchanged and the credential has life left in it, nothing is re-fetched
-    // and the frame keeps running.
-    if (appletViewerStillCurrentV1(
+    // unchanged and the credential has life left in it, the frame keeps
+    // running on what it has.
+    if (!appletViewerStillCurrentV1(
       held: viewer,
-      appletId: appletId,
+      appletId: focus.appletId,
       generationId: generationId,
     )) {
-      return;
+      viewer = AppletViewer.fromOpen(focus);
+      appletTimingV1('viewer-set', detail: generationId);
     }
-    final minted = await applets.token(appletId);
-    if (epoch != _epoch) return;
-    viewer = AppletViewer(
-      appletId: appletId,
-      generationId: generationId,
-      uiUrl: ui.uiUrl,
-      token: minted.token,
-      socketUrl: minted.socketUrl,
-      expiresAt: DateTime.parse(minted.expiresAt.value),
-    );
+    _changed();
+  }
+
+  Future<void> _readCode(int epoch) async {
+    final appletId = focusedId;
+    if (appletId == null) return;
+    final results = await Future.wait([
+      applets.source(botId, appletId),
+      applets.build(botId, appletId),
+    ]);
+    if (epoch != _epoch || focusedId != appletId) return;
+    source = results[0] as AppletSource;
+    build = results[1] as AppletBuild;
+    appletTimingV1('code-read');
   }
 
   /// A network that might come back is retried on a widening backoff; a
@@ -200,6 +226,9 @@ class AppletCanvasController extends ChangeNotifier {
     await load();
   }
 
+  /// Records the focus, then reads the open route: the frame for the new
+  /// Applet is loading before its code is asked for, and a picker tap is one
+  /// write and one read.
   Future<void> setFocus(String? appletId) async {
     try {
       final kept = await applets.setFocus(botId, appletId);
@@ -266,7 +295,21 @@ class AppletViewerFrame extends StatelessWidget {
     // connected with one that is about to expire.
     identity: '${viewer.generationId}|${viewer.uiUrl}|${viewer.token}',
     messages: [viewer.init(packageThemeTokensV1(context))],
+    // The frame's own hops, only while the log is on: the page is listened
+    // to for nothing at all otherwise.
+    onLoaded: appletTimingLogV1 ? () => appletTimingV1('frame-loaded') : null,
+    onMessage: appletTimingLogV1 ? _pageTiming : null,
   );
+
+  /// What the page reports of its open path: `socket-open`, `hello`,
+  /// `ready` and `first-render`, on the host's clock.
+  static void _pageTiming(Map<String, Object?> message) {
+    if (message['type'] != 'applet/timing') return;
+    final hop = message['hop'];
+    if (hop is String && RegExp(r'^[a-z-]{1,32}$').hasMatch(hop)) {
+      appletTimingV1('page-$hop');
+    }
+  }
 }
 
 class AppletCanvas extends StatefulWidget {
@@ -322,8 +365,10 @@ class _AppletCanvasState extends State<AppletCanvas> {
 
   /// A Turn working on the Applet is the only reason to re-read it: the
   /// Workspace has no invalidation of its own, and polling an idle Applet
-  /// spends a read a minute on nothing. The Turn settling gets one last read,
-  /// which is the one that finds the publish.
+  /// spends a read a minute on nothing. While it runs, the poll is the open
+  /// route alone — a live Applet's source is the code view's, not the
+  /// frame's. The Turn settling gets one full read, which is the one that
+  /// finds the publish.
   void _follow() {
     _poll?.cancel();
     if (!widget.running) {
@@ -332,7 +377,7 @@ class _AppletCanvasState extends State<AppletCanvas> {
     }
     _poll = Timer.periodic(
       appletCanvasPollV1,
-      (_) => unawaited(controller.load()),
+      (_) => unawaited(controller.poll()),
     );
   }
 
@@ -526,8 +571,15 @@ class _AppletCanvasState extends State<AppletCanvas> {
                 ButtonSegment(value: false, label: Text('Code')),
               ],
               selected: {_showingApp},
-              onSelectionChanged: (next) =>
-                  setState(() => _chosenApp = next.first),
+              onSelectionChanged: (next) {
+                setState(() => _chosenApp = next.first);
+                // The code is read when it is looked at, never ahead of the
+                // frame.
+                controller.codeView = !next.first;
+                if (!next.first && !controller.codeRead) {
+                  unawaited(controller.readCode());
+                }
+              },
             ),
           ),
         identified(

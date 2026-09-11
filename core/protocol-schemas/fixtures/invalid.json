@@ -1091,6 +1091,30 @@
     }
   },
   {
+    "name": "AppletOpenView invalid",
+    "schema": "AppletOpenView",
+    "value": {
+      "schemaVersion": 1,
+      "applets": [],
+      "focused": {
+        "appletId": "tim.counter"
+      },
+      "extra": true
+    }
+  },
+  {
+    "name": "AppletOpenFocus wrong socket scheme",
+    "schema": "AppletOpenFocus",
+    "value": {
+      "appletId": "tim.counter",
+      "generationId": "generation-1",
+      "uiUrl": "https://ui.bot.frockbot.com/packages/aaaa.html",
+      "token": "signed.token",
+      "socketUrl": "javascript:alert(1)",
+      "expiresAt": "2026-09-05T00:15:00.000Z"
+    }
+  },
+  {
     "name": "SettingsChangeCommand invalid",
     "schema": "SettingsChangeCommand",
     "value": {

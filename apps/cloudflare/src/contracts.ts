@@ -273,6 +273,22 @@ export interface UserBotStateBinding {
     generationId: string;
     contentHash: string;
   }>;
+  /**
+   * The focused Applet, opened in one read: the directory, and for the focus
+   * the generation, UI artifact hash and a viewer token. The route composes
+   * the URLs from its own origin.
+   */
+  openFocusedApplet(input: { schemaVersion: 1; botId: string }): Promise<{
+    schemaVersion: 1;
+    applets: unknown[];
+    focused?: {
+      appletId: string;
+      generationId?: string;
+      uiHash?: string;
+      token?: string;
+      expiresAt?: string;
+    };
+  }>;
   readFocusedApplet(input: {
     schemaVersion: 1;
     botId: string;
@@ -668,6 +684,8 @@ export interface GatewayDependencies {
   artifacts: ApplicationArtifactStore;
   /** Dedicated anonymous hostnames that serve only immutable iframe pages. */
   uiArtifactHosts?: readonly string[];
+  /** The request's `ctx.waitUntil`, for work that may outlive the answer. */
+  waitUntil?: (promise: Promise<unknown>) => void;
   auth: GatewayAuth;
   userExists(userId: string): Promise<boolean>;
   readDeploymentPolicy(): Promise<DeploymentPolicyV1>;

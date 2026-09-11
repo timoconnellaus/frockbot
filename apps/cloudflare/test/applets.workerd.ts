@@ -16,6 +16,7 @@ import {
   mintAppletViewerTokenV1,
   verifyAppletViewerTokenV1,
   APPLET_FACET_NAME_V1,
+  APPLET_MOUNT_INPUT_KEY,
   APPLET_ROLLBACK_FACET_NAME_V1,
   APPLET_TRIAL_KEY,
   APPLET_VIEWER_TOKEN_TTL_MS,
@@ -826,6 +827,175 @@ describe("Applet directory", () => {
       refusal = error;
     }
     expect(String(refusal)).toMatch(/different User/);
+  });
+});
+
+describe("opening an Applet", () => {
+  test("an activation hashes the bundle and pins its etag; a mount that finds the pin skips the hash", async () => {
+    const applet = appletId("etag");
+    const { generation, serverHash } = await publishGeneration(applet, {
+      version: "A",
+      tools: ["list_todos"],
+    });
+    const object = await env.APPLICATION_ARTIFACTS.head(
+      `packages/${serverHash}.mjs`,
+    );
+    const mountInput = await runInDurableObject(
+      stateFor(applet),
+      (_instance, state) =>
+        state.storage.kv.get<{ serverEtag?: string; generationId: string }>(
+          APPLET_MOUNT_INPUT_KEY,
+        ),
+    );
+    expect(mountInput?.generationId).toBe(generation.generationId);
+    expect(mountInput?.serverEtag).toBe(object?.etag);
+  });
+
+  test("a bundle whose bytes are not its key never becomes code", async () => {
+    const applet = appletId("tampered");
+    const source = appletModule({ version: "A", tools: ["list_todos"] });
+    const serverHash = await sha256Hex(source);
+    // The key says one thing and the bytes another: a write path that was
+    // bypassed, or a bucket rewritten underneath.
+    await env.APPLICATION_ARTIFACTS.put(
+      `packages/${serverHash}.mjs`,
+      `${source}\n// not what the hash says`,
+    );
+    const ui = "<!doctype html><h1>A</h1>";
+    const uiHash = await sha256Hex(ui);
+    await env.APPLICATION_ARTIFACTS.put(`packages/${uiHash}.html`, ui);
+    const createdAt = new Date().toISOString();
+    const outcome = await stateFor(applet).publish({
+      schemaVersion: 1,
+      userId: OWNER,
+      appletId: applet,
+      generation: {
+        schemaVersion: 1,
+        generationId: `${createdAt}:tampered`,
+        server: {
+          contentHash: serverHash,
+          size: source.length,
+          mediaType: "application/javascript",
+          bundlerVersion: "test",
+        },
+        ui: {
+          contentHash: uiHash,
+          size: ui.length,
+          mediaType: "text/html",
+          bundlerVersion: "test",
+        },
+        tools: [declaration("list_todos")],
+        contract: 1,
+        origin: "publish",
+        provenance: {
+          botId: "bot-1",
+          sessionId: `${OWNER}:bot-1`,
+          turnId: "turn-1",
+          runId: "run-1",
+        },
+        createdAt,
+        status: "pending",
+      },
+    });
+    expect(outcome.status).toBe("failed");
+    expect(outcome.status === "failed" && outcome.reason).toMatch(
+      /failed hash verification/,
+    );
+    expect(await currentGenerationId(applet)).toBe("none");
+  });
+
+  test("open with warm brings the facet up behind the answer", async () => {
+    const applet = appletId("warm");
+    const { generation } = await publishGeneration(applet, {
+      version: "A",
+      tools: ["list_todos"],
+    });
+    // A fresh instance of the object knows nothing: the mount input is
+    // durable, the facet is not resident until something asks for it.
+    const opened = await stateFor(applet).open({
+      schemaVersion: 1,
+      userId: OWNER,
+      appletId: applet,
+      warm: true,
+    });
+    expect(opened.current?.generationId).toBe(generation.generationId);
+    // The warm mount is behind the answer; the socket that follows finds the
+    // facet up and answers on it.
+    const response = await stateFor(applet).fetch(
+      new Request(
+        `https://bot.example/api/applets/${applet}/socket?u=${OWNER}&a=${applet}&g=${encodeURIComponent(generation.generationId)}`,
+        { headers: { Upgrade: "websocket" } },
+      ),
+    );
+    expect(response.status).toBe(101);
+    response.webSocket?.accept();
+    response.webSocket?.close(1000, "done");
+  });
+
+  test("open answers the current generation's artifacts from two key reads, and nothing before a publish", async () => {
+    const applet = appletId("open");
+    const before = await stateFor(applet).open({
+      schemaVersion: 1,
+      userId: OWNER,
+      appletId: applet,
+    });
+    expect(before).toEqual({ schemaVersion: 1, appletId: applet });
+
+    const { generation, serverHash, uiHash } = await publishGeneration(applet, {
+      version: "A",
+      tools: ["list_todos"],
+    });
+    const opened = await stateFor(applet).open({
+      schemaVersion: 1,
+      userId: OWNER,
+      appletId: applet,
+    });
+    expect(opened).toEqual({
+      schemaVersion: 1,
+      appletId: applet,
+      current: {
+        generationId: generation.generationId,
+        serverHash,
+        uiHash,
+      },
+    });
+  });
+
+  test("the directory answers one entry without listing, and refuses one it does not hold", async () => {
+    const userId = "user-directory-read-one";
+    const directory = env.USER_CONFIGURATIONS.get(
+      env.USER_CONFIGURATIONS.idFromName(userId),
+    );
+    const created = await directory.createApplet({
+      schemaVersion: 1,
+      userId,
+      displayName: "Todo",
+      provenance: { kind: "user" },
+    });
+    expect(
+      await directory.readApplet({
+        schemaVersion: 1,
+        userId,
+        appletId: created.appletId,
+      }),
+    ).toEqual(created);
+    // Refusals are read from a catch: the rejection of an RPC stub left to
+    // `expect().rejects` is reported unhandled inside the object as well.
+    const refusal = async (appletId: string) => {
+      try {
+        await directory.readApplet({ schemaVersion: 1, userId, appletId });
+      } catch (error) {
+        return String(error);
+      }
+      return "answered";
+    };
+    expect(await refusal(`${userId}.${"f".repeat(32)}`)).toMatch(/unavailable/);
+    await directory.deleteApplet({
+      schemaVersion: 1,
+      userId,
+      appletId: created.appletId,
+    });
+    expect(await refusal(created.appletId)).toMatch(/unavailable/);
   });
 });
 

@@ -201,6 +201,32 @@ async function installAppletRoutes(
       body: JSON.stringify({ schemaVersion: 1, status: "deleted" }),
     });
   });
+  // The canvas's one read: the directory, the focus, and for a published focus
+  // the viewer. An unpublished focus is its id alone, which the canvas draws as
+  // the building state.
+  await page.route(/\/api\/bots\/[^/]+\/applets\/open$/, (route) =>
+    route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        schemaVersion: 1,
+        applets: removed ? [] : [summary()],
+        ...(focused === null || removed
+          ? {}
+          : {
+              focused: published
+                ? {
+                    appletId: APPLET_ID,
+                    generationId: "generation-2",
+                    uiUrl: `${artifactOrigin}/packages/${CANVAS_HASH}.html`,
+                    token: "viewer.token",
+                    expiresAt: "2099-01-01T00:00:00.000Z",
+                    socketUrl: `ws://localhost:${port}/api/applets/${APPLET_ID}/socket`,
+                  }
+                : { appletId: APPLET_ID },
+            }),
+      }),
+    }),
+  );
   await page.route(/\/api\/bots\/[^/]+\/applets\/focus$/, async (route) => {
     if (route.request().method() === "POST") {
       const body = route.request().postDataJSON() as { appletId: unknown };
@@ -383,13 +409,7 @@ test("a Package entry opens its surface and a focused Applet fills the canvas", 
   userId,
   ollamaBaseUrl,
   baseURL,
-  allowedFailures,
 }, testInfo) => {
-  // An Applet with nothing published has no live page, and the route says so
-  // with a 404 the canvas reads as its building state. The browser logs it
-  // either way.
-  allowedFailures.requests.push(/\/api\/applets\/[^/]+\/ui$/u);
-  allowedFailures.console.push(/Failed to load resource.*404/u);
   const stubs = await installAppletRoutes(page, testInfo, baseURL);
   await provision(page, {
     userId,
@@ -479,10 +499,7 @@ test("the canvas is a full-height sheet on a phone with a composer chip", async 
   userId,
   ollamaBaseUrl,
   baseURL,
-  allowedFailures,
 }, testInfo) => {
-  allowedFailures.requests.push(/\/api\/applets\/[^/]+\/ui$/u);
-  allowedFailures.console.push(/Failed to load resource.*404/u);
   await installAppletRoutes(page, testInfo, baseURL);
   await provision(page, {
     userId,

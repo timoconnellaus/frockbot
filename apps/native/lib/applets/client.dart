@@ -12,8 +12,30 @@
 /// `FormatException` rather than a half-read Applet.
 library;
 
+import 'package:flutter/foundation.dart' show debugPrint;
+
 import '../client/transport.dart';
 import '../protocol/client_wire.generated.dart' as wire;
+
+/// `--dart-define=FROCKBOT_APPLET_TIMING=true` prints one line per hop of
+/// the open path — the open read, the viewer, the frame's load, and what the
+/// page reports of its own socket, hello and first render — so a slow open is
+/// read hop by hop rather than guessed at. Off, it costs a constant-folded
+/// branch, and the page is not asked to report anything.
+const appletTimingLogV1 = bool.fromEnvironment('FROCKBOT_APPLET_TIMING');
+
+/// When the current open began. One clock for the canvas and the frame it
+/// holds, so the page's hops line up with the host's.
+final appletOpenClockV1 = Stopwatch();
+
+/// One hop of the open path, in milliseconds since the open began.
+void appletTimingV1(String hop, {String detail = ''}) {
+  if (!appletTimingLogV1) return;
+  debugPrint(
+    'applet-timing $hop ${appletOpenClockV1.elapsedMilliseconds}ms'
+    '${detail.isEmpty ? '' : ' $detail'}',
+  );
+}
 
 String _applet(String appletId) => Uri.encodeComponent(appletId);
 String _bot(String botId) => Uri.encodeComponent(botId);
@@ -130,6 +152,31 @@ class AppletViewer {
     required this.expiresAt,
   });
 
+  /// The viewer as the open route answers it. Only for a focus that carries
+  /// one: an unpublished Applet has an id and nothing to frame.
+  static AppletViewer? fromOpen(wire.AppletOpenFocus focus) {
+    final generationId = focus.generationId?.value;
+    final uiUrl = focus.uiUrl;
+    final token = focus.token;
+    final socketUrl = focus.socketUrl;
+    final expiresAt = focus.expiresAt?.value;
+    if (generationId == null ||
+        uiUrl == null ||
+        token == null ||
+        socketUrl == null ||
+        expiresAt == null) {
+      return null;
+    }
+    return AppletViewer(
+      appletId: focus.appletId,
+      generationId: generationId,
+      uiUrl: AppletUi.fromJson({'uiUrl': uiUrl}).uiUrl,
+      token: token,
+      socketUrl: socketUrl,
+      expiresAt: DateTime.parse(expiresAt),
+    );
+  }
+
   /// The `init` the Applet SDK waits for. The token is the only credential an
   /// Applet page ever holds, and it names one User, one Applet and one
   /// generation for fifteen minutes.
@@ -142,6 +189,8 @@ class AppletViewer {
       'token': token,
       'generationId': generationId,
       'tokenTransport': 'subprotocol-v1',
+      // The page reports its own hops only when the host is keeping the log.
+      if (appletTimingLogV1) 'timing': true,
     },
   };
 }
@@ -152,6 +201,15 @@ class AppletsApi {
 
   Future<List<wire.AppletSummary>> list() async =>
       wire.AppletDirectory.fromJson(await api.request('/api/applets')).applets;
+
+  /// The canvas's one read: the directory, the Session's focus, and for the
+  /// focused Applet the generation, its page and a viewer credential. What
+  /// used to be four to seven requests in series, and the only request the
+  /// frame waits on.
+  Future<wire.AppletOpenView> open(String botId) async =>
+      wire.AppletOpenView.fromJson(
+        await api.request('/api/bots/${_bot(botId)}/applets/open'),
+      );
 
   Future<void> delete(String appletId) async {
     await api.request(

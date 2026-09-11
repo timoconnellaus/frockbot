@@ -30,6 +30,7 @@ class HostFrameView extends StatefulWidget {
   final bool allowSameOrigin;
   final String label;
   final ValueChanged<String>? onFailure;
+  final VoidCallback? onLoaded;
 
   /// What the page said. A WebView's top document is its own `parent`, so a
   /// page posting to `window.parent` raises a `message` event on the same
@@ -42,6 +43,7 @@ class HostFrameView extends StatefulWidget {
     this.messages = const [],
     this.allowSameOrigin = false,
     this.onFailure,
+    this.onLoaded,
     this.onMessage,
   });
 
@@ -124,6 +126,7 @@ class _HostFrameViewState extends State<HostFrameView> {
               : NavigationDecision.prevent,
           onPageFinished: (url) {
             if (url != widget.url) return;
+            if (epoch == _epoch) widget.onLoaded?.call();
             unawaited(_forward(web, epoch));
             unawaited(_deliver(web, epoch));
           },

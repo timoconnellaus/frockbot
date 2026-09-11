@@ -23,6 +23,9 @@ class HostFrame extends StatelessWidget {
   final BorderRadius borderRadius;
   final ValueChanged<String>? onFailure;
 
+  /// The document has loaded: the moment the host's messages are delivered.
+  final VoidCallback? onLoaded;
+
   /// What the page said, decoded from JSON and proved to have come from this
   /// frame. The host decides what any of it means.
   final ValueChanged<Map<String, Object?>>? onMessage;
@@ -38,6 +41,7 @@ class HostFrame extends StatelessWidget {
     this.messages = const [],
     this.allowSameOrigin = false,
     this.onFailure,
+    this.onLoaded,
     this.onMessage,
     this.borderRadius = const BorderRadius.all(Radius.circular(12)),
   });
@@ -54,6 +58,7 @@ class HostFrame extends StatelessWidget {
         messages: messages,
         allowSameOrigin: allowSameOrigin,
         onFailure: onFailure,
+        onLoaded: onLoaded,
         onMessage: onMessage,
       ),
     ),

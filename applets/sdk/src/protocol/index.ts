@@ -1,5 +1,5 @@
 /**
- * Applet wire protocol v1.
+ * Applet wire protocol, versions 1 and 2.
  *
  * One JSON frame per WebSocket message, at most 64 KB encoded. Both ends decode
  * with the functions here and nothing else: an unknown type, an unknown field,
@@ -7,16 +7,51 @@
  * that name a table or column it did not declare — that check needs the schema,
  * so it lives in `server/`, not here.
  *
- * Sequence:
+ * Sequence, v2 (a page that opened its socket with `v=2` in the URL):
+ *   server -> hello        on accept, carrying the `snapshot` when the URL
+ *                          named no `since` cursor; the page renders on it
+ *   client -> hello        only when it is resuming (`since`), or when the
+ *                          server's hello carried no snapshot
+ *   server -> changes      catch-up for a resumable cursor, else `snapshot`
+ *   client -> mutate       one client transaction
+ *   server -> ack|reject   to the originator; `changes` to every other socket
+ *
+ * Sequence, v1 (a page built before v2 sends no `v`):
  *   server -> hello        on accept (contract, generation, viewer, cursor)
  *   client -> hello        with `since` when it is resuming, otherwise absent
  *   server -> snapshot     full state, or `changes` when the cursor is resumable
- *   client -> mutate       one client transaction
- *   server -> ack|reject   to the originator; `changes` to every other socket
+ *   then as above
+ *
+ * The version a socket speaks is settled by its URL before the first frame,
+ * so a server never has to guess: the frames it sends carry that `v`, and a
+ * v1 page is spoken to exactly as it always was.
  */
 
 export const APPLET_CONTRACT_VERSION = 1 as const;
+/** The newest protocol this code speaks; a socket may still be spoken to in 1. */
+export const APPLET_PROTOCOL_VERSION = 2 as const;
+export type AppletProtocolVersion = 1 | 2;
 export const APPLET_FRAME_BYTE_LIMIT = 64 * 1024;
+
+/**
+ * What a socket's URL says about how to greet it: the protocol the page
+ * speaks and, on a reconnect, the cursor it will ask to resume from. Read on
+ * the server before the first frame, written by the client transport.
+ */
+export interface AppletHandshakeV1 {
+  protocol: AppletProtocolVersion;
+  since?: number;
+}
+
+export function appletHandshakeFromUrlV1(url: URL): AppletHandshakeV1 {
+  const protocol = url.searchParams.get("v") === "2" ? 2 : 1;
+  const since = url.searchParams.get("since");
+  const parsed = since === null ? Number.NaN : Number(since);
+  return {
+    protocol,
+    ...(Number.isSafeInteger(parsed) && parsed > 0 ? { since: parsed } : {}),
+  };
+}
 
 export type ChangeOperation = "insert" | "update" | "delete";
 
@@ -43,9 +78,14 @@ export interface AppletViewerV1 {
   canWrite: boolean;
 }
 
+export type AppletSnapshotTablesV1 = Record<
+  string,
+  Array<Record<string, unknown>>
+>;
+
 export type AppletServerFrameV1 =
   | {
-      v: 1;
+      v: AppletProtocolVersion;
       type: "hello";
       contract: 1;
       generationId: string;
@@ -53,32 +93,54 @@ export type AppletServerFrameV1 =
       tables: string[];
       schemaRevision: number;
       lastChangeId: number;
+      /**
+       * Every row of every table as of `lastChangeId`, on a v2 socket that
+       * opened with no cursor: the page renders on this frame and sends no
+       * hello of its own. Absent when it would not fit the frame, in which
+       * case the v1 exchange follows.
+       */
+      snapshot?: AppletSnapshotTablesV1;
     }
   | {
-      v: 1;
+      v: AppletProtocolVersion;
       type: "snapshot";
       lastChangeId: number;
-      tables: Record<string, Array<Record<string, unknown>>>;
+      tables: AppletSnapshotTablesV1;
     }
   | {
-      v: 1;
+      v: AppletProtocolVersion;
       type: "changes";
       lastChangeId: number;
       txnId?: string;
       changes: AppletChangeV1[];
     }
   | {
-      v: 1;
+      v: AppletProtocolVersion;
       type: "ack";
       txnId: string;
       lastChangeId: number;
       changes: AppletChangeV1[];
     }
-  | { v: 1; type: "reject"; txnId: string; reason: string };
+  | {
+      v: AppletProtocolVersion;
+      type: "reject";
+      txnId: string;
+      reason: string;
+    };
 
 export type AppletClientFrameV1 =
-  | { v: 1; type: "hello"; contract: 1; since?: number }
-  | { v: 1; type: "mutate"; txnId: string; mutations: AppletMutationV1[] };
+  | {
+      v: AppletProtocolVersion;
+      type: "hello";
+      contract: 1;
+      since?: number;
+    }
+  | {
+      v: AppletProtocolVersion;
+      type: "mutate";
+      txnId: string;
+      mutations: AppletMutationV1[];
+    };
 
 export class AppletProtocolError extends Error {}
 
@@ -188,8 +250,28 @@ function parse(message: unknown, label: string): Record<string, unknown> {
     fail(`${label} is not valid JSON`);
   }
   const value = object(parsed, label);
-  if (value.v !== 1) fail(`${label} speaks an unsupported protocol version`);
+  if (value.v !== 1 && value.v !== 2) {
+    fail(`${label} speaks an unsupported protocol version`);
+  }
   return value;
+}
+
+function versionOf(value: Record<string, unknown>): AppletProtocolVersion {
+  return value.v === 2 ? 2 : 1;
+}
+
+function snapshotTables(value: unknown, label: string): AppletSnapshotTablesV1 {
+  const tables = object(value, label);
+  const decoded: AppletSnapshotTablesV1 = {};
+  for (const [table, rows] of Object.entries(tables)) {
+    const rowsLabel = `${label}.${table}`;
+    name(table, rowsLabel);
+    if (!Array.isArray(rows)) fail(`${rowsLabel} must be an array`);
+    decoded[table] = rows.map((entry, index) =>
+      row(entry, `${rowsLabel}[${index}]`),
+    );
+  }
+  return decoded;
 }
 
 function decodeChange(candidate: unknown, label: string): AppletChangeV1 {
@@ -225,7 +307,7 @@ export function decodeClientFrame(message: unknown): AppletClientFrameV1 {
         ? undefined
         : cursor(value.since, "Applet hello.since");
     return {
-      v: 1,
+      v: versionOf(value),
       type: "hello",
       contract: 1,
       ...(since === undefined ? {} : { since }),
@@ -267,7 +349,7 @@ export function decodeClientFrame(message: unknown): AppletClientFrameV1 {
       return decoded;
     });
     return {
-      v: 1,
+      v: versionOf(value),
       type: "mutate",
       txnId: bounded(value.txnId, "Applet mutate.txnId", 64),
       mutations,
@@ -292,7 +374,9 @@ export function decodeServerFrame(message: unknown): AppletServerFrameV1 {
         "schemaRevision",
         "lastChangeId",
       ],
-      [],
+      // A v1 speaker never sends a snapshot in its hello, so a v1 frame that
+      // carries one is not one this code produced.
+      versionOf(value) === 2 ? ["snapshot"] : [],
       "Applet server hello",
     );
     if (value.contract !== APPLET_CONTRACT_VERSION) {
@@ -307,7 +391,7 @@ export function decodeServerFrame(message: unknown): AppletServerFrameV1 {
       fail("Applet server hello.tables must be a bounded array");
     }
     return {
-      v: 1,
+      v: versionOf(value),
       type: "hello",
       contract: 1,
       generationId: bounded(
@@ -329,6 +413,14 @@ export function decodeServerFrame(message: unknown): AppletServerFrameV1 {
         value.lastChangeId,
         "Applet server hello.lastChangeId",
       ),
+      ...(value.snapshot === undefined
+        ? {}
+        : {
+            snapshot: snapshotTables(
+              value.snapshot,
+              "Applet server hello.snapshot",
+            ),
+          }),
     };
   }
   if (value.type === "snapshot") {
@@ -338,21 +430,11 @@ export function decodeServerFrame(message: unknown): AppletServerFrameV1 {
       [],
       "Applet snapshot",
     );
-    const tables = object(value.tables, "Applet snapshot.tables");
-    const decoded: Record<string, Array<Record<string, unknown>>> = {};
-    for (const [table, rows] of Object.entries(tables)) {
-      const label = `Applet snapshot.tables.${table}`;
-      name(table, label);
-      if (!Array.isArray(rows)) fail(`${label} must be an array`);
-      decoded[table] = rows.map((entry, index) =>
-        row(entry, `${label}[${index}]`),
-      );
-    }
     return {
-      v: 1,
+      v: versionOf(value),
       type: "snapshot",
       lastChangeId: cursor(value.lastChangeId, "Applet snapshot.lastChangeId"),
-      tables: decoded,
+      tables: snapshotTables(value.tables, "Applet snapshot.tables"),
     };
   }
   if (value.type === "changes") {
@@ -372,7 +454,7 @@ export function decodeServerFrame(message: unknown): AppletServerFrameV1 {
         ? undefined
         : bounded(value.txnId, "Applet changes.txnId", 64);
     return {
-      v: 1,
+      v: versionOf(value),
       type: "changes",
       lastChangeId: cursor(value.lastChangeId, "Applet changes.lastChangeId"),
       ...(txnId === undefined ? {} : { txnId }),
@@ -389,7 +471,7 @@ export function decodeServerFrame(message: unknown): AppletServerFrameV1 {
     if (!Array.isArray(value.changes))
       fail("Applet ack.changes must be an array");
     return {
-      v: 1,
+      v: versionOf(value),
       type: "ack",
       txnId: bounded(value.txnId, "Applet ack.txnId", 64),
       lastChangeId: cursor(value.lastChangeId, "Applet ack.lastChangeId"),
@@ -401,7 +483,7 @@ export function decodeServerFrame(message: unknown): AppletServerFrameV1 {
   if (value.type === "reject") {
     exact(value, ["v", "type", "txnId", "reason"], [], "Applet reject");
     return {
-      v: 1,
+      v: versionOf(value),
       type: "reject",
       txnId: bounded(value.txnId, "Applet reject.txnId", 64),
       reason: bounded(value.reason, "Applet reject.reason", 512),

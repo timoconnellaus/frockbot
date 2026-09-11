@@ -126,8 +126,22 @@ function decodeHostInit(data: unknown): AppletHostInitV1 | undefined {
       ...(value.tokenTransport === "subprotocol-v1"
         ? { tokenTransport: "subprotocol-v1" as const }
         : {}),
+      ...(value.timing === true ? { timing: true } : {}),
     },
   };
+}
+
+/**
+ * One hop of the open path, posted to the host when its `init` asked for
+ * timing. The host keeps the log; the page only says when each hop landed,
+ * in its own clock, so the host can line them up with its own hops.
+ */
+function postTiming(hop: string): void {
+  if (typeof window === "undefined") return;
+  window.parent.postMessage(
+    { schemaVersion: 1, type: "applet/timing", hop, at: performance.now() },
+    "*",
+  );
 }
 
 /** Paint the host's semantic tokens onto the page as `--frockbot-*`. */
@@ -156,7 +170,19 @@ export function createApplet<TServer extends { tables: TablesShape }>(
   options: CreateAppletOptions = {},
 ): AppletClient<TServer["tables"]> {
   const { autoConnect, ...transportOptions } = options;
-  const transport = new AppletTransport(transportOptions);
+  const transport = new AppletTransport({
+    onTiming: (hop) => {
+      postTiming(hop);
+      // `ready` is the collections marked ready; the first paint of what
+      // they hold is the frame after React commits it.
+      if (hop === "ready" && typeof requestAnimationFrame === "function") {
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() => postTiming("first-render")),
+        );
+      }
+    },
+    ...transportOptions,
+  });
   const collections = new Map<string, Collection<AppletRow, string>>();
 
   const tables = new Proxy({} as Record<string, unknown>, {
