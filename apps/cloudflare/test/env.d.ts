@@ -31,6 +31,7 @@ interface ComputerTestEnv {
   COMPUTER_HOST_TOKEN: string;
   COMPUTER_COMPATIBILITY: DurableObjectNamespace<ComputerCompatibilityProbe>;
   ROUTINE_HOOK_SECRET: string;
+  COMPOSIO_API_KEY: string;
   MACHINE_TOKEN_SECRET: string;
   USER_CONFIGURATIONS: DurableObjectNamespace<UserConfiguration>;
   DEPLOYMENT_POLICY: DurableObjectNamespace<DeploymentPolicy>;

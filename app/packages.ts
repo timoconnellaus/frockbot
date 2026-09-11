@@ -13,6 +13,7 @@ import { auditDefinitionV1 } from "@frockbot/app/audit/definition";
 import { authDefinitionV1 } from "@frockbot/app/auth/definition";
 import { botTemplateDefinitionV1 } from "@frockbot/app/bot-template/definition";
 import { computerDefinitionV1 } from "@frockbot/computer/definition";
+import { connectDefinitionV1 } from "@frockbot/app/connect/definition";
 import { credentialsDefinitionV1 } from "@frockbot/app/credentials/definition";
 import { customModelsDefinitionV1 } from "@frockbot/app/custom-models/definition";
 import { flockDefinitionV1 } from "@frockbot/app/flock/definition";
@@ -53,6 +54,7 @@ export const FOUNDATION_PACKAGES_V1: readonly PackageDefinitionV1[] = [
   customModelsDefinitionV1,
   routinesDefinitionV1,
   credentialsDefinitionV1,
+  connectDefinitionV1,
   webDefinitionV1,
   voiceDefinitionV1,
   providerOllamaCloudDefinitionV1,

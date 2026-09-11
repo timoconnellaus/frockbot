@@ -170,6 +170,18 @@ export const OPTIONAL_PRODUCTION_SECRETS_V1: readonly OptionalProductionSecretV1
       degraded: "the operator debug routes 404",
     },
     {
+      name: "COMPOSIO_API_KEY",
+      why: "The project key behind Connected apps: sign-in links, connected accounts and every app tool call.",
+      degraded:
+        "no app can be connected; Connect answers that connecting apps is unavailable, and a Bot has no app tools",
+    },
+    {
+      name: "COMPOSIO_WEBHOOK_SECRET",
+      why: "Verifies Connected apps event deliveries before a Routine fires on one.",
+      degraded:
+        "app events are refused at the door, so no Routine fires on a connected app's event",
+    },
+    {
       name: "FROCK_AI_GATEWAY_TOKEN",
       why: "The `cf-aig-authorization` bearer for the AI Gateway.",
       degraded:

@@ -404,9 +404,13 @@ export function decodeConnectionCommandV1(input: unknown): ConnectionCommandV1 {
         "packageId",
         "action",
         "attemptId",
-        ...["label", "code", "callbackUrl", "browserKey"].filter(
-          (k) => value[k] !== undefined,
-        ),
+        ...[
+          "label",
+          "code",
+          "callbackUrl",
+          "browserKey",
+          "connectionTypeId",
+        ].filter((k) => value[k] !== undefined),
       ]);
       if (
         !["start", "check", "complete", "cancel"].includes(
@@ -436,6 +440,15 @@ export function decodeConnectionCommandV1(input: unknown): ConnectionCommandV1 {
         ...(value.callbackUrl === undefined
           ? {}
           : { callbackUrl: text(value.callbackUrl, "callbackUrl", 2048) }),
+        ...(value.connectionTypeId === undefined
+          ? {}
+          : {
+              connectionTypeId: text(
+                value.connectionTypeId,
+                "connectionTypeId",
+                128,
+              ),
+            }),
       };
     }
 

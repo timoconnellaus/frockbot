@@ -276,6 +276,10 @@ interface Env {
   CREDENTIAL_KEYRING?: string;
   /** Signs every Routine webhook key. Absent closes the webhook door. */
   ROUTINE_HOOK_SECRET?: string;
+  /** The Connected apps provider key. Absent, no app can be connected. */
+  COMPOSIO_API_KEY?: string;
+  /** Verifies Connected apps event deliveries. Absent closes that door. */
+  COMPOSIO_WEBHOOK_SECRET?: string;
   /**
    * Signs every machine token and pairing code. Absent closes the registered
    * machine door: pairing, enrollment and every machine route answer 503

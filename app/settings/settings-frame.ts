@@ -616,7 +616,13 @@ export function connectionsFrame(
       providers.push({
         packageId: item.packageId,
         connectionTypeId: type.id,
-        displayName: (item.displayName ?? type.displayName).slice(0, 200),
+        // A Package with one Connection Type is the row; a Package that
+        // declares several — one per connectable app — is a grouping, and the
+        // type is what a person is connecting.
+        displayName: ((item.connectionTypes?.length ?? 0) > 1
+          ? type.displayName
+          : (item.displayName ?? type.displayName)
+        ).slice(0, 200),
         kind,
         authorization: type.authorization.kind,
         connected,

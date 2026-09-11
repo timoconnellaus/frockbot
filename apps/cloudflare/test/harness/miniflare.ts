@@ -358,6 +358,147 @@ const WEB_STUB_PAGE = `<!doctype html>
 /** Requests the outbound seam saw for a non-public address, by host. */
 const blockedAddressCalls = new Map<string, number>();
 
+/**
+ * The Connected apps provider, as the User and Bot objects reach it. The key
+ * is what `vitest.*.config.ts` binds as `COMPOSIO_API_KEY`; anything else is
+ * refused as the real service would.
+ *
+ * One toolkit finishes its sign-in, one does not: a Gmail account is `ACTIVE`
+ * the first time it is asked about, and a Slack account is `FAILED`, so a
+ * test sees both outcomes without waiting on a poll interval. The tools list
+ * carries one important tool per app, and executing it echoes the arguments.
+ */
+export const COMPOSIO_STUB_ORIGIN = "https://backend.composio.dev";
+export const COMPOSIO_TEST_API_KEY = "workerd-composio-key";
+const composioAuthConfigs = new Map<string, string>();
+const composioAccounts = new Map<string, { toolkit: string; status: string }>();
+let composioAccountCounter = 0;
+
+async function composioStub(request: Request, url: URL): Promise<Response> {
+  if (request.headers.get("x-api-key") !== COMPOSIO_TEST_API_KEY) {
+    return Response.json({ error: "unauthorized" }, { status: 401 });
+  }
+  const path = url.pathname.replace(/^\/api\/v3(\.1)?/, "");
+  if (path === "/auth_configs" && request.method === "GET") {
+    return Response.json({
+      items: [...composioAuthConfigs].map(([slug, id]) => ({
+        id,
+        status: "ENABLED",
+        toolkit: { slug },
+      })),
+      next_cursor: null,
+    });
+  }
+  if (path === "/auth_configs" && request.method === "POST") {
+    const body = (await request.clone().json()) as {
+      toolkit?: { slug?: string };
+    };
+    const slug = body.toolkit?.slug ?? "unknown";
+    const id = `ac_${slug}`;
+    composioAuthConfigs.set(slug, id);
+    return Response.json(
+      { toolkit: { slug }, auth_config: { id } },
+      { status: 201 },
+    );
+  }
+  if (path === "/connected_accounts/link" && request.method === "POST") {
+    const body = (await request.clone().json()) as {
+      auth_config_id?: string;
+      user_id?: string;
+      callback_url?: string;
+    };
+    const toolkit = [...composioAuthConfigs].find(
+      ([, id]) => id === body.auth_config_id,
+    )?.[0];
+    if (!toolkit || !body.user_id || !body.callback_url) {
+      return Response.json({ error: "bad request" }, { status: 400 });
+    }
+    const id = `ca_${++composioAccountCounter}`;
+    composioAccounts.set(id, { toolkit, status: "INITIATED" });
+    return Response.json(
+      {
+        link_token: `lt_${id}`,
+        connected_account_id: id,
+        redirect_url: `https://connect.example.test/${id}`,
+        expires_at: new Date(Date.now() + 600_000).toISOString(),
+      },
+      { status: 201 },
+    );
+  }
+  const account = /^\/connected_accounts\/([^/]+)$/.exec(path);
+  if (account) {
+    const id = decodeURIComponent(account[1]!);
+    const stored = composioAccounts.get(id);
+    if (!stored) return Response.json({ error: "not found" }, { status: 404 });
+    if (request.method === "DELETE") {
+      composioAccounts.delete(id);
+      return Response.json({ success: true });
+    }
+    // The person "finished" or "abandoned" the sign-in between the link and
+    // this read, depending on the app.
+    if (stored.status === "INITIATED") {
+      stored.status = stored.toolkit === "slack" ? "FAILED" : "ACTIVE";
+    }
+    return Response.json({
+      id,
+      status: stored.status,
+      toolkit: { slug: stored.toolkit },
+      auth_config: { id: `ac_${stored.toolkit}`, is_disabled: false },
+      is_disabled: false,
+    });
+  }
+  if (path === "/tools" && request.method === "GET") {
+    const toolkit = url.searchParams.get("toolkit_slug") ?? "gmail";
+    const upper = toolkit.toUpperCase();
+    return Response.json({
+      items: [
+        {
+          slug: `${upper}_SEND_EMAIL`,
+          name: "Send email",
+          description: "Sends an email from the connected account.",
+          version: "20250930_00",
+          toolkit: { slug: toolkit },
+          input_parameters: {
+            type: "object",
+            properties: {
+              to: { type: "string", description: "Recipient address." },
+              body: { type: "string", description: "Plain-text body." },
+            },
+            required: ["to"],
+          },
+        },
+      ],
+      next_cursor: null,
+    });
+  }
+  const execute = /^\/tools\/execute\/([^/]+)$/.exec(path);
+  if (execute && request.method === "POST") {
+    const body = (await request.clone().json()) as {
+      connected_account_id?: string;
+      arguments?: Record<string, unknown>;
+    };
+    const stored = body.connected_account_id
+      ? composioAccounts.get(body.connected_account_id)
+      : undefined;
+    if (!stored || stored.status !== "ACTIVE") {
+      return Response.json({
+        successful: false,
+        data: {},
+        error: "connected account is not active",
+      });
+    }
+    return Response.json({
+      successful: true,
+      data: { id: "msg_1", tool: execute[1], ...(body.arguments ?? {}) },
+      error: null,
+    });
+  }
+  return Response.json(
+    { error: "unexpected provider request" },
+    { status: 404 },
+  );
+}
+
 function webStub(url: URL): Response {
   if (url.pathname === "/counters") {
     return Response.json({
@@ -410,6 +551,7 @@ async function webSearchStub(request: Request, key: string): Promise<Response> {
 export async function ollamaCloudStub(request: Request): Promise<Response> {
   const url = new URL(request.url);
   if (url.origin === WEB_STUB_ORIGIN) return webStub(url);
+  if (url.origin === COMPOSIO_STUB_ORIGIN) return composioStub(request, url);
   if (
     url.origin === "https://auth.x.ai" &&
     url.pathname === "/oauth2/device/code"

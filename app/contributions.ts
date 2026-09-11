@@ -34,6 +34,10 @@ import {
   type ComputerGatewayHost,
 } from "@frockbot/computer/backend";
 import {
+  backendContribution as connectGatewayContribution,
+  type ConnectGatewayHost,
+} from "@frockbot/app/connect/backend";
+import {
   backendContribution as flockGatewayContribution,
   type FlockGatewayHost,
 } from "@frockbot/app/flock/backend";
@@ -66,6 +70,10 @@ import {
   userContribution as credentialsUserContribution,
   type CredentialsUserApplicationHostV1,
 } from "@frockbot/app/credentials/user";
+import {
+  userContribution as connectUserContribution,
+  type ConnectUserApplicationHostV1,
+} from "@frockbot/app/connect/user";
 import {
   userContribution as ollamaCloudUserContribution,
   type OllamaCloudUserApplicationHostV1,
@@ -113,6 +121,7 @@ export {
   auditGatewayContribution,
   botTemplateGatewayContribution,
   computerGatewayContribution,
+  connectGatewayContribution,
   flockGatewayContribution,
   routinesGatewayContribution,
   searchGatewayContribution,
@@ -121,6 +130,7 @@ export {
   machineGatewayContribution,
   settingsUserContribution,
   credentialsUserContribution,
+  connectUserContribution,
   ollamaCloudUserContribution,
   frockAiUserContribution,
   botTemplateUserContribution,
@@ -196,6 +206,7 @@ export type FoundationGatewayHost = {
 } & AdminGatewayHost &
   BotTemplateGatewayHostV1 &
   ComputerGatewayHost &
+  ConnectGatewayHost &
   FlockGatewayHost &
   SettingsGatewayHost &
   RoutinesGatewayHost &
@@ -217,6 +228,7 @@ export type FoundationUserBackendHostV1 = {
   mountedContributions?: FoundationMountedContributionsV1;
 } & SettingsUserApplicationHostV1 &
   CredentialsUserApplicationHostV1 &
+  ConnectUserApplicationHostV1 &
   OllamaCloudUserApplicationHostV1 &
   FrockAiUserApplicationHostV1 &
   BotTemplateUserApplicationHostV1 &
@@ -268,6 +280,7 @@ export const backendDescriptorsV1: readonly AnyBackendDescriptor[] = [
   auditGatewayContribution,
   botTemplateGatewayContribution,
   computerGatewayContribution,
+  connectGatewayContribution,
   flockGatewayContribution,
   routinesGatewayContribution,
   searchGatewayContribution,
@@ -276,6 +289,7 @@ export const backendDescriptorsV1: readonly AnyBackendDescriptor[] = [
   machineGatewayContribution,
   settingsUserContribution,
   credentialsUserContribution,
+  connectUserContribution,
   ...catalogUserContributionsV1,
   ollamaCloudUserContribution,
   frockAiUserContribution,

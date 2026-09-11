@@ -190,7 +190,7 @@ Provider-reported token counts are used when present. Otherwise `estimateModelUs
 
 ### Resolution and mounting
 
-Composition is the untrusted layer and nothing else. First-party Packages are ordinary imports: `app/packages.ts` lists the 29 the deployment ships as `PackageDefinitionV1` records, and a Package that carries data (settings, Capabilities, Connection Types, durable roots, dependencies) exports its own definition from its own package. There is no manifest, no compiler and no application hash over a plan.
+Composition is the untrusted layer and nothing else. First-party Packages are ordinary imports: `app/packages.ts` lists the 30 the deployment ships as `PackageDefinitionV1` records, and a Package that carries data (settings, Capabilities, Connection Types, durable roots, dependencies) exports its own definition from its own package. There is no manifest, no compiler and no application hash over a plan.
 
 1. On first use the Bot Durable Object receives an empty bootstrap generation (`app/shell/backend-composition.ts`; `core/durable/composition/generation.ts`). A Bot that has installed and authored nothing composes nothing, which is why a release no longer has to rewrite every Bot's generation to follow the deploy.
 2. At admission, `activateCompositionV1` (`app/shell/turn.ts:299`) reads the pin, mounts, verifies, commits and records last-known-good.
@@ -639,7 +639,7 @@ view action's two do not.
 
 **PR 10a: Applets, the Computer and Package pages.**
 
-`lib/applets/` is the Applet canvas, over the Applet routes of §8. Two states
+`lib/applets/` is the Applet canvas, over the Applet routes of §9. Two states
 and the transition between them: the source as the Bot writes it, and the live
 Applet arriving over it once a generation is active. `progress.dart` is the sentence in between — a projection
 of the thread the client already holds, taking the furthest step it has evidence
@@ -743,7 +743,23 @@ Adjacent, outside the loop: image generation uses Workers AI ids directly (`app/
 
 ---
 
-## 8. Applets
+## 8. Connected apps
+
+`app/connect/` is the one integration layer for the services a User connects FrockBot to. It is first-party app code — the provider behind it is the deployment's, chosen at build time and named nowhere a person reads — not a plugin: `AGENTS.md` reserves plugin machinery for untrusted code, and a Bot-authored plugin reaches a connected account later through the `http` grant, which this module will serve.
+
+**One Package, one Connection Type per app.** `connectDefinitionV1` (`app/connect/definition.ts`) is built from the curated list in `catalog.ts` — Gmail, Google Calendar, Google Drive, GitHub, Slack, Notion — declaring for each a `connect-<app>` Connection Type (`authorization.kind: "grant"`, `allowMultiple`) and a `connect-<app>-tools` Capability bound to it. The Connectors frame names a row by the type when a Package declares more than one (`settings-frame.ts`), so each app is its own row beside a model provider's accounts, with nothing above it. Enablement is account-wide as every Connection is: connect once, every Bot holds it.
+
+**The hosted grant** (`user.ts`, `backend.ts`). Connect is the Connectors surface's existing `authorize` press: `POST /api/plugins/connect/connections` carries `connection/start`, which the gateway turns into a `connection/oauth` command (`action: "start"`, with the `connectionTypeId` that command grew for this) on the User Durable Object. There the Contribution finds or creates the provider's managed auth config for the app, mints a sign-in link for this User with `/api/connect/callback` as its return, writes the Connection in `authorizing` with the connected-account id, namespace and app in its safe metadata, and answers the link, which the client opens in the system browser. The return page is a `publicRoute` that says to come back and touches no object: an anonymous redirect must never address a Durable Object. Settling is a `registerConfigurationReadBootstrap`: before every settings read, each `authorizing` Connection is asked about at most every three seconds and moved to `ready` (with a fresh generation) or `failed` (with a line for the person); a sign-in nobody finishes fails after thirty minutes. Disconnect deletes the account upstream with `revoke_on_delete` and retires the Connection. Start and disconnect are keyed by their command id and replayed from the stored receipt.
+
+**Tools** (`agent.ts`). For each enabled Capability the runtime host has authorized against a `ready` Connection, `createConfiguredConnectRuntimeContribution` mounts one Tool Namespace named for the app — the toolkit slug, `gmail-2` for a second account — carrying the app's _important_ tools, read once per Turn through `pinToolCatalog` so the Turn keeps the exact schemas it was admitted under. Nothing is in the prompt for an app nobody connected. A call is `call_dynamic_tool` on that namespace; execution posts to the provider with the deployment key and the account id off the Connection's safe metadata, so no credential is ever leased, opened or logged. A tool-level refusal is an error the model can act on; a transport failure after dispatch says the outcome is unknown and not to repeat it, because the provider offers no idempotency key. A provider that cannot be reached mounts the namespace in `error` with no tools rather than failing the Turn.
+
+**The provider client** (`composio.ts`) is raw `fetch` against the v3.1 REST API with `x-api-key`, verified against the published OpenAPI document on 2026-09-11: auth configs, hosted links, the seven connected-account statuses, `important=true` tool listing, execution, and deletion. Every answer is decoded at that seam.
+
+**Secrets.** `COMPOSIO_API_KEY` is the project key (optional in `production-secrets.ts`: absent, no app can be connected and a Bot has no app tools); `COMPOSIO_WEBHOOK_SECRET` verifies event deliveries for the Routine trigger that is next. The harness answers `backend.composio.dev` with `composioStub` (`test/harness/miniflare.ts`), and `connect-apps.integration.ts` walks the row, the sign-in hand-off, the settle, the return page, a Bot's tool call and the disconnect through the gateway.
+
+---
+
+## 9. Applets
 
 ### Authoring
 
@@ -783,7 +799,7 @@ The facet's own SQLite inside the per-`<userId>:<appletId>` Durable Object, with
 
 ---
 
-## 9. Computer
+## 10. Computer
 
 ### The interface
 
@@ -852,7 +868,7 @@ All from `computer/`; neither implementation registers one.
 
 ---
 
-## 10. Storage
+## 11. Storage
 
 Bindings are declared in `apps/cloudflare/wrangler.jsonc`.
 
@@ -881,7 +897,7 @@ Secrets are declared in `apps/cloudflare/src/production-secrets.ts`. Required: `
 
 ---
 
-## 11. Auth
+## 12. Auth
 
 better-auth 1.7.2, configured once in `apps/cloudflare/src/auth.ts`. `bearer()` is the only enabled plugin: there is no admin plugin, no organization plugin and no jwt plugin. `trustedOrigins` is left at its `baseURL` default; `account.encryptOAuthTokens` is true. Missing secrets yield a stub that returns 503 for every route (`:64-97`).
 
@@ -910,7 +926,7 @@ Applets are off for every account until an admin turns them on. The switch is th
 
 ---
 
-## 12. Tests and CI
+## 13. Tests and CI
 
 ### Test layers
 
