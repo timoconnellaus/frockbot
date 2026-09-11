@@ -22,8 +22,15 @@ import {
   createInMemoryObjectBucketV1,
   createInMemoryWorkspaceGenerationsV1,
 } from "@frockbot/core/workspace-store/testing";
-import type { WorkspaceLayoutV1 } from "@frockbot/computer/core";
-import { computerBotKey, FlyComputer } from "./computer.ts";
+import {
+  ComputerError,
+  type WorkspaceLayoutV1,
+} from "@frockbot/computer/core";
+import {
+  computerBotKey,
+  FlyComputer,
+  type FlyAgentComputer,
+} from "./computer.ts";
 import { FakeComputerHost, type FakeComputerRunV1 } from "./host-double.ts";
 import { FLY_WORKSPACE_LAYOUT, FlyComputerHostV1 } from "./provider.ts";
 import {
@@ -960,6 +967,37 @@ describe("the durable-root sync, Package-declared roots", () => {
     sprite.maxScanOutputBytes = 8;
 
     expect(await surface.scanAll([skillsRoot, userMemoryRoot])).toBeUndefined();
+  });
+
+  test("a shed storage exec reports every root rather than re-scanning them", async () => {
+    // The container's load shed is `limit-exceeded` too, and the host client
+    // raises it exactly like this. Falling back would spend one more storage
+    // call per root against a host that just declared it is shedding.
+    const shedding = {
+      runStorage: async (): Promise<string> => {
+        throw new ComputerError(
+          "limit-exceeded",
+          "The Computer host is shedding load",
+          true,
+        );
+      },
+    } as unknown as FlyAgentComputer;
+    const surface = new FlySpriteSyncSurface({
+      computer: shedding,
+      layout: FLY_WORKSPACE_LAYOUT,
+      userId: USER,
+      botDirectoryKey: computerBotKey,
+    });
+
+    const scans = await surface.scanAll([skillsRoot, userMemoryRoot]);
+
+    expect(scans).toHaveLength(2);
+    for (const scan of scans ?? []) {
+      expect(scan).toMatchObject({
+        status: "unavailable",
+        reason: "The Computer host is shedding load",
+      });
+    }
   });
 
   test("emits valid Bash for the batched scan", async () => {

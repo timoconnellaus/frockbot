@@ -83,7 +83,6 @@
 // instead of writing a second one.
 import { createHash } from "node:crypto";
 import {
-  ComputerError,
   workspaceMountPathV1,
   type WorkspaceLayoutV1,
 } from "@frockbot/computer/core";
@@ -100,7 +99,10 @@ import {
   type WorkspaceSyncEffectsV1,
   type WorkspaceSyncEffectV1,
 } from "@frockbot/core/contracts";
-import type { FlyAgentComputer } from "./computer.js";
+import {
+  StorageOutputExceededError,
+  type FlyAgentComputer,
+} from "./computer.js";
 import {
   SYNC_CONFLICTS_DIR,
   SYNC_STAGING_DIR,
@@ -985,10 +987,11 @@ export class FlySpriteSyncSurface implements ComputerSyncSurfaceV1 {
   }
 
   /**
-   * One storage exec, keeping the refused answer's own code. An answer past
-   * the storage ceiling is the one failure a caller can do something about —
-   * `scanAll` falls back to per-root scans — so it is carried as the code the
-   * provider raised rather than left to be recognised from its prose.
+   * One storage exec, marking the one refusal a caller can do something about.
+   * An answer past the storage ceiling is raised as `StorageOutputExceededError`
+   * and nothing else is, so `scanAll` falls back to per-root scans for it while
+   * the host's own `limit-exceeded` — the container shedding load, which a
+   * fallback only multiplies — is carried back as an ordinary failure.
    */
   private async runStorage(script: string): Promise<
     | { status: "ok"; output: string }
@@ -1013,8 +1016,7 @@ export class FlySpriteSyncSurface implements ComputerSyncSurfaceV1 {
           "unavailable",
           error instanceof Error ? error.message : String(error),
         ),
-        limitExceeded:
-          error instanceof ComputerError && error.code === "limit-exceeded",
+        limitExceeded: error instanceof StorageOutputExceededError,
       };
     }
   }
