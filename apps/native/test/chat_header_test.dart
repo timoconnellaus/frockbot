@@ -98,6 +98,45 @@ void main() {
     }
   });
 
+  testWidgets(
+    'the panel switch is the last thing in the bar and says which way',
+    (tester) async {
+      tester.view.physicalSize = const Size(1200, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      var toggles = 0;
+      Widget header({required bool shown}) => MaterialApp(
+        theme: FrockTheme.theme(Brightness.dark),
+        home: Scaffold(
+          appBar: ChatHeader(
+            name: 'Bob',
+            textScale: 1,
+            onSettings: () {},
+            onRoutines: () {},
+            onTogglePanel: () => toggles++,
+            panelShown: shown,
+          ),
+        ),
+      );
+      await tester.pumpWidget(header(shown: true));
+      await tester.pumpAndSettle();
+      final toggle = byIdentifier(ShellIds.rightPanelToggle);
+      expect(toggle, findsOneWidget);
+      expect(find.byTooltip('Hide the panel'), findsOneWidget);
+      // Rightmost: against the column it shows and hides.
+      expect(
+        tester.getTopRight(toggle).dx,
+        greaterThan(tester.getTopRight(find.byTooltip('Bot settings')).dx),
+      );
+      await tester.tap(find.byTooltip('Hide the panel'));
+      expect(toggles, 1);
+      await tester.pumpWidget(header(shown: false));
+      await tester.pumpAndSettle();
+      expect(find.byTooltip('Show the panel'), findsOneWidget);
+    },
+  );
+
   for (final width in [320.0, 390.0]) {
     for (final scale in [0.85, 1.0, 2.0, 3.0]) {
       testWidgets(
@@ -152,44 +191,45 @@ void main() {
   }
 
   for (final scale in [1.0, 2.0]) {
-    testWidgets('on a phone the bar is Back, the Bot, and the Computer at ${scale}x', (
-      tester,
-    ) async {
-      // GrokBot's bar: three things. Routines, Applets and the Package pages
-      // are rows on the Bot's page, reached from its name.
-      tester.view.physicalSize = const Size(390, 900);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.resetPhysicalSize);
-      addTearDown(tester.view.resetDevicePixelRatio);
-      final opened = <String>[];
-      await tester.pumpWidget(
-        MaterialApp(
-          theme: FrockTheme.theme(Brightness.dark),
-          home: MediaQuery(
-            data: MediaQueryData(textScaler: TextScaler.linear(scale)),
-            child: Scaffold(
-              appBar: ChatHeader(
-                name: 'My very long research assistant',
-                textScale: scale,
-                onBack: () => opened.add('Bots'),
-                onOpenBot: () => opened.add('Bot'),
-                onComputer: () => opened.add('Computer'),
+    testWidgets(
+      'on a phone the bar is Back, the Bot, and the Computer at ${scale}x',
+      (tester) async {
+        // GrokBot's bar: three things. Routines, Applets and the Package pages
+        // are rows on the Bot's page, reached from its name.
+        tester.view.physicalSize = const Size(390, 900);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        final opened = <String>[];
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: FrockTheme.theme(Brightness.dark),
+            home: MediaQuery(
+              data: MediaQueryData(textScaler: TextScaler.linear(scale)),
+              child: Scaffold(
+                appBar: ChatHeader(
+                  name: 'My very long research assistant',
+                  textScale: scale,
+                  onBack: () => opened.add('Bots'),
+                  onOpenBot: () => opened.add('Bot'),
+                  onComputer: () => opened.add('Computer'),
+                ),
               ),
             ),
           ),
-        ),
-      );
-      await tester.pumpAndSettle();
-      expect(tester.takeException(), isNull);
-      expect(find.byTooltip('Routines'), findsNothing);
-      expect(find.byTooltip('Applets'), findsNothing);
-      expect(byIdentifier(ShellIds.botPanelToggle), findsOneWidget);
-      await tester.tap(byIdentifier(ShellIds.sidebarToggle));
-      await tester.tap(byIdentifier(ShellIds.botPanelToggle));
-      await tester.tap(find.byTooltip('Computer'));
-      expect(opened, ['Bots', 'Bot', 'Computer']);
-      // The pill is what carries the name: one tap target, not two.
-      expect(find.byTooltip('Bot settings'), findsOneWidget);
-    });
+        );
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        expect(find.byTooltip('Routines'), findsNothing);
+        expect(find.byTooltip('Applets'), findsNothing);
+        expect(byIdentifier(ShellIds.botPanelToggle), findsOneWidget);
+        await tester.tap(byIdentifier(ShellIds.sidebarToggle));
+        await tester.tap(byIdentifier(ShellIds.botPanelToggle));
+        await tester.tap(find.byTooltip('Computer'));
+        expect(opened, ['Bots', 'Bot', 'Computer']);
+        // The pill is what carries the name: one tap target, not two.
+        expect(find.byTooltip('Bot settings'), findsOneWidget);
+      },
+    );
   }
 }

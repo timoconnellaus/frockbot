@@ -132,6 +132,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   bool conversationOpen = false;
   bool panelOpen = false;
 
+  /// Whether the person has hidden the right panel where it is a column. The
+  /// drawer's flag above is not this: closing the drawer at one width must not
+  /// take the column away at another.
+  bool panelCollapsed = false;
+
   /// Which right-panel entry is on. The region holds two — the Bot's settings
   /// and its Routines — and shows one, because a column is a place to read one
   /// thing rather than a stack of everything a feature registered.
@@ -761,36 +766,30 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          // The panel names what it holds and offers the way out. Choosing
+          // what it holds is the chat header's job: its icons are the one set
+          // of doors, and a second row of them here was the same doors twice.
           Padding(
-            padding: const EdgeInsets.fromLTRB(12, 8, 4, 4),
+            padding: const EdgeInsets.fromLTRB(16, 8, 4, 4),
             child: Row(
               children: [
                 Expanded(
-                  child: SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: SegmentedButton<String>(
-                      showSelectedIcon: false,
-                      segments: [
-                        for (final entry in keys)
-                          ButtonSegment(
-                            value: entry,
-                            label: Text(
-                              slots.labelOf(ShellSlot.rightPanel, entry) ??
-                                  entry,
-                            ),
-                          ),
-                      ],
-                      selected: {key},
-                      onSelectionChanged: (next) =>
-                          setState(() => panelKey = next.first),
-                    ),
+                  child: Text(
+                    slots.labelOf(ShellSlot.rightPanel, key) ?? key,
+                    style: Theme.of(context).textTheme.titleMedium
+                        ?.copyWith(fontWeight: FontWeight.w500),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
                 identified(
                   ShellIds.rightPanelClose,
                   IconButton(
                     tooltip: 'Close the panel',
-                    onPressed: () => setState(() => panelOpen = false),
+                    onPressed: () => setState(() {
+                      panelOpen = false;
+                      panelCollapsed = true;
+                    }),
                     icon: const Icon(Icons.close),
                   ),
                 ),
@@ -817,6 +816,21 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       openRun = null;
       panelKey = key;
       panelOpen = true;
+      panelCollapsed = false;
+    });
+  }
+
+  /// The header's one switch for the panel beside the conversation: the
+  /// column at the widest tier, the drawer below it.
+  void _togglePanel() {
+    final triple =
+        shellTierForWidth(MediaQuery.sizeOf(context).width) == ShellTier.triple;
+    setState(() {
+      if (triple) {
+        panelCollapsed = !panelCollapsed;
+      } else {
+        panelOpen = !panelOpen;
+      }
     });
   }
 
@@ -1172,6 +1186,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     final single = tier == ShellTier.single;
     final bot = selected;
     final session = voiceSession;
+    final rightPanel = _rightPanel();
     return ShellSlotScope(
       slots: slots,
       // The footer is drawn below the whole three-tier layout, so it survives
@@ -1206,6 +1221,12 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                           ? () => _openPanel('computer')
                           : null,
                       onRoutines: single ? null : () => _openPanel('routines'),
+                      onTogglePanel: single || rightPanel == null
+                          ? null
+                          : _togglePanel,
+                      panelShown: tier == ShellTier.triple
+                          ? !panelCollapsed
+                          : panelOpen,
                       onApplets: single || appletCanvas == null
                           ? null
                           : () async {
@@ -1220,8 +1241,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
               conversationOpen: bot != null && conversationOpen,
               onBack: _openBack,
               panelOpen: panelOpen,
+              panelCollapsed: panelCollapsed,
               onDismiss: () => setState(() => panelOpen = false),
-              rightPanel: _rightPanel(),
+              rightPanel: rightPanel,
               sidebar: Column(
                 children: [
                   // The badge and the Package entries beside the list belong to the

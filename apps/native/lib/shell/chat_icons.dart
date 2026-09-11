@@ -2,7 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
-enum ChatIconKind { computer, routines, settings, applet, send }
+enum ChatIconKind { computer, routines, settings, applet, panel, send }
 
 /// One light stroke weight for the compact chat chrome, independent of the
 /// platform's bundled Material glyph weight.
@@ -75,6 +75,18 @@ class _ChatIconPainter extends CustomPainter {
         }
         path.close();
         canvas.drawCircle(const Offset(12, 12), 3, paint);
+      case ChatIconKind.panel:
+        // A window with its right-hand column marked off: the panel this
+        // shows and hides.
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(
+            const Rect.fromLTWH(3, 4, 18, 16),
+            const Radius.circular(2),
+          ),
+          paint,
+        );
+        path.moveTo(15, 4);
+        path.lineTo(15, 20);
       case ChatIconKind.send:
         path.moveTo(12, 20);
         path.lineTo(12, 4);

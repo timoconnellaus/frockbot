@@ -20,6 +20,7 @@ abstract final class ShellIds {
   static const conversation = 'shell-conversation';
   static const rightPanel = 'shell-right-panel';
   static const rightPanelClose = 'right-panel-close';
+  static const rightPanelToggle = 'right-panel-toggle';
   static const scrim = 'shell-scrim';
   static const botPanelToggle = 'bot-panel-toggle';
   static const transcript = 'chat-transcript';

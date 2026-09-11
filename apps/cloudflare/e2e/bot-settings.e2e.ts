@@ -139,8 +139,15 @@ test("Bot settings follows the GrokBot order and keeps extras under Advanced", a
   await expect(sem(page, "flock-danger-zone")).toBeVisible();
 
   // Routines is a Contribution mounted beside these settings in the same
-  // region, which is the composition this spec is here to prove holds.
+  // region, which is the composition this spec is here to prove holds. The
+  // chat header's Routines icon is the door; the region names it once shown.
+  await settle(page);
+  await page
+    .getByRole("button", { name: "Routines", exact: true })
+    .first()
+    .click();
   await expect(sem(page, "shell-right-panel")).toContainText("Routines");
+  await expect(sem(page, "routines-document")).toBeVisible({ timeout: 60_000 });
 
   // No error banner anywhere on the surface, and — through the `page` fixture
   // — no console error and no failed request during any of it.

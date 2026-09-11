@@ -52,16 +52,14 @@ function says(scope: Page | Locator, text: string) {
 }
 
 /**
- * One entry of the right panel's own selector, by the word on it.
+ * One of the chat header's doors into the right panel, by its name.
  *
- * A segment's label is drawn inside the segment, so the node carrying the word
- * is not the node that takes the press; this reaches the pressable one.
+ * The header's icons are the only way of choosing what the panel holds; the
+ * panel itself names its entry and offers the way out, nothing more. An icon
+ * button's name is its tooltip, and the header's is the first in the document.
  */
-function entry(scope: Page | Locator, label: string) {
-  return scope
-    .locator("[flt-tappable]")
-    .filter({ hasText: new RegExp(`^${label}$`, "u") })
-    .first();
+function door(page: Page, label: string) {
+  return page.getByRole("button", { name: label, exact: true }).first();
 }
 
 /**
@@ -89,29 +87,31 @@ test("the default panel composes Computer and Routines and swaps to Settings", a
   await settle(page);
 
   // At this width the region is a column the shell draws, and every feature
-  // that filled it is one press away in the region's own selector.
+  // that filled it is one press away in the chat header. The region names the
+  // entry it is showing, and only that one.
   const panel = sem(page, "shell-right-panel");
   await expect(panel).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
-  await expect(panel).toContainText("Settings");
-  await expect(panel).toContainText("Routines");
-  await expect(panel).toContainText("Computer");
   // Bot settings is the entry the region opens on.
+  await expect(panel).toContainText("Settings");
   await expect(sem(page, "bot-settings")).toBeVisible();
 
   await settle(page);
-  await entry(panel, "Computer").click();
+  await door(page, "Computer").click();
   await expect(sem(page, "computer-card")).toBeVisible({ timeout: 60_000 });
+  await expect(panel).toContainText("Computer");
   // The card is the whole statement: no caption repeats it underneath.
   await expect(says(page, "Observed's screen")).toHaveCount(0);
 
   await settle(page);
-  await entry(panel, "Routines").click();
+  await door(page, "Routines").click();
   await expect(sem(page, "routines-document")).toBeVisible({ timeout: 60_000 });
+  await expect(panel).toContainText("Routines");
   await expect(says(page, "No Routines yet.").first()).toBeVisible();
 
   await settle(page);
-  await entry(panel, "Settings").click();
+  await tap(page, "bot-panel-toggle").click();
   await expect(sem(page, "bot-settings")).toBeVisible();
+  await expect(panel).toContainText("Settings");
 
   expect(await horizontalOverflow(page)).toBeLessThanOrEqual(1);
 });
