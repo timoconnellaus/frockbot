@@ -243,6 +243,7 @@ class _FrockBotAppState extends State<FrockBotApp> {
             userId: userId!,
             botLinks: botLinks,
             onSignOut: signOut,
+            version: updates.version,
           ),
   );
 

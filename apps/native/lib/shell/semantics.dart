@@ -111,6 +111,7 @@ abstract final class SettingsIds {
   static const profileConnections = 'profile-connections';
   static const profileManageBots = 'profile-manage-bots';
   static const profileSignOut = 'profile-sign-out';
+  static const profileVersion = 'profile-version';
 
   static const botSettings = 'bot-settings';
   static const botAvatar = 'bot-avatar';

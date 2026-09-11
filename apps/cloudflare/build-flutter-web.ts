@@ -80,6 +80,23 @@ const BUILD_FLAGS = [
 ];
 
 /**
+ * The version name from `pubspec.yaml`, handed to the Dart program so the
+ * Profile page can say which release it is. The browser build has no build
+ * number of its own and no Shorebird patch, so the name alone is the version.
+ * The pubspec is already part of the source fingerprint, so a bump rebuilds.
+ */
+async function appVersionDefine(): Promise<string> {
+  const pubspec = await readFile(resolve(nativeRoot, "pubspec.yaml"), "utf8");
+  const version = /^version:\s*(\d+\.\d+\.\d+)\+\d+\s*$/m.exec(pubspec);
+  if (!version) {
+    throw new Error(
+      "apps/native/pubspec.yaml has no `version: <name>+<code>` line to build.",
+    );
+  }
+  return `--dart-define=FROCKBOT_APP_VERSION=${version[1]}`;
+}
+
+/**
  * The Dart sources, the assets, and the page template the build reads.
  *
  * `build/` and `.dart_tool/` are the build's own outputs, and the platform
@@ -172,7 +189,7 @@ if (await stagedIsCurrent(fingerprint)) {
 }
 
 Bun.spawnSync({
-  cmd: ["flutter", "build", "web", ...BUILD_FLAGS],
+  cmd: ["flutter", "build", "web", ...BUILD_FLAGS, await appVersionDefine()],
   cwd: nativeRoot,
   stdout: "inherit",
   stderr: "inherit",
