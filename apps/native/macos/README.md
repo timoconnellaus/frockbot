@@ -81,9 +81,13 @@ universal app and creates a draft. Watch the tag to completion with
 `bun scripts/ci-watch.ts`. Upload the verified DMG to that draft, verify its
 checksum and name, and publish it. The website's "Download for Mac" button
 points at `/download/mac`, which the marketing worker redirects to
-`releases/latest/download/FrockBot-macos.dmg`, so the newest published,
-non-prerelease GitHub release that carries that asset is what visitors get;
-no link edit is needed per release.
+`downloads.frockbot.com/mac/FrockBot-macos.dmg` — an R2 object the
+`publish-download` job overwrites once a release has finished, after archiving
+the same image under `mac/FrockBot-macos-<version>.dmg`. Visitors stay on our
+own domain and never see the repository, and what they receive changes only
+when a release completes, not when a GitHub Release is edited. A prerelease
+tag is archived but leaves the pointer alone. No link edit is needed per
+release.
 Cloud tags (`v*`) and Mac tags (`mac-v*`) ship independently; merging alone ships
 neither.
 

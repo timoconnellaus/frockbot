@@ -194,7 +194,7 @@ describe("marketing worker", () => {
   });
 
   test.each(["/download/mac", "/download/mac/"])(
-    "%s redirects to the latest notarized disk image on GitHub",
+    "%s redirects to the latest notarized disk image on our own domain",
     async (path: string) => {
       let served = false;
       const response = await worker.fetch(
@@ -212,8 +212,12 @@ describe("marketing worker", () => {
       expect(response.status).toBe(302);
       expect(response.headers.get("location")).toBe(MAC_DOWNLOAD_URL);
       expect(MAC_DOWNLOAD_URL).toBe(
-        "https://github.com/timoconnellaus/frockbot/releases/latest/download/FrockBot-macos.dmg",
+        "https://downloads.frockbot.com/mac/FrockBot-macos.dmg",
       );
+      // A download that bounces to github.com shows the repository in the
+      // address bar and ties what visitors receive to whichever Release
+      // happens to be marked latest.
+      expect(MAC_DOWNLOAD_URL).not.toContain("github.com");
     },
   );
 
