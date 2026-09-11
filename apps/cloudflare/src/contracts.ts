@@ -700,9 +700,31 @@ export interface GatewayDependencies {
   ): Promise<Response>;
   /** Absent, or with no token, when the deployment publishes no `/api/debug`. */
   debug?: DebugGatewaySurface;
+  /**
+   * The voice doors. Absent in a deployment that has neither the dictation
+   * nor the assistant configured; the routes then answer what is missing.
+   */
+  voice?: VoiceGatewayDependencies;
   backendContributions?: readonly BackendRouteContribution[];
   /** Webview origins allowed to call `/api/*` cross-origin. */
   allowedClientOrigins?: string[];
   allowDevelopmentIdentity?: boolean;
   compatibilityDate?: string;
+}
+
+/** The two voice sockets and the probe the clients read before offering them. */
+export interface VoiceGatewayDependencies {
+  capabilities(): { dictation: boolean; assistant: boolean };
+  /** The composer's dictation relay; the request is an authenticated upgrade. */
+  openDictation(userId: string, request: Request): Promise<Response>;
+  /**
+   * The account's voice session object. `deviceKey` names the client device
+   * so a socket it replaces rejoins its own call rather than superseding it.
+   */
+  openAssistant(
+    userId: string,
+    deviceKey: string,
+    request: Request,
+    context: { isAdmin: boolean; authMode: string },
+  ): Promise<Response>;
 }

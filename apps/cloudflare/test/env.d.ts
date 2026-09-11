@@ -8,6 +8,7 @@ import type {
 import type { UserConfiguration } from "../src/user-configuration.ts";
 import type { AppletState } from "../src/applet-state.ts";
 import type { DeploymentPolicy } from "../src/deployment-policy.ts";
+import type { WorkerdVoiceAssistant } from "./voice-assistant-probe.ts";
 
 interface ComputerTestEnv {
   APPLICATION_ARTIFACTS: R2Bucket;
@@ -33,6 +34,7 @@ interface ComputerTestEnv {
   MACHINE_TOKEN_SECRET: string;
   USER_CONFIGURATIONS: DurableObjectNamespace<UserConfiguration>;
   DEPLOYMENT_POLICY: DurableObjectNamespace<DeploymentPolicy>;
+  VOICE_ASSISTANTS: DurableObjectNamespace<WorkerdVoiceAssistant>;
 }
 
 declare global {

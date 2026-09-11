@@ -33,3 +33,6 @@ apps/native/android/.kotlin/
 .local-validation/
 
 .eval-results/
+
+# Throwaway visual references (docs/voice.md); kept byte-identical to what was approved.
+app/shell/client/voice-prototype/

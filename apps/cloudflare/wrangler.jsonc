@@ -111,6 +111,12 @@
         "name": "APPLET_STATES",
         "class_name": "AppletState",
       },
+      // The account-wide voice session, one object per User (docs/voice.md).
+      // A Cloudflare Agents SDK class; the Bot runtime stays hand-rolled.
+      {
+        "name": "VOICE_ASSISTANTS",
+        "class_name": "VoiceAssistant",
+      },
     ],
   },
   "migrations": [
@@ -139,6 +145,12 @@
     {
       "tag": "v6",
       "deleted_classes": ["VoiceSession"],
+    },
+    // A new class under a new name: the retired `VoiceSession` above cannot be
+    // revived, and this one is an Agents SDK object with SQLite storage.
+    {
+      "tag": "v7",
+      "new_sqlite_classes": ["VoiceAssistant"],
     },
   ],
   "vars": {
@@ -248,6 +260,10 @@
           {
             "name": "APPLET_STATES",
             "class_name": "AppletState",
+          },
+          {
+            "name": "VOICE_ASSISTANTS",
+            "class_name": "VoiceAssistant",
           },
         ],
       },
@@ -372,6 +388,10 @@
             "name": "APPLET_STATES",
             "class_name": "AppletState",
           },
+          {
+            "name": "VOICE_ASSISTANTS",
+            "class_name": "VoiceAssistant",
+          },
         ],
       },
       "vars": {
@@ -491,6 +511,10 @@
           {
             "name": "APPLET_STATES",
             "class_name": "AppletState",
+          },
+          {
+            "name": "VOICE_ASSISTANTS",
+            "class_name": "VoiceAssistant",
           },
         ],
       },

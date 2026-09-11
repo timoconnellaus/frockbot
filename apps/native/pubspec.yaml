@@ -23,6 +23,11 @@ dependencies:
   shorebird_code_push: 2.0.7
   web: 1.1.1
   web_socket_channel: 3.0.3
+  # Voice: streaming PCM16 capture, and gapless PCM16 playback with an
+  # interrupt. `record` asks for the microphone permission itself, so no
+  # separate permission plugin is carried for it.
+  record: 7.1.1
+  flutter_pcm_sound: 3.3.3
 
 dev_dependencies:
   flutter_test:

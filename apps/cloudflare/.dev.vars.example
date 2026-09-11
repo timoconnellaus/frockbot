@@ -20,3 +20,12 @@ DEBUG_TOKEN=replace-with-a-random-32-byte-token
 FROCK_AI_GATEWAY_TOKEN=replace-with-ai-gateway-authorization-token
 # The pre-rename name `FLOCK_AI_GATEWAY_TOKEN` is still read as a fallback, so
 # an existing local .dev.vars keeps working until it is renamed.
+# Voice (docs/voice.md). Both are required in production; absent locally, the
+# microphone and waveform buttons answer that voice is not set up.
+# The composer's dictation opens `wss://api.openai.com/v1/realtime` with this
+# key from the Worker; the browser never sees it.
+OPENAI_API_KEY=replace-with-an-openai-api-key
+# The voice session's speech, ElevenLabs Flash v2.5. The key stays server-side.
+ELEVENLABS_API_KEY=replace-with-an-elevenlabs-api-key
+# Optional: the ElevenLabs voice id; the default is George.
+# ELEVENLABS_VOICE_ID=JBFqnCBsd6RMkjVDRZzb

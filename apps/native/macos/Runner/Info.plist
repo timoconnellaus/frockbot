@@ -26,6 +26,8 @@
 	<string>Send messages from your Messages account only after you approve the recipient and exact text in FrockBot.</string>
 	<key>NSHumanReadableCopyright</key>
 	<string>$(PRODUCT_COPYRIGHT)</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>FrockBot uses the microphone to dictate messages and to hold a voice conversation with your Bots.</string>
 	<key>NSMainNibFile</key>
 	<string>MainMenu</string>
 	<key>NSPrincipalClass</key>

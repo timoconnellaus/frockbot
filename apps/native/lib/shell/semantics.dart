@@ -73,6 +73,22 @@ abstract final class SignInIds {
   static const note = 'sign-in-note';
 }
 
+/// Voice: the two controls that start it, and the footer that is it.
+///
+/// The controls are always present — a deployment without the keys answers a
+/// press with one line rather than hiding the button — so a spec can select
+/// on them whatever the deployment is configured with.
+abstract final class VoiceIds {
+  static const sidebarStart = 'voice-start';
+  static const footer = 'voice-footer';
+  static const footerAnimation = 'voice-footer-animation';
+  static const mute = 'voice-mute';
+  static const end = 'voice-end';
+  static const composerDictate = 'composer-dictate';
+  static const composerDictationStop = 'composer-dictation-stop';
+  static const composerDictationLevel = 'composer-dictation-level';
+}
+
 /// Settings: the account surfaces, and the Bot's own panel.
 ///
 /// The names follow the specs' selectors where those specs name a thing —
