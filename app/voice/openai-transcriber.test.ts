@@ -77,7 +77,7 @@ describe("the OpenAI assistant transcriber", () => {
     expect(ready).toBe(true);
   });
 
-  test("holds audio fed before the session is ready and sends it in order", async () => {
+  test("drops audio fed before the session is ready and sends it after", async () => {
     const socket = new FakeSocket();
     const session = transcriber(socket).createSession({});
     await Promise.resolve();
@@ -86,9 +86,9 @@ describe("the OpenAI assistant transcriber", () => {
     expect(socket.audio()).toHaveLength(0);
     socket.say({ type: "session.updated" });
     await session.waitUntilReady!();
-    expect(socket.audio()).toHaveLength(2);
+    expect(socket.audio()).toHaveLength(0);
     session.feed(FRAME);
-    expect(socket.audio()).toHaveLength(3);
+    expect(socket.audio()).toHaveLength(1);
     // 16 kHz in, 24 kHz out: a frame leaves larger than it arrived.
     const first = JSON.parse(socket.audio()[0]!) as { audio: string };
     expect(atob(first.audio).length).toBeGreaterThan(FRAME.byteLength);

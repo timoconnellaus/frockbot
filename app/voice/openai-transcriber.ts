@@ -55,8 +55,6 @@ export interface VoiceRealtimeSocketV1 {
 export interface OpenAiTranscriberOptionsV1 {
   /** Opens one upstream socket, already accepted. */
   openSocket: () => Promise<VoiceRealtimeSocketV1>;
-  /** Audio held while the session is still opening. Default: 10 s at 16 kHz. */
-  maxPendingBytes?: number;
 }
 
 /** What the assistant says to the upstream before any audio. */
@@ -81,8 +79,6 @@ export function voiceAssistantSessionUpdateV1(): Record<string, unknown> {
   };
 }
 
-const DEFAULT_PENDING_BYTES = 10 * 16_000 * 2;
-
 /**
  * A transcriber whose sessions are OpenAI realtime sockets.
  *
@@ -94,17 +90,15 @@ const DEFAULT_PENDING_BYTES = 10 * 16_000 * 2;
 export function createOpenAiTranscriberV1(
   options: OpenAiTranscriberOptionsV1,
 ): VoiceTranscriberV1 {
-  const maxPendingBytes = options.maxPendingBytes ?? DEFAULT_PENDING_BYTES;
   return {
     createSession(sessionOptions: VoiceTranscriberSessionOptionsV1 = {}) {
-      return openSession(options.openSocket, maxPendingBytes, sessionOptions);
+      return openSession(options.openSocket, sessionOptions);
     },
   };
 }
 
 function openSession(
   openSocket: () => Promise<VoiceRealtimeSocketV1>,
-  maxPendingBytes: number,
   options: VoiceTranscriberSessionOptionsV1,
 ): VoiceTranscriberSessionV1 {
   const upsample = createPcm16Upsampler16to24V1();
@@ -114,8 +108,6 @@ function openSession(
   let ready = false;
   let closed = false;
   let settled = false;
-  let pending: string[] = [];
-  let pendingBytes = 0;
   let resolveReady: () => void = () => {};
   let rejectReady: (error: Error) => void = () => {};
   const readyPromise = new Promise<void>((resolve, reject) => {
@@ -150,10 +142,6 @@ function openSession(
         if (ready) return;
         ready = true;
         settled = true;
-        const held = pending;
-        pending = [];
-        pendingBytes = 0;
-        for (const frame of held) socket?.send(frame);
         resolveReady();
         return;
       }
@@ -206,20 +194,11 @@ function openSession(
 
   return {
     feed(chunk: ArrayBuffer) {
-      if (closed) return;
-      const frame = voiceRealtimeAppendV1(upsample(chunk));
-      if (ready && socket) {
-        socket.send(frame);
-        return;
-      }
-      // The wrapper above only feeds after `waitUntilReady` resolves, but the
-      // SDK's own contract does not promise that, and losing the first words
-      // of a wake would be the worst possible failure here.
-      pending.push(frame);
-      pendingBytes += frame.length;
-      while (pendingBytes > maxPendingBytes && pending.length > 1) {
-        pendingBytes -= pending.shift()!.length;
-      }
+      // Audio fed before the session is ready is dropped: the sleeping
+      // wrapper above holds and drains frames itself and only feeds once
+      // `waitUntilReady` has resolved.
+      if (closed || !ready || !socket) return;
+      socket.send(voiceRealtimeAppendV1(upsample(chunk)));
     },
     waitUntilReady() {
       return readyPromise;
@@ -228,8 +207,6 @@ function openSession(
       if (closed) return;
       closed = true;
       settled = true;
-      pending = [];
-      pendingBytes = 0;
       socket?.close();
     },
   };

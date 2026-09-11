@@ -286,7 +286,6 @@ export class VoiceAssistant extends VoiceAgentBase<
         openVoiceUpstreamSocket(VOICE_ASSISTANT_STT_URL, {
           authorization: `Bearer ${apiKey}`,
         }),
-      maxPendingBytes: PENDING_AUDIO_BYTES,
     });
   }
 
@@ -524,16 +523,7 @@ export class VoiceAssistant extends VoiceAgentBase<
         if (call.exhausted) {
           throw new Error("today's transcription allowance is used up");
         }
-        return inner.createSession({
-          ...options,
-          onFatalError: (error) => {
-            // The one place this failure is visible. Without it a call that
-            // loses its ears looks, from every log, like a person who said
-            // nothing.
-            console.error("voice assistant stt failed", error.message);
-            options.onFatalError?.(error);
-          },
-        });
+        return inner.createSession(options);
       },
     };
     const sleeping = createSleepingTranscriberV1(gated, {
@@ -547,7 +537,18 @@ export class VoiceAssistant extends VoiceAgentBase<
     // what sleep and wake act on.
     return {
       createSession: (options) => {
-        const session = sleeping.createSession(options);
+        const session = sleeping.createSession({
+          ...options,
+          onFatalError: (error) => {
+            // The SDK logs its own record of any transcriber fatal; this one
+            // names it as the assistant's ears and, sitting outside the
+            // sleeping wrapper, also catches an upgrade that never became a
+            // session. Without it a call that loses its ears looks, from
+            // every log, like a person who said nothing.
+            console.error("voice assistant stt failed", error.message);
+            options.onFatalError?.(error);
+          },
+        });
         call.session = session;
         // Open at once: the first words after `listening` must not wait on a
         // cold upstream. The client's sleep message closes it when the room

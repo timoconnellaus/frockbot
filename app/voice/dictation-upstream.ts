@@ -22,8 +22,9 @@
 // `turn_detection` with "Turn detection is not supported for this
 // transcription model." and the session dies there, which is why no capture
 // in production ever reached `ready`. The models that do take VAD
-// (`gpt-transcribe`, `gpt-4o-transcribe`) do not stream deltas, and live
-// text as the person speaks is the point of dictation.
+// (`gpt-transcribe`, `gpt-4o-transcribe`) hold their deltas until the turn
+// commits and then send them all at once, and live text as the person speaks
+// is the point of dictation.
 //
 // So a capture is one item, not a series of them: deltas accumulate against
 // it from about half a second behind the speaker, nothing is committed while
