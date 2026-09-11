@@ -179,7 +179,7 @@ void main() {
       // The message is drawn, the notice is not, and the run is still failed.
       final closing = projectRuns([
         brokenFiring(),
-      ]).firstWhere((line) => line.id == 'rf-brief:assistant');
+      ]).firstWhere((line) => line.id == 'rf-brief:failed');
       expect(closing.status, LineStatus.error);
       expect(closing.notice, isNull);
       expect(closing.empty, isTrue);

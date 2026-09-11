@@ -90,7 +90,12 @@ class _TranscriptViewState extends State<TranscriptView> {
     _latestSendSource = widget.lines;
     _latestSendId = null;
     for (final line in ordered) {
-      if (line.role == LineRole.assistant && line.id.contains(':send:')) {
+      // What the cloud counts as a message: a send, or a Turn's failure that
+      // is drawn as its own notice. A failure already said as a message — a
+      // firing that broke before it could speak — is counted by that send.
+      if (line.role == LineRole.assistant &&
+          (line.id.contains(':send:') ||
+              (line.id.endsWith(':failed') && line.notice != null))) {
         _latestSendId = line.id;
       }
     }

@@ -134,24 +134,26 @@ export type SupersededPackageRecords<Snapshot> = (input: {
 }) => Promise<Record<string, unknown>>;
 
 /**
- * The notification a Turn that ended `failed` owes the person who was waiting
- * on it, decided by the Package that owns notification content.
+ * What a Turn that ended `failed` leaves for the person who was waiting on
+ * it, decided by the Package that owns the conversation.
  *
  * A completed Turn already tells them — "Bob replied", with what it said —
- * through the completion's own intent. A failed Turn had none, so the only
- * person who ever learned was the one still looking at that conversation. This
- * is the same seam for the other outcome: the kernel hands over the settled
- * record, whose `configurationSnapshot` is the durable copy of the settings
- * the Turn was admitted under, and writes back whatever intent comes out
- * without reading it.
+ * through its sends. A failed Turn had nothing of its own, so the only person
+ * who ever learned was the one still looking at that conversation. This is
+ * the same seam as `SupersededPackageRecords` for the other outcome: the
+ * kernel hands over the settled record, whose `configurationSnapshot` is the
+ * durable copy of the settings the Turn was admitted under, plus a reader
+ * bound to the settling transaction, and writes back whatever records come
+ * out without reading them.
  *
  * It is consulted only on the transition into `failed`, so a replay or a
- * recovery pass over a run that already settled writes nothing — an
- * acknowledged notification stays acknowledged.
+ * recovery pass over a run that already settled writes nothing — a failure
+ * the person has already been told about is not told twice.
  */
-export type FailedRunNotification<Snapshot> = (
-  run: StoredRunV1<Snapshot>,
-) => BotNotificationIntent | undefined;
+export type FailedRunRecords<Snapshot> = (input: {
+  run: StoredRunV1<Snapshot>;
+  read<T>(key: string): Promise<T | undefined>;
+}) => Promise<Record<string, unknown>>;
 
 /**
  * Settles a superseded run as terminal `superseded` and clears its active
@@ -337,7 +339,7 @@ export async function failStoredRun<Snapshot>(
   events: readonly SessionEvent[],
   failure: string,
   supersededRecords?: SupersededPackageRecords<Snapshot>,
-  failureNotification?: FailedRunNotification<Snapshot>,
+  failureRecords?: FailedRunRecords<Snapshot>,
 ): Promise<
   "failed" | "cancelled" | "superseded" | "preserved-completion" | "missing"
 > {
@@ -377,10 +379,17 @@ export async function failStoredRun<Snapshot>(
   const records: Record<string, unknown> = {
     [keys.run]: structuredClone(storedRunRecordV2(failed)),
   };
-  const intent = alreadyFailed ? undefined : failureNotification?.(failed);
-  if (intent) {
-    records[`${keys.notificationPrefix}${intent.notificationId}`] =
-      structuredClone(intent);
+  const contributed = alreadyFailed
+    ? {}
+    : ((await failureRecords?.({
+        run: failed,
+        read: <T>(key: string) => storage.get<T>(key),
+      })) ?? {});
+  for (const [key, value] of Object.entries(contributed)) {
+    if (key === keys.run || key === keys.activeRun) {
+      throw new Error(`failed-run records may not overwrite "${key}"`);
+    }
+    records[key] = structuredClone(value);
   }
   await new SessionEventLog(storage).rewrite(run.sessionId, latestEvents);
   await storage.put(records);

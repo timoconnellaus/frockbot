@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/client/transport.dart';
@@ -56,6 +58,12 @@ NativeApi api(
   return bot ?? botSettings();
 });
 
+/// The debounce, elapsed: what a person's pause in typing costs.
+Future<void> settle(WidgetTester tester) async {
+  await tester.pump(botSettingsAutosaveDelay + const Duration(milliseconds: 50));
+  await tester.pumpAndSettle();
+}
+
 Future<void> open(WidgetTester tester, BotSettingsController state) async {
   tester.view.physicalSize = const Size(390, 2200);
   tester.view.devicePixelRatio = 1;
@@ -87,7 +95,9 @@ void main() {
       find.text('Get notified when this Bot finishes or needs input'),
       findsOneWidget,
     );
-    expect(find.text('Save settings'), findsOneWidget);
+    // No button: a change is written as it is made.
+    expect(find.text('Save settings'), findsNothing);
+    expect(find.byType(FilledButton), findsNothing);
     // Everything else is behind Advanced, closed.
     expect(find.text('Title'), findsNothing);
     expect(find.text('Members'), findsNothing);
@@ -110,23 +120,24 @@ void main() {
       'alpha',
     );
     await open(tester, state);
-    expect(find.text('Save settings'), findsOneWidget);
+    expect(find.text('Name'), findsOneWidget);
     expect(find.text('Settings couldn’t load'), findsNothing);
     state.dispose();
   });
 
-  testWidgets('a save writes the profile, the policy and the Bot model', (
+  testWidgets('a pause in typing writes the profile, the policy and the model', (
     tester,
   ) async {
     final store = MemoryStore();
     final commands = <Map<String, Object?>>[];
     final state = BotSettingsController(api(store, commands), 'alpha');
     await open(tester, state);
+    await tester.enterText(find.byType(TextFormField).first, 'Renam');
+    await tester.pump(const Duration(milliseconds: 300));
+    // Still typing: nothing has been sent, letter by letter.
+    expect(commands, isEmpty);
     await tester.enterText(find.byType(TextFormField).first, 'Renamed');
-    await tester.tap(find.text('Pinned'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Save settings'));
-    await tester.pumpAndSettle();
+    await settle(tester);
     expect(commands.map((command) => command['type']), [
       'bot/set-profile',
       'bot/update-notifications',
@@ -134,9 +145,76 @@ void main() {
     ]);
     final profile = commands.first['profile']! as Map;
     expect(profile['name'], 'Renamed');
-    expect(profile['pinnedAt'], isNot(''));
     // No model was chosen, so the override is removed rather than written.
     expect(commands.last['unset'], ['model']);
+    expect(find.text('Saved.'), findsOneWidget);
+    // The field kept the person's focus and text through the write: what
+    // they typed is what it shows, and nothing was read back over it.
+    expect(
+      tester.widget<TextFormField>(find.byType(TextFormField).first).initialValue,
+      'Renamed',
+    );
+    state.dispose();
+  });
+
+  testWidgets('a switch is written the moment it is flipped', (tester) async {
+    final store = MemoryStore();
+    final commands = <Map<String, Object?>>[];
+    final state = BotSettingsController(api(store, commands), 'alpha');
+    await open(tester, state);
+    await tester.tap(find.text('Pinned'));
+    await tester.pumpAndSettle();
+    final profile = commands.first['profile']! as Map;
+    expect(profile['pinnedAt'], isNot(''));
+    // A second write keeps the instant the first one minted, so the tile the
+    // sidebar orders by does not move each time something else is saved.
+    await tester.tap(find.text('Notifications'));
+    await tester.pumpAndSettle();
+    expect((commands[3]['profile']! as Map)['pinnedAt'], profile['pinnedAt']);
+    state.dispose();
+  });
+
+  testWidgets('a change made mid-save is written after it', (tester) async {
+    final store = MemoryStore();
+    final commands = <Map<String, Object?>>[];
+    final gate = Completer<void>();
+    var held = false;
+    final state = BotSettingsController(
+      SettingsApi(store, (path, body) async {
+        if (body != null) {
+          commands.add(Map<String, Object?>.from(body as Map));
+          if (!held) {
+            held = true;
+            await gate.future;
+          }
+          return {
+            'schemaVersion': 1,
+            'commandId': body['commandId'],
+            'status': 'applied',
+          };
+        }
+        if (path.startsWith('/api/settings')) return account();
+        return botSettings();
+      }),
+      'alpha',
+    );
+    await open(tester, state);
+    await tester.tap(find.text('Pinned'));
+    await tester.pump();
+    // The first save is on the wire and held there. The next change lands
+    // while it is: it must not be lost to "already saving".
+    await tester.enterText(find.byType(TextFormField).first, 'Renamed');
+    await settle(tester);
+    expect(commands, hasLength(1));
+    gate.complete();
+    await settle(tester);
+    await settle(tester);
+    final names = [
+      for (final command in commands)
+        if (command['type'] == 'bot/set-profile')
+          (command['profile']! as Map)['name'],
+    ];
+    expect(names, ['Inspected', 'Renamed']);
     state.dispose();
   });
 
@@ -166,7 +244,7 @@ void main() {
       'alpha',
     );
     await open(tester, state);
-    await tester.tap(find.text('Save settings'));
+    await tester.tap(find.text('Notifications'));
     await tester.pumpAndSettle();
     // The read was at 3, and each applied command moved it.
     expect(commands.map((command) => command['expectedRevision']), [3, 4, 5]);
@@ -202,7 +280,7 @@ void main() {
       'alpha',
     );
     await open(tester, state);
-    await tester.tap(find.text('Save settings'));
+    await tester.tap(find.text('Notifications'));
     await tester.pumpAndSettle();
     // The refused command is the same command, asked again at the revision the
     // authority reported; the two after it fence on what that one left.
@@ -232,8 +310,6 @@ void main() {
     await open(tester, state);
     await tester.tap(find.text('Pinned'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Save settings'));
-    await tester.pumpAndSettle();
     expect((commands.first['profile']! as Map)['pinnedAt'], '');
     state.dispose();
   });
@@ -246,10 +322,13 @@ void main() {
     final state = BotSettingsController(api(store, commands), 'alpha');
     await open(tester, state);
     await tester.enterText(find.byType(TextFormField).first, '   ');
-    await tester.tap(find.text('Save settings'));
-    await tester.pumpAndSettle();
+    await settle(tester);
     expect(commands, isEmpty);
     expect(find.text('Enter a name for this Bot.'), findsOneWidget);
+    // And the next keystroke that makes it a name is what gets written.
+    await tester.enterText(find.byType(TextFormField).first, 'Named');
+    await settle(tester);
+    expect((commands.first['profile']! as Map)['name'], 'Named');
     state.dispose();
   });
 
@@ -264,7 +343,7 @@ void main() {
     );
     await open(tester, state);
     expect(find.text('Follow the account model'), findsNothing);
-    await tester.tap(find.text('Save settings'));
+    await tester.tap(find.text('Notifications'));
     await tester.pumpAndSettle();
     expect(commands.map((command) => command['type']), [
       'bot/set-profile',

@@ -444,9 +444,12 @@ List<TranscriptLine> projectRuns(List<Map<String, dynamic>> runs) {
         // said twice. The row stays — it is where the Turn's tools hang, and
         // the run is still `failed` — it just says nothing of its own.
         final failure = failureNotice(outcome?['message'] as String?);
+        // Named as its own message. The cloud counts a failed Turn unread
+        // under this id, so the line the person is shown is the line their
+        // read clears, and "Mark unread from here" can name it too.
         lines.add(
           TranscriptLine(
-            id: '$runId:assistant',
+            id: '$runId:failed',
             runId: runId,
             role: LineRole.assistant,
             // A Turn that broke after it had started talking keeps what it

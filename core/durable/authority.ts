@@ -37,7 +37,7 @@ import {
   completeStoredRun,
   type TerminalPackageRecords,
   type SupersededPackageRecords,
-  type FailedRunNotification,
+  type FailedRunRecords,
   failStoredRun,
 } from "./run-terminal.js";
 import {
@@ -132,15 +132,17 @@ export interface BotDurableAuthorityHooks<Snapshot> {
     result: BotTurnCompletion,
   ): BotNotificationIntent | undefined;
   /**
-   * Notification policy for a Turn that ended `failed`, given the settings the
-   * Turn was admitted under and its settled record. `undefined` records none.
+   * What a Turn that ended `failed` leaves for the person, given the settings
+   * the Turn was admitted under, its settled record, and a reader bound to
+   * the settling transaction. The kernel writes the returned keys without
+   * reading them; `{}` records nothing.
    *
    * The snapshot comes off the run itself rather than from a fresh read: a
    * failure settles on paths — recovery after a restart, the stale-run repair —
    * where nothing else has the settings to hand, and `configurationSnapshot` is
    * the durable copy of exactly the ones this Turn ran under.
    */
-  failureNotification?(
+  failureRecords?(
     snapshot: Snapshot,
     failed: {
       runId: string;
@@ -148,7 +150,8 @@ export interface BotDurableAuthorityHooks<Snapshot> {
       failure: string;
       events: readonly SessionEvent[];
     },
-  ): BotNotificationIntent | undefined;
+    read: <T>(key: string) => Promise<T | undefined>,
+  ): Promise<Record<string, unknown>>;
   /**
    * Package records written in the same transaction that settles a Turn, given
    * the settled run and the admission-index cursor it was admitted under. The
@@ -1214,7 +1217,7 @@ export class BotDurableAuthority<Snapshot> {
         run.events,
         STALE_RUNNING_RUN_FAILURE_V1,
         this.supersededPackageRecords(),
-        this.failedRunNotification(),
+        this.failedRunRecords(),
       );
       await this.refreshRecoveryAlarm(transaction);
     });
@@ -1673,22 +1676,27 @@ export class BotDurableAuthority<Snapshot> {
       });
   }
 
-  /** The Package's superseded-record hook, or `undefined` when it has none. */
   /**
-   * The Package's failed-Turn notification hook, bound to the run's own
-   * durable snapshot. Absent when the Package contributes none.
+   * The Package's failed-Turn records hook, bound to the run's own durable
+   * snapshot. Absent when the Package contributes none.
    */
-  private failedRunNotification(): FailedRunNotification<Snapshot> | undefined {
-    const hook = this.hooks.failureNotification;
+  private failedRunRecords(): FailedRunRecords<Snapshot> | undefined {
+    const hook = this.hooks.failureRecords;
     if (!hook) return undefined;
-    return (run) =>
-      hook.call(this.hooks, run.configurationSnapshot, {
-        runId: run.runId,
-        failure: run.failure ?? "",
-        events: run.events,
-      });
+    return ({ run, read }) =>
+      hook.call(
+        this.hooks,
+        run.configurationSnapshot,
+        {
+          runId: run.runId,
+          failure: run.failure ?? "",
+          events: run.events,
+        },
+        read,
+      );
   }
 
+  /** The Package's superseded-record hook, or `undefined` when it has none. */
   private supersededPackageRecords():
     SupersededPackageRecords<Snapshot> | undefined {
     const hook = this.hooks.supersededRecords;
@@ -1756,7 +1764,7 @@ export class BotDurableAuthority<Snapshot> {
         events,
         boundedRunFailureV1(failure),
         this.supersededPackageRecords(),
-        this.failedRunNotification(),
+        this.failedRunRecords(),
       );
       await this.refreshRecoveryAlarm(transaction);
     });
@@ -1897,7 +1905,7 @@ export class BotDurableAuthority<Snapshot> {
           run.events,
           plan.failure,
           this.supersededPackageRecords(),
-          this.failedRunNotification(),
+          this.failedRunRecords(),
         );
         await this.refreshRecoveryAlarm(transaction);
         return undefined;

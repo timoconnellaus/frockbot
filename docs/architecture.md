@@ -358,23 +358,31 @@ Screens (no router; `MaterialApp(home:)` plus `Navigator.push`):
 - `FrockBotApp` — `lib/main.dart:44`, `ThemeMode.dark` hardcoded
 - `SignInPage` — `lib/auth/sign_in_page.dart:5`
 - `AppShell` — `lib/shell/app_shell.dart`: the directory, the identities the
-  sidebar groups by, the unread fan-out, the drawers and the slot registry
+  sidebar groups by, the unread fan-out, the right-panel drawer, the slot
+  registry, the Bot's page and the account sheet. Three tiers
+  (`lib/shell/desktop_layout.dart`): columns at a desk; below 640 the Bot list
+  is the first screen, a conversation is a page over it with Back to the list,
+  and the conversation's bar is GrokBot's — Back, the Bot's name as the way to
+  its page, the Computer
 - `ShellSidebar` — `lib/shell/sidebar.dart`: pinned tiles in pin order, label
-  groups, unread badges, hidden Bots, search, create and the profile sheet
+  groups, unread badges, hidden Bots, and the list's three controls: the
+  account sheet, search, create
 - `ChatPane` / `ConversationView` — `lib/shell/chat_pane.dart` over
   `lib/shell/transcript.dart`, `composer.dart`, `markdown.dart`,
   `send_payload.dart` and `skill_menu.dart`
 - `RunView` — `lib/shell/run_view.dart`: a Turn's tool receipts, on the right
   panel at wide widths and as a page on the phone. The thread never names a
   tool; it offers one control that opens this.
-- `ActivityPage` — `lib/activity/page.dart:9`
-- `BotRecoveryPage` — `lib/recovery/page.dart:11`, detail with three tabs at `:202`
+- `BotRecoveryPage` — `lib/recovery/page.dart:11`, Manage Bots on the account
+  sheet, detail with three tabs at `:202`
 - `SettingsPage` — `lib/settings/page.dart`: a host over `ViewDocumentView`,
   not a renderer of its own. `ModelPicker` at `lib/settings/model_picker.dart`
   is the host editor for the one field whose choices are a paged catalog.
 - `BotSettingsView` — `lib/settings/bot_settings.dart`: one Bot's identity,
-  notifications and model, in the `right-panel` slot at wide widths and a
-  page on the phone
+  notifications and model, written as they are edited rather than on a Save
+  button; in the `right-panel` slot at wide widths, and on the phone the top
+  of the Bot's page, above the rows for its Routines, Applets and Package
+  pages
 - `ConnectionsPage` — `lib/connections/page.dart`: a host over
   `ViewDocumentView` for the accounts a User authorizes once for every Bot
 - `PluginsPage` — `lib/plugins/page.dart`: the same host over the Plugins

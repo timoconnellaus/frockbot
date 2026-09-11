@@ -60,7 +60,9 @@ test("browser and native share failed notices and idempotent unread/acknowledgem
     );
   const notices = await read();
   expect(notices.notifications).toHaveLength(1);
-  expect(notices.notifications[0]!.title).toContain("couldn't finish");
+  // The failed Turn is told as a message: named by the Bot, with the product's
+  // own sentence for what went wrong.
+  expect(notices.notifications[0]!.body).toContain("couldn't finish");
   expect(notices.notifications[0]!.body).not.toContain("401");
   expect(
     await (await asUser(userId, "/api/bots/notifications")).json(),
@@ -70,6 +72,8 @@ test("browser and native share failed notices and idempotent unread/acknowledgem
     await (await native("/api/bots/unread")).json(),
   ).unread[0]!;
   expect(unread.botId).toBe(botId);
+  expect(unread.count).toBe(1);
+  expect(unread.lastMessageId).toBe("failed-turn:failed");
   const command = {
     schemaVersion: 1,
     type: "bot/mark-unread",

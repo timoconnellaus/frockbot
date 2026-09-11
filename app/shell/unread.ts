@@ -155,7 +155,9 @@ export function isMessageBoundaryV1(value: unknown): value is string {
   return (
     typeof value === "string" &&
     value.length <= 200 &&
-    /^[-a-zA-Z0-9._]+:(?:user|send:(?:0|[1-9][0-9]*))(?![\s\S])/.test(value)
+    /^[-a-zA-Z0-9._]+:(?:user|failed|send:(?:0|[1-9][0-9]*))(?![\s\S])/.test(
+      value,
+    )
   );
 }
 
@@ -944,14 +946,20 @@ export async function executeUnreadCommand(
           ? projects
           : run.admission?.turnType === "automation" ||
             run.sessionId === sessionId;
+      // A failed Turn's notice is its own line in the thread, named
+      // `<runId>:failed`, and it is drawn for exactly the runs that ended that
+      // way — so a boundary naming one is validated against the run's status,
+      // never against a send its journal never held.
       const drawn =
         projects ||
         (run !== undefined &&
-          isVisibleRunV1(run) &&
-          (kind !== "send" ||
-            Number(position) <
-              run.events.filter((event) => event.type === "send/to-user")
-                .length));
+          (kind === "failed"
+            ? run.status === "failed"
+            : isVisibleRunV1(run) &&
+              (kind !== "send" ||
+                Number(position) <
+                  run.events.filter((event) => event.type === "send/to-user")
+                    .length)));
       if (!inChat || !drawn) {
         throw new Error(
           "Unread boundary does not name a message in this Bot’s chat",

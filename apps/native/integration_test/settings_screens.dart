@@ -10,8 +10,6 @@ import 'package:frockbot_native/client/transport.dart';
 import 'package:frockbot_native/client/plain_store.dart';
 import 'package:frockbot_native/settings/page.dart';
 import 'package:frockbot_native/connections/page.dart';
-import 'package:frockbot_native/activity/controller.dart';
-import 'package:frockbot_native/activity/page.dart';
 import 'package:frockbot_native/recovery/controller.dart';
 import 'package:frockbot_native/recovery/page.dart';
 import 'package:frockbot_native/protocol/client_wire.generated.dart' as wire;
@@ -122,15 +120,6 @@ Future<void> main() async {
               controller: recovery!,
               bot: detailBot!,
               initialTab: recoveryTab,
-            )
-          : home == 'inbox'
-          ? ActivityPage(
-              controller: ActivityController(
-                api,
-                store,
-                'native-settings-local',
-              )..botNames = {'native-inbox-design': 'Mira'},
-              openBot: (_) async {},
             )
           : home == 'connections'
           ? ConnectionsPage(

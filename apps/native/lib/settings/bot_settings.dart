@@ -7,6 +7,7 @@ import '../client/transport.dart';
 import '../flock/sheep.dart';
 import '../protocol/client_wire.generated.dart' as wire;
 import '../shell/semantics.dart';
+import '../theme/frock_theme.dart';
 import '../theme/states.dart';
 import 'model_picker.dart';
 
@@ -29,6 +30,12 @@ class BotSettingsController extends ChangeNotifier {
   String? message;
   int revision = 0;
   int accountRevision = 0;
+
+  /// How many reads have replaced what the fields show. A field is keyed on
+  /// this rather than on the revision: a save moves the revision on every
+  /// command, and re-keying a field mid-edit throws away its focus and the
+  /// text typed since the debounce fired.
+  int loads = 0;
 
   String name = '';
   String label = '';
@@ -74,6 +81,7 @@ class BotSettingsController extends ChangeNotifier {
           ((answer['packageValues'] as Map?)?['custom-models']
               as Map?)?['model'];
       loaded = true;
+      loads += 1;
       await _loadAccount();
     } catch (_) {
       message = 'Couldn’t load this Bot’s settings. Check your connection and try again.';
@@ -132,11 +140,18 @@ class BotSettingsController extends ChangeNotifier {
   /// Every configuration command is fenced on a revision, and each of these
   /// three moves it — so the revision the receipt reports is what the next one
   /// fences on rather than the one the read returned.
+  ///
+  /// What the fields show is not read back afterwards. The surface saves as
+  /// the person edits, and a read landing under a field they are still typing
+  /// into would replace their text with the server's copy of it.
   Future<bool> save() async {
     if (saving) return false;
     saving = true;
     message = null;
     _changed();
+    final pinInstant = pinned
+        ? (pinnedAt.isEmpty ? DateTime.now().toUtc().toIso8601String() : pinnedAt)
+        : '';
     try {
       await _command({
         'schemaVersion': 1,
@@ -149,13 +164,12 @@ class BotSettingsController extends ChangeNotifier {
           'description': description,
           'title': title.trim(),
           'hiddenFromSidebar': hidden,
-          'pinnedAt': pinned
-              ? (pinnedAt.isEmpty
-                    ? DateTime.now().toUtc().toIso8601String()
-                    : pinnedAt)
-              : '',
+          'pinnedAt': pinInstant,
         },
       });
+      // The instant the sidebar orders by is now the one that was written, so
+      // the next save keeps it rather than minting a newer one.
+      pinnedAt = pinInstant;
       await _command({
         'schemaVersion': 1,
         'commandId': randomId(),
@@ -184,7 +198,6 @@ class BotSettingsController extends ChangeNotifier {
     } finally {
       saving = false;
       _changed();
-      unawaited(load());
     }
   }
 
@@ -232,13 +245,28 @@ class BotSettingsController extends ChangeNotifier {
   }
 }
 
-/// The Bot settings surface: the right-hand panel at wide widths, a page on
-/// the phone. The order is GrokBot's — avatar, name, label, pinned,
+/// How long after the last keystroke a field's change is written. Long enough
+/// that a word is not saved letter by letter, short enough that leaving the
+/// page never loses one.
+const botSettingsAutosaveDelay = Duration(milliseconds: 700);
+
+/// The Bot settings surface: the right-hand panel at wide widths, the Bot's
+/// page on the phone. The order is GrokBot's — avatar, name, label, pinned,
 /// description, notifications — and everything else is under Advanced.
+///
+/// There is no Save button. A switch is written the moment it is flipped and a
+/// field a moment after the person stops typing, which is what GrokBot does
+/// and what a settings page on a phone is expected to do; the one thing the
+/// surface says about it is a status line, so a write that failed is never
+/// silent.
 class BotSettingsView extends StatefulWidget {
   final BotSettingsController controller;
   final VoidCallback? onClose;
   final Future<void> Function()? onSaved;
+
+  /// What the host mounts between the Bot's own settings and Advanced: on the
+  /// phone, the rows for its Routines, its Applets and its Package pages.
+  final List<Widget> sections;
 
   /// This Bot's sheep, so the avatar here is the one the sidebar draws.
   final String? background;
@@ -259,6 +287,7 @@ class BotSettingsView extends StatefulWidget {
     this.background,
     this.onEditAvatar,
     this.dangerZone,
+    this.sections = const [],
   });
 
   @override
@@ -268,6 +297,11 @@ class BotSettingsView extends StatefulWidget {
 class _BotSettingsViewState extends State<BotSettingsView> {
   final form = GlobalKey<FormState>();
   bool advanced = false;
+  Timer? _pending;
+
+  /// Edited since the last save started. A change made while a save is in
+  /// flight is not in that save, so it is written again once it lands.
+  bool _dirty = false;
 
   BotSettingsController get state => widget.controller;
 
@@ -277,9 +311,51 @@ class _BotSettingsViewState extends State<BotSettingsView> {
     if (!state.loaded && !state.busy) unawaited(state.load());
   }
 
+  /// A field's change: written once typing pauses.
+  void _typed(void Function() change) {
+    state.edit(change);
+    _dirty = true;
+    _pending?.cancel();
+    _pending = Timer(botSettingsAutosaveDelay, () => unawaited(_save()));
+  }
+
+  /// A switch's or a choice's change: written now.
+  void _chose(void Function() change) {
+    state.edit(change);
+    _dirty = true;
+    unawaited(_save());
+  }
+
   Future<void> _save() async {
-    if (!form.currentState!.validate()) return;
-    if (await state.save()) await widget.onSaved?.call();
+    _pending?.cancel();
+    _pending = null;
+    if (!mounted && !_dirty) return;
+    // A name that is empty is refused before anything is sent; the field
+    // says so, and the next keystroke tries again.
+    if (mounted && !(form.currentState?.validate() ?? true)) return;
+    if (state.saving) {
+      // The save in flight does not carry this change. Ask again when it has
+      // landed rather than dropping it.
+      _pending = Timer(botSettingsAutosaveDelay, () => unawaited(_save()));
+      return;
+    }
+    _dirty = false;
+    final saved = await state.save();
+    if (saved) await widget.onSaved?.call();
+    if (_dirty && mounted) {
+      _pending = Timer(botSettingsAutosaveDelay, () => unawaited(_save()));
+    }
+  }
+
+  @override
+  void dispose() {
+    // Leaving the page is not losing the last word typed on it.
+    if (_pending != null) {
+      _pending!.cancel();
+      _pending = null;
+      if (_dirty && state.name.trim().isNotEmpty) unawaited(state.save());
+    }
+    super.dispose();
   }
 
   Widget _field({
@@ -294,14 +370,13 @@ class _BotSettingsViewState extends State<BotSettingsView> {
   }) => identified(
     id,
     TextFormField(
-      key: ValueKey('$id.${state.revision}'),
+      key: ValueKey('$id.${state.loads}'),
       initialValue: value,
-      enabled: !state.saving,
       minLines: lines,
       maxLines: lines,
       maxLength: maxLength,
       decoration: InputDecoration(labelText: label, helperText: hint),
-      onChanged: (next) => state.edit(() => onChanged(next)),
+      onChanged: (next) => _typed(() => onChanged(next)),
       validator: required
           ? (next) => (next ?? '').trim().isEmpty
                 ? 'Enter a name for this Bot.'
@@ -323,9 +398,7 @@ class _BotSettingsViewState extends State<BotSettingsView> {
       title: Text(title),
       subtitle: Text(detail),
       value: value,
-      onChanged: state.saving
-          ? null
-          : (next) => state.edit(() => onChanged(next)),
+      onChanged: (next) => _chose(() => onChanged(next)),
     ),
   );
 
@@ -440,6 +513,7 @@ class _BotSettingsViewState extends State<BotSettingsView> {
                 onChanged: (next) => state.notifications = next,
               ),
               if (state.modelAvailable) _model(context),
+              ...widget.sections,
               const SizedBox(height: 8),
               identified(
                 SettingsIds.botAdvanced,
@@ -495,28 +569,44 @@ class _BotSettingsViewState extends State<BotSettingsView> {
                   ],
                 ),
               ),
-              if (state.message != null)
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  child: Semantics(
-                    liveRegion: true,
-                    child: Text(state.message!),
-                  ),
-                ),
-              const SizedBox(height: 8),
-              identified(
-                SettingsIds.botSave,
-                FilledButton(
-                  onPressed: state.saving ? null : _save,
-                  child: Text(state.saving ? 'Saving…' : 'Save settings'),
-                ),
-              ),
+              _status(context),
             ],
           ),
         ),
       );
     },
   );
+
+  /// What the surface says about writing: nothing until something has been
+  /// saved, then the one word, and a failure in the authority's own words.
+  Widget _status(BuildContext context) {
+    final text = state.saving ? 'Saving…' : state.message;
+    final failed =
+        !state.saving && state.message != null && state.message != 'Saved.';
+    return identified(
+      SettingsIds.botSaveStatus,
+      Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Semantics(
+          liveRegion: true,
+          child: AnimatedSwitcher(
+            duration: FrockTheme.motion(context, FrockTheme.fast),
+            child: text == null
+                ? const SizedBox(height: 20)
+                : Text(
+                    text,
+                    key: ValueKey(text),
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: failed
+                          ? Theme.of(context).colorScheme.error
+                          : Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+          ),
+        ),
+      ),
+    );
+  }
 
   Widget _model(BuildContext context) => identified(
     SettingsIds.botModel,
@@ -535,9 +625,7 @@ class _BotSettingsViewState extends State<BotSettingsView> {
               : jsonEncode(state.model),
         ),
         trailing: const Icon(Icons.expand_more_rounded),
-        onTap: state.saving
-            ? null
-            : () async {
+        onTap: () async {
                 final choice = await Navigator.of(context)
                     .push<wire.SettingChoice>(
                       MaterialPageRoute(
@@ -548,7 +636,7 @@ class _BotSettingsViewState extends State<BotSettingsView> {
                       ),
                     );
                 if (choice != null) {
-                  state.edit(() => state.model = choice.value.value);
+                  _chose(() => state.model = choice.value.value);
                 }
               },
       ),

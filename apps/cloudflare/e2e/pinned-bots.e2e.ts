@@ -28,7 +28,7 @@ test("pinning a Bot from its settings moves it to a tile above the list", async 
   page,
   userId,
 }) => {
-  // Saving the panel also saves the notification policy, which is on by
+  // A change saves the notification policy along with it, which is on by
   // default and asks the browser for permission; grant it so the save runs to
   // the end rather than stopping on a refusal this test is not about.
   await page.context().grantPermissions(["notifications"]);
@@ -45,9 +45,9 @@ test("pinning a Bot from its settings moves it to a tile above the list", async 
   // `aria-checked` is how the engine says which way it is set.
   const pinned = sem(page, "bot-pinned").locator('[role="switch"]');
   await expect(pinned).toHaveAttribute("aria-checked", "false");
+  // Flipping the switch is the save: there is nothing else to press.
   await pinned.click();
   await expect(pinned).toHaveAttribute("aria-checked", "true");
-  await sem(page, "bot-settings-save").click();
 
   const tile = tiles(page);
   await expect(tile).toHaveCount(1);

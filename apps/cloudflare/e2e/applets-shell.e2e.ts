@@ -491,11 +491,13 @@ test("the canvas is a full-height sheet on a phone with a composer chip", async 
   });
   await page.setViewportSize(PHONE);
 
-  // On a phone nothing opens itself: the focused Applet is a control in the
-  // header rather than a screen the User did not ask for.
+  // On a phone nothing opens itself: the Applets are a row on the Bot's page
+  // rather than a screen the User did not ask for, and the Bot's page is one
+  // tap from the conversation, on the Bot's name.
+  await expect(sem(page, "applet-canvas")).toHaveCount(0);
+  await press(sem(page, "bot-panel-toggle"));
   const chip = sem(page, "applet-chip");
   await expect(chip).toBeVisible({ timeout: 60_000 });
-  await expect(sem(page, "applet-canvas")).toHaveCount(0);
   await expectNoHorizontalOverflow(page);
   await page.screenshot({
     path: testInfo.outputPath("applets-phone-chip.png"),
@@ -507,7 +509,7 @@ test("the canvas is a full-height sheet on a phone with a composer chip", async 
   await expectNoHorizontalOverflow(page);
   await page.screenshot({ path: testInfo.outputPath("applets-phone.png") });
 
-  // And the way out gives the conversation back.
+  // And the way out gives the Bot's page back, with the row still on it.
   await press(sem(page, "applet-canvas-close"));
   await expect(sem(page, "applet-canvas")).toHaveCount(0);
   await expect(chip).toBeVisible();

@@ -3,9 +3,10 @@
 // The hosted WebUI is the product UI on every platform (`AGENTS.md`, "One
 // production path"), so the phone is not a separate client: it is this same
 // Flutter bundle at a 390pt viewport. Below 640 the shell is one column
-// (`apps/native/lib/shell/desktop_layout.dart`), which means the Bot list and
-// the right panel are both reachable only as drawers or as pages — and this
-// spec measures what that costs rather than eyeballing it.
+// (`apps/native/lib/shell/desktop_layout.dart`): the Bot list is the first
+// screen, a conversation is a page over it, and everything the right panel
+// held is a page too — and this spec measures what that costs rather than
+// eyeballing it.
 //
 // What it measures is different from what the Vue spec measured, because a
 // canvas has no layout to interrogate: there is no document to overflow, no
@@ -104,26 +105,21 @@ async function expectWithinViewport(
   ).toBeLessThanOrEqual(PHONE.height + 1);
 }
 
-/** Open the navigation drawer and prove it arrived. */
-async function openNavigation(page: Page): Promise<void> {
+/** Back to the Bot list from a conversation, and prove it arrived. */
+async function openBots(page: Page): Promise<void> {
   await sem(page, "sidebar-toggle").click();
   await expect(sem(page, "shell-sidebar")).toBeVisible();
+  await expect(sem(page, "shell-conversation")).toHaveCount(0);
 }
 
-/**
- * Close it by tapping the conversation behind it, which is the way back a
- * person reaches for before they look for a control.
- *
- * The tap is offset deliberately. The scrim covers the window, so its centre
- * is behind the drawer; what a person actually taps is the strip of
- * conversation still showing beside it, and that is the gesture worth proving.
- */
-async function closeNavigation(page: Page): Promise<void> {
-  // A raw tap rather than a click on a named widget: what receives it is the
-  // shell's own dismiss gesture, and which widget that belongs to is the
-  // layout's business rather than this spec's.
-  await page.mouse.click(PHONE.width - 20, PHONE.height / 2);
-  await expect(sem(page, "shell-sidebar")).toBeHidden();
+/** Into a Bot's conversation from the list, which is the only way in. */
+async function openConversation(page: Page, name: string): Promise<void> {
+  await sem(page, "shell-sidebar")
+    .locator('[flt-semantics-identifier^="sidebar-bot-"]')
+    .filter({ hasText: name })
+    .click();
+  await expect(sem(page, "shell-sidebar")).toHaveCount(0);
+  await expect(composerInput(page)).toBeVisible();
 }
 
 test("the shell is usable on a phone", async ({
@@ -140,23 +136,31 @@ test("the shell is usable on a phone", async ({
     botName: "Pocket",
   });
 
-  // One column: the Bot list is behind the toggle rather than beside the
-  // conversation, and the conversation has the window.
+  // One column: the conversation just opened has the window, and the way
+  // back to the list is in its bar rather than a drawer beside it.
   await expect(sem(page, "sidebar-toggle")).toBeVisible();
-  await expect(sem(page, "shell-sidebar")).toBeHidden();
+  await expect(sem(page, "shell-sidebar")).toHaveCount(0);
   await expect(composerInput(page)).toBeVisible();
   await shot(page, "01-empty-thread");
   await expectNothingRunsOffTheEdge(page);
   await expectWithinViewport(page, "chat-composer");
-  await expectWithinViewport(page, "send-button");
+  // An empty composer offers dictation; the send control takes its place
+  // once there is something to send.
+  await expectWithinViewport(page, "composer-dictate");
+  // GrokBot's bar: the way back, the Bot, the Computer. Nothing else is a
+  // control up here; Routines and Applets are rows on the Bot's page.
+  await expect(sem(page, "bot-panel-toggle")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Routines" })).toHaveCount(0);
 
-  // The Bot list and the sidebar's own actions live behind the drawer on a
-  // phone, so reaching any of them is itself a test of the drawer.
-  await openNavigation(page);
-  await shot(page, "02-navigation-drawer");
+  // The list is a screen of its own, with the list's three controls on it.
+  await openBots(page);
+  await shot(page, "02-bot-list");
   await expectNothingRunsOffTheEdge(page);
   await expectWithinViewport(page, "shell-sidebar");
-  await closeNavigation(page);
+  await expectWithinViewport(page, "sidebar-profile");
+  await expectWithinViewport(page, "sidebar-search");
+  await expectWithinViewport(page, "sidebar-create-bot");
+  await openConversation(page, "Pocket");
 
   // The fake provider's chat mode is one piece of state the whole suite
   // shares, and a spec before this one may have revoked the key to prove a
@@ -182,23 +186,21 @@ test("the shell is usable on a phone", async ({
   }
 
   /*
-   * Bot settings, from the conversation, in one tap.
+   * The Bot's page, from its name, in one tap.
    *
    * This is the finding that made the phone unusable rather than cramped: the
    * gear lived in the right panel's header, the right panel is a closed drawer
    * at this width, and so Name, Label, Description, Routines, the audit log
    * and template import had no route at all on a phone. In this client the
-   * panel's entries are pages instead of a drawer, and the toggle in the
-   * header is how they are reached — one tap from the conversation, with
-   * nothing else open.
+   * Bot's name in the bar opens one page with all of it — its settings, then
+   * a row for its Routines and each of its Package pages — one tap from the
+   * conversation, with nothing else open.
    */
   await sem(page, "bot-panel-toggle").click();
-  // With more than one entry the toggle offers them first, which is the
-  // selector the wide layout draws as a segmented control.
-  const chooser = page.getByText("Settings", { exact: true });
-  if (await chooser.isVisible().catch(() => false)) await chooser.click();
   await expect(sem(page, "bot-settings")).toBeVisible();
-  await shot(page, "04-bot-settings-page");
+  await expect(sem(page, "routines-panel-toggle")).toBeVisible();
+  await expect(sem(page, "bot-settings-save")).toHaveCount(0);
+  await shot(page, "04-bot-page");
   await expectNothingRunsOffTheEdge(page);
   await expectWithinViewport(page, "bot-name");
 
@@ -216,7 +218,7 @@ test("the shell is usable on a phone", async ({
    * there. Opening a surface, closing it, and then using the Bot list is the
    * cheapest proof that the layer went away.
    */
-  await openNavigation(page);
+  await openBots(page);
   await sem(page, "sidebar-search").click();
   await expect(sem(page, "search-overlay")).toBeVisible();
   await shot(page, "05-search-surface");
@@ -225,23 +227,17 @@ test("the shell is usable on a phone", async ({
   await expect(sem(page, "search-overlay")).toHaveCount(0);
 
   /*
-   * And the drawer closes behind a choice.
+   * And the list answers a choice with the conversation, whole.
    *
-   * Pocket is the Bot already open, which is the case that failed: the drawer
-   * closed on a *change* of Bot, and choosing the only Bot in the list changes
-   * nothing. So the drawer stayed over four fifths of the window, its profile
-   * trigger took the taps meant for the composer, and the strip of
-   * conversation beside it was the only way out (2026-09-05).
-   *
-   * The proof is also that the tap lands at all: a surviving scrim swallows it
-   * and the row simply never answers.
+   * Pocket is the Bot that was open a moment ago, which is the case that once
+   * failed: the old drawer closed on a *change* of Bot, and choosing the only
+   * Bot in the list changed nothing, so it stayed over four fifths of the
+   * window and its profile trigger took the taps meant for the composer
+   * (2026-09-05). A page has no such state to get wrong — but the proof that
+   * the tap lands at all, and that nothing survives over the composer, is
+   * still worth having.
    */
-  await openNavigation(page);
-  await sem(page, "shell-sidebar")
-    .locator('[flt-semantics-identifier^="sidebar-bot-"]')
-    .filter({ hasText: "Pocket" })
-    .click();
-  await expect(sem(page, "shell-sidebar")).toBeHidden();
+  await openConversation(page, "Pocket");
 
   // The composer is where it is, and takes a tap: nothing is over it.
   await composerInput(page).click();

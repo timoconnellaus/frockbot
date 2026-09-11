@@ -539,11 +539,12 @@ export async function enableApplets(page: Page, userId: string): Promise<void> {
 /**
  * Make the sidebar reachable, whatever the layout.
  *
- * Below the phone breakpoint the sidebar is a drawer that closes behind
- * whatever it opened, so a helper that clicks something inside it has to open
- * it first — and a helper that clicks two things, on two surfaces, has to open
- * it twice. At wider widths there is no toggle and this does nothing, which is
- * what lets every helper below call it unconditionally.
+ * Below the phone breakpoint the Bot list is the first screen and a
+ * conversation is a page over it, so a helper that clicks something in the
+ * list has to go back to it first — and a helper that clicks two things, on
+ * two surfaces, has to go back twice. At wider widths there is no toggle and
+ * this does nothing, which is what lets every helper below call it
+ * unconditionally.
  */
 export async function revealSidebar(page: Page): Promise<void> {
   const toggle = sem(page, "sidebar-toggle");
@@ -576,7 +577,7 @@ export async function createBot(
   await expect(sheet).toBeHidden({ timeout: 60_000 });
 }
 
-/** The profile sheet the sidebar footer opens: every account surface is in it. */
+/** The sheet the list's own avatar opens: every account surface is in it. */
 export async function openProfileMenu(page: Page): Promise<void> {
   await revealSidebar(page);
   await sem(page, "sidebar-profile").click();

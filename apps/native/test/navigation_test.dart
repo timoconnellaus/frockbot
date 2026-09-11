@@ -1,11 +1,13 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/client/bot_sessions.dart';
 import 'package:frockbot_native/client/transport.dart';
 import 'package:frockbot_native/shell/app_shell.dart';
-import 'package:frockbot_native/shell/desktop_layout.dart';
 import 'package:frockbot_native/shell/semantics.dart';
 import 'package:frockbot_native/theme/frock_theme.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
 
 import 'widget_test.dart' show MemoryStore;
 
@@ -18,46 +20,33 @@ class OfflineApi extends NativeApi {
     int limit = 512000,
     bool authenticated = true,
   }) async => throw const FormatException('offline fixture');
+
+  // A socket that is refused at once, rather than one left connecting under
+  // the transport's own deadline for the length of the test.
+  @override
+  Future<WebSocketChannel> socket(String botId, String? cursor) async =>
+      throw const FormatException('offline fixture');
 }
 
 Finder identifiedBy(String id) => find.byWidgetPredicate(
   (widget) => widget is Semantics && widget.properties.identifier == id,
 );
-void main() {
-  testWidgets(
-    'outside the hamburger menu dismisses it without activating chat',
-    (tester) async {
-      tester.view.physicalSize = const Size(390, 800);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.resetPhysicalSize);
-      addTearDown(tester.view.resetDevicePixelRatio);
-      var dismissed = 0;
-      var chatTaps = 0;
-      await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            body: ShellLayout(
-              navOpen: true,
-              panelOpen: false,
-              onDismiss: () => dismissed++,
-              sidebar: const SizedBox.expand(child: Text('Bots')),
-              conversation: GestureDetector(
-                onTap: () => chatTaps++,
-                child: const SizedBox.expand(),
-              ),
-              rightPanel: null,
-            ),
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-      await tester.tapAt(const Offset(365, 400));
-      expect(dismissed, 1);
-      expect(chatTaps, 0);
-    },
-  );
+Map<String, dynamic> registration(String botId, String name) => {
+  'schemaVersion': 1,
+  'botId': botId,
+  'registeredAt': '2026-09-05T00:00:00.000Z',
+  'initialName': name,
+  'sheep': {
+    'schemaVersion': 1,
+    'background': 'a',
+    'upper': 'b',
+    'middle': 'c',
+    'lower': 'd',
+  },
+};
 
-  testWidgets('phone menu covers the header, closes outside and on Back', (
+void main() {
+  testWidgets('a phone opens on the Bot list, and Back from a chat is the list', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(320, 800);
@@ -65,6 +54,13 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     final store = MemoryStore();
+    // The directory the last run cached: what a phone shows before the
+    // network answers, and here the only answer it gets.
+    store.values['directory/test-user'] = jsonEncode({
+      'schemaVersion': 1,
+      'revision': 1,
+      'bots': [registration('bot-one', 'Rosemary')],
+    });
     final api = OfflineApi(store);
     final sessions = BotSessions(api: api, store: store);
     final links = ValueNotifier<String?>(null);
@@ -82,23 +78,34 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('Your Bots'));
+    // The list is the screen: no hamburger, no drawer, the whole width.
+    expect(find.byTooltip('Your Bots'), findsNothing);
+    expect(tester.getSize(identifiedBy(ShellIds.sidebar)).width, 320);
+    expect(identifiedBy(ShellIds.sidebarProfile).hitTestable(), findsOneWidget);
+    expect(identifiedBy(ShellIds.conversation), findsNothing);
+
+    // A row opens its conversation as a page, with the way back in its bar.
+    await tester.tap(find.byKey(const ValueKey('bot-bot-one')));
     await tester.pumpAndSettle();
-    expect(tester.getTopLeft(identifiedBy(ShellIds.sidebar)).dy, 0);
-    expect(tester.getSize(identifiedBy(ShellIds.sidebar)).height, 800);
-    expect(
-      tester.getSize(identifiedBy(ShellIds.sidebar)).width,
-      lessThanOrEqualTo(272),
-    );
-    await tester.tapAt(const Offset(300, 20));
-    await tester.pumpAndSettle();
-    expect(identifiedBy(ShellIds.sidebarProfile).hitTestable(), findsNothing);
-    await tester.tap(find.byTooltip('Your Bots'));
-    await tester.pumpAndSettle();
+    expect(find.widgetWithText(AppBar, 'Rosemary'), findsOneWidget);
+    expect(identifiedBy(ShellIds.sidebarToggle), findsOneWidget);
+    expect(identifiedBy(ShellIds.botPanelToggle), findsOneWidget);
+    expect(find.byTooltip('Routines'), findsNothing);
+    expect(identifiedBy(ShellIds.sidebar), findsNothing);
+
+    // The system gesture is the same way back, and never the way out.
     await tester.binding.handlePopRoute();
     await tester.pumpAndSettle();
-    expect(identifiedBy(ShellIds.sidebarProfile).hitTestable(), findsNothing);
-    expect(find.byTooltip('Your Bots').hitTestable(), findsOneWidget);
+    expect(identifiedBy(ShellIds.sidebar).hitTestable(), findsOneWidget);
+    expect(find.widgetWithText(AppBar, 'Rosemary'), findsNothing);
+    expect(find.byType(AppShell), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('bot-bot-one')));
+    await tester.pumpAndSettle();
+    await tester.tap(identifiedBy(ShellIds.sidebarToggle));
+    await tester.pumpAndSettle();
+    expect(identifiedBy(ShellIds.sidebar).hitTestable(), findsOneWidget);
+
     await tester.pumpWidget(const SizedBox());
     sessions.clear();
     links.dispose();

@@ -2,16 +2,14 @@
 ///
 /// Three tiers at two widths. Wide enough and the shell is three columns — the
 /// Bot list, the conversation, and whatever a feature registered into the right
-/// panel. Below 980 the right
-/// panel stops being a column and becomes a drawer over the conversation,
-/// because two columns plus a panel leaves the conversation too narrow to
-/// read. Below 640 the Bot list goes the same way: a hand-held viewport has
-/// room for exactly one column, and squeezing three into 390 points is how the
-/// conversation ended up a hundred points wide with every label clipped.
-///
-/// Only one drawer is ever open. Opening either closes the other here, so
-/// nothing below has to reason about them overlapping, and one scrim serves
-/// whichever is open.
+/// panel. Below 980 the right panel stops being a column and becomes a drawer
+/// over the conversation, because two columns plus a panel leaves the
+/// conversation too narrow to read. Below 640 there is room for exactly one
+/// column, and the shell stops being columns at all: the Bot list is the first
+/// screen, a conversation is a page over it, and the way back is the way back.
+/// Squeezing three columns into 390 points is how the conversation ended up a
+/// hundred points wide with every label clipped, and a Bot list kept in a
+/// drawer beside the conversation was a second door to the same room.
 library;
 
 import 'dart:math' show min;
@@ -25,18 +23,17 @@ import 'semantics.dart';
 /// column, matching the stylesheet's first breakpoint.
 const double shellPanelInlineWidth = 980;
 
-/// The width at or below which the Bot list is a drawer too.
+/// The width at or below which the shell is one column.
 const double shellSinglePaneWidth = 640;
 
-/// How wide the Bot list is when it is a column, and when it is a drawer.
+/// How wide the Bot list is when it is a column.
 const double shellSidebarWidth = 288;
-const double shellDrawerWidth = 312;
 
 /// How wide the right panel is when it is a column.
 const double shellRightPanelWidth = 380;
 
 enum ShellTier {
-  /// One column; both the Bot list and the right panel are drawers.
+  /// One column: the Bot list, or the conversation over it.
   single,
 
   /// The Bot list and the conversation; the right panel is a drawer.
@@ -54,10 +51,14 @@ ShellTier shellTierForWidth(double width) => width <= shellSinglePaneWidth
 
 /// Lays the shell out for the width it is given.
 ///
-/// [navOpen] and [panelOpen] are the drawers' state and belong to the caller,
+/// [panelOpen] is the right-panel drawer's state and belongs to the caller,
 /// which is what lets a feature open the right panel from a message. At a tier
-/// where a region is a column, the flag is ignored: the column is drawn
+/// where the panel is a column, the flag is ignored: the column is drawn
 /// whenever a feature has filled it.
+///
+/// [conversationOpen] matters only at the single tier, where the Bot list is
+/// the root and the conversation is a page over it. The system Back gesture
+/// from that page calls [onBack] rather than leaving the app.
 class ShellLayout extends StatelessWidget {
   final PreferredSizeWidget? header;
   final Widget sidebar;
@@ -65,62 +66,57 @@ class ShellLayout extends StatelessWidget {
 
   /// What the right panel holds, or null when no feature has filled it.
   final Widget? rightPanel;
-  final bool navOpen;
   final bool panelOpen;
   final VoidCallback onDismiss;
+  final bool conversationOpen;
+  final VoidCallback onBack;
   const ShellLayout({
     super.key,
     this.header,
     required this.sidebar,
     required this.conversation,
     required this.rightPanel,
-    required this.navOpen,
     required this.panelOpen,
     required this.onDismiss,
+    required this.conversationOpen,
+    required this.onBack,
   });
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) {
       final tier = shellTierForWidth(constraints.maxWidth);
+      if (tier == ShellTier.single) return _single(context);
       final panel = rightPanel;
-      final inlineSidebar = tier != ShellTier.single;
       // At the widest tier the panel is a column, and a column a feature has
       // filled is simply there. The open flag is a drawer's, and only the
-      // narrower tiers have one.
+      // dual tier has one.
       final inlinePanel = tier == ShellTier.triple && panel != null;
-      // A drawer is only ever asked to open at a tier where it is a drawer.
-      final drawnNav = navOpen && !inlineSidebar;
       final drawnPanel = panelOpen && panel != null && !inlinePanel;
-      final drawerWidth = tier == ShellTier.single
-          ? constraints.maxWidth
-          : shellRightPanelWidth;
       final divider = Theme.of(context).colorScheme.outlineVariant;
-      final overlayOpen = drawnNav || drawnPanel;
       return PopScope(
-        canPop: !overlayOpen,
+        canPop: !drawnPanel,
         onPopInvokedWithResult: (didPop, _) {
-          if (!didPop && overlayOpen) onDismiss();
+          if (!didPop && drawnPanel) onDismiss();
         },
         child: Stack(
           fit: StackFit.expand,
           children: [
             ExcludeFocus(
-              excluding: overlayOpen,
+              excluding: drawnPanel,
               child: ExcludeSemantics(
-                excluding: overlayOpen,
+                excluding: drawnPanel,
                 child: Scaffold(
                   appBar: header,
                   body: SafeArea(
                     top: header == null,
                     child: Row(
                       children: [
-                        if (inlineSidebar)
-                          _Column(
-                            width: shellSidebarWidth,
-                            border: Border(right: BorderSide(color: divider)),
-                            child: identified(ShellIds.sidebar, sidebar),
-                          ),
+                        _Column(
+                          width: shellSidebarWidth,
+                          border: Border(right: BorderSide(color: divider)),
+                          child: identified(ShellIds.sidebar, sidebar),
+                        ),
                         Expanded(
                           child: identified(
                             ShellIds.conversation,
@@ -140,30 +136,82 @@ class ShellLayout extends StatelessWidget {
               ),
             ),
             Positioned.fill(
-              child: _Scrim(open: overlayOpen, onDismiss: onDismiss),
+              child: _Scrim(open: drawnPanel, onDismiss: onDismiss),
             ),
-            if (!inlineSidebar)
-              _Drawer(
-                open: drawnNav,
-                // Keep a useful strip of scrim even on a narrow phone.
-                width: min(
-                  shellDrawerWidth,
-                  (constraints.maxWidth - 48).clamp(0, constraints.maxWidth),
-                ),
-                from: AxisDirection.left,
-                child: identified(ShellIds.sidebar, sidebar),
-              ),
             if (panel != null && !inlinePanel)
               _Drawer(
                 open: drawnPanel,
-                width: min(drawerWidth, constraints.maxWidth),
-                from: AxisDirection.right,
+                width: min(shellRightPanelWidth, constraints.maxWidth),
                 child: identified(ShellIds.rightPanel, panel),
               ),
           ],
         ),
       );
     },
+  );
+
+  /// One column. The Bot list is the root page; the conversation slides over
+  /// it and Back slides it away. The right panel's entries are pages of their
+  /// own at this width, so there is no drawer to reason about.
+  Widget _single(BuildContext context) => PopScope(
+    canPop: !conversationOpen,
+    onPopInvokedWithResult: (didPop, _) {
+      if (!didPop && conversationOpen) onBack();
+    },
+    child: _PageSwitch(
+      forward: conversationOpen,
+      child: conversationOpen
+          ? Scaffold(
+              key: const ValueKey('conversation'),
+              appBar: header,
+              body: SafeArea(
+                top: header == null,
+                child: SizedBox.expand(
+                  child: identified(ShellIds.conversation, conversation),
+                ),
+              ),
+            )
+          : Scaffold(
+              key: const ValueKey('bots'),
+              body: SafeArea(
+                child: SizedBox.expand(
+                  child: identified(ShellIds.sidebar, sidebar),
+                ),
+              ),
+            ),
+    ),
+  );
+}
+
+/// A push-and-pop between two pages, drawn in place. The page coming in slides
+/// from the side it lives on and the page going out makes room, the way a
+/// route transition does — but both pages are this widget's children, so the
+/// shell keeps one state for both rather than one per route.
+class _PageSwitch extends StatelessWidget {
+  final bool forward;
+  final Widget child;
+  const _PageSwitch({required this.forward, required this.child});
+
+  @override
+  Widget build(BuildContext context) => AnimatedSwitcher(
+    duration: FrockTheme.motion(context),
+    switchInCurve: Curves.easeOutCubic,
+    switchOutCurve: Curves.easeInCubic,
+    layoutBuilder: (current, previous) =>
+        Stack(fit: StackFit.expand, children: [...previous, ?current]),
+    transitionBuilder: (page, animation) {
+      final entering = page.key == child.key;
+      // Forward: the conversation enters from the right and the list parks a
+      // little to the left. Back: the reverse of both.
+      final side = forward == entering
+          ? const Offset(1, 0)
+          : const Offset(-0.25, 0);
+      return SlideTransition(
+        position: Tween(begin: side, end: Offset.zero).animate(animation),
+        child: page,
+      );
+    },
+    child: child,
   );
 }
 
@@ -190,24 +238,14 @@ class _Column extends StatelessWidget {
 class _Drawer extends StatelessWidget {
   final bool open;
   final double width;
-  final AxisDirection from;
   final Widget child;
-  const _Drawer({
-    required this.open,
-    required this.width,
-    required this.from,
-    required this.child,
-  });
+  const _Drawer({required this.open, required this.width, required this.child});
 
   @override
   Widget build(BuildContext context) => Align(
-    alignment: from == AxisDirection.left
-        ? Alignment.centerLeft
-        : Alignment.centerRight,
+    alignment: Alignment.centerRight,
     child: AnimatedSlide(
-      offset: open
-          ? Offset.zero
-          : Offset(from == AxisDirection.left ? -1 : 1, 0),
+      offset: open ? Offset.zero : const Offset(1, 0),
       duration: FrockTheme.motion(context),
       curve: Curves.easeOutCubic,
       child: TickerMode(

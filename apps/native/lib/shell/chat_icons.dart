@@ -2,7 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
-enum ChatIconKind { menu, computer, routines, settings, applet, send }
+enum ChatIconKind { computer, routines, settings, applet, send }
 
 /// One light stroke weight for the compact chat chrome, independent of the
 /// platform's bundled Material glyph weight.
@@ -41,11 +41,6 @@ class _ChatIconPainter extends CustomPainter {
       ..strokeJoin = StrokeJoin.round;
     final path = Path();
     switch (kind) {
-      case ChatIconKind.menu:
-        for (final y in [6.0, 12.0, 18.0]) {
-          path.moveTo(4, y);
-          path.lineTo(20, y);
-        }
       case ChatIconKind.computer:
         canvas.drawRRect(
           RRect.fromRectAndRadius(
