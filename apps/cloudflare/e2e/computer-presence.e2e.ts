@@ -52,13 +52,15 @@ async function expectNoHorizontalOverflow(page: Page): Promise<void> {
 /**
  * Show the Computer in the right panel.
  *
- * The panel is one region with a segmented control over everything a feature
- * registered into it — Settings, Routines, the Applet canvas, the Computer —
- * and the segment's label is the only name it has.
+ * The chat header's icons are the doors into the panel — Settings, Routines,
+ * the Applet canvas, the Computer — and an icon button's name is its tooltip.
+ * The header's is the first in the document; the panel it opens names itself
+ * too, once it is showing.
  */
 async function openComputerPanel(page: Page): Promise<void> {
-  await sem(page, "shell-right-panel")
-    .getByText("Computer", { exact: true })
+  await page
+    .getByRole("button", { name: "Computer", exact: true })
+    .first()
     .click();
   await expect(sem(page, "computer-card")).toBeVisible({ timeout: 60_000 });
 }

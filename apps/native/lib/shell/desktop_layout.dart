@@ -54,7 +54,9 @@ ShellTier shellTierForWidth(double width) => width <= shellSinglePaneWidth
 /// [panelOpen] is the right-panel drawer's state and belongs to the caller,
 /// which is what lets a feature open the right panel from a message. At a tier
 /// where the panel is a column, the flag is ignored: the column is drawn
-/// whenever a feature has filled it.
+/// whenever a feature has filled it, unless the person has [panelCollapsed]
+/// it — the column's own state, so that closing the drawer at one width does
+/// not take the column away at another.
 ///
 /// [conversationOpen] matters only at the single tier, where the Bot list is
 /// the root and the conversation is a page over it. The system Back gesture
@@ -67,6 +69,7 @@ class ShellLayout extends StatelessWidget {
   /// What the right panel holds, or null when no feature has filled it.
   final Widget? rightPanel;
   final bool panelOpen;
+  final bool panelCollapsed;
   final VoidCallback onDismiss;
   final bool conversationOpen;
   final VoidCallback onBack;
@@ -77,6 +80,7 @@ class ShellLayout extends StatelessWidget {
     required this.conversation,
     required this.rightPanel,
     required this.panelOpen,
+    this.panelCollapsed = false,
     required this.onDismiss,
     required this.conversationOpen,
     required this.onBack,
@@ -91,8 +95,12 @@ class ShellLayout extends StatelessWidget {
       // At the widest tier the panel is a column, and a column a feature has
       // filled is simply there. The open flag is a drawer's, and only the
       // dual tier has one.
-      final inlinePanel = tier == ShellTier.triple && panel != null;
-      final drawnPanel = panelOpen && panel != null && !inlinePanel;
+      final inlinePanel =
+          tier == ShellTier.triple && panel != null && !panelCollapsed;
+      // The drawer, its scrim and its focus trap are the dual tier's alone: a
+      // collapsed column at the widest tier is simply gone, not a drawer
+      // waiting under a scrim.
+      final drawnPanel = tier == ShellTier.dual && panelOpen && panel != null;
       final divider = Theme.of(context).colorScheme.outlineVariant;
       return PopScope(
         canPop: !drawnPanel,
@@ -107,9 +115,7 @@ class ShellLayout extends StatelessWidget {
               child: ExcludeSemantics(
                 excluding: drawnPanel,
                 child: Scaffold(
-                  appBar: header,
                   body: SafeArea(
-                    top: header == null,
                     child: Row(
                       children: [
                         _Column(
@@ -117,10 +123,18 @@ class ShellLayout extends StatelessWidget {
                           border: Border(right: BorderSide(color: divider)),
                           child: identified(ShellIds.sidebar, sidebar),
                         ),
+                        // The header is the conversation's, not the window's:
+                        // a bar named after one Bot that ran over the list of
+                        // all of them read as the list being inside that Bot.
                         Expanded(
-                          child: identified(
-                            ShellIds.conversation,
-                            conversation,
+                          child: Scaffold(
+                            appBar: header,
+                            body: SizedBox.expand(
+                              child: identified(
+                                ShellIds.conversation,
+                                conversation,
+                              ),
+                            ),
                           ),
                         ),
                         if (inlinePanel)
@@ -138,7 +152,7 @@ class ShellLayout extends StatelessWidget {
             Positioned.fill(
               child: _Scrim(open: drawnPanel, onDismiss: onDismiss),
             ),
-            if (panel != null && !inlinePanel)
+            if (panel != null && tier == ShellTier.dual)
               _Drawer(
                 open: drawnPanel,
                 width: min(shellRightPanelWidth, constraints.maxWidth),

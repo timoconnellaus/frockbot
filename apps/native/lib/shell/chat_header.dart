@@ -33,6 +33,11 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
   final ConnectionState connection;
   final VoidCallback? onApplets;
 
+  /// Shows or hides the panel beside the conversation. Null on a phone, where
+  /// the panel's entries are pages and there is no column to hide.
+  final VoidCallback? onTogglePanel;
+  final bool panelShown;
+
   const ChatHeader({
     super.key,
     required this.name,
@@ -46,6 +51,8 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
     this.onRoutines,
     this.connection = ConnectionState.initializing,
     this.onApplets,
+    this.onTogglePanel,
+    this.panelShown = false,
   });
 
   double get _toolbarHeight => 56 * textScale.clamp(1, 3);
@@ -94,7 +101,11 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
                 icon: const Icon(Icons.arrow_back_rounded, size: 22),
               ),
             ),
-      titleSpacing: 4,
+      // With no back arrow the avatar is the first thing in the bar, and it
+      // sits as far from the left edge as the last icon's glyph does from the
+      // right: 4 of trailing space plus the icon's own margin inside its
+      // 40-wide button.
+      titleSpacing: onBack == null ? 14 : 4,
       title: onOpenBot == null
           ? title
           : Align(
@@ -142,6 +153,17 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
           identified(
             ShellIds.botPanelToggle,
             _destination('Bot settings', ChatIconKind.settings, onSettings),
+          ),
+        // The wide tiers' one switch for the panel beside the conversation:
+        // rightmost, against the column it shows and hides.
+        if (onTogglePanel != null)
+          identified(
+            ShellIds.rightPanelToggle,
+            _destination(
+              panelShown ? 'Hide the panel' : 'Show the panel',
+              ChatIconKind.panel,
+              onTogglePanel,
+            ),
           ),
         const SizedBox(width: 4),
       ],

@@ -121,6 +121,59 @@ void main() {
       expect(byIdentifier(ShellIds.sidebar), findsNothing);
     });
 
+    testWidgets('a collapsed column is gone until it is asked for again', (
+      tester,
+    ) async {
+      // At the widest tier the panel is a column, and the drawer's open flag
+      // is not what hides it: the person collapses the column itself, from
+      // the panel's close control or the header's switch, and the flag that
+      // the drawer tier uses stays what it was.
+      tester.view.physicalSize = const Size(1440, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      // The drawer's flag is left raised on purpose: opening an entry raises
+      // it at every tier, and a raised flag at this one must draw no scrim.
+      Widget layout({required bool collapsed}) => host(
+        ShellLayout(
+          panelOpen: true,
+          panelCollapsed: collapsed,
+          onDismiss: () {},
+          conversationOpen: true,
+          onBack: () {},
+          sidebar: const Text('bots'),
+          conversation: const Text('thread'),
+          rightPanel: const Text('work'),
+        ),
+      );
+      await tester.pumpWidget(layout(collapsed: false));
+      await tester.pumpAndSettle();
+      expect(byIdentifier(ShellIds.rightPanel), findsOneWidget);
+      expect(
+        tester.getSize(byIdentifier(ShellIds.conversation)).width,
+        1440 - shellSidebarWidth - shellRightPanelWidth,
+      );
+      await tester.pumpWidget(layout(collapsed: true));
+      await tester.pumpAndSettle();
+      expect(byIdentifier(ShellIds.rightPanel), findsNothing);
+      expect(
+        tester.getSize(byIdentifier(ShellIds.conversation)).width,
+        1440 - shellSidebarWidth,
+      );
+      expect(
+        tester
+            .widget<AnimatedOpacity>(
+              find.ancestor(
+                of: byIdentifier(ShellIds.scrim),
+                matching: find.byType(AnimatedOpacity),
+              ),
+            )
+            .opacity,
+        0,
+      );
+      expect(find.text('thread').hitTestable(), findsOneWidget);
+    });
+
     testWidgets(
       'on a phone Back from the conversation is the list, not the way out',
       (tester) async {
