@@ -146,8 +146,9 @@ export interface AvailableUserPackage {
   connectionTypes?: readonly ConnectionTypeDefinition[];
   /**
    * True when the immutable application manifest declares a Connection Type
-   * or Capability for this Package. These are the Packages a new User owns
-   * from their first configuration read.
+   * or Capability for this Package. These are the Packages a User is offered
+   * on the first configuration read that finds them missing from the
+   * bootstrap ledger.
    */
   installByDefault?: boolean;
   /** The seeded installation state. Omission preserves the enabled default. */
