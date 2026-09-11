@@ -700,9 +700,9 @@ export async function startHarness(
   let worker: SupervisedProcess | undefined;
 
   const stop = async (): Promise<void> => {
-    if (worker) await worker.stop();
-    if (appletBuild) await appletBuild.stop();
-    if (frockAi) await frockAi.stop();
+    await Promise.allSettled(
+      [worker, appletBuild, frockAi].map((service) => service?.stop()),
+    );
     if (ollama) await ollama.close();
     await new Promise<void>((closed) => log.end(closed));
     await rm(persistDirectory, { recursive: true, force: true });
