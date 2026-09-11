@@ -66,7 +66,3 @@ export function connectToolkitForConnectionTypeV1(
     (toolkit) => connectConnectionTypeIdV1(toolkit.slug) === connectionTypeId,
   );
 }
-
-export function connectToolkitV1(slug: string): ConnectToolkitV1 | undefined {
-  return CONNECT_TOOLKITS_V1.find((toolkit) => toolkit.slug === slug);
-}

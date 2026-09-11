@@ -207,6 +207,28 @@ describe("starting a connected app", () => {
     expect(connectSafeMetadataV1(second)?.namespace).toBe("gmail-2");
   });
 
+  test("a disconnected account's suffix is not handed to the next one", async () => {
+    const { contribution, settings, client, clock } = fixture();
+    await contribution.executeConnection("tim", start("s1"));
+    await contribution.executeConnection("tim", start("s2"));
+    client.set("ca_1", "ACTIVE");
+    client.set("ca_2", "ACTIVE");
+    clock.now += 5_000;
+    await contribution.bootstrap("tim");
+    await contribution.executeConnection("tim", {
+      schemaVersion: 1,
+      type: "connection/disconnect",
+      commandId: "gone",
+      connectionId: settings.state.connections[0]!.connectionId,
+      revokeUpstream: false,
+    });
+    await contribution.executeConnection("tim", start("s3"));
+    const third = settings.state.connections[2]!;
+    // `gmail-2` is still live, so the newcomer takes the first free name.
+    expect(connectSafeMetadataV1(third)?.namespace).toBe("gmail");
+    expect(third.displayName).toBe("Gmail");
+  });
+
   test("reuses the provider's existing auth config for an app", async () => {
     const { contribution, client } = fixture();
     client.authConfigs.push({ id: "ac_gmail", toolkitSlug: "gmail" });
@@ -269,6 +291,30 @@ describe("settling a sign-in on the next read", () => {
     expect(settings.state.connections[1]?.failure).toContain("expired");
   });
 
+  test("a disconnect that lands during the provider round trip is not undone", async () => {
+    const { contribution, settings, client, clock } = fixture();
+    await contribution.executeConnection("tim", start("s1"));
+    client.set("ca_1", "ACTIVE");
+    clock.now += 5_000;
+    const connectionId = settings.state.connections[0]!.connectionId;
+    // The disconnect wins the race: the account read comes back to a
+    // Connection that is no longer waiting.
+    const read = client.getConnectedAccount.bind(client);
+    client.getConnectedAccount = async (id: string) => {
+      const account = await read(id);
+      await contribution.executeConnection("tim", {
+        schemaVersion: 1,
+        type: "connection/disconnect",
+        commandId: "gone",
+        connectionId,
+        revokeUpstream: false,
+      });
+      return account;
+    };
+    await contribution.bootstrap("tim");
+    expect(settings.state.connections[0]?.state).toBe("revoked");
+  });
+
   test("gives up on a sign-in nobody finished", async () => {
     const { contribution, settings, clock } = fixture();
     await contribution.executeConnection("tim", start("s1"));
@@ -326,21 +372,6 @@ describe("changing a connected app", () => {
     expect(receipt.status).toBe("applied");
     expect(f.client.deleted).toEqual(["ca_1"]);
     expect(f.settings.state.connections[0]?.state).toBe("revoked");
-  });
-
-  test("an account the provider reports expired is marked so", async () => {
-    const f = fixture();
-    await ready(f);
-    expect(
-      await f.contribution.markAccountExpired("tim", "ca_1", "Expired."),
-    ).toBe(true);
-    expect(f.settings.state.connections[0]).toMatchObject({
-      state: "failed",
-      failure: "Expired.",
-    });
-    expect(
-      await f.contribution.markAccountExpired("tim", "ca_none", "Expired."),
-    ).toBe(false);
   });
 
   test("refuses a command for a Connection that is not this Package's", async () => {

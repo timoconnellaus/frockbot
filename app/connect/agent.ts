@@ -182,9 +182,7 @@ export async function executeConnectTool(
       isError: true,
     };
   }
-  let dispatched = false;
   try {
-    dispatched = true;
     const result = await client.executeTool({
       toolSlug: call.tool.slug,
       userId: call.userId,
@@ -211,9 +209,8 @@ export async function executeConnectTool(
     // A refusal the provider gave before doing anything is safe to retry
     // after fixing the call; anything else may have gone through.
     const refused =
-      !dispatched ||
-      (error instanceof ComposioRequestError &&
-        [400, 401, 403, 404, 422].includes(error.status));
+      error instanceof ComposioRequestError &&
+      [400, 401, 403, 404, 422].includes(error.status);
     if (error instanceof ComposioRequestError && error.status === 401) {
       return {
         content: "The account needs reconnecting before this app can be used.",

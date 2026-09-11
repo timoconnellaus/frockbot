@@ -156,11 +156,6 @@ export class ConnectUserBackendContribution {
     this.randomId = host.randomId ?? (() => crypto.randomUUID());
   }
 
-  /** Whether this deployment can connect anything at all. */
-  get available(): boolean {
-    return this.client !== undefined && !!this.host.callbackBaseUrl;
-  }
-
   async executeConnection(
     accountId: string,
     input: unknown,
@@ -223,35 +218,10 @@ export class ConnectUserBackendContribution {
     );
     if (waiting.length === 0) return;
     for (const connection of waiting) {
-      await this.reconcile(userId, connection);
+      // A read must never fail because the provider is down or a concurrent
+      // command moved the Connection first; the next read asks again.
+      await this.reconcile(userId, connection).catch(() => undefined);
     }
-  }
-
-  /**
-   * The provider says an account has stopped working. Its Connection is
-   * marked so, and every Bot loses the tools on the next Turn it resolves.
-   */
-  async markAccountExpired(
-    userId: string,
-    connectedAccountId: string,
-    line: string,
-  ): Promise<boolean> {
-    const snapshot = await this.host.settings.readSnapshot();
-    const connection = snapshot.connections.find(
-      (candidate) =>
-        candidate.packageId === CONNECT_PACKAGE_ID &&
-        candidate.state !== "revoked" &&
-        connectSafeMetadataV1(candidate)?.connectedAccountId ===
-          connectedAccountId,
-    );
-    if (!connection || connection.state === "failed") return false;
-    await this.host.settings.replaceConnection(
-      userId,
-      connection.connectionId,
-      connection.generation,
-      { ...connection, state: "failed", failure: line },
-    );
-    return true;
   }
 
   private async execute(
@@ -315,27 +285,37 @@ export class ConnectUserBackendContribution {
       callbackUrl: `${this.host.callbackBaseUrl.replace(/\/$/, "")}${CONNECT_CALLBACK_PATH}`,
     });
     const snapshot = await this.host.settings.readSnapshot();
-    const siblings = snapshot.connections.filter(
-      (connection) =>
-        connection.packageId === CONNECT_PACKAGE_ID &&
-        connection.connectionTypeId === command.connectionTypeId &&
-        connection.state !== "revoked",
-    ).length;
+    // A second account of the same app gets the first free suffix, never a
+    // count: a count is reused the moment an earlier account is disconnected,
+    // and two live Connections would then mount the same namespace.
+    const taken = new Set(
+      snapshot.connections
+        .filter(
+          (connection) =>
+            connection.packageId === CONNECT_PACKAGE_ID &&
+            connection.connectionTypeId === command.connectionTypeId &&
+            connection.state !== "revoked",
+        )
+        .map((connection) => connectSafeMetadataV1(connection)?.namespace),
+    );
+    let ordinal = 1;
+    while (
+      taken.has(ordinal === 1 ? toolkit.slug : `${toolkit.slug}-${ordinal}`)
+    )
+      ordinal += 1;
     const connectionId = `connection-${this.randomId()}`;
     const metadata: ConnectSafeMetadataV1 = {
       toolkitSlug: toolkit.slug,
       toolkitName: toolkit.name,
       connectedAccountId: link.connectedAccountId,
-      namespace:
-        siblings === 0 ? toolkit.slug : `${toolkit.slug}-${siblings + 1}`,
+      namespace: ordinal === 1 ? toolkit.slug : `${toolkit.slug}-${ordinal}`,
       startedAt: new Date(this.now()).toISOString(),
     };
     await this.host.settings.createConnection(accountId, {
       connectionId,
       packageId: CONNECT_PACKAGE_ID,
       connectionTypeId: command.connectionTypeId!,
-      displayName:
-        siblings === 0 ? toolkit.name : `${toolkit.name} ${siblings + 1}`,
+      displayName: ordinal === 1 ? toolkit.name : `${toolkit.name} ${ordinal}`,
       state: "authorizing",
       safeMetadata: { ...metadata },
     });
@@ -498,8 +478,16 @@ export class ConnectUserBackendContribution {
     state: "ready" | "failed",
     extra: { generation?: string; failure?: string },
   ): Promise<void> {
+    // The provider round trip took time; a disconnect or an earlier settle
+    // may have landed since the snapshot. Only a Connection still waiting is
+    // settled, and from its current record rather than the stale one.
+    const current = await this.host.settings.getConnection(
+      userId,
+      connection.connectionId,
+    );
+    if (!current || current.state !== "authorizing") return;
     const next: ConnectionView = {
-      ...connection,
+      ...current,
       state,
       ...(extra.generation ? { generation: extra.generation } : {}),
     };
@@ -508,7 +496,7 @@ export class ConnectUserBackendContribution {
     await this.host.settings.replaceConnection(
       userId,
       connection.connectionId,
-      connection.generation,
+      current.generation,
       next,
     );
   }
