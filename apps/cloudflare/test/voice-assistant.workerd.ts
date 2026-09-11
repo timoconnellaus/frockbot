@@ -155,6 +155,31 @@ async function settle(ms = 50): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/**
+ * Keeps asking until the probe is satisfied or the time is up. The library
+ * sends the idle status frame before it awaits `onCallEnd`, so a frame on the
+ * socket does not yet mean the assistant's own bookkeeping has finished.
+ */
+async function eventually<T>(
+  probe: () => Promise<T>,
+  satisfied: (value: T) => boolean,
+  label: string,
+  timeoutMs = 8_000,
+): Promise<T> {
+  const deadline = Date.now() + timeoutMs;
+  let value = await probe();
+  while (!satisfied(value)) {
+    if (Date.now() >= deadline) {
+      throw new Error(
+        `timed out waiting for ${label}: ${JSON.stringify(value)}`,
+      );
+    }
+    await settle(20);
+    value = await probe();
+  }
+  return value;
+}
+
 describe("the voice session object", () => {
   test("refuses a socket for anyone but the User it is named for", async () => {
     const userId = `voice-owner-${crypto.randomUUID()}`;
@@ -231,10 +256,17 @@ describe("the voice session object", () => {
       0,
     );
 
+    // The idle frame precedes the call-end hook, so the record is asked for
+    // until it is gone rather than read once.
     opened.socket.send(JSON.stringify({ type: "end_call" }));
     await opened.waitFor(status("idle"), "idle");
-    const calls = await stub.probeStorage("voice:call:");
-    expect(Object.keys(calls)).toEqual([]);
+    const calls = await eventually(
+      async (): Promise<string[]> =>
+        Object.keys(await stub.probeStorage("voice:call:")),
+      (keys) => keys.length === 0,
+      "the call record to be released",
+    );
+    expect(calls).toEqual([]);
     opened.socket.close();
   });
 
