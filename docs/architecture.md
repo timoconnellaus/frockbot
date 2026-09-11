@@ -469,7 +469,10 @@ is opaque to the renderer and the command a press means is not derivable from
 its label. `lib/plugins/document.dart` reads those back.
 
 **Connectors is host chrome over the frame.** `apps/native/lib/connections/page.dart`
-draws `ConnectionsFrame` (`/api/settings/connections`) itself: a card per
+draws `ConnectionsFrame` (`/api/settings/connections`) itself. Its connector
+half is the Marketplace: a page from the storefront icon on a phone's Bot list,
+a dialog (`MarketplaceDialog`) from the foot of the sidebar on a desktop, the
+same page laid out three rows across. Either way it is a card per
 provider — its bundled icon (`assets/connectors/<icon>.png`, named by the
 Connection Type's `icon`), what connecting it gives a Bot, the accounts held
 against it with a state line and a menu, and the one way to add another. The

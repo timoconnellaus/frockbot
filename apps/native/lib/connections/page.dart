@@ -31,6 +31,14 @@ class ConnectionsPage extends StatefulWidget {
   final String? packageId;
   final Future<bool> Function(Uri)? openBrowser;
 
+  /// Whether the rows are laid out three across: the Marketplace as a desktop
+  /// dialog draws it. A phone is always one column, a tablet two.
+  final bool grid;
+
+  /// Set where the page is drawn inside a dialog, which has no back gesture:
+  /// the way out is then a control the page draws.
+  final VoidCallback? onClose;
+
   const ConnectionsPage({
     super.key,
     required this.api,
@@ -39,7 +47,12 @@ class ConnectionsPage extends StatefulWidget {
     this.openBrowser,
     this.models = false,
     this.packageId,
+    this.grid = false,
+    this.onClose,
   });
+
+  /// What the connector half is called wherever it is drawn.
+  static const marketplaceTitle = 'Marketplace';
 
   @override
   State<ConnectionsPage> createState() => _ConnectionsPageState();
@@ -54,7 +67,8 @@ class _ConnectionsPageState extends State<ConnectionsPage>
   String? notice;
   int commands = 0;
 
-  String get title => widget.models ? 'Provider accounts' : 'Connected apps';
+  String get title =>
+      widget.models ? 'Provider accounts' : ConnectionsPage.marketplaceTitle;
   String get kind => widget.models ? 'model' : 'connector';
 
   @override
@@ -224,11 +238,16 @@ class _ConnectionsPageState extends State<ConnectionsPage>
                 ),
               ),
             _Centered(
+              maxWidth: widget.grid ? marketplaceDialogWidth : 680,
               child: LayoutBuilder(
                 builder: (context, constraints) {
                   // Two columns once there is room for two readable rows,
                   // as on a tablet or the desktop window; one on a phone.
-                  final columns = constraints.maxWidth >= 640 ? 2 : 1;
+                  final columns = widget.grid && constraints.maxWidth >= 900
+                      ? 3
+                      : constraints.maxWidth >= 640
+                      ? 2
+                      : 1;
                   const gap = 8.0;
                   final width =
                       (constraints.maxWidth - gap * (columns - 1)) / columns;
@@ -278,6 +297,17 @@ class _ConnectionsPageState extends State<ConnectionsPage>
     return Scaffold(
       appBar: AppBar(
         title: Text(title),
+        automaticallyImplyLeading: widget.onClose == null,
+        leading: widget.onClose == null
+            ? null
+            : identified(
+                ShellIds.rightPanelClose,
+                IconButton(
+                  tooltip: 'Close ${title.toLowerCase()}',
+                  onPressed: widget.onClose,
+                  icon: const Icon(Icons.close),
+                ),
+              ),
         actions: [
           identified(
             ConnectorIds.refresh,
@@ -299,11 +329,12 @@ class _ConnectionsPageState extends State<ConnectionsPage>
 
 class _Centered extends StatelessWidget {
   final Widget child;
-  const _Centered({required this.child});
+  final double maxWidth;
+  const _Centered({required this.child, this.maxWidth = 680});
   @override
   Widget build(BuildContext context) => Center(
     child: ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: 680),
+      constraints: BoxConstraints(maxWidth: maxWidth),
       child: child,
     ),
   );
@@ -1022,4 +1053,51 @@ class _ApiKeyFormState extends State<_ApiKeyForm> {
       ],
     );
   }
+}
+
+/// How wide the Marketplace dialog gets, which is room for three rows across.
+const marketplaceDialogWidth = 960.0;
+
+/// The Marketplace as a desktop draws it: a dialog over the shell, holding the
+/// same page a phone pushes, laid out three rows across.
+///
+/// A dialog rather than a page because on a desktop the list of Bots and the
+/// conversation stay where they are; connecting a service is a visit, not a
+/// departure. The way out is the close control in its bar, or the scrim.
+class MarketplaceDialog extends StatelessWidget {
+  final NativeApi api;
+  final LocalStore store;
+  final String userId;
+  final Future<bool> Function(Uri)? openBrowser;
+
+  const MarketplaceDialog({
+    super.key,
+    required this.api,
+    required this.store,
+    required this.userId,
+    this.openBrowser,
+  });
+
+  @override
+  Widget build(BuildContext context) => Dialog(
+    insetPadding: const EdgeInsets.all(24),
+    clipBehavior: Clip.antiAlias,
+    child: identified(
+      ConnectorIds.marketplaceDialog,
+      ConstrainedBox(
+        constraints: const BoxConstraints(
+          maxWidth: marketplaceDialogWidth + 40,
+          maxHeight: 760,
+        ),
+        child: ConnectionsPage(
+          api: api,
+          store: store,
+          userId: userId,
+          openBrowser: openBrowser,
+          grid: true,
+          onClose: () => Navigator.of(context).pop(),
+        ),
+      ),
+    ),
+  );
 }

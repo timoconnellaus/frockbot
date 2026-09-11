@@ -15,6 +15,7 @@ abstract final class ShellIds {
   static const sidebarSearch = 'sidebar-search';
   static const sidebarCreateBot = 'sidebar-create-bot';
   static const sidebarProfile = 'sidebar-profile';
+  static const sidebarMarketplace = 'sidebar-marketplace';
   static const sidebarHiddenToggle = 'sidebar-hidden-toggle';
   static const sidebarRetry = 'sidebar-retry';
   static const conversation = 'shell-conversation';
@@ -108,9 +109,9 @@ abstract final class SettingsIds {
   static const profileName = 'profile-name';
   static const profileSettings = 'profile-settings';
   static const profileModels = 'profile-models';
-  static const profileConnections = 'profile-connections';
   static const profileManageBots = 'profile-manage-bots';
   static const profileSignOut = 'profile-sign-out';
+  static const profileVersion = 'profile-version';
 
   static const botSettings = 'bot-settings';
   static const botAvatar = 'bot-avatar';
@@ -141,6 +142,10 @@ abstract final class SettingsIds {
 abstract final class ConnectorIds {
   static const document = 'connections-document';
   static const refresh = 'connections-refresh';
+
+  /// The Marketplace dialog a desktop opens from the foot of the sidebar; a
+  /// phone pushes the same page, and the page's own id is the marker on both.
+  static const marketplaceDialog = 'marketplace-dialog';
 
   static String group(String title) => viewGroupIdentifierV1(title);
   static String action(String actionId) => viewActionIdentifierV1(actionId);
@@ -178,15 +183,15 @@ abstract final class PluginIds {
 ///
 /// The names follow what `routines.e2e.ts` selects on — the section, a
 /// Routine's card, its controls and the delete confirmation — so that spec can
-/// be rewritten against Flutter Web with the same intent. The completions
-/// badge and its drawer are a count, a trigger and one acknowledgement per
-/// entry.
+/// be rewritten against Flutter Web with the same intent. The panel toggle is
+/// the one door to the surface — the chat header's Routines control on the
+/// wide tiers, the Bot page's row on a phone — and the drawer is one
+/// acknowledgement per entry.
 abstract final class RoutineIds {
   static const document = 'routines-document';
   static const refresh = 'routines-refresh';
   static const panel = 'routines-panel';
   static const panelToggle = 'routines-panel-toggle';
-  static const inboxBadge = 'routine-inbox-badge';
   static const inboxDrawer = 'routine-inbox-drawer';
   static const runLog = 'routine-run-log';
   static const confirmDelete = 'routine-delete-confirm';

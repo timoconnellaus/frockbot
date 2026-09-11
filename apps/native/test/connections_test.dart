@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/client/transport.dart';
 import 'package:frockbot_native/connections/document.dart';
 import 'package:frockbot_native/connections/page.dart';
+import 'package:frockbot_native/shell/semantics.dart';
 import 'package:frockbot_native/theme/frock_theme.dart';
 
 import 'settings_test.dart' show SettingsApi;
@@ -468,4 +469,73 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   }
+
+  testWidgets(
+    'the Marketplace is one column on a phone and three in a dialog',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final store = MemoryStore();
+      final api = SettingsApi(store, (_, _) async => connectionsFrame());
+
+      tester.view.physicalSize = const Size(390, 844);
+      await tester.pumpWidget(page(api, store));
+      await tester.pumpAndSettle();
+      expect(find.widgetWithText(AppBar, 'Marketplace'), findsOneWidget);
+      expect(find.text('Connected apps'), findsNothing);
+      // One below the other on a phone: only the connector rows are here, and
+      // Gmail sits under the Mac Messages row at the same left edge.
+      final mac = tester.getRect(find.text('Messages on your Mac'));
+      final gmail = tester.getRect(find.text('Gmail'));
+      expect(gmail.top, greaterThan(mac.bottom));
+      expect((gmail.left - mac.left).abs(), lessThan(1));
+
+      tester.view.physicalSize = const Size(1280, 900);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: FrockTheme.theme(Brightness.dark),
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => Center(
+                child: FilledButton(
+                  onPressed: () => showDialog<void>(
+                    context: context,
+                    builder: (_) => MarketplaceDialog(
+                      api: api,
+                      store: store,
+                      userId: 'tim',
+                    ),
+                  ),
+                  child: const Text('Open'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('Open'));
+      await tester.pumpAndSettle();
+      expect(find.byType(Dialog), findsOneWidget);
+      expect(find.widgetWithText(AppBar, 'Marketplace'), findsOneWidget);
+      expect(
+        find.byWidgetPredicate(
+          (widget) =>
+              widget is Semantics &&
+              widget.properties.identifier == ConnectorIds.group('Gmail'),
+        ),
+        findsOneWidget,
+      );
+      // Two rows side by side on one line, wide.
+      final left = tester.getRect(find.text('Messages on your Mac'));
+      final right = tester.getRect(find.text('Gmail'));
+      expect(right.left, greaterThan(left.right));
+      expect((right.top - left.top).abs(), lessThan(1));
+      // The way out is the control the page draws, since a dialog has no bar
+      // of its own to go back from.
+      await tester.tap(find.byTooltip('Close marketplace'));
+      await tester.pumpAndSettle();
+      expect(find.byType(Dialog), findsNothing);
+    },
+  );
 }
