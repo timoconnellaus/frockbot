@@ -370,59 +370,72 @@ class ShellSidebar extends StatelessWidget {
     final at = view?.lastMessage?['at'] as String?;
     final badge = unreadBadgeLabel(view);
     final isArchived = archived.contains(botId);
+    // The row's rounded selected tint must sit inside the column rather than
+    // run to its edges, so the tile is inset and its own padding shrunk by
+    // the same amount: the avatar and badge stay where they were.
     return identified(
       ShellIds.sidebarBot(botId),
-      ListTile(
-        key: ValueKey('bot-$botId'),
-        selected: botId == activeBotId,
-        enabled: !isArchived,
-        leading: SheepAvatar(
-          size: 34,
-          background: bot.sheep.background,
-          working: _working(bot),
-        ),
-        title: Row(
-          children: [
-            Expanded(
-              child: Text(
-                _name(bot),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodyLarge?.copyWith(
-                  fontWeight: view?.unread == true
-                      ? FontWeight.w700
-                      : FontWeight.w600,
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        child: ListTile(
+          key: ValueKey('bot-$botId'),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+          selected: botId == activeBotId,
+          enabled: !isArchived,
+          leading: SheepAvatar(
+            size: 34,
+            background: bot.sheep.background,
+            working: _working(bot),
+          ),
+          title: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  _name(bot),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodyLarge?.copyWith(
+                    fontWeight: view?.unread == true
+                        ? FontWeight.w700
+                        : FontWeight.w600,
+                  ),
                 ),
               ),
+              if (at != null)
+                Text(
+                  formatSidebarMessageTime(at),
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+            ],
+          ),
+          // A selected tile paints its text in the selection colour by default,
+          // which turns the preview pink; the tint behind the row already says
+          // it is open, so the preview keeps the quiet colour of every other.
+          subtitle: Text(
+            preview ?? profiles[botId]?.title ?? 'No messages yet',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
             ),
-            if (at != null)
-              Text(
-                formatSidebarMessageTime(at),
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
+          ),
+          // One slot, one meaning. The row's own selected state already says
+          // which Bot is open, so the slot carries unread and archived — the two
+          // things a row can say that its appearance does not.
+          trailing: badge == null && !isArchived
+              ? null
+              : Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (isArchived)
+                      Text('Archived', style: theme.textTheme.labelSmall),
+                    if (badge != null) Badge(label: Text(badge)),
+                  ],
                 ),
-              ),
-          ],
+          onTap: isArchived ? null : () => onSelect(botId),
         ),
-        subtitle: Text(
-          preview ?? profiles[botId]?.title ?? 'No messages yet',
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-        // One slot, one meaning. The row's own selected state already says
-        // which Bot is open, so the slot carries unread and archived — the two
-        // things a row can say that its appearance does not.
-        trailing: badge == null && !isArchived
-            ? null
-            : Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (isArchived)
-                    Text('Archived', style: theme.textTheme.labelSmall),
-                  if (badge != null) Badge(label: Text(badge)),
-                ],
-              ),
-        onTap: isArchived ? null : () => onSelect(botId),
       ),
     );
   }

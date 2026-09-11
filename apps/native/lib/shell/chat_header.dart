@@ -148,7 +148,10 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
             color: computerRunning ? Colors.blue : null,
           ),
         if (onRoutines != null)
-          _destination('Routines', ChatIconKind.routines, onRoutines),
+          identified(
+            RoutineIds.panelToggle,
+            _destination('Routines', ChatIconKind.routines, onRoutines),
+          ),
         if (onSettings != null)
           identified(
             ShellIds.botPanelToggle,

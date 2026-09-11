@@ -81,7 +81,7 @@ test("a Routine that breaks says so once, by name, and badges the Bot", async ({
   await expectReadyToSend(page);
 
   // The Routine, through the panel a person would use.
-  await press(sem(page, "routine-inbox-badge"));
+  await press(sem(page, "routines-panel-toggle"));
   const document = sem(page, "routines-document");
   await expect(document).toBeVisible({ timeout: 60_000 });
   await group(page, "New Routine").click();

@@ -400,43 +400,29 @@ void main() {
     expect(sent.single['type'], 'routine/delete');
   });
 
-  testWidgets('the badge counts what the surface read, and opens it', (
-    tester,
-  ) async {
+  test('the inbox count is what the surface read, and says so', () async {
     final store = MemoryStore();
-    var opened = false;
+    var notified = 0;
     final controller = RoutineInboxController(
       SettingsApi(store, (_, _) async => {'unacknowledged': 3}),
       'bot-1',
     );
     addTearDown(controller.dispose);
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: FrockTheme.theme(Brightness.dark),
-        home: Scaffold(
-          appBar: AppBar(
-            actions: [
-              RoutineInboxBadge(
-                controller: controller,
-                onOpen: () => opened = true,
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-    expect(find.text('3'), findsNothing);
+    controller.addListener(() => notified++);
+    expect(controller.unacknowledged, 0);
     await controller.load();
-    await tester.pumpAndSettle();
-    expect(find.text('3'), findsOneWidget);
-    await tester.tap(find.byType(IconButton));
-    expect(opened, isTrue);
+    expect(controller.unacknowledged, 3);
+    expect(controller.badge, '3');
+    expect(notified, 1);
+
+    // The same count again is not news.
+    controller.adopt(3);
+    expect(notified, 1);
 
     // Past ninety-nine the badge stops counting and says so.
     controller.adopt(1200);
-    await tester.pumpAndSettle();
-    expect(find.text('99+'), findsOneWidget);
+    expect(controller.badge, '99+');
+    expect(notified, 2);
   });
 
   testWidgets('Routines recovers from offline without raw backend detail', (

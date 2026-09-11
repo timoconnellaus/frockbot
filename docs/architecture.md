@@ -530,9 +530,11 @@ every registered builder: an entry registers with a label, the region draws a
 selector over them, and `ViewSurfacePage`'s `chrome` flag is off inside it
 because the region already carries the title. On the phone each entry is a page.
 
-**The rest of PR 8.** The completions badge is `RoutineInboxBadge` in the
-`header-actions` region: a silent Routine firing is filtered out of the visible
-transcript, so a count is the only place that completion becomes visible. A
+**The rest of PR 8.** The completions count is `RoutineInboxController`, worn
+as a badge by the Routines row on the phone's Bot page: a silent Routine firing
+is filtered out of the visible transcript, so a count is the only place that
+completion becomes visible. On the wide tiers the chat header's Routines
+control opens the same surface, which carries the count itself. A
 firing that spoke — an explicit `send_to_user`, or the message a broken firing
 commits in its place — is an ordinary message in the conversation instead; see
 [notifications](notifications.md). "Mark all read" means the

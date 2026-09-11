@@ -349,13 +349,14 @@ class WebhookKeyCard extends StatelessWidget {
   );
 }
 
-/// The completions badge, in the Bot header.
+/// The count of unacknowledged completions, which the phone's Routines row
+/// wears as a badge.
 ///
 /// A Routine firing cannot speak: it has no `send_to_user`, and its Turn is
 /// filtered out of the visible transcript. So the count here is the only place
-/// a completion becomes visible, and pressing it opens the surface that reads
-/// them. Acknowledging is a command on that surface, never a side effect of
-/// looking at this one.
+/// a completion becomes visible, and the row it badges opens the surface that
+/// reads them. Acknowledging is a command on that surface, never a side effect
+/// of looking at this one.
 class RoutineInboxController extends ChangeNotifier {
   final NativeApi api;
   final String botId;
@@ -390,37 +391,4 @@ class RoutineInboxController extends ChangeNotifier {
     _closed = true;
     super.dispose();
   }
-}
-
-class RoutineInboxBadge extends StatelessWidget {
-  final RoutineInboxController controller;
-  final VoidCallback onOpen;
-  const RoutineInboxBadge({
-    super.key,
-    required this.controller,
-    required this.onOpen,
-  });
-
-  @override
-  Widget build(BuildContext context) => AnimatedBuilder(
-    animation: controller,
-    builder: (context, _) {
-      final count = controller.unacknowledged;
-      final label =
-          'Routine completions${count > 0 ? ' (${controller.badge} unread)' : ''}';
-      return identified(
-        RoutineIds.inboxBadge,
-        IconButton(
-          tooltip: label,
-          onPressed: onOpen,
-          icon: count > 0
-              ? Badge(
-                  label: Text(controller.badge),
-                  child: const Icon(Icons.history_rounded),
-                )
-              : const Icon(Icons.history_rounded),
-        ),
-      );
-    },
-  );
 }
