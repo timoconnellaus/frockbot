@@ -256,27 +256,322 @@ jobs:
             publish_one "$package_dir" || exit 1
           done
 
+  macos-release:
+    name: Build notarized macOS app
+    needs: verify
+    runs-on: macos-14
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the release tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Fetch the qualified SDK by immutable framework revision. A privileged
+      # tag job must not silently move to a newer Flutter release.
+      - name: Check out qualified Flutter SDK
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: flutter/flutter
+          ref: 4cf24164269a5ebf0c16a028a00727d0e77bbb05
+          path: .flutter-sdk
+          persist-credentials: false
+
+      - name: Put Flutter on PATH
+        shell: bash
+        run: |
+          echo "$GITHUB_WORKSPACE/.flutter-sdk/bin" >> "$GITHUB_PATH"
+          "$GITHUB_WORKSPACE/.flutter-sdk/bin/flutter" config --no-analytics
+          "$GITHUB_WORKSPACE/.flutter-sdk/bin/flutter" precache --macos
+
+      - name: Validate Apple release configuration
+        env:
+          MACOS_DEVELOPER_ID_P12_BASE64: ${{ secrets.MACOS_DEVELOPER_ID_P12_BASE64 }}
+          MACOS_DEVELOPER_ID_P12_PASSWORD: ${{ secrets.MACOS_DEVELOPER_ID_P12_PASSWORD }}
+          MACOS_DEVELOPER_ID_PROFILE_BASE64: ${{ secrets.MACOS_DEVELOPER_ID_PROFILE_BASE64 }}
+          APPLE_NOTARIZATION_ID: ${{ secrets.APPLE_NOTARIZATION_ID }}
+          APPLE_NOTARIZATION_PASSWORD: ${{ secrets.APPLE_NOTARIZATION_PASSWORD }}
+        shell: bash
+        run: |
+          missing=()
+          for name in \
+            MACOS_DEVELOPER_ID_P12_BASE64 \
+            MACOS_DEVELOPER_ID_P12_PASSWORD \
+            MACOS_DEVELOPER_ID_PROFILE_BASE64 \
+            APPLE_NOTARIZATION_ID \
+            APPLE_NOTARIZATION_PASSWORD; do
+            if [[ -z "${!name}" ]]; then missing+=("$name"); fi
+          done
+          if (( ${#missing[@]} > 0 )); then
+            printf 'Missing macOS release secrets: %s\n' "${missing[*]}" >&2
+            exit 1
+          fi
+
+      - name: Import Developer ID identity and profile
+        id: signing
+        env:
+          MACOS_DEVELOPER_ID_P12_BASE64: ${{ secrets.MACOS_DEVELOPER_ID_P12_BASE64 }}
+          MACOS_DEVELOPER_ID_P12_PASSWORD: ${{ secrets.MACOS_DEVELOPER_ID_P12_PASSWORD }}
+          MACOS_DEVELOPER_ID_PROFILE_BASE64: ${{ secrets.MACOS_DEVELOPER_ID_PROFILE_BASE64 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          certificate_path="$RUNNER_TEMP/frockbot-developer-id.p12"
+          profile_path="$RUNNER_TEMP/frockbot-developer-id.provisionprofile"
+          profile_plist="$RUNNER_TEMP/frockbot-developer-id.plist"
+          keychain_path="$RUNNER_TEMP/frockbot-signing.keychain-db"
+          keychain_password="$(openssl rand -hex 32)"
+
+          printf '%s' "$MACOS_DEVELOPER_ID_P12_BASE64" | base64 -D > "$certificate_path"
+          printf '%s' "$MACOS_DEVELOPER_ID_PROFILE_BASE64" | base64 -D > "$profile_path"
+          security cms -D -i "$profile_path" > "$profile_plist"
+
+          profile_uuid="$(python3 - "$profile_plist" <<'PY'
+          from datetime import datetime, timezone
+          import plistlib
+          import re
+          import sys
+
+          with open(sys.argv[1], "rb") as source:
+              profile = plistlib.loads(source.read())
+          team = "Q444L76529"
+          bundle = "com.frockbot.mobile"
+          entitlements = profile.get("Entitlements", {})
+          failures = []
+          if profile.get("TeamIdentifier") != [team]:
+              failures.append("the profile belongs to a different Apple team")
+          if "OSX" not in profile.get("Platform", []):
+              failures.append("the profile is not for macOS")
+          if profile.get("ProvisionedDevices"):
+              failures.append("the profile is device-scoped, not Developer ID distribution")
+          expires = profile.get("ExpirationDate")
+          if not isinstance(expires, datetime) or expires.replace(tzinfo=timezone.utc) <= datetime.now(timezone.utc):
+              failures.append("the profile is expired or has no valid expiration")
+          if entitlements.get("com.apple.application-identifier") != f"{team}.{bundle}":
+              failures.append("the profile does not authorize the FrockBot bundle identifier")
+          domains = entitlements.get("com.apple.developer.associated-domains")
+          if domains != "*" and (not isinstance(domains, list) or "applinks:bot.frockbot.com" not in domains):
+              failures.append("the profile does not authorize the desktop login associated domain")
+          groups = entitlements.get("keychain-access-groups", [])
+          allowed_groups = {f"{team}.*", f"{team}.{bundle}"}
+          if not isinstance(groups, list) or not allowed_groups.intersection(groups):
+              failures.append("the profile does not authorize the protected Keychain group")
+          uuid = profile.get("UUID", "")
+          if not re.fullmatch(r"[0-9A-Fa-f-]{36}", uuid):
+              failures.append("the profile has no valid UUID")
+          if failures:
+              raise SystemExit("Invalid macOS distribution profile: " + "; ".join(failures))
+          print(uuid)
+          PY
+          )"
+
+          modern_profiles="$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"
+          legacy_profiles="$HOME/Library/MobileDevice/Provisioning Profiles"
+          modern_profile="$modern_profiles/$profile_uuid.provisionprofile"
+          legacy_profile="$legacy_profiles/$profile_uuid.provisionprofile"
+          mkdir -p "$modern_profiles" "$legacy_profiles"
+          install -m 600 "$profile_path" "$modern_profile"
+          install -m 600 "$profile_path" "$legacy_profile"
+
+          security create-keychain -p "$keychain_password" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security unlock-keychain -p "$keychain_password" "$keychain_path"
+          security import "$certificate_path" \
+            -P "$MACOS_DEVELOPER_ID_P12_PASSWORD" \
+            -t cert -f pkcs12 \
+            -T /usr/bin/codesign \
+            -T /usr/bin/security \
+            -k "$keychain_path"
+          rm -f "$certificate_path" "$profile_path" "$profile_plist"
+          security set-key-partition-list \
+            -S apple-tool:,apple: \
+            -s -k "$keychain_password" \
+            "$keychain_path"
+          security list-keychains -d user -s "$keychain_path"
+
+          identities="$({ security find-identity -v -p codesigning "$keychain_path" || true; } \
+            | sed -n 's/.*"\(Developer ID Application:[^"]*\)"/\1/p')"
+          if [[ "$(printf '%s\n' "$identities" | sed '/^$/d' | wc -l | tr -d ' ')" != 1 ]]; then
+            echo "The signing archive must contain exactly one Developer ID Application identity." >&2
+            exit 1
+          fi
+          {
+            echo "identity=$identities"
+            echo "profile_uuid=$profile_uuid"
+            echo "modern_profile=$modern_profile"
+            echo "legacy_profile=$legacy_profile"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build signed desktop app
+        working-directory: apps/native
+        env:
+          PROFILE_UUID: ${{ steps.signing.outputs.profile_uuid }}
+          SIGNING_IDENTITY: ${{ steps.signing.outputs.identity }}
+          VERSION: ${{ needs.verify.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 ../../scripts/check-native-pins.py
+          flutter pub get --enforce-lockfile
+          flutter build macos \
+            --release \
+            --config-only \
+            --no-pub \
+            --build-name="${VERSION%%-*}" \
+            --build-number="$GITHUB_RUN_NUMBER"
+          xcodebuild archive \
+            -workspace macos/Runner.xcworkspace \
+            -scheme Runner \
+            -configuration Release \
+            -archivePath "$RUNNER_TEMP/FrockBot.xcarchive" \
+            -derivedDataPath "$RUNNER_TEMP/FrockBotDerivedData" \
+            -destination 'generic/platform=macOS' \
+            DEVELOPMENT_TEAM=Q444L76529 \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="$SIGNING_IDENTITY" \
+            FROCKBOT_PROVISIONING_PROFILE_SPECIFIER="$PROFILE_UUID" \
+            CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO \
+            ENABLE_HARDENED_RUNTIME=YES \
+            OTHER_CODE_SIGN_FLAGS=--timestamp
+
+      - name: Verify Developer ID signature
+        env:
+          PROFILE_UUID: ${{ steps.signing.outputs.profile_uuid }}
+          SIGNING_IDENTITY: ${{ steps.signing.outputs.identity }}
+          VERSION: ${{ needs.verify.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          app="$RUNNER_TEMP/FrockBot.xcarchive/Products/Applications/FrockBot.app"
+          entitlements="$RUNNER_TEMP/frockbot-entitlements.plist"
+          embedded_profile="$RUNNER_TEMP/frockbot-embedded-profile.plist"
+          test -f "$app/Contents/embedded.provisionprofile"
+          [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist")" == com.frockbot.mobile ]]
+          [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")" == "${VERSION%%-*}" ]]
+          [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$app/Contents/Info.plist")" == "$GITHUB_RUN_NUMBER" ]]
+          security cms -D -i "$app/Contents/embedded.provisionprofile" > "$embedded_profile"
+          [[ "$(/usr/libexec/PlistBuddy -c 'Print :UUID' "$embedded_profile")" == "$PROFILE_UUID" ]]
+          codesign --verify --deep --strict --verbose=2 "$app"
+          details="$(codesign --display --verbose=4 "$app" 2>&1)"
+          grep -F "Authority=$SIGNING_IDENTITY" <<< "$details"
+          grep -F "TeamIdentifier=Q444L76529" <<< "$details"
+          grep -F "flags=0x10000(runtime)" <<< "$details"
+          codesign --display --entitlements "$entitlements" --xml "$app"
+          python3 - "$entitlements" <<'PY'
+          import plistlib
+          import sys
+
+          with open(sys.argv[1], "rb") as source:
+              entitlements = plistlib.loads(source.read())
+          if entitlements.get("com.apple.security.get-task-allow"):
+              raise SystemExit("The distributable desktop app must not carry the debugger entitlement.")
+          if entitlements.get("com.apple.developer.associated-domains") != ["applinks:bot.frockbot.com"]:
+              raise SystemExit("The distributable desktop app lost its login associated domain.")
+          groups = entitlements.get("keychain-access-groups", [])
+          if not isinstance(groups, list) or "Q444L76529.com.frockbot.mobile" not in groups:
+              raise SystemExit("The distributable desktop app lost its protected Keychain group.")
+          PY
+
+      - name: Notarize and staple desktop app
+        env:
+          APPLE_NOTARIZATION_ID: ${{ secrets.APPLE_NOTARIZATION_ID }}
+          APPLE_NOTARIZATION_PASSWORD: ${{ secrets.APPLE_NOTARIZATION_PASSWORD }}
+          VERSION: ${{ needs.verify.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          app="$RUNNER_TEMP/FrockBot.xcarchive/Products/Applications/FrockBot.app"
+          submission="$RUNNER_TEMP/FrockBot-notarization.zip"
+          result="$RUNNER_TEMP/FrockBot-notarization.json"
+          artifact="$RUNNER_TEMP/FrockBot-$VERSION-macos.zip"
+
+          ditto -c -k --keepParent "$app" "$submission"
+          set +e
+          xcrun notarytool submit "$submission" \
+            --apple-id "$APPLE_NOTARIZATION_ID" \
+            --password "$APPLE_NOTARIZATION_PASSWORD" \
+            --team-id Q444L76529 \
+            --wait \
+            --output-format json > "$result"
+          submit_status=$?
+          set -e
+          notarization_status="$(plutil -extract status raw "$result" 2>/dev/null || true)"
+          if (( submit_status != 0 )) || [[ "$notarization_status" != Accepted ]]; then
+            cat "$result"
+            submission_id="$(plutil -extract id raw "$result" 2>/dev/null || true)"
+            if [[ -n "$submission_id" ]]; then
+              xcrun notarytool log "$submission_id" \
+                --apple-id "$APPLE_NOTARIZATION_ID" \
+                --password "$APPLE_NOTARIZATION_PASSWORD" \
+                --team-id Q444L76529 || true
+            fi
+            exit 1
+          fi
+
+          xcrun stapler staple "$app"
+          xcrun stapler validate "$app"
+          spctl --assess --type execute --verbose=4 "$app"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          ditto -c -k --keepParent "$app" "$artifact"
+
+      - name: Upload notarized desktop app
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: frockbot-macos-release
+          path: ${{ runner.temp }}/FrockBot-${{ needs.verify.outputs.version }}-macos.zip
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+      - name: Remove imported signing material
+        if: always()
+        env:
+          LEGACY_PROFILE: ${{ steps.signing.outputs.legacy_profile }}
+          MODERN_PROFILE: ${{ steps.signing.outputs.modern_profile }}
+        shell: bash
+        run: |
+          if [[ -n "$LEGACY_PROFILE" ]]; then rm -f "$LEGACY_PROFILE"; fi
+          if [[ -n "$MODERN_PROFILE" ]]; then rm -f "$MODERN_PROFILE"; fi
+          security delete-keychain "$RUNNER_TEMP/frockbot-signing.keychain-db" 2>/dev/null || true
+
   github-release:
     name: Create GitHub release
-    # A Release is the record that this tag shipped, so it is created once
-    # production has actually moved — not before the approval, and not behind
-    # npm publishing, which has its own failure modes (first-publish trust,
-    # OIDC) and would otherwise leave a shipped tag showing as a bare one.
-    needs: [verify, deploy-marketing, deploy-backend]
+    # A Release is the record that this tag shipped and the desktop download
+    # surface, so it is created once production has actually moved — not before
+    # the approval, not behind npm publishing (first-publish trust, OIDC), and
+    # not before Apple has accepted the Mac app and the ticket has been stapled.
+    needs: [verify, deploy-marketing, deploy-backend, macos-release]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       contents: write
     steps:
-      - name: Create GitHub release
+      - name: Download notarized desktop app
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: frockbot-macos-release
+          path: .release-assets
+
+      - name: Create GitHub release and attach desktop app
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.verify.outputs.version }}
+        shell: bash
         run: |
+          set -euo pipefail
+          asset=".release-assets/FrockBot-$VERSION-macos.zip"
+          test -f "$asset"
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             echo "release $GITHUB_REF_NAME already exists"
+            gh release upload "$GITHUB_REF_NAME" "$asset" --clobber
           else
-            gh release create "$GITHUB_REF_NAME" --generate-notes --verify-tag
+            gh release create "$GITHUB_REF_NAME" \
+              "$asset" \
+              --generate-notes \
+              --verify-tag
           fi
 
   deploy-marketing:
