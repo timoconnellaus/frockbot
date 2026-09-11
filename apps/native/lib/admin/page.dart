@@ -6,6 +6,114 @@ import '../client/transport.dart';
 import '../shell/semantics.dart';
 import '../theme/states.dart';
 
+/// The amounts an admin is offered. Anything else is typed.
+const creditPresetCents = [500, 1000, 2500, 5000];
+
+/// The one write against an account's ledger: an amount and why.
+class CreditDialog extends StatefulWidget {
+  final String account;
+  const CreditDialog({super.key, required this.account});
+
+  @override
+  State<CreditDialog> createState() => _CreditDialogState();
+}
+
+class _CreditDialogState extends State<CreditDialog> {
+  int? cents;
+  final custom = TextEditingController();
+  final reason = TextEditingController();
+
+  @override
+  void dispose() {
+    custom.dispose();
+    reason.dispose();
+    super.dispose();
+  }
+
+  int? get chosen {
+    if (cents != null) return cents;
+    final typed = double.tryParse(custom.text.trim());
+    if (typed == null || typed <= 0 || typed > 1000) return null;
+    return (typed * 100).round();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final amount = chosen;
+    final ready = amount != null && reason.text.trim().isNotEmpty;
+    return identified(
+      AdminIds.creditDialog,
+      AlertDialog(
+        title: Text('Add credit for ${widget.account}'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Wrap(
+              spacing: 8,
+              children: [
+                for (final preset in creditPresetCents)
+                  identified(
+                    AdminIds.creditAmount(preset),
+                    ChoiceChip(
+                      label: Text('US\$${preset ~/ 100}'),
+                      selected: cents == preset,
+                      onSelected: (_) => setState(() {
+                        cents = preset;
+                        custom.clear();
+                      }),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: custom,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
+              decoration: const InputDecoration(
+                labelText: 'Or another amount, in US dollars',
+                helperText: 'Up to US\$1,000 at a time.',
+              ),
+              onChanged: (_) => setState(() => cents = null),
+            ),
+            const SizedBox(height: 12),
+            identified(
+              AdminIds.creditReason,
+              TextField(
+                controller: reason,
+                decoration: const InputDecoration(
+                  labelText: 'Reason',
+                  helperText: 'Kept with the grant.',
+                ),
+                onChanged: (_) => setState(() {}),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          identified(
+            AdminIds.creditConfirm,
+            FilledButton(
+              onPressed: ready
+                  ? () =>
+                        Navigator.of(context)
+                            .pop((cents: amount, reason: reason.text.trim()))
+                  : null,
+              child: const Text('Add credit'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// Admin: the decisions this app makes for the deployment rather than for
 /// an account — whether anyone new may sign up, and which accounts hold
 /// Applets.
@@ -133,6 +241,58 @@ class _AdminPageState extends State<AdminPage> {
     }
   }
 
+  /// Credit given by hand. The id is minted here, once per dialog, so the
+  /// request can land twice and grant once.
+  Future<void> grantCredit(String userId, int cents, String reason) async {
+    if (busy) return;
+    setState(() {
+      busy = true;
+      accountsMessage = null;
+    });
+    try {
+      final answer = await widget.api.request(
+        '/api/admin/users/${Uri.encodeComponent(userId)}/credit',
+        body: {
+          'schemaVersion': 1,
+          'type': 'user/grant-credit',
+          'id': randomId(),
+          'cents': cents,
+          'reason': reason,
+        },
+      );
+      if (mounted) {
+        setState(() {
+          accounts = [
+            for (final account in accounts ?? const <Map<String, Object?>>[])
+              if (account['userId'] == userId)
+                {...account, 'billing': answer}
+              else
+                account,
+          ];
+        });
+      }
+    } catch (_) {
+      await loadAccounts();
+      if (mounted && accountsMessage == null) {
+        setState(
+          () => accountsMessage =
+              'That credit didn’t land. Refresh and try again.',
+        );
+      }
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
+  Future<void> _askCredit(String userId, String title) async {
+    final grant = await showDialog<({int cents, String reason})>(
+      context: context,
+      builder: (_) => CreditDialog(account: title),
+    );
+    if (grant == null) return;
+    await grantCredit(userId, grant.cents, grant.reason);
+  }
+
   Future<void> setApplets(String userId, bool enabled) async {
     if (busy) return;
     setState(() {
@@ -244,11 +404,12 @@ class _AdminPageState extends State<AdminPage> {
                               ),
                             ),
                           const SizedBox(height: 32),
-                          Text('Applets', style: textTheme.titleMedium),
+                          Text('Accounts', style: textTheme.titleMedium),
                           const SizedBox(height: 4),
                           Text(
-                            'The small real-time apps a Bot builds beside the conversation. '
-                            'Turn them on for an account to offer its Bots the Applet tools.',
+                            'Each account’s Applets switch — the small real-time apps a Bot '
+                            'builds beside the conversation — and its credit. Complimentary '
+                            'credit is spendable without a subscription and never expires.',
                             style: textTheme.bodySmall,
                           ),
                           const SizedBox(height: 8),
@@ -308,14 +469,66 @@ class _AdminPageState extends State<AdminPage> {
       return _unreadableAccount(userId, title, detail);
     }
     final enabled = features['applets'] == true;
-    return identified(
-      AdminIds.applets(userId),
-      SwitchListTile(
-        contentPadding: EdgeInsets.zero,
-        title: Text(title),
-        subtitle: detail.isEmpty ? null : Text(detail),
-        value: enabled,
-        onChanged: busy ? null : (value) => setApplets(userId, value),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        identified(
+          AdminIds.applets(userId),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: Text(title),
+            subtitle: detail.isEmpty ? null : Text(detail),
+            value: enabled,
+            onChanged: busy ? null : (value) => setApplets(userId, value),
+          ),
+        ),
+        _credit(account, userId, title),
+      ],
+    );
+  }
+
+  /// What the account can spend, and the one thing an admin can do about it.
+  Widget _credit(Map<String, Object?> account, String userId, String title) {
+    final billing = (account['billing'] as Map?) ?? const {};
+    final String line;
+    if (billing['unavailable'] == true) {
+      line = 'Couldn’t read this account’s credit.';
+    } else {
+      String money(Object? micros) =>
+          'US\$${((micros as num? ?? 0) / 1000000).toStringAsFixed(2)}';
+      final parts = [
+        if (billing['subscribed'] == true) 'Subscribed' else 'No subscription',
+        '${money(billing['complimentaryMicros'])} complimentary',
+        if ((billing['includedMicros'] as num? ?? 0) > 0)
+          '${money(billing['includedMicros'])} monthly',
+        if ((billing['purchasedMicros'] as num? ?? 0) > 0)
+          '${money(billing['purchasedMicros'])} purchased',
+        if (billing['suspended'] == true) 'suspended',
+        if (billing['canSpend'] != true) 'can’t reply',
+      ];
+      line = parts.join(' · ');
+    }
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        children: [
+          Expanded(
+            child: identified(
+              AdminIds.credit(userId),
+              Text(line, style: Theme.of(context).textTheme.bodySmall),
+            ),
+          ),
+          identified(
+            AdminIds.addCredit(userId),
+            TextButton.icon(
+              onPressed: busy
+                  ? null
+                  : () => unawaited(_askCredit(userId, title)),
+              icon: const Icon(Icons.add_rounded, size: 18),
+              label: const Text('Add credit'),
+            ),
+          ),
+        ],
       ),
     );
   }

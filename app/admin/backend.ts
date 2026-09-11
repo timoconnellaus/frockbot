@@ -1,11 +1,15 @@
 import {
+  decodeAdminUserBillingV1,
   decodeAdminUserListViewV1,
   decodeDeploymentPolicyV1,
+  decodeGrantUserCreditCommandV1,
   decodeSetSignupsCommandV1,
   decodeSetUserFeaturesCommandV1,
   decodeUserFeaturesV1,
+  type AdminUserBillingV1,
   type AdminUserViewV1,
   type DeploymentPolicyV1,
+  type GrantUserCreditCommandV1,
   type SetSignupsCommandV1,
   type SetUserFeaturesCommandV1,
   type UserFeaturesV1,
@@ -34,6 +38,12 @@ export interface AdminGatewayHost {
     command: SetUserFeaturesCommandV1,
     updatedBy: string,
   ): Promise<UserFeaturesV1>;
+  readUserBilling(userId: string): Promise<AdminUserBillingV1>;
+  grantUserCredit(
+    userId: string,
+    command: GrantUserCreditCommandV1,
+    grantedBy: string,
+  ): Promise<AdminUserBillingV1>;
 }
 
 export interface AdminBackendRouteContribution {
@@ -50,6 +60,7 @@ export interface AdminBackendRouteContribution {
 }
 
 const USER_FEATURES_PATH = /^\/api\/admin\/users\/([^/]+)\/features$/;
+const USER_CREDIT_PATH = /^\/api\/admin\/users\/([^/]+)\/credit$/;
 
 function jsonError(status: number, message: string): Response {
   return Response.json({ error: message }, { status });
@@ -148,15 +159,25 @@ async function routeUsers(
     )
       ? listed
       : [{ userId: adminUserId }, ...listed];
-    const reads = await Promise.allSettled(
-      accounts.map((account) => host.readUserFeatures(account.userId)),
-    );
+    const [reads, balances] = await Promise.all([
+      Promise.allSettled(
+        accounts.map((account) => host.readUserFeatures(account.userId)),
+      ),
+      Promise.allSettled(
+        accounts.map((account) => host.readUserBilling(account.userId)),
+      ),
+    ]);
     const users: AdminUserViewV1[] = accounts.map((account, index) => {
       const read = reads[index];
+      const balance = balances[index];
       return {
         ...account,
         features:
           read?.status === "fulfilled" ? read.value : { unavailable: true },
+        billing:
+          balance?.status === "fulfilled"
+            ? balance.value
+            : { unavailable: true },
       };
     });
     return Response.json(
@@ -205,6 +226,50 @@ async function routeUserFeatures(
   }
 }
 
+function decodeAccountId(encoded: string): string | undefined {
+  let userId: string;
+  try {
+    userId = decodeURIComponent(encoded);
+  } catch {
+    return undefined;
+  }
+  return isRpcIdentifier(userId) ? userId : undefined;
+}
+
+/**
+ * Credit an admin gives by hand. The command carries the admin's own id for
+ * the grant, so the ledger grants once however many times the request lands.
+ */
+async function routeUserCredit(
+  request: Request,
+  url: URL,
+  host: AdminGatewayHost,
+  encodedUserId: string,
+  grantedBy: string,
+): Promise<Response> {
+  if (request.method !== "POST") return jsonError(405, "method not allowed");
+  if ([...url.searchParams.keys()].length > 0) {
+    return jsonError(400, "Admin credit query is invalid");
+  }
+  const userId = decodeAccountId(encodedUserId);
+  if (!userId) return jsonError(400, "Account id is invalid");
+  let command: GrantUserCreditCommandV1;
+  try {
+    command = decodeGrantUserCreditCommandV1(await request.json());
+  } catch (error) {
+    return jsonError(400, failure(error, "Credit grant was refused"));
+  }
+  try {
+    return Response.json(
+      decodeAdminUserBillingV1(
+        await host.grantUserCredit(userId, command, grantedBy),
+      ),
+    );
+  } catch (error) {
+    return jsonError(500, failure(error, "Credit could not be granted"));
+  }
+}
+
 export function createAdminBackendContribution(
   host: AdminGatewayHost,
 ): AdminBackendRouteContribution {
@@ -220,6 +285,10 @@ export function createAdminBackendContribution(
       }
       if (url.pathname === "/api/admin/users") {
         return routeUsers(request, url, host, context.userId);
+      }
+      const credit = url.pathname.match(USER_CREDIT_PATH);
+      if (credit) {
+        return routeUserCredit(request, url, host, credit[1], context.userId);
       }
       const features = url.pathname.match(USER_FEATURES_PATH);
       if (features) {

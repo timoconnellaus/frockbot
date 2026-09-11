@@ -44,7 +44,9 @@ enum LineStatus { streaming, completed, aborted, error }
 
 /// The way out of an ending the person cannot otherwise act on. `resendTurn`
 /// sends this Turn's own message again, unchanged, as a new Turn.
-enum LineRetry { resendTurn }
+/// The way out of a failed Turn a client can offer: sending the same message
+/// again, or opening Billing when the account could not pay for the reply.
+enum LineRetry { resendTurn, openBilling }
 
 class TranscriptLine {
   final String id;
@@ -222,25 +224,36 @@ const knownFailureCopy = <String>{
       'stopped. Try sending it again.',
   'The model stopped part-way through its reply and went quiet for a minute, '
       'so the request was stopped. Try sending it again.',
+  ...billingFailureCopy,
+};
+
+/// Billing's two refusals. Their way out is Billing, not sending again.
+const billingFailureCopy = <String>{
+  'A paid FrockBot subscription is required. Open Billing to subscribe or '
+      'update your payment method.',
+  'You have no usage credit left. Open Billing to add more.',
 };
 
 /// A failure sentence split into what it reports and whether sending the same
 /// message again is the way out of it. "You stopped this." and "This Bot
 /// wouldn't do that." are endings the person chose or the Bot meant, and
 /// neither is repaired by sending the message a second time.
-({String notice, bool retry}) failureNotice(String? failure) {
+({String notice, LineRetry? action}) failureNotice(String? failure) {
   final copy = failure != null && knownFailureCopy.contains(failure)
       ? failure
       : runFailureFallbackCopy;
+  if (billingFailureCopy.contains(copy)) {
+    return (notice: copy, action: LineRetry.openBilling);
+  }
   return copy.endsWith(failureRetryInvitation)
       ? (
           notice: copy.substring(
             0,
             copy.length - failureRetryInvitation.length,
           ),
-          retry: true,
+          action: LineRetry.resendTurn,
         )
-      : (notice: copy, retry: false);
+      : (notice: copy, action: null);
 }
 
 /// Each send with the ordinal the cloud names it by.
@@ -458,7 +471,7 @@ List<TranscriptLine> projectRuns(List<Map<String, dynamic>> runs) {
             at: admittedAt,
             status: LineStatus.error,
             notice: spoken ? null : failure.notice,
-            retry: !spoken && failure.retry ? LineRetry.resendTurn : null,
+            retry: spoken ? null : failure.action,
             tools: tools,
           ),
         );

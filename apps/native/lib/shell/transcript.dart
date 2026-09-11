@@ -32,6 +32,9 @@ class TranscriptView extends StatefulWidget {
   final Future<void> Function({bool older}) onRefresh;
   final void Function(TranscriptLine line) onOpenRun;
   final void Function(TranscriptLine line)? onRetryTurn;
+
+  /// Where a failure whose remedy is Billing sends the person.
+  final VoidCallback? onOpenBilling;
   final void Function(String url)? onOpenLink;
   final VoidCallback? onOpenSettings;
   final void Function(TranscriptLine)? onMessageActions;
@@ -57,6 +60,7 @@ class TranscriptView extends StatefulWidget {
     this.pendingText,
     this.approvals,
     this.onRetryTurn,
+    this.onOpenBilling,
     this.onOpenLink,
     this.onOpenSettings,
     this.onMessageActions,
@@ -135,6 +139,7 @@ class _TranscriptViewState extends State<TranscriptView> {
   Future<void> Function({bool older}) get onRefresh => widget.onRefresh;
   void Function(TranscriptLine line) get onOpenRun => widget.onOpenRun;
   void Function(TranscriptLine line)? get onRetryTurn => widget.onRetryTurn;
+  VoidCallback? get onOpenBilling => widget.onOpenBilling;
   void Function(String url)? get onOpenLink => widget.onOpenLink;
   VoidCallback? get onOpenSettings => widget.onOpenSettings;
   String get storageKey => widget.storageKey;
@@ -311,7 +316,12 @@ class _TranscriptViewState extends State<TranscriptView> {
             child,
             if (child != children.last) const SizedBox(height: 8),
           ],
-          if (line.notice != null) _Notice(line: line, onRetry: onRetryTurn),
+          if (line.notice != null)
+            _Notice(
+              line: line,
+              onRetry: onRetryTurn,
+              onOpenBilling: onOpenBilling,
+            ),
         ],
       ),
     );
@@ -404,7 +414,8 @@ class _Bubble extends StatelessWidget {
 class _Notice extends StatelessWidget {
   final TranscriptLine line;
   final void Function(TranscriptLine line)? onRetry;
-  const _Notice({required this.line, this.onRetry});
+  final VoidCallback? onOpenBilling;
+  const _Notice({required this.line, this.onRetry, this.onOpenBilling});
 
   @override
   Widget build(BuildContext context) {
@@ -432,6 +443,14 @@ class _Notice extends StatelessWidget {
               TextButton(
                 onPressed: () => onRetry!(line),
                 child: const Text('Try again'),
+              ),
+            ),
+          if (line.retry == LineRetry.openBilling && onOpenBilling != null)
+            identified(
+              ShellIds.openBilling(line.runId),
+              TextButton(
+                onPressed: onOpenBilling,
+                child: const Text('Open Billing'),
               ),
             ),
         ],

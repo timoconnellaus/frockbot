@@ -1,4 +1,7 @@
-import { BILLING_LAUNCH_BLOCKERS } from "./billing-readiness.js";
+import {
+  BILLING_LAUNCH_BLOCKERS,
+  hostedBillingEnabledV1,
+} from "./billing-readiness.js";
 import { COMPUTER_TARIFF } from "@frockbot/app/billing/computer";
 import { decodeModelRates } from "@frockbot/app/billing/model";
 import {
@@ -259,6 +262,9 @@ export function billingRoutes(
                 viewerRenewSeconds: COMPUTER_TARIFF.viewerRenewSeconds,
               },
               launchBlockers: BILLING_LAUNCH_BLOCKERS,
+              // Whether this deployment meters at all. Off, and credit is
+              // meaningless: nothing is charged and nothing is refused.
+              metered: hostedBillingEnabledV1(env),
               paymentsAvailable:
                 BILLING_LAUNCH_BLOCKERS.length === 0 &&
                 !!(

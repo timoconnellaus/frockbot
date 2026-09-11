@@ -47,9 +47,13 @@ class _BillingPageState extends State<BillingPage> with WidgetsBindingObserver {
       if (!mounted) return;
       setState(() {
         account = response;
-        message = response['paymentsAvailable'] == true
-            ? null
-            : 'Payments are not available yet.';
+        message = response['paymentsAvailable'] != true
+            ? 'Payments are not available yet.'
+            : response['suspended'] == true
+            ? 'Payments need review. Contact support before starting more paid work.'
+            : response['metered'] == true && response['canSpend'] != true
+            ? 'Your Bots can’t reply until you subscribe or receive credit.'
+            : null;
       });
     } catch (error) {
       if (mounted) setState(() => message = error.toString());
@@ -98,7 +102,8 @@ class _BillingPageState extends State<BillingPage> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     final data = account;
     final subscription = data?['subscription'] as Map?;
-    final active = data?['canSpend'] == true;
+    // Top-ups are bought against a subscription: they need one to be spent.
+    final subscribed = data?['subscribed'] == true;
     final hasSubscription =
         subscription != null &&
         !{'canceled', 'incomplete_expired'}.contains(subscription['status']);
@@ -140,6 +145,12 @@ class _BillingPageState extends State<BillingPage> with WidgetsBindingObserver {
               data?['includedMicros'],
               'Resets each billing month. Used first.',
             ),
+            if ((data?['complimentaryMicros'] as num? ?? 0) > 0)
+              _balance(
+                'Complimentary credit',
+                data?['complimentaryMicros'],
+                'Granted by FrockBot. Spendable without a subscription.',
+              ),
             _balance(
               'Purchased credit',
               data?['purchasedMicros'],
@@ -172,7 +183,7 @@ class _BillingPageState extends State<BillingPage> with WidgetsBindingObserver {
               children: [
                 for (final cents in [1000, 2500, 5000])
                   OutlinedButton(
-                    onPressed: available && active
+                    onPressed: available && subscribed
                         ? () => _openPayment('topup', cents: cents)
                         : null,
                     child: Text('US\$${cents ~/ 100}'),

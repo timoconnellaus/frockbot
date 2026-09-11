@@ -47,75 +47,78 @@ Map<String, dynamic> registration(String botId, String name) => {
 };
 
 void main() {
-  testWidgets('a phone opens on the Bot list, and Back from a chat is the list', (
-    tester,
-  ) async {
-    tester.view.physicalSize = const Size(320, 800);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-    final store = MemoryStore();
-    // The directory the last run cached: what a phone shows before the
-    // network answers, and here the only answer it gets.
-    store.values['directory/test-user'] = jsonEncode({
-      'schemaVersion': 1,
-      'revision': 1,
-      'bots': [registration('bot-one', 'Rosemary')],
-    });
-    final api = OfflineApi(store);
-    final sessions = BotSessions(api: api, store: store);
-    final links = ValueNotifier<String?>(null);
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: FrockTheme.theme(Brightness.dark),
-        home: AppShell(
-          api: api,
-          store: store,
-          sessions: sessions,
-          userId: 'test-user',
-          botLinks: links,
-          onSignOut: () async {},
+  creditTests();
+  testWidgets(
+    'a phone opens on the Bot list, and Back from a chat is the list',
+    (tester) async {
+      tester.view.physicalSize = const Size(320, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final store = MemoryStore();
+      // The directory the last run cached: what a phone shows before the
+      // network answers, and here the only answer it gets.
+      store.values['directory/test-user'] = jsonEncode({
+        'schemaVersion': 1,
+        'revision': 1,
+        'bots': [registration('bot-one', 'Rosemary')],
+      });
+      final api = OfflineApi(store);
+      final sessions = BotSessions(api: api, store: store);
+      final links = ValueNotifier<String?>(null);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: FrockTheme.theme(Brightness.dark),
+          home: AppShell(
+            api: api,
+            store: store,
+            sessions: sessions,
+            userId: 'test-user',
+            botLinks: links,
+            onSignOut: () async {},
+          ),
         ),
-      ),
-    );
-    await tester.pumpAndSettle();
-    // The list is the screen: no hamburger, no drawer, the whole width.
-    expect(find.byTooltip('Your Bots'), findsNothing);
-    expect(tester.getSize(identifiedBy(ShellIds.sidebar)).width, 320);
-    expect(identifiedBy(ShellIds.sidebarProfile).hitTestable(), findsOneWidget);
-    expect(identifiedBy(ShellIds.conversation), findsNothing);
+      );
+      await tester.pumpAndSettle();
+      // The list is the screen: no hamburger, no drawer, the whole width.
+      expect(find.byTooltip('Your Bots'), findsNothing);
+      expect(tester.getSize(identifiedBy(ShellIds.sidebar)).width, 320);
+      expect(
+        identifiedBy(ShellIds.sidebarProfile).hitTestable(),
+        findsOneWidget,
+      );
+      expect(identifiedBy(ShellIds.conversation), findsNothing);
 
-    // A row opens its conversation as a page, with the way back in its bar.
-    await tester.tap(find.byKey(const ValueKey('bot-bot-one')));
-    await tester.pumpAndSettle();
-    expect(find.widgetWithText(AppBar, 'Rosemary'), findsOneWidget);
-    expect(identifiedBy(ShellIds.sidebarToggle), findsOneWidget);
-    expect(identifiedBy(ShellIds.botPanelToggle), findsOneWidget);
-    expect(find.byTooltip('Routines'), findsNothing);
-    expect(identifiedBy(ShellIds.sidebar), findsNothing);
+      // A row opens its conversation as a page, with the way back in its bar.
+      await tester.tap(find.byKey(const ValueKey('bot-bot-one')));
+      await tester.pumpAndSettle();
+      expect(find.widgetWithText(AppBar, 'Rosemary'), findsOneWidget);
+      expect(identifiedBy(ShellIds.sidebarToggle), findsOneWidget);
+      expect(identifiedBy(ShellIds.botPanelToggle), findsOneWidget);
+      expect(find.byTooltip('Routines'), findsNothing);
+      expect(identifiedBy(ShellIds.sidebar), findsNothing);
 
-    // The system gesture is the same way back, and never the way out.
-    await tester.binding.handlePopRoute();
-    await tester.pumpAndSettle();
-    expect(identifiedBy(ShellIds.sidebar).hitTestable(), findsOneWidget);
-    expect(find.widgetWithText(AppBar, 'Rosemary'), findsNothing);
-    expect(find.byType(AppShell), findsOneWidget);
+      // The system gesture is the same way back, and never the way out.
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      expect(identifiedBy(ShellIds.sidebar).hitTestable(), findsOneWidget);
+      expect(find.widgetWithText(AppBar, 'Rosemary'), findsNothing);
+      expect(find.byType(AppShell), findsOneWidget);
 
-    await tester.tap(find.byKey(const ValueKey('bot-bot-one')));
-    await tester.pumpAndSettle();
-    await tester.tap(identifiedBy(ShellIds.sidebarToggle));
-    await tester.pumpAndSettle();
-    expect(identifiedBy(ShellIds.sidebar).hitTestable(), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('bot-bot-one')));
+      await tester.pumpAndSettle();
+      await tester.tap(identifiedBy(ShellIds.sidebarToggle));
+      await tester.pumpAndSettle();
+      expect(identifiedBy(ShellIds.sidebar).hitTestable(), findsOneWidget);
 
-    await tester.pumpWidget(const SizedBox());
-    sessions.clear();
-    links.dispose();
-    api.close();
-  });
+      await tester.pumpWidget(const SizedBox());
+      sessions.clear();
+      links.dispose();
+      api.close();
+    },
+  );
 
-  testWidgets('the Profile page ends with the running version', (
-    tester,
-  ) async {
+  testWidgets('the Profile page ends with the running version', (tester) async {
     tester.view.physicalSize = const Size(900, 900);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -265,6 +268,153 @@ void main() {
     await tester.pumpAndSettle();
     expect(identifiedBy(SettingsIds.profileMenu), findsOneWidget);
     expect(find.byType(BottomSheet), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+    sessions.clear();
+    links.dispose();
+    api.close();
+  });
+}
+
+/// An API that answers the account's balance and nothing else, so the shell
+/// can be shown with a metered account while every other read is offline.
+class BilledApi extends OfflineApi {
+  final Map<String, Object?> billing;
+  BilledApi(super.store, this.billing);
+  @override
+  Future<Object?> request(
+    String path, {
+    Object? body,
+    int limit = 512000,
+    bool authenticated = true,
+  }) async {
+    if (path == '/api/billing') return billing;
+    throw const FormatException('offline fixture');
+  }
+}
+
+Map<String, Object?> meteredBilling({required bool canSpend}) => {
+  'metered': true,
+  'paymentsAvailable': true,
+  'canSpend': canSpend,
+  'subscribed': false,
+  'suspended': false,
+  'includedMicros': 0,
+  'complimentaryMicros': canSpend ? 7250000 : 0,
+  'purchasedMicros': 0,
+  'reservedMicros': 0,
+};
+
+void creditTests() {
+  testWidgets('the Profile page opens with what the account can spend', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(900, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final store = MemoryStore();
+    final api = BilledApi(store, meteredBilling(canSpend: true));
+    final sessions = BotSessions(api: api, store: store);
+    final links = ValueNotifier<String?>(null);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: FrockTheme.theme(Brightness.dark),
+        home: AppShell(
+          api: api,
+          store: store,
+          sessions: sessions,
+          userId: 'test-user',
+          botLinks: links,
+          onSignOut: () async {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(identifiedBy(ShellIds.sidebarProfile));
+    await tester.pumpAndSettle();
+    final credit = identifiedBy(SettingsIds.profileCredit);
+    expect(credit, findsOneWidget);
+    expect(
+      find.descendant(
+        of: credit,
+        matching: find.text('US\$7.25 credit remaining'),
+      ),
+      findsOneWidget,
+    );
+    // Above the account's own rows: the first thing under the name.
+    expect(
+      tester.getTopLeft(credit).dy,
+      lessThan(tester.getTopLeft(identifiedBy(SettingsIds.profileSettings)).dy),
+    );
+    await tester.tap(credit);
+    await tester.pumpAndSettle();
+    expect(find.text('Billing & usage'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+    sessions.clear();
+    links.dispose();
+    api.close();
+  });
+
+  testWidgets('an account that cannot spend is told before it types', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(900, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final store = MemoryStore();
+    store.values['directory/test-user'] = jsonEncode({
+      'schemaVersion': 1,
+      'revision': 1,
+      'bots': [registration('bot-one', 'Rosemary')],
+    });
+    final api = BilledApi(store, meteredBilling(canSpend: false));
+    final sessions = BotSessions(api: api, store: store);
+    final links = ValueNotifier<String?>(null);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: FrockTheme.theme(Brightness.dark),
+        home: AppShell(
+          api: api,
+          store: store,
+          sessions: sessions,
+          userId: 'test-user',
+          botLinks: links,
+          onSignOut: () async {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('bot-bot-one')));
+    await tester.pumpAndSettle();
+    final banner = identifiedBy(ShellIds.outOfCredit);
+    expect(banner, findsOneWidget);
+    expect(
+      find.descendant(
+        of: banner,
+        matching: find.text(
+          'Your Bots can’t reply until you subscribe or add credit.',
+        ),
+      ),
+      findsOneWidget,
+    );
+    await tester.tap(
+      find.descendant(of: banner, matching: find.text('Open Billing')),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Billing & usage'), findsOneWidget);
+    // And the Profile says the same, in red.
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    await tester.tap(identifiedBy(ShellIds.sidebarProfile));
+    await tester.pumpAndSettle();
+    expect(
+      find.descendant(
+        of: identifiedBy(SettingsIds.profileCredit),
+        matching: find.text('No credit'),
+      ),
+      findsOneWidget,
+    );
     await tester.pumpWidget(const SizedBox());
     sessions.clear();
     links.dispose();

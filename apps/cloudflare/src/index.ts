@@ -117,6 +117,9 @@ import {
   type DeploymentPolicyV1,
   type SetSignupsCommandV1,
   decodeUserFeaturesV1,
+  decodeAdminUserBillingV1,
+  type AdminUserBillingV1,
+  type GrantUserCreditCommandV1,
   type SetUserFeaturesCommandV1,
   type UserFeaturesV1,
 } from "@frockbot/app/admin/shared";
@@ -328,6 +331,22 @@ async function listIdentityStoreUsers(
     .bind(limit)
     .all<{ id: string; email: string; name: string; createdAt: string }>();
   return result.results ?? [];
+}
+
+/** The User Durable Object's credit ledger, addressed by User, as the admin sees it. */
+function userBillingStub(
+  env: Env,
+  userId: string,
+): {
+  readBillingBalance(input: unknown): Promise<unknown>;
+  grantComplimentaryCredit(input: unknown): Promise<unknown>;
+} {
+  const id = env.USER_CONFIGURATIONS.idFromName(userId);
+  // SAFETY: Wrangler binds USER_CONFIGURATIONS to UserConfiguration; workers-types cannot infer its billing RPC surface.
+  return env.USER_CONFIGURATIONS.get(id) as unknown as {
+    readBillingBalance(input: unknown): Promise<unknown>;
+    grantComplimentaryCredit(input: unknown): Promise<unknown>;
+  };
 }
 
 /** The User Durable Object's account features, addressed by User. */
@@ -1755,6 +1774,30 @@ const createGatewayBackendContributions = (env: Env) =>
             userId,
             command,
             updatedBy,
+          }),
+        ),
+      ),
+    readUserBilling: async (userId: string): Promise<AdminUserBillingV1> =>
+      decodeAdminUserBillingV1(
+        rpcJsonSnapshot(
+          await userBillingStub(env, userId).readBillingBalance({ userId }),
+        ),
+      ),
+    grantUserCredit: async (
+      userId: string,
+      command: GrantUserCreditCommandV1,
+      grantedBy: string,
+    ): Promise<AdminUserBillingV1> =>
+      decodeAdminUserBillingV1(
+        rpcJsonSnapshot(
+          await userBillingStub(env, userId).grantComplimentaryCredit({
+            userId,
+            command: {
+              id: command.id,
+              micros: command.cents * 10_000,
+              grantedBy,
+              reason: command.reason,
+            },
           }),
         ),
       ),

@@ -13,6 +13,10 @@ import {
 } from "@frockbot/core/agent-loop";
 
 import { UNSENT_REPLY_REASON_V1 } from "./delivery.js";
+import {
+  CREDIT_EXHAUSTED_REASON_V1,
+  SUBSCRIPTION_REQUIRED_REASON_V1,
+} from "../billing/ledger.js";
 
 /**
  * The one place a Turn that did not finish is turned into a sentence for the
@@ -50,6 +54,19 @@ export const USER_FACING_FAILURE_REASONS_V1: readonly string[] = [
   TURN_DEADLINE_REASON_V1,
   STEP_LIMIT_REASON_V1,
   UNSENT_REPLY_REASON_V1,
+  // Billing's refusals name what the person can do about them — subscribe,
+  // or add credit — which the outcome alone ("model-error") never could.
+  SUBSCRIPTION_REQUIRED_REASON_V1,
+  CREDIT_EXHAUSTED_REASON_V1,
+];
+
+/**
+ * The failures whose way out is Billing rather than sending again. A client
+ * that can open Billing offers that instead of a retry.
+ */
+export const BILLING_FAILURE_REASONS_V1: readonly string[] = [
+  SUBSCRIPTION_REQUIRED_REASON_V1,
+  CREDIT_EXHAUSTED_REASON_V1,
 ];
 
 /**

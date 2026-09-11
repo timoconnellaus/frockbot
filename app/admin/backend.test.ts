@@ -6,6 +6,7 @@ import {
 import {
   DeploymentPolicyConflictError,
   defaultUserFeaturesV1,
+  type AdminUserBillingV1,
   type DeploymentPolicyV1,
   type UserFeaturesV1,
 } from "./shared.js";
@@ -25,11 +26,45 @@ function accountsHost(
   listed: Array<{ userId: string; email?: string; name?: string }>,
 ): Pick<
   AdminGatewayHost,
-  "listUsers" | "readUserFeatures" | "setUserFeatures"
-> & { features: Map<string, UserFeaturesV1> } {
+  | "listUsers"
+  | "readUserFeatures"
+  | "setUserFeatures"
+  | "readUserBilling"
+  | "grantUserCredit"
+> & {
+  features: Map<string, UserFeaturesV1>;
+  credit: Map<string, number>;
+  grants: Array<{ userId: string; id: string; cents: number; by: string }>;
+} {
   const features = new Map<string, UserFeaturesV1>();
+  const credit = new Map<string, number>();
+  const grants: Array<{
+    userId: string;
+    id: string;
+    cents: number;
+    by: string;
+  }> = [];
+  const billing = (userId: string): AdminUserBillingV1 => ({
+    includedMicros: 0,
+    purchasedMicros: 0,
+    complimentaryMicros: credit.get(userId) ?? 0,
+    reservedMicros: 0,
+    subscribed: false,
+    canSpend: (credit.get(userId) ?? 0) > 0,
+    suspended: false,
+  });
   return {
     features,
+    credit,
+    grants,
+    readUserBilling: (userId) => Promise.resolve(billing(userId)),
+    grantUserCredit: (userId, command, by) => {
+      if (!grants.some((g) => g.userId === userId && g.id === command.id)) {
+        grants.push({ userId, id: command.id, cents: command.cents, by });
+        credit.set(userId, (credit.get(userId) ?? 0) + command.cents * 10_000);
+      }
+      return Promise.resolve(billing(userId));
+    },
     listUsers: () => Promise.resolve(listed),
     readUserFeatures: (userId) =>
       Promise.resolve(features.get(userId) ?? defaultUserFeaturesV1()),
@@ -45,6 +80,16 @@ function accountsHost(
     },
   };
 }
+
+const noCredit: AdminUserBillingV1 = {
+  includedMicros: 0,
+  purchasedMicros: 0,
+  complimentaryMicros: 0,
+  reservedMicros: 0,
+  subscribed: false,
+  canSpend: false,
+  suspended: false,
+};
 
 describe("admin gateway contribution", () => {
   test("refuses non-admins before reading deployment policy", async () => {
@@ -173,12 +218,17 @@ describe("admin gateway contribution", () => {
     expect(await listed?.json<unknown>()).toEqual({
       schemaVersion: 1,
       users: [
-        { userId: "development", features: defaultUserFeaturesV1() },
+        {
+          userId: "development",
+          features: defaultUserFeaturesV1(),
+          billing: noCredit,
+        },
         {
           userId: "guest",
           email: "guest@example.com",
           name: "Guest",
           features: defaultUserFeaturesV1(),
+          billing: noCredit,
         },
       ],
     });
@@ -214,6 +264,94 @@ describe("admin gateway contribution", () => {
     expect(users.map((user) => [user.userId, user.features.applets])).toEqual([
       ["development", false],
       ["guest", true],
+    ]);
+  });
+
+  test("an admin grants credit once per id, and the list shows what it left", async () => {
+    const host = accountsHost([
+      { userId: "guest", email: "guest@example.com", name: "Guest" },
+    ]);
+    const contribution = createAdminBackendContribution({
+      readDeploymentPolicy: () => Promise.resolve(initialPolicy()),
+      setDeploymentSignups: () => Promise.resolve(initialPolicy()),
+      ...host,
+    });
+    const context = {
+      userId: "tim",
+      client: "browser" as const,
+      isAdmin: true,
+    };
+    const grant = (body: unknown) =>
+      contribution.route(
+        new Request("https://frockbot.test/api/admin/users/guest/credit", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        }),
+        new URL("https://frockbot.test/api/admin/users/guest/credit"),
+        context,
+      );
+    const command = {
+      schemaVersion: 1,
+      type: "user/grant-credit",
+      id: "grant-1",
+      cents: 1000,
+      reason: "Early tester",
+    };
+    const granted = await grant(command);
+    expect(granted?.status).toBe(200);
+    expect(await granted?.json()).toMatchObject({
+      complimentaryMicros: 10_000_000,
+      canSpend: true,
+    });
+    // The same tap again lands once.
+    await grant(command);
+    expect(host.grants).toEqual([
+      { userId: "guest", id: "grant-1", cents: 1000, by: "tim" },
+    ]);
+
+    for (const bad of [
+      { ...command, cents: 0 },
+      { ...command, cents: 100_001 },
+      { ...command, cents: 12.5 },
+      { ...command, reason: "" },
+      { ...command, id: "not valid!" },
+      { ...command, extra: true },
+    ]) {
+      expect((await grant(bad))?.status).toBe(400);
+    }
+    const refused = await grant({ ...command, id: "grant-2" });
+    expect(refused?.status).toBe(200);
+    expect(
+      (
+        await contribution.route(
+          new Request("https://frockbot.test/api/admin/users/guest/credit", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(command),
+          }),
+          new URL("https://frockbot.test/api/admin/users/guest/credit"),
+          { ...context, isAdmin: false },
+        )
+      )?.status,
+    ).toBe(403);
+
+    const listed = await contribution.route(
+      new Request("https://frockbot.test/api/admin/users"),
+      new URL("https://frockbot.test/api/admin/users"),
+      context,
+    );
+    const { users } = (await listed?.json()) as {
+      users: Array<{
+        userId: string;
+        billing: { complimentaryMicros: number };
+      }>;
+    };
+    expect(
+      users.map((user) => [user.userId, user.billing.complimentaryMicros]),
+    ).toEqual([
+      ["tim", 0],
+      ["guest", 20_000_000],
     ]);
   });
 

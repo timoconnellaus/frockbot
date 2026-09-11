@@ -201,12 +201,56 @@ export interface UserFeaturesUnavailableV1 {
 
 export type AdminUserFeaturesV1 = UserFeaturesV1 | UserFeaturesUnavailableV1;
 
+// --- Account credit -----------------------------------------------------------
+//
+// What an account can spend, and the one write an admin makes against it: a
+// complimentary grant. The ledger is the account's, in its User Durable
+// Object; the admin only ever adds to it, by an id the admin chose, so a
+// repeated tap grants once.
+
+export interface AdminUserBillingV1 {
+  includedMicros: number;
+  purchasedMicros: number;
+  complimentaryMicros: number;
+  reservedMicros: number;
+  subscribed: boolean;
+  canSpend: boolean;
+  suspended: boolean;
+}
+
+export interface AdminUserBillingUnavailableV1 {
+  unavailable: true;
+}
+
+export type AdminUserBillingViewV1 =
+  AdminUserBillingV1 | AdminUserBillingUnavailableV1;
+
+export interface GrantUserCreditCommandV1 {
+  schemaVersion: 1;
+  type: "user/grant-credit";
+  /** The admin's idempotency key for this one grant. */
+  id: string;
+  cents: number;
+  reason: string;
+}
+
+export interface GrantUserCreditRequestV1 {
+  schemaVersion: 1;
+  userId: string;
+  command: GrantUserCreditCommandV1;
+  grantedBy: string;
+}
+
+/** The most one hand-grant may be: a guard against a slipped digit. */
+export const GRANT_USER_CREDIT_MAXIMUM_CENTS = 100_000;
+
 /** One account as the admin list shows it: identity, and what it holds. */
 export interface AdminUserViewV1 {
   userId: string;
   email?: string;
   name?: string;
   features: AdminUserFeaturesV1;
+  billing: AdminUserBillingViewV1;
 }
 
 export interface AdminUserListViewV1 {
@@ -335,6 +379,132 @@ export function decodeSetUserFeaturesRequestV1(
   };
 }
 
+function micros(value: unknown, label: string): number {
+  if (!Number.isSafeInteger(value) || (value as number) < 0) {
+    throw new Error(`${label} is invalid`);
+  }
+  return value as number;
+}
+
+export function decodeAdminUserBillingV1(input: unknown): AdminUserBillingV1 {
+  const billing = record(input, "admin user billing");
+  exactKeys(
+    billing,
+    [
+      "includedMicros",
+      "purchasedMicros",
+      "complimentaryMicros",
+      "reservedMicros",
+      "subscribed",
+      "canSpend",
+      "suspended",
+    ],
+    "admin user billing",
+  );
+  for (const flag of ["subscribed", "canSpend", "suspended"]) {
+    if (typeof billing[flag] !== "boolean") {
+      throw new Error(`admin user billing.${flag} is invalid`);
+    }
+  }
+  return {
+    includedMicros: micros(
+      billing.includedMicros,
+      "admin user billing.includedMicros",
+    ),
+    purchasedMicros: micros(
+      billing.purchasedMicros,
+      "admin user billing.purchasedMicros",
+    ),
+    complimentaryMicros: micros(
+      billing.complimentaryMicros,
+      "admin user billing.complimentaryMicros",
+    ),
+    reservedMicros: micros(
+      billing.reservedMicros,
+      "admin user billing.reservedMicros",
+    ),
+    subscribed: billing.subscribed as boolean,
+    canSpend: billing.canSpend as boolean,
+    suspended: billing.suspended as boolean,
+  };
+}
+
+export function isUserBillingUnavailable(
+  billing: AdminUserBillingViewV1,
+): billing is AdminUserBillingUnavailableV1 {
+  return "unavailable" in billing;
+}
+
+export function decodeAdminUserBillingViewV1(
+  input: unknown,
+): AdminUserBillingViewV1 {
+  const billing = record(input, "admin user billing");
+  if ("unavailable" in billing) {
+    exactKeys(billing, ["unavailable"], "admin user billing");
+    if (billing.unavailable !== true) {
+      throw new Error("admin user billing.unavailable is invalid");
+    }
+    return { unavailable: true };
+  }
+  return decodeAdminUserBillingV1(billing);
+}
+
+export function decodeGrantUserCreditCommandV1(
+  input: unknown,
+): GrantUserCreditCommandV1 {
+  const command = record(input, "credit grant command");
+  exactKeys(
+    command,
+    ["schemaVersion", "type", "id", "cents", "reason"],
+    "credit grant command",
+  );
+  if (command.schemaVersion !== 1 || command.type !== "user/grant-credit") {
+    throw new Error("credit grant command is invalid");
+  }
+  const id = boundedString(command.id, "credit grant command.id", 128);
+  if (!/^[a-zA-Z0-9_.-]+$/.test(id)) {
+    throw new Error("credit grant command.id is invalid");
+  }
+  if (
+    !Number.isSafeInteger(command.cents) ||
+    (command.cents as number) < 1 ||
+    (command.cents as number) > GRANT_USER_CREDIT_MAXIMUM_CENTS
+  ) {
+    throw new Error("credit grant command.cents is invalid");
+  }
+  return {
+    schemaVersion: 1,
+    type: "user/grant-credit",
+    id,
+    cents: command.cents as number,
+    reason: boundedString(command.reason, "credit grant command.reason", 300),
+  };
+}
+
+export function decodeGrantUserCreditRequestV1(
+  input: unknown,
+): GrantUserCreditRequestV1 {
+  const request = record(input, "credit grant request");
+  exactKeys(
+    request,
+    ["schemaVersion", "userId", "command", "grantedBy"],
+    "credit grant request",
+  );
+  if (request.schemaVersion !== 1) {
+    throw new Error("credit grant request.schemaVersion is invalid");
+  }
+  return {
+    schemaVersion: 1,
+    userId: boundedString(request.userId, "credit grant request.userId", 512),
+    command: decodeGrantUserCreditCommandV1(request.command),
+    grantedBy: boundedString(
+      request.grantedBy,
+      "credit grant request.grantedBy",
+      512,
+    ),
+  };
+}
+
 function optionalDisplayString(
   value: unknown,
   maximum: number,
@@ -346,7 +516,7 @@ function optionalDisplayString(
 export function decodeAdminUserViewV1(input: unknown): AdminUserViewV1 {
   const user = record(input, "admin user");
   const keys = Object.keys(user);
-  const allowed = ["userId", "email", "name", "features"];
+  const allowed = ["userId", "email", "name", "features", "billing"];
   if (!keys.every((key) => allowed.includes(key))) {
     throw new Error("admin user has unknown fields");
   }
@@ -357,6 +527,7 @@ export function decodeAdminUserViewV1(input: unknown): AdminUserViewV1 {
     ...(email === undefined ? {} : { email }),
     ...(name === undefined ? {} : { name }),
     features: decodeAdminUserFeaturesV1(user.features),
+    billing: decodeAdminUserBillingViewV1(user.billing),
   };
 }
 

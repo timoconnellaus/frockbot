@@ -6,6 +6,38 @@ export const BILLING_PLAN = {
   pricingVersion: "2026-09-09",
 } as const;
 
+/**
+ * The two refusals a person is told in the conversation, so they are written
+ * for the person. `run-failure-copy` carries them through verbatim.
+ */
+export const SUBSCRIPTION_REQUIRED_REASON_V1 =
+  "A paid FrockBot subscription is required. Open Billing to subscribe or update your payment method.";
+export const CREDIT_EXHAUSTED_REASON_V1 =
+  "You have no usage credit left. Open Billing to add more.";
+
+export type GrantKind = "included" | "purchased" | "complimentary";
+
+/** Credit an administrator gave an account by hand. Spendable without a subscription. */
+export interface ComplimentaryGrant {
+  /** The admin's idempotency key; the grant is `complimentary:<id>`. */
+  id: string;
+  micros: number;
+  grantedBy: string;
+  reason: string;
+}
+
+export interface BillingBalance {
+  includedMicros: number;
+  purchasedMicros: number;
+  complimentaryMicros: number;
+  reservedMicros: number;
+  /** A paid subscription period is current: top-ups can be bought and spent. */
+  subscribed: boolean;
+  /** A model call would be admitted: subscribed, or complimentary credit remains. */
+  canSpend: boolean;
+  suspended: boolean;
+}
+
 export class BillingError extends Error {
   constructor(
     message: string,
@@ -164,12 +196,7 @@ export class BillingLedger {
       return result;
     });
   }
-  grant(
-    id: string,
-    kind: "included" | "purchased",
-    micros: number,
-    expires: number | null,
-  ) {
+  grant(id: string, kind: GrantKind, micros: number, expires: number | null) {
     identifier(id);
     amount(micros, "credit");
     if (expires !== null) timestamp(expires, "expiry");
@@ -199,24 +226,64 @@ export class BillingLedger {
       );
     });
   }
+  /**
+   * Admin-granted credit. Idempotent by the admin's id: the same command
+   * again is a no-op, a different amount or reason under the same id is a
+   * conflict, so a double-tapped button never grants twice.
+   */
+  grantComplimentary(command: ComplimentaryGrant) {
+    identifier(command.id);
+    amount(command.micros, "credit");
+    if (command.micros === 0) throw new BillingError("Invalid credit", 400);
+    if (
+      !command.grantedBy ||
+      command.grantedBy.length > 512 ||
+      !command.reason ||
+      command.reason.length > 300
+    )
+      throw new BillingError("Invalid credit grant", 400);
+    this.once(`complimentary:${command.id}`, command, () =>
+      this.grant(
+        `complimentary:${command.id}`,
+        "complimentary",
+        command.micros,
+        null,
+      ),
+    );
+  }
   subscription(): SubscriptionState | undefined {
     return this.get<SubscriptionState>("subscription");
   }
-  requireSubscription() {
+  /** Whether a paid subscription period is current and the account is not suspended. */
+  subscribed(): boolean {
     const subscription = this.subscription();
     const paid = this.get<PaidAccessState>("paidAccess");
-    if (
-      !subscription ||
-      subscription.status !== "active" ||
-      !paid ||
-      paid.subscriptionId !== subscription.subscriptionId ||
-      paid.periodStart > this.now() ||
-      paid.periodEnd <= this.now() ||
-      this.get<boolean>("suspended")
-    )
-      throw new BillingError(
-        "A paid FrockBot subscription is required. Open Billing to subscribe or update your payment method.",
-      );
+    return !!(
+      subscription &&
+      subscription.status === "active" &&
+      paid &&
+      paid.subscriptionId === subscription.subscriptionId &&
+      paid.periodStart <= this.now() &&
+      paid.periodEnd > this.now() &&
+      !this.get<boolean>("suspended")
+    );
+  }
+  requireSubscription() {
+    if (!this.subscribed())
+      throw new BillingError(SUBSCRIPTION_REQUIRED_REASON_V1);
+  }
+  /**
+   * The grants a reservation may draw on, cheapest to spend first: monthly
+   * credit expires soonest, complimentary credit was a gift, purchased credit
+   * carries forward. Without a subscription only complimentary credit counts.
+   */
+  private spendable(subscribed: boolean): Grant[] {
+    return this.rows<Grant>(
+      `SELECT id, kind, remaining, expires FROM billing_grants WHERE remaining > 0 AND (expires IS NULL OR expires > ?)${
+        subscribed ? "" : " AND kind = 'complimentary'"
+      } ORDER BY CASE kind WHEN 'included' THEN 0 WHEN 'complimentary' THEN 1 ELSE 2 END, expires, created, id`,
+      this.now(),
+    );
   }
   reserve(input: UsageReservation) {
     identifier(input.id);
@@ -242,16 +309,16 @@ export class BillingLedger {
           created: false,
         };
       }
-      this.requireSubscription();
+      const subscribed = this.subscribed();
+      if (this.get<boolean>("suspended"))
+        throw new BillingError(SUBSCRIPTION_REQUIRED_REASON_V1);
+      const grants = this.spendable(subscribed);
+      const available = grants.reduce((total, g) => total + g.remaining, 0);
+      if (!subscribed && available === 0)
+        throw new BillingError(SUBSCRIPTION_REQUIRED_REASON_V1);
       let needed = input.maximumMicros;
-      const grants = this.rows<Grant>(
-        "SELECT id, kind, remaining, expires FROM billing_grants WHERE remaining > 0 AND (expires IS NULL OR expires > ?) ORDER BY CASE kind WHEN 'included' THEN 0 ELSE 1 END, expires, created, id",
-        this.now(),
-      );
-      if (grants.reduce((total, grant) => total + grant.remaining, 0) < needed)
-        throw new BillingError(
-          "Usage credit has run out. Add a top-up in Billing to continue.",
-        );
+      if (available < needed)
+        throw new BillingError(CREDIT_EXHAUSTED_REASON_V1);
       const allocations: { id: string; micros: number }[] = [];
       for (const grant of grants) {
         const micros = Math.min(needed, grant.remaining);
@@ -373,16 +440,34 @@ export class BillingLedger {
       }
     });
   }
-  snapshot(before?: number) {
-    const now = this.now();
+  /** What the account can spend right now. Cheap: three small reads. */
+  balance(): BillingBalance {
     const grants = this.rows<Grant>(
       "SELECT id, kind, remaining, expires FROM billing_grants WHERE expires IS NULL OR expires > ?",
-      now,
+      this.now(),
     );
-    const pending =
-      this.rows<{ micros: number }>(
-        "SELECT COALESCE(SUM(maximum), 0) AS micros FROM billing_operations WHERE status = 'reserved'",
-      )[0]?.micros ?? 0;
+    const sum = (kind: GrantKind) =>
+      grants
+        .filter((g) => g.kind === kind)
+        .reduce((n, g) => n + g.remaining, 0);
+    const subscribed = this.subscribed();
+    const suspended = this.get<boolean>("suspended") ?? false;
+    const complimentaryMicros = sum("complimentary");
+    return {
+      includedMicros: sum("included"),
+      purchasedMicros: sum("purchased"),
+      complimentaryMicros,
+      reservedMicros:
+        this.rows<{ micros: number }>(
+          "SELECT COALESCE(SUM(maximum), 0) AS micros FROM billing_operations WHERE status = 'reserved'",
+        )[0]?.micros ?? 0,
+      subscribed,
+      canSpend: !suspended && (subscribed || complimentaryMicros > 0),
+      suspended,
+    };
+  }
+  snapshot(before?: number) {
+    const now = this.now();
     const usage = this.rows<SqlRow>(
       "SELECT rowid AS cursor, id, status, kind, bot_id AS botId, session_id AS sessionId, description, pricing_version AS pricingVersion, fingerprint, created, maximum AS reservedMicros, settlement FROM billing_operations WHERE rowid < ? ORDER BY rowid DESC LIMIT 100",
       before ?? Number.MAX_SAFE_INTEGER,
@@ -395,15 +480,8 @@ export class BillingLedger {
         ? (JSON.parse(row.settlement as string) as UsageSettlement)
         : null,
     }));
-    let canSpend = false;
-    try {
-      this.requireSubscription();
-      canSpend = true;
-    } catch {
-      /* A billing read remains available without paid access. */
-    }
     return {
-      canSpend,
+      ...this.balance(),
       paidAccess: this.get<PaidAccessState>("paidAccess") ?? null,
       summaries: this.rows<SqlRow>(
         "SELECT kind, bot_id AS botId, date(created / 1000, 'unixepoch') AS day, SUM(COALESCE(json_extract(settlement, '$.chargeMicros'), 0)) AS chargeMicros, COUNT(*) AS operations FROM billing_operations WHERE created >= ? GROUP BY day, kind, bot_id ORDER BY day DESC LIMIT 100",
@@ -414,14 +492,6 @@ export class BillingLedger {
       ),
       plan: BILLING_PLAN,
       subscription: this.subscription() ?? null,
-      suspended: this.get<boolean>("suspended") ?? false,
-      includedMicros: grants
-        .filter((g) => g.kind === "included")
-        .reduce((sum, g) => sum + g.remaining, 0),
-      purchasedMicros: grants
-        .filter((g) => g.kind === "purchased")
-        .reduce((sum, g) => sum + g.remaining, 0),
-      reservedMicros: pending,
       usage,
     };
   }

@@ -1,5 +1,7 @@
 import {
   BillingLedger,
+  type BillingBalance,
+  type ComplimentaryGrant,
   type UsageReservation,
   type UsageSettlement,
 } from "@frockbot/app/billing/ledger";
@@ -239,6 +241,20 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
   async readBilling(input: { userId: string; before?: number }) {
     await this.assertUserIdentity(input.userId);
     return this.billing().snapshot(input.before);
+  }
+  async readBillingBalance(input: { userId: string }): Promise<BillingBalance> {
+    await this.assertUserIdentity(input.userId);
+    return this.billing().balance();
+  }
+  /** An administrator's hand-granted credit. Returns the balance it left. */
+  async grantComplimentaryCredit(input: {
+    userId: string;
+    command: ComplimentaryGrant;
+  }): Promise<BillingBalance> {
+    await this.assertUserIdentity(input.userId);
+    const ledger = this.billing();
+    ledger.grantComplimentary(input.command);
+    return ledger.balance();
   }
   async billingCheckout(input: {
     userId: string;

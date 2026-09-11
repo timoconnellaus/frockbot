@@ -36,6 +36,7 @@ import '../recovery/page.dart';
 import '../routines/page.dart';
 import '../search/overlay.dart';
 import '../settings/billing.dart';
+import '../settings/credit.dart';
 import '../settings/bot_settings.dart';
 import '../settings/page.dart';
 import '../templates/page.dart';
@@ -183,6 +184,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   bool isAdmin = false;
   TranscriptLine? openRun;
 
+  /// What the account can spend, from `/api/billing`. Null until read, and
+  /// null on a deployment that does not meter: then credit means nothing and
+  /// no surface mentions it.
+  AccountCredit? credit;
+
   @override
   void initState() {
     super.initState();
@@ -253,6 +259,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     resumed = state == AppLifecycleState.resumed;
     push.lifecycle(resumed);
+    if (resumed) unawaited(_readCredit());
     _activityTimer?.cancel();
     _activityTimer = null;
     if (appIsAwayV1(state)) {
@@ -372,8 +379,31 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     }
   }
 
+  /// The balance, read beside the identity and again whenever Billing may
+  /// have changed it: a resume, a return from the Billing page. A read that
+  /// fails keeps the last answer rather than flashing "no credit".
+  Future<void> _readCredit() async {
+    try {
+      final answer = await widget.api.request('/api/billing');
+      final next = AccountCredit.decode(answer);
+      if (mounted && next != credit) setState(() => credit = next);
+    } catch (_) {
+      // The chat and Profile keep saying what they last knew.
+    }
+  }
+
+  /// The Billing page, and a fresh balance when it is left.
+  Future<void> _openBilling() async {
+    push.reading(null);
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => BillingPage(api: widget.api)),
+    );
+    await _readCredit();
+  }
+
   Future<void> load() async {
     unawaited(_readIdentity());
+    unawaited(_readCredit());
     try {
       final cached = await widget.store.read('directory/${widget.userId}');
       if (cached != null && bots.isEmpty) {
@@ -1379,6 +1409,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                             botId: bot.botId.value,
                             onOpenRun: _openRun,
                             onOpenSettings: _openSettings,
+                            outOfCredit: credit?.canSpend == false,
+                            onOpenBilling: () => unawaited(_openBilling()),
                             onMessageActions: (line) =>
                                 unawaited(_messageActions(line)),
                             onReadLatest: (messageId) =>
@@ -1518,6 +1550,17 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                           subtitle: const Text('Signed in'),
                         ),
                       ),
+                      // What the account can spend, first, because it is the
+                      // one thing on this page that decides whether a Bot
+                      // replies at all.
+                      if (credit case final credit?)
+                        identified(
+                          SettingsIds.profileCredit,
+                          CreditTile(
+                            credit: credit,
+                            onTap: () => unawaited(_openBilling()),
+                          ),
+                        ),
                       _profileGroup('Account', [
                         _profileRow(
                           SettingsIds.profileSettings,
@@ -1544,7 +1587,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                           'profile-billing',
                           Icons.account_balance_wallet_outlined,
                           'Billing & usage',
-                          () => _push(BillingPage(api: widget.api)),
+                          () => unawaited(_openBilling()),
                         ),
                         _profileRow(
                           MachineIds.profileEntry,
@@ -1693,9 +1736,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                               textAlign: TextAlign.center,
                               style: Theme.of(context).textTheme.bodySmall
                                   ?.copyWith(
-                                    color: Theme.of(
-                                      context,
-                                    ).colorScheme.onSurfaceVariant,
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .onSurfaceVariant,
                                   ),
                             ),
                           ),
