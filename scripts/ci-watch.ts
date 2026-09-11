@@ -107,7 +107,7 @@ export async function pullRequestReport(
       "view",
       String(pullRequest),
       "--json",
-      "state,mergedAt,statusCheckRollup,autoMergeRequest,url",
+      "state,mergedAt,statusCheckRollup,url",
     ]),
     "pull request",
   );
@@ -162,16 +162,7 @@ export async function pullRequestReport(
 
   // Every check passed and the pull request is still open. Merging is a
   // maintainer's click — there is no auto-merge — so for the session that
-  // opened it this is the terminal state: its work is done and green. A
-  // pull request the maintainer has already sent to the merge queue is the
-  // one case still worth waiting on, since the queue lands it by itself.
-  if (value.autoMergeRequest) {
-    return {
-      status: "pending",
-      summary: `#${pullRequest} is in the merge queue`,
-      detail: [url],
-    };
-  }
+  // opened it this is the terminal state: its work is done and green.
   return {
     status: "passed",
     summary: `#${pullRequest} is green and ready for a maintainer to merge`,

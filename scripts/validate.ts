@@ -39,10 +39,10 @@ export const categories: Record<string, string[][]> = {
 
 /**
  * What a push owes before it leaves the machine: the fast tier, the same set
- * `check.yml` runs on the pull request and again on the merge group. The slow
- * categories — runtime, integration, e2e, build — run once per landed change
- * on `main` (`main.yml`), and by hand through `bun run validate` when a change
- * warrants it.
+ * `check.yml` runs on the pull request. The slow categories — runtime,
+ * integration, e2e, build — run once per landed change on `main`
+ * (`main.yml`), and by hand through `bun run validate` when a change warrants
+ * it.
  */
 export const prePushCategories = ["format", "typecheck", "unit"];
 
@@ -164,10 +164,10 @@ export async function validate(
 }
 
 /**
- * A branch may be behind `main` — the merge queue reruns the check against
- * current `main` before anything lands, so there is nothing a rebase would
- * prove here — but it keeps a linear history: a merge commit on the branch is
- * `main` merged into it, which the queue would fold into an unreadable merge.
+ * A branch may be behind `main` — `main.yml` checks the merge commit itself,
+ * so a rebase before every push proved nothing the merge would not — but it
+ * keeps a linear history: a merge commit on the branch is `main` merged into
+ * it, which the eventual merge folds into an unreadable one.
  */
 export function requireLinearBranch(root: string, remote: string): void {
   git(root, "fetch", "--no-tags", "--", remote, "refs/heads/main");

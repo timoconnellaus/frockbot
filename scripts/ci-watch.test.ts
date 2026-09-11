@@ -92,30 +92,12 @@ describe("pull request leg", () => {
           statusCheckRollup: [
             { name: "Validate", status: "IN_PROGRESS", conclusion: "" },
           ],
-          autoMergeRequest: { enabledAt: "now" },
         },
       }),
       128,
     );
     expect(report.status).toBe("pending");
     expect(report.summary).toContain("Validate");
-  });
-
-  test("green checks with the pull request in the merge queue is still pending", async () => {
-    const report = await pullRequestReport(
-      fakeGitHub({
-        pr: {
-          state: "OPEN",
-          statusCheckRollup: [
-            { name: "Validate", status: "COMPLETED", conclusion: "SUCCESS" },
-          ],
-          autoMergeRequest: { enabledAt: "now" },
-        },
-      }),
-      128,
-    );
-    expect(report.status).toBe("pending");
-    expect(report.summary).toContain("merge queue");
   });
 
   test("green checks on an open pull request is the session's terminal state", async () => {
@@ -126,7 +108,6 @@ describe("pull request leg", () => {
           statusCheckRollup: [
             { name: "Validate", status: "COMPLETED", conclusion: "SUCCESS" },
           ],
-          autoMergeRequest: null,
         },
       }),
       128,
@@ -256,10 +237,7 @@ describe("watching", () => {
   });
 
   test("polls until the pull request settles", async () => {
-    const states = [
-      { state: "OPEN", statusCheckRollup: [], autoMergeRequest: {} },
-      merged,
-    ];
+    const states = [{ state: "OPEN", statusCheckRollup: [] }, merged];
     let index = 0;
     const gh: GitHubJson = () => Promise.resolve(states[Math.min(index++, 1)]);
     const report = await watch(

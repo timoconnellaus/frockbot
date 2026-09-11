@@ -1,15 +1,17 @@
 name: Main
 
-# The slow tier, once per landed change rather than once per push: the
+# Everything a landed change owes, once per landed change rather than once
+# per push: the fast tier `check.yml` ran on the pull request's own head, now
+# on the merge commit — a pull request merges without rebasing, so this is
+# the first time the combination exists — and then the slow tier: the
 # Cloudflare app's workerd and integration suites, the real build, and the
-# browser suite across four runners. `check.yml` already proved format,
-# typecheck and the unit tests on the merge group, so nothing here repeats
-# them.
+# browser suite across four runners.
 #
 # Green here does three things in order: deploys staging, cuts the next patch
 # tag, and starts `release.yml` for it. Production still moves only behind
 # that workflow's approval gate on the `production` environment — see
-# `README.md` → Releases. Red here blocks nobody's merge; it blocks the deploy.
+# `README.md` → Releases. Red here blocks nobody's merge; it blocks the
+# deploy, and the fix is the next pull request.
 
 on:
   push:
@@ -54,6 +56,15 @@ jobs:
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
+
+      - name: Check formatting
+        run: bun run format:check
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Test
+        run: bun test
 
       - name: Test Cloudflare runtime compatibility
         run: bun run --filter @frockbot/cloudflare test:workerd

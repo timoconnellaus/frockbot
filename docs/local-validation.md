@@ -31,8 +31,8 @@ previous receipt. The hook validates the outgoing commit, including peeled tag
 objects, and rejects other branch heads: push those from their own checkout.
 Branch deletion needs no validation. Pre-push fetches main from the push remote
 and rejects merge commits introduced on the branch; a branch behind main may
-push, because the merge queue reruns the check on the combination before it
-lands. A fetch failure blocks the push.
+push, because `main.yml` checks the merge commit itself once it lands. A fetch
+failure blocks the push.
 
 ## GitHub configuration
 
@@ -40,11 +40,12 @@ The pipeline depends on three settings outside the repository. Each is what
 holds a stage back; without it GitHub has nothing to wait for.
 
 - **The `main` ruleset** requires the `Check` status check, forbids deletion
-  and force-pushes, requires a pull request, and enables the **merge queue**
-  (merge commits, up to five entries built at once). "Require branches to be up
-  to date" is off: the queue reruns `Check` on the merge group, which proves
-  the same thing without a rebase. Auto-merge is not enabled on the repository;
-  a maintainer merges.
+  and force-pushes, and requires a pull request. "Require branches to be up to
+  date" is off: it made every landed pull request invalidate every other one,
+  and `main.yml` checks the merge commit itself. Auto-merge is not enabled on
+  the repository; a maintainer merges. GitHub's merge queue, which would check
+  the combination before landing it, is offered only on organization-owned
+  repositories, so this one has none.
 - **The `production` environment** has the maintainer as its required
   reviewer. `release.yml`'s deploy jobs declare it, so a release waits there
   until approved on the run's page. One approval covers every job in the run.
@@ -57,5 +58,6 @@ holds a stage back; without it GitHub has nothing to wait for.
 approval, the production deployment.
 
 Local receipts are a trusted solo-developer guardrail, not server-verifiable
-proof. GitHub cannot inspect them and Git permits bypassing local hooks; the
-merge queue's own run of `Check` is what a landed change has actually passed.
+proof. GitHub cannot inspect them and Git permits bypassing local hooks;
+`Check` on the pull request and `main.yml` on the merge commit are what a
+landed change has actually passed.

@@ -86,7 +86,7 @@ at the cited location. Items the re-orientation already removes are marked; see
 
 41. ~~**Dangling directory references.**~~ **Fixed.** `apps/cloudflare/index.html` referenced `apps/mobile` and the computer-host README referenced `apps/fly-host-prototype`; both are removed.
 
-42. ~~**An auto-merged pull request never deploys to staging.**~~ **Fixed.** Auto-merge is gone; the merge queue's merge is a real push to `main`, and `main.yml` deploys staging from it. The related trap — a tag created with `GITHUB_TOKEN` fires no `push` event — is handled by `main.yml` starting `release.yml` through `workflow_dispatch`, the one trigger that token may raise.
+42. ~~**An auto-merged pull request never deploys to staging.**~~ **Fixed.** Auto-merge is gone; a maintainer's merge is a real push to `main`, and `main.yml` deploys staging from it. The related trap — a tag created with `GITHUB_TOKEN` fires no `push` event — is handled by `main.yml` starting `release.yml` through `workflow_dispatch`, the one trigger that token may raise.
 
 43. ~~**The npm publish step fails every release for packages npm does not trust.**~~ **Fixed.** `release.yml` published every directory under `packages/`, so a package whose trusted publisher was not configured on npmjs.com failed the token exchange with an `E404` and reddened a release whose production deploy had already succeeded — the worst shape for a signal, because it trains you to ignore it. Publication is now opt-in through `frockbot.npm` in a package's own manifest, and exactly one package declares it: `@frockbot/applet-sdk`, published for Applet authors rather than for anything this repository installs. It has no `@frockbot` dependencies, so it publishes alone. Nothing else has a consumer off this repository.
 

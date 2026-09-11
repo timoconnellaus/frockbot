@@ -1,18 +1,19 @@
 name: Check
 
-# The one check a pull request owes before it may merge, and the one the
-# merge queue reruns against current `main` before it lands. It is the fast
-# tier — format, typecheck, unit tests and the two small package suites, a
-# couple of minutes on a cold runner — and it needs no secret, so a fork's
-# pull request runs it safely. The slow tier (workerd, integration, the
-# browser suite) runs once per landed change on `main` in `main.yml`, not
-# per push here, and staging and production are what it gates.
+# The one check a pull request owes before it may merge. It is the fast tier
+# — format, typecheck, unit tests and the two small package suites, a couple
+# of minutes on a cold runner — and it needs no secret, so a fork's pull
+# request runs it safely. It runs against the pull request's own head, not a
+# rebase onto current `main`: the ruleset does not require an up-to-date
+# branch, because at this merge rate that requirement was a rebase-and-rerun
+# loop. What the merge actually produced is checked by `main.yml`, which runs
+# this tier again and the slow one (workerd, integration, the browser suite)
+# on the merge commit, and gates staging and production on the result.
 #
 # The `main` ruleset requires a check by this job's exact name.
 
 on:
   pull_request:
-  merge_group:
 
 permissions:
   contents: read
