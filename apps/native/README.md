@@ -65,10 +65,12 @@ Staging is validated on a disposable emulator, never on Tim's phone. `shorebird 
 
 ```sh
 shorebird preview --device-id emulator-5554 --platform android --app-id fab29f02-321e-4be1-b478-68dff4398073 --release-version 1.2.0+<code> --track staging   # emulator only
-shorebird patches promote --release-version 1.2.0+<code> --patch-number <n>                                       # to stable after it works
+bun run native:promote --release-version 1.2.0+<code> --patch-number <n>                                          # to stable after it works
 ```
 
 The emulator has shown a signed staging patch download and restart, an offline boot and a remote rollback; a patch signed with the wrong private key is rejected by the CLI before upload. The evidence and what stays unqualified are in the [qualification ledger](../../docs/research/shorebird-qualification-2026-09-09.md). After promotion, launch the installed app on the phone twice and confirm the change is live. The APK download route stays the fallback for a phone that cannot pick up a patch.
+
+The release pipeline cuts this patch itself for every version tag whose `apps/native` differs from the previous tag. `release.yml`'s `Cut Android patch` runs `native-update.py patch --baseline shorebird`, which takes the baseline from Shorebird's release list instead of `baseline.json`: the newest active Android release is, by the rule above, the one installed on the phone. `Promote Android patch` runs `native-update.py promote` after the production deploy. The job installs the CLI version `qualification.json` records, takes the private key and the signer from repository secrets (see the root `README.md`, Releases → Android patches), and its patches show in `shorebird patches list`, not in the local `baseline.json`. Shorebird's native or asset diff verdict leaves the script with exit status 3, which the job reports as needing a full release. Full releases are never cut by the pipeline.
 
 The application retains `com.frockbot.mobile`. Compile SDK 37 is required by secure storage 11; minSdk 24 and targetSdk 36 remain unchanged. Its API-28+ WebView directory is separate from Capacitor's retained directory, and cookies are disabled before the first WebView. API 24–27 isolation remains unqualified. The acceptance build checks only a random continuity sentinel; same-User/Bot re-auth is a separate device check.
 

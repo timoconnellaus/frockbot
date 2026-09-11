@@ -139,6 +139,20 @@ bun scripts/ci-watch.ts pr 128 --once    # report now and exit, for a caller tha
 
 It names the quiet failures rather than waiting them out: a release whose packages published while `Deploy FrockBot app` failed, or one that completed without ever running the deploy jobs. A release parked at the approval gate is reported as waiting, not failed.
 
+### Android patches
+
+The phone app ships from the same run. `Cut Android patch` builds a signed Shorebird patch of `apps/native` against the newest active Android release and puts it on the staging track as soon as the tag verifies; `Promote Android patch` moves it to stable once `Deploy FrockBot app` has succeeded, so the one production approval promotes the client together with the server it was built against. A tag whose `apps/native` matches the previous release tag cuts nothing. When Shorebird finds native, asset or plugin changes the job stops with a notice rather than failing: only a full release carries those, and a full release is cut by hand with `bun run native:release` and installed once on the phone (see [`apps/native/README.md`](apps/native/README.md)). Neither Android job is on the web deploy's path, so neither can hold production back.
+
+The jobs read three repository secrets, set once from the machine that holds the originals:
+
+```
+gh secret set SHOREBIRD_TOKEN                                                         # an API key from https://console.shorebird.dev
+gh secret set SHOREBIRD_PATCH_PRIVATE_KEY < .native-build/updates/shorebird-private.pem
+base64 -i ~/.android/debug.keystore | gh secret set ANDROID_DEBUG_KEYSTORE_BASE64
+```
+
+The private key signs patches for the public key baked into every release, and the keystore is the signer the installed app already trusts. Neither is ever generated anew.
+
 ### Trusted publishing
 
 Releases publish to npm through GitHub OIDC. There is no `NPM_TOKEN`, and no registry credential exists in this repository at all: each package names `timoconnellaus/frockbot` and the workflow file `release.yml` as its trusted publisher, and npm exchanges the job's OIDC identity for a credential that expires with the job. Provenance attestation comes with it, so `--provenance` is never passed.

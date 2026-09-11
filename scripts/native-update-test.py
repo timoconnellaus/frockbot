@@ -169,11 +169,24 @@ class ShorebirdHarness(unittest.TestCase):
         self.signer = SIGNER
         self.built = None
         self.failure = None
+        self.failure_output = ""
         self.cli_version = "1.6.120"
+        self.service_releases = [
+            {"id": 1, "app_id": APP_ID, "version": f"{BUILD_NAME}+{NOW + 5}", "flutter_version": "3.47.0",
+             "platform_statuses": {"android": "active"}},
+            {"id": 2, "app_id": APP_ID, "version": f"{BUILD_NAME}+{NOW + 9}", "flutter_version": "3.47.0",
+             "platform_statuses": {"android": "active"}},
+            {"id": 3, "app_id": APP_ID, "version": f"{BUILD_NAME}+{NOW + 20}", "flutter_version": "3.47.0",
+             "platform_statuses": {"android": "inactive"}},
+            {"id": 4, "app_id": "other-app", "version": f"{BUILD_NAME}+{NOW + 30}", "flutter_version": "3.47.0",
+             "platform_statuses": {"android": "active"}},
+        ]
+        self.service_patches = [{"number": 1, "channel": "stable"}, {"number": 2, "channel": "staging"}]
         self.patches = [
             patch.object(updates, "STATE", self.state), patch.object(updates, "PUBLIC_KEY", self.public),
             patch.object(updates, "SHOREBIRD_YAML", self.yaml), patch.object(updates, "APK_OUTPUT", self.apk),
             patch.object(updates, "run", self.fake_run), patch.object(updates.subprocess, "run", self.fake_command),
+            patch.object(updates, "stream", self.fake_stream),
             patch.object(updates.time, "time", lambda: NOW), patch.dict(os.environ, self.environ, clear=True),
         ]
         for item in self.patches:
@@ -201,7 +214,21 @@ class ShorebirdHarness(unittest.TestCase):
             return f"package: name='com.frockbot.mobile' versionCode='{self.built}' versionName='{BUILD_NAME}'"
         if args[1:2] == ["verify"]:
             return f"Signer #1 certificate SHA-256 digest: {self.signer}"
+        if args[1:3] == ["releases", "list"]:
+            self.assertEqual(args[-1], "--json")
+            self.assertEqual(kwargs["cwd"], updates.NATIVE)
+            return json.dumps({"status": "success", "data": {"releases": self.service_releases}})
+        if args[1:3] == ["patches", "list"]:
+            self.assertEqual(args[-1], "--json")
+            return json.dumps({"status": "success", "data": {"patches": self.service_patches}})
         raise AssertionError(f"unexpected command {args}")
+
+    def fake_stream(self, args, **kwargs):
+        args = [str(a) for a in args]
+        self.commands.append((args, kwargs))
+        if self.failure:
+            return 1, self.failure_output
+        return 0, "Published patch.\n"
 
     def fake_command(self, args, **kwargs):
         args = [str(a) for a in args]
@@ -494,6 +521,7 @@ class PatchTest(ShorebirdHarness):
         self.assertEqual(kwargs["cwd"], updates.NATIVE)
         self.assertEqual(kwargs["env"]["FROCKBOT_ANDROID_VERSION_FLOOR"], str(NOW - 1))
         self.assertEqual(record["track"], "staging")
+        self.assertEqual(record["number"], 2)
         self.assertEqual(record["gitHead"], self.head)
         self.assertEqual(self.baseline()["patches"], [record])
         self.assertEqual(self.baseline()["buildNumber"], NOW)
@@ -580,6 +608,99 @@ class PatchTest(ShorebirdHarness):
         updates.main(["patch", "--track", "stable"])
         self.assertIn("--track=stable", self.shorebird()[0][0])
         self.assertEqual(self.baseline()["patches"][0]["track"], "stable")
+
+    def test_unpatchable_changes_exit_with_the_full_release_status(self):
+        self.failure = True
+        self.failure_output = "Your app contains native changes, which cannot be applied with a patch.\n"
+        with self.assertRaises(SystemExit) as result:
+            updates.main(["patch"])
+        self.assertEqual(result.exception.code, updates.FULL_RELEASE_REQUIRED_STATUS)
+        self.assertEqual(len(self.shorebird()), 1)
+        # The CLI refused before uploading, so there is nothing pending to reconcile and no record.
+        self.assertFalse((self.state / "pending-patch.json").exists())
+        self.assertEqual(self.baseline()["patches"], [])
+        self.failure_output = "Your app contains asset changes, which will not be included in the patch.\n"
+        with self.assertRaises(SystemExit) as result:
+            updates.main(["patch"])
+        self.assertEqual(result.exception.code, updates.FULL_RELEASE_REQUIRED_STATUS)
+
+    def test_other_patch_failures_are_not_mistaken_for_native_changes(self):
+        self.failure = True
+        self.failure_output = "Upload failed: 502\n"
+        with self.assertRaises(subprocess.CalledProcessError):
+            updates.patch()
+        self.assertTrue((self.state / "pending-patch.json").exists())
+
+
+class PipelinePatchTest(ShorebirdHarness):
+    """The release pipeline has no state directory: the baseline is whatever Shorebird reports."""
+
+    def setUp(self):
+        super().setUp()
+        self.key = self.state / "shorebird-private.pem"
+        self.key.write_text("private\n")
+
+    def test_patches_the_newest_active_release_for_this_app(self):
+        result = self.state / "result.json"
+        record = updates.patch(baseline_source="shorebird", result=result)
+        (args, kwargs), = self.shorebird()
+        self.assertEqual(args, [
+            str(self.cli), "patch", "android", f"--release-version={BUILD_NAME}+{NOW + 9}", f"--build-name={BUILD_NAME}",
+            f"--build-number={NOW + 9}", "--track=staging", f"--private-key-path={self.key}",
+            f"--public-key-path={self.public}", "--", "--target-platform=android-arm64"])
+        self.assertEqual(kwargs["env"]["FROCKBOT_ANDROID_VERSION_FLOOR"], str(NOW + 8))
+        self.assertEqual(record["number"], 2)
+        self.assertFalse((self.state / "baseline.json").exists())
+        self.assertFalse((self.state / "pending-patch.json").exists())
+        summary = json.loads(result.read_text())
+        self.assertEqual(summary["release"], f"{BUILD_NAME}+{NOW + 9}")
+        self.assertEqual(summary["patch"]["number"], 2)
+
+    def test_service_baseline_needs_an_active_android_release(self):
+        self.service_releases = [entry for entry in self.service_releases if entry["id"] in (3, 4)]
+        with self.assertRaisesRegex(RuntimeError, "no active Android release"):
+            updates.patch(baseline_source="shorebird")
+        self.assertEqual(self.shorebird(), [])
+
+    def test_release_built_with_another_flutter_requires_requalification(self):
+        for entry in self.service_releases:
+            entry["flutter_version"] = "3.48.0"
+        with self.assertRaisesRegex(RuntimeError, "Flutter changed"):
+            updates.patch(baseline_source="shorebird")
+        self.assertEqual(self.shorebird(), [])
+
+    def test_mismatched_key_pair_is_rejected_before_upload(self):
+        self.private_der = b"other-public-der"
+        with self.assertRaisesRegex(RuntimeError, "does not match"):
+            updates.patch(baseline_source="shorebird")
+        self.assertEqual(self.shorebird(), [])
+
+    def test_baseline_choice_through_the_cli(self):
+        updates.main(["patch", "--baseline", "shorebird"])
+        self.assertIn(f"--release-version={BUILD_NAME}+{NOW + 9}", self.shorebird()[0][0])
+
+
+class PromoteTest(ShorebirdHarness):
+    def test_promote_moves_the_patch_to_stable(self):
+        updates.main(["promote", "--release-version", f"{BUILD_NAME}+{NOW}", "--patch-number", "2"])
+        (args, kwargs), = self.shorebird()
+        self.assertEqual(args[1:], ["patches", "promote", f"--release-version={BUILD_NAME}+{NOW}", "--patch-number=2"])
+        self.assertEqual(kwargs["cwd"], updates.NATIVE)
+        self.assertTrue(kwargs["check"])
+
+    def test_promote_records_the_track_on_a_local_baseline(self):
+        updates.release()
+        (self.state / "shorebird-private.pem").write_text("private\n")
+        updates.patch()
+        self.commands.clear()
+        updates.promote(f"{BUILD_NAME}+{NOW}", 2)
+        self.assertEqual(self.baseline()["patches"][0]["track"], "stable")
+        self.assertEqual(len(self.shorebird()), 1)
+
+    def test_promote_requires_both_identifiers(self):
+        with self.assertRaises(SystemExit):
+            updates.main(["promote", "--release-version", f"{BUILD_NAME}+{NOW}"])
+        self.assertEqual(self.shorebird(), [])
 
 
 if __name__ == "__main__":
