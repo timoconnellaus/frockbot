@@ -30,7 +30,6 @@ interface FakeUpstream {
 function fakeUpstream(
   options: {
     refuse?: boolean;
-    raceBeforeStopAck?: boolean;
     onCommit?: "answer" | "silent" | "empty" | "fail";
     answerDelayMs?: number;
   } = {},
@@ -101,10 +100,6 @@ function fakeUpstream(
         };
         if (frame.type === "session.update") {
           sessionUpdates.push(frame);
-          if (sessionUpdates.length === 2 && options.raceBeforeStopAck) {
-            const id = newItem();
-            complete(id, "earlier turn");
-          }
           emit({ type: "session.updated" });
           return;
         }
@@ -297,17 +292,6 @@ describe("the dictation relay", () => {
     expect(opened.segments()).toEqual(["heard 1,2,3"]);
     expect(opened.frames.at(-1)).toEqual({ schemaVersion: 1, type: "final" });
     expect(await opened.closed).toBe(1000);
-  });
-
-  test("an automatic commit racing Stop cannot finalize before the explicit commit", async () => {
-    const upstream = fakeUpstream({ raceBeforeStopAck: true });
-    const opened = openRelay(upstream);
-    await ready(upstream, opened);
-    opened.socket.send(pcm(9));
-    opened.socket.send(stop);
-    await opened.waitFor((f) => f.type === "final", "final");
-    expect(upstream.commits).toBe(1);
-    expect(opened.segments()).toEqual(["earlier turn", "heard 9"]);
   });
 
   test("a stop before the upstream is ready still commits what was captured", async () => {

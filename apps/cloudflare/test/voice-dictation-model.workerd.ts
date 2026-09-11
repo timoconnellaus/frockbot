@@ -1,13 +1,15 @@
 // The dictation session the upstream actually receives, against an upstream
-// that enforces OpenAI's documented turn-detection policy.
+// that behaves the way OpenAI's realtime transcription endpoint was observed
+// to behave on 2026-09-11.
 //
-// Production dictation died at the first `session.update` because
-// `gpt-realtime-whisper` requires `turn_detection` omitted or null, while the
-// relay's committed-segment ordering needs server VAD. The fake here answers
-// the way the realtime transcription endpoint documents: a model that does
-// not support VAD refuses a session carrying `turn_detection`, a model that
-// does accepts it. Whether dictation works is therefore decided by the frame
-// the relay sends, not by anything this file asserts about source text.
+// The rule that killed production dictation: the streaming transcription
+// models answer any `turn_detection` with "Turn detection is not supported
+// for this transcription model." and the session is over. With turn detection
+// null the same endpoint streams deltas against a single item while the
+// person speaks, and produces a transcript only after the client commits.
+// Whether dictation works is therefore decided by the frame the relay sends
+// and by what it does at `stop`, not by anything this file asserts about
+// source text.
 import { describe, expect, test } from "vitest";
 import {
   openVoiceDictationRelayV1,
@@ -15,16 +17,25 @@ import {
 } from "../src/voice-dictation.ts";
 import { translateVoiceDictationUpstreamFrameV1 } from "@frockbot/app/voice/dictation-upstream";
 
-/** Transcription models OpenAI documents as refusing turn detection. */
-const NO_VAD_MODELS = new Set(["gpt-realtime-whisper"]);
+/** The streaming transcription models, which refuse turn detection outright. */
+const NO_VAD_MODELS = new Set(["gpt-live-transcribe", "gpt-realtime-whisper"]);
 
 const TURN_DETECTION_REFUSAL = {
   type: "error",
   error: {
     type: "invalid_request_error",
-    code: "unsupported_parameter",
+    code: "invalid_value",
     param: "session.audio.input.turn_detection",
     message: "Turn detection is not supported for this transcription model.",
+  },
+};
+
+const EMPTY_BUFFER_REFUSAL = {
+  type: "error",
+  error: {
+    type: "invalid_request_error",
+    code: "input_audio_buffer_commit_empty",
+    message: "Error committing input audio buffer: the buffer is empty.",
   },
 };
 
@@ -33,16 +44,19 @@ interface PolicyUpstream {
   sessionUpdates: Record<string, unknown>[];
   /** Raw frames the upstream answered with, in order. */
   answers: Record<string, unknown>[];
-  serverSide: () => WebSocket | undefined;
 }
 
-/** An upstream that applies the model/turn-detection rule to what it is sent. */
+/**
+ * An upstream that applies the observed rule to what it is sent: refuse any
+ * turn detection for a streaming model, otherwise stream deltas against one
+ * item and transcribe only what a client commit closes.
+ */
 function policyUpstream(): PolicyUpstream {
   const sessionUpdates: Record<string, unknown>[] = [];
   const answers: Record<string, unknown>[] = [];
   let server: WebSocket | undefined;
   let items = 0;
-  let sessionModel: string | undefined;
+  let itemId: string | undefined;
   let heard: number[] = [];
   const emit = (frame: Record<string, unknown>) => {
     answers.push(frame);
@@ -51,7 +65,6 @@ function policyUpstream(): PolicyUpstream {
   return {
     sessionUpdates,
     answers,
-    serverSide: () => server,
     socket: async () => {
       const pair = new WebSocketPair();
       const [client, upstream] = Object.values(pair);
@@ -69,15 +82,7 @@ function policyUpstream(): PolicyUpstream {
           const model = (
             input?.transcription as Record<string, unknown> | undefined
           )?.model as string | undefined;
-          // A later partial update (the relay disables VAD before its commit)
-          // is judged against the model the session was opened with.
-          if (model) sessionModel = model;
-          const turnDetection = input?.turn_detection;
-          if (
-            sessionModel &&
-            NO_VAD_MODELS.has(sessionModel) &&
-            turnDetection != null
-          ) {
+          if (model && NO_VAD_MODELS.has(model) && input?.turn_detection) {
             emit(TURN_DETECTION_REFUSAL);
             return;
           }
@@ -87,17 +92,29 @@ function policyUpstream(): PolicyUpstream {
         if (frame.type === "input_audio_buffer.append") {
           const byte = atob(String(frame.audio ?? "")).charCodeAt(0);
           heard.push(byte);
+          // Every delta of a capture belongs to the same item, and nothing is
+          // committed while the person is still speaking.
+          itemId ??= `item_${(items += 1)}`;
+          emit({
+            type: "conversation.item.input_audio_transcription.delta",
+            item_id: itemId,
+            delta: heard.length === 1 ? String(byte) : ` ${byte}`,
+          });
           return;
         }
         if (frame.type === "input_audio_buffer.commit") {
-          items += 1;
-          const itemId = `item_${items}`;
+          if (!itemId) {
+            emit(EMPTY_BUFFER_REFUSAL);
+            return;
+          }
+          const closed = itemId;
           const spoken = heard;
+          itemId = undefined;
           heard = [];
-          emit({ type: "input_audio_buffer.committed", item_id: itemId });
+          emit({ type: "input_audio_buffer.committed", item_id: closed });
           emit({
             type: "conversation.item.input_audio_transcription.completed",
-            item_id: itemId,
+            item_id: closed,
             transcript: `heard ${spoken.join(",")}`,
           });
         }
@@ -114,16 +131,17 @@ const lease: VoiceDictationLeaseV1 = {
   release: async () => {},
 };
 
-function openRelay(upstream: PolicyUpstream) {
+function openRelay(
+  connectUpstream: (
+    url: string,
+    headers: Record<string, string>,
+  ) => Promise<WebSocket>,
+) {
   const response = openVoiceDictationRelayV1(
     new Request("https://bot.frockbot.com/api/voice/dictation", {
       headers: { upgrade: "websocket" },
     }),
-    {
-      env: { OPENAI_API_KEY: "sk-test" },
-      connectUpstream: upstream.socket,
-      lease,
-    },
+    { env: { OPENAI_API_KEY: "sk-test" }, connectUpstream, lease },
   );
   expect(response.status).toBe(101);
   const socket = response.webSocket!;
@@ -184,13 +202,21 @@ const start = JSON.stringify({
 const stop = JSON.stringify({ schemaVersion: 1, type: "stop" });
 
 describe("dictation against an upstream that enforces the turn-detection rule", () => {
-  test("a capture reaches ready and lands its transcript", async () => {
+  test("a capture streams deltas and lands its transcript at stop", async () => {
     const upstream = policyUpstream();
-    const opened = openRelay(upstream);
+    const opened = openRelay(upstream.socket);
     opened.socket.send(start);
     opened.socket.send(pcm(1));
     await opened.waitFor((f) => f.type === "ready", "ready");
     opened.socket.send(pcm(2));
+    await opened.waitFor(
+      (f) => f.type === "delta" && String(f.text).includes("2"),
+      "the second delta",
+    );
+
+    // Nothing is transcribed until the relay commits: no segment yet.
+    expect(opened.frames.some((f) => f.type === "segment")).toBe(false);
+
     opened.socket.send(stop);
     await opened.waitFor((f) => f.type === "final", "final");
 
@@ -207,65 +233,95 @@ describe("dictation against an upstream that enforces the turn-detection rule", 
       "[evidence] composer frames: " +
         JSON.stringify(
           opened.frames.map((f) =>
-            f.type === "segment" ? `segment:${String(f.text)}` : f.type,
+            f.type === "delta" || f.type === "segment"
+              ? `${String(f.type)}:${String(f.text)}`
+              : f.type,
           ),
         ),
     );
 
-    // The upstream accepted, so the composer got text instead of a refusal.
     expect(opened.frames.some((f) => f.type === "error")).toBe(false);
     expect(
       opened.frames.filter((f) => f.type === "segment").map((f) => f.text),
     ).toEqual(["heard 1,2"]);
 
-    // Server VAD is still what the session asks for, unchanged.
+    // One item means one growing draft. The client replaces the previous
+    // delta with each new one, so what matters is that every delta extends
+    // the one before it — never repeats the words alongside them.
+    const deltas = opened.frames
+      .filter((f) => f.type === "delta")
+      .map((f) => String(f.text));
+    expect(deltas[0]).toBe("1");
+    expect(deltas.at(-1)).toBe("1 2");
+    for (const [index, text] of deltas.entries()) {
+      if (index === 0) continue;
+      expect(text.startsWith(deltas[index - 1]!)).toBe(true);
+    }
+
+    // The session asks for no turn detection at all, explicitly.
     const input = (
       (sent.session as Record<string, unknown>).audio as Record<string, unknown>
     ).input as Record<string, unknown>;
-    expect(input.turn_detection).toEqual({
-      type: "server_vad",
-      threshold: 0.5,
-      prefix_padding_ms: 300,
-      silence_duration_ms: 700,
-    });
+    expect(input).toHaveProperty("turn_detection");
+    expect(input.turn_detection).toBeNull();
+
+    // Exactly one commit closed the capture, and the relay sent it.
+    expect(
+      upstream.answers.filter((a) => a.type === "input_audio_buffer.committed"),
+    ).toHaveLength(1);
   });
 
-  test("the same upstream refuses a session that asks for the old model", async () => {
+  test("asking for server VAD again reproduces the production failure", async () => {
     const upstream = policyUpstream();
-    // Open the socket and speak the old session shape directly at it, so the
-    // rule the previous test passed is shown to have teeth.
-    const client = await upstream.socket();
-    const refusal = new Promise<string>((resolve) => {
-      client.addEventListener("message", (event) => {
-        if (typeof event.data === "string") resolve(event.data);
-      });
-    });
-    client.send(
-      JSON.stringify({
-        type: "session.update",
-        session: {
-          type: "transcription",
-          audio: {
-            input: {
-              format: { type: "audio/pcm", rate: 24000 },
-              noise_reduction: { type: "near_field" },
-              transcription: { model: "gpt-realtime-whisper" },
-              turn_detection: {
-                type: "server_vad",
-                threshold: 0.5,
-                prefix_padding_ms: 300,
-                silence_duration_ms: 700,
-              },
-            },
-          },
-        },
-      }),
+    // The relay's own session frame, with only the turn detection put back the
+    // way it was. Everything else — the relay, the upstream, the client — is
+    // unchanged, so what fails is the configuration and nothing else.
+    const withServerVad = async () => {
+      const socket = await upstream.socket();
+      const send = socket.send.bind(socket) as (data: unknown) => void;
+      socket.send = ((data: unknown) => {
+        if (typeof data === "string") {
+          const frame = JSON.parse(data) as Record<string, unknown>;
+          if (frame.type === "session.update") {
+            const input = (
+              (frame.session as Record<string, unknown>).audio as Record<
+                string,
+                unknown
+              >
+            ).input as Record<string, unknown>;
+            input.turn_detection = {
+              type: "server_vad",
+              threshold: 0.5,
+              prefix_padding_ms: 300,
+              silence_duration_ms: 700,
+            };
+            send(JSON.stringify(frame));
+            return;
+          }
+        }
+        send(data);
+      }) as typeof socket.send;
+      return socket;
+    };
+
+    const opened = openRelay(withServerVad);
+    opened.socket.send(start);
+    opened.socket.send(pcm(1));
+    const error = await opened.waitFor((f) => f.type === "error", "the error");
+    console.log(
+      "[evidence] composer frames with server VAD: " +
+        JSON.stringify(opened.frames.map((f) => f.type)),
     );
-    const raw = await refusal;
-    console.log("[evidence] upstream answer for the old model: " + raw);
-    // The relay reads that answer as a fatal refusal, not an empty buffer.
-    const event = translateVoiceDictationUpstreamFrameV1(raw);
-    expect(event).toEqual({
+    expect(opened.frames.some((f) => f.type === "ready")).toBe(false);
+    expect(error.code).toBe("upstream");
+    expect(error.message).toBe(
+      "Dictation stopped: the speech service refused the session. Try again.",
+    );
+
+    // And the refusal reads as fatal, not as an empty buffer the relay
+    // forgives after stop.
+    const raw = JSON.stringify(TURN_DETECTION_REFUSAL);
+    expect(translateVoiceDictationUpstreamFrameV1(raw)).toEqual({
       kind: "error",
       message: "Turn detection is not supported for this transcription model.",
       emptyBuffer: false,

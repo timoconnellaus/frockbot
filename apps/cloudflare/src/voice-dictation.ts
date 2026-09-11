@@ -13,13 +13,16 @@
 //   of seconds reserved up front and renewed while the capture runs — so a
 //   page that opens sockets in a loop is refused rather than billed.
 //
-//   Completeness. The upstream commits audio into items — by its own turn
-//   detection, and once more when the relay commits after `stop` — and
-//   answers each item's transcription in whatever order it likes. The relay
-//   keeps the committed order, hands segments to the client in it, and says
-//   `final` only once every committed item has answered. A stop the upstream
-//   cannot finish in time, or a provider failure after stop, is reported as
-//   what it is; the draft keeps what arrived.
+//   Completeness. The upstream has no turn detection — the streaming
+//   transcription models refuse it — so a capture is one item and the
+//   relay's commit after `stop` is the only thing that closes it. Deltas
+//   grow the draft while the person speaks; the committed item's transcript
+//   is the segment that replaces them. The relay still hands segments over
+//   in committed order and says `final` only once every committed item has
+//   answered, which costs nothing and holds if an upstream ever commits more
+//   than one. A stop the upstream cannot finish in time, or a provider
+//   failure after stop, is reported as what it is; the draft keeps what
+//   arrived.
 //
 //   Opening audio. Frames that arrive before the upstream has accepted the
 //   session are held in order, bounded, and forwarded once it has, so
@@ -174,7 +177,6 @@ function runRelay(
   let stopping = false;
   /** The relay's own commit after `stop` has been sent, and then answered. */
   let commitSent = false;
-  let disablingVad = false;
   let connectTimer: ReturnType<typeof setTimeout> | undefined;
   let stopCommitSettled = false;
   let leaseHeld = false;
@@ -282,7 +284,6 @@ function runRelay(
     switch (event.kind) {
       case "session-updated":
         if (!upstreamReady) acceptSession();
-        else if (disablingVad && stopping) commit();
         return;
       case "delta": {
         const id = event.itemId ?? "uncommitted";
@@ -302,8 +303,8 @@ function runRelay(
           }
           if (!answered.has(event.itemId)) outstanding.add(event.itemId);
         }
-        // VAD was disabled and acknowledged before the explicit commit,
-        // so an earlier automatic commit cannot be mistaken for this one.
+        // Turn detection is off upstream, so the only thing that commits an
+        // item is the relay's own commit after `stop`.
         if (stopping && commitSent) stopCommitSettled = true;
         flushSegments();
         return;
@@ -469,7 +470,7 @@ function runRelay(
         "limit",
       ),
     );
-    if (stopping) requestCommit();
+    if (stopping) commit();
   };
 
   const stop = () => {
@@ -485,28 +486,7 @@ function runRelay(
         "timeout",
       );
     });
-    if (upstream && upstreamReady) requestCommit();
-  };
-
-  const requestCommit = () => {
-    if (disablingVad) return;
-    disablingVad = true;
-    try {
-      upstream!.send(
-        JSON.stringify({
-          type: "session.update",
-          session: {
-            type: "transcription",
-            audio: { input: { turn_detection: null } },
-          },
-        }),
-      );
-    } catch {
-      fail(
-        "Dictation could not finish. What arrived is in your draft.",
-        "upstream",
-      );
-    }
+    if (upstream && upstreamReady) commit();
   };
 
   const commit = () => {

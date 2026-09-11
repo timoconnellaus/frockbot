@@ -48,9 +48,10 @@ describe("the dictation upstream", () => {
     expect(update.session.audio.input.transcription).toEqual({
       model: VOICE_DICTATION_MODEL_V1,
     });
-    expect(update.session.audio.input.turn_detection).toMatchObject({
-      type: "server_vad",
-    });
+    // Explicitly null, not absent: the upstream refuses this model with any
+    // turn detection, and defaults the field to server_vad when it is missing.
+    expect(update.session.audio.input).toHaveProperty("turn_detection");
+    expect(update.session.audio.input.turn_detection).toBeNull();
   });
 
   test("appends audio as base64 PCM", () => {
