@@ -112,16 +112,20 @@ Three things keep that parallelism honest, and a new spec inherits all three:
   `chat.e2e.ts` is the worked example — every test in it makes a Bot of its own
   and shares everything above that.
 
-`e2e/harness.ts` is the Playwright `webServer`: it runs `artifact:build`, seeds
-`dist/artifacts/foundation-v1.mjs` into the local `APPLICATION_ARTIFACTS`
-bucket, starts a fake Ollama HTTP server on a loopback port, and starts
-`wrangler dev --env e2e`. That environment exists because `development` marks
-`MEMORY_FILES`, `MEMORY_INDEX` and `AI` remote, and a remote binding makes
-`wrangler dev` open a Cloudflare API session that a pull request has no
+`e2e/harness.ts` is the Playwright `webServer`: it runs `artifact:build`,
+seeds `dist/artifacts/foundation-v1.mjs` into the local
+`APPLICATION_ARTIFACTS` bucket, applies the local D1 auth migrations to
+`frockbot-auth-e2e`, starts a fake Ollama HTTP server on a loopback port, and
+starts `wrangler dev --env e2e`. That environment exists because `development`
+marks `MEMORY_FILES`, `MEMORY_INDEX` and `AI` remote, and a remote binding
+makes `wrangler dev` open a Cloudflare API session that a pull request has no
 credential for; `e2e` is the same Worker with local bindings and no Vectorize
 or remote AI, exactly as `vitest.integration.config.ts` omits them. Every run
-gets a fresh `--persist-to` directory and the whole process tree — wrangler is
-started in its own process group — is torn down afterwards.
+gets a fresh `--persist-to` directory, which is why the auth migrations are
+applied every time: development sign-in never reads those tables, but Site
+administration lists the accounts from `user`, and an unmigrated database
+answers that read with `D1_ERROR: no such table: user`. The whole process tree
+— wrangler is started in its own process group — is torn down afterwards.
 
 The provider is reached through the Ollama Cloud Package's `api-base-url`
 Connection setting. `wrangler dev` has no `outboundService`, so a spec points
