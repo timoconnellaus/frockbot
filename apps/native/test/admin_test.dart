@@ -30,14 +30,12 @@ Map<String, Object?> accounts({required bool guestApplets}) => {
       'userId': 'tim-id',
       'email': 'tim@example.com',
       'name': 'Tim',
-      'createdAt': '2026-09-01T00:00:00.000Z',
       'features': features(applets: true),
     },
     {
       'userId': 'guest-id',
       'email': 'guest@example.com',
       'name': 'Guest',
-      'createdAt': '2026-09-02T00:00:00.000Z',
       'features': features(applets: guestApplets),
     },
   ],
@@ -123,6 +121,34 @@ void main() {
       matching: find.byType(SwitchListTile),
     );
     expect(tester.widget<SwitchListTile>(tim).value, isTrue);
+  });
+
+  testWidgets('a write that fails says so after the list reloads', (
+    tester,
+  ) async {
+    final api = SettingsApi(MemoryStore(), (path, body) async {
+      if (path == '/api/admin/policy') return policy();
+      if (path == '/api/admin/users') return accounts(guestApplets: false);
+      throw const RequestFailure('synthetic backend detail', 500);
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: FrockTheme.theme(Brightness.dark),
+        home: AdminPage(api: api),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final guest = find.descendant(
+      of: find.bySemanticsIdentifier(AdminIds.applets('guest-id')),
+      matching: find.byType(SwitchListTile),
+    );
+    await tester.tap(guest);
+    await tester.pumpAndSettle();
+    expect(
+      find.text('That change didn’t stick. Refresh and try again.'),
+      findsOneWidget,
+    );
+    expect(tester.widget<SwitchListTile>(guest).value, isFalse);
   });
 
   testWidgets('a refusal says who it is for and not what the route said', (

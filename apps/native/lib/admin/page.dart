@@ -160,13 +160,13 @@ class _AdminPageState extends State<AdminPage> {
         });
       }
     } catch (_) {
-      if (mounted) {
+      await loadAccounts();
+      if (mounted && accountsMessage == null) {
         setState(
           () => accountsMessage =
               'That change didn’t stick. Refresh and try again.',
         );
       }
-      await loadAccounts();
     } finally {
       if (mounted) setState(() => busy = false);
     }

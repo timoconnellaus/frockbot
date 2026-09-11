@@ -212,7 +212,13 @@ export async function listPackageUi(
 ): Promise<PackageIframeCompositionV1> {
   await state.authority.validateIdentity(identity);
   const projected = projectFirstPartyPackageIframeV1(identity.botId);
-  if (await appletsEnabled(state, identity)) return projected;
+  let enabled: boolean;
+  try {
+    enabled = await appletsEnabled(state, identity);
+  } catch {
+    enabled = false;
+  }
+  if (enabled) return projected;
   return {
     ...projected,
     contributions: projected.contributions.filter(

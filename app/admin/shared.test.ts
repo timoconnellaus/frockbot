@@ -95,12 +95,19 @@ describe("account feature codecs", () => {
             userId: "u1",
             email: "u1@example.com",
             name: "One",
-            createdAt: "2026-09-01T00:00:00.000Z",
             features,
           },
         ],
       }).users.map((user) => user.userId),
     ).toEqual(["development", "u1"]);
+  });
+
+  test("an identity store row with blank identifiers keeps its account", () => {
+    const [account] = decodeAdminUserListViewV1({
+      schemaVersion: 1,
+      users: [{ userId: "u1", email: "", name: "", features }],
+    }).users;
+    expect(account).toEqual({ userId: "u1", features });
   });
 
   test("the default is off and rejects unknown fields", () => {

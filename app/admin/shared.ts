@@ -194,7 +194,6 @@ export interface AdminUserViewV1 {
   userId: string;
   email?: string;
   name?: string;
-  createdAt?: string;
   features: UserFeaturesV1;
 }
 
@@ -310,29 +309,23 @@ function optionalBoundedString(
   label: string,
   maximum: number,
 ): string | undefined {
-  if (value === undefined) return undefined;
+  if (value === undefined || value === null || value === "") return undefined;
   return boundedString(value, label, maximum);
 }
 
 export function decodeAdminUserViewV1(input: unknown): AdminUserViewV1 {
   const user = record(input, "admin user");
   const keys = Object.keys(user);
-  const allowed = ["userId", "email", "name", "createdAt", "features"];
+  const allowed = ["userId", "email", "name", "features"];
   if (!keys.every((key) => allowed.includes(key))) {
     throw new Error("admin user has unknown fields");
   }
   const email = optionalBoundedString(user.email, "admin user.email", 512);
   const name = optionalBoundedString(user.name, "admin user.name", 512);
-  const createdAt = optionalBoundedString(
-    user.createdAt,
-    "admin user.createdAt",
-    64,
-  );
   return {
     userId: boundedString(user.userId, "admin user.userId", 512),
     ...(email === undefined ? {} : { email }),
     ...(name === undefined ? {} : { name }),
-    ...(createdAt === undefined ? {} : { createdAt }),
     features: decodeUserFeaturesV1(user.features),
   };
 }

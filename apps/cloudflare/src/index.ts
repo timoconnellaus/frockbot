@@ -1079,6 +1079,7 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
       botId: rpcBotId,
       appletId: rpcPattern(APPLET_ID_V1, 129),
     });
+    await this.requireApplets();
     return botStateStub(
       this.env,
       this.ctx.props.userId,
@@ -1091,6 +1092,7 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
       botId: rpcBotId,
       appletId: rpcPattern(APPLET_ID_V1, 129),
     });
+    await this.requireApplets();
     return botStateStub(
       this.env,
       this.ctx.props.userId,
@@ -1541,7 +1543,6 @@ const createGatewayBackendContributions = (env: Env) =>
         userId: user.id,
         email: user.email,
         name: user.name,
-        createdAt: user.createdAt,
       })),
     readUserFeatures: async (userId: string): Promise<UserFeaturesV1> =>
       decodeUserFeaturesV1(

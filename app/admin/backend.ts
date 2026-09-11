@@ -18,7 +18,6 @@ export interface AdminListedUserV1 {
   userId: string;
   email?: string;
   name?: string;
-  createdAt?: string;
 }
 
 export interface AdminGatewayHost {

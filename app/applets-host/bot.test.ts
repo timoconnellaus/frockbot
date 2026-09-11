@@ -3,6 +3,8 @@
 import { describe, expect, test } from "bun:test";
 import { APPLET_FOCUSED_KEY, type BotIdentity } from "@frockbot/core/durable";
 import type { ShellBotStateV1 } from "@frockbot/app/shell/backend-state";
+import { PACKAGE_IFRAME_FOCUS_TOOL_V2 } from "@frockbot/core/contracts";
+import { listPackageUi } from "@frockbot/app/skills/bot";
 import {
   appletsRuntimeHost,
   readFocusedApplet,
@@ -274,6 +276,19 @@ describe("the account's Applets switch", () => {
     expect(on.proposed[0]).toMatchObject({
       applets: [{ appletId: APPLET, generationId: "ag1" }],
     });
+  });
+
+  test("a switch that cannot be read still answers the package catalog", async () => {
+    const focusable = (catalog: {
+      contributions: Array<{ declaredTools: readonly string[] }>;
+    }) =>
+      catalog.contributions.some((contribution) =>
+        contribution.declaredTools.includes(PACKAGE_IFRAME_FOCUS_TOOL_V2),
+      );
+    const on = gatedHarness({ applets: true });
+    expect(focusable(await listPackageUi(on.state, IDENTITY))).toBe(true);
+    const { state } = gatedHarness({ applets: "unreachable" });
+    expect(focusable(await listPackageUi(state, IDENTITY))).toBe(false);
   });
 
   test("a switch that cannot be read leaves the Composition alone", async () => {
