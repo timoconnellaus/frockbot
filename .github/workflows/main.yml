@@ -7,6 +7,12 @@ name: Main
 # Cloudflare app's workerd and integration suites, the real build, and the
 # browser suite across four runners.
 #
+# The slow tier is spread across runners on purpose. `Validate`, the workerd
+# suite and the integration suite share nothing but `bun install`, which is
+# seconds, so each is its own job and the run takes as long as the longest of
+# them rather than the sum. What the whole tier concluded is read in one
+# place: `deploy-staging` and `release` below require every job.
+#
 # Green here does three things in order: deploys staging when the repository
 # variable `DEPLOY_STAGING` is `true`, cuts the next patch tag, and starts
 # `release.yml` for it. Production still moves only behind that workflow's
@@ -47,7 +53,7 @@ jobs:
   validate:
     name: Validate
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
 
     steps:
       - name: Check out repository
@@ -72,8 +78,48 @@ jobs:
       - name: Test
         run: bun test
 
+  runtime:
+    name: Cloudflare runtime
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.3.6
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
       - name: Test Cloudflare runtime compatibility
+        # The Durable Objects in workerd, against probe subclasses. No client
+        # and no artifact: this job never needs Flutter.
         run: bun run --filter @frockbot/cloudflare test:workerd
+
+  integration:
+    name: Cloudflare integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.3.6
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
 
       # `test:integration` and `build` both begin with `flutter build web` in
       # `apps/native`: the web client is Flutter Web, and `client:build` stages
@@ -88,6 +134,20 @@ jobs:
           channel: stable
           cache: true
 
+      # The staged client from the last run that built it from these same
+      # sources. `build-flutter-web.ts` fingerprints its inputs and skips
+      # `flutter build web` when the staged bundle matches, so a hit here turns
+      # a minute of dart2js into a no-op; the key names the same inputs the
+      # fingerprint covers, plus the SDK version the fingerprint reads from the
+      # toolchain. A miss builds as before and saves for the next run.
+      - name: Cache Flutter web client
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: |
+            apps/cloudflare/dist/web
+            apps/cloudflare/dist/flutter-web.json
+          key: flutter-web-${{ runner.os }}-3.47.0-${{ hashFiles('apps/native/lib/**', 'apps/native/web/**', 'apps/native/assets/**', 'apps/native/vendor/**', 'apps/native/pubspec.yaml', 'apps/native/pubspec.lock', 'apps/cloudflare/build-flutter-web.ts') }}
+
       - name: Test Cloudflare integration
         # `SELF.fetch` through the real gateway, the real built artifact and the
         # real Durable Objects. The provider is stubbed at the outbound seam and
@@ -95,15 +155,17 @@ jobs:
         run: bun run --filter @frockbot/cloudflare test:integration
 
       - name: Build
+        # Here rather than in `Validate` because it shares the Flutter client
+        # the integration suite just built.
         run: bun run build
 
   e2e:
     name: Browser end-to-end (${{ matrix.shard }}/${{ strategy.job-total }})
-    # Deliberately not `needs: validate`. This job shares nothing with Validate
-    # — it installs its own dependencies and the harness builds the artifact
-    # itself — so gating it behind Validate only made a two-minute job wait
-    # nine minutes for an answer it never reads. `deploy-staging` below is
-    # where the two are required to agree.
+    # Deliberately no `needs`. This job shares nothing with the others — it
+    # installs its own dependencies and the harness builds the artifact itself
+    # — so gating it behind them only made a two-minute job wait minutes for
+    # an answer it never reads. `deploy-staging` below is where they are all
+    # required to agree.
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -138,13 +200,23 @@ jobs:
 
       # The harness builds the artifact itself, and `artifact:build` now begins
       # with `flutter build web`; without the SDK every shard fails before the
-      # first spec. Same pin as Validate and `native.yml`.
+      # first spec. Same pin as the integration job and `native.yml`.
       - name: Set up Flutter
         uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
         with:
           flutter-version: 3.47.0
           channel: stable
           cache: true
+
+      # Same cache, same key, as the integration job: every shard would
+      # otherwise run its own minute of dart2js for an identical bundle.
+      - name: Cache Flutter web client
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: |
+            apps/cloudflare/dist/web
+            apps/cloudflare/dist/flutter-web.json
+          key: flutter-web-${{ runner.os }}-3.47.0-${{ hashFiles('apps/native/lib/**', 'apps/native/web/**', 'apps/native/assets/**', 'apps/native/vendor/**', 'apps/native/pubspec.yaml', 'apps/native/pubspec.lock', 'apps/cloudflare/build-flutter-web.ts') }}
 
       - name: Test browser end to end
         # A browser against `wrangler dev` running `src/index.ts` and the real
@@ -275,7 +347,7 @@ jobs:
     # Opt-in through the repository variable `DEPLOY_STAGING`: the job is
     # skipped, not failed, while the environment is unconfigured, so
     # `release` below still cuts the tag.
-    needs: [validate, e2e]
+    needs: [validate, runtime, integration, e2e]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.DEPLOY_STAGING == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -430,7 +502,8 @@ jobs:
 
       # `artifact:build` chains `client:build`, which is `flutter build web`,
       # so the staging Worker's `assets` payload is built here — before the
-      # deploy below uploads it. Same pin as Validate and `native.yml`.
+      # deploy below uploads it. Same pin as the integration job and
+      # `native.yml`.
       - name: Set up Flutter # zizmor: ignore[cache-poisoning] trusted main deployment
         uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
         with:
@@ -559,11 +632,13 @@ jobs:
     # Runs after a skipped staging deploy as well as a successful one, never
     # after a failed one: `!cancelled()` keeps the job eligible when
     # `deploy-staging` was skipped, and the result checks do the gating.
-    needs: [validate, e2e, deploy-staging]
+    needs: [validate, runtime, integration, e2e, deploy-staging]
     if: >-
       !cancelled()
       && github.event_name == 'push' && github.ref == 'refs/heads/main'
       && needs.validate.result == 'success'
+      && needs.runtime.result == 'success'
+      && needs.integration.result == 'success'
       && needs.e2e.result == 'success'
       && (needs.deploy-staging.result == 'success' || needs.deploy-staging.result == 'skipped')
     runs-on: ubuntu-latest
