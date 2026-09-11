@@ -138,7 +138,13 @@ class FakeClient {
   }
 }
 
-function fixture(options: { apiKey?: string; clock?: { now: number } } = {}) {
+function fixture(
+  options: {
+    apiKey?: string;
+    clock?: { now: number };
+    bootstrapDeadlineMs?: number;
+  } = {},
+) {
   const storage = new MemoryStorage();
   const settings = new FakeSettings();
   const client = new FakeClient();
@@ -153,6 +159,9 @@ function fixture(options: { apiKey?: string; clock?: { now: number } } = {}) {
     ...(options.apiKey === "" ? {} : { client: client as never }),
     now: () => clock.now,
     randomId: () => `id-${++ids}`,
+    ...(options.bootstrapDeadlineMs === undefined
+      ? {}
+      : { bootstrapDeadlineMs: options.bootstrapDeadlineMs }),
   });
   settings.registerConfigurationReadBootstrap(contribution);
   return { storage, settings, client, contribution, clock };
@@ -333,6 +342,27 @@ describe("settling a sign-in on the next read", () => {
     };
     await contribution.bootstrap("tim");
     expect(settings.state.connections[0]?.state).toBe("revoked");
+  });
+
+  test("a hanging provider neither stalls the read nor holds up a sibling", async () => {
+    const { contribution, settings, client, clock } = fixture({
+      bootstrapDeadlineMs: 100,
+    });
+    await contribution.executeConnection("tim", start("s1"));
+    await contribution.executeConnection("tim", start("s2"));
+    client.set("ca_2", "ACTIVE");
+    clock.now += 5_000;
+    // The first account's read never comes back at all.
+    const read = client.getConnectedAccount.bind(client);
+    client.getConnectedAccount = (id: string) =>
+      id === "ca_1" ? new Promise(() => undefined) : read(id);
+    const started = Date.now();
+    await contribution.bootstrap("tim");
+    expect(Date.now() - started).toBeLessThan(2_000);
+    expect(settings.state.connections.map((c) => c.state)).toEqual([
+      "authorizing",
+      "ready",
+    ]);
   });
 
   test("gives up on a sign-in nobody finished", async () => {

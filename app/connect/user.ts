@@ -48,6 +48,8 @@ const POLL_PREFIX = "connect:poll:v1:";
 const POLL_INTERVAL_MS = 3_000;
 /** How long a sign-in may stay unfinished before it is called failed. */
 const AUTHORIZATION_TIMEOUT_MS = 30 * 60_000;
+/** How long a settings read may wait on the provider before moving on. */
+const BOOTSTRAP_DEADLINE_MS = 5_000;
 export const CONNECT_CALLBACK_PATH = "/api/connect/callback";
 
 /** What a Connection of this Package keeps beside its state. Never a secret. */
@@ -58,6 +60,12 @@ export interface ConnectSafeMetadataV1 {
   /** The Bot-facing Tool Namespace; the slug, suffixed for a second account. */
   namespace: string;
   startedAt: string;
+}
+
+/** What a poll of the provider says to do with a waiting Connection. */
+interface ConnectSettlementV1 {
+  state: "ready" | "failed";
+  extra: { generation?: string; failure?: string };
 }
 
 interface StoredCommand {
@@ -82,6 +90,8 @@ export interface ConnectUserBackendHost {
   fetch?: ComposioFetch;
   now?: () => number;
   randomId?: () => string;
+  /** How long a settings read waits on the provider. Tests shorten it. */
+  bootstrapDeadlineMs?: number;
 }
 
 function decodeStoredCommand(value: unknown): StoredCommand {
@@ -141,6 +151,7 @@ export class ConnectUserBackendContribution {
   private readonly client?: ComposioClient;
   private readonly now: () => number;
   private readonly randomId: () => string;
+  private readonly bootstrapDeadlineMs: number;
 
   constructor(private readonly host: ConnectUserBackendHost) {
     this.client =
@@ -154,6 +165,8 @@ export class ConnectUserBackendContribution {
         : undefined);
     this.now = host.now ?? Date.now;
     this.randomId = host.randomId ?? (() => crypto.randomUUID());
+    this.bootstrapDeadlineMs =
+      host.bootstrapDeadlineMs ?? BOOTSTRAP_DEADLINE_MS;
   }
 
   async executeConnection(
@@ -204,10 +217,12 @@ export class ConnectUserBackendContribution {
   }
 
   /**
-   * Runs before every settings read. Each Connection still waiting on a
-   * sign-in is asked about, at most every few seconds, and settled when the
-   * provider has an answer. A provider that cannot be reached leaves the
-   * Connection where it is; the next read asks again.
+   * Runs before every settings read. Every Connection still waiting on a
+   * sign-in is asked about at once, at most every few seconds each, and
+   * settled when the provider has an answer. The answers are applied one at a
+   * time because each settle rewrites the one settings record. A read waits no
+   * longer than the deadline: a provider that is slow or unreachable leaves
+   * the Connection where it is and the next read asks again.
    */
   async bootstrap(userId: string): Promise<void> {
     const snapshot = await this.host.settings.readSnapshot();
@@ -217,11 +232,26 @@ export class ConnectUserBackendContribution {
         connection.state === "authorizing",
     );
     if (waiting.length === 0) return;
-    for (const connection of waiting) {
-      // A read must never fail because the provider is down or a concurrent
-      // command moved the Connection first; the next read asks again.
-      await this.reconcile(userId, connection).catch(() => undefined);
-    }
+    let applied: Promise<unknown> = Promise.resolve();
+    const settled = waiting.map(async (connection) => {
+      const outcome = await this.poll(connection).catch(() => undefined);
+      if (!outcome) return;
+      // A settle must never fail the read either: a concurrent command may
+      // have moved the Connection first, and the next read asks again.
+      const next = applied.then(() =>
+        this.settle(userId, connection, outcome.state, outcome.extra).catch(
+          () => undefined,
+        ),
+      );
+      applied = next;
+      await next;
+    });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, this.bootstrapDeadlineMs);
+    });
+    await Promise.race([Promise.all(settled), deadline]);
+    clearTimeout(timer);
   }
 
   private async execute(
@@ -465,17 +495,22 @@ export class ConnectUserBackendContribution {
     return receipt("applied");
   }
 
-  private async reconcile(
-    userId: string,
+  /**
+   * Asks the provider what became of one waiting Connection. It answers what
+   * to settle it to, or nothing at all when it is throttled, unreachable, or
+   * the sign-in is still legitimately outstanding. It never rejects: a read
+   * must not fail because the provider is down.
+   */
+  private async poll(
     connection: ConnectionView,
-  ): Promise<void> {
+  ): Promise<ConnectSettlementV1 | undefined> {
     const metadata = connectSafeMetadataV1(connection);
-    if (!metadata || !this.client) return;
+    if (!metadata || !this.client) return undefined;
     const pollKey = `${POLL_PREFIX}${connection.connectionId}`;
     const lastPolled = await this.host.storage.get<number>(pollKey);
     const now = this.now();
     if (typeof lastPolled === "number" && now - lastPolled < POLL_INTERVAL_MS) {
-      return;
+      return undefined;
     }
     await this.host.storage.put(pollKey, now);
     let account: ConnectedAccountSummaryV1;
@@ -487,29 +522,29 @@ export class ConnectUserBackendContribution {
       // Gone at the provider: the sign-in link expired unused, or the account
       // was removed from the dashboard. Either way there is nothing to wait for.
       if (error instanceof ComposioRequestError && error.status === 404) {
-        await this.settle(userId, connection, "failed", {
-          failure: connectFailureLineV1({ status: "FAILED" }),
-        });
+        return {
+          state: "failed",
+          extra: { failure: connectFailureLineV1({ status: "FAILED" }) },
+        };
       }
-      return;
+      return undefined;
     }
     if (account.status === "ACTIVE" && !account.disabled) {
-      await this.settle(userId, connection, "ready", {
-        generation: this.randomId(),
-      });
-      return;
+      return { state: "ready", extra: { generation: this.randomId() } };
     }
     if (account.status === "INITIALIZING" || account.status === "INITIATED") {
       if (now - Date.parse(metadata.startedAt) > AUTHORIZATION_TIMEOUT_MS) {
-        await this.settle(userId, connection, "failed", {
-          failure: "Sign-in timed out. Connect it again.",
-        });
+        return {
+          state: "failed",
+          extra: { failure: "Sign-in timed out. Connect it again." },
+        };
       }
-      return;
+      return undefined;
     }
-    await this.settle(userId, connection, "failed", {
-      failure: connectFailureLineV1(account),
-    });
+    return {
+      state: "failed",
+      extra: { failure: connectFailureLineV1(account) },
+    };
   }
 
   private async settle(
