@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import {
   categories,
   ignoredWorkingPath,
@@ -17,6 +17,7 @@ const roots: string[] = [];
 function git(root: string, ...args: string[]) {
   const result = Bun.spawnSync(["git", ...args], { cwd: root, env: GIT_ENV });
   if (result.exitCode) throw new Error(result.stderr.toString());
+  return result.stdout.toString().trim();
 }
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), "validation-test-"));
@@ -46,6 +47,36 @@ test("documentation exceptions do not ignore nested prompts or new code", () => 
   expect(() => snapshot(root)).not.toThrow();
   writeFileSync(join(root, "new.ts"), "export {};");
   expect(() => snapshot(root)).toThrow("new.ts");
+});
+
+test("a test run under a git hook leaves the hooked repository untouched", () => {
+  // Git exports GIT_DIR and friends to hooks; a `git init` under a fixture
+  // then re-initialised the repository being committed to, marking it bare
+  // and pointing its hooks at /dev/null. Bun hands a child the environment
+  // it started with, so mutating process.env here never reaches a spawned
+  // git: the variables must reach `bun test` the way git delivers them, from
+  // outside.
+  const hooked = fixture();
+  git(hooked, "config", "core.hooksPath", "hooks-of-hooked");
+  const child = Bun.spawnSync(
+    [process.execPath, "test", import.meta.path, "-t", "^documentation"],
+    {
+      cwd: resolve(import.meta.dirname, ".."),
+      env: {
+        ...GIT_ENV,
+        GIT_DIR: join(hooked, ".git"),
+        GIT_WORK_TREE: hooked,
+        GIT_INDEX_FILE: join(hooked, ".git", "index"),
+        GIT_PREFIX: "",
+      },
+    },
+  );
+  expect(child.stderr.toString()).toContain(" 1 pass");
+  expect(child.exitCode).toBe(0);
+  expect(git(hooked, "config", "--bool", "core.bare")).toBe("false");
+  expect(git(hooked, "config", "core.hooksPath")).toBe("hooks-of-hooked");
+  expect(git(hooked, "rev-list", "--count", "HEAD")).toBe("1");
+  expect(git(hooked, "status", "--porcelain")).toBe("");
 });
 
 test("a category runs under the shell's environment, not git's hook environment", async () => {
