@@ -167,14 +167,17 @@ class _ConnectionsPageState extends State<ConnectionsPage>
         .toList();
   }
 
-  List<Map<String, Object?>> accountsOf(Map<String, Object?> provider) =>
-      (frame?.accounts ?? const [])
-          .where(
-            (account) =>
-                account['packageId'] == provider['packageId'] &&
-                account['connectionTypeId'] == provider['connectionTypeId'],
-          )
-          .toList();
+  List<Map<String, Object?>> accountsOf(Map<String, Object?> provider) {
+    final packageId = provider['packageId'] as String;
+    final connectionTypeId = provider['connectionTypeId'] as String;
+    return (frame?.accounts ?? const [])
+        .where(
+          (account) =>
+              account['packageId'] as String == packageId &&
+              account['connectionTypeId'] as String == connectionTypeId,
+        )
+        .toList();
+  }
 
   @override
   Widget build(BuildContext context) {

@@ -132,7 +132,7 @@ export function connectSafeMetadataV1(
 
 /** What a person is told when a sign-in ends without an account. */
 export function connectFailureLineV1(
-  account: Pick<ConnectedAccountSummaryV1, "status" | "statusReason">,
+  account: Pick<ConnectedAccountSummaryV1, "status">,
 ): string {
   switch (account.status) {
     case "EXPIRED":
@@ -322,15 +322,9 @@ export class ConnectUserBackendContribution {
         connection.state !== "revoked",
     );
     // A sign-in that failed is a retry waiting to happen, not a live account:
-    // it is retired here so this one can take back the app's own name.
-    const live: typeof siblings = [];
-    for (const sibling of siblings) {
-      if (sibling.state !== "failed") {
-        live.push(sibling);
-        continue;
-      }
-      await this.retire(accountId, sibling);
-    }
+    // it holds no name, and it is retired once this Connection is written.
+    const dead = siblings.filter((sibling) => sibling.state === "failed");
+    const live = siblings.filter((sibling) => sibling.state !== "failed");
     // A second account of the same app gets the first free suffix, never a
     // count: a count is reused the moment an earlier account is disconnected,
     // and two live Connections would then mount the same namespace.
@@ -358,6 +352,7 @@ export class ConnectUserBackendContribution {
       state: "authorizing",
       safeMetadata: { ...metadata },
     });
+    for (const sibling of dead) await this.retire(accountId, sibling);
     return {
       schemaVersion: 1,
       commandId: command.commandId,
@@ -382,13 +377,6 @@ export class ConnectUserBackendContribution {
     connection: ConnectionView,
   ): Promise<void> {
     const metadata = connectSafeMetadataV1(connection);
-    if (this.client && metadata) {
-      try {
-        await this.client.deleteConnectedAccount(metadata.connectedAccountId);
-      } catch {
-        // The dead account is retired here either way.
-      }
-    }
     await this.host.settings.replaceConnection(
       accountId,
       connection.connectionId,
@@ -400,6 +388,13 @@ export class ConnectUserBackendContribution {
       } as ConnectionView,
     );
     await this.host.storage.delete(`${POLL_PREFIX}${connection.connectionId}`);
+    if (this.client && metadata) {
+      try {
+        await this.client.deleteConnectedAccount(metadata.connectedAccountId);
+      } catch {
+        // The dead account is retired here either way.
+      }
+    }
   }
 
   /**

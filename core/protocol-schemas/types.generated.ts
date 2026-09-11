@@ -648,7 +648,7 @@ export type ConnectionsFrame = {
       | "reconciliation-required"
       | "failed";
     packageId: Identifier;
-    connectionTypeId?: Identifier;
+    connectionTypeId: Identifier;
     kind: "model" | "connector";
     authorization: "none" | "api-key" | "ambient-native" | "grant";
     detail?: string;

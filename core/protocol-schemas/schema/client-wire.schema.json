@@ -3272,6 +3272,7 @@
               "label",
               "state",
               "packageId",
+              "connectionTypeId",
               "kind",
               "authorization"
             ],

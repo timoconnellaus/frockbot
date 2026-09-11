@@ -43,7 +43,6 @@ export interface ConnectedAccountSummaryV1 {
   status: ConnectedAccountStatusV1;
   toolkitSlug: string;
   disabled: boolean;
-  statusReason?: string;
 }
 
 export interface ConnectLinkV1 {
@@ -146,9 +145,6 @@ export function decodeConnectedAccountSummaryV1(
     status: status as ConnectedAccountStatusV1,
     toolkitSlug: requiredString(asRecord(account.toolkit), "slug"),
     disabled: account.is_disabled === true || authConfig.is_disabled === true,
-    ...(typeof account.status_reason === "string" && account.status_reason
-      ? { statusReason: account.status_reason.slice(0, 500) }
-      : {}),
   };
 }
 
