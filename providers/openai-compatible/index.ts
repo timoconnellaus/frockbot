@@ -411,6 +411,31 @@ export function structuredOutputPlanV1(
   };
 }
 
+/**
+ * The part of a request's Model Connection a replay state may carry.
+ *
+ * A replay state is a session event, and its decoder (`requireModelReplayStateV1`)
+ * declares exactly two binding fields: which Connection, and which generation of
+ * its credential. The binding snapshot itself carries a third,
+ * `catalogGeneration`, which is the account's catalog revision and no business
+ * of the event log — so a provider that spreads the whole snapshot into its
+ * replay state writes a key the decoder refuses, and every Turn on that
+ * Connection fails with "model replay state has invalid fields".
+ */
+export function modelReplayBindingV1(request: NormalizedModelRequest): {
+  connectionId?: string;
+  connectionGeneration?: string;
+} {
+  const binding = request.modelBinding;
+  if (!binding) return {};
+  return {
+    connectionId: binding.connectionId,
+    ...(binding.connectionGeneration === undefined
+      ? {}
+      : { connectionGeneration: binding.connectionGeneration }),
+  };
+}
+
 /** Prepends `instruction` to a system prompt, or makes one of it. */
 export function systemWithInstructionV1(
   system: string | undefined,

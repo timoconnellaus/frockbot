@@ -407,9 +407,20 @@ test("a Bot writes, checks and publishes an Applet, and its tool reaches the Bot
   await shot(page, "canvas-code");
   await second.close();
 
-  // The phone: the same published Applet, as a full-height sheet.
+  // The phone: the same published Applet, as a full-height sheet. A phone
+  // opens on the Bot list, a conversation is a page over it, and the
+  // conversation's bar is Back, the Bot's name and the Computer — the Applets
+  // are a row on the Bot's page, which that name opens.
   await page.setViewportSize(PHONE);
   await page.reload();
+  await expect(sem(page, "shell-sidebar")).toBeVisible({ timeout: 120_000 });
+  await press(
+    sem(page, "shell-sidebar")
+      .locator('[flt-semantics-identifier^="sidebar-bot-"]')
+      .filter({ hasText: "Builder" })
+      .first(),
+  );
+  await press(sem(page, "bot-panel-toggle"));
   const chip = sem(page, "applet-chip");
   await expect(chip).toBeVisible({ timeout: 60_000 });
   await shot(page, "phone-chip");

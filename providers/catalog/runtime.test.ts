@@ -7,6 +7,7 @@ import {
   decodeIsolateModelEventV1,
   decodeNormalizedModelRequestV1,
   decodeSessionEvent,
+  requireModelReplayStateV1,
   type LlmStreamEvent,
   type NormalizedModelRequest,
 } from "@frockbot/core/contracts";
@@ -300,5 +301,33 @@ describe("catalog provider bridge", () => {
         { type: "toolCall", id: "call-1", name: "lookup", arguments: {} },
       ]);
     }
+  });
+  test("carries only the Connection's own fields into the replay state", async () => {
+    // The account's catalog revision rides on the binding snapshot and the
+    // session event decoder refuses it: a replay state that spread the whole
+    // snapshot failed every Turn with "model replay state has invalid fields".
+    const result = await collect(
+      decodeCatalogStreamV1(
+        events({ type: "done", reason: "toolUse", message: response }),
+        {
+          ...request,
+          modelBinding: {
+            connectionId: "connection-1",
+            connectionGeneration: "generation-1",
+            catalogGeneration: "catalog-7",
+          },
+        },
+      ),
+    );
+    const stateEvent = result[0];
+    if (stateEvent?.type !== "provider-state") throw new Error("Missing state");
+    expect(() => requireModelReplayStateV1(stateEvent.state)).not.toThrow();
+    expect(Object.keys(stateEvent.state).sort()).toEqual([
+      "connectionGeneration",
+      "connectionId",
+      "content",
+      "model",
+      "provider",
+    ]);
   });
 });

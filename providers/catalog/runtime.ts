@@ -22,6 +22,7 @@ import {
 import {
   classifyOpenAICompatibleFailureV1,
   streamEventsWithModelRequestDeadlinesV1,
+  modelReplayBindingV1,
   structuredOutputPlanV1,
   systemWithInstructionV1,
 } from "../openai-compatible/index.js";
@@ -130,7 +131,7 @@ export async function* decodeCatalogStreamV1(
         provider: request.provider,
         model: request.model,
         content: JSON.stringify(response.content),
-        ...(request.modelBinding ?? {}),
+        ...modelReplayBindingV1(request),
       },
     };
     const usage = response.usage;

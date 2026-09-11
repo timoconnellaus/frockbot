@@ -3,7 +3,10 @@ import type {
   NormalizedModelRequest,
 } from "@frockbot/core/contracts";
 import { ModelProviderFailureError } from "@frockbot/core/contracts";
-import { classifyOpenAICompatibleFailureV1 } from "../openai-compatible/index.js";
+import {
+  classifyOpenAICompatibleFailureV1,
+  modelReplayBindingV1,
+} from "../openai-compatible/index.js";
 
 /** Bedrock's bearer-token Converse API works over fetch in a Worker, without the Node-only SDK loader. */
 export async function* bedrockStreamV1(
@@ -149,7 +152,7 @@ export async function* bedrockStreamV1(
       provider: request.provider,
       model: request.model,
       content: JSON.stringify(content),
-      ...(request.modelBinding ?? {}),
+      ...modelReplayBindingV1(request),
     },
   };
   if (body.usage)
