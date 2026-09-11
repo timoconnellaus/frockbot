@@ -463,7 +463,19 @@ export async function answerInputs(
       // it was, so a spec that put a field back to blank found its next answer
       // typed onto the end of the old one.
       if (value.length === 0) await input.press("Backspace");
-      else await input.pressSequentially(value);
+      // Line by line, with Shift+Enter between them. A bare Enter is Send in
+      // the composer wherever there is a keyboard with a Shift key, and
+      // `pressSequentially` turns a "\n" into exactly that key — so a
+      // multi-line draft typed in one go went out at its first line, and the
+      // read-back below found a field holding the rest. Shift+Enter is the
+      // line break on every multi-line field, the composer included.
+      else {
+        const lines = value.split("\n");
+        for (const [index, line] of lines.entries()) {
+          if (index > 0) await input.press("Shift+Enter");
+          if (line.length > 0) await input.pressSequentially(line);
+        }
+      }
     }
     // A second pass over every field once the last one is typed, because what
     // a stray edit empties is the field *before* the one being typed. A plain
@@ -886,9 +898,16 @@ export async function connectOllama(
     [provider.locator('input[aria-label="API key"]'), options.apiKey],
   ]);
   await press(action(provider, "connect-0"));
+  // The account's state is read from the row's accessible name, not its text:
+  // the compact Connectors page folds a provider's title, pill and account
+  // lines into one labelled node, so "Ready" is in `aria-label` and never in
+  // the text content a `toContainText` would read. The buttons are the only
+  // text left there.
   await expect(async () => {
     await press(sem(page, "connections-refresh"));
-    await expect(provider).toContainText("Ready", { timeout: 10_000 });
+    await expect(provider.getByLabel(/\bReady\b/u)).toBeVisible({
+      timeout: 10_000,
+    });
   }).toPass({ timeout: 90_000 });
   await closeOverlay(page);
 }
