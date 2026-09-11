@@ -22,6 +22,14 @@ export const NATIVE_RETURN_MACOS = `${NATIVE_ORIGIN}/native/return/macos`;
  * running with `ALLOW_DEVELOPMENT_AUTH` ever lists it.
  */
 export const NATIVE_RETURN_DEVELOPMENT = "frockbot-dev://native/return/android";
+/**
+ * The Mac app's custom scheme. A Universal Link only reaches the app from
+ * Safari, and only on a user's own click; Chrome and Firefox never dispatch
+ * one, and Google's completion redirect is not a click. The return page hands
+ * the same code and state to this scheme, which every browser can open. The
+ * code is useless without the PKCE verifier the app never shares.
+ */
+export const NATIVE_MACOS_SCHEME = "frockbot";
 const PREFIX = "frockbot-native.";
 const encoder = new TextEncoder();
 const NO_STORE = {
@@ -645,6 +653,8 @@ export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
           options.returnUris.includes(url.origin + url.pathname) &&
           request.method === "GET"
         ) {
+          if (url.origin + url.pathname === NATIVE_RETURN_MACOS)
+            return macosReturnPage();
           return new Response(
             "Return to FrockBot to finish signing in. If it did not open, check that the latest app is installed and try again.",
             {
@@ -661,4 +671,60 @@ export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
       }
     },
   };
+}
+
+/**
+ * The page Google's completion lands on in the Mac user's browser. It carries
+ * the code and state across to the app on its custom scheme, forwarding only
+ * those two query parameters and never reflecting them into markup.
+ */
+function macosReturnPage(): Response {
+  const target = `${NATIVE_MACOS_SCHEME}://${new URL(NATIVE_RETURN_MACOS).host}${new URL(NATIVE_RETURN_MACOS).pathname}`;
+  const html = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Return to FrockBot</title>
+<style>
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #171319; color: #f4eef2; font: 16px/1.5 -apple-system, "SF Pro Text", "Segoe UI", sans-serif; }
+  main { max-width: 26rem; padding: 2rem; text-align: center; }
+  h1 { font-size: 1.25rem; margin: 0 0 .5rem; }
+  p { margin: 0 0 1.25rem; color: #cfc3cb; }
+  a.open { display: inline-block; padding: .8rem 1.5rem; border-radius: .75rem; background: #ec2f6a; color: #fff; font-weight: 600; text-decoration: none; }
+  small { display: block; margin-top: 1.25rem; color: #9b8d96; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Return to FrockBot to finish signing in</h1>
+  <p>Your browser should open FrockBot now. If it did not, open it here.</p>
+  <a class="open" id="open" href="${target}">Open FrockBot</a>
+  <small>If FrockBot still does not open, check that the latest app is installed and sign in again.</small>
+</main>
+<script>
+(function () {
+  var incoming = new URLSearchParams(location.search);
+  var forwarded = new URLSearchParams();
+  ["code", "state"].forEach(function (key) {
+    var value = incoming.get(key);
+    if (value !== null) forwarded.set(key, value);
+  });
+  var href = ${JSON.stringify(target)} + (forwarded.toString() ? "?" + forwarded.toString() : "");
+  document.getElementById("open").setAttribute("href", href);
+  location.replace(href);
+})();
+</script>
+</body>
+</html>`;
+  return new Response(html, {
+    headers: {
+      ...NO_STORE,
+      "content-type": "text/html; charset=utf-8",
+      "content-security-policy":
+        "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'",
+      "x-content-type-options": "nosniff",
+    },
+  });
 }

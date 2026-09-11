@@ -67,9 +67,23 @@ class NativeSignIn implements SignIn {
     }
   }
 
+  /// The Mac app's custom scheme. Safari alone dispatches a Universal Link, and
+  /// only on the user's own click; the return page hands the same code and
+  /// state to this scheme so every browser reaches the app.
+  static const macosScheme = 'frockbot';
+
+  /// The return as the app would have received it on its verified link.
+  ///
+  /// Only the scheme differs: the host and path must still name the hosted
+  /// return exactly, so a link on the custom scheme is checked like any other.
+  static Uri canonical(Uri uri) => Platform.isMacOS && uri.scheme == macosScheme
+      ? uri.replace(scheme: 'https')
+      : uri;
+
   @override
-  Future<bool> accept(Uri uri) async {
+  Future<bool> accept(Uri incoming) async {
     final expected = Uri.parse(returnUri);
+    final uri = canonical(incoming);
     if (uri.scheme != expected.scheme ||
         uri.host != expected.host ||
         uri.port != expected.port ||
