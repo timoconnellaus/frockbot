@@ -280,7 +280,7 @@ export async function releaseReport(
       .map((asset) => record(asset, "release asset"))
       .find(
         (asset) =>
-          text(asset.name) === "FrockBot-macos.zip" && Number(asset.size) > 0,
+          text(asset.name) === "FrockBot-macos.dmg" && Number(asset.size) > 0,
       );
     if (release.isDraft !== false || !archive)
       return {

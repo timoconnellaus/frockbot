@@ -274,6 +274,7 @@
     background: var(--pink);
     color: #fff;
     font-weight: 700;
+    white-space: nowrap;
     box-shadow: 0 10px 24px rgb(236 56 107 / 20%);
     transition:
       transform 180ms ease,
@@ -302,6 +303,21 @@
   }
   .button-ghost:hover {
     background: var(--cream);
+  }
+  .button-mac {
+    background: var(--ink);
+    color: #fff;
+    box-shadow: 0 10px 24px rgb(30 29 39 / 18%);
+  }
+  .button-mac:hover {
+    background: #000;
+  }
+  .button-mac svg {
+    flex: none;
+    width: 18px;
+    height: 18px;
+    margin-top: -2px;
+    fill: currentColor;
   }
   .button-white {
     background: #fff;
@@ -384,6 +400,7 @@
   }
   .hero-actions {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 14px;
     margin-top: 28px;

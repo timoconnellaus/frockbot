@@ -348,7 +348,7 @@ describe("Mac direct release", () => {
       (await releaseReport(fakeGitHub({ runs, run, release }), "mac-v1.1.0"))
         .status,
     ).toBe("pending");
-    release.assets = [{ name: "FrockBot-macos.zip", size: 500 }];
+    release.assets = [{ name: "FrockBot-macos.dmg", size: 500 }];
     expect(
       (await releaseReport(fakeGitHub({ runs, run, release }), "mac-v1.1.0"))
         .status,
