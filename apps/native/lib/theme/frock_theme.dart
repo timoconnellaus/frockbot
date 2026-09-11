@@ -7,10 +7,14 @@ import 'package:flutter/services.dart';
 abstract final class FrockTheme {
   static const accent = Color(0xffec386b);
 
-  /// The pale pink secondary actions are written in. The voice footer's AI
-  /// row uses it so the two rows read as one family: the person is the
-  /// primary voice, the Bot answers underneath it.
+  /// The pale pink secondary actions are written in. The voice footer's
+  /// lobes use it as the tint between white and the accent.
   static const accentSoft = Color(0xfff59ab6);
+
+  /// The deep rose the Bot speaks in on the voice footer's pink slab: the
+  /// same hue as [accent], darker, so the two voices are one family told
+  /// apart by weight rather than by a second colour.
+  static const accentDeep = Color(0xff9c1a44);
   static const window = Color(0xff1f1e24);
   static const surface = Color(0xff211f26);
   static const raised = Color(0xff2c2a33);
