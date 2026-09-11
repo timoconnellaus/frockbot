@@ -215,6 +215,17 @@ describe("foundation application", () => {
         }),
       setUserFeatures: () =>
         Promise.reject(new Error("not used while composing")),
+      readUserBilling: () =>
+        Promise.resolve({
+          includedMicros: 0,
+          purchasedMicros: 0,
+          complimentaryMicros: 0,
+          reservedMicros: 0,
+          subscribed: false,
+          canSpend: false,
+          suspended: false,
+        }),
+      grantUserCredit: () => Promise.reject(new Error("not under test")),
       listBots: () =>
         Promise.resolve({ schemaVersion: 1, revision: 0, bots: [] }),
       listTemplateShares: () =>

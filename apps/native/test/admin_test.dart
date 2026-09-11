@@ -23,7 +23,20 @@ Map<String, Object?> features({required bool applets}) => {
   'updatedBy': applets ? 'tim' : 'deployment-default',
 };
 
-Map<String, Object?> accounts({required bool guestApplets}) => {
+Map<String, Object?> billing({int complimentaryMicros = 0}) => {
+  'includedMicros': 0,
+  'purchasedMicros': 0,
+  'complimentaryMicros': complimentaryMicros,
+  'reservedMicros': 0,
+  'subscribed': false,
+  'canSpend': complimentaryMicros > 0,
+  'suspended': false,
+};
+
+Map<String, Object?> accounts({
+  required bool guestApplets,
+  int guestCreditMicros = 0,
+}) => {
   'schemaVersion': 1,
   'users': [
     {
@@ -31,12 +44,14 @@ Map<String, Object?> accounts({required bool guestApplets}) => {
       'email': 'tim@example.com',
       'name': 'Tim',
       'features': features(applets: true),
+      'billing': billing(),
     },
     {
       'userId': 'guest-id',
       'email': 'guest@example.com',
       'name': 'Guest',
       'features': features(applets: guestApplets),
+      'billing': billing(complimentaryMicros: guestCreditMicros),
     },
   ],
 };
@@ -121,6 +136,82 @@ void main() {
       matching: find.byType(SwitchListTile),
     );
     expect(tester.widget<SwitchListTile>(tim).value, isTrue);
+  });
+
+  testWidgets('an admin grants an account credit, once, with a reason', (
+    tester,
+  ) async {
+    var guestCredit = 0;
+    final sent = <Map<String, Object?>>[];
+    final api = SettingsApi(MemoryStore(), (path, body) async {
+      if (path == '/api/admin/policy') return policy();
+      if (path == '/api/admin/users') {
+        return accounts(guestApplets: false, guestCreditMicros: guestCredit);
+      }
+      if (path == '/api/admin/users/guest-id/credit') {
+        final command = (body as Map).cast<String, Object?>();
+        sent.add(command);
+        guestCredit += (command['cents'] as int) * 10000;
+        return billing(complimentaryMicros: guestCredit);
+      }
+      throw StateError('unexpected $path');
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: FrockTheme.theme(Brightness.dark),
+        home: AdminPage(api: api),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.descendant(
+        of: find.bySemanticsIdentifier(AdminIds.credit('guest-id')),
+        matching: find.textContaining('US\$0.00 complimentary'),
+      ),
+      findsOneWidget,
+    );
+    await tester.tap(
+      find.bySemanticsIdentifier(AdminIds.addCredit('guest-id')),
+    );
+    await tester.pumpAndSettle();
+    expect(find.bySemanticsIdentifier(AdminIds.creditDialog), findsOneWidget);
+    // Nothing to send until an amount and a reason are both given.
+    final confirm = find.descendant(
+      of: find.bySemanticsIdentifier(AdminIds.creditConfirm),
+      matching: find.byType(FilledButton),
+    );
+    expect(tester.widget<FilledButton>(confirm).onPressed, isNull);
+    await tester.tap(find.bySemanticsIdentifier(AdminIds.creditAmount(1000)));
+    await tester.pumpAndSettle();
+    expect(tester.widget<FilledButton>(confirm).onPressed, isNull);
+    await tester.enterText(
+      find.descendant(
+        of: find.bySemanticsIdentifier(AdminIds.creditReason),
+        matching: find.byType(TextField),
+      ),
+      'Early tester',
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(confirm);
+    await tester.pumpAndSettle();
+    expect(sent, hasLength(1));
+    expect(sent.single, {
+      'schemaVersion': 1,
+      'type': 'user/grant-credit',
+      'id': sent.single['id'],
+      'cents': 1000,
+      'reason': 'Early tester',
+    });
+    expect((sent.single['id'] as String).isNotEmpty, isTrue);
+    expect(find.bySemanticsIdentifier(AdminIds.creditDialog), findsNothing);
+    // The answer is what is shown: the balance the grant left.
+    expect(
+      find.descendant(
+        of: find.bySemanticsIdentifier(AdminIds.credit('guest-id')),
+        matching: find.textContaining('US\$10.00 complimentary'),
+      ),
+      findsOneWidget,
+    );
   });
 
   testWidgets(

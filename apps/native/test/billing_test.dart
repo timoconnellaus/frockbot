@@ -26,7 +26,7 @@ void main() {
           'computerRate': {
             'activeUsdPerHour': 2.75,
             'storageIncludedGb': 100,
-          'viewerOpenSeconds': 30,
+            'viewerOpenSeconds': 30,
             'viewerRenewSeconds': 30,
           },
           'usage': [
@@ -69,6 +69,73 @@ void main() {
       api.close();
     },
   );
+
+  testWidgets(
+    'complimentary credit is shown, spendable, and no reason to sell a top-up',
+    (tester) async {
+      final api = SettingsApi(
+        MemoryStore(),
+        (_, _) async => {
+          'paymentsAvailable': true,
+          'metered': true,
+          'canSpend': true,
+          'subscribed': false,
+          'subscription': null,
+          'includedMicros': 0,
+          'complimentaryMicros': 5000000,
+          'purchasedMicros': 0,
+          'reservedMicros': 0,
+          'usage': <Object>[],
+        },
+      );
+      await tester.pumpWidget(MaterialApp(home: BillingPage(api: api)));
+      await tester.pumpAndSettle();
+      expect(find.text('Complimentary credit'), findsOneWidget);
+      expect(find.text('US\$5.00'), findsOneWidget);
+      expect(find.textContaining('Your Bots can’t reply'), findsNothing);
+      await tester.scrollUntilVisible(find.text('US\$10'), 300);
+      // A top-up is bought against a subscription, and there is none yet.
+      for (final label in ['US\$10', 'US\$25', 'US\$50']) {
+        expect(
+          tester
+              .widget<OutlinedButton>(
+                find.widgetWithText(OutlinedButton, label),
+              )
+              .onPressed,
+          isNull,
+        );
+      }
+      api.close();
+    },
+  );
+
+  testWidgets('a metered account that cannot spend is told so at the top', (
+    tester,
+  ) async {
+    final api = SettingsApi(
+      MemoryStore(),
+      (_, _) async => {
+        'paymentsAvailable': true,
+        'metered': true,
+        'canSpend': false,
+        'subscribed': false,
+        'subscription': null,
+        'includedMicros': 0,
+        'complimentaryMicros': 0,
+        'purchasedMicros': 0,
+        'reservedMicros': 0,
+        'usage': <Object>[],
+      },
+    );
+    await tester.pumpWidget(MaterialApp(home: BillingPage(api: api)));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Your Bots can’t reply until you subscribe or receive credit.'),
+      findsOneWidget,
+    );
+    expect(find.text('Complimentary credit'), findsNothing);
+    api.close();
+  });
 
   testWidgets('billing disables purchases when payment setup is unavailable', (
     tester,

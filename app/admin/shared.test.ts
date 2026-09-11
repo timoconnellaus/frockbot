@@ -79,6 +79,16 @@ describe("account feature codecs", () => {
     updatedBy: "owner-id",
   } as const;
 
+  const billing = {
+    includedMicros: 0,
+    purchasedMicros: 0,
+    complimentaryMicros: 2_500_000,
+    reservedMicros: 0,
+    subscribed: false,
+    canSpend: true,
+    suspended: false,
+  } as const;
+
   test("decode the exact features and command shapes", () => {
     expect(decodeUserFeaturesV1(features)).toEqual(features);
     expect(
@@ -92,12 +102,13 @@ describe("account feature codecs", () => {
       decodeAdminUserListViewV1({
         schemaVersion: 1,
         users: [
-          { userId: "development", features },
+          { userId: "development", features, billing },
           {
             userId: "u1",
             email: "u1@example.com",
             name: "One",
             features,
+            billing,
           },
         ],
       }).users.map((user) => user.userId),
@@ -107,9 +118,9 @@ describe("account feature codecs", () => {
   test("an identity store row with blank identifiers keeps its account", () => {
     const [account] = decodeAdminUserListViewV1({
       schemaVersion: 1,
-      users: [{ userId: "u1", email: "", name: "", features }],
+      users: [{ userId: "u1", email: "", name: "", features, billing }],
     }).users;
-    expect(account).toEqual({ userId: "u1", features });
+    expect(account).toEqual({ userId: "u1", features, billing });
   });
 
   test("an over-long display name is clamped, not refused", () => {
@@ -121,6 +132,7 @@ describe("account feature codecs", () => {
           email: "u1@example.com",
           name: "x".repeat(600),
           features,
+          billing,
         },
       ],
     }).users;
@@ -129,6 +141,7 @@ describe("account feature codecs", () => {
       email: "u1@example.com",
       name: "x".repeat(512),
       features,
+      billing,
     });
   });
 
@@ -136,8 +149,12 @@ describe("account feature codecs", () => {
     const [readable, unreadable] = decodeAdminUserListViewV1({
       schemaVersion: 1,
       users: [
-        { userId: "u1", features },
-        { userId: "u2", features: { unavailable: true } },
+        { userId: "u1", features, billing },
+        {
+          userId: "u2",
+          features: { unavailable: true },
+          billing: { unavailable: true },
+        },
       ],
     }).users;
     expect(readable?.features).toEqual(features);

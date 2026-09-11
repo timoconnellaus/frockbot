@@ -3,6 +3,11 @@ import { describe, expect, test } from "bun:test";
 import type { SessionEvent } from "@frockbot/core/contracts";
 import { MODEL_FIRST_BYTE_DEADLINE_REASON_V1 } from "@frockbot/core/contracts";
 import {
+  CREDIT_EXHAUSTED_REASON_V1,
+  SUBSCRIPTION_REQUIRED_REASON_V1,
+} from "../billing/ledger.js";
+import {
+  BILLING_FAILURE_REASONS_V1,
   CLIENT_VERSION_DEGRADED_MESSAGE_V1,
   failureNoticeV1,
   knownFailureCopyV1,
@@ -107,6 +112,26 @@ describe("runFailureCopyV1", () => {
       events: [turnEnd("interrupted")],
     });
     expect(copy).toBe(MODEL_FIRST_BYTE_DEADLINE_REASON_V1);
+  });
+
+  // Billing's refusals are the one model failure the person can do something
+  // about, so the sentence that names the remedy reaches the bubble intact.
+  test("a billing refusal reaches the person with its remedy", () => {
+    for (const reason of BILLING_FAILURE_REASONS_V1) {
+      const copy = runFailureCopyV1({
+        failure: `Bot turn ended with outcome model-error: ${reason}`,
+        events: [turnEnd("model-error")],
+      });
+      expect(copy).toBe(reason);
+      assertPlainV1(copy);
+      expect(knownFailureCopyV1(copy)).toBe(reason);
+      // Sending again does not repair an empty balance.
+      expect(failureNoticeV1(copy).retry).toBe(false);
+    }
+    expect(BILLING_FAILURE_REASONS_V1).toEqual([
+      SUBSCRIPTION_REQUIRED_REASON_V1,
+      CREDIT_EXHAUSTED_REASON_V1,
+    ]);
   });
 
   test("a Turn with no terminal event still says something plain", () => {

@@ -152,7 +152,8 @@ void main() {
     // The cloud tells the person as an ordinary message and projects it onto
     // the run in place of the send the firing never made. Drawing the outcome's
     // generic line underneath would be the same event said twice.
-    const said = '"Morning brief" did not run: The model couldn\'t finish '
+    const said =
+        '"Morning brief" did not run: The model couldn\'t finish '
         'its reply. Try again.';
     Map<String, dynamic> brokenFiring() => run(
       runId: 'rf-brief',
@@ -177,9 +178,8 @@ void main() {
 
     test('still draws the row the Turn hangs its work on', () {
       // The message is drawn, the notice is not, and the run is still failed.
-      final closing = projectRuns([
-        brokenFiring(),
-      ]).firstWhere((line) => line.id == 'rf-brief:failed');
+      final closing = projectRuns([brokenFiring()])
+          .firstWhere((line) => line.id == 'rf-brief:failed');
       expect(closing.status, LineStatus.error);
       expect(closing.notice, isNull);
       expect(closing.empty, isTrue);
@@ -239,6 +239,24 @@ void main() {
         lines.where((line) => line.retry == LineRetry.resendTurn),
         isNotEmpty,
       );
+    });
+  });
+
+  group('a reply the account could not pay for', () {
+    test('says so in the product’s words and offers Billing, not a resend', () {
+      for (final refusal in billingFailureCopy) {
+        final lines = projectRuns([
+          run(
+            runId: 'run-a',
+            input: 'Hello',
+            status: 'failed',
+            failure: refusal,
+          ),
+        ]);
+        expect(thread(lines), ['user: Hello', 'assistant: $refusal']);
+        final failed = lines.firstWhere((line) => line.id == 'run-a:failed');
+        expect(failed.retry, LineRetry.openBilling);
+      }
     });
   });
 

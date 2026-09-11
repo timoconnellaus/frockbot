@@ -45,6 +45,11 @@ class ChatPane extends StatefulWidget {
   final void Function(String?)? onReadLatest;
   final void Function(String? runId)? onWorkingChanged;
 
+  /// True when the account cannot pay for a reply: the banner says so before
+  /// the person types one, and a failed reply's notice can open Billing.
+  final bool outOfCredit;
+  final VoidCallback? onOpenBilling;
+
   /// Dictation, which the shell owns because a capture outlives this pane:
   /// switching Bots must flush into the Bot the capture started on.
   final VoidCallback? onDictate;
@@ -66,6 +71,8 @@ class ChatPane extends StatefulWidget {
     this.unreadFromMessageId,
     this.onReadLatest,
     this.onWorkingChanged,
+    this.outOfCredit = false,
+    this.onOpenBilling,
     this.onDictate,
     this.onStopDictation,
     this.dictating = false,
@@ -193,6 +200,21 @@ class _ChatPaneState extends State<ChatPane> {
               ),
             ],
           ),
+        if (widget.outOfCredit)
+          identified(
+            ShellIds.outOfCredit,
+            MaterialBanner(
+              content: const Text(
+                'Your Bots can’t reply until you subscribe or add credit.',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: widget.onOpenBilling,
+                  child: const Text('Open Billing'),
+                ),
+              ],
+            ),
+          ),
         Expanded(
           child: TranscriptView(
             background: widget.background,
@@ -209,6 +231,7 @@ class _ChatPaneState extends State<ChatPane> {
             onRefresh: _refresh,
             onOpenRun: widget.onOpenRun ?? (_) {},
             onRetryTurn: c.canSend ? _retry : null,
+            onOpenBilling: widget.onOpenBilling,
             onOpenSettings: widget.onOpenSettings,
             onMessageActions: widget.onMessageActions,
             unreadFromMessageId: widget.unreadFromMessageId,
@@ -277,6 +300,8 @@ class ConversationView extends StatefulWidget {
   final void Function(String?)? onReadLatest;
   final void Function(String? runId)? onWorkingChanged;
   final void Function(String botId, ConnectionState state)? onConnectionChanged;
+  final bool outOfCredit;
+  final VoidCallback? onOpenBilling;
   final VoidCallback? onDictate;
   final VoidCallback? onStopDictation;
   final bool dictating;
@@ -296,6 +321,8 @@ class ConversationView extends StatefulWidget {
     this.onReadLatest,
     this.onWorkingChanged,
     this.onConnectionChanged,
+    this.outOfCredit = false,
+    this.onOpenBilling,
     this.onDictate,
     this.onStopDictation,
     this.dictating = false,
@@ -372,6 +399,8 @@ class _ConversationViewState extends State<ConversationView>
       unreadFromMessageId: widget.unreadFromMessageId,
       onReadLatest: widget.onReadLatest,
       onWorkingChanged: widget.onWorkingChanged,
+      outOfCredit: widget.outOfCredit,
+      onOpenBilling: widget.onOpenBilling,
       onDictate: widget.onDictate,
       onStopDictation: widget.onStopDictation,
       dictating: widget.dictating,

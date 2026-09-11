@@ -131,6 +131,17 @@ function testGateway(
         ? Promise.reject(new Error("Durable Object reset while responding"))
         : readFeatures(userId),
     setUserFeatures: setFeatures,
+    readUserBilling: () =>
+      Promise.resolve({
+        includedMicros: 0,
+        purchasedMicros: 0,
+        complimentaryMicros: 0,
+        reservedMicros: 0,
+        subscribed: false,
+        canSpend: false,
+        suspended: false,
+      }),
+    grantUserCredit: () => Promise.reject(new Error("not under test")),
   };
   return createGateway({
     loader,

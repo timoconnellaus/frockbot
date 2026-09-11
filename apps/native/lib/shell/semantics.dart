@@ -45,6 +45,12 @@ abstract final class ShellIds {
   static String sidebarGroup(String key) => 'sidebar-group-$key';
   static String message(String id) => 'message-$id';
   static String retryTurn(String runId) => 'retry-turn-$runId';
+
+  /// The Billing door under a reply the account could not pay for.
+  static String openBilling(String runId) => 'open-billing-$runId';
+
+  /// The banner over a conversation whose account cannot spend.
+  static const outOfCredit = 'out-of-credit';
   static String openRun(String runId) => 'open-run-$runId';
   static String approve(String approvalId) => 'approval-approve-$approvalId';
   static String deny(String approvalId) => 'approval-deny-$approvalId';
@@ -112,6 +118,9 @@ abstract final class SettingsIds {
   static const profileManageBots = 'profile-manage-bots';
   static const profileSignOut = 'profile-sign-out';
   static const profileVersion = 'profile-version';
+
+  /// What the account can still spend, at the top of the Profile page.
+  static const profileCredit = 'profile-credit';
 
   static const botSettings = 'bot-settings';
   static const botAvatar = 'bot-avatar';
@@ -370,4 +379,14 @@ abstract final class AdminIds {
 
   /// The retry under an account whose Applets setting could not be read.
   static String appletsRetry(String userId) => 'admin-applets-retry-$userId';
+
+  /// One account's credit line and its Add credit door.
+  static String credit(String userId) => 'admin-credit-$userId';
+  static String addCredit(String userId) => 'admin-add-credit-$userId';
+
+  /// The dialog an admin grants credit from.
+  static const creditDialog = 'admin-credit-dialog';
+  static const creditReason = 'admin-credit-reason';
+  static const creditConfirm = 'admin-credit-confirm';
+  static String creditAmount(int cents) => 'admin-credit-amount-$cents';
 }

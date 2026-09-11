@@ -109,7 +109,7 @@ describe("the billing ledger", () => {
     ledger.grant("invoice:period", "included", 15_000_000, NOW + 100);
     now = NOW + 100;
     expect(() => ledger.reserve(reservation("effect:late", 1))).toThrow(
-      "Usage credit has run out",
+      "You have no usage credit left",
     );
     expect(ledger.snapshot().includedMicros).toBe(0);
   });
@@ -165,13 +165,100 @@ describe("the billing ledger", () => {
     active(ledger);
     ledger.grant("topup:one", "purchased", 99, null);
     expect(() => ledger.reserve(reservation("effect:too-large", 100))).toThrow(
-      "Usage credit has run out",
+      "You have no usage credit left",
     );
     expect(ledger.snapshot()).toMatchObject({
       purchasedMicros: 99,
       reservedMicros: 0,
       usage: [],
     });
+  });
+
+  test("complimentary credit is spendable without a subscription and is idempotent by id", () => {
+    const ledger = new BillingLedger(storage(), () => NOW);
+    expect(() => ledger.reserve(reservation("own-model", 0))).toThrow(
+      "A paid FrockBot subscription is required",
+    );
+    expect(ledger.balance()).toMatchObject({
+      canSpend: false,
+      subscribed: false,
+      complimentaryMicros: 0,
+    });
+    const command = {
+      id: "gift-1",
+      micros: 5_000_000,
+      grantedBy: "tim",
+      reason: "Early tester",
+    };
+    ledger.grantComplimentary(command);
+    // The same command again grants nothing more; a different amount under
+    // the same id is refused rather than silently replacing it.
+    ledger.grantComplimentary(command);
+    expect(() => ledger.grantComplimentary({ ...command, micros: 1 })).toThrow(
+      "Billing key reused with different data",
+    );
+    expect(ledger.balance()).toMatchObject({
+      canSpend: true,
+      subscribed: false,
+      complimentaryMicros: 5_000_000,
+    });
+    expect(ledger.snapshot().payments).toMatchObject([
+      { id: "complimentary:gift-1", kind: "complimentary", expires: null },
+    ]);
+    // A BYO model call costs nothing and is admitted; a hosted call draws on
+    // the gift; more than the gift is refused as exhausted credit.
+    expect(ledger.reserve(reservation("own-model", 0)).created).toBe(true);
+    expect(ledger.reserve(reservation("hosted", 4_000_000)).created).toBe(true);
+    expect(() => ledger.reserve(reservation("hosted-2", 2_000_000))).toThrow(
+      "You have no usage credit left",
+    );
+    ledger.settle({
+      id: "hosted",
+      costMicros: 500_000,
+      chargeMicros: 1_000_000,
+      quantities: { outputTokens: 10 },
+    });
+    expect(ledger.balance().complimentaryMicros).toBe(4_000_000);
+  });
+
+  test("purchased credit stays locked without a subscription; complimentary is spent after monthly credit", () => {
+    const ledger = new BillingLedger(storage(), () => NOW);
+    ledger.grant("topup:one", "purchased", 3_000_000, null);
+    ledger.grantComplimentary({
+      id: "gift-2",
+      micros: 1_000_000,
+      grantedBy: "tim",
+      reason: "Early tester",
+    });
+    expect(() => ledger.reserve(reservation("hosted", 2_000_000))).toThrow(
+      "You have no usage credit left",
+    );
+    active(ledger);
+    ledger.grant("monthly:sub_test:1", "included", 500_000, NOW + 86_400_000);
+    expect(ledger.reserve(reservation("hosted", 2_000_000)).created).toBe(true);
+    expect(ledger.balance()).toMatchObject({
+      includedMicros: 0,
+      complimentaryMicros: 0,
+      purchasedMicros: 2_500_000,
+      reservedMicros: 2_000_000,
+      subscribed: true,
+      canSpend: true,
+    });
+  });
+
+  test("a suspended account cannot spend complimentary credit either", () => {
+    const ledger = new BillingLedger(storage(), () => NOW);
+    ledger.grantComplimentary({
+      id: "gift-3",
+      micros: 1_000_000,
+      grantedBy: "tim",
+      reason: "Early tester",
+    });
+    ledger.set("suspended", true);
+    expect(ledger.balance().canSpend).toBe(false);
+    expect(() => ledger.reserve(reservation("hosted", 1))).toThrow(
+      "A paid FrockBot subscription is required",
+    );
   });
 
   test("requires a current subscription and treats the period end as expired", () => {
@@ -270,7 +357,7 @@ describe("the billing ledger", () => {
       reservedMicros: 0,
     });
     expect(() => ledger.reserve(reservation("effect:after-revoke", 1))).toThrow(
-      "Usage credit has run out",
+      "You have no usage credit left",
     );
   });
 
