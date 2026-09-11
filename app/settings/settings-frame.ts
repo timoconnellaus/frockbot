@@ -356,13 +356,16 @@ export function modelsSettingsFrame(
       pkg.capabilities?.some((capability) => capability.kind === "model"),
   );
   // A provider earns its own section once a person has done something with
-  // it: installed the Package, or connected an account. The rest of the
-  // catalog is offered through one picker, so the surface stays the size of
-  // what is set up rather than the size of what could be.
+  // it: enabled the Package, or connected an account. Catalog providers are
+  // installed disabled for everyone, so a disabled record alone is not that.
+  // The rest of the catalog is offered through one picker, so the surface
+  // stays the size of what is set up rather than the size of what could be.
   const providers = modelProviders.filter(
     (pkg) =>
       settings.packages.some(
-        (installation) => installation.packageId === pkg.packageId,
+        (installation) =>
+          installation.packageId === pkg.packageId &&
+          installation.state !== "disabled",
       ) ||
       settings.connections.some(
         (connection) =>

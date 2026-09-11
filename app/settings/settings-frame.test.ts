@@ -348,12 +348,19 @@ test("providers not yet set up are offered through one picker, not one section e
       values: {},
     }),
   ).toThrow("Choose a provider");
-  // Once installed, Together has its own section and leaves the picker.
+  // Catalog providers are installed disabled by default; that is still the
+  // picker. Once enabled, Together has its own section and leaves it.
   user.packages.push({
     packageId: "provider-together",
     version: "1.0.0",
-    state: "installed",
+    state: "disabled",
   });
+  expect(
+    modelsSettingsFrame("tim", user, [provider, together]).sections.map(
+      (section) => section.id,
+    ),
+  ).toEqual(["model", "provider.provider", "add-provider"]);
+  user.packages[1]!.state = "installed";
   expect(
     modelsSettingsFrame("tim", user, [provider, together]).sections.map(
       (section) => section.id,
