@@ -70,6 +70,15 @@ class AppletCanvasController extends ChangeNotifier {
   int _epoch = 0;
   Timer? _retry;
 
+  /// The re-mint before the held credential expires. A Turn's polling used to
+  /// be the only thing that re-read the viewer; an idle Applet's token then
+  /// lapsed, and its next reconnect was refused.
+  Timer? _refresh;
+
+  /// Set when the re-mint is due, so the next open answer's credential is
+  /// adopted whatever the held one's expiry reads.
+  bool _credentialDue = false;
+
   wire.AppletSummary? get focused =>
       directory.where((applet) => applet.appletId == focusedId).firstOrNull;
 
@@ -165,6 +174,7 @@ class AppletCanvasController extends ChangeNotifier {
       source = null;
       build = null;
       viewer = null;
+      _refresh?.cancel();
       _changed();
       return;
     }
@@ -180,21 +190,38 @@ class AppletCanvasController extends ChangeNotifier {
     if (generationId == null) {
       // Nothing published: the building state, and the code is the content.
       viewer = null;
+      _refresh?.cancel();
       _changed();
       return;
     }
     // The published generation is what the open Applet *is*: while it is
     // unchanged and the credential has life left in it, the frame keeps
     // running on what it has.
-    if (!appletViewerStillCurrentV1(
-      held: viewer,
-      appletId: focus.appletId,
-      generationId: generationId,
-    )) {
+    if (_credentialDue ||
+        !appletViewerStillCurrentV1(
+          held: viewer,
+          appletId: focus.appletId,
+          generationId: generationId,
+        )) {
       viewer = AppletViewer.fromOpen(focus);
+      _credentialDue = false;
       appletTimingV1('viewer-set', detail: generationId);
     }
+    _scheduleRefresh();
     _changed();
+  }
+
+  /// One open read, this close to the held credential's expiry: the answer
+  /// carries a fresh token, and the running frame is handed it as a refresh.
+  void _scheduleRefresh() {
+    _refresh?.cancel();
+    final held = viewer;
+    if (held == null) return;
+    final wait = held.refreshAt.difference(DateTime.now());
+    _refresh = Timer(wait.isNegative ? Duration.zero : wait, () {
+      _credentialDue = true;
+      unawaited(poll());
+    });
   }
 
   Future<void> _readCode(int epoch) async {
@@ -251,6 +278,7 @@ class AppletCanvasController extends ChangeNotifier {
     _closed = true;
     ++_epoch;
     _retry?.cancel();
+    _refresh?.cancel();
     super.dispose();
   }
 }
@@ -282,24 +310,55 @@ Map<String, Object?> appletsBridgeStateV2(AppletCanvasController? canvas) {
 
 /// The live Applet, framed. Also the widget the `applet-viewer` host frame
 /// resolves to for any `embed` node under this canvas.
-class AppletViewerFrame extends StatelessWidget {
+///
+/// A generation and a page are a document; a credential is not. The frame is
+/// built once per document and handed the credential it loaded with in
+/// `init`; a credential minted later reaches the same running page as a
+/// `refresh`, and the page reconnects in place. Before this the token was
+/// part of the frame's identity, and the re-mint three minutes before expiry
+/// rebuilt the document and its socket about every twelve minutes.
+class AppletViewerFrame extends StatefulWidget {
   final AppletViewer viewer;
   const AppletViewerFrame({super.key, required this.viewer});
 
   @override
-  Widget build(BuildContext context) => HostFrame(
-    url: viewer.uiUrl,
-    label: 'Applet',
-    // A new generation, or a new token, is a new document: the credential is
-    // delivered on load and never re-sent into a page that has already
-    // connected with one that is about to expire.
-    identity: '${viewer.generationId}|${viewer.uiUrl}|${viewer.token}',
-    messages: [viewer.init(packageThemeTokensV1(context))],
-    // The frame's own hops, only while the log is on: the page is listened
-    // to for nothing at all otherwise.
-    onLoaded: appletTimingLogV1 ? () => appletTimingV1('frame-loaded') : null,
-    onMessage: appletTimingLogV1 ? _pageTiming : null,
-  );
+  State<AppletViewerFrame> createState() => _AppletViewerFrameState();
+}
+
+class _AppletViewerFrameState extends State<AppletViewerFrame> {
+  /// The credential the document loaded with. `init` keeps carrying it, so a
+  /// list of messages the frame re-reads on a change names the `init` as
+  /// unchanged and delivers only the `refresh` behind it.
+  late AppletViewer _loaded = widget.viewer;
+
+  @override
+  void didUpdateWidget(AppletViewerFrame old) {
+    super.didUpdateWidget(old);
+    // A new document starts from the credential it is given.
+    if (old.viewer.documentIdentity != widget.viewer.documentIdentity) {
+      _loaded = widget.viewer;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = packageThemeTokensV1(context);
+    final viewer = widget.viewer;
+    return HostFrame(
+      url: viewer.uiUrl,
+      label: 'Applet',
+      identity: viewer.documentIdentity,
+      messages: appletFrameMessagesV1(
+        loaded: _loaded,
+        current: viewer,
+        themeTokens: tokens,
+      ),
+      // The frame's own hops, only while the log is on: the page is listened
+      // to for nothing at all otherwise.
+      onLoaded: appletTimingLogV1 ? () => appletTimingV1('frame-loaded') : null,
+      onMessage: appletTimingLogV1 ? _pageTiming : null,
+    );
+  }
 
   /// What the page reports of its open path: `socket-open`, `hello`,
   /// `ready` and `first-render`, on the host's clock.
@@ -312,8 +371,27 @@ class AppletViewerFrame extends StatelessWidget {
   }
 }
 
+/// The messages a live Applet's frame is given: the `init` it loaded with,
+/// and behind it the `refresh` carrying the current credential once that has
+/// moved on. The host frame delivers only what changed, so a running page
+/// sees the refresh and not its init again.
+List<Map<String, Object?>> appletFrameMessagesV1({
+  required AppletViewer loaded,
+  required AppletViewer current,
+  required Map<String, String> themeTokens,
+}) => [
+  loaded.init(themeTokens),
+  if (current.token != loaded.token) current.refresh(themeTokens),
+];
+
 class AppletCanvas extends StatefulWidget {
   final AppletCanvasController controller;
+
+  /// The key the live frame is built under, when the shell holds one. A
+  /// phone pre-mounts the frame off stage from the moment the Bot is adopted
+  /// and moves it into the canvas page when that is pushed; the key is what
+  /// makes the move a move rather than a second document.
+  final Key? frameKey;
 
   /// The thread, as the progress line reads it. Every Turn's tool activity,
   /// oldest first, because the last thing that happened to the Applet is what
@@ -327,6 +405,7 @@ class AppletCanvas extends StatefulWidget {
     this.lines = const [],
     this.running = false,
     this.onClose,
+    this.frameKey,
   });
 
   @override
@@ -514,7 +593,10 @@ class _AppletCanvasState extends State<AppletCanvas> {
                             Positioned.fill(
                               child: ColoredBox(
                                 color: scheme.surface,
-                                child: AppletViewerFrame(viewer: viewer!),
+                                child: AppletViewerFrame(
+                                  key: widget.frameKey,
+                                  viewer: viewer!,
+                                ),
                               ),
                             ),
                         ],

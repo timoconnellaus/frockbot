@@ -68,6 +68,11 @@ same server, told apart by the socket URL: a page built against v2 opens with
 | server → client | `ack`      | the resulting rows for that txn                                                             |
 | server → client | `reject`   | why the txn was refused (the client rolls back)                                             |
 
+The host hands the page its credential in an `init` postMessage, and a fresh
+credential later in a `refresh` of the same shape; the page reconnects in
+place rather than being reloaded, and with its cursor on the URL that is the
+`changes` path.
+
 A v2 page's first render waits on one frame: the server's `hello` carries the
 snapshot when the URL named no `since` cursor, and the page marks its
 collections ready on it. A reconnect puts `since` on the URL, gets a plain

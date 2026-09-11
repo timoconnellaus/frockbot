@@ -14,6 +14,8 @@ import 'dart:ui_web' as ui_web;
 import 'package:flutter/material.dart';
 import 'package:web/web.dart' as web;
 
+import 'host_frame_messages.dart';
+
 @JS('JSON.parse')
 external JSAny? _parseJson(JSString text);
 
@@ -119,17 +121,21 @@ class _HostFrameViewState extends State<HostFrameView> {
       _frame.src = widget.url;
       return;
     }
-    if (jsonEncode(old.messages) != jsonEncode(widget.messages)) _deliver();
+    _deliver(hostFrameChangedMessagesV1(old.messages, widget.messages));
   }
 
-  void _deliver() {
-    if (!_loaded || widget.messages.isEmpty) return;
+  /// Posts messages to the page: on load, all of them in order; on a change,
+  /// only the entries that changed or were added, so a page that already has
+  /// its credential is not handed it again beside the refresh it is owed.
+  void _deliver([List<Map<String, Object?>>? messages]) {
+    final batch = messages ?? widget.messages;
+    if (!_loaded || batch.isEmpty) return;
     final target = _frame.contentWindow;
     if (target == null) {
       widget.onFailure?.call('This page couldn’t be opened.');
       return;
     }
-    for (final message in widget.messages) {
+    for (final message in batch) {
       final encoded = _parseJson(jsonEncode(message).toJS);
       if (encoded == null) continue;
       // A sandboxed frame has an opaque origin, so `*` is the only target that

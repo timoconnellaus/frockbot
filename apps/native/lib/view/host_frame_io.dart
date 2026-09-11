@@ -17,6 +17,8 @@ import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
 import 'package:webview_flutter_wkwebview/webview_flutter_wkwebview.dart';
 
+import 'host_frame_messages.dart';
+
 class HostFrameView extends StatefulWidget {
   final String url;
 
@@ -66,8 +68,14 @@ class _HostFrameViewState extends State<HostFrameView> {
     super.didUpdateWidget(old);
     if (old.url != widget.url) {
       unawaited(_open());
-    } else if (jsonEncode(old.messages) != jsonEncode(widget.messages)) {
-      unawaited(_deliver(_web, _epoch));
+    } else {
+      unawaited(
+        _deliver(
+          _web,
+          _epoch,
+          hostFrameChangedMessagesV1(old.messages, widget.messages),
+        ),
+      );
     }
   }
 
@@ -159,7 +167,7 @@ class _HostFrameViewState extends State<HostFrameView> {
 window.addEventListener("message", (event) => {
   const data = event && event.data;
   if (!data || typeof data !== "object") return;
-  if (data.type === "init" || data.type === "state") return;
+  if (data.type === "init" || data.type === "refresh" || data.type === "state") return;
   try { $_channel.postMessage(JSON.stringify(data)); } catch (_) {}
 });
 ''');
@@ -169,11 +177,17 @@ window.addEventListener("message", (event) => {
   }
 
   /// The page is the top document in a WebView, so it is its own `parent` and
-  /// `window.postMessage` reaches the listener the SDK installed.
-  Future<void> _deliver(WebViewController? web, int epoch) async {
+  /// `window.postMessage` reaches the listener the SDK installed. On load
+  /// every message goes, in order; on a change, only what changed or was
+  /// added — a `refresh` reaches a running page this way.
+  Future<void> _deliver(
+    WebViewController? web,
+    int epoch, [
+    List<Map<String, Object?>>? messages,
+  ]) async {
     if (web == null || epoch != _epoch) return;
     try {
-      for (final message in widget.messages) {
+      for (final message in messages ?? widget.messages) {
         await web.runJavaScript(
           'window.postMessage(${jsonEncode(message)}, "*")',
         );

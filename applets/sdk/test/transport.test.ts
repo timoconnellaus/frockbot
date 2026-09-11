@@ -201,6 +201,54 @@ describe("the v2 handshake", () => {
   });
 });
 
+describe("a refreshed credential", () => {
+  it("reconnects in place with the cursor, and ignores the credential it already holds", () => {
+    const { sockets, transport, connect } = harness();
+    connect("token-1");
+    greeting(sockets[0]!, { snapshot: { todos: [] } });
+    expect(transport.state.status).toBe("ready");
+
+    // The same credential again: the live socket is kept.
+    transport.refresh({
+      socketUrl: "wss://applet.example/api/applets/review/socket",
+      token: "token-1",
+      generationId: "gen-1",
+    });
+    expect(sockets).toHaveLength(1);
+    expect(sockets[0]!.closed).toBe(false);
+
+    // A new one: the old socket goes, the new one opens with the cursor, so
+    // the server answers with changes rather than a snapshot.
+    transport.refresh({
+      socketUrl: "wss://applet.example/api/applets/review/socket",
+      token: "token-2",
+      generationId: "gen-1",
+    });
+    expect(sockets).toHaveLength(2);
+    expect(sockets[0]!.closed).toBe(true);
+    const url = new URL(sockets[1]!.url);
+    expect(url.searchParams.get("since")).toBe("7");
+    expect(url.searchParams.get("token")).toBe("token-2");
+    transport.close();
+  });
+
+  it("opens at once when it arrives during a reconnect backoff", () => {
+    const { sockets, transport, runTimers, connect } = harness();
+    connect("token-1");
+    fail(sockets[0]!);
+    transport.refresh({
+      socketUrl: "wss://applet.example/api/applets/review/socket",
+      token: "token-2",
+      generationId: "gen-1",
+    });
+    expect(sockets).toHaveLength(2);
+    expect(sockets[1]!.url).toContain("token=token-2");
+    runTimers();
+    expect(sockets).toHaveLength(2);
+    transport.close();
+  });
+});
+
 describe("reconnection", () => {
   it("one socket error followed by close opens only one replacement", () => {
     const { sockets, transport, runTimers, connect } = harness();
