@@ -41,6 +41,8 @@ function harness(
     maxRestarts?: number;
     windowMs?: number;
     now?: () => number;
+    stopChild?: (child: ChildProcess) => Promise<void>;
+    onSpawn?: (index: number) => void;
   } = {},
 ): Harness {
   const spawned: ChildProcess[] = [];
@@ -50,11 +52,12 @@ function harness(
     label: "test server",
     spawnChild: () => {
       const child = fakeChild();
+      overrides.onSpawn?.(spawned.length);
       spawned.push(child);
       return child;
     },
     waitUntilReady: () => ready.value(),
-    stopChild: async () => {},
+    stopChild: overrides.stopChild ?? (async () => {}),
     forwardOutput: () => {},
     // No real waiting: the backoff schedule is tested on its own below.
     sleep: async () => {},
@@ -115,6 +118,22 @@ describe("superviseProcess", () => {
     expect(supervised.child()).toBe(spawned[1]);
     expect(reports.join("\n")).toContain("exited unexpectedly");
     expect(reports.join("\n")).toContain("is serving again");
+  });
+
+  test("a crashed child's tree is stopped before its replacement starts", async () => {
+    // `wrangler dev` dying leaves workerd behind; the replacement must not
+    // open the same state directory beside it.
+    const order: string[] = [];
+    const { spawned, supervised } = harness({
+      stopChild: async (child) => {
+        order.push(`stop:${spawned.indexOf(child)}`);
+      },
+      onSpawn: (index) => order.push(`spawn:${index}`),
+    });
+    await supervised.start();
+    (spawned[0] as unknown as FakeChild).exit(1);
+    await settle();
+    expect(order).toEqual(["spawn:0", "stop:0", "spawn:1"]);
   });
 
   test("survives repeated crashes and then gives up", async () => {

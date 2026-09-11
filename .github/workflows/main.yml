@@ -167,7 +167,10 @@ jobs:
     # an answer it never reads. `deploy-staging` below is where they are all
     # required to agree.
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Twenty was one crash short: a shard that lost `wrangler dev` twice and
+    # then spent two four-minute test timeouts was cancelled at the limit,
+    # and a cancelled job uploads nothing, so the cause was gone with it.
+    timeout-minutes: 30
 
     # The specs may overlap now — every test takes a fresh identity and its own
     # scoped provider endpoint — but a runner has two cores, so the parallelism
@@ -241,7 +244,10 @@ jobs:
           if-no-files-found: error
 
       - name: Upload Playwright failure diagnostics
-        if: failure()
+        # On cancellation too: the job's own timeout cancels rather than
+        # fails, and a shard that ran out of time is exactly the one whose
+        # traces are needed.
+        if: failure() || cancelled()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: playwright-test-results-${{ matrix.shard }}
@@ -253,7 +259,7 @@ jobs:
         # tears the server down, so a crash at the end of a shard leaves no
         # visible cause. This is the last of what both `wrangler dev` processes
         # said, in the job log itself, before anybody downloads an artifact.
-        if: failure()
+        if: failure() || cancelled()
         run: |
           shopt -s nullglob
           logs=(apps/cloudflare/e2e/wrangler-logs/harness-*.log)
@@ -288,7 +294,7 @@ jobs:
         # `WRANGLER_LOG_PATH` puts in the same directory. It used to point at
         # `~/.config/.wrangler/logs` and upload nothing at all —
         # `actions/upload-artifact` does not expand `~`.
-        if: failure()
+        if: failure() || cancelled()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: wrangler-logs-${{ matrix.shard }}

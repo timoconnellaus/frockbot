@@ -148,7 +148,17 @@ export function superviseProcess(options: SuperviseOptions): SupervisedProcess {
             .map((line) => `  | ${line}`)
             .join("\n"),
       );
-      void restart();
+      // The child that exited is `wrangler dev`'s Node parent; what it spawned
+      // — workerd — does not die with it, and a replacement started over the
+      // same `--persist-to` directory would then share every Durable Object's
+      // SQLite file with a runtime nobody is talking to. A shard that lost
+      // its parent this way went on to run alarms twice and strand a Turn
+      // that was in flight across a reload. The orphans go before anything
+      // is started in their place.
+      void options
+        .stopChild(child)
+        .catch(() => {})
+        .then(restart);
     });
   };
 

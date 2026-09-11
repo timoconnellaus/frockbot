@@ -457,6 +457,12 @@ async function run(command: string, args: string[]): Promise<void> {
  * `wrangler dev` is a Node parent that supervises workerd. Killing the parent
  * alone leaves it free to respawn its child, so the harness puts wrangler in
  * its own process group (`detached`) and signals the whole group.
+ *
+ * The group is signalled whether or not the parent is still there. A parent
+ * that crashed leaves its workerd children alive in the group — the job's own
+ * cleanup found three generations of them after a shard with two crashes —
+ * and those are the processes still holding the Durable Object files a
+ * replacement is about to open.
  */
 async function stopProcessTree(child: ChildProcess): Promise<void> {
   const group = child.pid === undefined ? undefined : -child.pid;
@@ -468,11 +474,11 @@ async function stopProcessTree(child: ChildProcess): Promise<void> {
       // Already gone.
     }
   };
+  signal("SIGTERM");
   if (child.exitCode === null && child.signalCode === null) {
     const exited = new Promise<void>((done) =>
       child.once("exit", () => done()),
     );
-    signal("SIGTERM");
     const escalation = setTimeout(() => signal("SIGKILL"), SHUTDOWN_GRACE_MS);
     // Never block teardown on a process that refuses to die: escalate, give up
     // waiting, and let the caller finish releasing everything else.
@@ -481,6 +487,33 @@ async function stopProcessTree(child: ChildProcess): Promise<void> {
     );
     await Promise.race([exited, abandoned]);
     clearTimeout(escalation);
+  } else if (group !== undefined) {
+    // The parent is gone, so nothing reports the orphans' exit: the group is
+    // polled until it is empty, with the same escalation a live parent gets.
+    // Waiting matters — workerd is what holds the serving port, and a
+    // replacement started while it was still leaving met "Address already in
+    // use" and had to be restarted in its turn.
+    const groupAlive = (): boolean => {
+      try {
+        process.kill(group, 0);
+        return true;
+      } catch (error) {
+        return (error as NodeJS.ErrnoException).code !== "ESRCH";
+      }
+    };
+    const sleep = (ms: number) =>
+      new Promise<void>((done) => setTimeout(done, ms));
+    const waitUntilGone = async (deadline: number): Promise<boolean> => {
+      while (groupAlive()) {
+        if (Date.now() >= deadline) return false;
+        await sleep(100);
+      }
+      return true;
+    };
+    if (!(await waitUntilGone(Date.now() + SHUTDOWN_GRACE_MS))) {
+      signal("SIGKILL");
+      await waitUntilGone(Date.now() + SHUTDOWN_GRACE_MS);
+    }
   }
   // The Playwright `webServer` waits for this process's stdio to close, and an
   // inherited pipe held by a surviving grandchild would hang the run.
