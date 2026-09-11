@@ -17,6 +17,19 @@ function botStub(userId: string, botId: string) {
   return env.BOT_STATES.getByName(`${userId}:${botId}`);
 }
 
+/** What an admin does before an account's Bots see the Applet tools. */
+async function setApplets(userId: string, applets: boolean): Promise<void> {
+  const user = env.USER_CONFIGURATIONS.getByName(userId) as unknown as {
+    setFeatures(input: unknown): Promise<unknown>;
+  };
+  await user.setFeatures({
+    schemaVersion: 1,
+    userId,
+    command: { schemaVersion: 1, type: "user/set-features", applets },
+    updatedBy: "workerd-admin",
+  });
+}
+
 interface IframeCatalog {
   contributions: Array<{
     packageId: string;
@@ -55,6 +68,7 @@ describe("the Applets feature inside a real Bot", () => {
       botId: `applets-bot-${id}`,
     };
     await provisionBot(identity);
+    await setApplets(identity.userId, true);
     const bot = botStub(identity.userId, identity.botId);
     const sessionId = `${identity.userId}:${identity.botId}`;
 
@@ -120,6 +134,7 @@ describe("the Applets feature inside a real Bot", () => {
       botId: `applets-uibot-${id}`,
     };
     await provisionBot(identity);
+    await setApplets(identity.userId, true);
     const bot = botStub(identity.userId, identity.botId);
 
     const catalog = (await (
@@ -152,5 +167,38 @@ describe("the Applets feature inside a real Bot", () => {
         opens: { kind: "surface", page: "list" },
       },
     ]);
+  });
+
+  test("an account without Applets is offered neither the tools nor the pages", async () => {
+    const id = suffix();
+    const identity = {
+      userId: `applets-off-${id}`,
+      botId: `applets-offbot-${id}`,
+    };
+    await provisionBot(identity);
+    const bot = botStub(identity.userId, identity.botId);
+
+    const catalog = (await (
+      bot as unknown as {
+        listPackageUi(identity: unknown): Promise<IframeCatalog>;
+      }
+    ).listPackageUi({ schemaVersion: 1, ...identity })) as IframeCatalog;
+    expect(
+      catalog.contributions.some((entry) => entry.packageId === "applets"),
+    ).toBe(false);
+
+    const turn = await bot.run({
+      schemaVersion: 1,
+      ...identity,
+      command: {
+        runId: `run-off-${id}`,
+        sessionId: `${identity.userId}:${identity.botId}`,
+        acceptedAt: new Date().toISOString(),
+        text: frockbotToolCallPrompt("applet_list"),
+      },
+    });
+    const result = toolResult(turn as never);
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain('Tool not found: "applet_list"');
   });
 });

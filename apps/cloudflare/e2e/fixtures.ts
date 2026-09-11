@@ -515,6 +515,28 @@ export async function openApplication(
 }
 
 /**
+ * Turn Applets on for this test's account, as an admin would from Site
+ * administration.
+ *
+ * The feature is off for every account until an admin turns it on, and the
+ * fresh `?as_user=` identity a spec runs as is not one: the e2e stack names an
+ * admin email nobody signs in with. The gateway's own development identity is
+ * an admin unconditionally, and the header form of it is honoured per request
+ * and sets no cookie — so this call speaks as that admin without moving the
+ * page's session off the account under test.
+ */
+export async function enableApplets(page: Page, userId: string): Promise<void> {
+  const response = await page.request.post(
+    `/api/admin/users/${encodeURIComponent(userId)}/features`,
+    {
+      headers: { "x-frockbot-user-id": "development" },
+      data: { schemaVersion: 1, type: "user/set-features", applets: true },
+    },
+  );
+  expect(response.status(), await response.text()).toBe(200);
+}
+
+/**
  * Make the sidebar reachable, whatever the layout.
  *
  * Below the phone breakpoint the sidebar is a drawer that closes behind

@@ -339,5 +339,9 @@ abstract final class PackageIds {
 abstract final class AdminIds {
   static const refresh = 'admin-refresh';
   static const signups = 'admin-signups';
+  static const accounts = 'admin-accounts';
   static const profileEntry = 'profile-admin';
+
+  /// One account's Applets switch.
+  static String applets(String userId) => 'admin-applets-$userId';
 }

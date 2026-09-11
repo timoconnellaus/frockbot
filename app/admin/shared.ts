@@ -160,3 +160,186 @@ export class DeploymentPolicyConflictError extends Error {
     this.currentRevision = currentRevision;
   }
 }
+
+// --- Account features --------------------------------------------------------
+//
+// What an administrator has turned on for one account. Applets is the first:
+// a feature that is off offers no `applet_*` tools to that account's Bots,
+// mounts no Applet members into their Compositions, and shows no Applet
+// surfaces in the client. The record is the account's, so the User Durable
+// Object holds it; only an admin writes it.
+
+export interface UserFeaturesV1 {
+  schemaVersion: 1;
+  applets: boolean;
+  updatedAt: string;
+  updatedBy: string;
+}
+
+export interface SetUserFeaturesCommandV1 {
+  schemaVersion: 1;
+  type: "user/set-features";
+  applets: boolean;
+}
+
+export interface SetUserFeaturesRequestV1 {
+  schemaVersion: 1;
+  userId: string;
+  command: SetUserFeaturesCommandV1;
+  updatedBy: string;
+}
+
+/** One account as the admin list shows it: identity, and what it holds. */
+export interface AdminUserViewV1 {
+  userId: string;
+  email?: string;
+  name?: string;
+  features: UserFeaturesV1;
+}
+
+export interface AdminUserListViewV1 {
+  schemaVersion: 1;
+  users: AdminUserViewV1[];
+}
+
+export const USER_FEATURES_DEFAULT_UPDATED_BY = "deployment-default";
+
+export function defaultUserFeaturesV1(): UserFeaturesV1 {
+  return {
+    schemaVersion: 1,
+    applets: false,
+    updatedAt: new Date(0).toISOString(),
+    updatedBy: USER_FEATURES_DEFAULT_UPDATED_BY,
+  };
+}
+
+export function decodeUserFeaturesV1(input: unknown): UserFeaturesV1 {
+  const features = record(input, "user features");
+  exactKeys(
+    features,
+    ["schemaVersion", "applets", "updatedAt", "updatedBy"],
+    "user features",
+  );
+  if (features.schemaVersion !== 1) {
+    throw new Error("user features.schemaVersion is invalid");
+  }
+  if (typeof features.applets !== "boolean") {
+    throw new Error("user features.applets is invalid");
+  }
+  return {
+    schemaVersion: 1,
+    applets: features.applets,
+    updatedAt: isoTimestamp(features.updatedAt, "user features.updatedAt"),
+    updatedBy: boundedString(
+      features.updatedBy,
+      "user features.updatedBy",
+      512,
+    ),
+  };
+}
+
+export function decodeSetUserFeaturesCommandV1(
+  input: unknown,
+): SetUserFeaturesCommandV1 {
+  const command = record(input, "user features command");
+  exactKeys(
+    command,
+    ["schemaVersion", "type", "applets"],
+    "user features command",
+  );
+  if (
+    command.schemaVersion !== 1 ||
+    command.type !== "user/set-features" ||
+    typeof command.applets !== "boolean"
+  ) {
+    throw new Error("user features command is invalid");
+  }
+  return {
+    schemaVersion: 1,
+    type: "user/set-features",
+    applets: command.applets,
+  };
+}
+
+export function decodeUserFeaturesReadRequestV1(input: unknown): {
+  schemaVersion: 1;
+  userId: string;
+} {
+  const request = record(input, "user features read request");
+  exactKeys(request, ["schemaVersion", "userId"], "user features read request");
+  if (request.schemaVersion !== 1) {
+    throw new Error("user features read request.schemaVersion is invalid");
+  }
+  return {
+    schemaVersion: 1,
+    userId: boundedString(
+      request.userId,
+      "user features read request.userId",
+      512,
+    ),
+  };
+}
+
+export function decodeSetUserFeaturesRequestV1(
+  input: unknown,
+): SetUserFeaturesRequestV1 {
+  const request = record(input, "user features request");
+  exactKeys(
+    request,
+    ["schemaVersion", "userId", "command", "updatedBy"],
+    "user features request",
+  );
+  if (request.schemaVersion !== 1) {
+    throw new Error("user features request.schemaVersion is invalid");
+  }
+  return {
+    schemaVersion: 1,
+    userId: boundedString(request.userId, "user features request.userId", 512),
+    command: decodeSetUserFeaturesCommandV1(request.command),
+    updatedBy: boundedString(
+      request.updatedBy,
+      "user features request.updatedBy",
+      512,
+    ),
+  };
+}
+
+function optionalDisplayString(
+  value: unknown,
+  maximum: number,
+): string | undefined {
+  if (typeof value !== "string" || value.length === 0) return undefined;
+  return value.slice(0, maximum);
+}
+
+export function decodeAdminUserViewV1(input: unknown): AdminUserViewV1 {
+  const user = record(input, "admin user");
+  const keys = Object.keys(user);
+  const allowed = ["userId", "email", "name", "features"];
+  if (!keys.every((key) => allowed.includes(key))) {
+    throw new Error("admin user has unknown fields");
+  }
+  const email = optionalDisplayString(user.email, 512);
+  const name = optionalDisplayString(user.name, 512);
+  return {
+    userId: boundedString(user.userId, "admin user.userId", 512),
+    ...(email === undefined ? {} : { email }),
+    ...(name === undefined ? {} : { name }),
+    features: decodeUserFeaturesV1(user.features),
+  };
+}
+
+export function decodeAdminUserListViewV1(input: unknown): AdminUserListViewV1 {
+  const view = record(input, "admin user list");
+  exactKeys(view, ["schemaVersion", "users"], "admin user list");
+  if (view.schemaVersion !== 1) {
+    throw new Error("admin user list.schemaVersion is invalid");
+  }
+  if (!Array.isArray(view.users)) {
+    throw new Error("admin user list.users is invalid");
+  }
+  return {
+    schemaVersion: 1,
+    users: view.users.map((user) => decodeAdminUserViewV1(user)),
+  };
+}

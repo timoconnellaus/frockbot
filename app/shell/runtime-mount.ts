@@ -197,6 +197,14 @@ export async function agentRuntime(
         () => machines.list(),
       )
     : ({ status: "off" } as const);
+  // A Bot builds an Applet only inside an admitted Turn: the publish is a
+  // durable effect whose intent record has to name the Session and Turn that
+  // asked for it, and the scaffold write names the same writer. Resolved
+  // before the Composition is built for the same reason the machine gate is:
+  // the answer decides whether the Package is mounted at all.
+  const applets = turn
+    ? await appletsRuntimeHost(state, identity, turn)
+    : undefined;
   // Filled in once this Turn's model binding is resolved, below. The tool
   // and the prompt section both read it lazily, from inside the Turn.
   const subagentModels: SubagentModelOptionV1[] = [];
@@ -226,15 +234,7 @@ export async function agentRuntime(
             ),
           }
         : {}),
-      // A Bot builds an Applet only inside an admitted Turn: the publish is
-      // a durable effect whose intent record has to name the Session and Turn
-      // that asked for it, and the scaffold write names the same writer.
-      ...(turn
-        ? (() => {
-            const applets = appletsRuntimeHost(state, identity, turn);
-            return applets ? { applets } : {};
-          })()
-        : {}),
+      ...(applets ? { applets } : {}),
       // A Bot changes its own identity, or adds a Bot to its User's flock,
       // only inside an admitted Turn whose Session and Turn the write names.
       ...(turn

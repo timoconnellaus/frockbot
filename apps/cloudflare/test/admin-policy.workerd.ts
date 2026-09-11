@@ -6,8 +6,11 @@ import {
 } from "@frockbot/app/admin/backend";
 import {
   decodeDeploymentPolicyV1,
+  decodeUserFeaturesV1,
   type DeploymentPolicyV1,
   type SetSignupsCommandV1,
+  type SetUserFeaturesCommandV1,
+  type UserFeaturesV1,
 } from "@frockbot/app/admin/shared";
 import type {
   BotConfigurationBinding,
@@ -27,6 +30,8 @@ interface PolicyRpc {
 interface UserRpc {
   isProvisioned(input: unknown): Promise<boolean>;
   readConfiguration(input: unknown): Promise<unknown>;
+  readFeatures(input: unknown): Promise<unknown>;
+  setFeatures(input: unknown): Promise<unknown>;
 }
 
 function policyStub(): PolicyRpc {
@@ -52,6 +57,27 @@ async function setSignups(
   return decodeDeploymentPolicyV1(
     await policyStub().setSignups({
       schemaVersion: 1,
+      command,
+      updatedBy,
+    }),
+  );
+}
+
+async function readFeatures(userId: string): Promise<UserFeaturesV1> {
+  return decodeUserFeaturesV1(
+    await userStub(userId).readFeatures({ schemaVersion: 1, userId }),
+  );
+}
+
+async function setFeatures(
+  userId: string,
+  command: SetUserFeaturesCommandV1,
+  updatedBy: string,
+): Promise<UserFeaturesV1> {
+  return decodeUserFeaturesV1(
+    await userStub(userId).setFeatures({
+      schemaVersion: 1,
+      userId,
       command,
       updatedBy,
     }),
@@ -89,10 +115,15 @@ function signedInRequest(
   return new Request(`https://frockbot.test${path}`, { ...init, headers });
 }
 
-function testGateway() {
+function testGateway(
+  listed: Array<{ userId: string; email: string; name: string }> = [],
+) {
   const policyHost: AdminGatewayHost = {
     readDeploymentPolicy: readPolicy,
     setDeploymentSignups: setSignups,
+    listUsers: () => Promise.resolve(listed),
+    readUserFeatures: readFeatures,
+    setUserFeatures: setFeatures,
   };
   return createGateway({
     loader,
@@ -189,5 +220,70 @@ describe("deployment signup policy in workerd", () => {
     const existing = await gateway(signedInRequest("/", newcomer));
     expect(existing.status).toBe(200);
     expect(await existing.text()).toBe("admitted");
+  });
+
+  test("an admin turns Applets on for an account without provisioning it", async () => {
+    const owner = { id: "owner", email: "owner@example.com" };
+    const guest = {
+      id: `guest-${crypto.randomUUID()}`,
+      email: "guest@example.com",
+      name: "Guest",
+    };
+    const gateway = testGateway([
+      { userId: guest.id, email: guest.email, name: guest.name },
+    ]);
+
+    const listed = await gateway(signedInRequest("/api/admin/users", owner));
+    expect(listed.status).toBe(200);
+    const before = (await listed.json()) as {
+      users: Array<{ userId: string; features: { applets: boolean } }>;
+    };
+    expect(
+      before.users.map((user) => [user.userId, user.features.applets]),
+    ).toEqual([
+      ["owner", false],
+      [guest.id, false],
+    ]);
+
+    const enabled = await gateway(
+      signedInRequest(`/api/admin/users/${guest.id}/features`, owner, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          schemaVersion: 1,
+          type: "user/set-features",
+          applets: true,
+        }),
+      }),
+    );
+    expect(enabled.status).toBe(200);
+    expect(decodeUserFeaturesV1(await enabled.json())).toMatchObject({
+      applets: true,
+      updatedBy: "owner",
+    });
+    expect((await readFeatures(guest.id)).applets).toBe(true);
+
+    // Reading and writing an account's features is not admitting it: the
+    // signup gate still sees an account that has never been provisioned.
+    expect(
+      await userStub(guest.id).isProvisioned({
+        schemaVersion: 1,
+        userId: guest.id,
+      }),
+    ).toBe(false);
+
+    const refused = await gateway(
+      signedInRequest(`/api/admin/users/${guest.id}/features`, guest, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          schemaVersion: 1,
+          type: "user/set-features",
+          applets: false,
+        }),
+      }),
+    );
+    expect(refused.status).toBe(403);
+    expect((await readFeatures(guest.id)).applets).toBe(true);
   });
 });

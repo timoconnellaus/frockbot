@@ -106,6 +106,10 @@ _Avoid_: Run a skill, trigger, call
 A small real-time application a Bot builds for its User and the User opens beside the conversation: one Package's Instance Contribution, one durable instance of it, its UI, and the tools it exposes to every Bot of that User. Its code is a Package; its state is not.
 _Avoid_: App, gadget, application, widget
 
+**Account feature**:
+A capability an administrator turns on for one account from Site administration; Applets is the first. Off is silence on every surface — no tools, no Composition members, no canvas — and the account's data is kept. Held by the User, set only by an admin.
+_Avoid_: Feature flag, beta, entitlement, plan
+
 **Instance Contribution**:
 The part of a Package that runs as a Durable Object facet under a kernel-owned Applet Durable Object: a server class with its own storage, a UI page, and declared tools. Its storage is User product state that survives every code generation.
 _Avoid_: Backend, facet package, stateful plugin

@@ -30,6 +30,7 @@ import {
   type OwnedBotTurnCommand,
 } from "@frockbot/core/durable";
 import type { ShellBotStateV1 } from "@frockbot/app/shell/backend-state";
+import { decodeUserFeaturesV1 } from "@frockbot/app/admin/shared";
 import {
   createAppletCapabilityHostV1,
   createAppletInstanceBindingV1,
@@ -137,16 +138,51 @@ function appletCapabilityHost(
 }
 
 /**
- * The Applets feature's seam for one admitted Turn, or `undefined` when this
- * host cannot reach Applets at all.
+ * Whether an administrator has turned Applets on for this Bot's User.
+ *
+ * Read from the User Durable Object every time it is asked, never cached in
+ * the Bot: the switch is the admin's, and a Turn admitted after it moved
+ * should see where it is now. Throws when the User object cannot answer;
+ * each caller decides what an unanswerable switch means for it.
  */
-export function appletsRuntimeHost(
+export async function appletsEnabled(
+  state: ShellBotStateV1,
+  identity: BotIdentity,
+): Promise<boolean> {
+  const id = state.env.USER_CONFIGURATIONS.idFromName(identity.userId);
+  // SAFETY: this namespace is bound to UserConfiguration; generated Worker
+  // types do not expose its account features RPC surface.
+  const rpc = state.env.USER_CONFIGURATIONS.get(id) as unknown as {
+    readFeatures(input: unknown): Promise<unknown>;
+  };
+  return decodeUserFeaturesV1(
+    rpcJsonSnapshotV1(
+      await rpc.readFeatures({ schemaVersion: 1, userId: identity.userId }),
+    ),
+  ).applets;
+}
+
+/**
+ * The Applets feature's seam for one admitted Turn, or `undefined` when this
+ * host cannot reach Applets at all — or when the feature is off for this
+ * User. A switch that cannot be read is off for the Turn: a feature gate
+ * that let the tools exist and refuse would still have told the model they
+ * were there.
+ */
+export async function appletsRuntimeHost(
   state: ShellBotStateV1,
   identity: BotIdentity,
   turn: { sessionId: string; runId: string; turnId: string },
-): AppletsRuntimeHostV1 | undefined {
+): Promise<AppletsRuntimeHostV1 | undefined> {
   const capability = appletCapabilityHost(state, identity);
   if (!capability) return undefined;
+  let enabled: boolean;
+  try {
+    enabled = await appletsEnabled(state, identity);
+  } catch {
+    enabled = false;
+  }
+  if (!enabled) return undefined;
   return { applets: capability, turn };
 }
 
@@ -326,8 +362,20 @@ export async function resolveAppletComposition(
 ): Promise<void> {
   if (!state.env.APPLET_STATES) return;
   try {
+    const directory = appletUserDirectory(state, identity);
+    // With the feature off, the directory resolves to no members: the
+    // Applets the User already holds keep their data and come back at the
+    // first Turn after an admin turns the feature on again.
+    const enabled = await appletsEnabled(state, identity);
     await resolveAppletCompositionV1({
-      directory: appletUserDirectory(state, identity),
+      directory: enabled
+        ? directory
+        : {
+            compositionInput: async () => ({
+              ...(await directory.compositionInput()),
+              applets: [],
+            }),
+          },
       composition: {
         current: () => state.authority.composition.current(),
         propose: (generation, options) =>

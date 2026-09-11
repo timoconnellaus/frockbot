@@ -23,6 +23,7 @@ import {
   connectOllama,
   chooseDefaultModel,
   createBot,
+  enableApplets,
   expectReadyToSend,
   group,
   openApplication,
@@ -311,6 +312,7 @@ async function provision(
 ): Promise<void> {
   await page.setViewportSize(PROVISIONING_WINDOW);
   await openApplication(page, options.userId);
+  await enableApplets(page, options.userId);
   await enablePackage(page, "Custom models");
   await enablePackage(page, "Ollama Cloud");
   await connectOllama(page, {

@@ -37,7 +37,7 @@ Deploy paths:
 
 ## 2. Durable Objects
 
-Four classes in the app Worker, exported from `apps/cloudflare/src/index.ts:178-182`. `core/durable` defines no Durable Object class; it is the storage and authority library `BotState` delegates to.
+Four classes in the app Worker, exported from `apps/cloudflare/src/index.ts:181-184`. `core/durable` defines no Durable Object class; it is the storage and authority library `BotState` delegates to.
 
 ### `BotState` — `apps/cloudflare/src/bot-state.ts:369`
 
@@ -364,7 +364,8 @@ Screens (no router; `MaterialApp(home:)` plus `Navigator.push`):
 - `PluginsPage` — `lib/plugins/page.dart`: the same host over the Plugins
   document, plus the controller that carries enablement to the settings route
 - `AdminPage` — `lib/admin/page.dart`: the deployment's signups switch, over
-  `/api/admin/policy`
+  `/api/admin/policy`, and one Applets switch per account, over
+  `/api/admin/users` and `/api/admin/users/:userId/features`
 - `RoutinesView` — `lib/routines/page.dart`: what a Bot does on its own and
   what it left behind, in the `right-panel` slot beside Bot settings and a page
   on the phone. `RoutineRunsPage` (`lib/routines/runs.dart`) is one Routine's
@@ -875,6 +876,8 @@ Afterwards, every request carrying that bearer passes the compatibility gate —
 ### Admission and admin
 
 Admin is membership of the comma-separated `FROCKBOT_ADMIN_EMAILS` secret (`apps/cloudflare/src/admin-identities.ts:7-28`), enforced at `apps/cloudflare/src/gateway.ts:801-810`. Signups default to closed (`apps/cloudflare/src/deployment-policy.ts:17`) and are toggled by `deployment/set-signups`. `accountIsAdmitted` (`apps/cloudflare/src/account-admission.ts:8`) admits when the caller is an admin, when the User Durable Object already exists, or when signups are open. That gate governs use of the product. Account creation is gated separately, in better-auth's `user.create.before` hook (`signupDatabaseHooksV1`, `apps/cloudflare/src/auth.ts`), because `/api/auth/*` is served ahead of it.
+
+Applets are off for every account until an admin turns them on. The switch is the account's `UserFeaturesV1` record (`app/admin/shared.ts`), held by the User Durable Object under `user:features:v1` and read and written by RPCs that never pin the identity, so an admin can set it for an account that signed up while signups were closed without admitting that account. The gateway's admin Contribution (`app/admin/backend.ts`) lists accounts from the Better Auth `user` table, always including the signed-in admin, and writes one account's features. Off means silence everywhere the feature shows: the Bot object mounts no `applet_*` tools and resolves the account's Applets to no Composition members (`app/applets-host/bot.ts`, `appletsEnabled`), the package-ui projection omits the Package that declares the Applet focus tool so the client draws no canvas or picker (`app/skills/bot.ts`, `listPackageUi`), and the User-scoped Applet RPCs on `UserBotState` refuse. The Applets a User already holds keep their data and return at the first Turn after the switch goes back on.
 
 `ALLOW_DEVELOPMENT_AUTH` enables an identity bypass: `?as_user=` is accepted and persisted as the `frockbot_dev_user` cookie (`gateway.ts:342-362`, `:673-681`). It skips signup admission. `admin-identities.ts:20-21` treats the id `development` as admin unconditionally, and `:27` treats any development identity as admin when `FROCKBOT_ADMIN_EMAILS` is empty.
 

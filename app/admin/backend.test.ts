@@ -1,8 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { createAdminBackendContribution } from "./backend.js";
+import {
+  createAdminBackendContribution,
+  type AdminGatewayHost,
+} from "./backend.js";
 import {
   DeploymentPolicyConflictError,
+  defaultUserFeaturesV1,
   type DeploymentPolicyV1,
+  type UserFeaturesV1,
 } from "./shared.js";
 
 function initialPolicy(): DeploymentPolicyV1 {
@@ -15,6 +20,32 @@ function initialPolicy(): DeploymentPolicyV1 {
   };
 }
 
+/** A host whose accounts and features live in memory. */
+function accountsHost(
+  listed: Array<{ userId: string; email?: string; name?: string }>,
+): Pick<
+  AdminGatewayHost,
+  "listUsers" | "readUserFeatures" | "setUserFeatures"
+> & { features: Map<string, UserFeaturesV1> } {
+  const features = new Map<string, UserFeaturesV1>();
+  return {
+    features,
+    listUsers: () => Promise.resolve(listed),
+    readUserFeatures: (userId) =>
+      Promise.resolve(features.get(userId) ?? defaultUserFeaturesV1()),
+    setUserFeatures: (userId, command, updatedBy) => {
+      const next: UserFeaturesV1 = {
+        schemaVersion: 1,
+        applets: command.applets,
+        updatedAt: "2026-09-11T00:00:00.000Z",
+        updatedBy,
+      };
+      features.set(userId, next);
+      return Promise.resolve(next);
+    },
+  };
+}
+
 describe("admin gateway contribution", () => {
   test("refuses non-admins before reading deployment policy", async () => {
     let reads = 0;
@@ -24,6 +55,7 @@ describe("admin gateway contribution", () => {
         return Promise.resolve(initialPolicy());
       },
       setDeploymentSignups: () => Promise.resolve(initialPolicy()),
+      ...accountsHost([]),
     });
 
     const response = await contribution.route(
@@ -39,6 +71,7 @@ describe("admin gateway contribution", () => {
   test("reads and updates the policy with an optimistic revision", async () => {
     let policy = initialPolicy();
     const contribution = createAdminBackendContribution({
+      ...accountsHost([]),
       readDeploymentPolicy: () => Promise.resolve(policy),
       setDeploymentSignups: (command, updatedBy) => {
         if (command.revision !== policy.revision) {
@@ -107,5 +140,134 @@ describe("admin gateway contribution", () => {
       code: "revision-conflict",
       currentRevision: 1,
     });
+  });
+
+  test("lists every account, the signed-in admin included, with what each holds", async () => {
+    const host = accountsHost([
+      { userId: "guest", email: "guest@example.com", name: "Guest" },
+    ]);
+    const contribution = createAdminBackendContribution({
+      readDeploymentPolicy: () => Promise.resolve(initialPolicy()),
+      setDeploymentSignups: () => Promise.resolve(initialPolicy()),
+      ...host,
+    });
+    const context = {
+      userId: "development",
+      client: "browser" as const,
+      isAdmin: true,
+    };
+
+    const refused = await contribution.route(
+      new Request("https://frockbot.test/api/admin/users"),
+      new URL("https://frockbot.test/api/admin/users"),
+      { ...context, isAdmin: false },
+    );
+    expect(refused?.status).toBe(403);
+
+    const listed = await contribution.route(
+      new Request("https://frockbot.test/api/admin/users"),
+      new URL("https://frockbot.test/api/admin/users"),
+      context,
+    );
+    expect(listed?.status).toBe(200);
+    expect(await listed?.json<unknown>()).toEqual({
+      schemaVersion: 1,
+      users: [
+        { userId: "development", features: defaultUserFeaturesV1() },
+        {
+          userId: "guest",
+          email: "guest@example.com",
+          name: "Guest",
+          features: defaultUserFeaturesV1(),
+        },
+      ],
+    });
+
+    const enabled = await contribution.route(
+      new Request("https://frockbot.test/api/admin/users/guest/features", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          schemaVersion: 1,
+          type: "user/set-features",
+          applets: true,
+        }),
+      }),
+      new URL("https://frockbot.test/api/admin/users/guest/features"),
+      context,
+    );
+    expect(enabled?.status).toBe(200);
+    expect(await enabled?.json()).toMatchObject({
+      applets: true,
+      updatedBy: "development",
+    });
+    expect(host.features.get("guest")?.applets).toBe(true);
+
+    const relisted = await contribution.route(
+      new Request("https://frockbot.test/api/admin/users"),
+      new URL("https://frockbot.test/api/admin/users"),
+      context,
+    );
+    const { users } = (await relisted?.json()) as {
+      users: Array<{ userId: string; features: { applets: boolean } }>;
+    };
+    expect(users.map((user) => [user.userId, user.features.applets])).toEqual([
+      ["development", false],
+      ["guest", true],
+    ]);
+  });
+
+  test("refuses a malformed account id or command without touching the host", async () => {
+    let writes = 0;
+    const host = accountsHost([]);
+    const contribution = createAdminBackendContribution({
+      readDeploymentPolicy: () => Promise.resolve(initialPolicy()),
+      setDeploymentSignups: () => Promise.resolve(initialPolicy()),
+      ...host,
+      setUserFeatures: (...args) => {
+        writes += 1;
+        return host.setUserFeatures(...args);
+      },
+    });
+    const context = {
+      userId: "owner-id",
+      client: "browser" as const,
+      isAdmin: true,
+    };
+    const command = JSON.stringify({
+      schemaVersion: 1,
+      type: "user/set-features",
+      applets: true,
+    });
+    const badId = await contribution.route(
+      new Request(
+        "https://frockbot.test/api/admin/users/not%20an%20id/features",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: command,
+        },
+      ),
+      new URL("https://frockbot.test/api/admin/users/not%20an%20id/features"),
+      context,
+    );
+    expect(badId?.status).toBe(400);
+    const badCommand = await contribution.route(
+      new Request("https://frockbot.test/api/admin/users/guest/features", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ schemaVersion: 1, applets: true }),
+      }),
+      new URL("https://frockbot.test/api/admin/users/guest/features"),
+      context,
+    );
+    expect(badCommand?.status).toBe(400);
+    const unknown = await contribution.route(
+      new Request("https://frockbot.test/api/admin/nothing"),
+      new URL("https://frockbot.test/api/admin/nothing"),
+      context,
+    );
+    expect(unknown?.status).toBe(404);
+    expect(writes).toBe(0);
   });
 });

@@ -6,13 +6,15 @@ import '../client/transport.dart';
 import '../shell/semantics.dart';
 import '../theme/states.dart';
 
-/// Admin: the one deployment-wide decision this app can make — whether anyone
-/// new may sign up.
+/// Admin: the decisions this app makes for the deployment rather than for
+/// an account — whether anyone new may sign up, and which accounts hold
+/// Applets.
 ///
 /// It is not a document surface. The deployment policy is not a User's
 /// settings: it belongs to the deployment, is refused for anyone who is not an
 /// admin, and carries its own revision, so it reads and writes its own route
-/// rather than borrowing the settings projection.
+/// rather than borrowing the settings projection. Account features are the
+/// same shape of decision, made one account at a time.
 class AdminPage extends StatefulWidget {
   final NativeApi api;
   const AdminPage({super.key, required this.api});
@@ -23,9 +25,11 @@ class AdminPage extends StatefulWidget {
 
 class _AdminPageState extends State<AdminPage> {
   Map<String, Object?>? policy;
+  List<Map<String, Object?>>? accounts;
   bool busy = false;
   bool refused = false;
   String? message;
+  String? accountsMessage;
 
   @override
   void initState() {
@@ -47,6 +51,7 @@ class _AdminPageState extends State<AdminPage> {
           refused = false;
         });
       }
+      await loadAccounts();
     } on RequestFailure catch (failure) {
       if (mounted) {
         setState(() {
@@ -67,6 +72,30 @@ class _AdminPageState extends State<AdminPage> {
       }
     } finally {
       if (mounted) setState(() => busy = false);
+    }
+  }
+
+  /// The accounts and what each holds. Separate from the policy read so a
+  /// list that cannot load leaves the signups switch usable.
+  Future<void> loadAccounts() async {
+    try {
+      final answer = await widget.api.request('/api/admin/users');
+      final listed = (((answer as Map?) ?? const {})['users'] as List?) ?? [];
+      if (mounted) {
+        setState(() {
+          accounts = [
+            for (final user in listed.cast<Map>()) user.cast<String, Object?>(),
+          ];
+          accountsMessage = null;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          accounts = null;
+          accountsMessage = 'Couldn’t load the accounts. Refresh to try again.';
+        });
+      }
     }
   }
 
@@ -104,10 +133,50 @@ class _AdminPageState extends State<AdminPage> {
     }
   }
 
+  Future<void> setApplets(String userId, bool enabled) async {
+    if (busy) return;
+    setState(() {
+      busy = true;
+      accountsMessage = null;
+    });
+    try {
+      final answer = await widget.api.request(
+        '/api/admin/users/${Uri.encodeComponent(userId)}/features',
+        body: {
+          'schemaVersion': 1,
+          'type': 'user/set-features',
+          'applets': enabled,
+        },
+      );
+      if (mounted) {
+        setState(() {
+          accounts = [
+            for (final account in accounts ?? const <Map<String, Object?>>[])
+              if (account['userId'] == userId)
+                {...account, 'features': answer}
+              else
+                account,
+          ];
+        });
+      }
+    } catch (_) {
+      await loadAccounts();
+      if (mounted && accountsMessage == null) {
+        setState(
+          () => accountsMessage =
+              'That change didn’t stick. Refresh and try again.',
+        );
+      }
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final current = policy;
     final signups = ((current?['signups'] as Map?) ?? const {})['open'] == true;
+    final textTheme = Theme.of(context).textTheme;
     return Scaffold(
       appBar: AppBar(
         title: const Text('Site administration'),
@@ -164,7 +233,7 @@ class _AdminPageState extends State<AdminPage> {
                             current['updatedBy'] == 'deployment-default'
                                 ? 'Default setting'
                                 : 'Last changed by ${current['updatedBy'] ?? 'an administrator'}.',
-                            style: Theme.of(context).textTheme.bodySmall,
+                            style: textTheme.bodySmall,
                           ),
                           if (message != null)
                             Padding(
@@ -174,12 +243,76 @@ class _AdminPageState extends State<AdminPage> {
                                 child: Text(message!),
                               ),
                             ),
+                          const SizedBox(height: 32),
+                          Text('Applets', style: textTheme.titleMedium),
+                          const SizedBox(height: 4),
+                          Text(
+                            'The small real-time apps a Bot builds beside the conversation. '
+                            'Turn them on for an account to offer its Bots the Applet tools.',
+                            style: textTheme.bodySmall,
+                          ),
+                          const SizedBox(height: 8),
+                          identified(AdminIds.accounts, _accounts(context)),
+                          if (accountsMessage != null)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 16),
+                              child: Semantics(
+                                liveRegion: true,
+                                child: Text(accountsMessage!),
+                              ),
+                            ),
                         ],
                       ),
                     ),
                   ),
                 ],
               ),
+      ),
+    );
+  }
+
+  Widget _accounts(BuildContext context) {
+    final listed = accounts;
+    if (listed == null) {
+      return accountsMessage == null
+          ? const Padding(
+              padding: EdgeInsets.symmetric(vertical: 12),
+              child: Text('Loading the accounts…'),
+            )
+          : const SizedBox.shrink();
+    }
+    if (listed.isEmpty) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 12),
+        child: Text('No accounts yet.'),
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [for (final account in listed) _account(account)],
+    );
+  }
+
+  Widget _account(Map<String, Object?> account) {
+    final userId = account['userId'] as String? ?? '';
+    final name = account['name'] as String?;
+    final email = account['email'] as String?;
+    final title =
+        (name != null && name.isNotEmpty ? name : null) ?? email ?? userId;
+    final detail = [
+      if (email != null && email != title) email,
+      if (userId != title) userId,
+    ].join(' · ');
+    final enabled =
+        ((account['features'] as Map?) ?? const {})['applets'] == true;
+    return identified(
+      AdminIds.applets(userId),
+      SwitchListTile(
+        contentPadding: EdgeInsets.zero,
+        title: Text(title),
+        subtitle: detail.isEmpty ? null : Text(detail),
+        value: enabled,
+        onChanged: busy ? null : (value) => setApplets(userId, value),
       ),
     );
   }

@@ -115,6 +115,9 @@ import {
   decodeDeploymentPolicyV1,
   type DeploymentPolicyV1,
   type SetSignupsCommandV1,
+  decodeUserFeaturesV1,
+  type SetUserFeaturesCommandV1,
+  type UserFeaturesV1,
 } from "@frockbot/app/admin/shared";
 import { gatewayAuth } from "./auth.js";
 import {
@@ -274,6 +277,37 @@ function appletsUnconfigured(): Error {
   return new Error(APPLETS_UNAVAILABLE_MESSAGE_V1);
 }
 
+/** The accounts Better Auth holds, newest first. */
+async function listIdentityStoreUsers(
+  env: Env,
+  limit: number,
+): Promise<
+  Array<{ id: string; email: string; name: string; createdAt: string }>
+> {
+  const result = await env.AUTH_DB.prepare(
+    'select "id", "email", "name", "createdAt" from "user" order by "createdAt" desc limit ?',
+  )
+    .bind(limit)
+    .all<{ id: string; email: string; name: string; createdAt: string }>();
+  return result.results ?? [];
+}
+
+/** The User Durable Object's account features, addressed by User. */
+function userFeaturesStub(
+  env: Env,
+  userId: string,
+): {
+  readFeatures(input: unknown): Promise<unknown>;
+  setFeatures(input: unknown): Promise<unknown>;
+} {
+  const id = env.USER_CONFIGURATIONS.idFromName(userId);
+  // SAFETY: Wrangler binds USER_CONFIGURATIONS to UserConfiguration; workers-types cannot infer its generated account features RPC surface.
+  return env.USER_CONFIGURATIONS.get(id) as unknown as {
+    readFeatures(input: unknown): Promise<unknown>;
+    setFeatures(input: unknown): Promise<unknown>;
+  };
+}
+
 /**
  * The `/api/debug` surface, over the same durable records and identity store
  * the gateway already holds. Without `DEBUG_TOKEN` it carries no token, and
@@ -282,12 +316,7 @@ function appletsUnconfigured(): Error {
 function debugSurface(env: Env): DebugGatewaySurface {
   return {
     ...(env.DEBUG_TOKEN ? { token: env.DEBUG_TOKEN } : {}),
-    listUsers: async () => {
-      const result = await env.AUTH_DB.prepare(
-        'select "id", "email", "name", "createdAt" from "user" order by "createdAt" desc limit 50',
-      ).all<{ id: string; email: string; name: string; createdAt: string }>();
-      return result.results ?? [];
-    },
+    listUsers: () => listIdentityStoreUsers(env, 50),
     listBots: (userId) =>
       userConfigurationStub(env, userId).listBots({ schemaVersion: 1, userId }),
     snapshot: (userId, botId, query) =>
@@ -865,9 +894,30 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
   // reaches the User Durable Object only through here; it never gets a
   // namespace of its own.
 
+  /**
+   * The account's Applets switch, as an administrator set it. Off is silence
+   * for every Applet route this entrypoint serves: the client never asks for
+   * them then, and a caller that does is told why in one sentence.
+   */
+  private async requireApplets(): Promise<void> {
+    const userId = this.ctx.props.userId;
+    const features = decodeUserFeaturesV1(
+      rpcJsonSnapshot(
+        await userFeaturesStub(this.env, userId).readFeatures({
+          schemaVersion: 1,
+          userId,
+        }),
+      ),
+    );
+    if (!features.applets) {
+      throw new Error("Applets are not turned on for this account");
+    }
+  }
+
   async deleteApplet(input: unknown): Promise<unknown> {
     const request = decodeRpcEnvelopeV1(input, { appletId: rpcString(129) });
     const userId = this.ctx.props.userId;
+    await this.requireApplets();
     return rpcJsonSnapshot(
       await userAppletDirectoryStub(this.env, userId).deleteApplet({
         schemaVersion: 1,
@@ -879,6 +929,7 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
 
   async listApplets(_input?: unknown): Promise<unknown> {
     const userId = this.ctx.props.userId;
+    await this.requireApplets();
     return rpcJsonSnapshot(
       await userAppletDirectoryStub(this.env, userId).listApplets({
         schemaVersion: 1,
@@ -904,6 +955,7 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
     const request = decodeRpcEnvelopeV1(input, { appletId: rpcString(129) });
     const userId = this.ctx.props.userId;
     const appletId = request.appletId as string;
+    await this.requireApplets();
     const secret = this.env.APPLET_VIEWER_SECRET;
     if (!secret) throw appletsUnconfigured();
     const state = await this.appletCurrentGeneration(userId, appletId);
@@ -930,6 +982,7 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
     const request = decodeRpcEnvelopeV1(input, { appletId: rpcString(129) });
     const userId = this.ctx.props.userId;
     const appletId = request.appletId as string;
+    await this.requireApplets();
     const state = await this.appletCurrentGeneration(userId, appletId);
     return {
       appletId,
@@ -992,6 +1045,7 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
   async readFocusedApplet(input: unknown): Promise<unknown> {
     const request = decodeRpcEnvelopeV1(input, { botId: rpcBotId });
     const userId = this.ctx.props.userId;
+    await this.requireApplets();
     const botId = request.botId as string;
     return rpcJsonSnapshot(
       await botStateStub(this.env, userId, botId).readFocusedApplet({
@@ -1008,6 +1062,7 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
       appletId: rpcAppletIdOrNull,
     });
     const userId = this.ctx.props.userId;
+    await this.requireApplets();
     const botId = request.botId as string;
     return rpcJsonSnapshot(
       await botStateStub(this.env, userId, botId).setFocusedApplet({
@@ -1024,6 +1079,7 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
       botId: rpcBotId,
       appletId: rpcPattern(APPLET_ID_V1, 129),
     });
+    await this.requireApplets();
     return botStateStub(
       this.env,
       this.ctx.props.userId,
@@ -1036,6 +1092,7 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
       botId: rpcBotId,
       appletId: rpcPattern(APPLET_ID_V1, 129),
     });
+    await this.requireApplets();
     return botStateStub(
       this.env,
       this.ctx.props.userId,
@@ -1476,6 +1533,36 @@ const createGatewayBackendContributions = (env: Env) =>
         rpcJsonSnapshot(
           await deploymentPolicyStub(env).setSignups({
             schemaVersion: 1,
+            command,
+            updatedBy,
+          }),
+        ),
+      ),
+    listUsers: async () =>
+      (await listIdentityStoreUsers(env, 200)).map((user) => ({
+        userId: user.id,
+        email: user.email,
+        name: user.name,
+      })),
+    readUserFeatures: async (userId: string): Promise<UserFeaturesV1> =>
+      decodeUserFeaturesV1(
+        rpcJsonSnapshot(
+          await userFeaturesStub(env, userId).readFeatures({
+            schemaVersion: 1,
+            userId,
+          }),
+        ),
+      ),
+    setUserFeatures: async (
+      userId: string,
+      command: SetUserFeaturesCommandV1,
+      updatedBy: string,
+    ): Promise<UserFeaturesV1> =>
+      decodeUserFeaturesV1(
+        rpcJsonSnapshot(
+          await userFeaturesStub(env, userId).setFeatures({
+            schemaVersion: 1,
+            userId,
             command,
             updatedBy,
           }),

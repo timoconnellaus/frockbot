@@ -27,6 +27,7 @@ import {
   press,
   answerInputs,
   composerInput,
+  enableApplets,
   provisionThroughUi,
   sem,
   sendMessage,
@@ -280,6 +281,10 @@ test("a Bot writes, checks and publishes an Applet, and its tool reaches the Bot
   ).toBe(true);
 
   await page.setViewportSize(DESKTOP);
+  // Before the Bot exists: the shell reads what a Bot's Composition may show
+  // when the Bot is opened, and Applets are in it only once the account holds
+  // them.
+  await enableApplets(page, userId);
   await provisionThroughUi(page, {
     userId,
     apiKey: E2E_OLLAMA_GOOD_API_KEY,
