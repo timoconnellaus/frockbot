@@ -570,6 +570,19 @@ export type AppletSummary = {
   tools: Array<string>;
   createdAt: Instant;
 };
+export type AppletOpenFocus = {
+  appletId: string;
+  generationId?: GenerationId;
+  uiUrl?: string;
+  token?: string;
+  expiresAt?: Instant;
+  socketUrl?: string;
+};
+export type AppletOpenView = {
+  schemaVersion: 1;
+  applets: Array<AppletSummary>;
+  focused?: AppletOpenFocus;
+};
 export type AppletDirectory = {
   schemaVersion: 1;
   applets: Array<AppletSummary>;
@@ -841,6 +854,8 @@ export interface ProtocolTypes {
   BotWriter: BotWriter;
   TurnResponse: TurnResponse;
   AppletSummary: AppletSummary;
+  AppletOpenFocus: AppletOpenFocus;
+  AppletOpenView: AppletOpenView;
   AppletDirectory: AppletDirectory;
   SettingsChangeCommand: SettingsChangeCommand;
   SettingsReceipt: SettingsReceipt;

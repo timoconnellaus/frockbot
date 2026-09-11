@@ -129,6 +129,13 @@ export type AppletActivationV1 =
       residentGenerationId?: string;
     };
 
+/** What `open()` answers: the current generation's identity and artifacts. */
+export interface AppletOpenStateV1 {
+  schemaVersion: 1;
+  appletId: string;
+  current?: { generationId: string; serverHash: string; uiHash: string };
+}
+
 /** What `read()` answers: the whole visible state of one Applet. */
 export interface AppletStateViewV1 {
   schemaVersion: 1;
@@ -970,6 +977,38 @@ export class AppletState extends DurableObject<AppletStateEnv> {
     await this.ctx.storage.deleteAlarm();
     await this.ctx.storage.deleteAll();
     return { status: "deleted" };
+  }
+
+  /**
+   * What opening the Applet needs and nothing else: the current pointer and
+   * the artifacts of the generation it names. Two key reads, where `read()`
+   * lists every generation and every failure — this is the one call on the
+   * canvas's critical path, so it carries nothing the canvas does not draw.
+   */
+  async open(input: unknown): Promise<AppletOpenStateV1> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      appletId: rpcString(129),
+    });
+    this.#assertIdentity(request.userId as string, request.appletId as string);
+    await this.#settleInterruptedTrial();
+    const current = await this.#pointer(APPLET_CURRENT_KEY);
+    const generation = current
+      ? await this.#generation(current.generationId)
+      : undefined;
+    return {
+      schemaVersion: 1,
+      appletId: request.appletId as string,
+      ...(current && generation
+        ? {
+            current: {
+              generationId: current.generationId,
+              serverHash: generation.server.contentHash,
+              uiHash: generation.ui.contentHash,
+            },
+          }
+        : {}),
+    };
   }
 
   /** The whole visible state: current, last-known-good, history, failures. */

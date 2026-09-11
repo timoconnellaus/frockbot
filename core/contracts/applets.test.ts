@@ -7,6 +7,8 @@ import {
   decodeAppletPublishResultV1,
   decodeAppletBuildViewV1,
   decodeAppletListViewV1,
+  decodeAppletOpenFocusV1,
+  decodeAppletOpenViewV1,
   decodeAppletSourceViewV1,
   decodeAppletSummaryV1,
   decodeAppletUiViewV1,
@@ -292,6 +294,63 @@ describe("Applet canvas projections", () => {
     expect(() => decodeAppletBuildViewV1({ status: "broken" })).toThrow(
       "status is invalid",
     );
+  });
+
+  test("the open route is the directory plus the focused viewer, or less", () => {
+    const viewer = {
+      appletId: summary.appletId,
+      generationId: "generation-2",
+      uiUrl: "https://ui.bot.frockbot.com/packages/aa.html",
+      token: "signed.token",
+      socketUrl: "wss://bot.frockbot.com/api/applets/u1abc.todo/socket",
+      expiresAt: "2026-09-03T00:15:00.000Z",
+    };
+    const open = {
+      schemaVersion: 1 as const,
+      applets: [summary],
+      focused: viewer,
+    };
+    expect(decodeAppletOpenViewV1(open)).toEqual(open);
+    // Nothing focused: the canvas is closed, and the directory still lists.
+    expect(decodeAppletOpenViewV1({ schemaVersion: 1, applets: [] })).toEqual({
+      schemaVersion: 1,
+      applets: [],
+    });
+    // Focused and unpublished: the building state is the id alone.
+    const building = {
+      schemaVersion: 1,
+      applets: [
+        { ...summary, status: "draft", currentGenerationId: undefined },
+      ],
+      focused: { appletId: summary.appletId },
+    };
+    expect(decodeAppletOpenViewV1(building).focused).toEqual({
+      appletId: summary.appletId,
+    });
+    // Half a viewer is neither state.
+    expect(() =>
+      decodeAppletOpenFocusV1({ appletId: summary.appletId, token: "x" }),
+    ).toThrow("invalid fields");
+    // A focus the directory does not list is not an open Applet.
+    expect(() =>
+      decodeAppletOpenViewV1({
+        schemaVersion: 1,
+        applets: [],
+        focused: viewer,
+      }),
+    ).toThrow("directory does not");
+    expect(() =>
+      decodeAppletOpenViewV1({
+        ...open,
+        focused: { ...viewer, socketUrl: "javascript:alert(1)" },
+      }),
+    ).toThrow("socketUrl is invalid");
+    expect(() =>
+      decodeAppletOpenViewV1({
+        ...open,
+        focused: { ...viewer, uiUrl: "ftp://ui.example/x" },
+      }),
+    ).toThrow("uiUrl is invalid");
   });
 
   test("the UI route names an http origin and a generation", () => {

@@ -103,6 +103,8 @@ declare const validators: {
   isBotWriter(value: unknown): value is ProtocolTypes["BotWriter"];
   isTurnResponse(value: unknown): value is ProtocolTypes["TurnResponse"];
   isAppletSummary(value: unknown): value is ProtocolTypes["AppletSummary"];
+  isAppletOpenFocus(value: unknown): value is ProtocolTypes["AppletOpenFocus"];
+  isAppletOpenView(value: unknown): value is ProtocolTypes["AppletOpenView"];
   isAppletDirectory(value: unknown): value is ProtocolTypes["AppletDirectory"];
   isSettingsChangeCommand(
     value: unknown,

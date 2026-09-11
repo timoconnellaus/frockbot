@@ -17,13 +17,12 @@ void main() {
   ) async {
     var deleted = false;
     final api = SettingsApi(MemoryStore(), (path, body) async {
-      if (path == '/api/applets') {
+      if (path.endsWith('/applets/open')) {
         return {
           'schemaVersion': 1,
           'applets': [if (!deleted) applet().toJson()],
         };
       }
-      if (path.endsWith('/focus')) return {'appletId': null};
       if (path.endsWith('/delete')) {
         deleted = true;
         return {'schemaVersion': 1, 'status': 'deleted'};
@@ -121,13 +120,12 @@ void main() {
       var down = true;
       final api = SettingsApi(MemoryStore(), (path, body) async {
         if (down) throw const RequestFailure('applets are unavailable', 503);
-        if (path == '/api/applets') {
+        if (path.endsWith('/applets/open')) {
           return {
             'schemaVersion': 1,
             'applets': [applet().toJson()],
           };
         }
-        if (path.endsWith('/focus')) return {'appletId': null};
         throw StateError(path);
       });
       final controller = AppletCanvasController(api, 'bot-1');
@@ -286,56 +284,17 @@ void main() {
     },
   );
 
-  testWidgets(
-    'a directory that read fine renders when only the focus read fails',
-    (tester) async {
-      final api = SettingsApi(MemoryStore(), (path, body) async {
-        if (path == '/api/applets') {
-          return {
-            'schemaVersion': 1,
-            'applets': [applet().toJson()],
-          };
-        }
-        // The Applets listed fine; the per-Bot focus route is the one that is
-        // down, and it says nothing about whether the User has Applets.
-        if (path.endsWith('/focus')) {
-          throw const RequestFailure('applets are unavailable', 503);
-        }
-        throw StateError(path);
-      });
-      final controller = AppletCanvasController(api, 'bot-1');
-      await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(body: AppletPicker(controller: controller)),
-        ),
-      );
-      await tester.pumpAndSettle();
-      expect(find.text('Weekly Todos'), findsOneWidget);
-      expect(
-        find.text('Couldn\u2019t load Applets \u00b7 Retry'),
-        findsNothing,
-      );
-      expect(
-        find.text('No Applets yet. Ask a Bot to build one.'),
-        findsNothing,
-      );
-      await tester.pumpWidget(const SizedBox());
-      controller.dispose();
-    },
-  );
-
   testWidgets('deleting an Applet that is already gone is not a failure', (
     tester,
   ) async {
     var deleted = false;
     final api = SettingsApi(MemoryStore(), (path, body) async {
-      if (path == '/api/applets') {
+      if (path.endsWith('/applets/open')) {
         return {
           'schemaVersion': 1,
           'applets': [if (!deleted) applet().toJson()],
         };
       }
-      if (path.endsWith('/focus')) return {'appletId': null};
       if (path.endsWith('/delete')) {
         // Another window already deleted it, so the route answers with the
         // settled truth that there is no such Applet.
@@ -372,14 +331,16 @@ void main() {
     tester,
   ) async {
     final api = SettingsApi(MemoryStore(), (path, body) async {
-      if (path == '/api/applets') {
+      if (path.endsWith('/applets/open')) {
+        // The open read answered, and the focused Applet is unpublished, so
+        // its code is what there is to show.
         return {
           'schemaVersion': 1,
-          'applets': [applet(generationId: 'g1').toJson()],
+          'applets': [applet().toJson()],
+          'focused': {'appletId': 'todo.applet'},
         };
       }
-      if (path.endsWith('/focus')) return {'appletId': 'todo.applet'};
-      // The directory read answered; only this Applet's own detail is down.
+      // The directory read answered; only this Applet's own code is down.
       throw const RequestFailure('applets are unavailable', 503);
     });
     final controller = AppletCanvasController(api, 'bot-1');
@@ -569,47 +530,6 @@ void main() {
       // whatever was in the frame; the held one is still the only one.
       expect(tokens, 1);
       await tester.pumpWidget(const SizedBox());
-    },
-  );
-
-  testWidgets(
-    'a focus newer than the listing is re-read before it is dropped',
-    (tester) async {
-      var listings = 0;
-      final api = SettingsApi(MemoryStore(), (path, body) async {
-        if (path == '/api/applets') {
-          listings++;
-          // The Turn created the Applet between this canvas read's listing and
-          // its focus read, so the first listing cannot know about it.
-          return {
-            'schemaVersion': 1,
-            'applets': [if (listings > 1) applet(generationId: 'g1').toJson()],
-          };
-        }
-        if (path.endsWith('/focus')) return {'appletId': 'todo.applet'};
-        if (path.endsWith('/source')) return sourceView(['ui.tsx']);
-        if (path.endsWith('/build')) return {'status': 'unknown'};
-        if (path.endsWith('/ui')) {
-          return {
-            'uiUrl': 'https://ui.example/applet.html',
-            'generationId': 'g1',
-          };
-        }
-        if (path.endsWith('/token')) {
-          return {
-            'token': 'viewer-token',
-            'expiresAt': '2027-01-01T00:00:00.000Z',
-            'socketUrl':
-                'wss://bot.frockbot.com/api/applets/todo.applet/socket',
-          };
-        }
-        throw StateError(path);
-      });
-      final controller = AppletCanvasController(api, 'bot-1');
-      await controller.load();
-      expect(controller.focusedId, 'todo.applet');
-      expect(controller.focused?.displayName, 'Weekly Todos');
-      controller.dispose();
     },
   );
 }

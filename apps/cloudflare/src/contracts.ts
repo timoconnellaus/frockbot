@@ -273,6 +273,22 @@ export interface UserBotStateBinding {
     generationId: string;
     contentHash: string;
   }>;
+  /**
+   * The focused Applet, opened in one read: the directory, and for the focus
+   * the generation, UI artifact hash and a viewer token. The route composes
+   * the URLs from its own origin.
+   */
+  openFocusedApplet(input: { schemaVersion: 1; botId: string }): Promise<{
+    schemaVersion: 1;
+    applets: unknown[];
+    focused?: {
+      appletId: string;
+      generationId?: string;
+      uiHash?: string;
+      token?: string;
+      expiresAt?: string;
+    };
+  }>;
   readFocusedApplet(input: {
     schemaVersion: 1;
     botId: string;

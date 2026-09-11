@@ -46,6 +46,18 @@ ToolActivity tool(String name, String status, {String? text, Object? input}) =>
       input: input,
     );
 
+/// The viewer half of an open answer for a published Applet.
+Map<String, Object?> openViewer() => {
+  'generationId': '2026-09-05T01:00:00.000Z:abcdef0',
+  'uiUrl': 'https://ui.example/packages/abc.html',
+  'token': 'viewer-token',
+  // Millisecond precision exactly, because `Instant` is 24 characters and
+  // Dart writes microseconds when it has them.
+  'expiresAt':
+      '${DateTime.now().add(const Duration(minutes: 15)).toUtc().toIso8601String().substring(0, 23)}Z',
+  'socketUrl': 'wss://bot.frockbot.com/api/applets/todo.applet/socket',
+};
+
 Map<String, Object?> sourceView(List<String> paths) => {
   'appletId': 'todo.applet',
   'truncated': false,
@@ -299,40 +311,29 @@ void main() {
   });
 
   group('the canvas', () {
+    final requested = <String>[];
+    setUp(requested.clear);
     Future<AppletCanvasController> open(
       WidgetTester tester, {
       bool published = true,
     }) async {
       final store = MemoryStore();
       final api = SettingsApi(store, (path, body) async {
-        if (path == '/api/applets') {
+        requested.add(path);
+        if (path.endsWith('/applets/open')) {
           return {
             'schemaVersion': 1,
             'applets': [applet(generationId: published ? 'g1' : null).toJson()],
+            'focused': {
+              'appletId': 'todo.applet',
+              if (published) ...openViewer(),
+            },
           };
         }
-        if (path.endsWith('/applets/focus')) return {'appletId': 'todo.applet'};
         if (path.endsWith('/source')) {
           return sourceView(['server.ts', 'ui.tsx']);
         }
         if (path.endsWith('/build')) return {'status': 'unknown'};
-        if (path.endsWith('/ui')) {
-          return {
-            'uiUrl': 'https://ui.example/packages/abc.html',
-            if (published) 'generationId': '2026-09-05T01:00:00.000Z:abcdef0',
-          };
-        }
-        if (path.endsWith('/token')) {
-          return {
-            'token': 'viewer-token',
-            // Millisecond precision exactly, because `Instant` is 24
-            // characters and Dart writes microseconds when it has them.
-            'expiresAt':
-                '${DateTime.now().add(const Duration(minutes: 15)).toUtc().toIso8601String().substring(0, 23)}Z',
-            'socketUrl':
-                'wss://bot.frockbot.com/api/applets/todo.applet/socket',
-          };
-        }
         throw const RequestFailure('unexpected', 404);
       });
       final controller = AppletCanvasController(api, 'bot-1');
@@ -347,6 +348,55 @@ void main() {
       return controller;
     }
 
+    testWidgets('the frame is given its page before the code is asked for', (
+      tester,
+    ) async {
+      final controller = await open(tester);
+      // One read put the frame up. The source and the build are the code
+      // view's, and the code view is not what is showing.
+      expect(requested, ['/api/bots/bot-1/applets/open']);
+      expect(controller.viewer, isNotNull);
+      expect(controller.source, isNull);
+
+      // A Turn working on a live Applet re-reads the open route alone.
+      await controller.poll();
+      expect(requested, [
+        '/api/bots/bot-1/applets/open',
+        '/api/bots/bot-1/applets/open',
+      ]);
+
+      // The code is read when it is looked at.
+      await tester.tap(find.text('Code'));
+      await tester.pumpAndSettle();
+      expect(requested.skip(2), [
+        '/api/bots/bot-1/applets/todo.applet/source',
+        '/api/bots/bot-1/applets/todo.applet/build',
+      ]);
+      expect(controller.source, isNotNull);
+    });
+
+    testWidgets(
+      'a draft reads its code behind the open answer, in that order',
+      (tester) async {
+        final controller = await open(tester, published: false);
+        expect(requested, [
+          '/api/bots/bot-1/applets/open',
+          '/api/bots/bot-1/applets/todo.applet/source',
+          '/api/bots/bot-1/applets/todo.applet/build',
+        ]);
+        expect(controller.viewer, isNull);
+        // With nothing published the code is the content, so a poll keeps it
+        // fresh too.
+        requested.clear();
+        await controller.poll();
+        expect(requested.first, '/api/bots/bot-1/applets/open');
+        expect(
+          requested,
+          contains('/api/bots/bot-1/applets/todo.applet/source'),
+        );
+      },
+    );
+
     testWidgets('a draft opens on its code, with the progress line', (
       tester,
     ) async {
@@ -359,67 +409,54 @@ void main() {
       expect(find.text('App'), findsNothing);
     });
 
-    testWidgets('a focus that moves to a draft never keeps the last live page', (
-      tester,
-    ) async {
-      final store = MemoryStore();
-      var focus = 'todo.applet';
-      final api = SettingsApi(store, (path, body) async {
-        if (path == '/api/applets') {
-          return {
-            'schemaVersion': 1,
-            'applets': [
-              applet(generationId: 'g1').toJson(),
-              wire.AppletSummary.fromJson({
-                'appletId': 'draft.applet',
-                'displayName': 'Reading List',
-                'status': 'draft',
-                'tools': <String>[],
-                'createdAt': '2026-09-05T01:00:00.000Z',
-              }).toJson(),
-            ],
-          };
-        }
-        if (path.endsWith('/applets/focus')) return {'appletId': focus};
-        if (path.endsWith('/source')) {
-          return {
-            ...sourceView(['server.ts']),
-            'appletId': focus,
-          };
-        }
-        if (path.endsWith('/build')) return {'status': 'unknown'};
-        if (path.contains('draft.applet')) {
-          // What the route answers for an Applet with nothing published.
-          throw const RequestFailure('no active generation', 404);
-        }
-        if (path.endsWith('/ui')) {
-          return {
-            'uiUrl': 'https://ui.example/packages/abc.html',
-            'generationId': '2026-09-05T01:00:00.000Z:abcdef0',
-          };
-        }
-        if (path.endsWith('/token')) {
-          return {
-            'token': 'viewer-token',
-            'expiresAt':
-                '${DateTime.now().add(const Duration(minutes: 15)).toUtc().toIso8601String().substring(0, 23)}Z',
-            'socketUrl':
-                'wss://bot.frockbot.com/api/applets/todo.applet/socket',
-          };
-        }
-        throw const RequestFailure('unexpected', 404);
-      });
-      final controller = AppletCanvasController(api, 'bot-1');
-      await controller.load();
-      expect(controller.viewer, isNotNull);
-      focus = 'draft.applet';
-      await controller.load();
-      expect(controller.viewer, isNull);
-      expect(controller.focused?.displayName, 'Reading List');
-      // A draft is not a failed read: the code view is what there is to show.
-      expect(controller.failure, isNull);
-      controller.dispose();
-    });
+    testWidgets(
+      'a focus that moves to a draft never keeps the last live page',
+      (tester) async {
+        final store = MemoryStore();
+        var focus = 'todo.applet';
+        final api = SettingsApi(store, (path, body) async {
+          if (path.endsWith('/applets/open')) {
+            return {
+              'schemaVersion': 1,
+              'applets': [
+                applet(generationId: 'g1').toJson(),
+                wire.AppletSummary.fromJson({
+                  'appletId': 'draft.applet',
+                  'displayName': 'Reading List',
+                  'status': 'draft',
+                  'tools': <String>[],
+                  'createdAt': '2026-09-05T01:00:00.000Z',
+                }).toJson(),
+              ],
+              // A draft's focus is its id and nothing else: what the route
+              // answers for an Applet with nothing published.
+              'focused': {
+                'appletId': focus,
+                if (focus == 'todo.applet') ...openViewer(),
+              },
+            };
+          }
+          if (path.endsWith('/source')) {
+            return {
+              ...sourceView(['server.ts']),
+              'appletId': focus,
+            };
+          }
+          if (path.endsWith('/build')) return {'status': 'unknown'};
+          throw const RequestFailure('unexpected', 404);
+        });
+        final controller = AppletCanvasController(api, 'bot-1');
+        await controller.load();
+        expect(controller.viewer, isNotNull);
+        focus = 'draft.applet';
+        await controller.load();
+        expect(controller.viewer, isNull);
+        expect(controller.focused?.displayName, 'Reading List');
+        // A draft is not a failed read: the code view is what there is to show.
+        expect(controller.failure, isNull);
+        controller.dispose();
+      },
+    );
 
     testWidgets('a published Applet opens on the Applet, and toggles back', (
       tester,

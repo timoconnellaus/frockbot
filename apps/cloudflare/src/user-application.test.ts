@@ -25,6 +25,8 @@ function rpcBindingFor(state: BotStateBinding): UserBotStateBinding {
     mintAppletViewerToken: () =>
       Promise.reject(new Error("Applet is unavailable")),
     readAppletUi: () => Promise.reject(new Error("Applet is unavailable")),
+    openFocusedApplet: () =>
+      Promise.resolve({ schemaVersion: 1 as const, applets: [] }),
     readFocusedApplet: () =>
       Promise.resolve({
         schemaVersion: 1,
@@ -940,6 +942,115 @@ describe("run list failures", () => {
     expect(response.headers.get("content-type")).toContain("application/json");
     expect((await response.json()) as { error: string }).toEqual({
       error: 'run "run-1" has no valid Composition generation',
+    });
+  });
+});
+
+describe("the Applet open route", () => {
+  const applet = {
+    appletId: "alice.todo",
+    displayName: "Todo",
+    status: "published",
+    currentGenerationId: "g1",
+    tools: ["add_todo"],
+    createdAt: "2026-09-03T00:00:00.000Z",
+  };
+
+  test("answers the directory and the focused viewer with the URLs of this origin", async () => {
+    const env: UserApplicationEnv = {
+      BOT_STATE: {
+        ...rpcBindingFor({} as BotStateBinding),
+        openFocusedApplet: ({ botId }) => {
+          expect(botId).toBe("bot-1");
+          return Promise.resolve({
+            schemaVersion: 1 as const,
+            applets: [applet],
+            focused: {
+              appletId: "alice.todo",
+              generationId: "g1",
+              uiHash: "a".repeat(64),
+              token: "viewer-token",
+              expiresAt: "2026-09-03T00:15:00.000Z",
+            },
+          });
+        },
+      },
+      DEPLOYMENT: { userId: "alice", applicationHash: "foundation-v1" },
+    };
+    const response = await createUserApplication()(
+      new Request("https://frockbot.test/api/bots/bot-1/applets/open"),
+      env,
+    );
+    expect(response.status).toBe(200);
+    expect<unknown>(await response.json()).toEqual({
+      schemaVersion: 1,
+      applets: [applet],
+      focused: {
+        appletId: "alice.todo",
+        generationId: "g1",
+        // The anonymous artifact origin, as the `/ui` route names it.
+        uiUrl: `https://ui.frockbot.test/packages/${"a".repeat(64)}.html`,
+        token: "viewer-token",
+        // The address only; the token never rides in it.
+        socketUrl: "wss://frockbot.test/api/applets/alice.todo/socket",
+        expiresAt: "2026-09-03T00:15:00.000Z",
+      },
+    });
+  });
+
+  test("an unpublished focus is the building state, and no focus is the directory alone", async () => {
+    const answers = [
+      {
+        schemaVersion: 1 as const,
+        applets: [applet],
+        focused: { appletId: "alice.todo" },
+      },
+      { schemaVersion: 1 as const, applets: [applet] },
+    ];
+    const env: UserApplicationEnv = {
+      BOT_STATE: {
+        ...rpcBindingFor({} as BotStateBinding),
+        openFocusedApplet: () => Promise.resolve(answers.shift()!),
+      },
+      DEPLOYMENT: { userId: "alice", applicationHash: "foundation-v1" },
+    };
+    const fetchUserApplication = createUserApplication();
+    const building = await fetchUserApplication(
+      new Request("https://frockbot.test/api/bots/bot-1/applets/open"),
+      env,
+    );
+    expect<unknown>(await building.json()).toEqual({
+      schemaVersion: 1,
+      applets: [applet],
+      focused: { appletId: "alice.todo" },
+    });
+    const closed = await fetchUserApplication(
+      new Request("https://frockbot.test/api/bots/bot-1/applets/open"),
+      env,
+    );
+    expect<unknown>(await closed.json()).toEqual({
+      schemaVersion: 1,
+      applets: [applet],
+    });
+  });
+
+  test("a deployment that cannot sign tokens says so, once and finally", async () => {
+    const env: UserApplicationEnv = {
+      BOT_STATE: {
+        ...rpcBindingFor({} as BotStateBinding),
+        openFocusedApplet: () =>
+          Promise.reject(new Error(APPLETS_UNAVAILABLE_MESSAGE_V1)),
+      },
+      DEPLOYMENT: { userId: "alice", applicationHash: "foundation-v1" },
+    };
+    const response = await createUserApplication()(
+      new Request("https://frockbot.test/api/bots/bot-1/applets/open"),
+      env,
+    );
+    expect(response.status).toBe(503);
+    expect<unknown>(await response.json()).toEqual({
+      error: "Applets are unavailable right now.",
+      definitive: true,
     });
   });
 });

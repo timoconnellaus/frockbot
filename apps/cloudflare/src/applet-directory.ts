@@ -52,7 +52,9 @@ export interface AppletDirectoryStorage {
   list<T>(options: { prefix: string }): Promise<Map<string, T>>;
 }
 
-function summary(entry: AppletDirectoryEntryV1): AppletSummaryV1 {
+export function appletSummaryV1(
+  entry: AppletDirectoryEntryV1,
+): AppletSummaryV1 {
   return {
     appletId: entry.appletId,
     displayName: entry.displayName,
@@ -116,7 +118,7 @@ export class AppletDirectory {
       applets: entries
         .filter((entry) => entry.status !== "deleted")
         .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
-        .map(summary),
+        .map(appletSummaryV1),
     };
   }
 
@@ -191,7 +193,7 @@ export class AppletDirectory {
       status: "draft",
     });
     await this.#write(entry);
-    return summary(entry);
+    return appletSummaryV1(entry);
   }
 
   /**
@@ -215,7 +217,7 @@ export class AppletDirectory {
       status: "published",
     });
     await this.#write(updated);
-    return summary(updated);
+    return appletSummaryV1(updated);
   }
 
   /**
@@ -232,6 +234,6 @@ export class AppletDirectory {
       status: "deleted",
     });
     await this.#write(updated);
-    return summary(updated);
+    return appletSummaryV1(updated);
   }
 }

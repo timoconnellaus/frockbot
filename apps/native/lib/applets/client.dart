@@ -130,6 +130,31 @@ class AppletViewer {
     required this.expiresAt,
   });
 
+  /// The viewer as the open route answers it. Only for a focus that carries
+  /// one: an unpublished Applet has an id and nothing to frame.
+  static AppletViewer? fromOpen(wire.AppletOpenFocus focus) {
+    final generationId = focus.generationId?.value;
+    final uiUrl = focus.uiUrl;
+    final token = focus.token;
+    final socketUrl = focus.socketUrl;
+    final expiresAt = focus.expiresAt?.value;
+    if (generationId == null ||
+        uiUrl == null ||
+        token == null ||
+        socketUrl == null ||
+        expiresAt == null) {
+      return null;
+    }
+    return AppletViewer(
+      appletId: focus.appletId,
+      generationId: generationId,
+      uiUrl: AppletUi.fromJson({'uiUrl': uiUrl}).uiUrl,
+      token: token,
+      socketUrl: socketUrl,
+      expiresAt: DateTime.parse(expiresAt),
+    );
+  }
+
   /// The `init` the Applet SDK waits for. The token is the only credential an
   /// Applet page ever holds, and it names one User, one Applet and one
   /// generation for fifteen minutes.
@@ -152,6 +177,15 @@ class AppletsApi {
 
   Future<List<wire.AppletSummary>> list() async =>
       wire.AppletDirectory.fromJson(await api.request('/api/applets')).applets;
+
+  /// The canvas's one read: the directory, the Session's focus, and for the
+  /// focused Applet the generation, its page and a viewer credential. What
+  /// used to be four to seven requests in series, and the only request the
+  /// frame waits on.
+  Future<wire.AppletOpenView> open(String botId) async =>
+      wire.AppletOpenView.fromJson(
+        await api.request('/api/bots/${_bot(botId)}/applets/open'),
+      );
 
   Future<void> delete(String appletId) async {
     await api.request(

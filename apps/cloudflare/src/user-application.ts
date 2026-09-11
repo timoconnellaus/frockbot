@@ -16,6 +16,7 @@ import {
   APPLET_ID_V1,
   decodeAppletFocusViewV1,
   decodeAppletListViewV1,
+  decodeAppletOpenViewV1,
   decodeAppletUiViewV1,
   decodePackageIframeToolCommandV1,
   type PackageIframeCatalogV1,
@@ -188,6 +189,19 @@ function withSecurityHeaders(
     `default-src 'self'; script-src 'self' 'wasm-unsafe-eval' ${INSIGHTS_SCRIPT_ORIGIN}; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob:; connect-src 'self' ${INSIGHTS_REPORT_ORIGIN} ${applicationUrl.protocol === "https:" ? "wss:" : "ws:"}//${applicationUrl.host}; frame-src ${artifactOrigin}${viewerFrameOrigins}; frame-ancestors 'none'; base-uri 'self'`,
   );
   return secured;
+}
+
+/**
+ * The address of one Applet's socket, and only the address. Which carrier the
+ * token rides is the page's choice — a browser offers it as a subprotocol,
+ * everything else puts it in the query — and a token presented twice is
+ * refused, so the address must never carry one of its own.
+ */
+function appletSocketUrlV1(url: URL, appletId: string): string {
+  const socket = new URL(url.origin);
+  socket.protocol = url.protocol === "http:" ? "ws:" : "wss:";
+  socket.pathname = `/api/applets/${encodeURIComponent(appletId)}/socket`;
+  return socket.toString();
 }
 
 function jsonError(
@@ -527,13 +541,10 @@ function createUserApplicationRoute() {
         // choice — a browser offers it as a subprotocol, everything else puts
         // it in the query — and a token presented twice is refused, so the
         // address must never carry one of its own.
-        const socket = new URL(url.origin);
-        socket.protocol = url.protocol === "http:" ? "ws:" : "wss:";
-        socket.pathname = `/api/applets/${encodeURIComponent(appletId)}/socket`;
         return Response.json({
           token: minted.token,
           expiresAt: minted.expiresAt,
-          socketUrl: socket.toString(),
+          socketUrl: appletSocketUrlV1(url, appletId),
         });
       } catch (error) {
         const message =
@@ -554,6 +565,60 @@ function createUserApplicationRoute() {
             : 503,
           message,
         );
+      }
+    }
+    const appletOpenMatch = url.pathname.match(
+      /^\/api\/bots\/([^/]+)\/applets\/open$/,
+    );
+    if (appletOpenMatch) {
+      if (request.method !== "GET") return jsonError(405, "method not allowed");
+      let openBotId: string;
+      try {
+        openBotId = decodeBotIdV1(decodeURIComponent(appletOpenMatch[1]));
+      } catch {
+        return jsonError(400, "invalid bot id");
+      }
+      const missing = await requireRegisteredBot(env, openBotId);
+      if (missing) return missing;
+      try {
+        const opened = await env.BOT_STATE.openFocusedApplet({
+          schemaVersion: 1,
+          botId: openBotId,
+        });
+        const focused = opened.focused;
+        return Response.json(
+          decodeAppletOpenViewV1({
+            schemaVersion: 1,
+            applets: opened.applets,
+            ...(focused === undefined
+              ? {}
+              : {
+                  focused:
+                    focused.generationId === undefined ||
+                    focused.uiHash === undefined ||
+                    focused.token === undefined ||
+                    focused.expiresAt === undefined
+                      ? { appletId: focused.appletId }
+                      : {
+                          appletId: focused.appletId,
+                          generationId: focused.generationId,
+                          // The anonymous artifact origin, exactly as the
+                          // `/ui` route names it.
+                          uiUrl: appletPreviewUrlV1(url, focused.uiHash),
+                          token: focused.token,
+                          socketUrl: appletSocketUrlV1(url, focused.appletId),
+                          expiresAt: focused.expiresAt,
+                        },
+                }),
+          }),
+        );
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Applets are unavailable";
+        if (message === APPLETS_UNAVAILABLE_MESSAGE_V1) {
+          return jsonError(503, message, { definitive: true });
+        }
+        return jsonError(503, message);
       }
     }
     const appletFocusMatch = url.pathname.match(

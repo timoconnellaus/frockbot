@@ -895,7 +895,7 @@
     "value": {
       "schemaVersion": 1,
       "commandId": "command-1",
-      "text": "Hello 🐑 こんにちは"
+      "text": "Hello \ud83d\udc11 \u3053\u3093\u306b\u3061\u306f"
     }
   },
   {
@@ -1011,6 +1011,58 @@
           "createdAt": "2026-09-05T00:00:00.000Z"
         }
       ]
+    }
+  },
+  {
+    "name": "AppletOpenView valid",
+    "schema": "AppletOpenView",
+    "value": {
+      "schemaVersion": 1,
+      "applets": [
+        {
+          "appletId": "tim.counter",
+          "displayName": "Counter",
+          "status": "published",
+          "currentGenerationId": "generation-1",
+          "tools": ["increment"],
+          "createdAt": "2026-09-05T00:00:00.000Z"
+        }
+      ],
+      "focused": {
+        "appletId": "tim.counter",
+        "generationId": "generation-1",
+        "uiUrl": "https://ui.bot.frockbot.com/packages/aaaa.html",
+        "token": "signed.token",
+        "socketUrl": "wss://bot.frockbot.com/api/applets/tim.counter/socket",
+        "expiresAt": "2026-09-05T00:15:00.000Z"
+      }
+    }
+  },
+  {
+    "name": "AppletOpenView with nothing focused",
+    "schema": "AppletOpenView",
+    "value": {
+      "schemaVersion": 1,
+      "applets": []
+    }
+  },
+  {
+    "name": "AppletOpenFocus for an unpublished Applet",
+    "schema": "AppletOpenFocus",
+    "value": {
+      "appletId": "tim.counter"
+    }
+  },
+  {
+    "name": "AppletOpenFocus accepts a loopback socket for local development",
+    "schema": "AppletOpenFocus",
+    "value": {
+      "appletId": "tim.counter",
+      "generationId": "generation-1",
+      "uiUrl": "http://ui.localhost:8797/packages/aaaa.html",
+      "token": "signed.token",
+      "socketUrl": "ws://127.0.0.1:8797/api/applets/tim.counter/socket",
+      "expiresAt": "2026-09-05T00:15:00.000Z"
     }
   },
   {
@@ -1155,7 +1207,7 @@
           ]
         }
       ],
-      "modelInUse": "Auto · Frock AI"
+      "modelInUse": "Auto \u00b7 Frock AI"
     }
   },
   {

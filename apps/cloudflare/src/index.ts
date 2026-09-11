@@ -185,8 +185,8 @@ import {
   APPLET_VIEWER_UNCONFIGURED_DETAIL_V1,
 } from "@frockbot/core/durable";
 import {
-  decodeAppletGenerationV1,
   decodeAppletSummaryV1,
+  type AppletSummaryV1,
 } from "@frockbot/core/contracts";
 import type { AppletState } from "./applet-state.js";
 export { BotCapabilities } from "./bot-capabilities.js";
@@ -303,6 +303,14 @@ interface Env {
 function appletsUnconfigured(): Error {
   console.error(APPLET_VIEWER_UNCONFIGURED_DETAIL_V1);
   return new Error(APPLETS_UNAVAILABLE_MESSAGE_V1);
+}
+
+/** The summaries of a directory listing, decoded at this seam. */
+function appletsOf(listed: unknown): AppletSummaryV1[] {
+  const answer = rpcJsonSnapshot(listed) as { applets?: unknown };
+  return (Array.isArray(answer.applets) ? answer.applets : []).map((value) =>
+    decodeAppletSummaryV1(value),
+  );
 }
 
 /** The accounts Better Auth holds, newest first. */
@@ -737,19 +745,19 @@ function userAuditStub(env: Env, userId: string): UserAuditRpc {
 }
 
 /** The User Durable Object's Applet directory, addressed by User. */
+interface UserAppletDirectoryRpc {
+  listApplets(input: unknown): Promise<unknown>;
+  readApplet(input: unknown): Promise<unknown>;
+  deleteApplet(input: unknown): Promise<unknown>;
+}
+
 function userAppletDirectoryStub(
   env: Env,
   userId: string,
-): {
-  listApplets(input: unknown): Promise<unknown>;
-  deleteApplet(input: unknown): Promise<unknown>;
-} {
+): UserAppletDirectoryRpc {
   const id = env.USER_CONFIGURATIONS.idFromName(userId);
   // SAFETY: Wrangler binds USER_CONFIGURATIONS to UserConfiguration; workers-types cannot infer its generated Applet directory RPC surface.
-  return env.USER_CONFIGURATIONS.get(id) as unknown as {
-    listApplets(input: unknown): Promise<unknown>;
-    deleteApplet(input: unknown): Promise<unknown>;
-  };
+  return env.USER_CONFIGURATIONS.get(id) as unknown as UserAppletDirectoryRpc;
 }
 
 function userSearchStub(env: Env, userId: string): UserSearchRpc {
@@ -987,18 +995,12 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
     const secret = this.env.APPLET_VIEWER_SECRET;
     if (!secret) throw appletsUnconfigured();
     const state = await this.appletCurrentGeneration(userId, appletId);
-    const expiresAt = new Date(Date.now() + APPLET_VIEWER_TOKEN_TTL_MS);
-    return {
-      token: await mintAppletViewerTokenV1(secret, {
-        u: userId,
-        a: appletId,
-        g: state.generationId,
-        exp: Math.floor(expiresAt.getTime() / 1_000),
-      }),
-      expiresAt: expiresAt.toISOString(),
+    const minted = await this.mintViewerToken(secret, {
+      userId,
       appletId,
       generationId: state.generationId,
-    };
+    });
+    return { ...minted, appletId, generationId: state.generationId };
   }
 
   /** The current generation's UI artifact, for the canvas to nest. */
@@ -1019,55 +1021,151 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
     };
   }
 
+  /**
+   * The focused Applet, opened: the directory, the focus, and for the focused
+   * Applet the generation, the UI artifact and a viewer token — one answer,
+   * where the canvas used to make seven requests in series.
+   *
+   * The directory and the focus are two Durable Objects and are read in
+   * parallel; the generation is one `AppletState.open` read; the token is
+   * signed here. The route composes the URLs, because they are the request's
+   * origin and not this entrypoint's to know.
+   */
+  async openFocusedApplet(input: unknown): Promise<{
+    schemaVersion: 1;
+    applets: unknown[];
+    focused?: {
+      appletId: string;
+      generationId?: string;
+      uiHash?: string;
+      token?: string;
+      expiresAt?: string;
+    };
+  }> {
+    const request = decodeRpcEnvelopeV1(input, { botId: rpcBotId });
+    const userId = this.ctx.props.userId;
+    const botId = request.botId as string;
+    await this.requireApplets();
+    const directory = userAppletDirectoryStub(this.env, userId);
+    const [listed, focus] = await Promise.all([
+      directory.listApplets({ schemaVersion: 1, userId }),
+      botStateStub(this.env, userId, botId).readFocusedApplet({
+        schemaVersion: 1,
+        userId,
+        botId,
+      }),
+    ]);
+    let applets = appletsOf(listed);
+    const focusedId = (rpcJsonSnapshot(focus) as { appletId?: unknown })
+      .appletId;
+    if (typeof focusedId !== "string") return { schemaVersion: 1, applets };
+    let entry = applets.find((applet) => applet.appletId === focusedId);
+    if (!entry) {
+      // The listing was read beside the focus, so an Applet the Turn created
+      // and focused in between cannot be in it. The focus read already clears
+      // a focus its own directory read no longer lists, so a focus this
+      // listing has never heard of is a stale listing rather than a stale
+      // focus: list once more.
+      applets = appletsOf(
+        await directory.listApplets({ schemaVersion: 1, userId }),
+      );
+      entry = applets.find((applet) => applet.appletId === focusedId);
+      if (!entry) return { schemaVersion: 1, applets };
+    }
+    if (!entry.currentGenerationId) {
+      return { schemaVersion: 1, applets, focused: { appletId: focusedId } };
+    }
+    const state = await this.appletOpenState(userId, focusedId);
+    if (!state) {
+      return { schemaVersion: 1, applets, focused: { appletId: focusedId } };
+    }
+    const secret = this.env.APPLET_VIEWER_SECRET;
+    if (!secret) throw appletsUnconfigured();
+    const minted = await this.mintViewerToken(secret, {
+      userId,
+      appletId: focusedId,
+      generationId: state.generationId,
+    });
+    return {
+      schemaVersion: 1,
+      applets,
+      focused: {
+        appletId: focusedId,
+        generationId: state.generationId,
+        uiHash: state.uiContentHash,
+        token: minted.token,
+        expiresAt: minted.expiresAt,
+      },
+    };
+  }
+
+  private async mintViewerToken(
+    secret: string,
+    claims: { userId: string; appletId: string; generationId: string },
+  ): Promise<{ token: string; expiresAt: string }> {
+    const expiresAt = new Date(Date.now() + APPLET_VIEWER_TOKEN_TTL_MS);
+    return {
+      token: await mintAppletViewerTokenV1(secret, {
+        u: claims.userId,
+        a: claims.appletId,
+        g: claims.generationId,
+        exp: Math.floor(expiresAt.getTime() / 1_000),
+      }),
+      expiresAt: expiresAt.toISOString(),
+    };
+  }
+
+  /** The current generation, or nothing while none is active. One DO read. */
+  private async appletOpenState(
+    userId: string,
+    appletId: string,
+  ): Promise<{ generationId: string; uiContentHash: string } | undefined> {
+    const namespace = this.env.APPLET_STATES;
+    const opened = rpcJsonSnapshot(
+      await namespace
+        .get(namespace.idFromName(appletStateNameV1(userId, appletId)))
+        .open({ schemaVersion: 1, userId, appletId }),
+    ) as { current?: { generationId?: unknown; uiHash?: unknown } };
+    const generationId = opened.current?.generationId;
+    const uiContentHash = opened.current?.uiHash;
+    if (typeof generationId !== "string" || typeof uiContentHash !== "string")
+      return undefined;
+    return { generationId, uiContentHash };
+  }
+
+  /**
+   * The current generation of one Applet, for the two single-Applet routes.
+   * One directory entry and one `AppletState.open` read; an Applet with
+   * nothing active is a settled 404 to the caller.
+   */
   private async appletCurrentGeneration(
     userId: string,
     appletId: string,
-  ): Promise<{
-    generationId: string;
-    uiContentHash: string;
-    ui: ReturnType<typeof decodeAppletGenerationV1>["ui"];
-  }> {
+  ): Promise<{ generationId: string; uiContentHash: string }> {
     const directory = decodeAppletSummaryV1(
       await this.requireAppletSummary(userId, appletId),
     );
     if (directory.status === "deleted" || !directory.currentGenerationId) {
       throw new Error(`Applet "${appletId}" has no active generation`);
     }
-    const namespace = this.env.APPLET_STATES;
-    const view = rpcJsonSnapshot(
-      await namespace
-        .get(namespace.idFromName(appletStateNameV1(userId, appletId)))
-        .read({ schemaVersion: 1, userId, appletId }),
-    ) as { current?: { generationId?: unknown }; generations?: unknown };
-    const generationId = String(view.current?.generationId ?? "");
-    const generation = (Array.isArray(view.generations) ? view.generations : [])
-      .map((value) => decodeAppletGenerationV1(value))
-      .find((candidate) => candidate.generationId === generationId);
-    if (!generation) {
+    const state = await this.appletOpenState(userId, appletId);
+    if (!state) {
       throw new Error(`Applet "${appletId}" has no active generation`);
     }
-    return {
-      generationId,
-      uiContentHash: generation.ui.contentHash,
-      ui: generation.ui,
-    };
+    return state;
   }
 
   private async requireAppletSummary(
     userId: string,
     appletId: string,
   ): Promise<unknown> {
-    const answer = rpcJsonSnapshot(
-      await userAppletDirectoryStub(this.env, userId).listApplets({
+    return rpcJsonSnapshot(
+      await userAppletDirectoryStub(this.env, userId).readApplet({
         schemaVersion: 1,
         userId,
+        appletId,
       }),
-    ) as { applets?: unknown };
-    const found = (Array.isArray(answer.applets) ? answer.applets : []).find(
-      (applet) => (applet as { appletId?: unknown }).appletId === appletId,
     );
-    if (!found) throw new Error(`Applet "${appletId}" is unavailable`);
-    return found;
   }
 
   async readFocusedApplet(input: unknown): Promise<unknown> {

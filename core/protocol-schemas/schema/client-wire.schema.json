@@ -2932,6 +2932,62 @@
       "required": ["appletId", "displayName", "status", "tools", "createdAt"],
       "additionalProperties": false
     },
+    "AppletOpenFocus": {
+      "type": "object",
+      "properties": {
+        "appletId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 129,
+          "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]{0,95}\\.[a-z0-9-]{1,64}$"
+        },
+        "generationId": {
+          "$ref": "#/$defs/GenerationId"
+        },
+        "uiUrl": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 2048,
+          "pattern": "^https?://[^\\s/@?#]+/[^\\s#]*$"
+        },
+        "token": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "expiresAt": {
+          "$ref": "#/$defs/Instant"
+        },
+        "socketUrl": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 2048,
+          "pattern": "^(?:wss://[^\\s/@?#]+|ws://(?:127\\.0\\.0\\.1|10\\.0\\.2\\.2|localhost)(?::[0-9]+)?)/[^\\s#]*$"
+        }
+      },
+      "required": ["appletId"],
+      "additionalProperties": false
+    },
+    "AppletOpenView": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "applets": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/$defs/AppletSummary"
+          }
+        },
+        "focused": {
+          "$ref": "#/$defs/AppletOpenFocus"
+        }
+      },
+      "required": ["schemaVersion", "applets"],
+      "additionalProperties": false
+    },
     "AppletDirectory": {
       "type": "object",
       "properties": {

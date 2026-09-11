@@ -829,6 +829,74 @@ describe("Applet directory", () => {
   });
 });
 
+describe("opening an Applet", () => {
+  test("open answers the current generation's artifacts from two key reads, and nothing before a publish", async () => {
+    const applet = appletId("open");
+    const before = await stateFor(applet).open({
+      schemaVersion: 1,
+      userId: OWNER,
+      appletId: applet,
+    });
+    expect(before).toEqual({ schemaVersion: 1, appletId: applet });
+
+    const { generation, serverHash, uiHash } = await publishGeneration(applet, {
+      version: "A",
+      tools: ["list_todos"],
+    });
+    const opened = await stateFor(applet).open({
+      schemaVersion: 1,
+      userId: OWNER,
+      appletId: applet,
+    });
+    expect(opened).toEqual({
+      schemaVersion: 1,
+      appletId: applet,
+      current: {
+        generationId: generation.generationId,
+        serverHash,
+        uiHash,
+      },
+    });
+  });
+
+  test("the directory answers one entry without listing, and refuses one it does not hold", async () => {
+    const userId = "user-directory-read-one";
+    const directory = env.USER_CONFIGURATIONS.get(
+      env.USER_CONFIGURATIONS.idFromName(userId),
+    );
+    const created = await directory.createApplet({
+      schemaVersion: 1,
+      userId,
+      displayName: "Todo",
+      provenance: { kind: "user" },
+    });
+    expect(
+      await directory.readApplet({
+        schemaVersion: 1,
+        userId,
+        appletId: created.appletId,
+      }),
+    ).toEqual(created);
+    // Refusals are read from a catch: the rejection of an RPC stub left to
+    // `expect().rejects` is reported unhandled inside the object as well.
+    const refusal = async (appletId: string) => {
+      try {
+        await directory.readApplet({ schemaVersion: 1, userId, appletId });
+      } catch (error) {
+        return String(error);
+      }
+      return "answered";
+    };
+    expect(await refusal(`${userId}.${"f".repeat(32)}`)).toMatch(/unavailable/);
+    await directory.deleteApplet({
+      schemaVersion: 1,
+      userId,
+      appletId: created.appletId,
+    });
+    expect(await refusal(created.appletId)).toMatch(/unavailable/);
+  });
+});
+
 describe("Applet viewer tokens", () => {
   test.each(["query", "subprotocol"])(
     "the %s viewer handshake crosses the gateway and real facet without forwarding credentials",

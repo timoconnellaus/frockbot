@@ -765,6 +765,7 @@ Source is the durable root, in R2 through the Workspace store, keyed by `workspa
 
 - **Server.** `env.APPLETS.get(...)` with `globalOutbound: null`, an env of exactly `IDENTITY` and `CAPABILITIES`, and `limits {cpuMs: 5000, subRequests: 10}` (`applet-state.ts:245-273`). The loaded class is mounted as a Durable Object facet (`:297-308`) under a snapshot, trial and commit publish protocol with `facets.clone` rollback (`:479-613`).
 - **UI.** `ui.html` is served from the anonymous origin `ui.<host>` (`apps/cloudflare/src/gateway.ts:139-176`) and nested in an `<iframe sandbox="allow-scripts">` inside the Applets Package's own `canvas.html`, handshaken by postMessage, then connected over a WebSocket gated by an HMAC viewer token (`gateway.ts:434-516`).
+- **Opening.** The canvas reads `GET /api/bots/:bot/applets/open` (`AppletOpenViewV1`): the directory, the Session's focus, and for a published focus the generation, the page URL and a viewer token, from one `AppletState.open` read beside a parallel directory listing and focus read. The frame is given its page before the source or the last build is asked for; those are the code view's, read when it is shown. `/api/applets/:id/ui` and `/token` remain for the chat card and read one directory entry each. ADR 0025 records why.
 
 ### First-party pages
 

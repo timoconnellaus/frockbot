@@ -87,6 +87,8 @@ import {
 } from "@frockbot/core/contracts";
 import {
   AppletDirectory,
+  AppletUnavailableError,
+  appletSummaryV1,
   type AppletDirectoryViewV1,
 } from "./applet-directory.js";
 import type { AppletState } from "./applet-state.js";
@@ -1259,6 +1261,25 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
     await this.assertUserIdentity(request.userId as string);
     return this.appletDirectory().list();
+  }
+
+  /**
+   * One Applet's directory entry, as a summary. The viewer routes used to
+   * list the whole directory to find one row; this is the one row.
+   */
+  async readApplet(input: unknown): Promise<AppletSummaryV1> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      appletId: rpcString(129),
+    });
+    await this.assertUserIdentity(request.userId as string);
+    const entry = await this.appletDirectory().entry(
+      request.appletId as string,
+    );
+    if (!entry || entry.status === "deleted") {
+      throw new AppletUnavailableError(request.appletId as string);
+    }
+    return appletSummaryV1(entry);
   }
 
   /**
