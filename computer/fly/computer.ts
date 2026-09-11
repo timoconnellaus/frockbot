@@ -333,6 +333,21 @@ function isSlotExhaustion(error: unknown): boolean {
   );
 }
 
+/**
+ * The storage answer was larger than this side is willing to carry back.
+ *
+ * It is raised here and nowhere else, so a caller that can do something about
+ * an oversized answer — the durable-root sync, which falls back to per-root
+ * scans — can tell it apart from the host's own `limit-exceeded`, which is the
+ * container shedding load and which no fallback helps.
+ */
+export class StorageOutputExceededError extends ComputerError {
+  constructor() {
+    super("limit-exceeded", "Sprite storage output exceeded the maximum size");
+    this.name = "StorageOutputExceededError";
+  }
+}
+
 export class FlyAgentComputer {
   readonly botId: string;
   readonly botKey: string;
@@ -720,10 +735,7 @@ export class FlyComputer {
     );
     const stdout = outputText(outcome.stdout);
     if (stdout.length > MAX_STORAGE_OUTPUT || outcome.outputTruncated) {
-      throw new ComputerError(
-        "limit-exceeded",
-        "Sprite storage output exceeded the maximum size",
-      );
+      throw new StorageOutputExceededError();
     }
     return stdout;
   }

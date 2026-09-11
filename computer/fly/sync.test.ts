@@ -2,6 +2,9 @@
 
 import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   isLoadableSkillSourceV1,
   type WorkspaceFilesV1,
@@ -19,7 +22,12 @@ import {
   createInMemoryObjectBucketV1,
   createInMemoryWorkspaceGenerationsV1,
 } from "@frockbot/core/workspace-store/testing";
-import { computerBotKey, FlyComputer } from "./computer.ts";
+import { ComputerError, type WorkspaceLayoutV1 } from "@frockbot/computer/core";
+import {
+  computerBotKey,
+  FlyComputer,
+  type FlyAgentComputer,
+} from "./computer.ts";
 import { FakeComputerHost, type FakeComputerRunV1 } from "./host-double.ts";
 import { FLY_WORKSPACE_LAYOUT, FlyComputerHostV1 } from "./provider.ts";
 import {
@@ -116,6 +124,12 @@ class FakeSyncSprite {
   lastScanScript?: string;
   /** Drops the next sidecar write, as a pause between store and Computer does. */
   dropNextMaterialize = false;
+  /**
+   * Mount paths whose scan dies inside its own subshell, as a root whose
+   * directory cannot be created does. The section carries its marker and
+   * nothing else.
+   */
+  readonly unscannableMounts = new Set<string>();
   /** Every script this Computer was handed, in order. */
   readonly scripts: string[] = [];
 
@@ -171,7 +185,10 @@ class FakeSyncSprite {
           .slice(1)
           .map((section) => {
             const index = /^(\d+)/.exec(section)?.[1] ?? "";
-            return `${SCAN_ROOT_MARKER}${index}\n${this.scan(quoted(section, "ROOT") ?? "")}`;
+            const mount = quoted(section, "ROOT") ?? "";
+            if (this.unscannableMounts.has(mount))
+              return `${SCAN_ROOT_MARKER}${index}\n`;
+            return `${SCAN_ROOT_MARKER}${index}\n${this.scan(mount)}`;
           })
           .join("");
       }
@@ -853,6 +870,88 @@ describe("the durable-root sync, Package-declared roots", () => {
     expect(foreign![1]!.status).toBe("ok");
   });
 
+  test("a batched scan carries the roots that did scan when one root fails", async () => {
+    const sprite = new FakeSyncSprite();
+    const surface = new FlySpriteSyncSurface({
+      computer: attach(sprite).bot(BOT),
+      layout: FLY_WORKSPACE_LAYOUT,
+      userId: USER,
+      botDirectoryKey: computerBotKey,
+    });
+    sprite.shellWrite(MOUNTS.skills, "SKILL.md", "skill");
+    sprite.shellWrite(MOUNTS.userMemory, "notes.md", "memory");
+    // The last root, the one whose exit status the batch used to inherit.
+    sprite.unscannableMounts.add(MOUNTS.packageDeclared);
+
+    const batched = await surface.scanAll([
+      skillsRoot,
+      userMemoryRoot,
+      declaredRoot,
+    ]);
+
+    expect(batched!.map((outcome) => outcome.status)).toEqual([
+      "ok",
+      "ok",
+      "unavailable",
+    ]);
+    const first = batched![0]!;
+    if (first.status !== "ok") throw new Error(first.reason);
+    expect(first.scan.entries.map((entry) => entry.path)).toEqual(["SKILL.md"]);
+  });
+
+  test("the batched script exits clean when its last root cannot be scanned", async () => {
+    const base = mkdtempSync(join(tmpdir(), "frockbot-scan-"));
+    try {
+      // A regular file where the last root's directory must be: its `mkdir -p`
+      // fails, and under `set -eu` that subshell dies.
+      writeFileSync(join(base, "blocked"), "not a directory");
+      const layout: WorkspaceLayoutV1 = {
+        schemaVersion: 1,
+        home: base,
+        roots: [
+          {
+            kind: "user-instructions",
+            scope: "user",
+            mountPath: `${base}/workflows`,
+            access: "read-only",
+          },
+          {
+            kind: "user-memory",
+            scope: "user",
+            mountPath: `${base}/blocked/memory`,
+            access: "read-only",
+          },
+        ],
+      };
+      const sprite = new FakeSyncSprite();
+      const surface = new FlySpriteSyncSurface({
+        computer: attach(sprite).bot(BOT),
+        layout,
+        userId: USER,
+        botDirectoryKey: computerBotKey,
+      });
+      await surface.scanAll([userSkillsRoot, userMemoryRoot]);
+
+      const process = Bun.spawn(["bash", "-c", sprite.lastScanScript!], {
+        stdout: "pipe",
+        stderr: "ignore",
+      });
+      const [exitCode, stdout] = await Promise.all([
+        process.exited,
+        new Response(process.stdout).text(),
+      ]);
+
+      // The batch's own status is not the last root's status.
+      expect(exitCode).toBe(0);
+      const last = stdout.slice(stdout.lastIndexOf(`${SCAN_ROOT_MARKER}1`));
+      expect(last).toStartWith(`${SCAN_ROOT_MARKER}1`);
+      // The failed root is reported by its missing manifest terminator alone.
+      expect(last.split("\n").some((row) => row.startsWith("X\t"))).toBe(false);
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+
   test("a batched scan past the answer ceiling hands the roots back to one scan each", async () => {
     const sprite = new FakeSyncSprite();
     const surface = new FlySpriteSyncSurface({
@@ -865,6 +964,37 @@ describe("the durable-root sync, Package-declared roots", () => {
     sprite.maxScanOutputBytes = 8;
 
     expect(await surface.scanAll([skillsRoot, userMemoryRoot])).toBeUndefined();
+  });
+
+  test("a shed storage exec reports every root rather than re-scanning them", async () => {
+    // The container's load shed is `limit-exceeded` too, and the host client
+    // raises it exactly like this. Falling back would spend one more storage
+    // call per root against a host that just declared it is shedding.
+    const shedding = {
+      runStorage: async (): Promise<string> => {
+        throw new ComputerError(
+          "limit-exceeded",
+          "The Computer host is shedding load",
+          true,
+        );
+      },
+    } as unknown as FlyAgentComputer;
+    const surface = new FlySpriteSyncSurface({
+      computer: shedding,
+      layout: FLY_WORKSPACE_LAYOUT,
+      userId: USER,
+      botDirectoryKey: computerBotKey,
+    });
+
+    const scans = await surface.scanAll([skillsRoot, userMemoryRoot]);
+
+    expect(scans).toHaveLength(2);
+    for (const scan of scans ?? []) {
+      expect(scan).toMatchObject({
+        status: "unavailable",
+        reason: "The Computer host is shedding load",
+      });
+    }
   });
 
   test("emits valid Bash for the batched scan", async () => {
