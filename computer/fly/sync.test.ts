@@ -22,10 +22,7 @@ import {
   createInMemoryObjectBucketV1,
   createInMemoryWorkspaceGenerationsV1,
 } from "@frockbot/core/workspace-store/testing";
-import {
-  ComputerError,
-  type WorkspaceLayoutV1,
-} from "@frockbot/computer/core";
+import { ComputerError, type WorkspaceLayoutV1 } from "@frockbot/computer/core";
 import {
   computerBotKey,
   FlyComputer,
