@@ -194,7 +194,7 @@ void main() {
     // Only model providers are on the Models page.
     expect(find.text('Gmail'), findsNothing);
 
-    await tester.tap(find.text('Connect account'));
+    await tester.tap(find.text('Connect'));
     await tester.pumpAndSettle();
     await tester.enterText(
       find.widgetWithText(TextField, 'Account name'),
@@ -227,7 +227,7 @@ void main() {
     });
     await tester.pumpWidget(page(api, store, models: true));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Connect account'));
+    await tester.tap(find.text('Connect'));
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton, 'Connect account'));
     await tester.pumpAndSettle();
@@ -300,6 +300,12 @@ void main() {
     );
     await tester.pumpWidget(page(api, store));
     await tester.pumpAndSettle();
+    // Collapsed, the row says only that it is connected; opening it shows
+    // the account and the way to add another.
+    expect(find.text('Connected'), findsOneWidget);
+    expect(find.text('Add another account'), findsNothing);
+    await tester.tap(find.text('Gmail'));
+    await tester.pumpAndSettle();
     expect(find.text('Add another account'), findsOneWidget);
     expect(find.text('Ready'), findsOneWidget);
     await tester.tap(find.byTooltip('Manage Gmail'));
@@ -334,8 +340,10 @@ void main() {
     offline = false;
     await tester.tap(find.text('Try again'));
     await tester.pumpAndSettle();
-    expect(find.text('Ready · model list up to date'), findsOneWidget);
     expect(find.text('Connect account'), findsNothing);
+    await tester.tap(find.text('Ollama Cloud'));
+    await tester.pumpAndSettle();
+    expect(find.text('Ready · model list up to date'), findsOneWidget);
   });
 
   for (final brightness in Brightness.values) {
@@ -378,6 +386,9 @@ void main() {
           ),
         ),
       );
+      await tester.pumpAndSettle();
+      expect(find.text('Needs attention'), findsOneWidget);
+      await tester.tap(find.text('Gmail'));
       await tester.pumpAndSettle();
       expect(find.text('My long work account label'), findsOneWidget);
       expect(

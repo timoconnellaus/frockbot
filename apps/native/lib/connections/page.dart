@@ -218,8 +218,42 @@ class _ConnectionsPageState extends State<ConnectionsPage>
                   ),
                 ),
               ),
-            if (!widget.models && widget.packageId == null)
-              _Centered(child: _MacMessagesTile(page: widget)),
+            _Centered(
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  // Two columns once there is room for two readable rows,
+                  // as on a tablet or the desktop window; one on a phone.
+                  final columns = constraints.maxWidth >= 640 ? 2 : 1;
+                  const gap = 8.0;
+                  final width =
+                      (constraints.maxWidth - gap * (columns - 1)) / columns;
+                  return Wrap(
+                    spacing: gap,
+                    runSpacing: gap,
+                    children: [
+                      if (!widget.models && widget.packageId == null)
+                        SizedBox(
+                          width: width,
+                          child: _MacMessagesRow(page: widget),
+                        ),
+                      for (final (index, provider) in rows.indexed)
+                        SizedBox(
+                          width: width,
+                          child: _ProviderRow(
+                            index: index,
+                            provider: provider,
+                            accounts: accountsOf(provider),
+                            models: widget.models,
+                            busy: pending,
+                            send: _send,
+                            commandId: _commandId,
+                          ),
+                        ),
+                    ],
+                  );
+                },
+              ),
+            ),
             if (rows.isEmpty)
               _Centered(
                 child: Padding(
@@ -230,18 +264,6 @@ class _ConnectionsPageState extends State<ConnectionsPage>
                         : 'Nothing to connect yet.',
                     style: theme.textTheme.bodyMedium,
                   ),
-                ),
-              ),
-            for (final (index, provider) in rows.indexed)
-              _Centered(
-                child: _ProviderCard(
-                  index: index,
-                  provider: provider,
-                  accounts: accountsOf(provider),
-                  models: widget.models,
-                  busy: pending,
-                  send: _send,
-                  commandId: _commandId,
                 ),
               ),
           ],
@@ -307,33 +329,117 @@ class _Notice extends StatelessWidget {
   }
 }
 
-class _MacMessagesTile extends StatelessWidget {
-  final ConnectionsPage page;
-  const _MacMessagesTile({required this.page});
+/// One compact row: a mark, a name, one line on what it is, and at the end
+/// the state or the way in. Everything else — the accounts, the form — is
+/// below the row once it is opened.
+class _Row extends StatelessWidget {
+  final Widget mark;
+  final String title;
+  final String? subtitle;
+  final Widget? trailing;
+  final VoidCallback? onTap;
+  final Widget? below;
+  final bool open;
+  const _Row({
+    required this.mark,
+    required this.title,
+    this.subtitle,
+    this.trailing,
+    this.onTap,
+    this.below,
+    this.open = false,
+  });
+
   @override
-  Widget build(BuildContext context) => Card(
-    margin: const EdgeInsets.only(bottom: 12),
-    child: ListTile(
-      leading: const _IconTile(icon: Icons.message_outlined),
-      title: const Text('Messages on your Mac'),
-      subtitle: const Text('Allow access to Messages through a connected Mac'),
-      trailing: const Icon(Icons.chevron_right),
-      onTap: () => Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (_) => SettingsPage(
-            api: page.api,
-            store: page.store,
-            userId: page.userId,
-            section: 'package.machine-messages',
-            title: 'Messages on your Mac',
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Card(
+      margin: EdgeInsets.zero,
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          InkWell(
+            onTap: onTap,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
+              child: Row(
+                children: [
+                  mark,
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Semantics(
+                          header: true,
+                          child: Text(
+                            title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.titleSmall,
+                          ),
+                        ),
+                        if (subtitle case final String line)
+                          Text(
+                            line,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  if (trailing != null) ...[
+                    const SizedBox(width: 10),
+                    // At a large text size the pill shares the width rather
+                    // than pushing past the edge.
+                    Flexible(child: trailing!),
+                  ],
+                ],
+              ),
+            ),
           ),
+          if (open && below != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+              child: below,
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MacMessagesRow extends StatelessWidget {
+  final ConnectionsPage page;
+  const _MacMessagesRow({required this.page});
+  @override
+  Widget build(BuildContext context) => _Row(
+    mark: const _IconTile(icon: Icons.message_outlined),
+    title: 'Messages on your Mac',
+    subtitle: 'Allow access to Messages through a connected Mac',
+    trailing: Icon(
+      Icons.chevron_right,
+      color: Theme.of(context).colorScheme.onSurfaceVariant,
+    ),
+    onTap: () => Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => SettingsPage(
+          api: page.api,
+          store: page.store,
+          userId: page.userId,
+          section: 'package.machine-messages',
+          title: 'Messages on your Mac',
         ),
       ),
     ),
   );
 }
 
-/// The 44-point mark at the head of a card: the app's own logo when the
+/// The 40-point mark at the head of a row: the app's own logo when the
 /// deployment bundles one, otherwise a glyph — never a broken image.
 class _IconTile extends StatelessWidget {
   final String? asset;
@@ -344,23 +450,23 @@ class _IconTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final Widget mark = asset == null
-        ? Icon(icon, size: 24, color: scheme.onSurface)
+        ? Icon(icon, size: 22, color: scheme.onSurface)
         : Image.asset(
             'assets/connectors/$asset.png',
-            width: 28,
-            height: 28,
+            width: 26,
+            height: 26,
             filterQuality: FilterQuality.medium,
             errorBuilder: (_, _, _) =>
-                Icon(icon, size: 24, color: scheme.onSurface),
+                Icon(icon, size: 22, color: scheme.onSurface),
           );
     // Brand marks are drawn for a light ground, so the tile is one in both
     // themes; a glyph of our own takes the surface colour instead.
     return Container(
-      width: 44,
-      height: 44,
+      width: 40,
+      height: 40,
       decoration: BoxDecoration(
         color: asset == null ? scheme.surfaceContainerHighest : Colors.white,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(10),
         border: Border.all(color: scheme.outlineVariant),
       ),
       alignment: Alignment.center,
@@ -369,7 +475,59 @@ class _IconTile extends StatelessWidget {
   }
 }
 
-class _ProviderCard extends StatefulWidget {
+/// The small pill at the end of a row: the way in when nothing is
+/// connected, the state once something is.
+class _Pill extends StatelessWidget {
+  final String label;
+  final IconData? icon;
+  final bool primary;
+  final VoidCallback? onPressed;
+  const _Pill({
+    required this.label,
+    this.icon,
+    this.primary = false,
+    this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final style = ButtonStyle(
+      visualDensity: VisualDensity.compact,
+      padding: const WidgetStatePropertyAll(
+        EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      ),
+      minimumSize: const WidgetStatePropertyAll(Size(0, 32)),
+      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    );
+    if (onPressed == null) {
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (icon != null) ...[
+            Icon(icon, size: 16, color: scheme.onSurfaceVariant),
+            const SizedBox(width: 4),
+          ],
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.labelMedium
+                  ?.copyWith(color: scheme.onSurfaceVariant),
+            ),
+          ),
+        ],
+      );
+    }
+    final text = Text(label, maxLines: 1, overflow: TextOverflow.ellipsis);
+    return primary
+        ? FilledButton(onPressed: onPressed, style: style, child: text)
+        : FilledButton.tonal(onPressed: onPressed, style: style, child: text);
+  }
+}
+
+class _ProviderRow extends StatefulWidget {
   final int index;
   final Map<String, Object?> provider;
   final List<Map<String, Object?>> accounts;
@@ -377,7 +535,7 @@ class _ProviderCard extends StatefulWidget {
   final bool busy;
   final Future<void> Function(Map<String, Object?> command) send;
   final String Function() commandId;
-  const _ProviderCard({
+  const _ProviderRow({
     required this.index,
     required this.provider,
     required this.accounts,
@@ -388,10 +546,11 @@ class _ProviderCard extends StatefulWidget {
   });
 
   @override
-  State<_ProviderCard> createState() => _ProviderCardState();
+  State<_ProviderRow> createState() => _ProviderRowState();
 }
 
-class _ProviderCardState extends State<_ProviderCard> {
+class _ProviderRowState extends State<_ProviderRow> {
+  bool open = false;
   bool adding = false;
 
   Map<String, Object?> get provider => widget.provider;
@@ -399,6 +558,7 @@ class _ProviderCardState extends State<_ProviderCard> {
   String get authorization => provider['authorization'] as String;
   bool get mayConnect => provider['mayConnect'] == true;
   int get connected => (provider['connected'] as num?)?.toInt() ?? 0;
+  bool get hasAccounts => widget.accounts.isNotEmpty;
 
   Map<String, Object?> _command(String kind, Map<String, Object?> input) => {
     'commandId': widget.commandId(),
@@ -410,167 +570,151 @@ class _ProviderCardState extends State<_ProviderCard> {
     },
   };
 
+  /// The way in, when the row is not yet connected: a hosted grant opens the
+  /// app's sign-in at once, a keyed provider opens its form, and one that
+  /// needs nothing is simply turned on.
+  void _begin() {
+    switch (authorization) {
+      case 'grant':
+        unawaited(widget.send(_command('authorize', const {})));
+      case 'api-key':
+        setState(() {
+          open = true;
+          adding = true;
+        });
+      case 'none':
+        unawaited(
+          widget.send(_command('enable-connection', {'label': displayName})),
+        );
+    }
+  }
+
+  Widget? _trailing() {
+    if (hasAccounts) {
+      final ready = widget.accounts.where((a) => a['state'] == 'ready').length;
+      final failed = widget.accounts.any(
+        (a) =>
+            a['state'] == 'failed' || a['state'] == 'reconciliation-required',
+      );
+      return _Pill(
+        label: failed
+            ? 'Needs attention'
+            : widget.accounts.length == 1
+            ? (ready == 1 ? 'Connected' : 'Connecting…')
+            : '${widget.accounts.length} accounts',
+        icon: failed
+            ? Icons.error_outline
+            : ready > 0
+            ? Icons.check_rounded
+            : Icons.hourglass_top_rounded,
+      );
+    }
+    if (!mayConnect) return null;
+    return _Pill(
+      label: 'Connect',
+      primary: true,
+      onPressed: widget.busy ? null : _begin,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final description = provider['description'] as String?;
-    final countLine = connected == 0
-        ? 'No account connected'
-        : connected == 1
-        ? '1 account connected'
-        : '$connected accounts connected';
+    final subtitle =
+        description ??
+        (connected == 0
+            ? null
+            : connected == 1
+            ? '1 account connected'
+            : '$connected accounts connected');
     return identified(
       ConnectorIds.group(displayName),
-      Card(
-        margin: const EdgeInsets.only(bottom: 12),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _IconTile(
-                    asset: provider['icon'] as String?,
-                    icon: widget.models
-                        ? Icons.auto_awesome_outlined
-                        : Icons.link_rounded,
-                  ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Semantics(
-                          header: true,
-                          child: Text(
-                            displayName,
-                            style: theme.textTheme.titleMedium,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          description ?? countLine,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              if (widget.accounts.isNotEmpty) ...[
-                const SizedBox(height: 12),
-                for (final account in widget.accounts)
-                  _AccountRow(
-                    account: account,
-                    models: widget.models,
-                    busy: widget.busy,
-                    onCommand: (kind, input) => widget.send({
-                      'commandId': widget.commandId(),
-                      'input': {'kind': kind, ...input},
-                    }),
-                  ),
-              ] else if (description != null) ...[
-                const SizedBox(height: 8),
-                Text(
-                  countLine,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                ),
-              ],
-              const SizedBox(height: 12),
-              ..._footer(context),
-            ],
-          ),
+      _Row(
+        mark: _IconTile(
+          asset: provider['icon'] as String?,
+          icon: widget.models
+              ? Icons.auto_awesome_outlined
+              : Icons.link_rounded,
         ),
+        title: displayName,
+        subtitle: subtitle,
+        trailing: _trailing(),
+        onTap: hasAccounts || (mayConnect && authorization == 'api-key')
+            ? () => setState(() => open = !open)
+            : null,
+        open: open,
+        below: _details(context),
       ),
     );
   }
 
-  List<Widget> _footer(BuildContext context) {
-    if (!mayConnect) return const [];
-    switch (authorization) {
-      case 'grant':
-        final button = connected == 0
-            ? FilledButton.icon(
-                onPressed: widget.busy
-                    ? null
-                    : () => widget.send(_command('authorize', const {})),
-                icon: const Icon(Icons.open_in_new_rounded, size: 18),
-                label: const Text('Connect'),
-              )
-            : FilledButton.tonalIcon(
-                onPressed: widget.busy
-                    ? null
-                    : () => widget.send(_command('authorize', const {})),
-                icon: const Icon(Icons.add_rounded, size: 18),
-                label: const Text('Add another account'),
-              );
-        return [
+  Widget _details(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (final account in widget.accounts)
+          _AccountRow(
+            account: account,
+            models: widget.models,
+            busy: widget.busy,
+            onCommand: (kind, input) => widget.send({
+              'commandId': widget.commandId(),
+              'input': {'kind': kind, ...input},
+            }),
+          ),
+        if (mayConnect && authorization == 'grant' && hasAccounts)
           Align(
             alignment: Alignment.centerLeft,
-            child: identified(
-              ConnectorIds.action('authorize-${widget.index}'),
-              button,
+            child: Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: identified(
+                ConnectorIds.action('authorize-${widget.index}'),
+                TextButton.icon(
+                  onPressed: widget.busy
+                      ? null
+                      : () => widget.send(_command('authorize', const {})),
+                  icon: const Icon(Icons.add_rounded, size: 18),
+                  label: const Text('Add another account'),
+                ),
+              ),
             ),
           ),
-        ];
-      case 'api-key':
-        final label = connected == 0
-            ? 'Connect account'
-            : 'Add another account';
-        if (!adding) {
-          return [
+        if (mayConnect && authorization == 'api-key')
+          if (adding)
+            _ApiKeyForm(
+              index: widget.index,
+              provider: provider,
+              submitLabel: connected == 0
+                  ? 'Connect account'
+                  : 'Add another account',
+              busy: widget.busy,
+              onCancel: () => setState(() => adding = false),
+              onSubmit: (values) async {
+                await widget.send(_command('connect-api-key', values));
+                if (mounted) setState(() => adding = false);
+              },
+            )
+          else if (hasAccounts)
             Align(
               alignment: Alignment.centerLeft,
-              child: FilledButton.tonalIcon(
+              child: TextButton.icon(
                 onPressed: widget.busy
                     ? null
                     : () => setState(() => adding = true),
-                icon: Icon(
-                  connected == 0 ? Icons.key_rounded : Icons.add_rounded,
-                  size: 18,
-                ),
-                label: Text(label),
+                icon: const Icon(Icons.add_rounded, size: 18),
+                label: const Text('Add another account'),
               ),
             ),
-          ];
-        }
-        return [
-          _ApiKeyForm(
-            index: widget.index,
-            provider: provider,
-            submitLabel: label,
-            busy: widget.busy,
-            onCancel: () => setState(() => adding = false),
-            onSubmit: (values) async {
-              await widget.send(_command('connect-api-key', values));
-              if (mounted) setState(() => adding = false);
-            },
-          ),
-        ];
-      case 'none':
-        if (connected > 0) return const [];
-        return [
-          Align(
-            alignment: Alignment.centerLeft,
-            child: FilledButton.tonal(
-              onPressed: widget.busy
-                  ? null
-                  : () => widget.send(
-                      _command('enable-connection', {'label': displayName}),
-                    ),
-              child: const Text('Turn on for every Bot'),
+        if (widget.accounts.isEmpty && !adding)
+          Text(
+            'Nothing connected yet.',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
             ),
           ),
-        ];
-      default:
-        return const [];
-    }
+      ],
+    );
   }
 }
 
@@ -829,7 +973,9 @@ class _ApiKeyFormState extends State<_ApiKeyForm> {
           ),
         ),
         const SizedBox(height: 12),
-        Row(
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
           children: [
             identified(
               ConnectorIds.action('connect-${widget.index}'),
@@ -838,7 +984,6 @@ class _ApiKeyFormState extends State<_ApiKeyForm> {
                 child: Text(widget.submitLabel),
               ),
             ),
-            const SizedBox(width: 8),
             TextButton(
               onPressed: widget.busy ? null : widget.onCancel,
               child: const Text('Cancel'),
