@@ -9,10 +9,13 @@ import {
 class FakeSocket implements VoiceRealtimeSocketV1 {
   sent: string[] = [];
   closed = 0;
+  /** A socket that has dropped but not yet delivered its close event. */
+  dropped = false;
   #messages: ((raw: string) => void)[] = [];
   #closes: ((reason: string) => void)[] = [];
 
   send(data: string) {
+    if (this.dropped) throw new Error("WebSocket is not connected");
     this.sent.push(data);
   }
   close() {
@@ -203,6 +206,32 @@ describe("the OpenAI assistant transcriber", () => {
     socket.say({ type: "error", error: { message: "and again" } });
     socket.hangUp("gone");
     expect(fatals).toEqual(["session expired"]);
+  });
+
+  test("a send that throws is fatal rather than escaping feed", async () => {
+    const socket = new FakeSocket();
+    const fatals: string[] = [];
+    const session = transcriber(socket).createSession({
+      onFatalError: (error) => fatals.push(error.message),
+    });
+    await Promise.resolve();
+    socket.say({ type: "session.updated" });
+    await session.waitUntilReady!();
+    socket.dropped = true;
+    expect(() => session.feed(FRAME)).not.toThrow();
+    expect(fatals).toEqual(["the transcription service went away"]);
+    expect(socket.closed).toBe(1);
+  });
+
+  test("a handshake that throws fails the session instead of hanging", async () => {
+    const socket = new FakeSocket();
+    socket.dropped = true;
+    const session = createOpenAiTranscriberV1({
+      openSocket: () => Promise.resolve(socket),
+      connectTimeoutMs: 60_000,
+    }).createSession({});
+    await expect(session.waitUntilReady!()).rejects.toThrow("went away");
+    expect(socket.closed).toBe(1);
   });
 
   test("a socket that closes under a live session is fatal", async () => {

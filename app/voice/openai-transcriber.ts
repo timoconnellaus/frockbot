@@ -153,6 +153,15 @@ function openSession(
     options.onFatalError?.(error);
   };
 
+  const sendUpstream = (frame: string) => {
+    if (closed || !socket) return;
+    try {
+      socket.send(frame);
+    } catch {
+      fail("the transcription service went away");
+    }
+  };
+
   const onEvent = (raw: string) => {
     if (closed) return;
     const event = translateVoiceRealtimeUpstreamFrameV1(raw);
@@ -211,7 +220,7 @@ function openSession(
       opened.onClose((reason) => {
         fail(reason || "the transcription service closed the connection");
       });
-      opened.send(JSON.stringify(voiceAssistantSessionUpdateV1()));
+      sendUpstream(JSON.stringify(voiceAssistantSessionUpdateV1()));
     },
     (error: unknown) => {
       fail(error instanceof Error ? error.message : String(error));
@@ -226,7 +235,7 @@ function openSession(
       if (closed || !ready || !socket) return;
       const pcm = upsample(chunk);
       if (pcm.byteLength === 0) return;
-      socket.send(voiceRealtimeAppendV1(pcm));
+      sendUpstream(voiceRealtimeAppendV1(pcm));
     },
     waitUntilReady() {
       return readyPromise;

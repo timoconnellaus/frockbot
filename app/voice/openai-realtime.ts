@@ -115,7 +115,7 @@ export function translateVoiceRealtimeUpstreamFrameV1(
   return undefined;
 }
 
-export function voiceRealtimeErrorMessageV1(error: unknown): string {
+function voiceRealtimeErrorMessageV1(error: unknown): string {
   return error &&
     typeof error === "object" &&
     typeof (error as { message?: unknown }).message === "string"
@@ -123,7 +123,7 @@ export function voiceRealtimeErrorMessageV1(error: unknown): string {
     : "the transcription service refused the session";
 }
 
-export function voiceRealtimeBase64V1(bytes: Uint8Array): string {
+function voiceRealtimeBase64V1(bytes: Uint8Array): string {
   let binary = "";
   const chunk = 0x8000;
   for (let offset = 0; offset < bytes.length; offset += chunk) {
