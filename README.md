@@ -167,7 +167,7 @@ A failure in the publish step reporting a 404 from the token exchange means the 
 
 ## Staging deployment
 
-Automatic staging deployment is paused while validation runs locally. Heavy CI and native qualification are manual-only; production still ships through version tags. See [local validation](docs/local-validation.md) to restore automatic CI and staging.
+Staging deploys from `main` only when the repository variable `DEPLOY_STAGING` is `true` — see [Releases](#releases). It is unset, so nothing deploys here until the `staging` environment carries every value below; set it once it does.
 
 Staging isolates everything that holds state or identity — its own D1 database `frockbot-auth-staging`, its own R2 buckets, its own Vectorize index, its own secrets, and its own Durable Object namespaces, which come free because a namespace belongs to the Worker that declares it. It shares the stateless `frockbot-computer-host` Worker, which owns only the Sprites credential, so staging exercises the same host production does instead of paying for a second container deployment. The consequence is production's ordering constraint — a change to the host's contract ships with a tag, so staging sees it only once that tag lands.
 
