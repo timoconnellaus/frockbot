@@ -48,7 +48,44 @@ const ACCOUNT_MODEL_KEY = "user-account-model:v1";
 const ACCOUNT_MODEL_CHECKPOINT_KEY =
   "user-account-model:migration-checkpoint:v1";
 const DEFAULT_PACKAGES_BOOTSTRAP_KEY = "user-default-packages-bootstrap:v1";
-const DEFAULT_PACKAGES_BOOTSTRAP_VERSION = 3;
+const DEFAULT_PACKAGES_BOOTSTRAP_VERSION = 4;
+
+/**
+ * Which first-party Packages this account has ever been offered. A Package
+ * whose id is here is left exactly as the User has it — installed, disabled
+ * or uninstalled — and one that is not is seeded on the next read. That is
+ * how a Package shipped after the account was created reaches it, and how a
+ * later uninstall stays uninstalled.
+ */
+interface DefaultPackagesMarkerV4 {
+  schemaVersion: typeof DEFAULT_PACKAGES_BOOTSTRAP_VERSION;
+  seededPackageIds: readonly string[];
+}
+
+function decodeDefaultPackagesMarker(
+  marker: unknown,
+): { schemaVersion: 1 | 2 | 3 } | DefaultPackagesMarkerV4 {
+  if (!marker || typeof marker !== "object" || Array.isArray(marker)) {
+    throw new Error("Stored default Package bootstrap is invalid");
+  }
+  const { schemaVersion } = marker as { schemaVersion?: unknown };
+  const keys = Object.keys(marker);
+  if (schemaVersion === DEFAULT_PACKAGES_BOOTSTRAP_VERSION) {
+    const { seededPackageIds } = marker as { seededPackageIds?: unknown };
+    if (
+      keys.length !== 2 ||
+      !Array.isArray(seededPackageIds) ||
+      !seededPackageIds.every((id) => typeof id === "string")
+    ) {
+      throw new Error("Stored default Package bootstrap is invalid");
+    }
+    return { schemaVersion, seededPackageIds };
+  }
+  if (keys.length !== 1 || ![1, 2, 3].includes(schemaVersion as number)) {
+    throw new Error("Stored default Package bootstrap is invalid");
+  }
+  return { schemaVersion: schemaVersion as 1 | 2 | 3 };
+}
 const IDENTITY_KEY = "user-id";
 const RECEIPT_PREFIX = "configuration-receipt:";
 
@@ -465,6 +502,16 @@ export class UserSettingsBackendContribution {
     );
   }
 
+  /** The ledger after this read: what it held, plus every current default. */
+  private seededLedger(seededPackageIds: ReadonlySet<string>): string[] {
+    return [
+      ...new Set([
+        ...seededPackageIds,
+        ...this.defaultPackages.map((pkg) => pkg.packageId),
+      ]),
+    ].sort();
+  }
+
   private addMissingPackages(
     current: UserSettingsViewV1,
     defaults: readonly PackageInstallationView[],
@@ -533,11 +580,13 @@ export class UserSettingsBackendContribution {
   }
 
   /**
-   * Persist the application's first-party Package availability exactly once.
+   * Seed every first-party Package this account has not been offered yet.
    *
-   * The marker, rows, and revision bump share one transaction. A later
-   * uninstall therefore leaves the marker behind and cannot be undone by a
-   * read, while concurrent first reads converge on the same durable state.
+   * The marker's ledger, the rows and the revision bump share one transaction.
+   * An uninstall removes the row and leaves the id in the ledger, so a read
+   * never undoes it; a Package shipped after the account was created is not in
+   * the ledger, so the next read seeds it. Concurrent reads converge on the
+   * same durable state.
    */
   private async bootstrapDefaultPackages(
     userId: string,
@@ -554,19 +603,16 @@ export class UserSettingsBackendContribution {
       );
       const stored = await transaction.get<unknown>(STATE_KEY);
       if (marker !== undefined) {
-        if (
-          !marker ||
-          typeof marker !== "object" ||
-          Array.isArray(marker) ||
-          Object.keys(marker).length !== 1 ||
-          ![1, 2, DEFAULT_PACKAGES_BOOTSTRAP_VERSION].includes(
-            (marker as { schemaVersion?: unknown }).schemaVersion as number,
-          )
-        ) {
-          throw new Error("Stored default Package bootstrap is invalid");
-        }
-        const markerVersion = (marker as { schemaVersion: number })
-          .schemaVersion;
+        const decodedMarker = decodeDefaultPackagesMarker(marker);
+        const markerVersion = decodedMarker.schemaVersion;
+        // Markers before v4 carry no ledger: every default is treated as
+        // never offered, which is the one back-fill an account gets before
+        // the ledger takes over.
+        const seededPackageIds = new Set(
+          decodedMarker.schemaVersion === DEFAULT_PACKAGES_BOOTSTRAP_VERSION
+            ? decodedMarker.seededPackageIds
+            : [],
+        );
 
         // Marker v1 predates default-disabled model Packages and their
         // dependency closure. Seed that closure before the catalog-relative
@@ -604,10 +650,19 @@ export class UserSettingsBackendContribution {
           migrated = repaired;
         }
 
-        if (
-          markerVersion === DEFAULT_PACKAGES_BOOTSTRAP_VERSION &&
-          !settingsChanged
-        ) {
+        const seeded = this.addMissingPackages(
+          migrated,
+          this.defaultPackages.filter(
+            (pkg) => !seededPackageIds.has(pkg.packageId),
+          ),
+        );
+        settingsChanged ||= seeded !== migrated;
+        migrated = seeded;
+        const ledger = this.seededLedger(seededPackageIds);
+        const markerChanged =
+          markerVersion !== DEFAULT_PACKAGES_BOOTSTRAP_VERSION ||
+          ledger.length !== seededPackageIds.size;
+        if (!settingsChanged && !markerChanged) {
           return structuredClone(migrated);
         }
         const next = settingsChanged
@@ -619,7 +674,8 @@ export class UserSettingsBackendContribution {
             : {}),
           [DEFAULT_PACKAGES_BOOTSTRAP_KEY]: {
             schemaVersion: DEFAULT_PACKAGES_BOOTSTRAP_VERSION,
-          },
+            seededPackageIds: ledger,
+          } satisfies DefaultPackagesMarkerV4,
         });
         return structuredClone(next);
       }
@@ -641,7 +697,8 @@ export class UserSettingsBackendContribution {
         ...(await this.configurationRecords(next, transaction)),
         [DEFAULT_PACKAGES_BOOTSTRAP_KEY]: {
           schemaVersion: DEFAULT_PACKAGES_BOOTSTRAP_VERSION,
-        },
+          seededPackageIds: this.seededLedger(new Set()),
+        } satisfies DefaultPackagesMarkerV4,
       });
       return structuredClone(next);
     };

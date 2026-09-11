@@ -543,12 +543,9 @@ describe("User settings backend Contribution", () => {
       revision: 39,
       packages: [{ packageId: "web", state: "installed" }],
     });
-    expect(
-      await storage.get<{ schemaVersion: number }>(
-        "user-default-packages-bootstrap:v1",
-      ),
-    ).toEqual({
-      schemaVersion: 3,
+    expect(storage.values.get("user-default-packages-bootstrap:v1")).toEqual({
+      schemaVersion: 4,
+      seededPackageIds: ["web"],
     });
 
     await settings.executeConfiguration({
@@ -571,6 +568,159 @@ describe("User settings backend Contribution", () => {
       revision: 40,
       packages: [{ packageId: "web", state: "disabled" }],
     });
+  });
+
+  test("seeds a Package that shipped after the account was created", async () => {
+    const storage = new MemoryStorage();
+    const before = [
+      { packageId: "settings", version: "0.0.1", installByDefault: true },
+      { packageId: "web", version: "0.0.1", installByDefault: true },
+    ];
+    const seeded = createUserSettingsBackendContribution({
+      storage,
+      availablePackages: before,
+    });
+    const first = await seeded.readConfiguration({
+      schemaVersion: 1,
+      userId: "user-1",
+    });
+    expect(first.packages.map((pkg) => pkg.packageId)).toEqual([
+      "settings",
+      "web",
+    ]);
+
+    // The next deploy ships `connect`, default-installed, and a
+    // default-disabled provider; the same account reads it in as-is.
+    const after = [
+      ...before,
+      {
+        packageId: "connect",
+        version: "0.0.1",
+        installByDefault: true,
+        dependencies: ["settings"],
+      },
+      {
+        packageId: "provider-later",
+        version: "0.0.1",
+        installByDefault: true,
+        defaultEnablement: "disabled" as const,
+      },
+    ];
+    const shipped = createUserSettingsBackendContribution({
+      storage,
+      availablePackages: after,
+    });
+    const second = await shipped.readConfiguration({
+      schemaVersion: 1,
+      userId: "user-1",
+    });
+    expect(second).toMatchObject({
+      revision: first.revision + 1,
+      packages: [
+        { packageId: "settings", state: "installed" },
+        { packageId: "web", state: "installed" },
+        { packageId: "connect", state: "installed", provenance: "first-party" },
+        { packageId: "provider-later", state: "disabled" },
+      ],
+    });
+    expect(storage.values.get("user-default-packages-bootstrap:v1")).toEqual({
+      schemaVersion: 4,
+      seededPackageIds: ["connect", "provider-later", "settings", "web"],
+    });
+    // A read with nothing new writes nothing.
+    expect(
+      await shipped.readConfiguration({ schemaVersion: 1, userId: "user-1" }),
+    ).toEqual(second);
+  });
+
+  test("back-fills a pre-ledger account once, then honours its choices", async () => {
+    const storage = new MemoryStorage();
+    await storage.put("user-id", "legacy-user");
+    await storage.put("user-default-packages-bootstrap:v1", {
+      schemaVersion: 3,
+    });
+    await storage.put("user-configuration", {
+      schemaVersion: 1,
+      revision: 7,
+      profile: { name: "Legacy User" },
+      packages: [
+        {
+          packageId: "web",
+          version: "0.0.1",
+          state: "disabled",
+          provenance: "first-party",
+        },
+      ],
+      connections: [],
+    });
+    const settings = createUserSettingsBackendContribution({
+      storage,
+      availablePackages: [
+        { packageId: "web", version: "0.0.1", installByDefault: true },
+        { packageId: "connect", version: "0.0.1", installByDefault: true },
+      ],
+    });
+
+    const backfilled = await settings.readConfiguration({
+      schemaVersion: 1,
+      userId: "legacy-user",
+    });
+    expect(backfilled).toMatchObject({
+      revision: 8,
+      packages: [
+        { packageId: "web", state: "disabled" },
+        { packageId: "connect", state: "installed" },
+      ],
+    });
+
+    await settings.executeConfiguration({
+      schemaVersion: 1,
+      userId: "legacy-user",
+      command: {
+        schemaVersion: 1,
+        type: "user/uninstall-package",
+        commandId: "uninstall-connect",
+        expectedRevision: 8,
+        packageId: "connect",
+      },
+    });
+    const uninstalled = await settings.readConfiguration({
+      schemaVersion: 1,
+      userId: "legacy-user",
+    });
+    expect(uninstalled.packages.map((pkg) => pkg.packageId)).toEqual(["web"]);
+    // A fresh process over the same catalog sees the ledger, not a gap.
+    const restarted = createUserSettingsBackendContribution({
+      storage,
+      availablePackages: [
+        { packageId: "web", version: "0.0.1", installByDefault: true },
+        { packageId: "connect", version: "0.0.1", installByDefault: true },
+      ],
+    });
+    expect(
+      await restarted.readConfiguration({
+        schemaVersion: 1,
+        userId: "legacy-user",
+      }),
+    ).toEqual(uninstalled);
+  });
+
+  test("rejects a ledger marker that is not a list of Package ids", async () => {
+    const storage = new MemoryStorage();
+    await storage.put("user-id", "user-1");
+    await storage.put("user-default-packages-bootstrap:v1", {
+      schemaVersion: 4,
+      seededPackageIds: [1],
+    });
+    const settings = createUserSettingsBackendContribution({
+      storage,
+      availablePackages: [
+        { packageId: "web", version: "0.0.1", installByDefault: true },
+      ],
+    });
+    await expect(
+      settings.readConfiguration({ schemaVersion: 1, userId: "user-1" }),
+    ).rejects.toThrow("Stored default Package bootstrap is invalid");
   });
 
   test("installs a Package disabled when explicitly requested", async () => {
