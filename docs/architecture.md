@@ -37,7 +37,7 @@ Deploy paths:
 
 ## 2. Durable Objects
 
-Four classes in the app Worker, exported from `apps/cloudflare/src/index.ts:178-182`. `core/durable` defines no Durable Object class; it is the storage and authority library `BotState` delegates to.
+Four classes in the app Worker, exported from `apps/cloudflare/src/index.ts:181-184`. `core/durable` defines no Durable Object class; it is the storage and authority library `BotState` delegates to.
 
 ### `BotState` — `apps/cloudflare/src/bot-state.ts:369`
 
