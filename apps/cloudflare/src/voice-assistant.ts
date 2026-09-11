@@ -38,6 +38,7 @@ import {
   type VoiceDelegationRecordV1,
   type VoiceLedgerStorageV1,
 } from "@frockbot/app/voice/ledger";
+import { VOICE_REALTIME_TRANSCRIPTION_URL_V1 } from "@frockbot/app/voice/openai-realtime";
 import {
   createOpenAiTranscriberV1,
   type VoiceRealtimeSocketV1,
@@ -128,9 +129,6 @@ export const VOICE_ASSISTANT_DEFAULT_VOICE_ID = "JBFqnCBsd6RMkjVDRZzb";
 export const VOICE_ASSISTANT_TTS_MODEL = "eleven_flash_v2_5";
 /** How far back the User Memory log is read at call start. */
 export const VOICE_ASSISTANT_MEMORY_LOG_DAYS = 30;
-/** Where the assistant listens. Transcription-only realtime session. */
-export const VOICE_ASSISTANT_STT_URL =
-  "wss://api.openai.com/v1/realtime?intent=transcription";
 /** Pending audio held while a slept transcriber reopens: 10 s at 16 kHz. */
 const PENDING_AUDIO_BYTES = 10 * 16_000 * 2;
 /** How long a delegation look-up waits before the first check, and its ceiling. */
@@ -273,7 +271,7 @@ export class VoiceAssistant extends VoiceAgentBase<
     if (!apiKey) return undefined;
     return createOpenAiTranscriberV1({
       openSocket: () =>
-        openVoiceUpstreamSocket(VOICE_ASSISTANT_STT_URL, {
+        openVoiceUpstreamSocket(VOICE_REALTIME_TRANSCRIPTION_URL_V1, {
           authorization: `Bearer ${apiKey}`,
         }),
     });

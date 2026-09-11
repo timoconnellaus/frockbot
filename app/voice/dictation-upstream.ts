@@ -31,6 +31,7 @@
 // the person talks, and the relay's own commit after `stop` is what produces
 // the single `.completed` transcript. No commit, no transcript — that was
 // confirmed against a 73-second capture that was never committed.
+import { VOICE_REALTIME_TRANSCRIPTION_URL_V1 } from "./openai-realtime.js";
 import { VOICE_DICTATION_SAMPLE_RATE_V1 } from "./shared.js";
 
 /** The streaming transcription model dictation uses. */
@@ -68,7 +69,7 @@ export function voiceDictationUpstreamTargetV1(
   if (env.OPENAI_API_KEY) {
     return {
       path: "openai",
-      url: "wss://api.openai.com/v1/realtime?intent=transcription",
+      url: VOICE_REALTIME_TRANSCRIPTION_URL_V1,
       headers: { authorization: `Bearer ${env.OPENAI_API_KEY}` },
     };
   }

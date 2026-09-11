@@ -7,8 +7,8 @@
 /// seconds of quiet and wake it on the next onset.
 ///
 /// An awake upstream gets every frame — speech, pauses and the silence after
-/// a sentence alike. Flux decides where a turn ends and it needs that silence
-/// to decide it. The energy gate here is only ever asked two questions: has
+/// a sentence alike. OpenAI's server VAD decides where a turn ends and it
+/// needs that silence — 700 ms of it, `silence_duration_ms` — to decide it. The energy gate here is only ever asked two questions: has
 /// someone started talking (wake), and is someone talking over the reply
 /// (barge-in). It is not consulted about individual frames.
 ///
@@ -250,10 +250,11 @@ class AssistantSessionController extends ChangeNotifier {
       return;
     }
     // Awake means every frame, speech and silence alike, through pauses and
-    // while the assistant is thinking or speaking. Flux decides where a turn
-    // ends and needs the silence after the words to decide it; a client that
-    // cut the audio off a second after the last syllable would leave the
-    // transcript hanging until the upstream timed out.
+    // while the assistant is thinking or speaking. OpenAI's server VAD decides
+    // where a turn ends and needs the silence after the words to decide it —
+    // 700 ms, `silence_duration_ms`; a client that cut the audio off a second
+    // after the last syllable would leave the transcript hanging until the
+    // upstream timed out.
     socket.sendBinary(frame.bytes);
   }
 

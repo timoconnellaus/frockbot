@@ -16,6 +16,13 @@
 // it hears someone, which is what the assistant interrupts playback on.
 
 /**
+ * The transcription-only realtime socket both paths open. Dictation and the
+ * assistant differ in the session they configure, never in where they connect.
+ */
+export const VOICE_REALTIME_TRANSCRIPTION_URL_V1 =
+  "wss://api.openai.com/v1/realtime?intent=transcription";
+
+/**
  * The only PCM rate the realtime socket accepts, whatever the client
  * captured at. Audio recorded at another rate is resampled to meet it.
  */
