@@ -23,6 +23,8 @@ export interface ComputerHostEnv {
   /** Shared secret between the app Worker, this Worker, and the container. */
   COMPUTER_HOST_TOKEN: string;
   FROCKBOT_SPRITE_NAME?: string;
+  /** Fly region for newly created Sprites; unset lets the platform choose. */
+  FROCKBOT_SPRITE_REGION?: string;
 }
 
 /**
@@ -47,7 +49,7 @@ export interface ComputerHostEnv {
 export class FlyHostContainer extends Container<ComputerHostEnv> {
   defaultPort = 8080;
   requiredPorts = [8080];
-  sleepAfter = "10m";
+  sleepAfter = "30m";
   enableInternet = COMPUTER_HOST_EGRESS_V1.enableInternet;
   allowedHosts = [...COMPUTER_HOST_EGRESS_V1.allowedHosts];
   /**
@@ -88,6 +90,9 @@ export class FlyHostContainer extends Container<ComputerHostEnv> {
       COMPUTER_HOST_TOKEN: env.COMPUTER_HOST_TOKEN,
       ...(env.FROCKBOT_SPRITE_NAME
         ? { FROCKBOT_SPRITE_NAME: env.FROCKBOT_SPRITE_NAME }
+        : {}),
+      ...(env.FROCKBOT_SPRITE_REGION
+        ? { FROCKBOT_SPRITE_REGION: env.FROCKBOT_SPRITE_REGION }
         : {}),
     };
   }

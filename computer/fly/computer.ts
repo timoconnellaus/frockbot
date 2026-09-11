@@ -68,6 +68,15 @@ export const MAX_STORAGE_OUTPUT = 500_000;
 const EXEC_EXIT_MARKER = "__FROCKBOT_EXIT__";
 /** Largest screenshot this provider will carry back off a Computer. */
 export const SCREENSHOT_MAX_BYTES = 8 * 1024 * 1024;
+/**
+ * A capture no larger than this comes back inline on the `scrot` exec's own
+ * answer. Base64 is a third larger than the bytes, and the host caps one
+ * exec's output at 4 MiB, so the ceiling keeps the encoded picture well
+ * inside that with the size line beside it.
+ */
+export const SCREENSHOT_INLINE_MAX_BYTES = 1_500_000;
+export const SCREENSHOT_INLINE_OUTPUT_BYTES = 2_500_000;
+export const SCREENSHOT_INLINE_PREFIX = "__FROCKBOT_PNG__";
 /** Log bytes a single read carries back from a background process. */
 export const PROCESS_LOG_DEFAULT_TAIL_BYTES = 8_192;
 export const PROCESS_LOG_MAX_TAIL_BYTES = 64_000;
@@ -722,8 +731,9 @@ export class FlyComputer {
   /**
    * Captures the tenant's own desktop and carries the PNG back.
    *
-   * Two host operations and no new one: a guarded `exec` runs `scrot` under
-   * the tenant's own `DISPLAY`, and `file/read` brings the bytes back. The
+   * One guarded `exec` runs `scrot` under the tenant's own `DISPLAY` and
+   * answers with the PNG inline; only a capture past the inline ceiling is
+   * brought back by a second `file/read`. The
    * guard is the same one every Bot command carries, so a screenshot taken
    * while a human holds the takeover lease is refused rather than handing the
    * Bot a picture of the human's session.
@@ -760,7 +770,13 @@ export class FlyComputer {
       // rectangle the Bot's viewer is bound to, read from the same file.
       `SLOT=$(cat ${shellQuote(`${bot}/slot`)})`,
       `scrot --overwrite -a $((SLOT * ${SLOT_WIDTH})),0,${SLOT_WIDTH},${SLOT_HEIGHT} ${shellQuote(path)}`,
-      `stat -c %s ${shellQuote(path)}`,
+      `SIZE=$(stat -c %s ${shellQuote(path)})`,
+      `echo "$SIZE"`,
+      // The bytes ride back on the same answer whenever they fit: a second
+      // round trip for a file that is usually tens of kilobytes was most of
+      // what a capture cost. A capture past the inline ceiling is still read
+      // through `file/read`, so nothing is refused that was not before.
+      `if [ "$SIZE" -le ${SCREENSHOT_INLINE_MAX_BYTES} ]; then printf '${SCREENSHOT_INLINE_PREFIX}'; base64 -w0 ${shellQuote(path)}; echo; fi`,
     ].join("\n");
     const outcome = await this.execute(
       host,
@@ -768,11 +784,17 @@ export class FlyComputer {
       {
         signal,
         timeoutMs: TIMEOUTS.screenshot,
-        maxOutputBytes: MAX_OUTPUT,
+        maxOutputBytes: SCREENSHOT_INLINE_OUTPUT_BYTES,
       },
       "Sprite screenshot failed",
     );
-    const size = Number(outputText(outcome.stdout).trim().split("\n").pop());
+    const lines = outputText(outcome.stdout).trim().split("\n");
+    const inline = lines.find((line) =>
+      line.startsWith(SCREENSHOT_INLINE_PREFIX),
+    );
+    const size = Number(
+      lines.filter((line) => !line.startsWith(SCREENSHOT_INLINE_PREFIX)).pop(),
+    );
     if (!Number.isSafeInteger(size) || size <= 0) {
       throw new ComputerError(
         "provider-unavailable",
@@ -785,11 +807,16 @@ export class FlyComputer {
         `The screenshot is ${size} bytes, past the ${SCREENSHOT_MAX_BYTES}-byte limit`,
       );
     }
-    const read = await host.fileRead(path, {
-      signal,
-      timeoutMs: TIMEOUTS.screenshot,
-    });
-    const bytes = Uint8Array.from(Buffer.from(read.bytesBase64, "base64"));
+    const bytesBase64 =
+      inline !== undefined && !outcome.outputTruncated
+        ? inline.slice(SCREENSHOT_INLINE_PREFIX.length).trim()
+        : (
+            await host.fileRead(path, {
+              signal,
+              timeoutMs: TIMEOUTS.screenshot,
+            })
+          ).bytesBase64;
+    const bytes = Uint8Array.from(Buffer.from(bytesBase64, "base64"));
     if (bytes.byteLength === 0) {
       throw new ComputerError(
         "provider-unavailable",

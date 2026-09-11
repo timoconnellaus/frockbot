@@ -1,18 +1,18 @@
 /// <reference types="bun" />
 
-// `screenshotForAgent`: the two host operations a capture is made of.
-//
-// The subject is the pair — a guarded `exec` that runs `scrot` under the
-// tenant's own display, and a `file/read` that brings the PNG back — because
-// the pair is what makes the capture attributable. Leaving the file on the
-// Computer would let the sync mirror it back `unattributed`, so the bytes must
-// come off the Sprite before the Workspace writes them.
+// `screenshotForAgent`: one guarded `exec` that runs `scrot` under the
+// tenant's own display and answers with the PNG inline, and the `file/read`
+// that brings a capture past the inline ceiling back instead. Either way the
+// bytes come off the Sprite before the Workspace writes them: leaving the file
+// on the Computer would let the sync mirror it back `unattributed`, and the
+// read is what makes the capture attributable.
 import { describe, expect, test } from "bun:test";
 import { ComputerError } from "@frockbot/computer/core";
 import { BOTS_ROOT } from "./runtime.js";
 import {
   computerBotKey,
   FlyComputer,
+  SCREENSHOT_INLINE_PREFIX,
   SCREENSHOT_MAX_BYTES,
 } from "./computer.ts";
 import { FakeComputerHost } from "./host-double.ts";
@@ -29,6 +29,10 @@ function png(): Uint8Array {
   return bytes;
 }
 
+/**
+ * A runner that answers the size and nothing else is the shape of a capture
+ * past the inline ceiling: the provider has to read the file back.
+ */
 function hostWith(size: number): FakeComputerHost {
   const host = new FakeComputerHost((script) =>
     script.includes("scrot") ? { stdout: `${size}\n` } : {},
@@ -50,7 +54,32 @@ function signal(): AbortSignal {
 }
 
 describe("screenshotForAgent", () => {
-  test("runs scrot under the tenant's display behind the control guard, then reads the PNG back", async () => {
+  test("carries the PNG back on the scrot exec itself and reads nothing", async () => {
+    const host = new FakeComputerHost((script) =>
+      script.includes("scrot")
+        ? {
+            stdout: `64\n${SCREENSHOT_INLINE_PREFIX}${Buffer.from(png()).toString("base64")}\n`,
+          }
+        : {},
+    );
+    const computer = computerOn(host);
+    const bot = computer.bot("health");
+    await bot.ensure(signal());
+
+    const captured = await bot.screenshot(signal());
+
+    const script = host.scripts.find((candidate) =>
+      candidate.includes("scrot"),
+    )!;
+    expect(script).toContain(`base64 -w0 '${PATH}'`);
+    expect(host.reads).toEqual([]);
+    expect(captured.bytes.byteLength).toBe(64);
+    expect([...captured.bytes.subarray(0, 8)]).toEqual([
+      137, 80, 78, 71, 13, 10, 26, 10,
+    ]);
+  });
+
+  test("runs scrot under the tenant's display behind the control guard, then reads back a capture past the inline ceiling", async () => {
     const host = hostWith(64);
     const computer = computerOn(host);
     const bot = computer.bot("health");
@@ -69,8 +98,9 @@ describe("screenshotForAgent", () => {
     );
     expect(script).toContain("export DISPLAY=':100'");
     expect(script).toContain(`,720 '${PATH}'`);
-    // Read back rather than left on disk. That is the whole reason the
-    // Workspace can record the Bot as the writer of these bytes.
+    // Read back rather than left on disk when the answer carried no bytes.
+    // That is the whole reason the Workspace can record the Bot as the writer
+    // of these bytes.
     expect(host.reads).toEqual([{ botId: "health", path: PATH }]);
     expect(captured.display).toBe(":100");
     expect(captured.bytes.byteLength).toBe(64);
