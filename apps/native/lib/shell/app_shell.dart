@@ -1361,6 +1361,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                             onCreateBot: () => unawaited(_createBot()),
                             onSearch: _openSearch,
                             onProfile: _openProfile,
+                            onMarketplace: _openMarketplace,
+                            phone: single,
                             onVoice: () => unawaited(_startVoice()),
                             voiceActive: footerOpen,
                             onToggleHidden: () =>
@@ -1458,6 +1460,34 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         .focusRun(hit.runId);
   }
 
+  /// The Marketplace: a page and a list on a phone, where the list of Bots is
+  /// the screen and every destination is a page over it; a dialog and a grid
+  /// on a wider layout, where the Bots and the conversation stay put behind
+  /// it. One document either way.
+  void _openMarketplace() {
+    if (shellTierForWidth(MediaQuery.sizeOf(context).width) ==
+        ShellTier.single) {
+      _push(
+        ConnectionsPage(
+          api: widget.api,
+          store: widget.store,
+          userId: widget.userId,
+        ),
+      );
+      return;
+    }
+    unawaited(
+      showDialog<void>(
+        context: context,
+        builder: (_) => MarketplaceDialog(
+          api: widget.api,
+          store: widget.store,
+          userId: widget.userId,
+        ),
+      ),
+    );
+  }
+
   void _openSettings() => _push(
     SettingsPage(api: widget.api, store: widget.store, userId: widget.userId),
   );
@@ -1526,18 +1556,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                           Icons.account_balance_wallet_outlined,
                           'Billing & usage',
                           () => _push(BillingPage(api: widget.api)),
-                        ),
-                        _profileRow(
-                          SettingsIds.profileConnections,
-                          Icons.link_outlined,
-                          'Connected apps',
-                          () => _push(
-                            ConnectionsPage(
-                              api: widget.api,
-                              store: widget.store,
-                              userId: widget.userId,
-                            ),
-                          ),
                         ),
                         _profileRow(
                           MachineIds.profileEntry,

@@ -182,7 +182,7 @@ test("providers past the action budget are dropped whole, and said so", () => {
   ).toBe(true);
 });
 
-test("Connected apps excludes model providers and account setup targets only the chosen provider", () => {
+test("the Marketplace excludes model providers, holds its providers at the root, and account setup targets only the chosen provider", () => {
   const mixed = frame({
     providers: [
       ollama,
@@ -195,13 +195,23 @@ test("Connected apps excludes model providers and account setup targets only the
       },
     ],
   });
-  const apps = walk(connectionsDocumentV1(mixed).root);
+  const marketplace = connectionsDocumentV1(mixed);
+  const apps = walk(marketplace.root);
   expect(
     apps.some((node) => node.type === "group" && node.title === "Ollama Cloud"),
   ).toBe(false);
   expect(
     apps.some((node) => node.type === "group" && node.title === "Notes"),
   ).toBe(true);
+  // A provider is a top-level group of the root, not a row under a heading:
+  // that is what lets a wide host draw the Marketplace as a grid of cards.
+  expect(
+    marketplace.root.type === "group" &&
+      marketplace.root.children.map((node) =>
+        node.type === "group" ? node.title : node.type,
+      ),
+  ).toEqual(["Notes"]);
+  expect(marketplace.surfaceId).toBe("connections");
   const model = walk(
     connectionsDocumentV1(mixed, "model", ollama.packageId).root,
   );

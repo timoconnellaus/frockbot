@@ -91,6 +91,79 @@ class ViewCardGroups extends StatelessWidget {
   }
 }
 
+/// The host can present top-level titled groups as a grid of cards: each card
+/// is the group drawn by the shared renderer, title and all, so the document,
+/// its identifiers and its action targets are the ones the list draws.
+///
+/// This is the Marketplace on a desktop. The columns follow the width, and a
+/// row is as tall as its tallest card rather than the whole grid being as tall
+/// as the tallest of all of them: opening one provider's connect form should
+/// not stretch every other row on the page.
+class ViewGridGroups extends StatelessWidget {
+  final Map<String, Object?> node;
+  const ViewGridGroups({super.key, required this.node});
+
+  @override
+  Widget build(BuildContext context) {
+    if (node['type'] != 'group') return ViewNodeView(node: node);
+    final sections = <Widget>[];
+    var cards = <Map<String, Object?>>[];
+    void flush() {
+      if (cards.isEmpty) return;
+      final batch = cards;
+      cards = [];
+      sections.add(
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final large = MediaQuery.textScalerOf(context).scale(14) > 21;
+            final columns = large || constraints.maxWidth < 560
+                ? 1
+                : constraints.maxWidth < 860
+                ? 2
+                : 3;
+            return _EqualHeightCards(
+              columns: columns,
+              perRow: true,
+              children: [
+                for (final card in batch)
+                  Card(
+                    key: ValueKey(card['title']),
+                    margin: EdgeInsets.zero,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+                      child: ViewNodeView(node: card),
+                    ),
+                  ),
+              ],
+            );
+          },
+        ),
+      );
+    }
+
+    for (final raw in (node['children'] as List)) {
+      final child = (raw as Map).cast<String, Object?>();
+      if (child['type'] == 'group' && child['title'] != null) {
+        cards.add(child);
+      } else {
+        flush();
+        sections.add(
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: ViewNodeView(node: child),
+          ),
+        );
+      }
+    }
+    flush();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: sections,
+    );
+  }
+}
+
 class _CapabilityCard extends StatelessWidget {
   final Map<String, Object?> node;
   const _CapabilityCard({required this.node});
@@ -188,18 +261,28 @@ class _CapabilityCard extends StatelessWidget {
 /// every row shares a height without clipping longer descriptions.
 class _EqualHeightCards extends MultiChildRenderObjectWidget {
   final int columns;
-  const _EqualHeightCards({required this.columns, required super.children});
+
+  /// Whether each row takes the height of its own tallest card, rather than
+  /// every card taking the height of the tallest in the grid.
+  final bool perRow;
+  const _EqualHeightCards({
+    required this.columns,
+    this.perRow = false,
+    required super.children,
+  });
 
   @override
-  RenderObject createRenderObject(BuildContext context) => _CardGrid(columns);
+  RenderObject createRenderObject(BuildContext context) =>
+      _CardGrid(columns, perRow);
 
   @override
   void updateRenderObject(
     BuildContext context,
     covariant _CardGrid renderObject,
   ) {
-    if (renderObject.columns != columns) {
+    if (renderObject.columns != columns || renderObject.perRow != perRow) {
       renderObject.columns = columns;
+      renderObject.perRow = perRow;
       renderObject.markNeedsLayout();
     }
   }
@@ -218,7 +301,8 @@ class _CardGrid extends RenderBox
           ContainerBoxParentData<RenderBox>
         > {
   int columns;
-  _CardGrid(this.columns);
+  bool perRow;
+  _CardGrid(this.columns, this.perRow);
 
   @override
   void setupParentData(RenderBox child) {
@@ -228,27 +312,39 @@ class _CardGrid extends RenderBox
   @override
   void performLayout() {
     final width = (constraints.maxWidth - 12 * (columns - 1)) / columns;
-    var height = 0.0;
+    final rows = (childCount / columns).ceil();
+    // Measure first: a row's height is its tallest card's, or the grid's
+    // tallest card's when every card shares one height.
+    final heights = List<double>.filled(rows, 0);
+    var tallest = 0.0;
+    var index = 0;
     var child = firstChild;
     while (child != null) {
       child.layout(BoxConstraints.tightFor(width: width), parentUsesSize: true);
-      if (child.size.height > height) height = child.size.height;
+      final row = index ~/ columns;
+      if (child.size.height > heights[row]) heights[row] = child.size.height;
+      if (child.size.height > tallest) tallest = child.size.height;
+      index++;
       child = childAfter(child);
     }
-    var index = 0;
+    if (!perRow) heights.fillRange(0, rows, tallest);
+    var top = 0.0;
+    index = 0;
     child = firstChild;
     while (child != null) {
-      child.layout(BoxConstraints.tightFor(width: width, height: height));
+      final row = index ~/ columns;
+      if (index > 0 && index % columns == 0) top += heights[row - 1] + 12;
+      child.layout(BoxConstraints.tightFor(width: width, height: heights[row]));
       (child.parentData as ContainerBoxParentData<RenderBox>).offset = Offset(
         (index % columns) * (width + 12),
-        (index ~/ columns) * (height + 12),
+        top,
       );
       index++;
       child = childAfter(child);
     }
-    final rows = (childCount / columns).ceil();
+    final total = heights.fold(0.0, (sum, height) => sum + height);
     size = constraints.constrain(
-      Size(constraints.maxWidth, rows == 0 ? 0 : rows * (height + 12) - 12),
+      Size(constraints.maxWidth, rows == 0 ? 0 : total + 12 * (rows - 1)),
     );
   }
 

@@ -50,12 +50,16 @@ class ViewDocumentView extends StatefulWidget {
   final Map<String, ViewFrameBuilder> frames;
   final Map<String, ViewFieldBuilder> fields;
   final bool cardGroups;
+
+  /// Whether the root's titled groups are drawn as a grid of cards.
+  final bool gridGroups;
   ViewDocumentView({
     super.key,
     required this.document,
     required this.controller,
     this.fields = const {},
     this.cardGroups = false,
+    this.gridGroups = false,
     Map<String, ViewFrameBuilder>? frames,
   }) : frames = frames ?? hostViewFramesV1;
 
@@ -127,6 +131,10 @@ class _ViewDocumentViewState extends State<ViewDocumentView> {
           children: [
             if (widget.cardGroups)
               ViewCardGroups(
+                node: (json['root']! as Map).cast<String, Object?>(),
+              )
+            else if (widget.gridGroups)
+              ViewGridGroups(
                 node: (json['root']! as Map).cast<String, Object?>(),
               )
             else

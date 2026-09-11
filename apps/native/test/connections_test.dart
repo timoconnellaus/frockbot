@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/client/transport.dart';
 import 'package:frockbot_native/connections/document.dart';
 import 'package:frockbot_native/connections/page.dart';
+import 'package:frockbot_native/shell/semantics.dart';
 import 'package:frockbot_native/theme/frock_theme.dart';
 
 import 'settings_test.dart' show SettingsApi;
@@ -356,12 +357,147 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.textContaining('synthetic backend'), findsNothing);
-    expect(find.text('Connected apps couldn’t load'), findsOneWidget);
+    expect(find.text('Marketplace couldn’t load'), findsOneWidget);
     offline = false;
     await tester.tap(find.text('Try again'));
     await tester.pumpAndSettle();
     expect(find.text('Ready · model list up to date'), findsOneWidget);
     expect(find.text('Disconnect'), findsOneWidget);
+  });
+
+  /// The shape `connectionsDocumentV1` produces for the Marketplace: connector
+  /// providers straight at the root, one titled group each.
+  Map<String, Object?> marketplaceDocument(List<String> providers) => {
+    'schemaVersion': 1,
+    'surfaceId': 'connections',
+    'revision': 1,
+    'root': {
+      'type': 'group',
+      'orientation': 'column',
+      'children': [
+        for (final (index, name) in providers.indexed)
+          {
+            'type': 'group',
+            'orientation': 'column',
+            'title': name,
+            'children': [
+              {
+                'type': 'text',
+                'text': 'No account connected',
+                'style': 'status',
+              },
+              {
+                'type': 'action',
+                'actionId': 'authorize-$index',
+                'label': 'Connect',
+                'style': 'primary',
+                'input': {
+                  'kind': 'authorize',
+                  'packageId': 'p-$index',
+                  'connectionTypeId': 'account',
+                },
+              },
+            ],
+          },
+      ],
+    },
+    'actions': [
+      for (final (index, _) in providers.indexed)
+        {
+          'id': 'authorize-$index',
+          'schema': {
+            'type': 'object',
+            'properties': {
+              'kind': {'type': 'string', 'maxLength': 128},
+              'packageId': {'type': 'string', 'maxLength': 128},
+              'connectionTypeId': {'type': 'string', 'maxLength': 128},
+            },
+            'required': ['kind', 'packageId', 'connectionTypeId'],
+            'additionalProperties': false,
+          },
+        },
+    ],
+  };
+
+  testWidgets('the Marketplace is a list on a phone and a grid in a dialog', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final store = MemoryStore();
+    final api = SettingsApi(
+      store,
+      (_, _) async => marketplaceDocument(['Notes', 'Calendar', 'Mail']),
+    );
+
+    tester.view.physicalSize = const Size(390, 844);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: FrockTheme.theme(Brightness.dark),
+        home: ConnectionsPage(api: api, store: store, userId: 'tim'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(AppBar, 'Marketplace'), findsOneWidget);
+    expect(find.text('Connected apps'), findsNothing);
+    // One below the other, and no card around any of them.
+    expect(find.byType(Card), findsNothing);
+    final notes = tester.getRect(find.text('Notes'));
+    final calendar = tester.getRect(find.text('Calendar'));
+    expect(calendar.top, greaterThan(notes.bottom));
+    expect((calendar.left - notes.left).abs(), lessThan(1));
+
+    tester.view.physicalSize = const Size(1280, 900);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: FrockTheme.theme(Brightness.dark),
+        home: Scaffold(
+          body: Builder(
+            builder: (context) => Center(
+              child: FilledButton(
+                onPressed: () => showDialog<void>(
+                  context: context,
+                  builder: (_) =>
+                      MarketplaceDialog(api: api, store: store, userId: 'tim'),
+                ),
+                child: const Text('Open'),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('Open'));
+    await tester.pumpAndSettle();
+    expect(find.byType(Dialog), findsOneWidget);
+    expect(find.widgetWithText(AppBar, 'Marketplace'), findsOneWidget);
+    // Three providers, three cards, one row: the same groups, laid out wide,
+    // with the identifiers a browser spec selects on unchanged.
+    expect(find.byType(Card), findsNWidgets(3));
+    expect(
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is Semantics &&
+            widget.properties.identifier == ConnectorIds.group('Calendar'),
+      ),
+      findsOneWidget,
+    );
+    final cards = [
+      for (final title in ['Notes', 'Calendar', 'Mail'])
+        tester.getRect(
+          find.ancestor(of: find.text(title), matching: find.byType(Card)),
+        ),
+    ];
+    expect(cards[1].left, greaterThan(cards[0].right));
+    expect(cards[2].left, greaterThan(cards[1].right));
+    expect((cards[2].top - cards[0].top).abs(), lessThan(1));
+    expect(cards[2].right, lessThanOrEqualTo(1280 - 24));
+    // The way out is the control the page draws, since a dialog has no bar
+    // of its own to go back from.
+    await tester.tap(find.byTooltip('Close marketplace'));
+    await tester.pumpAndSettle();
+    expect(find.byType(Dialog), findsNothing);
   });
 
   for (final brightness in Brightness.values) {

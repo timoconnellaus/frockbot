@@ -184,6 +184,16 @@ class ShellSidebar extends StatelessWidget {
   final VoidCallback onSearch;
   final VoidCallback onProfile;
 
+  /// Opens the Marketplace: the services a Bot can be given, and the accounts
+  /// already on them. Where it is drawn depends on [phone].
+  final VoidCallback onMarketplace;
+
+  /// Whether this list is a phone's whole screen. There the Marketplace is a
+  /// control in the header beside the account, because the foot of a
+  /// full-height list is the last place a thumb reaches; on a wider layout
+  /// the column has a foot, and the Marketplace is a named row on it.
+  final bool phone;
+
   /// Opens the voice footer and starts the call, in the one gesture.
   final VoidCallback onVoice;
 
@@ -205,10 +215,12 @@ class ShellSidebar extends StatelessWidget {
     required this.onCreateBot,
     required this.onSearch,
     required this.onProfile,
+    required this.onMarketplace,
     required this.onVoice,
     required this.voiceActive,
     required this.onToggleHidden,
     required this.onRetry,
+    this.phone = false,
     this.error,
   });
 
@@ -250,6 +262,7 @@ class ShellSidebar extends StatelessWidget {
           onCreateBot: onCreateBot,
           onSearch: onSearch,
           onProfile: onProfile,
+          onMarketplace: phone ? onMarketplace : null,
           onVoice: onVoice,
           voiceActive: voiceActive,
         ),
@@ -344,6 +357,7 @@ class ShellSidebar extends StatelessWidget {
             ],
           ),
         ),
+        if (!phone) _Foot(onMarketplace: onMarketplace),
       ],
     );
   }
@@ -415,7 +429,7 @@ class ShellSidebar extends StatelessWidget {
 }
 
 /// The list's own controls, GrokBot's plus voice: you, a call, search, and
-/// a new Bot.
+/// a new Bot — and on a phone, the Marketplace beside you.
 ///
 /// Everything about the account is behind the first one; everything about one
 /// Bot is on that Bot's page. The list itself carries no title — the rows say
@@ -424,6 +438,10 @@ class _Header extends StatelessWidget {
   final VoidCallback onCreateBot;
   final VoidCallback onSearch;
   final VoidCallback onProfile;
+
+  /// The Marketplace, where the header is the place for it; null where the
+  /// column's foot names it instead.
+  final VoidCallback? onMarketplace;
 
   /// Starts the continuous voice session. One gesture: the footer opens and
   /// the call starts, because a footer that opens and then waits to be
@@ -436,6 +454,7 @@ class _Header extends StatelessWidget {
     required this.onVoice,
     required this.voiceActive,
     required this.onProfile,
+    this.onMarketplace,
   });
 
   @override
@@ -458,6 +477,15 @@ class _Header extends StatelessWidget {
               ),
             ),
           ),
+          if (onMarketplace case final VoidCallback open)
+            identified(
+              ShellIds.sidebarMarketplace,
+              IconButton(
+                tooltip: 'Marketplace',
+                onPressed: open,
+                icon: const Icon(Icons.storefront_outlined),
+              ),
+            ),
           const Spacer(),
           identified(
             VoiceIds.sidebarStart,
@@ -490,6 +518,40 @@ class _Header extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// The foot of the column on a wider layout: the Marketplace, named.
+///
+/// A row rather than an icon because the column has the width for a word, and
+/// a word is what makes a door someone has never opened worth opening.
+class _Foot extends StatelessWidget {
+  final VoidCallback onMarketplace;
+  const _Foot({required this.onMarketplace});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Divider(height: 1, color: theme.colorScheme.outlineVariant),
+        identified(
+          ShellIds.sidebarMarketplace,
+          ListTile(
+            leading: const Icon(Icons.storefront_outlined),
+            title: Text(
+              'Marketplace',
+              style: theme.textTheme.bodyLarge?.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            onTap: onMarketplace,
+          ),
+        ),
+      ],
     );
   }
 }

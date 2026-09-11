@@ -36,6 +36,14 @@ class ViewSurfacePage extends StatefulWidget {
   final Map<String, ViewFieldBuilder> fields;
   final bool cardGroups;
 
+  /// Whether the root's titled groups are drawn as a grid of cards, which is
+  /// the Marketplace on a desktop: the list a phone scrolls, laid out wide.
+  final bool gridGroups;
+
+  /// How wide the document is allowed to be. A column of settings reads best
+  /// narrow; a grid of cards needs the room.
+  final double maxWidth;
+
   /// Set where the surface is a region rather than a page — the right panel
   /// has no back gesture, so the way out is a control the panel draws.
   final VoidCallback? onClose;
@@ -65,6 +73,8 @@ class ViewSurfacePage extends StatefulWidget {
     required this.refreshId,
     this.fields = const {},
     this.cardGroups = false,
+    this.gridGroups = false,
+    this.maxWidth = 680,
     this.onClose,
     this.chrome = true,
     this.banner,
@@ -180,13 +190,13 @@ class _ViewSurfacePageState extends State<ViewSurfacePage>
                   if (widget.banner case final WidgetBuilder draw)
                     Center(
                       child: ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 680),
+                        constraints: BoxConstraints(maxWidth: widget.maxWidth),
                         child: draw(context),
                       ),
                     ),
                   Center(
                     child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 680),
+                      constraints: BoxConstraints(maxWidth: widget.maxWidth),
                       child: identified(
                         widget.documentId,
                         ViewDocumentView(
@@ -197,6 +207,7 @@ class _ViewSurfacePageState extends State<ViewSurfacePage>
                           controller: view,
                           fields: widget.fields,
                           cardGroups: widget.cardGroups,
+                          gridGroups: widget.gridGroups,
                         ),
                       ),
                     ),

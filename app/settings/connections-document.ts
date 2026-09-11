@@ -381,16 +381,22 @@ function providerNode(
   return { node: column(provider.displayName, children), actions };
 }
 
-function section(
-  title: string,
+/**
+ * The providers of one kind, each as its own titled group, in frame order.
+ *
+ * Nothing wraps them here: Models draws them under a heading of its own, and
+ * the Marketplace draws them straight at the root so a host can lay the
+ * groups out as a grid of cards, the same convention Plugins uses.
+ */
+function providerNodes(
   kind: "model" | "connector",
   frame: ConnectionsFrame,
   budget: number,
-): { node: ViewNode | undefined; actions: Action[] } {
+): { nodes: ViewNode[]; actions: Action[] } {
   const providers = frame.providers.filter(
     (provider) => provider.kind === kind,
   );
-  if (providers.length === 0) return { node: undefined, actions: [] };
+  if (providers.length === 0) return { nodes: [], actions: [] };
   const actions: Action[] = [];
   const children: ViewNode[] = [];
   let complete = true;
@@ -419,15 +425,19 @@ function section(
       ),
     );
   }
-  return { node: column(title, children), actions };
+  return { nodes: children, actions };
 }
 
 /**
  * A `ConnectionsFrame` as a `ViewDocument`.
  *
  * One document per home: a model provider's accounts are read from Models and
- * a connector Package's from Connected apps, so `kind` decides both which
- * providers the frame carries and which single section the document draws.
+ * a connector Package's from the Marketplace, so `kind` decides both which
+ * providers the frame carries and how the document holds them. Models keeps
+ * its providers under a "Your providers" heading beneath the model in use;
+ * the Marketplace is nothing but its providers, so they sit at the root as
+ * top-level titled groups — a list on a phone, a grid of cards on a desktop —
+ * without the document changing between the two.
  */
 export function connectionsDocumentV1(
   frame: ConnectionsFrame,
@@ -443,26 +453,23 @@ export function connectionsDocumentV1(
     ),
   };
   const shared = accountActions();
-  const offered = section(
-    kind === "model" ? "Your providers" : "Connected apps",
-    kind,
-    frame,
-    ACTION_LIMIT - shared.length,
-  );
+  const offered = providerNodes(kind, frame, ACTION_LIMIT - shared.length);
   const children: ViewNode[] = [];
   if (kind === "model" && frame.modelInUse) {
     children.push(column("Model in use", [text(frame.modelInUse, "status")]));
   }
-  if (offered.node) {
-    children.push(offered.node);
-  } else {
+  if (offered.nodes.length === 0) {
     children.push(
       text(
         kind === "model"
           ? "Connect a provider from Models to use its models here."
-          : "No connected apps yet. Available services will appear here. Connections you authorize are available to all your Bots.",
+          : "Nothing in the Marketplace yet. Services you can connect will appear here, and a connection you authorize is available to all your Bots.",
       ),
     );
+  } else if (kind === "model") {
+    children.push(column("Your providers", offered.nodes));
+  } else {
+    children.push(...offered.nodes);
   }
   return decodeProtocol("ViewDocument", {
     schemaVersion: 1,
