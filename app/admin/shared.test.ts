@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  decodeAdminUserFeaturesV1,
   decodeAdminUserListViewV1,
   decodeDeploymentPolicyV1,
   decodeSetSignupsCommandV1,
@@ -7,6 +8,7 @@ import {
   decodeSetUserFeaturesCommandV1,
   decodeUserFeaturesV1,
   defaultUserFeaturesV1,
+  isUserFeaturesUnavailable,
 } from "./shared.js";
 
 const policy = {
@@ -128,6 +130,42 @@ describe("account feature codecs", () => {
       name: "x".repeat(512),
       features,
     });
+  });
+
+  test("an account whose features could not be read is carried, not defaulted", () => {
+    const [readable, unreadable] = decodeAdminUserListViewV1({
+      schemaVersion: 1,
+      users: [
+        { userId: "u1", features },
+        { userId: "u2", features: { unavailable: true } },
+      ],
+    }).users;
+    expect(readable?.features).toEqual(features);
+    expect(unreadable?.features).toEqual({ unavailable: true });
+    expect(isUserFeaturesUnavailable(unreadable!.features)).toBe(true);
+    expect(isUserFeaturesUnavailable(readable!.features)).toBe(false);
+    expect(decodeAdminUserFeaturesV1({ unavailable: true })).toEqual({
+      unavailable: true,
+    });
+  });
+
+  test("the unavailable marker is exact: no value beside it, no false", () => {
+    expect(() => decodeAdminUserFeaturesV1({ unavailable: false })).toThrow(
+      "invalid",
+    );
+    expect(() =>
+      decodeAdminUserFeaturesV1({ unavailable: true, applets: false }),
+    ).toThrow("unknown fields");
+    expect(() =>
+      decodeAdminUserFeaturesV1({ ...features, unavailable: true }),
+    ).toThrow("unknown fields");
+    expect(() => decodeAdminUserFeaturesV1({})).toThrow("unknown fields");
+    expect(() =>
+      decodeAdminUserListViewV1({
+        schemaVersion: 1,
+        users: [{ userId: "u1", features: { unavailable: "yes" } }],
+      }),
+    ).toThrow("invalid");
   });
 
   test("the default is off and rejects unknown fields", () => {

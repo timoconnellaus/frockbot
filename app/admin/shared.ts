@@ -189,12 +189,24 @@ export interface SetUserFeaturesRequestV1 {
   updatedBy: string;
 }
 
+/**
+ * An account whose features could not be read when the list was built. It is
+ * not "off": off is a value the account's record holds, and this account's
+ * record could not be reached. The list carries the account anyway so one
+ * unreachable User Durable Object never hides every other account's switch.
+ */
+export interface UserFeaturesUnavailableV1 {
+  unavailable: true;
+}
+
+export type AdminUserFeaturesV1 = UserFeaturesV1 | UserFeaturesUnavailableV1;
+
 /** One account as the admin list shows it: identity, and what it holds. */
 export interface AdminUserViewV1 {
   userId: string;
   email?: string;
   name?: string;
-  features: UserFeaturesV1;
+  features: AdminUserFeaturesV1;
 }
 
 export interface AdminUserListViewV1 {
@@ -236,6 +248,25 @@ export function decodeUserFeaturesV1(input: unknown): UserFeaturesV1 {
       512,
     ),
   };
+}
+
+export function isUserFeaturesUnavailable(
+  features: AdminUserFeaturesV1,
+): features is UserFeaturesUnavailableV1 {
+  return "unavailable" in features;
+}
+
+/** The exact unavailable marker, or the exact features record; nothing between. */
+export function decodeAdminUserFeaturesV1(input: unknown): AdminUserFeaturesV1 {
+  const features = record(input, "admin user features");
+  if ("unavailable" in features) {
+    exactKeys(features, ["unavailable"], "admin user features");
+    if (features.unavailable !== true) {
+      throw new Error("admin user features.unavailable is invalid");
+    }
+    return { unavailable: true };
+  }
+  return decodeUserFeaturesV1(features);
 }
 
 export function decodeSetUserFeaturesCommandV1(
@@ -325,7 +356,7 @@ export function decodeAdminUserViewV1(input: unknown): AdminUserViewV1 {
     userId: boundedString(user.userId, "admin user.userId", 512),
     ...(email === undefined ? {} : { email }),
     ...(name === undefined ? {} : { name }),
-    features: decodeUserFeaturesV1(user.features),
+    features: decodeAdminUserFeaturesV1(user.features),
   };
 }
 

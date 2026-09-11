@@ -303,8 +303,11 @@ class _AdminPageState extends State<AdminPage> {
       if (email != null && email != title) email,
       if (userId != title) userId,
     ].join(' · ');
-    final enabled =
-        ((account['features'] as Map?) ?? const {})['applets'] == true;
+    final features = ((account['features'] as Map?) ?? const {});
+    if (features['unavailable'] == true) {
+      return _unreadableAccount(userId, title, detail);
+    }
+    final enabled = features['applets'] == true;
     return identified(
       AdminIds.applets(userId),
       SwitchListTile(
@@ -313,6 +316,41 @@ class _AdminPageState extends State<AdminPage> {
         subtitle: detail.isEmpty ? null : Text(detail),
         value: enabled,
         onChanged: busy ? null : (value) => setApplets(userId, value),
+      ),
+    );
+  }
+
+  /// An account whose Applets setting could not be read when the list was
+  /// built. The switch is disabled rather than off: off is a value the account
+  /// holds, and this account's value is not known. Trying again re-reads the
+  /// list, so the other accounts refresh with it.
+  Widget _unreadableAccount(String userId, String title, String detail) {
+    return identified(
+      AdminIds.applets(userId),
+      SwitchListTile(
+        contentPadding: EdgeInsets.zero,
+        title: Text(title),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (detail.isNotEmpty) Text(detail),
+            const Text(
+              'Couldn’t read whether Applets are on for this account.',
+            ),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: identified(
+                AdminIds.appletsRetry(userId),
+                TextButton(
+                  onPressed: busy ? null : () => unawaited(loadAccounts()),
+                  child: const Text('Try again'),
+                ),
+              ),
+            ),
+          ],
+        ),
+        value: false,
+        onChanged: null,
       ),
     );
   }

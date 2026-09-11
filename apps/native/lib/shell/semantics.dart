@@ -360,4 +360,7 @@ abstract final class AdminIds {
 
   /// One account's Applets switch.
   static String applets(String userId) => 'admin-applets-$userId';
+
+  /// The retry under an account whose Applets setting could not be read.
+  static String appletsRetry(String userId) => 'admin-applets-retry-$userId';
 }
