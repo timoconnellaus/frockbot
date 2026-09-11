@@ -123,7 +123,6 @@ async function fireRoutine(
       // the scripted call travels in it.
       prompt: toolCallTriggerPrompt(["wake_parent", { message: HANDOFF }]),
       schedule: "* * * * *",
-      timezone: "UTC",
     }),
   );
   await makeDue(userId, botId);

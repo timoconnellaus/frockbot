@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import type { UserSettingsViewV1 } from "@frockbot/core/configuration";
+import { isProtocolValue } from "@frockbot/core/protocol-schemas";
 import {
   applicationSettingsFrame,
   applicationSettingsCommand,
@@ -184,6 +185,7 @@ test("identity prefills an unsaved profile while saved fields remain authoritati
   expect(hinted.sections[0]!.fields.map((f) => f.value)).toEqual([
     "Timothy",
     "tim@example.test",
+    "UTC",
   ]);
   expect(user.profile).toEqual({ name: "FrockBot user" });
   user.profile = { name: "Tim", email: "chosen@example.test" };
@@ -192,7 +194,7 @@ test("identity prefills an unsaved profile while saved fields remain authoritati
       name: "Timothy",
       email: "tim@example.test",
     }).sections[0]!.fields.map((f) => f.value),
-  ).toEqual(["Tim", "chosen@example.test"]);
+  ).toEqual(["Tim", "chosen@example.test", "UTC"]);
 });
 
 test("the released model reader retains the account fallback without the removed control", async () => {
@@ -309,4 +311,83 @@ test("resetting an Application setting omits the empty patch at the owner seam",
       unset: ["limit"],
     }),
   ).toMatchObject({ type: "user/set-package-settings", unset: ["limit"] });
+});
+
+test("Profile owns the timezone used by Routines", () => {
+  const user = settings();
+  user.profile.timezone = "Australia/Sydney";
+  const profile = applicationSettingsFrame("tim", user, [provider])
+    .sections[0]!;
+  expect(profile).toMatchObject({
+    id: "profile",
+    fields: [
+      { id: "name", value: "Tim" },
+      { id: "email", value: "" },
+      {
+        id: "timezone",
+        kind: "select",
+        value: "Australia/Sydney",
+        required: true,
+        hint: "Your Routines use this time zone.",
+      },
+    ],
+  });
+  const timezone = profile.fields[2]!;
+  expect(timezone.choices!.length).toBeGreaterThan(400);
+  // The catalog is whatever this runtime's ICU build holds, and the wire bounds
+  // how many choices one field may carry: an over-long catalog would fail the
+  // whole Settings document on the client, not just this row.
+  expect(
+    isProtocolValue("SettingField", JSON.parse(JSON.stringify(timezone))),
+  ).toBe(true);
+  expect(timezone.choices).toContainEqual({
+    label: "Australia / Sydney",
+    value: "Australia/Sydney",
+  });
+  expect(new Set(timezone.choices!.map((choice) => choice.value)).size).toBe(
+    timezone.choices!.length,
+  );
+  expect(
+    applicationSettingsCommand({
+      schemaVersion: 1,
+      ownerId: "tim",
+      commandId: "save-profile",
+      expectedRevision: 8,
+      sectionId: "profile",
+      values: {
+        name: "Tim",
+        timezone: "Pacific/Auckland",
+      },
+    }),
+  ).toMatchObject({
+    type: "user/update-profile",
+    profile: { name: "Tim", timezone: "Pacific/Auckland" },
+  });
+  expect(() =>
+    applicationSettingsCommand({
+      schemaVersion: 1,
+      ownerId: "tim",
+      commandId: "save-invalid-profile",
+      expectedRevision: 8,
+      sectionId: "profile",
+      values: { name: "Tim", timezone: "Sydney-ish" },
+    }),
+  ).toThrow("profile.timezone is not an IANA time zone");
+});
+
+test("Profile defaults to UTC and keeps a valid stored alias selectable", () => {
+  const user = settings();
+  let timezone = applicationSettingsFrame("tim", user, [provider]).sections[0]!
+    .fields[2]!;
+  expect(timezone.value).toBe("UTC");
+  expect(timezone.choices![0]).toEqual({ label: "UTC", value: "UTC" });
+
+  user.profile.timezone = "US/Eastern";
+  timezone = applicationSettingsFrame("tim", user, [provider]).sections[0]!
+    .fields[2]!;
+  expect(timezone.value).toBe("US/Eastern");
+  expect(timezone.choices).toContainEqual({
+    label: "US / Eastern",
+    value: "US/Eastern",
+  });
 });

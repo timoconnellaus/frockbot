@@ -116,7 +116,6 @@ async function failedFiring(
       name: "Morning brief",
       prompt: "summarise the overnight mail",
       schedule: "* * * * *",
-      timezone: "UTC",
     }),
   );
   const dueAt = await dueAtWithFiringHeadroomV1();

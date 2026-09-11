@@ -83,7 +83,6 @@ async function buildSourceBot(userId: string, botId: string): Promise<string> {
       name: "On delivery",
       prompt: ROUTINE_PROMPT,
       trigger: { kind: "webhook" },
-      timezone: "Australia/Sydney",
     }),
   );
 

@@ -771,7 +771,6 @@ export class BotTemplateUserBackendContribution {
             ...(routine.triggerKind === "webhook"
               ? { trigger: { kind: "webhook" } }
               : {}),
-            timezone: routine.timezone,
           },
         });
         return { detail: receipt.routineId ?? routineId };

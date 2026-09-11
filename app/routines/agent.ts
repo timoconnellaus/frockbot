@@ -88,18 +88,13 @@ const ROUTINE_MANAGE_INPUT_SCHEMA = {
     schedule: {
       type: "string",
       description:
-        "A five-field cron expression, or @hourly, @daily, @weekly, @monthly, or @every 15m. Optionally prefixed with CRON_TZ=<zone>. A Routine has a schedule or a webhook trigger, never both.",
+        "A five-field cron expression, or @hourly, @daily, @weekly, @monthly, or @every 15m. It runs in the User's Profile time zone. A Routine has a schedule or a webhook trigger, never both.",
     },
     trigger: {
       type: "string",
       enum: ["webhook"],
       description:
         "Fire on a delivered webhook rather than on a clock. A Routine has a schedule or a trigger, never both.",
-    },
-    timezone: {
-      type: "string",
-      description:
-        "IANA time zone the schedule is read in, such as Australia/Sydney.",
     },
     userAsked: {
       type: "boolean",
@@ -125,7 +120,6 @@ interface RoutineManageInputV1 {
   prompt?: string;
   schedule?: string;
   trigger?: "webhook";
-  timezone?: string;
   userAsked?: boolean;
 }
 
@@ -141,7 +135,6 @@ function decodeRoutineManageInputV1(input: unknown): RoutineManageInputV1 {
     "prompt",
     "schedule",
     "trigger",
-    "timezone",
     "userAsked",
   ]);
   for (const key of Object.keys(value)) {
@@ -183,9 +176,6 @@ function decodeRoutineManageInputV1(input: unknown): RoutineManageInputV1 {
       ? {}
       : { schedule: optional("schedule")! }),
     ...(trigger === undefined ? {} : { trigger }),
-    ...(optional("timezone") === undefined
-      ? {}
-      : { timezone: optional("timezone")! }),
     ...(value.userAsked === undefined
       ? {}
       : { userAsked: value.userAsked as boolean }),
@@ -227,7 +217,6 @@ export function routineManageCommandV1(
       prompt: input.prompt,
       ...(input.schedule === undefined ? {} : { schedule: input.schedule }),
       ...(input.trigger === undefined ? {} : { trigger: { kind: "webhook" } }),
-      ...(input.timezone === undefined ? {} : { timezone: input.timezone }),
     });
   }
   if (input.routineId === undefined) {
@@ -244,7 +233,6 @@ export function routineManageCommandV1(
       ...(input.prompt === undefined ? {} : { prompt: input.prompt }),
       ...(input.schedule === undefined ? {} : { schedule: input.schedule }),
       ...(input.trigger === undefined ? {} : { trigger: { kind: "webhook" } }),
-      ...(input.timezone === undefined ? {} : { timezone: input.timezone }),
     });
   }
   return decodeRoutineCommandV1({

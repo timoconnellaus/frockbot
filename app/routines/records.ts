@@ -54,7 +54,6 @@ export interface RoutineRecordV1 {
   prompt: string;
   schedule?: string;
   trigger?: RoutineTriggerV1;
-  timezone: string;
   enabled: boolean;
   createdBy: RoutineWriterV1;
   updatedBy: RoutineWriterV1;
@@ -208,14 +207,17 @@ export function decodeRoutineRecordV1(value: unknown): RoutineRecordV1 {
       "routineId",
       "name",
       "prompt",
-      "timezone",
       "enabled",
       "createdBy",
       "updatedBy",
       "createdAt",
       "updatedAt",
     ],
-    ["schedule", "trigger", "lastRunAt"],
+    // `timezone` is retired and ignored: the account owns the zone now. A
+    // record written by the previous release still carries it, and a stored
+    // Routine that cannot be decoded is a Routine that disappears from the
+    // list and never fires again.
+    ["schedule", "trigger", "lastRunAt", "timezone"],
     "Routine record",
   );
   if (candidate.schemaVersion !== 1) {
@@ -235,11 +237,6 @@ export function decodeRoutineRecordV1(value: unknown): RoutineRecordV1 {
       candidate.prompt,
       ROUTINE_PROMPT_MAX_LENGTH,
       "Routine prompt",
-    ),
-    timezone: routineText(
-      candidate.timezone,
-      ROUTINE_TIMEZONE_MAX,
-      "Routine timezone",
     ),
     enabled: candidate.enabled,
     createdBy: decodeRoutineWriterV1(candidate.createdBy, "Routine createdBy"),

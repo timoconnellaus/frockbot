@@ -234,7 +234,6 @@ function scrubRoutines(
       ...(webhook || !candidate.schedule
         ? {}
         : { schedule: candidate.schedule.slice(0, 256) }),
-      timezone: candidate.timezone.slice(0, 64) || "UTC",
       ...(webhook
         ? { triggerKind: "webhook" as const }
         : candidate.schedule

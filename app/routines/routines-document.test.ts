@@ -153,7 +153,7 @@ test("the revision moves only when what the document says changes", () => {
   );
 });
 
-test("a moment is read in the Routine's own zone, and an unknown zone is UTC", () => {
+test("a moment is read in the Profile zone, and an unknown zone is UTC", () => {
   expect(routineMomentV1("2026-09-03T23:00:00.000Z", "Australia/Sydney")).toBe(
     "4 Sep 2026, 9:00am",
   );
@@ -192,12 +192,7 @@ test("the editor is one collapsed form until a Routine is named", () => {
     ROUTINE_EDITOR_FIELDS_V1.prompt,
     ROUTINE_EDITOR_FIELDS_V1.timing,
     ROUTINE_EDITOR_FIELDS_V1.schedule,
-    ROUTINE_EDITOR_FIELDS_V1.timezone,
   ]);
-  // A new Routine inherits the zone this Bot's Routines already use: the app
-  // has no IANA zone of its own to send.
-  const zone = fields.at(-1);
-  expect(zone?.type === "field" && zone.field.value).toBe("Australia/Sydney");
 });
 
 test("naming a Routine opens the editor on its own values and moves the revision", () => {
@@ -216,7 +211,6 @@ test("naming a Routine opens the editor on its own values and moves the revision
     "Summarise overnight email.",
     "schedule",
     "0 9 * * *",
-    "Australia/Sydney",
   ]);
   // Editing offers a way back out; creating has nothing to cancel.
   expect(

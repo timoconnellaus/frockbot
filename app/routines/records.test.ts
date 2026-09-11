@@ -13,7 +13,6 @@ const base = {
   name: "Morning brief",
   prompt: "Summarize overnight email.",
   schedule: "0 7 * * *",
-  timezone: "Australia/Sydney",
   enabled: true,
   createdBy: { kind: "user" },
   updatedBy: { kind: "user" },
@@ -50,6 +49,15 @@ describe("RoutineRecordV1", () => {
     expect(() => decodeRoutineRecordV1(rest)).toThrow(
       /needs a schedule or a trigger/,
     );
+  });
+
+  test("reads a record written with the retired timezone field and drops it", () => {
+    const decoded = decodeRoutineRecordV1({
+      ...base,
+      timezone: "Australia/Sydney",
+    });
+    expect(decoded).not.toHaveProperty("timezone");
+    expect(decoded.routineId).toBe("morning-brief");
   });
 
   test("refuses an oversized prompt", () => {

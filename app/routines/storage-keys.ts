@@ -22,6 +22,8 @@ export const ROUTINE_QUEUE_PREFIX = "routine-queue:";
 export const ROUTINE_KEY_PREFIX = "routine-key:";
 /** One accepted delivery, so a replay answers with the firing it already made. */
 export const ROUTINE_DELIVERY_PREFIX = "routine-delivery:";
+/** The Bot-local projection of its User authority's current Profile timezone. */
+export const ROUTINE_ACCOUNT_TIMEZONE_KEY = "routine-account-timezone:v1";
 
 /** Most run entries retained per Routine. Trimming loses index rows, never facts. */
 export const ROUTINE_RUN_LOG_LIMIT = 50;

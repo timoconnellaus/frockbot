@@ -192,7 +192,6 @@ function harness() {
     name: "Delivered brief",
     prompt: "Summarize the payload.",
     trigger: { kind: "webhook" },
-    timezone: "UTC",
   };
   return { storage, scheduler, store, create };
 }
@@ -217,7 +216,7 @@ async function deliver(
 describe("the durable half of the check", () => {
   test("mints a key once, on the receipt and nowhere else", async () => {
     const { store, create } = harness();
-    const receipt = await store.execute(create, USER);
+    const receipt = await store.execute(create, USER, "UTC");
     expect(receipt).toMatchObject({ status: "applied" });
     const minted = receipt.status === "applied" ? receipt.hook : undefined;
     expect(minted).toMatchObject({
@@ -228,11 +227,11 @@ describe("the durable half of the check", () => {
 
     // A replay of the same command id answers without the key: a key a replay
     // could re-read would not be a secret.
-    const replay = await store.execute(create, USER);
+    const replay = await store.execute(create, USER, "UTC");
     expect(replay.status === "applied" && replay.hook).toBeUndefined();
 
     // The listing says a key exists and never what it is.
-    const listed = await store.list("scout");
+    const listed = await store.list("scout", undefined, "UTC");
     expect(listed.routines[0]).toMatchObject({ hookKeyVersion: 1 });
     expect(JSON.stringify(listed)).not.toContain(minted!.token);
     // And the durable record holds a digest, not the token.
@@ -243,7 +242,7 @@ describe("the durable half of the check", () => {
 
   test("accepts a good key once and answers a replay with the same firing", async () => {
     const { scheduler, store, create } = harness();
-    const receipt = await store.execute(create, USER);
+    const receipt = await store.execute(create, USER, "UTC");
     const token = (receipt as { hook: { token: string } }).hook.token;
 
     // A replay is a delivery the caller itself said was the same one, by
@@ -259,13 +258,13 @@ describe("the durable half of the check", () => {
       expect(fire.trigger).toBe("webhook");
       expect(fire.cue).toContain('{"event":"push"}');
       return { status: "ok" };
-    });
+    }, "UTC");
     expect(fired).toEqual([first.fireId]);
   });
 
   test("two distinct deliveries with identical bodies are two firings", async () => {
     const { scheduler, store, create } = harness();
-    const receipt = await store.execute(create, USER);
+    const receipt = await store.execute(create, USER, "UTC");
     const token = (receipt as { hook: { token: string } }).hook.token;
 
     // A provider that sends `{"event":"push"}` twice sent two events. Without
@@ -282,13 +281,13 @@ describe("the durable half of the check", () => {
     await scheduler.settle(async (fire) => {
       fired.push(fire.fireId);
       return { status: "ok" };
-    });
+    }, "UTC");
     expect(fired.sort()).toEqual([first.fireId, second.fireId].sort());
   });
 
   test("a rotated key retires the one before it", async () => {
     const { store, create } = harness();
-    const created = await store.execute(create, USER);
+    const created = await store.execute(create, USER, "UTC");
     const old = (created as { hook: { token: string } }).hook.token;
 
     const rotated = await store.execute(
@@ -300,6 +299,7 @@ describe("the durable half of the check", () => {
         routineId: "brief",
       },
       USER,
+      "UTC",
     );
     const fresh = (rotated as { hook: { token: string; keyVersion: number } })
       .hook;
@@ -315,7 +315,7 @@ describe("the durable half of the check", () => {
 
   test("a revoked key leaves the door shut", async () => {
     const { store, create } = harness();
-    const created = await store.execute(create, USER);
+    const created = await store.execute(create, USER, "UTC");
     const token = (created as { hook: { token: string } }).hook.token;
 
     await store.execute(
@@ -327,18 +327,19 @@ describe("the durable half of the check", () => {
         routineId: "brief",
       },
       USER,
+      "UTC",
     );
     await expect(deliver(store, token, "{}")).rejects.toThrow(
       /webhook key is invalid/,
     );
     expect(
-      (await store.list("scout")).routines[0]?.hookKeyVersion,
+      (await store.list("scout", undefined, "UTC")).routines[0]?.hookKeyVersion,
     ).toBeUndefined();
   });
 
   test("a paused Routine says so, and an unknown one does not", async () => {
     const { store, create } = harness();
-    const created = await store.execute(create, USER);
+    const created = await store.execute(create, USER, "UTC");
     const token = (created as { hook: { token: string } }).hook.token;
 
     await store.execute(
@@ -350,6 +351,7 @@ describe("the durable half of the check", () => {
         routineId: "brief",
       },
       USER,
+      "UTC",
     );
     const paused = await deliver(store, token, "{}").catch(
       (error: unknown) => error,
@@ -365,6 +367,7 @@ describe("the durable half of the check", () => {
         routineId: "brief",
       },
       USER,
+      "UTC",
     );
     const gone = await deliver(store, token, "{}").catch(
       (error: unknown) => error,
@@ -374,7 +377,7 @@ describe("the durable half of the check", () => {
 
   test("a wrong key version is refused even with the right digest", async () => {
     const { store, create } = harness();
-    const created = await store.execute(create, USER);
+    const created = await store.execute(create, USER, "UTC");
     const token = (created as { hook: { token: string } }).hook.token;
     const refusal = await store
       .deliverHook({
@@ -390,7 +393,7 @@ describe("the durable half of the check", () => {
 
   test("a caller's idempotency key collapses two different bodies into one firing", async () => {
     const { scheduler, store, create } = harness();
-    const created = await store.execute(create, USER);
+    const created = await store.execute(create, USER, "UTC");
     const token = (created as { hook: { token: string } }).hook.token;
 
     const first = await deliver(store, token, '{"a":1}', "delivery-7");
@@ -401,7 +404,7 @@ describe("the durable half of the check", () => {
     await scheduler.settle(() => {
       fired += 1;
       return Promise.resolve({ status: "ok" as const });
-    });
+    }, "UTC");
     expect(fired).toBe(1);
   });
 
@@ -411,9 +414,11 @@ describe("the durable half of the check", () => {
     const store = new RoutineStore(storage, { firings: scheduler });
     const { create } = harness();
 
-    const receipt = await store.execute(create, USER);
+    const receipt = await store.execute(create, USER, "UTC");
     expect(receipt.status === "applied" && receipt.hook).toBeUndefined();
-    expect((await store.list("scout")).routines).toHaveLength(1);
+    expect((await store.list("scout", undefined, "UTC")).routines).toHaveLength(
+      1,
+    );
     await expect(
       store.execute(
         {
@@ -424,6 +429,7 @@ describe("the durable half of the check", () => {
           routineId: "brief",
         },
         USER,
+        "UTC",
       ),
     ).rejects.toThrow(/ROUTINE_HOOK_SECRET/);
   });

@@ -16,6 +16,7 @@ import {
   resolveBotExecutionPlanV1,
   resolveEffectiveBotModelV1,
   resolvePackageSettingValuesV1,
+  userTimezoneV1,
   type BotSettingsViewV1,
   type ConnectionView,
   type EnabledCapabilityV1,
@@ -38,6 +39,7 @@ import {
   createBotRoutinesHost,
   executeRoutineCommand,
   listRoutines,
+  projectRoutineAccountTimezoneV1,
 } from "@frockbot/app/routines/bot";
 import {
   executeConfigurationCommand,
@@ -115,6 +117,11 @@ export async function agentRuntime(
     schemaVersion: 1,
     userId: identity.userId,
   });
+  await projectRoutineAccountTimezoneV1(
+    state,
+    userTimezoneV1(user.profile),
+    user.revision,
+  );
   const packageDefinitions = executionPackagesV1(state.application);
   const plan = resolveBotExecutionPlanV1({
     bot: settings,
@@ -311,7 +318,7 @@ export async function agentRuntime(
       ...(turn
         ? {
             routines: {
-              ...createBotRoutinesHost(identity, turn, state.routines),
+              ...createBotRoutinesHost(identity, turn),
               list: () => listRoutines(state, identity),
               execute: (command, writer) =>
                 executeRoutineCommand(state, identity, command, writer),

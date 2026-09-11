@@ -41,9 +41,11 @@ import {
 } from "@frockbot/app/routines/inbox-store";
 import { decodeRoutineRecordV1 } from "@frockbot/app/routines/records";
 import {
+  ROUTINE_ACCOUNT_TIMEZONE_KEY,
   routineFailureMessageKeyV1,
   routineKeyV1,
 } from "@frockbot/app/routines/storage-keys";
+import { isRoutineTimezoneV1 } from "@frockbot/app/routines/cron";
 import {
   messageIdV1,
   visibleMessageRecordsV1,
@@ -100,6 +102,84 @@ export interface BotRoutinesTurn {
   runId: string;
   turnId: string;
   sessionId: string;
+}
+
+interface RoutineAccountTimezoneProjectionV1 {
+  schemaVersion: 1;
+  revision: number;
+  timezone: string;
+}
+
+function routineAccountTimezoneProjectionV1(
+  value: unknown,
+): RoutineAccountTimezoneProjectionV1 | undefined {
+  if (
+    !value ||
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    Object.keys(value).length !== 3
+  ) {
+    return undefined;
+  }
+  const projection = value as Record<string, unknown>;
+  return projection.schemaVersion === 1 &&
+    Number.isSafeInteger(projection.revision) &&
+    (projection.revision as number) >= 0 &&
+    typeof projection.timezone === "string" &&
+    isRoutineTimezoneV1(projection.timezone)
+    ? {
+        schemaVersion: 1,
+        revision: projection.revision as number,
+        timezone: projection.timezone,
+      }
+    : undefined;
+}
+
+/** The account clock projected into the Bot so alarms need no cross-DO read. */
+export async function routineAccountTimezoneV1(reads: {
+  get<T>(key: string): Promise<T | undefined>;
+}): Promise<string> {
+  const projection = routineAccountTimezoneProjectionV1(
+    await reads.get<unknown>(ROUTINE_ACCOUNT_TIMEZONE_KEY),
+  );
+  return projection?.timezone ?? "UTC";
+}
+
+/**
+ * Adopt the User authority's current timezone and re-arm the alarm under it.
+ *
+ * Nothing derived is discarded here. A stored clock records the zone it was
+ * computed in, so it recomputes itself exactly when the zone it names has
+ * moved; deleting clocks outright threw away every backoff and hold on any
+ * settings change, whether or not the zone was one of them.
+ */
+export async function projectRoutineAccountTimezoneV1(
+  state: ShellBotStateV1,
+  timezone: string,
+  revision: number,
+): Promise<void> {
+  if (!isRoutineTimezoneV1(timezone)) {
+    throw new Error(`timezone "${timezone}" is not an IANA time zone`);
+  }
+  if (!Number.isSafeInteger(revision) || revision < 0) {
+    throw new Error("timezone revision must be a non-negative integer");
+  }
+  await state.ctx.storage.transaction(async (transaction) => {
+    const current = routineAccountTimezoneProjectionV1(
+      await transaction.get<unknown>(ROUTINE_ACCOUNT_TIMEZONE_KEY),
+    );
+    // User RPCs may finish out of order after yielding across Durable Objects.
+    // The settings revision keeps an older fan-out from reverting a newer zone.
+    if (current && current.revision >= revision) {
+      return;
+    }
+    await transaction.put(ROUTINE_ACCOUNT_TIMEZONE_KEY, {
+      schemaVersion: 1,
+      revision,
+      timezone,
+    } satisfies RoutineAccountTimezoneProjectionV1);
+    await state.authority.refreshRecoveryAlarm(transaction);
+  });
 }
 
 /**
@@ -239,15 +319,17 @@ export function routineFireOutcomeV1(
 }
 
 /**
- * The Routines seam one admitted Turn runs under. A Turn is required: a Bot
- * writes a Routine only inside a Turn whose Session and Turn its provenance can
- * name, exactly as it writes a Skill or authors a Package.
+ * The provenance half of the Routines seam one admitted Turn runs under. A Turn
+ * is required: a Bot writes a Routine only inside a Turn whose Session and Turn
+ * its provenance can name, exactly as it writes a Skill or authors a Package.
+ *
+ * Reading and writing are the caller's: both need the account zone the Bot is
+ * projected under, which is storage the mount already holds.
  */
 export function createBotRoutinesHost(
   identity: BotRoutinesIdentity,
   turn: BotRoutinesTurn,
-  store: RoutineStore,
-): RoutinesRuntimeHostV1 {
+): Omit<RoutinesRuntimeHostV1, "list" | "execute"> {
   return {
     botId: identity.botId,
     writer: {
@@ -255,8 +337,6 @@ export function createBotRoutinesHost(
       turnId: turn.turnId,
       runId: turn.runId,
     },
-    list: () => store.list(identity.botId),
-    execute: (command, writer) => store.execute(command, writer),
   };
 }
 
@@ -435,7 +515,10 @@ export async function scheduledDeadlines(
     expiries.push(Date.parse(approval.expiresAt));
   }
   return [
-    ...(await state.routineScheduler.deadlines(transaction)),
+    ...(await state.routineScheduler.deadlines(
+      transaction,
+      await routineAccountTimezoneV1(transaction),
+    )),
     ...expiries.filter((at) => Number.isFinite(at)),
     // A dispatched task's 30-minute lifetime, and a child's own owed Turn,
     // both ride the one alarm this object already has: the parent reconciles
@@ -488,7 +571,10 @@ export async function deferScheduledWork(
 ): Promise<void> {
   // A Routine's deadline is a debt, so the scheduler holds it rather than
   // moving it while other durable work remains in flight.
-  await state.routineScheduler.defer(transaction);
+  await state.routineScheduler.defer(
+    transaction,
+    await routineAccountTimezoneV1(transaction),
+  );
   await state.hostScheduled.defer?.(transaction);
 }
 
@@ -540,15 +626,20 @@ async function settleRoutineFirings(state: ShellBotStateV1): Promise<void> {
   // a deferral: `dueAt` does not move, so the firing still lands.
   if (await state.authority.readActiveRunId()) {
     await state.ctx.storage.transaction((transaction) =>
-      state.routineScheduler.defer(transaction),
+      routineAccountTimezoneV1(transaction).then((timezone) =>
+        state.routineScheduler.defer(transaction, timezone),
+      ),
     );
     return;
   }
-  await state.routineScheduler.settle(async (fire) => {
-    const outcome = await runOneFiring(state, identity, fire);
-    await notifyFailedFiring(state, identity, fire, outcome);
-    return outcome;
-  });
+  await state.routineScheduler.settle(
+    async (fire) => {
+      const outcome = await runOneFiring(state, identity, fire);
+      await notifyFailedFiring(state, identity, fire, outcome);
+      return outcome;
+    },
+    await routineAccountTimezoneV1(state.ctx.storage),
+  );
 }
 
 async function runOneFiring(
@@ -686,9 +777,11 @@ export async function listRoutines(
   state: ShellBotStateV1,
   identity: BotIdentity,
 ): Promise<RoutineListViewV1> {
+  const timezone = await routineAccountTimezoneV1(state.ctx.storage);
   return state.routines.list(
     identity.botId,
-    await state.routineScheduler.nextRuns(),
+    await state.routineScheduler.nextRuns(timezone),
+    timezone,
   );
 }
 
@@ -706,7 +799,11 @@ export async function executeRoutineCommand(
   if (command.botId !== identity.botId) {
     throw new RoutineNotFoundError(command.routineId ?? command.botId);
   }
-  const receipt = await state.routines.execute(command, writer);
+  const receipt = await state.routines.execute(
+    command,
+    writer,
+    await routineAccountTimezoneV1(state.ctx.storage),
+  );
   // A created, re-timed, resumed or manually fired Routine changes what the
   // object is owed next, so the alarm is re-armed in the same call that wrote
   // the record rather than waiting for the next one to happen by.

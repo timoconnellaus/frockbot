@@ -6,6 +6,7 @@ import {
   ConfigurationConflictError,
   modelBindingFailureV1,
   resolveEffectiveBotModelV1,
+  userTimezoneV1,
   modelRuntimeLabel,
   MAX_PACKAGE_SETTING_TEXT_V1,
   type ConnectionView,
@@ -32,6 +33,41 @@ const IMAGE_MODEL_LABELS: Record<string, string> = {
   "@cf/bytedance/stable-diffusion-xl-lightning":
     "Stable Diffusion XL Lightning",
 };
+
+/**
+ * Most choices one setting field may carry on the wire (`SettingField.choices`
+ * in the client schema). The zone catalog comes from the host ICU build and
+ * grows with tzdata, and a catalog one entry over the bound would fail the
+ * whole Settings document rather than one row.
+ */
+const MAX_SETTING_CHOICES_V1 = 600;
+
+const PROFILE_TIMEZONES_V1 = Object.freeze(
+  [
+    "UTC",
+    ...Intl.supportedValuesOf("timeZone").filter(
+      (timezone) => timezone !== "UTC",
+    ),
+    // One slot is left for a saved selection the catalog does not name.
+  ].slice(0, MAX_SETTING_CHOICES_V1 - 1),
+);
+
+function timezoneLabelV1(timezone: string): string {
+  return timezone
+    .split("/")
+    .map((part) => part.replaceAll("_", " "))
+    .join(" / ");
+}
+
+function timezoneChoicesV1(current: string): SettingChoice[] {
+  const timezones = PROFILE_TIMEZONES_V1.includes(current)
+    ? PROFILE_TIMEZONES_V1
+    : [...PROFILE_TIMEZONES_V1, current];
+  return timezones.map((timezone) => ({
+    label: timezoneLabelV1(timezone),
+    value: timezone,
+  }));
+}
 
 function field(
   definition: PackageSettingDefinition,
@@ -112,6 +148,16 @@ export function applicationSettingsFrame(
           hint: "Optional contact email. This does not change your sign-in account.",
           maxLength: 320,
         },
+        {
+          id: "timezone",
+          label: "Time zone",
+          kind: "select",
+          value: userTimezoneV1(settings.profile),
+          editable: true,
+          required: true,
+          hint: "Your Routines use this time zone.",
+          choices: timezoneChoicesV1(userTimezoneV1(settings.profile)),
+        },
       ],
     },
   ];
@@ -186,7 +232,7 @@ export function applicationSettingsCommand(
         typeof command.values.email !== "string") ||
       command.unset?.length ||
       Object.keys(command.values).some(
-        (key) => key !== "name" && key !== "email",
+        (key) => key !== "name" && key !== "email" && key !== "timezone",
       )
     )
       throw new ConfigurationDecodeError("Invalid profile fields");
@@ -196,6 +242,7 @@ export function applicationSettingsCommand(
       profile: {
         name: command.values.name,
         ...(command.values.email ? { email: command.values.email } : {}),
+        timezone: command.values.timezone,
       },
     });
   }

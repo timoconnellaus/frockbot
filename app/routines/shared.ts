@@ -74,6 +74,7 @@ export interface RoutineViewV1 {
   prompt: string;
   schedule?: string;
   trigger?: RoutineTriggerV1;
+  /** The User Profile timezone this projection was rendered under. */
   timezone: string;
   enabled: boolean;
   createdBy: RoutineWriterViewV1;
@@ -141,7 +142,6 @@ export type RoutineCommandV1 =
       prompt: string;
       schedule?: string;
       trigger?: RoutineTriggerV1;
-      timezone?: string;
     })
   | (RoutineCommandMetaV1 & {
       /** Partial: only the fields the command carries change. */
@@ -151,7 +151,6 @@ export type RoutineCommandV1 =
       prompt?: string;
       schedule?: string;
       trigger?: RoutineTriggerV1;
-      timezone?: string;
       enabled?: boolean;
     })
   | (RoutineCommandMetaV1 & { type: "routine/pause"; routineId: string })
@@ -268,7 +267,7 @@ export function decodeRoutineCommandV1(value: unknown): RoutineCommandV1 {
     routineExactKeys(
       candidate,
       ["schemaVersion", "type", "commandId", "botId", "name", "prompt"],
-      ["routineId", "schedule", "trigger", "timezone"],
+      ["routineId", "schedule", "trigger"],
       "routine/create",
     );
     const created = {
@@ -301,15 +300,6 @@ export function decodeRoutineCommandV1(value: unknown): RoutineCommandV1 {
       ...(candidate.trigger === undefined
         ? {}
         : { trigger: decodeRoutineTriggerV1(candidate.trigger) }),
-      ...(candidate.timezone === undefined
-        ? {}
-        : {
-            timezone: routineText(
-              candidate.timezone,
-              ROUTINE_TIMEZONE_MAX,
-              "Routine timezone",
-            ),
-          }),
     } satisfies Extract<RoutineCommandV1, { type: "routine/create" }>;
     requireScheduleXorTriggerV1(created);
     return created;
@@ -318,7 +308,7 @@ export function decodeRoutineCommandV1(value: unknown): RoutineCommandV1 {
     routineExactKeys(
       candidate,
       ["schemaVersion", "type", "commandId", "botId", "routineId"],
-      ["name", "prompt", "schedule", "trigger", "timezone", "enabled"],
+      ["name", "prompt", "schedule", "trigger", "enabled"],
       "routine/update",
     );
     if (candidate.schedule !== undefined && candidate.trigger !== undefined) {
@@ -366,15 +356,6 @@ export function decodeRoutineCommandV1(value: unknown): RoutineCommandV1 {
       ...(candidate.trigger === undefined
         ? {}
         : { trigger: decodeRoutineTriggerV1(candidate.trigger) }),
-      ...(candidate.timezone === undefined
-        ? {}
-        : {
-            timezone: routineText(
-              candidate.timezone,
-              ROUTINE_TIMEZONE_MAX,
-              "Routine timezone",
-            ),
-          }),
       ...(candidate.enabled === undefined
         ? {}
         : { enabled: candidate.enabled as boolean }),

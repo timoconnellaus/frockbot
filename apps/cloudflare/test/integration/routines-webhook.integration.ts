@@ -83,7 +83,6 @@ async function webhookRoutine(label: string) {
       name: "Delivered brief",
       prompt: "Summarize the payload.",
       trigger: { kind: "webhook" },
-      timezone: "UTC",
     }),
   )) as { hook?: { token: string; keyVersion: number; path: string } };
   // The key comes back once, on the creating receipt, with the path it is

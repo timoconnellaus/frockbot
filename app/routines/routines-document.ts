@@ -85,7 +85,6 @@ export const ROUTINE_EDITOR_FIELDS_V1 = {
   prompt: "routine.prompt",
   timing: "routine.timing",
   schedule: "routine.schedule",
-  timezone: "routine.timezone",
 } as const;
 const KIND: ActionValueSchema = {
   type: "string",
@@ -311,11 +310,6 @@ function editorNode(frame: RoutinesFrameV1): ViewNode {
   const editing = frame.editing;
   const ids = ROUTINE_EDITOR_FIELDS_V1;
   const webhook = editing !== undefined && editing.schedule === undefined;
-  // A schedule is meant in the day the person who wrote it is living in, and
-  // this side of the wire cannot know that day: the phone has no IANA zone to
-  // send. So a new Routine inherits the zone this Bot's Routines already use,
-  // which is the closest thing to it that is actually known, and says so.
-  const inherited = frame.routines.at(-1)?.timezone ?? "UTC";
   return {
     type: "group",
     orientation: "column",
@@ -347,12 +341,6 @@ function editorNode(frame: RoutinesFrameV1): ViewNode {
       field(ids.schedule, "Schedule", editing?.schedule ?? "0 9 * * *", {
         maxLength: 256,
         hint: "cron, or @daily / @every 15m. Ignored for a webhook Routine, which is given a key instead.",
-      }),
-      field(ids.timezone, "Time zone", editing?.timezone ?? inherited, {
-        maxLength: 64,
-        hint: `The zone the schedule is read in, like Australia/Sydney.${
-          editing ? "" : ` Starting from ${inherited}.`
-        }`,
       }),
       {
         type: "group",
@@ -552,7 +540,7 @@ export function routinesDocumentV1(frame: RoutinesFrameV1): ViewDocument {
       },
       {
         // One action for both verbs: a `routineId` names the Routine to
-        // update, and its absence is what "create" means. The five field ids
+        // update, and its absence is what "create" means. The four field ids
         // are declared here, which is what lets their current values travel
         // with the press and nothing else.
         id: "save-routine",
@@ -565,7 +553,6 @@ export function routinesDocumentV1(frame: RoutinesFrameV1): ViewDocument {
             [ROUTINE_EDITOR_FIELDS_V1.prompt]: TEXT(8000),
             [ROUTINE_EDITOR_FIELDS_V1.timing]: TIMING,
             [ROUTINE_EDITOR_FIELDS_V1.schedule]: TEXT(256),
-            [ROUTINE_EDITOR_FIELDS_V1.timezone]: TEXT(64),
           },
           required: [
             "kind",

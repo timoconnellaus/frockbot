@@ -8,7 +8,7 @@ import {
 } from "./cron.js";
 
 describe("normalizeRoutineScheduleV1", () => {
-  test("accepts a five-field cron expression in the record's zone", () => {
+  test("accepts a five-field cron expression in the account zone", () => {
     expect(
       normalizeRoutineScheduleV1("0 9 * * 1-5", "Australia/Sydney"),
     ).toEqual({
@@ -34,14 +34,10 @@ describe("normalizeRoutineScheduleV1", () => {
     }
   });
 
-  test("reads a CRON_TZ= prefix as the schedule's own zone", () => {
-    expect(
+  test("does not allow a schedule to override the account time zone", () => {
+    expect(() =>
       normalizeRoutineScheduleV1("CRON_TZ=Europe/Berlin 30 6 * * *", "UTC"),
-    ).toEqual({
-      kind: "cron",
-      pattern: "30 6 * * *",
-      timezone: "Europe/Berlin",
-    });
+    ).toThrow(/five fields/);
   });
 
   test("parses @every as a fixed interval", () => {
@@ -143,18 +139,6 @@ describe("nextRoutineRunV1", () => {
     );
     expect(next("0 9 * * *", "America/New_York", "2026-03-08T00:00:00Z")).toBe(
       "2026-03-08T13:00:00.000Z",
-    );
-  });
-
-  test("reads CRON_TZ= as the zone the pattern is evaluated in", () => {
-    // The record says UTC; the schedule the user typed overrides it. At
-    // 00:00Z it is already 10:00 in Sydney, so the next 09:00 there is the
-    // following morning — 23:00Z, not 09:00Z.
-    expect(
-      next("CRON_TZ=Australia/Sydney 0 9 * * *", "UTC", "2026-06-01T00:00:00Z"),
-    ).toBe("2026-06-01T23:00:00.000Z");
-    expect(next("0 9 * * *", "UTC", "2026-06-01T00:00:00Z")).toBe(
-      "2026-06-01T09:00:00.000Z",
     );
   });
 

@@ -3,7 +3,12 @@
 Profile groups personal details, Bot abilities, and activity/sharing. Site
 administration is visible only to administrators; Refresh is a page action,
 not an account destination. Personal details reads the same resolved name as
-the Profile header. The optional contact email does not change sign-in.
+the Profile header. The optional contact email does not change sign-in. The
+Profile timezone is the single account clock: every scheduled Routine owned by
+the User is evaluated in that IANA timezone, so Routine editors do not ask for
+one independently. It is chosen from the runtime's IANA timezone list rather
+than typed, defaults to UTC, and keeps a saved selection the running catalog
+does not name.
 
 Models owns the account default and provider accounts. Automatic is the
 recommended zero-setup choice. Connecting or managing a provider opens its

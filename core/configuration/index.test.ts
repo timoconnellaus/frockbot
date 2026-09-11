@@ -445,6 +445,20 @@ describe("configuration DTO seam", () => {
       expect(() => decodeBotIdV1(value)).toThrow("botId is invalid");
   });
 
+  test("keeps a saved zone alias and refuses a bare offset on the Profile", () => {
+    for (const timezone of ["UTC", "US/Eastern", "Australia/Sydney"]) {
+      expect(
+        decodeConfigurationCommandV1({
+          schemaVersion: 1,
+          type: "user/update-profile",
+          commandId: "command-1",
+          expectedRevision: 3,
+          profile: { name: "Alice", timezone },
+        }),
+      ).toMatchObject({ profile: { name: "Alice", timezone } });
+    }
+  });
+
   test("decodes a versioned Bot profile command", () => {
     expect(
       decodeConfigurationCommandV1({
@@ -618,6 +632,22 @@ describe("configuration DTO seam", () => {
         ...meta,
         type: "user/update-profile",
         profile: { name: "Alice", extra: true },
+      },
+      {
+        ...meta,
+        type: "user/update-profile",
+        profile: { name: "Alice", timezone: "Mars/Olympus" },
+      },
+      // `Intl` accepts a bare offset; a Routine cannot be scheduled in one.
+      {
+        ...meta,
+        type: "user/update-profile",
+        profile: { name: "Alice", timezone: "+05:00" },
+      },
+      {
+        ...meta,
+        type: "user/update-profile",
+        profile: { name: "Alice", timezone: "+0530" },
       },
       {
         ...meta,

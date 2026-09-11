@@ -32,6 +32,8 @@ export interface RoutineScheduleStateV1 {
   routineId: string;
   /** The record revision this clock was computed under: the record's `updatedAt`. */
   anchor: string;
+  /** The User Profile timezone this derived clock was computed under. */
+  timezone: string;
   /** Epoch milliseconds the Routine is next owed a firing. */
   dueAt: number;
   /** Epoch milliseconds before which the alarm must not settle this Routine. */
@@ -99,7 +101,7 @@ export function decodeRoutineScheduleStateV1(
   const candidate = record(value, "Routine schedule state");
   routineExactKeys(
     candidate,
-    ["schemaVersion", "routineId", "anchor", "dueAt"],
+    ["schemaVersion", "routineId", "anchor", "timezone", "dueAt"],
     ["deferredUntil", "consecutiveFailures"],
     "Routine schedule state",
   );
@@ -115,6 +117,11 @@ export function decodeRoutineScheduleStateV1(
     schemaVersion: 1,
     routineId: candidate.routineId,
     anchor: routineTimestamp(candidate.anchor, "Routine schedule state anchor"),
+    timezone: routineText(
+      candidate.timezone,
+      64,
+      "Routine schedule state timezone",
+    ),
     dueAt: epoch(candidate.dueAt, "Routine schedule state dueAt"),
     ...(candidate.deferredUntil === undefined
       ? {}

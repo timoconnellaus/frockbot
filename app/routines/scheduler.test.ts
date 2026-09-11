@@ -56,7 +56,6 @@ function harness(options: {
   const store = new RoutineStore(storage, {
     now: time.now,
     firings: scheduler,
-    defaultTimezone: "UTC",
   });
   const create: RoutineCommandV1 = {
     schemaVersion: 1,
@@ -66,7 +65,6 @@ function harness(options: {
     routineId: "brief",
     name: "Morning brief",
     prompt: "Summarize overnight email.",
-    timezone: "UTC",
     ...(options.schedule === undefined
       ? { trigger: { kind: "webhook" as const } }
       : { schedule: options.schedule }),
@@ -90,7 +88,7 @@ function drain(
     .settle(async (fire) => {
       fired.push(fire);
       return outcome;
-    })
+    }, "UTC")
     .then(() => fired);
 }
 
@@ -100,9 +98,9 @@ describe("RoutineScheduler deadlines", () => {
       start: "2026-01-01T00:00:00.000Z",
       schedule: "0 9 * * *",
     });
-    await store.execute(create, USER);
+    await store.execute(create, USER, "UTC");
 
-    expect(await scheduler.deadlines(storage)).toEqual([
+    expect(await scheduler.deadlines(storage, "UTC")).toEqual([
       Date.parse("2026-01-01T09:00:00.000Z"),
     ]);
   });
@@ -112,7 +110,7 @@ describe("RoutineScheduler deadlines", () => {
       start: "2026-01-01T00:00:00.000Z",
       schedule: "0 9 * * *",
     });
-    await paused.store.execute(paused.create, USER);
+    await paused.store.execute(paused.create, USER, "UTC");
     await paused.store.execute(
       {
         schemaVersion: 1,
@@ -122,12 +120,15 @@ describe("RoutineScheduler deadlines", () => {
         routineId: "brief",
       },
       USER,
+      "UTC",
     );
-    expect(await paused.scheduler.deadlines(paused.storage)).toEqual([]);
+    expect(await paused.scheduler.deadlines(paused.storage, "UTC")).toEqual([]);
 
     const webhook = harness({ start: "2026-01-01T00:00:00.000Z" });
-    await webhook.store.execute(webhook.create, USER);
-    expect(await webhook.scheduler.deadlines(webhook.storage)).toEqual([]);
+    await webhook.store.execute(webhook.create, USER, "UTC");
+    expect(await webhook.scheduler.deadlines(webhook.storage, "UTC")).toEqual(
+      [],
+    );
   });
 
   test("a deferral holds the alarm off and never moves the debt", async () => {
@@ -135,16 +136,16 @@ describe("RoutineScheduler deadlines", () => {
       start: "2026-01-01T08:00:00.000Z",
       schedule: "0 9 * * *",
     });
-    await store.execute(create, USER);
+    await store.execute(create, USER, "UTC");
     // Nothing has written a clock yet: it is computed from the record until a
     // deferral or a firing has cause to persist one.
-    const due = (await scheduler.deadlines(storage))[0]!;
+    const due = (await scheduler.deadlines(storage, "UTC"))[0]!;
     expect(due).toBe(Date.parse("2026-01-01T09:00:00.000Z"));
 
     // The Turn overruns the occurrence: the alarm fires, the object is busy,
     // and the deferral holds.
     time.set("2026-01-01T09:00:30.000Z");
-    await scheduler.defer(storage);
+    await scheduler.defer(storage, "UTC");
 
     const deferred = await state(storage);
     expect(deferred.dueAt).toBe(due);
@@ -167,8 +168,8 @@ describe("RoutineScheduler deadlines", () => {
       start: "2026-01-01T00:00:00.000Z",
       schedule: "0 9 * * *",
     });
-    await store.execute(create, USER);
-    expect(await scheduler.deadlines(storage)).toEqual([
+    await store.execute(create, USER, "UTC");
+    expect(await scheduler.deadlines(storage, "UTC")).toEqual([
       Date.parse("2026-01-01T09:00:00.000Z"),
     ]);
 
@@ -182,10 +183,149 @@ describe("RoutineScheduler deadlines", () => {
         schedule: "0 6 * * *",
       },
       USER,
+      "UTC",
     );
-    expect(await scheduler.deadlines(storage)).toEqual([
+    expect(await scheduler.deadlines(storage, "UTC")).toEqual([
       Date.parse("2026-01-01T06:00:00.000Z"),
     ]);
+  });
+
+  test("recomputes an existing Routine when the account timezone changes", async () => {
+    const { storage, scheduler, store, create } = harness({
+      start: "2026-01-01T09:00:30.000Z",
+      schedule: "0 9 * * *",
+    });
+    await store.execute(create, USER, "UTC");
+    await scheduler.defer(storage, "UTC");
+    expect((await state(storage)).timezone).toBe("UTC");
+
+    expect(await scheduler.deadlines(storage, "Australia/Sydney")).toEqual([
+      Date.parse("2026-01-01T22:00:00.000Z"),
+    ]);
+  });
+
+  test("a zone change owes the next occurrence, never the elapsed ones", async () => {
+    const { storage, time, scheduler, store, create } = harness({
+      start: "2026-01-01T09:00:30.000Z",
+      schedule: "0 9 * * *",
+    });
+    await store.execute(create, USER, "UTC");
+    await scheduler.defer(storage, "UTC");
+
+    // Six weeks of ordinary firing later, the account moves zone. The record
+    // was written once and its anchor is that old; the clock is not.
+    time.set("2026-02-12T10:00:00.000Z");
+    await storage.put(routineScheduleKeyV1("brief"), {
+      ...(await state(storage)),
+      dueAt: Date.parse("2026-02-13T09:00:00.000Z"),
+      deferredUntil: undefined,
+    });
+
+    expect(await scheduler.deadlines(storage, "Australia/Sydney")).toEqual([
+      Date.parse("2026-02-12T22:00:00.000Z"),
+    ]);
+    // And nothing is owed right now, so no coalesced "you missed 42 runs".
+    const fired: RoutineFireV1[] = [];
+    await scheduler.settle(async (fire) => {
+      fired.push(fire);
+      return { status: "ok", summary: "done" };
+    }, "Australia/Sydney");
+    expect(fired).toEqual([]);
+  });
+
+  test("a zone change persists a clock the next alarm can actually claim", async () => {
+    const { storage, time, scheduler, store, create } = harness({
+      start: "2026-01-01T09:00:30.000Z",
+      schedule: "0 9 * * *",
+    });
+    await store.execute(create, USER, "UTC");
+    await scheduler.defer(storage, "UTC");
+
+    expect(await scheduler.deadlines(storage, "Australia/Sydney")).toEqual([
+      Date.parse("2026-01-01T22:00:00.000Z"),
+    ]);
+    // The rebuild reads the current moment, so it is written down. Left in
+    // memory it would be recomputed from a later "now" on every evaluation and
+    // the Routine would be permanently one occurrence away from firing.
+    expect(await state(storage)).toMatchObject({
+      timezone: "Australia/Sydney",
+      dueAt: Date.parse("2026-01-01T22:00:00.000Z"),
+    });
+
+    time.set("2026-01-01T22:00:00.000Z");
+    const fired: RoutineFireV1[] = [];
+    await scheduler.settle(async (fire) => {
+      fired.push(fire);
+      return { status: "ok", summary: "done" };
+    }, "Australia/Sydney");
+    expect(fired).toHaveLength(1);
+    expect(fired[0]).toMatchObject({
+      trigger: "cron",
+      dueAt: Date.parse("2026-01-01T22:00:00.000Z"),
+    });
+  });
+
+  test("a clock written before the account owned the zone keeps its debt", async () => {
+    const { storage, time, scheduler, store, create } = harness({
+      start: "2026-01-01T00:00:00.000Z",
+      schedule: "0 9 * * *",
+    });
+    await store.execute(create, USER, "UTC");
+    // The shape the previous release wrote: no `timezone`, because the zone
+    // was the Routine's own field.
+    await storage.put(routineScheduleKeyV1("brief"), {
+      schemaVersion: 1,
+      routineId: "brief",
+      anchor: "2026-01-01T00:00:00.000Z",
+      dueAt: Date.parse("2026-01-05T09:00:00.000Z"),
+    });
+
+    expect(await scheduler.deadlines(storage, "UTC")).toEqual([
+      Date.parse("2026-01-05T09:00:00.000Z"),
+    ]);
+    expect(await drain(scheduler)).toEqual([]);
+
+    time.set("2026-01-05T09:00:00.000Z");
+    const fired = await drain(scheduler);
+    expect(fired).toHaveLength(1);
+    expect(fired[0]).toMatchObject({
+      dueAt: Date.parse("2026-01-05T09:00:00.000Z"),
+    });
+  });
+
+  test("a clock or a schedule this deploy cannot read costs one Routine, not the alarm", async () => {
+    const { storage, time, scheduler, store, create } = harness({
+      start: "2026-01-01T00:00:00.000Z",
+      schedule: "0 9 * * *",
+    });
+    await store.execute(create, USER, "UTC");
+    await store.execute(
+      { ...create, commandId: "cmd-create-2", routineId: "digest" },
+      USER,
+      "UTC",
+    );
+
+    // A schedule stored under the retired `CRON_TZ=` prefix, and a clock
+    // written by a deploy this one cannot read back.
+    const stored = await storage.get<Record<string, unknown>>(
+      routineKeyV1("brief"),
+    );
+    await storage.put(routineKeyV1("brief"), {
+      ...stored,
+      schedule: "CRON_TZ=Australia/Sydney 0 9 * * *",
+    });
+    await storage.put(routineScheduleKeyV1("digest"), { schemaVersion: 9 });
+
+    // The unreadable Routine contributes no deadline; the healthy one still
+    // arms the alarm and still fires.
+    expect(await scheduler.deadlines(storage, "UTC")).toEqual([
+      Date.parse("2026-01-01T09:00:00.000Z"),
+    ]);
+
+    time.set("2026-01-01T09:00:00.000Z");
+    const fired = await drain(scheduler);
+    expect(fired).toHaveLength(1);
+    expect(fired[0]).toMatchObject({ routineId: "digest" });
   });
 });
 
@@ -195,7 +335,7 @@ describe("RoutineScheduler settle", () => {
       start: "2026-01-01T08:59:00.000Z",
       schedule: "0 9 * * *",
     });
-    await store.execute(create, USER);
+    await store.execute(create, USER, "UTC");
 
     expect(await drain(scheduler)).toEqual([]);
 
@@ -228,14 +368,14 @@ describe("RoutineScheduler settle", () => {
       start: "2026-01-01T08:00:00.000Z",
       schedule: "0 9 * * *",
     });
-    await store.execute(create, USER);
+    await store.execute(create, USER, "UTC");
     time.set("2026-01-01T09:00:00.000Z");
 
     let lockedDuringRun: unknown;
     await scheduler.settle(async () => {
       lockedDuringRun = await storage.get(routineFireKeyV1("brief"));
       return { status: "ok" };
-    });
+    }, "UTC");
 
     expect(lockedDuringRun).toMatchObject({ routineId: "brief" });
     expect(await storage.get(routineFireKeyV1("brief"))).toBeUndefined();
@@ -246,12 +386,12 @@ describe("RoutineScheduler settle", () => {
       start: "2026-01-01T08:00:00.000Z",
       schedule: "0 9 * * *",
     });
-    await store.execute(create, USER);
+    await store.execute(create, USER, "UTC");
     time.set("2026-01-01T09:00:00.000Z");
 
     await scheduler.settle(() => {
       throw new Error("the provider refused");
-    });
+    }, "UTC");
 
     const runs = await store.listRuns("scout", "brief");
     expect(runs.entries).toHaveLength(1);
@@ -267,7 +407,7 @@ describe("RoutineScheduler settle", () => {
       start: "2026-01-01T00:00:00.000Z",
       schedule: "0 * * * *",
     });
-    await store.execute(create, USER);
+    await store.execute(create, USER, "UTC");
     // Three hours pass with the object evicted.
     time.set("2026-01-01T04:30:00.000Z");
 
@@ -296,7 +436,7 @@ describe("RoutineScheduler settle", () => {
       start: "2026-01-01T00:00:00.000Z",
       schedule: "0 * * * *",
     });
-    await store.execute(create, USER);
+    await store.execute(create, USER, "UTC");
     time.set("2026-01-01T01:00:30.000Z");
 
     await drain(scheduler);
@@ -309,7 +449,7 @@ describe("RoutineScheduler settle", () => {
     const { time, scheduler, store, create } = harness({
       start: "2026-01-01T00:00:00.000Z",
     });
-    await store.execute(create, USER);
+    await store.execute(create, USER, "UTC");
 
     await scheduler.enqueue({
       routineId: "brief",
@@ -330,7 +470,7 @@ describe("RoutineScheduler settle", () => {
       concurrent.push(running);
       running -= 1;
       return { status: "ok" };
-    });
+    }, "UTC");
     expect(concurrent).toEqual([1, 1]);
 
     const runs = await store.listRuns("scout", "brief");
@@ -344,7 +484,7 @@ describe("RoutineScheduler settle", () => {
     const { scheduler, store, create } = harness({
       start: "2026-01-01T00:00:00.000Z",
     });
-    await store.execute(create, USER);
+    await store.execute(create, USER, "UTC");
     const first = await scheduler.enqueue({
       routineId: "brief",
       trigger: "manual",
@@ -365,7 +505,7 @@ describe("RoutineScheduler settle", () => {
     const { scheduler, store, create } = harness({
       start: "2026-01-01T00:00:00.000Z",
     });
-    await store.execute(create, USER);
+    await store.execute(create, USER, "UTC");
     for (let index = 0; index < ROUTINE_QUEUE_LIMIT; index += 1) {
       await scheduler.enqueue({
         routineId: "brief",
@@ -389,7 +529,7 @@ describe("routine/run", () => {
       start: "2026-01-01T00:00:00.000Z",
       schedule: "0 9 * * *",
     });
-    await store.execute(create, USER);
+    await store.execute(create, USER, "UTC");
 
     const receipt = await store.execute(
       {
@@ -400,6 +540,7 @@ describe("routine/run", () => {
         routineId: "brief",
       },
       USER,
+      "UTC",
     );
     expect(receipt).toMatchObject({
       status: "fired",
@@ -420,7 +561,7 @@ describe("routine/run", () => {
       start: "2026-01-01T00:00:00.000Z",
       schedule: "0 9 * * *",
     });
-    await store.execute(create, USER);
+    await store.execute(create, USER, "UTC");
     const command = {
       schemaVersion: 1,
       type: "routine/run",
@@ -429,8 +570,8 @@ describe("routine/run", () => {
       routineId: "brief",
     } satisfies RoutineCommandV1;
 
-    expect(await store.execute(command, USER)).toEqual(
-      await store.execute(command, USER),
+    expect(await store.execute(command, USER, "UTC")).toEqual(
+      await store.execute(command, USER, "UTC"),
     );
     expect(await drain(scheduler)).toHaveLength(1);
   });
@@ -440,13 +581,13 @@ describe("routine/run", () => {
       start: "2026-01-01T00:00:00.000Z",
       schedule: "0 9 * * *",
     });
-    await store.execute(create, USER);
+    await store.execute(create, USER, "UTC");
     await scheduler.enqueue({
       routineId: "brief",
       trigger: "manual",
       discriminator: "pending",
     });
-    await scheduler.deadlines(storage);
+    await scheduler.deadlines(storage, "UTC");
 
     await store.execute(
       {
@@ -457,6 +598,7 @@ describe("routine/run", () => {
         routineId: "brief",
       },
       USER,
+      "UTC",
     );
 
     expect(storage.keys().filter((key) => key.startsWith("routine"))).toEqual([
@@ -473,13 +615,14 @@ describe("nextRuns", () => {
       start: "2026-01-01T00:00:00.000Z",
       schedule: "0 9 * * *",
     });
-    await store.execute(create, USER);
+    await store.execute(create, USER, "UTC");
 
-    expect(await scheduler.nextRuns()).toEqual(
+    expect(await scheduler.nextRuns("UTC")).toEqual(
       new Map([["brief", "2026-01-01T09:00:00.000Z"]]),
     );
     expect(
-      (await store.list("scout", await scheduler.nextRuns())).routines[0],
+      (await store.list("scout", await scheduler.nextRuns("UTC"), "UTC"))
+        .routines[0],
     ).toMatchObject({ nextRunAt: "2026-01-01T09:00:00.000Z" });
 
     await store.execute(
@@ -491,11 +634,12 @@ describe("nextRuns", () => {
         routineId: "brief",
       },
       USER,
+      "UTC",
     );
-    expect(await scheduler.nextRuns()).toEqual(new Map());
+    expect(await scheduler.nextRuns("UTC")).toEqual(new Map());
     expect(
-      (await store.list("scout", await scheduler.nextRuns())).routines[0]
-        ?.nextRunAt,
+      (await store.list("scout", await scheduler.nextRuns("UTC"), "UTC"))
+        .routines[0]?.nextRunAt,
     ).toBeUndefined();
   });
 });
@@ -514,14 +658,14 @@ describe("an abandoned firing", () => {
       start: "2026-01-01T08:59:00.000Z",
       schedule: "0 9 * * *",
     });
-    await store.execute(create, USER);
+    await store.execute(create, USER, "UTC");
 
     // The isolate is killed between `#writeClaim` and `#settleFiring`: the
     // lock is durable and nothing will ever delete it.
     time.set("2026-01-01T09:00:00.000Z");
     await scheduler.settle(async () => {
       throw new DOMException("CPU time limit", "Error");
-    });
+    }, "UTC");
     // (that one settles) — now stage a genuinely orphaned lock.
     await storage.put(routineFireKeyV1("brief"), {
       schemaVersion: 1,
@@ -537,7 +681,7 @@ describe("an abandoned firing", () => {
     // object arms on is when the lease runs out — never nothing, which is what
     // let `deleteAlarm()` silence the Bot.
     time.set("2026-01-01T09:01:00.000Z");
-    expect(await scheduler.deadlines(storage)).toEqual([
+    expect(await scheduler.deadlines(storage, "UTC")).toEqual([
       Date.parse("2026-01-01T09:00:00.000Z") + ROUTINE_FIRE_LEASE_MS,
     ]);
   });
@@ -547,7 +691,7 @@ describe("an abandoned firing", () => {
       start: "2026-01-01T08:59:00.000Z",
       schedule: "0 9 * * *",
     });
-    await store.execute(create, USER);
+    await store.execute(create, USER, "UTC");
     await storage.put(routineFireKeyV1("brief"), {
       schemaVersion: 1,
       routineId: "brief",
@@ -580,7 +724,7 @@ describe("an abandoned firing", () => {
       start: "2026-01-01T08:59:00.000Z",
       schedule: "0 9 * * *",
     });
-    await store.execute(create, USER);
+    await store.execute(create, USER, "UTC");
     await storage.put(routineFireKeyV1("brief"), { schemaVersion: 99 });
 
     await scheduler.reapExpiredFirings();
@@ -596,7 +740,7 @@ describe("a firing that never comes back", () => {
       schedule: "0 9 * * *",
       fireTimeoutMs: 5,
     });
-    await store.execute(create, USER);
+    await store.execute(create, USER, "UTC");
 
     time.set("2026-01-01T09:00:00.000Z");
     let aborted = false;
@@ -610,6 +754,7 @@ describe("a firing that never comes back", () => {
           });
           void resolve;
         }),
+      "UTC",
     );
 
     expect(aborted).toBe(true);
@@ -629,7 +774,7 @@ describe("a firing that keeps failing", () => {
       start: "2026-01-01T00:00:00.000Z",
       schedule: "@every 1m",
     });
-    await store.execute(create, USER);
+    await store.execute(create, USER, "UTC");
 
     // The live wedge was `ok, ok, ok, failed, failed, …` at exactly 60s
     // intervals, for ever: every failure re-armed the next occurrence
@@ -638,7 +783,7 @@ describe("a firing that keeps failing", () => {
       scheduler.settle(async () => {
         firedAt.push(time.now().getTime());
         return { status: "failed", summary: "the provider refused" };
-      });
+      }, "UTC");
     const firedAt: number[] = [];
 
     time.set("2026-01-01T00:01:00.000Z");
@@ -662,7 +807,11 @@ describe("a firing that keeps failing", () => {
       await failing();
     }
     expect(firedAt).toHaveLength(ROUTINE_FAILURE_PAUSE_AFTER);
-    const listed = await store.list("scout", await scheduler.nextRuns());
+    const listed = await store.list(
+      "scout",
+      await scheduler.nextRuns("UTC"),
+      "UTC",
+    );
     expect(listed.routines[0]).toMatchObject({ enabled: false });
     // The reason is durable and in the run log the panel already renders.
     const runs = await storage.list<unknown>({ prefix: ROUTINE_RUN_PREFIX });
@@ -677,7 +826,7 @@ describe("a firing that keeps failing", () => {
       start: "2026-01-01T00:00:00.000Z",
       schedule: "@every 1m",
     });
-    await store.execute(create, USER);
+    await store.execute(create, USER, "UTC");
 
     time.set("2026-01-01T00:01:00.000Z");
     await drain(scheduler, { status: "failed", summary: "flaked" });
@@ -695,7 +844,7 @@ describe("a burst of missed occurrences", () => {
       start: "2026-01-01T00:00:00.000Z",
       schedule: "@every 1m",
     });
-    await store.execute(create, USER);
+    await store.execute(create, USER, "UTC");
 
     // Four minutes of stall — well inside the five-minute grace, which is
     // exactly where each occurrence used to be claimed on its own and one
@@ -715,7 +864,7 @@ describe("a failed firing", () => {
       start: "2026-01-01T00:00:00.000Z",
       schedule: "@every 1m",
     });
-    await store.execute(create, USER);
+    await store.execute(create, USER, "UTC");
 
     time.set("2026-01-01T00:01:00.000Z");
     await drain(scheduler, {
@@ -745,7 +894,7 @@ describe("a failed firing", () => {
       start: "2026-01-01T00:00:00.000Z",
       schedule: "@every 1m",
     });
-    await store.execute(create, USER);
+    await store.execute(create, USER, "UTC");
     time.set("2026-01-01T00:01:00.000Z");
     await drain(scheduler, { status: "failed", summary: "flaked" });
     time.set("2026-01-01T02:00:00.000Z");
@@ -768,7 +917,7 @@ describe("what a failing Routine tells the person", () => {
       start: "2026-01-01T00:00:00.000Z",
       schedule: "@every 1m",
     });
-    await store.execute(create, USER);
+    await store.execute(create, USER, "UTC");
     time.set("2026-01-01T00:01:00.000Z");
     const raw =
       'Bot turn ended with outcome model-error: tool occurrence "tool:1:1:1" was not settled before step end';
@@ -794,7 +943,7 @@ describe("what a failing Routine tells the person", () => {
       start: "2026-01-01T00:00:00.000Z",
       schedule: "@every 1m",
     });
-    await store.execute(create, USER);
+    await store.execute(create, USER, "UTC");
     time.set("2026-01-01T00:01:00.000Z");
     await drain(scheduler, {
       status: "failed",
@@ -815,7 +964,7 @@ describe("what a failing Routine tells the person", () => {
       start: "2026-01-01T00:00:00.000Z",
       schedule: "@every 1m",
     });
-    await store.execute(create, USER);
+    await store.execute(create, USER, "UTC");
     const failure = { status: "failed" as const, summary: "flaked" };
     for (const minute of ["00:01", "02:00", "04:00"]) {
       time.set(`2026-01-01T${minute}:00.000Z`);
@@ -839,7 +988,7 @@ describe("what a failing Routine tells the person", () => {
       start: "2026-01-01T00:00:00.000Z",
       schedule: "@every 1m",
     });
-    await store.execute(create, USER);
+    await store.execute(create, USER, "UTC");
     time.set("2026-01-01T00:01:00.000Z");
     await drain(scheduler, { status: "failed", summary: "flaked" });
     time.set("2026-01-01T02:00:00.000Z");
@@ -860,11 +1009,11 @@ describe("what a failing Routine tells the person", () => {
       start: "2026-01-01T00:00:00.000Z",
       schedule: "@every 1m",
     });
-    await store.execute(create, USER);
+    await store.execute(create, USER, "UTC");
     time.set("2026-01-01T00:01:00.000Z");
     await drain(scheduler, { status: "failed", summary: "flaked" });
 
-    const next = (await scheduler.nextRuns()).get("brief");
+    const next = (await scheduler.nextRuns("UTC")).get("brief");
     expect(next).toBeDefined();
     expect(Date.parse(next!)).toBeGreaterThan(time.now().getTime());
     expect(next).toBe(
@@ -879,7 +1028,7 @@ describe("an undecodable Routine record", () => {
       start: "2026-01-01T08:59:00.000Z",
       schedule: "0 9 * * *",
     });
-    await store.execute(create, USER);
+    await store.execute(create, USER, "UTC");
     // A record written by a newer deploy and read back after a rollback: the
     // decoder is exact-keys, so it refuses it outright.
     await storage.put("routine:from-the-future", {
@@ -892,10 +1041,10 @@ describe("an undecodable Routine record", () => {
     // runs inside `completeRun`, `failRun` and `acceptRun`: a throw here used
     // to poison every alarm refresh and every Turn settlement of the object.
     time.set("2026-01-01T09:00:00.000Z");
-    expect(await scheduler.deadlines(storage)).toEqual([
+    expect(await scheduler.deadlines(storage, "UTC")).toEqual([
       Date.parse("2026-01-01T09:00:00.000Z"),
     ]);
-    expect(await scheduler.nextRuns()).toEqual(
+    expect(await scheduler.nextRuns("UTC")).toEqual(
       new Map([["brief", "2026-01-01T09:00:00.000Z"]]),
     );
     // And the healthy Routine still fires.
@@ -916,7 +1065,7 @@ describe("a Routine deleted while it was firing", () => {
       start: "2026-01-01T08:59:00.000Z",
       schedule: "0 9 * * *",
     });
-    await store.execute(create, USER);
+    await store.execute(create, USER, "UTC");
     time.set("2026-01-01T09:00:00.000Z");
 
     const inbox = new RoutineInboxStore(storage);
@@ -931,9 +1080,10 @@ describe("a Routine deleted while it was firing", () => {
           routineId: "brief",
         },
         USER,
+        "UTC",
       );
       return { status: "failed", summary: "the model refused" };
-    });
+    }, "UTC");
 
     expect(
       storage.keys().filter((key) => key.startsWith(ROUTINE_RUN_PREFIX)),
@@ -941,7 +1091,7 @@ describe("a Routine deleted while it was firing", () => {
     expect(await inbox.list()).toEqual([]);
     expect(await storage.get(routineFireKeyV1("brief"))).toBeUndefined();
     expect(await storage.get(routineScheduleKeyV1("brief"))).toBeUndefined();
-    expect(await scheduler.deadlines(storage)).toEqual([]);
+    expect(await scheduler.deadlines(storage, "UTC")).toEqual([]);
   });
 
   test("a firing whose Routine still exists settles as it always did", async () => {
@@ -949,7 +1099,7 @@ describe("a Routine deleted while it was firing", () => {
       start: "2026-01-01T08:59:00.000Z",
       schedule: "0 9 * * *",
     });
-    await store.execute(create, USER);
+    await store.execute(create, USER, "UTC");
     time.set("2026-01-01T09:00:00.000Z");
     const inbox = new RoutineInboxStore(storage);
     await drain(scheduler, { status: "failed", summary: "the model refused" });
@@ -973,7 +1123,7 @@ describe("a stored schedule with no occurrence left", () => {
       start: "2026-01-01T00:00:00.000Z",
       schedule: "0 9 * * *",
     });
-    await store.execute(create, USER);
+    await store.execute(create, USER, "UTC");
     // February the 30th, straight into storage, past the write-time guard.
     const stored = (await storage.get(routineKeyV1("brief"))) as Record<
       string,
@@ -987,13 +1137,13 @@ describe("a stored schedule with no occurrence left", () => {
 
     expect(await drain(scheduler)).toEqual([]);
 
-    const listed = await store.list("scout");
+    const listed = await store.list("scout", undefined, "UTC");
     expect(listed.routines[0]!.enabled).toBe(false);
     const runs = await store.listRuns("scout", "brief");
     expect(runs.entries[0]!.status).toBe("skipped");
     expect(runs.entries[0]!.summary).toContain("never comes around again");
     // And the alarm no longer has anything to arm on for it.
-    expect(await scheduler.deadlines(storage)).toEqual([]);
+    expect(await scheduler.deadlines(storage, "UTC")).toEqual([]);
 
     // Draining again does not fire it either: it is off and its clock is gone.
     expect(await drain(scheduler)).toEqual([]);

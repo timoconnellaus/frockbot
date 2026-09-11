@@ -20,7 +20,6 @@
 // check a write must pass, and no webhook key: a webhook Routine records the
 // trigger kind, and minting is D3's.
 import {
-  isRoutineTimezoneV1,
   nextRoutineRunV1,
   normalizeRoutineScheduleV1,
   RoutineScheduleError,
@@ -149,8 +148,6 @@ export interface RoutineFiringSeamV1 {
 }
 
 export interface RoutineStoreOptionsV1 {
-  /** The zone a Routine that names none is scheduled in. */
-  defaultTimezone?: string;
   /** Injected so a test can pin a clock; production passes nothing. */
   now?(): Date;
   /** Injected so a test can pin an id; production passes nothing. */
@@ -184,6 +181,7 @@ function writerView(writer: RoutineWriterV1): RoutineWriterViewV1 {
  */
 export function routineViewV1(
   record: RoutineRecordV1,
+  timezone: string,
   nextRunAt?: string,
   hookKeyVersion?: number,
 ): RoutineViewV1 {
@@ -192,7 +190,7 @@ export function routineViewV1(
     routineId: record.routineId,
     name: record.name,
     prompt: record.prompt,
-    timezone: record.timezone,
+    timezone,
     enabled: record.enabled,
     createdBy: writerView(record.createdBy),
     updatedBy: writerView(record.updatedBy),
@@ -248,7 +246,6 @@ export async function appendRoutineRunEntryV1(
 
 export class RoutineStore {
   readonly #storage: RoutineStorageV1;
-  readonly #defaultTimezone: string;
   readonly #now: () => Date;
   readonly #newRoutineId: () => string;
   readonly #firings: RoutineFiringSeamV1 | undefined;
@@ -256,7 +253,6 @@ export class RoutineStore {
 
   constructor(storage: RoutineStorageV1, options: RoutineStoreOptionsV1 = {}) {
     this.#storage = storage;
-    this.#defaultTimezone = options.defaultTimezone ?? "UTC";
     this.#now = options.now ?? (() => new Date());
     this.#newRoutineId = options.newRoutineId ?? (() => crypto.randomUUID());
     this.#firings = options.firings;
@@ -270,7 +266,8 @@ export class RoutineStore {
    */
   async list(
     botId: string,
-    nextRuns?: ReadonlyMap<string, string>,
+    nextRuns: ReadonlyMap<string, string> | undefined,
+    timezone: string,
   ): Promise<RoutineListViewV1> {
     const stored = await this.#storage.list<unknown>({
       prefix: ROUTINE_PREFIX,
@@ -287,6 +284,7 @@ export class RoutineStore {
       views.push(
         routineViewV1(
           record,
+          timezone,
           nextRuns?.get(record.routineId),
           key === undefined
             ? undefined
@@ -474,6 +472,7 @@ export class RoutineStore {
   async execute(
     command: RoutineCommandV1,
     writer: RoutineWriterV1,
+    timezone: string,
   ): Promise<RoutineCommandReceiptV1> {
     const fingerprint = routineCommandFingerprintV1(command);
     // A refused command is returned out of the transaction rather than thrown
@@ -500,7 +499,7 @@ export class RoutineStore {
       }
       let receipt: RoutineCommandReceiptV1;
       try {
-        receipt = await this.#apply(transaction, command, writer);
+        receipt = await this.#apply(transaction, command, writer, timezone);
       } catch (error) {
         return { ok: false, error };
       }
@@ -521,6 +520,7 @@ export class RoutineStore {
     transaction: RoutineStorageWritesV1,
     command: RoutineCommandV1,
     writer: RoutineWriterV1,
+    timezone: string,
   ): Promise<RoutineCommandReceiptV1> {
     const at = this.#now().toISOString();
     if (command.type === "routine/create") {
@@ -540,13 +540,11 @@ export class RoutineStore {
       if (await transaction.get<unknown>(routineKeyV1(routineId))) {
         throw new RoutineDecodeError(`Routine "${routineId}" already exists`);
       }
-      const timezone = command.timezone ?? this.#defaultTimezone;
       const draft: RoutineRecordV1 = {
         schemaVersion: 1,
         routineId,
         name: command.name,
         prompt: command.prompt,
-        timezone,
         enabled: true,
         createdBy: writer,
         updatedBy: writer,
@@ -557,7 +555,7 @@ export class RoutineStore {
           : { schedule: command.schedule }),
         ...(command.trigger === undefined ? {} : { trigger: command.trigger }),
       };
-      const record = this.#validated(draft);
+      const record = this.#validated(draft, timezone);
       await transaction.put(routineKeyV1(routineId), record);
       // A webhook Routine is useless without a door key, so creating one mints
       // it in the same transaction. It is handed back once and never stored.
@@ -569,7 +567,7 @@ export class RoutineStore {
         schemaVersion: 1,
         commandId: command.commandId,
         status: "applied",
-        routine: routineViewV1(record, undefined, minted?.keyVersion),
+        routine: routineViewV1(record, timezone, undefined, minted?.keyVersion),
         ...(minted ? { hook: minted.mint } : {}),
       };
     }
@@ -615,7 +613,7 @@ export class RoutineStore {
           schemaVersion: 1,
           commandId: command.commandId,
           status: "applied",
-          routine: routineViewV1(current),
+          routine: routineViewV1(current, timezone),
         };
       }
       if (!this.#hookKeys) {
@@ -628,7 +626,12 @@ export class RoutineStore {
         schemaVersion: 1,
         commandId: command.commandId,
         status: "applied",
-        routine: routineViewV1(current, undefined, minted?.keyVersion),
+        routine: routineViewV1(
+          current,
+          timezone,
+          undefined,
+          minted?.keyVersion,
+        ),
         ...(minted ? { hook: minted.mint } : {}),
       };
     }
@@ -684,9 +687,6 @@ export class RoutineStore {
         ...current,
         ...(command.name === undefined ? {} : { name: command.name }),
         ...(command.prompt === undefined ? {} : { prompt: command.prompt }),
-        ...(command.timezone === undefined
-          ? {}
-          : { timezone: command.timezone }),
         ...(command.enabled === undefined ? {} : { enabled: command.enabled }),
         updatedBy: writer,
         updatedAt: at,
@@ -698,7 +698,7 @@ export class RoutineStore {
         if (command.trigger !== undefined) next.trigger = command.trigger;
       }
     }
-    const record = this.#validated(next);
+    const record = this.#validated(next, timezone);
     await transaction.put(routineKeyV1(record.routineId), record);
     // A Routine that has just become a webhook needs a key; one that has just
     // stopped being one must not keep a live door.
@@ -717,6 +717,7 @@ export class RoutineStore {
       status: "applied",
       routine: routineViewV1(
         record,
+        timezone,
         undefined,
         minted?.keyVersion ??
           (record.trigger?.kind === "webhook" && held !== undefined
@@ -771,21 +772,13 @@ export class RoutineStore {
    * timezone is resolved so a bad one is a rejected command rather than a dead
    * alarm, and nothing here computes a next firing.
    */
-  #validated(record: RoutineRecordV1): RoutineRecordV1 {
+  #validated(record: RoutineRecordV1, timezone: string): RoutineRecordV1 {
     const decoded = decodeRoutineRecordV1(record);
     requireScheduleXorTriggerV1(decoded);
-    if (!isRoutineTimezoneV1(decoded.timezone)) {
-      throw new RoutineDecodeError(
-        `timezone "${decoded.timezone}" is not an IANA time zone`,
-      );
-    }
     if (decoded.schedule !== undefined) {
       let normalized;
       try {
-        normalized = normalizeRoutineScheduleV1(
-          decoded.schedule,
-          decoded.timezone,
-        );
+        normalized = normalizeRoutineScheduleV1(decoded.schedule, timezone);
       } catch (error) {
         throw new RoutineDecodeError(
           error instanceof RoutineScheduleError
@@ -801,7 +794,7 @@ export class RoutineStore {
       const now = this.#now();
       if (nextRoutineRunV1(normalized, now, now) === undefined) {
         throw new RoutineDecodeError(
-          `schedule "${decoded.schedule}" never comes around again in ${decoded.timezone}`,
+          `schedule "${decoded.schedule}" never comes around again in ${timezone}`,
         );
       }
     }

@@ -40,7 +40,6 @@ function createCommand(botId: string, overrides: Record<string, unknown> = {}) {
     name: "Morning brief",
     prompt: "Summarize overnight email.",
     schedule: "0 7 * * *",
-    timezone: "Australia/Sydney",
     ...overrides,
   };
 }
@@ -70,7 +69,9 @@ describe("Routines round-trip through the gateway", () => {
     expect(listed.routines[0]).toMatchObject({
       name: "Morning brief",
       schedule: "0 7 * * *",
-      timezone: "Australia/Sydney",
+      // The create command names no zone: the view carries the account's,
+      // which for a User who has not chosen one in Profile is UTC.
+      timezone: "UTC",
       enabled: true,
       createdBy: { kind: "user" },
     });

@@ -846,7 +846,7 @@ describe("User settings backend Contribution", () => {
     ).toEqual({
       schemaVersion: 1,
       revision: 0,
-      profile: { name: USER_PROFILE_PLACEHOLDER_NAME_V1 },
+      profile: { name: USER_PROFILE_PLACEHOLDER_NAME_V1, timezone: "UTC" },
       packages: [],
       connections: [],
     });
@@ -857,15 +857,36 @@ describe("User settings backend Contribution", () => {
       command: {
         schemaVersion: 1,
         type: "user/update-profile",
-        commandId: "rename-user",
+        commandId: "update-profile",
         expectedRevision: 0,
-        profile: { name: "Tim" },
+        profile: { name: "Tim", timezone: "Australia/Sydney" },
       },
     });
 
     expect(
       await storage.get<UserSettingsViewV1>("user-configuration"),
-    ).toMatchObject({ revision: 1, profile: { name: "Tim" } });
+    ).toMatchObject({
+      revision: 1,
+      profile: { name: "Tim", timezone: "Australia/Sydney" },
+    });
+
+    await settings.executeConfiguration({
+      schemaVersion: 1,
+      userId: "user-1",
+      command: {
+        schemaVersion: 1,
+        type: "user/update-profile",
+        commandId: "rename-only",
+        expectedRevision: 1,
+        profile: { name: "Timothy" },
+      },
+    });
+    expect(
+      await storage.get<UserSettingsViewV1>("user-configuration"),
+    ).toMatchObject({
+      revision: 2,
+      profile: { name: "Timothy", timezone: "Australia/Sydney" },
+    });
   });
 
   test("admits only Packages declared by the immutable application", async () => {

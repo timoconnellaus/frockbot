@@ -24,16 +24,16 @@ const CONTEXT = {
   signal: new AbortController().signal,
 };
 
+const ZONE = "Australia/Sydney";
+
 function host(): RoutinesRuntimeHostV1 & { store: RoutineStore } {
-  const store = new RoutineStore(createMemoryRoutineStorageV1(), {
-    defaultTimezone: "Australia/Sydney",
-  });
+  const store = new RoutineStore(createMemoryRoutineStorageV1());
   return {
     botId: "scout",
     writer: WRITER,
     store,
-    list: () => store.list("scout"),
-    execute: (command, writer) => store.execute(command, writer),
+    list: () => store.list("scout", undefined, ZONE),
+    execute: (command, writer) => store.execute(command, writer, ZONE),
   };
 }
 
@@ -176,6 +176,15 @@ describe("routine_manage", () => {
       false,
     );
     expect(tool.validate?.({ action: "pause", secret: "x" })).toBe(false);
+    expect(
+      tool.validate?.({
+        action: "create",
+        name: "Brief",
+        prompt: "Do it",
+        schedule: "@daily",
+        timezone: "Australia/Sydney",
+      }),
+    ).toBe(false);
     expect(tool.validate?.({ action: "pause", routineId: "brief" })).toBe(true);
   });
 });
@@ -195,9 +204,9 @@ describe("a Routine the User created", () => {
         name: "Minute ping",
         prompt: "Say ping.",
         schedule: "@every 1m",
-        timezone: "UTC",
       },
       { kind: "user" },
+      ZONE,
     );
     return seam;
   }

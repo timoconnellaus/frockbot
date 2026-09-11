@@ -24,6 +24,7 @@ import {
   decodeUserSettingsViewV1,
   migrateStoredUserSettingsV1,
   MAX_USER_CONNECTIONS_V1,
+  userTimezoneV1,
   USER_PROFILE_PLACEHOLDER_NAME_V1,
   type ConnectionView,
   type ExecutionPackageDefinition,
@@ -135,7 +136,7 @@ function initialState(): UserSettingsViewV1 {
   return {
     schemaVersion: 1,
     revision: 0,
-    profile: { name: USER_PROFILE_PLACEHOLDER_NAME_V1 },
+    profile: { name: USER_PROFILE_PLACEHOLDER_NAME_V1, timezone: "UTC" },
     packages: [],
     connections: [],
   };
@@ -215,7 +216,14 @@ function applyUserCommand(
   const revision = current.revision + 1;
   switch (command.type) {
     case "user/update-profile":
-      return { ...current, revision, profile: command.profile };
+      return {
+        ...current,
+        revision,
+        profile: {
+          ...command.profile,
+          timezone: command.profile.timezone ?? userTimezoneV1(current.profile),
+        },
+      };
     case "user/choose-model-provider":
       return chooseProvider(current, command.packageId);
     case "user/set-account-model": {
