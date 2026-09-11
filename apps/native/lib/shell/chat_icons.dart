@@ -2,7 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
-enum ChatIconKind { computer, routines, settings, applet, panel, send }
+enum ChatIconKind { computer, routines, settings, applet, panel, send, mic }
 
 /// One light stroke weight for the compact chat chrome, independent of the
 /// platform's bundled Material glyph weight.
@@ -93,6 +93,22 @@ class _ChatIconPainter extends CustomPainter {
         path.moveTo(6, 10);
         path.lineTo(12, 4);
         path.lineTo(18, 10);
+      case ChatIconKind.mic:
+        // The capsule, its cradle, the stem and the foot share one vertical
+        // axis at 12 and span 3..21, so the glyph sits where the send arrow
+        // does rather than where the bundled Material mic happens to.
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(
+            const Rect.fromLTWH(9, 3, 6, 10),
+            const Radius.circular(3),
+          ),
+          paint,
+        );
+        path.addArc(const Rect.fromLTWH(6, 5, 12, 12), 0, math.pi);
+        path.moveTo(12, 17);
+        path.lineTo(12, 21);
+        path.moveTo(9, 21);
+        path.lineTo(15, 21);
       case ChatIconKind.applet:
         canvas.drawRRect(
           RRect.fromRectAndRadius(
