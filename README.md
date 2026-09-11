@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/marketing/frockbot-readme-banner.png" alt="FrockBot: a team of bots that finishes the job." width="100%">
+</p>
+
 # FrockBot
 
 FrockBot is an experimental application for persistent conversational bots. The hosted WebUI and cloud backend provide the product path.
