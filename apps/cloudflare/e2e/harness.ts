@@ -836,6 +836,23 @@ export async function startHarness(
       "--persist-to",
       persistDirectory,
     ]);
+    // The Better Auth tables, in the same fresh state directory. Development
+    // sign-in never reads them, but Site administration lists the accounts
+    // from the `user` table, and without the migration that read answers
+    // `D1_ERROR: no such table: user` — which a spec that opens Admin sees as
+    // a 500 no test allowed.
+    await run("bunx", [
+      "wrangler",
+      "--env",
+      "e2e",
+      "d1",
+      "migrations",
+      "apply",
+      "frockbot-auth-e2e",
+      "--local",
+      "--persist-to",
+      persistDirectory,
+    ]);
 
     ollama = await startFakeOllama(options.ollamaPort);
 
