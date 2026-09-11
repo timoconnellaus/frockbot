@@ -17,13 +17,6 @@ const roots: string[] = [];
 function git(root: string, ...args: string[]) {
   const result = Bun.spawnSync(["git", ...args], { cwd: root, env: GIT_ENV });
   if (result.exitCode) throw new Error(result.stderr.toString());
-}
-function gitOutput(root: string, ...args: string[]) {
-  const result = Bun.spawnSync(["git", ...args], {
-    cwd: root,
-    env: GIT_ENV,
-  });
-  if (result.exitCode) throw new Error(result.stderr.toString());
   return result.stdout.toString().trim();
 }
 function fixture() {
@@ -80,10 +73,10 @@ test("a test run under a git hook leaves the hooked repository untouched", () =>
   );
   expect(child.stderr.toString()).toContain(" 1 pass");
   expect(child.exitCode).toBe(0);
-  expect(gitOutput(hooked, "config", "--bool", "core.bare")).toBe("false");
-  expect(gitOutput(hooked, "config", "core.hooksPath")).toBe("hooks-of-hooked");
-  expect(gitOutput(hooked, "rev-list", "--count", "HEAD")).toBe("1");
-  expect(gitOutput(hooked, "status", "--porcelain")).toBe("");
+  expect(git(hooked, "config", "--bool", "core.bare")).toBe("false");
+  expect(git(hooked, "config", "core.hooksPath")).toBe("hooks-of-hooked");
+  expect(git(hooked, "rev-list", "--count", "HEAD")).toBe("1");
+  expect(git(hooked, "status", "--porcelain")).toBe("");
 });
 
 test("a category runs under the shell's environment, not git's hook environment", async () => {
