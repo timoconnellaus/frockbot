@@ -1,113 +1,45 @@
-name: CI
+name: Main
+
+# Everything a landed change owes, once per landed change rather than once
+# per push: the fast tier `check.yml` ran on the pull request's own head, now
+# on the merge commit — a pull request merges without rebasing, so this is
+# the first time the combination exists — and then the slow tier: the
+# Cloudflare app's workerd and integration suites, the real build, and the
+# browser suite across four runners.
+#
+# Green here does three things in order: deploys staging, cuts the next patch
+# tag, and starts `release.yml` for it. Production still moves only behind
+# that workflow's approval gate on the `production` environment — see
+# `README.md` → Releases. Red here blocks nobody's merge; it blocks the
+# deploy, and the fix is the next pull request.
 
 on:
+  push:
+    branches:
+      - main
+    # Documentation is `docs/**` and the Markdown files at the repository
+    # root. Markdown anywhere else is code: a Package may ship a Skill or a
+    # prompt as `.md`. A push that only touches documentation changes nothing
+    # deployable, so it starts no run at all — and, unlike a job-level skip,
+    # it cannot displace a queued run for a code change.
+    paths-ignore:
+      - "docs/**"
+      - "*.md"
   workflow_dispatch:
 
 permissions:
   contents: read
 
+# One run at a time, and at most one waiting: a burst of merges collapses to
+# the run in progress plus one for the newest head, which covers every commit
+# between. This is also what makes the tag numbering below race-free.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  group: main
+  cancel-in-progress: false
 
 jobs:
-  changes:
-    # Classifies what a run touches so a documentation-only change — a plan,
-    # an ADR, a README — does not spend nine minutes of Validate and four
-    # browser runners proving code it never changed. This is a job-level
-    # decision, not a workflow `paths-ignore`: the `main` ruleset requires the
-    # `Validate` and `Browser end-to-end` checks by name, and a check whose
-    # workflow never ran stays pending forever, while a job skipped by its
-    # `if` reports `skipped`, which the ruleset accepts.
-    #
-    # What counts as documentation is decided by `scripts/docs-only.sh`, the
-    # same script the pre-commit hook runs, so a commit the hook waved through
-    # as documentation is one this job classifies the same way.
-    name: Classify changes
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    outputs:
-      docs-only: ${{ steps.classify.outputs.docs-only }}
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          # The diff below needs both ends of the range to be present.
-          fetch-depth: 0
-
-      - name: Classify changed paths
-        id: classify
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          BASE_REF: ${{ github.base_ref }}
-          BEFORE_SHA: ${{ github.event.before }}
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          case "$EVENT_NAME" in
-            pull_request)
-              range="origin/${BASE_REF}...HEAD"
-              ;;
-            push)
-              # A branch creation has no `before`; treat it as a full run.
-              if [[ -z "$BEFORE_SHA" || "$BEFORE_SHA" =~ ^0+$ ]]; then
-                echo "docs-only=false" >> "$GITHUB_OUTPUT"
-                exit 0
-              fi
-              range="${BEFORE_SHA}..HEAD"
-              ;;
-            *)
-              # `workflow_dispatch` is a person asking for the whole suite.
-              echo "docs-only=false" >> "$GITHUB_OUTPUT"
-              exit 0
-              ;;
-          esac
-
-          changed="$(git diff --name-only "$range")"
-          printf 'Changed:\n%s\n' "${changed:-<none>}"
-
-          docs_only=false
-          if printf '%s\n' "$changed" | bash scripts/docs-only.sh; then
-            docs_only=true
-          fi
-
-          echo "docs-only=$docs_only"
-          echo "docs-only=$docs_only" >> "$GITHUB_OUTPUT"
-
-  docs:
-    # The one check a documentation change still owes: Prettier formats
-    # Markdown, and a plan that fails `format:check` would break the next
-    # code change's Validate instead of its own.
-    name: Check documentation
-    needs: changes
-    if: needs.changes.outputs.docs-only == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Set up Bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
-        with:
-          bun-version: 1.3.6
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Check formatting
-        run: bun run format:check
-
   validate:
     name: Validate
-    needs: changes
-    if: needs.changes.outputs.docs-only != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -137,56 +69,24 @@ jobs:
       - name: Test Cloudflare runtime compatibility
         run: bun run --filter @frockbot/cloudflare test:workerd
 
-      # `test:integration` builds the real artifact, which begins with
-      # `flutter build web`, so the SDK is needed here as it is for the shards.
-      - name: Set up Flutter
-        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
-        with:
-          flutter-version: 3.47.0
-          channel: stable
-
-      - name: Test Cloudflare integration
-        # `SELF.fetch` through the real gateway, the real built artifact and the
-        # real Durable Objects. The provider is stubbed at the outbound seam and
-        # authentication uses the development identity, so this needs no secret.
-        run: bun run --filter @frockbot/cloudflare test:integration
-
-      # No Docker: this is the decoders, the shard function, the router, and
-      # the container server against a fake SpritesClient. The container image
-      # and a real Sprite are the opt-in `test:live`, run by hand.
-      - name: Test Computer host
-        run: bun run --filter @frockbot/computer-host test
-
-      # The outbound WebSocket bridge in workerd, against a Worker
-      # impersonating the Sprites API at the outbound seam. No Docker, no
-      # Sprites cloud: the handshake, the socket pair and the pumping are the
-      # runtime's own, which is the part the injected fakes cannot model.
-      - name: Test Computer host runtime
-        run: bun run --filter @frockbot/computer-host test:workerd
-
-      # No Docker: the contract's decoders, the shard function, and the build
-      # pipeline run in-process against the SDK's own template. The container
-      # image is the opt-in Docker build documented in the app's README.
-      - name: Test Applet build service
-        run: bun run --filter @frockbot/applet-build test
-
-      # The front Worker in workerd — the token check and the forward — against
-      # a Worker impersonating the container at the binding it already uses.
-      - name: Test Applet build service runtime
-        run: bun run --filter @frockbot/applet-build test:workerd
-
-      # The web client is Flutter Web now: `client:build` runs `flutter build
-      # web` in `apps/native` and stages the payload the Worker's `assets`
-      # binding uploads, and `build` reaches that through `artifact:build`. The
-      # SDK is pinned to the revision `apps/native/qualification.json` records
-      # and `native.yml` checks for, so CI builds the client the qualification
-      # was taken against.
+      # `test:integration` and `build` both begin with `flutter build web` in
+      # `apps/native`: the web client is Flutter Web, and `client:build` stages
+      # the payload the Worker's `assets` binding uploads. The SDK is pinned to
+      # the revision `apps/native/qualification.json` records and `native.yml`
+      # checks for, so this builds the client the qualification was taken
+      # against.
       - name: Set up Flutter
         uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
         with:
           flutter-version: 3.47.0
           channel: stable
           cache: true
+
+      - name: Test Cloudflare integration
+        # `SELF.fetch` through the real gateway, the real built artifact and the
+        # real Durable Objects. The provider is stubbed at the outbound seam and
+        # authentication uses the development identity, so this needs no secret.
+        run: bun run --filter @frockbot/cloudflare test:integration
 
       - name: Build
         run: bun run build
@@ -196,11 +96,8 @@ jobs:
     # Deliberately not `needs: validate`. This job shares nothing with Validate
     # — it installs its own dependencies and the harness builds the artifact
     # itself — so gating it behind Validate only made a two-minute job wait
-    # nine minutes for an answer it never reads. The cost is that a push which
-    # fails typecheck still spends these runners; `deploy-staging` below is
-    # where the two are actually required to agree.
-    needs: changes
-    if: needs.changes.outputs.docs-only != 'true'
+    # nine minutes for an answer it never reads. `deploy-staging` below is
+    # where the two are required to agree.
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -321,34 +218,6 @@ jobs:
           retention-days: 7
           if-no-files-found: warn
 
-  e2e-gate:
-    # The `main` ruleset requires a check by this exact name, and sharding the
-    # job renamed the four that do the work — a required check that no job
-    # reports blocks every pull request forever. This job keeps the name
-    # stable, so the shard count stays a one-line edit to `matrix.shard`
-    # rather than a change to the repository's protection rules.
-    #
-    # It also passes when the shards were skipped because the change was
-    # documentation only: that is the one skip this job knows the reason for.
-    name: Browser end-to-end
-    needs: [changes, e2e]
-    if: ${{ !cancelled() }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-
-    steps:
-      - name: Require every shard to have passed
-        # A matrix result is `success` only when no leg failed, and `fail-fast`
-        # is off, so this reports on the whole suite rather than the first loss.
-        env:
-          SHARDS: ${{ needs.e2e.result }}
-          DOCS_ONLY: ${{ needs.changes.outputs.docs-only }}
-        run: |
-          echo "Browser end-to-end shards: $SHARDS (docs-only: $DOCS_ONLY)"
-          if [[ "$SHARDS" == "success" ]]; then exit 0; fi
-          if [[ "$SHARDS" == "skipped" && "$DOCS_ONLY" == "true" ]]; then exit 0; fi
-          exit 1
-
   e2e-report:
     name: Browser end-to-end report
     needs: e2e
@@ -392,12 +261,10 @@ jobs:
 
   deploy-staging:
     name: Deploy staging
-    # Staging follows the branch: merging to main integrates code and shows it
-    # running at staging-bot.frockbot.com. Production still follows the tag
-    # (`release.yml`), so nothing here can ship to bot.frockbot.com.
-    #
-    # A documentation-only push skips Validate and the shards, and this job
-    # is skipped with them: nothing deployable changed.
+    # Staging follows the branch: a landed change shows up running at
+    # staging-bot.frockbot.com as soon as the slow tier passes. Production
+    # follows the tag that `release` below cuts, so nothing here can ship to
+    # bot.frockbot.com.
     needs: [validate, e2e]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
@@ -655,3 +522,58 @@ jobs:
           NODE
 
           bunx wrangler deploy --env staging --secrets-file "$secrets_file"
+
+  release:
+    name: Cut release tag
+    # Tagging ships, and this is the tag. The next patch number after the
+    # highest `vX.Y.Z` on the repository is created on the revision staging is
+    # now running, and `release.yml` is started for it. A minor or major bump
+    # is a tag pushed by hand; this job simply continues from whatever is
+    # highest. If the head is already tagged — a hand-cut release that then
+    # merged — there is nothing to cut.
+    #
+    # `release.yml` is started with `workflow run` rather than left to notice
+    # the tag: a tag created with `GITHUB_TOKEN` fires no `push` event, and
+    # `workflow_dispatch` is the one trigger that token may raise.
+    needs: deploy-staging
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      actions: write
+
+    steps:
+      - name: Cut the next patch tag and start the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          refs="$(gh api --paginate "repos/$GH_REPO/git/matching-refs/tags/v" \
+            --jq '.[] | "\(.ref | ltrimstr("refs/tags/")) \(.object.sha)"')"
+
+          if grep -Eq "^v[0-9]+\.[0-9]+\.[0-9]+ $SHA$" <<<"$refs"; then
+            echo "$SHA is already a release tag; nothing to cut"
+            exit 0
+          fi
+
+          latest="$(grep -Eo '^v[0-9]+\.[0-9]+\.[0-9]+ ' <<<"$refs" \
+            | tr -d ' ' | sort -V | tail -n 1)"
+          if [[ -z "$latest" ]]; then
+            echo "no vX.Y.Z tag exists to continue from; push the first by hand" >&2
+            exit 1
+          fi
+
+          IFS=. read -r major minor patch <<<"${latest#v}"
+          tag="v$major.$minor.$((patch + 1))"
+
+          gh api -X POST "repos/$GH_REPO/git/refs" \
+            -f ref="refs/tags/$tag" -f sha="$SHA" >/dev/null
+          echo "created $tag at $SHA"
+
+          gh workflow run release.yml --ref "$tag"
+          echo "started release.yml for $tag"
+          echo "Cut \`$tag\` at \`$SHA\` and started the release; approve it under the \`production\` environment to deploy." >> "$GITHUB_STEP_SUMMARY"

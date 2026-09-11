@@ -111,30 +111,33 @@ Five layers, each answering a different question. The first four run in CI; the 
 
 Root `bun test` covers unit tests; runtime, integration and browser tests use
 separate suffixes and commands. Pre-commit formats staged files. Pre-push runs
-`bun run validate`, reusing successful categories for the exact commit and a
-clean code checkout. Run `bun run validate unit integration` to populate selected
-receipts while working. [Local validation](docs/local-validation.md) explains
-cache rules, worktree isolation and restoring automatic CI.
+the fast tier — `bun run validate format typecheck unit` — reusing successful
+categories for the exact commit and a clean code checkout; the slow tier runs
+on `main` after the merge. Run `bun run validate` for everything, or
+`bun run validate unit integration` to populate selected receipts while working.
+[Local validation](docs/local-validation.md) explains the cache rules, worktree
+isolation, and the GitHub configuration the pipeline depends on.
 
 ## Releases
 
-Merging integrates; tagging ships. A pull request is queued to merge itself once the lightweight PR gate passes (`auto-merge.yml`), so `main` stays continuously integrated and nothing about landing a change touches production. Production moves only when a maintainer pushes a version tag.
+Merging integrates; tagging ships. The pipeline has four stages, and a person decides at two of them:
 
-Pushing a valid SemVer tag such as `v0.1.0` or `v0.1.0-rc.1` (build metadata such as `+build.1` is rejected because npm does not accept it in package versions) validates the monorepo, publishes `applets/sdk` to npm with the tag's version — the one workspace whose manifest declares `frockbot.npm` — creates a GitHub release with generated notes, and then deploys production. Prereleases use npm's `next` dist-tag rather than `latest`. Application workspaces remain private.
+1. **Pull request** — `check.yml` runs the fast tier (format, typecheck, unit tests, the two small package suites) in a couple of minutes. It needs no secret, so a fork's pull request runs it too. It is the one check the `main` ruleset requires.
+2. **Merge** — a maintainer clicks merge. There is no auto-merge: a green pull request waits for a person. A branch need not be rebased first; the ruleset does not require it to be up to date, because at this merge rate that was a rebase-and-rerun loop. (GitHub's merge queue would prove the combination before landing it, but it is only offered on organization-owned repositories.)
+3. **`main`** — `main.yml` runs everything once per landed change, on the merge commit itself: the fast tier again, then the Cloudflare workerd and integration suites, the real build, and the browser suite across four runners. Green deploys staging, cuts the next patch tag on that revision, and starts `release.yml` for it. Red ships nothing, and the fix is the next pull request. A push that touches only `docs/**` and root Markdown starts no run.
+4. **Production** — `release.yml` verifies the tag, then its deploy jobs wait on the `production` environment, whose required reviewer is the maintainer. One approval on the run's page deploys bot.frockbot.com and frockbot.com, and only then publishes `applets/sdk` to npm and creates the GitHub release. A run nobody approves ships nothing; approve the newest and cancel the rest.
 
-Auto-merge waits on the branch ruleset for `main`, which requires `PR gate` and an up-to-date branch. That ruleset is what holds a queued pull request back; without it GitHub has nothing to wait for and would merge on open. **Allow auto-merge** must also be enabled in the repository's settings.
+Pushing a valid SemVer tag by hand — `v0.8.0` for a minor bump, `v0.8.0-rc.1` for a prerelease — runs the same release workflow with the same approval; the automatic cut continues from whatever tag is highest. Build metadata such as `+build.1` is rejected because npm does not accept it in package versions. Prereleases use npm's `next` dist-tag rather than `latest`. Application workspaces remain private.
 
-One pull request cannot queue itself: GitHub refuses to let `GITHUB_TOKEN` auto-merge anything that edits `.github/workflows/`, since that needs a `workflows` scope the Actions token cannot hold. A pull request that changes CI is merged by hand and the workflow logs a warning saying so.
-
-Neither leg is finished when it starts, so `scripts/ci-watch.ts` watches each to a terminal state and reduces it to an exit code — `0` landed, `1` failed, `2` still pending:
+Neither leg is finished when it starts, so `scripts/ci-watch.ts` watches each to a terminal state and reduces it to an exit code — `0` green or landed, `1` failed, `2` still pending:
 
 ```
-bun scripts/ci-watch.ts pr 128           # polls until merged, or names the red check
+bun scripts/ci-watch.ts pr 128           # polls until green and ready to merge, or names the red check
 bun scripts/ci-watch.ts release v0.2.0   # polls until production deployed
 bun scripts/ci-watch.ts pr 128 --once    # report now and exit, for a caller that paces itself
 ```
 
-It reports the two quiet failures by name rather than waiting them out: a pull request whose checks all passed but whose merge was never queued, and a release whose packages published while `Deploy FrockBot app` failed — a GitHub release standing in front of a production that never moved.
+It names the quiet failures rather than waiting them out: a release whose packages published while `Deploy FrockBot app` failed, or one that completed without ever running the deploy jobs. A release parked at the approval gate is reported as waiting, not failed.
 
 ### Trusted publishing
 

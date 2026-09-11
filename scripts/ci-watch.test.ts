@@ -92,7 +92,6 @@ describe("pull request leg", () => {
           statusCheckRollup: [
             { name: "Validate", status: "IN_PROGRESS", conclusion: "" },
           ],
-          autoMergeRequest: { enabledAt: "now" },
         },
       }),
       128,
@@ -101,7 +100,7 @@ describe("pull request leg", () => {
     expect(report.summary).toContain("Validate");
   });
 
-  test("green checks with the merge queued is still pending", async () => {
+  test("green checks on an open pull request is the session's terminal state", async () => {
     const report = await pullRequestReport(
       fakeGitHub({
         pr: {
@@ -109,31 +108,12 @@ describe("pull request leg", () => {
           statusCheckRollup: [
             { name: "Validate", status: "COMPLETED", conclusion: "SUCCESS" },
           ],
-          autoMergeRequest: { enabledAt: "now" },
         },
       }),
       128,
     );
-    expect(report.status).toBe("pending");
-    expect(report.summary).toContain("queued to merge");
-  });
-
-  test("green checks with nothing queued is the quiet failure this exists to catch", async () => {
-    const report = await pullRequestReport(
-      fakeGitHub({
-        pr: {
-          state: "OPEN",
-          statusCheckRollup: [
-            { name: "Validate", status: "COMPLETED", conclusion: "SUCCESS" },
-          ],
-          autoMergeRequest: null,
-        },
-      }),
-      128,
-    );
-    expect(report.status).toBe("failed");
-    expect(report.summary).toContain("nothing queued the merge");
-    expect(report.detail?.join(" ")).toContain(".github/workflows/");
+    expect(report.status).toBe("passed");
+    expect(report.summary).toContain("ready for a maintainer to merge");
   });
 
   test("reads a legacy status context, which carries no status field", async () => {
@@ -257,10 +237,7 @@ describe("watching", () => {
   });
 
   test("polls until the pull request settles", async () => {
-    const states = [
-      { state: "OPEN", statusCheckRollup: [], autoMergeRequest: {} },
-      merged,
-    ];
+    const states = [{ state: "OPEN", statusCheckRollup: [] }, merged];
     let index = 0;
     const gh: GitHubJson = () => Promise.resolve(states[Math.min(index++, 1)]);
     const report = await watch(

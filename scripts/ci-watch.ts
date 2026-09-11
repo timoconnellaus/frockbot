@@ -4,12 +4,13 @@
  *
  * Two legs, because the repository has two: merging integrates and tagging
  * ships (`README.md` → Releases). Each leg fails in ways that are quiet — a
- * pull request whose merge was never queued just sits open, and a release
- * whose deploy failed after its packages published leaves a GitHub release
- * standing in front of a production that never moved. Both report as a plain
- * exit code so a session, a hook, or a person reads the same verdict:
+ * red check on an open pull request, or a release whose deploy failed and
+ * left a GitHub release standing in front of a production that never moved.
+ * Both report as a plain exit code so a session, a hook, or a person reads
+ * the same verdict:
  *
- *   0  settled, and settled well: the pull request merged, or production moved
+ *   0  settled, and settled well: the pull request is green or merged, or
+ *      production moved
  *   1  failed, and the summary says what and where
  *   2  still pending — not an error, just not finished
  *
@@ -106,7 +107,7 @@ export async function pullRequestReport(
       "view",
       String(pullRequest),
       "--json",
-      "state,mergedAt,statusCheckRollup,autoMergeRequest,url",
+      "state,mergedAt,statusCheckRollup,url",
     ]),
     "pull request",
   );
@@ -159,24 +160,12 @@ export async function pullRequestReport(
     };
   }
 
-  // Every check passed and the pull request is still open. Auto-merge should
-  // have taken it; that it did not is the failure, not something to wait out.
-  // The usual cause is a pull request touching `.github/workflows/`, which
-  // `GITHUB_TOKEN` may not queue (see `.github/workflows/auto-merge.yml`).
-  if (!value.autoMergeRequest) {
-    return {
-      status: "failed",
-      summary: `#${pullRequest} passed its checks but nothing queued the merge`,
-      detail: [
-        "Auto-merge was refused or disabled; this pull request will sit open until it is merged by hand.",
-        "A pull request that edits .github/workflows/ can never be queued by GITHUB_TOKEN.",
-        url,
-      ],
-    };
-  }
+  // Every check passed and the pull request is still open. Merging is a
+  // maintainer's click — there is no auto-merge — so for the session that
+  // opened it this is the terminal state: its work is done and green.
   return {
-    status: "pending",
-    summary: `#${pullRequest} is queued to merge`,
+    status: "passed",
+    summary: `#${pullRequest} is green and ready for a maintainer to merge`,
     detail: [url],
   };
 }
@@ -249,9 +238,15 @@ export async function releaseReport(
   }
 
   if (text(run.status).toLowerCase() !== "completed") {
+    // `waiting` is the run held at the `production` environment's required
+    // reviewer: the tag verified, and one approval in the run's page deploys
+    // it. Nothing here can grant that, so say what is being waited for.
+    const waiting = text(run.status).toLowerCase() === "waiting";
     return {
       status: "pending",
-      summary: `${tag} is still releasing`,
+      summary: waiting
+        ? `${tag} is verified and waiting for production approval`
+        : `${tag} is still releasing`,
       detail: [url],
     };
   }
@@ -349,8 +344,9 @@ export function parseArguments(argv: readonly string[]): {
     subject,
     options: {
       once: rest.includes("--once"),
-      // CI here runs eight to fourteen minutes, so a minute between polls is
-      // frequent enough to feel immediate and rare enough to be free.
+      // The pull request check is a couple of minutes and a release about
+      // ten, so a minute between polls is frequent enough to feel immediate
+      // and rare enough to be free.
       intervalSeconds: numeric("--interval-seconds", 60),
       deadlineMinutes: numeric("--deadline-minutes", 40),
     },
