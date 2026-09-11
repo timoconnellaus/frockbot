@@ -38,10 +38,12 @@ function required(name: string): string {
 const spritesToken = required("SPRITES_TOKEN");
 const hostToken = required("COMPUTER_HOST_TOKEN");
 const baseSpriteName = process.env.FROCKBOT_SPRITE_NAME?.trim() || "frockbot";
+const spriteRegion = process.env.FROCKBOT_SPRITE_REGION?.trim() || undefined;
 
 const host = new ComputerHost({
   client: new SpritesClient(spritesToken) as unknown as SpritesClientHandle,
   baseSpriteName,
+  ...(spriteRegion ? { spriteRegion } : {}),
   digest: (value) => createHash("sha256").update(value).digest("hex"),
   // Provisioning a cold Computer takes minutes. Streamed callers see these
   // phases on the wire; the process log keeps the same account for operators.

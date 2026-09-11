@@ -813,7 +813,7 @@ A persistent Linux desktop virtual machine per User, rented from Fly Sprites (`a
 
 #### Provisioning
 
-`getSprite`, and on a miss `createSprite`, named `frockbot-<sha256(["user", userId])[0..12]>` (`computer/fly/runtime.ts`). The host then adopts an existing machine via a marker file, or provisions through a detached, resumable five-phase shell run — `layout`, `packages`, `runtime`, `browser`, `reference` — bounded at 10 minutes, at most 8 relaunches, polled every 3 seconds. Egress is restricted to one host: `enableInternet: false, allowedHosts: ["api.sprites.dev"], interceptHttps: true` (`apps/computer-host/src/egress.ts`), with a WebSocket bridge for upgrades.
+`getSprite`, and on a miss `createSprite`, named `frockbot-<sha256(["user", userId])[0..12]>` (`computer/fly/runtime.ts`). The host then adopts an existing machine via a marker file, or provisions through a detached, resumable five-phase shell run — `layout`, `packages`, `runtime`, `browser`, `reference` — bounded at 10 minutes, at most 8 relaunches, polled every second at first and at most every 5. New Sprites are created in `FROCKBOT_SPRITE_REGION` when that var is set; unset, the platform chooses, and an existing Sprite keeps its region. An ordinary open of an adopted Computer is one Sprite round trip: the adoption inspection rides on the front of the ensure script and is decoded out of the same answer, and only a stale digest or a pending update intent takes the two-step path. Egress is restricted to one host: `enableInternet: false, allowedHosts: ["api.sprites.dev"], interceptHttps: true` (`apps/computer-host/src/egress.ts`), with a WebSocket bridge for upgrades.
 
 #### Inside the Sprite
 
@@ -823,7 +823,7 @@ One Sprite, one browser and one screen per User; one slot — window plus clippe
 
 #### Lifecycle
 
-The container sets `sleepAfter: "10m"` with `max_instances: 3`. A renderer watchdog sends SIGKILL to Chromium renderer processes only, above 1.5 GiB RSS or when `MemAvailable` is under 512 MiB. A service refresh that does not complete returns without writing the state digest, so the next `open` retries it. The Bot Durable Object arms a 60-second connect watchdog before each connect. Slots are reclaimed after 900 seconds idle unless a 90-second lease is held; with no free slot the process exits 75.
+The container sets `sleepAfter: "30m"` with `max_instances: 3`, and its entrypoint runs `node` directly rather than `npm start`, because a cold start after the idle sleep is paid by one caller and npm's own start-up and registry call were about a second of it. A renderer watchdog sends SIGKILL to Chromium renderer processes only, above 1.5 GiB RSS or when `MemAvailable` is under 512 MiB. A service refresh that does not complete returns without writing the state digest, so the next `open` retries it. The Bot Durable Object arms a 60-second connect watchdog before each connect. Slots are reclaimed after 900 seconds idle unless a 90-second lease is held; with no free slot the process exits 75.
 
 ### The in-memory host
 
@@ -835,7 +835,7 @@ The container sets `sleepAfter: "10m"` with `max_instances: 3`. A renderer watch
 
 ### Screenshots and live view
 
-A screenshot is one operation on the session — `screenshot.capture()` — which the Fly host implements as a guarded `exec` running `scrot`, clipped to the Bot's slot of the shared screen, followed by a `file/read` (`computer/fly/computer.ts`); the bytes are filed into the durable `screenshots` root and attached to the model turn. The live view is the URL a viewer session answers with, iframed directly and with no Worker proxy; the app's `frame-src` is built from the registered host's `viewerFrameOrigins` (`apps/cloudflare/src/user-application.ts`), which is `https://*.sprites.app` for Fly. FrockBot ships its own viewer page because stock noVNC fixes `view_only` at construction.
+A screenshot is one operation on the session — `screenshot.capture()` — which the Fly host implements as one guarded `exec` running `scrot`, clipped to the Bot's slot of the shared screen, that answers with the PNG inline; only a capture past `SCREENSHOT_INLINE_MAX_BYTES` is followed by a `file/read` (`computer/fly/computer.ts`); the bytes are filed into the durable `screenshots` root and attached to the model turn. The live view is the URL a viewer session answers with, iframed directly and with no Worker proxy; the app's `frame-src` is built from the registered host's `viewerFrameOrigins` (`apps/cloudflare/src/user-application.ts`), which is `https://*.sprites.app` for Fly. FrockBot ships its own viewer page because stock noVNC fixes `view_only` at construction.
 
 ### Tools
 

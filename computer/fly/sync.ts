@@ -149,6 +149,8 @@ export const WORKSPACE_SYNC_IGNORED_DIRECTORIES_V1 = [
 
 /** Leaves headroom below `runStorageForAgent`'s 500 KB response ceiling. */
 export const WORKSPACE_SYNC_MANIFEST_MAX_BYTES_V1 = 400_000;
+/** Leads each root's section of a batched scan answer. */
+export const SCAN_ROOT_MARKER = "__FROCKBOT_SCAN_ROOT__";
 /** Bounds work and rows even when unusually short paths fit under the bytes. */
 export const WORKSPACE_SYNC_MANIFEST_MAX_ENTRIES_V1 = 2_000;
 
@@ -259,6 +261,15 @@ export type ComputerSyncNoteOutcomeV1 =
 export interface ComputerSyncSurfaceV1 {
   /** Every file and every recorded removal under one durable root. */
   scan(root: WorkspaceRootV1): Promise<ComputerSyncScanOutcomeV1>;
+  /**
+   * `scan` for every root in one Computer round trip, answered in the same
+   * order. A surface that cannot batch leaves this out; one that tried and
+   * could not carry the whole answer returns `undefined`, and the sync falls
+   * back to one `scan` per root.
+   */
+  scanAll?(
+    roots: readonly WorkspaceRootV1[],
+  ): Promise<ComputerSyncScanOutcomeV1[] | undefined>;
   read(
     root: WorkspaceRootV1,
     path: string,
@@ -434,8 +445,12 @@ class WorkspaceRootSync implements WorkspaceRootSyncV1 {
 
   async sync(): Promise<WorkspaceSyncReportV1> {
     const roots: WorkspaceSyncRootReportV1[] = [];
-    for (const root of this.options.roots) {
-      roots.push(await this.syncRoot(root));
+    // One scan for every root, when the surface can: the scan is the one
+    // Computer round trip every root pays even when nothing changed, and a
+    // Turn with five roots was paying it five times in a row.
+    const scans = await this.options.computer.scanAll?.(this.options.roots);
+    for (const [index, root] of this.options.roots.entries()) {
+      roots.push(await this.syncRoot(root, scans?.[index]));
     }
     return {
       roots,
@@ -444,9 +459,12 @@ class WorkspaceRootSync implements WorkspaceRootSyncV1 {
     };
   }
 
-  async syncRoot(root: WorkspaceRootV1): Promise<WorkspaceSyncRootReportV1> {
+  async syncRoot(
+    root: WorkspaceRootV1,
+    scanned?: ComputerSyncScanOutcomeV1,
+  ): Promise<WorkspaceSyncRootReportV1> {
     const report = emptyReport(root);
-    const scanned = await this.options.computer.scan(root);
+    scanned ??= await this.options.computer.scan(root);
     if (isFailure(scanned)) {
       report.failures.push({ ...scanned, root });
       return report;
@@ -1010,6 +1028,70 @@ export class FlySpriteSyncSurface implements ComputerSyncSurfaceV1 {
   async scan(root: WorkspaceRootV1): Promise<ComputerSyncScanOutcomeV1> {
     const mount = this.mount(root);
     if (typeof mount !== "string") return mount;
+    const output = await this.run(this.scanScript(mount));
+    if (typeof output !== "string") return output;
+    return this.decodeScan(output.split("\n"));
+  }
+
+  /**
+   * Every root's manifest from one script. Each root's scan runs in its own
+   * subshell behind a marker line naming its index, so one root that cannot
+   * be scanned stops nothing else, and the answer is cut back into the same
+   * per-root manifests `scan` would have produced.
+   *
+   * The one answer has the same ceiling one root's answer has. A Computer
+   * whose roots together exceed it answers `undefined`, and the caller pays
+   * the per-root round trips it would have paid before batching existed.
+   */
+  async scanAll(
+    roots: readonly WorkspaceRootV1[],
+  ): Promise<ComputerSyncScanOutcomeV1[] | undefined> {
+    const mounts = roots.map((root) => this.mount(root));
+    const sections = mounts.flatMap((mount, index) =>
+      typeof mount === "string"
+        ? [
+            `printf '${SCAN_ROOT_MARKER}%s\\n' ${index}`,
+            "(",
+            this.scanScript(mount),
+            ")",
+          ]
+        : [],
+    );
+    if (sections.length === 0) {
+      return mounts.map((mount) => mount as WorkspaceFailureV1);
+    }
+    const output = await this.run(sections.join("\n"));
+    if (typeof output !== "string") {
+      // The storage exec reports an answer past its ceiling as one message;
+      // that is the one failure batching itself caused.
+      return output.reason.includes("exceeded the maximum size")
+        ? undefined
+        : mounts.map((mount) => (typeof mount === "string" ? output : mount));
+    }
+    const rows = new Map<number, string[]>();
+    let current: string[] | undefined;
+    for (const row of output.split("\n")) {
+      if (row.startsWith(SCAN_ROOT_MARKER)) {
+        current = [];
+        rows.set(Number(row.slice(SCAN_ROOT_MARKER.length).trim()), current);
+        continue;
+      }
+      current?.push(row);
+    }
+    return mounts.map((mount, index) => {
+      if (typeof mount !== "string") return mount;
+      const section = rows.get(index);
+      if (!section || !section.some((row) => row.startsWith("X\t"))) {
+        return failure(
+          "unavailable",
+          "The Computer's scan ended before this root's manifest",
+        );
+      }
+      return this.decodeScan(section);
+    });
+  }
+
+  private scanScript(mount: string): string {
     const ignoredExpression = WORKSPACE_SYNC_IGNORED_DIRECTORIES_V1.map(
       (name) => `-name ${shellQuote(name)}`,
     ).join(" -o ");
@@ -1071,13 +1153,15 @@ export class FlySpriteSyncSurface implements ComputerSyncSurfaceV1 {
       'cat "$MANIFEST"',
       'printf "X\\t%s\\t%s\\n" "$IGNORED" "$OMITTED"',
     ].join("\n");
-    const output = await this.run(script);
-    if (typeof output !== "string") return output;
+    return script;
+  }
+
+  private decodeScan(rows: readonly string[]): ComputerSyncScanOutcomeV1 {
     const entries: ComputerSyncEntryV1[] = [];
     const removed = new Map<string, ComputerSyncRemovalV1>();
     let ignored = 0;
     let omitted = 0;
-    for (const row of output.split("\n")) {
+    for (const row of rows) {
       if (!row.trim()) continue;
       const [tag, encodedPath, second = "", third = "", fourth = ""] =
         row.split("\t");

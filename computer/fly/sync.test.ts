@@ -32,6 +32,7 @@ import {
   WORKSPACE_SYNC_MANIFEST_MAX_ENTRIES_V1,
   WORKSPACE_SYNC_MAX_FILE_BYTES_V1,
   type WorkspaceSyncReportV1,
+  SCAN_ROOT_MARKER,
 } from "./sync.ts";
 import {
   WORKSPACE_CHUNK_BYTES_V1,
@@ -163,6 +164,17 @@ class FakeSyncSprite {
     const root = quoted(shell, "ROOT");
     const relative = quoted(shell, "REL");
     if (shell.includes("append_manifest") && shell.includes("sha256sum")) {
+      if (shell.includes(SCAN_ROOT_MARKER)) {
+        // A batched scan: one section per root, each led by its marker.
+        return shell
+          .split(new RegExp(`printf '${SCAN_ROOT_MARKER}%s\\\\n' `))
+          .slice(1)
+          .map((section) => {
+            const index = /^(\d+)/.exec(section)?.[1] ?? "";
+            return `${SCAN_ROOT_MARKER}${index}\n${this.scan(quoted(section, "ROOT") ?? "")}`;
+          })
+          .join("");
+      }
       return this.scan(root ?? "");
     }
     if (shell.includes("__STAGED__")) return this.stageChunk(shell);
@@ -805,6 +817,79 @@ describe("the durable-root sync, Package-declared roots", () => {
     );
     expect(outcome.scan.ignored).toBe(0);
     expect(outcome.scan.omitted).toBe(100);
+  });
+
+  test("scans every root in one round trip and answers each root's own manifest", async () => {
+    const sprite = new FakeSyncSprite();
+    const surface = new FlySpriteSyncSurface({
+      computer: attach(sprite).bot(BOT),
+      layout: FLY_WORKSPACE_LAYOUT,
+      userId: USER,
+      botDirectoryKey: computerBotKey,
+    });
+    sprite.shellWrite(MOUNTS.skills, "SKILL.md", "skill");
+    sprite.shellWrite(MOUNTS.userMemory, "notes.md", "memory");
+    sprite.shellWrite(MOUNTS.packageDeclared, "to-dos/src/index.ts", "code");
+    const roots = [skillsRoot, userMemoryRoot, declaredRoot];
+    const separately = [];
+    for (const root of roots) separately.push(await surface.scan(root));
+    const before = sprite.scripts.length;
+
+    const batched = await surface.scanAll(roots);
+
+    expect(sprite.scripts.length - before).toBe(1);
+    expect(batched).toEqual(separately);
+    expect(batched!.map((outcome) => outcome.status)).toEqual([
+      "ok",
+      "ok",
+      "ok",
+    ]);
+    // A root that is not this User's is refused without reaching the Sprite.
+    const foreign = await surface.scanAll([
+      { ...skillsRoot, userId: "someone-else" },
+      skillsRoot,
+    ]);
+    expect(foreign![0]!.status).toBe("refused");
+    expect(foreign![1]!.status).toBe("ok");
+  });
+
+  test("a batched scan past the answer ceiling hands the roots back to one scan each", async () => {
+    const sprite = new FakeSyncSprite();
+    const surface = new FlySpriteSyncSurface({
+      computer: attach(sprite).bot(BOT),
+      layout: FLY_WORKSPACE_LAYOUT,
+      userId: USER,
+      botDirectoryKey: computerBotKey,
+    });
+    sprite.shellWrite(MOUNTS.skills, "SKILL.md", "skill");
+    sprite.maxScanOutputBytes = 8;
+
+    expect(await surface.scanAll([skillsRoot, userMemoryRoot])).toBeUndefined();
+  });
+
+  test("emits valid Bash for the batched scan", async () => {
+    const sprite = new FakeSyncSprite();
+    const surface = new FlySpriteSyncSurface({
+      computer: attach(sprite).bot(BOT),
+      layout: FLY_WORKSPACE_LAYOUT,
+      userId: USER,
+      botDirectoryKey: computerBotKey,
+    });
+
+    await surface.scanAll([skillsRoot, userMemoryRoot, declaredRoot]);
+
+    expect(sprite.lastScanScript).toContain(SCAN_ROOT_MARKER);
+    const process = Bun.spawn(["bash", "-n"], {
+      stdin: new Blob([sprite.lastScanScript!]),
+      stdout: "ignore",
+      stderr: "pipe",
+    });
+    const [exitCode, stderr] = await Promise.all([
+      process.exited,
+      new Response(process.stderr).text(),
+    ]);
+    expect(stderr).toBe("");
+    expect(exitCode).toBe(0);
   });
 
   test("emits valid Bash for the scan manifest", async () => {

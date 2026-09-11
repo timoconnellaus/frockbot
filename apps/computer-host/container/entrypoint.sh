@@ -16,4 +16,6 @@ if [ -f "$CLOUDFLARE_CONTAINERS_CA" ]; then
   export NODE_EXTRA_CA_CERTS
 fi
 
-exec npm start
+# `node` directly rather than `npm start`: npm adds about a second to a cold
+# start and phones the registry, which the egress allowlist refuses anyway.
+exec node container/server.ts

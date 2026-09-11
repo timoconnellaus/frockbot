@@ -205,7 +205,10 @@ export interface SpriteHandle {
 
 export interface SpritesClientHandle {
   getSprite(name: string): Promise<SpriteHandle>;
-  createSprite(name: string): Promise<SpriteHandle>;
+  createSprite(
+    name: string,
+    config?: { region?: string },
+  ): Promise<SpriteHandle>;
   deleteSprite(name: string): Promise<void>;
   listAllSprites(prefix?: string): Promise<{ name: string }[]>;
 }
@@ -230,8 +233,13 @@ export const COMPUTER_HOST_PHASE_TIMEOUTS = {
   provision: 10 * 60_000,
   /** One short exec that launches or polls the detached provisioner. */
   provisionStep: 60_000,
-  /** Gap between two polls. Far inside the SDK's 45-second pong window. */
-  provisionPoll: 3_000,
+  /**
+   * Gap between two polls, doubling to five times this. The update phases are
+   * file installs that finish in a few seconds, and a poll that waits three
+   * then six seconds to notice was most of what a first open after a release
+   * cost. Still far inside the SDK's 45-second pong window.
+   */
+  provisionPoll: 1_000,
   service: 120_000,
   ensureAgent: 60_000,
   control: 15_000,
@@ -654,6 +662,34 @@ interface AdoptionInspection {
   humanControlFresh: boolean;
 }
 
+/**
+ * Decodes the three marked lines `adoptionInspectionScript` prints. The lines
+ * are found by prefix rather than position, so the same decoder reads them
+ * off an answer that carries other output after them.
+ */
+function decodeAdoptionInspection(text: string): AdoptionInspection {
+  const lines = text.split("\n");
+  const field = (prefix: string): string | undefined =>
+    lines.find((line) => line.startsWith(prefix))?.slice(prefix.length);
+  const encodedState = field(ADOPTION_STATE_PREFIX);
+  let state: ComputerHostStateV1 | undefined;
+  if (encodedState) {
+    try {
+      state = decodeComputerHostStateV1(
+        JSON.parse(Buffer.from(encodedState, "base64").toString("utf8")),
+      );
+    } catch {
+      state = undefined;
+    }
+  }
+  const digest = field(ADOPTION_DIGEST_PREFIX)?.trim();
+  return {
+    ...(state ? { state } : {}),
+    ...(digest ? { digest } : {}),
+    humanControlFresh: field(ADOPTION_HUMAN_PREFIX)?.trim() === "1",
+  };
+}
+
 interface ActiveUpdate {
   progress: ComputerHostProvisioningV1;
   promise: Promise<ComputerRecord>;
@@ -669,6 +705,13 @@ export interface ComputerHostOptions {
   concurrency?: { perContainer: number; perUser: number };
   /** How often the host asks a detached provisioner how it is going. */
   provisionPollMs?: number;
+  /**
+   * The Fly region a new Sprite is created in. Every exec is a fresh
+   * WebSocket to the Sprite, so its distance from this container is paid on
+   * every command; unset, the platform chooses, and it chose Chicago for a
+   * User in Australia. An existing Sprite keeps its region.
+   */
+  spriteRegion?: string;
   /** Bounded wait for a caller that did not start the active update. */
   updateWaitMs?: number;
   /**
@@ -706,6 +749,7 @@ export class ComputerHost {
   private readonly now: () => number;
   private readonly concurrency: { perContainer: number; perUser: number };
   private readonly provisionPollMs: number;
+  private readonly spriteRegion: string | undefined;
   private readonly updateWaitMs: number;
   private readonly onProvisionProgress?: (
     spriteName: string,
@@ -752,6 +796,7 @@ export class ComputerHost {
     this.concurrency = options.concurrency ?? COMPUTER_HOST_CONCURRENCY;
     this.provisionPollMs =
       options.provisionPollMs ?? COMPUTER_HOST_PHASE_TIMEOUTS.provisionPoll;
+    this.spriteRegion = options.spriteRegion;
     this.updateWaitMs = options.updateWaitMs ?? COMPUTER_UPDATE_WAIT_MS;
     if (options.onProvisionProgress) {
       this.onProvisionProgress = options.onProvisionProgress;
@@ -979,12 +1024,7 @@ export class ComputerHost {
     request: ComputerHostRequestV1,
     onProgress?: (progress: ComputerHostProvisioningV1) => void,
   ): Promise<ComputerHostOpenResultV1> {
-    const record = await this.computer(
-      request.identity.userId,
-      true,
-      onProgress,
-    );
-    const sprite = await this.spriteFor(record.spriteName);
+    const userId = request.identity.userId;
     const botKey = computerBotKeyV1(request.tenant.botId, this.digest);
     const profile = Buffer.from(
       JSON.stringify(
@@ -1003,31 +1043,81 @@ export class ComputerHost {
     // call: the second answer is one `/dev/tcp` probe against the port the
     // first just wrote, and a second round trip to the Sprite per Turn buys
     // nothing. `exec` is gone because the shell has to outlive the script.
-    const ensured = await this.run(
-      sprite,
-      [
-        `set -eu`,
-        `${ENSURE_AGENT_SCRIPT} ${shellQuote(botKey)} ${shellQuote(profile)}`,
-        `SLOT=$(cat ${shellQuote(`${BOTS_ROOT}/${botKey}/slot`)} 2>/dev/null || true)`,
-        `printf '${DESKTOP_SLOT_PREFIX}%s\\n' "$SLOT"`,
-        `if [ -n "$SLOT" ] && (exec 3<>/dev/tcp/127.0.0.1/$((${VNC_PORT_BASE} + SLOT))) 2>/dev/null; then`,
-        `  echo ${DESKTOP_LIVE_MARKER}`,
-        `fi`,
-        // One browser on the Computer, so one port to probe. Its
-        // liveness is a different fact from the tenant's viewer being up:
-        // either can be missing on its own, and declaring a running service
-        // again would restart it.
-        `if (exec 3<>/dev/tcp/127.0.0.1/${COMPUTER_CDP_PORT}) 2>/dev/null; then`,
-        `  echo ${BROWSER_LIVE_MARKER}`,
-        `fi`,
-        `if [ -s ${shellQuote(`${BOTS_ROOT}/${botKey}/${TARGET_ID_FILE}`)} ]; then`,
-        `  echo ${WINDOW_LIVE_MARKER}`,
-        `fi`,
-        "",
-      ].join("\n"),
-      "ensure agent",
-      COMPUTER_HOST_PHASE_TIMEOUTS.ensureAgent,
-    );
+    const ensureScript = [
+      `set -eu`,
+      `${ENSURE_AGENT_SCRIPT} ${shellQuote(botKey)} ${shellQuote(profile)}`,
+      `SLOT=$(cat ${shellQuote(`${BOTS_ROOT}/${botKey}/slot`)} 2>/dev/null || true)`,
+      `printf '${DESKTOP_SLOT_PREFIX}%s\\n' "$SLOT"`,
+      `if [ -n "$SLOT" ] && (exec 3<>/dev/tcp/127.0.0.1/$((${VNC_PORT_BASE} + SLOT))) 2>/dev/null; then`,
+      `  echo ${DESKTOP_LIVE_MARKER}`,
+      `fi`,
+      // One browser on the Computer, so one port to probe. Its
+      // liveness is a different fact from the tenant's viewer being up:
+      // either can be missing on its own, and declaring a running service
+      // again would restart it.
+      `if (exec 3<>/dev/tcp/127.0.0.1/${COMPUTER_CDP_PORT}) 2>/dev/null; then`,
+      `  echo ${BROWSER_LIVE_MARKER}`,
+      `fi`,
+      `if [ -s ${shellQuote(`${BOTS_ROOT}/${botKey}/${TARGET_ID_FILE}`)} ]; then`,
+      `  echo ${WINDOW_LIVE_MARKER}`,
+      `fi`,
+      "",
+    ].join("\n");
+
+    // The ordinary open — a Computer this container already adopted, with no
+    // update in flight — reads the adoption record and attaches the tenant in
+    // one Sprite round trip. Every round trip costs a fresh WebSocket and,
+    // more often than not, a warm wake, so the inspection rides on the front
+    // of the ensure script and is decoded out of the same answer. Only a
+    // stale digest or a pending update intent falls back to the two-step
+    // path, which is the path a first open after a release takes anyway.
+    let record: ComputerRecord;
+    let ensured: ComputerHostExecOutcome;
+    const cached = this.computers.get(userId);
+    if (cached && !this.updates.has(userId)) {
+      const sprite = await this.spriteFor(cached.spriteName);
+      const combined = await this.run(
+        sprite,
+        `${adoptionInspectionScript}\n${ensureScript}`,
+        "ensure agent",
+        COMPUTER_HOST_PHASE_TIMEOUTS.ensureAgent,
+      );
+      const inspection = decodeAdoptionInspection(
+        combined.stdout.toString("utf8"),
+      );
+      if (
+        inspection.digest === runtimeDocumentDigestV1() &&
+        !inspection.state?.update
+      ) {
+        record = cached;
+        ensured = combined;
+      } else {
+        // The inspection prints before the ensure script runs, so its lines
+        // are trustworthy even when the attach itself failed; only an answer
+        // with no digest at all is re-read.
+        record = await this.ensureRuntimeCurrent(
+          userId,
+          cached,
+          inspection.digest === undefined ? undefined : inspection,
+          onProgress,
+        );
+        ensured = await this.run(
+          sprite,
+          ensureScript,
+          "ensure agent",
+          COMPUTER_HOST_PHASE_TIMEOUTS.ensureAgent,
+        );
+      }
+    } else {
+      record = await this.computer(userId, true, onProgress);
+      ensured = await this.run(
+        await this.spriteFor(record.spriteName),
+        ensureScript,
+        "ensure agent",
+        COMPUTER_HOST_PHASE_TIMEOUTS.ensureAgent,
+      );
+    }
+    const sprite = await this.spriteFor(record.spriteName);
     const ensuredText = `${ensured.stdout.toString("utf8")}${ensured.stderr.toString("utf8")}`;
     if (ensuredText.includes(NO_SLOTS_MARKER)) {
       throw new ComputerHostError(
@@ -1828,26 +1918,7 @@ export class ComputerHost {
         true,
       );
     }
-    const lines = outcome.stdout.toString("utf8").split("\n");
-    const field = (prefix: string): string | undefined =>
-      lines.find((line) => line.startsWith(prefix))?.slice(prefix.length);
-    const encodedState = field(ADOPTION_STATE_PREFIX);
-    let state: ComputerHostStateV1 | undefined;
-    if (encodedState) {
-      try {
-        state = decodeComputerHostStateV1(
-          JSON.parse(Buffer.from(encodedState, "base64").toString("utf8")),
-        );
-      } catch {
-        state = undefined;
-      }
-    }
-    const digest = field(ADOPTION_DIGEST_PREFIX)?.trim();
-    return {
-      ...(state ? { state } : {}),
-      ...(digest ? { digest } : {}),
-      humanControlFresh: field(ADOPTION_HUMAN_PREFIX)?.trim() === "1",
-    };
+    return decodeAdoptionInspection(outcome.stdout.toString("utf8"));
   }
 
   /**
@@ -1875,7 +1946,10 @@ export class ComputerHost {
       if (!isNotFound(error)) throw error;
     }
     try {
-      const created = await this.client.createSprite(name);
+      const created = await this.client.createSprite(
+        name,
+        this.spriteRegion ? { region: this.spriteRegion } : undefined,
+      );
       // Seeded rather than re-fetched: provisioning has the handle already,
       // and the operations that follow it in the same Turn would otherwise
       // each pay a lookup for it.

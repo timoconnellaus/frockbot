@@ -840,6 +840,45 @@ describe("open", () => {
     ).toBe(false);
   });
 
+  test("opens an adopted Computer in one Sprite round trip", async () => {
+    const { host, sprite } = provisioned();
+    await host.handle(request({ kind: "open" }, { effectId: "open-1" }));
+    const before = sprite.commands.length;
+
+    const response = await host.handle(
+      request({ kind: "open" }, { effectId: "open-2" }),
+    );
+
+    expect(response.status).toBe(200);
+    const commands = sprite.commands.slice(before);
+    // The adoption inspection rides on the front of the ensure script: one
+    // command carries both, and nothing runs the inspection on its own.
+    expect(commands).toHaveLength(1);
+    expect(commands[0]!.stdin).toContain("frockbot-adoption-state:");
+    expect(commands[0]!.stdin).toContain(ENSURE_AGENT_SCRIPT);
+    expect(commands[0]!.stdin.indexOf("frockbot-adoption-state:")).toBeLessThan(
+      commands[0]!.stdin.indexOf(ENSURE_AGENT_SCRIPT),
+    );
+  });
+
+  test("a stale digest read off the combined open still runs the update", async () => {
+    const { host, sprite } = provisioned();
+    await host.handle(request({ kind: "open" }, { effectId: "open-1" }));
+    writeFile(sprite, PROVISION_DIGEST, "stale\n");
+    sprite.scripts = [report("stopped", updateReady, "update")];
+
+    const response = await host.handle(
+      request({ kind: "open" }, { effectId: "open-2" }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(
+      sprite.commands.some((command) =>
+        command.stdin.includes(`${PROVISION_SCRIPT} update`),
+      ),
+    ).toBe(true);
+  });
+
   test("updates a mismatched runtime in place without apt and then hands back the same Computer", async () => {
     const { host, sprite } = provisioned();
     sprite.services.set(BROWSER_SERVICE, "running");

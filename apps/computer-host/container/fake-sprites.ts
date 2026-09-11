@@ -187,25 +187,30 @@ export class FakeSprite implements SpriteHandle {
     return new FakeCommand((stdin) => this.scriptFor(stdin), record);
   }
 
+  /** The three marked lines the adoption inspection prints. */
+  private adoptionLines(): string[] {
+    const state = this.files.get("/home/box/.frockbot/host-state.json");
+    const digest = this.files.get(PROVISION_DIGEST);
+    const now = Date.parse("2026-08-31T00:00:00.000Z");
+    const human = [...this.files.entries()].some(
+      ([path, file]) =>
+        path.startsWith(`${BOTS_ROOT}/`) &&
+        path.endsWith("/human-control") &&
+        now - file.mtime.getTime() <= LEASE_MAX_AGE_SECONDS * 1_000,
+    );
+    return [
+      `frockbot-adoption-state:${state ? state.bytes.toString("base64") : ""}\n`,
+      `frockbot-adoption-digest:${digest?.bytes.toString("utf8").trim() ?? ""}\n`,
+      `frockbot-adoption-human:${human ? "1" : "0"}\n`,
+    ];
+  }
+
   private scriptFor(stdin: string): ScriptedCommand {
-    if (stdin.includes("frockbot-adoption-state:")) {
-      const state = this.files.get("/home/box/.frockbot/host-state.json");
-      const digest = this.files.get(PROVISION_DIGEST);
-      const now = Date.parse("2026-08-31T00:00:00.000Z");
-      const human = [...this.files.entries()].some(
-        ([path, file]) =>
-          path.startsWith(`${BOTS_ROOT}/`) &&
-          path.endsWith("/human-control") &&
-          now - file.mtime.getTime() <= LEASE_MAX_AGE_SECONDS * 1_000,
-      );
-      return {
-        stdout: [
-          `frockbot-adoption-state:${state ? state.bytes.toString("base64") : ""}\n`,
-          `frockbot-adoption-digest:${digest?.bytes.toString("utf8").trim() ?? ""}\n`,
-          `frockbot-adoption-human:${human ? "1" : "0"}\n`,
-        ],
-        exitCode: 0,
-      };
+    // The inspection either stands alone or rides on the front of the ensure
+    // script; on a combined script its lines lead the attach's own answer.
+    const inspecting = stdin.includes("frockbot-adoption-state:");
+    if (inspecting && !stdin.includes(ENSURE_AGENT_SCRIPT)) {
+      return { stdout: this.adoptionLines(), exitCode: 0 };
     }
     // The window helpers are their own commands, not part of a test's scripted
     // queue: they run beside an open or a takeover and answer for themselves.
@@ -238,6 +243,7 @@ export class FakeSprite implements SpriteHandle {
       return {
         ...selected,
         stdout: [
+          ...(inspecting ? this.adoptionLines() : []),
           ...(selected.stdout ?? []),
           `${DESKTOP_SLOT_PREFIX}${slot?.toString().trim() ?? ""}\n`,
           ...(key && this.viewIsRunning(key)
