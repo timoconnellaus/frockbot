@@ -19,7 +19,6 @@ import {
 } from "agents";
 import {
   withVoice,
-  WorkersAIFluxSTT,
   type Transcriber,
   type TranscriberSession,
   type TTSProvider,
@@ -39,6 +38,10 @@ import {
   type VoiceDelegationRecordV1,
   type VoiceLedgerStorageV1,
 } from "@frockbot/app/voice/ledger";
+import {
+  createOpenAiTranscriberV1,
+  type VoiceRealtimeSocketV1,
+} from "@frockbot/app/voice/openai-transcriber";
 import {
   createSleepingTranscriberV1,
   type SleepingTranscriberSessionV1,
@@ -124,6 +127,9 @@ export const VOICE_ASSISTANT_DEFAULT_VOICE_ID = "JBFqnCBsd6RMkjVDRZzb";
 export const VOICE_ASSISTANT_TTS_MODEL = "eleven_flash_v2_5";
 /** How far back the User Memory log is read at call start. */
 export const VOICE_ASSISTANT_MEMORY_LOG_DAYS = 30;
+/** Where the assistant listens. Transcription-only realtime session. */
+export const VOICE_ASSISTANT_STT_URL =
+  "wss://api.openai.com/v1/realtime?intent=transcription";
 /** Pending audio held while a slept transcriber reopens: 10 s at 16 kHz. */
 const PENDING_AUDIO_BYTES = 10 * 16_000 * 2;
 /** How long a delegation look-up waits before the first check, and its ceiling. */
@@ -132,6 +138,7 @@ const DELEGATION_MAX_CHECK_SECONDS = 5 * 60;
 
 export interface VoiceAssistantEnv {
   AI?: Ai;
+  OPENAI_API_KEY?: string;
   ELEVENLABS_API_KEY?: string;
   ELEVENLABS_VOICE_ID?: string;
   USER_CONFIGURATIONS: DurableObjectNamespace;
@@ -150,9 +157,14 @@ export interface VoiceAssistantEnv {
 /** True when the deployment can run the assistant at all. */
 export function voiceAssistantConfiguredV1(env: {
   AI?: unknown;
+  OPENAI_API_KEY?: string;
   ELEVENLABS_API_KEY?: string;
 }): boolean {
-  return Boolean(env.AI) && Boolean(env.ELEVENLABS_API_KEY?.trim());
+  return (
+    Boolean(env.AI) &&
+    Boolean(env.OPENAI_API_KEY?.trim()) &&
+    Boolean(env.ELEVENLABS_API_KEY?.trim())
+  );
 }
 
 interface ConnectionIdentity {
@@ -183,6 +195,51 @@ const DELEGATION_REDISPATCH_AFTER_MS = 30_000;
 
 interface DelegationCheckPayload {
   runId: string;
+}
+
+/**
+ * Opens the transcription upstream with a `fetch` upgrade, the way a Worker
+ * must, and presents it as the plain socket the adapter drives.
+ */
+async function openVoiceUpstreamSocket(
+  url: string,
+  headers: Record<string, string>,
+): Promise<VoiceRealtimeSocketV1> {
+  const target = new URL(url);
+  target.protocol = "https:";
+  const response = await fetch(target, {
+    headers: { ...headers, upgrade: "websocket" },
+  });
+  const socket = response.webSocket;
+  if (response.status !== 101 || !socket) {
+    throw new Error(
+      `the speech service refused the upgrade (${response.status})`,
+    );
+  }
+  socket.accept();
+  return {
+    send: (data: string) => socket.send(data),
+    close: () => {
+      try {
+        socket.close();
+      } catch {
+        // Already gone; there is nothing to close.
+      }
+    },
+    onMessage: (handler: (raw: string) => void) => {
+      socket.addEventListener("message", (event: MessageEvent) => {
+        if (typeof event.data === "string") handler(event.data);
+      });
+    },
+    onClose: (handler: (reason: string) => void) => {
+      socket.addEventListener("close", (event: CloseEvent) => {
+        handler(event.reason ?? "");
+      });
+      socket.addEventListener("error", () => {
+        handler("the speech service connection failed");
+      });
+    },
+  };
 }
 
 const VoiceAgentBase = withVoice(Agent, {
@@ -222,8 +279,15 @@ export class VoiceAssistant extends VoiceAgentBase<
   }
 
   protected createInnerTranscriber(): VoiceTranscriberV1 | undefined {
-    if (!this.env.AI) return undefined;
-    return new WorkersAIFluxSTT(this.env.AI);
+    const apiKey = this.env.OPENAI_API_KEY?.trim();
+    if (!apiKey) return undefined;
+    return createOpenAiTranscriberV1({
+      openSocket: () =>
+        openVoiceUpstreamSocket(VOICE_ASSISTANT_STT_URL, {
+          authorization: `Bearer ${apiKey}`,
+        }),
+      maxPendingBytes: PENDING_AUDIO_BYTES,
+    });
   }
 
   protected async chatCompletion(
@@ -456,11 +520,20 @@ export class VoiceAssistant extends VoiceAgentBase<
     const call = this.#calls.get(connection.id);
     if (!inner || !call) return null;
     const gated: VoiceTranscriberV1 = {
-      createSession: (options) => {
+      createSession: (options = {}) => {
         if (call.exhausted) {
           throw new Error("today's transcription allowance is used up");
         }
-        return inner.createSession(options);
+        return inner.createSession({
+          ...options,
+          onFatalError: (error) => {
+            // The one place this failure is visible. Without it a call that
+            // loses its ears looks, from every log, like a person who said
+            // nothing.
+            console.error("voice assistant stt failed", error.message);
+            options.onFatalError?.(error);
+          },
+        });
       },
     };
     const sleeping = createSleepingTranscriberV1(gated, {

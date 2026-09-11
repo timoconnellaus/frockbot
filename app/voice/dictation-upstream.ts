@@ -1,9 +1,10 @@
 // Which transcription upstream dictation opens, and how its frames read.
 //
 // Everything here is a pure function over configuration and text, so it is
-// tested without a socket. It is also the whole of the provider's
-// vocabulary: the relay above it speaks only `VoiceDictationServerFrameV1`,
-// so a second provider is a change to this file alone.
+// tested without a socket. With the shared wire vocabulary in
+// `openai-realtime.ts` it is the whole of the provider: the relay above it
+// speaks only `VoiceDictationServerFrameV1`, so a second provider is a change
+// to these two files alone.
 //
 // Contract, from the OpenAI Realtime transcription guide and a run against
 // the live endpoint (2026-09-11): a `transcription` session is configured
@@ -29,10 +30,7 @@
 // the person talks, and the relay's own commit after `stop` is what produces
 // the single `.completed` transcript. No commit, no transcript — that was
 // confirmed against a 73-second capture that was never committed.
-import {
-  VOICE_DICTATION_SAMPLE_RATE_V1,
-  type VoiceDictationServerFrameV1,
-} from "./shared.js";
+import { VOICE_DICTATION_SAMPLE_RATE_V1 } from "./shared.js";
 
 /** The streaming transcription model dictation uses. */
 export const VOICE_DICTATION_MODEL_V1 = "gpt-live-transcribe";
@@ -111,113 +109,5 @@ export function voiceDictationSessionUpdateV1(): Record<string, unknown> {
   };
 }
 
-/** One frame of PCM16 as the upstream takes it. */
-export function voiceDictationAppendV1(pcm: ArrayBuffer): string {
-  return JSON.stringify({
-    type: "input_audio_buffer.append",
-    audio: base64(new Uint8Array(pcm)),
-  });
-}
-
-export function voiceDictationCommitV1(): string {
-  return JSON.stringify({ type: "input_audio_buffer.commit" });
-}
-
 export const VOICE_DICTATION_UPSTREAM_REFUSAL_MESSAGE_V1 =
   "Dictation stopped: the speech service refused the session. Try again.";
-
-/**
- * One upstream event, reduced to what the relay tracks.
- *
- * Every transcription belongs to an item the relay's commit after `stop`
- * closed. A capture is normally one such item; the ordering the relay keeps
- * costs nothing and holds if the upstream ever commits more than one. An
- * `error` that says the buffer had nothing to commit is the one refusal that
- * is not a failure after `stop` — it means the person pressed stop without
- * saying anything new.
- */
-export type VoiceDictationUpstreamEventV1 =
-  | { kind: "delta"; text: string; itemId?: string }
-  | { kind: "committed"; itemId: string }
-  | { kind: "session-updated" }
-  | { kind: "completed"; text: string; itemId?: string }
-  | { kind: "failed"; message: string; itemId?: string }
-  | { kind: "error"; message: string; emptyBuffer: boolean };
-
-const EMPTY_BUFFER_CODES = new Set([
-  "input_audio_buffer_commit_empty",
-  "input_audio_buffer_too_small",
-]);
-
-export function translateVoiceDictationUpstreamFrameV1(
-  raw: string,
-): VoiceDictationUpstreamEventV1 | undefined {
-  let value: unknown;
-  try {
-    value = JSON.parse(raw) as unknown;
-  } catch {
-    return undefined;
-  }
-  if (!value || typeof value !== "object") return undefined;
-  const event = value as Record<string, unknown>;
-  const type = typeof event.type === "string" ? event.type : "";
-  const itemId = typeof event.item_id === "string" ? event.item_id : undefined;
-  if (type === "session.updated") return { kind: "session-updated" };
-  if (type === "conversation.item.input_audio_transcription.delta") {
-    const text = typeof event.delta === "string" ? event.delta : "";
-    if (!text) return undefined;
-    return { kind: "delta", text, ...(itemId ? { itemId } : {}) };
-  }
-  if (type === "input_audio_buffer.committed") {
-    if (!itemId) return undefined;
-    return { kind: "committed", itemId };
-  }
-  if (type === "conversation.item.input_audio_transcription.completed") {
-    const text = typeof event.transcript === "string" ? event.transcript : "";
-    return {
-      kind: "completed",
-      text: text.trim(),
-      ...(itemId ? { itemId } : {}),
-    };
-  }
-  if (type === "conversation.item.input_audio_transcription.failed") {
-    return {
-      kind: "failed",
-      message: errorMessage(event.error),
-      ...(itemId ? { itemId } : {}),
-    };
-  }
-  if (type === "error") {
-    const error =
-      event.error && typeof event.error === "object"
-        ? (event.error as Record<string, unknown>)
-        : {};
-    const code = typeof error.code === "string" ? error.code : "";
-    const message = errorMessage(event.error);
-    return {
-      kind: "error",
-      message,
-      emptyBuffer:
-        EMPTY_BUFFER_CODES.has(code) ||
-        /buffer (is )?(too small|empty)|nothing to commit/i.test(message),
-    };
-  }
-  return undefined;
-}
-
-function errorMessage(error: unknown): string {
-  return error &&
-    typeof error === "object" &&
-    typeof (error as { message?: unknown }).message === "string"
-    ? (error as { message: string }).message
-    : "the transcription service refused the session";
-}
-
-function base64(bytes: Uint8Array): string {
-  let binary = "";
-  const chunk = 0x8000;
-  for (let offset = 0; offset < bytes.length; offset += chunk) {
-    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunk));
-  }
-  return btoa(binary);
-}

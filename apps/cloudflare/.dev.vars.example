@@ -22,8 +22,10 @@ FROCK_AI_GATEWAY_TOKEN=replace-with-ai-gateway-authorization-token
 # an existing local .dev.vars keeps working until it is renamed.
 # Voice (docs/voice.md). Both are required in production; absent locally, the
 # microphone and waveform buttons answer that voice is not set up.
-# The composer's dictation opens `wss://api.openai.com/v1/realtime` with this
-# key from the Worker; the browser never sees it.
+# Everything that listens opens `wss://api.openai.com/v1/realtime` with this
+# key from the Worker — the composer's dictation (`gpt-live-transcribe`) and
+# the continuous voice session (`gpt-transcribe` with server VAD). The client
+# never sees it. Absent, both say voice is not set up.
 OPENAI_API_KEY=replace-with-an-openai-api-key
 # The voice session's speech, ElevenLabs Flash v2.5. The key stays server-side.
 ELEVENLABS_API_KEY=replace-with-an-elevenlabs-api-key

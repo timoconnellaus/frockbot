@@ -1,12 +1,12 @@
 # Voice live checklist
 
 What has to be exercised against real providers and real microphones before
-voice is called working. As of 2026-09-11 one thing on this list has been:
-the dictation upstream, driven end to end against OpenAI through the real
-relay with synthesized speech rather than a microphone (the frames are in
-`docs/voice.md` under "The live endpoint"). Everything else below — every
-microphone, every client, and the whole ElevenLabs path — is still untested
-end to end. The deterministic checks that _have_ run are listed in
+voice is called working. As of 2026-09-11 two things on this list have been:
+the dictation upstream and the continuous session's listening, both driven end
+to end against OpenAI through the real Worker with synthesized speech rather
+than a microphone (the frames are in `docs/voice.md` under "The live
+endpoint"). Everything else below — every microphone, every client, and the
+whole ElevenLabs path — is still untested end to end. The deterministic checks that _have_ run are listed in
 `docs/voice.md` under "Verification".
 
 ## Prerequisites
@@ -15,8 +15,10 @@ end to end. The deterministic checks that _have_ run are listed in
   (see `.dev.vars.example`). Both are required production secrets, so the
   same names go into the repository's production environment before a
   release.
-- The `AI` binding reaching Workers AI (Flux STT) — `wrangler dev` with the
-  account's remote binding, or the deployed staging Worker.
+- The `AI` binding reaching Workers AI, which is the Frock AI gateway
+  transport for the assistant's chat model — `wrangler dev` with the account's
+  remote binding, or the deployed staging Worker. Nothing is transcribed
+  through it; `OPENAI_API_KEY` is what the assistant listens with.
 - A browser with a microphone (Chrome and Safari), and an Android device
   for the Flutter app.
 
@@ -70,12 +72,12 @@ end to end. The deterministic checks that _have_ run are listed in
 8. Background the app (switch tabs on the phone, switch apps on Android).
    Expect: capture and playback stop and the footer closes. Navigate between
    Bots and pages in the app: the footer stays.
-9. Leave the footer open in a quiet room for an hour. Expect: the Workers AI
-   and ElevenLabs dashboards show no spend for that hour.
+9. Leave the footer open in a quiet room for an hour. Expect: the OpenAI and
+   ElevenLabs dashboards show no spend for that hour.
 10. Check the ElevenLabs dashboard for character counts against the meter
     (`voice:meter:<day>` in the object's storage, readable through the
-    `/api/debug` snapshot once that route is extended) and the Workers AI
-    dashboard for Flux seconds.
+    `/api/debug` snapshot once that route is extended) and the OpenAI usage
+    page for `gpt-transcribe` minutes.
 
 ## Flutter
 

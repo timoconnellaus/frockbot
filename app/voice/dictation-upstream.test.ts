@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import {
-  translateVoiceDictationUpstreamFrameV1,
-  voiceDictationAppendV1,
+  translateVoiceRealtimeUpstreamFrameV1,
+  voiceRealtimeAppendV1,
+} from "./openai-realtime.js";
+import {
   voiceDictationConfiguredV1,
   voiceDictationSessionUpdateV1,
   voiceDictationUpstreamTargetV1,
@@ -56,7 +58,7 @@ describe("the dictation upstream", () => {
 
   test("appends audio as base64 PCM", () => {
     const frame = JSON.parse(
-      voiceDictationAppendV1(new Uint8Array([0, 1, 2, 255]).buffer),
+      voiceRealtimeAppendV1(new Uint8Array([0, 1, 2, 255]).buffer),
     ) as { type: string; audio: string };
     expect(frame.type).toBe("input_audio_buffer.append");
     expect([...atob(frame.audio)].map((c) => c.charCodeAt(0))).toEqual([
@@ -66,7 +68,7 @@ describe("the dictation upstream", () => {
 
   test("translates deltas, commits, completions, failures and errors by item", () => {
     expect(
-      translateVoiceDictationUpstreamFrameV1(
+      translateVoiceRealtimeUpstreamFrameV1(
         JSON.stringify({
           type: "conversation.item.input_audio_transcription.delta",
           item_id: "item_1",
@@ -75,7 +77,7 @@ describe("the dictation upstream", () => {
       ),
     ).toEqual({ kind: "delta", text: "hel", itemId: "item_1" });
     expect(
-      translateVoiceDictationUpstreamFrameV1(
+      translateVoiceRealtimeUpstreamFrameV1(
         JSON.stringify({
           type: "input_audio_buffer.committed",
           item_id: "item_1",
@@ -83,7 +85,7 @@ describe("the dictation upstream", () => {
       ),
     ).toEqual({ kind: "committed", itemId: "item_1" });
     expect(
-      translateVoiceDictationUpstreamFrameV1(
+      translateVoiceRealtimeUpstreamFrameV1(
         JSON.stringify({
           type: "conversation.item.input_audio_transcription.completed",
           item_id: "item_1",
@@ -92,7 +94,7 @@ describe("the dictation upstream", () => {
       ),
     ).toEqual({ kind: "completed", text: "hello there", itemId: "item_1" });
     expect(
-      translateVoiceDictationUpstreamFrameV1(
+      translateVoiceRealtimeUpstreamFrameV1(
         JSON.stringify({
           type: "conversation.item.input_audio_transcription.failed",
           item_id: "item_2",
@@ -101,13 +103,13 @@ describe("the dictation upstream", () => {
       ),
     ).toEqual({ kind: "failed", message: "too noisy", itemId: "item_2" });
     expect(
-      translateVoiceDictationUpstreamFrameV1(
+      translateVoiceRealtimeUpstreamFrameV1(
         JSON.stringify({ type: "error", error: { message: "bad key" } }),
       ),
     ).toEqual({ kind: "error", message: "bad key", emptyBuffer: false });
     // The one refusal that is not a failure after stop: nothing to commit.
     expect(
-      translateVoiceDictationUpstreamFrameV1(
+      translateVoiceRealtimeUpstreamFrameV1(
         JSON.stringify({
           type: "error",
           error: {
@@ -119,7 +121,7 @@ describe("the dictation upstream", () => {
       ),
     ).toMatchObject({ kind: "error", emptyBuffer: true });
     expect(
-      translateVoiceDictationUpstreamFrameV1(
+      translateVoiceRealtimeUpstreamFrameV1(
         JSON.stringify({
           type: "error",
           error: { message: "buffer too small. Expected at least 100ms" },
@@ -127,11 +129,11 @@ describe("the dictation upstream", () => {
       ),
     ).toMatchObject({ kind: "error", emptyBuffer: true });
     expect(
-      translateVoiceDictationUpstreamFrameV1(
+      translateVoiceRealtimeUpstreamFrameV1(
         JSON.stringify({ type: "session.updated" }),
       ),
     ).toEqual({ kind: "session-updated" });
-    expect(translateVoiceDictationUpstreamFrameV1("{")).toBeUndefined();
+    expect(translateVoiceRealtimeUpstreamFrameV1("{")).toBeUndefined();
   });
 });
 
