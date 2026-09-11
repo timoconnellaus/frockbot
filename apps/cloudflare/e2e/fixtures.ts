@@ -829,16 +829,36 @@ export async function enableCustomModels(page: Page): Promise<void> {
  * Install the Ollama Cloud provider, which is done on Models rather than in
  * Plugins: a model provider is not a Plugins row, and Connectors offers its
  * connect form only once the Package is installed.
+ *
+ * A provider nobody has set up is not a section of its own. Models offers the
+ * whole catalog through one "Add a provider" select, and a provider earns its
+ * section — with "Manage provider" beside its name — once it has been chosen
+ * there. Choosing hands the person to the provider's Connectors page, which is
+ * where `connectOllama` picks up; this only comes back to Models to see the
+ * section it made.
  */
 export async function chooseOllamaProvider(page: Page): Promise<void> {
   await openModels(page);
   const section = group(page, "Ollama Cloud");
-  await expect(section).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
+  const adder = group(page, "Add a provider");
+  await expect(section.or(adder).first()).toBeVisible({
+    timeout: SHELL_TIMEOUT_MS,
+  });
   if (!(await section.getByText("Manage provider").count())) {
+    // The select's id carries the section's index in the document, which a
+    // spec has no business knowing, so it is found by the field it names.
     await press(
-      section
-        .locator('[flt-semantics-identifier^="view-action-section-"]')
-        .first(),
+      adder.locator(
+        '[flt-semantics-identifier^="view-field-j"][flt-semantics-identifier$=".provider"]',
+      ),
+    );
+    await settle(page);
+    const choice = page.locator('[aria-label="Ollama Cloud"]').last();
+    await expect(choice).toBeVisible({ timeout: 30_000 });
+    await choice.click();
+    await settle(page);
+    await press(
+      adder.locator('[flt-semantics-identifier^="view-action-save-"]').first(),
     );
     await expect(sem(page, "connections-document")).toBeVisible({
       timeout: 60_000,
