@@ -44,9 +44,9 @@ function wallClock(instant: string, timezone: string): string {
 
 async function profileRevision(userId: string): Promise<number> {
   return (
-    (await expectOkJson(
-      await asUser(userId, "/api/settings/application"),
-    )) as { revision: number }
+    (await expectOkJson(await asUser(userId, "/api/settings/application"))) as {
+      revision: number;
+    }
   ).revision;
 }
 
@@ -253,9 +253,8 @@ describe("a Routine keeps the account's clock", () => {
     await runInDurableObject(
       botStateStubV1(userId, botId),
       async (_instance, state) => {
-        const healthy = await state.storage.get<Record<string, unknown>>(
-          "routine:brief",
-        );
+        const healthy =
+          await state.storage.get<Record<string, unknown>>("routine:brief");
         // A Routine written by the previous release: the zone lives on the
         // record and the schedule carries the retired `CRON_TZ=` prefix.
         await state.storage.put("routine:legacy", {
