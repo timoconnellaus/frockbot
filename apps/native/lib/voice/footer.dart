@@ -23,8 +23,11 @@ import '../shell/semantics.dart';
 import '../theme/frock_theme.dart';
 import 'assistant.dart';
 
-/// The footer's height. It is the same on a phone and on a desktop: the
-/// controls are always shown, so there is nothing to compact away.
+/// The footer's height, above the system inset. It is the same on a phone
+/// and on a desktop: the controls are always shown, so there is nothing to
+/// compact away. On a phone the footer also covers the bottom inset — the
+/// gesture bar or the navigation buttons — in its own colour, so the controls
+/// sit above the app switcher rather than under it.
 const double voiceFooterHeight = 52;
 
 /// The animation's width, on every viewport. It is never compacted: a
@@ -111,60 +114,67 @@ class _VoiceFooterState extends State<VoiceFooter>
     final failure = widget.session.error;
     return identified(
       VoiceIds.footer,
-      SizedBox(
-        height: voiceFooterHeight,
-        child: Material(
-          color: theme.colorScheme.surface,
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              border: Border(
-                top: BorderSide(color: theme.colorScheme.outlineVariant),
-              ),
+      Material(
+        color: theme.colorScheme.surface,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            border: Border(
+              top: BorderSide(color: theme.colorScheme.outlineVariant),
             ),
-            child: Stack(
-              children: [
-                Positioned.fill(
-                  child: Center(
-                    child: failure == null
-                        ? _animation(theme)
-                        : Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 96),
-                            child: Text(
-                              failure,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              textAlign: TextAlign.center,
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: theme.colorScheme.error,
+          ),
+          // The body is a fixed 52 points; the padding below it is the
+          // system's, and it is painted in the footer's colour.
+          child: SafeArea(
+            top: false,
+            child: SizedBox(
+              height: voiceFooterHeight,
+              child: Stack(
+                children: [
+                  Positioned.fill(
+                    child: Center(
+                      child: failure == null
+                          ? _animation(theme)
+                          : Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 96,
+                              ),
+                              child: Text(
+                                failure,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                textAlign: TextAlign.center,
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: theme.colorScheme.error,
+                                ),
                               ),
                             ),
-                          ),
+                    ),
                   ),
-                ),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (failure == null) _mute(theme),
-                      identified(
-                        VoiceIds.end,
-                        Semantics(
-                          label: 'End voice session',
-                          button: true,
-                          child: IconButton(
-                            iconSize: 20,
-                            visualDensity: VisualDensity.compact,
-                            onPressed: widget.onEnd,
-                            icon: const Icon(Icons.close),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (failure == null) _mute(theme),
+                        identified(
+                          VoiceIds.end,
+                          Semantics(
+                            label: 'End voice session',
+                            button: true,
+                            child: IconButton(
+                              iconSize: 20,
+                              visualDensity: VisualDensity.compact,
+                              onPressed: widget.onEnd,
+                              icon: const Icon(Icons.close),
+                            ),
                           ),
                         ),
-                      ),
-                      const SizedBox(width: 4),
-                    ],
+                        const SizedBox(width: 4),
+                      ],
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
