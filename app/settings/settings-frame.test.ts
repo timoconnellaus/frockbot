@@ -299,6 +299,68 @@ test("provider knobs have one Models home and disappear while disabled", () => {
   ).toMatchObject({ type: "user/set-package-settings", unset: ["limit"] });
 });
 
+test("providers not yet set up are offered through one picker, not one section each", () => {
+  const user = settings();
+  const together: AvailableUserPackage = {
+    ...provider,
+    packageId: "provider-together",
+    displayName: "Together",
+  };
+  const frame = modelsSettingsFrame("tim", user, [provider, together]);
+  expect(frame.sections.map((section) => section.id)).toEqual([
+    "model",
+    "provider.provider",
+    "add-provider",
+  ]);
+  expect(frame.sections[2]).toMatchObject({
+    label: "Add a provider",
+    fields: [
+      {
+        id: "provider",
+        kind: "select",
+        value: null,
+        required: true,
+        choices: [{ label: "Together", value: "provider-together" }],
+      },
+    ],
+  });
+  expect(frame.sections[2]!.actions).toBeUndefined();
+  expect(
+    modelsSettingsCommand({
+      schemaVersion: 1,
+      commandId: "add-together",
+      ownerId: "tim",
+      expectedRevision: 8,
+      sectionId: "add-provider",
+      values: { provider: "provider-together" },
+    }),
+  ).toMatchObject({
+    type: "user/choose-model-provider",
+    packageId: "provider-together",
+  });
+  expect(() =>
+    modelsSettingsCommand({
+      schemaVersion: 1,
+      commandId: "add-nothing",
+      ownerId: "tim",
+      expectedRevision: 8,
+      sectionId: "add-provider",
+      values: {},
+    }),
+  ).toThrow("Choose a provider");
+  // Once installed, Together has its own section and leaves the picker.
+  user.packages.push({
+    packageId: "provider-together",
+    version: "1.0.0",
+    state: "installed",
+  });
+  expect(
+    modelsSettingsFrame("tim", user, [provider, together]).sections.map(
+      (section) => section.id,
+    ),
+  ).toEqual(["model", "provider.provider", "provider.provider-together"]);
+});
+
 test("resetting an Application setting omits the empty patch at the owner seam", () => {
   expect(
     applicationSettingsCommand({

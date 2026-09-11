@@ -171,7 +171,12 @@ function projectSection(
     children.push({
       type: "action",
       actionId: `save-${index}`,
-      label: section.id === "profile" ? "Save profile" : "Save changes",
+      label:
+        section.id === "profile"
+          ? "Save profile"
+          : section.id === "add-provider"
+            ? "Connect provider"
+            : "Save changes",
       style: "primary",
       input: { sectionId: section.id },
     });

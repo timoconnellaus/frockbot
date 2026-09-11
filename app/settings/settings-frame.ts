@@ -336,16 +336,41 @@ export function modelSettingsOptions(
   });
 }
 
+/**
+ * The Models section that adds a provider not yet set up. Its one select
+ * names a catalog Package, and saving it is the same choose-provider command
+ * a per-provider section used to carry — one action for the whole catalog
+ * instead of one per provider, which the view's action budget cannot hold.
+ */
+export const ADD_PROVIDER_SECTION_V1 = "add-provider";
+export const ADD_PROVIDER_FIELD_V1 = "provider";
+
 export function modelsSettingsFrame(
   userId: string,
   settings: UserSettingsViewV1,
   catalog: readonly AvailableUserPackage[],
 ): SettingsFrame {
-  const providers = catalog.filter(
+  const modelProviders = catalog.filter(
     (pkg) =>
       !pkg.platformOwned &&
       pkg.capabilities?.some((capability) => capability.kind === "model"),
   );
+  // A provider earns its own section once a person has done something with
+  // it: installed the Package, or connected an account. The rest of the
+  // catalog is offered through one picker, so the surface stays the size of
+  // what is set up rather than the size of what could be.
+  const providers = modelProviders.filter(
+    (pkg) =>
+      settings.packages.some(
+        (installation) => installation.packageId === pkg.packageId,
+      ) ||
+      settings.connections.some(
+        (connection) =>
+          connection.packageId === pkg.packageId &&
+          connection.state !== "revoked",
+      ),
+  );
+  const available = modelProviders.filter((pkg) => !providers.includes(pkg));
   const selected = settings.accountModel ? { ...settings.accountModel } : null;
   const choices: SettingChoice[] = [];
   for (const choice of modelChoices(settings, catalog)) {
@@ -443,6 +468,26 @@ export function modelsSettingsFrame(
           }),
     });
   }
+  if (available.length > 0)
+    sections.push({
+      id: ADD_PROVIDER_SECTION_V1,
+      label: "Add a provider",
+      fields: [
+        {
+          id: ADD_PROVIDER_FIELD_V1,
+          label: "Provider",
+          kind: "select",
+          value: null,
+          editable: true,
+          required: true,
+          choices: available.map((pkg) => ({
+            label: (pkg.displayName ?? pkg.packageId).slice(0, 200),
+            value: pkg.packageId,
+          })),
+          hint: "Bring your own API key or sign in. Connecting opens the provider's account page.",
+        },
+      ],
+    });
   return decodeProtocol("SettingsFrame", {
     schemaVersion: 1,
     home: "models",
@@ -471,6 +516,20 @@ export function modelsSettingsCommand(
       type: "user/set-account-model",
       model: command.values["account-model"],
     });
+  if (command.sectionId === ADD_PROVIDER_SECTION_V1) {
+    const packageId = command.values[ADD_PROVIDER_FIELD_V1];
+    if (
+      typeof packageId !== "string" ||
+      command.unset?.length ||
+      Object.keys(command.values).length !== 1
+    )
+      throw new ConfigurationDecodeError("Choose a provider to add");
+    return userCommand({
+      ...meta,
+      type: "user/choose-model-provider",
+      packageId,
+    });
+  }
   if (command.sectionId.startsWith("provider.")) {
     const packageId = command.sectionId.slice(9);
     return Object.keys(command.values).length === 0 && !command.unset?.length
