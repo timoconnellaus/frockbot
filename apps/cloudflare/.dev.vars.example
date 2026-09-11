@@ -31,11 +31,8 @@ ELEVENLABS_API_KEY=replace-with-an-elevenlabs-api-key
 # ELEVENLABS_VOICE_ID=JBFqnCBsd6RMkjVDRZzb
 
 # Connected apps: the provider project key. Absent, no app can be connected
-# and the Connectors rows for apps say so. The webhook secret verifies the
-# event deliveries that fire Routines; set it from the provider dashboard once
-# the deployment's /api/connect/events URL is registered there.
+# and the Connectors rows for apps say so.
 COMPOSIO_API_KEY=replace-with-composio-project-api-key
-COMPOSIO_WEBHOOK_SECRET=replace-with-composio-webhook-signing-secret
 
 # Billing: use Stripe TEST mode locally. Never commit live values.
 # STRIPE_SECRET_KEY is the switch: leave it unset and billing stays off.

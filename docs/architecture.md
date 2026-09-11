@@ -754,7 +754,7 @@ Adjacent, outside the loop: image generation uses Workers AI ids directly (`app/
 
 **The provider client** (`composio.ts`) is raw `fetch` against the v3.1 REST API with `x-api-key`, verified against the published OpenAPI document on 2026-09-11: auth configs, hosted links, the seven connected-account statuses, `important=true` tool listing, execution, and deletion. Every answer is decoded at that seam.
 
-**Secrets.** `COMPOSIO_API_KEY` is the project key (optional in `production-secrets.ts`: absent, no app can be connected and a Bot has no app tools); `COMPOSIO_WEBHOOK_SECRET` verifies event deliveries for the Routine trigger that is next. The harness answers `backend.composio.dev` with `composioStub` (`test/harness/miniflare.ts`), and `connect-apps.integration.ts` walks the row, the sign-in hand-off, the settle, the return page, a Bot's tool call and the disconnect through the gateway.
+**Secrets.** `COMPOSIO_API_KEY` is the project key (optional in `production-secrets.ts`: absent, no app can be connected and a Bot has no app tools). The secret that verifies event deliveries arrives with cut 3, the Routine trigger. The harness answers `backend.composio.dev` with `composioStub` (`test/harness/miniflare.ts`), and `connect-apps.integration.ts` walks the row, the sign-in hand-off, the settle, the return page, a Bot's tool call and the disconnect through the gateway.
 
 ---
 

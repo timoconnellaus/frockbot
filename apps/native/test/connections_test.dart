@@ -372,6 +372,43 @@ void main() {
     expect(find.text('Ready · model list up to date'), findsOneWidget);
   });
 
+  testWidgets('a refresh that fails after a good load says so', (tester) async {
+    var offline = false;
+    final store = MemoryStore();
+    final api = SettingsApi(store, (_, _) async {
+      if (offline) throw const RequestFailure('synthetic backend detail');
+      return connectionsFrame(
+        connected: 1,
+        accounts: [
+          {
+            'id': 'conn-1',
+            'label': 'Work',
+            'packageId': 'connect',
+            'connectionTypeId': 'connect-gmail',
+            'kind': 'connector',
+            'authorization': 'grant',
+            'state': 'authorizing',
+          },
+        ],
+      );
+    });
+    await tester.pumpWidget(page(api, store));
+    await tester.pumpAndSettle();
+    expect(find.text('Gmail'), findsOneWidget);
+    expect(find.textContaining('Couldn’t load your connectors'), findsNothing);
+
+    offline = true;
+    await tester.fling(find.byType(ListView), const Offset(0, 320), 1000);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Gmail'), findsOneWidget);
+    expect(find.textContaining('synthetic backend'), findsNothing);
+    expect(
+      find.textContaining('Couldn’t load your connectors'),
+      findsOneWidget,
+    );
+  });
+
   for (final brightness in Brightness.values) {
     testWidgets('Connectors stays readable at 200% ($brightness)', (
       tester,

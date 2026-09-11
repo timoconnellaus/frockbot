@@ -580,7 +580,6 @@ jobs:
           # Connected apps. Optional: staging without them simply cannot
           # connect an app.
           COMPOSIO_API_KEY: ${{ secrets.COMPOSIO_API_KEY }}
-          COMPOSIO_WEBHOOK_SECRET: ${{ secrets.COMPOSIO_WEBHOOK_SECRET }}
         shell: bash
         run: |
           secrets_file="$RUNNER_TEMP/frockbot-staging.env"
@@ -608,7 +607,6 @@ jobs:
             'OPENAI_API_KEY',
             'ELEVENLABS_API_KEY',
             'COMPOSIO_API_KEY',
-            'COMPOSIO_WEBHOOK_SECRET',
           ].filter((name) => process.env[name]);
           console.log(
             JSON.stringify(

@@ -91,9 +91,12 @@ class _ConnectionsPageState extends State<ConnectionsPage>
       setState(() => frame = next);
     } catch (_) {
       if (!mounted) return;
-      setState(
-        () => loadFailure = 'Couldn’t load your connectors. Check your connection and try again.',
-      );
+      const message =
+          'Couldn’t load your connectors. Check your connection and try again.';
+      setState(() {
+        loadFailure = message;
+        if (frame != null) notice = message;
+      });
     } finally {
       if (mounted) setState(() => loading = false);
     }
