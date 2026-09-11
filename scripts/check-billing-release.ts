@@ -1,6 +1,12 @@
 import { BILLING_LAUNCH_BLOCKERS } from "../apps/cloudflare/src/billing-readiness.js";
 import { decodeModelRates } from "../app/billing/model.js";
 
+if (!process.env.STRIPE_SECRET_KEY?.trim()) {
+  console.log(
+    "Billing is switched off: STRIPE_SECRET_KEY is absent, so this deploy meters nothing and no launch check applies.",
+  );
+  process.exit(0);
+}
 const issues = [...BILLING_LAUNCH_BLOCKERS];
 for (const name of [
   "STRIPE_SECRET_KEY",

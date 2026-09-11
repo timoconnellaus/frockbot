@@ -1,6 +1,10 @@
 import { prepaidComputerHost } from "./billing-computer.js";
 import { decodeModelRates } from "@frockbot/app/billing/model";
 import type { BillingAccountRpc } from "./billing.js";
+import {
+  hostedBillingEnabledV1,
+  type BillingSwitchEnv,
+} from "./billing-readiness.js";
 import { cleanNotificationTestState } from "./notification-state-cleanup.js";
 import type { MessageNotice } from "@frockbot/app/notifications/messages";
 import {
@@ -178,13 +182,6 @@ import {
   APPLET_SOURCE_MAX_FILES_V1,
   decodeWorkspacePathV1,
 } from "@frockbot/core/contracts";
-
-function hostedBillingRequired(origin?: string): boolean {
-  return (
-    !!origin &&
-    !/^(localhost|127\.0\.0\.1|\[::1\])$/.test(new URL(origin).hostname)
-  );
-}
 
 function hostedModelLimits(raw?: string) {
   const rates = Object.values(decodeModelRates(raw));
@@ -518,7 +515,7 @@ export class BotState extends DurableObject<BotStateEnv> {
     // serves from the RPC that addresses it, never from its constructor.
     this.backendEnv = {
       ...env,
-      ...(hostedBillingRequired(env.BETTER_AUTH_URL) && env.COMPUTER_HOST
+      ...(hostedBillingEnabledV1(env as BillingSwitchEnv) && env.COMPUTER_HOST
         ? {
             COMPUTER_HOST: prepaidComputerHost(
               env.COMPUTER_HOST,
@@ -529,7 +526,7 @@ export class BotState extends DurableObject<BotStateEnv> {
             ),
           }
         : {}),
-      ...(hostedBillingRequired(env.BETTER_AUTH_URL)
+      ...(hostedBillingEnabledV1(env as BillingSwitchEnv)
         ? {
             BILLING: (userId: string, botId: string, sessionId: string) => {
               const account = env.USER_CONFIGURATIONS.get(
@@ -569,7 +566,7 @@ export class BotState extends DurableObject<BotStateEnv> {
               autoRoute: frockAiWorkerVarV1(env, "FROCK_AI_AUTO_ROUTE"),
               accountId: frockAiWorkerVarV1(env, "FROCK_AI_ACCOUNT_ID"),
               token: frockAiWorkerVarV1(env, "FROCK_AI_GATEWAY_TOKEN"),
-              ...(hostedBillingRequired(env.BETTER_AUTH_URL)
+              ...(hostedBillingEnabledV1(env as BillingSwitchEnv)
                 ? {
                     billingLimits: hostedModelLimits(
                       (env as BotStateEnv & { BILLING_MODEL_RATES?: string })

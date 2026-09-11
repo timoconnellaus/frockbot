@@ -66,22 +66,6 @@ export interface NonSecretWorkerSettingV1 extends ProductionSecretV1 {
  */
 export const REQUIRED_PRODUCTION_SECRETS_V1: readonly ProductionSecretV1[] = [
   {
-    name: "STRIPE_SECRET_KEY",
-    why: "Creates account subscriptions, top-ups and portal sessions.",
-  },
-  {
-    name: "STRIPE_WEBHOOK_SECRET",
-    why: "Verifies payment events before granting credit.",
-  },
-  {
-    name: "STRIPE_MONTHLY_PRICE_ID",
-    why: "Pins the US$29 monthly Stripe price.",
-  },
-  {
-    name: "BILLING_MODEL_RATES",
-    why: "Published hosted model prices and prepaid dispatch limits.",
-  },
-  {
     name: "FCM_SERVICE_ACCOUNT",
     why: "Authorizes Firebase push delivery to registered Android devices.",
   },
@@ -152,6 +136,28 @@ export const REQUIRED_PRODUCTION_SECRETS_V1: readonly ProductionSecretV1[] = [
  */
 export const OPTIONAL_PRODUCTION_SECRETS_V1: readonly OptionalProductionSecretV1[] =
   [
+    {
+      name: "STRIPE_SECRET_KEY",
+      why: "Creates account subscriptions, top-ups and portal sessions, and is the switch that turns billing on.",
+      degraded:
+        "billing stays switched off: nothing is metered, no subscription is required, and the billing page says payments are not available",
+    },
+    {
+      name: "STRIPE_WEBHOOK_SECRET",
+      why: "Verifies payment events before granting credit.",
+      degraded: "no Stripe event can grant credit, so checkout cannot complete",
+    },
+    {
+      name: "STRIPE_MONTHLY_PRICE_ID",
+      why: "Pins the US$29 monthly Stripe price.",
+      degraded: "subscription checkout answers that the plan is not configured",
+    },
+    {
+      name: "BILLING_MODEL_RATES",
+      why: "Published hosted model prices and prepaid dispatch limits.",
+      degraded:
+        "while billing is on, no hosted model is authorized to spend, so hosted-model turns are refused",
+    },
     {
       name: "FROCKBOT_ADMIN_EMAILS",
       why: "The identities allowed to open Admin.",
