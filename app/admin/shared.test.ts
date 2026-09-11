@@ -110,6 +110,26 @@ describe("account feature codecs", () => {
     expect(account).toEqual({ userId: "u1", features });
   });
 
+  test("an over-long display name is clamped, not refused", () => {
+    const [account] = decodeAdminUserListViewV1({
+      schemaVersion: 1,
+      users: [
+        {
+          userId: "u1",
+          email: "u1@example.com",
+          name: "x".repeat(600),
+          features,
+        },
+      ],
+    }).users;
+    expect(account).toEqual({
+      userId: "u1",
+      email: "u1@example.com",
+      name: "x".repeat(512),
+      features,
+    });
+  });
+
   test("the default is off and rejects unknown fields", () => {
     expect(defaultUserFeaturesV1().applets).toBe(false);
     expect(() => decodeUserFeaturesV1({ ...features, beta: true })).toThrow(

@@ -304,13 +304,12 @@ export function decodeSetUserFeaturesRequestV1(
   };
 }
 
-function optionalBoundedString(
+function optionalDisplayString(
   value: unknown,
-  label: string,
   maximum: number,
 ): string | undefined {
-  if (value === undefined || value === null || value === "") return undefined;
-  return boundedString(value, label, maximum);
+  if (typeof value !== "string" || value.length === 0) return undefined;
+  return value.slice(0, maximum);
 }
 
 export function decodeAdminUserViewV1(input: unknown): AdminUserViewV1 {
@@ -320,8 +319,8 @@ export function decodeAdminUserViewV1(input: unknown): AdminUserViewV1 {
   if (!keys.every((key) => allowed.includes(key))) {
     throw new Error("admin user has unknown fields");
   }
-  const email = optionalBoundedString(user.email, "admin user.email", 512);
-  const name = optionalBoundedString(user.name, "admin user.name", 512);
+  const email = optionalDisplayString(user.email, 512);
+  const name = optionalDisplayString(user.name, 512);
   return {
     userId: boundedString(user.userId, "admin user.userId", 512),
     ...(email === undefined ? {} : { email }),
