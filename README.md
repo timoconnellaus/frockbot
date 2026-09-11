@@ -407,3 +407,7 @@ The runtime's features and registries provide composition and lifecycle ownershi
 - the Computer interface has exactly one runtime behind it — Fly Sprites, driven from the Cloudflare Container host. A Kubernetes or Container-native Computer can be added as a provider Package, but no second adapter is implemented;
 - there is no Package catalog: the Packages a User can install are the ones compiled into the deployment, and nothing installs a third-party or Bot-published Package;
 - packaged applications are not code signed.
+
+## License
+
+MIT. See [`LICENSE`](LICENSE).
