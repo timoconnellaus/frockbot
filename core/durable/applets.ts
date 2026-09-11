@@ -184,6 +184,13 @@ export interface AppletMountInputV1 {
   loaderId: string;
   serverHash: string;
   contract: 1;
+  /**
+   * The R2 etag of the server artifact as it was when an activation verified
+   * its full hash. A later mount that finds the same etag under the same
+   * content-addressed key is reading the bytes that were hashed, and skips
+   * hashing them again; any other etag, or none recorded, hashes in full.
+   */
+  serverEtag?: string;
 }
 
 /**
@@ -364,7 +371,7 @@ export function decodeAppletMountInputV1(
       "serverHash",
       "contract",
     ],
-    [],
+    ["serverEtag"],
     label,
   );
   if (value.schemaVersion !== 1) {
@@ -383,6 +390,15 @@ export function decodeAppletMountInputV1(
     loaderId: hashString(value.loaderId, `${label}.loaderId`),
     serverHash: hashString(value.serverHash, `${label}.serverHash`),
     contract: 1,
+    ...(value.serverEtag === undefined
+      ? {}
+      : {
+          serverEtag: boundedString(
+            value.serverEtag,
+            `${label}.serverEtag`,
+            256,
+          ),
+        }),
   };
 }
 

@@ -684,6 +684,8 @@ export interface GatewayDependencies {
   artifacts: ApplicationArtifactStore;
   /** Dedicated anonymous hostnames that serve only immutable iframe pages. */
   uiArtifactHosts?: readonly string[];
+  /** The request's `ctx.waitUntil`, for work that may outlive the answer. */
+  waitUntil?: (promise: Promise<unknown>) => void;
   auth: GatewayAuth;
   userExists(userId: string): Promise<boolean>;
   readDeploymentPolicy(): Promise<DeploymentPolicyV1>;
