@@ -7,6 +7,7 @@ import 'package:frockbot_native/client/transport.dart';
 import 'package:frockbot_native/shell/app_shell.dart';
 import 'package:frockbot_native/shell/semantics.dart';
 import 'package:frockbot_native/theme/frock_theme.dart';
+import 'package:frockbot_native/update/app_version.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import 'widget_test.dart' show MemoryStore;
@@ -106,6 +107,55 @@ void main() {
     await tester.pumpAndSettle();
     expect(identifiedBy(ShellIds.sidebar).hitTestable(), findsOneWidget);
 
+    await tester.pumpWidget(const SizedBox());
+    sessions.clear();
+    links.dispose();
+    api.close();
+  });
+
+  testWidgets('the Profile page ends with the running version', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(900, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final store = MemoryStore();
+    final api = OfflineApi(store);
+    final sessions = BotSessions(api: api, store: store);
+    final links = ValueNotifier<String?>(null);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: FrockTheme.theme(Brightness.dark),
+        home: AppShell(
+          api: api,
+          store: store,
+          sessions: sessions,
+          userId: 'test-user',
+          botLinks: links,
+          onSignOut: () async {},
+          version: () async => const AppVersion(build: '1.2.0+17', patch: 3),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(identifiedBy(ShellIds.sidebarProfile));
+    await tester.pumpAndSettle();
+    final version = identifiedBy(SettingsIds.profileVersion);
+    expect(version, findsOneWidget);
+    expect(
+      find.descendant(
+        of: version,
+        matching: find.text('Version 1.2.0+17 · patch 3'),
+      ),
+      findsOneWidget,
+    );
+    // Below the door out, as the last thing on the page.
+    final signOut = identifiedBy(SettingsIds.profileSignOut);
+    expect(
+      tester.getTopLeft(version).dy,
+      greaterThan(tester.getBottomLeft(signOut).dy),
+    );
     await tester.pumpWidget(const SizedBox());
     sessions.clear();
     links.dispose();

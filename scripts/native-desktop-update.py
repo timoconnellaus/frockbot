@@ -142,7 +142,8 @@ def main():
 
     run(["bun", "scripts/check-client-protocol.ts"], cwd=ROOT)
     run(
-        [FLUTTER, "build", "macos", "--release", f"--build-name={name}", f"--build-number={number}"],
+        [FLUTTER, "build", "macos", "--release", f"--build-name={name}", f"--build-number={number}",
+         f"--dart-define=FROCKBOT_APP_VERSION={name}+{number}"],
         cwd=NATIVE,
     )
     inspect_app(BUILD_APP, name, number)

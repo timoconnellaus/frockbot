@@ -15,6 +15,7 @@ import 'package:shorebird_code_push/shorebird_code_push.dart';
 
 import '../shell/lifecycle.dart';
 import '../shell/semantics.dart';
+import 'app_version.dart';
 
 enum MobileUpdateStatus { upToDate, outdated, restartRequired, unavailable }
 
@@ -30,6 +31,10 @@ abstract interface class MobileUpdateService {
   Future<bool> download();
 
   Future<bool> restart();
+
+  /// The number of the patch this engine booted, or null when it runs the
+  /// release's own code or where Shorebird has no updater at all.
+  Future<int?> currentPatch();
 }
 
 class ShorebirdMobileUpdateService implements MobileUpdateService {
@@ -71,6 +76,12 @@ class ShorebirdMobileUpdateService implements MobileUpdateService {
         ? RestartMode.process
         : RestartMode.flutterEngine;
     return (await Restart.restartApp(mode: mode)).success;
+  }
+
+  @override
+  Future<int?> currentPatch() async {
+    if (!_mobile || !updater.isAvailable) return null;
+    return (await updater.readCurrentPatch())?.number;
   }
 }
 
@@ -121,6 +132,19 @@ class MobileUpdateController extends ChangeNotifier {
       // Update discovery is opportunistic. The next resume is the retry, and
       // the running app remains fully usable in the meantime.
     }
+  }
+
+  /// The version and patch this program is running, for the Profile page.
+  /// The patch is read from the updater on request; a lookup that fails
+  /// still leaves the compiled version to show.
+  Future<AppVersion> version() async {
+    int? patch;
+    try {
+      patch = await service.currentPatch();
+    } catch (_) {
+      patch = null;
+    }
+    return AppVersion(patch: patch);
   }
 
   Future<void> restart() async {

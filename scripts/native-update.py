@@ -62,6 +62,15 @@ def build_name():
     return match[1]
 
 
+def app_version_define(release_version):
+    """The flag that tells the Dart program which release it is, shown at the foot of the Profile page.
+
+    A patch carries its release's identity, never a version of its own: the patch number is read from
+    the Shorebird updater at run time.
+    """
+    return f"--dart-define=FROCKBOT_APP_VERSION={release_version}"
+
+
 class FullReleaseRequired(RuntimeError):
     """Shorebird found native or asset differences, which no patch can carry."""
 
@@ -332,7 +341,7 @@ def release(floor=0, build_number=None):
         raise RuntimeError("Android versionCode limit reached.")
     args = [cli, "release", "android", f"--flutter-version={FLUTTER_VERSION}", "--artifact=apk",
             f"--target-platform={TARGET_PLATFORM}", f"--build-name={build_name()}", f"--build-number={version}",
-            f"--public-key-path={PUBLIC_KEY}"]
+            f"--public-key-path={PUBLIC_KEY}", "--", app_version_define(f"{build_name()}+{version}")]
     if not intent:
         intent = {
             "versionCode": version, "package": PACKAGE, "appId": app_id(), "buildName": build_name(),
@@ -394,7 +403,7 @@ def patch(track="staging", baseline_source="local", result=None):
     args = [cli, "patch", "android", f"--release-version={base['releaseVersion']}",
             f"--build-name={base['buildName']}", f"--build-number={base['buildNumber']}", f"--track={track}",
             f"--private-key-path={key}", f"--public-key-path={PUBLIC_KEY}",
-            "--", f"--target-platform={base['targetPlatform']}"]
+            "--", f"--target-platform={base['targetPlatform']}", app_version_define(base["releaseVersion"])]
     if any(flag in arg for arg in args for flag in FORBIDDEN_PATCH_FLAGS):
         raise RuntimeError("A patch never overrides native or asset diffs; ship a full release instead.")
     # The release was built one above its floor; the same floor makes Gradle emit the same versionCode.

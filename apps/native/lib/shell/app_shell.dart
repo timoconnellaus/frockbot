@@ -39,6 +39,7 @@ import '../settings/billing.dart';
 import '../settings/bot_settings.dart';
 import '../settings/page.dart';
 import '../templates/page.dart';
+import '../update/app_version.dart';
 import '../view/sample_page.dart';
 import '../voice/assistant.dart';
 import '../voice/capabilities.dart';
@@ -70,6 +71,11 @@ class AppShell extends StatefulWidget {
   /// Bot, which is the only thing the entry asks of the shell.
   final ValueNotifier<String?> botLinks;
   final Future<void> Function() onSignOut;
+
+  /// What the Profile page says this program is. The entry hands over the
+  /// update controller's answer, which also knows the booted Shorebird patch;
+  /// without one the compiled version alone is shown.
+  final Future<AppVersion> Function() version;
   const AppShell({
     super.key,
     required this.api,
@@ -78,7 +84,10 @@ class AppShell extends StatefulWidget {
     required this.userId,
     required this.botLinks,
     required this.onSignOut,
+    this.version = compiledVersion,
   });
+
+  static Future<AppVersion> compiledVersion() async => const AppVersion();
 
   @override
   State<AppShell> createState() => _AppShellState();
@@ -1664,6 +1673,27 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                             ),
                           ),
                         ]),
+                      // The last line on the page: which program this is, so
+                      // a report of what went wrong can say what was running.
+                      Padding(
+                        padding: const EdgeInsets.only(top: 24),
+                        child: FutureBuilder<AppVersion>(
+                          future: widget.version(),
+                          builder: (context, answer) => identified(
+                            SettingsIds.profileVersion,
+                            Text(
+                              (answer.data ?? const AppVersion()).label,
+                              textAlign: TextAlign.center,
+                              style: Theme.of(context).textTheme.bodySmall
+                                  ?.copyWith(
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.onSurfaceVariant,
+                                  ),
+                            ),
+                          ),
+                        ),
+                      ),
                     ],
                   ),
                 ),

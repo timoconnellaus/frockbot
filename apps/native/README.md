@@ -137,4 +137,6 @@ scripts/native-acceptance.sh measure
 
 Google's system-browser consent is a supervised User step. The runner does not enter passwords. Flow selectors and the real device path are unverified until the Pixel is available. Raw output stays in `.native-build/native-acceptance/`. Activity launch time and Android gfxinfo are labelled as such; they do not satisfy first-editable-frame, Flutter raster or physical IME input-to-paint budgets.
 
+`--dart-define=FROCKBOT_APP_VERSION=<name>+<code>` is what the foot of the Profile page shows as the running version, with the booted Shorebird patch number beside it on Android. The release, patch, macOS and web builds all pass it from `pubspec.yaml`; a plain `flutter run` carries none and shows "Development build".
+
 `--dart-define=NATIVE_ACCEPTANCE=true` enables bounded frame/input telemetry containing no text or identifiers. Normal builds create no telemetry timer or output. `appInputToFrameMs` excludes hardware/compositor latency. The advisory CI workflow runs analysis/tests only when the exact SDK is already installed, and visibly reports a skip otherwise.

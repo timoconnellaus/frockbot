@@ -12,6 +12,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/shell/semantics.dart';
 import 'package:frockbot_native/client/plain_store.dart';
 import 'package:frockbot_native/client/store.dart';
+import 'package:frockbot_native/update/app_version.dart';
 import 'package:frockbot_native/update/update_ready.dart';
 
 class FakeUpdateService implements MobileUpdateService {
@@ -20,6 +21,8 @@ class FakeUpdateService implements MobileUpdateService {
   Completer<void>? checkGate;
   bool restartSucceeds;
   bool downloadStages;
+  int? patch;
+  Object? patchFailure;
   int checks = 0;
   int downloads = 0;
   int restarts = 0;
@@ -29,6 +32,8 @@ class FakeUpdateService implements MobileUpdateService {
     this.events = const [],
     this.restartSucceeds = true,
     this.downloadStages = true,
+    this.patch,
+    this.patchFailure,
   });
 
   @override
@@ -49,6 +54,12 @@ class FakeUpdateService implements MobileUpdateService {
     events.add('restart');
     restarts++;
     return restartSucceeds;
+  }
+
+  @override
+  Future<int?> currentPatch() async {
+    if (patchFailure != null) throw patchFailure!;
+    return patch;
   }
 }
 
@@ -268,6 +279,42 @@ void main() {
       debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
       expect(await ShorebirdMobileUpdateService().restart(), isFalse);
       expect(calls, isEmpty);
+    });
+  });
+
+  group('the version the Profile page shows', () {
+    test('names the booted patch beside the compiled release', () async {
+      final controller = MobileUpdateController(
+        service: FakeUpdateService(patch: 3),
+      );
+      addTearDown(controller.dispose);
+      final version = await controller.version();
+      expect(version.patch, 3);
+      expect(version.build, compiledAppVersion);
+      expect(
+        const AppVersion(build: '1.2.0+17', patch: 3).label,
+        'Version 1.2.0+17 · patch 3',
+      );
+    });
+
+    test('is the release alone when no patch is running', () {
+      expect(const AppVersion(build: '1.2.0+17').label, 'Version 1.2.0+17');
+    });
+
+    test('says so when the build was given no version', () {
+      expect(const AppVersion(build: '').label, 'Development build');
+      expect(
+        const AppVersion(build: '', patch: 2).label,
+        'Development build · patch 2',
+      );
+    });
+
+    test('survives an updater that cannot say', () async {
+      final controller = MobileUpdateController(
+        service: FakeUpdateService(patchFailure: StateError('no updater')),
+      );
+      addTearDown(controller.dispose);
+      expect((await controller.version()).patch, isNull);
     });
   });
 
