@@ -1121,10 +1121,12 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
     appletId: string,
   ): Promise<{ generationId: string; uiContentHash: string } | undefined> {
     const namespace = this.env.APPLET_STATES;
+    // `warm`: the facet comes up behind this answer, so the socket the page
+    // opens next finds the isolate and its schema already there.
     const opened = rpcJsonSnapshot(
       await namespace
         .get(namespace.idFromName(appletStateNameV1(userId, appletId)))
-        .open({ schemaVersion: 1, userId, appletId }),
+        .open({ schemaVersion: 1, userId, appletId, warm: true }),
     ) as { current?: { generationId?: unknown; uiHash?: unknown } };
     const generationId = opened.current?.generationId;
     const uiContentHash = opened.current?.uiHash;
@@ -2316,6 +2318,7 @@ export default {
           ? { adminEmails: env.FROCKBOT_ADMIN_EMAILS }
           : {}),
         applicationHashFor: async () => env.DEFAULT_APPLICATION_HASH,
+        waitUntil: (promise) => ctx.waitUntil(promise),
         botStateFor: (userId) =>
           runtimeExports.UserBotState({ props: { userId } }),
         userConfigurationFor: (userId): UserConfigurationBinding =>

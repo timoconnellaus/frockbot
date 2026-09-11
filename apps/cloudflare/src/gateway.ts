@@ -150,11 +150,21 @@ function jsonError(status: number, message: string): Response {
   return Response.json({ error: message }, { status });
 }
 
-/** Anonymous immutable artifact route. A configured UI host serves nothing else. */
+/**
+ * Anonymous immutable artifact route. A configured UI host serves nothing else.
+ *
+ * The Workers Cache sits in front of the bucket. The URL is the hash, so a
+ * cached copy can never be stale, and a credentialless iframe or a phone
+ * WebView shares none of the app origin's HTTP cache — the edge copy is the
+ * one cache every viewer of a page reaches. A miss reads and verifies the
+ * bytes as before and fills the cache behind the answer; a hit skips the
+ * bucket and the hash both.
+ */
 export async function servePackageUiArtifact(
   request: Request,
   url: URL,
   artifacts: GatewayDependencies["artifacts"],
+  waitUntil?: (promise: Promise<unknown>) => void,
 ): Promise<Response> {
   if (request.method !== "GET" && request.method !== "HEAD") {
     return jsonError(405, "method not allowed");
@@ -165,6 +175,18 @@ export async function servePackageUiArtifact(
     return jsonError(503, "Package UI artifacts are not configured");
   }
   const contentHash = match[1]!;
+  const etag = `"${contentHash}"`;
+  // One key for GET and HEAD, and none of the request's headers: what is
+  // cached is the artifact, and the artifact is the URL.
+  // `caches.default` is the Workers cache; the DOM typing this project also
+  // carries does not know the property, hence the cast.
+  const cache =
+    typeof caches === "undefined"
+      ? undefined
+      : (caches as unknown as { default?: Cache }).default;
+  const cacheKey = new Request(url.toString(), { method: "GET" });
+  const cached = cache ? await cache.match(cacheKey) : undefined;
+  if (cached) return answerArtifact(request, etag, cached);
   let html: string | undefined;
   try {
     html = await artifacts.loadPackageUiArtifact(contentHash);
@@ -172,24 +194,41 @@ export async function servePackageUiArtifact(
     return jsonError(502, "UI artifact failed verification");
   }
   if (html === undefined) return jsonError(404, "UI artifact was not found");
-  const etag = `"${contentHash}"`;
-  const headers = {
-    "content-type": "text/html; charset=utf-8",
-    // `no-transform` asks the edge to leave the bytes alone. An artifact is
-    // addressed by their hash, so a zone feature that rewrites its HTML —
-    // the Insights beacon injection is the one that did — is rewriting the
-    // thing the hash names.
-    "cache-control": "public, max-age=31536000, immutable, no-transform",
-    "content-security-policy": packageUiCspV1(url),
-    "cross-origin-resource-policy": "cross-origin",
-    "referrer-policy": "no-referrer",
-    "x-content-type-options": "nosniff",
-    etag,
-  };
-  if (request.headers.get("if-none-match") === etag) {
-    return new Response(null, { status: 304, headers });
+  const response = new Response(html, {
+    headers: {
+      "content-type": "text/html; charset=utf-8",
+      // `no-transform` asks the edge to leave the bytes alone. An artifact is
+      // addressed by their hash, so a zone feature that rewrites its HTML —
+      // the Insights beacon injection is the one that did — is rewriting the
+      // thing the hash names.
+      "cache-control": "public, max-age=31536000, immutable, no-transform",
+      "content-security-policy": packageUiCspV1(url),
+      "cross-origin-resource-policy": "cross-origin",
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
+      etag,
+    },
+  });
+  if (cache) {
+    const filling = cache.put(cacheKey, response.clone());
+    if (waitUntil) waitUntil(filling);
+    else await filling;
   }
-  return new Response(request.method === "HEAD" ? null : html, { headers });
+  return answerArtifact(request, etag, response);
+}
+
+/** The 304 and the HEAD, from a fresh response or a cached one alike. */
+function answerArtifact(
+  request: Request,
+  etag: string,
+  response: Response,
+): Response {
+  if (request.headers.get("if-none-match") === etag) {
+    return new Response(null, { status: 304, headers: response.headers });
+  }
+  return request.method === "HEAD"
+    ? new Response(null, { headers: response.headers })
+    : response;
 }
 
 function signupClosedResponse(request: Request, url: URL): Response {
@@ -1172,7 +1211,12 @@ export function createGateway(dependencies: GatewayDependencies) {
     }
 
     if (dependencies.uiArtifactHosts?.includes(url.hostname)) {
-      return servePackageUiArtifact(request, url, dependencies.artifacts);
+      return servePackageUiArtifact(
+        request,
+        url,
+        dependencies.artifacts,
+        dependencies.waitUntil,
+      );
     }
 
     const origin = allowedClientOrigin(

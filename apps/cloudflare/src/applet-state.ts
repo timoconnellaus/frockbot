@@ -55,6 +55,7 @@ import {
 import { BOT_ISOLATE_COMPATIBILITY_DATE } from "@frockbot/app/isolates/capabilities";
 import {
   decodeRpcEnvelopeV1,
+  rpcBoolean,
   rpcDecodedValue,
   rpcIdentifier,
   rpcInteger,
@@ -62,6 +63,7 @@ import {
   rpcString,
 } from "./durable-rpc.js";
 import { loggedEntryV1 } from "./entry-boundary.js";
+import { verifyAppletArtifactV1 } from "./applet-artifact.js";
 
 /** The two capabilities an Applet facet holds. Nothing else is in `env`. */
 export const APPLET_CAPABILITY_NAMES_V1 = [
@@ -167,16 +169,6 @@ function raceDeadline<T>(
   });
 }
 
-async function sha256Hex(value: string): Promise<string> {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(value),
-  );
-  return [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
-}
-
 /**
  * The `CAPABILITIES` slot of an Applet facet's `env`.
  *
@@ -249,51 +241,79 @@ export class AppletState extends DurableObject<AppletStateEnv> {
 
   // --- mount ---------------------------------------------------------------
 
-  async #load(input: AppletMountInputV1): Promise<WorkerStub> {
-    const source = await this.#artifact(input.serverHash);
-    const exports = this.ctx.exports as unknown as AppletStateExports;
-    const stateName = appletStateNameV1(input.userId, input.appletId);
-    return this.env.APPLETS.get(input.loaderId, () =>
-      Promise.resolve({
-        compatibilityDate: BOT_ISOLATE_COMPATIBILITY_DATE,
-        mainModule: "server.js",
-        modules: { "server.js": { js: source } },
-        // The constitution's rule made mechanical: no network except bindings.
-        globalOutbound: null,
-        env: {
-          IDENTITY: {
-            userId: input.userId,
-            appletId: input.appletId,
-            generationId: input.generationId,
-          } satisfies AppletIdentityV1,
-          CAPABILITIES: exports.AppletCapabilities({
-            props: {
+  /**
+   * The worker stubs this instance has loaded, by loader id. A loader id names
+   * one immutable bundle under one binding digest, so a stub once loaded is
+   * good for the life of the instance: without this every socket and every
+   * tool call re-read the bundle from R2 and hashed it again on its way to a
+   * loader that already held the isolate.
+   */
+  readonly #loaded = new Map<
+    string,
+    Promise<{ stub: WorkerStub; etag: string }>
+  >();
+
+  /** The mount in flight from `open({ warm: true })`, so two opens share one. */
+  #warming: Promise<void> | undefined;
+
+  #load(
+    input: AppletMountInputV1,
+  ): Promise<{ stub: WorkerStub; etag: string }> {
+    const held = this.#loaded.get(input.loaderId);
+    if (held) return held;
+    const loading = (async () => {
+      const artifact = await this.#artifact(input);
+      const exports = this.ctx.exports as unknown as AppletStateExports;
+      const stateName = appletStateNameV1(input.userId, input.appletId);
+      const stub = this.env.APPLETS.get(input.loaderId, () =>
+        Promise.resolve({
+          compatibilityDate: BOT_ISOLATE_COMPATIBILITY_DATE,
+          mainModule: "server.js",
+          modules: { "server.js": { js: artifact.source } },
+          // The constitution's rule made mechanical: no network except bindings.
+          globalOutbound: null,
+          env: {
+            IDENTITY: {
               userId: input.userId,
               appletId: input.appletId,
-              stateName,
-            },
-          }),
-        },
-        limits: APPLET_FACET_LIMITS_V1,
-      }),
-    );
+              generationId: input.generationId,
+            } satisfies AppletIdentityV1,
+            CAPABILITIES: exports.AppletCapabilities({
+              props: {
+                userId: input.userId,
+                appletId: input.appletId,
+                stateName,
+              },
+            }),
+          },
+          limits: APPLET_FACET_LIMITS_V1,
+        }),
+      );
+      return { stub, etag: artifact.etag };
+    })();
+    this.#loaded.set(input.loaderId, loading);
+    loading.catch(() => this.#loaded.delete(input.loaderId));
+    return loading;
   }
 
-  /** Hash-verified read. Mismatched bytes never become code. */
-  async #artifact(contentHash: string): Promise<string> {
-    const object = await this.env.APPLICATION_ARTIFACTS.get(
-      `packages/${contentHash}.mjs`,
-    );
-    if (!object) {
-      throw new Error(`Applet artifact "${contentHash}" is unavailable`);
-    }
-    const source = await object.text();
-    if ((await sha256Hex(source)) !== contentHash) {
-      throw new Error(
-        `Applet artifact "${contentHash}" failed hash verification`,
-      );
-    }
-    return source;
+  /**
+   * The bundle, verified. Mismatched bytes never become code: an activation
+   * hashes the whole bundle and pins the R2 etag it hashed; a later mount that
+   * finds that etag under the same content-addressed key is holding the same
+   * object version, and anything else is hashed in full (`applet-artifact.ts`).
+   */
+  async #artifact(
+    input: AppletMountInputV1,
+  ): Promise<{ source: string; etag: string }> {
+    return verifyAppletArtifactV1({
+      contentHash: input.serverHash,
+      object: await this.env.APPLICATION_ARTIFACTS.get(
+        `packages/${input.serverHash}.mjs`,
+      ),
+      ...(input.serverEtag === undefined
+        ? {}
+        : { pinnedEtag: input.serverEtag }),
+    });
   }
 
   /**
@@ -302,16 +322,41 @@ export class AppletState extends DurableObject<AppletStateEnv> {
    * this inside the same try/catch as `health()`.
    */
   async #facet(input: AppletMountInputV1): Promise<AppletFacetStub> {
-    const stub = await this.#load(input);
+    const { stub, etag } = await this.#load(input);
     // The mount input is durable before the facet is used, so `alarm()` can
-    // remount after an eviction that lost every in-memory field.
-    this.ctx.storage.kv.put(APPLET_MOUNT_INPUT_KEY, input);
+    // remount after an eviction that lost every in-memory field — and it
+    // carries the etag this load verified, so the next mount can trust it.
+    this.ctx.storage.kv.put(APPLET_MOUNT_INPUT_KEY, {
+      ...input,
+      serverEtag: etag,
+    } satisfies AppletMountInputV1);
     return this.ctx.facets.get(APPLET_FACET_NAME_V1, () => ({
       class: stub.getDurableObjectClass(
         "Applet",
       ) as DurableObjectClass<undefined>,
       id: APPLET_FACET_NAME_V1,
     })) as unknown as AppletFacetStub;
+  }
+
+  /**
+   * Bring the resident generation's facet up before anyone needs it: the
+   * isolate, and its schema through `health()`. Started from `open()`, which
+   * the canvas reads before its page opens the socket, so the socket finds
+   * the facet already there. A failure here is not recorded — the socket
+   * that follows hits the same failure on a path that is.
+   */
+  #warm(resident: AppletMountInputV1): Promise<void> {
+    this.#warming ??= (async () => {
+      try {
+        const facet = await this.#facet(resident);
+        await raceDeadline(() => facet.health(), APPLET_HEALTH_DEADLINE_MS);
+      } catch (error) {
+        console.warn(`Applet warm mount failed: ${errorMessage(error)}`);
+      } finally {
+        this.#warming = undefined;
+      }
+    })();
+    return this.#warming;
   }
 
   /** The mount input for the currently resident generation, if any. */
@@ -984,18 +1029,30 @@ export class AppletState extends DurableObject<AppletStateEnv> {
    * the artifacts of the generation it names. Two key reads, where `read()`
    * lists every generation and every failure — this is the one call on the
    * canvas's critical path, so it carries nothing the canvas does not draw.
+   *
+   * With `warm`, the resident generation's facet is mounted in the background
+   * so the socket that follows the answer finds it up.
    */
   async open(input: unknown): Promise<AppletOpenStateV1> {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      appletId: rpcString(129),
-    });
+    const request = decodeRpcEnvelopeV1(
+      input,
+      { userId: rpcIdentifier, appletId: rpcString(129) },
+      { warm: rpcBoolean },
+    );
     this.#assertIdentity(request.userId as string, request.appletId as string);
     await this.#settleInterruptedTrial();
     const current = await this.#pointer(APPLET_CURRENT_KEY);
     const generation = current
       ? await this.#generation(current.generationId)
       : undefined;
+    if (request.warm === true && current && generation) {
+      // Behind the answer, not before it: the canvas gets its page and its
+      // token now, and the facet is coming up while the page loads.
+      const resident = this.#residentMountInput();
+      if (resident && resident.generationId === current.generationId) {
+        this.ctx.waitUntil(this.#warm(resident));
+      }
+    }
     return {
       schemaVersion: 1,
       appletId: request.appletId as string,
