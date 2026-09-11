@@ -843,9 +843,47 @@ jobs:
           fi
 
           # The pointer the website redirects to. Short cache so a release is
-          # live in minutes, not whenever an edge copy happens to expire.
+          # live in minutes, not whenever an edge copy happens to expire. The
+          # zone's Browser Cache TTL acts as a floor and silently raises a
+          # shorter max-age to its own value, so this alone does not guarantee
+          # propagation — the purge below is what does.
           put "$latest" "public, max-age=300"
           echo "Download pointer: now \`$VERSION\` at https://frockbot.com/download/mac" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Purge the cached download pointer
+        # Overwriting the object in R2 does not evict the copies already at
+        # the edge and in browsers. Without this, a release stays unreachable
+        # behind a stale copy for as long as the cache says — and the check
+        # below can pass against a point of presence that happens to have no
+        # copy while others still serve the previous build. Only the mutable
+        # pointer is purged; the versioned key never changes.
+        if: ${{ !contains(needs.verify.outputs.version, '-') }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The zone for frockbot.com. Not a secret, and it is pinned for the
+          # same reason the account id is pinned in the Worker configs: the
+          # release should fail loudly rather than act on a zone it guessed.
+          zone="eaeb100c3d48f228cdb2309b5b8152cc"
+
+          response="$(curl -sS -X POST \
+            "https://api.cloudflare.com/client/v4/zones/$zone/purge_cache" \
+            -H "authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -H "content-type: application/json" \
+            -d '{"files":["https://downloads.frockbot.com/mac/FrockBot-macos.dmg"]}')"
+
+          if ! printf '%s' "$response" | python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin).get("success") else 1)'; then
+            echo 'Failed to purge the download pointer from cache.' >&2
+            # The overwhelmingly likely cause, and invisible otherwise: the
+            # upload above needs Workers R2 Storage, this needs Zone Cache
+            # Purge, and a token can hold the first without the second.
+            echo 'CLOUDFLARE_API_TOKEN may be missing the "Zone: Cache Purge" permission for frockbot.com.' >&2
+            printf '%s\n' "$response" >&2
+            exit 1
+          fi
+          echo "Purged the cached download pointer." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Verify the published download
         if: ${{ !contains(needs.verify.outputs.version, '-') }}
