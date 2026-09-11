@@ -46,7 +46,7 @@ export type VoiceRealtimeUpstreamEventV1 =
   | { kind: "delta"; text: string; itemId?: string }
   | { kind: "committed"; itemId: string }
   | { kind: "session-updated" }
-  | { kind: "speech-started"; itemId?: string }
+  | { kind: "speech-started" }
   | { kind: "completed"; text: string; itemId?: string }
   | { kind: "failed"; message: string; itemId?: string }
   | { kind: "error"; message: string; emptyBuffer: boolean };
@@ -71,7 +71,7 @@ export function translateVoiceRealtimeUpstreamFrameV1(
   const itemId = typeof event.item_id === "string" ? event.item_id : undefined;
   if (type === "session.updated") return { kind: "session-updated" };
   if (type === "input_audio_buffer.speech_started") {
-    return { kind: "speech-started", ...(itemId ? { itemId } : {}) };
+    return { kind: "speech-started" };
   }
   if (type === "conversation.item.input_audio_transcription.delta") {
     const text = typeof event.delta === "string" ? event.delta : "";

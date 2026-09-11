@@ -224,7 +224,9 @@ function openSession(
       // wrapper above holds and drains frames itself and only feeds once
       // `waitUntilReady` has resolved.
       if (closed || !ready || !socket) return;
-      socket.send(voiceRealtimeAppendV1(upsample(chunk)));
+      const pcm = upsample(chunk);
+      if (pcm.byteLength === 0) return;
+      socket.send(voiceRealtimeAppendV1(pcm));
     },
     waitUntilReady() {
       return readyPromise;
