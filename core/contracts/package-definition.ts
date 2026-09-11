@@ -63,6 +63,10 @@ export interface ConnectionTypeDefinition {
   catalogPath?: string;
   id: string;
   displayName: string;
+  /** One line on what connecting this gives a Bot, for the Connectors row. */
+  description?: string;
+  /** The bundled icon the client draws for this row, by name. Absent draws a glyph. */
+  icon?: string;
   allowMultiple: boolean;
   authorization: {
     kind: "none" | "api-key" | "ambient-native" | "grant";

@@ -27,6 +27,8 @@ export const connectDefinitionV1: PackageDefinitionV1 = {
   connectionTypes: CONNECT_TOOLKITS_V1.map((toolkit) => ({
     id: connectConnectionTypeIdV1(toolkit.slug),
     displayName: toolkit.name,
+    description: toolkit.description,
+    icon: toolkit.slug,
     allowMultiple: true,
     authorization: { kind: "grant" as const, driverId: CONNECT_PACKAGE_ID },
     capabilities: [connectCapabilityIdV1(toolkit.slug)],

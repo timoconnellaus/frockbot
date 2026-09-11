@@ -55,27 +55,7 @@ async function installProvider(userId: string): Promise<void> {
   );
 }
 
-describe("the Connectors document", () => {
-  it("asks for a key as a secret field the document carries no value for", async () => {
-    const userId = freshUserId("connectors-doc");
-    await installProvider(userId);
-
-    const document = (await expectOkJson(
-      await asUser(userId, "/api/settings/connections?as=document&kind=model"),
-    )) as Document;
-
-    expect(document.surfaceId).toBe("model-accounts");
-    const secret = walk(document.root).find(
-      (node) => node.type === "field" && node.field?.kind === "secret",
-    );
-    expect(secret?.field?.value).toBeNull();
-    expect(
-      document.actions.some((action) =>
-        action.schema.required.includes(secret!.field!.id),
-      ),
-    ).toBe(true);
-  });
-
+describe("the Connectors frame", () => {
   it("shows a connected account and never the key that connected it", async () => {
     const userId = freshUserId("connectors-connected");
     await installProvider(userId);
@@ -91,20 +71,23 @@ describe("the Connectors document", () => {
       }),
     );
 
-    const answer = await asUser(
-      userId,
-      "/api/settings/connections?as=document&kind=model",
-    );
+    const answer = await asUser(userId, "/api/settings/connections");
     const body = await answer.text();
     expect(answer.status).toBe(200);
     expect(body).not.toContain(OLLAMA_GOOD_API_KEY);
-    const document = JSON.parse(body) as Document;
-    const texts = walk(document.root).map((node) => node.text ?? "");
-    expect(texts).toContain("Integration");
-    expect(texts.some((line) => line.startsWith("Ready"))).toBe(true);
+    const frame = JSON.parse(body) as {
+      accounts: Array<{
+        label: string;
+        detail?: string;
+        connectionTypeId: string;
+      }>;
+    };
+    const account = frame.accounts.find((row) => row.label === "Integration");
+    expect(account?.connectionTypeId).toBe(PROVISIONED_MODEL.connectionTypeId);
+    expect(account?.detail?.startsWith("Ready")).toBe(true);
   });
 
-  it("answers the frame itself without the document parameter", async () => {
+  it("answers the frame with every provider", async () => {
     const userId = freshUserId("connectors-frame");
     const frame = (await expectOkJson(
       await asUser(userId, "/api/settings/connections"),

@@ -48,17 +48,28 @@ describe("Connected apps", () => {
   it("offers each app as its own Connectors row", async () => {
     const userId = freshUserId("connect-rows");
     await provisionThroughGateway({ userId, botId: "rows" });
-    const document = JSON.stringify(
-      await expectOkJson(
-        await asUser(userId, "/api/settings/connections?as=document"),
-      ),
-    );
+    const frame = (await expectOkJson(
+      await asUser(userId, "/api/settings/connections"),
+    )) as {
+      providers: Array<{
+        displayName: string;
+        kind: string;
+        authorization: string;
+        icon?: string;
+        description?: string;
+      }>;
+    };
     for (const name of ["Gmail", "Google Calendar", "GitHub", "Slack"]) {
-      expect(document).toContain(name);
+      const row = frame.providers.find((p) => p.displayName === name);
+      expect(row).toMatchObject({
+        kind: "connector",
+        authorization: "grant",
+      });
+      expect(row?.icon).toBeDefined();
+      expect(row?.description).toBeDefined();
     }
-    expect(document).toContain('"kind":"authorize"');
     // The provider is plumbing: it is named nowhere a person reads.
-    expect(document.toLowerCase()).not.toContain("composio");
+    expect(JSON.stringify(frame).toLowerCase()).not.toContain("composio");
   });
 
   it("hands the person to the app's sign-in and settles the account on the next read", async () => {

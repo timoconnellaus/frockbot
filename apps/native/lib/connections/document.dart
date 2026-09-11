@@ -18,7 +18,7 @@
 /// travels back, goes out on that command and nowhere else.
 library;
 
-/// The action kinds `connectionsDocumentV1` declares.
+/// The action kinds a Connectors press can mean.
 const connectionActionKindsV1 = <String>{
   'connect-api-key',
   'authorize',

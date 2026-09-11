@@ -628,6 +628,10 @@ export function connectionsFrame(
         connected,
         mayConnect: connected === 0 || type.allowMultiple,
         ...(fields.length ? { settings: fields } : {}),
+        ...(type.description
+          ? { description: type.description.slice(0, 300) }
+          : {}),
+        ...(type.icon ? { icon: type.icon } : {}),
       });
     }
   }
@@ -650,6 +654,7 @@ export function connectionsFrame(
       label: connection.displayName.slice(0, 200),
       state: connection.state,
       packageId: connection.packageId,
+      connectionTypeId: connection.connectionTypeId,
       kind,
       authorization:
         connection.authorization?.kind ?? declared.authorization.kind,
