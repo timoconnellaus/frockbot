@@ -17,6 +17,11 @@ NATIVE = ROOT / "apps/native"
 FLUTTER = Path(os.environ.get("FROCKBOT_FLUTTER", "/Users/tim/repos/flutter/bin/flutter"))
 BUILD_APP = NATIVE / "build/macos/Build/Products/Release/FrockBot.app"
 INSTALL_APP = Path("/Users/tim/Applications/FrockBot.app")
+DEBUG_APP = NATIVE / "build/macos/Build/Products/Debug/FrockBot.app"
+LSREGISTER = Path(
+    "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework"
+    "/Support/lsregister"
+)
 BUNDLE_ID = "com.frockbot.mobile"
 TEAM_ID = "Q444L76529"
 
@@ -123,6 +128,21 @@ def install(build, name, number):
             raise
 
 
+def register_installed_app():
+    """Make the installed bundle the one Launch Services opens `frockbot://` links with.
+
+    The build outputs carry the same bundle identifier and URL scheme as the
+    installed app. Left registered, Launch Services may hand the browser's
+    sign-in return to one of them and so launch a second copy of the app rather
+    than deliver the link to the running one.
+    """
+    if not LSREGISTER.is_file():
+        raise RuntimeError(f"Launch Services registration tool is missing: {LSREGISTER}")
+    for stale in (BUILD_APP, DEBUG_APP):
+        run([LSREGISTER, "-u", stale], check=False)
+    run([LSREGISTER, "-f", INSTALL_APP])
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -148,6 +168,7 @@ def main():
     )
     inspect_app(BUILD_APP, name, number)
     install(BUILD_APP, name, number)
+    register_installed_app()
     run(["open", INSTALL_APP])
     print(f"Installed and opened {INSTALL_APP}: {name}+{number}, protocol {protocol}, team {TEAM_ID}")
 
