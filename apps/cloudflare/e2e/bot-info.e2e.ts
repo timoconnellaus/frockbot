@@ -63,6 +63,20 @@ function door(page: Page, label: string) {
 }
 
 /**
+ * The panel, showing the entry it names.
+ *
+ * The name is one line of text at the top of the region, but the engine
+ * merges a leaf that heads a group into the group's accessible name rather
+ * than its text content, so the word is read from the label and not from the
+ * text.
+ */
+function panelNamed(page: Page, label: string) {
+  return sem(page, "shell-right-panel")
+    .locator(`[aria-label="${label}"]`)
+    .first();
+}
+
+/**
  * How far the window scrolls sideways.
  *
  * Flutter paints to a canvas sized to the window, so an overflowing layout
@@ -92,26 +106,26 @@ test("the default panel composes Computer and Routines and swaps to Settings", a
   const panel = sem(page, "shell-right-panel");
   await expect(panel).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
   // Bot settings is the entry the region opens on.
-  await expect(panel).toContainText("Settings");
+  await expect(panelNamed(page, "Settings")).toBeVisible();
   await expect(sem(page, "bot-settings")).toBeVisible();
 
   await settle(page);
   await door(page, "Computer").click();
   await expect(sem(page, "computer-card")).toBeVisible({ timeout: 60_000 });
-  await expect(panel).toContainText("Computer");
+  await expect(panelNamed(page, "Computer")).toBeVisible();
   // The card is the whole statement: no caption repeats it underneath.
   await expect(says(page, "Observed's screen")).toHaveCount(0);
 
   await settle(page);
   await door(page, "Routines").click();
   await expect(sem(page, "routines-document")).toBeVisible({ timeout: 60_000 });
-  await expect(panel).toContainText("Routines");
+  await expect(panelNamed(page, "Routines")).toBeVisible();
   await expect(says(page, "No Routines yet.").first()).toBeVisible();
 
   await settle(page);
   await tap(page, "bot-panel-toggle").click();
   await expect(sem(page, "bot-settings")).toBeVisible();
-  await expect(panel).toContainText("Settings");
+  await expect(panelNamed(page, "Settings")).toBeVisible();
 
   expect(await horizontalOverflow(page)).toBeLessThanOrEqual(1);
 });
