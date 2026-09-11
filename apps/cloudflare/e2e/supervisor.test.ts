@@ -96,13 +96,20 @@ describe("OutputTail", () => {
 
 describe("superviseProcess", () => {
   test("a first start that exits is a start-up failure, not a restart", async () => {
-    const { spawned, supervised, ready } = harness();
+    const stopped: ChildProcess[] = [];
+    const { spawned, supervised, ready } = harness({
+      stopChild: async (child) => {
+        stopped.push(child);
+      },
+    });
     ready.value = () => new Promise<void>(() => {});
     const started = supervised.start();
     (spawned[0] as unknown as FakeChild).exit(1);
     await expect(started).rejects.toThrow(/exited early with code 1/);
     expect(spawned).toHaveLength(1);
     expect(supervised.restarts()).toBe(0);
+    // Its workerd children outlive it, so the tree goes before start() throws.
+    expect(stopped).toEqual([spawned[0]]);
   });
 
   test("an exit after the server was ready is restarted on the same settings", async () => {
@@ -158,15 +165,41 @@ describe("superviseProcess", () => {
     const stopped = new Promise<void>((done) => {
       treeIsGone = done;
     });
-    const { spawned, supervised, ready } = harness({
+    const { spawned, supervised } = harness({
       stopChild: () => stopped,
     });
     await supervised.start();
-    // The replacement never becomes ready, so the only thing `stop()` can be
-    // waiting on is the crashed child's tree.
-    ready.value = () => new Promise<void>(() => {});
     (spawned[0] as unknown as FakeChild).exit(1);
     await settle();
+
+    let returned = false;
+    const stopping = supervised.stop().then(() => {
+      returned = true;
+    });
+    await settle();
+    expect(returned).toBe(false);
+
+    treeIsGone();
+    await stopping;
+    expect(returned).toBe(true);
+  });
+
+  test("stop() waits for a failed replacement's reaping to finish", async () => {
+    // The replacement that never came up still owns a process group; the
+    // harness must not wipe the state directory out from under it either.
+    let treeIsGone = () => {};
+    const secondStopped = new Promise<void>((done) => {
+      treeIsGone = done;
+    });
+    const { spawned, supervised, ready } = harness({
+      stopChild: (child) =>
+        spawned.indexOf(child) === 0 ? Promise.resolve() : secondStopped,
+    });
+    await supervised.start();
+    ready.value = () => Promise.reject(new Error("Address already in use"));
+    (spawned[0] as unknown as FakeChild).exit(1);
+    await settle();
+    expect(spawned).toHaveLength(2);
 
     let returned = false;
     const stopping = supervised.stop().then(() => {

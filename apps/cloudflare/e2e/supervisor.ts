@@ -202,7 +202,10 @@ export function superviseProcess(options: SuperviseOptions): SupervisedProcess {
         // Whatever is left of that attempt must not linger on the port.
         const failed = current;
         current = undefined;
-        if (failed) await options.stopChild(failed).catch(() => {});
+        if (failed) {
+          pendingStop = options.stopChild(failed).catch(() => {});
+          await pendingStop;
+        }
       }
     }
   };
@@ -224,6 +227,9 @@ export function superviseProcess(options: SuperviseOptions): SupervisedProcess {
         await Promise.race([options.waitUntilReady(), startupFailure]);
       } catch (error) {
         current = undefined;
+        // The early exit is the `wrangler dev` parent; workerd outlives it and
+        // keeps the state directory open while the harness tears itself down.
+        await options.stopChild(child).catch(() => {});
         throw error;
       }
       child.removeAllListeners("exit");
