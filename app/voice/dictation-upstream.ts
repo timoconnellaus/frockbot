@@ -5,22 +5,30 @@
 // vocabulary: the relay above it speaks only `VoiceDictationServerFrameV1`,
 // so a second provider is a change to this file alone.
 //
-// Contract, from the OpenAI Realtime transcription guide and the
-// `session.update` reference (read 2026-09-11): a `transcription` session is
-// configured with `session.audio.input.{format, noise_reduction,
-// transcription, turn_detection}`; audio arrives as base64 PCM16 in
-// `input_audio_buffer.append`; `input_audio_buffer.commit` closes a turn by
-// hand; the server answers `conversation.item.input_audio_transcription.delta`
-// and `.completed`.
+// Contract, from the OpenAI Realtime transcription guide and a run against
+// the live endpoint (2026-09-11): a `transcription` session is configured
+// with `session.audio.input.{format, noise_reduction, transcription,
+// turn_detection}`; audio arrives as base64 PCM16 in
+// `input_audio_buffer.append`; `input_audio_buffer.commit` closes the turn;
+// the server answers `session.updated`, then
+// `conversation.item.input_audio_transcription.delta` while the person
+// speaks, then `input_audio_buffer.committed` and `.completed`.
 //
 // The model is `gpt-live-transcribe`, OpenAI's current streaming
-// speech-to-text model, billed per audio minute on the realtime transcription
-// endpoint. It is here because the realtime VAD guide says models that
-// support VAD default to `server_vad` while `gpt-realtime-whisper` — what
-// dictation asked for before — requires turn detection omitted or null, which
-// is why every capture died at the first `session.update`. Server-side turn
-// detection is what gives the relay its committed segments, so the model
-// moved rather than the turn detection.
+// speech-to-text model, billed per audio minute. Turn detection is null
+// because it has to be: the streaming models (`gpt-live-transcribe` and the
+// `gpt-realtime-whisper` dictation asked for before) answer any
+// `turn_detection` with "Turn detection is not supported for this
+// transcription model." and the session dies there, which is why no capture
+// in production ever reached `ready`. The models that do take VAD
+// (`gpt-transcribe`, `gpt-4o-transcribe`) do not stream deltas, and live
+// text as the person speaks is the point of dictation.
+//
+// So a capture is one item, not a series of them: deltas accumulate against
+// it from about half a second behind the speaker, nothing is committed while
+// the person talks, and the relay's own commit after `stop` is what produces
+// the single `.completed` transcript. No commit, no transcript — that was
+// confirmed against a 73-second capture that was never committed.
 import {
   VOICE_DICTATION_SAMPLE_RATE_V1,
   type VoiceDictationServerFrameV1,
@@ -79,10 +87,12 @@ export function voiceDictationConfiguredV1(env: VoiceDictationEnvV1): boolean {
 /**
  * The one thing said to the upstream before audio starts.
  *
- * Server-side turn detection produces the `.completed` segments the composer
- * replaces its deltas with. 700 ms of silence closes a segment: long enough
- * that a breath mid-sentence does not fragment it, short enough that the
- * committed text keeps up with the speaker.
+ * `turn_detection: null` is not a preference. The upstream refuses the
+ * session outright if this model is given any turn detection, and the server
+ * defaults it to `server_vad` when the field is absent, so the null has to be
+ * sent explicitly. The consequence is the relay's: one item per capture,
+ * deltas while the person speaks, and the transcript only after the relay
+ * commits at `stop`.
  */
 export function voiceDictationSessionUpdateV1(): Record<string, unknown> {
   return {
@@ -94,12 +104,7 @@ export function voiceDictationSessionUpdateV1(): Record<string, unknown> {
           format: { type: "audio/pcm", rate: VOICE_DICTATION_SAMPLE_RATE_V1 },
           noise_reduction: { type: "near_field" },
           transcription: { model: VOICE_DICTATION_MODEL_V1 },
-          turn_detection: {
-            type: "server_vad",
-            threshold: 0.5,
-            prefix_padding_ms: 300,
-            silence_duration_ms: 700,
-          },
+          turn_detection: null,
         },
       },
     },
@@ -124,12 +129,12 @@ export const VOICE_DICTATION_UPSTREAM_REFUSAL_MESSAGE_V1 =
 /**
  * One upstream event, reduced to what the relay tracks.
  *
- * Every transcription belongs to an item the upstream committed — by its own
- * turn detection, or by the relay's commit after `stop` — and completions for
- * different items may arrive in any order. The relay keeps the committed
- * order and hands segments to the client in it, and `stop` is done only when
- * every committed item has answered. An `error` that says the buffer had
- * nothing to commit is the one refusal that is not a failure after `stop`.
+ * Every transcription belongs to an item the relay's commit after `stop`
+ * closed. A capture is normally one such item; the ordering the relay keeps
+ * costs nothing and holds if the upstream ever commits more than one. An
+ * `error` that says the buffer had nothing to commit is the one refusal that
+ * is not a failure after `stop` — it means the person pressed stop without
+ * saying anything new.
  */
 export type VoiceDictationUpstreamEventV1 =
   | { kind: "delta"; text: string; itemId?: string }

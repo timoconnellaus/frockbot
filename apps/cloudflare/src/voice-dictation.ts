@@ -13,13 +13,16 @@
 //   of seconds reserved up front and renewed while the capture runs — so a
 //   page that opens sockets in a loop is refused rather than billed.
 //
-//   Completeness. The upstream commits audio into items — by its own turn
-//   detection, and once more when the relay commits after `stop` — and
-//   answers each item's transcription in whatever order it likes. The relay
-//   keeps the committed order, hands segments to the client in it, and says
-//   `final` only once every committed item has answered. A stop the upstream
-//   cannot finish in time, or a provider failure after stop, is reported as
-//   what it is; the draft keeps what arrived.
+//   Completeness. The upstream has no turn detection — the streaming
+//   transcription models refuse it — so a capture is one item and the
+//   relay's commit after `stop` is the only thing that closes it. Deltas
+//   grow the draft while the person speaks; the committed item's transcript
+//   is the segment that replaces them. The relay still hands segments over
+//   in committed order and says `final` only once every committed item has
+//   answered, which costs nothing and holds if an upstream ever commits more
+//   than one. A stop the upstream cannot finish in time, or a provider
+//   failure after stop, is reported as what it is; the draft keeps what
+//   arrived.
 //
 //   Opening audio. Frames that arrive before the upstream has accepted the
 //   session are held in order, bounded, and forwarded once it has, so
@@ -174,9 +177,10 @@ function runRelay(
   let stopping = false;
   /** The relay's own commit after `stop` has been sent, and then answered. */
   let commitSent = false;
-  let disablingVad = false;
   let connectTimer: ReturnType<typeof setTimeout> | undefined;
   let stopCommitSettled = false;
+  /** The five-minute cap fired: the capture is finalised, then refused. */
+  let capped = false;
   let leaseHeld = false;
   let pending: ArrayBuffer[] = [];
   let pendingBytes = 0;
@@ -272,8 +276,24 @@ function runRelay(
   const stopIsComplete = () =>
     stopping && stopCommitSettled && outstanding.size === 0;
 
+  /**
+   * Ends a capture the upstream finished. A capture the five-minute cap
+   * stopped keeps every segment it produced and closes on the `limit` error
+   * in place of `final`, so the person is told why dictation ended.
+   */
+  const finishCapture = () => {
+    if (capped) {
+      fail(
+        "Dictation stopped after five minutes. Press the microphone to continue.",
+        "limit",
+      );
+      return;
+    }
+    finish({ schemaVersion: 1, type: "final" });
+  };
+
   const finishIfComplete = () => {
-    if (stopIsComplete()) finish({ schemaVersion: 1, type: "final" });
+    if (stopIsComplete()) finishCapture();
   };
 
   const onUpstreamEvent = (raw: string) => {
@@ -282,7 +302,6 @@ function runRelay(
     switch (event.kind) {
       case "session-updated":
         if (!upstreamReady) acceptSession();
-        else if (disablingVad && stopping) commit();
         return;
       case "delta": {
         const id = event.itemId ?? "uncommitted";
@@ -302,8 +321,8 @@ function runRelay(
           }
           if (!answered.has(event.itemId)) outstanding.add(event.itemId);
         }
-        // VAD was disabled and acknowledged before the explicit commit,
-        // so an earlier automatic commit cannot be mistaken for this one.
+        // Turn detection is off upstream, so the only thing that commits an
+        // item is the relay's own commit after `stop`.
         if (stopping && commitSent) stopCommitSettled = true;
         flushSegments();
         return;
@@ -341,8 +360,8 @@ function runRelay(
       }
       case "error":
         if (stopping && event.emptyBuffer) {
-          // The relay committed a buffer with nothing in it: the last words
-          // were already inside an item the upstream committed itself.
+          // The relay committed a buffer with nothing in it: the person
+          // pressed stop without saying anything new.
           stopCommitSettled = true;
           finishIfComplete();
           return;
@@ -427,7 +446,7 @@ function runRelay(
     socket.addEventListener("close", () => {
       if (closed) return;
       if (stopIsComplete()) {
-        finish({ schemaVersion: 1, type: "final" });
+        finishCapture();
         return;
       }
       fail(
@@ -463,13 +482,12 @@ function runRelay(
       });
     }
     send(client, { schemaVersion: 1, type: "ready" });
-    after(maxCaptureMs, () =>
-      fail(
-        "Dictation stopped after five minutes. Press the microphone to continue.",
-        "limit",
-      ),
-    );
-    if (stopping) requestCommit();
+    after(maxCaptureMs, () => {
+      if (closed || stopping) return;
+      capped = true;
+      stop();
+    });
+    if (stopping) commit();
   };
 
   const stop = () => {
@@ -485,28 +503,7 @@ function runRelay(
         "timeout",
       );
     });
-    if (upstream && upstreamReady) requestCommit();
-  };
-
-  const requestCommit = () => {
-    if (disablingVad) return;
-    disablingVad = true;
-    try {
-      upstream!.send(
-        JSON.stringify({
-          type: "session.update",
-          session: {
-            type: "transcription",
-            audio: { input: { turn_detection: null } },
-          },
-        }),
-      );
-    } catch {
-      fail(
-        "Dictation could not finish. What arrived is in your draft.",
-        "upstream",
-      );
-    }
+    if (upstream && upstreamReady) commit();
   };
 
   const commit = () => {

@@ -57,20 +57,21 @@ Client control frames:
 { "schemaVersion": 1, "type": "stop" }
 ```
 
-`stop` commits whatever audio is buffered upstream, waits for the last
-transcript segment (bounded at 6 s), then the server sends `final` and closes.
-Closing the socket without `stop` abandons the capture; nothing is committed.
+`stop` commits the capture upstream — the only thing that produces a
+transcript — waits for it (bounded at 6 s), then the server sends `final` and
+closes. Closing the socket without `stop` abandons the capture: nothing is
+committed, so nothing is transcribed, however long the person spoke.
 
 Server frames:
 
-| Frame                                          | Meaning                                                                             |
-| ---------------------------------------------- | ----------------------------------------------------------------------------------- |
-| `{schemaVersion:1,type:"ready"}`               | Upstream accepted the session; buffered audio has been forwarded.                   |
-| `{schemaVersion:1,type:"delta",text}`          | Interim text for the segment currently being spoken. Replaces the previous delta.   |
-| `{schemaVersion:1,type:"segment",text}`        | One completed utterance. The client appends it to the committed transcript.         |
-| `{schemaVersion:1,type:"final"}`               | Everything captured before `stop` has been transcribed. The server closes after it. |
-| `{schemaVersion:1,type:"notice",message}`      | Non-fatal: opening audio was truncated, and similar.                                |
-| `{schemaVersion:1,type:"error",message,code?}` | Fatal; the server closes. `code` ∈ `unconfigured`, `upstream`, `timeout`, `limit`.  |
+| Frame                                          | Meaning                                                                                   |
+| ---------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `{schemaVersion:1,type:"ready"}`               | Upstream accepted the session; buffered audio has been forwarded.                         |
+| `{schemaVersion:1,type:"delta",text}`          | Interim text so far, about half a second behind the speaker. Replaces the previous delta. |
+| `{schemaVersion:1,type:"segment",text}`        | The transcript of a committed item — in practice one per capture, at `stop`.              |
+| `{schemaVersion:1,type:"final"}`               | Everything captured before `stop` has been transcribed. The server closes after it.       |
+| `{schemaVersion:1,type:"notice",message}`      | Non-fatal: opening audio was truncated, and similar.                                      |
+| `{schemaVersion:1,type:"error",message,code?}` | Fatal; the server closes. `code` ∈ `unconfigured`, `upstream`, `timeout`, `limit`.        |
 
 The composer draft is `segments.join(" ") + " " + delta`. Stop flushes into an
 editable draft and never sends. The draft belongs to the Bot the capture started
@@ -78,26 +79,39 @@ on: the client binds the capture to the composer context at start and writes
 only to that context's draft, so switching Bots mid-capture never writes into
 another Bot's draft.
 
-`final` is sent only when every item the upstream committed — by its own turn
-detection, and by the relay's commit after `stop` — has answered; segments
-are handed over in committed order even when the provider answers them out
-of it. A provider failure after `stop`, or a stop the provider cannot finish
-within 6 s, is reported as `error` (`upstream` or `timeout`) with the words
-that did arrive already in the draft; the one refusal that is not a failure
-is the provider saying the final commit had nothing in it.
+A capture is one upstream item: deltas accumulate against it while the person
+speaks and the relay's commit at `stop` closes it, so the ordinary capture
+produces exactly one `segment` and then `final`. The relay still hands
+segments over in committed order and waits for every committed item, which
+costs nothing and holds if a provider ever commits more than one. A provider
+failure after `stop`, or a stop the provider cannot finish within 6 s, is
+reported as `error` (`upstream` or `timeout`) with the words that did arrive
+already in the draft; the one refusal that is not a failure is the provider
+saying the final commit had nothing in it.
 
-Bounds: a capture is closed by the server after 5 minutes; an upstream that has
+Bounds: after 5 minutes the server ends the capture the way a `stop` does —
+the commit, then the segment, so the draft keeps everything captured — and
+closes on `error` with code `limit` ("Dictation stopped after five minutes.
+Press the microphone to continue.") in place of `final`, which is what the
+person sees. A commit the provider cannot finish within the 6 s final timeout
+is still reported as `timeout`. An upstream that has
 not accepted within 10 s is reported as `timeout`. Before the provider is
 opened the relay takes the account's dictation lease from the voice object:
 one capture at a time per account, 60 s of provider time booked ahead and
 renewed every 30 s while the capture runs, refunded for the part not used on
 release, and refused (`error` with code `limit`) when the day's 120 minutes
-are spent or another capture holds the lease. The model is `gpt-live-transcribe`
-because the relay depends on server-side turn detection for its committed
-segments, and OpenAI's realtime VAD guide states that `gpt-realtime-whisper`
-requires turn detection to be omitted or null while models that support VAD
-default to `server_vad`. Upstream session shape (verified against the OpenAI Realtime
-transcription guide and API reference, 2026-09):
+are spent or another capture holds the lease.
+
+The model is `gpt-live-transcribe` and `turn_detection` is `null`, and neither
+half is a preference. The streaming transcription models — this one and the
+`gpt-realtime-whisper` dictation used to ask for — refuse any turn detection
+with "Turn detection is not supported for this transcription model." and the
+session ends there; that is why no capture in production ever reached `ready`.
+The models that accept VAD (`gpt-transcribe`, `gpt-4o-transcribe`) do not
+stream deltas, and live text as the person speaks is the point. The field is
+sent explicitly because the server otherwise defaults it to `server_vad`.
+Upstream session shape (verified against the live OpenAI endpoint,
+2026-09-11):
 
 ```json
 {
@@ -109,12 +123,7 @@ transcription guide and API reference, 2026-09):
         "format": { "type": "audio/pcm", "rate": 24000 },
         "noise_reduction": { "type": "near_field" },
         "transcription": { "model": "gpt-live-transcribe" },
-        "turn_detection": {
-          "type": "server_vad",
-          "threshold": 0.5,
-          "prefix_padding_ms": 300,
-          "silence_duration_ms": 700
-        }
+        "turn_detection": null
       }
     }
   }
@@ -122,7 +131,9 @@ transcription guide and API reference, 2026-09):
 ```
 
 Audio goes up as `{type:"input_audio_buffer.append", audio:<base64 pcm16>}`,
-`stop` sends `input_audio_buffer.commit`, and the relay maps
+`stop` sends `input_audio_buffer.commit` — answered by
+`input_audio_buffer.committed` and then the item's `.completed` within about
+half a second — and the relay maps
 `conversation.item.input_audio_transcription.delta` → `delta`,
 `…completed` → `segment`, `error` → `error`. The upstream URL is
 `wss://api.openai.com/v1/realtime?intent=transcription` with
@@ -346,7 +357,35 @@ know rather than ending the call over it.
 ## Verification
 
 What was run on 2026-09-10 in the crew worktree, with the results as they
-came back. Nothing here involved a real microphone or a real provider.
+came back. Except for the live run recorded directly below, nothing here
+involved a real microphone or a real provider.
+
+### The live endpoint, 2026-09-11
+
+`gpt-live-transcribe` was driven against
+`wss://api.openai.com/v1/realtime?intent=transcription` with the session frame
+above, and then the relay itself was driven end to end — a local Worker
+(`wrangler dev --env development`) with the real key, a client socket sending
+`start`, 5.5 s of 24 kHz PCM16 speech and `stop`:
+
+```
++1.20s {"schemaVersion":1,"type":"ready"}
++1.91s {"schemaVersion":1,"type":"delta","text":" Hello"}
+  … deltas about half a second behind the speaker, each extending the last …
++5.75s client sends stop
++6.90s {"schemaVersion":1,"type":"segment","text":"Hello, this is a dictation test for the composer. Please transcribe these words accurately:"}
++6.90s {"schemaVersion":1,"type":"final"}
+```
+
+Upstream, the same capture is one item: `session.updated` echoing
+`"turn_detection": null`, then
+`conversation.item.input_audio_transcription.delta` frames all carrying the
+same `item_id`, then — only after the relay's `input_audio_buffer.commit` —
+`input_audio_buffer.committed` and `.completed` within ~0.7 s. Asking the same
+endpoint for `server_vad` or `semantic_vad` instead answers
+`{"type":"error","error":{"code":"invalid_value","param":"session.audio.input.turn_detection","message":"Turn detection is not supported for this transcription model."}}`,
+and a 73-second capture that is never committed produces no transcript at all.
+Still unverified: a real microphone, a browser, and the Flutter client.
 
 | Check                                                                                                                                     | Result                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | ----------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -386,11 +425,12 @@ no composer rendered). The live steps are in `docs/voice-live-checklist.md`.
 ### Final review refinements
 
 The relay waits for the initial `session.updated` before draining opening audio.
-On Stop it disables automatic turn detection and waits for that update before
-committing; an earlier automatic commit cannot acknowledge the final commit.
-Incremental OpenAI deltas are accumulated per item before publishing the
-composer's cumulative interim text. Regression tests cover configuration
-acknowledgment, repeated deltas and an automatic commit racing Stop.
+On Stop it commits directly: turn detection is already off, so there is no
+automatic commit to guard against and no round trip to spend. Incremental
+OpenAI deltas are accumulated per item before publishing the composer's
+cumulative interim text. Regression tests cover configuration acknowledgment,
+repeated deltas, and an upstream that refuses turn detection the way the real
+one does.
 
 Client regression tests also cover Stop during a pending microphone permission,
 dictation failure returning microphone ownership through the shell, and stale

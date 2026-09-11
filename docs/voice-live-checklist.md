@@ -1,10 +1,12 @@
 # Voice live checklist
 
 What has to be exercised against real providers and real microphones before
-voice is called working. Nothing on this list has been run at the time of
-writing: the local `.dev.vars` in this checkout carries no `OPENAI_API_KEY`
-and no `ELEVENLABS_API_KEY`, so every provider path below is untested end to
-end. The deterministic checks that _have_ run are listed in
+voice is called working. As of 2026-09-11 one thing on this list has been:
+the dictation upstream, driven end to end against OpenAI through the real
+relay with synthesized speech rather than a microphone (the frames are in
+`docs/voice.md` under "The live endpoint"). Everything else below — every
+microphone, every client, and the whole ElevenLabs path — is still untested
+end to end. The deterministic checks that _have_ run are listed in
 `docs/voice.md` under "Verification".
 
 ## Prerequisites
@@ -22,18 +24,23 @@ end. The deterministic checks that _have_ run are listed in
 
 1. Open a Bot, press the microphone with an empty composer, start speaking
    immediately. Expect: the first words appear (opening audio buffered
-   while the socket connects), interim text updates as you speak, completed
-   segments replace it, nothing is sent.
-2. Press Stop mid-sentence. Expect: the last segment lands within ~6 s, the
-   draft stays editable, nothing is sent until you press Send.
+   while the socket connects) and the interim text grows about half a second
+   behind you, nothing is sent.
+2. Press Stop mid-sentence. Expect: the capture's transcript replaces the
+   interim text within ~1 s (bounded at 6 s), the draft stays editable,
+   nothing is sent until you press Send. There is no upstream turn detection,
+   so Stop is the only thing that transcribes: a capture abandoned without
+   Stop leaves nothing behind.
 3. Start dictating, switch to another Bot in the sidebar. Expect: dictation
    stops and its words are in the first Bot's draft, not the second's.
 4. Deny the microphone permission. Expect: one actionable line beside the
    composer, no socket opened.
 5. Kill the network mid-dictation. Expect: the words received so far remain in
    the draft, one short error line, no reconnect loop.
-6. Dictate for more than five minutes. Expect: the relay stops the capture
-   with a `limit` message; the draft keeps everything before it.
+6. Dictate for more than five minutes. Expect: the capture finalises the way a
+   Stop does first — the transcript segment lands in the draft, so it keeps
+   everything captured — and then one error line saying dictation stopped after
+   five minutes and to press the microphone to continue.
 7. Confirm in the OpenAI dashboard that the session used
    `gpt-live-transcribe` and was billed per audio minute, not per token.
 
