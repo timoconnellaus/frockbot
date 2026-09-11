@@ -1196,142 +1196,156 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       child: Column(
         children: [
           Expanded(
-            child: ShellLayout(
-              header: bot == null
-                  ? (single ? null : AppBar(title: const Text('FrockBot')))
-                  : ChatHeader(
-                      name: _name(bot),
-                      connection: selectedConnection,
-                      textScale:
-                          MediaQuery.textScalerOf(context).scale(14) / 14,
-                      background: _background(bot.botId.value),
-                      // A phone's bar is GrokBot's three things; the wider tiers
-                      // name each entry of the right panel beside the title.
-                      onBack: single ? _openBack : null,
-                      onOpenBot: single
-                          ? () => _pushPanel('bot-settings')
-                          : null,
-                      onSettings: single
-                          ? null
-                          : () => _openPanel('bot-settings'),
-                      computerRunning:
-                          computer?.available == true &&
-                          computer!.state.running,
-                      onComputer: computer?.available == true
-                          ? () => _openPanel('computer')
-                          : null,
-                      onRoutines: single ? null : () => _openPanel('routines'),
-                      onTogglePanel: single || rightPanel == null
-                          ? null
-                          : _togglePanel,
-                      panelShown: tier == ShellTier.triple
-                          ? !panelCollapsed
-                          : panelOpen,
-                      onApplets: single || appletCanvas == null
-                          ? null
-                          : () async {
-                              final id = await showDialog<String>(
-                                context: context,
-                                builder: (_) =>
-                                    AppletPicker(controller: appletCanvas!),
-                              );
-                              if (id != null && mounted) await _openApplet(id);
-                            },
+            // While the footer is up it covers the bottom inset itself, so the
+            // layout above it is told there is none: otherwise the composer
+            // would keep a gesture bar's worth of space above the footer.
+            child: MediaQuery.removePadding(
+              context: context,
+              removeBottom: footerOpen && session != null,
+              child: ShellLayout(
+                header: bot == null
+                    ? (single ? null : AppBar(title: const Text('FrockBot')))
+                    : ChatHeader(
+                        name: _name(bot),
+                        connection: selectedConnection,
+                        textScale:
+                            MediaQuery.textScalerOf(context).scale(14) / 14,
+                        background: _background(bot.botId.value),
+                        // A phone's bar is GrokBot's three things; the wider tiers
+                        // name each entry of the right panel beside the title.
+                        onBack: single ? _openBack : null,
+                        onOpenBot: single
+                            ? () => _pushPanel('bot-settings')
+                            : null,
+                        onSettings: single
+                            ? null
+                            : () => _openPanel('bot-settings'),
+                        computerRunning:
+                            computer?.available == true &&
+                            computer!.state.running,
+                        onComputer: computer?.available == true
+                            ? () => _openPanel('computer')
+                            : null,
+                        onRoutines: single
+                            ? null
+                            : () => _openPanel('routines'),
+                        onTogglePanel: single || rightPanel == null
+                            ? null
+                            : _togglePanel,
+                        panelShown: tier == ShellTier.triple
+                            ? !panelCollapsed
+                            : panelOpen,
+                        onApplets: single || appletCanvas == null
+                            ? null
+                            : () async {
+                                final id = await showDialog<String>(
+                                  context: context,
+                                  builder: (_) =>
+                                      AppletPicker(controller: appletCanvas!),
+                                );
+                                if (id != null && mounted) {
+                                  await _openApplet(id);
+                                }
+                              },
+                      ),
+                conversationOpen: bot != null && conversationOpen,
+                onBack: _openBack,
+                panelOpen: panelOpen,
+                panelCollapsed: panelCollapsed,
+                onDismiss: () => setState(() => panelOpen = false),
+                rightPanel: rightPanel,
+                sidebar: Column(
+                  children: [
+                    // The badge and the Package entries beside the list belong to the
+                    // column layout; on a phone they are rows on the Bot's page.
+                    if (!single)
+                      const SlotRegion(
+                        ShellSlot.headerActions,
+                        direction: Axis.horizontal,
+                      ),
+                    Expanded(
+                      child: ShellSidebar(
+                        bots: bots,
+                        profiles: profiles,
+                        unread: activity.unread,
+                        archived: archived,
+                        // A phone's list is a list of doors, not a selection: no row
+                        // is the current one once the conversation is a page.
+                        activeBotId: single ? null : bot?.botId.value,
+                        workingBotId: workingRunId == null
+                            ? null
+                            : bot?.botId.value,
+                        loaded: loaded,
+                        error: error,
+                        showHidden: showHidden,
+                        onSelect: _select,
+                        onCreateBot: () => unawaited(_createBot()),
+                        onSearch: _openSearch,
+                        onProfile: _openProfile,
+                        onVoice: () => unawaited(_startVoice()),
+                        voiceActive: footerOpen,
+                        onToggleHidden: () =>
+                            setState(() => showHidden = !showHidden),
+                        onRetry: load,
+                      ),
                     ),
-              conversationOpen: bot != null && conversationOpen,
-              onBack: _openBack,
-              panelOpen: panelOpen,
-              panelCollapsed: panelCollapsed,
-              onDismiss: () => setState(() => panelOpen = false),
-              rightPanel: rightPanel,
-              sidebar: Column(
-                children: [
-                  // The badge and the Package entries beside the list belong to the
-                  // column layout; on a phone they are rows on the Bot's page.
-                  if (!single)
-                    const SlotRegion(
-                      ShellSlot.headerActions,
-                      direction: Axis.horizontal,
-                    ),
-                  Expanded(
-                    child: ShellSidebar(
-                      bots: bots,
-                      profiles: profiles,
-                      unread: activity.unread,
-                      archived: archived,
-                      // A phone's list is a list of doors, not a selection: no row
-                      // is the current one once the conversation is a page.
-                      activeBotId: single ? null : bot?.botId.value,
-                      workingBotId: workingRunId == null
-                          ? null
-                          : bot?.botId.value,
-                      loaded: loaded,
-                      error: error,
-                      showHidden: showHidden,
-                      onSelect: _select,
-                      onCreateBot: () => unawaited(_createBot()),
-                      onSearch: _openSearch,
-                      onProfile: _openProfile,
-                      onVoice: () => unawaited(_startVoice()),
-                      voiceActive: footerOpen,
-                      onToggleHidden: () =>
-                          setState(() => showHidden = !showHidden),
-                      onRetry: load,
-                    ),
-                  ),
-                ],
+                  ],
+                ),
+                conversation: bot == null
+                    ? NoConversation(
+                        empty: bots.isEmpty,
+                        failure: bots.isEmpty ? error : null,
+                        action: 'Refresh Bots',
+                        onAction: () => unawaited(load()),
+                      )
+                    : ConversationView(
+                        key: ValueKey('${widget.userId}:${bot.botId.value}'),
+                        sessions: widget.sessions,
+                        api: widget.api,
+                        store: widget.store,
+                        userId: widget.userId,
+                        botId: bot.botId.value,
+                        onOpenRun: _openRun,
+                        onOpenSettings: _openSettings,
+                        onMessageActions: (line) =>
+                            unawaited(_messageActions(line)),
+                        onReadLatest: (messageId) =>
+                            _readLatest(bot.botId.value, messageId),
+                        unreadFromMessageId: activity
+                            .unread[bot.botId.value]
+                            ?.unreadFromMessageId,
+                        background: _background(bot.botId.value),
+                        onDictate: () => unawaited(_dictate()),
+                        onStopDictation: () => unawaited(_stopDictation()),
+                        dictating:
+                            dictation?.active == true &&
+                            dictation?.context == bot.botId.value,
+                        dictationLevel: dictation?.level,
+                        onWorkingChanged: (runId) {
+                          if (runId == workingRunId || !mounted) return;
+                          final settled = workingRunId != null && runId == null;
+                          setState(() => workingRunId = runId);
+                          // A Turn is how an Applet comes into existence, and the
+                          // Bot's page names the Applets the Bot holds — so the
+                          // directory is re-read when the Turn that may have changed
+                          // it ends. Read on adoption alone, a Bot that had just made
+                          // its first Applet had no way to it until the page was
+                          // reloaded.
+                          final canvas = appletCanvas;
+                          if (settled && canvas != null) {
+                            unawaited(canvas.load());
+                          }
+                        },
+                        onConnectionChanged: (botId, state) {
+                          if (!mounted ||
+                              selected?.botId.value != botId ||
+                              selectedConnection == state) {
+                            return;
+                          }
+                          setState(() => selectedConnection = state);
+                        },
+                      ),
               ),
-              conversation: bot == null
-                  ? NoConversation(
-                      empty: bots.isEmpty,
-                      failure: bots.isEmpty ? error : null,
-                      action: 'Refresh Bots',
-                      onAction: () => unawaited(load()),
-                    )
-                  : ConversationView(
-                      key: ValueKey('${widget.userId}:${bot.botId.value}'),
-                      sessions: widget.sessions,
-                      api: widget.api,
-                      store: widget.store,
-                      userId: widget.userId,
-                      botId: bot.botId.value,
-                      onOpenRun: _openRun,
-                      onOpenSettings: _openSettings,
-                      onMessageActions: (line) =>
-                          unawaited(_messageActions(line)),
-                      onReadLatest: (messageId) =>
-                          _readLatest(bot.botId.value, messageId),
-                      unreadFromMessageId:
-                          activity.unread[bot.botId.value]?.unreadFromMessageId,
-                      background: _background(bot.botId.value),
-                      onDictate: () => unawaited(_dictate()),
-                      onStopDictation: () => unawaited(_stopDictation()),
-                      dictating:
-                          dictation?.active == true &&
-                          dictation?.context == bot.botId.value,
-                      dictationLevel: dictation?.level,
-                      onWorkingChanged: (runId) {
-                        if (runId == workingRunId || !mounted) return;
-                        final settled = workingRunId != null && runId == null;
-                        setState(() => workingRunId = runId);
-                        // A Turn is how an Applet comes into existence, and the
-                        // Bot's page names the Applets the Bot holds — so the
-                        // directory is re-read when the Turn that may have changed
-                        // it ends. Read on adoption alone, a Bot that had just made
-                        // its first Applet had no way to it until the page was
-                        // reloaded.
-                        final canvas = appletCanvas;
-                        if (settled && canvas != null) unawaited(canvas.load());
-                      },
-                      onConnectionChanged: (botId, state) {
-                        if (!mounted ||
-                            selected?.botId.value != botId ||
-                            selectedConnection == state) {
-                          return;
-                        }
-                        setState(() => selectedConnection = state);
-                      },
-                    ),
             ),
           ),
           if (footerOpen && session != null)

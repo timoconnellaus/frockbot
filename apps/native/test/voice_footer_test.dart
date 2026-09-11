@@ -80,6 +80,41 @@ void main() {
     expect(animation.center.dx, closeTo(footer.center.dx, 0.5));
   });
 
+  testWidgets('covers the bottom system inset in its own colour', (
+    tester,
+  ) async {
+    final socket = FakeVoiceSocket();
+    final controller = session(socket);
+    addTearDown(controller.dispose);
+    tester.view.physicalSize = const Size(390, 800);
+    tester.view.devicePixelRatio = 1;
+    // An Android gesture bar: 48 points of padding under the app.
+    tester.view.padding = const FakeViewPadding(bottom: 48);
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: FrockTheme.theme(Brightness.dark),
+        home: Column(
+          children: [
+            const Expanded(child: SizedBox.expand()),
+            VoiceFooter(session: controller, onEnd: () {}),
+          ],
+        ),
+      ),
+    );
+    await tester.pump();
+
+    // The footer grows by the inset; the controls stay above it, so the
+    // buttons are not under the app switcher.
+    final footer = tester.getRect(find.byType(VoiceFooter));
+    expect(footer.height, voiceFooterHeight + 48);
+    expect(footer.bottom, 800);
+    final end = tester.getRect(find.bySemanticsLabel('End voice session'));
+    expect(end.bottom, lessThanOrEqualTo(800 - 48));
+    final animation = tester.getRect(find.byKey(voiceFooterAnimationKey));
+    expect(animation.bottom, lessThanOrEqualTo(800 - 48));
+  });
+
   testWidgets('the mute toggle says what it does and what it is', (
     tester,
   ) async {
