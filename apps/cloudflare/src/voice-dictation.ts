@@ -179,6 +179,8 @@ function runRelay(
   let commitSent = false;
   let connectTimer: ReturnType<typeof setTimeout> | undefined;
   let stopCommitSettled = false;
+  /** The five-minute cap fired: the capture is finalised, then refused. */
+  let capped = false;
   let leaseHeld = false;
   let pending: ArrayBuffer[] = [];
   let pendingBytes = 0;
@@ -274,8 +276,24 @@ function runRelay(
   const stopIsComplete = () =>
     stopping && stopCommitSettled && outstanding.size === 0;
 
+  /**
+   * Ends a capture the upstream finished. A capture the five-minute cap
+   * stopped keeps every segment it produced and closes on the `limit` error
+   * in place of `final`, so the person is told why dictation ended.
+   */
+  const finishCapture = () => {
+    if (capped) {
+      fail(
+        "Dictation stopped after five minutes. Press the microphone to continue.",
+        "limit",
+      );
+      return;
+    }
+    finish({ schemaVersion: 1, type: "final" });
+  };
+
   const finishIfComplete = () => {
-    if (stopIsComplete()) finish({ schemaVersion: 1, type: "final" });
+    if (stopIsComplete()) finishCapture();
   };
 
   const onUpstreamEvent = (raw: string) => {
@@ -342,8 +360,8 @@ function runRelay(
       }
       case "error":
         if (stopping && event.emptyBuffer) {
-          // The relay committed a buffer with nothing in it: the last words
-          // were already inside an item the upstream committed itself.
+          // The relay committed a buffer with nothing in it: the person
+          // pressed stop without saying anything new.
           stopCommitSettled = true;
           finishIfComplete();
           return;
@@ -428,7 +446,7 @@ function runRelay(
     socket.addEventListener("close", () => {
       if (closed) return;
       if (stopIsComplete()) {
-        finish({ schemaVersion: 1, type: "final" });
+        finishCapture();
         return;
       }
       fail(
@@ -466,12 +484,7 @@ function runRelay(
     send(client, { schemaVersion: 1, type: "ready" });
     after(maxCaptureMs, () => {
       if (closed || stopping) return;
-      send(client, {
-        schemaVersion: 1,
-        type: "notice",
-        message:
-          "Dictation stopped after five minutes. Press the microphone to continue.",
-      });
+      capped = true;
       stop();
     });
     if (stopping) commit();

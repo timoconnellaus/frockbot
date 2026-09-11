@@ -90,10 +90,11 @@ already in the draft; the one refusal that is not a failure is the provider
 saying the final commit had nothing in it.
 
 Bounds: after 5 minutes the server ends the capture the way a `stop` does —
-a `notice` saying "Dictation stopped after five minutes. Press the microphone
-to continue.", then the commit, the segment and `final`, so the words are kept;
-the `limit` code is left for the lease refusals that have nothing to hand back.
-An upstream that has
+the commit, then the segment, so the draft keeps everything captured — and
+closes on `error` with code `limit` ("Dictation stopped after five minutes.
+Press the microphone to continue.") in place of `final`, which is what the
+person sees. A commit the provider cannot finish within the 6 s final timeout
+is still reported as `timeout`. An upstream that has
 not accepted within 10 s is reported as `timeout`. Before the provider is
 opened the relay takes the account's dictation lease from the voice object:
 one capture at a time per account, 60 s of provider time booked ahead and

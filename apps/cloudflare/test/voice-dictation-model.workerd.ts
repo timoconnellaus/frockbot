@@ -264,7 +264,7 @@ describe("dictation against an upstream that enforces the turn-detection rule", 
     ).toHaveLength(1);
   });
 
-  test("the five-minute cap finalises the capture instead of dropping it", async () => {
+  test("the five-minute cap delivers the capture, then says why it ended", async () => {
     const upstream = policyUpstream();
     const opened = openRelay(upstream.socket, { maxCaptureMs: 500 });
     opened.socket.send(start);
@@ -276,17 +276,18 @@ describe("dictation against an upstream that enforces the turn-detection rule", 
       "the second delta",
     );
 
-    // Nobody presses Stop; the cap fires instead.
-    const notice = await opened.waitFor(
-      (f) => f.type === "notice",
-      "the notice",
-    );
-    expect(notice.message).toBe(
+    // Nobody presses Stop; the cap fires instead. It commits the capture the
+    // way a Stop does, so the words survive, and closes on the limit error
+    // in place of `final`.
+    const error = await opened.waitFor((f) => f.type === "error", "the error");
+    expect(error.code).toBe("limit");
+    expect(error.message).toBe(
       "Dictation stopped after five minutes. Press the microphone to continue.",
     );
-    await opened.waitFor((f) => f.type === "final", "final");
+    expect(opened.frames.some((f) => f.type === "final")).toBe(false);
 
-    expect(opened.frames.some((f) => f.type === "error")).toBe(false);
+    const types = opened.frames.map((f) => f.type);
+    expect(types.indexOf("segment")).toBeLessThan(types.indexOf("error"));
     expect(
       opened.frames.filter((f) => f.type === "segment").map((f) => f.text),
     ).toEqual(["heard 1,2"]);
