@@ -35,14 +35,25 @@ import { E2E_OLLAMA_GOOD_API_KEY } from "./harness.ts";
 import type { Locator, Page } from "@playwright/test";
 
 /**
- * Longer than the sidebar's unread poll.
+ * Wait for the sidebar's next unread poll to come back.
  *
- * A badge that is absent because nothing has looked yet proves nothing, so the
- * "no badge" assertions wait past a full poll before they are made. The number
- * covers the 10-second timer `ActivityController.load` runs on, and the
- * request it makes.
+ * A badge that is absent because nothing has looked yet proves nothing, so
+ * the "no badge" assertions are made after a poll that *started* after the
+ * thing they are about. The client asks `/api/bots/unread` on a ten-second
+ * timer (`ActivityController.load`, driven from `app_shell.dart`); this waits
+ * for the next request that timer issues and for its answer, rather than
+ * sleeping for two whole periods to be sure of covering one.
  */
-const PAST_ONE_UNREAD_POLL_MS = 20_000;
+async function afterNextUnreadPoll(page: Page): Promise<void> {
+  const request = await page.waitForRequest(
+    (candidate) =>
+      candidate.method() === "GET" &&
+      new URL(candidate.url()).pathname === "/api/bots/unread",
+    { timeout: 30_000 },
+  );
+  const response = await request.response();
+  expect(response?.ok(), "the unread poll answered").toBe(true);
+}
 
 function botRow(page: Page, name: string): Locator {
   return sem(page, "shell-sidebar")
@@ -148,7 +159,7 @@ test("a Bot that replies while another chat is open badges only its own row", as
   await expectReadyToSend(page);
   await expectNoBadge(page, "Beta");
   // Still gone a full poll later, rather than reappearing on the next fan-out.
-  await page.waitForTimeout(PAST_ONE_UNREAD_POLL_MS);
+  await afterNextUnreadPoll(page);
   await expectNoBadge(page, "Beta");
   await expectNoBadge(page, "Alpha");
 });
@@ -182,8 +193,12 @@ test("a reply in the chat the User is reading never raises a badge", async ({
 
   // The Bot Durable Object counted this Turn — it has to, it cannot see the
   // screen — so the only thing keeping the row quiet is the focus rule and the
-  // read receipt behind it. A poll has to have run for that to mean anything.
-  await page.waitForTimeout(PAST_ONE_UNREAD_POLL_MS);
+  // read receipt behind it. The Turn has to have settled, and a poll has to
+  // have run since, for that to mean anything.
+  await expect(sem(page, "working-indicator")).toHaveCount(0, {
+    timeout: 120_000,
+  });
+  await afterNextUnreadPoll(page);
   await expectNoBadge(page, "Alpha");
   await expectNoBadge(page, "Beta");
 
