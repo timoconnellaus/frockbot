@@ -181,7 +181,7 @@ class _VoiceFooterState extends State<VoiceFooter>
       _level = 0;
     }
     // A finished lobe is reborn only while there is sound: in silence the
-    // last ones fade out and nothing replaces them.
+    // last ones run out and nothing replaces them.
     for (var i = 0; i < _lobes.length; i++) {
       if (_lobes[i].isOver(_now) && _level > 0.03) {
         _lobes[i] = VoiceLobe.spawn(_random, _now, i);
@@ -226,9 +226,8 @@ class _VoiceFooterState extends State<VoiceFooter>
                       ? _stage()
                       : Center(
                           child: Padding(
-                            padding: const EdgeInsets.only(
-                              left: 24,
-                              right: voiceFooterControlsWidth,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: voiceFooterControlsWidth,
                             ),
                             child: Text(
                               failure,
@@ -325,7 +324,11 @@ class _VoiceFooterState extends State<VoiceFooter>
               constraints.maxWidth -
               voiceFooterStageInset -
               voiceFooterControlsWidth;
-          final width = math.min(voiceFooterStageMaxWidth, available);
+          final width = math.min(
+            voiceFooterStageMaxWidth,
+            math.max(0.0, available),
+          );
+          if (width == 0) return const SizedBox.shrink();
           final left = width < available
               ? (constraints.maxWidth - width) / 2
               : voiceFooterStageInset;

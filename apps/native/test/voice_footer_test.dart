@@ -6,12 +6,14 @@
 /// meter anyone can read. Both are measured.
 library;
 
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/voice/assistant.dart';
 import 'package:frockbot_native/voice/footer.dart';
+import 'package:frockbot_native/voice/socket.dart';
 import 'package:frockbot_native/theme/frock_theme.dart';
 
 import 'voice_fakes.dart';
@@ -88,6 +90,41 @@ void main() {
     // controls.
     final footer = tester.getRect(find.byType(VoiceFooter));
     expect(stage.center.dx, closeTo(footer.center.dx, 0.5));
+  });
+
+  testWidgets('a viewport too narrow for the stage lays out without a meter', (
+    tester,
+  ) async {
+    final socket = FakeVoiceSocket();
+    final controller = session(socket);
+    addTearDown(controller.dispose);
+    // Narrower than the inset plus the controls: there is no lane left for
+    // the meter, and the footer still lays out.
+    await mount(tester, controller, width: 120);
+
+    expect(tester.takeException(), isNull);
+    expect(find.byKey(voiceFooterAnimationKey), findsNothing);
+    expect(tester.getSize(find.byType(VoiceFooter)).height, voiceFooterHeight);
+  });
+
+  testWidgets('the failure text is centred on the slab', (tester) async {
+    final controller = AssistantSessionController(
+      openSocket: () => Future<VoiceSocket>.error(StateError('refused')),
+      capture: FakeVoiceCapture(),
+      player: FakeVoicePlayer(),
+    );
+    addTearDown(controller.dispose);
+    await mount(tester, controller, width: 390);
+    unawaited(controller.start());
+    await tester.pump();
+    await tester.pump();
+
+    expect(controller.error, isNotNull);
+    final text = tester.getRect(find.text(controller.error!));
+    final footer = tester.getRect(find.byType(VoiceFooter));
+    expect(text.center.dx, closeTo(footer.center.dx, 0.5));
+    // Mute is gone in the error state; the way out is not.
+    expect(find.bySemanticsLabel('Mute microphone'), findsNothing);
   });
 
   testWidgets('the slab is the brand pink, with no top border', (tester) async {
