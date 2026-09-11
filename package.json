@@ -27,6 +27,7 @@
     "smoke:native": "bun scripts/native-dev.ts smoke",
     "native:release": "python3 scripts/native-update.py release",
     "native:patch": "python3 scripts/native-update.py patch",
+    "native:promote": "python3 scripts/native-update.py promote",
     "native:serve": "python3 scripts/native-update.py serve",
     "update:desktop": "python3 scripts/native-desktop-update.py",
     "test:native-update": "python3 scripts/native-update-test.py",

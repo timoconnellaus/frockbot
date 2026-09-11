@@ -3,8 +3,12 @@
 release: `shorebird release android` (Flutter 3.47.0, arm64 APK) with the patch public key baked
          in, the existing signer, a versionCode above every known floor. Saves the baseline and
          publishes the APK for download. `build` is the same command.
-patch:   `shorebird patch android` against the saved baseline's exact version+build, staging track,
-         signed with the private key. No new APK, no new versionCode, never native/asset overrides.
+patch:   `shorebird patch android` against the baseline's exact version+build, staging track, signed
+         with the private key. No new APK, no new versionCode, never native/asset overrides. The
+         baseline is the saved release (`--baseline local`) or, in the release pipeline, the newest
+         active Android release Shorebird reports (`--baseline shorebird`). Exit status 3 means
+         Shorebird found native or asset differences: only a full release can carry that change.
+promote: move a patch to the stable track.
 publish: publish an already-built APK for download.  serve/setup: the download server.
 
 The Shorebird CLI comes from NATIVE_SHOREBIRD or PATH. There is no stock Flutter fallback: a stock
@@ -39,6 +43,8 @@ APK_OUTPUT = NATIVE / "build/app/outputs/flutter-apk/app-release.apk"
 EMBEDDED_YAML = "assets/flutter_assets/shorebird.yaml"
 VERSION_FLOOR_ENV = "FROCKBOT_ANDROID_VERSION_FLOOR"
 FORBIDDEN_PATCH_FLAGS = ("--allow-native-diffs", "--allow-asset-diffs")
+UNPATCHABLE_MESSAGES = ("Your app contains native changes", "Your app contains asset changes")
+FULL_RELEASE_REQUIRED_STATUS = 3
 INTENT_IDENTITY_KEYS = ("versionCode", "package", "appId", "buildName", "buildNumber", "releaseVersion",
                         "flutterVersion", "targetPlatform", "signerSha256", "publicKeySha256", "gitHead",
                         "workingTreeDirty", "intentCreatedAt")
@@ -56,8 +62,24 @@ def build_name():
     return match[1]
 
 
+class FullReleaseRequired(RuntimeError):
+    """Shorebird found native or asset differences, which no patch can carry."""
+
+
 def run(args, *, binary=False, **kwargs):
     return subprocess.check_output([str(a) for a in args], text=not binary, **kwargs)
+
+
+def stream(args, **kwargs):
+    """Run a long command, echoing its output as it arrives and keeping a copy to inspect."""
+    args = [str(a) for a in args]
+    lines = []
+    with subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, **kwargs) as process:
+        for line in process.stdout:
+            sys.stdout.write(line)
+            sys.stdout.flush()
+            lines.append(line)
+    return process.returncode, "".join(lines)
 
 
 def build_tool(name):
@@ -187,6 +209,41 @@ def baseline():
     return json.loads(path.read_text())
 
 
+def shorebird_json(cli, args):
+    document = json.loads(run([cli, *args, "--json"], cwd=NATIVE))
+    if document.get("status") != "success":
+        raise RuntimeError(f"`shorebird {' '.join(args)}` failed: {document.get('error') or document}")
+    return document["data"]
+
+
+def release_code(release):
+    return int(release["version"].split("+", 1)[1])
+
+
+def service_baseline(cli):
+    """The newest active Android release Shorebird has for this app, in the shape `baseline.json` uses.
+
+    The pipeline has no state directory: the release that was installed once as the enabling APK
+    is, by the rules in apps/native/README.md, the newest one uploaded. What the service cannot say
+    is which public key that release carries, so the key-pair check below is the only key check here.
+    """
+    expected = app_id()
+    releases = [release for release in shorebird_json(cli, ["releases", "list"])["releases"]
+                if release["app_id"] == expected and release.get("platform_statuses", {}).get("android") == "active"]
+    if not releases:
+        raise RuntimeError(f"Shorebird has no active Android release for app {expected}. Run `release` first.")
+    newest = max(releases, key=release_code)
+    name, code = newest["version"].split("+", 1)
+    return {"package": PACKAGE, "appId": newest["app_id"], "buildName": name, "buildNumber": int(code),
+            "releaseVersion": newest["version"], "flutterVersion": newest["flutter_version"],
+            "targetPlatform": TARGET_PLATFORM, "patches": []}
+
+
+def patch_number(cli, release_version):
+    patches = shorebird_json(cli, ["patches", "list", f"--release-version={release_version}"])["patches"]
+    return max((entry["number"] for entry in patches), default=None)
+
+
 def source():
     return {"gitHead": run(["git", "rev-parse", "HEAD"], cwd=ROOT).strip(),
             "workingTreeDirty": bool(run(["git", "status", "--porcelain"], cwd=ROOT).strip())}
@@ -303,7 +360,7 @@ def release(floor=0, build_number=None):
     return record
 
 
-def patch(track="staging"):
+def patch(track="staging", baseline_source="local", result=None):
     pending_release = STATE / "pending-release.json"
     if pending_release.exists():
         raise RuntimeError(f"A release is still pending. Finish or reconcile it before uploading a patch: {pending_release}")
@@ -314,16 +371,20 @@ def patch(track="staging"):
     if pending.exists():
         raise RuntimeError(f"A previous patch upload is unresolved. Check Shorebird before removing {pending}; do not upload it twice.")
     cli = shorebird_cli()
-    base = baseline()
+    local = baseline_source == "local"
+    base = baseline() if local else service_baseline(cli)
     key = private_key()
     der = public_key_der()
     checks = {
         "package": (base["package"], PACKAGE),
         "app_id": (base["appId"], app_id()),
-        "public key": (base["publicKeySha256"], hashlib.sha256(der).hexdigest()),
-        "Shorebird CLI": (base["shorebirdCli"], cli_version(cli)),
         "Flutter": (base["flutterVersion"], FLUTTER_VERSION),
     }
+    if local:
+        checks.update({
+            "public key": (base["publicKeySha256"], hashlib.sha256(der).hexdigest()),
+            "Shorebird CLI": (base["shorebirdCli"], cli_version(cli)),
+        })
     for name, (recorded, current) in checks.items():
         if recorded != current:
             raise RuntimeError(f"The {name} changed since release {base['releaseVersion']} ({recorded} -> {current}). "
@@ -339,14 +400,40 @@ def patch(track="staging"):
     # The release was built one above its floor; the same floor makes Gradle emit the same versionCode.
     env = {**os.environ, VERSION_FLOOR_ENV: str(base["buildNumber"] - 1)}
     write_atomic(pending, json.dumps({"releaseVersion": base["releaseVersion"], "track": track, **current_source}, indent=2) + "\n")
-    subprocess.run(args, cwd=NATIVE, check=True, env=env)
+    status, output = stream(args, cwd=NATIVE, env=env)
+    if status != 0:
+        if any(message in output for message in UNPATCHABLE_MESSAGES):
+            # The CLI stops before uploading anything, so there is no upload to reconcile.
+            pending.unlink()
+            raise FullReleaseRequired(f"Shorebird found changes a patch cannot carry against {base['releaseVersion']}. "
+                                      "Cut a full release (`bun run native:release`) and install it once on the phone.")
+        raise subprocess.CalledProcessError(status, args)
     record = {"track": track, "createdAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-              "patchArgs": args[1:], **source()}
-    base["patches"].append(record)
-    write_atomic(STATE / "baseline.json", json.dumps(base, indent=2) + "\n")
+              "number": patch_number(cli, base["releaseVersion"]), "patchArgs": args[1:], **source()}
+    if local:
+        base["patches"].append(record)
+        write_atomic(STATE / "baseline.json", json.dumps(base, indent=2) + "\n")
     pending.unlink()
-    print(json.dumps({"release": base["releaseVersion"], "patch": record}, indent=2))
+    summary = {"release": base["releaseVersion"], "patch": record}
+    if result:
+        write_atomic(result, json.dumps(summary, indent=2) + "\n")
+    print(json.dumps(summary, indent=2))
     return record
+
+
+def promote(release_version, number):
+    cli = shorebird_cli()
+    subprocess.run([cli, "patches", "promote", f"--release-version={release_version}", f"--patch-number={number}"],
+                   cwd=NATIVE, check=True)
+    path = STATE / "baseline.json"
+    if path.exists():
+        base = json.loads(path.read_text())
+        if base.get("releaseVersion") == release_version:
+            for entry in base["patches"]:
+                if entry.get("number") == number:
+                    entry["track"] = "stable"
+            write_atomic(path, json.dumps(base, indent=2) + "\n")
+    print(json.dumps({"release": release_version, "patch": number, "track": "stable"}, indent=2))
 
 
 class Downloads(BaseHTTPRequestHandler):
@@ -434,8 +521,13 @@ def setup():
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("command", choices=["build", "release", "patch", "publish", "serve", "setup"])
+    parser.add_argument("command", choices=["build", "release", "patch", "promote", "publish", "serve", "setup"])
     parser.add_argument("--apk", type=Path)
+    parser.add_argument("--baseline", default="local", choices=["local", "shorebird"],
+                        help="Patch the saved release (local) or the newest active release Shorebird reports.")
+    parser.add_argument("--result", type=Path, help="Write the patch outcome as JSON here as well as printing it.")
+    parser.add_argument("--release-version", help="promote: the release the patch belongs to, e.g. 1.2.0+1789034833.")
+    parser.add_argument("--patch-number", type=int, help="promote: the patch number to move to stable.")
     parser.add_argument("--version-floor", type=int, default=0,
                         help="Optional known installed versionCode; publishing does not require ADB.")
     parser.add_argument("--build-number", type=int, help="Exact versionCode, to retry one uncertain release upload.")
@@ -456,7 +548,15 @@ def main(argv=None):
         if args.command in ("build", "release"):
             release(args.version_floor, args.build_number)
         elif args.command == "patch":
-            patch(args.track)
+            try:
+                patch(args.track, args.baseline, args.result)
+            except FullReleaseRequired as error:
+                print(error, file=sys.stderr)
+                sys.exit(FULL_RELEASE_REQUIRED_STATUS)
+        elif args.command == "promote":
+            if not args.release_version or args.patch_number is None:
+                parser.error("promote requires --release-version and --patch-number")
+            promote(args.release_version, args.patch_number)
         else:
             if not args.apk:
                 parser.error("publish requires --apk")

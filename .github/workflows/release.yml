@@ -97,6 +97,146 @@ jobs:
       - name: Build
         run: bun run build
 
+  patch-android:
+    name: Cut Android patch
+    # The phone app's half of the release. A full Android release — a new APK
+    # with Shorebird's engine, the patch public key baked in and the phone's
+    # existing signer — is cut by hand with `bun run native:release` and
+    # installed once, because it needs the phone and the Tailscale download
+    # service (`apps/native/README.md`). Everything Dart ships from here: a
+    # signed patch against the newest active release Shorebird reports, on
+    # the staging track, and `promote-android` moves it to stable with the
+    # production approval. Nothing deployed here waits on this job, so a red
+    # patch never blocks the web release; a tag whose `apps/native` matches
+    # the previous release tag has nothing to patch and says so.
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+
+    outputs:
+      release: ${{ steps.patch.outputs.release }}
+      patch: ${{ steps.patch.outputs.patch }}
+
+    steps:
+      - name: Check out the release tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # The previous release tag is what "changed" is measured against.
+          fetch-depth: 0
+
+      - name: Compare the app with the previous release
+        id: change
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The tag before this one in version order. A hand-cut minor or
+          # prerelease tag compares with whatever it followed, like the
+          # automatic patch cut does.
+          previous="$(git tag --list 'v[0-9]*' --sort=version:refname \
+            | grep -B1 -Fx "$GITHUB_REF_NAME" | head -n 1)"
+          if [[ -z "$previous" || "$previous" == "$GITHUB_REF_NAME" ]]; then
+            echo "no earlier release tag; patching"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          elif git diff --quiet "$previous" HEAD -- apps/native; then
+            echo "apps/native is unchanged since $previous; nothing to patch"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Android: \`apps/native\` is unchanged since \`$previous\`; no patch cut." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "apps/native changed since $previous; patching"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check Android release configuration
+        if: steps.change.outputs.changed == 'true'
+        env:
+          SHOREBIRD_TOKEN: ${{ secrets.SHOREBIRD_TOKEN }}
+          SHOREBIRD_PATCH_PRIVATE_KEY: ${{ secrets.SHOREBIRD_PATCH_PRIVATE_KEY }}
+          ANDROID_DEBUG_KEYSTORE_BASE64: ${{ secrets.ANDROID_DEBUG_KEYSTORE_BASE64 }}
+        shell: bash
+        run: |
+          missing=()
+          # SHOREBIRD_TOKEN is an API key from console.shorebird.dev; the
+          # other two are the patch signing key and the phone's existing
+          # signer, both of which live only on Tim's machine otherwise.
+          for name in \
+            SHOREBIRD_TOKEN \
+            SHOREBIRD_PATCH_PRIVATE_KEY \
+            ANDROID_DEBUG_KEYSTORE_BASE64; do
+            if [[ -z "${!name}" ]]; then missing+=("$name"); fi
+          done
+
+          if (( ${#missing[@]} > 0 )); then
+            printf 'Missing Android release configuration: %s\n' "${missing[*]}" >&2
+            exit 1
+          fi
+
+      - name: Set up Java # zizmor: ignore[cache-poisoning] tag-only release job
+        if: steps.change.outputs.changed == 'true'
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Install the qualified Shorebird CLI
+        # The CLI is the version `apps/native/qualification.json` records: the
+        # one the enabling release was built and qualified with. Shorebird's
+        # own installer and setup action take whatever is current, and a
+        # patch must be built with the release's tooling. The CLI brings its
+        # own Flutter, so no `flutter-action` here.
+        if: steps.change.outputs.changed == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(python3 -c 'import json; print(json.load(open("apps/native/qualification.json"))["shorebird"]["cli"])')"
+          git clone --quiet --depth 1 --branch "v$version" \
+            https://github.com/shorebirdtech/shorebird.git "$RUNNER_TEMP/shorebird"
+          echo "$RUNNER_TEMP/shorebird/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/shorebird/bin/shorebird" --version
+
+      - name: Cut the patch to the staging track
+        if: steps.change.outputs.changed == 'true'
+        id: patch
+        env:
+          SHOREBIRD_TOKEN: ${{ secrets.SHOREBIRD_TOKEN }}
+          SHOREBIRD_PATCH_PRIVATE_KEY: ${{ secrets.SHOREBIRD_PATCH_PRIVATE_KEY }}
+          ANDROID_DEBUG_KEYSTORE_BASE64: ${{ secrets.ANDROID_DEBUG_KEYSTORE_BASE64 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          keystore="$RUNNER_TEMP/debug.keystore"
+          key="$RUNNER_TEMP/shorebird-private.pem"
+          trap 'rm -f "$keystore" "$key"' EXIT
+          base64 -d <<<"$ANDROID_DEBUG_KEYSTORE_BASE64" > "$keystore"
+          (umask 077; printf '%s\n' "$SHOREBIRD_PATCH_PRIVATE_KEY" > "$key")
+
+          export FROCKBOT_ANDROID_KEYSTORE="$keystore"
+          export NATIVE_SHOREBIRD_PRIVATE_KEY="$key"
+          export NATIVE_UPDATE_STATE="$RUNNER_TEMP/native-updates"
+          result="$RUNNER_TEMP/patch.json"
+
+          # Exit status 3 is the script's own verdict, not a failure: the
+          # change has native or asset differences, which only a full
+          # release can carry. Say so and let the web release continue.
+          status=0
+          python3 scripts/native-update.py patch --baseline shorebird --track staging --result "$result" || status=$?
+          if [[ $status -eq 3 ]]; then
+            echo "::notice title=Android needs a full release::This tag changes native code, assets or plugins. Cut a full release with \`bun run native:release\` and install it once on the phone."
+            echo "Android: **needs a full release** — Shorebird found changes a patch cannot carry. Run \`bun run native:release\` from this tag." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if [[ $status -ne 0 ]]; then
+            exit "$status"
+          fi
+
+          release="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["release"])' "$result")"
+          patch="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["patch"]["number"])' "$result")"
+          echo "release=$release" >> "$GITHUB_OUTPUT"
+          echo "patch=$patch" >> "$GITHUB_OUTPUT"
+          echo "Android: patch \`$patch\` on release \`$release\` is on the staging track; the production approval promotes it to stable." >> "$GITHUB_STEP_SUMMARY"
+
   publish-npm:
     name: Publish packages
     # After the production deploy, not beside it. The deploy jobs wait on the
@@ -585,3 +725,43 @@ jobs:
           bun "$GITHUB_WORKSPACE/scripts/check-production-secrets.ts" write-secrets-file "$secrets_file" || exit 1
 
           bunx wrangler deploy --secrets-file "$secrets_file"
+
+  promote-android:
+    name: Promote Android patch
+    # The approval that deploys production is the approval that promotes the
+    # patch: this job waits on `deploy-backend`, so a patched client never
+    # runs ahead of the server it was built against, and it asks for no
+    # second approval of its own. Skipped when no patch was cut.
+    needs: [patch-android, deploy-backend]
+    if: needs.patch-android.outputs.patch != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out the release tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the qualified Shorebird CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(python3 -c 'import json; print(json.load(open("apps/native/qualification.json"))["shorebird"]["cli"])')"
+          git clone --quiet --depth 1 --branch "v$version" \
+            https://github.com/shorebirdtech/shorebird.git "$RUNNER_TEMP/shorebird"
+          echo "$RUNNER_TEMP/shorebird/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/shorebird/bin/shorebird" --version
+
+      - name: Promote the patch to stable
+        env:
+          SHOREBIRD_TOKEN: ${{ secrets.SHOREBIRD_TOKEN }}
+          RELEASE: ${{ needs.patch-android.outputs.release }}
+          PATCH: ${{ needs.patch-android.outputs.patch }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/native-update.py promote --release-version "$RELEASE" --patch-number "$PATCH"
+          echo "Android: patch \`$PATCH\` on release \`$RELEASE\` is stable. Open the app on the phone twice and confirm the change is live." >> "$GITHUB_STEP_SUMMARY"

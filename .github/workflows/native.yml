@@ -19,6 +19,9 @@ jobs:
           persist-credentials: false
       - name: Verify committed qualification pins
         run: python3 scripts/check-native-pins.py
+      - name: Test the Android delivery script
+        # The release pipeline's Android patch goes through this script.
+        run: python3 scripts/native-update-test.py
       # The SDK is installed rather than probed for. It used to be neither: the
       # job looked for a `flutter` the runner image does not ship, printed a
       # `::notice::` and skipped every step below it, so these checks had never
