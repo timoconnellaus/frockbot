@@ -7,11 +7,17 @@ name: Main
 # Cloudflare app's workerd and integration suites, the real build, and the
 # browser suite across four runners.
 #
-# Green here does three things in order: deploys staging, cuts the next patch
-# tag, and starts `release.yml` for it. Production still moves only behind
-# that workflow's approval gate on the `production` environment — see
-# `README.md` → Releases. Red here blocks nobody's merge; it blocks the
-# deploy, and the fix is the next pull request.
+# Green here does three things in order: deploys staging when the repository
+# variable `DEPLOY_STAGING` is `true`, cuts the next patch tag, and starts
+# `release.yml` for it. Production still moves only behind that workflow's
+# approval gate on the `production` environment — see `README.md` →
+# Releases. Red here blocks nobody's merge; it blocks the deploy, and the
+# fix is the next pull request.
+#
+# Staging is opt-in because it does not exist yet: the `staging` environment
+# holds no Cloudflare token and no Google client, and a release must not wait
+# on a deploy nobody has configured. Set `DEPLOY_STAGING=true` once the
+# environment carries every secret `deploy-staging` validates.
 
 on:
   push:
@@ -265,8 +271,12 @@ jobs:
     # staging-bot.frockbot.com as soon as the slow tier passes. Production
     # follows the tag that `release` below cuts, so nothing here can ship to
     # bot.frockbot.com.
+    #
+    # Opt-in through the repository variable `DEPLOY_STAGING`: the job is
+    # skipped, not failed, while the environment is unconfigured, so
+    # `release` below still cuts the tag.
     needs: [validate, e2e]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.DEPLOY_STAGING == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -535,16 +545,27 @@ jobs:
   release:
     name: Cut release tag
     # Tagging ships, and this is the tag. The next patch number after the
-    # highest `vX.Y.Z` on the repository is created on the revision staging is
-    # now running, and `release.yml` is started for it. A minor or major bump
-    # is a tag pushed by hand; this job simply continues from whatever is
-    # highest. If the head is already tagged — a hand-cut release that then
-    # merged — there is nothing to cut.
+    # highest `vX.Y.Z` on the repository is created on the revision the slow
+    # tier just passed — and staging is now running, when staging is on — and
+    # `release.yml` is started for it. A minor or major bump is a tag pushed
+    # by hand; this job simply continues from whatever is highest. If the
+    # head is already tagged — a hand-cut release that then merged — there is
+    # nothing to cut.
     #
     # `release.yml` is started with `workflow run` rather than left to notice
     # the tag: a tag created with `GITHUB_TOKEN` fires no `push` event, and
     # `workflow_dispatch` is the one trigger that token may raise.
-    needs: deploy-staging
+    #
+    # Runs after a skipped staging deploy as well as a successful one, never
+    # after a failed one: `!cancelled()` keeps the job eligible when
+    # `deploy-staging` was skipped, and the result checks do the gating.
+    needs: [validate, e2e, deploy-staging]
+    if: >-
+      !cancelled()
+      && github.event_name == 'push' && github.ref == 'refs/heads/main'
+      && needs.validate.result == 'success'
+      && needs.e2e.result == 'success'
+      && (needs.deploy-staging.result == 'success' || needs.deploy-staging.result == 'skipped')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
