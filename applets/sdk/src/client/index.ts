@@ -87,8 +87,13 @@ export interface CreateAppletOptions extends AppletTransportOptions {
   autoConnect?: boolean;
 }
 
-/** The host's `init`, with the fields an Applet page needs. */
+/**
+ * The host's `init`, with the fields an Applet page needs — or its `refresh`,
+ * the same shape carrying a fresh viewer credential for a page that is
+ * already running, so the document need not be rebuilt to hold it.
+ */
 export interface AppletHostInitV1 {
+  type: "init" | "refresh";
   themeTokens: Record<string, string>;
   applet: AppletInitV1;
 }
@@ -96,7 +101,8 @@ export interface AppletHostInitV1 {
 function decodeHostInit(data: unknown): AppletHostInitV1 | undefined {
   if (!data || typeof data !== "object") return undefined;
   const message = data as Record<string, unknown>;
-  if (message.schemaVersion !== 1 || message.type !== "init") return undefined;
+  if (message.schemaVersion !== 1) return undefined;
+  if (message.type !== "init" && message.type !== "refresh") return undefined;
   const applet = message.applet;
   const tokens = message.themeTokens;
   if (!applet || typeof applet !== "object") return undefined;
@@ -118,6 +124,7 @@ function decodeHostInit(data: unknown): AppletHostInitV1 | undefined {
     }
   }
   return {
+    type: message.type,
     themeTokens,
     applet: {
       socketUrl: value.socketUrl,
@@ -152,7 +159,7 @@ export function applyThemeTokens(tokens: Record<string, string>): void {
   }
 }
 
-/** Subscribe to the host's `init` message. Returns an unsubscribe function. */
+/** Subscribe to the host's `init` and `refresh` messages. Returns an unsubscribe function. */
 export function listenForAppletInit(
   handler: (init: AppletHostInitV1) => void,
 ): () => void {
@@ -205,7 +212,8 @@ export function createApplet<TServer extends { tables: TablesShape }>(
     listenForAppletInit((init) => {
       applyThemeTokens(init.themeTokens);
       lastInit = init.applet;
-      transport.connect(init.applet);
+      if (init.type === "refresh") transport.refresh(init.applet);
+      else transport.connect(init.applet);
     });
     window.parent.postMessage(
       {

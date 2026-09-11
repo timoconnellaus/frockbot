@@ -8,6 +8,9 @@ import 'package:frockbot_native/client/transport.dart';
 import 'package:frockbot_native/protocol/client_wire.generated.dart' as wire;
 import 'package:frockbot_native/shell/transcript_model.dart';
 import 'package:frockbot_native/theme/frock_theme.dart';
+import 'package:frockbot_native/view/host_frame_io.dart'
+    if (dart.library.js_interop) 'package:frockbot_native/view/host_frame_web.dart';
+import 'package:frockbot_native/view/host_frame_messages.dart';
 
 import 'settings_test.dart' show SettingsApi;
 import 'widget_test.dart' show MemoryStore;
@@ -310,6 +313,121 @@ void main() {
     });
   });
 
+  group('the frame keeps its document across a re-minted credential', () {
+    AppletViewer viewer(String token, {String generationId = 'g1'}) =>
+        AppletViewer(
+          appletId: 'todo.applet',
+          generationId: generationId,
+          uiUrl: 'https://ui.example/packages/abc.html',
+          token: token,
+          socketUrl: 'wss://bot.frockbot.com/api/applets/todo.applet/socket',
+          expiresAt: DateTime.utc(2026, 9, 5, 1, 15),
+        );
+
+    test('the document is the generation and the page, never the token', () {
+      expect(viewer('t1').documentIdentity, viewer('t2').documentIdentity);
+      expect(
+        viewer('t1').documentIdentity,
+        isNot(viewer('t1', generationId: 'g2').documentIdentity),
+      );
+      expect(
+        viewer('t1').refreshAt,
+        DateTime.utc(2026, 9, 5, 1, 15).subtract(appletViewerRefreshV1),
+      );
+    });
+
+    test('a fresh token is a refresh behind the init the page loaded with', () {
+      const tokens = {'surface': '#000000'};
+      expect(
+        appletFrameMessagesV1(
+          loaded: viewer('t1'),
+          current: viewer('t1'),
+          themeTokens: tokens,
+        ).map((message) => message['type']),
+        ['init'],
+      );
+      final rotated = appletFrameMessagesV1(
+        loaded: viewer('t1'),
+        current: viewer('t2'),
+        themeTokens: tokens,
+      );
+      expect(rotated.map((message) => message['type']), ['init', 'refresh']);
+      // The init still names the credential the document loaded with, so a
+      // host frame re-reading the list finds it unchanged and delivers only
+      // the refresh; the refresh is init-shaped with the new credential.
+      expect((rotated[0]['applet']! as Map)['token'], 't1');
+      final refresh = rotated[1];
+      expect(refresh['schemaVersion'], 1);
+      expect(refresh['themeTokens'], tokens);
+      expect((refresh['applet']! as Map)['token'], 't2');
+      expect((refresh['applet']! as Map)['generationId'], 'g1');
+      expect((refresh['applet']! as Map)['tokenTransport'], 'subprotocol-v1');
+    });
+
+    test('a host frame delivers only what changed or was added', () {
+      final init = {'type': 'init', 'token': 't1'};
+      final refresh = {'type': 'refresh', 'token': 't2'};
+      expect(hostFrameChangedMessagesV1([init], [init, refresh]), [refresh]);
+      expect(hostFrameChangedMessagesV1([init], [init]), isEmpty);
+      final moved = {'type': 'state', 'value': 2};
+      expect(
+        hostFrameChangedMessagesV1(
+          [
+            init,
+            {'type': 'state', 'value': 1},
+          ],
+          [init, moved],
+        ),
+        [moved],
+      );
+    });
+
+    testWidgets('the frame is not rebuilt when the token moves', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: FrockTheme.theme(Brightness.dark),
+          home: Scaffold(body: AppletViewerFrame(viewer: viewer('t1'))),
+        ),
+      );
+      await tester.pump();
+      final before = tester.state(find.byType(HostFrameView));
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: FrockTheme.theme(Brightness.dark),
+          home: Scaffold(body: AppletViewerFrame(viewer: viewer('t2'))),
+        ),
+      );
+      await tester.pump();
+      expect(tester.state(find.byType(HostFrameView)), same(before));
+      final frame = tester.widget<HostFrameView>(find.byType(HostFrameView));
+      expect(frame.messages.map((message) => message['type']), [
+        'init',
+        'refresh',
+      ]);
+      // A new generation is a new document, and starts from its own init.
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: FrockTheme.theme(Brightness.dark),
+          home: Scaffold(
+            body: AppletViewerFrame(viewer: viewer('t3', generationId: 'g2')),
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(tester.state(find.byType(HostFrameView)), isNot(same(before)));
+      expect(
+        tester
+            .widget<HostFrameView>(find.byType(HostFrameView))
+            .messages
+            .map((message) => message['type']),
+        ['init'],
+      );
+      await tester.pumpWidget(const SizedBox());
+    });
+  });
+
   group('the canvas', () {
     final requested = <String>[];
     setUp(requested.clear);
@@ -373,7 +491,50 @@ void main() {
         '/api/bots/bot-1/applets/todo.applet/build',
       ]);
       expect(controller.source, isNotNull);
+      controller.dispose();
     });
+
+    testWidgets(
+      'the credential is re-read before it expires, with no Turn running',
+      (tester) async {
+        var minted = 0;
+        final api = SettingsApi(MemoryStore(), (path, body) async {
+          if (path.endsWith('/applets/open')) {
+            minted += 1;
+            return {
+              'schemaVersion': 1,
+              'applets': [applet(generationId: 'g1').toJson()],
+              'focused': {
+                'appletId': 'todo.applet',
+                ...openViewer(),
+                'token': 'viewer-token-$minted',
+              },
+            };
+          }
+          throw const RequestFailure('unexpected', 404);
+        });
+        final controller = AppletCanvasController(api, 'bot-1');
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: FrockTheme.theme(Brightness.dark),
+            home: Scaffold(body: AppletCanvas(controller: controller)),
+          ),
+        );
+        await controller.load();
+        await tester.pumpAndSettle();
+        expect(controller.viewer?.token, 'viewer-token-1');
+        // Fifteen minutes less the refresh margin: the open route is read
+        // again and the fresh token is adopted — the frame itself stays.
+        final before = tester.state(find.byType(HostFrameView));
+        await tester.pump(const Duration(minutes: 12, seconds: 1));
+        await tester.pumpAndSettle();
+        expect(minted, 2);
+        expect(controller.viewer?.token, 'viewer-token-2');
+        expect(tester.state(find.byType(HostFrameView)), same(before));
+        controller.dispose();
+        await tester.pumpWidget(const SizedBox());
+      },
+    );
 
     testWidgets(
       'a draft reads its code behind the open answer, in that order',
@@ -461,12 +622,13 @@ void main() {
     testWidgets('a published Applet opens on the Applet, and toggles back', (
       tester,
     ) async {
-      await open(tester);
+      final controller = await open(tester);
       expect(find.textContaining('Live since'), findsOneWidget);
       expect(find.text('App'), findsOneWidget);
       await tester.tap(find.text('Code'));
       await tester.pumpAndSettle();
       expect(find.text('server.ts'), findsOneWidget);
+      controller.dispose();
     });
   });
 }

@@ -174,6 +174,30 @@ export class AppletTransport {
     this.#open();
   }
 
+  /**
+   * A fresh viewer credential for the page that is already running: the
+   * host's `refresh` message. The document stays; the transport reconnects
+   * in place with the new token, and since it carries its cursor the server
+   * answers with `changes` rather than a snapshot. The same credential
+   * offered twice — a host re-sending what the page already holds — is not
+   * a reason to drop a live socket.
+   */
+  refresh(init: AppletInitV1): void {
+    const held = this.#init;
+    if (
+      held &&
+      this.#socket &&
+      !this.#closed &&
+      held.token === init.token &&
+      held.socketUrl === init.socketUrl &&
+      held.generationId === init.generationId
+    ) {
+      this.#init = init;
+      return;
+    }
+    this.connect(init);
+  }
+
   close(): void {
     this.#closed = true;
     this.#reset(1000, "closed");
