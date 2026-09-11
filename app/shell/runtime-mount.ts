@@ -221,7 +221,7 @@ export async function agentRuntime(
       readSecret,
       ...(turn
         ? {
-            skills: createBotSkillsHost(identity, turn, state.env),
+            skills: await createBotSkillsHost(state, identity, turn),
           }
         : {}),
       ...(turn

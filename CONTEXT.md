@@ -107,7 +107,7 @@ A small real-time application a Bot builds for its User and the User opens besid
 _Avoid_: App, gadget, application, widget
 
 **Account feature**:
-A capability an administrator turns on for one account from Site administration; Applets is the first. Off is silence on every surface — no tools, no Composition members, no canvas — and the account's data is kept. Held by the User, set only by an admin.
+A capability an administrator turns on for one account from Site administration; Applets is the first. Off is silence on every surface — no tools, no Composition members, no canvas, no managed Skill — and the account's data is kept. Held by the User, set only by an admin.
 _Avoid_: Feature flag, beta, entitlement, plan
 
 **Instance Contribution**:

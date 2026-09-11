@@ -22,8 +22,12 @@ Dependencies must be installed from the committed lockfile (`bun install
 environment remain intact; after changing either, rerun with `--force`.
 
 Each run isolates Wrangler service discovery so concurrent worktrees cannot
-replace one another’s local services. Browser checks allow the same two retries
-as the previous CI suite and reject focused `.only` tests.
+replace one another’s local services. Checks also run under the shell’s
+environment rather than the hook’s: `GIT_DIR` and the other per-invocation git
+variables are stripped, so a check that spawns git discovers its repository from
+its own working directory and not from the hook that started the push. Browser
+checks allow the same two retries as the previous CI suite and reject focused
+`.only` tests.
 
 An interrupted validation can leave `.local-validation/running`. Once the
 process has stopped, remove that directory and retry. Failed checks remove their

@@ -41,6 +41,7 @@ import { writeSkillDocumentV1 } from "@frockbot/app/skills/write";
 import type { ShellBotStateV1 } from "@frockbot/app/shell/backend-state";
 import { projectFirstPartyPackageIframeV1 } from "@frockbot/app/shell/composition-views";
 import { appletsEnabled } from "@frockbot/app/applets-host/bot";
+import { APPLETS_SKILL_SLUG_V1 } from "@frockbot/app/skills/managed";
 import { PACKAGE_IFRAME_FOCUS_TOOL_V2 } from "@frockbot/core/contracts";
 import {
   projectClientTurnV1,
@@ -74,18 +75,39 @@ export interface BotSkillsEnv {
 }
 
 /**
+ * The managed Skills this Bot's account is not offered.
+ *
+ * The Applets Skill is the Applets Package's own reference: it teaches the
+ * `applet_*` tools, so it goes exactly where those tools go. With the
+ * account's switch off the tools are not mounted, and a switch that cannot be
+ * read is off here for the same reason it is off for the tools — listing the
+ * Skill would tell the model the tools were there.
+ */
+async function withheldManagedSkillSlugs(
+  state: ShellBotStateV1,
+  identity: BotSkillsIdentity,
+): Promise<readonly string[]> {
+  let enabled: boolean;
+  try {
+    enabled = await appletsEnabled(state, identity);
+  } catch {
+    enabled = false;
+  }
+  return enabled ? [] : [APPLETS_SKILL_SLUG_V1];
+}
+
+/**
  * The Skills seam one admitted Turn runs under, or `undefined` when the Bot's
  * Workspace file surface is unavailable.
  */
-export function createBotSkillsHost(
+export async function createBotSkillsHost(
+  state: ShellBotStateV1,
   identity: BotSkillsIdentity,
   turn: BotSkillsTurn,
-  env: object,
-): SkillsRuntimeHostV1 | undefined {
-  // SAFETY: the Workspace file surface is constructed onto the Durable Object
-  // environment rather than declared in the generated `Env`, because it is not
-  // a Worker binding. Absence is a supported state, not an error.
-  const files = (env as BotSkillsEnv).WORKSPACE_FILES;
+): Promise<SkillsRuntimeHostV1 | undefined> {
+  // Absence is a supported state, not an error: a host that binds no
+  // Workspace mounts no Skills.
+  const files = state.env.WORKSPACE_FILES;
   if (!files) return undefined;
   return {
     owner: { userId: identity.userId, botId: identity.botId },
@@ -98,6 +120,7 @@ export function createBotSkillsHost(
       turnId: turn.turnId,
       runId: turn.runId,
     },
+    withheldManagedSlugs: await withheldManagedSkillSlugs(state, identity),
   };
 }
 
@@ -174,10 +197,13 @@ export async function listSkills(
   await state.authority.validateIdentity(identity);
   const reads = createBotSkillsReads(state.env);
   if (!reads) return { schemaVersion: 1, skills: [] };
-  const catalog = await loadFullSkillCatalogV1(reads, {
-    userId: identity.userId,
-    botId: identity.botId,
-  });
+  // The same withholding the Turn applies, so the popover never offers a
+  // managed Skill the Turn would not list.
+  const catalog = await loadFullSkillCatalogV1(
+    reads,
+    { userId: identity.userId, botId: identity.botId },
+    { withheldManagedSlugs: await withheldManagedSkillSlugs(state, identity) },
+  );
   const entries: ClientSkillCatalogEntryV1[] = [];
   for (const skill of catalog.skills) {
     const ref = skillRefForLoadedSkillV1(skill);

@@ -53,9 +53,11 @@ export function ignoredWorkingPath(path: string): boolean {
 }
 
 // Git exports GIT_DIR (and friends) to hooks, and this runs from the pre-push
-// hook. Every git call here is about `root`, so inherited repository pointers
-// must not redirect it: from a worktree hook they name the worktree's git
-// dir, which is not a work tree for any other `root`.
+// hook. Every git call here — and every command a category spawns — is about
+// `root`, so inherited repository pointers must not redirect it: from a
+// worktree hook they name the worktree's git dir, which is not a work tree for
+// any other `root`, and a test that runs `git init` in a temp directory under
+// that pointer marks this repository bare instead.
 export const GIT_ENV: Record<string, string | undefined> = Object.fromEntries(
   Object.entries(process.env).filter(
     ([name]) => !name.startsWith("GIT_") || name === "GIT_EXEC_PATH",
@@ -140,8 +142,11 @@ export async function validate(
       for (const command of categories[name]!) {
         const child = Bun.spawn(command, {
           cwd: root,
-          // Wrangler otherwise shares service discovery across all worktrees.
-          env: { ...process.env, WRANGLER_REGISTRY_PATH: registry },
+          env: {
+            ...GIT_ENV,
+            // Wrangler otherwise shares service discovery across all worktrees.
+            WRANGLER_REGISTRY_PATH: registry,
+          },
           stdin: "inherit",
           stdout: "inherit",
           stderr: "inherit",

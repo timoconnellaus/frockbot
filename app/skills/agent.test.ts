@@ -91,6 +91,31 @@ describe("the Skill catalog", () => {
     expect(catalog.loadedTurn()).toBe(4);
     await dispose();
   });
+
+  test("a managed Skill the host withholds is neither listed nor refused", async () => {
+    const { session, dispose } = await openSession();
+    const catalog = new SkillCatalog(OWNER, new FakeWorkspace(), ["applets"]);
+
+    await catalog.refresh(4, session);
+
+    const paths = catalog.current().skills.map((skill) => skill.path);
+    expect(paths).not.toContain("managed/applets/SKILL.md");
+    expect(paths).toContain("managed/add-connector/SKILL.md");
+    const injected = session.events.find(
+      (event) => event.type === "skill/injected",
+    );
+    // Withheld is not refused: nothing about the document was wrong, so the
+    // record says nothing about it, as it says nothing about an unmounted tool.
+    expect(
+      injected?.type === "skill/injected" ? injected.refusals : undefined,
+    ).toEqual([]);
+    expect(
+      injected?.type === "skill/injected"
+        ? injected.skills.map((skill) => skill.path)
+        : undefined,
+    ).not.toContain("managed/applets/SKILL.md");
+    await dispose();
+  });
 });
 
 describe("the skill_load tool", () => {

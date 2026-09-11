@@ -48,6 +48,28 @@ test("documentation exceptions do not ignore nested prompts or new code", () => 
   expect(() => snapshot(root)).toThrow("new.ts");
 });
 
+test("a category runs under the shell's environment, not git's hook environment", async () => {
+  const root = fixture();
+  categories.probe = [
+    [
+      process.execPath,
+      "-e",
+      'await Bun.write(".local-validation/gitdir", process.env.GIT_DIR ?? "unset")',
+    ],
+  ];
+  const previous = process.env.GIT_DIR;
+  process.env.GIT_DIR = "/nowhere/.git";
+  try {
+    await validate(root, ["probe"]);
+  } finally {
+    if (previous === undefined) delete process.env.GIT_DIR;
+    else process.env.GIT_DIR = previous;
+  }
+  expect(readFileSync(join(root, ".local-validation/gitdir"), "utf8")).toBe(
+    "unset",
+  );
+});
+
 test("success is reused per category and commit, while forced failure removes it", async () => {
   const root = fixture();
   categories.probe = [
