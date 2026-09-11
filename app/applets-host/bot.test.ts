@@ -3,7 +3,12 @@
 import { describe, expect, test } from "bun:test";
 import { APPLET_FOCUSED_KEY, type BotIdentity } from "@frockbot/core/durable";
 import type { ShellBotStateV1 } from "@frockbot/app/shell/backend-state";
-import { readFocusedApplet, setFocusedApplet } from "./bot.js";
+import {
+  appletsRuntimeHost,
+  readFocusedApplet,
+  resolveAppletComposition,
+  setFocusedApplet,
+} from "./bot.js";
 
 const IDENTITY: BotIdentity = { userId: "user-42", botId: "bot-1" };
 const APPLET = `${IDENTITY.userId}.${"a".repeat(32)}`;
@@ -137,5 +142,153 @@ describe("the focused Applet", () => {
     expect(values.get(APPLET_FOCUSED_KEY)).toMatchObject({
       appletId: APPLET,
     });
+  });
+});
+
+// --- The account's Applets switch ------------------------------------------
+
+const TURN = { sessionId: "user-42:bot-1", runId: "run-1", turnId: "turn-1" };
+
+/**
+ * A Bot host with everything Applets need bound, whose User Durable Object
+ * answers the features read as the harness says.
+ */
+function gatedHarness(options: {
+  applets: boolean | "unreachable";
+  directory?: Array<{ appletId: string; generationId: string }>;
+  current?: { generationId: string; applets?: unknown[] };
+}) {
+  const values = new Map<string, unknown>();
+  const proposed: unknown[] = [];
+  let directoryReads = 0;
+  const rpc = {
+    readFeatures: () => {
+      if (options.applets === "unreachable") {
+        throw new Error("the User object is unavailable");
+      }
+      return Promise.resolve({
+        schemaVersion: 1,
+        applets: options.applets,
+        updatedAt: "2026-09-11T00:00:00.000Z",
+        updatedBy: "owner",
+      });
+    },
+    readAppletCompositionInput: () => {
+      directoryReads += 1;
+      return Promise.resolve({
+        revision: 3,
+        applets: (options.directory ?? []).map((entry) => ({
+          ...entry,
+          tools: [],
+          provenance: {
+            kind: "bot",
+            botId: "bot-1",
+            sessionId: TURN.sessionId,
+            turnId: TURN.turnId,
+          },
+        })),
+      });
+    },
+  };
+  const current = {
+    generationId: "g0",
+    members: [],
+    ...(options.current ?? {}),
+  };
+  const state = {
+    ctx: {
+      storage: {
+        get: (key: string) => Promise.resolve(values.get(key)),
+        put: (entries: Record<string, unknown>) => {
+          for (const [key, value] of Object.entries(entries))
+            values.set(key, value);
+          return Promise.resolve();
+        },
+      },
+    },
+    env: {
+      USER_CONFIGURATIONS: {
+        idFromName: (name: string) => name,
+        get: () => rpc,
+      },
+      APPLET_STATES: {},
+      APPLICATION_ARTIFACTS: {},
+      WORKSPACE_FILES: {},
+    },
+    authority: {
+      validateIdentity: () => Promise.resolve(),
+      composition: {
+        current: () => Promise.resolve(current),
+        propose: (generation: unknown) => {
+          proposed.push(generation);
+          return Promise.resolve();
+        },
+      },
+    },
+  } as unknown as ShellBotStateV1;
+  return { state, proposed, directoryReads: () => directoryReads };
+}
+
+describe("the account's Applets switch", () => {
+  test("the tools are mounted only when the switch is on", async () => {
+    const on = gatedHarness({ applets: true });
+    expect(await appletsRuntimeHost(on.state, IDENTITY, TURN)).toMatchObject({
+      turn: TURN,
+    });
+    const off = gatedHarness({ applets: false });
+    expect(await appletsRuntimeHost(off.state, IDENTITY, TURN)).toBeUndefined();
+  });
+
+  test("a switch that cannot be read mounts nothing for the Turn", async () => {
+    const { state } = gatedHarness({ applets: "unreachable" });
+    expect(await appletsRuntimeHost(state, IDENTITY, TURN)).toBeUndefined();
+  });
+
+  test("with the switch off, a Composition holding Applets resolves to none", async () => {
+    const command = {
+      userId: IDENTITY.userId,
+      botId: IDENTITY.botId,
+      runId: TURN.runId,
+      sessionId: TURN.sessionId,
+    } as never;
+    const off = gatedHarness({
+      applets: false,
+      directory: [{ appletId: APPLET, generationId: "ag1" }],
+      current: {
+        generationId: "g1",
+        applets: [{ appletId: APPLET, generationId: "ag1", tools: [] }],
+      },
+    });
+    await resolveAppletComposition(off.state, IDENTITY, command);
+    expect(off.proposed).toHaveLength(1);
+    expect(off.proposed[0]).not.toHaveProperty("applets");
+
+    // Turned back on, the same directory comes back as members.
+    const on = gatedHarness({
+      applets: true,
+      directory: [{ appletId: APPLET, generationId: "ag1" }],
+      current: { generationId: "g2" },
+    });
+    await resolveAppletComposition(on.state, IDENTITY, command);
+    expect(on.proposed).toHaveLength(1);
+    expect(on.proposed[0]).toMatchObject({
+      applets: [{ appletId: APPLET, generationId: "ag1" }],
+    });
+  });
+
+  test("a switch that cannot be read leaves the Composition alone", async () => {
+    const command = {
+      userId: IDENTITY.userId,
+      botId: IDENTITY.botId,
+      runId: TURN.runId,
+      sessionId: TURN.sessionId,
+    } as never;
+    const { state, proposed, directoryReads } = gatedHarness({
+      applets: "unreachable",
+      directory: [{ appletId: APPLET, generationId: "ag1" }],
+    });
+    await resolveAppletComposition(state, IDENTITY, command);
+    expect(proposed).toHaveLength(0);
+    expect(directoryReads()).toBe(0);
   });
 });

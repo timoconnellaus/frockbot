@@ -1,5 +1,12 @@
 import { isPublicIdentifier } from "@frockbot/core/configuration";
 import {
+  decodeSetUserFeaturesRequestV1,
+  decodeUserFeaturesReadRequestV1,
+  decodeUserFeaturesV1,
+  defaultUserFeaturesV1,
+  type UserFeaturesV1,
+} from "@frockbot/app/admin/shared";
+import {
   decodePushRegistration,
   registerPushDevice,
   deliverPush,
@@ -125,6 +132,8 @@ const MEMORY_PROJECT_ID = /^[a-z0-9][a-z0-9-]{0,127}$/;
 
 /** The durable key pinning the User this object was provisioned for. */
 const USER_IDENTITY_KEY = "user:identity";
+/** The durable key holding what an administrator turned on for this User. */
+const USER_FEATURES_KEY = "user:features:v1";
 
 interface UserConfigurationEnv {
   FCM_SERVICE_ACCOUNT?: string;
@@ -420,6 +429,16 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
   async isProvisioned(input: unknown): Promise<boolean> {
     const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
     const userId = request.userId as string;
+    return (await this.addressedUser(userId)) === userId;
+  }
+
+  /**
+   * Checks that this object is the one `userId` names, without provisioning
+   * it: the durable pin is read and compared, never written. What comes back
+   * is the pin, so a caller can tell an unprovisioned User from a provisioned
+   * one.
+   */
+  private async addressedUser(userId: string): Promise<string | undefined> {
     const namespace = this.env.USER_CONFIGURATIONS;
     if (!namespace || !namespace.idFromName(userId).equals(this.ctx.id)) {
       throw new Error(
@@ -432,7 +451,36 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
         "this User Durable Object is the authority for a different User",
       );
     }
-    return pinned === userId;
+    return pinned;
+  }
+
+  // --- Account features ------------------------------------------------------
+  //
+  // What an administrator turned on for this User. Neither RPC pins the
+  // identity: an admin reads and sets features for accounts that have signed
+  // up but never been admitted, and doing so must not admit them — the pin is
+  // what `isProvisioned` and the signup gate read.
+
+  async readFeatures(input: unknown): Promise<UserFeaturesV1> {
+    const request = decodeUserFeaturesReadRequestV1(input);
+    await this.addressedUser(request.userId);
+    const stored = await this.ctx.storage.get<unknown>(USER_FEATURES_KEY);
+    return stored === undefined
+      ? defaultUserFeaturesV1()
+      : decodeUserFeaturesV1(stored);
+  }
+
+  async setFeatures(input: unknown): Promise<UserFeaturesV1> {
+    const request = decodeSetUserFeaturesRequestV1(input);
+    await this.addressedUser(request.userId);
+    const next: UserFeaturesV1 = {
+      schemaVersion: 1,
+      applets: request.command.applets,
+      updatedAt: new Date().toISOString(),
+      updatedBy: request.updatedBy,
+    };
+    await this.ctx.storage.put(USER_FEATURES_KEY, next);
+    return next;
   }
 
   async readConfiguration(input: unknown): Promise<UserSettingsViewV1> {

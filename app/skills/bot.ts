@@ -40,6 +40,8 @@ import {
 import { writeSkillDocumentV1 } from "@frockbot/app/skills/write";
 import type { ShellBotStateV1 } from "@frockbot/app/shell/backend-state";
 import { projectFirstPartyPackageIframeV1 } from "@frockbot/app/shell/composition-views";
+import { appletsEnabled } from "@frockbot/app/applets-host/bot";
+import { PACKAGE_IFRAME_FOCUS_TOOL_V2 } from "@frockbot/core/contracts";
 import {
   projectClientTurnV1,
   type ClientTurnV1,
@@ -195,13 +197,29 @@ export async function listSkills(
   return { schemaVersion: 1, skills: entries };
 }
 
-/** The first-party page registry, as inert iframe metadata for one Bot. */
+/**
+ * The first-party page registry, as inert iframe metadata for one Bot.
+ *
+ * A Package whose pages may focus an Applet is offered only when an admin
+ * has turned Applets on for this User. The client derives "Applets are here"
+ * from exactly that declaration, so leaving the Package out is what makes
+ * the canvas, the picker and the Applet routes silent for an account without
+ * the feature.
+ */
 export async function listPackageUi(
   state: ShellBotStateV1,
   identity: BotIdentity,
 ): Promise<PackageIframeCompositionV1> {
   await state.authority.validateIdentity(identity);
-  return projectFirstPartyPackageIframeV1(identity.botId);
+  const projected = projectFirstPartyPackageIframeV1(identity.botId);
+  if (await appletsEnabled(state, identity)) return projected;
+  return {
+    ...projected,
+    contributions: projected.contributions.filter(
+      (contribution) =>
+        !contribution.declaredTools.includes(PACKAGE_IFRAME_FOCUS_TOOL_V2),
+    ),
+  };
 }
 
 /**

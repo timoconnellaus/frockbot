@@ -202,6 +202,16 @@ describe("foundation application", () => {
         }),
       setDeploymentSignups: () =>
         Promise.reject(new Error("not used while composing")),
+      listUsers: () => Promise.resolve([]),
+      readUserFeatures: () =>
+        Promise.resolve({
+          schemaVersion: 1 as const,
+          applets: false,
+          updatedAt: "2026-09-01T00:00:00.000Z",
+          updatedBy: "deployment-default",
+        }),
+      setUserFeatures: () =>
+        Promise.reject(new Error("not used while composing")),
       listBots: () =>
         Promise.resolve({ schemaVersion: 1, revision: 0, bots: [] }),
       listTemplateShares: () =>
