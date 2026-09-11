@@ -462,7 +462,14 @@ still unverified live.
 | Browser (Vite dev server, no backend): footer at 1280 and 390 wide                                                                        | footer 52 px tall, meter 140 px at both widths, mute and X on the right, error state, idle AI row as a faint line — screenshots under `~/voice-screenshots/`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 
 Unit coverage in bun, all with fakes: the wire decoders, the OpenAI
-transcription vocabulary, the sleeping transcriber (open on first frame,
+transcription vocabulary, the assistant's OpenAI transcriber against a fake
+socket (the session it asks for, readiness only after `session.updated`,
+audio before that dropped, a frame too short to resample sending nothing,
+speech start and interim text and the utterance, an empty or failed item,
+errors and closes and throwing sends all fatal exactly once, connect and
+handshake timeouts), the 16 → 24 kHz upsampler (three samples for two, true
+interpolation, phase and an odd trailing byte carried across frames), the
+sleeping transcriber (open on first frame,
 drain in order, sleep, idle bound, bounded hold, startup failure, stale
 readiness), the ledger (exclusive call, rejoin, sequential keys, stale
 connection, caps, delegation dedup by run id, settlement idempotence,
