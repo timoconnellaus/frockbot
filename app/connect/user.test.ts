@@ -232,6 +232,23 @@ describe("starting a connected app", () => {
     expect(third.displayName).toBe("Gmail");
   });
 
+  test("a failed sign-in gives the app's own name back to the next one", async () => {
+    const { contribution, settings, client, clock } = fixture();
+    await contribution.executeConnection("tim", start("s1"));
+    client.set("ca_1", "FAILED");
+    clock.now += 5_000;
+    await contribution.bootstrap("tim");
+    expect(settings.state.connections[0]?.state).toBe("failed");
+
+    await contribution.executeConnection("tim", start("s2"));
+    const second = settings.state.connections[1]!;
+    expect(second.displayName).toBe("Gmail");
+    expect(connectSafeMetadataV1(second)?.namespace).toBe("gmail");
+    // The dead sign-in is retired here and upstream.
+    expect(settings.state.connections[0]?.state).toBe("revoked");
+    expect(client.deleted).toEqual(["ca_1"]);
+  });
+
   test("reuses the provider's existing auth config for an app", async () => {
     const { contribution, client } = fixture();
     client.authConfigs.push({ id: "ac_gmail", toolkitSlug: "gmail" });

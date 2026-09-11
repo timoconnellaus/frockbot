@@ -407,6 +407,13 @@ void main() {
       find.textContaining('Couldn’t load your connectors'),
       findsOneWidget,
     );
+
+    offline = false;
+    await tester.fling(find.byType(ListView), const Offset(0, 320), 1000);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Gmail'), findsOneWidget);
+    expect(find.textContaining('Couldn’t load your connectors'), findsNothing);
   });
 
   for (final brightness in Brightness.values) {

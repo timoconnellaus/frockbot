@@ -93,10 +93,7 @@ class _ConnectionsPageState extends State<ConnectionsPage>
       if (!mounted) return;
       const message =
           'Couldn’t load your connectors. Check your connection and try again.';
-      setState(() {
-        loadFailure = message;
-        if (frame != null) notice = message;
-      });
+      setState(() => loadFailure = message);
     } finally {
       if (mounted) setState(() => loading = false);
     }
@@ -183,6 +180,7 @@ class _ConnectionsPageState extends State<ConnectionsPage>
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final frame = this.frame;
+    final banner = notice ?? loadFailure;
     final Widget body;
     if (frame == null) {
       body = loading || loadFailure == null
@@ -202,10 +200,13 @@ class _ConnectionsPageState extends State<ConnectionsPage>
           physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
           children: [
-            if (notice case final String line)
+            if (banner case final String line)
               _Notice(
                 line: line,
-                onDismiss: () => setState(() => notice = null),
+                onDismiss: () => setState(() {
+                  notice = null;
+                  loadFailure = null;
+                }),
               ),
             if (widget.models && frame.modelInUse != null)
               _Centered(

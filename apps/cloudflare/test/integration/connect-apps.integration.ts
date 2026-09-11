@@ -87,7 +87,7 @@ describe("Connected apps", () => {
       `${ORIGIN}/api/connect/callback?status=success`,
     );
     expect(returned.status).toBe(200);
-    expect(await returned.text()).toContain("Connected");
+    expect(await returned.text()).toContain("Back to FrockBot");
 
     const [gmail] = await connections(userId);
     expect(gmail).toMatchObject({

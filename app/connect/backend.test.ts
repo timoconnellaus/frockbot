@@ -149,7 +149,7 @@ describe("the Connected apps gateway routes", () => {
     expect(response?.status).toBe(401);
   });
 
-  test("the return page is public, says what happened, and touches nothing", async () => {
+  test("the return page is public, sends a person back, and touches nothing", async () => {
     const { backend, commands } = contribution(() => {
       throw new Error("must not be called");
     });
@@ -161,7 +161,7 @@ describe("the Connected apps gateway routes", () => {
       {},
     );
     expect(ok?.status).toBe(200);
-    expect(await ok?.text()).toContain("Connected");
+    expect(await ok?.text()).toContain("Back to FrockBot");
     const failed = await backend.publicRoute!(
       new Request(
         "https://bot.frockbot.com/api/connect/callback?status=failed",
@@ -169,7 +169,7 @@ describe("the Connected apps gateway routes", () => {
       new URL("https://bot.frockbot.com/api/connect/callback?status=failed"),
       {},
     );
-    expect(await failed?.text()).toContain("didn't finish");
+    expect(await failed?.text()).toContain("Back to FrockBot");
     expect(commands).toHaveLength(0);
     const other = await backend.publicRoute!(
       new Request("https://bot.frockbot.com/api/other"),

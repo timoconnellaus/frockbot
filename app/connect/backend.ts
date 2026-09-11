@@ -58,27 +58,11 @@ function jsonError(status: number, error: string): Response {
   return Response.json({ error }, { status });
 }
 
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
-}
-
 /** The page a person lands on after the app's sign-in. No session, no state. */
-export function connectCallbackPageV1(url: URL): Response {
-  const status = (url.searchParams.get("status") ?? "").toLowerCase();
-  const failed = ["failed", "error", "expired", "cancelled", "canceled"].some(
-    (word) => status.includes(word),
-  );
-  const heading = failed ? "That didn't finish" : "Connected";
-  const line = failed
-    ? "The sign-in didn't complete. Go back to FrockBot and try connecting again."
-    : "Go back to FrockBot. The app is now available to every one of your Bots.";
+export function connectCallbackPageV1(): Response {
   const nonce = crypto.randomUUID();
   return new Response(
-    `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>${escapeHtml(heading)} · FrockBot</title><style nonce="${nonce}">body{font:17px system-ui;background:#faf8f4;color:#242323;max-width:38rem;margin:10vh auto;padding:24px}h1{font-size:1.6rem}</style><main><h1>${escapeHtml(heading)}</h1><p>${escapeHtml(line)}</p></main></html>`,
+    `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Back to FrockBot · FrockBot</title><style nonce="${nonce}">body{font:17px system-ui;background:#faf8f4;color:#242323;max-width:38rem;margin:10vh auto;padding:24px}h1{font-size:1.6rem}</style><main><h1>Back to FrockBot</h1><p>You can close this page and return to FrockBot. It will show whether the app connected.</p></main></html>`,
     {
       status: 200,
       headers: {
@@ -102,7 +86,7 @@ export function createConnectBackendContribution(
       if (request.method !== "GET") {
         return Promise.resolve(jsonError(405, "method not allowed"));
       }
-      return Promise.resolve(connectCallbackPageV1(url));
+      return Promise.resolve(connectCallbackPageV1());
     },
     async route(request, url, context) {
       const revoke = REVOKE.exec(url.pathname);

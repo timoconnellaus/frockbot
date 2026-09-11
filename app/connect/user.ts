@@ -285,18 +285,27 @@ export class ConnectUserBackendContribution {
       callbackUrl: `${this.host.callbackBaseUrl.replace(/\/$/, "")}${CONNECT_CALLBACK_PATH}`,
     });
     const snapshot = await this.host.settings.readSnapshot();
+    const siblings = snapshot.connections.filter(
+      (connection) =>
+        connection.packageId === CONNECT_PACKAGE_ID &&
+        connection.connectionTypeId === command.connectionTypeId &&
+        connection.state !== "revoked",
+    );
+    // A sign-in that failed is a retry waiting to happen, not a live account:
+    // it is retired here so this one can take back the app's own name.
+    const live: typeof siblings = [];
+    for (const sibling of siblings) {
+      if (sibling.state !== "failed") {
+        live.push(sibling);
+        continue;
+      }
+      await this.retire(accountId, sibling);
+    }
     // A second account of the same app gets the first free suffix, never a
     // count: a count is reused the moment an earlier account is disconnected,
     // and two live Connections would then mount the same namespace.
     const taken = new Set(
-      snapshot.connections
-        .filter(
-          (connection) =>
-            connection.packageId === CONNECT_PACKAGE_ID &&
-            connection.connectionTypeId === command.connectionTypeId &&
-            connection.state !== "revoked",
-        )
-        .map((connection) => connectSafeMetadataV1(connection)?.namespace),
+      live.map((connection) => connectSafeMetadataV1(connection)?.namespace),
     );
     let ordinal = 1;
     while (
@@ -331,6 +340,36 @@ export class ConnectUserBackendContribution {
         expiresAt: Date.parse(link.expiresAt),
       },
     };
+  }
+
+  /**
+   * Retires a Connection that will never become live: the upstream grant is
+   * dropped best effort, because a provider that cannot be reached must not
+   * keep a dead sign-in holding the app's name.
+   */
+  private async retire(
+    accountId: string,
+    connection: ConnectionView,
+  ): Promise<void> {
+    const metadata = connectSafeMetadataV1(connection);
+    if (this.client && metadata) {
+      try {
+        await this.client.deleteConnectedAccount(metadata.connectedAccountId);
+      } catch {
+        // The dead account is retired here either way.
+      }
+    }
+    await this.host.settings.replaceConnection(
+      accountId,
+      connection.connectionId,
+      connection.generation,
+      {
+        ...connection,
+        state: "revoked",
+        failure: undefined,
+      } as ConnectionView,
+    );
+    await this.host.storage.delete(`${POLL_PREFIX}${connection.connectionId}`);
   }
 
   /**
