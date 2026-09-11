@@ -5,8 +5,9 @@ import { join } from "node:path";
 import {
   categories,
   ignoredWorkingPath,
+  prePushCategories,
   pushCommits,
-  requireCurrentMain,
+  requireLinearBranch,
   snapshot,
   validate,
 } from "./validate";
@@ -91,7 +92,13 @@ test("deletions are ignored and outgoing commits are deduplicated", () => {
   expect(() => pushCommits("bad input")).toThrow();
 });
 
-test("remote main advancement blocks even a conflict-free branch", () => {
+test("pre-push owes the fast tier only, and every category it names exists", () => {
+  expect(prePushCategories).toEqual(["format", "typecheck", "unit"]);
+  for (const name of prePushCategories)
+    expect(Object.hasOwn(categories, name)).toBe(true);
+});
+
+test("a branch behind main may push, but a merge commit on it may not", () => {
   const remote = fixture();
   git(remote, "branch", "-M", "main");
   const local = mkdtempSync(join(tmpdir(), "validation-clone-"));
@@ -102,14 +109,16 @@ test("remote main advancement blocks even a conflict-free branch", () => {
   git(local, "config", "core.hooksPath", "/dev/null");
   git(local, "checkout", "-qb", "feature");
   git(local, "commit", "--allow-empty", "-qm", "feature");
-  expect(() => requireCurrentMain(local, "origin")).not.toThrow();
+  expect(() => requireLinearBranch(local, "origin")).not.toThrow();
   git(remote, "commit", "--allow-empty", "-qm", "advance main");
-  expect(() => requireCurrentMain(local, "origin")).toThrow(
-    "behind remote main",
-  );
-  git(local, "rebase", "origin/main");
-  expect(() => requireCurrentMain(local, "origin")).not.toThrow();
-  expect(() => requireCurrentMain(local, join(remote, "missing"))).toThrow();
+  expect(() => requireLinearBranch(local, "origin")).not.toThrow();
+  git(local, "fetch", "-q", "origin");
+  git(local, "merge", "-q", "--no-edit", "origin/main");
+  expect(() => requireLinearBranch(local, "origin")).toThrow("merge commits");
+  git(local, "reset", "-q", "--hard", "HEAD~1");
+  git(local, "rebase", "-q", "origin/main");
+  expect(() => requireLinearBranch(local, "origin")).not.toThrow();
+  expect(() => requireLinearBranch(local, join(remote, "missing"))).toThrow();
 });
 
 test("validation gives each run its own local service registry", async () => {

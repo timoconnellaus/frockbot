@@ -37,6 +37,15 @@ export const categories: Record<string, string[][]> = {
   build: [["bun", "run", "build"]],
 };
 
+/**
+ * What a push owes before it leaves the machine: the fast tier, the same set
+ * `check.yml` runs on the pull request and again on the merge group. The slow
+ * categories — runtime, integration, e2e, build — run once per landed change
+ * on `main` (`main.yml`), and by hand through `bun run validate` when a change
+ * warrants it.
+ */
+export const prePushCategories = ["format", "typecheck", "unit"];
+
 export function ignoredWorkingPath(path: string): boolean {
   return (
     path.startsWith("docs/") || (!path.includes("/") && path.endsWith(".md"))
@@ -154,17 +163,15 @@ export async function validate(
   }
 }
 
-export function requireCurrentMain(root: string, remote: string): void {
+/**
+ * A branch may be behind `main` — the merge queue reruns the check against
+ * current `main` before anything lands, so there is nothing a rebase would
+ * prove here — but it keeps a linear history: a merge commit on the branch is
+ * `main` merged into it, which the queue would fold into an unreadable merge.
+ */
+export function requireLinearBranch(root: string, remote: string): void {
   git(root, "fetch", "--no-tags", "--", remote, "refs/heads/main");
-  const base = git(root, "rev-parse", "FETCH_HEAD").trim();
-  const result = Bun.spawnSync(
-    ["git", "merge-base", "--is-ancestor", base, "HEAD"],
-    { cwd: root },
-  );
-  if (result.exitCode !== 0)
-    throw new Error(
-      "Your branch is behind remote main. Rebase onto main, validate, and push again.",
-    );
+  const base = git(root, "merge-base", "FETCH_HEAD", "HEAD").trim();
   if (git(root, "rev-list", "--merges", `${base}..HEAD`).trim())
     throw new Error(
       "PR branch contains merge commits. Rebase onto main before pushing.",
@@ -204,9 +211,8 @@ if (import.meta.main) {
         }
         const remote = args[args.indexOf("--pre-push") + 1];
         if (!remote) throw new Error("Pre-push requires a remote");
-        requireCurrentMain(root, remote);
-        await validate(root, Object.keys(categories));
-        requireCurrentMain(root, remote);
+        requireLinearBranch(root, remote);
+        await validate(root, prePushCategories);
         if (snapshot(root) !== head)
           throw new Error("Commit changed while preparing push");
       }

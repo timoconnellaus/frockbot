@@ -101,7 +101,7 @@ describe("pull request leg", () => {
     expect(report.summary).toContain("Validate");
   });
 
-  test("green checks with the merge queued is still pending", async () => {
+  test("green checks with the pull request in the merge queue is still pending", async () => {
     const report = await pullRequestReport(
       fakeGitHub({
         pr: {
@@ -115,10 +115,10 @@ describe("pull request leg", () => {
       128,
     );
     expect(report.status).toBe("pending");
-    expect(report.summary).toContain("queued to merge");
+    expect(report.summary).toContain("merge queue");
   });
 
-  test("green checks with nothing queued is the quiet failure this exists to catch", async () => {
+  test("green checks on an open pull request is the session's terminal state", async () => {
     const report = await pullRequestReport(
       fakeGitHub({
         pr: {
@@ -131,9 +131,8 @@ describe("pull request leg", () => {
       }),
       128,
     );
-    expect(report.status).toBe("failed");
-    expect(report.summary).toContain("nothing queued the merge");
-    expect(report.detail?.join(" ")).toContain(".github/workflows/");
+    expect(report.status).toBe("passed");
+    expect(report.summary).toContain("ready for a maintainer to merge");
   });
 
   test("reads a legacy status context, which carries no status field", async () => {

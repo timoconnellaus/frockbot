@@ -14,7 +14,7 @@ at the cited location. Items the re-orientation already removes are marked; see
 
 5. **Staging `vars` differ from production silently.** `apps/cloudflare/wrangler.jsonc:377-384` omits `FROCK_AI_GATEWAY_ID`, `FROCK_AI_AUTO_ROUTE` and `NATIVE_SLICE_2_AUTH`; named environments do not inherit top-level vars.
 
-6. **Two deploy paths rewrite `wrangler.jsonc` by regex** (`ci.yml:531-578`, `release.yml:394-446`). The checked-in placeholder `database_id` `00000000-0000-0000-0000-000000000000` and the string `foundation-v1` are load-bearing; reformatting the file breaks deployment.
+6. **Two deploy paths rewrite `wrangler.jsonc` by regex** (`main.yml`'s "Configure staging D1 database" and "Configure application artifact", `release.yml`'s production counterparts). The checked-in placeholder `database_id` `00000000-0000-0000-0000-000000000000` and the string `foundation-v1` are load-bearing; reformatting the file breaks deployment.
 
 7. ~~**Signups-closed does not prevent account creation.**~~ **Fixed.** `/api/auth/*` is served at `gateway.ts:753` ahead of the admission check, so any Google account could write `user`, `account` and `session` rows while signups were closed. `signupDatabaseHooksV1` (`apps/cloudflare/src/auth.ts`) now refuses the create unless signups are open or the email is a configured admin.
 
@@ -86,7 +86,7 @@ at the cited location. Items the re-orientation already removes are marked; see
 
 41. ~~**Dangling directory references.**~~ **Fixed.** `apps/cloudflare/index.html` referenced `apps/mobile` and the computer-host README referenced `apps/fly-host-prototype`; both are removed.
 
-42. **An auto-merged pull request never deploys to staging.** `ci.yml`'s `deploy-staging` is gated on `github.event_name == 'push' && github.ref == 'refs/heads/main'`, but `auto-merge.yml` merges with `GITHUB_TOKEN`, and GitHub does not trigger workflows from pushes made with it. So every auto-merged change reaches `main` without staging ever running it, and production is the first environment to see it. `workflow_dispatch` does not help: the job's `if` excludes it.
+42. ~~**An auto-merged pull request never deploys to staging.**~~ **Fixed.** Auto-merge is gone; the merge queue's merge is a real push to `main`, and `main.yml` deploys staging from it. The related trap — a tag created with `GITHUB_TOKEN` fires no `push` event — is handled by `main.yml` starting `release.yml` through `workflow_dispatch`, the one trigger that token may raise.
 
 43. ~~**The npm publish step fails every release for packages npm does not trust.**~~ **Fixed.** `release.yml` published every directory under `packages/`, so a package whose trusted publisher was not configured on npmjs.com failed the token exchange with an `E404` and reddened a release whose production deploy had already succeeded — the worst shape for a signal, because it trains you to ignore it. Publication is now opt-in through `frockbot.npm` in a package's own manifest, and exactly one package declares it: `@frockbot/applet-sdk`, published for Applet authors rather than for anything this repository installs. It has no `@frockbot` dependencies, so it publishes alone. Nothing else has a consumer off this repository.
 

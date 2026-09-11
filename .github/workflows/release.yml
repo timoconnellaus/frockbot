@@ -4,6 +4,11 @@ on:
   push:
     tags:
       - "v*.*.*"
+  # `main.yml` cuts the next patch tag once staging is green and starts this
+  # workflow for it by name: a tag it creates with `GITHUB_TOKEN` raises no
+  # `push` event. Run it with `--ref <tag>`, so `GITHUB_REF_NAME` is the tag
+  # here exactly as it is for a tag pushed by hand.
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -94,7 +99,11 @@ jobs:
 
   publish-npm:
     name: Publish packages
-    needs: verify
+    # After the production deploy, not beside it. The deploy jobs wait on the
+    # `production` environment's approval, and a package published for a
+    # release nobody approved would sit on npm ahead of a production that
+    # never moved.
+    needs: [verify, deploy-backend]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -249,10 +258,11 @@ jobs:
 
   github-release:
     name: Create GitHub release
-    # A Release is the record that this tag shipped. It must not wait behind
+    # A Release is the record that this tag shipped, so it is created once
+    # production has actually moved — not before the approval, and not behind
     # npm publishing, which has its own failure modes (first-publish trust,
-    # OIDC), or a tag that deployed to production shows up as a bare tag.
-    needs: verify
+    # OIDC) and would otherwise leave a shipped tag showing as a bare one.
+    needs: [verify, deploy-marketing, deploy-backend]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -272,10 +282,12 @@ jobs:
   deploy-marketing:
     name: Deploy marketing site
     # Production follows the tag, not the branch: merging to main integrates
-    # code, and pushing a version tag is what ships it. Both deploys wait on
-    # the verify gate, so the riskiest step of a release still runs only
-    # against code that typechecks, tests and builds — but they no longer wait
-    # on the npm upload, which they do not consume.
+    # code, and a version tag is what ships it. Both deploys wait on the
+    # verify gate, so the riskiest step of a release still runs only against
+    # code that typechecks, tests and builds. Both also declare the
+    # `production` environment, whose required reviewer holds them until a
+    # maintainer approves the run — the one click between a green `main` and
+    # bot.frockbot.com. One approval releases every job waiting on it.
     needs: verify
     runs-on: ubuntu-latest
     timeout-minutes: 10
