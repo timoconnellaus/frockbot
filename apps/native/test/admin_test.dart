@@ -123,6 +123,74 @@ void main() {
     expect(tester.widget<SwitchListTile>(tim).value, isTrue);
   });
 
+  testWidgets(
+    'an account whose Applets setting could not be read is unreadable, not off',
+    (tester) async {
+      var reads = 0;
+      final api = SettingsApi(MemoryStore(), (path, body) async {
+        if (path == '/api/admin/policy') return policy();
+        if (path == '/api/admin/users') {
+          reads += 1;
+          final listed = accounts(guestApplets: true);
+          if (reads == 1) {
+            final users = (listed['users'] as List)
+                .cast<Map<String, Object?>>();
+            listed['users'] = [
+              users[0],
+              {
+                ...users[1],
+                'features': {'unavailable': true},
+              },
+            ];
+          }
+          return listed;
+        }
+        throw StateError('unexpected $path');
+      });
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: FrockTheme.theme(Brightness.dark),
+          home: AdminPage(api: api),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final guest = find.descendant(
+        of: find.bySemanticsIdentifier(AdminIds.applets('guest-id')),
+        matching: find.byType(SwitchListTile),
+      );
+      expect(tester.widget<SwitchListTile>(guest).onChanged, isNull);
+      expect(
+        find.text('Couldn’t read whether Applets are on for this account.'),
+        findsOneWidget,
+      );
+      final tim = find.descendant(
+        of: find.bySemanticsIdentifier(AdminIds.applets('tim-id')),
+        matching: find.byType(SwitchListTile),
+      );
+      expect(tester.widget<SwitchListTile>(tim).onChanged, isNotNull);
+      expect(tester.widget<SwitchListTile>(tim).value, isTrue);
+      expect(
+        find.text('Couldn’t load the accounts. Refresh to try again.'),
+        findsNothing,
+      );
+
+      await tester.tap(
+        find.descendant(
+          of: find.bySemanticsIdentifier(AdminIds.appletsRetry('guest-id')),
+          matching: find.byType(TextButton),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(reads, 2);
+      expect(tester.widget<SwitchListTile>(guest).onChanged, isNotNull);
+      expect(tester.widget<SwitchListTile>(guest).value, isTrue);
+      expect(
+        find.text('Couldn’t read whether Applets are on for this account.'),
+        findsNothing,
+      );
+    },
+  );
+
   testWidgets('a write that fails says so after the list reloads', (
     tester,
   ) async {

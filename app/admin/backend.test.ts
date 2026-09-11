@@ -217,6 +217,56 @@ describe("admin gateway contribution", () => {
     ]);
   });
 
+  test("one unreadable account is marked unavailable and hides no other account", async () => {
+    const host = accountsHost([
+      { userId: "guest", email: "guest@example.com", name: "Guest" },
+      { userId: "wedged", email: "wedged@example.com", name: "Wedged" },
+      { userId: "other", email: "other@example.com", name: "Other" },
+    ]);
+    await host.setUserFeatures(
+      "other",
+      { schemaVersion: 1, type: "user/set-features", applets: true },
+      "development",
+    );
+    const contribution = createAdminBackendContribution({
+      readDeploymentPolicy: () => Promise.resolve(initialPolicy()),
+      setDeploymentSignups: () => Promise.resolve(initialPolicy()),
+      ...host,
+      readUserFeatures: (userId) =>
+        userId === "wedged"
+          ? Promise.reject(new Error("Durable Object reset while responding"))
+          : host.readUserFeatures(userId),
+    });
+
+    const listed = await contribution.route(
+      new Request("https://frockbot.test/api/admin/users"),
+      new URL("https://frockbot.test/api/admin/users"),
+      { userId: "development", client: "browser", isAdmin: true },
+    );
+    expect(listed?.status).toBe(200);
+    const { users } = (await listed?.json()) as {
+      users: Array<{ userId: string; features: Record<string, unknown> }>;
+    };
+    expect(
+      users.map((user): [string, unknown] => [user.userId, user.features]),
+    ).toEqual([
+      ["development", defaultUserFeaturesV1()],
+      ["guest", defaultUserFeaturesV1()],
+      ["wedged", { unavailable: true }],
+      [
+        "other",
+        {
+          ...defaultUserFeaturesV1(),
+          applets: true,
+          updatedAt: "2026-09-11T00:00:00.000Z",
+          updatedBy: "development",
+        },
+      ],
+    ]);
+    // The unreadable account is never reported as off: "off" is a value.
+    expect(users[2]?.features).not.toHaveProperty("applets");
+  });
+
   test("refuses a malformed account id or command without touching the host", async () => {
     let writes = 0;
     const host = accountsHost([]);

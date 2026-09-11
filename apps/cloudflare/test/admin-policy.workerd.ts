@@ -5,8 +5,10 @@ import {
   type AdminGatewayHost,
 } from "@frockbot/app/admin/backend";
 import {
+  decodeAdminUserListViewV1,
   decodeDeploymentPolicyV1,
   decodeUserFeaturesV1,
+  isUserFeaturesUnavailable,
   type DeploymentPolicyV1,
   type SetSignupsCommandV1,
   type SetUserFeaturesCommandV1,
@@ -117,12 +119,17 @@ function signedInRequest(
 
 function testGateway(
   listed: Array<{ userId: string; email: string; name: string }> = [],
+  /** Accounts whose User Durable Object read fails, as an outage would. */
+  unreadable: ReadonlySet<string> = new Set(),
 ) {
   const policyHost: AdminGatewayHost = {
     readDeploymentPolicy: readPolicy,
     setDeploymentSignups: setSignups,
     listUsers: () => Promise.resolve(listed),
-    readUserFeatures: readFeatures,
+    readUserFeatures: (userId) =>
+      unreadable.has(userId)
+        ? Promise.reject(new Error("Durable Object reset while responding"))
+        : readFeatures(userId),
     setUserFeatures: setFeatures,
   };
   return createGateway({
@@ -235,11 +242,14 @@ describe("deployment signup policy in workerd", () => {
 
     const listed = await gateway(signedInRequest("/api/admin/users", owner));
     expect(listed.status).toBe(200);
-    const before = (await listed.json()) as {
-      users: Array<{ userId: string; features: { applets: boolean } }>;
-    };
+    const before = decodeAdminUserListViewV1(await listed.json());
     expect(
-      before.users.map((user) => [user.userId, user.features.applets]),
+      before.users.map((user) => [
+        user.userId,
+        isUserFeaturesUnavailable(user.features)
+          ? "unavailable"
+          : user.features.applets,
+      ]),
     ).toEqual([
       ["owner", false],
       [guest.id, false],
@@ -285,5 +295,47 @@ describe("deployment signup policy in workerd", () => {
     );
     expect(refused.status).toBe(403);
     expect((await readFeatures(guest.id)).applets).toBe(true);
+  });
+
+  test("one account whose features cannot be read hides no other account's switch", async () => {
+    const owner = { id: "owner", email: "owner@example.com" };
+    const wedged = {
+      id: `wedged-${crypto.randomUUID()}`,
+      email: "wedged@example.com",
+      name: "Wedged",
+    };
+    const guest = {
+      id: `guest-${crypto.randomUUID()}`,
+      email: "guest@example.com",
+      name: "Guest",
+    };
+    await setFeatures(
+      guest.id,
+      { schemaVersion: 1, type: "user/set-features", applets: true },
+      owner.id,
+    );
+    const gateway = testGateway(
+      [
+        { userId: wedged.id, email: wedged.email, name: wedged.name },
+        { userId: guest.id, email: guest.email, name: guest.name },
+      ],
+      new Set([wedged.id]),
+    );
+
+    const listed = await gateway(signedInRequest("/api/admin/users", owner));
+    expect(listed.status).toBe(200);
+    const { users } = decodeAdminUserListViewV1(await listed.json());
+    expect(
+      users.map((user) => [
+        user.userId,
+        isUserFeaturesUnavailable(user.features)
+          ? "unavailable"
+          : user.features.applets,
+      ]),
+    ).toEqual([
+      ["owner", false],
+      [wedged.id, "unavailable"],
+      [guest.id, true],
+    ]);
   });
 });

@@ -124,6 +124,12 @@ async function routePolicy(
  * list: a development stack's identity has no row in the identity store, and
  * an admin who could not find their own account could not try a feature
  * before offering it to anyone else.
+ *
+ * Each account's features come from its own User Durable Object, so one read
+ * can fail while the rest answer. A failed read marks that one account
+ * unavailable rather than failing the list or reporting a default: the admin
+ * sees every other switch, and the unreadable account is shown as unreadable,
+ * never as off.
  */
 async function routeUsers(
   request: Request,
@@ -142,12 +148,17 @@ async function routeUsers(
     )
       ? listed
       : [{ userId: adminUserId }, ...listed];
-    const users: AdminUserViewV1[] = await Promise.all(
-      accounts.map(async (account) => ({
-        ...account,
-        features: await host.readUserFeatures(account.userId),
-      })),
+    const reads = await Promise.allSettled(
+      accounts.map((account) => host.readUserFeatures(account.userId)),
     );
+    const users: AdminUserViewV1[] = accounts.map((account, index) => {
+      const read = reads[index];
+      return {
+        ...account,
+        features:
+          read?.status === "fulfilled" ? read.value : { unavailable: true },
+      };
+    });
     return Response.json(
       decodeAdminUserListViewV1({ schemaVersion: 1, users }),
     );

@@ -40,6 +40,8 @@ and explicit apply step. Your computers distinguishes paired personal devices
 from the hosted Computer and preserves per-action approval. Site
 administration labels the actual setting as Allow new signups, and below it
 lists every account with an Applets switch: Applets are off for an account
-until an administrator turns them on there.
+until an administrator turns them on there. An account whose setting could
+not be read shows a disabled switch, says so, and offers Try again; it is
+never shown as off, and the other accounts' switches stay usable.
 
 Capability cards share the height of the tallest visible card. Each has an on/off switch in its top-right corner and a Settings button when configuration is available. Text enlargement increases the shared height instead of clipping descriptions.
