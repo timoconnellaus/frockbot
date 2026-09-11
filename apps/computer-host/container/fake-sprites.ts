@@ -437,6 +437,8 @@ function serviceStream(events: unknown[]): SpriteServiceStreamHandle {
 export class FakeSpritesClient implements SpritesClientHandle {
   readonly sprites = new Map<string, FakeSprite>();
   readonly created: string[] = [];
+  /** The placement config each `createSprite` was handed, in the same order. */
+  readonly createdConfigs: ({ region?: string } | undefined)[] = [];
   readonly deleted: string[] = [];
   /**
    * Every `getSprite`, in order.
@@ -466,8 +468,12 @@ export class FakeSpritesClient implements SpritesClientHandle {
     return sprite;
   }
 
-  async createSprite(name: string): Promise<SpriteHandle> {
+  async createSprite(
+    name: string,
+    config?: { region?: string },
+  ): Promise<SpriteHandle> {
     this.created.push(name);
+    this.createdConfigs.push(config);
     const sprite = new FakeSprite(name);
     this.sprites.set(name, sprite);
     this.onCreate?.(sprite);

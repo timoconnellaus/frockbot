@@ -81,6 +81,7 @@ function hostWith(
     perContainer: number;
     perUser: number;
   },
+  spriteRegion?: string,
 ): ComputerHost {
   return new ComputerHost({
     client,
@@ -91,6 +92,7 @@ function hostWith(
     // should not spend them.
     provisionPollMs: 1,
     ...(concurrency ? { concurrency } : {}),
+    ...(spriteRegion ? { spriteRegion } : {}),
   });
 }
 
@@ -297,6 +299,32 @@ describe("open", () => {
       },
     });
     expect(host.inFlightCount).toBe(0);
+  });
+
+  test("places a newly created Sprite in the configured region", async () => {
+    const placed = new FakeSpritesClient();
+    const placing = hostWith(placed, undefined, "syd");
+    placed.onCreate = (sprite) => {
+      sprite.scripts = [report("stopped", ready)];
+    };
+
+    expect((await placing.handle(request({ kind: "open" }))).status).toBe(200);
+
+    expect(placed.created).toEqual([placing.spriteNameFor("user-1")]);
+    expect(placed.createdConfigs).toEqual([{ region: "syd" }]);
+  });
+
+  test("leaves placement to the platform when no region is configured", async () => {
+    const client = new FakeSpritesClient();
+    const host = hostWith(client);
+    client.onCreate = (sprite) => {
+      sprite.scripts = [report("stopped", ready)];
+    };
+
+    expect((await host.handle(request({ kind: "open" }))).status).toBe(200);
+
+    expect(client.created).toEqual([host.spriteNameFor("user-1")]);
+    expect(client.createdConfigs).toEqual([undefined]);
   });
 
   test("provisions a new Computer and adopts it thereafter", async () => {

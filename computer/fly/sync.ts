@@ -83,6 +83,7 @@
 // instead of writing a second one.
 import { createHash } from "node:crypto";
 import {
+  ComputerError,
   workspaceMountPathV1,
   type WorkspaceLayoutV1,
 } from "@frockbot/computer/core";
@@ -983,18 +984,44 @@ export class FlySpriteSyncSurface implements ComputerSyncSurfaceV1 {
     }
   }
 
-  private async run(script: string): Promise<string | WorkspaceFailureV1> {
+  /**
+   * One storage exec, keeping the refused answer's own code. An answer past
+   * the storage ceiling is the one failure a caller can do something about —
+   * `scanAll` falls back to per-root scans — so it is carried as the code the
+   * provider raised rather than left to be recognised from its prose.
+   */
+  private async runStorage(script: string): Promise<
+    | { status: "ok"; output: string }
+    | {
+        status: "failed";
+        failure: WorkspaceFailureV1;
+        limitExceeded: boolean;
+      }
+  > {
     try {
-      return await this.options.computer.runStorage(
-        script,
-        new AbortController().signal,
-      );
+      return {
+        status: "ok",
+        output: await this.options.computer.runStorage(
+          script,
+          new AbortController().signal,
+        ),
+      };
     } catch (error) {
-      return failure(
-        "unavailable",
-        error instanceof Error ? error.message : String(error),
-      );
+      return {
+        status: "failed",
+        failure: failure(
+          "unavailable",
+          error instanceof Error ? error.message : String(error),
+        ),
+        limitExceeded:
+          error instanceof ComputerError && error.code === "limit-exceeded",
+      };
     }
+  }
+
+  private async run(script: string): Promise<string | WorkspaceFailureV1> {
+    const outcome = await this.runStorage(script);
+    return outcome.status === "ok" ? outcome.output : outcome.failure;
   }
 
   private relative(path: string): string | WorkspaceFailureV1 {
@@ -1060,14 +1087,21 @@ export class FlySpriteSyncSurface implements ComputerSyncSurfaceV1 {
     if (sections.length === 0) {
       return mounts.map((mount) => mount as WorkspaceFailureV1);
     }
-    const output = await this.run(sections.join("\n"));
-    if (typeof output !== "string") {
-      // The storage exec reports an answer past its ceiling as one message;
-      // that is the one failure batching itself caused.
-      return output.reason.includes("exceeded the maximum size")
-        ? undefined
-        : mounts.map((mount) => (typeof mount === "string" ? output : mount));
+    // The batch's own exit status must not be the last root's: a root that
+    // could not be scanned is reported by its section's missing `X` line, and
+    // stops nothing else. The terminator is a command of its own rather than
+    // `( … ) || true` around each root, which would put every subshell in a
+    // tested context and so disable the `set -e` its scan relies on.
+    const answer = await this.runStorage([...sections, "exit 0"].join("\n"));
+    if (answer.status !== "ok") {
+      // An answer past the storage ceiling is the one failure batching itself
+      // caused; the caller pays the per-root round trips instead.
+      if (answer.limitExceeded) return undefined;
+      return mounts.map((mount) =>
+        typeof mount === "string" ? answer.failure : mount,
+      );
     }
+    const output = answer.output;
     const rows = new Map<number, string[]>();
     let current: string[] | undefined;
     for (const row of output.split("\n")) {
