@@ -135,6 +135,10 @@ export function superviseProcess(options: SuperviseOptions): SupervisedProcess {
   let restarts = 0;
   let recent: number[] = [];
   let stopping = false;
+  // A crash reaps the dead child's tree asynchronously. `stop()` awaits this
+  // so a crash in the last seconds of a shard is not cut short by the harness
+  // exiting on top of it.
+  let pendingStop: Promise<void> | undefined;
 
   const attach = (child: ChildProcess): void => {
     child.once("exit", (code, signal) => {
@@ -155,10 +159,8 @@ export function superviseProcess(options: SuperviseOptions): SupervisedProcess {
       // its parent this way went on to run alarms twice and strand a Turn
       // that was in flight across a reload. The orphans go before anything
       // is started in their place.
-      void options
-        .stopChild(child)
-        .catch(() => {})
-        .then(restart);
+      pendingStop = options.stopChild(child).catch(() => {});
+      void pendingStop.then(restart);
     });
   };
 
@@ -234,6 +236,7 @@ export function superviseProcess(options: SuperviseOptions): SupervisedProcess {
       const child = current;
       current = undefined;
       if (child) await options.stopChild(child);
+      await pendingStop;
     },
   };
 }

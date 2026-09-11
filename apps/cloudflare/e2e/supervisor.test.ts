@@ -124,16 +124,60 @@ describe("superviseProcess", () => {
     // `wrangler dev` dying leaves workerd behind; the replacement must not
     // open the same state directory beside it.
     const order: string[] = [];
+    let treeIsGone = () => {};
+    const stopped = new Promise<void>((done) => {
+      treeIsGone = done;
+    });
     const { spawned, supervised } = harness({
-      stopChild: async (child) => {
+      stopChild: (child) => {
         order.push(`stop:${spawned.indexOf(child)}`);
+        return stopped;
       },
       onSpawn: (index) => order.push(`spawn:${index}`),
     });
     await supervised.start();
     (spawned[0] as unknown as FakeChild).exit(1);
     await settle();
+
+    // The tree is still alive: nothing may have taken the port yet.
+    expect(spawned).toHaveLength(1);
+    expect(order).toEqual(["spawn:0", "stop:0"]);
+
+    treeIsGone();
+    await settle();
+
+    expect(spawned).toHaveLength(2);
     expect(order).toEqual(["spawn:0", "stop:0", "spawn:1"]);
+  });
+
+  test("stop() waits for a crash's reaping to finish", async () => {
+    // Playwright tears the harness down seconds after a crash; returning
+    // before the dead child's tree is gone leaves workerd behind and wipes
+    // the state directory under it.
+    let treeIsGone = () => {};
+    const stopped = new Promise<void>((done) => {
+      treeIsGone = done;
+    });
+    const { spawned, supervised, ready } = harness({
+      stopChild: () => stopped,
+    });
+    await supervised.start();
+    // The replacement never becomes ready, so the only thing `stop()` can be
+    // waiting on is the crashed child's tree.
+    ready.value = () => new Promise<void>(() => {});
+    (spawned[0] as unknown as FakeChild).exit(1);
+    await settle();
+
+    let returned = false;
+    const stopping = supervised.stop().then(() => {
+      returned = true;
+    });
+    await settle();
+    expect(returned).toBe(false);
+
+    treeIsGone();
+    await stopping;
+    expect(returned).toBe(true);
   });
 
   test("survives repeated crashes and then gives up", async () => {
