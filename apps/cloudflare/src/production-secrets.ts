@@ -120,7 +120,7 @@ export const REQUIRED_PRODUCTION_SECRETS_V1: readonly ProductionSecretV1[] = [
   },
   {
     name: "OPENAI_API_KEY",
-    why: "Opens the composer's realtime dictation session. Absent, the microphone button answers that voice is not set up.",
+    why: "Opens every realtime transcription session: the composer's dictation and the voice session's listening. Absent, both answer that voice is not set up.",
   },
   {
     name: "ELEVENLABS_API_KEY",

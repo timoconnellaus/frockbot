@@ -3,11 +3,11 @@
 Two voice features, two transports, one credential rule: provider keys never
 leave the Worker.
 
-| Feature                                 | Route                                | Server                                                                    | Providers                                                                 |
-| --------------------------------------- | ------------------------------------ | ------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| Composer dictation (one Bot's composer) | `GET /api/voice/dictation` WebSocket | Worker-level relay, `apps/cloudflare/src/voice-dictation.ts`              | OpenAI Realtime transcription, model `gpt-live-transcribe`                |
-| Continuous voice session (all Bots)     | `GET /api/voice/assistant` WebSocket | `VoiceAssistant` Durable Object, `apps/cloudflare/src/voice-assistant.ts` | Workers AI Flux STT → Frock AI gateway (chat) → ElevenLabs Flash v2.5 TTS |
-| Capability probe                        | `GET /api/voice/capabilities`        | Gateway                                                                   | —                                                                         |
+| Feature                                 | Route                                | Server                                                                    | Providers                                                                                                                   |
+| --------------------------------------- | ------------------------------------ | ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| Composer dictation (one Bot's composer) | `GET /api/voice/dictation` WebSocket | Worker-level relay, `apps/cloudflare/src/voice-dictation.ts`              | OpenAI Realtime transcription, model `gpt-live-transcribe`                                                                  |
+| Continuous voice session (all Bots)     | `GET /api/voice/assistant` WebSocket | `VoiceAssistant` Durable Object, `apps/cloudflare/src/voice-assistant.ts` | OpenAI Realtime transcription, model `gpt-transcribe` with server VAD → Frock AI gateway (chat) → ElevenLabs Flash v2.5 TTS |
+| Capability probe                        | `GET /api/voice/capabilities`        | Gateway                                                                   | —                                                                                                                           |
 
 Both WebSocket routes are authenticated exactly like `/api/bots/:id/state-channel`:
 the browser's better-auth cookie, or the native app's `Authorization: Bearer
@@ -17,7 +17,8 @@ the gateway re-verifies and nothing below it is reachable another way. There is
 no `/agents/*` route.
 
 The pure parts — protocol decoders, the durable ledger, the speech gate, the
-context assembly, the dictation upstream vocabulary — live in `app/voice/` and
+context assembly, the realtime upstream vocabulary and both transcription
+adapters — live in `app/voice/` and
 import no Cloudflare SDK. The two Worker modules above are the adapters.
 
 ## Capabilities
@@ -107,8 +108,9 @@ half is a preference. The streaming transcription models — this one and the
 `gpt-realtime-whisper` dictation used to ask for — refuse any turn detection
 with "Turn detection is not supported for this transcription model." and the
 session ends there; that is why no capture in production ever reached `ready`.
-The models that accept VAD (`gpt-transcribe`, `gpt-4o-transcribe`) do not
-stream deltas, and live text as the person speaks is the point. The field is
+The models that accept VAD (`gpt-transcribe`, `gpt-4o-transcribe`) hold their
+deltas until the turn commits and then send them all at once, and live text as
+the person speaks is the point here. The field is
 sent explicitly because the server otherwise defaults it to `server_vad`.
 Upstream session shape (verified against the live OpenAI endpoint,
 2026-09-11):
@@ -174,7 +176,9 @@ the server ends the older call (that client sees `status: idle` and a
 Binary frames: PCM16 little-endian, mono, **16 kHz**. Frame size is the
 client's choice; 40 ms (1280 bytes) is what both clients send. Audio sent
 between `start_call` and `listening` is buffered by the SDK (bounded, 960 KB)
-and fed to the transcriber in order.
+and fed to the transcriber in order. The server resamples every frame to the
+24 kHz the upstream insists on (`app/voice/pcm-resample.ts`); the clients never
+change rate.
 
 ### Audio down
 
@@ -193,7 +197,8 @@ speaker now. Transcript frames (`transcript`, `transcript_interim`,
 
 Two detectors, both stop playback:
 
-- Server: Flux `StartOfTurn` aborts the reply and sends `playback_interrupt`.
+- Server: the upstream's `input_audio_buffer.speech_started` — its own VAD
+  hearing someone — aborts the reply and sends `playback_interrupt`.
 - Client: the local energy gate sees a sustained onset (stricter than the
   wake onset) while `status` is `speaking` → stop the speaker immediately and
   send `{type:"interrupt"}`. Background noise below the adapted floor does not
@@ -204,10 +209,11 @@ Turn the assistant already delegated: that work is durable in the Bot.
 
 ### Sleep and wake (cost control)
 
-The SDK forwards every audio frame to the transcriber, and Flux bills every
-second it hears, silence included. Flux also needs the silence _after_ speech
-to decide a turn has ended (its end-of-turn timeout is up to 5 s), so a client
-must never cut audio a few hundred milliseconds after a phrase. The policy:
+The SDK forwards every audio frame to the transcriber, and the upstream bills
+every second it hears, silence included. It also needs the silence _after_
+speech to decide a turn has ended (700 ms of it, `silence_duration_ms`), so a
+client must never cut audio a few hundred milliseconds after a phrase. The
+policy:
 
 - The client runs an energy gate on every frame: an adaptive noise floor, an
   onset that needs several consecutive loud frames, and a 500 ms pre-roll
@@ -303,7 +309,7 @@ Caps meter what costs money, never how long the footer has been open: a
 session may stay open silently for hours because a sleeping upstream costs
 nothing. What is counted per account, durably, per UTC day:
 
-- upstream STT seconds — the time a Flux session is awake, booked in 60 s
+- upstream STT seconds — the time an STT session is awake, booked in 60 s
   windows the moment the upstream starts opening, renewed while it stays awake,
   and refunded for the unused part when it sleeps (bounded at 240 min/day; a
   window past the cap shuts the upstream for the day and tells the client);
@@ -320,16 +326,24 @@ rather than opening a new one. Raw audio is never stored anywhere.
 
 ## Credentials
 
-| Name                           | Where             | Required | What it enables                                                                                      |
-| ------------------------------ | ----------------- | -------- | ---------------------------------------------------------------------------------------------------- |
-| `OPENAI_API_KEY`               | Worker secret     | optional | Composer dictation. Absent: starting dictation reports that voice is unavailable.                    |
-| `ELEVENLABS_API_KEY`           | Worker secret     | optional | The continuous voice session's speech. Absent: starting a session reports that voice is unavailable. |
-| `ELEVENLABS_VOICE_ID`          | Worker var        | optional | Voice id; default is ElevenLabs "George" (`JBFqnCBsd6RMkjVDRZzb`).                                   |
-| `VOICE_DICTATION_UPSTREAM_URL` | test harness only | —        | Points dictation at a local fake; never set in production.                                           |
+| Name                           | Where             | Required | What it enables                                                                                                    |
+| ------------------------------ | ----------------- | -------- | ------------------------------------------------------------------------------------------------------------------ |
+| `OPENAI_API_KEY`               | Worker secret     | optional | All listening: composer dictation and the continuous session's STT. Absent: both report that voice is unavailable. |
+| `ELEVENLABS_API_KEY`           | Worker secret     | optional | The continuous voice session's speech. Absent: starting a session reports that voice is unavailable.               |
+| `ELEVENLABS_VOICE_ID`          | Worker var        | optional | Voice id; default is ElevenLabs "George" (`JBFqnCBsd6RMkjVDRZzb`).                                                 |
+| `VOICE_DICTATION_UPSTREAM_URL` | test harness only | —        | Points dictation at a local fake; never set in production.                                                         |
 
 Declared in `apps/cloudflare/src/production-secrets.ts`, carried by the release
-workflow, listed in `.dev.vars.example`. Workers AI Flux STT uses the existing
-`AI` binding and needs no key.
+workflow, listed in `.dev.vars.example`. The `AI` binding is still required
+for the continuous session — it is the Frock AI gateway transport for the chat
+model — but nothing is transcribed through it any more.
+
+What listening costs, from OpenAI's pricing page on 2026-09-11:
+`gpt-transcribe` is $0.0045 per minute of audio and `gpt-live-transcribe`,
+which dictation needs for its live deltas, is $0.017. The assistant meters
+_awake_ seconds rather than seconds of speech, because a session that is awake
+is being charged whether or not anyone is talking; the 240 min/day cap is
+therefore about $1.08 a day at most.
 
 ## Clients
 
@@ -387,6 +401,53 @@ endpoint for `server_vad` or `semantic_vad` instead answers
 and a 73-second capture that is never committed produces no transcript at all.
 Still unverified: a real microphone, a browser, and the Flutter client.
 
+The continuous session listens through the same endpoint but the other way
+round: `gpt-transcribe` with server VAD, which finds turn boundaries itself
+and says nothing until it has. Its session frame, verified the same day:
+
+```json
+{
+  "type": "session.update",
+  "session": {
+    "type": "transcription",
+    "audio": {
+      "input": {
+        "format": { "type": "audio/pcm", "rate": 24000 },
+        "noise_reduction": { "type": "far_field" },
+        "transcription": { "model": "gpt-transcribe" },
+        "turn_detection": {
+          "type": "server_vad",
+          "threshold": 0.5,
+          "prefix_padding_ms": 300,
+          "silence_duration_ms": 700
+        }
+      }
+    }
+  }
+}
+```
+
+Driving the adapter against it with 3.9 s of speech in 40 ms frames, then
+silence: `session.created` → `session.updated` →
+`input_audio_buffer.speech_started {audio_start_ms:0}` (this is barge-in) →
+`speech_stopped {audio_end_ms:3872}` → `committed` → `conversation.item.added`
+/ `done` → transcription deltas in a burst → `.completed` with the sentence,
+about 0.6 s after the speech stopped. The `audio_end_ms` matching the real
+length of the clip is also what proves the 16 → 24 kHz resampling: at the
+wrong rate the endpoint would hear the same words over a different span. A
+pause of about a second mid-sentence produces two items, and therefore two
+Turns; that is accepted.
+
+Then the object itself, under `wrangler dev --env development` on port 8799
+with the real key (`?as_user=development`): `welcome`, `hello`, `start_call` →
+`voice/state upstream:"starting"` → `status:"listening"` → `voice/state
+upstream:"awake"` → the same speech up as 40 ms frames →
+`transcript_interim` frames → `transcript role:"user"` with the sentence →
+`status:"thinking"` → the model's `transcript_delta`/`transcript_end` →
+`status:"listening"`. No audio came back, because the local `.dev.vars` holds
+no ElevenLabs key; the reply's speech is the one leg of the cascade that is
+still unverified live.
+
 | Check                                                                                                                                     | Result                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | ----------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `bun run typecheck` (client protocol, layer imports, applet assets, 13 packages)                                                          | passed                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
@@ -401,7 +462,14 @@ Still unverified: a real microphone, a browser, and the Flutter client.
 | Browser (Vite dev server, no backend): footer at 1280 and 390 wide                                                                        | footer 52 px tall, meter 140 px at both widths, mute and X on the right, error state, idle AI row as a faint line — screenshots under `~/voice-screenshots/`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 
 Unit coverage in bun, all with fakes: the wire decoders, the OpenAI
-transcription vocabulary, the sleeping transcriber (open on first frame,
+transcription vocabulary, the assistant's OpenAI transcriber against a fake
+socket (the session it asks for, readiness only after `session.updated`,
+audio before that dropped, a frame too short to resample sending nothing,
+speech start and interim text and the utterance, an empty or failed item,
+errors and closes and throwing sends all fatal exactly once, connect and
+handshake timeouts), the 16 → 24 kHz upsampler (three samples for two, true
+interpolation, phase and an odd trailing byte carried across frames), the
+sleeping transcriber (open on first frame,
 drain in order, sleep, idle bound, bounded hold, startup failure, stale
 readiness), the ledger (exclusive call, rejoin, sequential keys, stale
 connection, caps, delegation dedup by run id, settlement idempotence,
@@ -415,7 +483,7 @@ dictation controller (opening audio in order after `ready`, stop before
 ready, text after a Bot switch to the original draft, error keeps the draft,
 final timeout), microphone ownership, and the Flutter equivalents of each.
 
-**Not verified.** Any live OpenAI, Workers AI Flux or ElevenLabs session;
+**Not verified.** Any live ElevenLabs session;
 any real microphone or speaker on any platform; Android runtime permission
 and macOS TCC prompts; acoustic echo cancellation between a device's speaker
 and its microphone; the composer's microphone button and capture animation

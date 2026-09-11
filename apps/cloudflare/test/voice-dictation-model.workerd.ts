@@ -15,7 +15,7 @@ import {
   openVoiceDictationRelayV1,
   type VoiceDictationLeaseV1,
 } from "../src/voice-dictation.ts";
-import { translateVoiceDictationUpstreamFrameV1 } from "@frockbot/app/voice/dictation-upstream";
+import { translateVoiceRealtimeUpstreamFrameV1 } from "@frockbot/app/voice/openai-realtime";
 
 /** The streaming transcription models, which refuse turn detection outright. */
 const NO_VAD_MODELS = new Set(["gpt-live-transcribe", "gpt-realtime-whisper"]);
@@ -346,7 +346,7 @@ describe("dictation against an upstream that enforces the turn-detection rule", 
     // And the refusal reads as fatal, not as an empty buffer the relay
     // forgives after stop.
     const raw = JSON.stringify(TURN_DETECTION_REFUSAL);
-    expect(translateVoiceDictationUpstreamFrameV1(raw)).toEqual({
+    expect(translateVoiceRealtimeUpstreamFrameV1(raw)).toEqual({
       kind: "error",
       message: "Turn detection is not supported for this transcription model.",
       emptyBuffer: false,

@@ -38,8 +38,8 @@ export const VOICE_ASSISTANT_OUTPUT_SAMPLE_RATE_V1 = 24_000;
 
 /** A capture nobody stops is closed rather than left to spend the budget. */
 export const VOICE_DICTATION_MAX_MS_V1 = 5 * 60_000;
-/** How long the upstream has to accept a dictation session. */
-export const VOICE_DICTATION_CONNECT_TIMEOUT_MS_V1 = 10_000;
+/** How long an OpenAI realtime upstream has to accept a session. */
+export const VOICE_REALTIME_CONNECT_TIMEOUT_MS_V1 = 10_000;
 /** How long `stop` waits for the last segment before answering `final` anyway. */
 export const VOICE_DICTATION_FINAL_TIMEOUT_MS_V1 = 6_000;
 /** The account's dictation lease is renewed this often while a capture runs. */

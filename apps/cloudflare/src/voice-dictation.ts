@@ -28,20 +28,22 @@
 //   session are held in order, bounded, and forwarded once it has, so
 //   pressing the microphone and speaking at once loses nothing.
 import {
-  translateVoiceDictationUpstreamFrameV1,
-  voiceDictationAppendV1,
-  voiceDictationCommitV1,
   voiceDictationSessionUpdateV1,
   voiceDictationUpstreamTargetV1,
   type VoiceDictationEnvV1,
 } from "@frockbot/app/voice/dictation-upstream";
 import {
+  translateVoiceRealtimeUpstreamFrameV1,
+  voiceRealtimeAppendV1,
+  voiceRealtimeCommitV1,
+} from "@frockbot/app/voice/openai-realtime";
+import {
   decodeVoiceDictationClientFrameV1,
-  VOICE_DICTATION_CONNECT_TIMEOUT_MS_V1,
   VOICE_DICTATION_FINAL_TIMEOUT_MS_V1,
   VOICE_DICTATION_LEASE_RENEW_MS_V1,
   VOICE_DICTATION_MAX_MS_V1,
   VOICE_DICTATION_OPENING_BUFFER_BYTES_V1,
+  VOICE_REALTIME_CONNECT_TIMEOUT_MS_V1,
   type VoiceDictationServerFrameV1,
 } from "@frockbot/app/voice/shared";
 
@@ -75,7 +77,7 @@ export interface VoiceDictationRelayOptions {
 }
 
 /** Opens the upstream with a `fetch` upgrade, the way a Worker must. */
-async function fetchUpstreamSocket(
+export async function fetchVoiceUpstreamSocketV1(
   url: string,
   headers: Record<string, string>,
 ): Promise<WebSocket> {
@@ -160,13 +162,13 @@ function runRelay(
   options: VoiceDictationRelayOptions,
 ): void {
   const connectTimeoutMs =
-    options.connectTimeoutMs ?? VOICE_DICTATION_CONNECT_TIMEOUT_MS_V1;
+    options.connectTimeoutMs ?? VOICE_REALTIME_CONNECT_TIMEOUT_MS_V1;
   const finalTimeoutMs =
     options.finalTimeoutMs ?? VOICE_DICTATION_FINAL_TIMEOUT_MS_V1;
   const maxCaptureMs = options.maxCaptureMs ?? VOICE_DICTATION_MAX_MS_V1;
   const leaseRenewMs =
     options.leaseRenewMs ?? VOICE_DICTATION_LEASE_RENEW_MS_V1;
-  const connectUpstream = options.connectUpstream ?? fetchUpstreamSocket;
+  const connectUpstream = options.connectUpstream ?? fetchVoiceUpstreamSocketV1;
   const now = options.now ?? (() => Date.now());
 
   let started = false;
@@ -236,7 +238,7 @@ function runRelay(
   const forward = (chunk: ArrayBuffer) => {
     if (upstream && upstreamReady) {
       try {
-        upstream.send(voiceDictationAppendV1(chunk));
+        upstream.send(voiceRealtimeAppendV1(chunk));
       } catch {
         fail("Dictation stopped: the speech service went away.", "upstream");
       }
@@ -297,7 +299,7 @@ function runRelay(
   };
 
   const onUpstreamEvent = (raw: string) => {
-    const event = translateVoiceDictationUpstreamFrameV1(raw);
+    const event = translateVoiceRealtimeUpstreamFrameV1(raw);
     if (!event) return;
     switch (event.kind) {
       case "session-updated":
@@ -510,7 +512,7 @@ function runRelay(
     if (commitSent) return;
     commitSent = true;
     try {
-      upstream!.send(voiceDictationCommitV1());
+      upstream!.send(voiceRealtimeCommitV1());
     } catch {
       fail(
         "Dictation ended before the last words were transcribed. What arrived is in your draft.",

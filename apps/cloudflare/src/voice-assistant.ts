@@ -19,7 +19,6 @@ import {
 } from "agents";
 import {
   withVoice,
-  WorkersAIFluxSTT,
   type Transcriber,
   type TranscriberSession,
   type TTSProvider,
@@ -39,6 +38,11 @@ import {
   type VoiceDelegationRecordV1,
   type VoiceLedgerStorageV1,
 } from "@frockbot/app/voice/ledger";
+import { VOICE_REALTIME_TRANSCRIPTION_URL_V1 } from "@frockbot/app/voice/openai-realtime";
+import {
+  createOpenAiTranscriberV1,
+  type VoiceRealtimeSocketV1,
+} from "@frockbot/app/voice/openai-transcriber";
 import {
   createSleepingTranscriberV1,
   type SleepingTranscriberSessionV1,
@@ -78,6 +82,7 @@ import {
   createUserWorkspaceGenerationsV1,
   type UserMemoryRpc,
 } from "./memory.js";
+import { fetchVoiceUpstreamSocketV1 } from "./voice-dictation.js";
 import { createDurableWorkspaceFilesV1 } from "./workspace.js";
 import { rpcJsonSnapshotV1 } from "./durable-rpc.js";
 
@@ -132,6 +137,7 @@ const DELEGATION_MAX_CHECK_SECONDS = 5 * 60;
 
 export interface VoiceAssistantEnv {
   AI?: Ai;
+  OPENAI_API_KEY?: string;
   ELEVENLABS_API_KEY?: string;
   ELEVENLABS_VOICE_ID?: string;
   USER_CONFIGURATIONS: DurableObjectNamespace;
@@ -150,9 +156,14 @@ export interface VoiceAssistantEnv {
 /** True when the deployment can run the assistant at all. */
 export function voiceAssistantConfiguredV1(env: {
   AI?: unknown;
+  OPENAI_API_KEY?: string;
   ELEVENLABS_API_KEY?: string;
 }): boolean {
-  return Boolean(env.AI) && Boolean(env.ELEVENLABS_API_KEY?.trim());
+  return (
+    Boolean(env.AI) &&
+    Boolean(env.OPENAI_API_KEY?.trim()) &&
+    Boolean(env.ELEVENLABS_API_KEY?.trim())
+  );
 }
 
 interface ConnectionIdentity {
@@ -183,6 +194,40 @@ const DELEGATION_REDISPATCH_AFTER_MS = 30_000;
 
 interface DelegationCheckPayload {
   runId: string;
+}
+
+/**
+ * Presents the transcription upstream, opened with the `fetch` upgrade the
+ * dictation relay already owns, as the plain socket the adapter drives.
+ */
+async function openVoiceUpstreamSocket(
+  url: string,
+  headers: Record<string, string>,
+): Promise<VoiceRealtimeSocketV1> {
+  const socket = await fetchVoiceUpstreamSocketV1(url, headers);
+  return {
+    send: (data: string) => socket.send(data),
+    close: () => {
+      try {
+        socket.close();
+      } catch {
+        // Already gone; there is nothing to close.
+      }
+    },
+    onMessage: (handler: (raw: string) => void) => {
+      socket.addEventListener("message", (event: MessageEvent) => {
+        if (typeof event.data === "string") handler(event.data);
+      });
+    },
+    onClose: (handler: (reason: string) => void) => {
+      socket.addEventListener("close", (event: CloseEvent) => {
+        handler(event.reason ?? "");
+      });
+      socket.addEventListener("error", () => {
+        handler("the speech service connection failed");
+      });
+    },
+  };
 }
 
 const VoiceAgentBase = withVoice(Agent, {
@@ -222,8 +267,14 @@ export class VoiceAssistant extends VoiceAgentBase<
   }
 
   protected createInnerTranscriber(): VoiceTranscriberV1 | undefined {
-    if (!this.env.AI) return undefined;
-    return new WorkersAIFluxSTT(this.env.AI);
+    const apiKey = this.env.OPENAI_API_KEY?.trim();
+    if (!apiKey) return undefined;
+    return createOpenAiTranscriberV1({
+      openSocket: () =>
+        openVoiceUpstreamSocket(VOICE_REALTIME_TRANSCRIPTION_URL_V1, {
+          authorization: `Bearer ${apiKey}`,
+        }),
+    });
   }
 
   protected async chatCompletion(
@@ -456,7 +507,7 @@ export class VoiceAssistant extends VoiceAgentBase<
     const call = this.#calls.get(connection.id);
     if (!inner || !call) return null;
     const gated: VoiceTranscriberV1 = {
-      createSession: (options) => {
+      createSession: (options = {}) => {
         if (call.exhausted) {
           throw new Error("today's transcription allowance is used up");
         }
@@ -473,8 +524,19 @@ export class VoiceAssistant extends VoiceAgentBase<
     // The SDK calls `createSession` once per call; the wrapper session is
     // what sleep and wake act on.
     return {
-      createSession: (options) => {
-        const session = sleeping.createSession(options);
+      createSession: (options = {}) => {
+        const session = sleeping.createSession({
+          ...options,
+          onFatalError: (error) => {
+            // The SDK logs its own record of any transcriber fatal; this one
+            // names it as the assistant's ears and, sitting outside the
+            // sleeping wrapper, also catches an upgrade that never became a
+            // session. Without it a call that loses its ears looks, from
+            // every log, like a person who said nothing.
+            console.error("voice assistant stt failed", error.message);
+            options.onFatalError?.(error);
+          },
+        });
         call.session = session;
         // Open at once: the first words after `listening` must not wait on a
         // cold upstream. The client's sleep message closes it when the room
