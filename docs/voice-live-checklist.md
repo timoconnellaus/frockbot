@@ -37,8 +37,10 @@ end to end. The deterministic checks that _have_ run are listed in
    composer, no socket opened.
 5. Kill the network mid-dictation. Expect: the words received so far remain in
    the draft, one short error line, no reconnect loop.
-6. Dictate for more than five minutes. Expect: the relay stops the capture
-   with a `limit` message; the draft keeps everything before it.
+6. Dictate for more than five minutes. Expect: a `notice` saying dictation
+   stopped after five minutes, then the capture finalises the way a Stop does —
+   the transcript segment lands in the draft and the socket closes cleanly, no
+   error line.
 7. Confirm in the OpenAI dashboard that the session used
    `gpt-live-transcribe` and was billed per audio minute, not per token.
 

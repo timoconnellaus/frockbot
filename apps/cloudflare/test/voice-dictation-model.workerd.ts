@@ -30,15 +30,6 @@ const TURN_DETECTION_REFUSAL = {
   },
 };
 
-const EMPTY_BUFFER_REFUSAL = {
-  type: "error",
-  error: {
-    type: "invalid_request_error",
-    code: "input_audio_buffer_commit_empty",
-    message: "Error committing input audio buffer: the buffer is empty.",
-  },
-};
-
 interface PolicyUpstream {
   socket: () => Promise<WebSocket>;
   sessionUpdates: Record<string, unknown>[];
@@ -103,11 +94,7 @@ function policyUpstream(): PolicyUpstream {
           return;
         }
         if (frame.type === "input_audio_buffer.commit") {
-          if (!itemId) {
-            emit(EMPTY_BUFFER_REFUSAL);
-            return;
-          }
-          const closed = itemId;
+          const closed = itemId!;
           const spoken = heard;
           itemId = undefined;
           heard = [];
@@ -136,12 +123,18 @@ function openRelay(
     url: string,
     headers: Record<string, string>,
   ) => Promise<WebSocket>,
+  overrides: { maxCaptureMs?: number } = {},
 ) {
   const response = openVoiceDictationRelayV1(
     new Request("https://bot.frockbot.com/api/voice/dictation", {
       headers: { upgrade: "websocket" },
     }),
-    { env: { OPENAI_API_KEY: "sk-test" }, connectUpstream, lease },
+    {
+      env: { OPENAI_API_KEY: "sk-test" },
+      connectUpstream,
+      lease,
+      ...overrides,
+    },
   );
   expect(response.status).toBe(101);
   const socket = response.webSocket!;
@@ -266,6 +259,37 @@ describe("dictation against an upstream that enforces the turn-detection rule", 
     expect(input.turn_detection).toBeNull();
 
     // Exactly one commit closed the capture, and the relay sent it.
+    expect(
+      upstream.answers.filter((a) => a.type === "input_audio_buffer.committed"),
+    ).toHaveLength(1);
+  });
+
+  test("the five-minute cap finalises the capture instead of dropping it", async () => {
+    const upstream = policyUpstream();
+    const opened = openRelay(upstream.socket, { maxCaptureMs: 500 });
+    opened.socket.send(start);
+    opened.socket.send(pcm(1));
+    await opened.waitFor((f) => f.type === "ready", "ready");
+    opened.socket.send(pcm(2));
+    await opened.waitFor(
+      (f) => f.type === "delta" && String(f.text).includes("2"),
+      "the second delta",
+    );
+
+    // Nobody presses Stop; the cap fires instead.
+    const notice = await opened.waitFor(
+      (f) => f.type === "notice",
+      "the notice",
+    );
+    expect(notice.message).toBe(
+      "Dictation stopped after five minutes. Press the microphone to continue.",
+    );
+    await opened.waitFor((f) => f.type === "final", "final");
+
+    expect(opened.frames.some((f) => f.type === "error")).toBe(false);
+    expect(
+      opened.frames.filter((f) => f.type === "segment").map((f) => f.text),
+    ).toEqual(["heard 1,2"]);
     expect(
       upstream.answers.filter((a) => a.type === "input_audio_buffer.committed"),
     ).toHaveLength(1);

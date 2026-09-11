@@ -464,12 +464,16 @@ function runRelay(
       });
     }
     send(client, { schemaVersion: 1, type: "ready" });
-    after(maxCaptureMs, () =>
-      fail(
-        "Dictation stopped after five minutes. Press the microphone to continue.",
-        "limit",
-      ),
-    );
+    after(maxCaptureMs, () => {
+      if (closed || stopping) return;
+      send(client, {
+        schemaVersion: 1,
+        type: "notice",
+        message:
+          "Dictation stopped after five minutes. Press the microphone to continue.",
+      });
+      stop();
+    });
     if (stopping) commit();
   };
 

@@ -89,7 +89,11 @@ reported as `error` (`upstream` or `timeout`) with the words that did arrive
 already in the draft; the one refusal that is not a failure is the provider
 saying the final commit had nothing in it.
 
-Bounds: a capture is closed by the server after 5 minutes; an upstream that has
+Bounds: after 5 minutes the server ends the capture the way a `stop` does —
+a `notice` saying "Dictation stopped after five minutes. Press the microphone
+to continue.", then the commit, the segment and `final`, so the words are kept;
+the `limit` code is left for the lease refusals that have nothing to hand back.
+An upstream that has
 not accepted within 10 s is reported as `timeout`. Before the provider is
 opened the relay takes the account's dictation lease from the voice object:
 one capture at a time per account, 60 s of provider time booked ahead and

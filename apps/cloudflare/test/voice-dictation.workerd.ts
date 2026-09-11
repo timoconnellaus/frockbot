@@ -8,10 +8,12 @@ import {
  * A stand-in for the OpenAI Realtime transcription socket.
  *
  * It records the audio bytes it was appended and emits a delta per append.
- * Turn detection is the test's to drive: `vadCommit()` commits the audio so
- * far into a new item and answers its transcription after `answerDelayMs`,
- * and the relay's own commit after `stop` is answered the way `onCommit`
- * says: a new item, silence, the empty-buffer refusal, or a failure.
+ * `vadCommit()` is a synthetic extra commit — the real upstream has no turn
+ * detection and never commits on its own — kept so the relay's committed-order
+ * handling stays covered: it closes the audio so far into a new item and
+ * answers its transcription after `answerDelayMs`. The relay's own commit
+ * after `stop` is answered the way `onCommit` says: a new item, silence, the
+ * empty-buffer refusal, or a failure.
  */
 interface FakeUpstream {
   socket: () => Promise<WebSocket>;
