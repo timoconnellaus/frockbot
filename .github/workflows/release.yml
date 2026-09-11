@@ -418,6 +418,12 @@ jobs:
           ref: 4cf24164269a5ebf0c16a028a00727d0e77bbb05
           path: .flutter-sdk
           persist-credentials: false
+          # Flutter reads its own version from `git describe --tags`. A
+          # shallow checkout without tags reports 0.0.0-unknown, and
+          # `flutter pub get` then refuses the app's `flutter: "3.47.0"`
+          # constraint (v0.7.16, run 34562782289). The 3.47.0 tag points at
+          # the pinned revision, so fetching tags makes the SDK name itself.
+          fetch-tags: true
 
       - name: Put Flutter on PATH
         shell: bash
