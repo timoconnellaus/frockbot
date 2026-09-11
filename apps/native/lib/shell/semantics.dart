@@ -15,8 +15,6 @@ abstract final class ShellIds {
   static const sidebarSearch = 'sidebar-search';
   static const sidebarCreateBot = 'sidebar-create-bot';
   static const sidebarProfile = 'sidebar-profile';
-  static const sidebarInbox = 'sidebar-inbox';
-  static const sidebarManage = 'sidebar-manage';
   static const sidebarHiddenToggle = 'sidebar-hidden-toggle';
   static const sidebarRetry = 'sidebar-retry';
   static const conversation = 'shell-conversation';
@@ -110,6 +108,7 @@ abstract final class SettingsIds {
   static const profileSettings = 'profile-settings';
   static const profileModels = 'profile-models';
   static const profileConnections = 'profile-connections';
+  static const profileManageBots = 'profile-manage-bots';
   static const profileSignOut = 'profile-sign-out';
 
   static const botSettings = 'bot-settings';
@@ -125,7 +124,8 @@ abstract final class SettingsIds {
   static const botHidden = 'bot-hidden-from-sidebar';
   static const botIdentity = 'bot-info-identity';
   static const botMembers = 'bot-info-members';
-  static const botSave = 'bot-settings-save';
+  static const botSaveStatus = 'bot-settings-status';
+  static const botPage = 'bot-page';
 
   static String modelOption(String label) => 'model-option-$label';
 }

@@ -524,9 +524,11 @@ describe("Bot recovery", () => {
     expect(storage.alarmAt).toBeUndefined();
   });
 
-  // A completed Turn already says "Bob replied" in the inbox. A failed one said
-  // nothing at all, so a person who was not watching that conversation never
-  // learned their Bot had given up.
+  // A completed Turn already speaks for itself. A failed one said nothing at
+  // all, so a person who was not watching that conversation never learned
+  // their Bot had given up. Now it is one ordinary message: an intent for the
+  // directory, a push, an unread count and a sidebar preview, all in the
+  // settling transaction.
   test("tells the person once when a Turn settles failed", async () => {
     const storage = new MemoryStorage();
     const settings = {
@@ -554,11 +556,21 @@ describe("Bot recovery", () => {
     expect(rest).toEqual([]);
     expect(notification).toMatchObject({
       runId: run.runId,
-      title: "Bob couldn't finish",
+      title: "Bob",
       // The sentence written for the person, never the stored diagnostic.
       body: RUN_FAILURE_COPY_V1.interrupted,
     });
     expect(notification?.body).not.toContain("provider-1");
+    // The same failure is the newest thing in the conversation: one unread,
+    // named by the line the transcript draws for a failed run, and the row's
+    // preview says the same sentence.
+    expect(storage.values.get("shell:unread")).toMatchObject({
+      lastMessageId: `${run.runId}:failed`,
+    });
+    expect(storage.values.get("shell:preview")).toMatchObject({
+      text: RUN_FAILURE_COPY_V1.interrupted,
+      role: "assistant",
+    });
 
     // Acknowledged, then recovered again: one failure is one notification, and
     // a replay never resurrects one the person has already read.

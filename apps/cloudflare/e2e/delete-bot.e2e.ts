@@ -10,6 +10,7 @@ import {
   createBot,
   expect,
   openApplication,
+  openProfileMenu,
   revealSidebar,
   sem,
   SHELL_TIMEOUT_MS,
@@ -164,9 +165,10 @@ test("manage mode offers Archive and Delete, and Delete confirms first", async (
   // Off Manage Bots, a row is a row: nothing destructive is one click away.
   await expect(sem(page, "shell-sidebar").getByText("Delete")).toHaveCount(0);
 
-  await revealSidebar(page);
-  await settle(page);
-  await tap(page, "sidebar-manage").click();
+  // Manage Bots is the account's, so it is on the account's sheet rather
+  // than a control beside the list.
+  await openProfileMenu(page);
+  await tap(page, "profile-manage-bots").click();
   const manage = page.getByText("Your Bots, in your control");
   await expect(manage).toBeVisible({ timeout: 60_000 });
   await settle(page);

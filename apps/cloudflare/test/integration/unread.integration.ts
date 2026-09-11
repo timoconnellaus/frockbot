@@ -172,8 +172,8 @@ describe("unread and notifications through the gateway", () => {
   });
 
   // A Turn that fails is the one a person most needs to hear about, and it
-  // used to be the only outcome that told them nothing: the notice existed for
-  // "Bob replied" and for nothing else.
+  // used to be the only outcome that told them nothing. It is told as a
+  // message now: an intent in the directory, and the Bot's row badged.
   it("lists the intent a failed Turn raises, in the person's own words", async () => {
     const userId = freshUserId("unread-failed");
     const botId = "unread-failed-bot";
@@ -221,7 +221,7 @@ describe("unread and notifications through the gateway", () => {
         intent.botId === botId && intent.runId === "unread-failed-turn-1",
     );
     expect(raised).toBeDefined();
-    expect(raised?.title).toBe(`${settings.profile.name} couldn't finish`);
+    expect(raised?.title).toBe(settings.profile.name);
     // The sentence written for the person. The provider's status code and the
     // outcome's name stay on the stored record, where the debug surface reads
     // them.
@@ -229,5 +229,14 @@ describe("unread and notifications through the gateway", () => {
     expect(raised?.body).not.toContain("model-error");
     expect(raised?.body).not.toContain("401");
     expect(raised?.body).not.toContain("Ollama");
+    const unread = (await expectOkJson(
+      await asUser(userId, "/api/bots/unread"),
+    )) as {
+      unread: Array<{ botId: string; count: number; lastMessageId?: string }>;
+    };
+    expect(unread.unread.find((view) => view.botId === botId)).toMatchObject({
+      count: 1,
+      lastMessageId: "unread-failed-turn-1:failed",
+    });
   });
 });

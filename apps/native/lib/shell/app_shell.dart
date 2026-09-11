@@ -14,7 +14,6 @@ import 'package:flutter/services.dart';
 
 import '../activity/controller.dart';
 import '../activity/push.dart';
-import '../activity/page.dart';
 import '../admin/page.dart';
 import '../applets/canvas.dart';
 import '../applets/picker.dart';
@@ -125,7 +124,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   PackageCatalog? catalog;
   String? error;
   bool loaded = false;
-  bool navOpen = false;
+
+  /// On a phone the Bot list is the first screen and a conversation is a
+  /// page over it; this is whether that page is up. At the wider tiers the
+  /// conversation is a column and this is not consulted.
+  bool conversationOpen = false;
   bool panelOpen = false;
 
   /// Which right-panel entry is on. The region holds two — the Bot's settings
@@ -185,7 +188,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     final viewing =
         resumed &&
         push.focused &&
-        !navOpen &&
+        _conversationVisible &&
         !panelOpen &&
         openRun == null &&
         ModalRoute.of(context)?.isCurrent == true;
@@ -205,6 +208,12 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     clearManualForBot = null;
     unawaited(activity.mark(botId, read: true));
   }
+
+  /// Whether the conversation is on screen at all: always at the wider tiers,
+  /// and on a phone only while its page is up over the list.
+  bool get _conversationVisible =>
+      shellTierForWidth(MediaQuery.sizeOf(context).width) != ShellTier.single ||
+      conversationOpen;
 
   void _startPolling() {
     _activityTimer?.cancel();
@@ -409,7 +418,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                 .firstOrNull;
       error = null;
     });
-    activity.botNames = {for (final bot in bots) bot.botId.value: _name(bot)};
     unawaited(_restoreSelection());
   }
 
@@ -437,7 +445,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
               entry['botId'] as String: SidebarProfile.decode(entry)!,
         };
       });
-      activity.botNames = {for (final bot in bots) bot.botId.value: _name(bot)};
     } catch (_) {
       // The registration seed is still a name; nothing is lost but the label.
     }
@@ -482,7 +489,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     setState(() {
       selected = bot;
       if (switching) selectedConnection = ConnectionState.initializing;
-      navOpen = false;
+      conversationOpen = true;
       openRun = null;
       panelOpen = false;
     });
@@ -708,8 +715,18 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
 
   void _push(Widget page) {
     push.reading(null);
-    setState(() => navOpen = false);
     Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => page));
+  }
+
+  /// Back from a conversation on a phone: the list again, with nothing of the
+  /// conversation's left open over it.
+  void _openBack() {
+    push.reading(null);
+    setState(() {
+      conversationOpen = false;
+      openRun = null;
+      panelOpen = false;
+    });
   }
 
   void _openRun(TranscriptLine line) {
@@ -834,7 +851,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                 onTap: () => Navigator.pop(context, 'copy'),
               ),
 
-            if (line.id.endsWith(':user') || line.id.contains(':send:'))
+            if (line.id.endsWith(':user') ||
+                line.id.endsWith(':failed') ||
+                line.id.contains(':send:'))
               ListTile(
                 leading: const Icon(Icons.mark_chat_unread_outlined),
                 title: const Text('Mark unread from here'),
@@ -946,31 +965,122 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       return;
     }
     if (controller == null) return;
-    _push(
-      Scaffold(
-        appBar: AppBar(title: const Text('Bot settings')),
-        body: SafeArea(
-          top: false,
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                BotSettingsView(
-                  controller: controller,
-                  onSaved: load,
-                  background: _background(bot.botId.value),
-                  onEditAvatar: () =>
-                      unawaited(_editAvatar(bot.botId.value, _name(bot))),
-                  dangerZone: _dangerZone(bot.botId.value, _name(bot)),
-                ),
-                ..._packageSettings(bot.botId.value),
-              ],
+    _push(_botPage(bot, controller));
+  }
+
+  /// The Bot's page, GrokBot's: one scroll from its face to its danger zone.
+  ///
+  /// Its settings, then the rows for what else it holds — Routines, Applets,
+  /// the pages its Packages mount — then Advanced. The rows are read off the
+  /// slot registry live, so a Computer or a Package entry that registers
+  /// after the page opened appears on it rather than on the next visit.
+  Widget _botPage(wire.BotRegistration bot, BotSettingsController controller) {
+    final botId = bot.botId.value;
+    return Scaffold(
+      appBar: AppBar(),
+      body: SafeArea(
+        top: false,
+        child: identified(
+          SettingsIds.botPage,
+          ListenableBuilder(
+            listenable: slots,
+            builder: (context, _) => SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  BotSettingsView(
+                    controller: controller,
+                    onSaved: load,
+                    background: _background(botId),
+                    onEditAvatar: () =>
+                        unawaited(_editAvatar(botId, _name(bot))),
+                    dangerZone: _dangerZone(botId, _name(bot)),
+                    sections: _botRows(),
+                  ),
+                  ..._packageSettings(botId),
+                ],
+              ),
             ),
           ),
         ),
       ),
     );
+  }
+
+  /// What the Bot holds besides its settings, one row each.
+  List<Widget> _botRows() {
+    final inbox = routineInbox;
+    final canvas = appletCanvas;
+    // The Applets Package declares an entry of its own called Applets. The
+    // row above is the same door, so one of them is enough on a page.
+    final entries = [
+      for (final entry in packageIframeEntriesV1(catalog))
+        if (canvas == null || entry.entry.label.toLowerCase() != 'applets')
+          entry,
+    ];
+    const chevron = Icon(Icons.chevron_right_rounded);
+    return [
+      const SizedBox(height: 12),
+      Card(
+        margin: EdgeInsets.zero,
+        child: Column(
+          children: [
+            identified(
+              RoutineIds.panelToggle,
+              ListTile(
+                leading: const Icon(Icons.history_rounded),
+                title: const Text('Routines'),
+                trailing: inbox == null
+                    ? chevron
+                    : AnimatedBuilder(
+                        animation: inbox,
+                        builder: (context, _) => Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (inbox.unacknowledged > 0)
+                              Badge(label: Text(inbox.badge)),
+                            chevron,
+                          ],
+                        ),
+                      ),
+                onTap: () => _openPanel('routines'),
+              ),
+            ),
+            if (canvas != null) ...[
+              const Divider(height: 1),
+              identified(
+                AppletIds.chip,
+                ListTile(
+                  leading: const Icon(Icons.widgets_outlined),
+                  title: const Text('Applets'),
+                  trailing: chevron,
+                  onTap: () async {
+                    final id = await showDialog<String>(
+                      context: context,
+                      builder: (_) => AppletPicker(controller: canvas),
+                    );
+                    if (id != null && mounted) await _openApplet(id);
+                  },
+                ),
+              ),
+            ],
+            for (final entry in entries) ...[
+              const Divider(height: 1),
+              identified(
+                PackageIds.entry(entry.contribution.packageId, entry.entry.id),
+                ListTile(
+                  leading: Icon(_packageIcon(entry.entry.icon)),
+                  title: Text(entry.entry.label),
+                  trailing: chevron,
+                  onTap: () => _openPackagePage(entry),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    ];
   }
 
   /// The Package pages mounted in Bot settings, drawn under the Bot's own
@@ -1028,6 +1138,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     // the shell falls back to whatever the reload leaves selected.
     onDeleted: () => setState(() {
       panelOpen = false;
+      conversationOpen = false;
       selected = null;
     }),
   );
@@ -1037,7 +1148,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// The message is sent through the same session the conversation uses, so a
   /// new Bot's first Turn is admitted exactly as every other one is.
   Future<void> _createBot() async {
-    setState(() => navOpen = false);
     final controller = CreateBotController(
       widget.api,
       widget.store,
@@ -1058,6 +1168,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     final tier = shellTierForWidth(MediaQuery.sizeOf(context).width);
+    final single = tier == ShellTier.single;
     final bot = selected;
     final session = voiceSession;
     return ShellSlotScope(
@@ -1071,34 +1182,30 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           Expanded(
             child: ShellLayout(
               header: bot == null
-                  ? AppBar(
-                      title: const Text('FrockBot'),
-                      leading: tier == ShellTier.single
-                          ? IconButton(
-                              tooltip: 'Your Bots',
-                              onPressed: () => setState(() => navOpen = true),
-                              icon: const Icon(Icons.menu),
-                            )
-                          : null,
-                    )
+                  ? (single ? null : AppBar(title: const Text('FrockBot')))
                   : ChatHeader(
                       name: _name(bot),
                       connection: selectedConnection,
                       textScale:
                           MediaQuery.textScalerOf(context).scale(14) / 14,
                       background: _background(bot.botId.value),
-                      onBots: tier == ShellTier.single
-                          ? () => setState(() => navOpen = !navOpen)
+                      // A phone's bar is GrokBot's three things; the wider tiers
+                      // name each entry of the right panel beside the title.
+                      onBack: single ? _openBack : null,
+                      onOpenBot: single
+                          ? () => _pushPanel('bot-settings')
                           : null,
-                      onSettings: () => _openPanel('bot-settings'),
+                      onSettings: single
+                          ? null
+                          : () => _openPanel('bot-settings'),
                       computerRunning:
                           computer?.available == true &&
                           computer!.state.running,
                       onComputer: computer?.available == true
                           ? () => _openPanel('computer')
                           : null,
-                      onRoutines: () => _openPanel('routines'),
-                      onApplets: appletCanvas == null
+                      onRoutines: single ? null : () => _openPanel('routines'),
+                      onApplets: single || appletCanvas == null
                           ? null
                           : () async {
                               final id = await showDialog<String>(
@@ -1109,53 +1216,41 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                               if (id != null && mounted) await _openApplet(id);
                             },
                     ),
-              navOpen: navOpen,
+              conversationOpen: bot != null && conversationOpen,
+              onBack: _openBack,
               panelOpen: panelOpen,
-              onDismiss: () => setState(() {
-                navOpen = false;
-                panelOpen = false;
-              }),
+              onDismiss: () => setState(() => panelOpen = false),
               rightPanel: _rightPanel(),
               sidebar: Column(
                 children: [
-                  const SlotRegion(
-                    ShellSlot.headerActions,
-                    direction: Axis.horizontal,
-                  ),
+                  // The badge and the Package entries beside the list belong to the
+                  // column layout; on a phone they are rows on the Bot's page.
+                  if (!single)
+                    const SlotRegion(
+                      ShellSlot.headerActions,
+                      direction: Axis.horizontal,
+                    ),
                   Expanded(
                     child: ShellSidebar(
                       bots: bots,
                       profiles: profiles,
                       unread: activity.unread,
                       archived: archived,
-                      activeBotId: bot?.botId.value,
+                      // A phone's list is a list of doors, not a selection: no row
+                      // is the current one once the conversation is a page.
+                      activeBotId: single ? null : bot?.botId.value,
                       workingBotId: workingRunId == null
                           ? null
                           : bot?.botId.value,
                       loaded: loaded,
                       error: error,
                       showHidden: showHidden,
-                      inboxCount: activity.notices.length,
                       onSelect: _select,
                       onCreateBot: () => unawaited(_createBot()),
                       onSearch: _openSearch,
                       onProfile: _openProfile,
-                      onInbox: () => _push(
-                        ActivityPage(
-                          controller: activity,
-                          openBot: _openBotFromInbox,
-                        ),
-                      ),
                       onVoice: () => unawaited(_startVoice()),
                       voiceActive: footerOpen,
-                      onManage: () => _push(
-                        BotRecoveryPage(
-                          api: widget.api,
-                          store: widget.store,
-                          userId: widget.userId,
-                          changed: load,
-                        ),
-                      ),
                       onToggleHidden: () =>
                           setState(() => showHidden = !showHidden),
                       onRetry: load,
@@ -1167,12 +1262,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                   ? NoConversation(
                       empty: bots.isEmpty,
                       failure: bots.isEmpty ? error : null,
-                      action: bots.isEmpty || tier != ShellTier.single
-                          ? 'Refresh Bots'
-                          : 'Your Bots',
-                      onAction: bots.isEmpty || tier != ShellTier.single
-                          ? () => unawaited(load())
-                          : () => setState(() => navOpen = true),
+                      action: 'Refresh Bots',
+                      onAction: () => unawaited(load()),
                     )
                   : ConversationView(
                       key: ValueKey('${widget.userId}:${bot.botId.value}'),
@@ -1200,6 +1291,12 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                         if (runId == workingRunId || !mounted) return;
                         final settled = workingRunId != null && runId == null;
                         setState(() => workingRunId = runId);
+                        // A Turn is how an Applet comes into existence, and the
+                        // Bot's page names the Applets the Bot holds — so the
+                        // directory is re-read when the Turn that may have changed
+                        // it ends. Read on adoption alone, a Bot that had just made
+                        // its first Applet had no way to it until the page was
+                        // reloaded.
                         final canvas = appletCanvas;
                         if (settled && canvas != null) unawaited(canvas.load());
                       },
@@ -1221,17 +1318,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     );
   }
 
-  Future<void> _openBotFromInbox(String botId) async {
-    await load();
-    if (mounted) _select(botId);
-  }
-
   /// Search over every conversation this account has, which is the backend's
   /// index rather than the names the sidebar happens to hold. A chosen hit is
   /// its Bot and its Turn: the shell opens the Bot and the transcript scrolls
   /// to the Turn.
   Future<void> _openSearch() async {
-    setState(() => navOpen = false);
     final hit = await showSearchOverlayV1(context, widget.api);
     if (hit == null || !mounted) return;
     if (bots.every((bot) => bot.botId.value != hit.botId)) await load();
@@ -1250,24 +1341,32 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   );
 
   /// Account destinations push above Profile, so Back returns here.
+  ///
+  /// One sheet, GrokBot's shape: who is signed in, what is the account's, what
+  /// is every Bot's, and the door out. Each row is a name and a chevron; what
+  /// a destination is for is said on the destination.
   void _openProfile() {
     _push(
       Scaffold(
-        appBar: AppBar(title: const Text('Profile')),
+        appBar: AppBar(title: const Text('You')),
         body: identified(
           SettingsIds.profileMenu,
           SafeArea(
+            top: false,
             child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 32),
               child: Center(
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 680),
                   child: Column(
-                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       identified(
                         SettingsIds.profileName,
                         ListTile(
+                          contentPadding: EdgeInsets.zero,
                           leading: const CircleAvatar(
+                            radius: 24,
                             child: Icon(Icons.person_outline),
                           ),
                           title: FutureBuilder<String>(
@@ -1278,124 +1377,69 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                           subtitle: const Text('Signed in'),
                         ),
                       ),
-                      const Divider(height: 1),
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 20, 16, 4),
-                        child: Align(
-                          alignment: Alignment.centerLeft,
-                          child: Text(
-                            'Account',
-                            style: Theme.of(context).textTheme.titleSmall,
+                      _profileGroup('Account', [
+                        _profileRow(
+                          SettingsIds.profileSettings,
+                          Icons.settings_outlined,
+                          'Personal details',
+                          _openSettings,
+                        ),
+                      ]),
+                      _profileGroup('Bots', [
+                        _profileRow(
+                          SettingsIds.profileModels,
+                          Icons.auto_awesome_rounded,
+                          'Models',
+                          () => _push(
+                            SettingsPage(
+                              api: widget.api,
+                              store: widget.store,
+                              userId: widget.userId,
+                              home: 'models',
+                            ),
                           ),
                         ),
-                      ),
-                      identified(
-                        SettingsIds.profileSettings,
-                        ListTile(
-                          leading: const Icon(Icons.settings_outlined),
-                          title: const Text('Personal details'),
-                          subtitle: const Text(
-                            'Your name and optional contact email',
-                          ),
-                          onTap: () {
-                            _openSettings();
-                          },
-                        ),
-                      ),
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 20, 16, 4),
-                        child: Align(
-                          alignment: Alignment.centerLeft,
-                          child: Text(
-                            'Your Bots’ abilities',
-                            style: Theme.of(context).textTheme.titleSmall,
+                        _profileRow(
+                          SettingsIds.profileConnections,
+                          Icons.link_outlined,
+                          'Connected apps',
+                          () => _push(
+                            ConnectionsPage(
+                              api: widget.api,
+                              store: widget.store,
+                              userId: widget.userId,
+                            ),
                           ),
                         ),
-                      ),
-                      identified(
-                        SettingsIds.profileModels,
-                        ListTile(
-                          leading: const Icon(Icons.auto_awesome_rounded),
-                          title: const Text('Models'),
-                          subtitle: const Text(
-                            'Choose a model or connect a provider',
+                        _profileRow(
+                          MachineIds.profileEntry,
+                          Icons.computer_outlined,
+                          'Your computers',
+                          () => _push(
+                            MachinesPage(
+                              api: widget.api,
+                              store: widget.store,
+                              userId: widget.userId,
+                            ),
                           ),
-                          onTap: () {
-                            _push(
-                              SettingsPage(
-                                api: widget.api,
-                                store: widget.store,
-                                userId: widget.userId,
-                                home: 'models',
-                              ),
-                            );
-                          },
                         ),
-                      ),
-                      identified(
-                        SettingsIds.profileConnections,
-                        ListTile(
-                          leading: const Icon(Icons.link_outlined),
-                          title: const Text('Connected apps'),
-                          subtitle: const Text('Services your Bots can use'),
-                          onTap: () {
-                            _push(
-                              ConnectionsPage(
-                                api: widget.api,
-                                store: widget.store,
-                                userId: widget.userId,
-                              ),
-                            );
-                          },
-                        ),
-                      ),
-                      identified(
-                        MachineIds.profileEntry,
-                        ListTile(
-                          leading: const Icon(Icons.computer_outlined),
-                          title: const Text('Your computers'),
-                          subtitle: const Text(
-                            'Computers a Bot may reach, with your approval',
+                        _profileRow(
+                          PluginIds.profileEntry,
+                          Icons.extension_outlined,
+                          'Plugins',
+                          () => _push(
+                            PluginsPage(
+                              api: widget.api,
+                              store: widget.store,
+                              userId: widget.userId,
+                            ),
                           ),
-                          onTap: () {
-                            _push(
-                              MachinesPage(
-                                api: widget.api,
-                                store: widget.store,
-                                userId: widget.userId,
-                              ),
-                            );
-                          },
                         ),
-                      ),
-                      identified(
-                        PluginIds.profileEntry,
-                        ListTile(
-                          leading: const Icon(Icons.extension_outlined),
-                          title: const Text('Plugins'),
-                          subtitle: const Text(
-                            'Extensions that add new abilities',
-                          ),
-                          onTap: () {
-                            _push(
-                              PluginsPage(
-                                api: widget.api,
-                                store: widget.store,
-                                userId: widget.userId,
-                              ),
-                            );
-                          },
-                        ),
-                      ),
-                      identified(
-                        'profile-capabilities',
-                        ListTile(
-                          leading: const Icon(Icons.tune_outlined),
-                          title: const Text('Bot capabilities'),
-                          subtitle: const Text(
-                            'Manage optional built-in features for all your Bots',
-                          ),
-                          onTap: () => _push(
+                        _profileRow(
+                          'profile-capabilities',
+                          Icons.tune_outlined,
+                          'Bot capabilities',
+                          () => _push(
                             PluginsPage(
                               api: widget.api,
                               store: widget.store,
@@ -1404,108 +1448,103 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                             ),
                           ),
                         ),
-                      ),
-                      const Divider(),
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 20, 16, 4),
-                        child: Align(
-                          alignment: Alignment.centerLeft,
-                          child: Text(
-                            'Activity & sharing',
-                            style: Theme.of(context).textTheme.titleSmall,
-                          ),
-                        ),
-                      ),
-                      identified(
-                        AuditIds.recoveryEntry,
-                        ListTile(
-                          leading: const Icon(Icons.history_rounded),
-                          title: const Text('Activity & history'),
-                          subtitle: const Text('Actions across all your Bots'),
-                          onTap: () {
-                            _push(
-                              AuditPage(
-                                api: widget.api,
-                                store: widget.store,
-                                userId: widget.userId,
-                              ),
-                            );
-                          },
-                        ),
-                      ),
-                      identified(
-                        TemplateIds.profileEntry,
-                        ListTile(
-                          leading: const Icon(Icons.inventory_2_outlined),
-                          title: const Text('Bot templates'),
-                          subtitle: const Text(
-                            'Create a Bot from a template, or share one of yours',
-                          ),
-                          onTap: () {
-                            _push(
-                              TemplatesPage(
-                                api: widget.api,
-                                store: widget.store,
-                                userId: widget.userId,
-                                botId: selected?.botId.value,
-                                botName: selected == null
-                                    ? null
-                                    : _name(selected!),
-                              ),
-                            );
-                          },
-                        ),
-                      ),
-                      const Divider(),
-                      // Admin belongs to the deployment, not to the account, so the
-                      // entry is here only for someone the gateway already answers it
-                      // for. A non-admin is not offered a door that refuses them.
-                      if (isAdmin)
-                        identified(
-                          AdminIds.profileEntry,
-                          ListTile(
-                            leading: const Icon(Icons.shield_outlined),
-                            title: const Text('Site administration'),
-                            subtitle: const Text(
-                              'Manage who can join this site',
+                        _profileRow(
+                          TemplateIds.profileEntry,
+                          Icons.inventory_2_outlined,
+                          'Bot templates',
+                          () => _push(
+                            TemplatesPage(
+                              api: widget.api,
+                              store: widget.store,
+                              userId: widget.userId,
+                              botId: selected?.botId.value,
+                              botName: selected == null
+                                  ? null
+                                  : _name(selected!),
                             ),
-                            onTap: () {
-                              _push(AdminPage(api: widget.api));
-                            },
                           ),
                         ),
-                      // A development build can look at the ViewNode renderer before a
-                      // plugin produces a document; the shipped app has no such door.
-                      if (developmentAuth)
-                        ListTile(
-                          leading: const Icon(
-                            Icons.dashboard_customize_outlined,
+                        _profileRow(
+                          SettingsIds.profileManageBots,
+                          Icons.manage_accounts_outlined,
+                          'Manage Bots',
+                          () => _push(
+                            BotRecoveryPage(
+                              api: widget.api,
+                              store: widget.store,
+                              userId: widget.userId,
+                              changed: load,
+                            ),
                           ),
-                          title: const Text('View sample'),
-                          onTap: () {
-                            _push(
-                              ViewSamplePage(
-                                store: widget.store,
-                                userId: widget.userId,
+                        ),
+                        _profileRow(
+                          AuditIds.recoveryEntry,
+                          Icons.history_rounded,
+                          'Activity & history',
+                          () => _push(
+                            AuditPage(
+                              api: widget.api,
+                              store: widget.store,
+                              userId: widget.userId,
+                            ),
+                          ),
+                        ),
+                      ]),
+                      // Admin belongs to the deployment, not to the account,
+                      // so the entry is here only for someone the gateway
+                      // already answers it for. A development build can look
+                      // at the ViewNode renderer before a plugin produces a
+                      // document; the shipped app has no such door.
+                      if (isAdmin || developmentAuth)
+                        _profileGroup('This site', [
+                          if (isAdmin)
+                            _profileRow(
+                              AdminIds.profileEntry,
+                              Icons.shield_outlined,
+                              'Site administration',
+                              () => _push(AdminPage(api: widget.api)),
+                            ),
+                          if (developmentAuth)
+                            _profileRow(
+                              'profile-view-sample',
+                              Icons.dashboard_customize_outlined,
+                              'View sample',
+                              () => _push(
+                                ViewSamplePage(
+                                  store: widget.store,
+                                  userId: widget.userId,
+                                ),
                               ),
-                            );
-                          },
-                        ),
-                      const Divider(),
+                            ),
+                        ]),
                       if (!localDevelopment)
-                        identified(
-                          SettingsIds.profileSignOut,
-                          ListTile(
-                            leading: const Icon(Icons.logout),
-                            title: const Text('Sign out'),
-                            onTap: () {
-                              Navigator.of(context).pop();
-                              unawaited(
-                                push.logout().then((_) => widget.onSignOut()),
-                              );
-                            },
+                        _profileGroup(null, [
+                          identified(
+                            SettingsIds.profileSignOut,
+                            Builder(
+                              builder: (context) => ListTile(
+                                leading: Icon(
+                                  Icons.logout,
+                                  color: Theme.of(context).colorScheme.error,
+                                ),
+                                title: Text(
+                                  'Sign out',
+                                  style: TextStyle(
+                                    color: Theme.of(context).colorScheme.error,
+                                  ),
+                                ),
+                                onTap: () {
+                                  Navigator.of(context).pop();
+                                  unawaited(
+                                    push.logout().then(
+                                      (_) => widget.onSignOut(),
+                                    ),
+                                  );
+                                },
+                              ),
+                            ),
                           ),
-                        ),
+                        ]),
                     ],
                   ),
                 ),
@@ -1516,6 +1555,54 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       ),
     );
   }
+
+  /// One card of rows, with the name of what they have in common above it.
+  Widget _profileGroup(String? title, List<Widget> rows) => Builder(
+    builder: (context) => Padding(
+      padding: const EdgeInsets.only(top: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (title != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(4, 0, 4, 6),
+              child: Text(
+                title,
+                style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+          Card(
+            margin: EdgeInsets.zero,
+            child: Column(
+              children: [
+                for (var index = 0; index < rows.length; index++) ...[
+                  if (index > 0) const Divider(height: 1),
+                  rows[index],
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+
+  Widget _profileRow(
+    String id,
+    IconData icon,
+    String title,
+    VoidCallback onTap,
+  ) => identified(
+    id,
+    ListTile(
+      leading: Icon(icon),
+      title: Text(title),
+      trailing: const Icon(Icons.chevron_right_rounded),
+      onTap: onTap,
+    ),
+  );
 
   /// The saved profile name, falling back to the account this session holds.
   /// A name is a courtesy: a read that fails leaves the page usable.

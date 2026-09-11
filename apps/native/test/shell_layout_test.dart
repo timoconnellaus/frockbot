@@ -72,11 +72,12 @@ void main() {
     testWidgets('draws three panes at a desk and one on a phone', (
       tester,
     ) async {
-      Widget layout() => host(
+      Widget layout({bool conversationOpen = false}) => host(
         ShellLayout(
-          navOpen: false,
           panelOpen: true,
           onDismiss: () {},
+          conversationOpen: conversationOpen,
+          onBack: () {},
           sidebar: const Text('bots'),
           conversation: const Text('thread'),
           rightPanel: const Text('work'),
@@ -105,12 +106,50 @@ void main() {
         900 - shellSidebarWidth,
       );
 
-      // On a phone both are drawers and the conversation has the window.
+      // On a phone the Bot list is the first screen and has the window; the
+      // conversation is a page over it, with the window too, and nothing of
+      // the right panel is drawn at all.
       tester.view.physicalSize = const Size(390, 780);
       await tester.pumpWidget(layout());
       await tester.pumpAndSettle();
+      expect(tester.getSize(byIdentifier(ShellIds.sidebar)).width, 390);
+      expect(byIdentifier(ShellIds.conversation), findsNothing);
+      expect(byIdentifier(ShellIds.rightPanel), findsNothing);
+      await tester.pumpWidget(layout(conversationOpen: true));
+      await tester.pumpAndSettle();
       expect(tester.getSize(byIdentifier(ShellIds.conversation)).width, 390);
+      expect(byIdentifier(ShellIds.sidebar), findsNothing);
     });
+
+    testWidgets(
+      'on a phone Back from the conversation is the list, not the way out',
+      (tester) async {
+        tester.view.physicalSize = const Size(390, 780);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        var backs = 0;
+        await tester.pumpWidget(
+          host(
+            ShellLayout(
+              panelOpen: false,
+              onDismiss: () {},
+              conversationOpen: true,
+              onBack: () => backs++,
+              sidebar: const Text('bots'),
+              conversation: const Text('thread'),
+              rightPanel: null,
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.binding.handlePopRoute();
+        await tester.pumpAndSettle();
+        expect(backs, 1);
+        // The app is still here: nothing popped past the shell.
+        expect(find.text('thread'), findsOneWidget);
+      },
+    );
 
     testWidgets('an open drawer is dismissed by tapping what it covers', (
       tester,
@@ -120,9 +159,8 @@ void main() {
       // constraints allow, and a `Stack`'s non-positioned children are loosely
       // constrained — so an unpositioned scrim was 0x0. It dimmed nothing, took
       // no tap, and was dropped from the accessibility tree for having no area,
-      // which left the only way out of a phone's Bot list the control that
-      // opened it.
-      tester.view.physicalSize = const Size(390, 780);
+      // which left the only way out of the panel the control that opened it.
+      tester.view.physicalSize = const Size(900, 780);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
@@ -130,9 +168,10 @@ void main() {
       await tester.pumpWidget(
         host(
           ShellLayout(
-            navOpen: true,
-            panelOpen: false,
+            panelOpen: true,
             onDismiss: () => dismissed++,
+            conversationOpen: true,
+            onBack: () {},
             sidebar: const Text('bots'),
             conversation: const Text('thread'),
             rightPanel: const Text('work'),
@@ -142,7 +181,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(
         tester.getSize(byIdentifier(ShellIds.scrim)),
-        const Size(390, 780),
+        const Size(900, 780),
       );
       // Beside the drawer, over the conversation the person can see.
       await tester.tapAt(const Offset(340, 400));
@@ -152,7 +191,7 @@ void main() {
     testWidgets('a parked drawer is not read out or hit-tested', (
       tester,
     ) async {
-      tester.view.physicalSize = const Size(390, 780);
+      tester.view.physicalSize = const Size(900, 780);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
@@ -160,9 +199,10 @@ void main() {
       await tester.pumpWidget(
         host(
           ShellLayout(
-            navOpen: false,
             panelOpen: false,
             onDismiss: () => dismissed++,
+            conversationOpen: true,
+            onBack: () {},
             sidebar: const Text('bots'),
             conversation: const Text('thread'),
             rightPanel: const Text('work'),
@@ -171,7 +211,7 @@ void main() {
       );
       await tester.pumpAndSettle();
       // The scrim is inert while nothing is open.
-      await tester.tapAt(const Offset(200, 400));
+      await tester.tapAt(const Offset(500, 400));
       expect(dismissed, 0);
     });
   });
@@ -355,13 +395,10 @@ void main() {
             workingBotId: null,
             loaded: true,
             showHidden: false,
-            inboxCount: 1,
             onSelect: (_) {},
             onCreateBot: () {},
             onSearch: () {},
             onProfile: () {},
-            onInbox: () {},
-            onManage: () {},
             onVoice: () {},
             voiceActive: false,
             onToggleHidden: () {},
@@ -377,7 +414,10 @@ void main() {
       expect(byIdentifier(ShellIds.sidebarCreateBot), findsOneWidget);
       expect(byIdentifier(ShellIds.sidebarSearch), findsOneWidget);
       expect(byIdentifier(ShellIds.sidebarProfile), findsOneWidget);
-      expect(byIdentifier(ShellIds.sidebarInbox), findsOneWidget);
+      // Four controls and no more: you, a call, search, a new Bot. The
+      // account is behind the first and each Bot's own affairs are on its
+      // page.
+      expect(find.byType(IconButton), findsNWidgets(4));
       expect(find.text('2'), findsOneWidget);
       // A pinned Bot is a tile instead of a row, never both.
       expect(byIdentifier(ShellIds.sidebarBot('rosemary')), findsNothing);
@@ -397,13 +437,10 @@ void main() {
             loaded: true,
             error: 'Couldn’t reach FrockBot.',
             showHidden: false,
-            inboxCount: 0,
             onSelect: (_) {},
             onCreateBot: () {},
             onSearch: () {},
             onProfile: () {},
-            onInbox: () {},
-            onManage: () {},
             onVoice: () {},
             voiceActive: false,
             onToggleHidden: () {},

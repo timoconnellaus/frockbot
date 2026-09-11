@@ -27,9 +27,6 @@ class ActivityController extends ChangeNotifier {
   final LocalStore store;
   final String userId;
   ActivityController(this.api, this.store, this.userId);
-  Map<String, String> botNames = {};
-  String botName(String id) => botNames[id] ?? 'Your Bot';
-  List<Map<String, dynamic>> notices = [];
   Map<String, wire.UnreadView> unread = {};
   String? error;
   bool loading = false;
@@ -53,23 +50,8 @@ class ActivityController extends ChangeNotifier {
       final views = wire.UnreadDirectory.fromJson(
         await api.request('/api/bots/unread'),
       );
-      final directory =
-          wire.NotificationDirectory.fromJson(
-                await api.request('/api/bots/notifications'),
-              ).toJson()
-              as Map;
-      final unique = <String, Map<String, dynamic>>{};
-      for (final item in directory['notifications'] as List) {
-        final notice = Map<String, dynamic>.from(item as Map);
-        unique['${notice['botId']}:${notice['notificationId']}'] = notice;
-      }
       if (_disposed) return;
       unread = {for (final view in views.unread) view.botId.value: view};
-      notices = unique.values.toList()
-        ..sort(
-          (a, b) =>
-              (b['createdAt'] as String).compareTo(a['createdAt'] as String),
-        );
       loaded = true;
       error = null;
     } catch (_) {
@@ -78,37 +60,6 @@ class ActivityController extends ChangeNotifier {
       }
     } finally {
       loading = false;
-      _notify();
-    }
-  }
-
-  Future<void> acknowledge(Map<String, dynamic> notice) async {
-    if (_disposed || saving || pending) return;
-    saving = true;
-    _notify();
-    try {
-      final command = wire.NotificationAck.fromJson({
-        'schemaVersion': 1,
-        'action': 'acknowledge',
-        'notificationId': notice['notificationId'],
-      });
-      wire.BotId.fromJson(notice['botId']);
-      wire.Acknowledgement.fromJson(
-        await api.request(
-          '/api/bots/${Uri.encodeComponent(notice['botId'] as String)}/notifications',
-          body: command.toJson(),
-        ),
-      );
-      notices.removeWhere(
-        (n) =>
-            n['botId'] == notice['botId'] &&
-            n['notificationId'] == notice['notificationId'],
-      );
-      error = null;
-    } catch (_) {
-      error = 'Couldn’t confirm that update. Refresh to check its status.';
-    } finally {
-      saving = false;
       _notify();
     }
   }

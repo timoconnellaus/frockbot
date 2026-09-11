@@ -7,15 +7,29 @@ import '../flock/sheep.dart';
 import 'semantics.dart';
 import 'chat_icons.dart';
 
+/// The conversation's title bar.
+///
+/// On a phone it is GrokBot's: the way back to the Bot list, the Bot's name as
+/// a pill that opens the Bot's page, and the Computer. Everything else the Bot
+/// holds — its Routines, its Applets, the pages its Packages mount — is on that
+/// page rather than in a row of icons. At the wider tiers the right panel is a
+/// column or a drawer beside the conversation, and the bar names each entry of
+/// it separately.
 class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
   final String name;
   final double textScale;
   final String? background;
-  final VoidCallback? onBots;
-  final VoidCallback onSettings;
+
+  /// Back to the Bot list. The phone's, where the conversation is a page.
+  final VoidCallback? onBack;
+
+  /// Opens the Bot's page from its name. The phone's: at wider tiers the
+  /// settings icon opens the panel's entry instead.
+  final VoidCallback? onOpenBot;
+  final VoidCallback? onSettings;
   final VoidCallback? onComputer;
   final bool computerRunning;
-  final VoidCallback onRoutines;
+  final VoidCallback? onRoutines;
   final ConnectionState connection;
   final VoidCallback? onApplets;
 
@@ -24,11 +38,12 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
     required this.name,
     this.textScale = 1,
     this.background,
-    this.onBots,
-    required this.onSettings,
+    this.onBack,
+    this.onOpenBot,
+    this.onSettings,
     this.onComputer,
     this.computerRunning = false,
-    required this.onRoutines,
+    this.onRoutines,
     this.connection = ConnectionState.initializing,
     this.onApplets,
   });
@@ -38,21 +53,9 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
   Size get preferredSize => Size.fromHeight(_toolbarHeight);
 
   @override
-  Widget build(BuildContext context) => AppBar(
-    toolbarHeight: _toolbarHeight,
-    leadingWidth: 48,
-    leading: onBots == null
-        ? null
-        : identified(
-            ShellIds.sidebarToggle,
-            IconButton(
-              tooltip: 'Your Bots',
-              onPressed: onBots,
-              icon: const ChatIcon(ChatIconKind.menu, size: 20),
-            ),
-          ),
-    titleSpacing: 4,
-    title: Row(
+  Widget build(BuildContext context) {
+    final title = Row(
+      mainAxisSize: onOpenBot == null ? MainAxisSize.max : MainAxisSize.min,
       children: [
         Stack(
           clipBehavior: Clip.none,
@@ -67,7 +70,7 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
           ],
         ),
         const SizedBox(width: 8),
-        Expanded(
+        Flexible(
           child: Text(
             name,
             maxLines: 2,
@@ -77,26 +80,73 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
           ),
         ),
       ],
-    ),
-    actions: [
-      identified(
-        AppletIds.chip,
-        _destination('Applets', ChatIconKind.applet, onApplets),
-      ),
-      _destination(
-        'Computer',
-        ChatIconKind.computer,
-        onComputer,
-        color: computerRunning ? Colors.blue : null,
-      ),
-      _destination('Routines', ChatIconKind.routines, onRoutines),
-      identified(
-        ShellIds.botPanelToggle,
-        _destination('Bot settings', ChatIconKind.settings, onSettings),
-      ),
-      const SizedBox(width: 4),
-    ],
-  );
+    );
+    return AppBar(
+      toolbarHeight: _toolbarHeight,
+      leadingWidth: 48,
+      leading: onBack == null
+          ? null
+          : identified(
+              ShellIds.sidebarToggle,
+              IconButton(
+                tooltip: 'Your Bots',
+                onPressed: onBack,
+                icon: const Icon(Icons.arrow_back_rounded, size: 22),
+              ),
+            ),
+      titleSpacing: 4,
+      title: onOpenBot == null
+          ? title
+          : Align(
+              alignment: Alignment.centerLeft,
+              // A button rather than a bare InkWell, so its semantics are the
+              // same shape as every other control in this bar: one node that
+              // is the identifier, one tappable node inside it.
+              child: identified(
+                ShellIds.botPanelToggle,
+                Tooltip(
+                  message: 'Bot settings',
+                  child: TextButton(
+                    onPressed: onOpenBot,
+                    style: TextButton.styleFrom(
+                      backgroundColor: Theme.of(context)
+                          .colorScheme
+                          .surfaceContainerHighest,
+                      foregroundColor: Theme.of(context).colorScheme.onSurface,
+                      shape: const StadiumBorder(),
+                      padding: const EdgeInsets.fromLTRB(6, 6, 14, 6),
+                      minimumSize: const Size(0, 40),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    child: title,
+                  ),
+                ),
+              ),
+            ),
+      actions: [
+        if (onApplets != null)
+          identified(
+            AppletIds.chip,
+            _destination('Applets', ChatIconKind.applet, onApplets),
+          ),
+        if (onComputer != null)
+          _destination(
+            'Computer',
+            ChatIconKind.computer,
+            onComputer,
+            color: computerRunning ? Colors.blue : null,
+          ),
+        if (onRoutines != null)
+          _destination('Routines', ChatIconKind.routines, onRoutines),
+        if (onSettings != null)
+          identified(
+            ShellIds.botPanelToggle,
+            _destination('Bot settings', ChatIconKind.settings, onSettings),
+          ),
+        const SizedBox(width: 4),
+      ],
+    );
+  }
 
   Widget _destination(
     String label,

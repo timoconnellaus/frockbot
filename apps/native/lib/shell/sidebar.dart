@@ -179,13 +179,10 @@ class ShellSidebar extends StatelessWidget {
   final bool loaded;
   final String? error;
   final bool showHidden;
-  final int inboxCount;
   final void Function(String botId) onSelect;
   final VoidCallback onCreateBot;
   final VoidCallback onSearch;
   final VoidCallback onProfile;
-  final VoidCallback onInbox;
-  final VoidCallback onManage;
 
   /// Opens the voice footer and starts the call, in the one gesture.
   final VoidCallback onVoice;
@@ -204,13 +201,10 @@ class ShellSidebar extends StatelessWidget {
     required this.workingBotId,
     required this.loaded,
     required this.showHidden,
-    required this.inboxCount,
     required this.onSelect,
     required this.onCreateBot,
     required this.onSearch,
     required this.onProfile,
-    required this.onInbox,
-    required this.onManage,
     required this.onVoice,
     required this.voiceActive,
     required this.onToggleHidden,
@@ -255,7 +249,7 @@ class ShellSidebar extends StatelessWidget {
         _Header(
           onCreateBot: onCreateBot,
           onSearch: onSearch,
-          onManage: onManage,
+          onProfile: onProfile,
           onVoice: onVoice,
           voiceActive: voiceActive,
         ),
@@ -350,8 +344,6 @@ class ShellSidebar extends StatelessWidget {
             ],
           ),
         ),
-        const Divider(height: 1),
-        _Footer(inboxCount: inboxCount, onInbox: onInbox, onProfile: onProfile),
       ],
     );
   }
@@ -422,10 +414,16 @@ class ShellSidebar extends StatelessWidget {
   }
 }
 
+/// The list's own controls, GrokBot's plus voice: you, a call, search, and
+/// a new Bot.
+///
+/// Everything about the account is behind the first one; everything about one
+/// Bot is on that Bot's page. The list itself carries no title — the rows say
+/// what it is.
 class _Header extends StatelessWidget {
   final VoidCallback onCreateBot;
   final VoidCallback onSearch;
-  final VoidCallback onManage;
+  final VoidCallback onProfile;
 
   /// Starts the continuous voice session. One gesture: the footer opens and
   /// the call starts, because a footer that opens and then waits to be
@@ -435,100 +433,65 @@ class _Header extends StatelessWidget {
   const _Header({
     required this.onCreateBot,
     required this.onSearch,
-    required this.onManage,
     required this.onVoice,
     required this.voiceActive,
-  });
-
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(16, 12, 8, 8),
-    child: Row(
-      children: [
-        Expanded(
-          child: Text(
-            'Your Bots',
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
-        ),
-        identified(
-          ShellIds.sidebarSearch,
-          IconButton(
-            tooltip: 'Search',
-            onPressed: onSearch,
-            icon: const Icon(Icons.search),
-          ),
-        ),
-        identified(
-          VoiceIds.sidebarStart,
-          IconButton(
-            tooltip: voiceActive
-                ? 'Voice session active'
-                : 'Start voice session',
-            isSelected: voiceActive,
-            onPressed: onVoice,
-            icon: const Icon(Icons.graphic_eq),
-          ),
-        ),
-        identified(
-          ShellIds.sidebarManage,
-          IconButton(
-            tooltip: 'Manage Bots',
-            onPressed: onManage,
-            icon: const Icon(Icons.manage_accounts_outlined),
-          ),
-        ),
-        identified(
-          ShellIds.sidebarCreateBot,
-          IconButton.filledTonal(
-            tooltip: 'Add a sheep',
-            onPressed: onCreateBot,
-            icon: const Icon(Icons.add),
-          ),
-        ),
-      ],
-    ),
-  );
-}
-
-class _Footer extends StatelessWidget {
-  final int inboxCount;
-  final VoidCallback onInbox;
-  final VoidCallback onProfile;
-  const _Footer({
-    required this.inboxCount,
-    required this.onInbox,
     required this.onProfile,
   });
 
   @override
-  Widget build(BuildContext context) => Row(
-    children: [
-      Expanded(
-        child: identified(
-          ShellIds.sidebarProfile,
-          ListTile(
-            leading: const Icon(Icons.account_circle_outlined),
-            title: const Text('You'),
-            onTap: onProfile,
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 8, 8, 4),
+      child: Row(
+        children: [
+          identified(
+            ShellIds.sidebarProfile,
+            IconButton(
+              tooltip: 'You',
+              onPressed: onProfile,
+              icon: CircleAvatar(
+                radius: 18,
+                backgroundColor: scheme.surfaceContainerHighest,
+                foregroundColor: scheme.onSurface,
+                child: const Icon(Icons.person_outline, size: 22),
+              ),
+            ),
           ),
-        ),
-      ),
-      identified(
-        ShellIds.sidebarInbox,
-        IconButton(
-          tooltip: 'Inbox',
-          onPressed: onInbox,
-          icon: Badge(
-            isLabelVisible: inboxCount > 0,
-            label: Text('$inboxCount'),
-            child: const Icon(Icons.inbox_outlined),
+          const Spacer(),
+          identified(
+            VoiceIds.sidebarStart,
+            IconButton.filledTonal(
+              tooltip: voiceActive
+                  ? 'Voice session active'
+                  : 'Start voice session',
+              isSelected: voiceActive,
+              onPressed: onVoice,
+              icon: const Icon(Icons.graphic_eq),
+            ),
           ),
-        ),
+          const SizedBox(width: 4),
+          identified(
+            ShellIds.sidebarSearch,
+            IconButton.filledTonal(
+              tooltip: 'Search',
+              onPressed: onSearch,
+              icon: const Icon(Icons.search),
+            ),
+          ),
+          const SizedBox(width: 4),
+          identified(
+            ShellIds.sidebarCreateBot,
+            IconButton.filledTonal(
+              tooltip: 'Add a sheep',
+              onPressed: onCreateBot,
+              icon: const Icon(Icons.add),
+            ),
+          ),
+        ],
       ),
-      const SizedBox(width: 8),
-    ],
-  );
+    );
+  }
 }
 
 class _PinnedTile extends StatelessWidget {

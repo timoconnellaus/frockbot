@@ -13,7 +13,7 @@ import { bootstrapCompositionGeneration } from "./backend-composition.js";
 import type { BotSettingsViewV1 } from "@frockbot/core/configuration";
 import {
   acknowledgeNotification,
-  createFailureNotification,
+  failedTurnRecordsV1,
   listNotifications,
   supersededPackageRecords,
   terminalPackageRecords,
@@ -73,8 +73,8 @@ export class ShellBotBackendContribution {
       eventRecords: messageRecords,
       eventsCommitted: () => host.messagesCommitted?.(),
       notification: () => undefined,
-      failureNotification: (snapshot, failed) =>
-        createFailureNotification(snapshot, failed),
+      failureRecords: (snapshot, failed, read) =>
+        failedTurnRecordsV1({ settings: snapshot, failed, read }),
       terminalRecords: (input) => terminalPackageRecords(input),
       supersededRecords: (input) => supersededPackageRecords(input),
       interruptTurn: (runId, reason) => state.turn.interrupt(runId, reason),

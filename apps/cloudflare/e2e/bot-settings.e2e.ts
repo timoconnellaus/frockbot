@@ -120,7 +120,10 @@ test("Bot settings follows the GrokBot order and keeps extras under Advanced", a
     "aria-label",
     /Get notified when this Bot finishes or needs input/u,
   );
-  await expect(sem(page, "bot-settings-save")).toBeVisible();
+  // No Save button: a change is written as it is made, and the surface says
+  // only what became of the write.
+  await expect(sem(page, "bot-settings-save")).toHaveCount(0);
+  await expect(sem(page, "bot-settings-status")).toHaveCount(1);
   await expect(sem(page, "bot-title")).toHaveCount(0);
 
   await settle(page);

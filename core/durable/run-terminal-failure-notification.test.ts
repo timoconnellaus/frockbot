@@ -1,7 +1,10 @@
 // A Turn that ends `failed` owes the person who was waiting on it the same
 // kind of notice a completed one gives them. Before this, only a completed
-// Turn recorded a notification intent, so a deadline, a provider outage or a
-// restart reached nobody who was not still looking at that conversation.
+// Turn recorded anything, so a deadline, a provider outage or a restart
+// reached nobody who was not still looking at that conversation. The kernel
+// hands the settled run to the Package's records hook and writes back what
+// comes out; the policy — what to write, and when to write nothing — is the
+// Package's, and the fixture below stands in for it.
 import { describe, expect, test } from "bun:test";
 import { Session, type SessionEvent } from "@frockbot/core/contracts";
 import { MemoryStorage } from "./memory-storage.fixture.ts";
@@ -28,14 +31,20 @@ const KEYS = {
 };
 
 /** The Package policy under test: it reads the run's own durable snapshot. */
-function failureNotification(run: StoredRunV1<Snapshot>) {
-  if (!run.configurationSnapshot.notify) return undefined;
+async function failureRecords({
+  run,
+}: {
+  run: StoredRunV1<Snapshot>;
+}): Promise<Record<string, unknown>> {
+  if (!run.configurationSnapshot.notify) return {};
   return {
-    notificationId: `run-failed-${run.runId}`,
-    runId: run.runId,
-    createdAt: "2026-09-05T00:00:00.000Z",
-    title: `${run.configurationSnapshot.name} couldn't finish`,
-    body: "This Bot couldn't finish its reply. Try again.",
+    [`${KEYS.notificationPrefix}run-failed-${run.runId}`]: {
+      notificationId: `run-failed-${run.runId}`,
+      runId: run.runId,
+      createdAt: "2026-09-05T00:00:00.000Z",
+      title: `${run.configurationSnapshot.name} couldn't finish`,
+      body: "This Bot couldn't finish its reply. Try again.",
+    },
   };
 }
 
@@ -95,7 +104,7 @@ function notifications(storage: MemoryStorage): unknown[] {
     .map(([, value]) => value);
 }
 
-describe("the notification a failed Turn records", () => {
+describe("the records a failed Turn leaves", () => {
   test("is composed from the snapshot the Turn was admitted under", async () => {
     const { storage, events } = await settledStorage();
 
@@ -108,7 +117,7 @@ describe("the notification a failed Turn records", () => {
       events,
       "Bot turn ended with outcome model-error: Model request failed (401)",
       undefined,
-      failureNotification,
+      failureRecords,
     );
 
     expect(notifications(storage)).toEqual([
@@ -136,7 +145,7 @@ describe("the notification a failed Turn records", () => {
       events,
       "Bot turn ended with outcome model-error",
       undefined,
-      failureNotification,
+      failureRecords,
     );
 
     expect(notifications(storage)).toEqual([]);
@@ -154,7 +163,7 @@ describe("the notification a failed Turn records", () => {
       events,
       "the service restarted",
       undefined,
-      failureNotification,
+      failureRecords,
     );
     // What acknowledging it does. A recovery pass over the same run must not
     // bring it back — the person has already read it.
@@ -169,7 +178,7 @@ describe("the notification a failed Turn records", () => {
       events,
       "the service restarted",
       undefined,
-      failureNotification,
+      failureRecords,
     );
 
     expect(notifications(storage)).toEqual([]);
@@ -190,7 +199,7 @@ describe("the notification a failed Turn records", () => {
       events,
       "Bot turn ended with outcome model-error",
       undefined,
-      failureNotification,
+      failureRecords,
     );
 
     expect((storage.values.get(KEYS.run) as StoredRunV1<Snapshot>).status).toBe(
@@ -213,7 +222,7 @@ describe("the notification a failed Turn records", () => {
       events,
       "Bot turn ended with outcome model-error",
       undefined,
-      failureNotification,
+      failureRecords,
     );
 
     expect((storage.values.get(KEYS.run) as StoredRunV1<Snapshot>).status).toBe(

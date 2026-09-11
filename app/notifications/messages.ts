@@ -29,6 +29,15 @@ export function messageIdV1(runId: string, ordinal: number): string {
   return `${runId}:send:${ordinal}`;
 }
 
+/**
+ * What a failed Turn's notice is called. The transcript draws one line per
+ * failed run, under this id, so the message the unread record names is the
+ * line the device shows and opening the conversation clears it.
+ */
+export function failedTurnMessageIdV1(runId: string): string {
+  return `${runId}:failed`;
+}
+
 export interface MessageNotice {
   notificationId: string;
   messageId: string;

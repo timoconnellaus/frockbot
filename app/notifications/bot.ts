@@ -9,7 +9,7 @@ import type {
   StoredRun,
 } from "@frockbot/app/shell/backend-contracts";
 import type { ShellBotStateV1 } from "@frockbot/app/shell/backend-state";
-import { notificationIdV1 } from "@frockbot/app/shell/notification-id";
+import { failedTurnMessageIdV1, visibleMessageRecordsV1 } from "./messages.js";
 import { runFailureCopyV1 } from "@frockbot/app/shell/run-failure-copy";
 import {
   shellTerminalRecordsV1,
@@ -32,46 +32,52 @@ export async function acknowledgeNotification(
 /**
  * What a Turn that did not finish tells the person who was waiting on it.
  *
- * A completed Turn notifies ("Bob replied", with what it said); a failed one
- * used to notify nobody, so a deadline, a provider outage, a restart or a
- * Composition that would not mount was visible only to whoever happened to
- * still be looking at that conversation. This is the same intent for the
- * other outcome, written in the transaction that settles the run, once per
- * failed run.
+ * A completed Turn speaks for itself through its sends. A failed one used to
+ * record only a directory intent — visible on a surface nobody opened, sent
+ * to no device, counted nowhere — so a deadline, a provider outage, a restart
+ * or a Composition that would not mount was visible only to whoever happened
+ * to still be looking at that conversation. Now it is told exactly the way a
+ * Routine that broke is told: one ordinary message, through the same index,
+ * unread cursor, sidebar preview and push outbox, written in the transaction
+ * that settles the run, once per failed run. The conversation draws it on the
+ * run's own line, so the id the device shows is the one the unread record
+ * names, and opening the conversation clears it.
  *
  * The body is the product's own sentence for the failure — `runFailureCopyV1`
  * is the one place a stored diagnostic becomes something a person reads —
  * and never the diagnostic itself, which stays on the debug surface.
  */
-export function createFailureNotification(
-  settings: BotSettingsViewV1,
+export async function failedTurnRecordsV1(input: {
+  settings: BotSettingsViewV1;
   failed: {
     runId: string;
     failure: string;
     events: readonly SessionEvent[];
-  },
-): BotNotificationIntent | undefined {
-  // The mute on updates covers this one: a failure is an update about a Turn
-  // that ended, not a decision the Bot is waiting on.
-  if (!settings.notifications.enabled) return undefined;
+  };
+  read<T>(key: string): Promise<T | undefined>;
+}): Promise<Record<string, unknown>> {
   // An automation Turn does not speak to its User here. A Routine firing that
-  // fails already records its own `routine-failed` notification, and a
-  // subagent task its own; a second intent for the same failure would be two
-  // rows for one event.
-  const automation = failed.events.some(
+  // fails already commits its own message, and a subagent task its own; a
+  // second message for the same failure would be one event said twice.
+  const automation = input.failed.events.some(
     (event) => event.type === "turn/admission" && event.turnType !== "chat",
   );
-  if (automation) return undefined;
-  return {
-    notificationId: notificationIdV1("run-failed", failed.runId),
-    runId: failed.runId,
-    createdAt: new Date().toISOString(),
-    title: `${settings.profile.name} couldn't finish`,
-    body: runFailureCopyV1({
-      failure: failed.failure,
-      events: failed.events,
-    }).slice(0, 240),
-  };
+  if (automation) return {};
+  return visibleMessageRecordsV1({
+    settings: input.settings,
+    read: input.read,
+    messages: [
+      {
+        messageId: failedTurnMessageIdV1(input.failed.runId),
+        runId: input.failed.runId,
+        createdAt: new Date().toISOString(),
+        body: runFailureCopyV1({
+          failure: input.failed.failure,
+          events: input.failed.events,
+        }).slice(0, 240),
+      },
+    ],
+  });
 }
 
 /**
