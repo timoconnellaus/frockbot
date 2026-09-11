@@ -5,7 +5,7 @@ leave the Worker.
 
 | Feature                                 | Route                                | Server                                                                    | Providers                                                                 |
 | --------------------------------------- | ------------------------------------ | ------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| Composer dictation (one Bot's composer) | `GET /api/voice/dictation` WebSocket | Worker-level relay, `apps/cloudflare/src/voice-dictation.ts`              | OpenAI Realtime transcription, model `gpt-realtime-whisper`               |
+| Composer dictation (one Bot's composer) | `GET /api/voice/dictation` WebSocket | Worker-level relay, `apps/cloudflare/src/voice-dictation.ts`              | OpenAI Realtime transcription, model `gpt-live-transcribe`                |
 | Continuous voice session (all Bots)     | `GET /api/voice/assistant` WebSocket | `VoiceAssistant` Durable Object, `apps/cloudflare/src/voice-assistant.ts` | Workers AI Flux STT → Frock AI gateway (chat) → ElevenLabs Flash v2.5 TTS |
 | Capability probe                        | `GET /api/voice/capabilities`        | Gateway                                                                   | —                                                                         |
 
@@ -92,7 +92,11 @@ opened the relay takes the account's dictation lease from the voice object:
 one capture at a time per account, 60 s of provider time booked ahead and
 renewed every 30 s while the capture runs, refunded for the part not used on
 release, and refused (`error` with code `limit`) when the day's 120 minutes
-are spent or another capture holds the lease. Upstream session shape (verified against the OpenAI Realtime
+are spent or another capture holds the lease. The model is `gpt-live-transcribe`
+because the relay depends on server-side turn detection for its committed
+segments, and OpenAI's realtime VAD guide states that `gpt-realtime-whisper`
+requires turn detection to be omitted or null while models that support VAD
+default to `server_vad`. Upstream session shape (verified against the OpenAI Realtime
 transcription guide and API reference, 2026-09):
 
 ```json
@@ -104,7 +108,7 @@ transcription guide and API reference, 2026-09):
       "input": {
         "format": { "type": "audio/pcm", "rate": 24000 },
         "noise_reduction": { "type": "near_field" },
-        "transcription": { "model": "gpt-realtime-whisper" },
+        "transcription": { "model": "gpt-live-transcribe" },
         "turn_detection": {
           "type": "server_vad",
           "threshold": 0.5,

@@ -6,21 +6,28 @@
 // so a second provider is a change to this file alone.
 //
 // Contract, from the OpenAI Realtime transcription guide and the
-// `session.update` reference (read 2026-09-10): a `transcription` session is
+// `session.update` reference (read 2026-09-11): a `transcription` session is
 // configured with `session.audio.input.{format, noise_reduction,
 // transcription, turn_detection}`; audio arrives as base64 PCM16 in
 // `input_audio_buffer.append`; `input_audio_buffer.commit` closes a turn by
 // hand; the server answers `conversation.item.input_audio_transcription.delta`
-// and `.completed`. The model page for `gpt-realtime-whisper` names it a
-// streaming speech-to-text model billed per minute, served on the realtime
-// transcription endpoint.
+// and `.completed`.
+//
+// The model is `gpt-live-transcribe`, OpenAI's current streaming
+// speech-to-text model, billed per audio minute on the realtime transcription
+// endpoint. It is here because the realtime VAD guide says models that
+// support VAD default to `server_vad` while `gpt-realtime-whisper` — what
+// dictation asked for before — requires turn detection omitted or null, which
+// is why every capture died at the first `session.update`. Server-side turn
+// detection is what gives the relay its committed segments, so the model
+// moved rather than the turn detection.
 import {
   VOICE_DICTATION_SAMPLE_RATE_V1,
   type VoiceDictationServerFrameV1,
 } from "./shared.js";
 
 /** The streaming transcription model dictation uses. */
-export const VOICE_DICTATION_MODEL_V1 = "gpt-realtime-whisper";
+export const VOICE_DICTATION_MODEL_V1 = "gpt-live-transcribe";
 
 export interface VoiceDictationEnvV1 {
   /** The direct OpenAI path. Deployed as a Worker secret. */
