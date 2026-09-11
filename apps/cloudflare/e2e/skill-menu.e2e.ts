@@ -33,22 +33,22 @@ async function expectHighlighted(
  * Choosing a Skill rewrites the field's value from Dart, and the engine
  * answers a rewrite by tearing its editing element down — so between one
  * popover and the next there may be no `<input>` inside the composer's
- * semantics node at all. Anything holding the old element, `focus()` included,
- * then types into nothing. The gesture is on the semantics node, which is
- * always there, and the element is looked up again afterwards.
+ * semantics node at all. The gesture is on the semantics node, which is
+ * always there, and it opens a fresh editing session. The one thing that has
+ * to be true before a keystroke is sent is that the new element has the
+ * focus: a key pressed while the engine is still building it goes nowhere,
+ * which is the whole of what used to be covered by retrying this for a
+ * minute with fixed waits inside. Waiting on the focus itself is exact, and
+ * every step then has one bounded auto-wait of its own.
  */
 async function openPopover(page: Page): Promise<void> {
-  await expect(async () => {
-    await sem(page, "chat-composer").click();
-    // The engine builds the editing element when it opens the session, so this
-    // is the first moment there is one to type into.
-    const composer = composerInput(page);
-    await expect(composer).toBeVisible({ timeout: 5_000 });
-    await composer.press("ControlOrMeta+a");
-    await composer.pressSequentially("/");
-    await expect(composer).toHaveValue("/");
-    await expect(sem(page, "skill-menu")).toBeVisible({ timeout: 5_000 });
-  }).toPass({ timeout: 60_000 });
+  await sem(page, "chat-composer").click();
+  const composer = composerInput(page);
+  await expect(composer).toBeFocused();
+  await composer.press("ControlOrMeta+a");
+  await composer.pressSequentially("/");
+  await expect(composer).toHaveValue("/");
+  await expect(sem(page, "skill-menu")).toBeVisible();
 }
 
 test("the Skill popover keeps the highlight the arrow keys put on it", async ({
