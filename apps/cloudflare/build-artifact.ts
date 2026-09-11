@@ -43,6 +43,25 @@ const result = await Bun.build({
   define: {
     __FROCKBOT_FLUTTER_BUILD__: JSON.stringify(flutterBuild),
     __FROCKBOT_CLIENT_ICON__: JSON.stringify(clientIcon),
+    // The module identity this bundle reports to itself.
+    //
+    // A Worker Loader module has no file URL, so `import.meta.url` is
+    // `undefined` inside the isolate. That is fatal rather than cosmetic: the
+    // provider catalog reaches the model provider SDKs (`openai`,
+    // `@anthropic-ai/sdk`, `google-auth-library` and the CommonJS packages
+    // underneath them), and for those Bun emits
+    // `var require = createRequire(import.meta.url)` as the bundle's *first*
+    // top-level statement. `createRequire(undefined)` throws
+    // `TypeError: The argument 'path' must be a file URL object, a file URL
+    // string, or an absolute path string`, so the artifact never finishes
+    // evaluating and every request answers `Failed to start Worker`.
+    //
+    // Naming the bundle here is what a module loaded from a file would have
+    // had. The `require` it builds is only ever called from inside the lazy
+    // CommonJS wrappers of those SDKs' Node-only code paths — none of which an
+    // artifact takes — and when one is, it reaches the `nodejs_compat`
+    // built-ins exactly as any other `require` in the Worker does.
+    "import.meta.url": JSON.stringify("file:///frockbot/foundation-v1.mjs"),
   },
 });
 
@@ -51,6 +70,15 @@ if (result.success) {
     output.path.endsWith(".mjs"),
   );
   if (!artifact) throw new Error("user application artifact was not emitted");
+  // The `import.meta.url` substitution above is load-bearing, and a bundler
+  // that stopped honouring it would leave an artifact that builds, ships, and
+  // then fails to evaluate in every isolate that loads it. That is only
+  // visible in the browser end-to-end job, hours later, as
+  // `Failed to start Worker`. Read the bytes back instead.
+  if ((await readFile(artifact.path, "utf8")).includes("import.meta.url"))
+    throw new Error(
+      "user application artifact still reads import.meta.url, which is undefined in a Worker Loader isolate",
+    );
   process.stdout.write(`Built ${artifact.path} (${artifact.size} bytes)\n`);
 } else {
   for (const log of result.logs) process.stderr.write(`${String(log)}\n`);
