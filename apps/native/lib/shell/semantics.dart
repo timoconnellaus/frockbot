@@ -15,6 +15,7 @@ abstract final class ShellIds {
   static const sidebarSearch = 'sidebar-search';
   static const sidebarCreateBot = 'sidebar-create-bot';
   static const sidebarProfile = 'sidebar-profile';
+  static const sidebarMarketplace = 'sidebar-marketplace';
   static const sidebarHiddenToggle = 'sidebar-hidden-toggle';
   static const sidebarRetry = 'sidebar-retry';
   static const conversation = 'shell-conversation';
@@ -108,7 +109,6 @@ abstract final class SettingsIds {
   static const profileName = 'profile-name';
   static const profileSettings = 'profile-settings';
   static const profileModels = 'profile-models';
-  static const profileConnections = 'profile-connections';
   static const profileManageBots = 'profile-manage-bots';
   static const profileSignOut = 'profile-sign-out';
   static const profileVersion = 'profile-version';
@@ -145,6 +145,11 @@ abstract final class SettingsIds {
 abstract final class ConnectorIds {
   static const document = 'connections-document';
   static const refresh = 'connections-refresh';
+
+  /// The Marketplace dialog a desktop opens from the foot of the sidebar; a
+  /// phone pushes the same document as a page, and the document's own id is
+  /// the marker on both.
+  static const marketplaceDialog = 'marketplace-dialog';
 
   /// The connect form of the provider at `index`, field by field. These are
   /// the projected ids from `connectionsDocumentV1`.

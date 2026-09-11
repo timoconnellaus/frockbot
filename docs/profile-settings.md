@@ -15,7 +15,14 @@ recommended zero-setup choice. Connecting or managing a provider opens its
 account page inside the app. API keys remain write-only. Custom server
 addresses and provider-specific settings are collapsed under Advanced.
 Image generation is a separate Models destination with readable model names.
-Connected apps excludes model providers and links to Messages on your Mac.
+
+The Marketplace is the services a Bot can be given and the accounts already on
+them — every connector, and never a model provider. It is not a Profile entry:
+its door is on the Bot list itself, beside the avatar on a phone and a named
+row at the foot of the sidebar on a desktop. A phone opens it as a page and a
+list; a desktop opens it as a dialog over the shell, the same providers laid
+out as a grid of cards, three across at full width. It links to Messages on
+your Mac. What Plugins calls "Set up in Marketplace" lands here.
 
 Plugins lists extensions, with visible purpose and status, search, and
 collapsed version/configuration/enablement controls. The current deployment

@@ -162,6 +162,77 @@ void main() {
     api.close();
   });
 
+  testWidgets('the Marketplace is a page on a phone and a dialog beside it', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final store = MemoryStore();
+    final api = OfflineApi(store);
+    final sessions = BotSessions(api: api, store: store);
+    final links = ValueNotifier<String?>(null);
+    Widget shell() => MaterialApp(
+      theme: FrockTheme.theme(Brightness.dark),
+      home: AppShell(
+        api: api,
+        store: store,
+        sessions: sessions,
+        userId: 'test-user',
+        botLinks: links,
+        onSignOut: () async {},
+      ),
+    );
+
+    // A phone: the door is in the list's bar, and it opens a page over the
+    // list, with the way back in that page's bar.
+    tester.view.physicalSize = const Size(320, 800);
+    await tester.pumpWidget(shell());
+    await tester.pumpAndSettle();
+    expect(find.text('Marketplace'), findsNothing);
+    await tester.tap(identifiedBy(ShellIds.sidebarMarketplace));
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(AppBar, 'Marketplace'), findsOneWidget);
+    expect(find.byType(Dialog), findsNothing);
+    expect(identifiedBy(ShellIds.sidebar), findsNothing);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(identifiedBy(ShellIds.sidebar).hitTestable(), findsOneWidget);
+
+    // A desktop: the door is the foot of the column, named, and it opens a
+    // dialog over the shell rather than a page in place of it.
+    await tester.pumpWidget(const SizedBox());
+    tester.view.physicalSize = const Size(1200, 800);
+    await tester.pumpWidget(shell());
+    await tester.pumpAndSettle();
+    final foot = identifiedBy(ShellIds.sidebarMarketplace);
+    expect(
+      find.descendant(of: foot, matching: find.text('Marketplace')),
+      findsOneWidget,
+    );
+    await tester.tap(foot);
+    await tester.pumpAndSettle();
+    expect(find.byType(Dialog), findsOneWidget);
+    expect(identifiedBy(ConnectorIds.marketplaceDialog), findsOneWidget);
+    expect(find.widgetWithText(AppBar, 'Marketplace'), findsOneWidget);
+    expect(identifiedBy(ShellIds.sidebar), findsOneWidget);
+    await tester.tap(find.byTooltip('Close marketplace'));
+    await tester.pumpAndSettle();
+    expect(find.byType(Dialog), findsNothing);
+
+    // It is not in the account sheet any more: the list is where it lives.
+    await tester.tap(identifiedBy(ShellIds.sidebarProfile));
+    await tester.pumpAndSettle();
+    expect(identifiedBy(SettingsIds.profileMenu), findsOneWidget);
+    expect(find.text('Connected apps'), findsNothing);
+    expect(find.widgetWithText(ListTile, 'Marketplace'), findsNothing);
+
+    await tester.pumpWidget(const SizedBox());
+    sessions.clear();
+    links.dispose();
+    api.close();
+  });
+
   testWidgets('Settings back returns to the Profile page', (tester) async {
     tester.view.physicalSize = const Size(900, 900);
     tester.view.devicePixelRatio = 1;

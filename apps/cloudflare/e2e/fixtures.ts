@@ -629,9 +629,21 @@ export async function openModels(page: Page): Promise<void> {
   await openProfileSurface(page, "profile-models", "settings-model-field");
 }
 
-/** Open Connectors: the accounts a User authorizes for every Bot they own. */
+/**
+ * Open the Marketplace: the services a User authorizes once for every Bot
+ * they own. Its door is on the Bot list itself rather than in the profile
+ * sheet — beside the avatar on a phone, the foot of the column on a desktop —
+ * and the same identifier names both. On a desktop it is a dialog over the
+ * shell, on a phone a page; the document's marker is the same in either.
+ */
 export async function openConnectors(page: Page): Promise<void> {
-  await openProfileSurface(page, "profile-connections", "connections-document");
+  await expect(async () => {
+    await revealSidebar(page);
+    await press(sem(page, "sidebar-marketplace"));
+    await expect(sem(page, "connections-document")).toBeVisible({
+      timeout: 10_000,
+    });
+  }).toPass({ timeout: 120_000 });
 }
 
 /** Open account Settings. */

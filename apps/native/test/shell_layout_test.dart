@@ -452,6 +452,7 @@ void main() {
             onCreateBot: () {},
             onSearch: () {},
             onProfile: () {},
+            onMarketplace: () {},
             onVoice: () {},
             voiceActive: false,
             onToggleHidden: () {},
@@ -469,11 +470,73 @@ void main() {
       expect(byIdentifier(ShellIds.sidebarProfile), findsOneWidget);
       // Four controls and no more: you, a call, search, a new Bot. The
       // account is behind the first and each Bot's own affairs are on its
-      // page.
+      // page. The Marketplace is the column's foot, a named row below the
+      // list rather than a fifth icon in its bar.
       expect(find.byType(IconButton), findsNWidgets(4));
+      final foot = byIdentifier(ShellIds.sidebarMarketplace);
+      expect(foot, findsOneWidget);
+      expect(
+        find.descendant(of: foot, matching: find.text('Marketplace')),
+        findsOneWidget,
+      );
+      expect(
+        tester.getTopLeft(foot).dy,
+        greaterThan(
+          tester.getBottomLeft(byIdentifier(ShellIds.sidebarBot('scout'))).dy,
+        ),
+      );
       expect(find.text('2'), findsOneWidget);
       // A pinned Bot is a tile instead of a row, never both.
       expect(byIdentifier(ShellIds.sidebarBot('rosemary')), findsNothing);
+    });
+
+    testWidgets('a phone puts the Marketplace beside the account', (
+      tester,
+    ) async {
+      var opened = 0;
+      await tester.pumpWidget(
+        host(
+          ShellSidebar(
+            bots: [bot('scout', 'Scout')],
+            profiles: const {},
+            unread: const {},
+            archived: const {},
+            activeBotId: null,
+            workingBotId: null,
+            loaded: true,
+            showHidden: false,
+            phone: true,
+            onSelect: (_) {},
+            onCreateBot: () {},
+            onSearch: () {},
+            onProfile: () {},
+            onMarketplace: () => opened++,
+            onVoice: () {},
+            voiceActive: false,
+            onToggleHidden: () {},
+            onRetry: () async {},
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // An icon in the bar, not a row at the foot: the foot of a phone's
+      // full-height list is where a thumb reaches last.
+      final marketplace = byIdentifier(ShellIds.sidebarMarketplace);
+      expect(marketplace, findsOneWidget);
+      expect(find.text('Marketplace'), findsNothing);
+      expect(find.byTooltip('Marketplace'), findsOneWidget);
+      expect(find.byType(IconButton), findsNWidgets(5));
+      final profile = tester.getRect(byIdentifier(ShellIds.sidebarProfile));
+      final door = tester.getRect(marketplace);
+      expect(door.left, greaterThanOrEqualTo(profile.right - 1));
+      expect(
+        door.left,
+        lessThan(tester.getRect(byIdentifier(ShellIds.sidebarSearch)).left),
+      );
+      expect((door.center.dy - profile.center.dy).abs(), lessThan(1));
+      await tester.tap(marketplace);
+      expect(opened, 1);
     });
 
     testWidgets('an unreadable list offers the read again', (tester) async {
@@ -494,6 +557,7 @@ void main() {
             onCreateBot: () {},
             onSearch: () {},
             onProfile: () {},
+            onMarketplace: () {},
             onVoice: () {},
             voiceActive: false,
             onToggleHidden: () {},

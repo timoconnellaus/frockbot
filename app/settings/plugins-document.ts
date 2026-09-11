@@ -38,7 +38,7 @@ type Plugin = PluginsFrame["plugins"][number];
 
 const HOME_LABELS: Record<Plugin["home"], string | undefined> = {
   models: "Models",
-  connections: "Connected apps",
+  connections: "Marketplace",
   "user-settings": "Feature settings",
   none: undefined,
 };

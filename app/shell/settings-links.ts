@@ -188,7 +188,7 @@ export const SETTINGS_ANCHORS_V1: readonly SettingsAnchorV1[] = [
   {
     anchor: "user-connections",
     surface: "connections",
-    label: "Connectors",
+    label: "Marketplace",
     scope: "user",
   },
   {
