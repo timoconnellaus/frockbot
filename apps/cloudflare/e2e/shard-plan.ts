@@ -12,32 +12,75 @@
 // budget (`supervisor.ts`), after which every remaining spec in the shard
 // fails on a server that is no longer there.
 //
-// `planShards` packs the same indivisible files by size instead: largest
-// first, each onto the shard that is currently the lightest. The result is
-// deterministic — the same corpus always produces the same assignment, so a
-// rerun of one shard runs the same specs — and no shard is more than one file
-// heavier than it has to be.
+// Counting tests was the first fix, and it was not enough: a test here costs
+// anywhere from half a second to a minute and a half, so four shards of twelve
+// tests each still ran for five, eleven, five and seven minutes. `planShards`
+// therefore packs by *measured seconds* — `spec-weights.json`, harvested from
+// a green run's blob reports by `harvest-spec-weights.ts` — and only falls
+// back to the test count for a file the table has never seen, priced at the
+// measured average per test so a new spec is neither free nor a whole shard.
+//
+// The packing is greedy longest-first: the costliest file goes to the shard
+// that is currently the lightest. The result is deterministic — the same
+// corpus always produces the same assignment, so a rerun of one shard runs
+// the same specs — and no shard is more than one file heavier than it has to
+// be.
 //
 // `balanced-shard-reporter.ts` is what applies this to a run.
 
-/** A spec file and how many tests it contributes. */
+/** A spec file, how many tests it holds, and how long it took last time. */
 export interface SpecWeight {
   readonly file: string;
   readonly tests: number;
+  /** Measured wall-clock of the whole file; absent for a file not yet timed. */
+  readonly seconds?: number;
 }
 
-/** Files sorted the way both plans read them: heaviest first, then by name. */
-function bySizeThenName(specs: readonly SpecWeight[]): SpecWeight[] {
+/** A spec file with the cost the packer will use for it. */
+export interface SpecCost {
+  readonly file: string;
+  readonly tests: number;
+  readonly cost: number;
+}
+
+/**
+ * The cost of each file in seconds, or the nearest thing to seconds a file
+ * without a measurement can be given.
+ *
+ * A file the table knows is its measured seconds. A file it does not know is
+ * its test count times the measured seconds per test across the files that
+ * are known — so the untimed newcomer is priced like an average test rather
+ * than like nothing. With no measurements at all the rate is one, and the
+ * plan is the old count-balanced one.
+ */
+export function weighSpecs(specs: readonly SpecWeight[]): SpecCost[] {
+  const measured = specs.filter((spec) => spec.seconds !== undefined);
+  const measuredSeconds = measured.reduce(
+    (sum, spec) => sum + (spec.seconds ?? 0),
+    0,
+  );
+  const measuredTests = measured.reduce((sum, spec) => sum + spec.tests, 0);
+  const secondsPerTest =
+    measuredTests > 0 ? measuredSeconds / measuredTests : 1;
+  return specs.map((spec) => ({
+    file: spec.file,
+    tests: spec.tests,
+    cost: spec.seconds ?? spec.tests * secondsPerTest,
+  }));
+}
+
+/** Files sorted the way the plan reads them: costliest first, then by name. */
+function byCostThenName(specs: readonly SpecCost[]): SpecCost[] {
   return [...specs].sort(
     (left, right) =>
-      right.tests - left.tests || (left.file < right.file ? -1 : 1),
+      right.cost - left.cost || (left.file < right.file ? -1 : 1),
   );
 }
 
 /**
  * Divide the spec files between `total` shards, keeping each file whole.
  *
- * Greedy longest-first packing: the heaviest file goes to the emptiest shard.
+ * Greedy longest-first packing: the costliest file goes to the emptiest shard.
  * That is optimal to within one file for this shape of problem, and it is
  * stable — no randomness, no dependence on file order in the directory.
  */
@@ -46,17 +89,17 @@ export function planShards(
   total: number,
 ): string[][] {
   if (total < 1) throw new Error("a run has at least one shard");
-  const shards: { files: string[]; tests: number }[] = Array.from(
+  const shards: { files: string[]; cost: number }[] = Array.from(
     { length: total },
-    () => ({ files: [], tests: 0 }),
+    () => ({ files: [], cost: 0 }),
   );
-  for (const spec of bySizeThenName(specs)) {
+  for (const spec of byCostThenName(weighSpecs(specs))) {
     let lightest = shards[0];
     for (const shard of shards) {
-      if (shard.tests < lightest.tests) lightest = shard;
+      if (shard.cost < lightest.cost) lightest = shard;
     }
     lightest.files.push(spec.file);
-    lightest.tests += spec.tests;
+    lightest.cost += spec.cost;
   }
   return shards.map((shard) => [...shard.files].sort());
 }
@@ -114,5 +157,18 @@ export function shardSizes(
   const tests = new Map(specs.map((spec) => [spec.file, spec.tests]));
   return plan.map((files) =>
     files.reduce((sum, file) => sum + (tests.get(file) ?? 0), 0),
+  );
+}
+
+/** How many seconds each shard of a plan is expected to run, by the table. */
+export function shardSeconds(
+  specs: readonly SpecWeight[],
+  plan: readonly string[][],
+): number[] {
+  const costs = new Map(
+    weighSpecs(specs).map((spec) => [spec.file, spec.cost]),
+  );
+  return plan.map((files) =>
+    files.reduce((sum, file) => sum + (costs.get(file) ?? 0), 0),
   );
 }

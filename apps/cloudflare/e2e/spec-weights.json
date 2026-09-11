@@ -1,0 +1,34 @@
+{
+  "source": {
+    "run": "https://github.com/timoconnellaus/frockbot/actions/runs/34561531194",
+    "commit": "0bf82fa",
+    "harvested": "2026-09-11"
+  },
+  "regenerate": "bun e2e/harvest-spec-weights.ts <run id | directory>",
+  "seconds": {
+    "admin.e2e.ts": 8.9,
+    "applets-publish.e2e.ts": 73.1,
+    "applets-shell.e2e.ts": 174.7,
+    "applets.e2e.ts": 107.6,
+    "bot-info.e2e.ts": 12.8,
+    "bot-settings.e2e.ts": 7.5,
+    "chat.e2e.ts": 128.9,
+    "computer-presence.e2e.ts": 13.8,
+    "continuous-chat.e2e.ts": 83,
+    "defaults.e2e.ts": 5.1,
+    "delete-bot.e2e.ts": 29.9,
+    "errors.e2e.ts": 11.3,
+    "first-run.e2e.ts": 3.7,
+    "mobile.e2e.ts": 54.9,
+    "package-iframe-ui.e2e.ts": 5.5,
+    "pinned-bots.e2e.ts": 8.6,
+    "profile.e2e.ts": 27.9,
+    "routine-failure-message.e2e.ts": 52,
+    "routines.e2e.ts": 15.3,
+    "settings-models.e2e.ts": 48.3,
+    "sidebar-groups.e2e.ts": 7.3,
+    "skill-menu.e2e.ts": 41.7,
+    "theme.e2e.ts": 3.4,
+    "unread-focus.e2e.ts": 130.4
+  }
+}
