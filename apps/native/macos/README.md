@@ -71,17 +71,19 @@ python3 scripts/mac-release.py 1.1.0 --release
 
 The script signs nested frameworks, helper and app separately with hardened
 runtime, checks notarization is **Accepted**, staples and validates its ticket,
-and passes Gatekeeper assessment before producing `FrockBot-macos.zip`. Signing
-failures must never result in an unsigned public release.
+and passes Gatekeeper assessment, then packages the stapled app into a
+Developer ID-signed `FrockBot-macos.dmg` with an Applications shortcut and
+notarizes and staples the image too. Signing failures must never result in an
+unsigned public release.
 
 Push `mac-v1.1.0` on that same commit. The Mac release workflow qualifies the
 universal app and creates a draft. Watch the tag to completion with
-`bun scripts/ci-watch.ts`. Upload the verified ZIP to that draft, verify its
-checksum and name, and publish it. Only once that asset is public does the
-website gain a Mac download button, pointing at that explicit release so cloud
-releases cannot accidentally replace it. That button lives in
-`apps/marketing/public/index.html` and currently points at `mac-v1.1.0`; update
-its link with each Mac release.
+`bun scripts/ci-watch.ts`. Upload the verified DMG to that draft, verify its
+checksum and name, and publish it. The website's "Download for Mac" button
+points at `/download/mac`, which the marketing worker redirects to
+`releases/latest/download/FrockBot-macos.dmg`, so the newest published,
+non-prerelease GitHub release that carries that asset is what visitors get;
+no link edit is needed per release.
 Cloud tags (`v*`) and Mac tags (`mac-v*`) ship independently; merging alone ships
 neither.
 

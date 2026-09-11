@@ -8,6 +8,29 @@ interface Env {
 
 const CANONICAL_HOST = "frockbot.com";
 
+// The Mac download is a stable site URL, not a GitHub asset link baked into
+// the page: GitHub resolves `releases/latest/download/<asset>` to the newest
+// published, non-prerelease release, and every release attaches the disk
+// image under this fixed name. The redirect is temporary so the target can
+// move without stale caches.
+export const MAC_DOWNLOAD_PATH = "/download/mac";
+export const MAC_DOWNLOAD_URL =
+  "https://github.com/timoconnellaus/frockbot/releases/latest/download/FrockBot-macos.dmg";
+
+export function macDownloadRedirect(request: Request): Response | null {
+  let url: URL;
+  try {
+    url = new URL(request.url);
+  } catch {
+    return null;
+  }
+  if (url.pathname.replace(/\/+$/, "") !== MAC_DOWNLOAD_PATH) return null;
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    return new Response(null, { status: 405, headers: { allow: "GET, HEAD" } });
+  }
+  return Response.redirect(MAC_DOWNLOAD_URL, 302);
+}
+
 const SECURITY_HEADERS = {
   "cross-origin-opener-policy": "same-origin",
   "content-security-policy": [
@@ -54,6 +77,8 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const canonical = canonicalUrl(request);
     if (canonical) return Response.redirect(canonical, 308);
+    const download = macDownloadRedirect(request);
+    if (download) return download;
     return withSecurityHeaders(await env.ASSETS.fetch(request));
   },
 };

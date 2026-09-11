@@ -614,53 +614,80 @@ jobs:
               raise SystemExit("The distributable desktop app lost its protected Keychain group.")
           PY
 
-      - name: Notarize and staple desktop app
+      - name: Notarize and staple desktop app and disk image
         env:
           APPLE_NOTARIZATION_ID: ${{ secrets.APPLE_NOTARIZATION_ID }}
           APPLE_NOTARIZATION_PASSWORD: ${{ secrets.APPLE_NOTARIZATION_PASSWORD }}
-          VERSION: ${{ needs.verify.outputs.version }}
+          SIGNING_IDENTITY: ${{ steps.signing.outputs.identity }}
         shell: bash
         run: |
           set -euo pipefail
           app="$RUNNER_TEMP/FrockBot.xcarchive/Products/Applications/FrockBot.app"
           submission="$RUNNER_TEMP/FrockBot-notarization.zip"
-          result="$RUNNER_TEMP/FrockBot-notarization.json"
-          artifact="$RUNNER_TEMP/FrockBot-$VERSION-macos.zip"
+          dmg="$RUNNER_TEMP/FrockBot-macos.dmg"
 
-          ditto -c -k --keepParent "$app" "$submission"
-          set +e
-          xcrun notarytool submit "$submission" \
-            --apple-id "$APPLE_NOTARIZATION_ID" \
-            --password "$APPLE_NOTARIZATION_PASSWORD" \
-            --team-id Q444L76529 \
-            --wait \
-            --output-format json > "$result"
-          submit_status=$?
-          set -e
-          notarization_status="$(plutil -extract status raw "$result" 2>/dev/null || true)"
-          if (( submit_status != 0 )) || [[ "$notarization_status" != Accepted ]]; then
-            cat "$result"
-            submission_id="$(plutil -extract id raw "$result" 2>/dev/null || true)"
-            if [[ -n "$submission_id" ]]; then
-              xcrun notarytool log "$submission_id" \
-                --apple-id "$APPLE_NOTARIZATION_ID" \
-                --password "$APPLE_NOTARIZATION_PASSWORD" \
-                --team-id Q444L76529 || true
+          notarize() {
+            local target="$1"
+            local result
+            result="$RUNNER_TEMP/$(basename "$target").notarization.json"
+            set +e
+            xcrun notarytool submit "$target" \
+              --apple-id "$APPLE_NOTARIZATION_ID" \
+              --password "$APPLE_NOTARIZATION_PASSWORD" \
+              --team-id Q444L76529 \
+              --wait \
+              --output-format json > "$result"
+            local submit_status=$?
+            set -e
+            local status
+            status="$(plutil -extract status raw "$result" 2>/dev/null || true)"
+            if (( submit_status != 0 )) || [[ "$status" != Accepted ]]; then
+              cat "$result"
+              local submission_id
+              submission_id="$(plutil -extract id raw "$result" 2>/dev/null || true)"
+              if [[ -n "$submission_id" ]]; then
+                xcrun notarytool log "$submission_id" \
+                  --apple-id "$APPLE_NOTARIZATION_ID" \
+                  --password "$APPLE_NOTARIZATION_PASSWORD" \
+                  --team-id Q444L76529 || true
+              fi
+              return 1
             fi
-            exit 1
-          fi
+          }
 
+          # The app is notarized and stapled first so the copy inside the
+          # image carries its own ticket; then the image is notarized and
+          # stapled as its own artifact, which is what Apple expects of a
+          # disk image that is the public download.
+          ditto -c -k --keepParent "$app" "$submission"
+          notarize "$submission"
           xcrun stapler staple "$app"
           xcrun stapler validate "$app"
           spctl --assess --type execute --verbose=4 "$app"
           codesign --verify --deep --strict --verbose=2 "$app"
-          ditto -c -k --keepParent "$app" "$artifact"
 
-      - name: Upload notarized desktop app
+          scripts/mac-dmg.sh "$app" "$dmg" "$SIGNING_IDENTITY"
+          notarize "$dmg"
+          xcrun stapler staple "$dmg"
+          xcrun stapler validate "$dmg"
+          spctl --assess --type open --context context:primary-signature --verbose=4 "$dmg"
+
+          # Prove the image the website will serve mounts and carries the
+          # stapled app next to the Applications shortcut.
+          mount="$RUNNER_TEMP/FrockBot-mount"
+          hdiutil attach -readonly -nobrowse -noautoopen -mountpoint "$mount" "$dmg" >/dev/null
+          trap 'hdiutil detach "$mount" >/dev/null || true' EXIT
+          test -L "$mount/Applications"
+          xcrun stapler validate "$mount/FrockBot.app"
+          codesign --verify --deep --strict "$mount/FrockBot.app"
+          hdiutil detach "$mount" >/dev/null
+          trap - EXIT
+
+      - name: Upload notarized disk image
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: frockbot-macos-release
-          path: ${{ runner.temp }}/FrockBot-${{ needs.verify.outputs.version }}-macos.zip
+          path: ${{ runner.temp }}/FrockBot-macos.dmg
           if-no-files-found: error
           compression-level: 0
           retention-days: 7
@@ -688,21 +715,23 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Download notarized desktop app
+      - name: Download notarized disk image
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: frockbot-macos-release
           path: .release-assets
 
-      - name: Create GitHub release and attach desktop app
+      - name: Create GitHub release and attach disk image
+        # The asset keeps a fixed name so the website's /download/mac redirect
+        # can point at `releases/latest/download/FrockBot-macos.dmg` and never
+        # needs editing per release.
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          VERSION: ${{ needs.verify.outputs.version }}
         shell: bash
         run: |
           set -euo pipefail
-          asset=".release-assets/FrockBot-$VERSION-macos.zip"
+          asset=".release-assets/FrockBot-macos.dmg"
           test -f "$asset"
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             echo "release $GITHUB_REF_NAME already exists"

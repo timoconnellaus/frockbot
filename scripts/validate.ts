@@ -52,8 +52,18 @@ export function ignoredWorkingPath(path: string): boolean {
   );
 }
 
+// Git exports GIT_DIR (and friends) to hooks, and this runs from the pre-push
+// hook. Every git call here is about `root`, so inherited repository pointers
+// must not redirect it: from a worktree hook they name the worktree's git
+// dir, which is not a work tree for any other `root`.
+export const GIT_ENV: Record<string, string | undefined> = Object.fromEntries(
+  Object.entries(process.env).filter(
+    ([name]) => !name.startsWith("GIT_") || name === "GIT_EXEC_PATH",
+  ),
+);
+
 function git(root: string, ...args: string[]): string {
-  const result = Bun.spawnSync(["git", ...args], { cwd: root });
+  const result = Bun.spawnSync(["git", ...args], { cwd: root, env: GIT_ENV });
   if (result.exitCode !== 0) throw new Error(result.stderr.toString());
   return result.stdout.toString();
 }

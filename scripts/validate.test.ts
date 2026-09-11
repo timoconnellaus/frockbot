@@ -10,11 +10,12 @@ import {
   requireLinearBranch,
   snapshot,
   validate,
+  GIT_ENV,
 } from "./validate";
 
 const roots: string[] = [];
 function git(root: string, ...args: string[]) {
-  const result = Bun.spawnSync(["git", ...args], { cwd: root });
+  const result = Bun.spawnSync(["git", ...args], { cwd: root, env: GIT_ENV });
   if (result.exitCode) throw new Error(result.stderr.toString());
 }
 function fixture() {

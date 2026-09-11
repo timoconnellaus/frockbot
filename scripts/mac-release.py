@@ -18,6 +18,17 @@ def run(*args):
     subprocess.run([str(arg) for arg in args], cwd=NATIVE if str(args[0]) == "flutter" else ROOT, check=True)
 
 
+def notarize(target, profile):
+    result = subprocess.run(["xcrun", "notarytool", "submit", str(target),
+        "--keychain-profile", profile, "--wait", "--output-format", "json"],
+        check=True, capture_output=True, text=True)
+    report = json.loads(result.stdout)
+    if report.get("status") != "Accepted":
+        raise RuntimeError(f"Notarization was not accepted (submission {report.get('id', 'unknown')})")
+    run("xcrun", "stapler", "staple", target)
+    run("xcrun", "stapler", "validate", target)
+
+
 def build(version, destination, identity=None, profile=None, provisioning=None):
     if not re.fullmatch(r"\d+\.\d+\.\d+", version):
         raise ValueError("Version must be major.minor.patch")
@@ -79,23 +90,27 @@ def build(version, destination, identity=None, profile=None, provisioning=None):
             run(*args, item)
         run("codesign", "--verify", "--deep", "--strict", app)
         if identity:
+            # Notarize and staple the app first so the copy inside the image
+            # carries its own ticket, then package, sign, notarize and staple
+            # the disk image that is the public download.
             submission = staging / "submission.zip"
             run("ditto", "-c", "-k", "--keepParent", app, submission)
-            result = subprocess.run(["xcrun", "notarytool", "submit", str(submission),
-                "--keychain-profile", profile, "--wait", "--output-format", "json"],
-                check=True, capture_output=True, text=True)
-            report = json.loads(result.stdout)
-            if report.get("status") != "Accepted":
-                raise RuntimeError(f"Notarization was not accepted (submission {report.get('id', 'unknown')})")
+            notarize(submission, profile)
             run("xcrun", "stapler", "staple", app)
             run("xcrun", "stapler", "validate", app)
             run("spctl", "--assess", "--type", "execute", "--verbose=2", app)
-        suffix = "" if identity else "-development"
-        archive = destination / f"FrockBot-macos{suffix}.zip"
+            archive = destination / "FrockBot-macos.dmg"
+        else:
+            archive = destination / "FrockBot-macos-development.zip"
         if archive.exists():
             raise FileExistsError(f"Refusing to replace {archive}")
         packaged = staging / archive.name
-        run("ditto", "-c", "-k", "--keepParent", app, packaged)
+        if identity:
+            run(ROOT / "scripts/mac-dmg.sh", app, packaged, identity)
+            notarize(packaged, profile)
+            run("spctl", "--assess", "--type", "open", "--context", "context:primary-signature", "--verbose=2", packaged)
+        else:
+            run("ditto", "-c", "-k", "--keepParent", app, packaged)
         # Reserve the destination atomically; a failed copy never looks like a release.
         with packaged.open("rb") as source, archive.open("xb") as target:
             try:

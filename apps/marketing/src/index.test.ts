@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import worker, { canonicalUrl, withSecurityHeaders } from "./index";
+import worker, {
+  MAC_DOWNLOAD_URL,
+  canonicalUrl,
+  withSecurityHeaders,
+} from "./index";
 
 function assets(response: Response) {
   return {
@@ -189,6 +193,39 @@ describe("marketing worker", () => {
     );
   });
 
+  test.each(["/download/mac", "/download/mac/"])(
+    "%s redirects to the latest notarized disk image on GitHub",
+    async (path: string) => {
+      let served = false;
+      const response = await worker.fetch(
+        new Request(`https://frockbot.com${path}`),
+        {
+          ASSETS: {
+            fetch: () => {
+              served = true;
+              return Promise.resolve(new Response("unused"));
+            },
+          },
+        },
+      );
+      expect(served).toBe(false);
+      expect(response.status).toBe(302);
+      expect(response.headers.get("location")).toBe(MAC_DOWNLOAD_URL);
+      expect(MAC_DOWNLOAD_URL).toBe(
+        "https://github.com/timoconnellaus/frockbot/releases/latest/download/FrockBot-macos.dmg",
+      );
+    },
+  );
+
+  test("the download redirect only answers GET and HEAD", async () => {
+    const response = await worker.fetch(
+      new Request("https://frockbot.com/download/mac", { method: "POST" }),
+      { ASSETS: assets(new Response("unused")) },
+    );
+    expect(response.status).toBe(405);
+    expect(response.headers.get("allow")).toBe("GET, HEAD");
+  });
+
   test("preserves an asset response while adding headers", async () => {
     const original = new Response("not found", { status: 404 });
     const secured = withSecurityHeaders(original);
@@ -285,16 +322,20 @@ describe("legal policy pages", () => {
     },
   );
 
-  test("the referenced GitHub symbol is defined once with real artwork", async () => {
-    const symbols = await spriteSymbols(await publicFile("index.html"));
+  test.each(["github-mark", "apple-mark"])(
+    "the referenced %s symbol is defined once with real artwork",
+    async (id: string) => {
+      const symbols = (
+        await spriteSymbols(await publicFile("index.html"))
+      ).filter((symbol) => symbol.id === id);
 
-    expect(symbols).toHaveLength(1);
-    const [symbol] = symbols;
-    expect(symbol.id).toBe("github-mark");
-    expect(symbol.viewBox).toBe("0 0 24 24");
-    expect(symbol.paths).toHaveLength(1);
-    expect(symbol.paths[0].trim()).not.toBe("");
-  });
+      expect(symbols).toHaveLength(1);
+      const [symbol] = symbols;
+      expect(symbol.viewBox).toBe("0 0 24 24");
+      expect(symbol.paths).toHaveLength(1);
+      expect(symbol.paths[0].trim()).not.toBe("");
+    },
+  );
 
   test("the GitHub sprite host stays out of the rendered layout", async () => {
     const spriteRules = parseStyleRules(await publicFile("styles.css")).filter(
@@ -391,5 +432,57 @@ describe("legal policy pages", () => {
     expect(terms).toContain('href="/"');
     expect(terms).toContain('href="/privacy/"');
     expect(terms.toLowerCase()).not.toContain("arbitration");
+  });
+});
+
+describe("Mac download button", () => {
+  test("the hero offers the site download route with the Apple mark", async () => {
+    const homepage = await publicFile("index.html");
+    const links: { classes: string; text: string; symbols: string[] }[] = [];
+    const current = () => links[links.length - 1];
+
+    await drain(
+      new HTMLRewriter()
+        .on('.hero-actions a[href="/download/mac"]', {
+          element(element) {
+            links.push({
+              classes: element.getAttribute("class") ?? "",
+              text: "",
+              symbols: [],
+            });
+          },
+          text(chunk) {
+            current().text += chunk.text;
+          },
+        })
+        .on('.hero-actions a[href="/download/mac"] use', {
+          element(element) {
+            current().symbols.push(element.getAttribute("href") ?? "");
+          },
+        }),
+      homepage,
+    );
+
+    expect(links).toHaveLength(1);
+    expect(links[0].classes.split(/\s+/)).toContain("button-mac");
+    expect(links[0].text.replace(/\s+/g, " ").trim()).toBe("Download for Mac");
+    expect(links[0].symbols).toEqual(["#apple-mark"]);
+    expect(homepage).not.toContain("releases/download/mac-v");
+  });
+
+  test("hero buttons keep their label on one line and wrap as a row", async () => {
+    const rules = parseStyleRules(await publicFile("styles.css"));
+    const declarations = (selector: string) =>
+      Object.assign(
+        {},
+        ...rules
+          .filter((rule) => rule.selectors.includes(selector))
+          .map((rule) => rule.declarations),
+      ) as Record<string, string>;
+
+    expect(declarations(".button")["white-space"]).toBe("nowrap");
+    expect(declarations(".hero-actions")["flex-wrap"]).toBe("wrap");
+    expect(declarations(".button-mac").background).toBe("var(--ink)");
+    expect(declarations(".button-mac svg").fill).toBe("currentColor");
   });
 });
