@@ -20,6 +20,7 @@ import {
   voiceRealtimeAppendV1,
   VOICE_REALTIME_PCM_RATE_V1,
 } from "./openai-realtime.js";
+import { VOICE_REALTIME_CONNECT_TIMEOUT_MS_V1 } from "./shared.js";
 import type {
   VoiceTranscriberSessionOptionsV1,
   VoiceTranscriberSessionV1,
@@ -55,6 +56,12 @@ export interface VoiceRealtimeSocketV1 {
 export interface OpenAiTranscriberOptionsV1 {
   /** Opens one upstream socket, already accepted. */
   openSocket: () => Promise<VoiceRealtimeSocketV1>;
+  /**
+   * How long the upstream has to answer the session frame before the session
+   * fails. An upgrade that returns 101 and then says nothing would otherwise
+   * leave the call listening to an upstream that never hears it.
+   */
+  connectTimeoutMs?: number;
 }
 
 /** What the assistant says to the upstream before any audio. */
@@ -92,7 +99,11 @@ export function createOpenAiTranscriberV1(
 ): VoiceTranscriberV1 {
   return {
     createSession(sessionOptions: VoiceTranscriberSessionOptionsV1 = {}) {
-      return openSession(options.openSocket, sessionOptions);
+      return openSession(
+        options.openSocket,
+        sessionOptions,
+        options.connectTimeoutMs ?? VOICE_REALTIME_CONNECT_TIMEOUT_MS_V1,
+      );
     },
   };
 }
@@ -100,6 +111,7 @@ export function createOpenAiTranscriberV1(
 function openSession(
   openSocket: () => Promise<VoiceRealtimeSocketV1>,
   options: VoiceTranscriberSessionOptionsV1,
+  connectTimeoutMs: number,
 ): VoiceTranscriberSessionV1 {
   const upsample = createPcm16Upsampler16to24V1();
   /** Text accumulated per item id, so an interim reads as the whole phrase. */
@@ -118,8 +130,16 @@ function openSession(
   // a rejection before then would be unhandled.
   readyPromise.catch(() => {});
 
+  let connectTimer: ReturnType<typeof setTimeout> | undefined;
+  const stopWaiting = () => {
+    if (connectTimer === undefined) return;
+    clearTimeout(connectTimer);
+    connectTimer = undefined;
+  };
+
   const fail = (message: string) => {
     if (closed) return;
+    stopWaiting();
     const error = new Error(message);
     if (!settled) {
       settled = true;
@@ -142,6 +162,7 @@ function openSession(
         if (ready) return;
         ready = true;
         settled = true;
+        stopWaiting();
         resolveReady();
         return;
       }
@@ -173,6 +194,11 @@ function openSession(
         return;
     }
   };
+
+  connectTimer = setTimeout(() => {
+    connectTimer = undefined;
+    fail("the transcription service didn't start in time");
+  }, connectTimeoutMs);
 
   void openSocket().then(
     (opened) => {
@@ -207,6 +233,7 @@ function openSession(
       if (closed) return;
       closed = true;
       settled = true;
+      stopWaiting();
       socket?.close();
     },
   };

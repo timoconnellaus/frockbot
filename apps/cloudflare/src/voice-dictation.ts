@@ -39,11 +39,11 @@ import {
 } from "@frockbot/app/voice/openai-realtime";
 import {
   decodeVoiceDictationClientFrameV1,
-  VOICE_DICTATION_CONNECT_TIMEOUT_MS_V1,
   VOICE_DICTATION_FINAL_TIMEOUT_MS_V1,
   VOICE_DICTATION_LEASE_RENEW_MS_V1,
   VOICE_DICTATION_MAX_MS_V1,
   VOICE_DICTATION_OPENING_BUFFER_BYTES_V1,
+  VOICE_REALTIME_CONNECT_TIMEOUT_MS_V1,
   type VoiceDictationServerFrameV1,
 } from "@frockbot/app/voice/shared";
 
@@ -162,7 +162,7 @@ function runRelay(
   options: VoiceDictationRelayOptions,
 ): void {
   const connectTimeoutMs =
-    options.connectTimeoutMs ?? VOICE_DICTATION_CONNECT_TIMEOUT_MS_V1;
+    options.connectTimeoutMs ?? VOICE_REALTIME_CONNECT_TIMEOUT_MS_V1;
   const finalTimeoutMs =
     options.finalTimeoutMs ?? VOICE_DICTATION_FINAL_TIMEOUT_MS_V1;
   const maxCaptureMs = options.maxCaptureMs ?? VOICE_DICTATION_MAX_MS_V1;

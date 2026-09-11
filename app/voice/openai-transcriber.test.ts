@@ -232,6 +232,18 @@ describe("the OpenAI assistant transcriber", () => {
     expect(fatals).toEqual([]);
   });
 
+  test("a handshake the upstream never answers fails the session", async () => {
+    const socket = new FakeSocket();
+    const session = createOpenAiTranscriberV1({
+      openSocket: () => Promise.resolve(socket),
+      connectTimeoutMs: 5,
+    }).createSession({});
+    await expect(session.waitUntilReady!()).rejects.toThrow(
+      "didn't start in time",
+    );
+    expect(socket.closed).toBe(1);
+  });
+
   test("a socket that never opens fails the session rather than hanging", async () => {
     const session = createOpenAiTranscriberV1({
       openSocket: () => Promise.reject(new Error("upgrade refused (401)")),
