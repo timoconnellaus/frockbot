@@ -103,3 +103,53 @@ test("a User edits and saves the prefilled profile name", async ({
   await openProfileMenu(page);
   await expect(sem(page, "profile-name")).toContainText("Tim");
 });
+
+test("a User picks a time zone from the profile's dropdown and it sticks", async ({
+  page,
+  userId,
+}, testInfo) => {
+  await openApplication(page, userId);
+  await openSettings(page);
+
+  const settings = sem(page, "settings-document");
+  const timezone = sem(settings, "view-field-j0.timezone");
+  // The zone is a dropdown and not a typed field: the account starts on UTC,
+  // and what a person does to change it is open a list and press one entry.
+  // The row announces itself as a button holding the current zone, and there
+  // is no text field on it for a person to type a zone into.
+  await expect(timezone).toHaveAttribute("role", "button");
+  await expect(timezone).toHaveAttribute("aria-label", /Time zone\s+UTC/);
+  await expect(timezone.locator("input")).toHaveCount(0);
+  await testInfo.attach("profile-timezone-dropdown.png", {
+    body: await page.screenshot(),
+    contentType: "image/png",
+  });
+
+  await tap(settings, "view-field-j0.timezone").click();
+  await settle(page);
+  // Every entry of the catalog is a readable label rather than a raw zone id.
+  const choice = page.locator('[aria-label="Africa / Abidjan"]').last();
+  await expect(choice).toBeVisible();
+  await choice.scrollIntoViewIfNeeded();
+  await testInfo.attach("profile-timezone-open.png", {
+    body: await page.screenshot(),
+    contentType: "image/png",
+  });
+  await choice.click();
+  await settle(page);
+  await expect(timezone).toHaveAttribute("aria-label", /Africa \/ Abidjan/);
+
+  await tap(settings, "view-action-save-0").click();
+  await expect(announcement(page, "Saved.")).toBeVisible({ timeout: 60_000 });
+
+  // The zone a person chose is the zone the account comes back on.
+  await closeOverlay(page);
+  await openSettings(page);
+  await expect(
+    sem(sem(page, "settings-document"), "view-field-j0.timezone"),
+  ).toHaveAttribute("aria-label", /Africa \/ Abidjan/);
+  await testInfo.attach("profile-timezone-saved.png", {
+    body: await page.screenshot(),
+    contentType: "image/png",
+  });
+});
