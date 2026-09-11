@@ -8,14 +8,19 @@ interface Env {
 
 const CANONICAL_HOST = "frockbot.com";
 
-// The Mac download is a stable site URL, not a GitHub asset link baked into
-// the page: GitHub resolves `releases/latest/download/<asset>` to the newest
-// published, non-prerelease release, and every release attaches the disk
-// image under this fixed name. The redirect is temporary so the target can
-// move without stale caches.
+// The Mac download is a stable site URL that lands on our own domain, not on
+// the repository. The release workflow writes every disk image to R2 under an
+// immutable versioned key and only then overwrites this `latest` pointer, so
+// what the site hands out moves when a release finishes rather than whenever
+// a Release object is edited. Serving from the R2 custom domain rather than
+// proxying through this Worker keeps range requests and resumable downloads —
+// a Worker would have to implement `Range` itself to survive a dropped
+// connection mid-download. The redirect is temporary so the target can move
+// without stale caches. The disk image is still attached to each GitHub
+// release as the per-tag provenance record.
 export const MAC_DOWNLOAD_PATH = "/download/mac";
 export const MAC_DOWNLOAD_URL =
-  "https://github.com/timoconnellaus/frockbot/releases/latest/download/FrockBot-macos.dmg";
+  "https://downloads.frockbot.com/mac/FrockBot-macos.dmg";
 
 export function macDownloadRedirect(request: Request): Response | null {
   let url: URL;
