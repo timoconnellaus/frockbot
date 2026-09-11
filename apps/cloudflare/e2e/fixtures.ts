@@ -875,7 +875,7 @@ export async function connectOllama(
   });
   const provider = group(page, "Ollama Cloud");
   await expect(provider).toBeVisible({ timeout: 60_000 });
-  await press(provider.getByText("Connect account", { exact: true }));
+  await press(provider.getByText("Connect", { exact: true }));
   await press(provider.getByText("Advanced — custom server", { exact: true }));
   await answerInputs([
     [

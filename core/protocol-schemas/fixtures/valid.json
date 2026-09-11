@@ -1182,6 +1182,7 @@
           "label": "Work calendar",
           "state": "ready",
           "packageId": "connector-calendar",
+          "connectionTypeId": "calendar-account",
           "kind": "connector",
           "authorization": "grant",
           "detail": "Available to every Bot"

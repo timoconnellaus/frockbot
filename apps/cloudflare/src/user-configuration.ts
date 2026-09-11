@@ -149,6 +149,8 @@ interface UserConfigurationEnv extends BillingEnv {
   ALLOW_DEVELOPMENT_AUTH?: string;
   BETTER_AUTH_URL?: string;
   CREDENTIAL_KEYRING?: string;
+  /** The Connected apps provider key. Absent, nothing can be connected. */
+  COMPOSIO_API_KEY?: string;
   /**
    * Signs every machine token and pairing code. Absent closes the door: a
    * pairing is refused rather than offered under a signature nothing could
@@ -326,7 +328,9 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
             ? this.env.MACHINE_TOKEN_SECRET
             : name === "BETTER_AUTH_URL"
               ? this.env.BETTER_AUTH_URL
-              : this.env.CREDENTIAL_KEYRING,
+              : name === "COMPOSIO_API_KEY"
+                ? this.env.COMPOSIO_API_KEY
+                : this.env.CREDENTIAL_KEYRING,
         // The Bot Template seams. The blob store is the artifact bucket,
         // written through the same collision-checking rule immutable
         // application artifacts already use; the Bot reader is three

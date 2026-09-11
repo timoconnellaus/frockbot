@@ -1,6 +1,7 @@
 import { catalogProvidersV1 } from "@frockbot/providers/catalog/definition";
 import { createCatalogProviderFeatureV1 } from "@frockbot/providers/catalog/runtime";
 import type { CredentialLeaseV1 } from "@frockbot/core/connection";
+import { createConfiguredConnectRuntimeContribution } from "@frockbot/app/connect/agent";
 import type {
   BotExecutionPlanV1,
   ConnectionView,
@@ -193,6 +194,27 @@ const enabledRuntimeContributionFactories = new Map<
   string,
   EnabledRuntimeContributionFactory
 >([
+  [
+    "connect",
+    ({
+      capability,
+      userId,
+      connection,
+      readSecret,
+      fetch: outbound,
+      pinToolCatalog,
+    }) =>
+      createConfiguredConnectRuntimeContribution({
+        capability,
+        userId,
+        ...(connection ? { connection } : {}),
+        ...(readSecret("COMPOSIO_API_KEY")
+          ? { apiKey: readSecret("COMPOSIO_API_KEY") }
+          : {}),
+        ...(outbound ? { fetch: outbound } : {}),
+        ...(pinToolCatalog ? { pinToolCatalog } : {}),
+      }),
+  ],
   [
     "web",
     ({ capability, fetch: outbound }) =>

@@ -30,6 +30,10 @@ ELEVENLABS_API_KEY=replace-with-an-elevenlabs-api-key
 # Optional: the ElevenLabs voice id; the default is George.
 # ELEVENLABS_VOICE_ID=JBFqnCBsd6RMkjVDRZzb
 
+# Connected apps: the provider project key. Absent, no app can be connected
+# and the Connectors rows for apps say so.
+COMPOSIO_API_KEY=replace-with-composio-project-api-key
+
 # Billing: use Stripe TEST mode locally. Never commit live values.
 # STRIPE_SECRET_KEY is the switch: leave it unset and billing stays off.
 # A localhost BETTER_AUTH_URL never bills, even with a key.

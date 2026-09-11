@@ -22,6 +22,11 @@ export interface ModelOAuthCommandV1 {
   code?: string;
   /** Set by the authenticated gateway, never taken from client input. */
   callbackUrl?: string;
+  /**
+   * The Connection Type a hosted grant is for, when the Package declares more
+   * than one. A model provider's OAuth has exactly one and never sets it.
+   */
+  connectionTypeId?: string;
 }
 export function decodeModelOAuthProgressV1(
   input: unknown,

@@ -28,6 +28,7 @@ import {
   type SearchUserBackendContribution,
   type SearchUserBackendHost,
 } from "@frockbot/app/search/user";
+import { type ConnectUserBackendContribution } from "@frockbot/app/connect/user";
 import { type OllamaCloudUserBackendContribution } from "@frockbot/providers/ollama-cloud/user";
 import { type FrockAiUserBackendContribution } from "@frockbot/providers/frock-ai/user";
 import {
@@ -177,7 +178,11 @@ export async function createFoundationUserBackendContributions(host: {
       setAlarm(scheduledTime: number | Date): Promise<void>;
     };
   readSecret(
-    name: "CREDENTIAL_KEYRING" | "MACHINE_TOKEN_SECRET" | "BETTER_AUTH_URL",
+    name:
+      | "CREDENTIAL_KEYRING"
+      | "MACHINE_TOKEN_SECRET"
+      | "BETTER_AUTH_URL"
+      | "COMPOSIO_API_KEY",
   ): string | undefined;
   /**
    * The Bot lifecycle seam. Archive and restore are Bot authority, so the
@@ -279,6 +284,20 @@ export async function createFoundationUserBackendContributions(host: {
       }
       return { storage: host.storage, keyring };
     },
+    get connect() {
+      const settings = mountedContributions.get(settingsUserContribution);
+      if (!settings) {
+        throw new Error("Connected apps require the Settings Contribution");
+      }
+      const apiKey = host.readSecret("COMPOSIO_API_KEY");
+      const callbackBaseUrl = host.readSecret("BETTER_AUTH_URL");
+      return {
+        storage: host.storage,
+        settings,
+        ...(apiKey ? { apiKey } : {}),
+        ...(callbackBaseUrl ? { callbackBaseUrl } : {}),
+      };
+    },
     get ollamaCloud() {
       const settings = mountedContributions.get(settingsUserContribution);
       const credentials = mountedContributions.get(credentialsUserContribution);
@@ -369,6 +388,7 @@ export async function createFoundationUserBackendContributions(host: {
   const mounted = await createFoundationBackendContributions<
     | UserSettingsBackendContribution
     | CredentialUserBackendContribution
+    | ConnectUserBackendContribution
     | OllamaCloudUserBackendContribution
     | FrockAiUserBackendContribution
     | FlockUserBackendContribution

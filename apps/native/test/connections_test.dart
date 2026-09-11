@@ -9,174 +9,82 @@ import 'package:frockbot_native/theme/frock_theme.dart';
 import 'settings_test.dart' show SettingsApi;
 import 'widget_test.dart' show MemoryStore;
 
-/// The shape `connectionsDocumentV1` produces for one API-key provider,
-/// written by hand so the Flutter side is pinned to the projection's contract
-/// rather than to whatever the server happens to emit today.
-Map<String, Object?> connectionsDocument({
+/// The `ConnectionsFrame` the server produces, written by hand so the Flutter
+/// side is pinned to the frame's contract rather than to whatever the server
+/// happens to emit today: one keyed model provider, one hosted-grant app.
+Map<String, Object?> connectionsFrame({
   int revision = 1,
   List<Map<String, Object?>> accounts = const [],
   bool mayConnect = true,
+  int connected = 0,
 }) => {
   'schemaVersion': 1,
-  'surfaceId': 'connections',
+  'ownerId': 'tim',
   'revision': revision,
-  'root': {
-    'type': 'group',
-    'orientation': 'column',
-    'children': [
+  'modelInUse': 'Auto · Frock AI',
+  'accounts': [
+    for (final account in accounts)
       {
-        'type': 'group',
-        'orientation': 'column',
-        'title': 'Model in use',
-        'children': [
-          {'type': 'text', 'text': 'Auto · Frock AI', 'style': 'status'},
-        ],
+        'id': account['id'],
+        'label': account['label'],
+        'state': account['state'] ?? 'ready',
+        'packageId': account['packageId'] ?? 'provider-ollama-cloud',
+        'connectionTypeId':
+            account['connectionTypeId'] ?? 'ollama-cloud-account',
+        'kind': account['kind'] ?? 'model',
+        'authorization': account['authorization'] ?? 'api-key',
+        if (account['detail'] != null) 'detail': account['detail'],
+        if (account['failure'] != null) 'failure': account['failure'],
       },
-      {
-        'type': 'group',
-        'orientation': 'column',
-        'title': 'Provider accounts',
-        'children': [
-          {
-            'type': 'group',
-            'orientation': 'column',
-            'title': 'Ollama Cloud',
-            'children': [
-              {
-                'type': 'text',
-                'text': accounts.isEmpty
-                    ? 'No account connected'
-                    : '1 account connected',
-                'style': 'status',
-              },
-              for (final account in accounts)
-                {
-                  'type': 'group',
-                  'orientation': 'column',
-                  'children': [
-                    {
-                      'type': 'text',
-                      'text': account['label'],
-                      'style': 'label',
-                    },
-                    {
-                      'type': 'text',
-                      'text': account['detail'],
-                      'style': 'status',
-                    },
-                    {
-                      'type': 'group',
-                      'orientation': 'row',
-                      'children': [
-                        {
-                          'type': 'action',
-                          'actionId': 'disconnect',
-                          'label': 'Disconnect',
-                          'style': 'danger',
-                          'input': {
-                            'kind': 'disconnect',
-                            'connectionId': account['id'],
-                          },
-                        },
-                      ],
-                    },
-                  ],
-                },
-              if (mayConnect) ...[
-                {
-                  'type': 'field',
-                  'field': {
-                    'id': 'c0.label',
-                    'label': 'Connection label',
-                    'kind': 'text',
-                    'value': 'Ollama Cloud',
-                    'editable': true,
-                    'required': true,
-                    'maxLength': 120,
-                  },
-                },
-                {
-                  'type': 'field',
-                  'field': {
-                    'id': 'c0.key',
-                    'label': 'API key',
-                    'kind': 'secret',
-                    'value': null,
-                    'editable': true,
-                    'required': true,
-                  },
-                },
-                {
-                  'type': 'field',
-                  'field': {
-                    'id': 'c0.s.api-base-url',
-                    'label': 'API base URL',
-                    'kind': 'text',
-                    'value': null,
-                    'editable': true,
-                  },
-                },
-                {
-                  'type': 'action',
-                  'actionId': 'connect-0',
-                  'label': 'Connect account',
-                  'style': 'primary',
-                  'input': {
-                    'kind': 'connect-api-key',
-                    'packageId': 'provider-ollama-cloud',
-                    'connectionTypeId': 'ollama-cloud-account',
-                  },
-                },
-              ],
-            ],
-          },
-        ],
-      },
-    ],
-  },
-  'actions': [
+  ],
+  'providers': [
     {
-      'id': 'disconnect',
-      'schema': {
-        'type': 'object',
-        'properties': {
-          'kind': {
-            'type': 'string',
-            'enum': ['disconnect', 'connect-api-key'],
-          },
-          'connectionId': {'type': 'string', 'maxLength': 128},
+      'packageId': 'provider-ollama-cloud',
+      'connectionTypeId': 'ollama-cloud-account',
+      'displayName': 'Ollama Cloud',
+      'kind': 'model',
+      'authorization': 'api-key',
+      'connected': connected,
+      'mayConnect': mayConnect,
+      'settings': [
+        {
+          'id': 'api-base-url',
+          'label': 'API base URL',
+          'kind': 'text',
+          'value': null,
+          'editable': true,
         },
-        'required': ['kind', 'connectionId'],
-        'additionalProperties': false,
-      },
+      ],
     },
     {
-      'id': 'connect-0',
-      'schema': {
-        'type': 'object',
-        'properties': {
-          'kind': {
-            'type': 'string',
-            'enum': ['connect-api-key'],
-          },
-          'packageId': {'type': 'string', 'maxLength': 128},
-          'connectionTypeId': {'type': 'string', 'maxLength': 128},
-          'c0.label': {'type': 'string', 'maxLength': 120},
-          'c0.key': {'type': 'string', 'maxLength': 8000},
-          'c0.s.api-base-url': {'type': 'string', 'maxLength': 2000},
-        },
-        'required': [
-          'kind',
-          'packageId',
-          'connectionTypeId',
-          'c0.label',
-          'c0.key',
-        ],
-        'additionalProperties': false,
-      },
+      'packageId': 'connect',
+      'connectionTypeId': 'connect-gmail',
+      'displayName': 'Gmail',
+      'kind': 'connector',
+      'authorization': 'grant',
+      'connected': connected,
+      'mayConnect': true,
+      'description': 'Read, search, label and send email in a Gmail account.',
+      'icon': 'gmail',
     },
   ],
 };
+
+Widget page(
+  SettingsApi api,
+  MemoryStore store, {
+  bool models = false,
+  Future<bool> Function(Uri)? openBrowser,
+}) => MaterialApp(
+  theme: FrockTheme.theme(Brightness.dark),
+  home: ConnectionsPage(
+    api: api,
+    store: store,
+    userId: 'tim',
+    models: models,
+    openBrowser: openBrowser,
+  ),
+);
 
 void main() {
   group('the projection read back', () {
@@ -271,7 +179,7 @@ void main() {
     final sent = <Map<String, Object?>>[];
     var revision = 1;
     final api = SettingsApi(store, (path, body) async {
-      if (body == null) return connectionsDocument(revision: revision);
+      if (body == null) return connectionsFrame(revision: revision);
       sent.add((body as Map).cast<String, Object?>());
       revision = 2;
       return {
@@ -281,30 +189,30 @@ void main() {
         'status': 'applied',
       };
     });
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: FrockTheme.theme(Brightness.dark),
-        home: ConnectionsPage(api: api, store: store, userId: 'tim'),
-      ),
-    );
+    await tester.pumpWidget(page(api, store, models: true));
     await tester.pumpAndSettle();
-    expect(find.text('Auto · Frock AI'), findsOneWidget);
+    expect(find.text('Model in use: Auto · Frock AI'), findsOneWidget);
+    // Only model providers are on the Models page.
+    expect(find.text('Gmail'), findsNothing);
 
+    await tester.tap(find.text('Connect'));
+    await tester.pumpAndSettle();
     await tester.enterText(
-      find.widgetWithText(TextFormField, 'Connection label'),
+      find.widgetWithText(TextField, 'Account name'),
       'Local Ollama',
     );
     await tester.enterText(
-      find.widgetWithText(TextFormField, 'API key'),
+      find.widgetWithText(TextField, 'API key'),
       'synthetic-test-key',
     );
-    await tester.tap(find.text('Connect account'));
+    await tester.tap(find.widgetWithText(FilledButton, 'Connect account'));
     await tester.pumpAndSettle();
 
     expect(sent.single['apiKey'], 'synthetic-test-key');
     expect(sent.single['label'], 'Local Ollama');
-    // The document that comes back carries no key, and the widget that took
-    // one starts empty again rather than holding a credential in memory.
+    expect(sent.single['type'], 'connection/create-api-key');
+    // The frame that comes back carries no key, and the widget that took one
+    // starts empty again rather than holding a credential in memory.
     expect(find.text('synthetic-test-key'), findsNothing);
   });
 
@@ -314,21 +222,123 @@ void main() {
     final store = MemoryStore();
     final sent = <Object?>[];
     final api = SettingsApi(store, (path, body) async {
-      if (body == null) return connectionsDocument();
+      if (body == null) return connectionsFrame();
       sent.add(body);
       return {'commandId': 'x', 'status': 'applied'};
     });
+    await tester.pumpWidget(page(api, store, models: true));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Connect'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Connect account'));
+    await tester.pumpAndSettle();
+    expect(sent, isEmpty);
+    expect(find.text('This account still needs a key.'), findsOneWidget);
+  });
+
+  testWidgets('a hosted grant opens the checked destination and nothing else', (
+    tester,
+  ) async {
+    final store = MemoryStore();
+    final opened = <Uri>[];
+    final sent = <Map<String, Object?>>[];
+    final api = SettingsApi(store, (path, body) async {
+      if (body == null) return connectionsFrame();
+      sent.add({'path': path, ...(body as Map).cast<String, Object?>()});
+      return {
+        'schemaVersion': 1,
+        'status': 'authorization-required',
+        'connectionId': 'conn-2',
+        'redirectUrl': 'https://connect.example/go',
+        'expiresAt': '2026-09-11T00:10:00.000Z',
+      };
+    });
     await tester.pumpWidget(
-      MaterialApp(
-        theme: FrockTheme.theme(Brightness.dark),
-        home: ConnectionsPage(api: api, store: store, userId: 'tim'),
+      page(
+        api,
+        store,
+        openBrowser: (uri) async {
+          opened.add(uri);
+          return true;
+        },
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Connect account'));
+    // The app's card carries its own mark and says what it gives a Bot.
+    expect(find.byType(Image), findsOneWidget);
+    expect(
+      find.text('Read, search, label and send email in a Gmail account.'),
+      findsOneWidget,
+    );
+    await tester.tap(find.text('Connect'));
     await tester.pumpAndSettle();
-    expect(sent, isEmpty);
-    expect(find.text('This action still needs an answer.'), findsOneWidget);
+    expect(sent.single['path'], '/api/plugins/connect/connections');
+    expect(sent.single['type'], 'connection/start');
+    expect(sent.single['connectionTypeId'], 'connect-gmail');
+    expect(opened.single.toString(), 'https://connect.example/go');
+  });
+
+  testWidgets('a second account is offered once one is connected', (
+    tester,
+  ) async {
+    final store = MemoryStore();
+    final api = SettingsApi(
+      store,
+      (_, _) async => connectionsFrame(
+        connected: 1,
+        accounts: [
+          {
+            'id': 'conn-1',
+            'label': 'Gmail',
+            'packageId': 'connect',
+            'connectionTypeId': 'connect-gmail',
+            'kind': 'connector',
+            'authorization': 'grant',
+            'detail': 'Ready',
+          },
+        ],
+      ),
+    );
+    await tester.pumpWidget(page(api, store));
+    await tester.pumpAndSettle();
+    // Collapsed, the row says only that it is connected; opening it shows
+    // the account and the way to add another.
+    expect(find.text('Connected'), findsOneWidget);
+    expect(find.text('Add another account'), findsNothing);
+    await tester.tap(find.text('Gmail'));
+    await tester.pumpAndSettle();
+    expect(find.text('Add another account'), findsOneWidget);
+    expect(find.text('Ready'), findsOneWidget);
+    await tester.tap(find.byTooltip('Manage Gmail'));
+    await tester.pumpAndSettle();
+    expect(find.text('Turn off'), findsOneWidget);
+    expect(find.text('Disconnect'), findsOneWidget);
+  });
+
+  testWidgets('a turned-off account reads as turned off, not connecting', (
+    tester,
+  ) async {
+    final store = MemoryStore();
+    final api = SettingsApi(
+      store,
+      (_, _) async => connectionsFrame(
+        accounts: [
+          {
+            'id': 'conn-1',
+            'label': 'Gmail',
+            'state': 'disabled',
+            'packageId': 'connect',
+            'connectionTypeId': 'connect-gmail',
+            'kind': 'connector',
+            'authorization': 'grant',
+          },
+        ],
+      ),
+    );
+    await tester.pumpWidget(page(api, store));
+    await tester.pumpAndSettle();
+    expect(find.text('Turned off'), findsOneWidget);
+    expect(find.text('Connecting…'), findsNothing);
   });
 
   testWidgets('Connectors recovers from offline without raw backend detail', (
@@ -338,7 +348,8 @@ void main() {
     final store = MemoryStore();
     final api = SettingsApi(store, (_, _) async {
       if (offline) throw const RequestFailure('synthetic backend detail');
-      return connectionsDocument(
+      return connectionsFrame(
+        connected: 1,
         accounts: [
           {
             'id': 'conn-1',
@@ -349,155 +360,61 @@ void main() {
         mayConnect: false,
       );
     });
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: FrockTheme.theme(Brightness.dark),
-        home: ConnectionsPage(api: api, store: store, userId: 'tim'),
-      ),
-    );
+    await tester.pumpWidget(page(api, store, models: true));
     await tester.pumpAndSettle();
     expect(find.textContaining('synthetic backend'), findsNothing);
-    expect(find.text('Marketplace couldn’t load'), findsOneWidget);
+    expect(find.text('Provider accounts couldn’t load'), findsOneWidget);
     offline = false;
     await tester.tap(find.text('Try again'));
     await tester.pumpAndSettle();
+    expect(find.text('Connect account'), findsNothing);
+    await tester.tap(find.text('Ollama Cloud'));
+    await tester.pumpAndSettle();
     expect(find.text('Ready · model list up to date'), findsOneWidget);
-    expect(find.text('Disconnect'), findsOneWidget);
   });
 
-  /// The shape `connectionsDocumentV1` produces for the Marketplace: connector
-  /// providers straight at the root, one titled group each.
-  Map<String, Object?> marketplaceDocument(List<String> providers) => {
-    'schemaVersion': 1,
-    'surfaceId': 'connections',
-    'revision': 1,
-    'root': {
-      'type': 'group',
-      'orientation': 'column',
-      'children': [
-        for (final (index, name) in providers.indexed)
-          {
-            'type': 'group',
-            'orientation': 'column',
-            'title': name,
-            'children': [
-              {
-                'type': 'text',
-                'text': 'No account connected',
-                'style': 'status',
-              },
-              {
-                'type': 'action',
-                'actionId': 'authorize-$index',
-                'label': 'Connect',
-                'style': 'primary',
-                'input': {
-                  'kind': 'authorize',
-                  'packageId': 'p-$index',
-                  'connectionTypeId': 'account',
-                },
-              },
-            ],
-          },
-      ],
-    },
-    'actions': [
-      for (final (index, _) in providers.indexed)
-        {
-          'id': 'authorize-$index',
-          'schema': {
-            'type': 'object',
-            'properties': {
-              'kind': {'type': 'string', 'maxLength': 128},
-              'packageId': {'type': 'string', 'maxLength': 128},
-              'connectionTypeId': {'type': 'string', 'maxLength': 128},
-            },
-            'required': ['kind', 'packageId', 'connectionTypeId'],
-            'additionalProperties': false,
-          },
-        },
-    ],
-  };
-
-  testWidgets('the Marketplace is a list on a phone and a grid in a dialog', (
-    tester,
-  ) async {
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
+  testWidgets('a refresh that fails after a good load says so', (tester) async {
+    var offline = false;
     final store = MemoryStore();
-    final api = SettingsApi(
-      store,
-      (_, _) async => marketplaceDocument(['Notes', 'Calendar', 'Mail']),
-    );
-
-    tester.view.physicalSize = const Size(390, 844);
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: FrockTheme.theme(Brightness.dark),
-        home: ConnectionsPage(api: api, store: store, userId: 'tim'),
-      ),
-    );
+    final api = SettingsApi(store, (_, _) async {
+      if (offline) throw const RequestFailure('synthetic backend detail');
+      return connectionsFrame(
+        connected: 1,
+        accounts: [
+          {
+            'id': 'conn-1',
+            'label': 'Work',
+            'packageId': 'connect',
+            'connectionTypeId': 'connect-gmail',
+            'kind': 'connector',
+            'authorization': 'grant',
+            'state': 'authorizing',
+          },
+        ],
+      );
+    });
+    await tester.pumpWidget(page(api, store));
     await tester.pumpAndSettle();
-    expect(find.widgetWithText(AppBar, 'Marketplace'), findsOneWidget);
-    expect(find.text('Connected apps'), findsNothing);
-    // One below the other, and no card around any of them.
-    expect(find.byType(Card), findsNothing);
-    final notes = tester.getRect(find.text('Notes'));
-    final calendar = tester.getRect(find.text('Calendar'));
-    expect(calendar.top, greaterThan(notes.bottom));
-    expect((calendar.left - notes.left).abs(), lessThan(1));
+    expect(find.text('Gmail'), findsOneWidget);
+    expect(find.textContaining('Couldn’t load your connectors'), findsNothing);
 
-    tester.view.physicalSize = const Size(1280, 900);
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: FrockTheme.theme(Brightness.dark),
-        home: Scaffold(
-          body: Builder(
-            builder: (context) => Center(
-              child: FilledButton(
-                onPressed: () => showDialog<void>(
-                  context: context,
-                  builder: (_) =>
-                      MarketplaceDialog(api: api, store: store, userId: 'tim'),
-                ),
-                child: const Text('Open'),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-    await tester.tap(find.text('Open'));
+    offline = true;
+    await tester.fling(find.byType(ListView), const Offset(0, 320), 1000);
     await tester.pumpAndSettle();
-    expect(find.byType(Dialog), findsOneWidget);
-    expect(find.widgetWithText(AppBar, 'Marketplace'), findsOneWidget);
-    // Three providers, three cards, one row: the same groups, laid out wide,
-    // with the identifiers a browser spec selects on unchanged.
-    expect(find.byType(Card), findsNWidgets(3));
+
+    expect(find.text('Gmail'), findsOneWidget);
+    expect(find.textContaining('synthetic backend'), findsNothing);
     expect(
-      find.byWidgetPredicate(
-        (widget) =>
-            widget is Semantics &&
-            widget.properties.identifier == ConnectorIds.group('Calendar'),
-      ),
+      find.textContaining('Couldn’t load your connectors'),
       findsOneWidget,
     );
-    final cards = [
-      for (final title in ['Notes', 'Calendar', 'Mail'])
-        tester.getRect(
-          find.ancestor(of: find.text(title), matching: find.byType(Card)),
-        ),
-    ];
-    expect(cards[1].left, greaterThan(cards[0].right));
-    expect(cards[2].left, greaterThan(cards[1].right));
-    expect((cards[2].top - cards[0].top).abs(), lessThan(1));
-    expect(cards[2].right, lessThanOrEqualTo(1280 - 24));
-    // The way out is the control the page draws, since a dialog has no bar
-    // of its own to go back from.
-    await tester.tap(find.byTooltip('Close marketplace'));
+
+    offline = false;
+    await tester.fling(find.byType(ListView), const Offset(0, 320), 1000);
     await tester.pumpAndSettle();
-    expect(find.byType(Dialog), findsNothing);
+
+    expect(find.text('Gmail'), findsOneWidget);
+    expect(find.textContaining('Couldn’t load your connectors'), findsNothing);
   });
 
   for (final brightness in Brightness.values) {
@@ -511,12 +428,19 @@ void main() {
       final store = MemoryStore();
       final api = SettingsApi(
         store,
-        (_, _) async => connectionsDocument(
+        (_, _) async => connectionsFrame(
+          connected: 1,
           accounts: [
             {
               'id': 'conn-1',
               'label': 'My long work account label',
-              'detail': 'Needs attention',
+              'state': 'failed',
+              'packageId': 'connect',
+              'connectionTypeId': 'connect-gmail',
+              'kind': 'connector',
+              'authorization': 'grant',
+              'detail': 'Not working',
+              'failure': 'Sign-in didn’t finish. Connect it again.',
             },
           ],
         ),
@@ -534,13 +458,84 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      await tester.scrollUntilVisible(
-        find.text('Needs attention'),
-        200,
-        scrollable: find.byType(Scrollable).first,
-      );
       expect(find.text('Needs attention'), findsOneWidget);
+      await tester.tap(find.text('Gmail'));
+      await tester.pumpAndSettle();
+      expect(find.text('My long work account label'), findsOneWidget);
+      expect(
+        find.text('Sign-in didn’t finish. Connect it again.'),
+        findsOneWidget,
+      );
       expect(tester.takeException(), isNull);
     });
   }
+
+  testWidgets(
+    'the Marketplace is one column on a phone and three in a dialog',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final store = MemoryStore();
+      final api = SettingsApi(store, (_, _) async => connectionsFrame());
+
+      tester.view.physicalSize = const Size(390, 844);
+      await tester.pumpWidget(page(api, store));
+      await tester.pumpAndSettle();
+      expect(find.widgetWithText(AppBar, 'Marketplace'), findsOneWidget);
+      expect(find.text('Connected apps'), findsNothing);
+      // One below the other on a phone: only the connector rows are here, and
+      // Gmail sits under the Mac Messages row at the same left edge.
+      final mac = tester.getRect(find.text('Messages on your Mac'));
+      final gmail = tester.getRect(find.text('Gmail'));
+      expect(gmail.top, greaterThan(mac.bottom));
+      expect((gmail.left - mac.left).abs(), lessThan(1));
+
+      tester.view.physicalSize = const Size(1280, 900);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: FrockTheme.theme(Brightness.dark),
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => Center(
+                child: FilledButton(
+                  onPressed: () => showDialog<void>(
+                    context: context,
+                    builder: (_) => MarketplaceDialog(
+                      api: api,
+                      store: store,
+                      userId: 'tim',
+                    ),
+                  ),
+                  child: const Text('Open'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('Open'));
+      await tester.pumpAndSettle();
+      expect(find.byType(Dialog), findsOneWidget);
+      expect(find.widgetWithText(AppBar, 'Marketplace'), findsOneWidget);
+      expect(
+        find.byWidgetPredicate(
+          (widget) =>
+              widget is Semantics &&
+              widget.properties.identifier == ConnectorIds.group('Gmail'),
+        ),
+        findsOneWidget,
+      );
+      // Two rows side by side on one line, wide.
+      final left = tester.getRect(find.text('Messages on your Mac'));
+      final right = tester.getRect(find.text('Gmail'));
+      expect(right.left, greaterThan(left.right));
+      expect((right.top - left.top).abs(), lessThan(1));
+      // The way out is the control the page draws, since a dialog has no bar
+      // of its own to go back from.
+      await tester.tap(find.byTooltip('Close marketplace'));
+      await tester.pumpAndSettle();
+      expect(find.byType(Dialog), findsNothing);
+    },
+  );
 }

@@ -6,6 +6,7 @@ import {
   FAKE_COMPUTER_HOST_TOKEN,
 } from "./test/computer-host-fake.ts";
 import {
+  COMPOSIO_TEST_API_KEY,
   createOutboundService,
   TEST_CREDENTIAL_KEYRING,
 } from "./test/harness/miniflare.ts";
@@ -93,6 +94,8 @@ export default defineConfig({
           COMPUTER_HOST_SHARDS: String(FAKE_COMPUTER_HOST_SHARDS),
           // A fixed signing secret, so a test can mint the key it presents.
           ROUTINE_HOOK_SECRET: "workerd-routine-hook-secret-0123456789abcdef",
+          // The Connected apps provider key the harness stub accepts.
+          COMPOSIO_API_KEY: COMPOSIO_TEST_API_KEY,
           // The registered-machine door's signing secret. Fixed, so a test can
           // mint the token a machine presents and forge one that must be
           // refused.

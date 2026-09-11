@@ -648,6 +648,7 @@ export type ConnectionsFrame = {
       | "reconciliation-required"
       | "failed";
     packageId: Identifier;
+    connectionTypeId: Identifier;
     kind: "model" | "connector";
     authorization: "none" | "api-key" | "ambient-native" | "grant";
     detail?: string;
@@ -662,6 +663,8 @@ export type ConnectionsFrame = {
     connected: number;
     mayConnect: boolean;
     settings?: Array<SettingField>;
+    description?: string;
+    icon?: Identifier;
   }>;
   modelInUse?: string;
 };

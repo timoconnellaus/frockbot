@@ -3247,6 +3247,9 @@
               "packageId": {
                 "$ref": "#/$defs/Identifier"
               },
+              "connectionTypeId": {
+                "$ref": "#/$defs/Identifier"
+              },
               "kind": {
                 "enum": ["model", "connector"]
               },
@@ -3269,6 +3272,7 @@
               "label",
               "state",
               "packageId",
+              "connectionTypeId",
               "kind",
               "authorization"
             ],
@@ -3313,6 +3317,14 @@
                 "items": {
                   "$ref": "#/$defs/SettingField"
                 }
+              },
+              "description": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 300
+              },
+              "icon": {
+                "$ref": "#/$defs/Identifier"
               }
             },
             "required": [

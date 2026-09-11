@@ -28,6 +28,7 @@ describe("foundation application", () => {
       "custom-models",
       "routines",
       "credentials",
+      "connect",
       "web",
       "voice",
       "provider-ollama-cloud",
@@ -319,6 +320,7 @@ describe("foundation application", () => {
       "audit",
       "bot-template",
       "computer",
+      "connect",
       "flock",
       "routines",
       "search",
@@ -345,7 +347,7 @@ describe("foundation application", () => {
       });
     expect(botBackend.contributions).toHaveLength(3);
     expect(userBackend.contributions).toHaveLength(
-      9 + catalogProviderDefinitionsV1.length,
+      10 + catalogProviderDefinitionsV1.length,
     );
     const userSpecifiers = userBackend.contributions.map(
       (contribution) => contribution.specifier,

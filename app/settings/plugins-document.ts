@@ -1,6 +1,5 @@
 // The `PluginsFrame` a settings route produces, projected as the `ViewDocument`
-// the host renders — the same convention as `settings-document.ts` and
-// `connections-document.ts`, reached with `?as=document`.
+// the host renders — the same convention as `settings-document.ts`, reached with `?as=document`.
 //
 // Every action declares a `kind` from the closed vocabulary below, because the
 // command an action means is not derivable from the label a person reads. The

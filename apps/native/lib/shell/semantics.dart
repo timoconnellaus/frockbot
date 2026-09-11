@@ -134,30 +134,18 @@ abstract final class SettingsIds {
 
 /// Connectors: the accounts a User authorizes for every Bot they own.
 ///
-/// The names cover what a connect flow is driven by — the provider card, the
-/// connect form's three fields, the connect button and the account row's state
-/// line. What the Connection *becomes* is asserted on the routes, in
-/// `test/integration/connect-ollama.integration.ts`; what is left for a
-/// browser spec here is the person's half: the form posts the command and the
-/// card's state line follows it. A provider's own controls are named by the
-/// projected field ids, which is the one place the document's conventions
-/// surface in a selector.
+/// The page is host chrome over the `ConnectionsFrame`, so the names here are
+/// what a connect flow is driven by: the page, its refresh, a provider's card
+/// and its connect button. A card is named by its provider's display name the
+/// way a titled group is, so a spec scopes to "Ollama Cloud" the same way
+/// whichever renderer draws it.
 abstract final class ConnectorIds {
   static const document = 'connections-document';
   static const refresh = 'connections-refresh';
 
   /// The Marketplace dialog a desktop opens from the foot of the sidebar; a
-  /// phone pushes the same document as a page, and the document's own id is
-  /// the marker on both.
+  /// phone pushes the same page, and the page's own id is the marker on both.
   static const marketplaceDialog = 'marketplace-dialog';
-
-  /// The connect form of the provider at `index`, field by field. These are
-  /// the projected ids from `connectionsDocumentV1`.
-  static String connectLabel(int index) =>
-      viewFieldIdentifierV1('c$index.label');
-  static String connectKey(int index) => viewFieldIdentifierV1('c$index.key');
-  static String connectSetting(int index, String setting) =>
-      viewFieldIdentifierV1('c$index.s.$setting');
 
   static String group(String title) => viewGroupIdentifierV1(title);
   static String action(String actionId) => viewActionIdentifierV1(actionId);

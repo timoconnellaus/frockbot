@@ -1025,6 +1025,7 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
           DEBUG_TOKEN: ${{ secrets.DEBUG_TOKEN }}
+          COMPOSIO_API_KEY: ${{ secrets.COMPOSIO_API_KEY }}
           FROCK_AI_GATEWAY_TOKEN: ${{ secrets.FROCK_AI_GATEWAY_TOKEN || secrets.FLOCK_AI_GATEWAY_TOKEN }}
         shell: bash
         run: |
@@ -1224,6 +1225,7 @@ jobs:
           # Optional: authorizes the read-only /api/debug operator surface.
           # Absent and the deployed Worker simply 404s those routes.
           DEBUG_TOKEN: ${{ secrets.DEBUG_TOKEN }}
+          COMPOSIO_API_KEY: ${{ secrets.COMPOSIO_API_KEY }}
           # Optional: the `cf-aig-authorization` bearer for the AI Gateway.
           # Present, Frock AI takes the compat HTTP transport, the only one
           # that accepts the `dynamic/<route>` Auto model (cloudflare/ai#617).
