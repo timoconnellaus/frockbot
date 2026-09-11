@@ -52,12 +52,12 @@ async function answer(
 }
 
 /**
- * Open the Routines surface, which the completions badge in the Bot's header
- * opens — the badge is the only door to a Routine firing, so it is the door
- * this spec uses.
+ * Open the Routines surface through the Routines control in the chat header —
+ * the one door to a Routine firing on the wide tiers, so it is the door this
+ * spec uses.
  */
 async function openRoutines(page: Page): Promise<Locator> {
-  await press(sem(page, "routine-inbox-badge"));
+  await press(sem(page, "routines-panel-toggle"));
   const document = sem(page, "routines-document");
   await expect(document).toBeVisible({ timeout: 60_000 });
   return document;

@@ -190,15 +190,15 @@ abstract final class PluginIds {
 ///
 /// The names follow what `routines.e2e.ts` selects on — the section, a
 /// Routine's card, its controls and the delete confirmation — so that spec can
-/// be rewritten against Flutter Web with the same intent. The completions
-/// badge and its drawer are a count, a trigger and one acknowledgement per
-/// entry.
+/// be rewritten against Flutter Web with the same intent. The panel toggle is
+/// the one door to the surface — the chat header's Routines control on the
+/// wide tiers, the Bot page's row on a phone — and the drawer is one
+/// acknowledgement per entry.
 abstract final class RoutineIds {
   static const document = 'routines-document';
   static const refresh = 'routines-refresh';
   static const panel = 'routines-panel';
   static const panelToggle = 'routines-panel-toggle';
-  static const inboxBadge = 'routine-inbox-badge';
   static const inboxDrawer = 'routine-inbox-drawer';
   static const runLog = 'routine-run-log';
   static const confirmDelete = 'routine-delete-confirm';

@@ -577,17 +577,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       ),
       label: 'Routines',
     );
-    // A firing that finished while the app was open is only ever visible as a
-    // count, so the badge is read on this Bot's own signal rather than on a
-    // click that may never come.
-    slots.register(
-      ShellSlot.headerActions,
-      'routine-inbox',
-      (context) => RoutineInboxBadge(
-        controller: inbox,
-        onOpen: () => _openPanel('routines'),
-      ),
-    );
     appletCanvas?.dispose();
     computer?.dispose();
     appletCanvas = null;
@@ -1335,7 +1324,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                     rightPanel: rightPanel,
                     sidebar: Column(
                       children: [
-                        // The badge and the Package entries beside the list belong to the
+                        // The Package entries beside the list belong to the
                         // column layout; on a phone they are rows on the Bot's page.
                         if (!single)
                           const SlotRegion(
