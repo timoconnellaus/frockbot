@@ -1003,9 +1003,11 @@ the rows whose status the code moved:
   remain, over the compiled-in Packages, and are still User-scoped as
   GrokBot's are. The User Durable Object records every compiled-in Package
   that declares a Connection Type or Capability as an installed first-party
-  row on its first configuration read, behind a durable one-time marker, so a
-  later uninstall sticks, and the Plugins surface projects those rows as Added
-  or their real Connection state.
+  row on a configuration read, behind a durable marker holding the ledger of
+  every Package id the account has ever been offered, so a Package that ships
+  later still reaches an existing account while a later uninstall sticks, and
+  the Plugins surface projects those rows as Added or their real Connection
+  state.
 - **43** — the MCP half of the lifecycle is landed and the multi-account half
   is not. A server is a Connection with a durable `McpServerRecordV1` beside it
   (`plugin-mcp/src/records.ts`), and GrokBot's whole lifecycle set has a

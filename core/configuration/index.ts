@@ -2001,8 +2001,8 @@ function migrateCatalogRelativeUserSettingsV1(
   });
 
   // Platform infrastructure is not a User preference. Repair it on every
-  // catalog-relative read, including records that already carry the latest
-  // one-shot bootstrap marker, and collapse any duplicate rows to one current
+  // catalog-relative read, including records whose bootstrap ledger already
+  // holds every current default, and collapse any duplicate rows to one current
   // first-party installation.
   const platformPackages = new Map(
     packages
