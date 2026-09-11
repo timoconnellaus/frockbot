@@ -58,26 +58,39 @@ async function shot(page: Page, name: string): Promise<void> {
  * covers the regions and the controls in them at once. A widget that is
  * deliberately off-canvas is not in the tree at all — a parked drawer is built
  * behind `ExcludeSemantics` — so nothing here has to make an exception for it.
+ *
+ * Measured until it settles rather than once. A page arrives over the one
+ * below it on a slide — a Cupertino slide wherever the engine takes the host
+ * for an Apple platform — and a single read taken while that transition is
+ * still running catches the incoming page a few pixels short of home: the
+ * whole page reported as five pixels off the right edge, which is a frame of
+ * an animation rather than the layout this is asking about.
  */
 async function expectNothingRunsOffTheEdge(page: Page): Promise<void> {
-  const offending = await page.evaluate((width) => {
-    const wide: { id: string; left: number; right: number }[] = [];
-    for (const node of document.querySelectorAll(
-      "[flt-semantics-identifier]",
-    )) {
-      const box = node.getBoundingClientRect();
-      if (box.width === 0 && box.height === 0) continue;
-      if (box.left < -1 || box.right > width + 1) {
-        wide.push({
-          id: node.getAttribute("flt-semantics-identifier") ?? "?",
-          left: Math.round(box.left),
-          right: Math.round(box.right),
-        });
+  const measure = (width: number) =>
+    page.evaluate((limit) => {
+      const wide: { id: string; left: number; right: number }[] = [];
+      for (const node of document.querySelectorAll(
+        "[flt-semantics-identifier]",
+      )) {
+        const box = node.getBoundingClientRect();
+        if (box.width === 0 && box.height === 0) continue;
+        if (box.left < -1 || box.right > limit + 1) {
+          wide.push({
+            id: node.getAttribute("flt-semantics-identifier") ?? "?",
+            left: Math.round(box.left),
+            right: Math.round(box.right),
+          });
+        }
       }
-    }
-    return wide;
-  }, PHONE.width);
-  expect(offending, "these widgets run off the side of the window").toEqual([]);
+      return wide;
+    }, width);
+  await expect
+    .poll(() => measure(PHONE.width), {
+      message: "these widgets run off the side of the window",
+      timeout: 10_000,
+    })
+    .toEqual([]);
 }
 
 /** Every part of a named widget is inside the window. */
