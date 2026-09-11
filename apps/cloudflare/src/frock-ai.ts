@@ -37,6 +37,7 @@ export interface FrockAiGatewayHostV1 {
 export const FROCK_AI_GATEWAY_TIMEOUT_MS_V1 = MODEL_FIRST_BYTE_DEADLINE_MS_V1;
 
 export interface FrockAiGatewayConfigV1 {
+  billingLimits?: { inputTokens: number; outputTokens: number };
   gatewayId?: string;
   autoRoute?: string;
   /**
@@ -135,6 +136,22 @@ export function createFrockAiGatewayHostV1(
   return {
     autoRoute,
     async runChatCompletion(gatewayModel, body, signal) {
+      if (config.billingLimits) {
+        const { inputTokens, outputTokens } = config.billingLimits;
+        // A byte bound overcounts text tokens. Images require a separate model
+        // quote; do not silently price their pixels as a short URL.
+        const encoded = JSON.stringify(body);
+        if (
+          encoded.includes('"image_url"') ||
+          new TextEncoder().encode(encoded).length + 1024 > inputTokens
+        ) {
+          throw new FrockAiTransportErrorV1(
+            "This request exceeds its prepaid model limit. Use a connected model for this request.",
+            400,
+          );
+        }
+        body = { ...body, max_tokens: outputTokens };
+      }
       // The deadline is disarmed the moment the response exists, so what it
       // bounds is reaching the gateway and nothing after it. Left armed it
       // aborted the response *body* mid-stream, which is not a gateway that

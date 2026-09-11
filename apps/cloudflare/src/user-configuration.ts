@@ -1,3 +1,9 @@
+import {
+  BillingLedger,
+  type UsageReservation,
+  type UsageSettlement,
+} from "@frockbot/app/billing/ledger";
+import { accountPayments, type BillingEnv } from "./billing.js";
 import { isPublicIdentifier } from "@frockbot/core/configuration";
 import {
   decodeSetUserFeaturesRequestV1,
@@ -136,7 +142,7 @@ const USER_IDENTITY_KEY = "user:identity";
 /** The durable key holding what an administrator turned on for this User. */
 const USER_FEATURES_KEY = "user:features:v1";
 
-interface UserConfigurationEnv {
+interface UserConfigurationEnv extends BillingEnv {
   FCM_SERVICE_ACCOUNT?: string;
   ALLOW_DEVELOPMENT_AUTH?: string;
   BETTER_AUTH_URL?: string;
@@ -214,6 +220,57 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
         }
       }),
     );
+  }
+
+  async reconcileBilling(input: {
+    userId: string;
+    command: Parameters<BillingLedger["reconcile"]>[0];
+  }) {
+    await this.assertUserIdentity(input.userId);
+    this.billing().reconcile(input.command);
+  }
+  private billing() {
+    return new BillingLedger(this.ctx.storage);
+  }
+  async readBilling(input: { userId: string; before?: number }) {
+    await this.assertUserIdentity(input.userId);
+    return this.billing().snapshot(input.before);
+  }
+  async billingCheckout(input: {
+    userId: string;
+    command: { id: string; kind: "subscription" | "topup"; cents?: number };
+  }) {
+    await this.assertUserIdentity(input.userId);
+    return accountPayments(this.billing(), this.env, input.userId).checkout(
+      input.command,
+    );
+  }
+  async billingPortal(input: { userId: string; commandId: string }) {
+    await this.assertUserIdentity(input.userId);
+    return accountPayments(this.billing(), this.env, input.userId).portal(
+      input.commandId,
+    );
+  }
+  async billingWebhook(input: {
+    userId: string;
+    event: Record<string, unknown>;
+  }) {
+    await this.assertUserIdentity(input.userId);
+    await accountPayments(this.billing(), this.env, input.userId).webhook(
+      input.event,
+    );
+  }
+  async reserveUsage(input: { userId: string; reservation: UsageReservation }) {
+    await this.assertUserIdentity(input.userId);
+    return this.billing().reserve(input.reservation);
+  }
+  async settleUsage(input: { userId: string; settlement: UsageSettlement }) {
+    await this.assertUserIdentity(input.userId);
+    this.billing().settle(input.settlement);
+  }
+  async requirePaidAccount(input: { userId: string }) {
+    await this.assertUserIdentity(input.userId);
+    this.billing().requireSubscription();
   }
 
   async registerPush(input: { userId: string; registration: unknown }) {

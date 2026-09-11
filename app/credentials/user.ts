@@ -326,6 +326,88 @@ export class CredentialUserBackendContribution {
     this.now = host.now ?? Date.now;
   }
 
+  private readonly secretUpdates = new Map<string, Promise<void>>();
+
+  /** Encrypted, account-bound storage for an unfinished sign-in, inside the User authority. */
+  async openPreparedSecret(input: PreparedApiKeyCredential): Promise<string> {
+    return openCredentialV1({
+      keyring: this.keyring,
+      context: {
+        accountId: input.accountId,
+        connectionId: input.connectionId,
+        packageId: input.packageId,
+        credentialGeneration: input.generation,
+      },
+      envelope: input.envelope,
+    });
+  }
+
+  /** A refresh may rotate a one-use token. An interrupted attempt requires sign-in, never a blind retry. */
+  async refreshActiveSecret(input: {
+    accountId: string;
+    connectionId: string;
+    packageId: string;
+    generation: string;
+    needsRefresh(secret: string): boolean;
+    refresh(secret: string): Promise<string>;
+  }): Promise<void> {
+    const key = credentialKey(input.connectionId, input.generation);
+    const running = this.secretUpdates.get(key);
+    if (running) {
+      await running;
+      return this.refreshActiveSecret(input);
+    }
+    const work = (async () => {
+      const intentKey = `credential-refresh:${input.connectionId}:${input.generation}`;
+      const admitted = await this.host.storage.transaction(async (storage) => {
+        const raw = await storage.get<unknown>(key);
+        if (!raw)
+          throw new Error("OAuth credential is unavailable; sign in again");
+        const record = decodeStoredCredentialGeneration(raw);
+        if (
+          record.accountId !== input.accountId ||
+          record.packageId !== input.packageId ||
+          record.state !== "active" ||
+          (await storage.get(activeKey(input.connectionId))) !==
+            input.generation
+        )
+          throw new Error("OAuth credential authority changed");
+        if (await storage.get(intentKey))
+          throw new Error("OAuth refresh was interrupted; sign in again");
+        const secret = await this.openPreparedSecret({
+          ...input,
+          envelope: record.envelope,
+        });
+        if (!input.needsRefresh(secret)) return undefined;
+        await storage.put(intentKey, true);
+        return { secret, envelope: record.envelope };
+      });
+      if (!admitted) return;
+      const secret = await input.refresh(admitted.secret);
+      const prepared = await this.prepareApiKey({ ...input, apiKey: secret });
+      await this.host.storage.transaction(async (storage) => {
+        const raw = await storage.get<unknown>(key);
+        if (!raw) throw new Error("OAuth connection was disconnected");
+        const record = decodeStoredCredentialGeneration(raw);
+        if (
+          record.state !== "active" ||
+          (await storage.get(activeKey(input.connectionId))) !==
+            input.generation ||
+          record.envelope.nonce !== admitted.envelope.nonce
+        )
+          throw new Error("OAuth credential changed during refresh");
+        await storage.put(key, { ...record, envelope: prepared.envelope });
+        await storage.delete(intentKey);
+      });
+    })();
+    this.secretUpdates.set(key, work);
+    try {
+      await work;
+    } finally {
+      if (this.secretUpdates.get(key) === work) this.secretUpdates.delete(key);
+    }
+  }
+
   private async enqueueLease(
     storage: CredentialTransaction,
     effectId: string,

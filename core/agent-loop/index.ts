@@ -576,6 +576,9 @@ class LoopAgent implements Agent, LoopRuntime {
       requestId: response.request.requestId,
       text: response.text,
       toolCalls: response.toolCalls,
+      ...(response.providerState
+        ? { providerState: response.providerState }
+        : {}),
     });
     await this.session.flush();
     signal.throwIfAborted();

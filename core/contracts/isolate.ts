@@ -25,6 +25,7 @@ import {
 } from "./loop-events.js";
 import {
   decodeTurnTypeV1,
+  requireModelReplayStateV1,
   type LlmStreamEvent,
   type NormalizedModelRequest,
   type ToolSchema,
@@ -1204,6 +1205,11 @@ export function decodeIsolateModelEventV1(
       throw new Error(`${label}.reason is invalid`);
     }
     return { type: "finish", reason: value.reason };
+  }
+  if (value.type === "provider-state") {
+    exactKeys(value, ["type", "state"], label);
+    requireModelReplayStateV1(value.state, `${label}.state`);
+    return { type: "provider-state", state: value.state };
   }
   if (value.type === "tool-call") {
     exactKeys(value, ["type", "call"], label);

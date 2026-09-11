@@ -2419,6 +2419,20 @@ export class ComputerHost {
         "viewer revoke",
         COMPUTER_HOST_PHASE_TIMEOUTS.control,
       );
+      // Removing the token prevents reconnects. Stopping this tenant's
+      // x11vnc also closes an already-established WebSocket, which is required
+      // when prepaid renewal is refused: an old connection must not keep the
+      // Sprite billable after its paid viewer window ends.
+      const service = viewServiceNameV1(botKey);
+      try {
+        await withTimeout(
+          settleService(await sprite.stopService(service, "10s"), service),
+          "viewer stop",
+          COMPUTER_HOST_PHASE_TIMEOUTS.service,
+        );
+      } catch {
+        // Already stopped or absent is the desired end state.
+      }
       return Response.json({ version: 1, effectId: request.effectId });
     }
 

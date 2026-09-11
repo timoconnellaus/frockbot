@@ -1261,6 +1261,7 @@ export class UserSettingsBackendContribution {
     command: ConnectionCommandV1,
   ): Promise<string> {
     const projected =
+      command.type === "connection/oauth" ||
       command.type === "connection/create-api-key" ||
       command.type === "connection/create"
         ? command.packageId

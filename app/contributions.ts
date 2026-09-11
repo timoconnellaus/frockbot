@@ -1,3 +1,4 @@
+import { catalogUserContributionsV1 } from "@frockbot/providers/catalog/user";
 /**
  * The foundation application's backend Contribution list.
  *
@@ -275,6 +276,7 @@ export const backendDescriptorsV1: readonly AnyBackendDescriptor[] = [
   machineGatewayContribution,
   settingsUserContribution,
   credentialsUserContribution,
+  ...catalogUserContributionsV1,
   ollamaCloudUserContribution,
   frockAiUserContribution,
   botTemplateUserContribution,

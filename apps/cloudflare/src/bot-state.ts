@@ -1,3 +1,6 @@
+import { prepaidComputerHost } from "./billing-computer.js";
+import { decodeModelRates } from "@frockbot/app/billing/model";
+import type { BillingAccountRpc } from "./billing.js";
 import { cleanNotificationTestState } from "./notification-state-cleanup.js";
 import type { MessageNotice } from "@frockbot/app/notifications/messages";
 import {
@@ -175,6 +178,25 @@ import {
   APPLET_SOURCE_MAX_FILES_V1,
   decodeWorkspacePathV1,
 } from "@frockbot/core/contracts";
+
+function hostedBillingRequired(origin?: string): boolean {
+  return (
+    !!origin &&
+    !/^(localhost|127\.0\.0\.1|\[::1\])$/.test(new URL(origin).hostname)
+  );
+}
+
+function hostedModelLimits(raw?: string) {
+  const rates = Object.values(decodeModelRates(raw));
+  return {
+    inputTokens: rates.length
+      ? Math.min(...rates.map((rate) => rate.maximumInputTokens))
+      : 0,
+    outputTokens: rates.length
+      ? Math.min(...rates.map((rate) => rate.maximumOutputTokens))
+      : 0,
+  };
+}
 
 /*
  * Where an Applet's source lives.
@@ -496,6 +518,42 @@ export class BotState extends DurableObject<BotStateEnv> {
     // serves from the RPC that addresses it, never from its constructor.
     this.backendEnv = {
       ...env,
+      ...(hostedBillingRequired(env.BETTER_AUTH_URL) && env.COMPUTER_HOST
+        ? {
+            COMPUTER_HOST: prepaidComputerHost(
+              env.COMPUTER_HOST,
+              (userId) =>
+                env.USER_CONFIGURATIONS.get(
+                  env.USER_CONFIGURATIONS.idFromName(userId),
+                ) as unknown as BillingAccountRpc,
+            ),
+          }
+        : {}),
+      ...(hostedBillingRequired(env.BETTER_AUTH_URL)
+        ? {
+            BILLING: (userId: string, botId: string, sessionId: string) => {
+              const account = env.USER_CONFIGURATIONS.get(
+                env.USER_CONFIGURATIONS.idFromName(userId),
+              ) as unknown as BillingAccountRpc;
+              return {
+                botId,
+                sessionId,
+                rates: decodeModelRates(
+                  (env as BotStateEnv & { BILLING_MODEL_RATES?: string })
+                    .BILLING_MODEL_RATES,
+                ),
+                account: {
+                  reserve: (
+                    reservation: import("@frockbot/app/billing/ledger").UsageReservation,
+                  ) => account.reserveUsage({ userId, reservation }),
+                  settle: (
+                    settlement: import("@frockbot/app/billing/ledger").UsageSettlement,
+                  ) => account.settleUsage({ userId, settlement }),
+                },
+              };
+            },
+          }
+        : {}),
       MEMORY_CHUNK_INDEX: {
         record: async (vectorIds) => {
           const entries = memoryChunkIndexEntriesV1(vectorIds);
@@ -511,6 +569,14 @@ export class BotState extends DurableObject<BotStateEnv> {
               autoRoute: frockAiWorkerVarV1(env, "FROCK_AI_AUTO_ROUTE"),
               accountId: frockAiWorkerVarV1(env, "FROCK_AI_ACCOUNT_ID"),
               token: frockAiWorkerVarV1(env, "FROCK_AI_GATEWAY_TOKEN"),
+              ...(hostedBillingRequired(env.BETTER_AUTH_URL)
+                ? {
+                    billingLimits: hostedModelLimits(
+                      (env as BotStateEnv & { BILLING_MODEL_RATES?: string })
+                        .BILLING_MODEL_RATES,
+                    ),
+                  }
+                : {}),
             }),
           }
         : {}),

@@ -35,6 +35,7 @@ import '../plugins/page.dart';
 import '../recovery/page.dart';
 import '../routines/page.dart';
 import '../search/overlay.dart';
+import '../settings/billing.dart';
 import '../settings/bot_settings.dart';
 import '../settings/page.dart';
 import '../templates/page.dart';
@@ -1398,6 +1399,12 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                               home: 'models',
                             ),
                           ),
+                        ),
+                        _profileRow(
+                          'profile-billing',
+                          Icons.account_balance_wallet_outlined,
+                          'Billing & usage',
+                          () => _push(BillingPage(api: widget.api)),
                         ),
                         _profileRow(
                           SettingsIds.profileConnections,

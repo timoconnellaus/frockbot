@@ -1,3 +1,4 @@
+import { billingRoutes, type BillingAccountRpc } from "./billing.js";
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { BOT_STATE_CHANNEL_INTERNAL_PATH } from "./bot-state-channel.js";
 import {
@@ -197,6 +198,10 @@ export { BotState, DeploymentPolicy, UserConfiguration };
 export { VoiceAssistant };
 
 interface Env {
+  STRIPE_SECRET_KEY?: string;
+  STRIPE_WEBHOOK_SECRET?: string;
+  STRIPE_MONTHLY_PRICE_ID?: string;
+  BILLING_MODEL_RATES?: string;
   FCM_SERVICE_ACCOUNT?: string;
   /** Explicit qualification gate; not enabled by the production configuration. */
   NATIVE_SLICE_2_AUTH?: string;
@@ -2229,7 +2234,16 @@ export default {
         openBotStateChannel: (userId, botId, request, context) =>
           openOwnedBotStateChannel(env, userId, botId, request, context),
         voice: voiceGatewayDependencies(env),
-        backendContributions: [...mountedBackend.contributions],
+        backendContributions: [
+          ...mountedBackend.contributions,
+          billingRoutes(
+            env,
+            (userId) =>
+              env.USER_CONFIGURATIONS.get(
+                env.USER_CONFIGURATIONS.idFromName(userId),
+              ) as unknown as BillingAccountRpc,
+          ),
+        ],
         debug: debugSurface(env),
         allowedClientOrigins: allowedClientOrigins(env),
         allowDevelopmentIdentity: env.ALLOW_DEVELOPMENT_AUTH === "true",

@@ -265,6 +265,11 @@ describe("production setup", () => {
       MACHINE_TOKEN_SECRET:
         "9f2c4a6e8d0b1357913579bdf02468ace13579bdf02468ace13579bdf02468ac",
       FCM_SERVICE_ACCOUNT: '{"project_id":"frockbot-test"}',
+      STRIPE_SECRET_KEY: "sk_test_production",
+      STRIPE_WEBHOOK_SECRET: "whsec_production",
+      STRIPE_MONTHLY_PRICE_ID: "price_production_monthly",
+      BILLING_MODEL_RATES:
+        '{"@cf/test/model":{"inputMicrosPerToken":1,"cachedInputMicrosPerToken":1,"outputMicrosPerToken":2,"maximumInputTokens":1000,"maximumOutputTokens":1000}}',
       // Required since 2026-09-05: without it every published Applet answers
       // 503, which is what production did until the manifest was added.
       APPLET_VIEWER_SECRET:

@@ -265,6 +265,11 @@ export async function executeTurn(
         botId: input.identity.botId,
         sessionId: input.command.sessionId,
         sessionEvents: input.previousEvents,
+        billing: state.env.BILLING?.(
+          input.identity.userId,
+          input.identity.botId,
+          input.command.sessionId,
+        ),
         persistSessionEvents: input.persistSessionEvents,
         agentPackages: runtime.agentPackages,
         modelSelection: runtime.modelSelection,

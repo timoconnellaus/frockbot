@@ -793,6 +793,11 @@ function isolateModelPath(
       const composition = await createShellCompositionHost({
         botId: identity.botId,
         sessionId: `isolate-model:${request.requestId}`,
+        billing: state.env.BILLING?.(
+          identity.userId,
+          identity.botId,
+          `isolate-model:${request.requestId}`,
+        ),
         sessionEvents: [],
         agentPackages: runtime.agentPackages,
         modelSelection: runtime.modelSelection,

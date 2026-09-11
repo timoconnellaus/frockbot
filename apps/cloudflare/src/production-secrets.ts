@@ -66,6 +66,22 @@ export interface NonSecretWorkerSettingV1 extends ProductionSecretV1 {
  */
 export const REQUIRED_PRODUCTION_SECRETS_V1: readonly ProductionSecretV1[] = [
   {
+    name: "STRIPE_SECRET_KEY",
+    why: "Creates account subscriptions, top-ups and portal sessions.",
+  },
+  {
+    name: "STRIPE_WEBHOOK_SECRET",
+    why: "Verifies payment events before granting credit.",
+  },
+  {
+    name: "STRIPE_MONTHLY_PRICE_ID",
+    why: "Pins the US$29 monthly Stripe price.",
+  },
+  {
+    name: "BILLING_MODEL_RATES",
+    why: "Published hosted model prices and prepaid dispatch limits.",
+  },
+  {
     name: "FCM_SERVICE_ACCOUNT",
     why: "Authorizes Firebase push delivery to registered Android devices.",
   },

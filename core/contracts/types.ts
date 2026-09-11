@@ -116,9 +116,53 @@ export interface ToolAttachmentV1 {
   dataBase64?: string;
 }
 
+/** Opaque response content needed to replay provider signatures after eviction. */
+export interface ModelReplayStateV1 {
+  connectionId?: string;
+  connectionGeneration?: string;
+  provider: string;
+  model: string;
+  content: string;
+}
+
+export function requireModelReplayStateV1(
+  value: unknown,
+  label = "model replay state",
+): asserts value is ModelReplayStateV1 {
+  const state = eventRecord(value, label);
+  requireEventKeys(
+    state,
+    [
+      "provider",
+      "model",
+      "content",
+      ...(state.connectionId === undefined ? [] : ["connectionId"]),
+      ...(state.connectionGeneration === undefined
+        ? []
+        : ["connectionGeneration"]),
+    ],
+    label,
+  );
+  if (state.connectionId !== undefined)
+    eventString(state.connectionId, `${label}.connectionId`);
+  if (state.connectionGeneration !== undefined)
+    eventString(state.connectionGeneration, `${label}.connectionGeneration`);
+  eventString(state.provider, `${label}.provider`);
+  eventString(state.model, `${label}.model`);
+  const content = eventString(state.content, `${label}.content`);
+  if (content.length > 524_288)
+    throw new Error(`${label}.content exceeds its limit`);
+  requireJsonValue(JSON.parse(content), `${label}.content`);
+}
+
 export type LlmMessage =
   | { role: "user"; content: string }
-  | { role: "assistant"; content: string; toolCalls: ToolCall[] }
+  | {
+      role: "assistant";
+      content: string;
+      toolCalls: ToolCall[];
+      providerState?: ModelReplayStateV1;
+    }
   | {
       role: "tool";
       callId: string;
@@ -156,6 +200,7 @@ export interface LlmUsageV1 {
 }
 
 export type LlmStreamEvent =
+  | { type: "provider-state"; state: ModelReplayStateV1 }
   | { type: "text-delta"; text: string }
   | { type: "tool-call"; call: ToolCall }
   | { type: "usage"; usage: LlmUsageV1 }
@@ -378,6 +423,7 @@ export interface SessionEventMap {
     requestId: string;
     text: string;
     toolCalls: ToolCall[];
+    providerState?: ModelReplayStateV1;
   };
   "tool/call": {
     turn: number;
@@ -981,7 +1027,21 @@ function requireLlmMessage(value: unknown, label: string): void {
     return;
   }
   if (role === "assistant") {
-    requireEventKeys(message, ["role", "content", "toolCalls"], label);
+    requireEventKeys(
+      message,
+      [
+        "role",
+        "content",
+        "toolCalls",
+        ...(message.providerState === undefined ? [] : ["providerState"]),
+      ],
+      label,
+    );
+    if (message.providerState !== undefined)
+      requireModelReplayStateV1(
+        message.providerState,
+        `${label}.providerState`,
+      );
     eventString(message.content, `${label}.content`, true);
     if (!Array.isArray(message.toolCalls)) {
       throw new Error(`${label}.toolCalls must be an array`);
@@ -1494,13 +1554,22 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
     case "assistant/message":
       requireEventKeys(
         event,
-        keys("turn", "step", "requestId", "text", "toolCalls"),
+        keys(
+          "turn",
+          "step",
+          "requestId",
+          "text",
+          "toolCalls",
+          ...(event.providerState === undefined ? [] : ["providerState"]),
+        ),
         "session event",
       );
       turn();
       step();
       requestId();
       text();
+      if (event.providerState !== undefined)
+        requireModelReplayStateV1(event.providerState);
       if (!Array.isArray(event.toolCalls)) {
         throw new Error("session event.toolCalls must be an array");
       }
