@@ -35,7 +35,7 @@ end. The deterministic checks that _have_ run are listed in
 6. Dictate for more than five minutes. Expect: the relay stops the capture
    with a `limit` message; the draft keeps everything before it.
 7. Confirm in the OpenAI dashboard that the session used
-   `gpt-realtime-whisper` and was billed per audio minute, not per token.
+   `gpt-live-transcribe` and was billed per audio minute, not per token.
 
 ## Continuous session
 
