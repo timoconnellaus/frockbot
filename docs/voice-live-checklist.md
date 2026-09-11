@@ -46,12 +46,12 @@ end to end. The deterministic checks that _have_ run are listed in
 
 ## Continuous session
 
-1. Press the waveform button. Expect: the footer appears at once, the user
-   row animates from the microphone before the server says `listening`, the
-   call starts within ~2 s.
+1. Press the waveform button. Expect: the footer appears at once, the meter's
+   lobes bloom white and pale pink from the microphone before the server says
+   `listening`, the call starts within ~2 s.
 2. Ask "what bots do I have". Expect: the reply is spoken from ElevenLabs
-   (George, Flash v2.5, PCM 24 kHz), the AI row animates from the playback,
-   the reply names the live Bots.
+   (George, Flash v2.5, PCM 24 kHz), the same meter blooms deep rose from the
+   playback, the reply names the live Bots.
 3. Interrupt the reply by speaking. Expect: playback stops within ~200 ms and
    the assistant listens; a cough or a door closing does not stop it.
 4. Ask a Bot to do something substantial ("ask Remy to plan my week").
