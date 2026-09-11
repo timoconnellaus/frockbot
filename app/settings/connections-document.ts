@@ -171,7 +171,8 @@ function accountNode(account: Account): ViewNode {
   }
   if (
     account.kind === "model" &&
-    account.authorization === "api-key" &&
+    (account.authorization === "api-key" ||
+      account.authorization === "grant") &&
     account.state === "ready"
   ) {
     controls.push(
@@ -192,7 +193,7 @@ function accountNode(account: Account): ViewNode {
   }
   if (account.state !== "revoking") {
     controls.push(
-      account.authorization === "api-key"
+      account.authorization === "api-key" || account.kind === "model"
         ? press(
             "disconnect",
             "Disconnect",

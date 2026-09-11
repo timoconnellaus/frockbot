@@ -201,7 +201,12 @@
     "./web/ssrf": "./web/ssrf.ts",
     "./package.json": "./package.json",
     "./notifications/messages": "./notifications/messages.ts",
-    "./notifications/storage-keys": "./notifications/storage-keys.ts"
+    "./notifications/storage-keys": "./notifications/storage-keys.ts",
+    "./billing/ledger": "./billing/ledger.ts",
+    "./billing/computer": "./billing/computer.ts",
+    "./billing/stripe": "./billing/stripe.ts",
+    "./billing/page": "./billing/page.ts",
+    "./billing/model": "./billing/model.ts"
   },
   "scripts": {
     "test": "bun test .",

@@ -105,3 +105,12 @@ The flip served the Flutter web build at `/` and took the Vue client out in the 
 ## Not now
 
 Voice, billing, package publishing, per-Bot plugin scoping, avatar wearables, and Applet sharing between Users. Each is an addition to the target, not a change to it.
+
+## Billing implementation awaiting launch
+
+The US$29 account plan, US$15 included allowance, prepaid top-ups, Stripe adapter,
+account ledger, model metering, native/web billing screens, and marketing pricing
+section are implemented locally. Launch is blocked on a verified Sprites resource
+meter and prepaid computer cutoff; adding Stripe keys alone does not make this
+ready to ship. [Billing implementation and launch checklist](billing.md) records
+the current status, tested boundaries, and required morning setup.

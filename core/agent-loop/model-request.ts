@@ -1,5 +1,6 @@
 import {
   type LlmStreamEvent,
+  requireModelReplayStateV1,
   type LlmUsageV1,
   type ModelProviderFailureClassV1,
   type NormalizedModelRequest,
@@ -227,6 +228,7 @@ export async function consumeStreamV1(
   signal: AbortSignal,
 ): Promise<ModelResponse> {
   let text = "";
+  let providerState: ModelResponse["providerState"];
   const toolCalls: ToolCall[] = [];
   let usage: LlmUsageV1 | undefined;
   let structuredFailure:
@@ -236,6 +238,18 @@ export async function consumeStreamV1(
   try {
     for await (const event of runtime.services.llm.stream(request, signal)) {
       signal.throwIfAborted();
+      if (event.type === "provider-state") {
+        requireModelReplayStateV1(event.state);
+        if (
+          event.state.provider !== request.provider ||
+          event.state.model !== request.model ||
+          event.state.connectionId !== request.modelBinding?.connectionId ||
+          event.state.connectionGeneration !==
+            request.modelBinding?.connectionGeneration
+        )
+          throw new Error("Model replay state identity does not match request");
+        providerState = structuredClone(event.state);
+      }
       if (event.type === "usage") usage = structuredClone(event.usage);
       applyStreamEventV1(
         runtime,
@@ -285,7 +299,12 @@ export async function consumeStreamV1(
   if (structuredFailure) {
     throw new StructuredOutputValidationError(structuredFailure);
   }
-  return { request, text, toolCalls };
+  return {
+    request,
+    text,
+    toolCalls,
+    ...(providerState ? { providerState } : {}),
+  };
 }
 
 /** One `model/usage` per dispatch, because each dispatch may have been billed. */

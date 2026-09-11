@@ -1,3 +1,4 @@
+import { routeModelOAuthV1 } from "./model-oauth-page.js";
 import {
   decodeBotIdV1,
   decodeCompositionCommandReceiptV1,
@@ -61,6 +62,11 @@ export type SettingsGatewayHost = SettingsConnectionGatewayHost &
 
 export interface SettingsBackendRouteContribution {
   packageId: string;
+  publicRoute?(
+    request: Request,
+    url: URL,
+    context: { client: "browser" | "desktop" },
+  ): Promise<Response | undefined>;
   route(
     request: Request,
     url: URL,
@@ -181,7 +187,39 @@ export function createSettingsBackendContribution(
 ): SettingsBackendRouteContribution {
   return {
     packageId: "settings",
+    async publicRoute(request, url) {
+      if (
+        ![
+          "/api/model-oauth",
+          "/api/model-oauth/progress",
+          "/api/model-oauth/callback",
+        ].includes(url.pathname)
+      )
+        return undefined;
+      try {
+        return await routeModelOAuthV1(host, request, url);
+      } catch {
+        return jsonError(
+          400,
+          "Sign-in link is invalid, expired, or could not finish. Start a new sign-in in FrockBot.",
+        );
+      }
+    },
     async route(request, url, context) {
+      try {
+        const oauth = await routeModelOAuthV1(
+          host,
+          request,
+          url,
+          context.userId,
+        );
+        if (oauth) return oauth;
+      } catch (error) {
+        return jsonError(
+          400,
+          error instanceof Error ? error.message : "Sign-in failed",
+        );
+      }
       if (!context.userId) return undefined;
       const composition = await routeComposition(
         host,
@@ -237,6 +275,10 @@ export function createSettingsBackendContribution(
         return jsonError(405, "method not allowed");
       try {
         const command = decodeConnectionCommandV1(await request.json());
+        if (command.type === "connection/oauth") {
+          // The registered return address belongs to this authenticated gateway.
+          command.callbackUrl = `${url.origin}/api/model-oauth/callback`;
+        }
         return Response.json(
           decodeConnectionCommandReceiptV1(
             await host.executeConnection(context.userId, command),

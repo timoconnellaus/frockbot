@@ -410,6 +410,18 @@ async function webSearchStub(request: Request, key: string): Promise<Response> {
 export async function ollamaCloudStub(request: Request): Promise<Response> {
   const url = new URL(request.url);
   if (url.origin === WEB_STUB_ORIGIN) return webStub(url);
+  if (
+    url.origin === "https://auth.x.ai" &&
+    url.pathname === "/oauth2/device/code"
+  ) {
+    return Response.json({
+      device_code: "integration-xai-device-secret",
+      user_code: "XAI-INTEGRATION",
+      verification_uri: "https://console.x.ai/device",
+      expires_in: 900,
+      interval: 5,
+    });
+  }
   if (!url.hostname.includes("ollama.com")) {
     // Anything a Bot should never reach is counted before it is refused, so a
     // test can prove the request was not made rather than only that it failed.

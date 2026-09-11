@@ -1,3 +1,8 @@
+import {
+  decodeModelOAuthProgressV1,
+  type ModelOAuthProgressV1,
+  type ModelOAuthCommandV1,
+} from "./oauth.js";
 import type {
   ConnectionAuthorizationKind,
   CredentialDescriptorV1,
@@ -115,6 +120,7 @@ export interface DisconnectConnectionCommandV1 {
 }
 
 export type ConnectionCommandV1 =
+  | ModelOAuthCommandV1
   | CreateConnectionCommandV1
   | CreateApiKeyConnectionCommandV1
   | RotateApiKeyConnectionCommandV1
@@ -124,6 +130,7 @@ export type ConnectionCommandV1 =
   | DisconnectConnectionCommandV1;
 
 export interface ConnectionCommandReceiptV1 {
+  oauth?: ModelOAuthProgressV1;
   schemaVersion: 1;
   commandId: string;
   connectionId: string;
@@ -359,7 +366,13 @@ export function decodeConnectionCommandReceiptV1(
   input: unknown,
 ): ConnectionCommandReceiptV1 {
   const value = record(input, "Connection command receipt");
-  exact(value, ["schemaVersion", "commandId", "connectionId", "status"]);
+  exact(value, [
+    "schemaVersion",
+    "commandId",
+    "connectionId",
+    "status",
+    ...(value.oauth === undefined ? [] : ["oauth"]),
+  ]);
   const statuses: ConnectionCommandReceiptV1["status"][] = [
     "applied",
     "failed",
@@ -373,6 +386,9 @@ export function decodeConnectionCommandReceiptV1(
     commandId: decodeConnectionCommandIdV1(value.commandId),
     connectionId: text(value.connectionId, "connectionId", 128),
     status: value.status as ConnectionCommandReceiptV1["status"],
+    ...(value.oauth === undefined
+      ? {}
+      : { oauth: decodeModelOAuthProgressV1(value.oauth) }),
   };
 }
 
@@ -380,6 +396,49 @@ export function decodeConnectionCommandV1(input: unknown): ConnectionCommandV1 {
   const value = record(input, "Connection command");
   const base = common(value);
   switch (value.type) {
+    case "connection/oauth": {
+      exact(value, [
+        "schemaVersion",
+        "type",
+        "commandId",
+        "packageId",
+        "action",
+        "attemptId",
+        ...["label", "code", "callbackUrl", "browserKey"].filter(
+          (k) => value[k] !== undefined,
+        ),
+      ]);
+      if (
+        !["start", "check", "complete", "cancel"].includes(
+          value.action as string,
+        )
+      )
+        throw new Error("Invalid OAuth action");
+      return {
+        ...base,
+        type: value.type,
+        packageId: text(value.packageId, "packageId", 128),
+        ...(value.browserKey === undefined
+          ? {}
+          : { browserKey: text(value.browserKey, "browserKey", 128) }),
+        action: value.action as ModelOAuthCommandV1["action"],
+        attemptId: text(
+          decodeConnectionCommandIdV1(value.attemptId),
+          "attemptId",
+          64,
+        ),
+        ...(value.label === undefined
+          ? {}
+          : { label: text(value.label, "label", 120) }),
+        ...(value.code === undefined
+          ? {}
+          : { code: text(value.code, "code", 8192) }),
+        ...(value.callbackUrl === undefined
+          ? {}
+          : { callbackUrl: text(value.callbackUrl, "callbackUrl", 2048) }),
+      };
+    }
+
     case "connection/create":
       exact(value, [
         "schemaVersion",

@@ -311,6 +311,9 @@ export class Session {
           role: "assistant",
           content: event.text,
           toolCalls: event.toolCalls,
+          ...(event.providerState
+            ? { providerState: event.providerState }
+            : {}),
         });
       } else if (event.type === "tool/result") {
         const call = journal.get(event.occurrenceId)!.occurrence.call;

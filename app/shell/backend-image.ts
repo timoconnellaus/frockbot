@@ -51,6 +51,7 @@ export interface NativeAiBindingV1 {
  * as its own type so the binding's absence is a typed state, not a cast.
  */
 export interface BotImageEnv {
+  BILLING?: unknown;
   AI?: NativeAiBindingV1;
   WORKSPACE_FILES?: WorkspaceFilesV1;
 }
@@ -174,7 +175,19 @@ export function createBotImageHost(
       runId: turn.runId,
     },
     files,
-    ...(bindings.AI ? { model: createNativeAiImageModelV1(bindings.AI) } : {}),
+    ...(bindings.AI
+      ? {
+          model: bindings.BILLING
+            ? {
+                async run(): Promise<ArrayBuffer> {
+                  throw new Error(
+                    "Hosted image generation is awaiting a published usage rate. No credit has been charged.",
+                  );
+                },
+              }
+            : createNativeAiImageModelV1(bindings.AI),
+        }
+      : {}),
     ...(modelId ? { modelId } : {}),
   };
 }

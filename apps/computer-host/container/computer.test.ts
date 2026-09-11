@@ -1891,13 +1891,17 @@ describe("viewer", () => {
     expect(sprite.commands.at(-1)?.stdin).toContain('touch "$BOT/last-seen"');
   });
 
-  test("revoking removes the token from the gateway's file", async () => {
+  test("revoking removes the token and disconnects an existing viewer", async () => {
     const { host, sprite } = provisioned();
+    const botKey = `bot-1-${digest("bot-1").slice(0, 12)}`;
+    const service = viewServiceNameV1(botKey);
+    sprite.services.set(service, "running");
     await host.handle(
       request({ kind: "viewer", action: "revoke", sessionId: "opaque-token" }),
     );
     expect(sprite.commands.at(-1)?.stdin).toContain(`${RUNTIME_ROOT}/tokens`);
     expect(sprite.commands.at(-1)?.stdin).toContain("'opaque-token'");
+    expect(sprite.serviceStops).toEqual([service]);
   });
 });
 

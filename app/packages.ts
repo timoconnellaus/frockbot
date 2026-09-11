@@ -18,7 +18,7 @@ import { customModelsDefinitionV1 } from "@frockbot/app/custom-models/definition
 import { flockDefinitionV1 } from "@frockbot/app/flock/definition";
 import { imageDefinitionV1 } from "@frockbot/app/image/definition";
 import { machineMessagesDefinitionV1 } from "@frockbot/app/machine-messages/definition";
-import { providerAnthropicDefinitionV1 } from "@frockbot/providers/anthropic/definition";
+import { catalogProviderDefinitionsV1 } from "@frockbot/providers/catalog/definition";
 import { providerFlockAiDefinitionV1 } from "@frockbot/providers/frock-ai/definition";
 import { providerOllamaCloudDefinitionV1 } from "@frockbot/providers/ollama-cloud/definition";
 import { routinesDefinitionV1 } from "@frockbot/app/routines/definition";
@@ -57,7 +57,7 @@ export const FOUNDATION_PACKAGES_V1: readonly PackageDefinitionV1[] = [
   voiceDefinitionV1,
   providerOllamaCloudDefinitionV1,
   providerFlockAiDefinitionV1,
-  providerAnthropicDefinitionV1,
+  ...catalogProviderDefinitionsV1,
   flockDefinitionV1,
   botTemplateDefinitionV1,
   searchDefinitionV1,

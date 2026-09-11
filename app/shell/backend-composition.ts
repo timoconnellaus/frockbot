@@ -1,3 +1,4 @@
+import type { ModelBilling } from "../billing/model.js";
 // The Shell Package owns the Composition a Turn runs on. First-party code is
 // the foundation runtime, ordinary imports in this bundle and never a
 // Composition member; every member is untrusted and mounts through
@@ -99,6 +100,7 @@ export interface ShellAppletMountOptions {
 }
 
 export interface ShellCompositionMountOptions {
+  billing?: ModelBilling;
   botId: string;
   sessionId: string;
   sessionEvents: readonly SessionEvent[];
@@ -159,6 +161,7 @@ export function createShellCompositionHost(
       signal.throwIfAborted();
       const runtime = await createFoundationRuntime(undefined, {
         agentId: options.botId,
+        billing: options.billing,
         sessionId: options.sessionId,
         sessionEvents: options.sessionEvents,
         composition: {

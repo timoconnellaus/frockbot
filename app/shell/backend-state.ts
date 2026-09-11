@@ -1,3 +1,4 @@
+import type { ModelBilling } from "../billing/model.js";
 import type { TurnTypeV1, WorkspaceFilesV1 } from "@frockbot/core/contracts";
 import type { BotSettingsViewV1 } from "@frockbot/core/configuration";
 import {
@@ -28,6 +29,7 @@ import type {
 } from "./backend-runtime.js";
 
 export interface BotStateEnv {
+  BILLING?: (userId: string, botId: string, sessionId: string) => ModelBilling;
   MEMORY_FILES: R2Bucket;
   /** Object-storage file surfaces constructed by the Cloudflare adapter. */
   WORKSPACE_FILES?: WorkspaceFilesV1;

@@ -1,3 +1,5 @@
+import { catalogProvidersV1 } from "@frockbot/providers/catalog/definition";
+import { createCatalogProviderFeatureV1 } from "@frockbot/providers/catalog/runtime";
 import type { CredentialLeaseV1 } from "@frockbot/core/connection";
 import type {
   BotExecutionPlanV1,
@@ -55,7 +57,6 @@ import {
   ollamaChatBaseUrl,
 } from "@frockbot/providers/ollama-cloud/runtime";
 import { createFrockAiFeature } from "@frockbot/providers/frock-ai/runtime";
-import { createAnthropicFeature } from "@frockbot/providers/anthropic/runtime";
 import {
   createRoutinesRuntimeFeature,
   type RoutinesRuntimeHostV1,
@@ -265,6 +266,7 @@ interface ModelRuntimeContributionConfig {
    * pointed the Connection at something other than the Package default.
    */
   apiBaseUrl?: string;
+  settings?: Record<string, unknown>;
 }
 
 interface ModelRuntimeContributionFactory {
@@ -325,31 +327,26 @@ const modelRuntimeContributionFactories = new Map<
       },
     },
   ],
-  [
-    "provider-anthropic",
-    {
-      providerType: "anthropic",
-      create: ({
-        apiBaseUrl,
-        leaseCredential,
-        settleCredential,
-        accountId,
-        connectionId,
-      }) => {
-        if (!leaseCredential || !settleCredential) {
-          throw new Error("Anthropic credential host is unavailable");
-        }
-        return createAnthropicFeature({
-          accountId,
-          connectionId,
-          packageId: "provider-anthropic",
-          leaseCredential,
-          settleCredential,
-          ...(apiBaseUrl ? { apiBaseUrl } : {}),
-        });
+  ...catalogProvidersV1.map(
+    (provider): [string, ModelRuntimeContributionFactory] => [
+      `provider-${provider.id}`,
+      {
+        providerType: provider.id,
+        create: (config) => {
+          if (!config.leaseCredential || !config.settleCredential)
+            throw new Error(`${provider.name} credential host is unavailable`);
+          return createCatalogProviderFeatureV1({
+            providerId: provider.id,
+            accountId: config.accountId,
+            connectionId: config.connectionId,
+            settings: config.settings,
+            leaseCredential: config.leaseCredential,
+            settleCredential: config.settleCredential,
+          });
+        },
       },
-    },
-  ],
+    ],
+  ),
 ]);
 
 /**
@@ -579,6 +576,7 @@ export function createFoundationModelRuntimePackage(
     feature: factory.create({
       ...host,
       connectionId: binding.connection.connectionId,
+      settings: binding.connection.settings,
       ...(binding.connection.generation
         ? { connectionGeneration: binding.connection.generation }
         : {}),

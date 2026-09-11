@@ -1,3 +1,4 @@
+import { BilledLlmRegistry, type ModelBilling } from "./billing/model.js";
 import {
   FOUNDATION_MODEL,
   FOUNDATION_PROVIDER,
@@ -87,6 +88,7 @@ export interface RuntimeModelSelection {
 }
 
 export interface FoundationRuntimeOptions {
+  billing?: ModelBilling;
   botId?: string;
   agentId?: string;
   sessionId?: string;
@@ -130,7 +132,9 @@ export async function createFoundationRuntime(
     persistEvents: options.persistSessionEvents,
   });
   const systemPrompt = new SystemPromptRegistry(hooks);
-  const llm = new LlmRegistry(hooks);
+  const llm = options.billing
+    ? new BilledLlmRegistry(hooks, options.billing)
+    : new LlmRegistry(hooks);
   const tools = new ToolRegistry(hooks, systemPrompt);
   const services: FoundationRuntimeServices = {
     sessions,

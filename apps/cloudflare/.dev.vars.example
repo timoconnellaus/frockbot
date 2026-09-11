@@ -29,3 +29,14 @@ OPENAI_API_KEY=replace-with-an-openai-api-key
 ELEVENLABS_API_KEY=replace-with-an-elevenlabs-api-key
 # Optional: the ElevenLabs voice id; the default is George.
 # ELEVENLABS_VOICE_ID=JBFqnCBsd6RMkjVDRZzb
+
+# Billing: use Stripe TEST mode locally. Never commit live values.
+# STRIPE_SECRET_KEY is the switch: leave it unset and billing stays off.
+# A localhost BETTER_AUTH_URL never bills, even with a key.
+# Configure webhook API version 2025-02-24.acacia.
+STRIPE_SECRET_KEY=replace-with-stripe-test-secret-key
+STRIPE_WEBHOOK_SECRET=replace-with-stripe-test-webhook-secret
+STRIPE_MONTHLY_PRICE_ID=replace-with-29-usd-monthly-price-id
+# Exact hosted model IDs -> verified provider rates and hard token bounds.
+# See docs/billing.md. Empty means no hosted model is authorized to spend.
+BILLING_MODEL_RATES={}

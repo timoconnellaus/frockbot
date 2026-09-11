@@ -34,6 +34,7 @@ export interface ModelResponse {
   request: NormalizedModelRequest;
   text: string;
   toolCalls: ToolCall[];
+  providerState?: import("@frockbot/core/contracts").ModelReplayStateV1;
 }
 
 /** The step a Turn currently has open, so its settlement can close it. */

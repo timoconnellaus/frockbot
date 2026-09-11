@@ -1,0 +1,1450 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <title>FrockBot computer host decision</title>
+    <style>
+      :root {
+        --ink: #1e1d27;
+        --muted: #6d6974;
+        --pink: #ec386b;
+        --pink-dark: #cb2655;
+        --blush: #fce2ea;
+        --cream: #faf7f2;
+        --paper: #fff;
+        --line: #e7e0d9;
+        --green: #19745b;
+        --green-pale: #e1f4ed;
+        --amber: #9a5a06;
+        --amber-pale: #fff0d0;
+        --red: #a52f49;
+        --red-pale: #fbe4e9;
+        --shadow: 0 18px 55px rgba(30, 29, 39, 0.09);
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html {
+        scroll-behavior: smooth;
+      }
+      body {
+        margin: 0;
+        min-width: 320px;
+        color: var(--ink);
+        background:
+          radial-gradient(
+            circle at 88% 7%,
+            rgba(236, 56, 107, 0.12),
+            transparent 26rem
+          ),
+          var(--cream);
+        font:
+          15px/1.55 Manrope,
+          Inter,
+          ui-sans-serif,
+          system-ui,
+          sans-serif;
+      }
+      a {
+        color: inherit;
+      }
+      button,
+      input {
+        font: inherit;
+      }
+      .shell {
+        width: min(1220px, calc(100% - 36px));
+        margin: 0 auto;
+      }
+      header {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        border-bottom: 1px solid rgba(231, 224, 217, 0.85);
+        background: rgba(250, 247, 242, 0.9);
+        backdrop-filter: blur(14px);
+      }
+      .nav {
+        min-height: 64px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 20px;
+      }
+      .brand {
+        font-weight: 900;
+        letter-spacing: -0.04em;
+        font-size: 20px;
+      }
+      .brand span {
+        color: var(--pink);
+      }
+      .nav small {
+        color: var(--muted);
+        font-weight: 650;
+      }
+      main {
+        padding: 56px 0 80px;
+      }
+      .eyebrow {
+        margin: 0 0 10px;
+        color: var(--pink-dark);
+        font-size: 12px;
+        font-weight: 850;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+      h1,
+      h2,
+      h3 {
+        margin: 0;
+        line-height: 1.08;
+        letter-spacing: -0.035em;
+      }
+      h1 {
+        max-width: 880px;
+        font:
+          400 clamp(42px, 7vw, 84px)/0.98 Georgia,
+          serif;
+      }
+      h1 em {
+        color: var(--pink);
+        font-style: italic;
+      }
+      h2 {
+        font:
+          400 clamp(30px, 4vw, 48px)/1 Georgia,
+          serif;
+      }
+      h3 {
+        font-size: 19px;
+      }
+      .lede {
+        max-width: 790px;
+        margin: 24px 0 0;
+        color: var(--muted);
+        font-size: 18px;
+      }
+      .hero-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 9px;
+        margin-top: 26px;
+      }
+      .pill,
+      .status {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.78);
+        padding: 7px 11px;
+        font-size: 12px;
+        font-weight: 800;
+      }
+      .recommendation {
+        display: grid;
+        grid-template-columns: 1.35fr 0.65fr;
+        gap: 28px;
+        margin-top: 46px;
+        padding: 34px;
+        border: 2px solid var(--ink);
+        border-radius: 24px;
+        background: var(--paper);
+        box-shadow: var(--shadow);
+      }
+      .recommendation h2 {
+        max-width: 720px;
+      }
+      .recommendation p {
+        color: var(--muted);
+        font-size: 16px;
+      }
+      .verdict {
+        align-self: stretch;
+        display: grid;
+        place-content: center;
+        min-width: 0;
+        border-radius: 18px;
+        padding: 22px;
+        background: var(--ink);
+        color: white;
+        text-align: center;
+      }
+      .verdict strong {
+        color: #ff8eae;
+        font:
+          400 34px/1 Georgia,
+          serif;
+      }
+      .verdict span {
+        margin-top: 8px;
+        color: #d9d5de;
+        font-size: 13px;
+      }
+      section {
+        margin-top: 72px;
+      }
+      .section-head {
+        display: flex;
+        align-items: end;
+        justify-content: space-between;
+        gap: 24px;
+        margin-bottom: 24px;
+      }
+      .section-head p {
+        max-width: 550px;
+        margin: 0;
+        color: var(--muted);
+      }
+      .cards {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 16px;
+      }
+      .card {
+        min-width: 0;
+        padding: 24px;
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        background: var(--paper);
+      }
+      .card.primary {
+        border: 2px solid var(--pink);
+        box-shadow: var(--shadow);
+      }
+      .card h3 {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+      .rank {
+        color: var(--pink);
+        font:
+          400 34px/1 Georgia,
+          serif;
+      }
+      .card p {
+        color: var(--muted);
+      }
+      .tag {
+        display: inline-block;
+        margin: 4px 4px 0 0;
+        padding: 4px 8px;
+        border-radius: 7px;
+        background: var(--blush);
+        color: var(--pink-dark);
+        font-size: 11px;
+        font-weight: 800;
+      }
+      .architecture {
+        display: grid;
+        grid-template-columns: repeat(7, auto);
+        align-items: stretch;
+        gap: 10px;
+        overflow-x: auto;
+        padding: 24px;
+        border-radius: 20px;
+        background: var(--ink);
+        color: white;
+      }
+      .node {
+        min-width: 145px;
+        padding: 17px;
+        border: 1px solid #45424d;
+        border-radius: 14px;
+        background: #2b2931;
+      }
+      .node strong {
+        display: block;
+        color: #fff;
+      }
+      .node small {
+        display: block;
+        margin-top: 7px;
+        color: #bcb7c3;
+      }
+      .node.accent {
+        border-color: var(--pink);
+        background: #3b2430;
+      }
+      .arrow {
+        display: grid;
+        place-items: center;
+        color: #ff8eae;
+        font-size: 22px;
+      }
+      .split {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+        margin-top: 16px;
+      }
+      .note {
+        padding: 18px;
+        border-radius: 14px;
+        background: var(--green-pale);
+        color: #145c48;
+      }
+      .note.warn {
+        background: var(--amber-pale);
+        color: #714206;
+      }
+      .note strong {
+        display: block;
+        margin-bottom: 4px;
+      }
+      .table-wrap {
+        overflow-x: auto;
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        background: var(--paper);
+      }
+      table {
+        width: 100%;
+        min-width: 980px;
+        border-collapse: collapse;
+      }
+      th,
+      td {
+        padding: 16px 14px;
+        border-bottom: 1px solid var(--line);
+        text-align: left;
+        vertical-align: top;
+      }
+      th {
+        position: sticky;
+        top: 64px;
+        background: #f5efe8;
+        color: #4d4954;
+        font-size: 11px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      tr:last-child td {
+        border-bottom: 0;
+      }
+      tr.recommended td {
+        background: #fff9fb;
+      }
+      td:first-child {
+        font-weight: 850;
+      }
+      .good {
+        color: var(--green);
+        font-weight: 850;
+      }
+      .mixed {
+        color: var(--amber);
+        font-weight: 850;
+      }
+      .bad {
+        color: var(--red);
+        font-weight: 850;
+      }
+      .unknown {
+        color: var(--muted);
+        font-weight: 700;
+      }
+      .tabs {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 14px;
+      }
+      .tabs button {
+        cursor: pointer;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: white;
+        padding: 8px 13px;
+        color: var(--muted);
+        font-weight: 800;
+      }
+      .tabs button[aria-pressed="true"] {
+        border-color: var(--ink);
+        background: var(--ink);
+        color: white;
+      }
+      tr[hidden] {
+        display: none;
+      }
+      .calculator {
+        display: grid;
+        grid-template-columns: 0.75fr 1.25fr;
+        gap: 20px;
+      }
+      .controls,
+      .results {
+        padding: 26px;
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        background: white;
+      }
+      .control {
+        margin-top: 20px;
+      }
+      .control label {
+        display: flex;
+        justify-content: space-between;
+        gap: 15px;
+        font-weight: 800;
+      }
+      .control output {
+        color: var(--pink-dark);
+      }
+      input[type="range"] {
+        width: 100%;
+        accent-color: var(--pink);
+      }
+      .result-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+        margin-top: 18px;
+      }
+      .result {
+        padding: 17px;
+        border-radius: 13px;
+        background: var(--cream);
+      }
+      .result strong {
+        display: block;
+        font:
+          400 29px/1 Georgia,
+          serif;
+      }
+      .result small {
+        color: var(--muted);
+      }
+      .result.highlight {
+        background: var(--blush);
+      }
+      .fine {
+        margin-top: 16px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .gates {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: 10px;
+        counter-reset: gate;
+      }
+      .gate {
+        min-width: 0;
+        padding: 18px;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: white;
+        counter-increment: gate;
+      }
+      .gate::before {
+        content: counter(gate, decimal-leading-zero);
+        display: block;
+        margin-bottom: 18px;
+        color: var(--pink);
+        font:
+          400 28px/1 Georgia,
+          serif;
+      }
+      .gate strong {
+        display: block;
+      }
+      .gate span {
+        display: block;
+        margin-top: 7px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+      details {
+        border-bottom: 1px solid var(--line);
+        background: white;
+      }
+      details:first-of-type {
+        border-radius: 16px 16px 0 0;
+      }
+      details:last-of-type {
+        border: 0;
+        border-radius: 0 0 16px 16px;
+      }
+      summary {
+        cursor: pointer;
+        padding: 18px 20px;
+        font-weight: 850;
+      }
+      details > div {
+        padding: 0 20px 20px;
+        color: var(--muted);
+      }
+      .sources {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+      }
+      .source {
+        min-width: 0;
+        padding: 14px 16px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: white;
+        text-decoration: none;
+      }
+      .source:hover {
+        border-color: var(--pink);
+      }
+      .source strong {
+        display: block;
+        overflow-wrap: anywhere;
+      }
+      .source small {
+        color: var(--muted);
+      }
+      footer {
+        margin-top: 70px;
+        padding-top: 24px;
+        border-top: 1px solid var(--line);
+        color: var(--muted);
+      }
+      @media (max-width: 900px) {
+        .recommendation,
+        .calculator,
+        .split {
+          grid-template-columns: 1fr;
+        }
+        .cards {
+          grid-template-columns: 1fr;
+        }
+        .gates {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+        .section-head {
+          align-items: start;
+          flex-direction: column;
+        }
+      }
+      @media (max-width: 560px) {
+        .shell {
+          width: min(100% - 24px, 1220px);
+        }
+        main {
+          padding-top: 36px;
+        }
+        .nav small {
+          display: none;
+        }
+        .recommendation {
+          padding: 22px;
+        }
+        .gates,
+        .sources,
+        .result-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+      @media print {
+        header,
+        .tabs,
+        .calculator {
+          display: none;
+        }
+        body {
+          background: white;
+        }
+        section {
+          break-inside: avoid;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="shell nav">
+        <div class="brand">Frock<span>Bot</span> · infrastructure decision</div>
+        <small>Computer host review · 10 September 2026</small>
+      </div>
+    </header>
+    <main class="shell">
+      <p class="eyebrow">Decision brief</p>
+      <h1>A better home for the <em>Computer</em></h1>
+      <p class="lede">
+        Fly Sprites gives FrockBot the right user experience, but not the
+        per-Computer billing data we need. Seven current platforms were assessed
+        against the product’s actual boundary: an isolated Linux desktop,
+        durable files and browser identity, sleep/resume, controlled egress, and
+        defensible prepaid billing.
+      </p>
+      <div class="hero-meta">
+        <span class="pill">US$29 plan</span
+        ><span class="pill">US$15 included usage</span
+        ><span class="pill">2× infrastructure rate</span
+        ><span class="pill">One Computer per User</span>
+      </div>
+
+      <div class="note warn" style="margin-top: 24px">
+        <strong>Status · deferred 10 September 2026</strong>This brief preserves
+        the research for a later Computer-host decision. Cloudflare Containers,
+        GKE Agent Sandbox and the other replacement paths are outside the
+        current payment implementation.
+      </div>
+
+      <article class="recommendation">
+        <div>
+          <p class="eyebrow">Recommendation</p>
+          <h2>
+            Prototype Cloudflare Containers and GKE Agent Sandbox before
+            building a fixed Fly tariff.
+          </h2>
+          <p>
+            Cloudflare remains the lead because it exposes per-instance billing
+            usage and keeps FrockBot on its existing platform. GKE is now a
+            serious challenger: Agent Sandbox is designed for isolated, stateful
+            agent environments, and Pod snapshots can preserve memory plus
+            filesystem state. Its snapshot suspend/resume path is newer and
+            currently needs more cluster setup, so a small two-host bake-off is
+            justified before committing.
+          </p>
+          <span class="tag">Cloudflare billing lead</span
+          ><span class="tag">GKE continuity challenger</span
+          ><span class="tag">Prototype both</span>
+        </div>
+        <div class="verdict">
+          <strong>Cloudflare leads</strong
+          ><span>GKE Agent Sandbox may offer the better Computer</span>
+        </div>
+      </article>
+
+      <section>
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Shortlist</p>
+            <h2>The four credible paths</h2>
+          </div>
+          <p>
+            The recommendation optimizes for launchable billing and preserving
+            the Computer experience. It does not assume that “persistent
+            filesystem” means a running process survives.
+          </p>
+        </div>
+        <div class="cards">
+          <article class="card primary">
+            <h3>Cloudflare Containers <span class="rank">01</span></h3>
+            <p>
+              Billing usage by instance, strong VM isolation, programmatic sleep
+              and the existing FrockBot platform. Rebuild the live desktop after
+              sleep from a controlled R2 backup.
+            </p>
+            <span class="tag">Prototype now</span>
+          </article>
+          <article class="card">
+            <h3>GKE Agent Sandbox <span class="rank">02</span></h3>
+            <p>
+              Purpose-built single-user agent sandboxes, gVisor isolation,
+              persistent volumes, default-deny networking and whole-Pod
+              snapshots. Similar indicative runtime cost, with a newer and
+              heavier control plane.
+            </p>
+            <span class="tag">Prototype challenger</span>
+          </article>
+          <article class="card">
+            <h3>Daytona <span class="rank">03</span></h3>
+            <p>
+              Closest managed replacement for Sprites: native VNC/Computer Use,
+              pause/archive, persistent files, network policy and per-sandbox
+              metrics. Higher cost and up to 48-hour billing settlement lag.
+            </p>
+            <span class="tag">Managed fallback</span>
+          </article>
+          <article class="card">
+            <h3>Keep Fly Sprites <span class="rank">04</span></h3>
+            <p>
+              Preserves today’s implementation and strongest continuity, but
+              usage cannot currently be attributed from the public Sprite API.
+              Only viable with a deliberately fixed customer tariff.
+            </p>
+            <span class="tag">Temporary option</span>
+          </article>
+        </div>
+      </section>
+
+      <section>
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Kubernetes path</p>
+            <h2>GKE changes the shortlist</h2>
+          </div>
+          <p>
+            A generic Kubernetes cluster adds too much machinery. GKE Agent
+            Sandbox is different because its API is specifically shaped around
+            isolated, stateful, single-replica agent environments.
+          </p>
+        </div>
+        <div class="split">
+          <div class="note">
+            <strong>Why it is viable</strong>Autopilot bills requested Pod CPU
+            and memory in one-second increments while Pods are creating or
+            running. At current Iowa list rates, 1 vCPU + 6 GiB is about
+            US$0.074/hour before persistent disk and shared cluster costs—almost
+            identical to the Cloudflare estimate at 25% CPU. Agent Sandbox adds
+            stable identity, persistent storage, default-deny networking, gVisor
+            isolation and warm pools. Pod snapshots can capture memory and
+            filesystem state, avoiding Cloudflare’s forced browser restart.
+          </div>
+          <div class="note warn">
+            <strong>Why it does not lead yet</strong>The full snapshot
+            suspend/resume workflow requires a recent GKE version, Cloud Storage
+            and IAM setup, and currently uses a temporary manual installation
+            until snapshot support is fully available in the managed add-on.
+            Customer attribution would also be FrockBot-owned lifecycle
+            accounting or OpenCost, rather than a simple vendor feed like
+            Cloudflare’s.
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Target design</p>
+            <h2>How Cloudflare persistence would work</h2>
+          </div>
+          <p>
+            The live filesystem stays fast and POSIX-compatible. R2 holds
+            explicit recovery points, not a continuously mounted Chromium
+            database.
+          </p>
+        </div>
+        <div
+          class="architecture"
+          role="img"
+          aria-label="FrockBot Worker routes one user to one Cloudflare container. The container runs a Linux desktop on ephemeral disk. A controlled checkpoint writes a backup to R2. Billing metrics flow by instance ID into the account ledger."
+        >
+          <div class="node">
+            <strong>Bot Durable Object</strong
+            ><small
+              >Durable intent, turn recovery and prepaid reservation</small
+            >
+          </div>
+          <div class="arrow">→</div>
+          <div class="node accent">
+            <strong>User routing key</strong
+            ><small
+              >One Computer per User; record the actual instance ID for
+              billing</small
+            >
+          </div>
+          <div class="arrow">→</div>
+          <div class="node">
+            <strong>Local Linux desktop</strong
+            ><small>Chromium, Xvfb/noVNC and fast ephemeral disk</small>
+          </div>
+          <div class="arrow">⇄</div>
+          <div class="node">
+            <strong>R2 recovery point</strong
+            ><small>Quiesced /home + workspace backup; restore on wake</small>
+          </div>
+        </div>
+        <div class="split">
+          <div class="note">
+            <strong>Billing path</strong>Reserve a conservative maximum before
+            waking the Computer. Query Cloudflare’s billing-usage dataset by
+            instance ID, settle actual CPU/memory/disk/network usage, and stop
+            at the prepaid boundary.
+          </div>
+          <div class="note warn">
+            <strong>Persistence caveat</strong>Cloudflare says all local disk is
+            ephemeral. Object storage is not POSIX storage. Chromium must be
+            stopped before checkpointing; crashes can lose work since the last
+            completed backup. This must be measured in a prototype.
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Recovered prior art</p>
+            <h2>ZeroBSAI already tested the hybrid filesystem</h2>
+          </div>
+          <p>
+            The old implementation did not treat R2 FUSE as a normal local disk.
+            It separated durable user files, high-churn local data, encrypted
+            recovery snapshots and semantic memory.
+          </p>
+        </div>
+        <div class="cards">
+          <article class="card primary">
+            <h3>R2 FUSE workspace</h3>
+            <p>
+              A per-user R2 prefix was mounted at <code>/workspace</code> with
+              tigrisfs. This provided continuously durable ordinary files while
+              the Cloudflare Container itself remained disposable.
+            </p>
+          </article>
+          <article class="card">
+            <h3>Local POSIX escape hatch</h3>
+            <p>
+              Package directories stayed on local disk. The remembered C code
+              intercepted <code>mkdir</code>/<code>mkdirat</code> and invoked a
+              tightly scoped mount helper so <code>node_modules</code> was
+              bind-mounted before its first write reached FUSE.
+            </p>
+          </article>
+          <article class="card">
+            <h3>Restic recovery layer</h3>
+            <p>
+              High-churn caches and package state were snapshotted separately
+              into encrypted restic repositories on R2 and restored after a cold
+              start. A root-owned socket daemon kept R2 credentials away from
+              ordinary sandbox commands.
+            </p>
+          </article>
+          <article class="card">
+            <h3>R2 + Vectorize memory</h3>
+            <p>
+              Markdown was the durable source of truth in a separate R2 bucket.
+              Vectorize stored replaceable chunk embeddings and metadata; pinned
+              preferences plus top semantic matches were loaded before each
+              model turn.
+            </p>
+          </article>
+        </div>
+        <div class="split">
+          <div class="note">
+            <strong>What to reuse</strong>Keep durable user files and agent
+            memory outside the container. Keep Chromium’s profile, SQLite,
+            LevelDB, package trees and build caches on fast local POSIX disk,
+            then checkpoint them only from a quiesced state.
+          </div>
+          <div class="note warn">
+            <strong>What to redesign</strong>The C helper lives in the related
+            crabby-kit implementation; ZeroBSAI retained a polling shell
+            predecessor in a stash. The setuid helper and direct R2 credentials
+            need a fresh security review before reuse, and neither approach
+            makes FUSE suitable for a live Chromium profile.
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Comparison</p>
+            <h2>What each platform really gives us</h2>
+          </div>
+          <p>
+            Use the filters to focus on the shortlist. “Meter” means a
+            programmatic path suitable for customer attribution, not merely a
+            vendor dashboard.
+          </p>
+        </div>
+        <div class="tabs" role="group" aria-label="Filter vendors">
+          <button type="button" aria-pressed="true" data-filter="all">
+            All options
+          </button>
+          <button type="button" aria-pressed="false" data-filter="shortlist">
+            Shortlist
+          </button>
+          <button type="button" aria-pressed="false" data-filter="metered">
+            Verified meter
+          </button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Platform</th>
+                <th>Billable attribution</th>
+                <th>Persistence after sleep</th>
+                <th>Desktop/browser</th>
+                <th>Network control</th>
+                <th>Fit for FrockBot</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr class="recommended" data-tags="shortlist metered">
+                <td>Cloudflare Containers</td>
+                <td>
+                  <span class="good">Strong.</span> GraphQL billing usage by
+                  instance ID: CPU seconds, byte-seconds of memory/disk,
+                  transmitted bytes.
+                </td>
+                <td>
+                  <span class="mixed">Checkpointed.</span> Local disk is erased;
+                  R2 directory backups restore as a copy-on-write overlay. Live
+                  processes restart.
+                </td>
+                <td>
+                  <span class="mixed">Build it.</span> Full Linux VM/container
+                  and port exposure; FrockBot can carry its Chromium/noVNC stack
+                  across.
+                </td>
+                <td>
+                  <span class="good">Strong.</span> Deny-by-default hosts, HTTPS
+                  interception and credentials held in Workers.
+                </td>
+                <td>
+                  <strong>Best first prototype.</strong> Solves metering and
+                  simplifies the control plane.
+                </td>
+              </tr>
+              <tr data-tags="shortlist metered">
+                <td>GKE Agent Sandbox</td>
+                <td>
+                  <span class="mixed">Workable.</span> Autopilot pricing is
+                  deterministic from requested resources and billable Pod
+                  lifetime; OpenCost can allocate by Pod or User label, but
+                  FrockBot owns reconciliation.
+                </td>
+                <td>
+                  <span class="good">Potentially excellent.</span> Persistent
+                  volumes are native; whole-Pod snapshots capture memory and
+                  filesystem state. Snapshot integration is still maturing.
+                </td>
+                <td>
+                  <span class="mixed">Build it.</span> Carry the Chromium/noVNC
+                  image into a stateful single-Pod Sandbox with stable routing.
+                </td>
+                <td>
+                  <span class="good">Strong.</span> gVisor isolation,
+                  default-deny networking, namespaced identity and resource
+                  limits.
+                </td>
+                <td>
+                  <strong>Best technical challenger.</strong> Similar indicative
+                  runtime cost and better continuity, with more operational
+                  surface.
+                </td>
+              </tr>
+              <tr data-tags="shortlist metered">
+                <td>Daytona</td>
+                <td>
+                  <span class="good">Strong shape.</span> Per-sandbox
+                  CPU/RAM/disk metrics and deterministic reserved-resource
+                  pricing; billing can settle up to 48 hours later.
+                </td>
+                <td>
+                  <span class="good">Strong.</span> Stop preserves disk; VM
+                  pause preserves memory; archive moves a container filesystem
+                  to object storage at zero compute/disk charge.
+                </td>
+                <td>
+                  <span class="good">Native.</span> VNC and Computer Use are
+                  product features when the image carries the desktop stack.
+                </td>
+                <td>
+                  <span class="good">Strong.</span> Domain/CIDR allowlists,
+                  block-all and outbound proxy on eligible tiers.
+                </td>
+                <td>
+                  <strong>Best managed fallback.</strong> Closest semantic
+                  match, with more vendor cost and distance.
+                </td>
+              </tr>
+              <tr data-tags="shortlist">
+                <td>Fly Sprites</td>
+                <td>
+                  <span class="bad">Blocked.</span> Public Sprite records lack
+                  the underlying app/Machine mapping and per-Sprite resource
+                  usage.
+                </td>
+                <td>
+                  <span class="good">Excellent.</span> Current native persistent
+                  Computer behavior and running-state continuity.
+                </td>
+                <td>
+                  <span class="good">Proven.</span> FrockBot’s current
+                  Chromium/noVNC implementation works.
+                </td>
+                <td>
+                  <span class="good">Implemented.</span> Existing host proxy and
+                  allowlist.
+                </td>
+                <td>
+                  <strong>Fixed tariff only.</strong> Lowest migration effort,
+                  weakest billing evidence.
+                </td>
+              </tr>
+              <tr data-tags="metered">
+                <td>E2B</td>
+                <td>
+                  <span class="mixed">Partial.</span> Sandbox metrics exist and
+                  runtime is billed per second, but the public docs do not
+                  establish a canonical billable-usage feed.
+                </td>
+                <td>
+                  <span class="mixed">Beta.</span> Pause/resume exists, while
+                  normal Pro sessions are capped at 24 hours; persistent
+                  multi-day sessions are Enterprise.
+                </td>
+                <td>
+                  <span class="mixed">Build it.</span> Linux, files, PTY and
+                  ports; no first-party desktop surface in the reviewed docs.
+                </td>
+                <td>
+                  <span class="mixed">Basic.</span> Internet can be disabled;
+                  fine-grained controls are less clear than Cloudflare/Daytona.
+                </td>
+                <td>
+                  Good agent sandbox, but the US$150/month Pro base is awkward
+                  at launch.
+                </td>
+              </tr>
+              <tr data-tags="metered">
+                <td>Modal Sandboxes</td>
+                <td>
+                  <span class="mixed">Workable.</span> Billing APIs support
+                  reports and tags, but cost is max(requested, actual); limits
+                  must equal the quoted ceiling.
+                </td>
+                <td>
+                  <span class="mixed">Checkpointed.</span> Filesystem/directory
+                  snapshots and persistent Volumes; memory snapshots are alpha
+                  and expire after seven days.
+                </td>
+                <td>
+                  <span class="mixed">Build it.</span> Linux sandboxes and
+                  tunnels; desktop is not a first-party product surface.
+                </td>
+                <td>
+                  <span class="mixed">Available.</span> Proxies and sandbox
+                  isolation; region pinning adds a multiplier.
+                </td>
+                <td>
+                  Technically capable, expensive Sandbox rates and more
+                  adaptation than Cloudflare.
+                </td>
+              </tr>
+              <tr data-tags="">
+                <td>Vercel Sandbox</td>
+                <td>
+                  <span class="bad">Insufficiently granular.</span> Active CPU
+                  and memory pricing are clear, but reviewed usage interfaces
+                  are team/project-oriented rather than canonical per-sandbox
+                  billing.
+                </td>
+                <td>
+                  <span class="mixed">Persistent by default.</span> Automatic
+                  filesystem snapshots across sessions; no live-process
+                  continuity. Drives are the beta feature.
+                </td>
+                <td>
+                  <span class="mixed">Ecosystem.</span> Cua demonstrates
+                  desktops, but it is an additional layer.
+                </td>
+                <td>
+                  <span class="mixed">Reasonable.</span> Secure sandboxes, but
+                  less aligned with FrockBot’s Worker-native trust boundary.
+                </td>
+                <td>
+                  Promising product, no advantage over Cloudflare for this
+                  stack.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section>
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Cost shape</p>
+            <h2>Cloudflare standard-2 working estimate</h2>
+          </div>
+          <p>
+            This models one 1-vCPU, 6-GiB, 12-GB desktop while awake. CPU is
+            charged only while active; memory and disk are provisioned for the
+            running duration.
+          </p>
+        </div>
+        <div class="calculator">
+          <div class="controls">
+            <h3>Usage assumptions</h3>
+            <div class="control">
+              <label for="hours"
+                >Awake hours / month <output id="hoursOut">20</output></label
+              ><input id="hours" type="range" min="1" max="200" value="20" />
+            </div>
+            <div class="control">
+              <label for="cpu"
+                >Average CPU activity <output id="cpuOut">25%</output></label
+              ><input
+                id="cpu"
+                type="range"
+                min="5"
+                max="100"
+                step="5"
+                value="25"
+              />
+            </div>
+            <div class="control">
+              <label for="markup"
+                >Customer multiplier <output id="markupOut">2.0×</output></label
+              ><input
+                id="markup"
+                type="range"
+                min="1"
+                max="3"
+                step="0.1"
+                value="2"
+              />
+            </div>
+          </div>
+          <div class="results">
+            <h3>Illustrative monthly compute</h3>
+            <div class="result-grid">
+              <div class="result">
+                <strong id="infraCost">$1.50</strong
+                ><small>Cloudflare infrastructure</small>
+              </div>
+              <div class="result highlight">
+                <strong id="customerCost">$3.00</strong
+                ><small>Customer usage charge</small>
+              </div>
+              <div class="result">
+                <strong id="includedHours">100.0 h</strong
+                ><small>Hours covered by US$15 credit at this load</small>
+              </div>
+              <div class="result">
+                <strong id="hourlyCost">$0.150/h</strong
+                ><small>Customer rate at this CPU activity</small>
+              </div>
+            </div>
+            <p class="fine">
+              Rates used: CPU US$0.072/vCPU-hour, memory US$0.009/GiB-hour and
+              disk US$0.000252/GB-hour. This excludes Workers, Durable Objects,
+              logs, R2 operations/storage, and network egress. Included
+              Cloudflare allowances are deliberately ignored so the customer
+              price remains stable. This is a planning estimate, not a published
+              FrockBot tariff.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Go / no-go</p>
+            <h2>A five-gate prototype</h2>
+          </div>
+          <p>
+            No billing redesign is needed yet. Prove the host boundary first,
+            then replace the current launch blocker with measured rates.
+          </p>
+        </div>
+        <div class="gates">
+          <div class="gate">
+            <strong>Desktop boots</strong
+            ><span
+              >Chromium + Xvfb/noVNC starts within an acceptable cold-wake
+              target on standard-1 and standard-2.</span
+            >
+          </div>
+          <div class="gate">
+            <strong>Identity returns</strong
+            ><span
+              >After quiescing Chromium, back up and restore `/home`; cookies,
+              browser profile and user files survive.</span
+            >
+          </div>
+          <div class="gate">
+            <strong>Crash loss is bounded</strong
+            ><span
+              >Periodic checkpoints and durable operation records limit recovery
+              to a clearly stated window.</span
+            >
+          </div>
+          <div class="gate">
+            <strong>Meter reconciles</strong
+            ><span
+              >Instance-level GraphQL usage matches the Cloudflare dashboard and
+              arrives within a measured delay.</span
+            >
+          </div>
+          <div class="gate">
+            <strong>Credit cuts off</strong
+            ><span
+              >A conservative reservation prevents overspend;
+              cancellation/viewer revocation still works at zero balance.</span
+            >
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Open questions</p>
+            <h2>What the prototype must answer</h2>
+          </div>
+        </div>
+        <details open>
+          <summary>Can Chromium’s profile be restored safely?</summary>
+          <div>
+            Cloudflare explicitly warns that object storage is not
+            POSIX-compatible and that partially written files may be captured
+            inconsistently. The safe sequence is to stop Chromium, verify
+            profile locks are gone, create a directory backup, record its handle
+            durably, then stop the container. The restored copy-on-write overlay
+            is also ephemeral, so restoration must run on every wake. A direct
+            live R2 FUSE mount should be limited to ordinary workspace files
+            unless tests prove otherwise.
+          </div>
+        </details>
+        <details>
+          <summary>Does the hybrid filesystem remain predictable?</summary>
+          <div>
+            ZeroBSAI proved that ordinary files can live on an R2 FUSE mount
+            while package state stays on local POSIX disk. The prototype must
+            test permissions, deletion, concurrent writes, cross-layer moves and
+            cold recovery. Chromium’s profile remains local and is captured only
+            after a clean shutdown.
+          </div>
+        </details>
+        <details>
+          <summary>Can memory stay independent of the Computer?</summary>
+          <div>
+            Canonical Markdown memory should remain in R2 and be available when
+            the Computer is asleep. Vectorize is a rebuildable retrieval index,
+            not the source of truth. The prototype should prove both graceful
+            fallback and a full index rebuild from R2.
+          </div>
+        </details>
+        <details>
+          <summary>Does the usage feed arrive quickly enough?</summary>
+          <div>
+            The billing dataset has the right per-instance dimensions and units,
+            but the reviewed documentation does not promise freshness. FrockBot
+            can reserve the worst-case cost for a bounded awake window and
+            settle later; the prototype should measure query lag under real
+            workloads.
+          </div>
+        </details>
+        <details>
+          <summary>Do we need process continuity?</summary>
+          <div>
+            Most Computer operations can resume from durable turn intent plus
+            files. Long-lived background services would restart after sleep. If
+            preserving RAM and running processes is a hard product requirement,
+            Daytona VM pause—or continuing with Sprites—fits better.
+          </div>
+        </details>
+        <details>
+          <summary>What happens to inactive accounts?</summary>
+          <div>
+            Cloudflare backup handles default to a three-day TTL, enforced when
+            restoring, while expired R2 objects remain until separately deleted.
+            FrockBot must set a longer explicit TTL, own R2 lifecycle cleanup
+            and define an account-deletion path before real users arrive.
+          </div>
+        </details>
+      </section>
+
+      <section>
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Primary sources</p>
+            <h2>Evidence behind the brief</h2>
+          </div>
+          <p>
+            Vendor documentation was checked on 10 September 2026. Unknowns
+            remain labelled as unknowns.
+          </p>
+        </div>
+        <div class="sources">
+          <a
+            class="source"
+            href="https://developers.cloudflare.com/analytics/graphql-api/tutorials/querying-container-metrics/"
+            ><strong>Cloudflare · Container billing usage via GraphQL</strong
+            ><small
+              >Per-instance CPU, memory, disk and transmitted-byte fields</small
+            ></a
+          >
+          <a
+            class="source"
+            href="https://developers.cloudflare.com/containers/platform/pricing/"
+            ><strong>Cloudflare · Containers pricing</strong
+            ><small>10ms billing, sleep behavior and instance rates</small></a
+          >
+          <a
+            class="source"
+            href="https://developers.cloudflare.com/containers/concepts/architecture/"
+            ><strong>Cloudflare · Container lifecycle</strong
+            ><small>Ephemeral disk, SIGTERM shutdown and sleep</small></a
+          >
+          <a
+            class="source"
+            href="https://developers.cloudflare.com/containers/examples/r2-fuse-mount/"
+            ><strong>Cloudflare · Mount R2 with FUSE</strong
+            ><small>Supported tigrisfs setup and FUSE capability</small></a
+          >
+          <a
+            class="source"
+            href="https://developers.cloudflare.com/sandbox/api/backups/"
+            ><strong>Cloudflare · Sandbox backup API</strong
+            ><small
+              >R2 archives, restore overlays, TTL and consistency caveats</small
+            ></a
+          >
+          <a
+            class="source"
+            href="https://developers.cloudflare.com/sandbox/concepts/security/"
+            ><strong>Cloudflare · Sandbox security</strong
+            ><small
+              >Per-sandbox VM, filesystem/process/network isolation</small
+            ></a
+          >
+          <a
+            class="source"
+            href="https://developers.cloudflare.com/sandbox/guides/outbound-traffic/"
+            ><strong>Cloudflare · Outbound controls</strong
+            ><small
+              >Deny-by-default policy and secret injection outside the
+              sandbox</small
+            ></a
+          >
+          <a
+            class="source"
+            href="https://docs.cloud.google.com/kubernetes-engine/docs/concepts/machine-learning/agent-sandbox"
+            ><strong>Google Cloud · GKE Agent Sandbox</strong
+            ><small
+              >Stateful single-Pod sandboxes, warm pools, routing and
+              default-deny networking</small
+            ></a
+          >
+          <a
+            class="source"
+            href="https://docs.cloud.google.com/kubernetes-engine/docs/how-to/agent-sandbox-pod-snapshots"
+            ><strong>Google Cloud · Agent Sandbox Pod snapshots</strong
+            ><small
+              >Memory/filesystem capture, restore flow and current setup
+              requirements</small
+            ></a
+          >
+          <a
+            class="source"
+            href="https://cloud.google.com/kubernetes-engine/pricing"
+            ><strong>Google Cloud · GKE pricing</strong
+            ><small>Per-second Autopilot Pod billing and cluster fee</small></a
+          >
+          <a class="source" href="https://opencost.io/docs/integrations/api/"
+            ><strong>OpenCost · Allocation API</strong
+            ><small
+              >Cost allocation by Pod, container, namespace or label</small
+            ></a
+          >
+          <a class="source" href="https://www.daytona.io/docs/en/billing/"
+            ><strong>Daytona · Billing and lifecycle states</strong
+            ><small
+              >Per-sandbox usage and the 48-hour settlement window</small
+            ></a
+          >
+          <a class="source" href="https://www.daytona.io/docs/sandboxes"
+            ><strong>Daytona · Sandbox lifecycle</strong
+            ><small>Pause, archive, restore and filesystem behavior</small></a
+          >
+          <a class="source" href="https://www.daytona.io/pricing"
+            ><strong>Daytona · Pricing</strong
+            ><small>Per-second CPU, RAM and disk rates</small></a
+          >
+          <a class="source" href="https://e2b.dev/pricing"
+            ><strong>E2B · Pricing and limits</strong
+            ><small>Per-second runtime, Pro base and session limits</small></a
+          >
+          <a
+            class="source"
+            href="https://modal.com/docs/guide/sandbox-resources"
+            ><strong>Modal · Sandbox resource billing</strong
+            ><small
+              >Max(requested, actual) model and resource ceilings</small
+            ></a
+          >
+          <a
+            class="source"
+            href="https://modal.com/docs/guide/sandbox-snapshots"
+            ><strong>Modal · Sandbox snapshots</strong
+            ><small
+              >Filesystem, directory and experimental memory snapshots</small
+            ></a
+          >
+          <a
+            class="source"
+            href="https://vercel.com/kb/guide/vercel-sandbox-duration-and-persistence"
+            ><strong>Vercel · Duration and persistence</strong
+            ><small
+              >Session limits, filesystem snapshots and billing shape</small
+            ></a
+          >
+          <a class="source" href="https://fly.io/sprites/"
+            ><strong>Fly · Sprites pricing</strong
+            ><small>Current measured CPU, RAM and storage rates</small></a
+          >
+        </div>
+      </section>
+
+      <footer>
+        Prepared for FrockBot’s computer-host decision. Recommendation:
+        prototype Cloudflare, keep Daytona ready as the fallback, and defer the
+        fixed Fly tariff until the prototype reports.
+      </footer>
+    </main>
+    <script>
+      const buttons = [...document.querySelectorAll("[data-filter]")];
+      const rows = [...document.querySelectorAll("tbody tr")];
+      buttons.forEach((button) =>
+        button.addEventListener("click", () => {
+          buttons.forEach((candidate) =>
+            candidate.setAttribute(
+              "aria-pressed",
+              String(candidate === button),
+            ),
+          );
+          const filter = button.dataset.filter;
+          rows.forEach((row) => {
+            row.hidden =
+              filter !== "all" && !row.dataset.tags.split(" ").includes(filter);
+          });
+        }),
+      );
+
+      const hours = document.querySelector("#hours");
+      const cpu = document.querySelector("#cpu");
+      const markup = document.querySelector("#markup");
+      const money = (value) =>
+        new Intl.NumberFormat("en-US", {
+          style: "currency",
+          currency: "USD",
+        }).format(value);
+      function updateCost() {
+        const h = Number(hours.value);
+        const utilization = Number(cpu.value) / 100;
+        const multiple = Number(markup.value);
+        const hourlyInfra = 0.072 * utilization + 6 * 0.009 + 12 * 0.000252;
+        const monthlyInfra = hourlyInfra * h;
+        const customerHourly = hourlyInfra * multiple;
+        document.querySelector("#hoursOut").textContent = h;
+        document.querySelector("#cpuOut").textContent = `${cpu.value}%`;
+        document.querySelector("#markupOut").textContent =
+          `${multiple.toFixed(1)}×`;
+        document.querySelector("#infraCost").textContent = money(monthlyInfra);
+        document.querySelector("#customerCost").textContent = money(
+          monthlyInfra * multiple,
+        );
+        document.querySelector("#includedHours").textContent =
+          `${(15 / customerHourly).toFixed(1)} h`;
+        document.querySelector("#hourlyCost").textContent =
+          `${money(customerHourly)}/h`;
+      }
+      [hours, cpu, markup].forEach((control) =>
+        control.addEventListener("input", updateCost),
+      );
+      updateCost();
+    </script>
+  </body>
+</html>

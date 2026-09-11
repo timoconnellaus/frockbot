@@ -1,3 +1,4 @@
+import { catalogProviderDefinitionsV1 } from "@frockbot/providers/catalog/definition";
 import { describe, expect, test } from "bun:test";
 import {
   createFoundationEnabledRuntimePackages,
@@ -31,7 +32,7 @@ describe("foundation application", () => {
       "voice",
       "provider-ollama-cloud",
       "provider-flock-ai",
-      "provider-anthropic",
+      ...catalogProviderDefinitionsV1.map((provider) => provider.id),
       "flock",
       "bot-template",
       "search",
@@ -343,7 +344,9 @@ describe("foundation application", () => {
           lifecycle.mount({ specifier, startConnection() {} }),
       });
     expect(botBackend.contributions).toHaveLength(3);
-    expect(userBackend.contributions).toHaveLength(9);
+    expect(userBackend.contributions).toHaveLength(
+      9 + catalogProviderDefinitionsV1.length,
+    );
     const userSpecifiers = userBackend.contributions.map(
       (contribution) => contribution.specifier,
     );
