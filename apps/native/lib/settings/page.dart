@@ -129,10 +129,13 @@ class _SettingsPageState extends State<SettingsPage>
     if (receipt['status'] == 'applied') {
       reloadWanted = true;
       saved = 'Saved.';
+      final chosen = chosenProviderPackageIdV1(command);
       if (viewActionKindV1(command) == 'choose-provider') {
         await _manageProvider(
           (command['input'] as Map?)?['sectionId'] as String?,
         );
+      } else if (chosen != null) {
+        await _manageProvider('provider.$chosen');
       }
     }
     return receipt;

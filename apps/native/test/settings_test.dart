@@ -175,6 +175,26 @@ void main() {
       );
     });
 
+    test('a save of the add-provider section names the chosen Package', () {
+      expect(
+        chosenProviderPackageIdV1({
+          'actionId': 'save-3',
+          'input': {
+            'sectionId': 'add-provider',
+            'j3.provider': '"provider-together"',
+          },
+        }),
+        'provider-together',
+      );
+      expect(
+        chosenProviderPackageIdV1({
+          'actionId': 'save-0',
+          'input': {'sectionId': 'profile', 'f0.name': 'Tim'},
+        }),
+        isNull,
+      );
+    });
+
     test('an action naming no section is refused before dispatch', () {
       expect(
         () => settingsChangeCommandV1(

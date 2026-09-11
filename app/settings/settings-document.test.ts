@@ -109,6 +109,35 @@ test("a field id names its section, and a select says its value is JSON", () => 
   expect(field.field.choiceSource).toBe("account-models");
 });
 
+test("the add-provider section's save reads as connecting", () => {
+  const document = settingsDocumentV1(
+    frame([
+      {
+        id: "add-provider",
+        label: "Add a provider",
+        fields: [
+          {
+            id: "provider",
+            label: "Provider",
+            kind: "select",
+            value: null,
+            editable: true,
+            required: true,
+            choices: [{ label: "Together", value: "provider-together" }],
+          },
+        ],
+      },
+    ]),
+  );
+  const save = group(document, 0).children[1]!;
+  if (save.type !== "action") throw new Error("expected an action");
+  expect(save.label).toBe("Connect provider");
+  expect(document.actions[0]!.schema.required).toEqual([
+    "sectionId",
+    "j0.provider",
+  ]);
+});
+
 test("projectedFieldIdV1 refuses an id longer than an identifier", () => {
   expect(
     projectedFieldIdV1(

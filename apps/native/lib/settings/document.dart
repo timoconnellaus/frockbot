@@ -18,6 +18,25 @@ library;
 import 'dart:convert';
 
 const manageProviderKindV1 = 'manage-provider';
+const addProviderSectionV1 = 'add-provider';
+const addProviderFieldV1 = 'provider';
+
+/// The Package a save of the "Add a provider" section chose, or null when the
+/// command is any other settings change. The chosen provider's account page
+/// is what comes next, so the surface needs the id back out of the input.
+String? chosenProviderPackageIdV1(Map<String, Object?> command) {
+  final input = ((command['input'] as Map?) ?? const {})
+      .cast<String, Object?>();
+  if (input['sectionId'] != addProviderSectionV1) return null;
+  for (final entry in input.entries) {
+    if (!entry.key.endsWith('.$addProviderFieldV1')) continue;
+    final value = entry.key.startsWith('j')
+        ? jsonDecode(entry.value! as String)
+        : entry.value;
+    return value is String ? value : null;
+  }
+  return null;
+}
 
 /// The kind a section action names, when the action is one.
 String? viewActionKindV1(Map<String, Object?> command) =>
