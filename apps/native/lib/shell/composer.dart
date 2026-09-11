@@ -7,11 +7,14 @@
 /// what disabled Try again for the exact case it exists for.
 library;
 
+import 'dart:math' as math;
+
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../acceptance_metrics.dart';
+import '../orientation.dart' show isNativeMobile;
 import '../voice/footer.dart' show VoiceDictationBars;
 import 'semantics.dart';
 import 'chat_icons.dart';
@@ -46,6 +49,16 @@ bool sendReady({
 
 /// Whether the draft is something the send route would accept.
 bool draftSendable(String text) => text.isNotEmpty && !turnTextTooLong(text);
+
+/// Whether a bare Enter sends. Where there is a keyboard with a Shift key,
+/// Enter is Send and Shift+Enter is the line break. A phone's soft keyboard
+/// has no such pair, so there Enter keeps breaking the line and Send stays the
+/// button; Cmd+Enter and Ctrl+Enter send everywhere.
+bool get enterSends => !isNativeMobile;
+
+/// The field's vertical inset, in one place because the corner button is
+/// centred against the one-line field this produces.
+const EdgeInsets composerFieldPadding = EdgeInsets.fromLTRB(15, 14, 4, 14);
 
 /// One submission in flight, and the draft generation it displaced.
 class ComposerSubmission {
@@ -185,11 +198,47 @@ class _ComposerState extends State<Composer> {
     widget.focus.requestFocus();
   }
 
+  void _enter() {
+    final skills = widget.skills;
+    if (skills != null && skills.open) {
+      if (skills.highlighted < skills.candidates.length) {
+        _choose(skills.candidates[skills.highlighted]);
+      }
+      return;
+    }
+    if (widget.ready && draftSendable(widget.editor.text.trim())) {
+      widget.onSend();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final text = widget.editor.text;
     final canSend = widget.ready && draftSendable(text.trim());
+    final fieldStyle = theme.textTheme.bodyLarge?.copyWith(
+      fontWeight: FontWeight.w300,
+    );
+    // The height of the field with one line in it, as the decorator sizes
+    // it: the inset around one line, adjusted for the theme's density and
+    // never under the interactive minimum. The corner button is centred
+    // against this, so on a one-line draft it sits level with the text, and
+    // as the draft grows the row's end alignment keeps it in the bottom
+    // corner beside the last line.
+    final oneLine = math.max(
+      kMinInteractiveDimension,
+      composerFieldPadding.vertical +
+          MediaQuery.textScalerOf(context).scale(fieldStyle?.fontSize ?? 15) *
+              (fieldStyle?.height ?? 1.0) +
+          theme.visualDensity.baseSizeAdjustment.dy,
+    );
+    Widget corner(Widget button) => Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 3),
+      child: SizedBox(
+        height: oneLine,
+        child: Center(child: button),
+      ),
+    );
     final dictatable = widget.onDictate != null && text.trim().isEmpty;
     final skills = widget.skills;
     return Column(
@@ -273,6 +322,15 @@ class _ComposerState extends State<Composer> {
                         LogicalKeyboardKey.enter,
                         control: true,
                       ): widget.onSend,
+                      // A bare Enter (Shift+Enter is left to the field, which
+                      // breaks the line) sends, or takes the highlighted Skill
+                      // while the popover is up. An empty or oversized draft
+                      // swallows it rather than growing by a blank line.
+                      if (enterSends) ...{
+                        const SingleActivator(LogicalKeyboardKey.enter): _enter,
+                        const SingleActivator(LogicalKeyboardKey.numpadEnter):
+                            _enter,
+                      },
                       if (skills != null && skills.open) ...{
                         const SingleActivator(LogicalKeyboardKey.arrowUp): () =>
                             skills.move(-1),
@@ -292,9 +350,7 @@ class _ComposerState extends State<Composer> {
                           key: const ValueKey('composer'),
                           controller: widget.editor,
                           focusNode: widget.focus,
-                          style: theme.textTheme.bodyLarge?.copyWith(
-                            fontWeight: FontWeight.w300,
-                          ),
+                          style: fieldStyle,
                           minLines: 1,
                           maxLines: 6,
                           keyboardType: TextInputType.multiline,
@@ -305,12 +361,7 @@ class _ComposerState extends State<Composer> {
                             border: InputBorder.none,
                             enabledBorder: InputBorder.none,
                             focusedBorder: InputBorder.none,
-                            contentPadding: const EdgeInsets.fromLTRB(
-                              15,
-                              14,
-                              4,
-                              14,
-                            ),
+                            contentPadding: composerFieldPadding,
                             counterText: '',
                           ),
                           onChanged: (value) {
@@ -332,9 +383,8 @@ class _ComposerState extends State<Composer> {
                     VoiceDictationBars(level: level),
                   identified(
                     VoiceIds.composerDictationStop,
-                    Padding(
-                      padding: const EdgeInsets.all(3),
-                      child: IconButton.filledTonal(
+                    corner(
+                      IconButton.filledTonal(
                         key: const ValueKey('dictation-stop'),
                         tooltip: 'Stop dictation',
                         onPressed: widget.onStopDictation,
@@ -353,9 +403,8 @@ class _ComposerState extends State<Composer> {
                 else if (dictatable)
                   identified(
                     VoiceIds.composerDictate,
-                    Padding(
-                      padding: const EdgeInsets.all(3),
-                      child: IconButton.filled(
+                    corner(
+                      IconButton.filled(
                         key: const ValueKey('dictate'),
                         tooltip: 'Dictate message',
                         onPressed: widget.onDictate,
@@ -364,16 +413,15 @@ class _ComposerState extends State<Composer> {
                             borderRadius: BorderRadius.circular(11),
                           ),
                         ),
-                        icon: const Icon(Icons.mic_none, size: 20),
+                        icon: const ChatIcon(ChatIconKind.mic),
                       ),
                     ),
                   )
                 else
                   identified(
                     ShellIds.sendButton,
-                    Padding(
-                      padding: const EdgeInsets.all(3),
-                      child: IconButton.filled(
+                    corner(
+                      IconButton.filled(
                         key: const ValueKey('send'),
                         tooltip: 'Send',
                         onPressed: canSend ? widget.onSend : null,
