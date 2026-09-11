@@ -180,9 +180,20 @@ class AppletViewer {
   /// The `init` the Applet SDK waits for. The token is the only credential an
   /// Applet page ever holds, and it names one User, one Applet and one
   /// generation for fifteen minutes.
-  Map<String, Object?> init(Map<String, String> themeTokens) => {
+  Map<String, Object?> init(Map<String, String> themeTokens) =>
+      _message('init', themeTokens);
+
+  /// The same shape as `init`, for a page that is already running: a fresh
+  /// credential it adopts by reconnecting in place, with no document rebuilt.
+  Map<String, Object?> refresh(Map<String, String> themeTokens) =>
+      _message('refresh', themeTokens);
+
+  Map<String, Object?> _message(
+    String type,
+    Map<String, String> themeTokens,
+  ) => {
     'schemaVersion': 1,
-    'type': 'init',
+    'type': type,
     'themeTokens': themeTokens,
     'applet': {
       'socketUrl': socketUrl,
@@ -193,6 +204,14 @@ class AppletViewer {
       if (appletTimingLogV1) 'timing': true,
     },
   };
+
+  /// What makes this viewer the same document as another: the generation
+  /// and the page. The credential is not part of it — a re-minted token
+  /// reaches the running page as a `refresh`, never as a rebuilt frame.
+  String get documentIdentity => '$generationId|$uiUrl';
+
+  /// When the credential should be re-minted: this close to its expiry.
+  DateTime get refreshAt => expiresAt.subtract(appletViewerRefreshV1);
 }
 
 class AppletsApi {
