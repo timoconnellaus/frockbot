@@ -70,9 +70,9 @@ function oversize(artifacts: {
 }
 
 /**
- * A Plugin build: the same seam, a different pipeline. The module is one
- * file, so the only ceiling is its own; the manifest came out of the built
- * module run in Miniflare, so it is decoded here before it is believed.
+ * A Plugin build: the same seam, a different pipeline. The manifest came out
+ * of the built module run in Miniflare, so it is decoded here before it is
+ * believed, and both artifacts are held to the ceilings a publish stores.
  */
 async function buildPlugin(
   directory: string,
@@ -113,20 +113,25 @@ async function buildPlugin(
       ],
     };
   }
-  if (outcome.module.length > APPLET_BUILD_LIMITS.moduleBytes) {
-    return {
-      status: "failed",
-      stage: "bundle",
-      diagnostics: [
-        {
-          file: "plugin.ts",
-          line: 1,
-          column: 1,
-          message: `The built module is ${outcome.module.length} bytes, over the ${APPLET_BUILD_LIMITS.moduleBytes}-byte ceiling a publish will store.`,
-          severity: "error",
-        },
-      ],
-    };
+  const checks: [string, number, number][] = [
+    ["module.js", outcome.module.length, APPLET_BUILD_LIMITS.moduleBytes],
+    [
+      "manifest.json",
+      JSON.stringify(manifest).length,
+      APPLET_BUILD_LIMITS.manifestBytes,
+    ],
+  ];
+  const diagnostics = checks
+    .filter(([, size, limit]) => size > limit)
+    .map(([name, size, limit]) => ({
+      file: "plugin.ts",
+      line: 1,
+      column: 1,
+      message: `dist/${name} is ${size} bytes, over the ${limit}-byte ceiling a publish will store.`,
+      severity: "error" as const,
+    }));
+  if (diagnostics.length > 0) {
+    return { status: "failed", stage: "bundle", diagnostics };
   }
   return { status: "built", manifest, module: outcome.module };
 }

@@ -17,20 +17,6 @@ async function scaffold(): Promise<string> {
   return (await scaffoldPluginTemplateV1()).directory;
 }
 
-describe("the Plugin template", () => {
-  it("names the same tools in plugin.json and plugin.ts", async () => {
-    const { files } = await scaffoldPluginTemplateV1();
-    const descriptor = JSON.parse(
-      files.find((file) => file.path === "plugin.json")!.text,
-    ) as { id: string; tools: { name: string }[] };
-    expect(descriptor.id).toBe("notes");
-    const source = files.find((file) => file.path === "plugin.ts")!.text;
-    for (const tool of descriptor.tools) {
-      expect(source).toContain(`name: "${tool.name}"`);
-    }
-  });
-});
-
 describe("check", () => {
   it("passes on a fresh template", async () => {
     expect(
@@ -68,13 +54,23 @@ describe("check", () => {
 
 describe("build", () => {
   it("bundles one module and describes it by running it", async () => {
-    const outcome = await runPluginBuildV1(await scaffold(), {
+    const { directory, files } = await scaffoldPluginTemplateV1();
+    const outcome = await runPluginBuildV1(directory, {
       mode: "build",
       id: "notes",
     });
     if (outcome.status !== "built") {
       throw new Error(`expected a build: ${JSON.stringify(outcome)}`);
     }
+    // The template's two files describe one Plugin: what the module really
+    // exports, read by running it, is what `plugin.json` declares.
+    const descriptor = JSON.parse(
+      files.find((file) => file.path === "plugin.json")!.text,
+    ) as { id: string; tools: { name: string }[] };
+    expect(descriptor.id).toBe("notes");
+    expect(outcome.manifest.tools.map((tool) => tool.name)).toEqual(
+      descriptor.tools.map((tool) => tool.name),
+    );
     expect(outcome.manifest.tools.map((tool) => tool.name)).toEqual([
       "note_count",
       "note_add",
@@ -150,7 +146,7 @@ describe("build", () => {
     }
   }, 180_000);
 
-  it("a module that exports no tools fails at describe, not at mount", async () => {
+  it("a module that exports no tools array fails at describe, not at mount", async () => {
     const directory = await scaffold();
     await writeFile(
       join(directory, "plugin.ts"),
@@ -160,7 +156,30 @@ describe("build", () => {
     const outcome = await runPluginBuildV1(directory, { mode: "build" });
     expect(outcome).toMatchObject({ status: "failed", stage: "describe" });
     if (outcome.status === "failed") {
-      expect(outcome.diagnostics[0]!.message).toContain('non-empty "tools"');
+      expect(outcome.diagnostics[0]!.message).toContain('a "tools" array');
     }
+  }, 180_000);
+
+  it("builds a Plugin that serves a hook and no tools", async () => {
+    const directory = await scaffold();
+    await writeFile(
+      join(directory, "plugin.ts"),
+      [
+        'import type { PluginHooks, PluginTool } from "@frockbot/applet-sdk/plugin";',
+        "export const tools: PluginTool[] = [];",
+        'export const execute = () => "no tools";',
+        "export const hooks: PluginHooks = {",
+        '  "system-prompt/assemble": (payload) => payload.assembly,',
+        "};",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    const outcome = await runPluginBuildV1(directory, { mode: "build" });
+    if (outcome.status !== "built") {
+      throw new Error(`expected a build: ${JSON.stringify(outcome)}`);
+    }
+    expect(outcome.manifest.tools).toEqual([]);
+    expect(outcome.manifest.hooks).toEqual(["system-prompt/assemble"]);
   }, 180_000);
 });

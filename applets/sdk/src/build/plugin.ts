@@ -276,8 +276,8 @@ function names(value, label) {
 }
 
 function describe() {
-  if (!Array.isArray(plugin.tools) || plugin.tools.length === 0) {
-    throw new Error('the module must export a non-empty "tools" array');
+  if (!Array.isArray(plugin.tools)) {
+    throw new Error('the module must export a "tools" array');
   }
   if (typeof plugin.execute !== "function") {
     throw new Error('the module must export an "execute" function');
@@ -357,7 +357,7 @@ export async function describePlugin(
 
 function validateDescription(input: PluginDescriptionV1): PluginDescriptionV1 {
   if (!Array.isArray(input.tools) || input.tools.length > MAX_TOOLS) {
-    throw new Error(`The Plugin declares no tools, or more than ${MAX_TOOLS}`);
+    throw new Error(`The Plugin declares more than ${MAX_TOOLS} tools`);
   }
   const seen = new Set<string>();
   for (const tool of input.tools) {

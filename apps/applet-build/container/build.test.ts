@@ -162,4 +162,36 @@ describe("the Applet build service", () => {
       }),
     ).toMatchObject({ status: "failed", stage: "descriptor" });
   }, 180_000);
+
+  test("refuses a Plugin manifest over the ceiling a publish stores", async () => {
+    const { files } = await scaffoldPluginTemplateV1({
+      prefix: "plugin-build-oversize-",
+    });
+    const oversize = await buildAppletRequestV1({
+      version: 1,
+      effectId: "effect-9",
+      kind: "plugin",
+      id: "notes",
+      mode: "build",
+      files: files.map((file) =>
+        file.path === "plugin.ts"
+          ? {
+              ...file,
+              text: [
+                'import type { PluginTool } from "@frockbot/applet-sdk/plugin";',
+                "export const tools: PluginTool[] = [",
+                '  { name: "big", description: "Big.", inputSchema: { type: "object", title: "x".repeat(120_000) } },',
+                "];",
+                'export const execute = () => "x";',
+                "",
+              ].join("\n"),
+            }
+          : file,
+      ),
+    });
+    expect(oversize).toMatchObject({ status: "failed", stage: "bundle" });
+    if (oversize.status === "failed") {
+      expect(oversize.diagnostics[0]?.message).toContain("manifest.json");
+    }
+  }, 180_000);
 });
