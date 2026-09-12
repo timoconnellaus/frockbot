@@ -154,9 +154,20 @@ class AssistantSessionController extends ChangeNotifier {
   Future<VoiceSocket?> _connect(int generation) async {
     final began = DateTime.now();
     for (var attempt = 0; attempt < 2; attempt++) {
+      final pending = openSocket();
       try {
-        return await openSocket().timeout(connectRetryWindow);
+        return await pending.timeout(connectRetryWindow);
       } on Object {
+        unawaited(
+          pending
+              .then(
+                (socket) => socket.close(
+                  code: voiceCloseAbandonedV1,
+                  reason: 'abandoned-connect',
+                ),
+              )
+              .catchError((Object _) {}),
+        );
         if (generation != _generation || _disposed) return null;
         final elapsed = DateTime.now().difference(began);
         if (attempt == 1 || elapsed >= connectRetryWindow) break;

@@ -389,7 +389,7 @@ export class VoiceAssistant extends VoiceAgentBase<
     const deviceKey =
       context.request.headers.get(VOICE_ASSISTANT_DEVICE_HEADER) ?? "unknown";
     if (!userId || userId !== this.name) {
-      this.trace(connection, "refused-identity", { deviceKey });
+      this.trace(connection, "refused-identity", { device: deviceKey });
       connection.close(4403, "voice session is not yours");
       return;
     }
@@ -801,7 +801,11 @@ export class VoiceAssistant extends VoiceAgentBase<
               ? { answer: result.answer }
               : { failure: result.outcome };
             traced = spoke
-              ? { answerChars: result.answer.length }
+              ? {
+                  outcome: result.outcome,
+                  delegations: result.delegations,
+                  answerChars: result.answer.length,
+                }
               : { failure: result.outcome };
           },
         );

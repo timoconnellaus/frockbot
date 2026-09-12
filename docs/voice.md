@@ -273,14 +273,14 @@ account's.
 The object writes one `voice assistant {json}` line per step, readable in
 `wrangler tail` and Workers Logs: `connected`, `call-admitted`, `upstream`
 (`starting` | `awake` | `asleep`), `listening`, `utterance` (length and whether
-it reached the model, never the words), `turn`, `turn-settled` (an answer's
-length, or a failure classification — never a provider's error sentence),
-`refused` (with the code and sentence the client was sent), `stt-failed`,
-`call-ended` and `closed` (the client's code and reason). Every line carries
-the connection id, the device key and, once admitted, the call id and elapsed
-milliseconds. A call that reaches `listening` and then `closed` with no
-`utterance` in between was ended by the client before anything was heard; the
-`closed` reason says by which path.
+it reached the model, never the words), `turn`, `turn-settled` (the outcome,
+the delegation count and the answer's length, or a failure classification —
+never a provider's error sentence), `refused` (with the code and sentence the
+client was sent), `stt-failed`, `call-ended` and `closed` (the client's code
+and reason). Every line carries the connection id, the device key and, once
+admitted, the call id and elapsed milliseconds. A call that reaches
+`listening` and then `closed` with no `utterance` in between was ended by the
+client before anything was heard; the `closed` reason says by which path.
 
 ### Text turns
 

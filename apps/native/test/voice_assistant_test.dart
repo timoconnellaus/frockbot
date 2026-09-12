@@ -449,6 +449,31 @@ void main() {
     });
   });
 
+  test('a socket that arrives after the connect window is abandoned', () async {
+    final pending = <Completer<VoiceSocket>>[];
+    final socket = FakeVoiceSocket();
+    final controller = AssistantSessionController(
+      openSocket: () {
+        final opening = Completer<VoiceSocket>();
+        pending.add(opening);
+        return opening.future;
+      },
+      capture: FakeVoiceCapture(),
+      player: FakeVoicePlayer(),
+      connectRetryWindow: const Duration(milliseconds: 20),
+    );
+    await controller.start();
+    await settle();
+    expect(controller.phase, VoiceSessionPhase.error);
+
+    pending.first.complete(socket);
+    await settle();
+    expect(socket.closed, isTrue);
+    expect(socket.closeCode, voiceCloseAbandonedV1);
+    expect(socket.closeReason, 'abandoned-connect');
+    controller.dispose();
+  });
+
   test('a connect that never works is an error, not a loop', () async {
     var attempts = 0;
     final controller = AssistantSessionController(
