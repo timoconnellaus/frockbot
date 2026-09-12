@@ -42,11 +42,12 @@ import type { ShellBotStateV1 } from "@frockbot/app/shell/backend-state";
 import { admitTurnV1 } from "@frockbot/app/composition/bot";
 import { projectFirstPartyPackageIframeV1 } from "@frockbot/app/shell/composition-views";
 import { appletsEnabled } from "@frockbot/app/applets-host/bot";
+import { userAccountFeaturesV1 } from "@frockbot/app/settings/bot";
+import type { UserFeaturesV1 } from "@frockbot/app/admin/shared";
 import {
   APPLETS_SKILL_SLUG_V1,
   PLUGINS_SKILL_SLUG_V1,
 } from "@frockbot/app/skills/managed";
-import { pluginAuthoringEnabled } from "@frockbot/app/plugins/authoring-bot";
 import { PACKAGE_IFRAME_FOCUS_TOOL_V2 } from "@frockbot/core/contracts";
 import {
   projectClientTurnV1,
@@ -92,21 +93,21 @@ async function withheldManagedSkillSlugs(
   state: ShellBotStateV1,
   identity: BotSkillsIdentity,
 ): Promise<readonly string[]> {
-  const withheld: string[] = [];
   // The same rule for each gated feature: the Skill goes exactly where the
-  // tools go, and a switch that cannot be read is off.
-  const gates: Array<[string, () => Promise<boolean>]> = [
-    [APPLETS_SKILL_SLUG_V1, () => appletsEnabled(state, identity)],
-    [PLUGINS_SKILL_SLUG_V1, () => pluginAuthoringEnabled(state, identity)],
-  ];
-  for (const [slug, read] of gates) {
-    let enabled: boolean;
-    try {
-      enabled = await read();
-    } catch {
-      enabled = false;
-    }
-    if (!enabled) withheld.push(slug);
+  // tools go, and a switch that cannot be read is off. One read of the
+  // account's features answers every gate.
+  let features: UserFeaturesV1 | undefined;
+  try {
+    features = await userAccountFeaturesV1(state, identity);
+  } catch {
+    features = undefined;
+  }
+  const withheld: string[] = [];
+  if (!features?.applets) withheld.push(APPLETS_SKILL_SLUG_V1);
+  // The plugin tools also need the artifact bucket they store a module in, so
+  // a deployment without it is handed no Skill teaching them either.
+  if (!features?.pluginAuthoring || !state.env.APPLICATION_ARTIFACTS) {
+    withheld.push(PLUGINS_SKILL_SLUG_V1);
   }
   return withheld;
 }

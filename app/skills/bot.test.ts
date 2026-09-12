@@ -13,6 +13,8 @@ const TURN = { runId: "run-9", turnId: "turn-4", sessionId: "user-1:bot-1" };
 function botState(options: {
   applets: boolean | "unreachable";
   pluginAuthoring?: boolean;
+  /** The artifact bucket a Plugin's module is stored in; bound by default. */
+  artifacts?: boolean;
   workspace?: FakeWorkspace;
 }): ShellBotStateV1 {
   const rpc = {
@@ -35,6 +37,7 @@ function botState(options: {
         idFromName: (name: string) => name,
         get: () => rpc,
       },
+      ...(options.artifacts === false ? {} : { APPLICATION_ARTIFACTS: {} }),
       ...(options.workspace ? { WORKSPACE_FILES: options.workspace } : {}),
     },
     authority: { validateIdentity: () => Promise.resolve() },
@@ -104,6 +107,19 @@ describe("the Bot Skills seam", () => {
       TURN,
     );
     expect(on?.withheldManagedSlugs).toEqual([]);
+    // The Skill goes exactly where the tools go, and the tools need the
+    // bucket a published module is stored in.
+    const unbound = await createBotSkillsHost(
+      botState({
+        applets: true,
+        pluginAuthoring: true,
+        artifacts: false,
+        workspace,
+      }),
+      IDENTITY,
+      TURN,
+    );
+    expect(unbound?.withheldManagedSlugs).toEqual(["plugins"]);
   });
 });
 

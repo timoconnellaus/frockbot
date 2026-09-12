@@ -571,6 +571,18 @@ describe("enabling, disabling and settings", () => {
     expect(storage.get(PLUGIN_ENABLEMENT_KEY_V1)).toMatchObject({
       enabled: { notes: false },
     });
+    // Only a Plugin this Bot could run has a switch: an id nothing installed
+    // and a first-party feature are both refused, so the map cannot grow past
+    // what it can hold.
+    expect(await host.disable({ pluginId: "weather" })).toMatchObject({
+      status: "refused",
+    });
+    expect(await host.disable({ pluginId: "routines" })).toMatchObject({
+      status: "refused",
+    });
+    expect(storage.get(PLUGIN_ENABLEMENT_KEY_V1)).toMatchObject({
+      enabled: { notes: false },
+    });
     const locked = harness({
       catalog: [
         {

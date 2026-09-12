@@ -29,6 +29,11 @@ import {
 } from "@frockbot/core/connection";
 import { IDENTITY_KEY, type BotIdentity } from "@frockbot/core/durable";
 import {
+  decodeUserFeaturesV1,
+  type UserFeaturesV1,
+} from "@frockbot/app/admin/shared";
+import { appletRpcSnapshotV1 } from "@frockbot/app/applets-host/records";
+import {
   decodeDirectoryViewV1,
   decodeFlockReceiptV1,
   type BotDirectoryViewV1,
@@ -464,6 +469,33 @@ export interface UserConfigurationRpcV1 {
     userId: string,
     commandId: string,
   ): Promise<MachineCommandResultV1 | undefined>;
+}
+
+/**
+ * The account features record, read from the User Durable Object every time it
+ * is asked and never cached in the Bot: the switches are the admin's, and a
+ * Turn admitted after one moved should see where it is now. Throws when the
+ * User object cannot answer; each caller decides what an unanswerable switch
+ * means for it.
+ *
+ * One read answers every feature gate, so a Turn asks the User object once
+ * rather than once per switch.
+ */
+export async function userAccountFeaturesV1(
+  state: ShellBotStateV1,
+  identity: BotIdentity,
+): Promise<UserFeaturesV1> {
+  const id = state.env.USER_CONFIGURATIONS.idFromName(identity.userId);
+  // SAFETY: this namespace is bound to UserConfiguration; generated Worker
+  // types do not expose its account features RPC surface.
+  const rpc = state.env.USER_CONFIGURATIONS.get(id) as unknown as {
+    readFeatures(input: unknown): Promise<unknown>;
+  };
+  return decodeUserFeaturesV1(
+    appletRpcSnapshotV1(
+      await rpc.readFeatures({ schemaVersion: 1, userId: identity.userId }),
+    ),
+  );
 }
 
 export function userConfigurationV1(

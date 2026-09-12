@@ -15,14 +15,13 @@ import {
   type CompositionGenerationV1,
   type CompositionMemberV1,
 } from "@frockbot/core/durable";
-import { decodeUserFeaturesV1 } from "@frockbot/app/admin/shared";
 import { appletBuildService } from "@frockbot/app/applets-host/bot";
-import { appletRpcSnapshotV1 as rpcJsonSnapshotV1 } from "@frockbot/app/applets-host/records";
 import {
   currentUserCompositionV1,
   proposeUserCompositionV1,
 } from "@frockbot/app/composition/bot";
 import { pluginSettingsKeyV1 } from "@frockbot/app/isolates/bot";
+import { userAccountFeaturesV1 } from "@frockbot/app/settings/bot";
 import type { ShellBotStateV1 } from "@frockbot/app/shell/backend-state";
 import {
   recordPluginIntentOutcomeV1,
@@ -38,27 +37,6 @@ import type { PluginAuthoringRuntimeHostV1 } from "./feature.js";
 
 /** How many times a proposal re-reads and retries after losing the pin race. */
 const PROPOSE_ATTEMPTS = 3;
-
-/**
- * The master toggle: an admin-held Account feature that gates Bot authoring
- * only (ADR 0026). A switch that cannot be read is off.
- */
-export async function pluginAuthoringEnabled(
-  state: ShellBotStateV1,
-  identity: BotIdentity,
-): Promise<boolean> {
-  const id = state.env.USER_CONFIGURATIONS.idFromName(identity.userId);
-  // SAFETY: this namespace is bound to UserConfiguration; generated Worker
-  // types do not expose its account features RPC surface.
-  const rpc = state.env.USER_CONFIGURATIONS.get(id) as unknown as {
-    readFeatures(input: unknown): Promise<unknown>;
-  };
-  return decodeUserFeaturesV1(
-    rpcJsonSnapshotV1(
-      await rpc.readFeatures({ schemaVersion: 1, userId: identity.userId }),
-    ),
-  ).pluginAuthoring;
-}
 
 /**
  * The Plugins feature's seam for one admitted Turn, or `undefined` when this
@@ -77,7 +55,7 @@ export async function pluginAuthoringRuntimeHost(
   if (!artifacts || !workspace) return undefined;
   let enabled: boolean;
   try {
-    enabled = await pluginAuthoringEnabled(state, identity);
+    enabled = (await userAccountFeaturesV1(state, identity)).pluginAuthoring;
   } catch {
     enabled = false;
   }
@@ -177,8 +155,10 @@ export async function generationWithPluginV1(
  * A `publish` proposes the generation on the User — skipped when the current
  * generation already holds this exact artifact, which is what makes a retry
  * safe — and then switches the Plugin on for this Bot. An `enable` only
- * switches. Either way the outcome is recorded on the intent, so a person
- * reading it later sees what their approval came to.
+ * switches. An application that got through records its outcome on the
+ * intent, so a person reading it later sees what their approval came to; one
+ * that threw records nothing and raises, leaving an approval a retry can
+ * still apply rather than one closed as failed.
  */
 export async function applyApprovedPluginIntentV1(
   state: ShellBotStateV1,
@@ -189,72 +169,56 @@ export async function applyApprovedPluginIntentV1(
   if (intent.decision !== "approved" || intent.outcome !== undefined) {
     return intent;
   }
-  const at = () => now().toISOString();
   const pluginId =
     intent.action.kind === "publish"
       ? intent.action.member.packageId
       : intent.action.pluginId;
-  try {
-    let generationId: string | undefined;
-    if (intent.action.kind === "publish") {
-      const member = intent.action.member;
-      for (let attempt = 0; attempt < PROPOSE_ATTEMPTS; attempt += 1) {
-        const current = await currentUserCompositionV1(state, identity);
-        const held = current.members.find(
-          (candidate) => candidate.packageId === member.packageId,
-        );
-        if (held?.artifact.contentHash === member.artifact.contentHash) {
-          generationId = current.generationId;
-          break;
-        }
-        const generation = await generationWithPluginV1(
-          current,
-          member,
-          intent,
-          now(),
-        );
-        try {
-          await proposeUserCompositionV1(state, identity, {
-            generation,
-            pin: true,
-            expectedCurrentGenerationId: current.generationId,
-          });
-          generationId = generation.generationId;
-          break;
-        } catch (error) {
-          // A lost race is a re-read, not a failure. Across the User RPC the
-          // error arrives as a plain Error, so its name is matched as well.
-          const conflict =
-            error instanceof CompositionPinConflictError ||
-            (error instanceof Error &&
-              /composition pointer moved/.test(error.message));
-          if (conflict && attempt + 1 < PROPOSE_ATTEMPTS) continue;
-          throw error;
-        }
+  let generationId: string | undefined;
+  if (intent.action.kind === "publish") {
+    const member = intent.action.member;
+    for (let attempt = 0; attempt < PROPOSE_ATTEMPTS; attempt += 1) {
+      const current = await currentUserCompositionV1(state, identity);
+      const held = current.members.find(
+        (candidate) => candidate.packageId === member.packageId,
+      );
+      if (held?.artifact.contentHash === member.artifact.contentHash) {
+        generationId = current.generationId;
+        break;
+      }
+      const generation = await generationWithPluginV1(
+        current,
+        member,
+        intent,
+        now(),
+      );
+      try {
+        await proposeUserCompositionV1(state, identity, {
+          generation,
+          pin: true,
+          expectedCurrentGenerationId: current.generationId,
+        });
+        generationId = generation.generationId;
+        break;
+      } catch (error) {
+        // A lost race is a re-read, not a failure. Across the User RPC the
+        // error arrives as a plain Error, so its name is matched as well.
+        const conflict =
+          error instanceof CompositionPinConflictError ||
+          (error instanceof Error &&
+            /composition pointer moved/.test(error.message));
+        if (conflict && attempt + 1 < PROPOSE_ATTEMPTS) continue;
+        throw error;
       }
     }
-    await switchPluginForBotV1(state.ctx.storage, pluginId, true, now());
-    return await recordPluginIntentOutcomeV1(
-      state.ctx.storage,
-      intent.approvalId,
-      {
-        status: "applied",
-        at: at(),
-        ...(generationId === undefined ? {} : { generationId }),
-      },
-    );
-  } catch (error) {
-    return await recordPluginIntentOutcomeV1(
-      state.ctx.storage,
-      intent.approvalId,
-      {
-        status: "failed",
-        reason: (error instanceof Error ? error.message : String(error)).slice(
-          0,
-          1_024,
-        ),
-        at: at(),
-      },
-    );
   }
+  await switchPluginForBotV1(state.ctx.storage, pluginId, true, now());
+  return await recordPluginIntentOutcomeV1(
+    state.ctx.storage,
+    intent.approvalId,
+    {
+      status: "applied",
+      at: now().toISOString(),
+      ...(generationId === undefined ? {} : { generationId }),
+    },
+  );
 }

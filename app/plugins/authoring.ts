@@ -47,7 +47,6 @@ import {
   type PluginEnablementStorageV1,
 } from "./enablement.js";
 import {
-  PLUGIN_SOURCE_FILES_V1,
   assertPluginIdV1,
   pluginIdFromDisplayNameV1,
   pluginSourceFilePathV1,
@@ -664,7 +663,7 @@ export function createPluginAuthoringHostV1(
         },
         artifact: {
           contentHash,
-          size: module.length,
+          size: new TextEncoder().encode(module).byteLength,
           mediaType: "application/javascript",
           bundlerVersion: PLUGIN_BUNDLER_VERSION_V1,
         },
@@ -723,6 +722,18 @@ export function createPluginAuthoringHostV1(
           reason: `"${seeded.displayName}" is always on`,
         };
       }
+      // Only a Plugin this Bot could run has a switch here. A first-party
+      // feature is never a Composition member, and an id nothing installed is
+      // a switch the map would carry for nothing.
+      const current = await seams.composition.current();
+      if (
+        !current.members.some((candidate) => candidate.packageId === pluginId)
+      ) {
+        return {
+          status: "refused",
+          reason: `"${pluginId}" is not in this account's Composition`,
+        };
+      }
       await switchPluginForBotV1(seams.storage, pluginId, false, now());
       return { status: "off" };
     },
@@ -779,6 +790,3 @@ export function createPluginAuthoringHostV1(
     },
   };
 }
-
-/** The two source files every Plugin is, for the tools' words. */
-export const PLUGIN_SOURCE_FILE_NAMES_V1 = PLUGIN_SOURCE_FILES_V1.join(" and ");

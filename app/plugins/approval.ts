@@ -20,6 +20,7 @@
 //     recorded in the transaction that records the approval; the generation
 //     proposal — a cross-object call — runs after the commit, and is
 //     idempotent on what the Composition already holds.
+import { SEND_TO_USER_LIMITS_V1 } from "@frockbot/core/contracts";
 import type { CompositionMemberV1 } from "@frockbot/core/durable";
 import { decodeCompositionMemberV1 } from "@frockbot/core/durable";
 
@@ -55,9 +56,16 @@ export type PluginIntentActionV1 =
       pluginId: string;
     };
 
-export type PluginIntentOutcomeV1 =
-  | { status: "applied"; generationId?: string; at: string }
-  | { status: "failed"; reason: string; at: string };
+/**
+ * What applying an approved intent came to. Only an application it survived
+ * is recorded: a proposal that threw leaves no outcome, so the approval stays
+ * one a retry could still apply rather than a decision closed as failed.
+ */
+export type PluginIntentOutcomeV1 = {
+  status: "applied";
+  generationId?: string;
+  at: string;
+};
 
 export interface PluginIntentRecordV1 {
   schemaVersion: 1;
@@ -82,7 +90,6 @@ export class PluginIntentDecodeError extends Error {
 
 const PLUGIN_ID = /^[a-z][a-z0-9-]{0,63}$/;
 const MAX_ID = 256;
-const MAX_REASON = 1_024;
 
 function record(input: unknown, label: string): Record<string, unknown> {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
@@ -174,14 +181,6 @@ function decodeOutcome(input: unknown, label: string): PluginIntentOutcomeV1 {
               `${label}.generationId`,
             ),
           }),
-    };
-  }
-  if (value.status === "failed") {
-    exactKeys(value, ["status", "reason", "at"], [], label);
-    return {
-      status: "failed",
-      reason: text(value.reason, MAX_REASON, `${label}.reason`),
-      at: timestamp(value.at, `${label}.at`),
     };
   }
   throw new PluginIntentDecodeError(`${label}.status is invalid`);
@@ -296,6 +295,11 @@ export async function recordPluginIntentOutcomeV1(
 /**
  * The card's wording: what the Plugin reaches, in the User's words, so the
  * decision is about what it does and not about a version number.
+ *
+ * A descriptor may legally name sixty-four tools and thirty-two hosts, so the
+ * sentence is held inside the bound the send payload is decoded against: a
+ * card longer than that would be a Turn nobody could settle and an approval
+ * nobody could answer.
  */
 export function pluginApprovalActionV1(
   member: Pick<CompositionMemberV1, "descriptor">,
@@ -323,7 +327,9 @@ export function pluginApprovalActionV1(
         : `It reaches ${descriptor.network.hosts.join(", ")}.`,
     );
   }
-  return parts.join(" ");
+  const action = parts.join(" ");
+  const limit = SEND_TO_USER_LIMITS_V1.action;
+  return action.length <= limit ? action : `${action.slice(0, limit - 1)}…`;
 }
 
 /** Open network or a credentialed Connection is the User's whole account. */

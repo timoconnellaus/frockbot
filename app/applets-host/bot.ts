@@ -34,7 +34,7 @@ import {
   currentUserCompositionV1,
   proposeUserCompositionV1,
 } from "@frockbot/app/composition/bot";
-import { decodeUserFeaturesV1 } from "@frockbot/app/admin/shared";
+import { userAccountFeaturesV1 } from "@frockbot/app/settings/bot";
 import {
   createAppletCapabilityHostV1,
   createAppletInstanceBindingV1,
@@ -161,17 +161,7 @@ export async function appletsEnabled(
   state: ShellBotStateV1,
   identity: BotIdentity,
 ): Promise<boolean> {
-  const id = state.env.USER_CONFIGURATIONS.idFromName(identity.userId);
-  // SAFETY: this namespace is bound to UserConfiguration; generated Worker
-  // types do not expose its account features RPC surface.
-  const rpc = state.env.USER_CONFIGURATIONS.get(id) as unknown as {
-    readFeatures(input: unknown): Promise<unknown>;
-  };
-  return decodeUserFeaturesV1(
-    rpcJsonSnapshotV1(
-      await rpc.readFeatures({ schemaVersion: 1, userId: identity.userId }),
-    ),
-  ).applets;
+  return (await userAccountFeaturesV1(state, identity)).applets;
 }
 
 /**

@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { decodePluginDescriptorV1 } from "@frockbot/core/contracts";
+import {
+  decodePluginDescriptorV1,
+  decodeSendToUserPayloadV1,
+} from "@frockbot/core/contracts";
 import type { CompositionMemberV1 } from "@frockbot/core/durable";
 import {
   decodePluginIntentRecordV1,
@@ -160,11 +163,50 @@ describe("a Plugin intent", () => {
       at: "2026-09-12T00:03:00.000Z",
     });
     const again = await recordPluginIntentOutcomeV1(store, INTENT.approvalId, {
-      status: "failed",
-      reason: "late",
+      status: "applied",
+      generationId: "g3",
       at: "2026-09-12T00:04:00.000Z",
     });
-    expect(again?.outcome?.status).toBe("applied");
+    expect(again?.outcome).toEqual({
+      status: "applied",
+      generationId: "g2",
+      at: "2026-09-12T00:03:00.000Z",
+    });
+  });
+
+  test("a card for the widest descriptor a Bot may publish still decodes as a send", () => {
+    const descriptor = decodePluginDescriptorV1({
+      id: "notes",
+      displayName: "Notes",
+      version: "1",
+      contractVersion: 4,
+      tools: Array.from({ length: 64 }, (_unused, index) => ({
+        name: `note_${index}_${"t".repeat(50)}`.slice(0, 64),
+        description: "Keep a note.",
+        inputSchema: {},
+      })),
+      hooks: ["agent/tool-exposure"],
+      grants: ["storage", "http"],
+      network: {
+        hosts: Array.from(
+          { length: 32 },
+          (_unused, index) =>
+            `h${index}.${"a".repeat(60)}.${"b".repeat(60)}.${"c".repeat(60)}.example.com`,
+        ),
+      },
+      contextKeys: ["user", "bot", "session"],
+    });
+    const action = pluginApprovalActionV1({ descriptor }, "Run");
+    expect(action.length).toBe(2_000);
+    expect(
+      decodeSendToUserPayloadV1({
+        type: "approval",
+        approvalId: "tool.1.1.0",
+        action,
+        rationale: "The Bot built this Plugin and asks to run it.",
+        risk: pluginApprovalRiskV1({ descriptor }),
+      }),
+    ).toMatchObject({ type: "approval", action });
   });
 
   test("the card says what the Plugin reaches, and open network is high risk", () => {
