@@ -9,6 +9,7 @@ import type {
   VoiceTranscriberSessionOptionsV1,
   VoiceTranscriberV1,
 } from "@frockbot/app/voice/sleeping-transcriber";
+import type { Connection } from "agents";
 import { VoiceAssistant } from "../src/voice-assistant.ts";
 import type { VoiceDelegationRecordV1 } from "@frockbot/app/voice/ledger";
 
@@ -48,6 +49,7 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
   #script: VoiceProbeScript = {};
   #dropDispatches = 0;
   #dispatched: string[] = [];
+  #traces: Record<string, unknown>[] = [];
 
   /** A one-second window, so a cap can bite inside a test's patience. */
   protected override sttWindowSeconds(): number {
@@ -66,6 +68,33 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
     }
     this.#dispatched.push(`sent:${delegation.runId}`);
     super.dispatchDelegation(userId, delegation);
+  }
+
+  /**
+   * Records the line the object actually emits — the JSON string handed to
+   * the console — so a test reads the telemetry an operator would read,
+   * not a second construction of it.
+   */
+  protected override trace(
+    connection: Connection,
+    event: string,
+    fields: Record<string, unknown> = {},
+  ): void {
+    const { info, warn } = console;
+    const capture = (...args: unknown[]) => {
+      const payload = args[1];
+      if (typeof payload === "string") {
+        this.#traces.push(JSON.parse(payload) as Record<string, unknown>);
+      }
+    };
+    console.info = capture;
+    console.warn = capture;
+    try {
+      super.trace(connection, event, fields);
+    } finally {
+      console.info = info;
+      console.warn = warn;
+    }
   }
 
   protected override createTts() {
@@ -155,6 +184,10 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
   }
 
   // -- probe RPCs -----------------------------------------------------------
+
+  async probeTraces(): Promise<Record<string, unknown>[]> {
+    return [...this.#traces];
+  }
 
   async probeSetScript(script: VoiceProbeScript): Promise<void> {
     this.#script = script;

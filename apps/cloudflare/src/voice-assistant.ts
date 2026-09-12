@@ -247,6 +247,14 @@ export class VoiceAssistant extends VoiceAgentBase<
 > {
   #calls = new Map<string, LiveCall>();
 
+  /**
+   * What the trace still needs after the call record is gone: the ordinary
+   * hang-up releases the call on `end_call` and only then closes the socket,
+   * so the `closed` line would otherwise name no call and measure nothing.
+   * Dropped at the end of `onClose`, once that line is written.
+   */
+  #traced = new Map<string, { callId: string; startedAt: number }>();
+
   tts: (TTSProvider & Partial<StreamingTTSProvider>) | undefined =
     this.createTts();
 
@@ -355,12 +363,13 @@ export class VoiceAssistant extends VoiceAgentBase<
    * that went nowhere used to look, from every log, like a call nobody made.
    * Never the words spoken: lengths and ids only.
    */
-  private trace(
+  protected trace(
     connection: Connection,
     event: string,
     fields: Record<string, unknown> = {},
   ): void {
-    const call = this.#calls.get(connection.id);
+    const call =
+      this.#calls.get(connection.id) ?? this.#traced.get(connection.id);
     const line = {
       event,
       connection: connection.id,
@@ -413,6 +422,7 @@ export class VoiceAssistant extends VoiceAgentBase<
       wasClean,
     });
     await this.releaseCall(connection);
+    this.#traced.delete(connection.id);
     await super.onClose?.(connection, code, reason, wasClean);
   }
 
@@ -544,6 +554,10 @@ export class VoiceAssistant extends VoiceAgentBase<
       quotaSaid: false,
     };
     this.#calls.set(connection.id, call);
+    this.#traced.set(connection.id, {
+      callId: call.callId,
+      startedAt: call.startedAt,
+    });
     this.trace(connection, "call-admitted", {
       admission: admission.status,
       replaced: admission.replaced?.connectionId,

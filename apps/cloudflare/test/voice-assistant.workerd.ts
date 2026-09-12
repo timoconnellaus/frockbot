@@ -270,6 +270,37 @@ describe("the voice session object", () => {
     opened.socket.close();
   });
 
+  test("the closing trace still names the call after end_call released it", async () => {
+    const userId = `voice-trace-${crypto.randomUUID()}`;
+    const stub = assistant(userId);
+    const opened = await open(userId, {}, "phone");
+    await startCall(opened);
+    const admitted = await eventually(
+      async () =>
+        (await stub.probeTraces()).find((t) => t.event === "call-admitted"),
+      (line) => Boolean(line),
+      "the call-admitted trace",
+    );
+    // The ordinary hang-up: end_call releases the call record, and only then
+    // does the socket close. The closing line must still say which call it
+    // was and how long it ran.
+    opened.socket.send(JSON.stringify({ type: "end_call" }));
+    await opened.waitFor(status("idle"), "idle");
+    opened.socket.close(1000, "end-button");
+    const closed = await eventually(
+      async () => (await stub.probeTraces()).find((t) => t.event === "closed"),
+      (line) => Boolean(line),
+      "the closed trace",
+    );
+    expect(closed).toMatchObject({
+      call: admitted!.call,
+      device: "phone",
+      code: 1000,
+      reason: "end-button",
+    });
+    expect(closed!.elapsedMs).toBeGreaterThanOrEqual(0);
+  });
+
   test("an utterance becomes a ledgered turn, a spoken reply, and metered speech", async () => {
     const userId = `voice-turn-${crypto.randomUUID()}`;
     const stub = assistant(userId);
