@@ -22,6 +22,7 @@ import type {
   ToolRegistration,
 } from "@frockbot/core/contracts";
 import {
+  PluginFatalFailureError,
   PluginWorkerHost,
   pluginMountOrderV1,
   raceDeadline,
@@ -145,6 +146,7 @@ function harness(
     healthThrows?: string;
     deadlineMs?: number;
     artifacts?: Record<string, string>;
+    recordHookFailure?: (failure: IsolateHookFailureV1) => Promise<void>;
   } = {},
 ): Harness {
   const loads: RecordedLoad[] = [];
@@ -232,7 +234,7 @@ function harness(
     turnType: "chat",
     recordHookFailure: (failure) => {
       hookFailures.push(failure);
-      return Promise.resolve();
+      return input.recordHookFailure?.(failure) ?? Promise.resolve();
     },
     capabilities: {} as BotCapabilitiesStub,
     compatibilityDate: "2026-01-01",
@@ -1084,6 +1086,54 @@ describe("hooks", () => {
       },
     ]);
     await active.dispose();
+  });
+
+  test("a failure the Bot answers as fatal fails the hook instead of being swallowed", async () => {
+    for (const hook of [
+      // The worker named the Plugin it skipped...
+      () =>
+        Promise.resolve({
+          schemaVersion: 1 as const,
+          status: "unchanged" as const,
+          failures: [{ pluginId: "weather", reason: "hook exploded" }],
+        }),
+      // ...and the worker as a whole never answered.
+      () => new Promise<never>(() => {}),
+    ]) {
+      const subject = harness({
+        deadlineMs: 5,
+        health: (plugins) => ({
+          schemaVersion: 1,
+          contractVersion: ISOLATE_CONTRACT_VERSION,
+          plugins: plugins.map((pluginId) =>
+            healthy(pluginId, { hooks: ["agent/tool-exposure"] }),
+          ),
+        }),
+        hook,
+        recordHookFailure: () =>
+          Promise.reject(
+            new PluginFatalFailureError('plugin "weather" is always on'),
+          ),
+      });
+      const prepared = await subject.host.mount([
+        member("weather", { hooks: ["agent/tool-exposure"] }),
+      ]);
+      const active = await prepared.commit();
+      const original = [
+        { name: "first_party", description: "", inputSchema: {} },
+      ];
+      await expect(
+        subject.hooks.toolExposure(
+          agent(),
+          original,
+          1,
+          1,
+          new AbortController().signal,
+          () => Promise.resolve(original),
+        ),
+      ).rejects.toThrow(/is always on/);
+      await active.dispose();
+    }
   });
 
   test("an undecodable or late answer passes the original through and is recorded", async () => {
