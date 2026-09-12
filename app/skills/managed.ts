@@ -30,10 +30,14 @@ import {
   APPLETS_SKILL_DOCUMENT_V1,
   APPLETS_SKILL_SLUG_V1,
 } from "./managed-applets.generated.js";
+import {
+  PLUGINS_SKILL_DOCUMENT_V1,
+  PLUGINS_SKILL_SLUG_V1,
+} from "./managed-plugins.generated.js";
 
-// Re-exported because the generated module it comes from is not a package
-// export, and a caller outside this package needs the slug to withhold it.
-export { APPLETS_SKILL_SLUG_V1 };
+// Re-exported because the generated modules they come from are not package
+// exports, and a caller outside this package needs the slugs to withhold them.
+export { APPLETS_SKILL_SLUG_V1, PLUGINS_SKILL_SLUG_V1 };
 
 /** The directory prefix a managed Skill's synthetic path carries. */
 export const MANAGED_SKILL_PATH_PREFIX = "managed";
@@ -196,6 +200,10 @@ export const MANAGED_SKILL_DOCUMENTS_V1: readonly ManagedSkillDocumentV1[] = [
   // Applets Package has no in-process code to carry it, and the managed set is
   // the mechanism a first-party Skill already ships through.
   { slug: APPLETS_SKILL_SLUG_V1, text: APPLETS_SKILL_DOCUMENT_V1 },
+  // The Plugin SDK reference (ADR 0026), authored in
+  // `app/plugins/skills/plugins.md` and copied here the same way. Withheld
+  // with the `plugin_*` tools when the account's authoring switch is off.
+  { slug: PLUGINS_SKILL_SLUG_V1, text: PLUGINS_SKILL_DOCUMENT_V1 },
 ];
 
 /** The synthetic path a managed Skill is listed and loadable under. */

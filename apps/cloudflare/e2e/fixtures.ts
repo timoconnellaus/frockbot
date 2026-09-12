@@ -549,6 +549,29 @@ export async function enableApplets(page: Page, userId: string): Promise<void> {
 }
 
 /**
+ * Turn Plugin authoring on for one account, as the admin does (ADR 0026's
+ * master toggle). The command carries `applets` as well; it is left off.
+ */
+export async function enablePluginAuthoring(
+  page: Page,
+  userId: string,
+): Promise<void> {
+  const response = await page.request.post(
+    `/api/admin/users/${encodeURIComponent(userId)}/features`,
+    {
+      headers: { "x-frockbot-user-id": "development" },
+      data: {
+        schemaVersion: 1,
+        type: "user/set-features",
+        applets: false,
+        pluginAuthoring: true,
+      },
+    },
+  );
+  expect(response.status(), await response.text()).toBe(200);
+}
+
+/**
  * Make the sidebar reachable, whatever the layout.
  *
  * Below the phone breakpoint the Bot list is the first screen and a
@@ -1071,6 +1094,15 @@ export async function sendMessage(
   // than the thread already had.
   const messages = transcriptMessages(page);
   const before = await messages.count();
+  // The thread is a lazy list: only the rows on screen exist in the tree, so
+  // on a long thread the count stops growing at what fits and a new message
+  // shows as a different row at the bottom instead. Both are read.
+  const newest = async () =>
+    (await messages.count()) === 0
+      ? ""
+      : ((await messages.last().getAttribute("flt-semantics-identifier")) ??
+        "");
+  const newestBefore = await newest();
   // Typed through the same retry the connect form needs: the engine drops keys
   // sent before it has opened the field's editing session, and a draft that
   // arrives with its first few characters missing is a different message —
@@ -1088,8 +1120,16 @@ export async function sendMessage(
   // is not a number this side can know. What the Turn was admitted at all is
   // the claim here; the settled count is asserted below, where it is exact.
   await expect
-    .poll(() => messages.count(), { timeout: 120_000 })
-    .toBeGreaterThanOrEqual(before + 1);
+    .poll(
+      async () =>
+        (await messages.count()) >= before + 1 ||
+        (await newest()) !== newestBefore,
+      {
+        timeout: 120_000,
+        message: "the person's message never reached the thread",
+      },
+    )
+    .toBe(true);
   // There is no SSE: the client POSTs the Turn and polls the run. The Turn has
   // settled when the working row has gone and whatever the Bot said is drawn.
   await expect(sem(page, "working-indicator")).toHaveCount(0, {

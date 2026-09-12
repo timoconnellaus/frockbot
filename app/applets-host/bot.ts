@@ -53,7 +53,7 @@ import {
  * The service is handed source and returns bytes; the R2 write and the hash
  * verification stay here, so a compromised builder holds no authority.
  */
-function appletBuildService(
+export function appletBuildService(
   state: ShellBotStateV1,
 ): AppletBuildServiceV1 | undefined {
   const fetcher = state.env.APPLET_BUILD;

@@ -224,9 +224,14 @@ export function seededMemberV1(
 
 /**
  * Whether one Bot runs a Plugin, from its seed state and the Bot's map.
- * `locked` always runs; `default-off` runs only when switched on; anything
- * else — `default-on`, an opened `admin-gated`, a Plugin a Bot wrote — runs
- * unless switched off.
+ * `locked` always runs; `default-off` runs only when switched on; `default-on`
+ * and an opened `admin-gated` run unless switched off.
+ *
+ * A Plugin a Bot wrote — no seed, because the catalog never lists it — runs
+ * only when switched on, like `default-off`. The switch is the User's answer
+ * to the approval card the authoring Bot asked for, or the switch on a
+ * sibling Bot's Plugins page; a publish on its own runs nowhere, which is
+ * what "self-modification never widens authority by itself" means here.
  */
 export function pluginRunsForBotV1(
   seed: PluginSeedStateV1 | undefined,
@@ -235,7 +240,7 @@ export function pluginRunsForBotV1(
 ): boolean {
   if (seed === "locked") return true;
   const flag = enablement.enabled[pluginId];
-  if (seed === "default-off") return flag === true;
+  if (seed === undefined || seed === "default-off") return flag === true;
   return flag !== false;
 }
 

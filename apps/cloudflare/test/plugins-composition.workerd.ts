@@ -101,6 +101,10 @@ interface CompositionRpc {
   recordAppletGeneration(input: unknown): Promise<{ appletId: string }>;
 }
 
+interface FeaturesRpc {
+  setFeatures(input: unknown): Promise<unknown>;
+}
+
 interface BotRpc {
   run(command: unknown): Promise<{ runId: string }>;
   listCompositionGenerations(input: unknown): Promise<{
@@ -116,7 +120,18 @@ interface BotRpc {
       }
     | { status: "conflict"; currentRevision: number }
   >;
-  readPluginEnablement(input: unknown): Promise<{ revision: number }>;
+  readPluginEnablement(input: unknown): Promise<{
+    revision: number;
+    enabled: Record<string, boolean>;
+  }>;
+  listApprovals(input: unknown): Promise<{
+    pending: number;
+    approvals: Array<{ approvalId: string; decision: string; action: string }>;
+  }>;
+  decideApproval(input: unknown): Promise<{
+    status: string;
+    approval: { approvalId: string; decision: string };
+  }>;
   readBotPluginsFrame(input: unknown): Promise<{
     revision: number;
     plugins: Array<{
@@ -140,6 +155,53 @@ function user(userId: string): CompositionRpc {
   // SAFETY: the generated stub type is too deep to instantiate here; this
   // names only the methods the test calls.
   return env.USER_CONFIGURATIONS.getByName(userId) as unknown as CompositionRpc;
+}
+
+function features(userId: string): FeaturesRpc {
+  // SAFETY: as above — only the one method the test calls.
+  return env.USER_CONFIGURATIONS.getByName(userId) as unknown as FeaturesRpc;
+}
+
+/** One Bot's switch for one Plugin, as the Plugins page flips it. */
+async function switchPlugin(
+  identity: { userId: string; botId: string },
+  pluginId: string,
+  enabled: boolean,
+): Promise<void> {
+  const current = await bot(identity).readPluginEnablement({
+    schemaVersion: 1,
+    ...identity,
+  });
+  const answer = await bot(identity).setBotPluginEnabled({
+    schemaVersion: 1,
+    ...identity,
+    command: {
+      schemaVersion: 1,
+      kind: "set-plugin-enabled",
+      commandId: crypto.randomUUID(),
+      pluginId,
+      enabled,
+      expectedRevision: current.revision,
+    },
+  });
+  expect(answer).toMatchObject({ status: "applied" });
+}
+
+/** The stored events of one run, for reading a tool's answer back. */
+async function runEvents(
+  identity: { userId: string; botId: string },
+  runId: string,
+): Promise<Array<{ type: string; content?: string; name?: string }>> {
+  const runs = await runInDurableObject(
+    env.BOT_STATES.getByName(`${identity.userId}:${identity.botId}`),
+    (_instance, state) =>
+      hydratedStoredRunsV1<{
+        runId: string;
+        sessionId: string;
+        events: Array<{ type: string; content?: string; name?: string }>;
+      }>(state.storage),
+  );
+  return runs.find((candidate) => candidate.runId === runId)?.events ?? [];
 }
 
 function bot(identity: { userId: string; botId: string }): BotRpc {
@@ -255,7 +317,12 @@ async function storeRoundtrip(
   );
   expect(
     result,
-    JSON.stringify(run?.events.map((event) => event.type)),
+    // What every tool answered, so a refusal reads as its own words.
+    JSON.stringify(
+      run?.events
+        .filter((event) => event.type === "tool/result")
+        .map((event) => event.content),
+    ),
   ).toBeDefined();
   const raw = (result as { content?: string }).content ?? "";
   const outer = JSON.parse(raw) as { content?: string };
@@ -492,7 +559,12 @@ async function callPluginTool(
   );
   expect(
     result,
-    JSON.stringify(run?.events.map((event) => event.type)),
+    // What every tool answered, so a refusal reads as its own words.
+    JSON.stringify(
+      run?.events
+        .filter((event) => event.type === "tool/result")
+        .map((event) => event.content),
+    ),
   ).toBeDefined();
   const raw = (result as { content?: string }).content ?? "";
   const outer = JSON.parse(raw) as { content?: string };
@@ -981,6 +1053,9 @@ describe("the User-owned Composition", () => {
       pin: true,
       expectedCurrentGenerationId: bootstrap.generationId,
     });
+    // A Plugin a Bot wrote runs nowhere until a person switches it on: here
+    // the Plugins page's switch stands in for the approval card.
+    await switchPlugin(identity, STORE_PLUGIN_ID, true);
 
     const inner = await storeRoundtrip(identity, "run-1", "hello");
     expect(inner).toMatchObject({
@@ -999,6 +1074,8 @@ describe("the User-owned Composition", () => {
     // the first Bot's object loaded — including the `CAPABILITIES` stub minted
     // there. The stub must still answer, and it must route by the scope's Bot:
     // this Turn's writes land in this Bot's own object, not the first one's.
+    // The switch is per Bot, so the sibling turns the Plugin on for itself.
+    await switchPlugin(second, STORE_PLUGIN_ID, true);
     const sibling = await storeRoundtrip(second, "run-2", "world");
     expect(sibling).toMatchObject({
       put: "available",
@@ -1024,6 +1101,8 @@ describe("the User-owned Composition", () => {
         descriptor: BOUND_PLUGIN_DESCRIPTOR,
       },
     ]);
+    // A Plugin a Bot wrote runs nowhere until a person switches it on.
+    await switchPlugin(identity, BOUND_PLUGIN_ID, true);
 
     const seen = await callPluginTool(
       identity,
@@ -1059,6 +1138,8 @@ describe("the User-owned Composition", () => {
         descriptor: UNGRANTED_PLUGIN_DESCRIPTOR,
       },
     ]);
+    // A Plugin a Bot wrote runs nowhere until a person switches it on.
+    await switchPlugin(identity, UNGRANTED_PLUGIN_ID, true);
 
     const seen = await callPluginTool(
       identity,
@@ -1087,6 +1168,8 @@ describe("the User-owned Composition", () => {
         descriptor: OPEN_PLUGIN_DESCRIPTOR,
       },
     ]);
+    // A Plugin a Bot wrote runs nowhere until a person switches it on.
+    await switchPlugin(identity, OPEN_PLUGIN_ID, true);
 
     const seen = await callPluginTool(
       identity,
@@ -1100,5 +1183,167 @@ describe("the User-owned Composition", () => {
     // suite's outbound stands in for the outside and answers 403, which only
     // a request the loopback let out can see — a refusal throws instead.
     expect(seen).toMatchObject({ admitted: true, status: 403 });
+  });
+
+  test("a sibling Bot asks to turn a Plugin on, and it runs only once the User approves", async () => {
+    const userId = `user-${crypto.randomUUID()}`;
+    const author = { userId, botId: "bot-1" };
+    const sibling = { userId, botId: "bot-2" };
+    await provisionBot(author);
+    await provisionSiblingBot(sibling, 1);
+    await features(userId).setFeatures({
+      schemaVersion: 1,
+      userId,
+      command: {
+        schemaVersion: 1,
+        type: "user/set-features",
+        applets: false,
+        pluginAuthoring: true,
+      },
+      updatedBy: "test",
+    });
+    await turn(author, "run-0");
+    const bootstrap = (
+      await user(userId).readComposition({ schemaVersion: 1, userId })
+    ).current;
+    const contentHash = await sha256Hex(STORE_PLUGIN_SOURCE);
+    await env.APPLICATION_ARTIFACTS.put(
+      `packages/${contentHash}.mjs`,
+      STORE_PLUGIN_SOURCE,
+    );
+    const createdAt = "2026-09-12T02:00:00.000Z";
+    const members: CompositionMemberV1[] = [
+      {
+        packageId: STORE_PLUGIN_ID,
+        version: "0.0.1",
+        descriptor: STORE_PLUGIN_DESCRIPTOR,
+        provenance: {
+          kind: "bot",
+          packageId: STORE_PLUGIN_ID,
+          version: "0.0.1",
+          botId: "bot-1",
+          sessionId: `${userId}:bot-1`,
+          turnId: "run-0",
+          runId: "run-0",
+          authoredAt: createdAt,
+        },
+        artifact: {
+          contentHash,
+          size: STORE_PLUGIN_SOURCE.length,
+          mediaType: "application/javascript",
+          bundlerVersion: "probe-seed",
+        },
+      },
+    ];
+    const artifactSetHash = await compositionArtifactSetHashV1(members);
+    await user(userId).proposeComposition({
+      schemaVersion: 1,
+      userId,
+      generation: {
+        schemaVersion: 1,
+        generationId: compositionGenerationIdV1(createdAt, artifactSetHash),
+        artifactSetHash,
+        parentGenerationId: bootstrap.generationId,
+        createdAt,
+        origin: {
+          kind: "bot-authored",
+          runId: "run-0",
+          sessionId: `${userId}:bot-1`,
+          turnId: "run-0",
+        },
+        members,
+        status: "pending",
+      },
+      pin: true,
+      expectedCurrentGenerationId: bootstrap.generationId,
+    });
+
+    // The sibling sees the Plugin but does not run it; plugin_enable asks.
+    const session = `${userId}:bot-2`;
+    await bot(sibling).run({
+      schemaVersion: 1,
+      ...sibling,
+      command: {
+        runId: "ask-1",
+        sessionId: session,
+        acceptedAt: new Date().toISOString(),
+        text: toolCallTriggerPrompt([
+          "call_dynamic_tool",
+          dynamicToolInputV1({
+            namespace: "frockbot",
+            toolName: "plugin_enable",
+            input: { pluginId: STORE_PLUGIN_ID },
+          }),
+        ]),
+      },
+    });
+    const asked = (await runEvents(sibling, "ask-1")).find(
+      (event) =>
+        event.type === "tool/result" &&
+        typeof event.content === "string" &&
+        event.content.includes("Asked the User to turn"),
+    );
+    expect(asked, "plugin_enable did not ask").toBeDefined();
+    const listed = await bot(sibling).listApprovals({
+      schemaVersion: 1,
+      ...sibling,
+    });
+    expect(listed.pending).toBe(1);
+    const card = listed.approvals[0]!;
+    expect(card.action).toContain('Turn on the Plugin "Probe store"');
+    expect(
+      (
+        await bot(sibling).readPluginEnablement({
+          schemaVersion: 1,
+          ...sibling,
+        })
+      ).enabled[STORE_PLUGIN_ID],
+    ).toBeUndefined();
+
+    // The person answers; the switch flips with the decision.
+    const decided = await bot(sibling).decideApproval({
+      schemaVersion: 1,
+      ...sibling,
+      approvalId: card.approvalId,
+      command: { schemaVersion: 1, decision: "approved" },
+    });
+    expect(decided.status).toBe("recorded");
+    expect(
+      (
+        await bot(sibling).readPluginEnablement({
+          schemaVersion: 1,
+          ...sibling,
+        })
+      ).enabled[STORE_PLUGIN_ID],
+    ).toBe(true);
+
+    // And from the next Turn the Plugin's tool answers.
+    await bot(sibling).run({
+      schemaVersion: 1,
+      ...sibling,
+      command: {
+        runId: "use-1",
+        sessionId: session,
+        acceptedAt: new Date().toISOString(),
+        text: toolCallTriggerPrompt([
+          "call_dynamic_tool",
+          dynamicToolInputV1({
+            namespace: STORE_PLUGIN_ID,
+            toolName: "store_roundtrip",
+            input: { word: "approved" },
+          }),
+        ]),
+      },
+    });
+    const answered = (await runEvents(sibling, "use-1")).find(
+      (event) =>
+        event.type === "tool/result" &&
+        typeof event.content === "string" &&
+        event.content.includes('"put"'),
+    );
+    expect(
+      answered,
+      "the Plugin's tool did not run after approval",
+    ).toBeDefined();
   });
 });

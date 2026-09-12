@@ -380,7 +380,7 @@ export function decodeArtifactRefV1(
   return value as unknown as ArtifactRefV1;
 }
 
-function decodeCompositionMemberV1(
+export function decodeCompositionMemberV1(
   input: unknown,
   label: string,
 ): CompositionMemberV1 {

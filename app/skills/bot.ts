@@ -42,7 +42,11 @@ import type { ShellBotStateV1 } from "@frockbot/app/shell/backend-state";
 import { admitTurnV1 } from "@frockbot/app/composition/bot";
 import { projectFirstPartyPackageIframeV1 } from "@frockbot/app/shell/composition-views";
 import { appletsEnabled } from "@frockbot/app/applets-host/bot";
-import { APPLETS_SKILL_SLUG_V1 } from "@frockbot/app/skills/managed";
+import {
+  APPLETS_SKILL_SLUG_V1,
+  PLUGINS_SKILL_SLUG_V1,
+} from "@frockbot/app/skills/managed";
+import { pluginAuthoringEnabled } from "@frockbot/app/plugins/authoring-bot";
 import { PACKAGE_IFRAME_FOCUS_TOOL_V2 } from "@frockbot/core/contracts";
 import {
   projectClientTurnV1,
@@ -88,13 +92,23 @@ async function withheldManagedSkillSlugs(
   state: ShellBotStateV1,
   identity: BotSkillsIdentity,
 ): Promise<readonly string[]> {
-  let enabled: boolean;
-  try {
-    enabled = await appletsEnabled(state, identity);
-  } catch {
-    enabled = false;
+  const withheld: string[] = [];
+  // The same rule for each gated feature: the Skill goes exactly where the
+  // tools go, and a switch that cannot be read is off.
+  const gates: Array<[string, () => Promise<boolean>]> = [
+    [APPLETS_SKILL_SLUG_V1, () => appletsEnabled(state, identity)],
+    [PLUGINS_SKILL_SLUG_V1, () => pluginAuthoringEnabled(state, identity)],
+  ];
+  for (const [slug, read] of gates) {
+    let enabled: boolean;
+    try {
+      enabled = await read();
+    } catch {
+      enabled = false;
+    }
+    if (!enabled) withheld.push(slug);
   }
-  return enabled ? [] : [APPLETS_SKILL_SLUG_V1];
+  return withheld;
 }
 
 /**

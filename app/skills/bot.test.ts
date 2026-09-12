@@ -12,6 +12,7 @@ const TURN = { runId: "run-9", turnId: "turn-4", sessionId: "user-1:bot-1" };
  */
 function botState(options: {
   applets: boolean | "unreachable";
+  pluginAuthoring?: boolean;
   workspace?: FakeWorkspace;
 }): ShellBotStateV1 {
   const rpc = {
@@ -22,6 +23,7 @@ function botState(options: {
       return Promise.resolve({
         schemaVersion: 1,
         applets: options.applets,
+        pluginAuthoring: options.pluginAuthoring ?? true,
         updatedAt: "2026-09-11T00:00:00.000Z",
         updatedBy: "owner",
       });
@@ -85,7 +87,23 @@ describe("the Bot Skills seam", () => {
       IDENTITY,
       TURN,
     );
-    expect(unreachable?.withheldManagedSlugs).toEqual(["applets"]);
+    expect(unreachable?.withheldManagedSlugs).toEqual(["applets", "plugins"]);
+  });
+
+  test("withholds the managed Plugins Skill exactly when authoring is off", async () => {
+    const workspace = new FakeWorkspace();
+    const off = await createBotSkillsHost(
+      botState({ applets: true, pluginAuthoring: false, workspace }),
+      IDENTITY,
+      TURN,
+    );
+    expect(off?.withheldManagedSlugs).toEqual(["plugins"]);
+    const on = await createBotSkillsHost(
+      botState({ applets: true, pluginAuthoring: true, workspace }),
+      IDENTITY,
+      TURN,
+    );
+    expect(on?.withheldManagedSlugs).toEqual([]);
   });
 });
 
