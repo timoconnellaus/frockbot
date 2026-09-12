@@ -50,7 +50,8 @@ import {
 import type { BotIdentity } from "@frockbot/core/durable";
 import { frockbotToolCallV1 } from "@frockbot/core/tools";
 import { estimateModelUsageV1 } from "@frockbot/core/agent-loop";
-import { modelCost } from "@frockbot/app/billing/model";
+import { modelCharge, modelCost } from "@frockbot/app/billing/model";
+import { FROCK_AI_PROVIDER_TYPE } from "@frockbot/providers/frock-ai/catalog";
 import { memoryScopeRootV1 } from "@frockbot/app/memory/roots";
 import { notePluginFailureV1 } from "@frockbot/app/plugins/health-bot";
 import {
@@ -1095,16 +1096,28 @@ function isolateModelPath(
           // an estimate from the exact request and response when it did not.
           const counted =
             usage ?? estimateModelUsageV1(request, { text, toolCalls });
-          const rate = billing?.rates[request.model];
-          await call.record({
-            requestId: request.requestId,
-            provider: request.provider,
-            model: request.model,
-            usage: counted,
-            estimated: usage === undefined,
-            latencyMs: Math.max(0, Date.now() - startedAt),
-            ...(rate ? { costMicros: modelCost(counted, rate) } : {}),
-          });
+          // Only a hosted call the provider reported usage for is settled as a
+          // charge on the account, so only that one carries a price here.
+          const rate =
+            usage && request.provider === FROCK_AI_PROVIDER_TYPE
+              ? billing?.rates[request.model]
+              : undefined;
+          try {
+            await call.record({
+              requestId: request.requestId,
+              provider: request.provider,
+              model: request.model,
+              usage: counted,
+              estimated: usage === undefined,
+              latencyMs: Math.max(0, Date.now() - startedAt),
+              ...(rate
+                ? { costMicros: modelCharge(modelCost(counted, rate)) }
+                : {}),
+            });
+          } catch {
+            // Bookkeeping is not the Plugin's call: a failed append never
+            // fails a model call the account has already been billed for.
+          }
         }
       }
     },

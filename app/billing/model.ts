@@ -109,6 +109,11 @@ export function modelCost(usage: LlmUsageV1, rate: ModelRate) {
   );
 }
 
+/** What the account pays for a call that cost the deployment `costMicros`. */
+export function modelCharge(costMicros: number) {
+  return costMicros * 2;
+}
+
 /** Meter the actual provider so plugin hooks cannot replace its reported usage. */
 export class BilledLlmRegistry extends LlmRegistry {
   constructor(
@@ -160,7 +165,7 @@ export class BilledLlmRegistry extends LlmRegistry {
       reservation = await this.billing.account.reserve({
         id,
         kind: "model",
-        maximumMicros: maximumCost * 2,
+        maximumMicros: modelCharge(maximumCost),
         botId: this.billing.botId,
         sessionId: this.billing.sessionId,
         description: `${request.model}${hosted ? "" : " · own model account"}${
@@ -224,7 +229,7 @@ export class BilledLlmRegistry extends LlmRegistry {
         await this.billing.account.settle({
           id,
           costMicros: cost,
-          chargeMicros: cost * 2,
+          chargeMicros: modelCharge(cost),
           quantities: {
             inputTokens: usage?.inputTokens ?? 0,
             outputTokens: usage?.outputTokens ?? 0,
