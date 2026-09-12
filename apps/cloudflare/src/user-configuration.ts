@@ -1825,7 +1825,7 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
             : { schedule: routine.schedule }),
           ...(routine.trigger === undefined
             ? {}
-            : { trigger: { kind: routine.trigger.kind } }),
+            : { trigger: routine.trigger }),
           timezone: routine.timezone,
         })),
     };

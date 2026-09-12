@@ -19,6 +19,7 @@
     "./plugins/authoring-bot": "./plugins/authoring-bot.ts",
     "./plugins/feature": "./plugins/feature.ts",
     "./plugins/root": "./plugins/root.ts",
+    "./plugins/triggers-bot": "./plugins/triggers-bot.ts",
     "./plugins/catalog": "./plugins/catalog.ts",
     "./plugins/page": "./plugins/page.ts",
     "./plugins/enablement": "./plugins/enablement.ts",

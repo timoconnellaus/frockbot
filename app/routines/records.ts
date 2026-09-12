@@ -40,8 +40,26 @@ export type RoutineWriterV1 =
   | { kind: "user" }
   | { kind: "bot"; botId: string; sessionId: string; turnId: string };
 
-/** A Routine that fires on a delivered event rather than on a clock. */
-export type RoutineTriggerV1 = { kind: "webhook" };
+/**
+ * A Routine that fires on a delivered event rather than on a clock.
+ *
+ * `webhook` fires on any delivery at its door. `plugin` (ADR 0026) enters
+ * through the same door but hands the delivery to one of the account's
+ * Plugins first — the trigger it exports under `trigger` — and fires with what
+ * the Plugin answered, or not at all when it dropped the delivery.
+ */
+export type RoutineTriggerV1 =
+  { kind: "webhook" } | { kind: "plugin"; pluginId: string; trigger: string };
+
+const ROUTINE_PLUGIN_ID = /^[a-z][a-z0-9-]{0,63}$/;
+const ROUTINE_PLUGIN_TRIGGER = /^[a-z][a-z0-9_-]{0,63}$/;
+
+/** The words a page or a cue use for what a Routine fires on. */
+export function routineTriggerLabelV1(trigger: RoutineTriggerV1): string {
+  return trigger.kind === "webhook"
+    ? "Webhook trigger"
+    : `Plugin trigger · ${trigger.pluginId}/${trigger.trigger}`;
+}
 
 /**
  * One Routine. `schedule` and `trigger` are exclusive: "never both `schedule`
@@ -170,9 +188,29 @@ export function decodeRoutineTriggerV1(
   label = "Routine trigger",
 ): RoutineTriggerV1 {
   const candidate = record(value, label);
+  if (candidate.kind === "plugin") {
+    routineExactKeys(candidate, ["kind", "pluginId", "trigger"], [], label);
+    if (
+      typeof candidate.pluginId !== "string" ||
+      !ROUTINE_PLUGIN_ID.test(candidate.pluginId)
+    ) {
+      throw new RoutineDecodeError(`${label} pluginId is invalid`);
+    }
+    if (
+      typeof candidate.trigger !== "string" ||
+      !ROUTINE_PLUGIN_TRIGGER.test(candidate.trigger)
+    ) {
+      throw new RoutineDecodeError(`${label} trigger is invalid`);
+    }
+    return {
+      kind: "plugin",
+      pluginId: candidate.pluginId,
+      trigger: candidate.trigger,
+    };
+  }
   routineExactKeys(candidate, ["kind"], [], label);
   if (candidate.kind !== "webhook") {
-    throw new RoutineDecodeError(`${label} kind must be "webhook"`);
+    throw new RoutineDecodeError(`${label} kind must be "webhook" or "plugin"`);
   }
   return { kind: "webhook" };
 }

@@ -87,7 +87,7 @@ How the deployment ships a Plugin: `locked` (on for every Bot, no switch), `defa
 _Avoid_: Tier, preinstall flag
 
 **Plugin trigger**:
-A Routine trigger kind whose event arrives on the app-owned `/hooks/<token>` route, is verified and shaped by the Plugin's `trigger.receive` hook, and is enqueued as a firing by the app. The Plugin never binds a route and never enqueues a Turn.
+A Routine trigger kind whose event arrives on the app-owned Routine webhook door — the same signed, keyed, replay-guarded route a webhook Routine uses — is verified and shaped by the trigger the Plugin exports under `triggers`, and is enqueued as a firing by the app, or dropped with the Plugin's reason. The Plugin never binds a route and never enqueues a Turn.
 _Avoid_: Webhook plugin, inbound handler
 
 **Computer**:

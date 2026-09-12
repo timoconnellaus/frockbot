@@ -24,6 +24,7 @@ import {
   RoutineHookError,
   ROUTINE_HOOK_BODY_MAX_BYTES,
   routineDeliveryIdV1,
+  routineHookHeadersV1,
   verifyRoutineHookTokenV1,
 } from "./hook.js";
 import {
@@ -49,10 +50,8 @@ import { routinesDocumentV1 } from "./routines-document.js";
 import { defineGatewayContribution } from "@frockbot/core/contracts/contributions";
 
 /** One delivery, as the Bot Durable Object answers it. */
-export interface RoutineHookDeliveryReceiptV1 {
-  status: "accepted" | "duplicate";
-  fireId: string;
-}
+export type { RoutineHookDeliveryReceiptV1 } from "./store.js";
+import type { RoutineHookDeliveryReceiptV1 } from "./store.js";
 
 export interface RoutinesGatewayHost {
   /**
@@ -70,6 +69,7 @@ export interface RoutinesGatewayHost {
       deliveryId: string;
       body: string;
       contentType?: string | null;
+      headers?: Record<string, string>;
     },
   ): Promise<RoutineHookDeliveryReceiptV1>;
   listRoutines(userId: string, botId: string): Promise<RoutineListViewV1>;
@@ -223,15 +223,19 @@ async function deliverHook(
       ),
       body,
       contentType: request.headers.get("content-type"),
+      headers: routineHookHeadersV1(request.headers),
     });
     // 202 either way: the firing is durable and queued, and a replay answers
-    // with the firing the first delivery already made.
+    // with what the first delivery already did — the firing it made, or the
+    // Plugin's reason for dropping it.
     return Response.json(
       {
         schemaVersion: 1,
         status: receipt.status,
         routineId: claims.r,
-        fireId: receipt.fireId,
+        ...(receipt.status === "dropped"
+          ? { reason: receipt.reason }
+          : { fireId: receipt.fireId }),
       },
       { status: 202 },
     );

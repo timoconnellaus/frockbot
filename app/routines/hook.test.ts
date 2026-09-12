@@ -201,9 +201,9 @@ async function deliver(
   token: string,
   body: string,
   idempotencyKey?: string,
-) {
+): Promise<{ status: "accepted" | "duplicate"; fireId: string }> {
   const claims = await verifyRoutineHookTokenV1(SECRET, token);
-  return store.deliverHook({
+  const receipt = await store.deliverHook({
     routineId: claims.r,
     keyVersion: claims.v,
     digest: await routineHookDigestV1(token),
@@ -211,6 +211,10 @@ async function deliver(
     body,
     contentType: "application/json",
   });
+  // A webhook Routine's delivery is never dropped: only a Plugin trigger can
+  // answer that, and `plugin-triggers.test.ts` covers it.
+  if (receipt.status === "dropped") throw new Error(receipt.reason);
+  return receipt;
 }
 
 describe("the durable half of the check", () => {

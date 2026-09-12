@@ -25,7 +25,9 @@ import {
 } from "@frockbot/app/routines/firing";
 import {
   RoutineStore,
+  type RoutineHookDeliveryReceiptV1,
   type RoutineHookMinterV1,
+  type RoutinePluginTriggerSeamV1,
   type RoutineStorageV1,
 } from "@frockbot/app/routines/store";
 import {
@@ -196,6 +198,7 @@ export async function projectRoutineAccountTimezoneV1(
 export function createBotRoutines(
   storage: RoutineStorageV1,
   hookKeys?: RoutineHookMinterV1,
+  pluginTriggers?: RoutinePluginTriggerSeamV1,
 ): {
   store: RoutineStore;
   scheduler: RoutineScheduler;
@@ -206,6 +209,7 @@ export function createBotRoutines(
     store: new RoutineStore(storage, {
       firings: scheduler,
       ...(hookKeys ? { hookKeys } : {}),
+      ...(pluginTriggers ? { pluginTriggers } : {}),
     }),
   };
 }
@@ -849,8 +853,9 @@ export async function deliverRoutineHook(
     deliveryId: string;
     body: string;
     contentType?: string | null;
+    headers?: Record<string, string>;
   },
-): Promise<{ status: "accepted" | "duplicate"; fireId: string }> {
+): Promise<RoutineHookDeliveryReceiptV1> {
   const accepted = await state.routines.deliverHook(input);
   await state.ctx.storage.transaction((transaction) =>
     state.authority.refreshRecoveryAlarm(transaction),

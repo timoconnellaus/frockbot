@@ -24,6 +24,7 @@ import {
   ROUTINE_NAME_MAX_LENGTH,
   ROUTINE_PROMPT_MAX_LENGTH,
   RoutineDecodeError,
+  type RoutineTriggerV1,
   type RoutineWriterV1,
 } from "./records.js";
 import {
@@ -96,6 +97,21 @@ const ROUTINE_MANAGE_INPUT_SCHEMA = {
       description:
         "Fire on a delivered webhook rather than on a clock. A Routine has a schedule or a trigger, never both.",
     },
+    pluginTrigger: {
+      type: "object",
+      description:
+        "Fire on a delivery one of this account's Plugins handles first: the Plugin reads the delivery through its exported trigger and answers with the text this Routine runs on, or drops it. The Plugin must be on for this Bot. Exclusive with schedule and trigger.",
+      properties: {
+        pluginId: { type: "string", description: "The Plugin's id." },
+        trigger: {
+          type: "string",
+          description:
+            "The trigger the Plugin exports and declares in plugin.json.",
+        },
+      },
+      required: ["pluginId", "trigger"],
+      additionalProperties: false,
+    },
     userAsked: {
       type: "boolean",
       description:
@@ -120,6 +136,7 @@ interface RoutineManageInputV1 {
   prompt?: string;
   schedule?: string;
   trigger?: "webhook";
+  pluginTrigger?: { pluginId: string; trigger: string };
   userAsked?: boolean;
 }
 
@@ -135,6 +152,7 @@ function decodeRoutineManageInputV1(input: unknown): RoutineManageInputV1 {
     "prompt",
     "schedule",
     "trigger",
+    "pluginTrigger",
     "userAsked",
   ]);
   for (const key of Object.keys(value)) {
@@ -160,6 +178,30 @@ function decodeRoutineManageInputV1(input: unknown): RoutineManageInputV1 {
   if (value.trigger === "webhook") trigger = "webhook";
   else if (value.trigger !== undefined)
     throw new RoutineDecodeError('routine_manage trigger must be "webhook"');
+  let pluginTrigger: RoutineManageInputV1["pluginTrigger"];
+  if (value.pluginTrigger !== undefined) {
+    const candidate = value.pluginTrigger;
+    if (
+      !candidate ||
+      typeof candidate !== "object" ||
+      Array.isArray(candidate) ||
+      typeof (candidate as Record<string, unknown>).pluginId !== "string" ||
+      typeof (candidate as Record<string, unknown>).trigger !== "string"
+    ) {
+      throw new RoutineDecodeError(
+        "routine_manage pluginTrigger must name a pluginId and a trigger",
+      );
+    }
+    if (trigger !== undefined) {
+      throw new RoutineDecodeError(
+        "routine_manage takes a trigger or a pluginTrigger, never both",
+      );
+    }
+    pluginTrigger = {
+      pluginId: (candidate as { pluginId: string }).pluginId,
+      trigger: (candidate as { trigger: string }).trigger,
+    };
+  }
   if (value.userAsked !== undefined && typeof value.userAsked !== "boolean") {
     throw new RoutineDecodeError("routine_manage userAsked must be a boolean");
   }
@@ -176,6 +218,7 @@ function decodeRoutineManageInputV1(input: unknown): RoutineManageInputV1 {
       ? {}
       : { schedule: optional("schedule")! }),
     ...(trigger === undefined ? {} : { trigger }),
+    ...(pluginTrigger === undefined ? {} : { pluginTrigger }),
     ...(value.userAsked === undefined
       ? {}
       : { userAsked: value.userAsked as boolean }),
@@ -199,6 +242,20 @@ export function routineToolCommandIdV1(effectId: string): string {
  * translation from a model's words to a durable command, and it is worth
  * testing without a host.
  */
+/** The trigger record a tool call names, if it names one. */
+function routineTriggerOfInputV1(
+  input: RoutineManageInputV1,
+): RoutineTriggerV1 | undefined {
+  if (input.pluginTrigger !== undefined) {
+    return {
+      kind: "plugin",
+      pluginId: input.pluginTrigger.pluginId,
+      trigger: input.pluginTrigger.trigger,
+    };
+  }
+  return input.trigger === undefined ? undefined : { kind: "webhook" };
+}
+
 export function routineManageCommandV1(
   input: RoutineManageInputV1,
   meta: { botId: string; commandId: string },
@@ -216,7 +273,9 @@ export function routineManageCommandV1(
       name: input.name,
       prompt: input.prompt,
       ...(input.schedule === undefined ? {} : { schedule: input.schedule }),
-      ...(input.trigger === undefined ? {} : { trigger: { kind: "webhook" } }),
+      ...(routineTriggerOfInputV1(input) === undefined
+        ? {}
+        : { trigger: routineTriggerOfInputV1(input) }),
     });
   }
   if (input.routineId === undefined) {
@@ -232,7 +291,9 @@ export function routineManageCommandV1(
       ...(input.name === undefined ? {} : { name: input.name }),
       ...(input.prompt === undefined ? {} : { prompt: input.prompt }),
       ...(input.schedule === undefined ? {} : { schedule: input.schedule }),
-      ...(input.trigger === undefined ? {} : { trigger: { kind: "webhook" } }),
+      ...(routineTriggerOfInputV1(input) === undefined
+        ? {}
+        : { trigger: routineTriggerOfInputV1(input) }),
     });
   }
   return decodeRoutineCommandV1({

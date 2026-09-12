@@ -7,12 +7,17 @@
 // the Bot's.
 import { env } from "cloudflare:workers";
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { provisionBot, provisionSiblingBot } from "./provision-bot.ts";
 import { hydratedStoredRunsV1 } from "./session-log-probe.ts";
 import { toolCallTriggerPrompt } from "./harness/miniflare.ts";
 import { dynamicToolInputV1 } from "./dynamic-tools.ts";
 import { decodePluginDescriptorV1 } from "@frockbot/core/contracts";
+import {
+  routineDeliveryIdV1,
+  routineHookDigestV1,
+  verifyRoutineHookTokenV1,
+} from "@frockbot/app/routines/hook";
 import {
   compositionArtifactSetHashV1,
   compositionGenerationIdV1,
@@ -112,13 +117,22 @@ interface BotRpc {
     currentGenerationId: string;
     generations: { generationId: string; isCurrent: boolean }[];
   }>;
-  executeRoutineCommand(input: unknown): Promise<{ status: string }>;
   setPluginEnabled(input: unknown): Promise<
     | {
         status: "applied";
         enablement: { revision: number; enabled: Record<string, boolean> };
       }
     | { status: "conflict"; currentRevision: number }
+  >;
+  executeRoutineCommand(input: unknown): Promise<{
+    status: string;
+    hook?: { token: string; keyVersion: number };
+  }>;
+  deliverRoutineHook(
+    input: unknown,
+  ): Promise<
+    | { status: "accepted" | "duplicate"; fireId: string }
+    | { status: "dropped"; reason: string }
   >;
   readPluginEnablement(input: unknown): Promise<{
     revision: number;
@@ -1345,5 +1359,370 @@ describe("the User-owned Composition", () => {
       answered,
       "the Plugin's tool did not run after approval",
     ).toBeDefined();
+  });
+
+  test("a Plugin trigger reads a delivery at the webhook door and says what the Routine runs on", async () => {
+    const userId = `user-${crypto.randomUUID()}`;
+    const identity = { userId, botId: "bot-1" };
+    await provisionBot(identity);
+    await turn(identity, "run-0");
+    const bootstrap = (
+      await user(userId).readComposition({ schemaVersion: 1, userId })
+    ).current;
+
+    const TRIGGER_PLUGIN_ID = "alerts";
+    const TRIGGER_PLUGIN_SOURCE = `
+export const tools = [
+  { name: "alerts_noop", description: "Does nothing", inputSchema: {}, idempotent: true },
+];
+export const triggers = {
+  inbound: async function (delivery, ctx) {
+    const event = JSON.parse(delivery.body);
+    return "Storm warning for " + event.city + " (signed " + delivery.headers["x-signature"] + ") for " + ctx.bot.botId;
+  },
+  refuse: async function () {
+    return { drop: true, reason: "nothing in this delivery is for me" };
+  },
+};
+export async function execute() {
+  return "ok";
+}
+`;
+    const descriptor = decodePluginDescriptorV1({
+      id: TRIGGER_PLUGIN_ID,
+      displayName: "Alerts",
+      version: "0.0.1",
+      contractVersion: 4,
+      tools: [
+        { name: "alerts_noop", description: "Does nothing", inputSchema: {} },
+      ],
+      hooks: [],
+      grants: [],
+      triggers: [
+        { name: "inbound", description: "A delivery" },
+        { name: "refuse", description: "A delivery it drops" },
+      ],
+      contextKeys: ["user", "bot", "session"],
+    });
+    const contentHash = await sha256Hex(TRIGGER_PLUGIN_SOURCE);
+    await env.APPLICATION_ARTIFACTS.put(
+      `packages/${contentHash}.mjs`,
+      TRIGGER_PLUGIN_SOURCE,
+    );
+    const createdAt = "2026-09-12T03:00:00.000Z";
+    const members: CompositionMemberV1[] = [
+      {
+        packageId: TRIGGER_PLUGIN_ID,
+        version: "0.0.1",
+        descriptor,
+        provenance: {
+          kind: "bot",
+          packageId: TRIGGER_PLUGIN_ID,
+          version: "0.0.1",
+          botId: "bot-1",
+          sessionId: `${userId}:bot-1`,
+          turnId: "run-0",
+          runId: "run-0",
+          authoredAt: createdAt,
+        },
+        artifact: {
+          contentHash,
+          size: TRIGGER_PLUGIN_SOURCE.length,
+          mediaType: "application/javascript",
+          bundlerVersion: "probe-seed",
+        },
+      },
+    ];
+    const artifactSetHash = await compositionArtifactSetHashV1(members);
+    await user(userId).proposeComposition({
+      schemaVersion: 1,
+      userId,
+      generation: {
+        schemaVersion: 1,
+        generationId: compositionGenerationIdV1(createdAt, artifactSetHash),
+        artifactSetHash,
+        parentGenerationId: bootstrap.generationId,
+        createdAt,
+        origin: {
+          kind: "bot-authored",
+          runId: "run-0",
+          sessionId: `${userId}:bot-1`,
+          turnId: "run-0",
+        },
+        members,
+        status: "pending",
+      },
+      pin: true,
+      expectedCurrentGenerationId: bootstrap.generationId,
+    });
+    await switchPlugin(identity, TRIGGER_PLUGIN_ID, true);
+
+    const routine = async (routineId: string, trigger: string) => {
+      const receipt = await bot(identity).executeRoutineCommand({
+        schemaVersion: 1,
+        ...identity,
+        command: {
+          schemaVersion: 1,
+          type: "routine/create",
+          commandId: `create-${routineId}`,
+          botId: identity.botId,
+          routineId,
+          name: `Routine ${routineId}`,
+          prompt: "Tell the User what the alert means.",
+          trigger: { kind: "plugin", pluginId: TRIGGER_PLUGIN_ID, trigger },
+        },
+      });
+      expect(receipt.hook?.keyVersion, "a Plugin trigger is keyed").toBe(1);
+      return receipt.hook!.token;
+    };
+    const deliver = async (token: string, body: string, key: string) => {
+      const claims = await verifyRoutineHookTokenV1(
+        env.ROUTINE_HOOK_SECRET,
+        token,
+      );
+      return bot(identity).deliverRoutineHook({
+        schemaVersion: 1,
+        ...identity,
+        delivery: {
+          routineId: claims.r,
+          keyVersion: claims.v,
+          digest: await routineHookDigestV1(token),
+          deliveryId: await routineDeliveryIdV1(claims.r, body, key),
+          body,
+          contentType: "application/json",
+          headers: {
+            "x-signature": "sig-1",
+            "content-type": "application/json",
+          },
+        },
+      });
+    };
+
+    const inbound = await routine("storms", "inbound");
+    const fired = await deliver(inbound, '{"city":"Wollongong"}', "evt-1");
+    expect(fired).toMatchObject({ status: "accepted" });
+    // The queued firing carries what the Plugin said, never the raw body.
+    const deliveries = await runInDurableObject(
+      env.BOT_STATES.getByName(`${userId}:bot-1`),
+      async (_instance, state) =>
+        [
+          ...(
+            await state.storage.list<{ delivery?: string }>({
+              prefix: "routine-queue:",
+            })
+          ).values(),
+        ].map((queued) => queued.delivery ?? ""),
+    );
+    expect(deliveries).toHaveLength(1);
+    expect(deliveries[0]).toContain(
+      "Storm warning for Wollongong (signed sig-1) for bot-1",
+    );
+    expect(deliveries[0]).not.toContain('{"city":"Wollongong"}');
+    // A replay answers with the firing, and asks the Plugin nothing twice.
+    expect(await deliver(inbound, '{"city":"Wollongong"}', "evt-1")).toEqual({
+      status: "duplicate",
+      fireId: (fired as { fireId: string }).fireId,
+    });
+
+    const refusing = await routine("quiet", "refuse");
+    expect(await deliver(refusing, "{}", "evt-2")).toEqual({
+      status: "dropped",
+      reason: "nothing in this delivery is for me",
+    });
+
+    // Off for this Bot, the Plugin sees nothing and the delivery is dropped.
+    await switchPlugin(identity, TRIGGER_PLUGIN_ID, false);
+    expect(await deliver(inbound, '{"city":"Sydney"}', "evt-3")).toMatchObject({
+      status: "dropped",
+      reason: expect.stringContaining("is off for this Bot"),
+    });
+  });
+
+  test("the Turn reads the Plugin's sentence, and a second copy of one delivery joins the first", async () => {
+    const userId = `user-${crypto.randomUUID()}`;
+    const identity = { userId, botId: "bot-1" };
+    await provisionBot(identity);
+    await turn(identity, "run-0");
+    const bootstrap = (
+      await user(userId).readComposition({ schemaVersion: 1, userId })
+    ).current;
+
+    // The trigger dwells on every delivery, so a second copy of one event
+    // reaches the door while the Plugin still holds the first.
+    const SLOW_PLUGIN_ID = "slow-alerts";
+    const DWELL_MS = 1_200;
+    const SLOW_PLUGIN_SOURCE = `
+export const tools = [
+  { name: "slow_noop", description: "Does nothing", inputSchema: {}, idempotent: true },
+];
+export const triggers = {
+  slow: async function (delivery) {
+    await new Promise((resolve) => setTimeout(resolve, ${DWELL_MS}));
+    return "Storm over " + JSON.parse(delivery.body).city;
+  },
+};
+export async function execute() {
+  return "ok";
+}
+`;
+    const descriptor = decodePluginDescriptorV1({
+      id: SLOW_PLUGIN_ID,
+      displayName: "Slow alerts",
+      version: "0.0.1",
+      contractVersion: 4,
+      tools: [
+        { name: "slow_noop", description: "Does nothing", inputSchema: {} },
+      ],
+      hooks: [],
+      grants: [],
+      triggers: [{ name: "slow", description: "A delivery it dwells on" }],
+      contextKeys: ["user", "bot", "session"],
+    });
+    const contentHash = await sha256Hex(SLOW_PLUGIN_SOURCE);
+    await env.APPLICATION_ARTIFACTS.put(
+      `packages/${contentHash}.mjs`,
+      SLOW_PLUGIN_SOURCE,
+    );
+    const createdAt = "2026-09-12T04:00:00.000Z";
+    const members: CompositionMemberV1[] = [
+      {
+        packageId: SLOW_PLUGIN_ID,
+        version: "0.0.1",
+        descriptor,
+        provenance: {
+          kind: "bot",
+          packageId: SLOW_PLUGIN_ID,
+          version: "0.0.1",
+          botId: "bot-1",
+          sessionId: `${userId}:bot-1`,
+          turnId: "run-0",
+          runId: "run-0",
+          authoredAt: createdAt,
+        },
+        artifact: {
+          contentHash,
+          size: SLOW_PLUGIN_SOURCE.length,
+          mediaType: "application/javascript",
+          bundlerVersion: "probe-seed",
+        },
+      },
+    ];
+    const artifactSetHash = await compositionArtifactSetHashV1(members);
+    await user(userId).proposeComposition({
+      schemaVersion: 1,
+      userId,
+      generation: {
+        schemaVersion: 1,
+        generationId: compositionGenerationIdV1(createdAt, artifactSetHash),
+        artifactSetHash,
+        parentGenerationId: bootstrap.generationId,
+        createdAt,
+        origin: {
+          kind: "bot-authored",
+          runId: "run-0",
+          sessionId: `${userId}:bot-1`,
+          turnId: "run-0",
+        },
+        members,
+        status: "pending",
+      },
+      pin: true,
+      expectedCurrentGenerationId: bootstrap.generationId,
+    });
+    await switchPlugin(identity, SLOW_PLUGIN_ID, true);
+
+    const routine = async (routineId: string) => {
+      const receipt = await bot(identity).executeRoutineCommand({
+        schemaVersion: 1,
+        ...identity,
+        command: {
+          schemaVersion: 1,
+          type: "routine/create",
+          commandId: `create-${routineId}`,
+          botId: identity.botId,
+          routineId,
+          name: `Routine ${routineId}`,
+          prompt: "Tell the User what the alert means.",
+          trigger: {
+            kind: "plugin",
+            pluginId: SLOW_PLUGIN_ID,
+            trigger: "slow",
+          },
+        },
+      });
+      return receipt.hook!.token;
+    };
+    const delivery = async (token: string, body: string, key: string) => {
+      const claims = await verifyRoutineHookTokenV1(
+        env.ROUTINE_HOOK_SECRET,
+        token,
+      );
+      return {
+        schemaVersion: 1,
+        ...identity,
+        delivery: {
+          routineId: claims.r,
+          keyVersion: claims.v,
+          digest: await routineHookDigestV1(token),
+          deliveryId: await routineDeliveryIdV1(claims.r, body, key),
+          body,
+          contentType: "application/json",
+          headers: { "content-type": "application/json" },
+        },
+      };
+    };
+    // What the Turn was admitted with, for the Routine named: the cue the
+    // model reads, which is where the Plugin's answer has to turn up.
+    const cuesFor = async (routineId: string) =>
+      [
+        ...(
+          await runInDurableObject(
+            env.BOT_STATES.getByName(`${userId}:bot-1`),
+            (_instance, state) =>
+              state.storage.list<{
+                input: string;
+                admission?: { origin?: { routineId?: string } };
+              }>({ prefix: "run:" }),
+          )
+        ).values(),
+      ]
+        .filter((run) => run.admission?.origin?.routineId === routineId)
+        .map((run) => run.input);
+
+    // Two copies of one delivery, both at the door while the Plugin dwells.
+    const twice = await routine("twice");
+    const copy = await delivery(twice, '{"city":"Wollongong"}', "evt-1");
+    const [first, second] = await Promise.all([
+      bot(identity).deliverRoutineHook(copy),
+      (async () => {
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        const startedAt = Date.now();
+        const receipt = await bot(identity).deliverRoutineHook(copy);
+        return { receipt, elapsedMs: Date.now() - startedAt };
+      })(),
+    ]);
+    expect(first).toMatchObject({ status: "accepted" });
+    expect(second.receipt).toEqual({
+      status: "duplicate",
+      fireId: (first as { fireId: string }).fireId,
+    });
+    // It answered sooner than an ask of its own could have: the second copy
+    // joined the delivery already inside the Plugin instead of handing the
+    // Plugin the same event twice.
+    expect(
+      second.elapsedMs,
+      "the second copy waited out a dwell of its own, so the Plugin was asked twice",
+    ).toBeLessThan(DWELL_MS);
+
+    // The one firing those copies made runs a Turn, and its cue is what the
+    // Plugin said — never the body the Plugin read.
+    await runDurableObjectAlarm(env.BOT_STATES.getByName(`${userId}:bot-1`));
+    await vi.waitFor(
+      async () => expect(await cuesFor("twice")).toHaveLength(1),
+      { timeout: 5_000, interval: 25 },
+    );
+    const [cue] = await cuesFor("twice");
+    expect(cue).toContain("Storm over Wollongong");
+    expect(cue).not.toContain('{"city":"Wollongong"}');
   });
 });

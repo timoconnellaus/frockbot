@@ -251,6 +251,8 @@ First-party code is never a Composition member: it is imported, and `app/package
 
 A publish never runs anything. `plugin_publish` and `plugin_enable` write a Plugin intent (`app/plugins/approval.ts`, `plugin:intent:<approvalId>`, keyed by the Turn's `effectId`) and then put an approval card on the Turn's own log naming the Plugin's tools, hooks, grants and hosts. The approval settlement (`app/approvals/bot.ts`) settles the intent in the same transaction as the decision; after the commit an approved `publish` proposes the generation on the User — the current one with the member replaced or appended, skipped when the Composition already holds that artifact, retried on a lost pin race — and switches the Plugin on for this Bot; an approved `enable` only switches. Sibling Bots of the same User see the new generation but run the Plugin only when a person switches it on for them.
 
+**Triggers (ADR 0026 step 8).** A Routine's trigger is `{ kind: "webhook" }` or `{ kind: "plugin", pluginId, trigger }` (`app/routines/records.ts`); both enter through the same signed webhook door (`app/routines/hook.ts`, `app/routines/backend.ts`), keyed and replay-guarded alike, and `routine_manage` takes a `pluginTrigger` beside `trigger`. For a Plugin trigger the store (`RoutineStore.deliverHook`) makes the door's checks in one transaction, hands the delivery — body and the sender's headers, never the door's credential — to the Plugin outside any transaction, then enqueues the firing with the Plugin's text as the delivered payload, or records a drop with the Plugin's reason so a replay answers the same. `deliverPluginTriggerV1` (`app/plugins/triggers-bot.ts`) mounts the User's Plugin worker for the delivery alone under a synthetic Turn identity naming the Routine, delivers to `receiveTrigger`, and disposes; a Plugin that is off for this Bot, declares no such trigger, or does not mount is a drop with that reason.
+
 ---
 
 ## 6. Clients
@@ -658,8 +660,8 @@ Three more projections in the settings-document family:
   thirty-two declared actions on each of them. Which form is open is
   navigation, so it is asked for on the read and written nowhere, and naming a
   different Routine moves the revision so the host adopts a controller whose
-  field values are answers to the form now on screen. A webhook Routine also
-  gets its two key controls, and only a webhook one: the route refuses a key
+  field values are answers to the form now on screen. A triggered Routine also
+  gets its two key controls, and only a triggered one: the route refuses a key
   for a scheduled Routine, so the control is absent rather than offered.
 
 **A secret the authority minted once is never in a document.** A webhook key

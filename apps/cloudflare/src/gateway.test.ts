@@ -797,7 +797,10 @@ class MemoryConfiguration
 
   deliverRoutineHook(
     request: Parameters<BotConfigurationBinding["deliverRoutineHook"]>[0],
-  ): Promise<{ status: "accepted" | "duplicate"; fireId: string }> {
+  ): Promise<
+    | { status: "accepted" | "duplicate"; fireId: string }
+    | { status: "dropped"; reason: string }
+  > {
     return this.routineStore(request.botId).deliverHook(request.delivery);
   }
 

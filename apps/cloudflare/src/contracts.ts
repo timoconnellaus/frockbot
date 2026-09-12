@@ -664,8 +664,12 @@ export interface BotConfigurationBinding {
       deliveryId: string;
       body: string;
       contentType?: string | null;
+      headers?: Record<string, string>;
     };
-  }): Promise<{ status: "accepted" | "duplicate"; fireId: string }>;
+  }): Promise<
+    | { status: "accepted" | "duplicate"; fireId: string }
+    | { status: "dropped"; reason: string }
+  >;
   listRoutineRuns(request: {
     schemaVersion: 1;
     userId: string;
