@@ -187,13 +187,6 @@ interface LiveCall {
   exhausted: boolean;
   turnId?: string;
   quotaSaid: boolean;
-  /** Synthesized audio handed down this socket, so silence has a number. */
-  audioChunks: number;
-  audioBytes: number;
-  /** Sentences whose first chunk has been traced. */
-  sentencesSpoken: number;
-  /** The sentence the last chunk belonged to, to spot the next one's first. */
-  lastSentence?: string;
 }
 
 /** Look-ups a delegation gets before it is settled as never accepted. */
@@ -260,7 +253,24 @@ export class VoiceAssistant extends VoiceAgentBase<
    * so the `closed` line would otherwise name no call and measure nothing.
    * Dropped at the end of `onClose`, once that line is written.
    */
-  #traced = new Map<string, { callId: string; startedAt: number }>();
+  #traced = new Map<
+    string,
+    {
+      callId: string;
+      startedAt: number;
+      /** Synthesized audio handed down this socket, so silence has a number. */
+      audioChunks: number;
+      audioBytes: number;
+      sentencesSpoken: number;
+      /**
+       * Sentences accepted for synthesis whose first chunk has not arrived,
+       * counted per sentence: the SDK pumps several sentences at once, so
+       * their chunks interleave and the previous chunk's text says nothing
+       * about which sentence this one starts.
+       */
+      awaitingFirstChunk: Map<string, number>;
+    }
+  >();
 
   tts: (TTSProvider & Partial<StreamingTTSProvider>) | undefined =
     this.createTts();
@@ -559,14 +569,15 @@ export class VoiceAssistant extends VoiceAgentBase<
       muted: false,
       exhausted: false,
       quotaSaid: false,
-      audioChunks: 0,
-      audioBytes: 0,
-      sentencesSpoken: 0,
     };
     this.#calls.set(connection.id, call);
     this.#traced.set(connection.id, {
       callId: call.callId,
       startedAt: call.startedAt,
+      audioChunks: 0,
+      audioBytes: 0,
+      sentencesSpoken: 0,
+      awaitingFirstChunk: new Map(),
     });
     this.trace(connection, "call-admitted", {
       admission: admission.status,
@@ -722,11 +733,11 @@ export class VoiceAssistant extends VoiceAgentBase<
   }
 
   override async onCallEnd(connection: Connection): Promise<void> {
-    const call = this.#calls.get(connection.id);
+    const traced = this.#traced.get(connection.id);
     this.trace(connection, "call-ended", {
-      audioChunks: call?.audioChunks ?? 0,
-      audioBytes: call?.audioBytes ?? 0,
-      sentencesSpoken: call?.sentencesSpoken ?? 0,
+      audioChunks: traced?.audioChunks ?? 0,
+      audioBytes: traced?.audioBytes ?? 0,
+      sentencesSpoken: traced?.sentencesSpoken ?? 0,
     });
     await this.releaseCall(connection);
   }
@@ -752,20 +763,19 @@ export class VoiceAssistant extends VoiceAgentBase<
     text: string,
     connection: Connection,
   ): Promise<ArrayBuffer | null> {
-    const call = this.#calls.get(connection.id);
-    if (call) {
-      call.audioChunks += 1;
-      call.audioBytes += audio.byteLength;
-    }
-    if (!call || call.audioChunks === 1 || text !== call.lastSentence) {
-      if (call) {
-        call.lastSentence = text;
-        call.sentencesSpoken += 1;
-      }
+    const traced = this.#traced.get(connection.id);
+    if (!traced) return audio;
+    traced.audioChunks += 1;
+    traced.audioBytes += audio.byteLength;
+    const awaiting = traced.awaitingFirstChunk.get(text) ?? 0;
+    if (awaiting > 0) {
+      if (awaiting > 1) traced.awaitingFirstChunk.set(text, awaiting - 1);
+      else traced.awaitingFirstChunk.delete(text);
+      traced.sentencesSpoken += 1;
       this.trace(connection, "audio", {
         chars: text.length,
         bytes: audio.byteLength,
-        chunk: call?.audioChunks ?? 1,
+        chunk: traced.audioChunks,
       });
     }
     return audio;
@@ -828,6 +838,13 @@ export class VoiceAssistant extends VoiceAgentBase<
       return null;
     }
     await ledger.addMeter(now, { ttsCharacters: text.length });
+    const traced = this.#traced.get(connection.id);
+    if (traced) {
+      traced.awaitingFirstChunk.set(
+        text,
+        (traced.awaitingFirstChunk.get(text) ?? 0) + 1,
+      );
+    }
     return text;
   }
 

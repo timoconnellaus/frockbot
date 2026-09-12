@@ -377,6 +377,51 @@ describe("the voice session object", () => {
     opened.socket.close();
   });
 
+  test("a repeated sentence is still traced, and a superseded call keeps its totals", async () => {
+    const userId = `voice-audio-${crypto.randomUUID()}`;
+    const stub = assistant(userId);
+    // Two sentences the reply says identically: the audio line has to come
+    // from the sentence being accepted, not from the previous chunk's text.
+    await stub.probeSetScript({ reply: "Right away. Right away." });
+    const phone = await open(userId, {}, "phone");
+    await startCall(phone);
+    await phone.waitFor(state("awake"), "awake");
+    expect(await stub.probeUtterance("say it twice")).toBe(true);
+    await eventually(
+      async () => await stub.probeSynthesized(),
+      (spoken) => spoken.length === 2,
+      "both sentences synthesized",
+    );
+    expect(await stub.probeSynthesized()).toEqual([
+      "Right away.",
+      "Right away.",
+    ]);
+    const audio = (await stub.probeTraces()).filter((t) => t.event === "audio");
+    expect(audio).toHaveLength(2);
+    expect(audio.map((t) => t.chars)).toEqual([11, 11]);
+    expect(audio.map((t) => t.chunk)).toEqual([1, 2]);
+
+    // The laptop displaces the phone: the phone's call record is released
+    // before the SDK ends the call, so its totals have to outlive it.
+    const laptop = await open(userId, {}, "laptop");
+    await startCall(laptop);
+    await phone.waitFor(
+      (f) => f.type === "voice/refusal" && f.code === "superseded",
+      "superseded refusal",
+    );
+    const ended = await eventually(
+      async () =>
+        (await stub.probeTraces()).find(
+          (t) => t.event === "call-ended" && t.device === "phone",
+        ),
+      (line) => Boolean(line),
+      "the phone's call-ended trace",
+    );
+    expect(ended).toMatchObject({ audioChunks: 2, sentencesSpoken: 2 });
+    expect(Number(ended!.audioBytes)).toBeGreaterThan(0);
+    for (const opened of [phone, laptop]) opened.socket.close();
+  });
+
   test("a newer device takes the call and the older one is told", async () => {
     const userId = `voice-exclusive-${crypto.randomUUID()}`;
     const first = await open(userId, {}, "phone");

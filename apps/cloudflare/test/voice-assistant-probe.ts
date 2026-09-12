@@ -25,6 +25,8 @@ export interface VoiceProbeScript {
   /** Transcripts containing this word become an `ask_bot` call to `botId`. */
   delegateWord?: string;
   botId?: string;
+  /** The whole model reply, so a test can choose its sentences. */
+  reply?: string;
 }
 
 function sse(events: unknown[]): ReadableStream<Uint8Array> {
@@ -55,7 +57,6 @@ export interface VoiceTraceLine {
   elapsedMs?: number;
   code?: number;
   reason?: string;
-  source?: string;
   chars?: number;
   bytes?: number;
   chunk?: number;
@@ -198,6 +199,9 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
           ],
         },
       ]);
+    }
+    if (script.reply) {
+      return sse([{ choices: [{ delta: { content: script.reply } }] }]);
     }
     return sse([
       { choices: [{ delta: { content: "You said: " } }] },
