@@ -66,6 +66,21 @@ bool _matches(Map<String, Object?> schema, Object? value) {
   return false;
 }
 
+/// Where a prediction is filed.
+///
+/// An action id does not name a control: one document draws a switch per
+/// Plugin and a Delete per Routine, all under the same id. What tells them
+/// apart is the input the press is about to send, minus the one value the
+/// prediction changes.
+String viewPredictionKeyV1(Map<String, Object?> node, {String? without}) {
+  final input = ((node['input'] as Map?) ?? const {}).cast<String, Object?>();
+  final names = input.keys.where((name) => name != without).toList()..sort();
+  return [
+    node['actionId'],
+    for (final name in names) '$name=${input[name]}',
+  ].join('|');
+}
+
 /// Field values and one retained command envelope, on the settings surface's
 /// terms: persist the command id before dispatch, keep it through a lost reply,
 /// and let the person check it rather than mint a second one.
@@ -76,6 +91,19 @@ class ViewController extends ChangeNotifier {
   final int revision;
   final ViewActionDispatch dispatch;
   final values = <String, Object?>{};
+
+  /// What this client drew for itself while a command is in flight, keyed by
+  /// `viewPredictionKeyV1`.
+  ///
+  /// Only what the client already computed and put in the command body is in
+  /// here — a switch it flipped, a row it chose, a record it asked to delete —
+  /// never anything the authority decides. A prediction covers exactly the
+  /// window between the receipt and the document that replaces it: the surface
+  /// mints a new controller for every revision, so an applied change drops it
+  /// when the read lands, and anything short of an accepted command drops it
+  /// below. There is one command in flight at a time, so there is one
+  /// prediction at a time, and rolling back is clearing the map.
+  final predicted = <String, Object?>{};
 
   /// Field ids holding a credential. A secret is not part of the document, so
   /// it is dropped the moment the command that carried it has been answered
@@ -115,10 +143,14 @@ class ViewController extends ChangeNotifier {
     _changed();
   }
 
+  /// Sends an action, optionally drawing its outcome at once: `predictKey` and
+  /// `predictValue` are what the caller already knows it is about to send.
   Future<void> submit(
     Map<String, Object?> node,
-    Map<String, Object?> schema,
-  ) async {
+    Map<String, Object?> schema, {
+    String? predictKey,
+    Object? predictValue,
+  }) async {
     if (busy || pending != null) return;
     try {
       pending = {
@@ -133,6 +165,9 @@ class ViewController extends ChangeNotifier {
       _changed();
       return;
     }
+    // After the input passed: a refused press changes nothing, so it draws
+    // nothing either.
+    if (predictKey != null) predicted[predictKey] = predictValue;
     await check();
   }
 
@@ -158,11 +193,16 @@ class ViewController extends ChangeNotifier {
         for (final id in secrets) {
           values.remove(id);
         }
+        if (receipt['status'] != 'applied') predicted.clear();
         message = receipt['status'] == 'applied'
             ? 'Done.'
             : 'That action couldn’t be completed. Refresh and try again.';
       }
     } on RequestFailure catch (failure) {
+      // A prediction is what the client knows was accepted, so an unconfirmed
+      // command takes its drawing back too: the document is stale, but it is
+      // at least the last thing the authority said.
+      predicted.clear();
       if (failure.refused) {
         await store.delete(_key);
         pending = null;
@@ -172,6 +212,7 @@ class ViewController extends ChangeNotifier {
             'Couldn’t confirm that action. Check it before trying another.';
       }
     } catch (_) {
+      predicted.clear();
       message = 'Couldn’t confirm that action. Check it before trying another.';
     } finally {
       busy = false;

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -33,10 +34,168 @@ Map<String, Object?> document(
   'actions': actions,
 };
 
+const _enableAction = {
+  'id': 'set-package-enabled',
+  'schema': {
+    'type': 'object',
+    'properties': {
+      'kind': {
+        'type': 'string',
+        'enum': ['set-package-enabled'],
+      },
+      'packageId': {'type': 'string', 'maxLength': 128},
+      'enabled': {'type': 'boolean'},
+    },
+    'required': ['kind', 'packageId', 'enabled'],
+    'additionalProperties': false,
+  },
+};
+
+const _installAction = {
+  'id': 'install-package',
+  'schema': {
+    'type': 'object',
+    'properties': {
+      'kind': {
+        'type': 'string',
+        'enum': ['install-package'],
+      },
+      'packageId': {'type': 'string', 'maxLength': 128},
+      'version': {'type': 'string', 'maxLength': 64},
+    },
+    'required': ['kind', 'packageId', 'version'],
+    'additionalProperties': false,
+  },
+};
+
+const _deleteRoutine = {
+  'id': 'delete-routine',
+  'schema': {
+    'type': 'object',
+    'properties': {
+      'kind': {
+        'type': 'string',
+        'enum': ['delete-routine'],
+      },
+      'routineId': {'type': 'string', 'maxLength': 200},
+    },
+    'required': ['kind', 'routineId'],
+    'additionalProperties': false,
+  },
+};
+
+const _chooseA = {
+  'id': 'choose-a',
+  'schema': {
+    'type': 'object',
+    'properties': <String, Object?>{},
+    'required': <String>[],
+    'additionalProperties': false,
+  },
+};
+
+const _chooseB = {
+  'id': 'choose-b',
+  'schema': {
+    'type': 'object',
+    'properties': <String, Object?>{},
+    'required': <String>[],
+    'additionalProperties': false,
+  },
+};
+
+/// A Plugins card, as `pluginsDocumentV1` draws one: the switch beside the
+/// title is the card's own action read backwards, and the same switch carries
+/// an install on a package that is not there yet.
+Map<String, Object?> _card({required bool on, bool installing = false}) => {
+  'type': 'group',
+  'orientation': 'column',
+  'children': [
+    {
+      'type': 'group',
+      'orientation': 'column',
+      'title': 'Ollama Cloud',
+      'children': [
+        {'type': 'text', 'text': 'Models', 'style': 'label'},
+        {
+          'type': 'group',
+          'orientation': 'row',
+          'children': [
+            {
+              'type': 'action',
+              'actionId': installing
+                  ? 'install-package'
+                  : 'set-package-enabled',
+              'label': on ? 'Turn off' : 'Turn on',
+              'input': installing
+                  ? {
+                      'kind': 'install-package',
+                      'packageId': 'provider-ollama-cloud',
+                      'version': '1.0.0',
+                    }
+                  : {
+                      'kind': 'set-package-enabled',
+                      'packageId': 'provider-ollama-cloud',
+                      'enabled': !on,
+                    },
+            },
+          ],
+        },
+      ],
+    },
+  ],
+};
+
+/// A list whose rows are a choice: one of them is the answer.
+Map<String, Object?> _rows() => {
+  'type': 'list',
+  'rows': [
+    {
+      'id': 'a',
+      'actionId': 'choose-a',
+      'selected': true,
+      'node': {'type': 'text', 'text': 'Sydney'},
+    },
+    {
+      'id': 'b',
+      'actionId': 'choose-b',
+      'node': {'type': 'text', 'text': 'Frankfurt'},
+    },
+  ],
+};
+
+/// Two Routines, each a titled group with a Delete, as
+/// `routinesDocumentV1` draws them.
+Map<String, Object?> _routines() => {
+  'type': 'group',
+  'orientation': 'column',
+  'children': [
+    for (final name in ['Morning digest', 'Evening digest'])
+      {
+        'type': 'group',
+        'orientation': 'column',
+        'title': name,
+        'children': [
+          {
+            'type': 'action',
+            'actionId': 'delete-routine',
+            'label': name == 'Morning digest' ? 'Delete' : 'Delete too',
+            'style': 'danger',
+            'input': {'kind': 'delete-routine', 'routineId': name},
+          },
+        ],
+      },
+  ],
+};
+
 class Harness {
   final MemoryStore store = MemoryStore();
   final List<Map<String, Object?>> dispatched = [];
   Map<String, Object?> receipt = const {'status': 'applied'};
+
+  /// Held open to look at what the client drew for itself while the command
+  /// is still in flight, which is the whole of what a prediction covers.
+  Completer<void>? gate;
   late final ViewController controller = ViewController(
     store: store,
     userId: 'tim',
@@ -44,6 +203,7 @@ class Harness {
     revision: 1,
     dispatch: (command) async {
       dispatched.add(command);
+      if (gate != null) await gate!.future;
       return {'commandId': command['commandId'], ...receipt};
     },
   );
@@ -53,6 +213,7 @@ Future<Harness> pump(
   WidgetTester tester,
   Map<String, Object?> json, {
   Map<String, ViewFrameBuilder>? frames,
+  bool cardGroups = false,
 }) async {
   final harness = Harness();
   await tester.pumpWidget(
@@ -64,6 +225,7 @@ Future<Harness> pump(
             document: wire.ViewDocument.fromJson(json),
             controller: harness.controller,
             frames: frames,
+            cardGroups: cardGroups,
           ),
         ),
       ),
@@ -524,5 +686,145 @@ void main() {
       ),
       sampleViewDocumentV1,
     );
+  });
+
+  group('what the client draws for itself', () {
+    testWidgets('a plugin switch moves on the press, not on the read', (
+      tester,
+    ) async {
+      final harness = await pump(
+        tester,
+        document(_card(on: true), actions: const [_enableAction]),
+        cardGroups: true,
+      );
+      harness.gate = Completer<void>();
+      expect(tester.widget<Switch>(find.byType(Switch)).value, isTrue);
+      await tester.tap(find.byType(Switch));
+      await tester.pump();
+      expect(tester.widget<Switch>(find.byType(Switch)).value, isFalse);
+      expect(harness.dispatched.single['actionId'], 'set-package-enabled');
+      harness.gate!.complete();
+      await tester.pumpAndSettle();
+      // Applied: a prediction covers the window up to the document that
+      // replaces it, so it is still what the switch shows.
+      expect(tester.widget<Switch>(find.byType(Switch)).value, isFalse);
+    });
+
+    testWidgets('a refused enablement puts the switch back', (tester) async {
+      final harness = await pump(
+        tester,
+        document(_card(on: true), actions: const [_enableAction]),
+        cardGroups: true,
+      );
+      harness.receipt = const {'status': 'rejected'};
+      harness.gate = Completer<void>();
+      await tester.tap(find.byType(Switch));
+      await tester.pump();
+      expect(tester.widget<Switch>(find.byType(Switch)).value, isFalse);
+      harness.gate!.complete();
+      await tester.pumpAndSettle();
+      expect(tester.widget<Switch>(find.byType(Switch)).value, isTrue);
+      expect(harness.controller.predicted, isEmpty);
+    });
+
+    testWidgets('an install is not predicted: the version is not ours', (
+      tester,
+    ) async {
+      final harness = await pump(
+        tester,
+        document(
+          _card(on: false, installing: true),
+          actions: const [_installAction],
+        ),
+        cardGroups: true,
+      );
+      harness.gate = Completer<void>();
+      await tester.tap(find.byType(Switch));
+      await tester.pump();
+      expect(tester.widget<Switch>(find.byType(Switch)).value, isFalse);
+      expect(harness.dispatched.single['actionId'], 'install-package');
+      expect(harness.controller.predicted, isEmpty);
+      harness.gate!.complete();
+      await tester.pumpAndSettle();
+      expect(tester.widget<Switch>(find.byType(Switch)).value, isFalse);
+    });
+
+    testWidgets('a tapped row takes the check from its sibling at once', (
+      tester,
+    ) async {
+      final harness = await pump(
+        tester,
+        document(_rows(), actions: const [_chooseA, _chooseB]),
+      );
+      harness.gate = Completer<void>();
+      ListTile row(String id) =>
+          tester.widget<ListTile>(find.byKey(ValueKey('view-row-$id')));
+      expect(row('a').selected, isTrue);
+      await tester.tap(find.text('Frankfurt'));
+      await tester.pump();
+      expect(row('a').selected, isFalse);
+      expect(row('b').selected, isTrue);
+      expect(find.byIcon(Icons.check_rounded), findsOneWidget);
+      harness.gate!.complete();
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('a deleted Routine leaves the document on the press', (
+      tester,
+    ) async {
+      final harness = await pump(
+        tester,
+        document(_routines(), actions: const [_deleteRoutine]),
+      );
+      harness.gate = Completer<void>();
+      expect(find.text('Morning digest'), findsOneWidget);
+      await tester.tap(find.text('Delete'));
+      await tester.pump();
+      expect(find.text('Morning digest'), findsNothing);
+      expect(find.text('Evening digest'), findsOneWidget);
+      harness.gate!.complete();
+      await tester.pumpAndSettle();
+      expect(find.text('Morning digest'), findsNothing);
+    });
+
+    testWidgets('a refused delete brings the Routine back', (tester) async {
+      final harness = await pump(
+        tester,
+        document(_routines(), actions: const [_deleteRoutine]),
+      );
+      harness.receipt = const {'status': 'rejected'};
+      harness.gate = Completer<void>();
+      await tester.tap(find.text('Delete'));
+      await tester.pump();
+      expect(find.text('Morning digest'), findsNothing);
+      harness.gate!.complete();
+      await tester.pumpAndSettle();
+      expect(find.text('Morning digest'), findsOneWidget);
+      expect(harness.controller.predicted, isEmpty);
+    });
+
+    test('a prediction is keyed by what the press acts on, not by its id', () {
+      final first = {
+        'actionId': 'set-package-enabled',
+        'input': {'packageId': 'one', 'enabled': false},
+      };
+      final second = {
+        'actionId': 'set-package-enabled',
+        'input': {'packageId': 'two', 'enabled': false},
+      };
+      expect(
+        viewPredictionKeyV1(first, without: 'enabled'),
+        isNot(viewPredictionKeyV1(second, without: 'enabled')),
+      );
+      // The value being predicted is the one that changes, so it is not part
+      // of the key: the switch reads back what it wrote.
+      expect(
+        viewPredictionKeyV1(first, without: 'enabled'),
+        viewPredictionKeyV1({
+          'actionId': 'set-package-enabled',
+          'input': {'packageId': 'one', 'enabled': true},
+        }, without: 'enabled'),
+      );
+    });
   });
 }
