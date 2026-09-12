@@ -47,6 +47,7 @@ import '../voice/capabilities.dart';
 import '../voice/capture.dart';
 import '../voice/dictation.dart';
 import '../voice/footer.dart';
+import '../voice/motion.dart';
 import '../voice/mic_ownership.dart';
 import '../voice/player.dart';
 import '../voice/protocol.dart' show voiceUnavailableMessage;
@@ -180,6 +181,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   AssistantSessionController? voiceSession;
   DictationController? dictation;
   bool footerOpen = false;
+  bool footerExiting = false;
   bool showHidden = false;
   bool isAdmin = false;
   TranscriptLine? openRun;
@@ -293,6 +295,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     setState(() {
       voiceSession = session;
       footerOpen = true;
+      footerExiting = false;
     });
     await session.start();
   }
@@ -301,18 +304,15 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// navigates nowhere.
   Future<void> _endVoice({required String reason}) async {
     final session = voiceSession;
-    if (session == null) return;
-    await session.end(reason: reason);
-    session.dispose();
-    microphone.releaseAssistant();
-    if (!mounted) {
-      voiceSession = null;
-      return;
-    }
+    if (session == null || !footerOpen) return;
     setState(() {
-      voiceSession = null;
       footerOpen = false;
+      footerExiting = true;
     });
+    await session.end(reason: reason);
+    microphone.releaseAssistant();
+    // Retain the ended controller while the footer exits. It is disposed
+    // when the next session replaces it, or when the shell is disposed.
   }
 
   Future<void> _dictate() async {
@@ -1293,7 +1293,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
             // would keep a gesture bar's worth of space above the footer.
             child: MediaQuery.removePadding(
               context: context,
-              removeBottom: footerOpen && session != null,
+              removeBottom: (footerOpen || footerExiting) && session != null,
               child: Stack(
                 fit: StackFit.expand,
                 children: [
@@ -1421,9 +1421,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                             background: _background(bot.botId.value),
                             onDictate: () => unawaited(_dictate()),
                             onStopDictation: () => unawaited(_stopDictation()),
-                            dictating:
-                                dictation?.active == true &&
-                                dictation?.context == bot.botId.value,
+                            dictationState:
+                                dictation?.context == bot.botId.value
+                                ? dictation!.state
+                                : DictationState.idle,
                             dictationLevel: dictation?.level,
                             onWorkingChanged: (runId) {
                               if (runId == workingRunId || !mounted) return;
@@ -1456,11 +1457,21 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
               ),
             ),
           ),
-          if (footerOpen && session != null)
-            VoiceFooter(
-              session: session,
-              onEnd: () => unawaited(_endVoice(reason: 'end-button')),
-            ),
+          VoiceReveal(
+            visible: footerOpen && session != null,
+            bottomInset: footerOpen || footerExiting
+                ? MediaQuery.paddingOf(context).bottom
+                : 0,
+            onHidden: () {
+              if (footerExiting) setState(() => footerExiting = false);
+            },
+            child: session == null
+                ? const SizedBox.shrink()
+                : VoiceFooter(
+                    session: session,
+                    onEnd: () => unawaited(_endVoice(reason: 'end-button')),
+                  ),
+          ),
         ],
       ),
     );

@@ -15,7 +15,10 @@ import 'package:flutter/services.dart';
 
 import '../acceptance_metrics.dart';
 import '../orientation.dart' show isNativeMobile;
-import '../voice/footer.dart' show VoiceDictationBars;
+import '../theme/frock_theme.dart';
+import '../voice/dictation.dart';
+import '../voice/motion.dart';
+import '../voice/waveform.dart';
 import 'semantics.dart';
 import 'chat_icons.dart';
 import 'skill_menu.dart';
@@ -128,7 +131,11 @@ class Composer extends StatefulWidget {
   final VoidCallback? onStopDictation;
 
   /// Whether this composer's Bot is the one being dictated into.
-  final bool dictating;
+  final DictationState dictationState;
+  bool get dictating =>
+      dictationState == DictationState.starting ||
+      dictationState == DictationState.capturing ||
+      dictationState == DictationState.stopping;
 
   /// The capture level, 0..1, which is what the bars are drawn from.
   final ValueListenable<double>? dictationLevel;
@@ -145,7 +152,7 @@ class Composer extends StatefulWidget {
     required this.skills,
     this.onDictate,
     this.onStopDictation,
-    this.dictating = false,
+    this.dictationState = DictationState.idle,
     this.dictationLevel,
   });
 
@@ -206,16 +213,101 @@ class _ComposerState extends State<Composer> {
       }
       return;
     }
-    if (widget.ready && draftSendable(widget.editor.text.trim())) {
+    if (!widget.dictating &&
+        widget.ready &&
+        draftSendable(widget.editor.text.trim())) {
       widget.onSend();
     }
   }
+
+  Widget _actionButton(
+    BuildContext context, {
+    required bool dictatable,
+    required bool canSend,
+  }) => KeyedSubtree(
+    key: ValueKey(
+      widget.dictating
+          ? 'recording-action'
+          : dictatable
+          ? 'dictate-action'
+          : 'send-action',
+    ),
+    child: widget.dictating
+        ? identified(
+            VoiceIds.composerDictationStop,
+            IconButton.filled(
+              key: const ValueKey('dictation-stop'),
+              tooltip: widget.dictationState == DictationState.stopping
+                  ? 'Finishing dictation'
+                  : 'Stop dictation',
+              onPressed: widget.dictationState == DictationState.stopping
+                  ? null
+                  : widget.onStopDictation,
+              style: IconButton.styleFrom(
+                shape: const CircleBorder(),
+                minimumSize: const Size(48, 48),
+              ),
+              icon: voiceIconTransition(
+                context,
+                widget.dictationState == DictationState.stopping
+                    ? SizedBox(
+                        key: const ValueKey('finishing'),
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          value: MediaQuery.disableAnimationsOf(context)
+                              ? 0.75
+                              : null,
+                        ),
+                      )
+                    : const Icon(
+                        Icons.stop_rounded,
+                        key: ValueKey('recording'),
+                        size: 24,
+                      ),
+              ),
+            ),
+          )
+        : dictatable
+        ? identified(
+            VoiceIds.composerDictate,
+            IconButton.filled(
+              key: const ValueKey('dictate'),
+              tooltip: 'Dictate message',
+              onPressed: widget.onDictate,
+              style: IconButton.styleFrom(
+                minimumSize: const Size(48, 48),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+              icon: const ChatIcon(ChatIconKind.mic),
+            ),
+          )
+        : identified(
+            ShellIds.sendButton,
+            IconButton.filled(
+              key: const ValueKey('send'),
+              tooltip: 'Send',
+              onPressed: canSend ? widget.onSend : null,
+              style: IconButton.styleFrom(
+                minimumSize: const Size(48, 48),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+              icon: const ChatIcon(ChatIconKind.send),
+            ),
+          ),
+  );
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final text = widget.editor.text;
-    final canSend = widget.ready && draftSendable(text.trim());
+    final canSend =
+        !widget.dictating && widget.ready && draftSendable(text.trim());
     final fieldStyle = theme.textTheme.bodyLarge?.copyWith(
       fontWeight: FontWeight.w300,
     );
@@ -295,12 +387,19 @@ class _ComposerState extends State<Composer> {
           ),
         Padding(
           padding: const EdgeInsets.fromLTRB(14, 4, 14, 10),
-          child: DecoratedBox(
+          child: AnimatedContainer(
+            duration: FrockTheme.motion(context, voiceEnterDuration),
+            curve: Curves.easeOutCubic,
             decoration: BoxDecoration(
-              color: theme.colorScheme.surfaceContainerHighest,
+              color: Color.alphaBlend(
+                theme.colorScheme.primary.withValues(
+                  alpha: widget.dictating ? 0.07 : 0,
+                ),
+                theme.colorScheme.surfaceContainerHighest,
+              ),
               borderRadius: BorderRadius.circular(19),
               border: Border.all(
-                color: widget.focus.hasFocus
+                color: widget.dictating || widget.focus.hasFocus
                     ? Color.alphaBlend(
                         theme.colorScheme.primary.withValues(alpha: 0.4),
                         theme.colorScheme.outlineVariant,
@@ -308,132 +407,175 @@ class _ComposerState extends State<Composer> {
                     : theme.colorScheme.outlineVariant,
               ),
             ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Expanded(
-                  child: CallbackShortcuts(
-                    bindings: {
-                      const SingleActivator(
-                        LogicalKeyboardKey.enter,
-                        meta: true,
-                      ): widget.onSend,
-                      const SingleActivator(
-                        LogicalKeyboardKey.enter,
-                        control: true,
-                      ): widget.onSend,
-                      // A bare Enter (Shift+Enter is left to the field, which
-                      // breaks the line) sends, or takes the highlighted Skill
-                      // while the popover is up. An empty or oversized draft
-                      // swallows it rather than growing by a blank line.
-                      if (enterSends) ...{
-                        const SingleActivator(LogicalKeyboardKey.enter): _enter,
-                        const SingleActivator(LogicalKeyboardKey.numpadEnter):
-                            _enter,
-                      },
-                      if (skills != null && skills.open) ...{
-                        const SingleActivator(LogicalKeyboardKey.arrowUp): () =>
-                            skills.move(-1),
-                        const SingleActivator(
-                          LogicalKeyboardKey.arrowDown,
-                        ): () =>
-                            skills.move(1),
-                        const SingleActivator(LogicalKeyboardKey.escape):
-                            skills.close,
-                      },
-                    },
-                    child: identified(
-                      ShellIds.composer,
-                      Semantics(
-                        label: 'Message your Bot',
-                        child: TextField(
-                          key: const ValueKey('composer'),
-                          controller: widget.editor,
-                          focusNode: widget.focus,
-                          style: fieldStyle,
-                          minLines: 1,
-                          maxLines: 6,
-                          keyboardType: TextInputType.multiline,
-                          textInputAction: TextInputAction.newline,
-                          decoration: InputDecoration(
-                            hintText: 'Message your Bot',
-                            filled: false,
-                            border: InputBorder.none,
-                            enabledBorder: InputBorder.none,
-                            focusedBorder: InputBorder.none,
-                            contentPadding: composerFieldPadding,
-                            counterText: '',
-                          ),
-                          onChanged: (value) {
-                            AcceptanceMetrics.instance.inputChanged();
-                            widget.onChanged(value);
-                            _refreshPopover();
-                            setState(() {});
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Expanded(
+                      child: CallbackShortcuts(
+                        bindings: {
+                          const SingleActivator(
+                            LogicalKeyboardKey.enter,
+                            meta: true,
+                          ): () {
+                            if (canSend) widget.onSend();
                           },
+                          const SingleActivator(
+                            LogicalKeyboardKey.enter,
+                            control: true,
+                          ): () {
+                            if (canSend) widget.onSend();
+                          },
+                          // A bare Enter (Shift+Enter is left to the field, which
+                          // breaks the line) sends, or takes the highlighted Skill
+                          // while the popover is up. An empty or oversized draft
+                          // swallows it rather than growing by a blank line.
+                          if (enterSends) ...{
+                            const SingleActivator(LogicalKeyboardKey.enter):
+                                _enter,
+                            const SingleActivator(
+                              LogicalKeyboardKey.numpadEnter,
+                            ): _enter,
+                          },
+                          if (skills != null && skills.open) ...{
+                            const SingleActivator(
+                              LogicalKeyboardKey.arrowUp,
+                            ): () =>
+                                skills.move(-1),
+                            const SingleActivator(
+                              LogicalKeyboardKey.arrowDown,
+                            ): () =>
+                                skills.move(1),
+                            const SingleActivator(LogicalKeyboardKey.escape):
+                                skills.close,
+                          },
+                        },
+                        child: identified(
+                          ShellIds.composer,
+                          Semantics(
+                            label: 'Message your Bot',
+                            child: TextField(
+                              key: const ValueKey('composer'),
+                              controller: widget.editor,
+                              focusNode: widget.focus,
+                              style: fieldStyle,
+                              minLines: 1,
+                              maxLines: 6,
+                              keyboardType: TextInputType.multiline,
+                              textInputAction: TextInputAction.newline,
+                              decoration: InputDecoration(
+                                hintText: 'Message your Bot',
+                                filled: false,
+                                border: InputBorder.none,
+                                enabledBorder: InputBorder.none,
+                                focusedBorder: InputBorder.none,
+                                contentPadding: composerFieldPadding,
+                                counterText: '',
+                              ),
+                              onChanged: (value) {
+                                AcceptanceMetrics.instance.inputChanged();
+                                widget.onChanged(value);
+                                _refreshPopover();
+                                setState(() {});
+                              },
+                            ),
+                          ),
                         ),
                       ),
+                    ),
+                    corner(
+                      AnimatedSwitcher(
+                        duration: FrockTheme.motion(context, FrockTheme.enter),
+                        switchInCurve: Curves.easeOutCubic,
+                        switchOutCurve: Curves.easeInCubic,
+                        // Outgoing controls remain visible, but cannot be pressed
+                        // or announced after the current action has changed.
+                        layoutBuilder: (currentChild, previousChildren) =>
+                            Stack(
+                              alignment: Alignment.center,
+                              children: [
+                                for (final child in previousChildren)
+                                  ExcludeSemantics(
+                                    child: IgnorePointer(child: child),
+                                  ),
+                                ?currentChild,
+                              ],
+                            ),
+                        transitionBuilder: (child, animation) => FadeTransition(
+                          opacity: animation,
+                          child: ScaleTransition(
+                            scale: Tween<double>(
+                              begin: 0.8,
+                              end: 1,
+                            ).animate(animation),
+                            child: child,
+                          ),
+                        ),
+                        child: _actionButton(
+                          context,
+                          dictatable: dictatable,
+                          canSend: canSend,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                VoiceReveal(
+                  visible: widget.dictating,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(18, 0, 18, 10),
+                    child: Row(
+                      children: [
+                        Flexible(
+                          child: Semantics(
+                            liveRegion: true,
+                            child: AnimatedSwitcher(
+                              duration: FrockTheme.motion(
+                                context,
+                                FrockTheme.fast,
+                              ),
+                              child: Text(
+                                switch (widget.dictationState) {
+                                  DictationState.starting => 'Starting…',
+                                  DictationState.stopping => 'Finishing…',
+                                  _ => 'Listening',
+                                },
+                                key: ValueKey(widget.dictationState),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.labelMedium?.copyWith(
+                                  color: theme.colorScheme.primary,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 20),
+                        Expanded(
+                          flex: 2,
+                          child: SizedBox(
+                            height: 44,
+                            child: widget.dictationLevel != null
+                                ? identified(
+                                    VoiceIds.composerDictationLevel,
+                                    VoiceWaveform(
+                                      source: widget.dictationLevel!,
+                                      microphone: () =>
+                                          widget.dictationLevel!.value,
+                                      enabled:
+                                          widget.dictationState ==
+                                          DictationState.capturing,
+                                    ),
+                                  )
+                                : const SizedBox.shrink(),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ),
-                // Dictating: what the person needs is the level and a way to
-                // stop, so the bars and Stop take the corner. Nothing here
-                // sends — Stop flushes into the draft and Send stays theirs.
-                if (widget.dictating) ...[
-                  if (widget.dictationLevel case final level?)
-                    VoiceDictationBars(level: level),
-                  identified(
-                    VoiceIds.composerDictationStop,
-                    corner(
-                      IconButton.filledTonal(
-                        key: const ValueKey('dictation-stop'),
-                        tooltip: 'Stop dictation',
-                        onPressed: widget.onStopDictation,
-                        style: IconButton.styleFrom(
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(11),
-                          ),
-                        ),
-                        icon: const Icon(Icons.stop_rounded, size: 20),
-                      ),
-                    ),
-                  ),
-                ]
-                // An empty draft has nothing to send, so the corner offers
-                // the other way to fill it.
-                else if (dictatable)
-                  identified(
-                    VoiceIds.composerDictate,
-                    corner(
-                      IconButton.filled(
-                        key: const ValueKey('dictate'),
-                        tooltip: 'Dictate message',
-                        onPressed: widget.onDictate,
-                        style: IconButton.styleFrom(
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(11),
-                          ),
-                        ),
-                        icon: const ChatIcon(ChatIconKind.mic),
-                      ),
-                    ),
-                  )
-                else
-                  identified(
-                    ShellIds.sendButton,
-                    corner(
-                      IconButton.filled(
-                        key: const ValueKey('send'),
-                        tooltip: 'Send',
-                        onPressed: canSend ? widget.onSend : null,
-                        style: IconButton.styleFrom(
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(11),
-                          ),
-                        ),
-                        icon: const ChatIcon(ChatIconKind.send),
-                      ),
-                    ),
-                  ),
               ],
             ),
           ),

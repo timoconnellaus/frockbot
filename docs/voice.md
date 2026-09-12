@@ -410,6 +410,24 @@ entitlement. `AppShell`'s lifecycle observer ends capture and playback when
 the app leaves the foreground; navigation inside the app leaves the footer
 alone.
 
+### Voice controls and motion
+
+Dictation expands a recording lane inside the composer, with a larger waveform
+and explicit starting, listening and finishing states. Stop commits to the
+editable draft; the finishing control is disabled until transcription ends.
+The realtime footer opens and closes with coordinated size, slide and fade
+transitions. Closing begins microphone and playback teardown immediately and
+keeps the outgoing visual mounted only through its exit. Bottom system insets
+transfer back to the conversation without a final layout jump.
+
+Both meters use the same continuous ribbons, driven only by audio levels.
+A time-based envelope uses a 65 ms attack and 220 ms release; microphone and
+playback levels ease separately so the speaker tint does not flicker.
+The painter repaints on display frames without rebuilding controls, stops its
+ticker in silence, and follows Flutter's ticker lifecycle. Reduced motion
+shows a static level shape and makes transitions immediate. Controls keep
+48-point touch targets in both themes.
+
 ### SDK frames a client must ignore
 
 Beside the messages above, the Agents SDK sends `cf_agent_identity`,

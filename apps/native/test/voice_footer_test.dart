@@ -7,12 +7,12 @@
 library;
 
 import 'dart:async';
-import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/voice/assistant.dart';
 import 'package:frockbot_native/voice/footer.dart';
+import 'package:frockbot_native/voice/waveform.dart';
 import 'package:frockbot_native/voice/socket.dart';
 import 'package:frockbot_native/theme/frock_theme.dart';
 
@@ -107,7 +107,9 @@ void main() {
     expect(tester.getSize(find.byType(VoiceFooter)).height, voiceFooterHeight);
   });
 
-  testWidgets('the failure text is centred on the slab', (tester) async {
+  testWidgets('the failure stays readable beside its exit control', (
+    tester,
+  ) async {
     final controller = AssistantSessionController(
       openSocket: () => Future<VoiceSocket>.error(StateError('refused')),
       capture: FakeVoiceCapture(),
@@ -122,7 +124,11 @@ void main() {
     expect(controller.error, isNotNull);
     final text = tester.getRect(find.text(controller.error!));
     final footer = tester.getRect(find.byType(VoiceFooter));
-    expect(text.center.dx, closeTo(footer.center.dx, 0.5));
+    expect(text.left, greaterThanOrEqualTo(footer.left + 24));
+    expect(
+      text.right,
+      lessThan(tester.getRect(find.byTooltip('End voice session')).left),
+    );
     // Mute is gone in the error state; the way out is not.
     expect(find.bySemanticsLabel('Mute microphone'), findsNothing);
   });
@@ -143,11 +149,8 @@ void main() {
     );
     expect(material.color, FrockTheme.accent);
     expect(
-      find.descendant(
-        of: find.byType(VoiceFooter),
-        matching: find.byType(DecoratedBox),
-      ),
-      findsNothing,
+      material.borderRadius,
+      const BorderRadius.vertical(top: Radius.circular(24)),
     );
   });
 
@@ -159,78 +162,6 @@ void main() {
       // saturation sits on the accent's hue.
       if (hsl.saturation > 0.2) expect(hsl.hue, closeTo(hue, 12));
     }
-  });
-
-  group('the level follower', () {
-    /// Runs [seconds] of frames at 60 Hz with the same raw levels.
-    void run(
-      VoiceLevelFollower follower, {
-      required double from,
-      required double seconds,
-      double mic = 0,
-      double playback = 0,
-    }) {
-      const dt = 1 / 60;
-      for (var t = from; t < from + seconds; t += dt) {
-        follower.step(now: t + dt, dt: dt, mic: mic, playback: playback);
-      }
-    }
-
-    test('chases a word up quickly and lets it go slowly', () {
-      final f = VoiceLevelFollower();
-      run(f, from: 0, seconds: 0.1, mic: 0.5);
-      expect(f.speaker, VoiceSpeaker.person);
-      final peak = f.level;
-      expect(peak, greaterThan(VoiceLevelFollower.shape(0.5) * 0.85));
-      // Two frames of silence: still most of the way up, not gone.
-      run(f, from: 0.1, seconds: 2 / 60);
-      expect(f.level, greaterThan(peak * 0.7));
-      expect(f.speaker, VoiceSpeaker.person);
-      // A second and a half of silence: gone, and nobody's.
-      run(f, from: 0.14, seconds: 1.5);
-      expect(f.level, 0);
-      expect(f.speaker, VoiceSpeaker.nobody);
-    });
-
-    test('never steps: each frame moves a bounded part of the way', () {
-      final f = VoiceLevelFollower();
-      var last = 0.0;
-      const dt = 1 / 60;
-      for (var i = 1; i <= 30; i++) {
-        f.step(now: i * dt, dt: dt, mic: i.isEven ? 0.9 : 0.0, playback: 0);
-        expect((f.level - last).abs(), lessThan(0.4));
-        last = f.level;
-      }
-    });
-
-    test('the person wins over the Bot, and the Bot holds through a gap', () {
-      final f = VoiceLevelFollower();
-      run(f, from: 0, seconds: 0.3, playback: 0.4);
-      expect(f.speaker, VoiceSpeaker.bot);
-      run(f, from: 0.3, seconds: 0.1, playback: 0.4, mic: 0.3);
-      expect(f.speaker, VoiceSpeaker.person);
-      run(f, from: 0.4, seconds: 0.3, playback: 0.4);
-      expect(f.speaker, VoiceSpeaker.bot);
-      // A short gap in the reply keeps the Bot's colour.
-      run(f, from: 0.7, seconds: 0.1);
-      expect(f.speaker, VoiceSpeaker.bot);
-    });
-
-    test('a bad level is silence, not a crash', () {
-      final f = VoiceLevelFollower();
-      f.step(now: 1, dt: 1 / 60, mic: double.nan, playback: double.infinity);
-      expect(f.level.isFinite, isTrue);
-    });
-  });
-
-  test('a spent lobe is over; a spawned one lives out its life', () {
-    final lobes = List.generate(voiceLobeCount, VoiceLobe.spent);
-    expect(lobes.every((l) => l.isOver(0)), isTrue);
-    final fresh = VoiceLobe.spawn(math.Random(1), 10, 0);
-    expect(fresh.isOver(10), isFalse);
-    expect(fresh.progress(10), 0);
-    expect(fresh.progress(10 + fresh.life), 1);
-    expect(fresh.isOver(10 + fresh.life), isTrue);
   });
 
   testWidgets('covers the bottom system inset in its own colour', (
