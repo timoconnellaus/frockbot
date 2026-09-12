@@ -251,7 +251,15 @@ export class BotDurableAuthority<Snapshot> {
    * one (ADR 0026).
    */
   readonly composition: DurableCompositionStore;
-  /** Why a generation failed to activate, and whether it is quarantined. */
+  /**
+   * Why a generation failed to activate, and whether it is quarantined —
+   * against this object's own storage. Since the Composition moved to the
+   * User (ADR 0026) no production path on a Bot reads this one: activation,
+   * the settings views and `debugSnapshot` all go through
+   * `compositionFailureLogV1` (`app/composition/bot.ts`) against the User's
+   * log, which is the authority. This field survives for the test harnesses
+   * that drive the authority directly.
+   */
   readonly compositionFailures: DurableCompositionFailureLog;
   private executingRunId: string | undefined;
   /**
