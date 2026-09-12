@@ -13,6 +13,7 @@
     "./composition/bot": "./composition/bot.ts",
     "./composition/user": "./composition/user.ts",
     "./composition/user.fixture": "./composition/user.fixture.ts",
+    "./plugins/catalog": "./plugins/catalog.ts",
     "./plugins/enablement": "./plugins/enablement.ts",
     "./applets-host/records": "./applets-host/records.ts",
     "./approvals/bot": "./approvals/bot.ts",

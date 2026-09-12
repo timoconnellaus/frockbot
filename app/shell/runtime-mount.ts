@@ -23,6 +23,8 @@ import {
   type PackageSettingValueV1,
   type ResolvedModelBindingV1,
 } from "@frockbot/core/configuration";
+import { maskPlanForBotV1 } from "@frockbot/app/plugins/catalog";
+import { readPluginEnablementV1 } from "@frockbot/app/plugins/enablement";
 import type {
   FoundationAgentPackage,
   RuntimeModelSelection,
@@ -123,11 +125,17 @@ export async function agentRuntime(
     user.revision,
   );
   const packageDefinitions = executionPackagesV1(state.application);
-  const plan = resolveBotExecutionPlanV1({
-    bot: settings,
-    user,
-    packages: packageDefinitions,
-  });
+  // The account installed the set; which first-party features this Bot runs
+  // is its own map, read here so a feature switched off for one Bot
+  // contributes nothing to its Turn (ADR 0026).
+  const plan = maskPlanForBotV1(
+    resolveBotExecutionPlanV1({
+      bot: settings,
+      user,
+      packages: packageDefinitions,
+    }),
+    await readPluginEnablementV1(state.ctx.storage),
+  );
   // The durable roots this User's enabled Packages declare, read from the
   // same installations the Composition is resolved from. Handed to the
   // Computer sync below; nothing else reads it.

@@ -75,6 +75,8 @@ describe("account feature codecs", () => {
   const features = {
     schemaVersion: 1,
     applets: true,
+    pluginAuthoring: false,
+    plugins: [] as string[],
     updatedAt: "2026-09-11T00:00:00.000Z",
     updatedBy: "owner-id",
   } as const;

@@ -30,11 +30,12 @@ function exactKeys(
   value: Record<string, unknown>,
   expected: readonly string[],
   label: string,
+  optional: readonly string[] = [],
 ): void {
   const keys = Object.keys(value);
   if (
-    keys.length !== expected.length ||
-    !keys.every((key) => expected.includes(key))
+    !expected.every((key) => keys.includes(key)) ||
+    !keys.every((key) => expected.includes(key) || optional.includes(key))
   ) {
     throw new Error(`${label} has unknown fields`);
   }
@@ -172,6 +173,10 @@ export class DeploymentPolicyConflictError extends Error {
 export interface UserFeaturesV1 {
   schemaVersion: 1;
   applets: boolean;
+  /** Whether this account's Bots may author Plugins (ADR 0026's master toggle). */
+  pluginAuthoring: boolean;
+  /** The admin-gated seeded Plugins an admin has opened for this account. */
+  plugins: string[];
   updatedAt: string;
   updatedBy: string;
 }
@@ -180,6 +185,8 @@ export interface SetUserFeaturesCommandV1 {
   schemaVersion: 1;
   type: "user/set-features";
   applets: boolean;
+  pluginAuthoring?: boolean;
+  plugins?: string[];
 }
 
 export interface SetUserFeaturesRequestV1 {
@@ -264,17 +271,40 @@ export function defaultUserFeaturesV1(): UserFeaturesV1 {
   return {
     schemaVersion: 1,
     applets: false,
+    pluginAuthoring: false,
+    plugins: [],
     updatedAt: new Date(0).toISOString(),
     updatedBy: USER_FEATURES_DEFAULT_UPDATED_BY,
   };
 }
 
+const PLUGIN_ID = /^[a-z][a-z0-9-]{0,63}$/;
+
+function pluginIds(value: unknown, label: string): string[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > 64) {
+    throw new Error(`${label} must be a bounded array`);
+  }
+  const ids = value.map((entry, index) => {
+    const id = boundedString(entry, `${label}[${index}]`, 64);
+    if (!PLUGIN_ID.test(id)) throw new Error(`${label}[${index}] is invalid`);
+    return id;
+  });
+  if (new Set(ids).size !== ids.length) {
+    throw new Error(`${label} contains duplicates`);
+  }
+  return ids.toSorted();
+}
+
 export function decodeUserFeaturesV1(input: unknown): UserFeaturesV1 {
   const features = record(input, "user features");
+  // The two Plugin fields arrived after the record did (ADR 0026); a record
+  // written without them reads as closed and none opened.
   exactKeys(
     features,
     ["schemaVersion", "applets", "updatedAt", "updatedBy"],
     "user features",
+    ["pluginAuthoring", "plugins"],
   );
   if (features.schemaVersion !== 1) {
     throw new Error("user features.schemaVersion is invalid");
@@ -282,9 +312,17 @@ export function decodeUserFeaturesV1(input: unknown): UserFeaturesV1 {
   if (typeof features.applets !== "boolean") {
     throw new Error("user features.applets is invalid");
   }
+  if (
+    features.pluginAuthoring !== undefined &&
+    typeof features.pluginAuthoring !== "boolean"
+  ) {
+    throw new Error("user features.pluginAuthoring is invalid");
+  }
   return {
     schemaVersion: 1,
     applets: features.applets,
+    pluginAuthoring: features.pluginAuthoring === true,
+    plugins: pluginIds(features.plugins, "user features.plugins"),
     updatedAt: isoTimestamp(features.updatedAt, "user features.updatedAt"),
     updatedBy: boundedString(
       features.updatedBy,
@@ -321,11 +359,14 @@ export function decodeSetUserFeaturesCommandV1(
     command,
     ["schemaVersion", "type", "applets"],
     "user features command",
+    ["pluginAuthoring", "plugins"],
   );
   if (
     command.schemaVersion !== 1 ||
     command.type !== "user/set-features" ||
-    typeof command.applets !== "boolean"
+    typeof command.applets !== "boolean" ||
+    (command.pluginAuthoring !== undefined &&
+      typeof command.pluginAuthoring !== "boolean")
   ) {
     throw new Error("user features command is invalid");
   }
@@ -333,6 +374,14 @@ export function decodeSetUserFeaturesCommandV1(
     schemaVersion: 1,
     type: "user/set-features",
     applets: command.applets,
+    ...(command.pluginAuthoring === undefined
+      ? {}
+      : { pluginAuthoring: command.pluginAuthoring }),
+    ...(command.plugins === undefined
+      ? {}
+      : {
+          plugins: pluginIds(command.plugins, "user features command.plugins"),
+        }),
   };
 }
 
