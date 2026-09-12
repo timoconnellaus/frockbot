@@ -296,8 +296,6 @@ describe("one worker per User", () => {
     expect(load.code.globalOutbound).toBeNull();
     expect(load.code.env.IDENTITY).toEqual({
       userId: "user-1",
-      botId: "bot-1",
-      generationId: "gen-1",
       plugins: [
         { pluginId: "weather", grants: [], consumes: [] },
         { pluginId: "greeter", grants: [], consumes: [] },
@@ -889,12 +887,12 @@ describe("what a descriptor may declare", () => {
   test("a grant this deployment has not opened is refused at resolve", async () => {
     const subject = harness();
     const prepared = await subject.host.mount([
-      member("weather", { grants: ["storage", "ai"] }),
+      member("weather", { grants: ["files", "ai"] }),
     ]);
     expect(prepared.failures[0]).toMatchObject({
       pluginId: "weather",
       phase: "resolve",
-      message: expect.stringMatching(/has not opened: storage/),
+      message: expect.stringMatching(/has not opened: files/),
     });
     expect(subject.loads).toHaveLength(0);
   });

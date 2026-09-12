@@ -240,19 +240,16 @@ describe("a Bot Package in a loaded Dynamic Worker", () => {
     });
 
     expect(loaded).toHaveLength(1);
-    // Network access exists only through the per-Bot authority bindings.
-    expect(loaded[0]?.globalOutbound).toBeNull();
+    // Network access exists only through the egress loopback the declared
+    // hosts minted, and the loopback capabilities; the identity carries
+    // nothing per Turn or per Bot.
+    expect(loaded[0]?.egress).toBe(true);
     expect(loaded[0]?.envKeys).toEqual(["CAPABILITIES", "IDENTITY"]);
-    expect(loaded[0]?.identityKeys).toEqual([
-      "botId",
-      "generationId",
-      "plugins",
-      "userId",
-    ]);
+    expect(loaded[0]?.identityKeys).toEqual(["plugins", "userId"]);
     expect(loaded[0]?.limits.subRequests).toBeGreaterThan(0);
   });
 
-  test("fetch() inside Bot code is rejected", async () => {
+  test("fetch() to a host no enabled plugin declared is refused by the egress loopback", async () => {
     const stub = probe(`egress-${crypto.randomUUID()}`);
     const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);
 
@@ -265,7 +262,9 @@ describe("a Bot Package in a loaded Dynamic Worker", () => {
 
     expect(result.isError).toBe(true);
     expect(result.content).not.toContain("egress-allowed");
-    expect(result.content).toMatch(/not permitted to access the internet/i);
+    expect(result.content).toMatch(
+      /not declared by any enabled plugin|not permitted to access the internet/i,
+    );
   });
 
   test("the isolate sees exactly CAPABILITIES and IDENTITY", async () => {
@@ -324,7 +323,7 @@ describe("a Bot Package in a loaded Dynamic Worker", () => {
     expect(await stub.readStorage()).toBe("host-only");
   });
 
-  test("two Bots with the same artifact get different loader ids", async () => {
+  test("two Bots of one User with the same artifact share a loader id", async () => {
     const stub = probe(`loader-ids-${crypto.randomUUID()}`);
     const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);
 
@@ -342,8 +341,7 @@ describe("a Bot Package in a loaded Dynamic Worker", () => {
     expect(first).toHaveLength(1);
     expect(second).toHaveLength(1);
     expect(first[0]).toMatch(/^plugin-worker:user-1:[0-9a-f]{64}$/);
-    expect(second[0]).toMatch(/^plugin-worker:user-1:[0-9a-f]{64}$/);
-    expect(first[0]).not.toBe(second[0]);
+    expect(second[0]).toBe(first[0]);
   });
 
   test("two plugins share one worker: provider first, its service handed on, hooks chained", async () => {
@@ -559,46 +557,6 @@ describe("a Bot Package in a loaded Dynamic Worker", () => {
 });
 
 describe("the isolate capability binding", () => {
-  test("list reports exactly the Bot's authority", async () => {
-    const stub = probe(`list-${crypto.randomUUID()}`);
-    const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);
-    const connection = {
-      connectionId: "connection-1",
-      packageId: "provider-ollama-cloud",
-      connectionTypeId: "ollama-cloud-account",
-      displayName: "Work",
-      generation: "connection-generation-1",
-      safeMetadata: { region: "au" },
-    };
-    const model = {
-      connectionId: connection.connectionId,
-      packageId: connection.packageId,
-      provider: "ollama-cloud",
-      providerModelId: "glm-5.3-flash:cloud",
-      connectionGeneration: connection.generation,
-    };
-
-    const result = await stub.callTool({
-      userId: "user-1",
-      botId: "bot-1",
-      artifact,
-      tool: "list_capabilities",
-      connections: [connection],
-      model,
-      memory: true,
-      workspace: true,
-    });
-
-    expect(JSON.parse(result.content)).toEqual({
-      status: "available",
-      connections: [connection],
-      model,
-      memory: true,
-      workspace: true,
-      schedule: true,
-    });
-  });
-
   test("a capability the Bot does not hold is unavailable", async () => {
     const stub = probe(`unavailable-${crypto.randomUUID()}`);
     const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);
@@ -624,11 +582,23 @@ describe("the isolate capability binding", () => {
         tools: [],
       },
     });
+    // The probe is not a Bot Turn the Bot object is running, so every call
+    // that resolves authority there is refused: the loopback stub carries no
+    // snapshot to answer from.
+    const listed = await stub.callTool({
+      userId: "user-1",
+      botId: "bot-1",
+      artifact,
+      tool: "list_capabilities",
+    });
 
     expect(JSON.parse(connection.content)).toMatchObject({
       status: "unavailable",
     });
     expect(JSON.parse(model.content)).toMatchObject({
+      status: "unavailable",
+    });
+    expect(JSON.parse(listed.content)).toMatchObject({
       status: "unavailable",
     });
   });
@@ -645,35 +615,5 @@ describe("the isolate capability binding", () => {
     });
 
     expect(result).toEqual({ content: "function", isError: false });
-  });
-
-  test("adding or removing a Connection yields a new isolate", async () => {
-    const stub = probe(`connection-identity-${crypto.randomUUID()}`);
-    const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);
-    const identity = {
-      userId: `user-${crypto.randomUUID()}`,
-      botId: `bot-${crypto.randomUUID()}`,
-      artifact,
-    };
-    const connection = {
-      connectionId: "connection-1",
-      packageId: "provider-ollama-cloud",
-      connectionTypeId: "ollama-cloud-account",
-      displayName: "Work",
-      generation: "connection-generation-1",
-      safeMetadata: {},
-    };
-
-    const without = await stub.observedLoaderIds(identity);
-    const withConnection = await stub.observedLoaderIds({
-      ...identity,
-      connections: [connection],
-    });
-    const removedAgain = await stub.observedLoaderIds(identity);
-
-    expect(without).toHaveLength(1);
-    expect(withConnection).toHaveLength(1);
-    expect(removedAgain).toEqual(without);
-    expect(withConnection[0]).not.toBe(without[0]);
   });
 });

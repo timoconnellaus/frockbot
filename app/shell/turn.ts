@@ -265,15 +265,18 @@ export async function executeTurn(
     : undefined;
   const host: CompositionMountHost<ShellMountedComposition> = {
     mount: async (mounting, signal) => {
+      // The User installed the set; which of it this Bot runs is its own map,
+      // and that is also what decides the worker's egress policy.
+      const enablement = await readPluginEnablementV1(state.ctx.storage);
+      const enabled = enabledPluginIdsV1(mounting.members, enablement);
       const isolate = await isolateMountOptions(state, input.identity, {
         runId: input.command.runId,
         sessionId: input.command.sessionId,
         generationId: mounting.generationId,
         settings,
+        members: mounting.members,
+        enabled,
       });
-      // The User installed the set; which of it this Bot runs is its own map.
-      const enablement = await readPluginEnablementV1(state.ctx.storage);
-      const enabled = enabledPluginIdsV1(mounting.members, enablement);
       const mounted = await createShellCompositionHost({
         botId: input.identity.botId,
         sessionId: input.command.sessionId,
@@ -304,7 +307,7 @@ export async function executeTurn(
             input.command.sessionId,
             effect,
           ),
-        ...(isolate ? { isolate: { ...isolate, enabled } } : {}),
+        ...(isolate ? { isolate } : {}),
         ...(appletRouting ? { applets: appletRouting } : {}),
       }).mount(mounting, signal);
       return mounted;

@@ -10,10 +10,83 @@ import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { describe, expect, test } from "vitest";
 import { provisionBot, provisionSiblingBot } from "./provision-bot.ts";
 import { hydratedStoredRunsV1 } from "./session-log-probe.ts";
+import { toolCallTriggerPrompt } from "./harness/miniflare.ts";
+import { dynamicToolInputV1 } from "./dynamic-tools.ts";
+import { decodePluginDescriptorV1 } from "@frockbot/core/contracts";
+import {
+  compositionArtifactSetHashV1,
+  compositionGenerationIdV1,
+  type CompositionMemberV1,
+} from "@frockbot/core/durable";
+
+/**
+ * A Plugin that exercises the loopback capabilities from inside a real Turn:
+ * its storage round-trips a value, its settings read what the Bot holds, and
+ * `capabilities.list()` reports the Bot's authority — all through the Bot
+ * Durable Object, which is what the per-User stub routes to.
+ */
+const STORE_PLUGIN_ID = "probe-store";
+const STORE_PLUGIN_SOURCE = `
+export const tools = [
+  { name: "store_roundtrip", description: "Writes, lists and reads a value", inputSchema: { type: "object" }, idempotent: false },
+];
+export async function execute(tool, input, ctx) {
+  if (tool !== "store_roundtrip") return "unknown tool";
+  const put = await ctx.storage.put({ key: "greeting", value: { word: input.word } });
+  const got = await ctx.storage.get({ key: "greeting" });
+  const missing = await ctx.storage.get({ key: "absent" });
+  const listed = await ctx.storage.list({});
+  const settings = await ctx.settings.read();
+  const authority = await ctx.capabilities.list();
+  return JSON.stringify({
+    put: put.status,
+    got: got.value,
+    missing: missing.value,
+    keys: listed.status === "available" ? listed.entries.map((entry) => entry.key) : listed,
+    settings: settings.status === "available" ? settings.values : settings,
+    authority: authority.status,
+    connections: authority.status === "available" ? authority.connections.length : -1,
+    bot: ctx.bot.botId,
+    user: ctx.user.userId,
+  });
+}
+`;
+const STORE_PLUGIN_DESCRIPTOR = decodePluginDescriptorV1({
+  id: STORE_PLUGIN_ID,
+  displayName: "Probe store",
+  version: "0.0.1",
+  contractVersion: 4,
+  tools: [
+    {
+      name: "store_roundtrip",
+      description: "Writes, lists and reads a value",
+      inputSchema: { type: "object" },
+    },
+  ],
+  hooks: [],
+  grants: ["storage"],
+  contextKeys: ["user", "bot", "session"],
+});
+
+async function sha256Hex(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(value),
+  );
+  return [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
 
 interface CompositionRpc {
   readComposition(input: unknown): Promise<{
-    current: { generationId: string; status: string; createdAt: string };
+    current: {
+      generationId: string;
+      status: string;
+      createdAt: string;
+      artifactSetHash: string;
+      members: unknown[];
+    };
     lastKnownGood: { generationId: string };
   }>;
   readCompositionGeneration(
@@ -447,5 +520,123 @@ describe("the User-owned Composition", () => {
       generationId: pinned.generationId,
       status: "active",
     });
+  });
+
+  test("a plugin in a real Turn reaches storage, settings and the Bot's authority through the loopback", async () => {
+    const userId = `user-${crypto.randomUUID()}`;
+    const identity = { userId, botId: "bot-1" };
+    await provisionBot(identity);
+    await turn(identity, "run-0");
+    const bootstrap = (
+      await user(userId).readComposition({ schemaVersion: 1, userId })
+    ).current;
+
+    // The artifact is seeded the way a build would store it: content-addressed.
+    const contentHash = await sha256Hex(STORE_PLUGIN_SOURCE);
+    await env.APPLICATION_ARTIFACTS.put(
+      `packages/${contentHash}.mjs`,
+      STORE_PLUGIN_SOURCE,
+    );
+    const createdAt = "2026-09-12T01:00:00.000Z";
+    const members: CompositionMemberV1[] = [
+      {
+        packageId: STORE_PLUGIN_ID,
+        version: "0.0.1",
+        descriptor: STORE_PLUGIN_DESCRIPTOR,
+        provenance: {
+          kind: "bot",
+          packageId: STORE_PLUGIN_ID,
+          version: "0.0.1",
+          botId: "bot-1",
+          sessionId: `${userId}:bot-1`,
+          turnId: "run-0",
+          runId: "run-0",
+          authoredAt: createdAt,
+        },
+        artifact: {
+          contentHash,
+          size: STORE_PLUGIN_SOURCE.length,
+          mediaType: "application/javascript",
+          bundlerVersion: "probe-seed",
+        },
+      },
+    ];
+    const artifactSetHash = await compositionArtifactSetHashV1(members);
+    await user(userId).proposeComposition({
+      schemaVersion: 1,
+      userId,
+      generation: {
+        schemaVersion: 1,
+        generationId: compositionGenerationIdV1(createdAt, artifactSetHash),
+        artifactSetHash,
+        parentGenerationId: bootstrap.generationId,
+        createdAt,
+        origin: {
+          kind: "bot-authored",
+          runId: "run-0",
+          sessionId: `${userId}:bot-1`,
+          turnId: "run-0",
+        },
+        members,
+        status: "pending",
+      },
+      pin: true,
+      expectedCurrentGenerationId: bootstrap.generationId,
+    });
+
+    await bot(identity).run({
+      schemaVersion: 1,
+      ...identity,
+      command: {
+        runId: "run-1",
+        sessionId: `${userId}:bot-1`,
+        acceptedAt: new Date().toISOString(),
+        text: toolCallTriggerPrompt([
+          "call_dynamic_tool",
+          dynamicToolInputV1({
+            namespace: STORE_PLUGIN_ID,
+            toolName: "store_roundtrip",
+            input: { word: "hello" },
+          }),
+        ]),
+      },
+    });
+
+    const runs = await runInDurableObject(
+      env.BOT_STATES.getByName(`${userId}:bot-1`),
+      (_instance, state) =>
+        hydratedStoredRunsV1<{
+          runId: string;
+          sessionId: string;
+          events: Array<{ type: string; content?: string; name?: string }>;
+        }>(state.storage),
+    );
+    const run = runs.find((candidate) => candidate.runId === "run-1");
+    const result = run?.events.find(
+      (event) =>
+        event.type === "tool/result" &&
+        typeof event.content === "string" &&
+        event.content.includes('"put"'),
+    );
+    expect(
+      result,
+      JSON.stringify(run?.events.map((event) => event.type)),
+    ).toBeDefined();
+    const raw = (result as { content?: string }).content ?? "";
+    const outer = JSON.parse(raw) as { content?: string };
+    const inner = JSON.parse(
+      typeof outer.content === "string" ? outer.content : raw,
+    );
+    expect(inner).toMatchObject({
+      put: "available",
+      got: { word: "hello" },
+      missing: null,
+      keys: ["greeting"],
+      settings: {},
+      authority: "available",
+      bot: "bot-1",
+      user: userId,
+    });
+    expect(inner.connections).toBeGreaterThanOrEqual(1);
   });
 });

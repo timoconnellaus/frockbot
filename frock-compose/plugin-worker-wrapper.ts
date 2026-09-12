@@ -205,10 +205,15 @@ const BOT_ISOLATE_CONTEXT_PROPERTY_SOURCE_V1 = {
   bindings: "Object.keys(env).sort()",
   capabilities: `{
       list: function () {
-        return capabilities.list();
+        return capabilities.list(scope);
       },
     }`,
   services: "plugin.services",
+  settings: `{
+      read: function () {
+        return capabilities.settings(scope);
+      },
+    }`,
 } satisfies Partial<Record<keyof BotPackageContextV1, string>>;
 
 /**
@@ -221,7 +226,7 @@ const BOT_ISOLATE_GRANT_PROPERTY_SOURCE_V1 = {
     "model",
     `{
       invoke: async function (request) {
-        const outcome = await capabilities.invokeModel(request);
+        const outcome = await capabilities.invokeModel(scope, request);
         if (!outcome || outcome.status !== "streaming") return outcome;
         return {
           status: "streaming",
@@ -235,13 +240,13 @@ const BOT_ISOLATE_GRANT_PROPERTY_SOURCE_V1 = {
     "memory",
     `{
       read: function (request) {
-        return capabilities.memoryRead(request);
+        return capabilities.memoryRead(scope, request);
       },
       write: function (request) {
-        return capabilities.memoryWrite(request);
+        return capabilities.memoryWrite(scope, request);
       },
       forget: function (request) {
-        return capabilities.memoryForget(request);
+        return capabilities.memoryForget(scope, request);
       },
     }`,
   ],
@@ -249,29 +254,46 @@ const BOT_ISOLATE_GRANT_PROPERTY_SOURCE_V1 = {
     "workspace",
     `{
       read: function (path) {
-        return capabilities.workspaceRead(path);
+        return capabilities.workspaceRead(scope, path);
       },
       list: function (request) {
-        return capabilities.workspaceList(request);
+        return capabilities.workspaceList(scope, request);
       },
       stat: function (path) {
-        return capabilities.workspaceStat(path);
+        return capabilities.workspaceStat(scope, path);
       },
       write: function (request) {
-        return capabilities.workspaceWrite(request);
+        return capabilities.workspaceWrite(scope, request);
       },
       delete: function (request) {
-        return capabilities.workspaceDelete(request);
+        return capabilities.workspaceDelete(scope, request);
       },
     }`,
   ],
   http: [
     "connection",
-    "function (connectionId) { return capabilities.connection(connectionId); }",
+    "function (connectionId) { return capabilities.connection(scope, connectionId); }",
   ],
   schedule: [
     "schedule",
-    "function (request) { return capabilities.schedule(request); }",
+    "function (request) { return capabilities.schedule(scope, request); }",
+  ],
+  storage: [
+    "storage",
+    `{
+      get: function (request) {
+        return capabilities.storageGet(scope, request);
+      },
+      put: function (request) {
+        return capabilities.storagePut(scope, request);
+      },
+      delete: function (request) {
+        return capabilities.storageDelete(scope, request);
+      },
+      list: function (request) {
+        return capabilities.storageList(scope, request);
+      },
+    }`,
   ],
 } satisfies Record<string, [keyof BotPackageContextV1, string]>;
 
@@ -284,6 +306,16 @@ export const BOT_ISOLATE_NARROW_CONTEXT_KEYS_V1 = [
 export const BOT_ISOLATE_NARROW_CONTEXT_SOURCE_V1 = `function narrowContext(env, invocation, plugin, deadlineMs) {
   const capabilities = env.CAPABILITIES;
   const grants = plugin.grants || [];
+  // Every loopback call names the Turn, the Bot and the Plugin it is for: the
+  // stub itself is per User and carries none of that.
+  const scope = {
+    botId: invocation.botId,
+    sessionId: invocation.sessionId,
+    runId: invocation.runId,
+    turnId: invocation.turnId,
+    generationId: invocation.generationId,
+    pluginId: plugin.pluginId,
+  };
   const context = {
 ${Object.entries(BOT_ISOLATE_CONTEXT_PROPERTY_SOURCE_V1)
   .map(([key, source]) => `    ${JSON.stringify(key)}: ${source},`)
@@ -686,7 +718,7 @@ export default class extends WorkerEntrypoint {
  * Bumped with any change to the generated text; folded into the module-set
  * hash beside the contract version, so a wrapper change is a new worker.
  */
-export const PLUGIN_WORKER_INDEX_VERSION = "index-v1";
+export const PLUGIN_WORKER_INDEX_VERSION = "index-v2";
 
 /** The module map a Plugin worker mounts: the index and one module per Plugin. */
 export function pluginWorkerModuleMap(

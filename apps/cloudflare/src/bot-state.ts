@@ -76,7 +76,14 @@ import {
 } from "@frockbot/app/applets-host/bot";
 import {
   isolateConnection,
+  isolateAuthority,
   isolateInvokeModel,
+  isolateSettings,
+  isolateStorageDelete,
+  isolateStorageGet,
+  isolateStorageList,
+  isolateStoragePut,
+  type IsolateCallScopeV1,
   isolateMemoryForget,
   isolateMemoryRead,
   isolateMemoryWrite,
@@ -157,6 +164,10 @@ import {
 import {
   decodePackageIframeToolCommandV1,
   decodeIsolateMemoryReadRequestV1,
+  decodeIsolateStorageDeleteRequestV1,
+  decodeIsolateStorageGetRequestV1,
+  decodeIsolateStorageListRequestV1,
+  decodeIsolateStoragePutRequestV1,
   decodeIsolateMemoryWriteRequestV1,
   decodeIsolateScheduleRequestV1,
   decodeIsolateWorkspaceDeleteRequestV1,
@@ -1201,6 +1212,64 @@ export class BotState extends DurableObject<BotStateEnv> {
       generationId: request.generationId as string,
       request: request.request as NormalizedModelRequest,
     });
+  }
+
+  async isolateAuthority(input: unknown) {
+    const request = decodeIsolateCallRpcV1(input, (value) => value ?? null);
+    return isolateAuthority(
+      (await this.contribution()).state,
+      { userId: request.userId as string, botId: request.botId as string },
+      request as unknown as IsolateCallScopeV1,
+    );
+  }
+
+  async isolateStorageGet(input: unknown) {
+    return isolateStorageGet(
+      (await this.contribution()).state,
+      decodeIsolateCallRpcV1(
+        input,
+        decodeIsolateStorageGetRequestV1,
+      ) as unknown as IsolateCallScopeV1,
+    );
+  }
+
+  async isolateStoragePut(input: unknown) {
+    return isolateStoragePut(
+      (await this.contribution()).state,
+      decodeIsolateCallRpcV1(
+        input,
+        decodeIsolateStoragePutRequestV1,
+      ) as unknown as IsolateCallScopeV1,
+    );
+  }
+
+  async isolateStorageDelete(input: unknown) {
+    return isolateStorageDelete(
+      (await this.contribution()).state,
+      decodeIsolateCallRpcV1(
+        input,
+        decodeIsolateStorageDeleteRequestV1,
+      ) as unknown as IsolateCallScopeV1,
+    );
+  }
+
+  async isolateStorageList(input: unknown) {
+    return isolateStorageList(
+      (await this.contribution()).state,
+      decodeIsolateCallRpcV1(input, (value) =>
+        decodeIsolateStorageListRequestV1(value ?? {}),
+      ) as unknown as IsolateCallScopeV1,
+    );
+  }
+
+  async isolateSettings(input: unknown) {
+    return isolateSettings(
+      (await this.contribution()).state,
+      decodeIsolateCallRpcV1(
+        input,
+        (value) => value ?? null,
+      ) as unknown as IsolateCallScopeV1,
+    );
   }
 
   async isolateMemoryRead(input: unknown) {

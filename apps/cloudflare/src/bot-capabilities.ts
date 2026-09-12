@@ -1,7 +1,11 @@
-// The loopback CAPABILITIES service binding a Bot isolate sees.
+// The loopback CAPABILITIES service binding a Plugin worker sees.
 //
-// Props carry one per-Bot authority snapshot. Package id is attribution only:
-// every Package mounted for this Bot lists the same Connections and model.
+// Minted once per User with the User as its only prop. Which Turn, Bot and
+// Plugin a call is for arrives on the call as its scope; the Bot Durable Object
+// it is routed to resolves that Turn's authority when it is called and refuses
+// a scope that is not the Turn it is running. So nothing here can go stale in
+// a cached worker, and nothing here can hand out authority the Bot does not
+// hold: the stub is an address, not a snapshot.
 import { WorkerEntrypoint } from "cloudflare:workers";
 import type {
   IsolateCapabilityListOutcomeV1,
@@ -9,6 +13,10 @@ import type {
   IsolateMemoryOutcomeV1,
   IsolateModelOutcomeV1,
   IsolateScheduleOutcomeV1,
+  IsolateScopeV1,
+  IsolateSettingsOutcomeV1,
+  IsolateStorageListOutcomeV1,
+  IsolateStorageOutcomeV1,
   IsolateWorkspaceOutcomeV1,
 } from "@frockbot/core/contracts";
 import {
@@ -17,16 +25,18 @@ import {
   decodeIsolateMemoryWriteRequestV1,
   decodeIsolateModelInvocationV1,
   decodeIsolateScheduleRequestV1,
+  decodeIsolateScopeV1,
+  decodeIsolateStorageDeleteRequestV1,
+  decodeIsolateStorageGetRequestV1,
+  decodeIsolateStorageListRequestV1,
+  decodeIsolateStoragePutRequestV1,
   decodeIsolateWorkspaceDeleteRequestV1,
   decodeIsolateWorkspaceListRequestV1,
   decodeIsolateWorkspacePathV1,
   decodeIsolateWorkspaceWriteRequestV1,
   decodeNormalizedModelRequestV1,
 } from "@frockbot/core/contracts";
-import {
-  matchesAdmittedConnectionV1,
-  type BotCapabilitiesPropsV1,
-} from "@frockbot/app/isolates/capabilities";
+import type { BotCapabilitiesPropsV1 } from "@frockbot/app/isolates/capabilities";
 import type { BotState } from "./bot-state.js";
 
 function unavailable(reason: string): {
@@ -43,6 +53,7 @@ export interface BotCapabilitiesEnv {
 }
 
 interface BotIsolateRpc {
+  isolateAuthority(input: unknown): Promise<unknown>;
   isolateInvokeModel(input: unknown): Promise<unknown>;
   isolateMemoryRead(input: unknown): Promise<IsolateMemoryOutcomeV1>;
   isolateMemoryWrite(input: unknown): Promise<IsolateMemoryOutcomeV1>;
@@ -54,161 +65,203 @@ interface BotIsolateRpc {
   isolateWorkspaceDelete(input: unknown): Promise<IsolateWorkspaceOutcomeV1>;
   isolateConnection(input: unknown): Promise<IsolateConnectionOutcomeV1>;
   isolateSchedule(input: unknown): Promise<IsolateScheduleOutcomeV1>;
+  isolateStorageGet(input: unknown): Promise<IsolateStorageOutcomeV1>;
+  isolateStoragePut(input: unknown): Promise<IsolateStorageOutcomeV1>;
+  isolateStorageDelete(input: unknown): Promise<IsolateStorageOutcomeV1>;
+  isolateStorageList(input: unknown): Promise<IsolateStorageListOutcomeV1>;
+  isolateSettings(input: unknown): Promise<IsolateSettingsOutcomeV1>;
 }
 
 export class BotCapabilities extends WorkerEntrypoint<
   BotCapabilitiesEnv,
   BotCapabilitiesPropsV1
 > {
-  private get rpc(): BotIsolateRpc {
-    const props = this.ctx.props;
-    const id = this.env.BOT_STATES.idFromName(`${props.userId}:${props.botId}`);
+  /** The Bot the scope names, which is always one of this User's. */
+  private rpc(scope: IsolateScopeV1): BotIsolateRpc {
+    const id = this.env.BOT_STATES.idFromName(
+      `${this.ctx.props.userId}:${scope.botId}`,
+    );
     return this.env.BOT_STATES.get(id) as unknown as BotIsolateRpc;
   }
 
-  private scope(request: unknown): Record<string, unknown> {
-    const props = this.ctx.props;
+  /**
+   * The envelope every Bot RPC takes. The scope is decoded here — Plugin code
+   * wrote it, through the wrapper — and the User comes from the props, which
+   * Plugin code cannot forge.
+   */
+  private scoped(
+    rawScope: unknown,
+    request: unknown,
+  ): { rpc: BotIsolateRpc; envelope: Record<string, unknown> } {
+    const scope = decodeIsolateScopeV1(rawScope);
     return {
-      schemaVersion: 1,
-      userId: props.userId,
-      botId: props.botId,
-      runId: props.runId,
-      sessionId: props.sessionId,
-      turnId: props.turnId,
-      packageId: props.packageId,
-      generationId: props.generationId,
-      request,
+      rpc: this.rpc(scope),
+      envelope: {
+        schemaVersion: 1,
+        userId: this.ctx.props.userId,
+        botId: scope.botId,
+        runId: scope.runId,
+        sessionId: scope.sessionId,
+        turnId: scope.turnId,
+        packageId: scope.pluginId,
+        generationId: scope.generationId,
+        request,
+      },
     };
   }
 
-  list(): Promise<IsolateCapabilityListOutcomeV1> {
+  async list(scope: unknown): Promise<IsolateCapabilityListOutcomeV1> {
     try {
-      return Promise.resolve(
-        decodeIsolateCapabilityListV1({
-          status: "available",
-          connections: this.ctx.props.connections,
-          ...(this.ctx.props.model ? { model: this.ctx.props.model } : {}),
-          memory: this.ctx.props.memory,
-          workspace: this.ctx.props.workspace,
-          schedule: true,
-        }),
+      const { rpc, envelope } = this.scoped(scope, null);
+      return decodeIsolateCapabilityListV1(
+        await rpc.isolateAuthority(envelope),
       );
     } catch {
-      return Promise.resolve(unavailable("capabilities are unavailable"));
+      return unavailable("capabilities are unavailable");
     }
   }
 
-  async invokeModel(request: unknown): Promise<IsolateModelOutcomeV1> {
+  async invokeModel(
+    scope: unknown,
+    request: unknown,
+  ): Promise<IsolateModelOutcomeV1> {
     try {
-      const decoded = decodeNormalizedModelRequestV1(request);
-      const admitted = this.ctx.props.model;
-      if (
-        !admitted ||
-        decoded.provider !== admitted.provider ||
-        decoded.model !== admitted.providerModelId
-      ) {
-        return unavailable("the model is unavailable");
-      }
+      const { rpc, envelope } = this.scoped(
+        scope,
+        decodeNormalizedModelRequestV1(request),
+      );
       return decodeIsolateModelInvocationV1(
-        await this.rpc.isolateInvokeModel(
-          this.scope({
-            ...decoded,
-            modelBinding: {
-              connectionId: admitted.connectionId,
-              connectionGeneration: admitted.connectionGeneration,
-              ...(admitted.catalogGeneration
-                ? { catalogGeneration: admitted.catalogGeneration }
-                : {}),
-            },
-          }),
-        ),
+        await rpc.isolateInvokeModel(envelope),
       );
     } catch {
       return unavailable("the model request could not be served");
     }
   }
 
-  async memoryRead(request: unknown): Promise<IsolateMemoryOutcomeV1> {
+  async memoryRead(
+    scope: unknown,
+    request: unknown,
+  ): Promise<IsolateMemoryOutcomeV1> {
     try {
-      return await this.rpc.isolateMemoryRead(
-        this.scope(decodeIsolateMemoryReadRequestV1(request)),
+      const { rpc, envelope } = this.scoped(
+        scope,
+        decodeIsolateMemoryReadRequestV1(request),
       );
+      return await rpc.isolateMemoryRead(envelope);
     } catch {
       return unavailable("Memory is unavailable");
     }
   }
 
-  async memoryWrite(request: unknown): Promise<IsolateMemoryOutcomeV1> {
+  async memoryWrite(
+    scope: unknown,
+    request: unknown,
+  ): Promise<IsolateMemoryOutcomeV1> {
     try {
-      return await this.rpc.isolateMemoryWrite(
-        this.scope(decodeIsolateMemoryWriteRequestV1(request)),
+      const { rpc, envelope } = this.scoped(
+        scope,
+        decodeIsolateMemoryWriteRequestV1(request),
       );
+      return await rpc.isolateMemoryWrite(envelope);
     } catch {
       return unavailable("Memory is unavailable");
     }
   }
 
-  async memoryForget(request: unknown): Promise<IsolateMemoryOutcomeV1> {
+  async memoryForget(
+    scope: unknown,
+    request: unknown,
+  ): Promise<IsolateMemoryOutcomeV1> {
     try {
-      return await this.rpc.isolateMemoryForget(
-        this.scope(decodeIsolateMemoryWriteRequestV1(request)),
+      const { rpc, envelope } = this.scoped(
+        scope,
+        decodeIsolateMemoryWriteRequestV1(request),
       );
+      return await rpc.isolateMemoryForget(envelope);
     } catch {
       return unavailable("Memory is unavailable");
     }
   }
 
-  async workspaceRead(request: unknown): Promise<IsolateWorkspaceOutcomeV1> {
+  async workspaceRead(
+    scope: unknown,
+    request: unknown,
+  ): Promise<IsolateWorkspaceOutcomeV1> {
     try {
-      return await this.rpc.isolateWorkspaceRead(
-        this.scope(decodeIsolateWorkspacePathV1(request)),
+      const { rpc, envelope } = this.scoped(
+        scope,
+        decodeIsolateWorkspacePathV1(request),
       );
+      return await rpc.isolateWorkspaceRead(envelope);
     } catch {
       return unavailable("Workspace is unavailable");
     }
   }
 
-  async workspaceList(request: unknown): Promise<IsolateWorkspaceOutcomeV1> {
+  async workspaceList(
+    scope: unknown,
+    request: unknown,
+  ): Promise<IsolateWorkspaceOutcomeV1> {
     try {
-      return await this.rpc.isolateWorkspaceList(
-        this.scope(decodeIsolateWorkspaceListRequestV1(request)),
+      const { rpc, envelope } = this.scoped(
+        scope,
+        decodeIsolateWorkspaceListRequestV1(request),
       );
+      return await rpc.isolateWorkspaceList(envelope);
     } catch {
       return unavailable("Workspace is unavailable");
     }
   }
 
-  async workspaceStat(request: unknown): Promise<IsolateWorkspaceOutcomeV1> {
+  async workspaceStat(
+    scope: unknown,
+    request: unknown,
+  ): Promise<IsolateWorkspaceOutcomeV1> {
     try {
-      return await this.rpc.isolateWorkspaceStat(
-        this.scope(decodeIsolateWorkspacePathV1(request)),
+      const { rpc, envelope } = this.scoped(
+        scope,
+        decodeIsolateWorkspacePathV1(request),
       );
+      return await rpc.isolateWorkspaceStat(envelope);
     } catch {
       return unavailable("Workspace is unavailable");
     }
   }
 
-  async workspaceWrite(request: unknown): Promise<IsolateWorkspaceOutcomeV1> {
+  async workspaceWrite(
+    scope: unknown,
+    request: unknown,
+  ): Promise<IsolateWorkspaceOutcomeV1> {
     try {
-      return await this.rpc.isolateWorkspaceWrite(
-        this.scope(decodeIsolateWorkspaceWriteRequestV1(request)),
+      const { rpc, envelope } = this.scoped(
+        scope,
+        decodeIsolateWorkspaceWriteRequestV1(request),
       );
+      return await rpc.isolateWorkspaceWrite(envelope);
     } catch {
       return unavailable("Workspace is unavailable");
     }
   }
 
-  async workspaceDelete(request: unknown): Promise<IsolateWorkspaceOutcomeV1> {
+  async workspaceDelete(
+    scope: unknown,
+    request: unknown,
+  ): Promise<IsolateWorkspaceOutcomeV1> {
     try {
-      return await this.rpc.isolateWorkspaceDelete(
-        this.scope(decodeIsolateWorkspaceDeleteRequestV1(request)),
+      const { rpc, envelope } = this.scoped(
+        scope,
+        decodeIsolateWorkspaceDeleteRequestV1(request),
       );
+      return await rpc.isolateWorkspaceDelete(envelope);
     } catch {
       return unavailable("Workspace is unavailable");
     }
   }
 
-  async connection(connectionId: unknown): Promise<IsolateConnectionOutcomeV1> {
+  async connection(
+    scope: unknown,
+    connectionId: unknown,
+  ): Promise<IsolateConnectionOutcomeV1> {
     if (
       typeof connectionId !== "string" ||
       connectionId.length === 0 ||
@@ -216,29 +269,95 @@ export class BotCapabilities extends WorkerEntrypoint<
     ) {
       return unavailable("the Connection is unavailable");
     }
-    const admitted = this.ctx.props.connections.find(
-      (connection) => connection.connectionId === connectionId,
-    );
     try {
-      const outcome = await this.rpc.isolateConnection(
-        this.scope(connectionId),
-      );
-      if (!matchesAdmittedConnectionV1(admitted, outcome)) {
-        return unavailable("the Connection is unavailable");
-      }
-      return outcome;
+      const { rpc, envelope } = this.scoped(scope, connectionId);
+      return await rpc.isolateConnection(envelope);
     } catch {
       return unavailable("the Connection is unavailable");
     }
   }
 
-  async schedule(request: unknown): Promise<IsolateScheduleOutcomeV1> {
+  async schedule(
+    scope: unknown,
+    request: unknown,
+  ): Promise<IsolateScheduleOutcomeV1> {
     try {
-      return await this.rpc.isolateSchedule(
-        this.scope(decodeIsolateScheduleRequestV1(request)),
+      const { rpc, envelope } = this.scoped(
+        scope,
+        decodeIsolateScheduleRequestV1(request),
       );
+      return await rpc.isolateSchedule(envelope);
     } catch {
       return unavailable("durable scheduling is unavailable");
+    }
+  }
+
+  async storageGet(
+    scope: unknown,
+    request: unknown,
+  ): Promise<IsolateStorageOutcomeV1> {
+    try {
+      const { rpc, envelope } = this.scoped(
+        scope,
+        decodeIsolateStorageGetRequestV1(request),
+      );
+      return await rpc.isolateStorageGet(envelope);
+    } catch {
+      return unavailable("storage is unavailable");
+    }
+  }
+
+  async storagePut(
+    scope: unknown,
+    request: unknown,
+  ): Promise<IsolateStorageOutcomeV1> {
+    try {
+      const { rpc, envelope } = this.scoped(
+        scope,
+        decodeIsolateStoragePutRequestV1(request),
+      );
+      return await rpc.isolateStoragePut(envelope);
+    } catch {
+      return unavailable("storage is unavailable");
+    }
+  }
+
+  async storageDelete(
+    scope: unknown,
+    request: unknown,
+  ): Promise<IsolateStorageOutcomeV1> {
+    try {
+      const { rpc, envelope } = this.scoped(
+        scope,
+        decodeIsolateStorageDeleteRequestV1(request),
+      );
+      return await rpc.isolateStorageDelete(envelope);
+    } catch {
+      return unavailable("storage is unavailable");
+    }
+  }
+
+  async storageList(
+    scope: unknown,
+    request: unknown,
+  ): Promise<IsolateStorageListOutcomeV1> {
+    try {
+      const { rpc, envelope } = this.scoped(
+        scope,
+        decodeIsolateStorageListRequestV1(request ?? {}),
+      );
+      return await rpc.isolateStorageList(envelope);
+    } catch {
+      return unavailable("storage is unavailable");
+    }
+  }
+
+  async settings(scope: unknown): Promise<IsolateSettingsOutcomeV1> {
+    try {
+      const { rpc, envelope } = this.scoped(scope, null);
+      return await rpc.isolateSettings(envelope);
+    } catch {
+      return unavailable("settings are unavailable");
     }
   }
 }
