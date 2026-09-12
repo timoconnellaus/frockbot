@@ -88,6 +88,45 @@ void main() {
     },
   );
 
+  testWidgets('an outgoing panel survives its owner clearing the child', (
+    tester,
+  ) async {
+    var visible = true;
+    late StateSetter update;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: StatefulBuilder(
+          builder: (context, setState) {
+            update = setState;
+            return Align(
+              alignment: Alignment.bottomCenter,
+              child: VoiceReveal(
+                visible: visible,
+                child: visible
+                    ? const SizedBox(height: 84, child: Text('Call'))
+                    : const SizedBox.shrink(),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    update(() => visible = false);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.text('Call'), findsOneWidget);
+    expect(
+      tester.getSize(find.byType(VoiceReveal)).height,
+      inExclusiveRange(0, 84),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Call'), findsNothing);
+    update(() => visible = true);
+    await tester.pumpAndSettle();
+    expect(find.text('Call'), findsOneWidget);
+  });
+
   testWidgets('closing transfers the system inset without a layout jump', (
     tester,
   ) async {

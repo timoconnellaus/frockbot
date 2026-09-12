@@ -29,6 +29,14 @@ class VoiceReveal extends StatefulWidget {
 
 class _VoiceRevealState extends State<VoiceReveal>
     with SingleTickerProviderStateMixin {
+  Widget? _shownChild;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.visible) _shownChild = widget.child;
+  }
+
   late final AnimationController _controller =
       AnimationController(
         vsync: this,
@@ -36,6 +44,7 @@ class _VoiceRevealState extends State<VoiceReveal>
         reverseDuration: voiceExitDuration,
       )..addStatusListener((status) {
         if (status != AnimationStatus.dismissed) return;
+        _shownChild = null;
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted && !widget.visible) widget.onHidden?.call();
         });
@@ -59,6 +68,7 @@ class _VoiceRevealState extends State<VoiceReveal>
   @override
   void didUpdateWidget(VoiceReveal oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (widget.visible) _shownChild = widget.child;
     if (widget.visible != oldWidget.visible) _animate();
   }
 
@@ -102,7 +112,7 @@ class _VoiceRevealState extends State<VoiceReveal>
         ),
       );
     },
-    child: widget.child,
+    child: _shownChild,
   );
 
   @override

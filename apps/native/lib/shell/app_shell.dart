@@ -311,8 +311,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     });
     await session.end(reason: reason);
     microphone.releaseAssistant();
-    // Retain the ended controller while the footer exits. It is disposed
-    // when the next session replaces it, or when the shell is disposed.
+    if (!mounted) return;
+    session.dispose();
+    if (identical(voiceSession, session)) {
+      setState(() => voiceSession = null);
+    }
   }
 
   Future<void> _dictate() async {
@@ -1293,7 +1296,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
             // would keep a gesture bar's worth of space above the footer.
             child: MediaQuery.removePadding(
               context: context,
-              removeBottom: (footerOpen || footerExiting) && session != null,
+              removeBottom: footerOpen || footerExiting,
               child: Stack(
                 fit: StackFit.expand,
                 children: [
