@@ -144,8 +144,8 @@ export const hooks: PluginHooks = {
 - `version` is a string you bump when you publish a change. A publish with
   the version already live is still a new generation — the User approves the
   code, not the number — but bumping it is how you both tell versions apart.
-- `tools` and `hooks` must match the module's exports, name for name. A
-  mismatch is refused at publish with both lists.
+- `tools`, `hooks`, `triggers` and `views` must match the module's exports,
+  name for name. A mismatch is refused at publish with both lists.
 - `grants` is what the module may use, from `storage`, `http`, `schedule`,
   `ai`, `memory`, `workspace`. With `http`, add `"network": { "hosts": ["api.example.com"] }`
   (a leading `*.` matches one subdomain label), or `"network": { "open": true }`
@@ -196,6 +196,47 @@ not. Then create the Routine with `routine_manage`:
 The Routine is keyed like a webhook one — the receipt carries the URL and the
 key the outside service posts to — and the Plugin must be on for this Bot,
 or every delivery is dropped with that reason.
+
+## Sections
+
+A Plugin can draw a section on its own card on the Bot's Plugins page — a
+status line, a count, a control. Export `views`, one function per surface id,
+and declare each in `plugin.json` under `views` with slot `settings.sections`:
+
+```ts
+export const views = {
+  "notes.settings": async (ctx) => {
+    const stored = await ctx.storage?.get({ key: "notes" });
+    const count =
+      stored?.status === "available" && Array.isArray(stored.value)
+        ? stored.value.length
+        : 0;
+    return {
+      root: {
+        type: "group",
+        orientation: "column",
+        children: [
+          { type: "text", text: `${count} note(s) kept.` },
+          { type: "action", actionId: "note_clear", label: "Clear notes" },
+        ],
+      },
+    };
+  },
+};
+```
+
+```json
+"views": [{ "slot": "settings.sections", "surfaceId": "notes.settings" }]
+```
+
+The host draws the tree with its own widgets: `text`, `group`, `list` and
+`action` nodes, at most 64 of them. A control's `actionId` names one of your
+tools; pressing it runs that tool with the control's `input`, outside any
+Turn, and the section is drawn again. A `field` or `embed` node, or a tool
+you do not declare, is refused and the card says so instead of the section.
+A section runs with the same `ctx` a tool call gets and is drawn only while
+the Plugin is on for that Bot. Outside a Turn — a section, a control, a
+trigger — `ctx.schedule` answers unavailable; everything else works.
 
 ## What you cannot do
 

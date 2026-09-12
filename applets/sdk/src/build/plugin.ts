@@ -51,6 +51,7 @@ export interface PluginDescriptionV1 {
   hooks: string[];
   services: string[];
   triggers: string[];
+  views: string[];
 }
 
 export interface PluginBuildManifestV1 extends PluginDescriptionV1 {
@@ -301,6 +302,7 @@ function describe() {
     hooks: names(plugin.hooks, "hooks"),
     services: names(plugin.services, "services"),
     triggers: names(plugin.triggers, "triggers"),
+    views: names(plugin.views, "views"),
   };
 }
 
@@ -393,6 +395,7 @@ function validateDescription(input: PluginDescriptionV1): PluginDescriptionV1 {
     hooks: [...input.hooks],
     services: [...input.services],
     triggers: [...input.triggers],
+    views: [...input.views],
   };
 }
 

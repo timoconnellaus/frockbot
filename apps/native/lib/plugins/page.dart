@@ -115,10 +115,37 @@ class PluginsController extends ViewSurfaceController {
   @override
   Future<Map<String, Object?>> dispatch(Map<String, Object?> command) async {
     if (botId != null) {
-      // A Bot's switch: the command names the Plugin and the revision the
-      // page read, and the Bot answers applied, conflict or rejected.
       final input = ((command['input'] as Map?) ?? const {})
           .cast<String, Object?>();
+      if (input['kind'] == 'plugin-tool') {
+        // A control on a Plugin's section: the Bot runs the tool it names
+        // and the page is read again, so the section shows what changed.
+        final answer = await api.request(
+          _path,
+          body: {
+            'schemaVersion': 1,
+            'kind': 'plugin-tool',
+            'commandId': command['commandId'],
+            'pluginId': input['pluginId'],
+            'tool': input['tool'],
+            'arguments': input['arguments'] ?? '',
+          },
+        );
+        final receipt = ((answer as Map?) ?? const {}).cast<String, Object?>();
+        final ran = receipt['status'] == 'ran' && receipt['isError'] != true;
+        return {
+          'commandId': command['commandId'],
+          'status': ran ? 'applied' : 'rejected',
+          if (!ran)
+            'failure': receipt['failure'] is String
+                ? receipt['failure']
+                : receipt['content'] is String
+                ? receipt['content']
+                : 'This control could not run.',
+        };
+      }
+      // A Bot's switch: the command names the Plugin and the revision the
+      // page read, and the Bot answers applied, conflict or rejected.
       final answer = await api.request(
         _path,
         body: {

@@ -45,6 +45,7 @@ export const BOT_ISOLATE_DEADLINE_SOURCE = `function withIsolateDeadline(work, d
 export const BOT_ISOLATE_INVOCATION_SOURCE = `var TOOL_NAME = /^[a-z][a-z0-9_]{0,63}$/;
 var PLUGIN_ID = /^[a-z][a-z0-9-]{0,63}$/;
 var TRIGGER_NAME = /^[a-z][a-z0-9_-]{0,63}$/;
+var SURFACE_ID = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
 var HOOK_EVENTS = ${JSON.stringify(BOT_ISOLATE_HOOK_EVENTS_V1)};
 var IDENTITY_KEYS = ["botId", "sessionId", "runId", "turnId", "generationId"];
 function isRecord(value) {
@@ -137,6 +138,31 @@ var TRIGGER_INVOCATION_KEYS = [
   "routineId",
   "deadlineMs",
 ];
+var VIEW_INVOCATION_KEYS = [
+  "schemaVersion",
+  "pluginId",
+  "surfaceId",
+  "botId",
+  "sessionId",
+  "runId",
+  "turnId",
+  "generationId",
+  "deadlineMs",
+];
+function decodeViewInvocation(value) {
+  exactKeys(value, VIEW_INVOCATION_KEYS, "plugin worker view invocation");
+  if (value.schemaVersion !== 1) {
+    throw new Error("plugin worker view invocation schemaVersion is unsupported");
+  }
+  if (typeof value.pluginId !== "string" || !PLUGIN_ID.test(value.pluginId)) {
+    throw new Error("plugin worker view invocation pluginId is invalid");
+  }
+  if (typeof value.surfaceId !== "string" || !SURFACE_ID.test(value.surfaceId)) {
+    throw new Error("plugin worker view invocation surfaceId is invalid");
+  }
+  identityFields(value, "plugin worker view invocation");
+  return value;
+}
 function decodeTriggerInvocation(value) {
   exactKeys(value, TRIGGER_INVOCATION_KEYS, "plugin worker trigger invocation");
   if (value.schemaVersion !== 1) {
@@ -450,10 +476,12 @@ export const BOT_ISOLATE_TRIGGER_SOURCE = `async function runTrigger(invocation,
 
 /** What one Plugin's module must export, checked once at mount. */
 export const BOT_ISOLATE_DECLARATION_SOURCE = `function declaredTools(module, pluginId) {
-  const declared = Array.isArray(module.tools) ? module.tools : [];
-  if (declared.length === 0) {
-    throw new Error('plugin "' + pluginId + '" must export a non-empty "tools" array');
+  // A Plugin that only serves hooks, triggers or views exports an empty
+  // array: the build admits one, so the worker does too.
+  if (!Array.isArray(module.tools)) {
+    throw new Error('plugin "' + pluginId + '" must export a "tools" array');
   }
+  const declared = module.tools;
   if (typeof module.execute !== "function") {
     throw new Error('plugin "' + pluginId + '" must export an "execute" function');
   }
@@ -524,6 +552,44 @@ function declaredTriggers(module, pluginId) {
     }
     return name;
   });
+}
+function declaredViews(module, pluginId) {
+  if (module.views === undefined) return [];
+  if (!isRecord(module.views)) {
+    throw new Error('plugin "' + pluginId + '" "views" must be an object');
+  }
+  return Object.keys(module.views).map(function (surfaceId) {
+    if (!SURFACE_ID.test(surfaceId)) {
+      throw new Error('plugin "' + pluginId + '" declared a view with an invalid surface id');
+    }
+    if (typeof module.views[surfaceId] !== "function") {
+      throw new Error('plugin "' + pluginId + '" view "' + surfaceId + '" must be a function');
+    }
+    return surfaceId;
+  });
+}`;
+
+/**
+ * One slot render: the Plugin's view function is handed a `ctx` shaped like a
+ * tool call's and answers with a document, or drops with a reason.
+ */
+export const BOT_ISOLATE_VIEW_SOURCE = `async function runView(invocation, resolve, contextFor) {
+  try {
+    const plugin = resolve(invocation.pluginId);
+    if (!plugin.views.includes(invocation.surfaceId)) {
+      throw new Error('plugin "' + invocation.pluginId + '" did not declare view "' + invocation.surfaceId + '"');
+    }
+    const context = contextFor(invocation, plugin, invocation.deadlineMs);
+    const value = await withIsolateDeadline(function () {
+      return plugin.module.views[invocation.surfaceId](context);
+    }, invocation.deadlineMs);
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      return { schemaVersion: 1, status: "rendered", document: value };
+    }
+    return { schemaVersion: 1, status: "drop", reason: "the view returned no document" };
+  } catch (error) {
+    return { schemaVersion: 1, status: "drop", reason: errorText(error) };
+  }
 }`;
 
 /** The path a Plugin's artifact is mounted at inside the worker's module map. */
@@ -575,6 +641,8 @@ ${BOT_ISOLATE_HOOK_CHAIN_SOURCE}
 
 ${BOT_ISOLATE_TRIGGER_SOURCE}
 
+${BOT_ISOLATE_VIEW_SOURCE}
+
 /**
  * Every Plugin the identity names, mounted once in identity order. A Plugin
  * whose module does not declare itself correctly is carried as not ok and
@@ -600,6 +668,7 @@ function mountAll(env) {
       hooks: [],
       provides: [],
       triggers: [],
+      views: [],
       services: {},
     };
     try {
@@ -607,6 +676,7 @@ function mountAll(env) {
       plugin.tools = declaredTools(module, pluginId);
       plugin.hooks = declaredHooks(module, pluginId);
       plugin.triggers = declaredTriggers(module, pluginId);
+      plugin.views = declaredViews(module, pluginId);
       const services = declaredServices(module, pluginId);
       plugin.provides = Object.keys(services);
       for (const name of plugin.consumes) {
@@ -653,6 +723,7 @@ export default class extends WorkerEntrypoint {
               return { name: name, version: 1 };
             }),
             triggers: plugin.triggers,
+            views: plugin.views,
           },
           plugin.ok ? {} : { reason: plugin.reason },
         );
@@ -710,6 +781,25 @@ export default class extends WorkerEntrypoint {
       },
     );
   }
+
+  async view(rawInvocation) {
+    let invocation;
+    try {
+      invocation = decodeViewInvocation(rawInvocation);
+    } catch (error) {
+      return { schemaVersion: 1, status: "drop", reason: errorText(error) };
+    }
+    const env = this.env;
+    return runView(
+      invocation,
+      function (pluginId) {
+        return findPlugin(env, pluginId);
+      },
+      function (identity, plugin, deadlineMs) {
+        return narrowContext(env, identity, plugin, deadlineMs);
+      },
+    );
+  }
 }
 `;
 }
@@ -718,7 +808,7 @@ export default class extends WorkerEntrypoint {
  * Bumped with any change to the generated text; folded into the module-set
  * hash beside the contract version, so a wrapper change is a new worker.
  */
-export const PLUGIN_WORKER_INDEX_VERSION = "index-v2";
+export const PLUGIN_WORKER_INDEX_VERSION = "index-v4";
 
 /** The module map a Plugin worker mounts: the index and one module per Plugin. */
 export function pluginWorkerModuleMap(

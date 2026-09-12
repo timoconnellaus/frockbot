@@ -303,6 +303,7 @@ describe("the Plugin build response", () => {
     hooks: ["agent/tool-exposure" as const],
     services: ["weather-lookup"],
     triggers: ["weather_alert"],
+    views: ["weather.settings"],
     hashes: { module: "b".repeat(64) },
   };
 
@@ -338,6 +339,9 @@ describe("the Plugin build response", () => {
     expect(() =>
       decodePluginBuildManifestV1({ ...manifest, triggers: ["a b"] }),
     ).toThrow(/triggers\[0\] is invalid/);
+    expect(() =>
+      decodePluginBuildManifestV1({ ...manifest, views: ["bad surface"] }),
+    ).toThrow(/views\[0\] is invalid/);
   });
 
   test("refuses a module past its ceiling with the limit-exceeded code", () => {

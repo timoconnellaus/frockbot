@@ -251,6 +251,91 @@ void main() {
     expect(tester.widget<Switch>(find.byType(Switch)).value, isFalse);
   });
 
+  testWidgets('a section control on a Bot page posts the tool it names', (
+    tester,
+  ) async {
+    final store = MemoryStore();
+    final sent = <Map<String, Object?>>[];
+    var loads = 0;
+    final api = SettingsApi(store, (path, body) async {
+      if (body == null) {
+        loads += 1;
+        return {
+          'schemaVersion': 1,
+          'surfaceId': 'bot-plugins',
+          'revision': 3,
+          'root': {
+            'type': 'group',
+            'orientation': 'column',
+            'children': [
+              {
+                'type': 'group',
+                'orientation': 'column',
+                'title': 'Counter · Made by your Bot',
+                'children': [
+                  {'type': 'text', 'text': 'Count: $loads'},
+                  {
+                    'type': 'action',
+                    'actionId': 'plugin-tool',
+                    'label': 'Add two',
+                    'input': {
+                      'kind': 'plugin-tool',
+                      'pluginId': 'counter',
+                      'tool': 'counter_bump',
+                      'arguments': '{"by":2}',
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+          'actions': [
+            {
+              'id': 'plugin-tool',
+              'schema': {
+                'type': 'object',
+                'properties': {
+                  'kind': {
+                    'type': 'string',
+                    'enum': ['plugin-tool'],
+                  },
+                  'pluginId': {'type': 'string', 'maxLength': 128},
+                  'tool': {'type': 'string', 'maxLength': 128},
+                  'arguments': {'type': 'string', 'maxLength': 8000},
+                },
+                'required': ['kind', 'pluginId', 'tool', 'arguments'],
+                'additionalProperties': false,
+              },
+            },
+          ],
+        };
+      }
+      expect(path, '/api/bots/bot-1/plugins');
+      sent.add((body as Map).cast<String, Object?>());
+      return {'status': 'ran', 'content': 'count is 2', 'isError': false};
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: FrockTheme.theme(Brightness.dark),
+        home: PluginsPage(
+          api: api,
+          store: store,
+          userId: 'tim',
+          botId: 'bot-1',
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Count: 1'), findsOneWidget);
+    await tester.tap(find.text('Add two'));
+    await tester.pumpAndSettle();
+    expect(sent.single['kind'], 'plugin-tool');
+    expect(sent.single['tool'], 'counter_bump');
+    expect(sent.single['arguments'], '{"by":2}');
+    // The page is read again, so the section shows what changed.
+    expect(find.text('Count: 2'), findsOneWidget);
+  });
+
   testWidgets('Plugins recovers from offline without raw backend detail', (
     tester,
   ) async {

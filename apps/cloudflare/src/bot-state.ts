@@ -316,7 +316,11 @@ import {
   readBotPluginsFrameV1,
   setBotPluginEnabledV1,
 } from "@frockbot/app/plugins/bot";
-import { decodeSetBotPluginEnabledCommandV1 } from "@frockbot/app/plugins/page";
+import {
+  decodePluginToolCommandV1,
+  decodeSetBotPluginEnabledCommandV1,
+} from "@frockbot/app/plugins/page";
+import { executeBotPluginToolV1 } from "@frockbot/app/plugins/views-bot";
 
 function isFrockAiGatewayBindingV1(
   value: BotStateEnv["AI"],
@@ -1127,7 +1131,34 @@ export class BotState extends DurableObject<BotStateEnv> {
     };
     const { shell } = await this.materialized(identity);
     await shell.validateIdentity(identity);
-    return readBotPluginsFrameV1(shell.state, identity);
+    // The page's read draws every section; a switch re-reads without them.
+    return readBotPluginsFrameV1(shell.state, identity, undefined, {
+      sections: true,
+    });
+  }
+
+  /**
+   * Runs the tool a section's control names, outside any Turn. A Plugin
+   * that is off, has no section or no such tool is a rejection with the
+   * reason, never a thrown error.
+   */
+  async executeBotPluginTool(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      command: rpcDecoded(decodePluginToolCommandV1),
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { shell } = await this.materialized(identity);
+    await shell.validateIdentity(identity);
+    return executeBotPluginToolV1(
+      shell.state,
+      identity,
+      request.command as ReturnType<typeof decodePluginToolCommandV1>,
+    );
   }
 
   /**

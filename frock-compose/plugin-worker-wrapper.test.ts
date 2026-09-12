@@ -14,6 +14,7 @@ import {
   BOT_ISOLATE_NARROW_CONTEXT_KEYS_V1,
   BOT_ISOLATE_NARROW_CONTEXT_SOURCE_V1,
   BOT_ISOLATE_TRIGGER_SOURCE,
+  BOT_ISOLATE_VIEW_SOURCE,
   PLUGIN_WORKER_MAIN_MODULE,
   pluginWorkerIndexSourceV1,
   pluginWorkerModuleMap,
@@ -52,12 +53,13 @@ const narrowContext = new Function(
 )() as NarrowContext;
 
 const declarations = new Function(
-  `${BOT_ISOLATE_INVOCATION_SOURCE}\n${BOT_ISOLATE_DECLARATION_SOURCE}\nreturn { declaredTools, declaredHooks, declaredServices, declaredTriggers };`,
+  `${BOT_ISOLATE_INVOCATION_SOURCE}\n${BOT_ISOLATE_DECLARATION_SOURCE}\nreturn { declaredTools, declaredHooks, declaredServices, declaredTriggers, declaredViews };`,
 )() as {
   declaredTools: (module: unknown, pluginId: string) => unknown[];
   declaredHooks: (module: unknown, pluginId: string) => string[];
   declaredServices: (module: unknown, pluginId: string) => unknown;
   declaredTriggers: (module: unknown, pluginId: string) => string[];
+  declaredViews: (module: unknown, pluginId: string) => string[];
 };
 
 function invocation(overrides: Record<string, unknown> = {}) {
@@ -524,12 +526,26 @@ describe("the generated wrapper's declaration checks", () => {
       ),
     ).toEqual(["forecast_ready"]);
     expect(declarations.declaredServices({}, "weather")).toEqual({});
+    expect(
+      declarations.declaredViews(
+        { views: { "weather.settings": () => undefined } },
+        "weather",
+      ),
+    ).toEqual(["weather.settings"]);
+    expect(declarations.declaredViews({}, "weather")).toEqual([]);
   });
 
   test("refuses a module that does not declare itself", () => {
-    expect(() => declarations.declaredTools({ tools: [] }, "weather")).toThrow(
-      /non-empty "tools" array/,
+    expect(() => declarations.declaredTools({}, "weather")).toThrow(
+      /a "tools" array/,
     );
+    // A hooks-only Plugin declares no tools, and the build admits one.
+    expect(
+      declarations.declaredTools(
+        { tools: [], execute: () => undefined },
+        "weather",
+      ),
+    ).toEqual([]);
     expect(() =>
       declarations.declaredTools({ tools: [{ name: "ok" }] }, "weather"),
     ).toThrow(/"execute" function/);
@@ -551,6 +567,15 @@ describe("the generated wrapper's declaration checks", () => {
     expect(() =>
       declarations.declaredServices({ services: 1 }, "weather"),
     ).toThrow(/"services" must be an object/);
+    expect(() =>
+      declarations.declaredViews(
+        { views: { "bad surface": () => 1 } },
+        "weather",
+      ),
+    ).toThrow(/invalid surface id/);
+    expect(() =>
+      declarations.declaredViews({ views: { ok: 1 } }, "weather"),
+    ).toThrow(/must be a function/);
   });
 });
 
@@ -746,5 +771,130 @@ describe("the generated wrapper's trigger delivery", () => {
     );
     expect(result.status).toBe("drop");
     expect(result.reason).toMatch(/exceeded its deadline of 25ms/);
+  });
+});
+
+type ViewResult = {
+  schemaVersion: number;
+  status: string;
+  document?: unknown;
+  reason?: string;
+};
+
+const runView = new Function(
+  [
+    BOT_ISOLATE_DEADLINE_SOURCE,
+    BOT_ISOLATE_ERROR_TEXT_SOURCE,
+    BOT_ISOLATE_VIEW_SOURCE,
+    "return runView;",
+  ].join("\n"),
+)() as (
+  invocation: Record<string, unknown>,
+  resolve: (pluginId: string) => unknown,
+  contextFor: (
+    identity: Record<string, unknown>,
+    plugin: unknown,
+    deadlineMs: number,
+  ) => unknown,
+) => Promise<ViewResult>;
+
+describe("the generated wrapper's view rendering", () => {
+  function viewInvocation(overrides: Record<string, unknown> = {}) {
+    return {
+      schemaVersion: 1,
+      pluginId: "weather",
+      surfaceId: "weather.settings",
+      botId: "bot-1",
+      sessionId: "user-1:bot-1",
+      runId: "view:weather.settings",
+      turnId: "view:weather.settings",
+      generationId: "gen-1",
+      deadlineMs: 1_000,
+      ...overrides,
+    };
+  }
+
+  function viewPlugin(
+    render: (ctx: unknown) => unknown,
+    views: string[] = ["weather.settings"],
+  ) {
+    return {
+      pluginId: "weather",
+      views,
+      module: { views: { "weather.settings": render } },
+    };
+  }
+
+  const contexts: unknown[] = [];
+  function contextFor(
+    identity: Record<string, unknown>,
+    _plugin: unknown,
+    deadlineMs: number,
+  ) {
+    contexts.push({ runId: identity.runId, deadlineMs });
+    return { deadlineMs };
+  }
+
+  test("a returned object is the rendered document, with the invocation as the context's identity", async () => {
+    contexts.length = 0;
+    const result = await runView(
+      viewInvocation(),
+      () => viewPlugin(() => ({ root: { type: "text", text: "Sunny" } })),
+      contextFor,
+    );
+    expect(result).toEqual({
+      schemaVersion: 1,
+      status: "rendered",
+      document: { root: { type: "text", text: "Sunny" } },
+    });
+    expect(contexts).toEqual([
+      { runId: "view:weather.settings", deadlineMs: 1_000 },
+    ]);
+  });
+
+  test("nothing, an undeclared surface, a throw and an overrun all drop with a reason", async () => {
+    expect(
+      await runView(
+        viewInvocation(),
+        () => viewPlugin(() => undefined),
+        contextFor,
+      ),
+    ).toEqual({
+      schemaVersion: 1,
+      status: "drop",
+      reason: "the view returned no document",
+    });
+    expect(
+      await runView(
+        viewInvocation(),
+        () => viewPlugin(() => ({ root: {} }), ["other"]),
+        contextFor,
+      ),
+    ).toEqual({
+      schemaVersion: 1,
+      status: "drop",
+      reason: 'plugin "weather" did not declare view "weather.settings"',
+    });
+    expect(
+      await runView(
+        viewInvocation(),
+        () =>
+          viewPlugin(() => {
+            throw new Error("no forecast today");
+          }),
+        contextFor,
+      ),
+    ).toEqual({
+      schemaVersion: 1,
+      status: "drop",
+      reason: "no forecast today",
+    });
+    const late = await runView(
+      viewInvocation({ deadlineMs: 25 }),
+      () => viewPlugin(() => never()),
+      contextFor,
+    );
+    expect(late.status).toBe("drop");
+    expect(late.reason).toMatch(/exceeded its deadline of 25ms/);
   });
 });

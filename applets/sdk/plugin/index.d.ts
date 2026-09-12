@@ -380,6 +380,56 @@ export type PluginTrigger = (
 export type PluginTriggers = Record<string, PluginTrigger>;
 
 /**
+ * One node of a section a Plugin renders on its card. The host draws it with
+ * its own widgets; a Plugin ships no markup. `field` and `embed` nodes are
+ * not accepted from a Plugin and are left out when the card is drawn.
+ */
+export type PluginViewNode =
+  | {
+      type: "text";
+      text: string;
+      style?: "body" | "heading" | "label" | "status";
+    }
+  | {
+      type: "group";
+      orientation: "row" | "column";
+      title?: string;
+      collapsed?: boolean;
+      children: PluginViewNode[];
+    }
+  | {
+      /**
+       * A control. `actionId` names one of this Plugin's tools; pressing it
+       * runs that tool with `input`, outside any Turn, and the section is
+       * rendered again.
+       */
+      type: "action";
+      actionId: string;
+      label: string;
+      style?: "primary" | "secondary" | "danger";
+      input?: { [key: string]: unknown };
+    }
+  | {
+      type: "list";
+      empty?: string;
+      rows: { id: string; node: PluginViewNode; selected?: boolean }[];
+    };
+
+/** What a view returns: the section's tree. Return nothing to show no section. */
+export interface PluginViewDocument {
+  root: PluginViewNode;
+}
+
+/** A view: renders one declared surface with the same `ctx` a tool call gets. */
+export type PluginView = (
+  ctx: PluginContext,
+) =>
+  | Promise<PluginViewDocument | undefined | void>
+  | PluginViewDocument
+  | undefined
+  | void;
+
+/**
  * A tool call's answer. A string is handed to the Bot as it is; anything else
  * is JSON-serialized. Throw to answer with an error the Bot can read — the
  * wrapper turns a thrown `Error` into an error result with its message.
@@ -409,4 +459,9 @@ export interface PluginModule {
   /** Values other Plugins that `consume` a service of the same name receive. */
   services?: Record<string, unknown>;
   triggers?: PluginTriggers;
+  /**
+   * One view per surface id declared under `views` in `plugin.json`, each
+   * with slot `settings.sections`: a section drawn on this Plugin's card.
+   */
+  views?: Record<string, PluginView>;
 }

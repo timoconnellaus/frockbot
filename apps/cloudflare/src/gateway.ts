@@ -7,7 +7,7 @@ import {
 import { pluginsDocumentV1 } from "@frockbot/app/settings/plugins-document";
 import {
   botPluginsDocumentV1,
-  decodeSetBotPluginEnabledCommandV1,
+  decodeBotPluginsCommandV1,
 } from "@frockbot/app/plugins/page";
 import { accountIsAdmitted } from "./account-admission.js";
 import { isNativeAuthPath, readNativeJsonBody } from "./native-auth.js";
@@ -1048,7 +1048,7 @@ export function createGateway(dependencies: GatewayDependencies) {
         // report a storage failure as a bad request.
         let command;
         try {
-          command = decodeSetBotPluginEnabledCommandV1(await request.json());
+          command = decodeBotPluginsCommandV1(await request.json());
         } catch (error) {
           return jsonError(
             400,
@@ -1058,12 +1058,19 @@ export function createGateway(dependencies: GatewayDependencies) {
           );
         }
         return Response.json(
-          await binding.setBotPluginEnabled({
-            schemaVersion: 1,
-            userId,
-            botId,
-            command,
-          }),
+          command.kind === "plugin-tool"
+            ? await binding.executeBotPluginTool({
+                schemaVersion: 1,
+                userId,
+                botId,
+                command,
+              })
+            : await binding.setBotPluginEnabled({
+                schemaVersion: 1,
+                userId,
+                botId,
+                command,
+              }),
           { headers: { "cache-control": "no-store" } },
         );
       } catch (error) {

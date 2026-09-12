@@ -69,10 +69,11 @@ export const APPLET_BUILD_LIMITS = {
   toolDescription: 1_024,
   /** A Plugin's built module. One file, bundled, no imports. */
   moduleBytes: 2 * 1_024 * 1_024,
-  /** Hooks, services and triggers one Plugin module may export. */
+  /** Hooks, services, triggers and views one Plugin module may export. */
   hooks: 6,
   services: 32,
   triggers: 16,
+  views: 16,
   /** Diagnostics one failure may carry. */
   diagnostics: 200,
   /** Failure text on a diagnostic or a problem response. */
@@ -86,6 +87,8 @@ const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:@-]*$/;
 const TOOL_NAME = /^[a-z][a-z0-9_]{0,63}$/;
 const SERVICE_NAME = /^[a-z][a-z0-9-]{0,63}$/;
 const TRIGGER_NAME = /^[a-z][a-z0-9_-]{0,63}$/;
+/** The `Identifier` a `ViewDocument.surfaceId` accepts; matches the Plugin descriptor. */
+const SURFACE_ID = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
 /** The loop events a Plugin may hook, as `BOT_ISOLATE_HOOK_EVENTS_V1` lists them. */
 export const PLUGIN_BUILD_HOOK_EVENTS_V1 = [
   "system-prompt/assemble",
@@ -191,6 +194,8 @@ export interface PluginBuildManifestV1 {
   hooks: PluginBuildHookEventV1[];
   services: string[];
   triggers: string[];
+  /** The surface ids the module exports a view for, one function each. */
+  views: string[];
   hashes: { module: string };
 }
 
@@ -644,7 +649,7 @@ export function decodePluginBuildManifestV1(
   const value = object(input, label);
   exactly(
     value,
-    ["contract", "tools", "hooks", "services", "triggers", "hashes"],
+    ["contract", "tools", "hooks", "services", "triggers", "views", "hashes"],
     label,
   );
   if (value.contract !== 1) fail(`${label} contract is not 1`);
@@ -686,6 +691,12 @@ export function decodePluginBuildManifestV1(
       TRIGGER_NAME,
       APPLET_BUILD_LIMITS.triggers,
       `${label} triggers`,
+    ),
+    views: boundedNames(
+      value.views,
+      SURFACE_ID,
+      APPLET_BUILD_LIMITS.views,
+      `${label} views`,
     ),
     hashes: { module: hash(hashes.module, `${label} module hash`) },
   };

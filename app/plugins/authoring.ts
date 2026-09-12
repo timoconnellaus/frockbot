@@ -271,6 +271,10 @@ export function pluginManifestDisagreementV1(
   if (!sameNames(triggers, manifest.triggers)) {
     return `plugin.json declares triggers [${triggers.join(", ")}] but plugin.ts exports [${manifest.triggers.join(", ")}]`;
   }
+  const views = (descriptor.views ?? []).map((view) => view.surfaceId);
+  if (!sameNames(views, manifest.views)) {
+    return `plugin.json declares views [${views.join(", ")}] but plugin.ts exports views [${manifest.views.join(", ")}]`;
+  }
   return undefined;
 }
 

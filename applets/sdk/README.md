@@ -44,7 +44,7 @@ which `applet_create` writes through the Workspace.
 
 A Plugin (ADR 0026) is written against `@frockbot/applet-sdk/plugin`, which
 is declarations only: `plugin.ts` exports `tools` and `execute`, and may
-export `hooks`, `services` and `triggers`, beside a `plugin.json` descriptor.
+export `hooks`, `services`, `triggers` and `views`, beside a `plugin.json` descriptor.
 `tools` may be empty — a Plugin that only serves hooks is admissible, because
 the kernel's own descriptor contract admits one.
 `runPluginBuildV1(directory, { mode, id })` is four stages — `descriptor`,

@@ -157,8 +157,20 @@ interface BotRpc {
       on: boolean;
       switchable: boolean;
       unavailable?: string;
+      sections?: Array<{
+        surfaceId: string;
+        root?: unknown;
+        failure?: string;
+        nodes: number;
+      }>;
     }>;
   }>;
+  executeBotPluginTool(
+    input: unknown,
+  ): Promise<
+    | { status: "ran"; content: string; isError: boolean }
+    | { status: "rejected"; failure: string }
+  >;
   setBotPluginEnabled(
     input: unknown,
   ): Promise<
@@ -2082,5 +2094,169 @@ export async function execute() {
     expect(
       page.plugins.find((candidate) => candidate.pluginId === "steady"),
     ).toMatchObject({ on: true });
+  });
+
+  test("a Plugin's settings section is drawn on the Bot's page, and its control runs the tool it names", async () => {
+    const userId = `user-${crypto.randomUUID()}`;
+    const identity = { userId, botId: "bot-1" };
+    await provisionBot(identity);
+    await turn(identity, "run-0");
+    const bootstrap = (
+      await user(userId).readComposition({ schemaVersion: 1, userId })
+    ).current;
+
+    const COUNTER_ID = "counter";
+    const COUNTER_SOURCE = `
+export const tools = [
+  { name: "counter_bump", description: "Adds one", inputSchema: { type: "object" }, idempotent: false },
+];
+export async function execute(tool, input, ctx) {
+  if (tool !== "counter_bump") return "unknown tool";
+  const got = await ctx.storage.get({ key: "count" });
+  const next = (typeof got.value === "number" ? got.value : 0) + (input.by ?? 1);
+  await ctx.storage.put({ key: "count", value: next });
+  return "count is " + next;
+}
+export const views = {
+  "counter.settings": async function (ctx) {
+    const got = await ctx.storage.get({ key: "count" });
+    const count = typeof got.value === "number" ? got.value : 0;
+    return {
+      root: {
+        type: "group",
+        orientation: "column",
+        children: [
+          { type: "text", text: "Count: " + count + " for " + ctx.bot.botId },
+          { type: "action", actionId: "counter_bump", label: "Add two", input: { by: 2 } },
+          { type: "field", field: { id: "nope", label: "nope", kind: "text" } },
+        ],
+      },
+    };
+  },
+};
+`;
+    const descriptor = decodePluginDescriptorV1({
+      id: COUNTER_ID,
+      displayName: "Counter",
+      version: "0.0.1",
+      contractVersion: 4,
+      tools: [
+        { name: "counter_bump", description: "Adds one", inputSchema: {} },
+      ],
+      hooks: [],
+      grants: ["storage"],
+      views: [{ slot: "settings.sections", surfaceId: "counter.settings" }],
+      contextKeys: ["user", "bot", "session"],
+    });
+    const contentHash = await sha256Hex(COUNTER_SOURCE);
+    await env.APPLICATION_ARTIFACTS.put(
+      `packages/${contentHash}.mjs`,
+      COUNTER_SOURCE,
+    );
+    const createdAt = "2026-09-12T05:00:00.000Z";
+    const members: CompositionMemberV1[] = [
+      {
+        packageId: COUNTER_ID,
+        version: "0.0.1",
+        descriptor,
+        provenance: {
+          kind: "bot",
+          packageId: COUNTER_ID,
+          version: "0.0.1",
+          botId: "bot-1",
+          sessionId: `${userId}:bot-1`,
+          turnId: "run-0",
+          runId: "run-0",
+          authoredAt: createdAt,
+        },
+        artifact: {
+          contentHash,
+          size: COUNTER_SOURCE.length,
+          mediaType: "application/javascript",
+          bundlerVersion: "probe-seed",
+        },
+      },
+    ];
+    const artifactSetHash = await compositionArtifactSetHashV1(members);
+    await user(userId).proposeComposition({
+      schemaVersion: 1,
+      userId,
+      generation: {
+        schemaVersion: 1,
+        generationId: compositionGenerationIdV1(createdAt, artifactSetHash),
+        artifactSetHash,
+        parentGenerationId: bootstrap.generationId,
+        createdAt,
+        origin: {
+          kind: "bot-authored",
+          runId: "run-0",
+          sessionId: `${userId}:bot-1`,
+          turnId: "run-0",
+        },
+        members,
+        status: "pending",
+      },
+      pin: true,
+      expectedCurrentGenerationId: bootstrap.generationId,
+    });
+
+    const row = async () =>
+      (
+        await bot(identity).readBotPluginsFrame({
+          schemaVersion: 1,
+          ...identity,
+        })
+      ).plugins.find((candidate) => candidate.pluginId === COUNTER_ID);
+    const press = (by: number, commandId: string) =>
+      bot(identity).executeBotPluginTool({
+        schemaVersion: 1,
+        ...identity,
+        command: {
+          schemaVersion: 1,
+          kind: "plugin-tool",
+          commandId,
+          pluginId: COUNTER_ID,
+          tool: "counter_bump",
+          arguments: JSON.stringify({ by }),
+        },
+      });
+
+    // Off, the Plugin draws nothing and its control is refused.
+    expect((await row())?.sections).toBeUndefined();
+    expect(await press(2, "press-0")).toEqual({
+      status: "rejected",
+      failure: '"Counter" is off for this Bot',
+    });
+
+    // On, the section is the Plugin's tree minus what a section cannot hold.
+    await switchPlugin(identity, COUNTER_ID, true);
+    const before = (await row())?.sections;
+    expect(before).toHaveLength(1);
+    expect(before?.[0]?.failure).toMatch(/cannot hold a field node/);
+
+    // The control runs the tool outside any Turn, through the same loopback.
+    expect(await press(2, "press-1")).toEqual({
+      status: "ran",
+      content: "count is 2",
+      isError: false,
+    });
+    expect(await press(3, "press-2")).toMatchObject({ content: "count is 5" });
+    expect(
+      await bot(identity).executeBotPluginTool({
+        schemaVersion: 1,
+        ...identity,
+        command: {
+          schemaVersion: 1,
+          kind: "plugin-tool",
+          commandId: "press-3",
+          pluginId: COUNTER_ID,
+          tool: "counter_other",
+          arguments: "",
+        },
+      }),
+    ).toEqual({
+      status: "rejected",
+      failure: '"Counter" has no "counter_other" control',
+    });
   });
 });

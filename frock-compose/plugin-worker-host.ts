@@ -18,6 +18,7 @@ import {
   decodePluginWorkerHealthV1,
   decodePluginWorkerHookResultV1,
   decodePluginWorkerTriggerResultV1,
+  decodePluginWorkerViewResultV1,
   isolateToolSchemaV1,
   ISOLATE_CONTRACT_VERSION,
   ISOLATE_MAX_DEADLINE_MS,
@@ -40,9 +41,12 @@ import {
   type PluginWorkerEntrypoint,
   type PluginWorkerHookInvocationV1,
   type PluginWorkerPluginHealthV1,
+  type IsolateToolResultV1,
   type PluginWorkerToolInvocationV1,
   type PluginWorkerTriggerInvocationV1,
   type PluginWorkerTriggerResultV1,
+  type PluginWorkerViewInvocationV1,
+  type PluginWorkerViewResultV1,
   type ToolDefinition,
   type ToolExecutionContext,
   type ToolExecutionResult,
@@ -52,6 +56,7 @@ import {
 import {
   type PluginDescriptorV1,
   type PluginGrantV1,
+  type PluginSlotV1,
 } from "@frockbot/core/contracts";
 import {
   CompositionMountFailureError,
@@ -87,6 +92,12 @@ const OPEN_PLUGIN_GRANTS_V1: readonly PluginGrantV1[] = [
   "workspace",
   "storage",
 ];
+
+/**
+ * The slots this deployment draws. `settings.sections` renders on a Plugin's
+ * card (ADR 0026 step 9); the other four wait on the surfaces that use them.
+ */
+const OPEN_PLUGIN_SLOTS_V1: readonly PluginSlotV1[] = ["settings.sections"];
 
 /** The `WorkerCode` a Plugin worker is loaded from. Structurally the platform's. */
 export interface BotIsolateWorkerCode {
@@ -226,6 +237,23 @@ export interface ActivePluginWorker {
   deliverTrigger(
     invocation: PluginWorkerTriggerInvocationV1,
   ): Promise<PluginWorkerTriggerResultV1>;
+  /**
+   * Renders one of a Plugin's declared views (ADR 0026 step 9's
+   * `settings.sections` slot). Gated like a trigger: only a verified and
+   * enabled Plugin renders, and any other answer is a drop with its reason.
+   */
+  renderView(
+    invocation: PluginWorkerViewInvocationV1,
+  ): Promise<PluginWorkerViewResultV1>;
+  /**
+   * Runs one declared tool outside any Turn: a control on a Plugin's settings
+   * section is the User's own click, so the call is made here rather than
+   * through the Bot's tool registry. Gated like a view; a tool the Plugin's
+   * health report did not list is refused before the worker is reached.
+   */
+  executeTool(
+    invocation: PluginWorkerToolInvocationV1,
+  ): Promise<IsolateToolResultV1>;
   dispose(): Promise<void>;
 }
 
@@ -455,6 +483,18 @@ export class PluginWorkerHost {
           Promise.resolve({
             deliverTrigger: (invocation: PluginWorkerTriggerInvocationV1) =>
               Promise.resolve(droppedTrigger(invocation.pluginId)),
+            renderView: (invocation: PluginWorkerViewInvocationV1) =>
+              Promise.resolve<PluginWorkerViewResultV1>({
+                schemaVersion: 1,
+                status: "drop",
+                reason: `plugin "${invocation.pluginId}" did not mount in this generation`,
+              }),
+            executeTool: (invocation: PluginWorkerToolInvocationV1) =>
+              Promise.resolve<IsolateToolResultV1>({
+                schemaVersion: 1,
+                content: `plugin "${invocation.pluginId}" did not mount in this generation`,
+                isError: true,
+              }),
             dispose: () => Promise.resolve(),
           }),
       };
@@ -650,6 +690,88 @@ export class PluginWorkerHost {
               return droppedTrigger(invocation.pluginId, errorMessage(error));
             }
           },
+          renderView: async (
+            invocation: PluginWorkerViewInvocationV1,
+          ): Promise<PluginWorkerViewResultV1> => {
+            const drop = (reason: string): PluginWorkerViewResultV1 => ({
+              schemaVersion: 1,
+              status: "drop",
+              reason: reason.slice(0, MAX_FAILURE_REASON_V1),
+            });
+            if (disposed) {
+              return drop(
+                "the plugin worker for this generation is no longer mounted",
+              );
+            }
+            if (!live.has(invocation.pluginId)) {
+              return drop(
+                `plugin "${invocation.pluginId}" did not mount in this generation`,
+              );
+            }
+            const deadlineMs = Math.min(
+              invocation.deadlineMs,
+              ISOLATE_MAX_DEADLINE_MS - PLUGIN_WORKER_HOOK_RACE_MARGIN_MS,
+            );
+            try {
+              const raw = await raceDeadline(
+                () => entrypoint.view({ ...invocation, deadlineMs }),
+                deadlineMs + PLUGIN_WORKER_HOOK_RACE_MARGIN_MS,
+              );
+              return decodePluginWorkerViewResultV1(
+                raw,
+                `plugin "${invocation.pluginId}" view result`,
+              );
+            } catch (error) {
+              return drop(errorMessage(error));
+            }
+          },
+          executeTool: async (
+            invocation: PluginWorkerToolInvocationV1,
+          ): Promise<IsolateToolResultV1> => {
+            const refuse = (content: string): IsolateToolResultV1 => ({
+              schemaVersion: 1,
+              content: content.slice(0, MAX_FAILURE_REASON_V1),
+              isError: true,
+            });
+            if (disposed) {
+              return refuse(
+                "the plugin worker for this generation is no longer mounted",
+              );
+            }
+            const entry = surviving.find(
+              (candidate) => candidate.member.packageId === invocation.pluginId,
+            );
+            if (!entry) {
+              return refuse(
+                `plugin "${invocation.pluginId}" did not mount in this generation`,
+              );
+            }
+            if (
+              !entry.health.tools.some((tool) => tool.name === invocation.tool)
+            ) {
+              return refuse(
+                `plugin "${invocation.pluginId}" declares no tool "${invocation.tool}"`,
+              );
+            }
+            const deadlineMs = Math.min(
+              invocation.deadlineMs,
+              ISOLATE_MAX_DEADLINE_MS - PLUGIN_WORKER_HOOK_RACE_MARGIN_MS,
+            );
+            try {
+              const raw = await raceDeadline(
+                () => entrypoint.execute({ ...invocation, deadlineMs }),
+                deadlineMs + PLUGIN_WORKER_HOOK_RACE_MARGIN_MS,
+              );
+              return decodeIsolateToolResultV1(
+                raw,
+                `plugin "${invocation.pluginId}" tool result`,
+              );
+            } catch (error) {
+              return refuse(
+                `Tool "${invocation.tool}" failed in its plugin: ${errorMessage(error)}`,
+              );
+            }
+          },
           dispose: () => {
             if (disposed) return Promise.resolve();
             disposed = true;
@@ -681,8 +803,12 @@ export class PluginWorkerHost {
     if (closedGrants.length > 0) {
       return `plugin "${pluginId}" declares grants this deployment has not opened: ${closedGrants.join(", ")}`;
     }
-    if (descriptor.slots && descriptor.slots.length > 0) {
-      return `plugin "${pluginId}" declares slots, which open when the settings section lands`;
+    const closedSlots = [
+      ...(descriptor.slots ?? []),
+      ...(descriptor.views ?? []).map((view) => view.slot),
+    ].filter((slot) => !OPEN_PLUGIN_SLOTS_V1.includes(slot));
+    if (closedSlots.length > 0) {
+      return `plugin "${pluginId}" declares slots this deployment has not opened: ${[...new Set(closedSlots)].join(", ")}`;
     }
     return undefined;
   }
@@ -732,6 +858,16 @@ export class PluginWorkerHost {
       declaredTriggers.some((name, index) => name !== reportedTriggers[index])
     ) {
       return `plugin "${pluginId}" triggers do not match its declared triggers (declared:${declaredTriggers.join(",")} reported:${reportedTriggers.join(",")})`;
+    }
+    const declaredViews = (descriptor.views ?? [])
+      .map((view) => view.surfaceId)
+      .toSorted();
+    const reportedViews = [...reported.views].toSorted();
+    if (
+      declaredViews.length !== reportedViews.length ||
+      declaredViews.some((name, index) => name !== reportedViews[index])
+    ) {
+      return `plugin "${pluginId}" views do not match its declared views (declared:${declaredViews.join(",")} reported:${reportedViews.join(",")})`;
     }
     return undefined;
   }
