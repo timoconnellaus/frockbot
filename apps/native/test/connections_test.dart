@@ -347,23 +347,61 @@ void main() {
     expect(reads, 2);
   });
 
-  test('a return link is the callback under our origin, and nothing else', () {
-    for (final link in [
-      'https://bot.frockbot.com/api/connect/callback/android?status=success',
-      'https://bot.frockbot.com/api/connect/callback?status=success',
-      'frockbot://bot.frockbot.com/api/connect/callback/macos',
-    ]) {
-      expect(isConnectReturnV1(Uri.parse(link)), isTrue, reason: link);
-    }
-    for (final link in [
-      'https://bot.frockbot.com/native/return/android?code=1&state=2',
-      'https://bot.frockbot.com/?bot=primary',
-      'https://bot.frockbot.com/api/connect/callbacks',
-      'http://bot.frockbot.com/api/connect/callback',
-    ]) {
-      expect(isConnectReturnV1(Uri.parse(link)), isFalse, reason: link);
-    }
+  testWidgets('a door closing while a read is in flight still re-reads', (
+    tester,
+  ) async {
+    final store = MemoryStore();
+    final gates = <Completer<void>>[];
+    var reads = 0;
+    final api = SettingsApi(store, (path, body) async {
+      reads += 1;
+      final gate = Completer<void>();
+      gates.add(gate);
+      await gate.future;
+      return connectionsFrame();
+    });
+    await tester.pumpWidget(page(api, store));
+    await tester.pump();
+    expect(reads, 1);
+    // The return lands while the first read is still out: it must not be
+    // swallowed by the read already in flight.
+    connectReturns.value += 1;
+    await tester.pump();
+    gates.first.complete();
+    await tester.pump();
+    await tester.pump();
+    expect(reads, 2);
+    gates.last.complete();
+    await tester.pumpAndSettle();
   });
+
+  test(
+    'a return link is one of this app\'s two return pages, and nothing else',
+    () {
+      for (final link in [
+        'https://bot.frockbot.com/api/connect/callback/android?status=success',
+        'frockbot://bot.frockbot.com/api/connect/callback/macos',
+      ]) {
+        expect(isConnectReturnV1(Uri.parse(link)), isTrue, reason: link);
+      }
+      for (final link in [
+        // The browser-tab page: it never opens the app.
+        'https://bot.frockbot.com/api/connect/callback?status=success',
+        // Each client's page only on the scheme that page hands over on.
+        'frockbot://bot.frockbot.com/api/connect/callback/android',
+        'https://bot.frockbot.com/api/connect/callback/macos',
+        // Anything else under the callback path.
+        'https://bot.frockbot.com/api/connect/callback/ios',
+        'https://bot.frockbot.com/api/connect/callback/android/extra',
+        'https://bot.frockbot.com/native/return/android?code=1&state=2',
+        'https://bot.frockbot.com/?bot=primary',
+        'https://bot.frockbot.com/api/connect/callbacks',
+        'http://bot.frockbot.com/api/connect/callback/android',
+      ]) {
+        expect(isConnectReturnV1(Uri.parse(link)), isFalse, reason: link);
+      }
+    },
+  );
 
   testWidgets('a second account is offered once one is connected', (
     tester,

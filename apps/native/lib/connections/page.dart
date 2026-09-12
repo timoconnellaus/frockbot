@@ -73,6 +73,11 @@ class _ConnectionsPageState extends State<ConnectionsPage>
   String? notice;
   int commands = 0;
 
+  /// A read asked for while one was already in flight. The answer in flight
+  /// was taken before the thing that asked — a return link landing during
+  /// the resume read — so it is taken again once that one settles.
+  bool reread = false;
+
   String get title =>
       widget.models ? 'Provider accounts' : ConnectionsPage.marketplaceTitle;
   String get kind => widget.models ? 'model' : 'connector';
@@ -104,22 +109,33 @@ class _ConnectionsPageState extends State<ConnectionsPage>
   void _returned() => unawaited(load());
 
   Future<void> load() async {
-    if (loading) return;
+    if (loading) {
+      reread = true;
+      return;
+    }
     setState(() {
       loading = true;
       loadFailure = null;
     });
     try {
-      final next = wire.ConnectionsFrame.fromJson(
-        await widget.api.request('/api/settings/connections'),
-      );
-      if (!mounted) return;
-      setState(() => frame = next);
-    } catch (_) {
-      if (!mounted) return;
-      const message =
-          'Couldn’t load your connectors. Check your connection and try again.';
-      setState(() => loadFailure = message);
+      do {
+        reread = false;
+        try {
+          final next = wire.ConnectionsFrame.fromJson(
+            await widget.api.request('/api/settings/connections'),
+          );
+          if (!mounted) return;
+          setState(() {
+            frame = next;
+            loadFailure = null;
+          });
+        } catch (_) {
+          if (!mounted) return;
+          const message =
+              'Couldn’t load your connectors. Check your connection and try again.';
+          setState(() => loadFailure = message);
+        }
+      } while (reread);
     } finally {
       if (mounted) setState(() => loading = false);
     }
@@ -838,14 +854,10 @@ class _ProviderRowState extends State<_ProviderRow> {
               child: identified(
                 ConnectorIds.action('authorize-${widget.index}'),
                 TextButton.icon(
-                  onPressed: () => widget.send(_command('authorize', const {})),
-                  icon: widget.busy
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.add_rounded, size: 18),
+                  onPressed: widget.busy
+                      ? null
+                      : () => widget.send(_command('authorize', const {})),
+                  icon: const Icon(Icons.add_rounded, size: 18),
                   label: const Text('Add another account'),
                 ),
               ),

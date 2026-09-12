@@ -175,14 +175,16 @@ ConnectionRequestV1 startConnectionRequestV1(Map<String, Object?> command) {
 /// segment; the page there is what the browser keeps once the app has opened.
 const connectReturnPathV1 = '/api/connect/callback';
 
-/// Whether a link the app was opened with is a hosted door closing: a return
-/// on the verified link (Android) or on the app's own scheme (macOS). Nothing
-/// on it is read — the next settings read is what settles the Connection.
-bool isConnectReturnV1(Uri uri) =>
-    (uri.scheme == 'https' || uri.scheme == 'frockbot') &&
-    uri.host.isNotEmpty &&
-    (uri.path == connectReturnPathV1 ||
-        uri.path.startsWith('$connectReturnPathV1/'));
+/// Whether a link the app was opened with is a hosted door closing. There
+/// are exactly two such links: the verified App Link under this app's own
+/// segment on Android, and the same page handed over on the app's scheme on
+/// a Mac. Nothing on the link is read — the next settings read is what
+/// settles the Connection.
+bool isConnectReturnV1(Uri uri) => switch (uri.scheme) {
+  'https' => uri.path == '$connectReturnPathV1/android',
+  'frockbot' => uri.path == '$connectReturnPathV1/macos',
+  _ => false,
+};
 
 /// Bumped each time a hosted door closes into the app, so the page that
 /// opened it reads its frame again without waiting on a lifecycle resume.
