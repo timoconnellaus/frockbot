@@ -250,7 +250,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         (view?.manuallyUnread == true && clearManualForBot != botId)) {
       return;
     }
-    if (activity.loading || activity.saving || activity.pending) return;
+    if (activity.loading || activity.busy(botId)) return;
     clearManualForBot = null;
     unawaited(activity.mark(botId, read: true));
   }
@@ -984,8 +984,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
               ListTile(
                 leading: const Icon(Icons.mark_chat_read_outlined),
                 title: const Text('Mark as read'),
-                enabled:
-                    !activity.saving && !activity.pending && !activity.loading,
+                enabled: !activity.busy(bot.botId.value) && !activity.loading,
                 onTap: () => Navigator.pop(context, 'read'),
               ),
 
@@ -1002,8 +1001,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
               ListTile(
                 leading: const Icon(Icons.mark_chat_unread_outlined),
                 title: const Text('Mark unread from here'),
-                enabled:
-                    !activity.saving && !activity.pending && !activity.loading,
+                enabled: !activity.busy(bot.botId.value) && !activity.loading,
                 onTap: () => Navigator.pop(context, 'unread'),
               ),
             ListTile(
@@ -1043,12 +1041,14 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   Future<void> _openApplet(String appletId) async {
     final canvas = appletCanvas;
     if (canvas == null) return;
+    // The panel opens onto the chosen Applet now, rather than after the write
+    // that records the focus and the read that follows it.
+    canvas.predictFocus(appletId);
+    _openPanel('applet');
     await canvas.setFocus(appletId);
     // A focus read may finish after the person switches Bots.
     if (!mounted || canvas != appletCanvas) return;
-    if (canvas.focusedId == appletId) {
-      _openPanel('applet');
-    } else {
+    if (canvas.focusedId != appletId) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Couldn’t open this Applet. Try again.')),
       );

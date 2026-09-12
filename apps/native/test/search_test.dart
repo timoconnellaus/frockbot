@@ -194,4 +194,26 @@ void main() {
     expect(find.textContaining('synthetic backend'), findsNothing);
     expect(find.text('Search couldn’t run'), findsOneWidget);
   });
+
+  test(
+    'a refused rebuild leaves the index in the state it is actually in',
+    () async {
+      final api = SettingsApi(MemoryStore(), (path, body) async {
+        if (path == '/api/search/rebuild') {
+          throw const FormatException('synthetic backend detail');
+        }
+        return results(indexState: 'stale');
+      });
+      final controller = BotSearchController(api);
+      controller.query = 'ledger';
+      await controller.run();
+      expect(controller.indexState, 'stale');
+
+      await controller.rebuild();
+      expect(controller.indexState, 'stale');
+      expect(controller.rebuilding, isFalse);
+      expect(controller.error, isNotNull);
+      controller.dispose();
+    },
+  );
 }
