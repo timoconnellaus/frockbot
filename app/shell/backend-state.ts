@@ -22,6 +22,7 @@ import {
   createBotRoutineHookMinter,
   createBotRoutines,
 } from "@frockbot/app/routines/bot";
+import { deliverPluginTriggerV1 } from "@frockbot/app/plugins/triggers-bot";
 import type { ConfigurationActivityV1 } from "@frockbot/app/settings/bot";
 import type {
   ShellApplicationV1,
@@ -314,6 +315,20 @@ export class ShellBotStateV1 {
         () => this.authority.readDurableIdentity(),
         host.env.ROUTINE_HOOK_SECRET,
       ),
+      // A Plugin trigger (ADR 0026) reaches the Plugin worker through this
+      // object's own seams; the identity is read the same deferred way.
+      {
+        deliver: async (input) => {
+          const owner = await this.authority.readDurableIdentity();
+          if (!owner) {
+            return {
+              status: "drop",
+              reason: "this Bot has no durable identity",
+            };
+          }
+          return deliverPluginTriggerV1(this, owner, input);
+        },
+      },
     );
     this.routines = routines.store;
     this.routineScheduler = routines.scheduler;

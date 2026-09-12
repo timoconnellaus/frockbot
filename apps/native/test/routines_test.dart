@@ -510,6 +510,37 @@ void main() {
         'bot-1',
       );
       expect(command['trigger'], {'kind': 'webhook'});
+    });
+
+    test('a Plugin-triggered Routine names the Plugin and its trigger', () {
+      final command = routineCommandV1(
+        save({
+          'routine.name': 'Alerts',
+          'routine.prompt': 'Read the alert.',
+          'routine.timing': 'plugin',
+          'routine.pluginId': 'weather',
+          'routine.pluginTrigger': 'alert',
+        }),
+        'bot-1',
+      );
+      expect(command['type'], 'routine/create');
+      expect(command['trigger'], {
+        'kind': 'plugin',
+        'pluginId': 'weather',
+        'trigger': 'alert',
+      });
+      expect(command.containsKey('schedule'), isFalse);
+      expect(
+        () => routineCommandV1(
+          save({
+            'routine.name': 'Alerts',
+            'routine.prompt': 'Read the alert.',
+            'routine.timing': 'plugin',
+          }),
+          'bot-1',
+        ),
+        throwsFormatException,
+      );
       expect(command.containsKey('schedule'), isFalse);
     });
 

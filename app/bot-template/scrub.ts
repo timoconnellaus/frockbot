@@ -65,7 +65,9 @@ export interface TemplateRoutineCandidateV1 {
   name: string;
   prompt: string;
   schedule?: string;
-  trigger?: { kind: "webhook" };
+  /** A webhook, or a Plugin trigger naming the Plugin's id and trigger. */
+  trigger?:
+    { kind: "webhook" } | { kind: "plugin"; pluginId: string; trigger: string };
   timezone: string;
 }
 
@@ -223,7 +225,10 @@ function scrubRoutines(
   for (const candidate of source.routines) {
     if (routines.length >= MAX_TEMPLATE_ROUTINES_V1) break;
     if (!candidate.prompt) continue;
-    const webhook = candidate.trigger?.kind === "webhook";
+    // A Plugin-triggered Routine travels as a webhook one: the Plugin it
+    // names is this account's, and an import lands disabled and unkeyed
+    // either way, so the person re-keys it and points it where they choose.
+    const webhook = candidate.trigger !== undefined;
     routines.push({
       slug: uniqueSlug(templateSlugV1(candidate.name, "routine"), slugs),
       name: candidate.name.slice(0, 100),

@@ -192,6 +192,8 @@ test("the editor is one collapsed form until a Routine is named", () => {
     ROUTINE_EDITOR_FIELDS_V1.prompt,
     ROUTINE_EDITOR_FIELDS_V1.timing,
     ROUTINE_EDITOR_FIELDS_V1.schedule,
+    ROUTINE_EDITOR_FIELDS_V1.pluginId,
+    ROUTINE_EDITOR_FIELDS_V1.pluginTrigger,
   ]);
 });
 
@@ -206,11 +208,14 @@ test("naming a Routine opens the editor on its own values and moves the revision
   const values = walk(editor!)
     .filter((node) => node.type === "field")
     .map((node) => (node.type === "field" ? node.field.value : null));
+  // The editor's two Plugin-trigger fields are empty for a scheduled Routine.
   expect(values).toEqual([
     "Morning brief",
     "Summarise overnight email.",
     "schedule",
     "0 9 * * *",
+    null,
+    null,
   ]);
   // Editing offers a way back out; creating has nothing to cancel.
   expect(

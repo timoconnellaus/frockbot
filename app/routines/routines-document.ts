@@ -20,6 +20,7 @@ import {
   type ViewNode,
 } from "@frockbot/core/protocol-schemas";
 import type { RoutineInboxEntryViewV1, RoutineViewV1 } from "./shared.js";
+import { routineTriggerLabelV1 } from "./records.js";
 
 export const ROUTINE_ACTION_KINDS_V1 = [
   "set-routine-enabled",
@@ -76,7 +77,7 @@ const TEXT = (maxLength: number): ActionValueSchema => ({
 /** What a Routine fires on. Exactly one of the two, which the codec enforces. */
 const TIMING: ActionValueSchema = {
   type: "string",
-  enum: ["schedule", "webhook"],
+  enum: ["schedule", "webhook", "plugin"],
 };
 
 /** The field ids the editor's one form uses, and the action that reads them. */
@@ -85,6 +86,9 @@ export const ROUTINE_EDITOR_FIELDS_V1 = {
   prompt: "routine.prompt",
   timing: "routine.timing",
   schedule: "routine.schedule",
+  /** A Plugin trigger's two names, read only when the timing says `plugin`. */
+  pluginId: "routine.pluginId",
+  pluginTrigger: "routine.pluginTrigger",
 } as const;
 const KIND: ActionValueSchema = {
   type: "string",
@@ -211,7 +215,9 @@ function status(text: string): ViewNode {
 function routineFacts(routine: RoutineViewV1): string {
   const timing = routine.schedule
     ? `${routine.schedule} · ${routine.timezone}`
-    : "Webhook trigger";
+    : routine.trigger
+      ? routineTriggerLabelV1(routine.trigger)
+      : "Webhook trigger";
   const last = routine.lastRunAt
     ? `Last ${routineMomentV1(routine.lastRunAt, routine.timezone)}`
     : "Never run";
@@ -310,6 +316,8 @@ function editorNode(frame: RoutinesFrameV1): ViewNode {
   const editing = frame.editing;
   const ids = ROUTINE_EDITOR_FIELDS_V1;
   const webhook = editing !== undefined && editing.schedule === undefined;
+  const plugin =
+    editing?.trigger?.kind === "plugin" ? editing.trigger : undefined;
   return {
     type: "group",
     orientation: "column",
@@ -330,17 +338,26 @@ function editorNode(frame: RoutinesFrameV1): ViewNode {
           id: ids.timing,
           label: "Fires on",
           kind: "select",
-          value: webhook ? "webhook" : "schedule",
+          value: plugin ? "plugin" : webhook ? "webhook" : "schedule",
           editable: true,
           choices: [
             { label: "A schedule", value: "schedule" },
             { label: "A webhook", value: "webhook" },
+            { label: "A Plugin trigger", value: "plugin" },
           ],
         },
       } as ViewNode,
       field(ids.schedule, "Schedule", editing?.schedule ?? "0 9 * * *", {
         maxLength: 256,
-        hint: "cron, or @daily / @every 15m. Ignored for a webhook Routine, which is given a key instead.",
+        hint: "cron, or @daily / @every 15m. Ignored for a webhook or Plugin Routine, which is given a key instead.",
+      }),
+      field(ids.pluginId, "Plugin", plugin?.pluginId ?? null, {
+        maxLength: 64,
+        hint: "For a Plugin trigger: the Plugin's id, as the Plugins page names it.",
+      }),
+      field(ids.pluginTrigger, "Plugin trigger", plugin?.trigger ?? null, {
+        maxLength: 64,
+        hint: "The trigger the Plugin exports. The Plugin reads each delivery first and says what this Routine runs on.",
       }),
       {
         type: "group",
@@ -553,6 +570,8 @@ export function routinesDocumentV1(frame: RoutinesFrameV1): ViewDocument {
             [ROUTINE_EDITOR_FIELDS_V1.prompt]: TEXT(8000),
             [ROUTINE_EDITOR_FIELDS_V1.timing]: TIMING,
             [ROUTINE_EDITOR_FIELDS_V1.schedule]: TEXT(256),
+            [ROUTINE_EDITOR_FIELDS_V1.pluginId]: TEXT(64),
+            [ROUTINE_EDITOR_FIELDS_V1.pluginTrigger]: TEXT(64),
           },
           required: [
             "kind",

@@ -28,6 +28,8 @@ const routineEditorFieldsV1 = (
   prompt: 'routine.prompt',
   timing: 'routine.timing',
   schedule: 'routine.schedule',
+  pluginId: 'routine.pluginId',
+  pluginTrigger: 'routine.pluginTrigger',
 );
 
 /// The kind an action names, or nothing when it names none.
@@ -115,6 +117,8 @@ bool routineSaveIsNoOpV1(
     routineEditorFieldsV1.prompt,
     routineEditorFieldsV1.timing,
     routineEditorFieldsV1.schedule,
+    routineEditorFieldsV1.pluginId,
+    routineEditorFieldsV1.pluginTrigger,
   ]) {
     if (input.containsKey(id) && input[id] != seeds[id]) return false;
   }
@@ -160,8 +164,8 @@ Map<String, Object?> routineCommandV1(
 /// One press, two verbs: a `routineId` names the Routine to update, and its
 /// absence is what creating means.
 ///
-/// A Routine fires on a schedule or on a webhook and never on both, so exactly
-/// one of the two travels. An update carries every field the form holds, which
+/// A Routine fires on a schedule, on a webhook, or on a Plugin trigger and
+/// never on two of them, so exactly one travels. An update carries every field the form holds, which
 /// is what a form the person just read and pressed Save on means — the route's
 /// partial update is for a Bot changing one thing, not for a person looking at
 /// all of them.
@@ -177,11 +181,22 @@ Map<String, Object?> _saveCommandV1(
   if (prompt.trim().isEmpty) {
     throw const FormatException('Say what this Routine should do.');
   }
-  final webhook = input[routineEditorFieldsV1.timing] == 'webhook';
+  final timing = input[routineEditorFieldsV1.timing];
+  final webhook = timing == 'webhook';
+  final plugin = timing == 'plugin';
   final schedule = (input[routineEditorFieldsV1.schedule] as String? ?? '')
       .trim();
-  if (!webhook && schedule.isEmpty) {
+  if (!webhook && !plugin && schedule.isEmpty) {
     throw const FormatException('Give this Routine a schedule.');
+  }
+  final pluginId = (input[routineEditorFieldsV1.pluginId] as String? ?? '')
+      .trim();
+  final pluginTrigger =
+      (input[routineEditorFieldsV1.pluginTrigger] as String? ?? '').trim();
+  if (plugin && (pluginId.isEmpty || pluginTrigger.isEmpty)) {
+    throw const FormatException(
+      'Name the Plugin and the trigger this Routine fires on.',
+    );
   }
   final routineId = routineIdV1(command);
   return {
@@ -192,7 +207,12 @@ Map<String, Object?> _saveCommandV1(
     'routineId': ?routineId,
     'name': name,
     'prompt': prompt,
-    if (webhook) 'trigger': {'kind': 'webhook'} else 'schedule': schedule,
+    if (plugin)
+      'trigger': {'kind': 'plugin', 'pluginId': pluginId, 'trigger': pluginTrigger}
+    else if (webhook)
+      'trigger': {'kind': 'webhook'}
+    else
+      'schedule': schedule,
   };
 }
 

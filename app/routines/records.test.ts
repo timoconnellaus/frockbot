@@ -41,6 +41,31 @@ describe("RoutineRecordV1", () => {
     expect(Object.keys(decoded)).not.toContain("key");
   });
 
+  test("decodes a Plugin-triggered Routine, naming the Plugin and its trigger", () => {
+    const { schedule: _schedule, ...rest } = base;
+    const decoded = decodeRoutineRecordV1({
+      ...rest,
+      trigger: { kind: "plugin", pluginId: "weather", trigger: "alert" },
+    });
+    expect(decoded.trigger).toEqual({
+      kind: "plugin",
+      pluginId: "weather",
+      trigger: "alert",
+    });
+    expect(() =>
+      decodeRoutineRecordV1({
+        ...rest,
+        trigger: { kind: "plugin", pluginId: "Weather", trigger: "alert" },
+      }),
+    ).toThrow(/pluginId is invalid/);
+    expect(() =>
+      decodeRoutineRecordV1({
+        ...rest,
+        trigger: { kind: "plugin", pluginId: "weather" },
+      }),
+    ).toThrow(/invalid fields|missing/);
+  });
+
   test("refuses both a schedule and a trigger, and refuses neither", () => {
     expect(() =>
       decodeRoutineRecordV1({ ...base, trigger: { kind: "webhook" } }),

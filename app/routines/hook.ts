@@ -59,12 +59,46 @@ export interface RoutineHookKeyV1 {
   createdAt: string;
 }
 
-/** One delivery already accepted, kept so a replay answers with its firing. */
+/**
+ * One delivery already accepted, kept so a replay answers with what the first
+ * one did: the firing it made, or — for a Plugin trigger — the reason the
+ * Plugin dropped it.
+ */
 export interface RoutineDeliveryReceiptV1 {
   schemaVersion: 1;
   routineId: string;
-  fireId: string;
+  fireId?: string;
+  dropped?: string;
   acceptedAt: string;
+}
+
+/** Longest one delivery's headers may total, as the Plugin worker bounds them. */
+export const ROUTINE_HOOK_HEADERS_MAX_BYTES = 8 * 1024;
+
+/**
+ * The headers a Plugin trigger is shown: the ones a sender signs or labels a
+ * delivery with, never the door's own credential. Lower-cased and bounded.
+ */
+export function routineHookHeadersV1(
+  headers: Iterable<[string, string]>,
+): Record<string, string> {
+  const kept: Record<string, string> = {};
+  let total = 0;
+  for (const [rawName, value] of headers) {
+    const name = rawName.toLowerCase();
+    if (
+      name === "authorization" ||
+      name === "cookie" ||
+      name === "x-routine-key" ||
+      name === "host"
+    ) {
+      continue;
+    }
+    total += name.length + value.length;
+    if (total > ROUTINE_HOOK_HEADERS_MAX_BYTES) break;
+    kept[name] = value;
+  }
+  return kept;
 }
 
 export class RoutineHookError extends Error {
@@ -361,6 +395,8 @@ export interface RoutineHookDeliveryV1 {
   deliveryId: string;
   body: string;
   contentType?: string | null;
+  /** Present for a delivery a Plugin trigger may read. */
+  headers?: Record<string, string>;
 }
 
 export function decodeRoutineHookDeliveryV1(
@@ -373,7 +409,7 @@ export function decodeRoutineHookDeliveryV1(
   routineExactKeys(
     candidate,
     ["routineId", "keyVersion", "digest", "deliveryId", "body"],
-    ["contentType"],
+    ["contentType", "headers"],
     "Routine hook delivery",
   );
   if (!isRoutineIdV1(candidate.routineId)) {
@@ -412,7 +448,38 @@ export function decodeRoutineHookDeliveryV1(
       "Routine hook delivery contentType must be a string",
     );
   }
+  let headers: Record<string, string> | undefined;
+  if (candidate.headers !== undefined) {
+    if (
+      !candidate.headers ||
+      typeof candidate.headers !== "object" ||
+      Array.isArray(candidate.headers)
+    ) {
+      throw new RoutineDecodeError(
+        "Routine hook delivery headers must be an object",
+      );
+    }
+    let total = 0;
+    headers = {};
+    for (const [name, value] of Object.entries(
+      candidate.headers as Record<string, unknown>,
+    )) {
+      if (typeof value !== "string" || name !== name.toLowerCase()) {
+        throw new RoutineDecodeError(
+          "Routine hook delivery headers must be lower-cased strings",
+        );
+      }
+      total += name.length + value.length;
+      if (total > ROUTINE_HOOK_HEADERS_MAX_BYTES) {
+        throw new RoutineDecodeError(
+          "Routine hook delivery headers are too large",
+        );
+      }
+      headers[name] = value;
+    }
+  }
   return {
+    ...(headers === undefined ? {} : { headers }),
     routineId: candidate.routineId,
     keyVersion: candidate.keyVersion as number,
     digest: candidate.digest,

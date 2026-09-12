@@ -294,6 +294,36 @@ describe("routineManageCommandV1", () => {
       ),
     ).toMatchObject({ type: "routine/create", trigger: { kind: "webhook" } });
   });
+
+  test("maps a Plugin trigger to the Plugin's id and trigger, exclusive with the webhook", () => {
+    expect(
+      routineManageCommandV1(
+        {
+          action: "create",
+          name: "Alerts",
+          prompt: "Read it",
+          pluginTrigger: { pluginId: "weather", trigger: "alert" },
+        },
+        { botId: "scout", commandId: "cmd-2" },
+      ),
+    ).toMatchObject({
+      type: "routine/create",
+      trigger: { kind: "plugin", pluginId: "weather", trigger: "alert" },
+    });
+    expect(
+      routineManageCommandV1(
+        {
+          action: "update",
+          routineId: "alerts",
+          pluginTrigger: { pluginId: "weather", trigger: "alert" },
+        },
+        { botId: "scout", commandId: "cmd-3" },
+      ),
+    ).toMatchObject({
+      type: "routine/update",
+      trigger: { kind: "plugin", pluginId: "weather", trigger: "alert" },
+    });
+  });
 });
 
 describe("routineToolCommandIdV1", () => {
