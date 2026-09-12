@@ -79,6 +79,8 @@ export interface LoopHooksV1 {
   request?(
     agent: LoopAgentRuntimeV1,
     request: NormalizedModelRequest,
+    turn: number,
+    step: number,
     signal: AbortSignal,
     next: () => Promise<NormalizedModelRequest>,
   ): Promise<NormalizedModelRequest>;
@@ -238,12 +240,14 @@ export class LoopHookListV1 {
   request(
     agent: LoopAgentRuntimeV1,
     request: NormalizedModelRequest,
+    turn: number,
+    step: number,
     signal: AbortSignal,
     fallback: () => Promise<NormalizedModelRequest>,
   ): Promise<NormalizedModelRequest> {
     return this.#wrap(
       "request",
-      (hook, next) => hook.request(agent, request, signal, next),
+      (hook, next) => hook.request(agent, request, turn, step, signal, next),
       fallback,
     );
   }

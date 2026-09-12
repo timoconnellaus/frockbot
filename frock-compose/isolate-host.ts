@@ -40,8 +40,6 @@ import {
 import {
   canonicalJson,
   sha256,
-  PLUGIN_ACTIONS_V1,
-  type PluginActionV1,
   type PluginDescriptorV1,
   type PluginGrantV1,
 } from "@frockbot/core/contracts";
@@ -89,38 +87,6 @@ const OPEN_PLUGIN_GRANTS_V1: readonly PluginGrantV1[] = [
   "memory",
   "workspace",
 ];
-
-/** Each action's loop seam. Absent ⇒ declared in the vocabulary, not yet open. */
-const PLUGIN_ACTION_HOOKS_V1: Partial<
-  Record<PluginActionV1, BotIsolateHookEventNameV1>
-> = {
-  "context.assemble": "system-prompt/assemble",
-  "tools.expose": "agent/tool-exposure",
-  "turn.terminate": "agent/turn-stopping",
-};
-
-/** `tool.call` is the one action that wraps both halves of a tool call. */
-const PLUGIN_TOOL_CALL_HOOKS_V1: readonly BotIsolateHookEventNameV1[] = [
-  "tools/pre-execute",
-  "tools/post-execute",
-];
-
-/** The loop hooks a descriptor's actions add, in vocabulary order. */
-export function pluginHookEventsV1(
-  actions: readonly PluginActionV1[],
-): BotIsolateHookEventNameV1[] {
-  const events: BotIsolateHookEventNameV1[] = [];
-  for (const action of PLUGIN_ACTIONS_V1) {
-    if (!actions.includes(action)) continue;
-    if (action === "tool.call") {
-      events.push(...PLUGIN_TOOL_CALL_HOOKS_V1);
-      continue;
-    }
-    const event = PLUGIN_ACTION_HOOKS_V1[action];
-    if (event) events.push(event);
-  }
-  return events;
-}
 
 /** The `WorkerCode` a Bot isolate is loaded from. Structurally the platform's. */
 export interface BotIsolateWorkerCode {
@@ -264,16 +230,6 @@ export class BotIsolateContributionHost {
         `package "${packageId}" declares grants this deployment has not opened: ${closedGrants.join(", ")}`,
       );
     }
-    const closedActions = descriptor.actions.filter(
-      (action) =>
-        action !== "tool.call" && PLUGIN_ACTION_HOOKS_V1[action] === undefined,
-    );
-    if (closedActions.length > 0) {
-      throw new CompositionMountFailureError(
-        "resolve",
-        `package "${packageId}" declares actions with no loop seam yet: ${closedActions.join(", ")}`,
-      );
-    }
     if (descriptor.slots && descriptor.slots.length > 0) {
       throw new CompositionMountFailureError(
         "resolve",
@@ -355,7 +311,7 @@ export class BotIsolateContributionHost {
         ],
       );
     }
-    const declaredHooks = pluginHookEventsV1(descriptor.actions).toSorted();
+    const declaredHooks = [...descriptor.hooks].toSorted();
     const reportedHooks = (health.hooks ?? []).toSorted();
     if (
       declaredHooks.length !== reportedHooks.length ||
@@ -363,7 +319,7 @@ export class BotIsolateContributionHost {
     ) {
       throw new CompositionMountFailureError(
         "health",
-        `package "${packageId}" isolate hooks do not match its declared actions`,
+        `package "${packageId}" isolate hooks do not match its declared hooks`,
         [
           `declared:${declaredHooks.join(",")}`,
           `reported:${reportedHooks.join(",")}`,
@@ -519,6 +475,21 @@ export class BotIsolateContributionHost {
               entrypoint,
               event,
               { step: this.stepSnapshot(agent, turn, step), tools: current },
+              current,
+              signal,
+            );
+          },
+        });
+      case "agent/request":
+        return hooks.add({
+          request: async (agent, _request, turn, step, signal, next) => {
+            const current = await next();
+            if (agent.botId !== this.options.botId) return current;
+            return this.invokeHook(
+              packageId,
+              entrypoint,
+              event,
+              { step: this.stepSnapshot(agent, turn, step), request: current },
               current,
               signal,
             );

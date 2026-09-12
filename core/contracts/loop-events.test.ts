@@ -84,4 +84,79 @@ describe("the public loop event declaration", () => {
       decodeBotIsolateHookReplacementV1("tools/pre-execute", ready, denied),
     ).toThrow(/cannot lift/);
   });
+
+  test("a request hook shapes the request and cannot redirect it", () => {
+    const original = {
+      requestId: "request-1",
+      provider: "scripted",
+      model: "scripted-v1",
+      system: "core",
+      messages: [],
+      tools: [],
+    };
+    expect(
+      decodeBotIsolateHookReplacementV1(
+        "agent/request",
+        { ...original, system: "plugin system" },
+        original,
+      ),
+    ).toMatchObject({ requestId: "request-1", system: "plugin system" });
+    for (const redirect of [
+      { ...original, requestId: "request-2" },
+      { ...original, provider: "other" },
+      { ...original, model: "other-model" },
+    ]) {
+      expect(() =>
+        decodeBotIsolateHookReplacementV1("agent/request", redirect, original),
+      ).toThrow(/cannot redirect/);
+    }
+    expect(() =>
+      decodeBotIsolateHookReplacementV1(
+        "agent/request",
+        { ...original, live: () => {} },
+        original,
+      ),
+    ).toThrow(/invalid fields/);
+  });
+
+  test("a request hook cannot change the model binding", () => {
+    const binding = {
+      connectionId: "connection-1",
+      connectionGeneration: "1",
+    };
+    const bound = {
+      requestId: "request-1",
+      provider: "scripted",
+      model: "scripted-v1",
+      system: "core",
+      messages: [],
+      tools: [],
+      modelBinding: binding,
+    };
+    expect(
+      decodeBotIsolateHookReplacementV1(
+        "agent/request",
+        { ...bound, system: "plugin system" },
+        bound,
+      ),
+    ).toMatchObject({ modelBinding: binding });
+    for (const redirect of [
+      { ...bound, modelBinding: { ...binding, connectionId: "connection-2" } },
+      { ...bound, modelBinding: { ...binding, connectionGeneration: "2" } },
+      { ...bound, modelBinding: { connectionId: "connection-1" } },
+      { ...bound, modelBinding: undefined },
+    ]) {
+      expect(() =>
+        decodeBotIsolateHookReplacementV1("agent/request", redirect, bound),
+      ).toThrow(/cannot redirect/);
+    }
+    const unbound = { ...bound, modelBinding: undefined };
+    expect(() =>
+      decodeBotIsolateHookReplacementV1(
+        "agent/request",
+        { ...unbound, modelBinding: binding },
+        unbound,
+      ),
+    ).toThrow(/cannot redirect/);
+  });
 });

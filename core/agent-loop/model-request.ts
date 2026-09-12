@@ -87,8 +87,13 @@ async function buildModelRequestV1(
       ? { modelBinding: structuredClone(options.modelBinding) }
       : {}),
   };
-  return services.hooks.request(runtime.agent, proposed, signal, () =>
-    Promise.resolve(proposed),
+  return services.hooks.request(
+    runtime.agent,
+    proposed,
+    turn,
+    step,
+    signal,
+    () => Promise.resolve(proposed),
   );
 }
 

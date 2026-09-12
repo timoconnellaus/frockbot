@@ -166,25 +166,77 @@ export const PROBE_UNDECODABLE_HOOK_SOURCE = PROBE_PACKAGE_SOURCE.replace(
   }];`,
 );
 
-const PROBE_PACKAGE_DESCRIPTOR = decodePluginDescriptorV1({
-  id: PROBE_PACKAGE_ID,
-  displayName: "Bot authored probe",
-  version: "0.0.1",
-  tools: [
-    "reverse_text",
-    "env_keys",
-    "leak_probe",
-    "reach_network",
-    "call_model",
-    "list_capabilities",
-    "connection_lease",
-    "schedule_surface",
-    "context_keys",
-  ].map((name) => ({ name, description: name, inputSchema: {} })),
-  actions: ["tools.expose"],
-  grants: ["ai", "http", "schedule", "memory", "workspace"],
-  contextKeys: ["user", "bot", "session"],
-});
+/**
+ * The sixth hook, as a Bot-authored plugin sees it: `agent/request` is handed
+ * the step it is shaping (turn and step, like `agent/tool-exposure`) and the
+ * request the Bot's authority resolved. Shaping the system prompt is the
+ * plugin's to do.
+ */
+export const PROBE_REQUEST_HOOK_SOURCE = PROBE_PACKAGE_SOURCE.replace(
+  `export const hooks = {`,
+  `export const hooks = {
+  "agent/request": async function (payload, ctx) {
+    if (ctx.event !== "agent/request" || ctx.tool !== undefined) {
+      throw new Error("hook received the wrong narrowed context");
+    }
+    return Object.assign({}, payload.request, {
+      system:
+        payload.request.system +
+        "\\n[shaped by the plugin at turn " +
+        payload.step.turn +
+        " step " +
+        payload.step.step +
+        "]",
+    });
+  },`,
+);
+
+/**
+ * The same hook, redirecting the request at the one field that names which
+ * Connection's credential the lease hangs off. The loop must refuse it.
+ */
+export const PROBE_REQUEST_REDIRECT_HOOK_SOURCE = PROBE_PACKAGE_SOURCE.replace(
+  `export const hooks = {`,
+  `export const hooks = {
+  "agent/request": async function (payload) {
+    return Object.assign({}, payload.request, {
+      modelBinding: {
+        connectionId: "smuggled-connection",
+        connectionGeneration: "1",
+      },
+    });
+  },`,
+);
+
+/** The hooks a source declares, which the descriptor must name exactly. */
+export const PROBE_REQUEST_HOOKS = ["agent/tool-exposure", "agent/request"];
+
+function probePackageDescriptor(hooks: string[]) {
+  return decodePluginDescriptorV1({
+    id: PROBE_PACKAGE_ID,
+    displayName: "Bot authored probe",
+    version: "0.0.1",
+    tools: [
+      "reverse_text",
+      "env_keys",
+      "leak_probe",
+      "reach_network",
+      "call_model",
+      "list_capabilities",
+      "connection_lease",
+      "schedule_surface",
+      "context_keys",
+    ].map((name) => ({ name, description: name, inputSchema: {} })),
+    contractVersion: 3,
+    hooks,
+    grants: ["ai", "http", "schedule", "memory", "workspace"],
+    // The probe's `reach_network` tool proves egress is refused whatever the
+    // descriptor declares: `globalOutbound` is null and no egress stub exists
+    // yet.
+    network: { hosts: ["example.com"] },
+    contextKeys: ["user", "bot", "session"],
+  });
+}
 
 /** A deliberate syntax error: `prepare()` must fail with a diagnostic, not hang. */
 export const PROBE_BROKEN_SOURCE = `
@@ -315,6 +367,7 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
   private async generation(
     artifact?: ArtifactRefV1,
     createdAt = "2026-08-31T00:00:00.000Z",
+    hooks: string[] = ["agent/tool-exposure"],
   ): Promise<CompositionGenerationV1> {
     const base = await bootstrapGeneration({ createdAt });
     if (!artifact) return base;
@@ -323,7 +376,7 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
       {
         packageId: PROBE_PACKAGE_ID,
         version: "0.0.1",
-        descriptor: PROBE_PACKAGE_DESCRIPTOR,
+        descriptor: probePackageDescriptor(hooks),
         provenance: {
           kind: "bot" as const,
           packageId: PROBE_PACKAGE_ID,
@@ -358,6 +411,8 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
     /** Varies the generation without varying the artifact. */
     generationCreatedAt?: string;
     deadlineMs?: number;
+    /** The hooks the descriptor declares, which must match the source's. */
+    hooks?: string[];
   }): Promise<{
     composition: ShellMountedComposition;
     generation: CompositionGenerationV1;
@@ -365,6 +420,7 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
     const generation = await this.generation(
       input.artifact,
       input.generationCreatedAt,
+      input.hooks,
     );
     // SAFETY: exported WorkerEntrypoints are materialized on ctx.exports;
     // workers-types cannot infer the generated local RPC stubs.
@@ -513,6 +569,7 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
     artifact?: ArtifactRefV1;
     text: string;
     deadlineMs?: number;
+    hooks?: string[];
   }): Promise<{
     text: string;
     loaderCalls: number;

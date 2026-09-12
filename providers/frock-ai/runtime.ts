@@ -225,7 +225,7 @@ export function createFrockAiFeature(
         fallbackAgents.add(agent);
         return { kind: "fallback" } as const;
       },
-      request: async (agent, _request, _signal, next) => {
+      request: async (agent, _request, _turn, _step, _signal, next) => {
         const request = await next();
         return fallbackAgents.has(agent)
           ? { ...request, model: FROCK_AI_DEFAULT_MODEL }

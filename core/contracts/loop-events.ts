@@ -13,6 +13,7 @@
 // is added only to the mounted Bot's hook list and is additionally
 // fenced by botId and Composition generation, so it cannot reach another Bot
 // or an in-flight Turn pinned to another generation.
+import { canonicalJson } from "./canonical-json.js";
 import type {
   PromptAssembly,
   PromptAssemblyContext,
@@ -214,15 +215,15 @@ export type LoopEventNameV1 = keyof LoopEventPayloadMapV1;
 
 /**
  * The loop seams a plugin may wrap, and only these. They are exactly the
- * actions `AGENTS.md` names — `context.assemble`, `tools.expose`, `tool.call`
- * (both halves) and `turn.terminate` — and adding one is a deliberate widening
- * of the plugin surface. Operational wrappers that carry an AbortSignal, an
- * async stream, or an effect body stay first-party: the isolate receives
- * policy DTOs, never control of the durable skeleton.
+ * hooks `AGENTS.md` names, and adding one is a deliberate widening of the
+ * plugin surface. Operational wrappers that carry an AbortSignal, an async
+ * stream, or an effect body stay first-party: the isolate receives policy
+ * DTOs, never control of the durable skeleton.
  */
 export const BOT_ISOLATE_HOOK_EVENTS_V1 = [
   "system-prompt/assemble",
   "agent/tool-exposure",
+  "agent/request",
   "tools/pre-execute",
   "tools/post-execute",
   "agent/turn-stopping",
@@ -370,6 +371,13 @@ function sameHookCall(left: ToolCall, right: ToolCall): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
+/** An absent binding is its own value: absent has to stay absent. */
+function modelBindingKey(
+  binding: NormalizedModelRequest["modelBinding"],
+): string {
+  return binding === undefined ? "absent" : canonicalJson(binding);
+}
+
 /** Exact, event-specific decoding for an untrusted isolate replacement. */
 export function decodeBotIsolateHookReplacementV1<
   Event extends BotIsolateHookEventNameV1,
@@ -423,6 +431,27 @@ export function decodeBotIsolateHookReplacementV1<
         },
         label,
       ).tools;
+      break;
+    }
+    case "agent/request": {
+      // The request id is the idempotency key a spend record and a credential
+      // lease are held under, and the provider, model and model binding are
+      // what the Bot's authority resolved — the binding names the Connection
+      // whose credential the lease hangs off. A plugin shapes the request it
+      // was handed, it does not redirect it. Everything else — system,
+      // messages, tools, params — is the plugin's to replace.
+      const prior = original as NormalizedModelRequest;
+      const request = decodeNormalizedModelRequestV1(input, label);
+      if (
+        request.requestId !== prior.requestId ||
+        request.provider !== prior.provider ||
+        request.model !== prior.model ||
+        modelBindingKey(request.modelBinding) !==
+          modelBindingKey(prior.modelBinding)
+      ) {
+        throw new Error(`${label} cannot redirect the request`);
+      }
+      decoded = request;
       break;
     }
     case "tools/pre-execute": {
@@ -540,7 +569,7 @@ export const LOOP_EVENTS_V1 = {
     mode: "waterfall",
     payload: "{ step, request }",
     returns: "NormalizedModelRequest",
-    isolateHook: false,
+    isolateHook: true,
   },
   "agent/request-error": {
     mode: "waterfall",

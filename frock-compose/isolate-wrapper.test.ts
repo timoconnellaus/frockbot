@@ -101,7 +101,7 @@ describe("the generated wrapper's invocation decoder", () => {
       event: "agent/tool-exposure",
     });
     expect(() =>
-      decodeHookInvocation({ ...hook, event: "agent/request" }),
+      decodeHookInvocation({ ...hook, event: "agent/request-error" }),
     ).toThrow(/unsupported/);
     expect(() =>
       decodeHookInvocation({ ...hook, signal: "live AbortSignal" }),
