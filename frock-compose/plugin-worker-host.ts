@@ -169,7 +169,6 @@ export interface PreparedPluginWorker {
   readonly mounted: readonly string[];
   readonly failures: readonly PluginMountFailureV1[];
   commit(): Promise<ActivePluginWorker>;
-  rollback(): Promise<void>;
 }
 
 export interface ActivePluginWorker {
@@ -190,8 +189,15 @@ function errorMessage(error: unknown): string {
  * otherwise the order the generation listed them. A Plugin whose need no
  * sibling meets, or that sits in a cycle, is left out and named, and the rest
  * still mount.
+ *
+ * `alreadyExcluded` names Plugins the caller has already failed and named. They
+ * are still read as providers, so a Plugin consuming their services is told the
+ * provider did not mount rather than that nothing provides the service.
  */
-export function pluginMountOrderV1(members: readonly BotIsolateMemberV1[]): {
+export function pluginMountOrderV1(
+  members: readonly BotIsolateMemberV1[],
+  alreadyExcluded: ReadonlySet<string> = new Set(),
+): {
   order: BotIsolateMemberV1[];
   failures: PluginMountFailureV1[];
 } {
@@ -201,6 +207,7 @@ export function pluginMountOrderV1(members: readonly BotIsolateMemberV1[]): {
     { member: BotIsolateMemberV1; version: number }
   >();
   for (const member of members) {
+    if (alreadyExcluded.has(member.packageId)) continue;
     for (const service of member.descriptor.provides ?? []) {
       const existing = providers.get(service.name);
       if (existing) {
@@ -214,7 +221,20 @@ export function pluginMountOrderV1(members: readonly BotIsolateMemberV1[]): {
       providers.set(service.name, { member, version: service.version });
     }
   }
-  const excluded = new Set(failures.map((failure) => failure.pluginId));
+  // An already-failed Plugin fills only the services no mountable sibling
+  // claims, so it never displaces a live provider or earns a duplicate failure
+  // on top of the one it already has.
+  for (const member of members) {
+    if (!alreadyExcluded.has(member.packageId)) continue;
+    for (const service of member.descriptor.provides ?? []) {
+      if (providers.has(service.name)) continue;
+      providers.set(service.name, { member, version: service.version });
+    }
+  }
+  const excluded = new Set([
+    ...alreadyExcluded,
+    ...failures.map((failure) => failure.pluginId),
+  ]);
   const needs = new Map<string, BotIsolateMemberV1[]>();
   for (const member of members) {
     if (excluded.has(member.packageId)) continue;
@@ -229,6 +249,13 @@ export function pluginMountOrderV1(members: readonly BotIsolateMemberV1[]): {
         });
         excluded.add(member.packageId);
         break;
+      }
+      if (excluded.has(provider.member.packageId)) {
+        // The Kahn pass below names this as consuming from a Plugin that did
+        // not mount, which is the true reason whatever else the provider
+        // declared.
+        upstream.push(provider.member);
+        continue;
       }
       if (provider.version !== service.version) {
         failures.push({
@@ -320,20 +347,20 @@ export class PluginWorkerHost {
     members: readonly BotIsolateMemberV1[],
   ): Promise<PreparedPluginWorker> {
     const failures: PluginMountFailureV1[] = [];
-    const admitted: BotIsolateMemberV1[] = [];
+    const refused = new Set<string>();
     for (const member of members) {
       const refusal = this.refusal(member);
-      if (refusal) {
-        failures.push({
-          pluginId: member.packageId,
-          phase: "resolve",
-          message: refusal,
-        });
-        continue;
-      }
-      admitted.push(member);
+      if (!refusal) continue;
+      failures.push({
+        pluginId: member.packageId,
+        phase: "resolve",
+        message: refusal,
+      });
+      refused.add(member.packageId);
     }
-    const ordered = pluginMountOrderV1(admitted);
+    // A refused Plugin still counts as the provider of its services, so its
+    // consumers are told the provider did not mount.
+    const ordered = pluginMountOrderV1(members, refused);
     failures.push(...ordered.failures);
 
     const resolved: ResolvedPlugin[] = [];
@@ -361,7 +388,6 @@ export class PluginWorkerHost {
         mounted: [],
         failures,
         commit: () => Promise.resolve({ dispose: () => Promise.resolve() }),
-        rollback: () => Promise.resolve(),
       };
     }
 
@@ -517,7 +543,6 @@ export class PluginWorkerHost {
           },
         });
       },
-      rollback: () => Promise.resolve(),
     };
   }
 

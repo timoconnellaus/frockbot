@@ -416,6 +416,24 @@ describe("mount order from provides and consumes", () => {
     ]);
   });
 
+  test("a consumer of a refused provider is named for the plugin that did not mount", async () => {
+    const subject = harness();
+    const provider = member("provider", {
+      slots: ["composer.toolbar"],
+      provides: [{ name: "greeting", version: 1 }],
+    });
+    const consumer = member("consumer", {
+      consumes: [{ name: "greeting", version: 1 }],
+    });
+    const prepared = await subject.host.mount([provider, consumer]);
+    expect(prepared.mounted).toEqual([]);
+    expect(subject.loads).toHaveLength(0);
+    expect(prepared.failures.map((failure) => failure.message)).toEqual([
+      'plugin "provider" declares slots, which open when the settings section lands',
+      'plugin "consumer" consumes a service from a plugin that did not mount',
+    ]);
+  });
+
   test("a plugin downstream of a cycle is named for the cycle it is not in", () => {
     const a = member("a", {
       provides: [{ name: "a-data", version: 1 }],
