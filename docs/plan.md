@@ -22,7 +22,7 @@ The seven modules: `core`, `app`, `frock-compose`, `providers`, `computer`, `app
 Settled, and not to be relitigated without a reason that is new:
 
 - **Bot-authored packages stay.** Self-modification is the product, so the loader, generations and grants survive — scoped to untrusted code rather than applied to everything.
-- **A tenant is a User.** One frock-compose client per account. Per-Bot scoping is a later addition, not a correction; a Bot authoring a plugin makes it available to that User's Bots, which is what account-shaped configuration already means.
+- **A tenant is a User.** One Plugin worker per account. A Bot authoring a Plugin installs it for that User; which Bots run it is the Bot's own enable map ([ADR 0026](adr/0026-plugins.md)).
 - **The base has no DI container.** Ordinary imports. This is what stops the collapse from quietly undoing itself.
 - **The Computer stays, as a Package.** One provider-neutral `ComputerHost` interface with Fly behind it, so another host can be substituted. It leaves the Applet authoring path entirely.
 - **Applets follow cloudflare-os.** Source in object storage, built by a cloud service, mounted from an immutable artifact into a Durable Object facet. The runtime is already correct; only authoring moves.
@@ -112,9 +112,13 @@ The flip served the Flutter web build at `/` and took the Vue client out in the 
 
 - _Cut 3._ Triggers. A third Routine trigger beside schedule and webhook — `{ kind: "connection", connectionId, triggerType, config }` — whose instance is created at the provider when the Routine is, under an effect id, and deleted with it. One deployment-wide `POST /api/connect/events` door, HMAC-verified with `COMPOSIO_WEBHOOK_SECRET`, routes a `trigger.message` to the owning Bot as a firing keyed by the event id, marks a Routine unavailable on `trigger.disabled`, and marks a Connection failed on `connected_account.expired`. `routine_manage` gains the trigger and a `list_triggers` that offers only connected apps' events.
 
+**12. Plugins.** _In progress, in nine steps that each leave `main` shippable ([ADR 0026](adr/0026-plugins.md))._ A User customises a Bot by talking to it, and the way a Bot changes is by adding Plugins. Two layers: the deploy holds the loop, the first-party features behind per-Bot flags, the loopbacks and the hook contract; one Dynamic Worker per User holds every Plugin the deployment seeded or a Bot wrote, keyed by the hash of its artifacts and the contract version so a release never reloads it. Six hooks answer with plain patches. Storage, network, model and settings are loopback capabilities masked per Bot per Turn; declared hosts and open network access are approved by the User on the Plugin's card. The User Durable Object owns the generation; the Bot owns its enable map, approvals, settings and quarantine. Seeded Plugins are locked, default-on, default-off or admin-gated. The Bot authors through a `plugin_*` Tool Namespace and a managed Skill, builds through the Applet build service, and activates through an Approval card. Plugins can be Routine trigger sources behind an app-owned `/hooks/<token>` route. The page is "Plugins".
+
+- _Step 1, done._ The ADR, the terms in `CONTEXT.md`, and the amendments to `AGENTS.md`: the sixth hook, the shape of the `http` grant, provides and consumes, triggers, settings, the per-Bot exception to account-shaped configuration, and the one path by which a Plugin gains reach.
+
 ## Not now
 
-Voice, billing, package publishing, per-Bot plugin scoping, avatar wearables, and Applet sharing between Users. Each is an addition to the target, not a change to it.
+Voice, billing, package publishing, a Plugin marketplace, avatar wearables, and Applet sharing between Users. Each is an addition to the target, not a change to it.
 
 ## Billing implementation awaiting launch
 
