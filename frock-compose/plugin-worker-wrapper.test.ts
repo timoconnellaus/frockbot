@@ -40,6 +40,7 @@ type NarrowContext = (
   env: Record<string, unknown>,
   invocation: Record<string, unknown>,
   plugin: Record<string, unknown>,
+  deadlineMs: number,
 ) => Record<string, unknown>;
 
 const narrowContext = new Function(
@@ -121,7 +122,7 @@ type HookPlugin = {
 type RunHookChain = (
   plugins: HookPlugin[],
   invocation: Record<string, unknown>,
-  contextFor: (plugin: HookPlugin) => unknown,
+  contextFor: (plugin: HookPlugin, deadlineMs: number) => unknown,
 ) => Promise<{
   status: string;
   replacement?: unknown;
@@ -216,6 +217,26 @@ describe("the generated wrapper's hook chain", () => {
     expect(result.failures[1]!.reason).toBe(
       "the hook chain exhausted its deadline of 150ms before this plugin ran",
     );
+  });
+
+  test("hands each plugin the deadline it actually has, not the chain's", async () => {
+    const slices: number[] = [];
+    await runHookChain(
+      [
+        hookPlugin("first", async () => {
+          await sleep(120);
+        }),
+        hookPlugin("second", () => undefined),
+      ],
+      hookInvocation(1_000, ["first", "second"]),
+      (_plugin, deadlineMs) => {
+        slices.push(deadlineMs);
+        return {};
+      },
+    );
+    expect(slices).toHaveLength(2);
+    expect(slices[0]).toBeLessThanOrEqual(1_000);
+    expect(slices[1]).toBeLessThan(slices[0]! - 100);
   });
 });
 
@@ -345,16 +366,16 @@ describe("the generated wrapper's narrowed context", () => {
     runId: "run-1",
     turnId: "turn-1",
     generationId: "gen-1",
-    deadlineMs: 1_000,
   };
 
   test("builds no grant member for a plugin that declared no grants", () => {
     const subject = env();
-    const context = narrowContext(subject.env, invocation, {
-      pluginId: "weather",
-      grants: [],
-      services: {},
-    });
+    const context = narrowContext(
+      subject.env,
+      invocation,
+      { pluginId: "weather", grants: [], services: {} },
+      1_000,
+    );
     for (const key of [
       "model",
       "memory",
@@ -376,11 +397,16 @@ describe("the generated wrapper's narrowed context", () => {
 
   test("builds exactly the declared grant's member, wired to the stub", async () => {
     const subject = env();
-    const context = narrowContext(subject.env, invocation, {
-      pluginId: "weather",
-      grants: ["schedule"],
-      services: { forecast: { at: () => "noon" } },
-    });
+    const context = narrowContext(
+      subject.env,
+      invocation,
+      {
+        pluginId: "weather",
+        grants: ["schedule"],
+        services: { forecast: { at: () => "noon" } },
+      },
+      1_000,
+    );
     expect(typeof context.schedule).toBe("function");
     expect(context.memory).toBeUndefined();
     await expect(
@@ -400,11 +426,16 @@ describe("the generated wrapper's narrowed context", () => {
 
   test("holds every catalogued key when every grant is declared", () => {
     const subject = env();
-    const context = narrowContext(subject.env, invocation, {
-      pluginId: "weather",
-      grants: ["ai", "memory", "workspace", "http", "schedule"],
-      services: {},
-    });
+    const context = narrowContext(
+      subject.env,
+      invocation,
+      {
+        pluginId: "weather",
+        grants: ["ai", "memory", "workspace", "http", "schedule"],
+        services: {},
+      },
+      1_000,
+    );
     expect(Object.keys(context).toSorted()).toEqual(
       [...BOT_ISOLATE_NARROW_CONTEXT_KEYS_V1].toSorted(),
     );

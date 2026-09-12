@@ -161,6 +161,14 @@ export const BOT_ISOLATE_DEFAULT_LIMITS: BotIsolateLimits = {
 };
 
 export const BOT_ISOLATE_DEFAULT_DEADLINE_MS = 15_000;
+
+/**
+ * What the Durable Object's race allows on top of the chain's own budget, so
+ * a chain that spends every millisecond it was given still gets its answer —
+ * including the Plugins it named as skipped — back before the race fires.
+ */
+export const PLUGIN_WORKER_HOOK_RACE_MARGIN_MS = 250;
+
 export const BOT_ISOLATE_DEFAULT_HEALTH_DEADLINE_MS = 10_000;
 
 /** A mounted worker: what it registers on commit, and what it could not mount. */
@@ -817,7 +825,7 @@ export class PluginWorkerHost {
   ): Promise<LoopEventReturnMapV1[Event]> {
     const deadlineMs = Math.min(
       this.options.deadlineMs ?? BOT_ISOLATE_DEFAULT_DEADLINE_MS,
-      ISOLATE_MAX_DEADLINE_MS,
+      ISOLATE_MAX_DEADLINE_MS - PLUGIN_WORKER_HOOK_RACE_MARGIN_MS,
     );
     try {
       const invocation: PluginWorkerHookInvocationV1<Event> = {
@@ -835,7 +843,7 @@ export class PluginWorkerHost {
       const result = decodePluginWorkerHookResultV1(
         await raceDeadline(
           () => entrypoint.hook(invocation),
-          deadlineMs,
+          deadlineMs + PLUGIN_WORKER_HOOK_RACE_MARGIN_MS,
           signal,
         ),
         "plugin worker hook result",

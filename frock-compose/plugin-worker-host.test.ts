@@ -28,7 +28,32 @@ import {
   type IsolateHookFailureV1,
   type PluginWorkerHostOptions,
 } from "./plugin-worker-host.ts";
-import { PLUGIN_WORKER_MAIN_MODULE } from "./plugin-worker-wrapper.ts";
+import {
+  BOT_ISOLATE_DEADLINE_SOURCE,
+  BOT_ISOLATE_ERROR_TEXT_SOURCE,
+  BOT_ISOLATE_HOOK_CHAIN_SOURCE,
+  BOT_ISOLATE_HOOK_VALUE_KEYS_V1,
+  PLUGIN_WORKER_MAIN_MODULE,
+} from "./plugin-worker-wrapper.ts";
+
+// The generated chain, compiled from the source the worker embeds, so this
+// runs the real chain behind the Durable Object's race.
+const runHookChain = new Function(
+  [
+    `const HOOK_VALUE_KEYS = ${JSON.stringify(BOT_ISOLATE_HOOK_VALUE_KEYS_V1)};`,
+    BOT_ISOLATE_DEADLINE_SOURCE,
+    BOT_ISOLATE_ERROR_TEXT_SOURCE,
+    BOT_ISOLATE_HOOK_CHAIN_SOURCE,
+    "return runHookChain;",
+  ].join("\n"),
+)() as (
+  plugins: unknown[],
+  invocation: PluginWorkerHookInvocationV1,
+  contextFor: () => unknown,
+) => Promise<{
+  status: string;
+  failures: { pluginId: string; reason: string }[];
+}>;
 
 const HASH = "a".repeat(64);
 
@@ -888,6 +913,73 @@ describe("hooks", () => {
       expect(subject.hookFailures[0]!.packageId).toBe("weather");
       await active.dispose();
     }
+  });
+
+  test("lets a chain that spends its whole deadline still name who it skipped", async () => {
+    const subject = harness({
+      deadlineMs: 150,
+      health: (plugins) => ({
+        schemaVersion: 1,
+        contractVersion: ISOLATE_CONTRACT_VERSION,
+        plugins: plugins.map((pluginId) =>
+          healthy(pluginId, { hooks: ["agent/tool-exposure"] }),
+        ),
+      }),
+      hook: (invocation) =>
+        runHookChain(
+          [
+            {
+              pluginId: "slow",
+              ok: true,
+              hooks: ["agent/tool-exposure"],
+              module: {
+                hooks: {
+                  "agent/tool-exposure": () => new Promise(() => {}),
+                },
+              },
+            },
+            {
+              pluginId: "starved",
+              ok: true,
+              hooks: ["agent/tool-exposure"],
+              module: {
+                hooks: { "agent/tool-exposure": () => undefined },
+              },
+            },
+          ],
+          invocation,
+          () => ({}),
+        ) as ReturnType<PluginWorkerEntrypoint["hook"]>,
+    });
+    const prepared = await subject.host.mount([
+      member("slow", { hooks: ["agent/tool-exposure"] }),
+      member("starved", {
+        hooks: ["agent/tool-exposure"],
+        contentHash: "c".repeat(64),
+      }),
+    ]);
+    const active = await prepared.commit();
+    const original = [
+      { name: "first_party", description: "", inputSchema: {} },
+    ];
+    expect(
+      await subject.hooks.toolExposure(
+        agent(),
+        original,
+        1,
+        1,
+        new AbortController().signal,
+        () => Promise.resolve(original),
+      ),
+    ).toEqual(original);
+    expect(subject.hookFailures.map((failure) => failure.packageId)).toEqual([
+      "slow",
+      "starved",
+    ]);
+    expect(subject.hookFailures[1]!.message).toBe(
+      "the hook chain exhausted its deadline of 150ms before this plugin ran",
+    );
+    await active.dispose();
   });
 });
 

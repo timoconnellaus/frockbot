@@ -200,7 +200,7 @@ const BOT_ISOLATE_CONTEXT_PROPERTY_SOURCE_V1 = {
       generationId: invocation.generationId,
     }`,
   packageId: "plugin.pluginId",
-  deadlineMs: "invocation.deadlineMs",
+  deadlineMs: "deadlineMs",
   bindings: "Object.keys(env).sort()",
   capabilities: `{
       list: function () {
@@ -280,7 +280,7 @@ export const BOT_ISOLATE_NARROW_CONTEXT_KEYS_V1 = [
   ...Object.values(BOT_ISOLATE_GRANT_PROPERTY_SOURCE_V1).map(([key]) => key),
 ] as Array<keyof BotPackageContextV1>;
 
-export const BOT_ISOLATE_NARROW_CONTEXT_SOURCE_V1 = `function narrowContext(env, invocation, plugin) {
+export const BOT_ISOLATE_NARROW_CONTEXT_SOURCE_V1 = `function narrowContext(env, invocation, plugin, deadlineMs) {
   const capabilities = env.CAPABILITIES;
   const grants = plugin.grants || [];
   const context = {
@@ -322,9 +322,9 @@ export const BOT_ISOLATE_ERROR_TEXT_SOURCE = `function errorText(error) {
  * The hook chain, shared verbatim between the generated wrapper and the Bun
  * test that proves it. The invocation's deadline is the budget for the whole
  * chain, because the Durable Object races the single `hook()` call against
- * that same number: each Plugin is given only what is left of it, and a
- * Plugin the chain reaches with nothing left is skipped and named rather
- * than started on borrowed time the kernel would charge to everyone.
+ * that number plus a fixed margin: each Plugin is given only what is left of
+ * it, and a Plugin the chain reaches with nothing left is skipped and named
+ * rather than started on borrowed time the kernel would charge to everyone.
  */
 export const BOT_ISOLATE_HOOK_CHAIN_SOURCE = `var HOOK_MIN_SLICE_MS = 25;
 async function runHookChain(plugins, invocation, contextFor) {
@@ -348,7 +348,7 @@ async function runHookChain(plugins, invocation, contextFor) {
       replaced && valueKey
         ? Object.assign({}, invocation.payload, { [valueKey]: replacement })
         : invocation.payload;
-    const context = contextFor(plugin);
+    const context = contextFor(plugin, remaining);
     try {
       const value = await withIsolateDeadline(function () {
         return plugin.module.hooks[invocation.event](payload, context);
@@ -588,7 +588,7 @@ export default class extends WorkerEntrypoint {
     }
     try {
       const plugin = findPlugin(this.env, invocation.pluginId);
-      const context = narrowContext(this.env, invocation, plugin);
+      const context = narrowContext(this.env, invocation, plugin, invocation.deadlineMs);
       const value = await withIsolateDeadline(function () {
         return plugin.module.execute(invocation.tool, invocation.input, context);
       }, invocation.deadlineMs);
@@ -611,8 +611,8 @@ export default class extends WorkerEntrypoint {
   async hook(rawInvocation) {
     const invocation = decodeHookInvocation(rawInvocation);
     const env = this.env;
-    return runHookChain(mountAll(env), invocation, function (plugin) {
-      return narrowContext(env, invocation, plugin);
+    return runHookChain(mountAll(env), invocation, function (plugin, deadlineMs) {
+      return narrowContext(env, invocation, plugin, deadlineMs);
     });
   }
 
@@ -631,9 +631,9 @@ export default class extends WorkerEntrypoint {
           runId: "trigger:" + invocation.routineId,
           turnId: "trigger:" + invocation.routineId,
           generationId: "trigger",
-          deadlineMs: invocation.deadlineMs,
         },
         plugin,
+        invocation.deadlineMs,
       );
       const value = await withIsolateDeadline(function () {
         return plugin.module.triggers[invocation.trigger](
