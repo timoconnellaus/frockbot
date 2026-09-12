@@ -26,7 +26,7 @@ import {
   type TextSource,
   type VoiceTurnContext,
 } from "@cloudflare/voice";
-import { ElevenLabsTTS } from "@cloudflare/voice-elevenlabs";
+import { ElevenLabsSTT, ElevenLabsTTS } from "@cloudflare/voice-elevenlabs";
 import {
   renderVoiceSystemPromptV1,
   runVoiceTurnV1,
@@ -49,6 +49,12 @@ import {
   type VoiceTranscriberV1,
 } from "@frockbot/app/voice/sleeping-transcriber";
 import { guardSpeechProviderV1 } from "@frockbot/app/voice/tts-guard";
+import {
+  VOICE_ASSISTANT_SCRIBE_OPTIONS_V1,
+  voiceAssistantSttKeyV1,
+  voiceAssistantSttProviderV1,
+  type VoiceAssistantSttEnvV1,
+} from "@frockbot/app/voice/scribe-transcriber";
 import {
   decodeVoiceAssistantClientMessageV1,
   VOICE_ASSISTANT_OUTPUT_SAMPLE_RATE_V1,
@@ -148,6 +154,8 @@ export interface VoiceAssistantEnv {
   OPENAI_API_KEY?: string;
   ELEVENLABS_API_KEY?: string;
   ELEVENLABS_VOICE_ID?: string;
+  /** `scribe` (default) or `openai`: which provider the assistant listens through. */
+  VOICE_ASSISTANT_STT?: string;
   USER_CONFIGURATIONS: DurableObjectNamespace;
   BOT_STATES: DurableObjectNamespace;
   MEMORY_FILES?: R2Bucket;
@@ -162,14 +170,12 @@ export interface VoiceAssistantEnv {
 }
 
 /** True when the deployment can run the assistant at all. */
-export function voiceAssistantConfiguredV1(env: {
-  AI?: unknown;
-  OPENAI_API_KEY?: string;
-  ELEVENLABS_API_KEY?: string;
-}): boolean {
+export function voiceAssistantConfiguredV1(
+  env: { AI?: unknown } & VoiceAssistantSttEnvV1,
+): boolean {
   return (
     Boolean(env.AI) &&
-    Boolean(env.OPENAI_API_KEY?.trim()) &&
+    Boolean(voiceAssistantSttKeyV1(env)) &&
     Boolean(env.ELEVENLABS_API_KEY?.trim())
   );
 }
@@ -336,14 +342,22 @@ export class VoiceAssistant extends VoiceAgentBase<
   }
 
   protected createInnerTranscriber(): VoiceTranscriberV1 | undefined {
-    const apiKey = this.env.OPENAI_API_KEY?.trim();
+    const apiKey = voiceAssistantSttKeyV1(this.env);
     if (!apiKey) return undefined;
-    return createOpenAiTranscriberV1({
-      openSocket: () =>
-        openVoiceUpstreamSocket(VOICE_REALTIME_TRANSCRIPTION_URL_V1, {
-          authorization: `Bearer ${apiKey}`,
-        }),
-    });
+    if (voiceAssistantSttProviderV1(this.env) === "openai") {
+      return createOpenAiTranscriberV1({
+        openSocket: () =>
+          openVoiceUpstreamSocket(VOICE_REALTIME_TRANSCRIPTION_URL_V1, {
+            authorization: `Bearer ${apiKey}`,
+          }),
+      });
+    }
+    // The SDK's `Transcriber` and this module's `VoiceTranscriberV1` are the
+    // same shape; the adapter opens its own socket with a `fetch` upgrade.
+    return new ElevenLabsSTT({
+      apiKey,
+      ...VOICE_ASSISTANT_SCRIBE_OPTIONS_V1,
+    }) as VoiceTranscriberV1;
   }
 
   protected async chatCompletion(

@@ -14,9 +14,9 @@
 ///   is speaking, is enough to stop it.
 ///
 /// What it must never be used for is deciding whether an individual frame is
-/// worth sending once the upstream is awake. OpenAI's server VAD decides where
-/// a turn ends and needs the silence after the words to decide it — 700 ms,
-/// `silence_duration_ms` — so an awake session gets a frame every 40 ms (a
+/// worth sending once the upstream is awake. The server's transcriber decides
+/// where a turn ends and needs the silence after the words to decide it —
+/// about half a second — so an awake session gets a frame every 40 ms (a
 /// silent one while the reply plays, which is the controller's rule, not
 /// this gate's). [quietForMs] exists for the one policy that does stop the
 /// audio: twenty continuous seconds of quiet while listening.

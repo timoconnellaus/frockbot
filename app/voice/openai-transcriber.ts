@@ -1,5 +1,7 @@
-// The continuous assistant's ears: OpenAI realtime transcription with the
-// server deciding where a turn ends.
+// The continuous assistant's fallback ears: OpenAI realtime transcription
+// with the server deciding where a turn ends. Reached only under
+// `VOICE_ASSISTANT_STT=openai`; the default is ElevenLabs Scribe v2 Realtime
+// (`./scribe-transcriber.ts`).
 //
 // The assistant is hands-free. Nobody presses a key to say "I have finished
 // speaking", so something has to hear the pause — and the thing that hears it

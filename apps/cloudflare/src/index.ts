@@ -258,6 +258,7 @@ interface Env {
   ELEVENLABS_API_KEY?: string;
   /** The ElevenLabs voice the assistant speaks with; George when unset. */
   ELEVENLABS_VOICE_ID?: string;
+  VOICE_ASSISTANT_STT?: string;
   /** A local dictation stand-in for the test harness; never set in production. */
   VOICE_DICTATION_UPSTREAM_URL?: string;
   COMPUTER_HOST: Fetcher;
