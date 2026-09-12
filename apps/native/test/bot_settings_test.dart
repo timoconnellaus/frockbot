@@ -519,6 +519,7 @@ class _ShellState extends State<_Shell> {
               profiles: profiles,
               unread: const {},
               archived: const {},
+              focusedBotId: null,
               activeBotId: 'alpha',
               workingBotId: null,
               loaded: true,
