@@ -25,13 +25,13 @@ whole ElevenLabs path — is still untested end to end. The deterministic checks
 ## Dictation
 
 1. Open a Bot, press the microphone with an empty composer, start speaking
-   immediately. Expect: the first words appear (opening audio buffered
-   while the socket connects) and the interim text grows about half a second
-   behind you, nothing is sent.
-2. Press Stop mid-sentence. Expect: the capture's transcript replaces the
-   interim text within ~1 s (bounded at 6 s), the draft stays editable,
-   nothing is sent until you press Send. There is no upstream turn detection,
-   so Stop is the only thing that transcribes: a capture abandoned without
+   immediately. Expect: the message field gives way to the recording dock
+   (opening audio is buffered while the socket connects), its meter follows
+   your voice, no words are shown while you speak, and nothing is sent.
+2. Press Stop mid-sentence. Expect: the dock closes and the capture's
+   transcript is in the draft within ~1 s (bounded at 6 s), the draft stays
+   editable, nothing is sent until you press Send. There is no upstream turn
+   detection, so Stop is the only thing that transcribes: a capture without
    Stop leaves nothing behind.
 3. Start dictating, switch to another Bot in the sidebar. Expect: dictation
    stops and its words are in the first Bot's draft, not the second's.
@@ -48,9 +48,9 @@ whole ElevenLabs path — is still untested end to end. The deterministic checks
 
 ## Continuous session
 
-1. Press the waveform button. Expect: the footer appears at once, the meter's
-   lobes bloom white and pale pink from the microphone before the server says
-   `listening`, the call starts within ~2 s.
+1. Press the waveform button. Expect: the footer slides up from the bottom
+   edge immediately, the meter's lobes bloom white and pale pink from the
+   microphone before the server says `listening`, the call starts within ~2 s.
 2. Ask "what bots do I have". Expect: the reply is spoken from ElevenLabs
    (George, Flash v2.5, PCM 24 kHz), the same meter blooms deep rose from the
    playback, the reply names the live Bots.
