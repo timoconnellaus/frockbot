@@ -19,6 +19,8 @@ library;
 
 import 'dart:collection';
 import 'dart:math' as math;
+import 'dart:typed_data';
+import 'dart:ui' show Vertices, VertexMode;
 
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
@@ -123,6 +125,70 @@ class VoiceLobe {
   bool isOver(double now) => now - born >= life;
 }
 
+/// Turns raw levels into one that can be watched.
+///
+/// A microphone frame's RMS is noisy, and speech dips under the silence
+/// threshold between syllables. Shown as it is, the meter steps thirty times
+/// a second and blinks out in every gap. So the shown level chases the real
+/// one: quickly up, so a word lands when it is spoken, and slowly down, so a
+/// gap reads as a breath rather than a cut. Whose voice it is holds for a
+/// moment past their last sound, so the colour does not flicker between the
+/// two speakers on every pause.
+class VoiceLevelFollower {
+  /// Time constants of the chase, in seconds: the level closes about 63% of
+  /// the gap to its target in one of these.
+  static const double attack = 0.04;
+  static const double release = 0.18;
+
+  /// How long a speaker keeps the meter after their last sound.
+  static const double hold = 0.25;
+
+  double level = 0;
+  VoiceSpeaker speaker = VoiceSpeaker.nobody;
+  double _flow = 0;
+  double _personUntil = -1;
+  double _botUntil = -1;
+
+  /// Advances the follower to [now] with the raw levels as they are now.
+  /// [dt] is the time since the last step, in seconds.
+  void step({
+    required double now,
+    required double dt,
+    required double mic,
+    required double playback,
+  }) {
+    // The Bot's level is filtered before anything else, because a spoken
+    // reply is continuous and a per-frame RMS of it is not.
+    _flow = _flow * 0.55 + _clean(playback) * 0.45;
+    final person = _clean(mic);
+    if (person > voiceLevelEpsilon) _personUntil = now + hold;
+    if (_flow > voiceLevelEpsilon) _botUntil = now + hold;
+    final double target;
+    if (now < _personUntil) {
+      speaker = VoiceSpeaker.person;
+      target = person > voiceLevelEpsilon ? shape(person) : 0;
+    } else if (now < _botUntil) {
+      speaker = VoiceSpeaker.bot;
+      target = _flow > voiceLevelEpsilon ? shape(_flow) : 0;
+    } else {
+      speaker = VoiceSpeaker.nobody;
+      target = 0;
+    }
+    final tau = target > level ? attack : release;
+    final k = dt <= 0 ? 1.0 : 1 - math.exp(-dt / tau);
+    level += (target - level) * k;
+    if (level < 0.001) level = 0;
+  }
+
+  static double _clean(double value) =>
+      value.isFinite ? value.clamp(0.0, 1.0) : 0.0;
+
+  /// A little compression: speech lives near the bottom of a linear scale
+  /// and would otherwise barely move the meter.
+  static double shape(double value) =>
+      math.min(1.0, math.pow(value, 0.55).toDouble() * 1.4);
+}
+
 class VoiceFooter extends StatefulWidget {
   final AssistantSessionController session;
 
@@ -137,11 +203,6 @@ class VoiceFooter extends StatefulWidget {
 
 class _VoiceFooterState extends State<VoiceFooter>
     with SingleTickerProviderStateMixin {
-  /// How often the levels are read and a spent lobe is reborn. The lobes
-  /// themselves move on every frame; only the sampling is paced, so the
-  /// meter is smooth on a 60 Hz phone and a 120 Hz one alike.
-  static const _sample = Duration(milliseconds: 33);
-
   late final Ticker _ticker;
   final math.Random _random = math.Random();
 
@@ -150,8 +211,8 @@ class _VoiceFooterState extends State<VoiceFooter>
   /// `setState`, so a frame of the meter rebuilds no widget at all.
   final VoiceMeterModel _model = VoiceMeterModel();
   final _FrameNotifier _frame = _FrameNotifier();
-  Duration _last = Duration.zero - _sample;
-  double _flow = 0;
+  final VoiceLevelFollower _follower = VoiceLevelFollower();
+  double _last = 0;
 
   /// The two things the chrome shows besides the meter. The session notifies
   /// on every level change during playback, thirty times a second; the
@@ -170,6 +231,14 @@ class _VoiceFooterState extends State<VoiceFooter>
     _ticker = createTicker(_tick)..start();
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // With motion turned off the meter is a still bar that only says how
+    // loud: the level is information, the lobes are not.
+    _model.still = MediaQuery.disableAnimationsOf(context);
+  }
+
   void _sessionChanged() {
     final error = widget.session.error;
     final muted = widget.session.muted;
@@ -179,32 +248,22 @@ class _VoiceFooterState extends State<VoiceFooter>
     if (mounted) setState(() {});
   }
 
+  /// Every frame: the level chases the real one, a spent lobe is reborn
+  /// while there is sound, and the painter is told to draw.
   void _tick(Duration elapsed) {
     final now = elapsed.inMicroseconds / 1e6;
+    final dt = now - _last;
+    _last = now;
     _model.now = now;
-    if (elapsed - _last >= _sample) {
-      _last = elapsed;
-      _sampleLevels(now);
-    }
-    _frame.tick();
-  }
-
-  void _sampleLevels(double now) {
     final session = widget.session;
-    // The person's level is shown as it is. The Bot's flows, because a
-    // spoken reply is continuous and a per-frame RMS of it is not.
-    _flow = _flow * 0.55 + _clean(session.playbackLevel) * 0.45;
-    final mic = _clean(session.micLevel);
-    if (mic > voiceLevelEpsilon) {
-      _model.speaker = VoiceSpeaker.person;
-      _model.level = _shape(mic);
-    } else if (_flow > voiceLevelEpsilon) {
-      _model.speaker = VoiceSpeaker.bot;
-      _model.level = _shape(_flow);
-    } else {
-      _model.speaker = VoiceSpeaker.nobody;
-      _model.level = 0;
-    }
+    _follower.step(
+      now: now,
+      dt: dt,
+      mic: session.micLevel,
+      playback: session.playbackLevel,
+    );
+    _model.level = _follower.level;
+    _model.speaker = _follower.speaker;
     // A finished lobe is reborn only while there is sound: in silence the
     // last ones run out and nothing replaces them.
     final lobes = _model.lobes;
@@ -213,15 +272,8 @@ class _VoiceFooterState extends State<VoiceFooter>
         lobes[i] = VoiceLobe.spawn(_random, now, i);
       }
     }
+    _frame.tick();
   }
-
-  static double _clean(double value) =>
-      value.isFinite ? value.clamp(0.0, 1.0) : 0.0;
-
-  /// A little compression: speech lives near the bottom of a linear scale
-  /// and would otherwise barely move the meter.
-  static double _shape(double value) =>
-      math.min(1.0, math.pow(value, 0.55).toDouble() * 1.4);
 
   @override
   void dispose() {
@@ -371,6 +423,8 @@ class _VoiceFooterState extends State<VoiceFooter>
                   child: CustomPaint(
                     key: voiceFooterAnimationKey,
                     painter: VoiceLobesPainter(model: _model, repaint: _frame),
+                    // It changes every frame; caching its raster is waste.
+                    willChange: true,
                     size: Size.infinite,
                   ),
                 ),
@@ -396,6 +450,9 @@ class VoiceMeterModel {
   double level = 0;
   VoiceSpeaker speaker = VoiceSpeaker.nobody;
   double now = 0;
+
+  /// Motion is off for this person: draw a level, not a shape.
+  bool still = false;
 }
 
 /// The bump `(2 / (2 + u⁴))³` tabulated over |u| in [0, [_bumpReach]) so a
@@ -455,6 +512,10 @@ class VoiceLobesPainter extends CustomPainter {
     final tints = model.speaker == VoiceSpeaker.bot
         ? voiceLobeTintsBot
         : voiceLobeTintsPerson;
+    if (model.still) {
+      _paintStill(canvas, size, middle, level, tints);
+      return;
+    }
     final lobes = model.lobes;
     final points = math.max(24, (size.width / _pointSpacing).ceil());
     // The layer is only as tall as the tallest lobe can reach, above and
@@ -471,27 +532,62 @@ class VoiceLobesPainter extends CustomPainter {
       final paint = Paint()
         ..color = tints[i % tints.length].withValues(alpha: 0.55)
         ..blendMode = BlendMode.plus;
-      final phase = now * 6 + lobe.seed;
-      for (final sign in const [1.0, -1.0]) {
-        final path = Path()..moveTo(0, middle);
-        for (var p = 0; p <= points; p++) {
-          final x = p / points * 6 - 3;
-          final px = p / points * size.width;
-          final bump = _bump((x - lobe.offset) / lobe.width);
-          if (bump < 1e-3) {
-            path.lineTo(px, middle);
-            continue;
-          }
-          final ripple = 1 + 0.12 * math.sin(x * 5 + phase);
-          path.lineTo(px, middle - sign * height * bump * ripple);
-        }
-        path
-          ..lineTo(size.width, middle)
-          ..close();
-        canvas.drawPath(path, paint);
-      }
+      canvas.drawVertices(
+        _strip(lobe, size.width, middle, height, now, points),
+        BlendMode.srcOver,
+        paint,
+      );
     }
     canvas.restore();
+  }
+
+  /// One lobe as a triangle strip: at each x a point above the line and its
+  /// mirror below, so the strip fills the whole band the lobe covers. The
+  /// renderer draws a strip as it is, where a filled path must first be
+  /// tessellated on every frame.
+  static Vertices _strip(
+    VoiceLobe lobe,
+    double width,
+    double middle,
+    double height,
+    double now,
+    int points,
+  ) {
+    final positions = Float32List((points + 1) * 4);
+    final phase = now * 6 + lobe.seed;
+    var at = 0;
+    for (var p = 0; p <= points; p++) {
+      final x = p / points * 6 - 3;
+      final px = p / points * width;
+      final bump = _bump((x - lobe.offset) / lobe.width);
+      final h = bump < 1e-3
+          ? 0.0
+          : height * bump * (1 + 0.12 * math.sin(x * 5 + phase));
+      positions[at++] = px;
+      positions[at++] = middle - h;
+      positions[at++] = px;
+      positions[at++] = middle + h;
+    }
+    return Vertices.raw(VertexMode.triangleStrip, positions);
+  }
+
+  /// Reduced motion: a bar from the centre, as wide as the level, in the
+  /// speaker's first tint. It moves only as the level does.
+  static void _paintStill(
+    Canvas canvas,
+    Size size,
+    double middle,
+    double level,
+    List<Color> tints,
+  ) {
+    final half = size.width / 2 * level;
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(size.width / 2 - half, middle - 3, half * 2, 6),
+        const Radius.circular(3),
+      ),
+      Paint()..color = tints.first.withValues(alpha: 0.9),
+    );
   }
 
   @override
