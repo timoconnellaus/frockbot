@@ -11,6 +11,14 @@ updates:
       dependencies:
         patterns:
           - "*"
+    # `patchedDependencies` in package.json keys the ProxyWorker fix
+    # (cloudflare/workers-sdk#15317) to one exact wrangler version, and a bump
+    # detaches it silently: the patch matches nothing and the e2e flake it
+    # fixes comes back with no signal. Bumping wrangler means re-creating
+    # `patches/wrangler@<version>.patch` by hand, so it is not a grouped
+    # automatic update.
+    ignore:
+      - dependency-name: wrangler
     open-pull-requests-limit: 10
 
   - package-ecosystem: github-actions

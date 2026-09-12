@@ -511,6 +511,37 @@ export async function stopProcessTree(child: ChildProcess): Promise<void> {
   child.stderr?.destroy();
 }
 
+/**
+ * The processes still in a supervised child's group, with their memory, and
+ * the machine's free memory — for the crash report of a `wrangler dev` whose
+ * parent has already gone. Linux only; elsewhere it says so and moves on.
+ */
+export function describeProcessGroup(pid: number | undefined): string {
+  if (pid === undefined) return "No pid to describe.";
+  const run = (command: string, args: string[]): string => {
+    const result = spawnSync(command, args, {
+      encoding: "utf8",
+      timeout: 10_000,
+    });
+    return result.error
+      ? `${command}: ${result.error.message}`
+      : `${result.stdout}${result.stderr}`.trim();
+  };
+  const tree = run("ps", ["-eo", "pid,ppid,pgid,rss,vsz,stat,etime,args"])
+    .split("\n")
+    .filter(
+      (line, index) =>
+        index === 0 || line.trim().split(/\s+/u)[2] === String(pid),
+    )
+    .join("\n");
+  return [
+    `Process group ${pid} after the exit:`,
+    tree,
+    "Memory:",
+    run("free", ["-m"]),
+  ].join("\n");
+}
+
 async function waitForManifest(baseUrl: string): Promise<void> {
   const deadline = Date.now() + READY_TIMEOUT_MS;
   let lastFailure = "no attempt was made";
@@ -529,6 +560,14 @@ async function waitForManifest(baseUrl: string): Promise<void> {
   throw new Error(
     `Timed out waiting for ${baseUrl}/app-manifest: ${lastFailure}`,
   );
+}
+
+/**
+ * The `--log-level` of the app's `wrangler dev`. `warn` by default; set
+ * `E2E_WRANGLER_LOG_LEVEL=debug` to hear workerd itself.
+ */
+export function workerLogLevel(): "debug" | "warn" {
+  return process.env.E2E_WRANGLER_LOG_LEVEL === "debug" ? "debug" : "warn";
 }
 
 /** The bearer token `/api/debug/*` accepts in an end-to-end run. */
@@ -833,9 +872,12 @@ export async function startHarness(
         `APPLET_BUILD_TOKEN:${E2E_APPLET_BUILD_TOKEN}`,
         "--persist-to",
         persistDirectory,
-        // As above: the per-request log is the flood, not the signal.
+        // As above: the per-request log is the flood, not the signal. `debug`
+        // is the one level that also passes `--verbose` to workerd, whose
+        // own lifecycle log is the only witness when it tears an isolate
+        // down without a word on stderr.
         "--log-level",
-        "warn",
+        workerLogLevel(),
       ],
       // `detached` puts wrangler in its own process group so the whole tree can
       // be signalled at once: killing the Node parent alone leaves it free to
@@ -930,7 +972,15 @@ export async function startHarness(
       label: "FrockBot wrangler dev",
       spawnChild: spawnWorker,
       waitUntilReady: () => waitForManifest(baseUrl),
-      stopChild: stopProcessTree,
+      stopChild: async (child) => {
+        // A crash, not a stop: what is left of the tree and how much memory
+        // the machine had, before the orphans are reaped and the evidence
+        // with them.
+        if (child.exitCode !== null || child.signalCode !== null) {
+          note(describeProcessGroup(child.pid));
+        }
+        await stopProcessTree(child);
+      },
       forwardOutput,
       report: note,
     });

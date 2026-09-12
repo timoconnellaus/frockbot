@@ -68,7 +68,7 @@ bun test
 bun run build
 ```
 
-GitHub Actions runs these checks on pushes to `main` and on pull requests. Dependabot checks Bun/npm dependencies and GitHub Actions weekly.
+GitHub Actions runs these checks on pushes to `main` and on pull requests. Dependabot checks Bun/npm dependencies and GitHub Actions weekly, with one exclusion: `wrangler` is pinned by `patchedDependencies` in `package.json` to the `patches/wrangler@<version>.patch` that keeps its dev proxy from treating one dropped forwarded request as fatal ([cloudflare/workers-sdk#15317](https://github.com/cloudflare/workers-sdk/issues/15317)). A bump detaches that patch silently, so wrangler is upgraded by hand and the patch re-created with `bun patch` against the new version.
 
 ### Typechecking
 

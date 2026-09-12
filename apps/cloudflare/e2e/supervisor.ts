@@ -6,16 +6,21 @@
 // page fixture navigates to an address nothing is listening on. One shard's
 // crash therefore costs a whole shard's evidence.
 //
-// The crash that motivates this is not fully explained. Workerd prints
-//
-//   ✘ [ERROR] kj::getCaughtExceptionAsKj() = kj/async-io-unix.c++:186:
-//     disconnected: ::write(...): Broken pipe
-//
-// mid-suite and the runtime is gone a few seconds later. Rather than wait for
-// a root cause, this supervises the child: on an exit nobody asked for it
-// starts a fresh one on the same port and the same `--persist-to` directory,
-// waits for it to serve again, and prints the tail of what the dead one said.
-// A spec in flight still fails; the ones after it do not.
+// The crash that motivated this is now explained, and mostly gone. Wrangler's
+// ProxyWorker forwards every browser request to the Worker's own runtime, and
+// treats one forwarded request whose connection is lost as a fatal error of
+// the dev server (cloudflare/workers-sdk#15317): the whole process exits with
+// an empty `✘ [ERROR]`. On a CI runner that lost connection is between the
+// proxy and the Worker runtime — the shape of a keep-alive connection reused
+// as the other side closed it — and it lands on ordinary requests the browser
+// is still waiting on, not on a client abort. The patch in
+// `patches/wrangler@*.patch` re-forwards such a request on a fresh connection,
+// and only if every attempt drops does it answer 503 for that one request
+// instead of stopping the server. This supervisor is the backstop for
+// whatever else takes the child down: on an exit nobody asked for it starts a
+// fresh one on the same port and the same `--persist-to` directory, waits for
+// it to serve again, and prints the tail of what the dead one said. A spec in
+// flight still fails; the ones after it do not.
 import type { ChildProcess } from "node:child_process";
 
 /** How many unexpected exits are tolerated inside `RESTART_WINDOW_MS`. */
@@ -24,14 +29,14 @@ export const MAX_RESTARTS = 5;
 /**
  * The window the restart budget is counted over.
  *
- * A lifetime budget answers the wrong question. `wrangler dev` exits roughly
- * once every few minutes on a CI runner (its proxy treats one dropped
- * forwarded request as fatal — cloudflare/workers-sdk#15317), so a lifetime
- * count of five is really a ceiling on how long a shard may run: the long
- * shard spent it, and every spec after that met a server that was never
- * coming back. What the cap is for is telling a server that cannot come back
- * from one that keeps being knocked over, and that is a question about a
- * window, not about a whole run.
+ * A lifetime budget answers the wrong question. Before the wrangler patch,
+ * `wrangler dev` exited roughly once every few minutes on a CI runner (its
+ * proxy treated one dropped forwarded request as fatal —
+ * cloudflare/workers-sdk#15317), so a lifetime count of five was really a
+ * ceiling on how long a shard could run: the long shard spent it, and every
+ * spec after that met a server that was never coming back. What the cap is
+ * for is telling a server that cannot come back from one that keeps being
+ * knocked over, and that is a question about a window, not about a whole run.
  */
 export const RESTART_WINDOW_MS = 5 * 60_000;
 
