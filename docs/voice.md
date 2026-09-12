@@ -375,9 +375,10 @@ recorded before the stop command is sent.
 Settlement is durable scheduling, not `waitUntil`: after admitting a
 delegation the object calls `this.schedule(…)` to look the run up with
 `lookupRun(runId)`; a settled answer is stored on the delegation record and,
-if a call is live, spoken. A look-up that finds the Bot never admitted the
-run — the dispatch was lost, or the Bot was busy and refused it — sends the
-same intent again under the same run id (never within 30 s of the last
+if a call is live and no reply is in flight, spoken — otherwise it is held
+and rescheduled, see "A reply that fails". A look-up that finds the Bot never
+admitted the run — the dispatch was lost, or the Bot was busy and refused it —
+sends the same intent again under the same run id (never within 30 s of the last
 send), on a backoff that widens to five minutes, until the Bot takes it or
 the fortieth look-up settles it as an explicit failure the person hears.
 Recovery on `onStart` re-schedules any delegation still `admitted`. A spoken
@@ -590,7 +591,10 @@ connection, caps, delegation dedup by run id, settlement idempotence,
 recovery abandoning turns and expiring old delegations, daily meters), the
 turn loop (streamed text, tool round trip, throwing tool, last step without
 tools, per-turn delegation bound, abort, answer bound, history bound), the
-browser speech gate and session (continuous streaming through pauses, sleep
+speech guard (audio passed through untouched, a sentence answered with no
+audio throwing after the host is told, an aborted request staying quiet, a
+provider without streaming left without it), the browser speech gate and
+session (continuous streaming through pauses, sleep
 after 20 s quiet in `listening`, wake with pre-roll in order, mute, barge-in
 only on the stricter detector while speaking, refusal ends the call), the
 dictation controller (opening audio in order after `ready`, stop before

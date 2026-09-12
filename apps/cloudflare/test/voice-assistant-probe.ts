@@ -78,6 +78,8 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
   #dropDispatches = 0;
   #dispatched: string[] = [];
   #traces: VoiceTraceLine[] = [];
+  #stalled: Promise<void> | undefined;
+  #release: (() => void) | undefined;
 
   /** A one-second window, so a cap can bite inside a test's patience. */
   protected override sttWindowSeconds(): number {
@@ -169,6 +171,7 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
     body: Record<string, unknown>,
   ): Promise<ReadableStream<Uint8Array>> {
     this.#chats.push(body);
+    if (this.#stalled) await this.#stalled;
     const messages = body.messages as { role: string; content: string }[];
     const last = messages.at(-1)!;
     if (last.role === "tool") {
@@ -274,6 +277,24 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
 
   async probePutStorage(key: string, value: unknown): Promise<void> {
     await this.ctx.storage.put(key, value);
+  }
+
+  /**
+   * Holds the model's answer open, so the call has a reply in flight for as
+   * long as the test wants one.
+   */
+  async probeStallChat(): Promise<void> {
+    this.#stalled = new Promise<void>((resolve) => {
+      this.#release = resolve;
+    });
+  }
+
+  /** Lets the held answer through. */
+  async probeReleaseChat(): Promise<void> {
+    const release = this.#release;
+    this.#stalled = undefined;
+    this.#release = undefined;
+    release?.();
   }
 
   /** Runs the scheduled look-up by hand, as the alarm would. */

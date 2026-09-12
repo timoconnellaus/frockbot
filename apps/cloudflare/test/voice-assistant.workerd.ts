@@ -708,6 +708,86 @@ describe("the voice session object", () => {
     opened.socket.close();
   });
 
+  test("a Bot answer held over two replies is still read out", async () => {
+    const suffix = crypto.randomUUID();
+    const identity = {
+      userId: `voice-rehold-${suffix}`,
+      botId: `voice-bot-${suffix}`,
+    };
+    await provisionBot(identity);
+    const stub = assistant(identity.userId);
+    await stub.probeSetScript({ delegateWord: "plan", botId: identity.botId });
+    const opened = await open(identity.userId);
+    await startCall(opened);
+    await opened.waitFor(state("awake"), "awake");
+    expect(await stub.probeUtterance("please plan my week")).toBe(true);
+    await opened.waitFor(
+      (f) =>
+        f.type === "transcript_end" && String(f.text).startsWith("Done: Asked"),
+      "delegation acknowledged aloud",
+    );
+    const [delegation] = Object.values(
+      await stub.probeStorage("voice:delegation:"),
+    ) as VoiceDelegationRecordV1[];
+    const bot = env.BOT_STATES.getByName(
+      `${identity.userId}:${identity.botId}`,
+    );
+    // SAFETY: names only the read this test makes.
+    const botRpc = bot as unknown as {
+      lookupRun(input: unknown): Promise<{ state: string }>;
+    };
+    await eventually(
+      () =>
+        botRpc.lookupRun({
+          schemaVersion: 1,
+          ...identity,
+          query: { schemaVersion: 1, runId: delegation!.runId },
+        }),
+      (lookup) => lookup.state === "terminal",
+      "the Bot's Turn to settle",
+      12_000,
+    );
+
+    // The person has asked something else and that answer is still being
+    // produced, so the Bot's answer is held — and is held a second time when
+    // its own wake-up lands with the reply still going. A re-hold that
+    // deduped onto the row being executed would lose the wake-up outright.
+    await stub.probeStallChat();
+    await stub.probeSetScript({ reply: "Right away." });
+    expect(await stub.probeUtterance("what else is on today")).toBe(true);
+    await eventually(
+      async () => (await stub.probeTraces()).filter((t) => t.event === "turn"),
+      (turns) => turns.length >= 2,
+      "the second question's turn",
+    );
+    await stub.probeCheckDelegation(delegation!.runId);
+    await eventually(
+      async () =>
+        (await stub.probeTraces()).filter((t) => t.event === "delegation-held"),
+      (held) => held.length >= 2,
+      "a second hold from the scheduled wake-up",
+    );
+    expect(
+      (await stub.probeSynthesized()).some((t) => t.startsWith("Workerd Bot")),
+    ).toBe(false);
+
+    // The reply finishes: the answer the person asked the Bot for is read out
+    // on this call, not left for the next one.
+    await stub.probeReleaseChat();
+    await opened.waitFor(
+      (f) =>
+        f.type === "transcript_end" && String(f.text).startsWith("Workerd Bot"),
+      "answer read out after the second hold",
+      12_000,
+    );
+    await settle(100);
+    const [spoken] = Object.values(
+      await stub.probeStorage("voice:delegation:"),
+    ) as VoiceDelegationRecordV1[];
+    expect(spoken!.state).toBe("spoken");
+    opened.socket.close();
+  });
+
   test("asking the same thing again in one turn admits one Bot Turn", async () => {
     const suffix = crypto.randomUUID();
     const identity = {
