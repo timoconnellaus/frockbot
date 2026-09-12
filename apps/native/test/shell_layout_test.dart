@@ -8,6 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/protocol/client_wire.generated.dart' as wire;
 import 'package:frockbot_native/flock/sheep.dart';
 import 'package:frockbot_native/shell/desktop_layout.dart';
+import 'package:frockbot_native/shell/focus.dart';
 import 'package:frockbot_native/shell/markdown.dart';
 import 'package:frockbot_native/shell/run_view.dart';
 import 'package:frockbot_native/shell/semantics.dart';
@@ -38,13 +39,14 @@ wire.UnreadView unread({
   bool capped = false,
   bool isUnread = false,
   bool working = false,
+  bool manual = false,
 }) => wire.UnreadView.fromJson({
   'schemaVersion': 1,
   'botId': botId,
   'count': count,
   'capped': capped,
   'unread': isUnread,
-  'manuallyUnread': false,
+  'manuallyUnread': manual,
   'working': working,
 });
 
@@ -387,23 +389,58 @@ void main() {
 
   group('the sidebar row', () {
     test('says how many unread, and nothing at zero', () {
-      expect(unreadBadgeLabel(null), isNull);
-      expect(unreadBadgeLabel(unread(botId: 'a')), isNull);
+      String? label(wire.UnreadView? view) =>
+          sidebarUnreadFor(view, focused: false).label;
+      expect(label(null), isNull);
+      expect(label(unread(botId: 'a')), isNull);
+      expect(label(unread(botId: 'a', count: 0, isUnread: true)), isNull);
+      expect(label(unread(botId: 'a', count: 3, isUnread: true)), '3');
       expect(
-        unreadBadgeLabel(unread(botId: 'a', count: 0, isUnread: true)),
-        isNull,
-      );
-      expect(
-        unreadBadgeLabel(unread(botId: 'a', count: 3, isUnread: true)),
-        '3',
-      );
-      expect(
-        unreadBadgeLabel(
-          unread(botId: 'a', count: 99, capped: true, isUnread: true),
-        ),
+        label(unread(botId: 'a', count: 99, capped: true, isUnread: true)),
         '99+',
       );
+      expect(
+        label(unread(botId: 'a', count: 0, isUnread: true, manual: true)),
+        '•',
+      );
     });
+
+    test('draws no count for the Bot the User is reading', () {
+      final view = unread(botId: 'a', count: 3, isUnread: true);
+      final shown = sidebarUnreadFor(view, focused: true);
+      // The fan-out is right and the row is still quiet: the receipt that
+      // clears the count is a round trip behind the message that raised it,
+      // and the row never renders a count it is about to lose.
+      expect(shown.label, isNull);
+      expect(shown.count, 0);
+      expect(shown.unread, isFalse);
+      expect(sidebarUnreadFor(view, focused: false).label, '3');
+    });
+
+    test('a Bot marked unread by hand stays bold while it is open', () {
+      // Intent, not arithmetic: only opening the Bot again clears it.
+      final shown = sidebarUnreadFor(
+        unread(botId: 'a', count: 0, isUnread: true, manual: true),
+        focused: true,
+      );
+      expect(shown.unread, isTrue);
+      expect(shown.label, '•');
+    });
+
+    test(
+      'a hand-marked Bot still draws no count for a reply it is open on',
+      () {
+        // The flag survives the reply settling, the arithmetic does not: the
+        // row the User is reading never paints a number or feeds a group total.
+        final shown = sidebarUnreadFor(
+          unread(botId: 'a', count: 1, isUnread: true, manual: true),
+          focused: true,
+        );
+        expect(shown.label, '•');
+        expect(shown.count, 0);
+        expect(shown.unread, isTrue);
+      },
+    );
 
     test('says a time today, a weekday this week, a date beyond it', () {
       final now = DateTime(2026, 9, 8, 15, 0);
@@ -445,6 +482,7 @@ void main() {
             unread: {'scout': unread(botId: 'scout', count: 2, isUnread: true)},
             archived: const {},
             activeBotId: 'scout',
+            focusedBotId: null,
             workingBotId: null,
             loaded: true,
             showHidden: false,
@@ -490,6 +528,41 @@ void main() {
       expect(byIdentifier(ShellIds.sidebarBot('rosemary')), findsNothing);
     });
 
+    testWidgets('the open Bot the User is reading wears no badge', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        host(
+          ShellSidebar(
+            bots: [bot('scout', 'Scout')],
+            profiles: const {},
+            unread: {'scout': unread(botId: 'scout', count: 2, isUnread: true)},
+            archived: const {},
+            activeBotId: 'scout',
+            focusedBotId: 'scout',
+            workingBotId: null,
+            loaded: true,
+            showHidden: false,
+            onSelect: (_) {},
+            onCreateBot: () {},
+            onSearch: () {},
+            onProfile: () {},
+            onMarketplace: () {},
+            onVoice: () {},
+            voiceControl: VoiceControlState.idle,
+            onToggleHidden: () {},
+            onRetry: () async {},
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Not a count that arrives and goes: the reply to the message being
+      // typed never paints one on the row it is being typed into.
+      expect(find.byType(Badge), findsNothing);
+      expect(find.text('2'), findsNothing);
+    });
+
     testWidgets('a phone puts the Marketplace beside the account', (
       tester,
     ) async {
@@ -502,6 +575,7 @@ void main() {
             unread: const {},
             archived: const {},
             activeBotId: null,
+            focusedBotId: null,
             workingBotId: null,
             loaded: true,
             showHidden: false,
@@ -549,6 +623,7 @@ void main() {
             unread: const {},
             archived: const {},
             activeBotId: null,
+            focusedBotId: null,
             workingBotId: null,
             loaded: true,
             error: 'Couldn’t reach FrockBot.',

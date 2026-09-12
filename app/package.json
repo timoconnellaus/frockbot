@@ -171,7 +171,6 @@
     "./shell/debug": "./shell/debug.ts",
     "./shell/debug-protocol": "./shell/debug-protocol.ts",
     "./shell/definition": "./shell/definition.ts",
-    "./shell/focus": "./shell/focus.ts",
     "./shell/identity": "./shell/identity.ts",
     "./shell/notification-id": "./shell/notification-id.ts",
     "./shell/reads": "./shell/reads.ts",

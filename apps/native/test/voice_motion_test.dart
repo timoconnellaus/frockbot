@@ -743,6 +743,7 @@ void main() {
               unread: const {},
               archived: const {},
               activeBotId: null,
+              focusedBotId: null,
               workingBotId: null,
               loaded: true,
               showHidden: false,

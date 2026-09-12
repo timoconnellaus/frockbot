@@ -217,15 +217,27 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     unawaited(push.syncRead());
   }
 
+  /// The Bot the User is reading right now, or null when none is: the open
+  /// chat, on a window that holds focus, with nothing covering it. One
+  /// definition, because the read receipt and the sidebar's badge are two
+  /// halves of the same answer and must not disagree.
+  String? get _focusedBotId {
+    final open = selected?.botId.value;
+    if (open == null ||
+        !resumed ||
+        !push.focused ||
+        !_conversationVisible ||
+        panelOpen ||
+        openRun != null ||
+        ModalRoute.of(context)?.isCurrent != true) {
+      return null;
+    }
+    return open;
+  }
+
   void _readLatest(String botId, String? messageId) {
     if (!mounted) return;
-    final viewing =
-        resumed &&
-        push.focused &&
-        _conversationVisible &&
-        !panelOpen &&
-        openRun == null &&
-        ModalRoute.of(context)?.isCurrent == true;
+    final viewing = _focusedBotId == botId;
     final view = activity.unread[botId];
     // Presence is only claimed for the message the cloud says is the latest and
     // this device is actually showing. Claiming it for anything else asks the
@@ -1442,6 +1454,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                             profiles: profiles,
                             unread: activity.unread,
                             archived: archived,
+                            // The count for the Bot being read is suppressed
+                            // here rather than waited out: the receipt that
+                            // clears it is a round trip behind the message.
+                            focusedBotId: _focusedBotId,
                             // A phone's list is a list of doors, not a selection: no row
                             // is the current one once the conversation is a page.
                             activeBotId: single ? null : bot?.botId.value,
