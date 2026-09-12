@@ -317,8 +317,31 @@ export default {
 };
 `;
 
-/** Ask the built module what it exports, by running it. */
+/** How long a workerd boot is given before the build gives up on it. */
+const BOOT_DEADLINE_MS = 30_000;
+
+/** A workerd that never reported ready; the boot, not the Plugin, failed. */
+class RuntimeDidNotStart extends Error {}
+
+/**
+ * Ask the built module what it exports, by running it.
+ *
+ * Each build spawns its own workerd, and a spawn occasionally never reports
+ * ready. A boot that misses the deadline is let go of and tried once more, so
+ * a build answers rather than hanging on a runtime that never came up.
+ */
 export async function describePlugin(
+  moduleCode: string,
+): Promise<PluginDescriptionV1> {
+  try {
+    return await describeInWorkerd(moduleCode);
+  } catch (error) {
+    if (!(error instanceof RuntimeDidNotStart)) throw error;
+    return await describeInWorkerd(moduleCode);
+  }
+}
+
+async function describeInWorkerd(
   moduleCode: string,
 ): Promise<PluginDescriptionV1> {
   const miniflare = new Miniflare(
@@ -338,8 +361,10 @@ export async function describePlugin(
       port: 0,
     }),
   );
+  let started = false;
   try {
-    const url = await miniflare.ready;
+    const url = await bootedWithin(miniflare.ready);
+    started = true;
     const response = (await miniflare.dispatchFetch(
       new URL(`/describe?${randomUUID()}`, url).toString(),
     )) as unknown as Response;
@@ -351,7 +376,29 @@ export async function describePlugin(
     }
     return validateDescription(body.description);
   } finally {
-    await miniflare.dispose();
+    // A runtime that never started is let go of rather than waited on.
+    if (started) await miniflare.dispose();
+    else void miniflare.dispose().catch(() => {});
+  }
+}
+
+async function bootedWithin(ready: Promise<URL>): Promise<URL> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () =>
+        reject(
+          new RuntimeDidNotStart(
+            `The Workers runtime did not start within ${BOOT_DEADLINE_MS}ms`,
+          ),
+        ),
+      BOOT_DEADLINE_MS,
+    );
+  });
+  try {
+    return await Promise.race([ready, deadline]);
+  } finally {
+    clearTimeout(timer);
   }
 }
 
