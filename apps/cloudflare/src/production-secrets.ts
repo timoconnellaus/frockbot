@@ -210,6 +210,10 @@ export const NON_SECRET_WORKER_SETTINGS_V1: readonly NonSecretWorkerSettingV1[] 
       why: "An optional `vars` entry naming the assistant's voice; George when unset.",
     },
     {
+      name: "VOICE_ASSISTANT_STT",
+      why: "An optional `vars` entry choosing the assistant's ears: `openai` for gpt-transcribe, otherwise ElevenLabs Scribe.",
+    },
+    {
       name: "VOICE_DICTATION_UPSTREAM_URL",
       why: "Points dictation at a local stand-in; set by the test harness only.",
       forbiddenLive:
