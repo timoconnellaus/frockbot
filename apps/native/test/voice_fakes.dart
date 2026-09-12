@@ -96,8 +96,14 @@ class FakeVoiceCapture implements VoiceCapture {
     return _frames.stream;
   }
 
+  /// A recorder that throws on stop, the way a device plugin can when the
+  /// audio session has already gone away.
+  Object? stopFailure;
+
   @override
   Future<void> stop() async {
+    final failed = stopFailure;
+    if (failed != null) throw failed;
     if (_active) stops++;
     _active = false;
   }

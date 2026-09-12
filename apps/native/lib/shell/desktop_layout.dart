@@ -116,12 +116,16 @@ class ShellLayout extends StatelessWidget {
                 excluding: drawnPanel,
                 child: Scaffold(
                   body: SafeArea(
+                    bottom: false,
                     child: Row(
                       children: [
                         _Column(
                           width: shellSidebarWidth,
                           border: Border(right: BorderSide(color: divider)),
-                          child: identified(ShellIds.sidebar, sidebar),
+                          child: SafeArea(
+                            top: false,
+                            child: identified(ShellIds.sidebar, sidebar),
+                          ),
                         ),
                         // The header is the conversation's, not the window's:
                         // a bar named after one Bot that ran over the list of
@@ -141,7 +145,10 @@ class ShellLayout extends StatelessWidget {
                           _Column(
                             width: shellRightPanelWidth,
                             border: Border(left: BorderSide(color: divider)),
-                            child: identified(ShellIds.rightPanel, panel),
+                            child: SafeArea(
+                              top: false,
+                              child: identified(ShellIds.rightPanel, panel),
+                            ),
                           ),
                       ],
                     ),
@@ -180,6 +187,8 @@ class ShellLayout extends StatelessWidget {
               appBar: header,
               body: SafeArea(
                 top: header == null,
+                // The composer paints through the gesture inset itself.
+                bottom: false,
                 child: SizedBox.expand(
                   child: identified(ShellIds.conversation, conversation),
                 ),

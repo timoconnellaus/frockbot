@@ -47,6 +47,7 @@ import '../voice/capabilities.dart';
 import '../voice/capture.dart';
 import '../voice/dictation.dart';
 import '../voice/footer.dart';
+import '../voice/motion.dart';
 import '../voice/mic_ownership.dart';
 import '../voice/player.dart';
 import '../voice/protocol.dart' show voiceUnavailableMessage;
@@ -180,6 +181,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   AssistantSessionController? voiceSession;
   DictationController? dictation;
   bool footerOpen = false;
+  bool footerExiting = false;
   bool showHidden = false;
   bool isAdmin = false;
   TranscriptLine? openRun;
@@ -293,6 +295,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     setState(() {
       voiceSession = session;
       footerOpen = true;
+      footerExiting = false;
     });
     await session.start();
   }
@@ -301,18 +304,22 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// navigates nowhere.
   Future<void> _endVoice({required String reason}) async {
     final session = voiceSession;
-    if (session == null) return;
-    await session.end(reason: reason);
-    session.dispose();
-    microphone.releaseAssistant();
-    if (!mounted) {
-      voiceSession = null;
-      return;
-    }
+    if (session == null || !footerOpen) return;
     setState(() {
-      voiceSession = null;
       footerOpen = false;
+      footerExiting = true;
     });
+    try {
+      await session.end(reason: reason);
+    } finally {
+      microphone.releaseAssistant();
+      if (mounted) {
+        session.dispose();
+        if (identical(voiceSession, session)) {
+          setState(() => voiceSession = null);
+        }
+      }
+    }
   }
 
   Future<void> _dictate() async {
@@ -1279,7 +1286,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     final bot = selected;
     final session = voiceSession;
     final rightPanel = _rightPanel();
-    return ShellSlotScope(
+    final shell = ShellSlotScope(
       slots: slots,
       // The footer is drawn below the whole three-tier layout, so it survives
       // a Bot switch, a page and a drawer, and the app above it stays usable.
@@ -1293,7 +1300,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
             // would keep a gesture bar's worth of space above the footer.
             child: MediaQuery.removePadding(
               context: context,
-              removeBottom: footerOpen && session != null,
+              removeBottom: footerOpen || footerExiting,
               child: Stack(
                 fit: StackFit.expand,
                 children: [
@@ -1383,7 +1390,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                             onMarketplace: _openMarketplace,
                             phone: single,
                             onVoice: () => unawaited(_startVoice()),
-                            voiceActive: footerOpen,
+                            voiceControl: voiceControlStateV1(
+                              footerOpen: footerOpen,
+                              sessionActive: voiceSession?.active == true,
+                            ),
                             onToggleHidden: () =>
                                 setState(() => showHidden = !showHidden),
                             onRetry: load,
@@ -1421,9 +1431,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                             background: _background(bot.botId.value),
                             onDictate: () => unawaited(_dictate()),
                             onStopDictation: () => unawaited(_stopDictation()),
-                            dictating:
-                                dictation?.active == true &&
-                                dictation?.context == bot.botId.value,
+                            dictationState:
+                                dictation?.context == bot.botId.value
+                                ? dictation!.state
+                                : DictationState.idle,
                             dictationLevel: dictation?.level,
                             onWorkingChanged: (runId) {
                               if (runId == workingRunId || !mounted) return;
@@ -1456,13 +1467,27 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
               ),
             ),
           ),
-          if (footerOpen && session != null)
-            VoiceFooter(
-              session: session,
-              onEnd: () => unawaited(_endVoice(reason: 'end-button')),
-            ),
+          VoiceReveal(
+            visible: footerOpen && session != null,
+            bottomInset: footerOpen || footerExiting
+                ? MediaQuery.paddingOf(context).bottom
+                : 0,
+            onHidden: () {
+              if (footerExiting) setState(() => footerExiting = false);
+            },
+            child: session == null
+                ? const SizedBox.shrink()
+                : VoiceFooter(
+                    session: session,
+                    onEnd: () => unawaited(_endVoice(reason: 'end-button')),
+                  ),
+          ),
         ],
       ),
+    );
+    return ColoredBox(
+      color: Theme.of(context).colorScheme.surface,
+      child: shell,
     );
   }
 

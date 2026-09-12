@@ -21,6 +21,15 @@ import 'socket.dart';
 
 enum DictationState { idle, starting, capturing, stopping, done, error }
 
+extension DictationStateActivity on DictationState {
+  /// Whether a capture is in progress: the one definition every surface asks,
+  /// so a new in-flight state cannot mean one thing here and another there.
+  bool get active =>
+      this == DictationState.starting ||
+      this == DictationState.capturing ||
+      this == DictationState.stopping;
+}
+
 /// Writes the assembled draft into one composer context.
 typedef DictationDraftSink = void Function(Object context, String text);
 
@@ -156,10 +165,7 @@ class DictationController extends ChangeNotifier {
   String? get notice => _notice;
   Object? get context => _context;
   double get micLevel => level.value;
-  bool get active =>
-      _state == DictationState.starting ||
-      _state == DictationState.capturing ||
-      _state == DictationState.stopping;
+  bool get active => _state.active;
 
   /// The draft as the protocol defines it: committed segments, then the
   /// interim delta.

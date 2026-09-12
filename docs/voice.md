@@ -410,6 +410,32 @@ entitlement. `AppShell`'s lifecycle observer ends capture and playback when
 the app leaves the foreground; navigation inside the app leaves the footer
 alone.
 
+### Voice controls and motion
+
+Dictation replaces the message field with a text-free dock spanning the chat
+width and meeting the bottom edge. Its waveform and 48-point Stop control share
+one row with 24-point internal padding; only the top corners are rounded.
+Starting, listening and finishing are announced through live semantics and
+control tooltips. Real errors remain visible. Stop commits to the editable
+draft without sending; the finishing control is disabled until transcription
+ends. The realtime footer spans the whole shell with the same inset controls,
+reserved waveform space and background covering the bottom system inset.
+Both docks open and close with coordinated size, slide and fade transitions.
+The complete controls paint throughout the transition without a shrinking clip.
+Closing begins microphone and playback teardown immediately and keeps the
+outgoing visual mounted only through its exit. Bottom system insets
+transfer back to the conversation without a final layout jump. While that
+teardown finishes, the sidebar's start control says the session is ending and
+cannot be pressed, because a start in that window would be dropped.
+
+Both meters use the same continuous ribbons, driven only by audio levels.
+A time-based envelope uses a 65 ms attack and 220 ms release; microphone and
+playback levels ease separately so the speaker tint does not flicker.
+The painter repaints on display frames without rebuilding controls, stops its
+ticker in silence, and follows Flutter's ticker lifecycle. Reduced motion
+shows a static level shape and makes transitions immediate. Controls keep
+48-point touch targets in both themes.
+
 ### SDK frames a client must ignore
 
 Beside the messages above, the Agents SDK sends `cf_agent_identity`,
@@ -508,7 +534,7 @@ still unverified live.
 | `apps/cloudflare`: `wrangler deploy --dry-run` (bundles the Worker with the Agents SDK)                                                   | passed                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `apps/native`: `flutter analyze`, `flutter test`, `scripts/check-native-pins.py`                                                          | no issues; 556 passed; pins match                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `apps/native`: `flutter build apk --debug` (by the native specialist; nothing installed)                                                  | built                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| Browser (Vite dev server, no backend): footer at 1280 and 390 wide                                                                        | footer 52 px tall, meter 140 px at both widths, mute and X on the right, error state, idle AI row as a faint line — screenshots under `~/voice-screenshots/` (superseded 2026-09-11 by the pink slab: 84 pt, one lobed meter on a stage that fills the width beside the controls on a phone and stops at 420 pt centred on a desktop; measured by `apps/native/test/voice_footer_test.dart`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| Browser (Vite dev server, no backend): footer at 1280 and 390 wide                                                                        | footer 52 px tall, meter 140 px at both widths, mute and X on the right, error state, idle AI row as a faint line — screenshots under `~/voice-screenshots/` (superseded 2026-09-11 by the pink slab: 84 pt, one lobed meter on a stage that fills the width beside the controls on a phone and stops at 420 pt centred on a desktop; superseded again on 2026-09-12 by the bottom-attached dock described under "Voice controls and motion": 96 pt over the system inset; both measured by `apps/native/test/voice_footer_test.dart`)                                                                                                                                                                                                                                                                                                                                              |
 
 Unit coverage in bun, all with fakes: the wire decoders, the OpenAI
 transcription vocabulary, the assistant's OpenAI transcriber against a fake

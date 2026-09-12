@@ -22,6 +22,7 @@ import '../client/bot_sessions.dart';
 import '../client/chat_controller.dart';
 import '../client/transport.dart';
 import '../theme/states.dart';
+import '../voice/dictation.dart';
 import 'composer.dart';
 import 'lifecycle.dart';
 import 'run_view.dart';
@@ -54,7 +55,7 @@ class ChatPane extends StatefulWidget {
   /// switching Bots must flush into the Bot the capture started on.
   final VoidCallback? onDictate;
   final VoidCallback? onStopDictation;
-  final bool dictating;
+  final DictationState dictationState;
   final ValueListenable<double>? dictationLevel;
 
   /// The Bot's sheep background, so its avatar is the same one everywhere.
@@ -75,7 +76,7 @@ class ChatPane extends StatefulWidget {
     this.onOpenBilling,
     this.onDictate,
     this.onStopDictation,
-    this.dictating = false,
+    this.dictationState = DictationState.idle,
     this.dictationLevel,
     this.background,
   });
@@ -269,7 +270,7 @@ class _ChatPaneState extends State<ChatPane> {
           skills: skills,
           onDictate: widget.onDictate,
           onStopDictation: widget.onStopDictation,
-          dictating: widget.dictating,
+          dictationState: widget.dictationState,
           dictationLevel: widget.dictationLevel,
         ),
       ],
@@ -304,7 +305,7 @@ class ConversationView extends StatefulWidget {
   final VoidCallback? onOpenBilling;
   final VoidCallback? onDictate;
   final VoidCallback? onStopDictation;
-  final bool dictating;
+  final DictationState dictationState;
   final ValueListenable<double>? dictationLevel;
   final String? background;
   const ConversationView({
@@ -325,7 +326,7 @@ class ConversationView extends StatefulWidget {
     this.onOpenBilling,
     this.onDictate,
     this.onStopDictation,
-    this.dictating = false,
+    this.dictationState = DictationState.idle,
     this.dictationLevel,
     this.background,
   });
@@ -403,7 +404,7 @@ class _ConversationViewState extends State<ConversationView>
       onOpenBilling: widget.onOpenBilling,
       onDictate: widget.onDictate,
       onStopDictation: widget.onStopDictation,
-      dictating: widget.dictating,
+      dictationState: widget.dictationState,
       dictationLevel: widget.dictationLevel,
     ),
   );
