@@ -29,6 +29,18 @@ class SlowCloseSocket extends FakeVoiceSocket {
   }
 }
 
+/// A socket whose close fails, the way a dead connection's can.
+class FailingCloseSocket extends FakeVoiceSocket {
+  @override
+  Future<void> close({
+    int code = voiceCloseNormalV1,
+    String reason = '',
+  }) async {
+    await super.close(code: code, reason: reason);
+    throw StateError('socket');
+  }
+}
+
 void main() {
   test(
     'speech attacks smoothly and releases more gently at any refresh rate',
@@ -403,6 +415,35 @@ void main() {
       VoiceControlState.idle,
     );
   });
+
+  test(
+    'a failing recorder or socket still ends the call and frees the control',
+    () async {
+      final capture = FakeVoiceCapture()..stopFailure = StateError('recorder');
+      final socket = FailingCloseSocket();
+      final controller = AssistantSessionController(
+        openSocket: () async => socket,
+        capture: capture,
+        player: FakeVoicePlayer(),
+      );
+      await controller.start();
+      await settle();
+
+      await controller.end(reason: 'end-button');
+      expect(controller.phase, VoiceSessionPhase.ended);
+      expect(
+        voiceControlStateV1(
+          footerOpen: false,
+          sessionActive: controller.active,
+        ),
+        VoiceControlState.idle,
+      );
+      expect(socket.closeReason, 'end-button');
+      controller.dispose();
+      await settle();
+    },
+    timeout: const Timeout(Duration(seconds: 10)),
+  );
 
   testWidgets(
     'the voice control cannot invite a start while a call is ending',

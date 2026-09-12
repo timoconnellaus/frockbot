@@ -547,7 +547,9 @@ class _ComposerState extends State<Composer> {
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: theme.textTheme.labelMedium?.copyWith(
-                                  color: theme.colorScheme.primary,
+                                  color: theme.brightness == Brightness.dark
+                                      ? FrockTheme.accentSoft
+                                      : theme.colorScheme.primary,
                                 ),
                               ),
                             ),

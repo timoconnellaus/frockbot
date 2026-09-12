@@ -412,19 +412,26 @@ class AssistantSessionController extends ChangeNotifier {
   }) async {
     _startTimer?.cancel();
     _startTimer = null;
-    await _closeCapture();
-    await _inbound?.cancel();
+    await _settled(_closeCapture);
+    final inbound = _inbound;
     _inbound = null;
+    await _settled(() async => inbound?.cancel());
     final socket = _socket;
     _socket = null;
-    await player.close();
+    await _settled(player.close);
     player.removeListener(_notify);
-    await socket?.close(code: code, reason: reason);
+    await _settled(() async => socket?.close(code: code, reason: reason));
     _micLevel = 0;
     _opening.clear();
     _openingBytes = 0;
     _started = false;
   }
+
+  /// A recorder, a speaker or a socket that fails to close is not a reason
+  /// to strand the call in [VoiceSessionPhase.ending] with the microphone
+  /// still held: every step runs and the phase still lands.
+  Future<void> _settled(Future<void> Function() step) =>
+      Future<void>.sync(step).catchError((Object _) {});
 
   void _set(VoiceSessionPhase phase) {
     if (_phase == phase) return;
