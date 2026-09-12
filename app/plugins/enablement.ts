@@ -3,10 +3,9 @@
 // Bot able to do X" is what a person says (ADR 0026). This is the Bot's half:
 // a revisioned map from Plugin id to on or off, read at every mount.
 //
-// Absent means on. A Plugin the map does not name runs; a User who never
-// touched the switch gets what the generation installed. Seed states that
-// default a Plugin off arrive with the catalog (ADR 0026 step 6) and will be
-// applied where the default is decided, not here.
+// Absent means the Plugin's default: a User who never touched the switch gets
+// what the generation installed, and what a seeded Plugin's seed state says
+// (`catalog.ts`). The map holds only what someone said, on or off.
 
 export const PLUGIN_ENABLEMENT_KEY_V1 = "plugins:enablement";
 
@@ -116,11 +115,11 @@ export class PluginEnablementConflictError extends Error {
 }
 
 /**
- * Switches one Plugin for this Bot. Always fenced on the revision the caller
- * read, so two people flipping switches from stale pages do not silently undo
- * each other; there is no unfenced way in. Switching a Plugin back to on
- * removes its entry: absent is on, and the map holds only what someone
- * changed.
+ * Switches one Plugin for this Bot. Fenced on the revision the caller read,
+ * so two people flipping switches from stale pages do not silently undo each
+ * other. The map records what was said, on or off: absent still reads as
+ * the Plugin's default, and an explicit on is what turns a default-off
+ * Plugin on.
  */
 export async function setPluginEnabledV1(
   storage: PluginEnablementStorageV1,
@@ -141,9 +140,7 @@ export async function setPluginEnabledV1(
       current.revision,
     );
   }
-  const enabled = { ...current.enabled };
-  if (input.enabled) delete enabled[input.pluginId];
-  else enabled[input.pluginId] = false;
+  const enabled = { ...current.enabled, [input.pluginId]: input.enabled };
   const next: PluginEnablementV1 = {
     schemaVersion: 1,
     revision: current.revision + 1,

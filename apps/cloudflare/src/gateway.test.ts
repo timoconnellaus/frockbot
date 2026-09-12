@@ -473,6 +473,12 @@ class MemoryConfiguration
   async readPluginsFrame(): Promise<PluginsFrame> {
     throw new Error("Plugins frame not configured in this fixture");
   }
+  async readBotPluginsFrame(): Promise<never> {
+    throw new Error("Bot plugins frame not configured in this fixture");
+  }
+  async setBotPluginEnabled(): Promise<never> {
+    throw new Error("Bot plugins frame not configured in this fixture");
+  }
 
   async readSettingsFrame(): Promise<SettingsFrame> {
     throw new Error("Settings frame not configured in this fixture");

@@ -309,7 +309,7 @@ export function settingsDocumentV1(frame: SettingsFrame): ViewDocument {
   if (frame.sections.length === 0)
     children.push(
       statusNode(
-        "This feature is turned off. Enable it in Bot capabilities to see its settings.",
+        "This feature is turned off. Enable it in Account features to see its settings.",
       ),
     );
   return decodeProtocol("ViewDocument", {

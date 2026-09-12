@@ -192,7 +192,7 @@ export function pluginsDocumentV1(
   if (frame.plugins.length === 0) {
     children.push({
       type: "text",
-      text: "No extensions are available yet. Your Bots already include memory, skills, routines and a hosted Computer. Model providers are in Models; optional features are in Bot capabilities.",
+      text: "No extensions are available yet. Your Bots already include memory, skills, routines and a hosted Computer. Model providers are in Models; optional features are in Account features.",
     });
   }
   return decodeProtocol("ViewDocument", {

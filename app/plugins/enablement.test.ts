@@ -53,13 +53,13 @@ describe("which plugins a Bot runs", () => {
         off,
       ),
     ).toEqual(["weather"]);
-    // Back on is absent again: the map holds only what someone changed.
+    // Back on is recorded as on: an explicit on is what a default-off Plugin needs.
     const on = await setPluginEnabledV1(store, {
       pluginId: "greeter",
       enabled: true,
       expectedRevision: 1,
     });
-    expect(on.enabled).toEqual({});
+    expect(on.enabled).toEqual({ greeter: true });
     expect(on.revision).toBe(2);
     expect(store.entries.get(PLUGIN_ENABLEMENT_KEY_V1)).toEqual(on);
   });
