@@ -457,8 +457,14 @@ async function run(command: string, args: string[]): Promise<void> {
  * `wrangler dev` is a Node parent that supervises workerd. Killing the parent
  * alone leaves it free to respawn its child, so the harness puts wrangler in
  * its own process group (`detached`) and signals the whole group.
+ *
+ * The group is signalled whether or not the parent is still there. A parent
+ * that crashed leaves its workerd children alive in the group — the job's own
+ * cleanup found three generations of them after a shard with two crashes —
+ * and those are the processes still holding the Durable Object files a
+ * replacement is about to open.
  */
-async function stopProcessTree(child: ChildProcess): Promise<void> {
+export async function stopProcessTree(child: ChildProcess): Promise<void> {
   const group = child.pid === undefined ? undefined : -child.pid;
   const signal = (name: NodeJS.Signals): void => {
     try {
@@ -468,19 +474,35 @@ async function stopProcessTree(child: ChildProcess): Promise<void> {
       // Already gone.
     }
   };
-  if (child.exitCode === null && child.signalCode === null) {
-    const exited = new Promise<void>((done) =>
-      child.once("exit", () => done()),
-    );
-    signal("SIGTERM");
-    const escalation = setTimeout(() => signal("SIGKILL"), SHUTDOWN_GRACE_MS);
-    // Never block teardown on a process that refuses to die: escalate, give up
-    // waiting, and let the caller finish releasing everything else.
-    const abandoned = new Promise<void>((done) =>
-      setTimeout(done, SHUTDOWN_GRACE_MS * 2).unref(),
-    );
-    await Promise.race([exited, abandoned]);
-    clearTimeout(escalation);
+  signal("SIGTERM");
+  const sleep = (ms: number) =>
+    new Promise<void>((done) => setTimeout(done, ms));
+  const stillRunning = (): boolean => {
+    if (group === undefined)
+      return child.exitCode === null && child.signalCode === null;
+    try {
+      process.kill(group, 0);
+      return true;
+    } catch (error) {
+      return (error as NodeJS.ErrnoException).code !== "ESRCH";
+    }
+  };
+  // Waiting on the parent's own exit is not enough: workerd is what holds the
+  // serving port and the Durable Object files, so the group is polled until it
+  // is empty whether or not the parent is still there. A replacement started
+  // while workerd was still leaving met "Address already in use" and had to be
+  // restarted in its turn. The wait is bounded either way — teardown never
+  // blocks on a process that refuses to die.
+  const waitUntilGone = async (deadline: number): Promise<boolean> => {
+    while (stillRunning()) {
+      if (Date.now() >= deadline) return false;
+      await sleep(100);
+    }
+    return true;
+  };
+  if (!(await waitUntilGone(Date.now() + SHUTDOWN_GRACE_MS))) {
+    signal("SIGKILL");
+    await waitUntilGone(Date.now() + SHUTDOWN_GRACE_MS);
   }
   // The Playwright `webServer` waits for this process's stdio to close, and an
   // inherited pipe held by a surviving grandchild would hang the run.
@@ -678,9 +700,16 @@ export async function startHarness(
   let worker: SupervisedProcess | undefined;
 
   const stop = async (): Promise<void> => {
-    if (worker) await worker.stop();
-    if (appletBuild) await appletBuild.stop();
-    if (frockAi) await frockAi.stop();
+    // Together, not one after another: each `stopProcessTree` now waits for a
+    // whole process group to empty, so a service that is slow to release
+    // SIGTERM costs up to the grace period plus its escalation. Three of those
+    // in sequence would outlast the `webServer` `gracefulShutdown` budget in
+    // `playwright.config.ts`, and whichever service had not been reached yet
+    // would be left behind with its workerd when Playwright SIGKILLs this
+    // process.
+    await Promise.allSettled(
+      [worker, appletBuild, frockAi].map((service) => service?.stop()),
+    );
     if (ollama) await ollama.close();
     await new Promise<void>((closed) => log.end(closed));
     await rm(persistDirectory, { recursive: true, force: true });

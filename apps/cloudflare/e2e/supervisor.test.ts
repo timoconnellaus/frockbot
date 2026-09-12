@@ -41,6 +41,8 @@ function harness(
     maxRestarts?: number;
     windowMs?: number;
     now?: () => number;
+    stopChild?: (child: ChildProcess) => Promise<void>;
+    onSpawn?: (index: number) => void;
   } = {},
 ): Harness {
   const spawned: ChildProcess[] = [];
@@ -50,11 +52,12 @@ function harness(
     label: "test server",
     spawnChild: () => {
       const child = fakeChild();
+      overrides.onSpawn?.(spawned.length);
       spawned.push(child);
       return child;
     },
     waitUntilReady: () => ready.value(),
-    stopChild: async () => {},
+    stopChild: overrides.stopChild ?? (async () => {}),
     forwardOutput: () => {},
     // No real waiting: the backoff schedule is tested on its own below.
     sleep: async () => {},
@@ -93,13 +96,20 @@ describe("OutputTail", () => {
 
 describe("superviseProcess", () => {
   test("a first start that exits is a start-up failure, not a restart", async () => {
-    const { spawned, supervised, ready } = harness();
+    const stopped: ChildProcess[] = [];
+    const { spawned, supervised, ready } = harness({
+      stopChild: async (child) => {
+        stopped.push(child);
+      },
+    });
     ready.value = () => new Promise<void>(() => {});
     const started = supervised.start();
     (spawned[0] as unknown as FakeChild).exit(1);
     await expect(started).rejects.toThrow(/exited early with code 1/);
     expect(spawned).toHaveLength(1);
     expect(supervised.restarts()).toBe(0);
+    // Its workerd children outlive it, so the tree goes before start() throws.
+    expect(stopped).toEqual([spawned[0]]);
   });
 
   test("an exit after the server was ready is restarted on the same settings", async () => {
@@ -115,6 +125,134 @@ describe("superviseProcess", () => {
     expect(supervised.child()).toBe(spawned[1]);
     expect(reports.join("\n")).toContain("exited unexpectedly");
     expect(reports.join("\n")).toContain("is serving again");
+  });
+
+  test("a crashed child's tree is stopped before its replacement starts", async () => {
+    // `wrangler dev` dying leaves workerd behind; the replacement must not
+    // open the same state directory beside it.
+    const order: string[] = [];
+    let treeIsGone = () => {};
+    const stopped = new Promise<void>((done) => {
+      treeIsGone = done;
+    });
+    const { spawned, supervised } = harness({
+      stopChild: (child) => {
+        order.push(`stop:${spawned.indexOf(child)}`);
+        return stopped;
+      },
+      onSpawn: (index) => order.push(`spawn:${index}`),
+    });
+    await supervised.start();
+    (spawned[0] as unknown as FakeChild).exit(1);
+    await settle();
+
+    // The tree is still alive: nothing may have taken the port yet.
+    expect(spawned).toHaveLength(1);
+    expect(order).toEqual(["spawn:0", "stop:0"]);
+
+    treeIsGone();
+    await settle();
+
+    expect(spawned).toHaveLength(2);
+    expect(order).toEqual(["spawn:0", "stop:0", "spawn:1"]);
+  });
+
+  test("stop() waits for a crash's reaping to finish", async () => {
+    // Playwright tears the harness down seconds after a crash; returning
+    // before the dead child's tree is gone leaves workerd behind and wipes
+    // the state directory under it.
+    let treeIsGone = () => {};
+    const stopped = new Promise<void>((done) => {
+      treeIsGone = done;
+    });
+    const { spawned, supervised } = harness({
+      stopChild: () => stopped,
+    });
+    await supervised.start();
+    (spawned[0] as unknown as FakeChild).exit(1);
+    await settle();
+
+    let returned = false;
+    const stopping = supervised.stop().then(() => {
+      returned = true;
+    });
+    await settle();
+    expect(returned).toBe(false);
+
+    treeIsGone();
+    await stopping;
+    expect(returned).toBe(true);
+  });
+
+  test("stop() waits for a failed replacement's reaping to finish", async () => {
+    // The replacement that never came up still owns a process group; the
+    // harness must not wipe the state directory out from under it either.
+    let treeIsGone = () => {};
+    const secondStopped = new Promise<void>((done) => {
+      treeIsGone = done;
+    });
+    const { spawned, supervised, ready } = harness({
+      stopChild: (child) =>
+        spawned.indexOf(child) === 0 ? Promise.resolve() : secondStopped,
+    });
+    await supervised.start();
+    ready.value = () => Promise.reject(new Error("Address already in use"));
+    (spawned[0] as unknown as FakeChild).exit(1);
+    await settle();
+    expect(spawned).toHaveLength(2);
+
+    let returned = false;
+    const stopping = supervised.stop().then(() => {
+      returned = true;
+    });
+    await settle();
+    expect(returned).toBe(false);
+
+    treeIsGone();
+    await stopping;
+    expect(returned).toBe(true);
+  });
+
+  test("a replacement that exits mid-readiness is handled by the one loop", async () => {
+    // A replacement can hit the same proxy crash while its readiness check is
+    // still outstanding. That exit belongs to the attempt waiting on it, not
+    // to a second restart loop racing the first over `current`.
+    const stopped: ChildProcess[] = [];
+    let readinessFailed = (_error: Error) => {};
+    const { spawned, supervised, ready } = harness({
+      stopChild: async (child) => {
+        stopped.push(child);
+      },
+    });
+    await supervised.start();
+    ready.value = () =>
+      spawned.length === 2
+        ? new Promise<void>((_, fail) => {
+            readinessFailed = fail;
+          })
+        : Promise.resolve();
+
+    (spawned[0] as unknown as FakeChild).exit(1);
+    await settle();
+    expect(spawned).toHaveLength(2);
+
+    (spawned[1] as unknown as FakeChild).exit(1);
+    await settle();
+
+    // One loop carried on: the dead replacement's tree went, one more child
+    // was spawned, and it is the one being supervised.
+    expect(spawned).toHaveLength(3);
+    expect(supervised.restarts()).toBe(2);
+    expect(supervised.child()).toBe(spawned[2]);
+    expect(stopped).toEqual([spawned[0], spawned[1]]);
+
+    // The abandoned readiness check settling late must not reach the healthy
+    // replacement that took the dead one's place.
+    readinessFailed(new Error("still not serving"));
+    await settle();
+    expect(spawned).toHaveLength(3);
+    expect(supervised.child()).toBe(spawned[2]);
+    expect(stopped).toEqual([spawned[0], spawned[1]]);
   });
 
   test("survives repeated crashes and then gives up", async () => {

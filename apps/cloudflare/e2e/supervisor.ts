@@ -135,8 +135,24 @@ export function superviseProcess(options: SuperviseOptions): SupervisedProcess {
   let restarts = 0;
   let recent: number[] = [];
   let stopping = false;
+  // A crash reaps the dead child's tree asynchronously. `stop()` awaits this
+  // so a crash in the last seconds of a shard is not cut short by the harness
+  // exiting on top of it.
+  let pendingStop: Promise<void> | undefined;
+
+  // Until the readiness check passes, an exit is that attempt's failure and
+  // must reject into the caller rather than start a restart loop of its own.
+  const exitsEarly = (child: ChildProcess): Promise<never> =>
+    new Promise<never>((_, fail) => {
+      child.once("exit", (code) =>
+        fail(new Error(`${options.label} exited early with code ${code}`)),
+      );
+      child.once("error", fail);
+    });
 
   const attach = (child: ChildProcess): void => {
+    child.removeAllListeners("exit");
+    child.removeAllListeners("error");
     child.once("exit", (code, signal) => {
       if (stopping || child !== current) return;
       current = undefined;
@@ -148,7 +164,15 @@ export function superviseProcess(options: SuperviseOptions): SupervisedProcess {
             .map((line) => `  | ${line}`)
             .join("\n"),
       );
-      void restart();
+      // The child that exited is `wrangler dev`'s Node parent; what it spawned
+      // — workerd — does not die with it, and a replacement started over the
+      // same `--persist-to` directory would then share every Durable Object's
+      // SQLite file with a runtime nobody is talking to. A shard that lost
+      // its parent this way went on to run alarms twice and strand a Turn
+      // that was in flight across a reload. The orphans go before anything
+      // is started in their place.
+      pendingStop = options.stopChild(child).catch(() => {});
+      void pendingStop.then(restart);
     });
   };
 
@@ -177,8 +201,8 @@ export function superviseProcess(options: SuperviseOptions): SupervisedProcess {
         const child = options.spawnChild();
         current = child;
         options.forwardOutput(child, tail);
+        await Promise.race([options.waitUntilReady(), exitsEarly(child)]);
         attach(child);
-        await options.waitUntilReady();
         report(`${options.label} is serving again.`);
         return;
       } catch (error) {
@@ -190,7 +214,10 @@ export function superviseProcess(options: SuperviseOptions): SupervisedProcess {
         // Whatever is left of that attempt must not linger on the port.
         const failed = current;
         current = undefined;
-        if (failed) await options.stopChild(failed).catch(() => {});
+        if (failed) {
+          pendingStop = options.stopChild(failed).catch(() => {});
+          await pendingStop;
+        }
       }
     }
   };
@@ -200,21 +227,15 @@ export function superviseProcess(options: SuperviseOptions): SupervisedProcess {
       const child = options.spawnChild();
       current = child;
       options.forwardOutput(child, tail);
-      // Until the first readiness check passes, an exit is a start-up failure
-      // and must reject rather than trigger a restart.
-      const startupFailure = new Promise<never>((_, fail) => {
-        child.once("exit", (code) =>
-          fail(new Error(`${options.label} exited early with code ${code}`)),
-        );
-        child.once("error", fail);
-      });
       try {
-        await Promise.race([options.waitUntilReady(), startupFailure]);
+        await Promise.race([options.waitUntilReady(), exitsEarly(child)]);
       } catch (error) {
         current = undefined;
+        // The early exit is the `wrangler dev` parent; workerd outlives it and
+        // keeps the state directory open while the harness tears itself down.
+        await options.stopChild(child).catch(() => {});
         throw error;
       }
-      child.removeAllListeners("exit");
       attach(child);
     },
     child: () => current,
@@ -224,6 +245,7 @@ export function superviseProcess(options: SuperviseOptions): SupervisedProcess {
       const child = current;
       current = undefined;
       if (child) await options.stopChild(child);
+      await pendingStop;
     },
   };
 }

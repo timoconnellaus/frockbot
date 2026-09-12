@@ -43,8 +43,8 @@ Authentication uses the gateway's development identity
 fresh random user id per test so no two tests share Durable Object state. No
 secret is required.
 
-`docs/architecture-checks.md` § Integration maps each test to its seam and to
-the production incident it guards.
+Each test's own header comment names the seam it covers and the production
+incident it guards; there is no separate index of them.
 
 The file suffix matters: root `bun test` matches `*.test.ts` and `*.spec.ts` and
 neither `*.workerd.ts` nor `*.integration.ts`, so the pre-commit hook never runs
@@ -142,8 +142,8 @@ build flags and the Flutter version — and skips the build when the staged
 bundle already came from exactly those. `FROCKBOT_FORCE_CLIENT_BUILD=1` builds
 anyway.
 
-`docs/architecture-checks.md` § Browser end to end maps each spec to its seam
-and incident.
+Each spec's own header comment names its seam and incident, the same way the
+integration tests do.
 
 ## The Computer, and what no local pool can prove
 
