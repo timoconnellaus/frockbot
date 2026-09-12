@@ -81,6 +81,13 @@ export interface IsolateCallScopeV1 {
  * Connections and model are resolved once for the Bot and every member receives
  * the same list.
  */
+/**
+ * The attribution every Plugin's capability call carries. Package id on the
+ * props is attribution only — every Plugin in the worker holds the same
+ * authority — and the worker is one binding, so it is one name.
+ */
+export const PLUGIN_WORKER_PACKAGE_ID = "plugin-worker";
+
 export async function isolateMountOptions(
   state: ShellBotStateV1,
   identity: BotIdentity,
@@ -115,24 +122,21 @@ export async function isolateMountOptions(
     turnId: turn.runId,
     loader,
     artifacts: createR2PackageArtifactStore(artifacts),
-    capabilitiesFor: (member) =>
-      mintCapabilities({
-        props: {
-          userId: identity.userId,
-          botId: identity.botId,
-          runId: turn.runId,
-          sessionId: turn.sessionId,
-          turnId: turn.runId,
-          generationId: turn.generationId,
-          packageId: member.packageId,
-          connections: structuredClone(authority.connections),
-          ...(authority.model
-            ? { model: structuredClone(authority.model) }
-            : {}),
-          memory: authority.memory,
-          workspace: authority.workspace,
-        },
-      }),
+    capabilities: mintCapabilities({
+      props: {
+        userId: identity.userId,
+        botId: identity.botId,
+        runId: turn.runId,
+        sessionId: turn.sessionId,
+        turnId: turn.runId,
+        generationId: turn.generationId,
+        packageId: PLUGIN_WORKER_PACKAGE_ID,
+        connections: structuredClone(authority.connections),
+        ...(authority.model ? { model: structuredClone(authority.model) } : {}),
+        memory: authority.memory,
+        workspace: authority.workspace,
+      },
+    }),
     bindingDigest: await isolateBindingDigestV1({
       userId: identity.userId,
       botId: identity.botId,

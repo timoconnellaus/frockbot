@@ -222,20 +222,23 @@ An in-flight Turn keeps the generation it pinned. Activation takes effect at the
 
 Failure phases are `resolve | bundle | mount | health`, declared beside the activation that records them (`core/durable/composition/failure.ts`) and raised by the host the app supplies. `activateCompositionV1` reads the pin, mounts and verifies, then commits and clears failures. On failure it records the attempt, marks the generation `failed` or `quarantined`, mounts last-known-good, notifies, and admits the Turn on the fallback. The quarantine threshold is three attempts; a quarantined generation is never retried. If last-known-good is itself the failing generation, the error is rethrown.
 
-### Isolate loading — `frock-compose/isolate-host.ts`
+### The Plugin worker — `frock-compose/plugin-worker-host.ts`
 
-- Loading uses the `BOT_PACKAGES` Worker Loader binding, typed structurally as `BotIsolateLoader` (`:72`). There is no dynamic `import()`.
-- `loader.get(loaderId, () => ({compatibilityDate, mainModule, modules, globalOutbound: null, env: {IDENTITY, CAPABILITIES}, limits: {cpuMs: 5000, subRequests: 5}}))` (`:434-455`).
-- The loader id is `isolateLoaderIdV1({userId, artifactSetHash: botIsolateModuleSetHashV1(artifactContentHash, bindingDigest, grants)})`. The module-set hash covers wrapper version, wrapper source hash, package hash, binding digest and the member's declared grants, because a loader id is served from cache with the `env` it was first loaded with.
+Every Plugin a generation names mounts into one Dynamic Worker per User, layer two of [ADR 0026](adr/0026-plugins.md). The loop stays in the Bot Durable Object and calls the worker once per open hook per Turn.
+
+- Loading uses the `BOT_PACKAGES` Worker Loader binding, typed structurally as `BotIsolateLoader`. There is no dynamic `import()`.
+- `loader.get(loaderId, () => ({compatibilityDate, mainModule: "index.js", modules, globalOutbound: null, env: {IDENTITY, CAPABILITIES}, limits: {cpuMs: 5000, subRequests: 5}}))`. `modules` is the generated index plus one `plugins/<id>.js` per Plugin (`plugin-worker-wrapper.ts`); `IDENTITY` carries the User, the Bot, the generation and each Plugin's id, grants and consumed services.
+- The loader id is `pluginWorkerLoaderIdV1({userId, moduleSetHash})`, where `pluginWorkerModuleSetHashV1` covers the contract version, the index version, every artifact by content and the binding digest, because a loader id is served from cache with the `env` it was first loaded with. The binding digest still carries the Turn's authority snapshot, so the worker reloads when that changes; the per-call identity that lets it hold across Turns arrives with the loopback rework (ADR 0026 step 5).
 - Artifacts come from `createR2PackageArtifactStore` (`app/isolates/capabilities.ts`): R2 key `packages/<contentHash>.mjs`, sha-256 verified before load.
-- `BotIsolateContributionHost.prepare` first refuses a descriptor naming a grant or slot this deployment has not opened, then loads the artifact, mounts and calls `entrypoint.health()` as one guarded phase, requiring `health.ok`, non-empty tools, a matching `packageId`, and tool and hook names equal to the descriptor's. Per-tool turn admission comes from the isolate's own health report.
-- `BotCapabilities` (`apps/cloudflare/src/bot-capabilities.ts:68`), a `WorkerEntrypoint`, is the loopback through which an isolate reaches the kernel. It is minted per Turn by `isolateMountOptions` (`app/isolates/bot.ts:99`).
+- `PluginWorkerHost.mount` first refuses, per Plugin and at `resolve`, a descriptor that does not match its member, names a retired contract, a grant this deployment has not opened, or a slot; orders the rest so a provider mounts before the Plugins that consume its service (`pluginMountOrderV1`, which excludes and names an unmet, mismatched, duplicated or cyclic need); loads every artifact; then mounts and calls `health()` as one guarded phase. A module that does not parse fails the whole worker at `mount`, naming every Plugin. A Plugin whose report differs from its descriptor — tools, hooks, services or triggers — fails at `health` alone; the others still mount.
+- On commit the host registers each verified Plugin's tools under its own namespace and one loop hook per event any of them declared. A hook call carries the enabled list; the index runs the enabled Plugins that declared the event in mount order, each seeing the value the one before it left, and names any it skipped. The Durable Object records each named skip as `package/hook-failed`; a worker that does not answer in time, or answers with a value the kernel cannot decode, is charged to every enabled Plugin that wraps the event.
+- `BotCapabilities` (`apps/cloudflare/src/bot-capabilities.ts`), a `WorkerEntrypoint`, is the loopback through which every Plugin in the worker reaches the kernel. It is minted once per Turn by `isolateMountOptions` (`app/isolates/bot.ts`) and shared by the worker.
 
 ### Built-in versus dynamic
 
 First-party code is never a Composition member: it is imported, and `app/packages.ts` is the list that says it exists. A member is untrusted by definition and always carries an artifact and a descriptor.
 
-Nothing produces a member today. The isolate host, the `BOT_PACKAGES` loader and the capability contract are all still here and still exercised by the Applet instance path and the isolate probe; a _Package_ artifact returns with the step 8 build service (`plan.md`).
+Nothing produces a member today. The Plugin worker host, the `BOT_PACKAGES` loader and the contracts are exercised by the isolate probe, including a two-Plugin worker; the deployment catalog and Bot authoring arrive with ADR 0026 steps 6 and 7.
 
 ---
 

@@ -4,8 +4,8 @@
 //
 // It stands in for the Bot's Durable Object the way `CompositionProbe` stands
 // in for the kernel authority: the code under test is production
-// (`createShellCompositionHost`, `BotIsolateContributionHost`,
-// `BOT_ISOLATE_WRAPPER_SOURCE`, `BotCapabilities`), and only the Turn's
+// (`createShellCompositionHost`, `PluginWorkerHost`, the generated index,
+// `BotCapabilities`), and only the Turn's
 // surrounding configuration is fixture.
 import { DurableObject } from "cloudflare:workers";
 import { decodePluginDescriptorV1 } from "@frockbot/core/contracts";
@@ -238,6 +238,75 @@ function probePackageDescriptor(hooks: string[]) {
   });
 }
 
+/**
+ * Two Plugins that only make sense together: the provider exports a service
+ * and a prompt hook, the consumer reads the service in a tool and wraps the
+ * same hook after the provider, so a Turn proves mount order, services and
+ * the chain inside one worker.
+ */
+export const PROBE_PROVIDER_ID = "probe-provider";
+export const PROBE_CONSUMER_ID = "probe-consumer";
+
+export const PROBE_PROVIDER_SOURCE = `
+export const tools = [
+  { name: "provider_ping", description: "Answers", inputSchema: {}, idempotent: true },
+];
+export const services = { "greeting": { word: "hello" } };
+export const hooks = {
+  "agent/tool-exposure": async function (payload) {
+    return [...payload.tools, { name: "from_provider", description: "", inputSchema: {} }];
+  },
+};
+export async function execute(tool) {
+  return tool === "provider_ping" ? "pong" : "unknown tool";
+}
+`;
+
+export const PROBE_CONSUMER_SOURCE = `
+export const tools = [
+  { name: "read_service", description: "Reads the provider's service", inputSchema: {}, idempotent: true },
+];
+export const hooks = {
+  "agent/tool-exposure": async function (payload) {
+    return [...payload.tools, { name: "from_consumer", description: "", inputSchema: {} }];
+  },
+};
+export async function execute(tool, input, ctx) {
+  if (tool !== "read_service") return "unknown tool";
+  return JSON.stringify({ services: Object.keys(ctx.services), word: ctx.services.greeting.word, packageId: ctx.packageId });
+}
+`;
+
+const PROBE_PROVIDER_DESCRIPTOR = decodePluginDescriptorV1({
+  id: PROBE_PROVIDER_ID,
+  displayName: "Probe provider",
+  version: "0.0.1",
+  tools: [{ name: "provider_ping", description: "Answers", inputSchema: {} }],
+  contractVersion: 4,
+  hooks: ["agent/tool-exposure"],
+  grants: [],
+  provides: [{ name: "greeting", version: 1 }],
+  contextKeys: ["user", "bot", "session"],
+});
+
+const PROBE_CONSUMER_DESCRIPTOR = decodePluginDescriptorV1({
+  id: PROBE_CONSUMER_ID,
+  displayName: "Probe consumer",
+  version: "0.0.1",
+  tools: [
+    {
+      name: "read_service",
+      description: "Reads the provider's service",
+      inputSchema: {},
+    },
+  ],
+  contractVersion: 4,
+  hooks: ["agent/tool-exposure"],
+  grants: [],
+  consumes: [{ name: "greeting", version: 1 }],
+  contextKeys: ["user", "bot", "session"],
+});
+
 /** A deliberate syntax error: `prepare()` must fail with a diagnostic, not hang. */
 export const PROBE_BROKEN_SOURCE = `
 export const tools = [{ name: "broken", description: "", inputSchema: {} }];
@@ -368,27 +437,51 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
     artifact?: ArtifactRefV1,
     createdAt = "2026-08-31T00:00:00.000Z",
     hooks: string[] = ["agent/tool-exposure"],
+    pair?: { provider: ArtifactRefV1; consumer: ArtifactRefV1 },
   ): Promise<CompositionGenerationV1> {
     const base = await bootstrapGeneration({ createdAt });
-    if (!artifact) return base;
+    if (!artifact && !pair) return base;
+    const authored = (
+      packageId: string,
+      descriptor: CompositionMemberV1["descriptor"],
+      ref: ArtifactRefV1,
+    ): CompositionMemberV1 => ({
+      packageId,
+      version: "0.0.1",
+      descriptor,
+      provenance: {
+        kind: "bot" as const,
+        packageId,
+        version: "0.0.1",
+        botId: "probe",
+        sessionId: "user-1:probe",
+        turnId: "turn-1",
+        runId: "run-1",
+        authoredAt: createdAt,
+      },
+      artifact: ref,
+    });
     const members: CompositionMemberV1[] = [
       ...base.members,
-      {
-        packageId: PROBE_PACKAGE_ID,
-        version: "0.0.1",
-        descriptor: probePackageDescriptor(hooks),
-        provenance: {
-          kind: "bot" as const,
-          packageId: PROBE_PACKAGE_ID,
-          version: "0.0.1",
-          botId: "probe",
-          sessionId: "user-1:probe",
-          turnId: "turn-1",
-          runId: "run-1",
-          authoredAt: createdAt,
-        },
-        artifact,
-      },
+      ...(artifact
+        ? [authored(PROBE_PACKAGE_ID, probePackageDescriptor(hooks), artifact)]
+        : []),
+      // The generation lists members by id, consumer before provider, so the
+      // host's ordering — not the listing — is what puts the provider first.
+      ...(pair
+        ? [
+            authored(
+              PROBE_CONSUMER_ID,
+              PROBE_CONSUMER_DESCRIPTOR,
+              pair.consumer,
+            ),
+            authored(
+              PROBE_PROVIDER_ID,
+              PROBE_PROVIDER_DESCRIPTOR,
+              pair.provider,
+            ),
+          ]
+        : []),
     ].sort((left, right) => left.packageId.localeCompare(right.packageId));
     const artifactSetHash = await compositionArtifactSetHashV1(members);
     return {
@@ -404,6 +497,7 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
     userId: string;
     botId: string;
     artifact?: ArtifactRefV1;
+    pair?: { provider: ArtifactRefV1; consumer: ArtifactRefV1 };
     connections?: IsolateConnectionV1[];
     model?: IsolateModelBindingV1;
     memory?: boolean;
@@ -421,6 +515,7 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
       input.artifact,
       input.generationCreatedAt,
       input.hooks,
+      input.pair,
     );
     // SAFETY: exported WorkerEntrypoints are materialized on ctx.exports;
     // workers-types cannot infer the generated local RPC stubs.
@@ -461,22 +556,21 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
             return module;
           },
         },
-        capabilitiesFor: (member) =>
-          exports.BotCapabilities({
-            props: {
-              userId: input.userId,
-              botId: input.botId,
-              runId: "run-1",
-              sessionId: `${input.userId}:${input.botId}`,
-              turnId: "turn-1",
-              generationId: generation.generationId,
-              packageId: member.packageId,
-              connections: structuredClone(input.connections ?? []),
-              ...(input.model ? { model: structuredClone(input.model) } : {}),
-              memory: input.memory ?? false,
-              workspace: input.workspace ?? false,
-            },
-          }),
+        capabilities: exports.BotCapabilities({
+          props: {
+            userId: input.userId,
+            botId: input.botId,
+            runId: "run-1",
+            sessionId: `${input.userId}:${input.botId}`,
+            turnId: "turn-1",
+            generationId: generation.generationId,
+            packageId: "plugin-worker",
+            connections: structuredClone(input.connections ?? []),
+            ...(input.model ? { model: structuredClone(input.model) } : {}),
+            memory: input.memory ?? false,
+            workspace: input.workspace ?? false,
+          },
+        }),
         bindingDigest: await isolateBindingDigestV1({
           userId: input.userId,
           botId: input.botId,
@@ -499,6 +593,76 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
     createdAt?: string,
   ): Promise<CompositionGenerationV1> {
     return await this.generation(artifact, createdAt);
+  }
+
+  /**
+   * Mounts the provider and consumer pair as one worker, calls the consumer's
+   * tool, and runs one tool-exposure hook through the chain.
+   */
+  async probePair(input: {
+    userId: string;
+    botId: string;
+    provider: ArtifactRefV1;
+    consumer: ArtifactRefV1;
+  }): Promise<{
+    loaderCalls: number;
+    pluginOrder: string[];
+    serviceRead: { content: string; isError: boolean };
+    exposedTools: string[];
+  }> {
+    this.loaderIds = [];
+    this.loadedCode = [];
+    const { composition, generation } = await this.mount({
+      userId: input.userId,
+      botId: input.botId,
+      pair: { provider: input.provider, consumer: input.consumer },
+    });
+    try {
+      await composition.verify(new AbortController().signal);
+      const identity = this.loadedCode[0]?.env.IDENTITY as
+        { plugins: { pluginId: string }[] } | undefined;
+      const call = dynamicToolCallV1("call-1", {
+        namespace: PROBE_CONSUMER_ID,
+        toolName: "read_service",
+        input: {},
+      });
+      const context = {
+        botId: input.botId,
+        agentId: input.botId,
+        sessionId: `${input.userId}:${input.botId}`,
+        compositionGenerationId: generation.generationId,
+        turnType: "chat" as const,
+        effectId: "tool:1:1:0",
+        signal: new AbortController().signal,
+      };
+      const preparation = await composition.runtime.services.tools.prepare(
+        call,
+        { ...context, toolCall: call },
+      );
+      const serviceRead =
+        preparation.kind !== "ready"
+          ? preparation.result
+          : await composition.runtime.services.tools.executePrepared(
+              preparation,
+              context,
+            );
+      const exposed = await composition.runtime.services.hooks.toolExposure(
+        composition.runtime.agent.agent as never,
+        [],
+        1,
+        1,
+        new AbortController().signal,
+        () => Promise.resolve([]),
+      );
+      return {
+        loaderCalls: this.loaderIds.length,
+        pluginOrder: identity?.plugins.map((plugin) => plugin.pluginId) ?? [],
+        serviceRead,
+        exposedTools: exposed.map((tool) => tool.name),
+      };
+    } finally {
+      await composition.dispose();
+    }
   }
 
   /** Mounts, verifies, and calls one isolate tool through `ctx.tools`. */

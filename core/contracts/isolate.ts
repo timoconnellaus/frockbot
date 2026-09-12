@@ -35,13 +35,18 @@ import { STRUCTURED_OUTPUT_ISSUE_LIMIT_V1 } from "./structured-output.js";
 /**
  * The wire contract version the kernel wrapper emits. Version 2 added
  * per-tool turn admission. Version 3 added declared loop hooks and hook RPC.
+ * Version 4 is the Plugin worker: one Dynamic Worker per User over a
+ * generated index, the `agent/request` hook, services a plugin provides and
+ * consumes, and triggers.
  */
-export const ISOLATE_CONTRACT_VERSION = 3;
+export const ISOLATE_CONTRACT_VERSION = 4;
 
 /** Every contract version the kernel still decodes. */
-export type IsolateContractVersion = 1 | 2 | 3;
+export type IsolateContractVersion = 1 | 2 | 3 | 4;
 
-const ISOLATE_CONTRACT_VERSIONS: readonly IsolateContractVersion[] = [1, 2, 3];
+const ISOLATE_CONTRACT_VERSIONS: readonly IsolateContractVersion[] = [
+  1, 2, 3, 4,
+];
 
 /** The upper bound on a single isolate invocation, enforced on both sides. */
 export const ISOLATE_MAX_DEADLINE_MS = 60_000;
@@ -341,6 +346,11 @@ export interface BotPackageContextV1 {
   readonly capabilities: {
     list(): Promise<IsolateCapabilityListOutcomeV1>;
   };
+  /**
+   * The services other plugins in the worker provide and this plugin declared
+   * it consumes, by service name. Empty for a plugin that consumes nothing.
+   */
+  readonly services: Record<string, unknown>;
   /** The `ai` grant. */
   readonly model?: {
     invoke(request: NormalizedModelRequest): Promise<BotPackageModelOutcomeV1>;

@@ -3,7 +3,9 @@ import { describe, expect, test } from "vitest";
 import { BOT_ISOLATE_CONTEXT_KEYS_V1 } from "@frockbot/core/contracts";
 import {
   PROBE_BROKEN_SOURCE,
+  PROBE_CONSUMER_SOURCE,
   PROBE_PACKAGE_SOURCE,
+  PROBE_PROVIDER_SOURCE,
   PROBE_REQUEST_HOOK_SOURCE,
   PROBE_REQUEST_HOOKS,
   PROBE_REQUEST_REDIRECT_HOOK_SOURCE,
@@ -236,8 +238,7 @@ describe("a Bot Package in a loaded Dynamic Worker", () => {
     expect(loaded[0]?.identityKeys).toEqual([
       "botId",
       "generationId",
-      "grants",
-      "packageId",
+      "plugins",
       "userId",
     ]);
     expect(loaded[0]?.limits.subRequests).toBeGreaterThan(0);
@@ -332,9 +333,32 @@ describe("a Bot Package in a loaded Dynamic Worker", () => {
 
     expect(first).toHaveLength(1);
     expect(second).toHaveLength(1);
-    expect(first[0]).toMatch(/^bot-package:user-1:[0-9a-f]{64}$/);
-    expect(second[0]).toMatch(/^bot-package:user-1:[0-9a-f]{64}$/);
+    expect(first[0]).toMatch(/^plugin-worker:user-1:[0-9a-f]{64}$/);
+    expect(second[0]).toMatch(/^plugin-worker:user-1:[0-9a-f]{64}$/);
     expect(first[0]).not.toBe(second[0]);
+  });
+
+  test("two plugins share one worker: provider first, its service handed on, hooks chained", async () => {
+    const stub = probe(`pair-${crypto.randomUUID()}`);
+    const provider = await stub.seedArtifact(PROBE_PROVIDER_SOURCE);
+    const consumer = await stub.seedArtifact(PROBE_CONSUMER_SOURCE);
+
+    const result = await stub.probePair({
+      userId: `user-${crypto.randomUUID()}`,
+      botId: "bot-1",
+      provider,
+      consumer,
+    });
+
+    expect(result.loaderCalls).toBe(1);
+    expect(result.pluginOrder).toEqual(["probe-provider", "probe-consumer"]);
+    expect(result.serviceRead.isError).toBe(false);
+    expect(JSON.parse(result.serviceRead.content)).toEqual({
+      services: ["greeting"],
+      word: "hello",
+      packageId: "probe-consumer",
+    });
+    expect(result.exposedTools).toEqual(["from_provider", "from_consumer"]);
   });
 
   test("a broken package.js fails verification with a diagnostic, not a hang", async () => {
@@ -347,8 +371,8 @@ describe("a Bot Package in a loaded Dynamic Worker", () => {
       artifact,
     });
 
-    expect(failure).toContain("failed to mount in its isolate");
-    expect(failure).toMatch(/package\.js/);
+    expect(failure).toContain("plugin worker failed to mount");
+    expect(failure).toMatch(/plugins: bot-authored/);
   });
 });
 
