@@ -37,7 +37,9 @@ import {
   type IsolateStorageListOutcomeV1,
   type IsolateStorageOutcomeV1,
   type IsolateWorkspaceOutcomeV1,
+  type LlmUsageV1,
   type NormalizedModelRequest,
+  type ToolCall,
   type PluginDescriptorV1,
   type WorkspacePathV1,
 } from "@frockbot/core/contracts";
@@ -47,6 +49,9 @@ import {
 } from "@frockbot/core/configuration";
 import type { BotIdentity } from "@frockbot/core/durable";
 import { frockbotToolCallV1 } from "@frockbot/core/tools";
+import { estimateModelUsageV1 } from "@frockbot/core/agent-loop";
+import { modelCharge, modelCost } from "@frockbot/app/billing/model";
+import { FROCK_AI_PROVIDER_TYPE } from "@frockbot/providers/frock-ai/catalog";
 import { memoryScopeRootV1 } from "@frockbot/app/memory/roots";
 import { notePluginFailureV1 } from "@frockbot/app/plugins/health-bot";
 import {
@@ -401,9 +406,76 @@ export async function isolateInvokeModel(
     },
     authority,
     runtime
-      ? { path: isolateModelPath(state, identity, runtime, input.generationId) }
+      ? {
+          path: isolateModelPath(state, identity, runtime, {
+            generationId: input.generationId,
+            packageId: input.packageId,
+            sessionId: input.sessionId,
+            record: (usage) => recordPluginModelUsageV1(state, input, usage),
+          }),
+        }
       : undefined,
   ).invokeModel(request);
+}
+
+/** What one Plugin model call came to, once the stream has ended. */
+interface PluginModelUsageV1 {
+  requestId: string;
+  provider: string;
+  model: string;
+  usage: LlmUsageV1;
+  estimated: boolean;
+  latencyMs: number;
+  costMicros?: number;
+}
+
+/**
+ * Appends the call to the Turn's log as `package/model-usage`, the way the
+ * loop appends its own `model/usage`, so the Work view can itemise what each
+ * Plugin spent (ADR 0026). A call from a standalone mount — a trigger, a
+ * section — has no Turn log; the ledger still names the Plugin.
+ */
+async function recordPluginModelUsageV1(
+  state: ShellBotStateV1,
+  input: {
+    runId: string;
+    sessionId: string;
+    turnId: string;
+    packageId: string;
+    generationId: string;
+  },
+  usage: PluginModelUsageV1,
+): Promise<void> {
+  const active = activeIsolateTurn(state, input);
+  const session = active?.mounted.runtime.services.sessions.get(
+    input.sessionId,
+  );
+  if (!session) return;
+  const started = session.events.findLast(
+    (event) => event.type === "step/start",
+  );
+  if (started?.type !== "step/start") return;
+  session.append({
+    type: "package/model-usage",
+    turn: started.turn,
+    step: started.step,
+    packageId: input.packageId,
+    requestId: usage.requestId,
+    provider: usage.provider,
+    model: usage.model,
+    inputTokens: usage.usage.inputTokens,
+    outputTokens: usage.usage.outputTokens,
+    ...(usage.usage.cachedInputTokens !== undefined
+      ? { cachedInputTokens: usage.usage.cachedInputTokens }
+      : {}),
+    ...(usage.usage.reasoningTokens !== undefined
+      ? { reasoningTokens: usage.usage.reasoningTokens }
+      : {}),
+    latencyMs: usage.latencyMs,
+    estimated: usage.estimated,
+    ...(usage.costMicros !== undefined ? { costMicros: usage.costMicros } : {}),
+  });
+  await session.flush();
 }
 
 /**
@@ -963,37 +1035,90 @@ function isolateModelPath(
     agentPackages: FoundationAgentPackage[];
     modelSelection: RuntimeModelSelection;
   },
-  generationId: string,
+  call: {
+    generationId: string;
+    packageId: string;
+    /** The Session the call is for: the ledger's join key to the Turn. */
+    sessionId: string;
+    record: (usage: PluginModelUsageV1) => Promise<void>;
+  },
 ): IsolateModelPath {
   return {
     async *stream(request, signal) {
       const generation = await readPinnedCompositionGenerationV1(
         state,
         identity,
-        generationId,
+        call.generationId,
       );
       if (!generation) {
         throw new Error(
-          `isolate model invocation pins unknown Composition generation "${generationId}"`,
+          `isolate model invocation pins unknown Composition generation "${call.generationId}"`,
         );
       }
+      // The ledger names the Turn's Session and the Plugin, so a Bot's or a
+      // Session's spend includes what its Plugins spent, itemised by name.
+      const billing = state.env.BILLING?.(
+        identity.userId,
+        identity.botId,
+        call.sessionId,
+      );
       const composition = await createShellCompositionHost({
         botId: identity.botId,
-        sessionId: `isolate-model:${request.requestId}`,
-        billing: state.env.BILLING?.(
-          identity.userId,
-          identity.botId,
-          `isolate-model:${request.requestId}`,
-        ),
+        sessionId: call.sessionId,
+        ...(billing
+          ? { billing: { ...billing, attribution: `plugin ${call.packageId}` } }
+          : {}),
         sessionEvents: [],
         agentPackages: runtime.agentPackages,
         modelSelection: runtime.modelSelection,
         admitEffect: () => Promise.resolve(true),
       }).mount(generation, signal);
+      const startedAt = Date.now();
+      let usage: LlmUsageV1 | undefined;
+      let text = "";
+      const toolCalls: ToolCall[] = [];
+      let complete = false;
       try {
-        yield* composition.runtime.services.llm.stream(request, signal);
+        for await (const event of composition.runtime.services.llm.stream(
+          request,
+          signal,
+        )) {
+          if (event.type === "usage") usage = structuredClone(event.usage);
+          else if (event.type === "text-delta") text += event.text;
+          else if (event.type === "tool-call") toolCalls.push(event.call);
+          yield event;
+        }
+        complete = true;
       } finally {
         await composition.dispose();
+        if (complete) {
+          // Like the loop's own accounting: what the provider reported, or
+          // an estimate from the exact request and response when it did not.
+          const counted =
+            usage ?? estimateModelUsageV1(request, { text, toolCalls });
+          // Only a hosted call the provider reported usage for is settled as a
+          // charge on the account, so only that one carries a price here.
+          const rate =
+            usage && request.provider === FROCK_AI_PROVIDER_TYPE
+              ? billing?.rates[request.model]
+              : undefined;
+          try {
+            await call.record({
+              requestId: request.requestId,
+              provider: request.provider,
+              model: request.model,
+              usage: counted,
+              estimated: usage === undefined,
+              latencyMs: Math.max(0, Date.now() - startedAt),
+              ...(rate
+                ? { costMicros: modelCharge(modelCost(counted, rate)) }
+                : {}),
+            });
+          } catch {
+            // Bookkeeping is not the Plugin's call: a failed append never
+            // fails a model call the account has already been billed for.
+          }
+        }
       }
     },
   };

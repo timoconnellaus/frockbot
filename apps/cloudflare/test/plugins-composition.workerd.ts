@@ -2352,4 +2352,100 @@ export const views = {
     // The switch the User needs to turn it off still works.
     await switchPlugin(identity, BROKEN_ID, false);
   });
+
+  test("a Plugin's model call in a real Turn is recorded on the Turn's log, attributed to the Plugin", async () => {
+    const userId = `user-${crypto.randomUUID()}`;
+    const identity = { userId, botId: "bot-1" };
+    await provisionBot(identity);
+    await turn(identity, "run-0");
+
+    const ASKER_ID = "asker";
+    const ASKER_SOURCE = `
+export const tools = [
+  { name: "ask_model", description: "Asks the Bot's model one thing", inputSchema: { type: "object" }, idempotent: false },
+];
+export async function execute(tool, input, ctx) {
+  if (tool !== "ask_model") return "unknown tool";
+  const outcome = await ctx.model.invoke({
+    requestId: "asker-" + input.n,
+    provider: "ollama-cloud",
+    model: "glm-5.3-flash:cloud",
+    system: "",
+    messages: [{ role: "user", content: "hello from a plugin" }],
+    tools: [],
+  });
+  if (outcome.status !== "streaming") return JSON.stringify(outcome);
+  let text = "";
+  for await (const event of outcome.events) {
+    if (event.type === "text-delta") text += event.text;
+  }
+  return "the model said: " + text;
+}
+`;
+    const descriptor = decodePluginDescriptorV1({
+      id: ASKER_ID,
+      displayName: "Asker",
+      version: "0.0.1",
+      contractVersion: 4,
+      tools: [
+        { name: "ask_model", description: "Asks the model", inputSchema: {} },
+      ],
+      hooks: [],
+      grants: ["ai"],
+      contextKeys: ["user", "bot", "session"],
+    });
+    await pinGeneration(userId, [
+      { id: ASKER_ID, source: ASKER_SOURCE, descriptor },
+    ]);
+    await switchPlugin(identity, ASKER_ID, true);
+
+    await bot(identity).run({
+      schemaVersion: 1,
+      ...identity,
+      command: {
+        runId: "run-1",
+        sessionId: `${userId}:bot-1`,
+        acceptedAt: new Date().toISOString(),
+        text: toolCallTriggerPrompt([
+          "call_dynamic_tool",
+          dynamicToolInputV1({
+            namespace: ASKER_ID,
+            toolName: "ask_model",
+            input: { n: 1 },
+          }),
+        ]),
+      },
+    });
+    const events = await runEvents(identity, "run-1");
+    const answer = events.find(
+      (event) =>
+        event.type === "tool/result" &&
+        typeof event.content === "string" &&
+        event.content.includes("the model said"),
+    );
+    expect(
+      answer,
+      JSON.stringify(events.map((event) => event.type)),
+    ).toBeDefined();
+    // The accounting the loop keeps for its own calls, kept for the Plugin's:
+    // attributed, counted, and on the Turn's own log.
+    const usage = events.find((event) => event.type === "package/model-usage");
+    expect(usage).toMatchObject({
+      type: "package/model-usage",
+      packageId: ASKER_ID,
+      requestId: "asker-1",
+      provider: "ollama-cloud",
+      model: "glm-5.3-flash:cloud",
+    });
+    const counted = usage as unknown as {
+      inputTokens: number;
+      outputTokens: number;
+      latencyMs: number;
+      estimated: boolean;
+    };
+    expect(counted.inputTokens).toBeGreaterThan(0);
+    expect(counted.outputTokens).toBeGreaterThan(0);
+    expect(counted.latencyMs).toBeGreaterThanOrEqual(0);
+    expect(typeof counted.estimated).toBe("boolean");
+  });
 });

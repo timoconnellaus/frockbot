@@ -413,7 +413,10 @@ class RunView extends StatelessWidget {
             const Divider(height: 1),
           ],
           Expanded(
-            child: line.tools.isEmpty && line.sends.isEmpty
+            child:
+                line.tools.isEmpty &&
+                    line.sends.isEmpty &&
+                    line.pluginCalls.isEmpty
                 ? Center(
                     child: Padding(
                       padding: const EdgeInsets.all(32),
@@ -441,6 +444,19 @@ class RunView extends StatelessWidget {
                     padding: const EdgeInsets.symmetric(vertical: 8),
                     children: [
                       for (final tool in line.tools) _ToolRow(tool: tool),
+                      if (line.pluginCalls.isNotEmpty) ...[
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                          child: Text(
+                            'Plugins',
+                            style: theme.textTheme.labelMedium?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ),
+                        for (final call in line.pluginCalls)
+                          _PluginCallRow(call: call),
+                      ],
                       if (line.notice != null)
                         Padding(
                           padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
@@ -455,6 +471,33 @@ class RunView extends StatelessWidget {
                   ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// One model call a Plugin made, as the receipt reads it: the Plugin, the
+/// model, the tokens, and the cost when the account was billed for it.
+class _PluginCallRow extends StatelessWidget {
+  final PluginModelCall call;
+  const _PluginCallRow({required this.call});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cost = call.cost;
+    return ListTile(
+      dense: true,
+      leading: Icon(
+        Icons.extension_outlined,
+        size: 18,
+        color: theme.colorScheme.primary,
+      ),
+      title: Text(call.pluginId, style: theme.textTheme.bodyMedium),
+      subtitle: Text(
+        '${call.model} · ${call.inputTokens} in, ${call.outputTokens} out'
+        '${cost == null ? '' : ' · $cost'}',
+        style: theme.textTheme.bodySmall,
       ),
     );
   }

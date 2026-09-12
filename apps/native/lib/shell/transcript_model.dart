@@ -36,6 +36,28 @@ class ToolActivity {
   });
 }
 
+/// One model call a Plugin made in the Turn, itemised on the run view: which
+/// Plugin, which model, the tokens, and the cost when the deployment bills.
+class PluginModelCall {
+  final String pluginId;
+  final String model;
+  final int inputTokens;
+  final int outputTokens;
+  final int? costMicros;
+  const PluginModelCall({
+    required this.pluginId,
+    required this.model,
+    required this.inputTokens,
+    required this.outputTokens,
+    this.costMicros,
+  });
+
+  /// "US\$0.0012", or nothing when the deployment did not bill the call.
+  String? get cost => costMicros == null
+      ? null
+      : 'US\$${(costMicros! / 1e6).toStringAsFixed(4)}';
+}
+
 enum LineRole { user, assistant, system }
 
 /// `streaming` is a Turn in flight; `aborted` is one that was stopped or
@@ -72,6 +94,7 @@ class TranscriptLine {
   final LineRetry? retry;
   final List<ToolActivity> tools;
   final List<SendPayloadLine> sends;
+  final List<PluginModelCall> pluginCalls;
   const TranscriptLine({
     required this.id,
     required this.runId,
@@ -85,6 +108,7 @@ class TranscriptLine {
     this.retry,
     this.tools = const [],
     this.sends = const [],
+    this.pluginCalls = const [],
   });
 
   bool get empty =>
@@ -342,6 +366,30 @@ List<ToolActivity> _toolsFrom(List<Object?> events) {
   return tools.values.toList();
 }
 
+List<PluginModelCall> _pluginCallsFrom(List<Object?> events) {
+  final calls = <PluginModelCall>[];
+  for (final event in events) {
+    if (event is! Map || event['type'] != 'plugin/model-usage') continue;
+    final pluginId = event['pluginId'];
+    final model = event['model'];
+    final input = event['inputTokens'];
+    final output = event['outputTokens'];
+    if (pluginId is! String || model is! String) continue;
+    if (input is! int || output is! int) continue;
+    final cost = event['costMicros'];
+    calls.add(
+      PluginModelCall(
+        pluginId: pluginId,
+        model: model,
+        inputTokens: input,
+        outputTokens: output,
+        costMicros: cost is int ? cost : null,
+      ),
+    );
+  }
+  return calls;
+}
+
 /// Projects durable runs into the lines the thread draws.
 ///
 /// One line per `send_to_user` in the order the Bot sent them, then the Turn's
@@ -387,6 +435,7 @@ List<TranscriptLine> projectRuns(List<Map<String, dynamic>> runs) {
       );
     }
     final tools = _toolsFrom(events);
+    final pluginCalls = _pluginCallsFrom(events);
     // Only explicit sends carry the Bot's voice; outcome text is private.
     const text = '';
     final outcome = run['outcome'] as Map?;
@@ -414,6 +463,7 @@ List<TranscriptLine> projectRuns(List<Map<String, dynamic>> runs) {
             pending: queued,
             stopRequested: run['stopRequestedAt'] != null,
             tools: tools,
+            pluginCalls: pluginCalls,
           ),
         );
       case 'superseded':
@@ -429,6 +479,7 @@ List<TranscriptLine> projectRuns(List<Map<String, dynamic>> runs) {
             at: admittedAt,
             status: LineStatus.aborted,
             tools: tools,
+            pluginCalls: pluginCalls,
           ),
         );
       case 'cancelled':
@@ -442,6 +493,7 @@ List<TranscriptLine> projectRuns(List<Map<String, dynamic>> runs) {
             status: LineStatus.aborted,
             notice: spoken ? null : 'You stopped this.',
             tools: tools,
+            pluginCalls: pluginCalls,
           ),
         );
       case 'failed':
@@ -473,6 +525,7 @@ List<TranscriptLine> projectRuns(List<Map<String, dynamic>> runs) {
             notice: spoken ? null : failure.notice,
             retry: spoken ? null : failure.action,
             tools: tools,
+            pluginCalls: pluginCalls,
           ),
         );
       default:
@@ -485,6 +538,7 @@ List<TranscriptLine> projectRuns(List<Map<String, dynamic>> runs) {
             at: admittedAt,
             status: LineStatus.completed,
             tools: tools,
+            pluginCalls: pluginCalls,
           ),
         );
     }

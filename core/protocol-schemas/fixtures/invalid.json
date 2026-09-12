@@ -490,6 +490,18 @@
     "value": null
   },
   {
+    "name": "RunEvent plugin model usage rejects negative tokens",
+    "schema": "RunEvent",
+    "value": {
+      "type": "plugin/model-usage",
+      "pluginId": "weather",
+      "requestId": "req-1",
+      "model": "glm-5.3-flash:cloud",
+      "inputTokens": -1,
+      "outputTokens": 40
+    }
+  },
+  {
     "name": "RunOutcome wrong shape",
     "schema": "RunOutcome",
     "value": null

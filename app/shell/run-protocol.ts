@@ -55,6 +55,12 @@ export interface ClientTurnEvent {
   description?: string;
   model?: string;
   background?: boolean;
+  /** A `plugin/model-usage` line: what one Plugin's model call came to. */
+  pluginId?: string;
+  requestId?: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  costMicros?: number;
   /**
    * Binaries a tool filed in a durable root. References - media type, content
    * hash, and the encoded Workspace path - never bytes: a thread carries
@@ -286,6 +292,20 @@ export type ClientRunEventV1 =
       description: string;
       model: string;
       background: boolean;
+    }
+  /**
+   * One model call a Plugin made in this Turn, itemised for the Work view
+   * (ADR 0026): which Plugin, which model, the tokens, and the cost when the
+   * deployment bills. Never the prompt or the answer.
+   */
+  | {
+      type: "plugin/model-usage";
+      pluginId: string;
+      requestId: string;
+      model: string;
+      inputTokens: number;
+      outputTokens: number;
+      costMicros?: number;
     };
 
 /** The bounded, public identity needed to present a dynamic tool call. */
@@ -778,6 +798,23 @@ function projectionUnits(
             type: "computer/sync",
             status: event.status,
             message: computerSyncCopyV1(event),
+          },
+        ],
+        droppable: true,
+      });
+    } else if (event.type === "package/model-usage") {
+      units.push({
+        events: [
+          {
+            type: "plugin/model-usage",
+            pluginId: truncate(event.packageId, MAX_EVENT_ID_LENGTH),
+            requestId: truncate(event.requestId, MAX_EVENT_ID_LENGTH),
+            model: truncateWireString(event.model, MAX_TASK_MODEL_BYTES),
+            inputTokens: event.inputTokens,
+            outputTokens: event.outputTokens,
+            ...(event.costMicros !== undefined
+              ? { costMicros: event.costMicros }
+              : {}),
           },
         ],
         droppable: true,
@@ -1441,6 +1478,45 @@ function decodeEvent(value: unknown): ClientRunEventV1 | undefined {
       ),
     };
   }
+  if (event.type === "plugin/model-usage") {
+    exactKeys(
+      event,
+      [
+        "type",
+        "pluginId",
+        "requestId",
+        "model",
+        "inputTokens",
+        "outputTokens",
+        ...(Object.hasOwn(event, "costMicros") ? ["costMicros"] : []),
+      ],
+      "run event",
+    );
+    const count = (key: string): number => {
+      const field = event[key];
+      if (!Number.isSafeInteger(field) || (field as number) < 0) {
+        throw new Error(`run event.${key} must be a non-negative safe integer`);
+      }
+      return field as number;
+    };
+    return {
+      type: "plugin/model-usage",
+      pluginId: publicEventId(
+        string(event, "pluginId", MAX_EVENT_ID_LENGTH, "run event"),
+        "run event.pluginId",
+      ),
+      requestId: publicEventId(
+        string(event, "requestId", MAX_EVENT_ID_LENGTH, "run event"),
+        "run event.requestId",
+      ),
+      model: wireString(event, "model", MAX_TASK_MODEL_BYTES, "run event"),
+      inputTokens: count("inputTokens"),
+      outputTokens: count("outputTokens"),
+      ...(event.costMicros !== undefined
+        ? { costMicros: count("costMicros") }
+        : {}),
+    };
+  }
   if (event.type === "task/dispatched") {
     exactKeys(
       event,
@@ -1519,6 +1595,7 @@ function decodeEvents(values: unknown[]): ClientTurnEvent[] {
       call?.type === "send/to-user" ||
       call?.type === "wake/parent" ||
       call?.type === "task/dispatched" ||
+      call?.type === "plugin/model-usage" ||
       call?.type === "computer/sync"
     ) {
       index += 1;

@@ -387,6 +387,19 @@
     }
   },
   {
+    "name": "RunEvent plugin model usage valid",
+    "schema": "RunEvent",
+    "value": {
+      "type": "plugin/model-usage",
+      "pluginId": "weather",
+      "requestId": "req-1",
+      "model": "glm-5.3-flash:cloud",
+      "inputTokens": 120,
+      "outputTokens": 40,
+      "costMicros": 1200
+    }
+  },
+  {
     "name": "RunOutcome valid",
     "schema": "RunOutcome",
     "value": {

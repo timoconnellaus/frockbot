@@ -1249,6 +1249,53 @@
             "background"
           ],
           "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "plugin/model-usage"
+            },
+            "pluginId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "requestId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "model": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            },
+            "inputTokens": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "outputTokens": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "costMicros": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "type",
+            "pluginId",
+            "requestId",
+            "model",
+            "inputTokens",
+            "outputTokens"
+          ],
+          "additionalProperties": false
         }
       ]
     },
