@@ -1036,6 +1036,45 @@ export async function provisionThroughUi(
 }
 
 /**
+ * Put a draft into the composer and prove the *widget* holds it, not only the
+ * element.
+ *
+ * `answerInputs` reads the draft back from the DOM, which is the very value
+ * the engine ignores when the keys arrived before it had opened the field's
+ * editing session — and the composer is the one field where that shows: the
+ * corner button is the microphone while the widget's draft is empty and Send
+ * once it is not. So the draft is typed until the corner agrees with it — Send
+ * standing for a draft, the microphone for a clear — and retyped through the
+ * same path when the engine dropped it. A Main run failed three retries in a
+ * row with the whole prompt in the element and the microphone still in the
+ * corner; this is what tells the two apart.
+ */
+export async function answerComposer(page: Page, text: string): Promise<void> {
+  const composer = composerInput(page);
+  const sendsStanding = text.length > 0 ? 1 : 0;
+  for (let attempt = 0; ; attempt += 1) {
+    await answerInputs([[composer, text]]);
+    try {
+      await expect(sem(page, "send-button")).toHaveCount(sendsStanding, {
+        timeout: 8_000,
+      });
+      return;
+    } catch (error) {
+      if (attempt >= 2) throw error;
+      // The engine dropped the keys; put the element back and go again. Every
+      // call is bounded the way `answerInputs` bounds its own reads: the state
+      // being recovered from is the engine having torn the field's editing
+      // session down, so the element may be gone — and this project sets no
+      // action timeout, so an unbounded wait for it would spend the whole
+      // test's budget and report an opaque timeout instead of this failure.
+      await composer.focus({ timeout: 15_000 });
+      await composer.press("ControlOrMeta+a", { timeout: 15_000 });
+      await composer.press("Backspace", { timeout: 15_000 });
+    }
+  }
+}
+
+/**
  * Wait until this client could start a Turn.
  *
  * The composer's field is never disabled — readiness is about the transport,
@@ -1047,14 +1086,14 @@ export async function expectReadyToSend(page: Page): Promise<void> {
   const composer = composerInput(page);
   await expect(composer).toBeVisible({ timeout: 60_000 });
   const draft = await composer.inputValue();
-  await answerInputs([[composer, draft.length > 0 ? draft : "ready?"]]);
+  await answerComposer(page, draft.length > 0 ? draft : "ready?");
   await expect
     .poll(() => pressDisabled(sem(page, "send-button")), { timeout: 60_000 })
     .toBe(false);
-  // Put back through the same path it was typed through. A `fill` here writes
-  // the element and not the widget, so the question this asked would be left
-  // in the composer for the next spec to find its own message typed onto.
-  await answerInputs([[composer, draft]]);
+  // Put back through the same path it was typed through, corner and all. A
+  // clear that reached the element alone leaves the widget still holding the
+  // question this asked, and the next spec's message goes out typed onto it.
+  await answerComposer(page, draft);
 }
 
 /** The message composer's own input. */
@@ -1103,11 +1142,9 @@ export async function sendMessage(
       : ((await messages.last().getAttribute("flt-semantics-identifier")) ??
         "");
   const newestBefore = await newest();
-  // Typed through the same retry the connect form needs: the engine drops keys
-  // sent before it has opened the field's editing session, and a draft that
-  // arrives with its first few characters missing is a different message —
-  // which, when the draft carries a tool script, is a different Turn.
-  await answerInputs([[composer, text]]);
+  // Typed through `answerComposer`, which is where the engine's dropped keys
+  // and the corner button that tells them apart are explained.
+  await answerComposer(page, text);
   await press(sem(page, "send-button"));
   await expect(composer).toHaveValue("", { timeout: 120_000 });
   // The person's own bubble, which is a row in the thread rather than text in

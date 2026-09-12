@@ -18,9 +18,9 @@ import {
   test,
   expect,
   action,
-  answerInputs,
   closeOverlay,
   connectOllama,
+  answerComposer,
   chooseDefaultModel,
   createBot,
   enableApplets,
@@ -131,15 +131,14 @@ async function runTool(
   // The Applets tools are first-party registrations, so the scripted model
   // calls them by name, on its own line.
   //
-  // Typed through the shared retry rather than filled: `fill` writes the DOM
-  // input's value, which the engine reads only while it is holding an editing
-  // session open on that field. A draft that arrives with characters missing
-  // is a different message, and when the draft carries a tool script it is a
-  // Turn that calls no tool at all — which is what "the directory never held
-  // the Applet" looked like from here.
-  await answerInputs([
-    [composer, `${text}\n${e2eFrockbotToolCallPrompt(name, input)}`],
-  ]);
+  // Typed through `answerComposer` rather than filled: a draft that arrives
+  // with characters missing is a Turn that calls no tool at all, which is what
+  // "the directory never held the Applet" looked like from here. The engine
+  // behaviour behind that is explained on `answerComposer`.
+  await answerComposer(
+    page,
+    `${text}\n${e2eFrockbotToolCallPrompt(name, input)}`,
+  );
   await press(sem(page, "send-button"));
   // The composer keeps the draft until the submission is accepted, so an empty
   // composer — not a click that returned — is the Turn being admitted.

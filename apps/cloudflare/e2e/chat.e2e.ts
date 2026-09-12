@@ -17,7 +17,7 @@
 import {
   test,
   expect,
-  answerInputs,
+  answerComposer,
   composerInput,
   createBot,
   press,
@@ -170,11 +170,9 @@ async function threadOrder(page: Page): Promise<string[]> {
  * Turn it belongs to has already settled.
  */
 async function beginTurn(page: Page, text: string): Promise<void> {
-  // Typed through the retry the engine needs: keys sent before it has opened
-  // the field's editing session are dropped, and a draft that arrives with its
-  // first characters missing is a different message — which, when the draft
-  // carries a tool script, is a different Turn.
-  await answerInputs([[composerInput(page), text]]);
+  // Typed through `answerComposer`, which is where the engine's dropped keys
+  // and the corner button that tells them apart are explained.
+  await answerComposer(page, text);
   // Send closes while a submission is in flight and while the client is still
   // confirming the last one, and a click on a closed button is a no-op that
   // reads afterwards as a message the product lost. Waiting for it to open
@@ -283,9 +281,7 @@ test("a Turn that is running when the page reloads still delivers its reply", as
   // The provider holds the completion open, so the Turn is genuinely running
   // while the browser goes away.
   await setFakeOllamaChatMode(page, ollamaBaseUrl, "slow");
-  await answerInputs([
-    [composerInput(page), `take your time\n${says("Worth the wait")}`],
-  ]);
+  await answerComposer(page, `take your time\n${says("Worth the wait")}`);
   await press(sem(page, "send-button"));
 
   // Reloaded without waiting for the composer to clear, because the wait is
@@ -720,7 +716,7 @@ test("a send the server refuses for size keeps the draft and says why", async ({
     })
     .toContain("-10 characters left");
   await expect.poll(() => pressDisabled(sem(page, "send-button"))).toBe(true);
-  await answerInputs([[composer, ""]]);
+  await answerComposer(page, "");
 
   // A refusal that reaches the client anyway — another tab, an older build, a
   // proxy of its own — is still a refusal, and the answer already says why.
@@ -735,7 +731,7 @@ test("a send the server refuses for size keeps the draft and says why", async ({
   });
 
   const prompt = "this one is refused";
-  await answerInputs([[composer, prompt]]);
+  await answerComposer(page, prompt);
   await sem(page, "send-button").click();
 
   // The server's own sentence, not "Agent request failed" and not a guess.
@@ -778,7 +774,7 @@ test("a Bot the client cannot reach settles with a reason and a Retry", async ({
 
   const composer = composerInput(page);
   const prompt = "are you there";
-  await answerInputs([[composer, prompt]]);
+  await answerComposer(page, prompt);
   await sem(page, "send-button").click();
 
   // The bound is several seconds of backoff, and then it settles by itself,
