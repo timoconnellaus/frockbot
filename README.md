@@ -291,7 +291,7 @@ app/              The product: `runtime.ts`, the Contribution tables, and one di
   machine-messages/ Message delivery to and from a User's registered machines
   memory/         Bot, User and Project Markdown memory over the Workspace store
   notifications/  User-visible messages, their unread cursors, and the push outbox
-  plugins/        The deployment catalog and seed states, a Bot's Plugins page, and its enable map behind a revision fence
+  plugins/        The deployment catalog and seed states, a Bot's Plugins page, its enable map behind a revision fence, and the `plugin_*` authoring tools with the approval that makes a published Plugin live
   routines/       Durable Routines, the alarm scheduler, and the webhook door
   search/         Per-User transcript index, search route, and overlay
   settings/       Bot, Package, and User settings surfaces
