@@ -39,14 +39,12 @@ import {
 } from "@frockbot/app/plugins/enablement";
 import {
   BOT_ISOLATE_COMPATIBILITY_DATE,
-  isolateBindingDigestV1,
+  pluginEgressPolicyV1,
+  pluginWorkerBindingDigestV1,
   type BotCapabilitiesPropsV1,
+  type PluginEgressPropsV1,
 } from "@frockbot/app/isolates/capabilities";
-import type {
-  IsolateConnectionV1,
-  IsolateModelBindingV1,
-  PluginWorkerTriggerResultV1,
-} from "@frockbot/core/contracts";
+import type { PluginWorkerTriggerResultV1 } from "@frockbot/core/contracts";
 import type { FoundationAgentPackage } from "@frockbot/app/agent-runtime";
 import type { BotCapabilities } from "../src/bot-capabilities.ts";
 import type { WorkerdBotState } from "./computer-compatibility-worker.ts";
@@ -68,6 +66,7 @@ export interface BotIsolateProbeEnv {
 
 interface ProbeExports {
   BotCapabilities(options: { props: BotCapabilitiesPropsV1 }): BotCapabilities;
+  PluginEgress(options: { props: PluginEgressPropsV1 }): unknown;
 }
 
 async function sha256Hex(value: string): Promise<string> {
@@ -93,6 +92,7 @@ export const tools = [
   { name: "env_keys", description: "Reports the bindings this isolate can see", inputSchema: {}, idempotent: true },
   { name: "leak_probe", description: "Reports whether host state leaked in", inputSchema: {}, idempotent: true },
   { name: "reach_network", description: "Attempts egress", inputSchema: {}, idempotent: false },
+  { name: "reach_declared", description: "Reaches a declared host", inputSchema: {}, idempotent: false },
   { name: "call_model", description: "Calls the model binding", inputSchema: {}, idempotent: false },
   { name: "list_capabilities", description: "Lists the Bot's authority", inputSchema: {}, idempotent: true },
   { name: "connection_lease", description: "Requests a lease for one Connection", inputSchema: {}, idempotent: true },
@@ -123,13 +123,21 @@ export async function execute(tool, input, ctx) {
         secret: typeof globalThis.SECRET_TOKEN,
         botStates: typeof globalThis.BOT_STATES,
         loader: typeof globalThis.BOT_PACKAGES,
-        storage: typeof ctx.storage,
+        // The storage grant is a key-value loopback, never the object's own storage API.
+        storage: typeof (ctx.storage && ctx.storage.transaction),
         env: typeof ctx.env,
         durableObject: typeof globalThis.DurableObject,
       });
     case "reach_network":
-      await fetch("https://example.com");
+      // A host no enabled plugin declared: the egress loopback refuses it.
+      await fetch("https://undeclared.invalid/");
       return "egress-allowed";
+    case "reach_declared": {
+      // A host this Plugin's descriptor declared: the loopback admits it and
+      // the request reaches the outside, which answers with a status.
+      const response = await fetch("https://example.com/probe");
+      return JSON.stringify({ status: response.status });
+    }
     case "list_capabilities":
       return JSON.stringify(await ctx.capabilities.list());
     case "connection_lease":
@@ -228,6 +236,7 @@ function probePackageDescriptor(hooks: string[]) {
       "env_keys",
       "leak_probe",
       "reach_network",
+      "reach_declared",
       "call_model",
       "list_capabilities",
       "connection_lease",
@@ -236,10 +245,9 @@ function probePackageDescriptor(hooks: string[]) {
     ].map((name) => ({ name, description: name, inputSchema: {} })),
     contractVersion: 3,
     hooks,
-    grants: ["ai", "http", "schedule", "memory", "workspace"],
-    // The probe's `reach_network` tool proves egress is refused whatever the
-    // descriptor declares: `globalOutbound` is null and no egress stub exists
-    // yet.
+    grants: ["ai", "http", "schedule", "memory", "workspace", "storage"],
+    // The probe's `reach_network` tool reaches for a host outside this list,
+    // so the egress loopback minted from it refuses the request.
     network: { hosts: ["example.com"] },
     contextKeys: ["user", "bot", "session"],
   });
@@ -467,7 +475,8 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
     artifact: ArtifactRefV1;
   }): Promise<
     {
-      globalOutbound: null;
+      /** Whether an egress loopback is bound; the stub itself never leaves the object. */
+      egress: boolean;
       envKeys: string[];
       identityKeys: string[];
       limits: { cpuMs: number; subRequests: number };
@@ -478,7 +487,7 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
     await composition.verify(new AbortController().signal);
     await composition.dispose();
     return this.loadedCode.map((code) => ({
-      globalOutbound: code.globalOutbound,
+      egress: code.globalOutbound !== null && code.globalOutbound !== undefined,
       envKeys: Object.keys(code.env).sort(),
       identityKeys: Object.keys(code.env.IDENTITY).sort(),
       limits: code.limits,
@@ -570,10 +579,6 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
     botId: string;
     artifact?: ArtifactRefV1;
     pair?: { provider?: ArtifactRefV1; consumer: ArtifactRefV1 };
-    connections?: IsolateConnectionV1[];
-    model?: IsolateModelBindingV1;
-    memory?: boolean;
-    workspace?: boolean;
     /** Varies the generation without varying the artifact. */
     generationCreatedAt?: string;
     deadlineMs?: number;
@@ -598,6 +603,11 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
     // SAFETY: exported WorkerEntrypoints are materialized on ctx.exports;
     // workers-types cannot infer the generated local RPC stubs.
     const exports = this.ctx.exports as unknown as ProbeExports;
+    // The egress policy is what the generation's plugins declared — in the
+    // Bot object it is narrowed to the enabled ones; the probe enables all.
+    const policy = pluginEgressPolicyV1(
+      generation.members.map((member) => member.descriptor),
+    );
     const composition = await createShellCompositionHost({
       admitEffect: () => Promise.resolve(true),
       botId: input.botId,
@@ -635,26 +645,18 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
           },
         },
         capabilities: exports.BotCapabilities({
-          props: {
-            userId: input.userId,
-            botId: input.botId,
-            runId: "run-1",
-            sessionId: `${input.userId}:${input.botId}`,
-            turnId: "turn-1",
-            generationId: generation.generationId,
-            packageId: "plugin-worker",
-            connections: structuredClone(input.connections ?? []),
-            ...(input.model ? { model: structuredClone(input.model) } : {}),
-            memory: input.memory ?? false,
-            workspace: input.workspace ?? false,
-          },
+          props: { userId: input.userId },
         }),
-        bindingDigest: await isolateBindingDigestV1({
+        ...(policy
+          ? {
+              egress: exports.PluginEgress({
+                props: { userId: input.userId, ...policy },
+              }),
+            }
+          : {}),
+        bindingDigest: await pluginWorkerBindingDigestV1({
           userId: input.userId,
-          botId: input.botId,
-          connections: input.connections ?? [],
-          ...(input.model ? { model: input.model } : {}),
-          compositionGenerationId: generation.generationId,
+          egress: policy,
         }),
         compatibilityDate: BOT_ISOLATE_COMPATIBILITY_DATE,
         enabled,
@@ -875,10 +877,6 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
     artifact: ArtifactRefV1;
     tool: string;
     toolInput?: unknown;
-    connections?: IsolateConnectionV1[];
-    model?: IsolateModelBindingV1;
-    memory?: boolean;
-    workspace?: boolean;
     generationCreatedAt?: string;
     /** Sends the call without the metadata an external namespace demands. */
     omitDescription?: boolean;
@@ -1018,8 +1016,6 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
     userId: string;
     botId: string;
     artifact: ArtifactRefV1;
-    connections?: IsolateConnectionV1[];
-    model?: IsolateModelBindingV1;
     generationCreatedAt?: string;
   }): Promise<string[]> {
     this.loaderIds = [];
@@ -1101,25 +1097,12 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
       turnType: "chat",
       recordHookFailure: () => Promise.resolve(),
       capabilities: exports.BotCapabilities({
-        props: {
-          userId: input.userId,
-          botId: input.botId,
-          runId: "run-1",
-          sessionId: `${input.userId}:${input.botId}`,
-          turnId: "turn-1",
-          generationId: generation.generationId,
-          packageId: "plugin-worker",
-          connections: [],
-          memory: false,
-          workspace: false,
-        },
+        props: { userId: input.userId },
       }),
       compatibilityDate: BOT_ISOLATE_COMPATIBILITY_DATE,
-      bindingDigest: await isolateBindingDigestV1({
+      bindingDigest: await pluginWorkerBindingDigestV1({
         userId: input.userId,
-        botId: input.botId,
-        connections: [],
-        compositionGenerationId: generation.generationId,
+        egress: undefined,
       }),
     });
     try {

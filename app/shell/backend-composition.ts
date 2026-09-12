@@ -82,6 +82,12 @@ export interface ShellIsolateMountOptions {
   deadlineMs?: number;
   /** The Plugins this Bot runs; absent means every installed one. */
   enabled?: readonly string[];
+  /**
+   * The egress loopback the worker's `globalOutbound` is bound to, minted by
+   * the Bot Durable Object from the enabled Plugins' declared hosts. Absent
+   * leaves the worker with no outbound at all.
+   */
+  egress?: unknown;
 }
 
 /**
@@ -234,6 +240,9 @@ export function createShellCompositionHost(
               ...(isolate.enabled === undefined
                 ? {}
                 : { enabled: isolate.enabled }),
+              ...(isolate.egress === undefined
+                ? {}
+                : { egress: isolate.egress }),
             });
             // Mount and health-check are one guarded phase (Worker Loader spike).
             const prepared = await host.mount(generation.members);

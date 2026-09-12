@@ -14,25 +14,35 @@ import type {
   LlmStreamEvent,
   NormalizedModelRequest,
 } from "@frockbot/core/contracts";
-import { encodeIsolateModelEventLineV1 } from "@frockbot/core/contracts";
+import {
+  encodeIsolateModelEventLineV1,
+  pluginNetworkAdmitsHostV1,
+} from "@frockbot/core/contracts";
 import type { BotIsolateArtifactStore } from "@frockbot/frock-compose";
 
 export type { IsolateModelBindingV1 } from "@frockbot/core/contracts";
 
 export const BOT_ISOLATE_COMPATIBILITY_DATE = "2026-08-27";
 
+/**
+ * What the loopback stub is minted with: the User, and nothing else. Which
+ * Turn, Bot and Plugin a call is for arrives on the call itself, and the Bot
+ * Durable Object resolves the authority for that Turn when it is called, so
+ * the stub never holds a snapshot that can go stale in a cached worker.
+ */
 export interface BotCapabilitiesPropsV1 {
   userId: string;
-  botId: string;
-  runId: string;
-  sessionId: string;
-  turnId: string;
-  generationId: string;
-  packageId: string;
-  connections: IsolateConnectionV1[];
-  model?: IsolateModelBindingV1;
-  memory: boolean;
-  workspace: boolean;
+}
+
+/**
+ * What the egress loopback is minted with. Every Plugin in the worker shares
+ * a realm, so the policy is the union of what the enabled Plugins declared
+ * and is described to the User that way.
+ */
+export interface PluginEgressPropsV1 {
+  userId: string;
+  hosts: string[];
+  open: boolean;
 }
 
 export const ISOLATE_MODEL_REQUEST_PREFIX = "isolate:model-request:";
@@ -101,23 +111,6 @@ export function matchingModelBindingV1(
     return undefined;
   }
   return binding;
-}
-
-/**
- * A loaded isolate may receive only the Connection generation baked into its
- * admitted authority snapshot. A later User Connection change gets a new
- * binding digest and isolate identity; it must not leak through this old stub.
- */
-export function matchesAdmittedConnectionV1(
-  admitted: IsolateConnectionV1 | undefined,
-  outcome: IsolateConnectionOutcomeV1,
-): outcome is IsolateConnectionLeaseV1 {
-  return (
-    admitted !== undefined &&
-    outcome.status === "available" &&
-    outcome.connectionId === admitted.connectionId &&
-    outcome.generation === admitted.generation
-  );
 }
 
 export function createIsolateCapabilityHost(
@@ -244,48 +237,78 @@ export function isolateModelEventStreamV1(
 }
 
 /**
- * The content address of the bindings baked into a loaded isolate's env.
- *
- * Connection order is irrelevant; ids and generations are the authority
- * identity. User, Bot, the resolved model binding, and the pinned Composition
- * generation complete the digest. Package id is deliberately absent: two
- * Packages of one Bot receive the same authority projection.
- *
- * `runId` is here because `CAPABILITIES` is one of those bindings and it is
- * scoped to one Turn: the stub carries that Turn's run, session, and turn id,
- * and the Bot Durable Object refuses a capability call whose scope is not the
- * Turn it is currently running. The loader hands back the *cached* worker for a
- * repeated id, env and all, so leaving the Turn out of the digest gave a second
- * Turn on one Composition generation an isolate holding the first Turn's stub —
- * every `ctx.memory`, `ctx.workspace`, and `ctx.applets` call in it answered
- * "the Package is not running in this Bot's active Composition". The digest is
- * a statement about what is bound; a per-Turn binding belongs in it.
+ * The content address of what is baked into a Plugin worker's `env`: the
+ * User the `CAPABILITIES` stub is minted for, and the egress policy the
+ * `globalOutbound` stub enforces. Nothing per Turn or per Bot belongs here:
+ * every capability call names its scope, and the Bot Durable Object resolves
+ * that Turn's authority when it is called, so a cached worker never answers
+ * under a stale snapshot. A changed policy — a Plugin declaring a new host
+ * enabled or disabled — is a new worker.
  */
-export async function isolateBindingDigestV1(input: {
+export async function pluginWorkerBindingDigestV1(input: {
   userId: string;
-  botId: string;
-  connections: readonly Pick<
-    IsolateConnectionV1,
-    "connectionId" | "generation"
-  >[];
-  model?: IsolateModelBindingV1;
-  compositionGenerationId: string;
-  /** The Turn whose `CAPABILITIES` stub this isolate's env carries. */
-  runId?: string;
+  egress: Pick<PluginEgressPropsV1, "hosts" | "open"> | undefined;
 }): Promise<string> {
-  const connections = [...input.connections]
-    .map(({ connectionId, generation }) => ({ connectionId, generation }))
-    .sort((left, right) => left.connectionId.localeCompare(right.connectionId));
   return await sha256Hex(
     JSON.stringify({
+      version: 2,
       userId: input.userId,
-      botId: input.botId,
-      compositionGenerationId: input.compositionGenerationId,
-      runId: input.runId ?? null,
-      connections,
-      model: input.model ?? null,
+      egress: input.egress
+        ? { hosts: [...input.egress.hosts].sort(), open: input.egress.open }
+        : null,
     }),
   );
+}
+
+/** Whether one request's URL is inside the policy a worker's egress was minted with. */
+export function pluginEgressAdmitsV1(
+  policy: Pick<PluginEgressPropsV1, "hosts" | "open">,
+  url: string,
+): { admitted: true; host: string } | { admitted: false; reason: string } {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return { admitted: false, reason: "the request URL is invalid" };
+  }
+  if (parsed.protocol !== "https:") {
+    return {
+      admitted: false,
+      reason: `plugin egress is https only; "${parsed.protocol}" is refused`,
+    };
+  }
+  const host = parsed.hostname.toLowerCase();
+  const network = policy.open
+    ? { open: true as const }
+    : { hosts: policy.hosts };
+  if (!pluginNetworkAdmitsHostV1(network, host)) {
+    return {
+      admitted: false,
+      reason: `plugin egress to "${host}" is not declared by any enabled plugin on this account`,
+    };
+  }
+  return { admitted: true, host };
+}
+
+/**
+ * The egress policy for one Bot's Turn: the union of the declared hosts of
+ * the enabled Plugins, or open access if any of them asked for it, or nothing
+ * when none holds the http grant. `undefined` leaves `globalOutbound` null.
+ */
+export function pluginEgressPolicyV1(
+  plugins: readonly { network?: { hosts: string[] } | { open: true } }[],
+): Pick<PluginEgressPropsV1, "hosts" | "open"> | undefined {
+  const hosts = new Set<string>();
+  let open = false;
+  let any = false;
+  for (const plugin of plugins) {
+    if (!plugin.network) continue;
+    any = true;
+    if ("open" in plugin.network) open = true;
+    else for (const host of plugin.network.hosts) hosts.add(host);
+  }
+  if (!any) return undefined;
+  return open ? { hosts: [], open: true } : { hosts: [...hosts].sort(), open };
 }
 
 async function sha256Hex(value: string): Promise<string> {

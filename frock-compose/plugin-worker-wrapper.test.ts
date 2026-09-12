@@ -386,12 +386,14 @@ describe("the generated wrapper's narrowed context", () => {
       env: {
         IDENTITY: { userId: "user-1" },
         CAPABILITIES: {
-          list: () => {
-            calls.push({ method: "list", argument: undefined });
+          // Every loopback call carries its scope first; the fakes record it
+          // so the tests can hold the wrapper to naming the Plugin.
+          list: (scope: unknown) => {
+            calls.push({ method: "list", argument: scope });
             return Promise.resolve({ status: "available" });
           },
-          schedule: (request: unknown) => {
-            calls.push({ method: "schedule", argument: request });
+          schedule: (scope: unknown, request: unknown) => {
+            calls.push({ method: "schedule", argument: { scope, request } });
             return Promise.resolve({ status: "scheduled" });
           },
         },
@@ -407,6 +409,14 @@ describe("the generated wrapper's narrowed context", () => {
     runId: "run-1",
     turnId: "turn-1",
     generationId: "gen-1",
+  };
+  const scope = {
+    botId: "bot-1",
+    sessionId: "user-1:bot-1",
+    runId: "run-1",
+    turnId: "turn-1",
+    generationId: "gen-1",
+    pluginId: "weather",
   };
 
   test("builds no grant member for a plugin that declared no grants", () => {
@@ -457,8 +467,8 @@ describe("the generated wrapper's narrowed context", () => {
     ).resolves.toEqual({ status: "scheduled" });
     await (context.capabilities as { list: () => Promise<unknown> }).list();
     expect(subject.calls).toEqual([
-      { method: "schedule", argument: { in: 60 } },
-      { method: "list", argument: undefined },
+      { method: "schedule", argument: { scope, request: { in: 60 } } },
+      { method: "list", argument: scope },
     ]);
     expect(
       (context.services as { forecast: { at: () => string } }).forecast.at(),
@@ -472,7 +482,7 @@ describe("the generated wrapper's narrowed context", () => {
       invocation,
       {
         pluginId: "weather",
-        grants: ["ai", "memory", "workspace", "http", "schedule"],
+        grants: ["ai", "memory", "workspace", "http", "schedule", "storage"],
         services: {},
       },
       1_000,

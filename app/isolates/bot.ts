@@ -15,20 +15,30 @@ import {
   decodeIsolateMemoryReadRequestV1,
   decodeIsolateMemoryWriteRequestV1,
   decodeIsolateScheduleRequestV1,
+  decodeIsolateStorageDeleteRequestV1,
+  decodeIsolateStorageGetRequestV1,
+  decodeIsolateStorageListRequestV1,
+  decodeIsolateStoragePutRequestV1,
   decodeIsolateWorkspaceDeleteRequestV1,
   decodeIsolateWorkspaceListRequestV1,
   decodeIsolateWorkspacePathV1,
   decodeIsolateWorkspaceWriteRequestV1,
   decodeWorkspacePathV1,
   decodeWorkspaceRootV1,
+  MAX_ISOLATE_STORAGE_LIST_V1,
   type BotCapabilitiesStub,
+  type IsolateCapabilityListOutcomeV1,
   type IsolateConnectionOutcomeV1,
   type IsolateConnectionV1,
   type IsolateMemoryOutcomeV1,
   type IsolateModelInvocationV1,
   type IsolateScheduleOutcomeV1,
+  type IsolateSettingsOutcomeV1,
+  type IsolateStorageListOutcomeV1,
+  type IsolateStorageOutcomeV1,
   type IsolateWorkspaceOutcomeV1,
   type NormalizedModelRequest,
+  type PluginDescriptorV1,
   type WorkspacePathV1,
 } from "@frockbot/core/contracts";
 import {
@@ -58,12 +68,24 @@ import {
   BOT_ISOLATE_COMPATIBILITY_DATE,
   createIsolateCapabilityHost,
   createR2PackageArtifactStore,
-  isolateBindingDigestV1,
+  pluginEgressPolicyV1,
+  pluginWorkerBindingDigestV1,
   type BotCapabilitiesPropsV1,
   type IsolateCapabilityHost,
   type IsolateModelBindingV1,
   type IsolateModelPath,
+  type PluginEgressPropsV1,
 } from "./capabilities.js";
+
+/** Where one Plugin's per-Bot key-value entries live in the Bot object. */
+export function pluginStorageKeyV1(pluginId: string, key: string): string {
+  return `plugin:storage:${pluginId}:${key}`;
+}
+
+/** Where one Plugin's per-Bot settings values live in the Bot object. */
+export function pluginSettingsKeyV1(pluginId: string): string {
+  return `plugin:settings:${pluginId}`;
+}
 
 /** The Turn a grant call names, and the member making it. */
 export interface IsolateCallScopeV1 {
@@ -78,13 +100,6 @@ export interface IsolateCallScopeV1 {
 }
 
 /**
- * The attribution every Plugin's capability call carries. Package id on the
- * props is attribution only — every Plugin in the worker holds the same
- * authority — and the worker is one binding, so it is one name.
- */
-export const PLUGIN_WORKER_PACKAGE_ID = "plugin-worker";
-
-/**
  * Everything a Bot isolate member needs. Package identity is attribution only;
  * Connections and model are resolved once for the Bot and every member receives
  * the same list.
@@ -96,7 +111,9 @@ export async function isolateMountOptions(
     runId: string;
     sessionId: string;
     generationId: string;
-    settings: BotSettingsViewV1;
+    /** The generation's Plugins and which of them this Bot runs. */
+    members: readonly { packageId: string; descriptor: PluginDescriptorV1 }[];
+    enabled: readonly string[];
   },
 ): Promise<ShellIsolateMountOptions | undefined> {
   const loader = state.env.BOT_PACKAGES;
@@ -107,47 +124,152 @@ export async function isolateMountOptions(
         BotCapabilities?: (options: {
           props: BotCapabilitiesPropsV1;
         }) => BotCapabilitiesStub;
+        PluginEgress?: (options: { props: PluginEgressPropsV1 }) => unknown;
       };
     }
   ).exports;
   if (!loader || !artifacts || !exports?.BotCapabilities) return undefined;
-  const authority = await isolateAuthoritySnapshot(
-    state,
-    identity,
-    turn.settings,
+  // The stub is per User and carries no snapshot: every call names its Turn
+  // and the authority is resolved then. The egress policy is what the enabled
+  // Plugins declared, and is the one thing beside the User baked into env.
+  const policy = pluginEgressPolicyV1(
+    turn.members
+      .filter((member) => turn.enabled.includes(member.packageId))
+      .map((member) => member.descriptor),
   );
-  const mintCapabilities = exports.BotCapabilities;
+  const egress =
+    policy && exports.PluginEgress
+      ? exports.PluginEgress({ props: { userId: identity.userId, ...policy } })
+      : undefined;
   return {
     userId: identity.userId,
     runId: turn.runId,
     turnId: turn.runId,
     loader,
     artifacts: createR2PackageArtifactStore(artifacts),
-    capabilities: mintCapabilities({
-      props: {
-        userId: identity.userId,
-        botId: identity.botId,
-        runId: turn.runId,
-        sessionId: turn.sessionId,
-        turnId: turn.runId,
-        generationId: turn.generationId,
-        packageId: PLUGIN_WORKER_PACKAGE_ID,
-        connections: structuredClone(authority.connections),
-        ...(authority.model ? { model: structuredClone(authority.model) } : {}),
-        memory: authority.memory,
-        workspace: authority.workspace,
-      },
+    capabilities: exports.BotCapabilities({
+      props: { userId: identity.userId },
     }),
-    bindingDigest: await isolateBindingDigestV1({
+    ...(egress === undefined ? {} : { egress }),
+    bindingDigest: await pluginWorkerBindingDigestV1({
       userId: identity.userId,
-      botId: identity.botId,
-      runId: turn.runId,
-      connections: authority.connections,
-      ...(authority.model ? { model: authority.model } : {}),
-      compositionGenerationId: turn.generationId,
+      egress: egress === undefined ? undefined : policy,
     }),
     compatibilityDate: BOT_ISOLATE_COMPATIBILITY_DATE,
+    enabled: turn.enabled,
   };
+}
+
+/** What the Bot holds right now, for the Plugin that asked. */
+export async function isolateAuthority(
+  state: ShellBotStateV1,
+  identity: BotIdentity,
+  input: IsolateCallScopeV1,
+): Promise<IsolateCapabilityListOutcomeV1> {
+  if (!activeIsolateTurn(state, input)) {
+    return {
+      status: "unavailable",
+      reason: "the Package is not running in this Bot's active Composition",
+    };
+  }
+  const settings = await readBotSettingsV1(state, identity);
+  const authority = await isolateAuthoritySnapshot(state, identity, settings);
+  return {
+    status: "available",
+    connections: authority.connections,
+    ...(authority.model ? { model: authority.model } : {}),
+    memory: authority.memory,
+    workspace: authority.workspace,
+    schedule: true,
+  };
+}
+
+export async function isolateStorageGet(
+  state: ShellBotStateV1,
+  input: IsolateCallScopeV1,
+): Promise<IsolateStorageOutcomeV1> {
+  if (!activeIsolateTurn(state, input)) {
+    return { status: "unavailable", reason: "storage is unavailable" };
+  }
+  const request = decodeIsolateStorageGetRequestV1(input.request);
+  const value = await state.ctx.storage.get<unknown>(
+    pluginStorageKeyV1(input.packageId, request.key),
+  );
+  return { status: "available", value: value ?? null };
+}
+
+export async function isolateStoragePut(
+  state: ShellBotStateV1,
+  input: IsolateCallScopeV1,
+): Promise<IsolateStorageOutcomeV1> {
+  if (!activeIsolateTurn(state, input)) {
+    return { status: "unavailable", reason: "storage is unavailable" };
+  }
+  const request = decodeIsolateStoragePutRequestV1(input.request);
+  const key = pluginStorageKeyV1(input.packageId, request.key);
+  await state.ctx.storage.put(key, request.value);
+  return { status: "available", value: request.value };
+}
+
+export async function isolateStorageDelete(
+  state: ShellBotStateV1,
+  input: IsolateCallScopeV1,
+): Promise<IsolateStorageOutcomeV1> {
+  if (!activeIsolateTurn(state, input)) {
+    return { status: "unavailable", reason: "storage is unavailable" };
+  }
+  const request = decodeIsolateStorageDeleteRequestV1(input.request);
+  const deleted = await state.ctx.storage.delete(
+    pluginStorageKeyV1(input.packageId, request.key),
+  );
+  return { status: "available", value: deleted };
+}
+
+export async function isolateStorageList(
+  state: ShellBotStateV1,
+  input: IsolateCallScopeV1,
+): Promise<IsolateStorageListOutcomeV1> {
+  if (!activeIsolateTurn(state, input)) {
+    return { status: "unavailable", reason: "storage is unavailable" };
+  }
+  const request = decodeIsolateStorageListRequestV1(input.request ?? {});
+  const base = pluginStorageKeyV1(input.packageId, "");
+  const limit = request.limit ?? MAX_ISOLATE_STORAGE_LIST_V1;
+  const listed = await state.ctx.storage.list<unknown>({
+    prefix: base + (request.prefix ?? ""),
+    ...(request.cursor === undefined ? {} : { startAfter: request.cursor }),
+    limit: limit + 1,
+  });
+  const entries = [...listed.entries()].map(([storedKey, value]) => ({
+    key: storedKey.slice(base.length),
+    value,
+  }));
+  const page = entries.slice(0, limit);
+  const last = page.at(-1);
+  return {
+    status: "available",
+    entries: page,
+    ...(entries.length > limit && last
+      ? { cursor: pluginStorageKeyV1(input.packageId, last.key) }
+      : {}),
+  };
+}
+
+export async function isolateSettings(
+  state: ShellBotStateV1,
+  input: IsolateCallScopeV1,
+): Promise<IsolateSettingsOutcomeV1> {
+  if (!activeIsolateTurn(state, input)) {
+    return { status: "unavailable", reason: "settings are unavailable" };
+  }
+  const stored = await state.ctx.storage.get<unknown>(
+    pluginSettingsKeyV1(input.packageId),
+  );
+  const values =
+    stored && typeof stored === "object" && !Array.isArray(stored)
+      ? (stored as Record<string, unknown>)
+      : {};
+  return { status: "available", values: structuredClone(values) };
 }
 
 /** The Connections, model, Memory and Workspace every member of one Turn is given. */
@@ -232,19 +354,37 @@ export async function isolateInvokeModel(
   }
   const settings = await readBotSettingsV1(state, identity);
   const authority = await isolateAuthoritySnapshot(state, identity, settings);
+  const admitted = authority.model;
+  if (
+    !admitted ||
+    input.request.provider !== admitted.provider ||
+    input.request.model !== admitted.providerModelId
+  ) {
+    return { status: "unavailable", reason: "the model is unavailable" };
+  }
   let runtime:
     | {
         agentPackages: FoundationAgentPackage[];
         modelSelection: RuntimeModelSelection;
       }
     | undefined;
-  if (authority.model) {
-    try {
-      runtime = await agentRuntime(state, identity, settings);
-    } catch {
-      runtime = undefined;
-    }
+  try {
+    runtime = await agentRuntime(state, identity, settings);
+  } catch {
+    runtime = undefined;
   }
+  // The binding is the Bot's, resolved now: a Plugin names a provider and a
+  // model, never a Connection.
+  const request: NormalizedModelRequest = {
+    ...input.request,
+    modelBinding: {
+      connectionId: admitted.connectionId,
+      connectionGeneration: admitted.connectionGeneration,
+      ...(admitted.catalogGeneration
+        ? { catalogGeneration: admitted.catalogGeneration }
+        : {}),
+    },
+  };
   return isolateCapabilities(
     state,
     {
@@ -253,10 +393,10 @@ export async function isolateInvokeModel(
       generationId: input.generationId,
     },
     authority,
-    runtime && authority.model
+    runtime
       ? { path: isolateModelPath(state, identity, runtime, input.generationId) }
       : undefined,
-  ).invokeModel(input.request);
+  ).invokeModel(request);
 }
 
 /**
@@ -681,11 +821,11 @@ function activeIsolateTurn(
     active.sessionId !== input.sessionId ||
     active.turnId !== input.turnId ||
     active.generationId !== input.generationId ||
-    input.packageId !== PLUGIN_WORKER_PACKAGE_ID ||
-    // Every capability call arrives from the one Plugin worker the Turn
-    // mounted, under the shared attribution id, so the gate is that this
-    // generation put at least one Plugin in that worker.
-    !active.mounted.generation.members.some((member) => member.artifact)
+    // Every capability call names the Plugin it is for, from the scope the
+    // wrapper put on it; the gate is that this generation mounted that Plugin.
+    !active.mounted.generation.members.some(
+      (member) => member.packageId === input.packageId && member.artifact,
+    )
   ) {
     return undefined;
   }

@@ -111,7 +111,17 @@ export interface IsolateHealthV1 {
   hooks?: BotIsolateHookEventNameV1[];
 }
 
-/** One Plugin the worker mounts, as `IDENTITY` names it. */
+/**
+ * What `IDENTITY` carries into the Plugin worker. Structured-clonable, never a
+ * stub, and nothing that changes from one Turn or Bot to the next: the worker
+ * is one per User, and a loader id is served from cache with the `env` it was
+ * first loaded with.
+ */
+export interface IsolateIdentityV1 {
+  userId: string;
+  plugins: readonly IsolatePluginIdentityV1[];
+}
+
 export interface IsolatePluginIdentityV1 {
   pluginId: string;
   /**
@@ -120,21 +130,62 @@ export interface IsolatePluginIdentityV1 {
    * has no `ctx.workspace` to call rather than a call that refuses.
    */
   grants: readonly string[];
-  /** The services this Plugin consumes, filled from Plugins mounted before it. */
+  /** The services it consumes, by name; mounted after their providers. */
   consumes: readonly string[];
 }
 
 /**
- * What `IDENTITY` carries into the worker. Structured-clonable, never a stub.
- * `plugins` is in mount order: providers before the Plugins consuming them,
- * which is also the order the generated index runs a hook in.
+ * Which Turn, Bot and Plugin a capability call is for. The loopback stub in
+ * `env` is per User and carries nothing else; the wrapper puts this on every
+ * call from the invocation it is serving, and the Bot Durable Object refuses a
+ * scope that is not the Turn it is running. Inside the worker every Plugin
+ * shares a realm, so `pluginId` is attribution, never authority.
  */
-export interface IsolateIdentityV1 {
-  userId: string;
+export interface IsolateScopeV1 {
   botId: string;
+  sessionId: string;
+  runId: string;
+  turnId: string;
   generationId: string;
-  plugins: readonly IsolatePluginIdentityV1[];
+  pluginId: string;
 }
+
+/** One entry in a Plugin's per-Bot key-value store. */
+export interface IsolateStorageEntryV1 {
+  key: string;
+  value: unknown;
+}
+
+export interface IsolateStorageGetRequestV1 {
+  key: string;
+}
+export interface IsolateStoragePutRequestV1 {
+  key: string;
+  value: unknown;
+}
+export interface IsolateStorageDeleteRequestV1 {
+  key: string;
+}
+export interface IsolateStorageListRequestV1 {
+  prefix?: string;
+  limit?: number;
+  cursor?: string;
+}
+export type IsolateStorageOutcomeV1 =
+  { status: "available"; value: unknown } | IsolateCapabilityFailureV1;
+export type IsolateStorageListOutcomeV1 =
+  | { status: "available"; entries: IsolateStorageEntryV1[]; cursor?: string }
+  | IsolateCapabilityFailureV1;
+
+/** The Plugin's settings values for this Bot, as the User set them. */
+export type IsolateSettingsOutcomeV1 =
+  | { status: "available"; values: Record<string, unknown> }
+  | IsolateCapabilityFailureV1;
+
+/** The bound on one stored value, serialized; a Plugin's store is not a file system. */
+export const MAX_ISOLATE_STORAGE_VALUE_BYTES_V1 = 65_536;
+export const MAX_ISOLATE_STORAGE_LIST_V1 = 256;
+const STORAGE_KEY = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$/;
 
 /**
  * A capability call the authority could not serve. It is a declared variant,
@@ -268,36 +319,68 @@ export type IsolateModelOutcomeV1 = IsolateModelInvocationV1;
  * the Bot does not already hold.
  */
 export interface BotCapabilitiesStub {
-  list(): Promise<IsolateCapabilityListOutcomeV1>;
-  invokeModel(request: NormalizedModelRequest): Promise<IsolateModelOutcomeV1>;
+  list(scope: IsolateScopeV1): Promise<IsolateCapabilityListOutcomeV1>;
+  invokeModel(
+    scope: IsolateScopeV1,
+    request: NormalizedModelRequest,
+  ): Promise<IsolateModelOutcomeV1>;
   memoryRead(
+    scope: IsolateScopeV1,
     request: IsolateMemoryReadRequestV1,
   ): Promise<IsolateMemoryOutcomeV1>;
   memoryWrite(
+    scope: IsolateScopeV1,
     request: IsolateMemoryWriteRequestV1,
   ): Promise<IsolateMemoryOutcomeV1>;
   memoryForget(
+    scope: IsolateScopeV1,
     request: IsolateMemoryWriteRequestV1,
   ): Promise<IsolateMemoryOutcomeV1>;
   workspaceRead(
+    scope: IsolateScopeV1,
     path: IsolateWorkspacePathV1,
   ): Promise<IsolateWorkspaceOutcomeV1>;
   workspaceList(
+    scope: IsolateScopeV1,
     request: IsolateWorkspaceListRequestV1,
   ): Promise<IsolateWorkspaceOutcomeV1>;
   workspaceStat(
+    scope: IsolateScopeV1,
     path: IsolateWorkspacePathV1,
   ): Promise<IsolateWorkspaceOutcomeV1>;
   workspaceWrite(
+    scope: IsolateScopeV1,
     request: IsolateWorkspaceWriteRequestV1,
   ): Promise<IsolateWorkspaceOutcomeV1>;
   workspaceDelete(
+    scope: IsolateScopeV1,
     request: IsolateWorkspaceDeleteRequestV1,
   ): Promise<IsolateWorkspaceOutcomeV1>;
-  connection(connectionId: string): Promise<IsolateConnectionOutcomeV1>;
+  connection(
+    scope: IsolateScopeV1,
+    connectionId: string,
+  ): Promise<IsolateConnectionOutcomeV1>;
   schedule(
+    scope: IsolateScopeV1,
     request: IsolateScheduleRequestV1,
   ): Promise<IsolateScheduleOutcomeV1>;
+  storageGet(
+    scope: IsolateScopeV1,
+    request: IsolateStorageGetRequestV1,
+  ): Promise<IsolateStorageOutcomeV1>;
+  storagePut(
+    scope: IsolateScopeV1,
+    request: IsolateStoragePutRequestV1,
+  ): Promise<IsolateStorageOutcomeV1>;
+  storageDelete(
+    scope: IsolateScopeV1,
+    request: IsolateStorageDeleteRequestV1,
+  ): Promise<IsolateStorageOutcomeV1>;
+  storageList(
+    scope: IsolateScopeV1,
+    request: IsolateStorageListRequestV1,
+  ): Promise<IsolateStorageListOutcomeV1>;
+  settings(scope: IsolateScopeV1): Promise<IsolateSettingsOutcomeV1>;
 }
 
 /** The model outcome Bot-authored `package.js` receives after wrapper narrowing. */
@@ -352,6 +435,10 @@ export interface BotPackageContextV1 {
    * it consumes, by service name. Empty for a plugin that consumes nothing.
    */
   readonly services: Record<string, unknown>;
+  /** This Plugin's settings values for this Bot, as the User set them. */
+  readonly settings: {
+    read(): Promise<IsolateSettingsOutcomeV1>;
+  };
   /** The `ai` grant. */
   readonly model?: {
     invoke(request: NormalizedModelRequest): Promise<BotPackageModelOutcomeV1>;
@@ -388,6 +475,17 @@ export interface BotPackageContextV1 {
   readonly schedule?: (
     request: IsolateScheduleRequestV1,
   ) => Promise<IsolateScheduleOutcomeV1>;
+  /** The `storage` grant: a key-value store scoped to this Plugin and this Bot. */
+  readonly storage?: {
+    get(request: IsolateStorageGetRequestV1): Promise<IsolateStorageOutcomeV1>;
+    put(request: IsolateStoragePutRequestV1): Promise<IsolateStorageOutcomeV1>;
+    delete(
+      request: IsolateStorageDeleteRequestV1,
+    ): Promise<IsolateStorageOutcomeV1>;
+    list(
+      request: IsolateStorageListRequestV1,
+    ): Promise<IsolateStorageListOutcomeV1>;
+  };
 }
 
 export interface BotPackageExecutionContextV1 extends BotPackageContextV1 {
@@ -813,49 +911,145 @@ export function decodeIsolateHealthV1(
   };
 }
 
-export function decodeIsolateIdentityV1(
+export function decodeIsolateScopeV1(
   input: unknown,
-  label = "isolate identity",
-): IsolateIdentityV1 {
+  label = "isolate scope",
+): IsolateScopeV1 {
   const value = record(input, label);
-  exactKeys(value, ["userId", "botId", "generationId", "plugins"], label);
-  if (!Array.isArray(value.plugins) || value.plugins.length > 64) {
-    throw new Error(`${label}.plugins must be a bounded array`);
+  exactKeys(
+    value,
+    ["botId", "sessionId", "runId", "turnId", "generationId", "pluginId"],
+    label,
+  );
+  const pluginId = boundedString(value.pluginId, `${label}.pluginId`, 64);
+  if (!/^[a-z][a-z0-9-]{0,63}$/.test(pluginId)) {
+    throw new Error(`${label}.pluginId is invalid`);
   }
   return {
-    userId: boundedString(value.userId, `${label}.userId`, 256),
     botId: boundedString(value.botId, `${label}.botId`, 256),
+    sessionId: boundedString(value.sessionId, `${label}.sessionId`, 257),
+    runId: boundedString(value.runId, `${label}.runId`, 128),
+    turnId: boundedString(value.turnId, `${label}.turnId`, 128),
     generationId: boundedString(
       value.generationId,
       `${label}.generationId`,
       256,
     ),
-    plugins: value.plugins.map((plugin, index) =>
-      decodeIsolatePluginIdentityV1(plugin, `${label}.plugins[${index}]`),
-    ),
+    pluginId,
   };
 }
 
-function decodeIsolatePluginIdentityV1(
+function storageKey(value: unknown, label: string): string {
+  const key = boundedString(value, label, 256);
+  if (!STORAGE_KEY.test(key)) throw new Error(`${label} is invalid`);
+  return key;
+}
+
+export function decodeIsolateStorageGetRequestV1(
   input: unknown,
-  label: string,
-): IsolatePluginIdentityV1 {
+  label = "isolate storage get",
+): IsolateStorageGetRequestV1 {
   const value = record(input, label);
-  exactKeys(value, ["pluginId", "grants", "consumes"], label);
-  if (!Array.isArray(value.grants) || value.grants.length > 16) {
-    throw new Error(`${label}.grants must be a bounded array`);
-  }
-  if (!Array.isArray(value.consumes) || value.consumes.length > 64) {
-    throw new Error(`${label}.consumes must be a bounded array`);
+  exactKeys(value, ["key"], label);
+  return { key: storageKey(value.key, `${label}.key`) };
+}
+
+export function decodeIsolateStoragePutRequestV1(
+  input: unknown,
+  label = "isolate storage put",
+): IsolateStoragePutRequestV1 {
+  const value = record(input, label);
+  exactKeys(value, ["key", "value"], label);
+  jsonValue(value.value, `${label}.value`);
+  const serialized = JSON.stringify(value.value);
+  if (
+    serialized === undefined ||
+    new TextEncoder().encode(serialized).length >
+      MAX_ISOLATE_STORAGE_VALUE_BYTES_V1
+  ) {
+    throw new Error(`${label}.value exceeds its bound`);
   }
   return {
-    pluginId: boundedString(value.pluginId, `${label}.pluginId`, 128),
-    grants: value.grants.map((grant, index) =>
-      boundedString(grant, `${label}.grants[${index}]`, 32),
-    ),
-    consumes: value.consumes.map((service, index) =>
-      boundedString(service, `${label}.consumes[${index}]`, 64),
-    ),
+    key: storageKey(value.key, `${label}.key`),
+    value: JSON.parse(serialized) as unknown,
+  };
+}
+
+export function decodeIsolateStorageDeleteRequestV1(
+  input: unknown,
+  label = "isolate storage delete",
+): IsolateStorageDeleteRequestV1 {
+  const value = record(input, label);
+  exactKeys(value, ["key"], label);
+  return { key: storageKey(value.key, `${label}.key`) };
+}
+
+export function decodeIsolateStorageListRequestV1(
+  input: unknown,
+  label = "isolate storage list",
+): IsolateStorageListRequestV1 {
+  const value = record(input, label);
+  exactKeys(value, [], label, ["prefix", "limit", "cursor"]);
+  const limit = value.limit;
+  if (
+    limit !== undefined &&
+    (!Number.isSafeInteger(limit) ||
+      (limit as number) < 1 ||
+      (limit as number) > MAX_ISOLATE_STORAGE_LIST_V1)
+  ) {
+    throw new Error(`${label}.limit is out of range`);
+  }
+  return {
+    ...(value.prefix === undefined
+      ? {}
+      : { prefix: boundedString(value.prefix, `${label}.prefix`, 256, true) }),
+    ...(limit === undefined ? {} : { limit: limit as number }),
+    ...(value.cursor === undefined
+      ? {}
+      : { cursor: boundedString(value.cursor, `${label}.cursor`, 512) }),
+  };
+}
+
+export function decodeIsolateIdentityV1(
+  input: unknown,
+  label = "isolate identity",
+): IsolateIdentityV1 {
+  const value = record(input, label);
+  exactKeys(value, ["userId", "plugins"], label);
+  if (!Array.isArray(value.plugins) || value.plugins.length > 64) {
+    throw new Error(`${label}.plugins must be a bounded array`);
+  }
+  const plugins = value.plugins.map((entry, index) => {
+    const itemLabel = `${label}.plugins[${index}]`;
+    const plugin = record(entry, itemLabel);
+    exactKeys(plugin, ["pluginId", "grants", "consumes"], itemLabel);
+    const pluginId = boundedString(
+      plugin.pluginId,
+      `${itemLabel}.pluginId`,
+      64,
+    );
+    if (!/^[a-z][a-z0-9-]{0,63}$/.test(pluginId)) {
+      throw new Error(`${itemLabel}.pluginId is invalid`);
+    }
+    const names = (field: "grants" | "consumes"): string[] => {
+      const list = plugin[field];
+      if (!Array.isArray(list) || list.length > 64) {
+        throw new Error(`${itemLabel}.${field} must be a bounded array`);
+      }
+      return list.map((name, nameIndex) =>
+        boundedString(name, `${itemLabel}.${field}[${nameIndex}]`, 64),
+      );
+    };
+    return { pluginId, grants: names("grants"), consumes: names("consumes") };
+  });
+  if (
+    new Set(plugins.map((plugin) => plugin.pluginId)).size !== plugins.length
+  ) {
+    throw new Error(`${label}.plugins contains duplicate ids`);
+  }
+  return {
+    userId: boundedString(value.userId, `${label}.userId`, 256),
+    plugins,
   };
 }
 

@@ -6,11 +6,12 @@ import type {
 } from "@frockbot/core/contracts";
 import {
   createIsolateCapabilityHost,
-  isolateBindingDigestV1,
+  pluginEgressAdmitsV1,
+  pluginEgressPolicyV1,
+  pluginWorkerBindingDigestV1,
   isolateModelEventStreamV1,
   ISOLATE_MODEL_FAILURE_MESSAGE,
   ISOLATE_MODEL_REQUEST_PREFIX,
-  matchesAdmittedConnectionV1,
   matchingModelBindingV1,
   type IsolateModelBindingV1,
   type IsolateModelRequestRecordV1,
@@ -199,125 +200,78 @@ describe("per-Bot isolate authority", () => {
     });
     expect(subject.forwarded).toHaveLength(0);
   });
-
-  test("an old isolate cannot receive a newly added or regenerated Connection", () => {
-    const lease = {
-      status: "available" as const,
-      leaseId: "lease-1",
-      connectionId: "connection-1",
-      generation: "generation-1",
-      expiresAt: "2026-08-31T00:05:00.000Z",
-    };
-    expect(matchesAdmittedConnectionV1(CONNECTIONS[0], lease)).toBe(true);
-    expect(matchesAdmittedConnectionV1(undefined, lease)).toBe(false);
-    expect(
-      matchesAdmittedConnectionV1(CONNECTIONS[0], {
-        ...lease,
-        generation: "generation-2",
-      }),
-    ).toBe(false);
-  });
 });
 
-describe("isolate binding digest", () => {
-  test("is order-independent for the same Bot authority", async () => {
-    const another = {
-      ...CONNECTIONS[0]!,
-      connectionId: "connection-2",
-      generation: "generation-2",
-    };
-    const input = {
-      model: BINDING,
-      compositionGenerationId: "composition-1",
-    };
-    await expect(
-      isolateBindingDigestV1({
-        ...IDENTITY,
-        ...input,
-        connections: [CONNECTIONS[0]!, another],
+describe("the Plugin worker's binding digest", () => {
+  test("names the User and the egress policy, and nothing per Turn or Bot", async () => {
+    const base = await pluginWorkerBindingDigestV1({
+      userId: "user-1",
+      egress: { hosts: ["api.example.com"], open: false },
+    });
+    expect(base).toMatch(/^[0-9a-f]{64}$/);
+    expect(
+      await pluginWorkerBindingDigestV1({
+        userId: "user-1",
+        egress: { hosts: ["api.example.com"], open: false },
       }),
-    ).resolves.toBe(
-      await isolateBindingDigestV1({
-        ...IDENTITY,
-        ...input,
-        connections: [another, CONNECTIONS[0]!],
+    ).toBe(base);
+    expect(
+      await pluginWorkerBindingDigestV1({
+        userId: "user-2",
+        egress: { hosts: ["api.example.com"], open: false },
+      }),
+    ).not.toBe(base);
+    expect(
+      await pluginWorkerBindingDigestV1({
+        userId: "user-1",
+        egress: { hosts: ["other.example.com"], open: false },
+      }),
+    ).not.toBe(base);
+    expect(
+      await pluginWorkerBindingDigestV1({
+        userId: "user-1",
+        egress: undefined,
+      }),
+    ).not.toBe(base);
+    expect(
+      await pluginWorkerBindingDigestV1({
+        userId: "user-1",
+        egress: { hosts: [], open: true },
+      }),
+    ).not.toBe(base);
+  });
+
+  test("is insensitive to the order hosts were listed in", async () => {
+    expect(
+      await pluginWorkerBindingDigestV1({
+        userId: "user-1",
+        egress: { hosts: ["b.example.com", "a.example.com"], open: false },
+      }),
+    ).toBe(
+      await pluginWorkerBindingDigestV1({
+        userId: "user-1",
+        egress: { hosts: ["a.example.com", "b.example.com"], open: false },
       }),
     );
   });
+});
 
-  test("changes with User and Bot identity", async () => {
-    const input = {
-      connections: CONNECTIONS,
-      model: BINDING,
-      compositionGenerationId: "composition-1",
-    };
-    const base = await isolateBindingDigestV1({ ...IDENTITY, ...input });
-    const otherUser = await isolateBindingDigestV1({
-      userId: "user-2",
-      botId: IDENTITY.botId,
-      ...input,
-    });
-    const otherBot = await isolateBindingDigestV1({
-      userId: IDENTITY.userId,
-      botId: "bot-2",
-      ...input,
-    });
-
-    expect(otherUser).not.toBe(base);
-    expect(otherBot).not.toBe(base);
-  });
-
-  test("changes when a Connection is added, removed, or regenerated", async () => {
-    const base = await isolateBindingDigestV1({
-      ...IDENTITY,
-      connections: CONNECTIONS,
-      model: BINDING,
-      compositionGenerationId: "composition-1",
-    });
-    const added = await isolateBindingDigestV1({
-      ...IDENTITY,
-      connections: [
-        ...CONNECTIONS,
-        { ...CONNECTIONS[0]!, connectionId: "connection-2" },
-      ],
-      model: BINDING,
-      compositionGenerationId: "composition-1",
-    });
-    const removed = await isolateBindingDigestV1({
-      ...IDENTITY,
-      connections: [],
-      model: BINDING,
-      compositionGenerationId: "composition-1",
-    });
-    const regenerated = await isolateBindingDigestV1({
-      ...IDENTITY,
-      connections: [{ ...CONNECTIONS[0]!, generation: "generation-2" }],
-      model: BINDING,
-      compositionGenerationId: "composition-1",
-    });
-    expect(new Set([base, added, removed, regenerated]).size).toBe(4);
-  });
-
-  test("changes with the model binding and Composition generation", async () => {
-    const base = await isolateBindingDigestV1({
-      ...IDENTITY,
-      connections: CONNECTIONS,
-      model: BINDING,
-      compositionGenerationId: "composition-1",
-    });
-    const model = await isolateBindingDigestV1({
-      ...IDENTITY,
-      connections: CONNECTIONS,
-      model: { ...BINDING, providerModelId: "other" },
-      compositionGenerationId: "composition-1",
-    });
-    const composition = await isolateBindingDigestV1({
-      ...IDENTITY,
-      connections: CONNECTIONS,
-      model: BINDING,
-      compositionGenerationId: "composition-2",
-    });
-    expect(new Set([base, model, composition]).size).toBe(3);
+describe("the egress policy of one Bot's enabled Plugins", () => {
+  test("is the union of declared hosts, or open if any asked for it, or nothing", () => {
+    expect(pluginEgressPolicyV1([{}, {}])).toBeUndefined();
+    expect(
+      pluginEgressPolicyV1([
+        { network: { hosts: ["b.example.com"] } },
+        {},
+        { network: { hosts: ["a.example.com", "b.example.com"] } },
+      ]),
+    ).toEqual({ hosts: ["a.example.com", "b.example.com"], open: false });
+    expect(
+      pluginEgressPolicyV1([
+        { network: { hosts: ["a.example.com"] } },
+        { network: { open: true } },
+      ]),
+    ).toEqual({ hosts: [], open: true });
   });
 });
 
@@ -374,5 +328,57 @@ describe("provider errors crossing into Bot code", () => {
     expect(failure).toBe(ISOLATE_MODEL_FAILURE_MESSAGE);
     expect(failure).not.toContain("sk-live-123");
     expect(failure).not.toContain("ollama.com");
+  });
+});
+
+describe("what the egress loopback admits", () => {
+  const policy = {
+    hosts: ["api.example.com", "*.weather.example"],
+    open: false,
+  };
+
+  test("a declared host over https, and a wildcard's subdomains", () => {
+    expect(pluginEgressAdmitsV1(policy, "https://api.example.com/v1")).toEqual({
+      admitted: true,
+      host: "api.example.com",
+    });
+    expect(
+      pluginEgressAdmitsV1(policy, "https://API.Example.com/v1?x=1"),
+    ).toEqual({ admitted: true, host: "api.example.com" });
+    expect(
+      pluginEgressAdmitsV1(policy, "https://au.weather.example/today"),
+    ).toMatchObject({ admitted: true });
+  });
+
+  test("refuses an undeclared host, the bare wildcard domain, http and junk", () => {
+    expect(
+      pluginEgressAdmitsV1(policy, "https://other.example.com/"),
+    ).toMatchObject({
+      admitted: false,
+      reason: expect.stringMatching(/not declared by any enabled plugin/),
+    });
+    expect(
+      pluginEgressAdmitsV1(policy, "https://weather.example/"),
+    ).toMatchObject({ admitted: false });
+    expect(
+      pluginEgressAdmitsV1(policy, "http://api.example.com/"),
+    ).toMatchObject({
+      admitted: false,
+      reason: expect.stringMatching(/https only/),
+    });
+    expect(pluginEgressAdmitsV1(policy, "not a url")).toMatchObject({
+      admitted: false,
+      reason: expect.stringMatching(/invalid/),
+    });
+  });
+
+  test("open access admits any https host and still refuses http", () => {
+    const open = { hosts: [], open: true };
+    expect(
+      pluginEgressAdmitsV1(open, "https://anything.invalid/"),
+    ).toMatchObject({ admitted: true });
+    expect(
+      pluginEgressAdmitsV1(open, "http://anything.invalid/"),
+    ).toMatchObject({ admitted: false });
   });
 });

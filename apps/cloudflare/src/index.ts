@@ -193,6 +193,7 @@ import {
 } from "@frockbot/core/contracts";
 import type { AppletState } from "./applet-state.js";
 export { BotCapabilities } from "./bot-capabilities.js";
+export { PluginEgress } from "./plugin-egress.js";
 // The Applet authority: the Durable Object that owns one Applet instance,
 // and the loopback `CAPABILITIES` entrypoint its facet is handed.
 export { AppletCapabilities, AppletState } from "./applet-state.js";

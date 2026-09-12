@@ -3,8 +3,10 @@
 // declares.
 //
 // First-party code is ordinary imports in the kernel isolate; everything else
-// runs in one loaded Worker per User with `globalOutbound` disabled and only
-// the loopback bindings the Bot's authority grants, and this is what loads it.
+// runs in one loaded Worker per User with only the loopback bindings the Bot's
+// authority grants — `globalOutbound` among them, bound to the egress loopback
+// when the enabled Plugins declared network and null when they did not — and
+// this is what loads it.
 //
 // Two loader behaviours are load-bearing here: `.get()` never throws, so mount
 // and `health()` are a single guarded phase; and a reused loader id silently
@@ -73,9 +75,9 @@ export interface BotIsolateMemberV1 {
 }
 
 /**
- * The grants a host in this deployment can actually honour. `storage`,
- * `files` and `computer` are named in the vocabulary and wait on their hosts;
- * a Plugin declaring one is refused at resolve rather than mounted inert.
+ * The grants a host in this deployment can actually honour. `files` and
+ * `computer` are named in the vocabulary and wait on their hosts; a Plugin
+ * declaring one is refused at resolve rather than mounted inert.
  */
 const OPEN_PLUGIN_GRANTS_V1: readonly PluginGrantV1[] = [
   "http",
@@ -83,6 +85,7 @@ const OPEN_PLUGIN_GRANTS_V1: readonly PluginGrantV1[] = [
   "ai",
   "memory",
   "workspace",
+  "storage",
 ];
 
 /** The `WorkerCode` a Plugin worker is loaded from. Structurally the platform's. */
@@ -90,7 +93,7 @@ export interface BotIsolateWorkerCode {
   compatibilityDate: string;
   mainModule: string;
   modules: Record<string, { js: string }>;
-  globalOutbound: null;
+  globalOutbound: null | unknown;
   env: BotIsolateEnv;
   limits: { cpuMs: number; subRequests: number };
 }
@@ -148,12 +151,23 @@ export interface PluginWorkerHostOptions {
   subagentRole?: string;
   /** Durably records a hook the worker skipped, before the loop continues. */
   recordHookFailure(failure: IsolateHookFailureV1): Promise<void>;
-  /** The loopback `CAPABILITIES` binding, minted by the Bot's Durable Object. */
+  /**
+   * The loopback `CAPABILITIES` binding, minted by the Bot's Durable Object
+   * for this User. Per User, never per Turn: every call carries its scope.
+   */
   capabilities: BotCapabilitiesStub;
+  /**
+   * The worker's `globalOutbound`: a loopback service the Durable Object
+   * minted with the hosts the User's enabled Plugins declared, or nothing,
+   * which leaves `fetch` refused. Whatever it is, it is baked into `env` and
+   * therefore into the binding digest.
+   */
+  egress?: unknown;
   compatibilityDate: string;
   /**
-   * Content address of the bindings baked into `env`. Folded into the loader
-   * id so a cached worker never answers under stale authority.
+   * Content address of the bindings baked into `env` — the User and the
+   * egress policy. Folded into the loader id so a cached worker never answers
+   * under a stale `env`.
    */
   bindingDigest: string;
   limits?: BotIsolateLimits;
@@ -717,10 +731,10 @@ export class PluginWorkerHost {
     resolved: readonly ResolvedPlugin[],
   ): BotIsolateLoadedWorker {
     const limits = this.options.limits ?? BOT_ISOLATE_DEFAULT_LIMITS;
+    // Nothing per Turn or per Bot: the worker is one per User, and a loader
+    // id is served with the `env` it was first loaded with.
     const identity: IsolateIdentityV1 = {
       userId: this.options.userId,
-      botId: this.options.botId,
-      generationId: this.options.generationId,
       plugins: resolved.map(({ member }) => ({
         pluginId: member.packageId,
         ...pluginIdentityV1(member),
@@ -736,8 +750,9 @@ export class PluginWorkerHost {
             source,
           })),
         ),
-        // The constitution's rule, made mechanical: no network except bindings.
-        globalOutbound: null,
+        // The constitution's rule, made mechanical: no network except what
+        // the egress loopback admits, and none at all without one.
+        globalOutbound: (this.options.egress ?? null) as null,
         env: { IDENTITY: identity, CAPABILITIES: this.options.capabilities },
         limits,
       }),
