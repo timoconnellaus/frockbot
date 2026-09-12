@@ -55,6 +55,13 @@ export interface VoiceTraceLine {
   elapsedMs?: number;
   code?: number;
   reason?: string;
+  source?: string;
+  chars?: number;
+  bytes?: number;
+  chunk?: number;
+  audioChunks?: number;
+  audioBytes?: number;
+  sentencesSpoken?: number;
 }
 
 export class WorkerdVoiceAssistant extends VoiceAssistant {

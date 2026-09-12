@@ -287,8 +287,15 @@ the delegation count and the answer's length, or a failure classification —
 never a provider's error sentence), `speech-suppressed` (the speech allowance is
 used up, so a sentence of the reply was never turned into audio — the cap and
 the sentence's length, never its words), `refused` (with the code and sentence
-the client was sent), `stt-failed`, `call-ended` and `closed` (the client's code
-and reason). Every line carries the connection id, and — once `onConnect`
+the client was sent), `stt-failed`, `speech-started` (the transcription
+service's own voice detector heard someone), `interrupted` (the SDK stopped
+the reply in flight: preceded by `speech-started`, the upstream's detector cut
+it; on its own, the phone's local energy gate sent `interrupt`), `audio` (the first synthesized
+chunk of each sentence reached the socket — the sentence's length in
+characters, the chunk's bytes and the running chunk count; a reply with a
+`turn-settled` but no `audio` never became sound), `call-ended` (with the
+call's total synthesized chunks, bytes and sentences) and `closed` (the
+client's code and reason). Every line carries the connection id, and — once `onConnect`
 accepted the socket — the device key; `refused-identity` carries the device key
 from the header it just rejected, and the `closed` line for a refused socket has
 none. Once admitted, every line also carries the call id and elapsed

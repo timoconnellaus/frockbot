@@ -346,8 +346,34 @@ describe("the voice session object", () => {
     }[];
     expect(meters[0]).toMatchObject({ turns: 1 });
     expect(meters[0]!.ttsCharacters).toBeGreaterThan(0);
+    // The tail can prove speech left the object: one `audio` line per
+    // sentence, and the call's total on the way out.
+    const audio = (await stub.probeTraces()).filter((t) => t.event === "audio");
+    expect(audio).toHaveLength(1);
+    expect(audio[0]).toMatchObject({
+      chars: "You said: what time is it.".length,
+      chunk: 1,
+    });
+    expect(Number(audio[0]!.bytes)).toBeGreaterThan(0);
+    // The phone's interrupt is on record, with no upstream `speech-started`
+    // before it: that is how the tail tells the two detectors apart.
+    opened.socket.send(JSON.stringify({ type: "interrupt" }));
+    await eventually(
+      async () =>
+        (await stub.probeTraces()).find((t) => t.event === "interrupted"),
+      (line) => Boolean(line),
+      "the interrupted trace",
+    );
+    expect(
+      (await stub.probeTraces()).some((t) => t.event === "speech-started"),
+    ).toBe(false);
     opened.socket.send(JSON.stringify({ type: "end_call" }));
     await opened.waitFor(status("idle"), "idle");
+    const ended = (await stub.probeTraces()).find(
+      (t) => t.event === "call-ended",
+    );
+    expect(ended).toMatchObject({ sentencesSpoken: 1 });
+    expect(Number(ended!.audioChunks)).toBeGreaterThan(0);
     opened.socket.close();
   });
 
