@@ -121,14 +121,14 @@ class _ChatIconPainter extends CustomPainter {
       case ChatIconKind.plugins:
         // A piece with two tabs: the square, and the knobs that make it a
         // Plugin rather than an Applet's window.
-        path.moveTo(5, 9);
-        path.lineTo(9, 9);
-        path.arcToPoint(const Offset(13, 9), radius: const Radius.circular(2));
-        path.lineTo(17, 9);
-        path.lineTo(17, 13);
-        path.arcToPoint(const Offset(17, 17), radius: const Radius.circular(2));
-        path.lineTo(17, 21);
-        path.lineTo(5, 21);
+        path.moveTo(5, 7);
+        path.lineTo(9, 7);
+        path.arcToPoint(const Offset(13, 7), radius: const Radius.circular(2));
+        path.lineTo(17, 7);
+        path.lineTo(17, 11);
+        path.arcToPoint(const Offset(17, 15), radius: const Radius.circular(2));
+        path.lineTo(17, 19);
+        path.lineTo(5, 19);
         path.close();
       case ChatIconKind.applet:
         canvas.drawRRect(

@@ -256,7 +256,7 @@ void main() {
     expect(opened, 1);
   });
 
-  testWidgets('a phone header offers no Plugins door; the Bot page does', (
+  testWidgets('a header given no Plugins callback draws no Plugins door', (
     tester,
   ) async {
     await tester.pumpWidget(

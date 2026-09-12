@@ -1,10 +1,11 @@
-// The Bot's own Plugins page, driven from the profile sheet (ADR 0026).
+// The Bot's own Plugins page, driven from its header (ADR 0026).
 //
-// The page is the Bot's: the profile entry names the selected Bot, the list is
-// what that Bot could run, and a switch is that Bot's alone. This spec walks
-// the product path — open the sheet, open the page, flip Web off — and then
-// reads the same Bot's page back to prove the switch is what the Bot serves,
-// not what the widget last painted.
+// A Bot's Plugins are Bot settings, so the door is the Plugins button in the
+// Bot's header and the page opens in the panel beside the conversation; the
+// Profile keeps only what applies to the whole account. This spec walks the
+// product path — check the Profile names no Bot, open the panel, flip Web off
+// — and then reads the same Bot's page back to prove the switch is what the
+// Bot serves, not what the widget last painted.
 import type { Locator, Page } from "@playwright/test";
 import {
   closeOverlay,
@@ -82,8 +83,7 @@ test("a Bot's Plugins page is its own, and a switch it holds is the Bot's", asyn
   // The Bot's Plugins are Bot settings: the door is in its header.
   await openBotPlugins(page);
 
-  // What the panel says it is, and the five first-party features it offers.
-  await expect(says(page, "Plugins").first()).toBeVisible();
+  // The five first-party features the panel offers.
   for (const slug of [
     "web-built-in",
     "routines-built-in",
