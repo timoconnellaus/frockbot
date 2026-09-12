@@ -137,57 +137,82 @@ class VoiceFooter extends StatefulWidget {
 
 class _VoiceFooterState extends State<VoiceFooter>
     with SingleTickerProviderStateMixin {
+  /// How often the levels are read and a spent lobe is reborn. The lobes
+  /// themselves move on every frame; only the sampling is paced, so the
+  /// meter is smooth on a 60 Hz phone and a 120 Hz one alike.
   static const _sample = Duration(milliseconds: 33);
 
   late final Ticker _ticker;
   final math.Random _random = math.Random();
-  final List<VoiceLobe> _lobes = List.generate(voiceLobeCount, VoiceLobe.spent);
-  Duration _last = Duration.zero;
-  double _now = 0;
+
+  /// What the painter reads. It is mutated in place by the ticker and the
+  /// painter is told to repaint through [_frame]; nothing here calls
+  /// `setState`, so a frame of the meter rebuilds no widget at all.
+  final VoiceMeterModel _model = VoiceMeterModel();
+  final _FrameNotifier _frame = _FrameNotifier();
+  Duration _last = Duration.zero - _sample;
   double _flow = 0;
-  double _level = 0;
-  VoiceSpeaker _speaker = VoiceSpeaker.nobody;
+
+  /// The two things the chrome shows besides the meter. The session notifies
+  /// on every level change during playback, thirty times a second; the
+  /// footer rebuilds only when one of these actually moved.
+  String? _shownError;
+  bool _shownMuted = false;
 
   @override
   void initState() {
     super.initState();
-    widget.session.addListener(_repaint);
+    _shownError = widget.session.error;
+    _shownMuted = widget.session.muted;
+    widget.session.addListener(_sessionChanged);
     // The ticker runs only while a call does, and is disposed with the
     // footer. Nothing here animates when the footer is not on screen.
     _ticker = createTicker(_tick)..start();
   }
 
-  void _repaint() {
+  void _sessionChanged() {
+    final error = widget.session.error;
+    final muted = widget.session.muted;
+    if (error == _shownError && muted == _shownMuted) return;
+    _shownError = error;
+    _shownMuted = muted;
     if (mounted) setState(() {});
   }
 
   void _tick(Duration elapsed) {
-    if (elapsed - _last < _sample) return;
-    _last = elapsed;
-    _now = elapsed.inMicroseconds / 1e6;
+    final now = elapsed.inMicroseconds / 1e6;
+    _model.now = now;
+    if (elapsed - _last >= _sample) {
+      _last = elapsed;
+      _sampleLevels(now);
+    }
+    _frame.tick();
+  }
+
+  void _sampleLevels(double now) {
     final session = widget.session;
     // The person's level is shown as it is. The Bot's flows, because a
     // spoken reply is continuous and a per-frame RMS of it is not.
     _flow = _flow * 0.55 + _clean(session.playbackLevel) * 0.45;
     final mic = _clean(session.micLevel);
     if (mic > voiceLevelEpsilon) {
-      _speaker = VoiceSpeaker.person;
-      _level = _shape(mic);
+      _model.speaker = VoiceSpeaker.person;
+      _model.level = _shape(mic);
     } else if (_flow > voiceLevelEpsilon) {
-      _speaker = VoiceSpeaker.bot;
-      _level = _shape(_flow);
+      _model.speaker = VoiceSpeaker.bot;
+      _model.level = _shape(_flow);
     } else {
-      _speaker = VoiceSpeaker.nobody;
-      _level = 0;
+      _model.speaker = VoiceSpeaker.nobody;
+      _model.level = 0;
     }
     // A finished lobe is reborn only while there is sound: in silence the
     // last ones run out and nothing replaces them.
-    for (var i = 0; i < _lobes.length; i++) {
-      if (_lobes[i].isOver(_now) && _level > 0.03) {
-        _lobes[i] = VoiceLobe.spawn(_random, _now, i);
+    final lobes = _model.lobes;
+    for (var i = 0; i < lobes.length; i++) {
+      if (lobes[i].isOver(now) && _model.level > 0.03) {
+        lobes[i] = VoiceLobe.spawn(_random, now, i);
       }
     }
-    if (mounted) setState(() {});
   }
 
   static double _clean(double value) =>
@@ -201,7 +226,8 @@ class _VoiceFooterState extends State<VoiceFooter>
   @override
   void dispose() {
     _ticker.dispose();
-    widget.session.removeListener(_repaint);
+    widget.session.removeListener(_sessionChanged);
+    _frame.dispose();
     super.dispose();
   }
 
@@ -339,15 +365,14 @@ class _VoiceFooterState extends State<VoiceFooter>
                 top: 0,
                 width: width,
                 height: voiceFooterHeight,
-                child: CustomPaint(
-                  key: voiceFooterAnimationKey,
-                  painter: VoiceLobesPainter(
-                    lobes: List.of(_lobes, growable: false),
-                    level: _level,
-                    speaker: _speaker,
-                    now: _now,
+                // The boundary keeps a frame of the meter from repainting
+                // the whole shell beneath the footer.
+                child: RepaintBoundary(
+                  child: CustomPaint(
+                    key: voiceFooterAnimationKey,
+                    painter: VoiceLobesPainter(model: _model, repaint: _frame),
+                    size: Size.infinite,
                   ),
-                  size: Size.infinite,
                 ),
               ),
             ],
@@ -358,6 +383,40 @@ class _VoiceFooterState extends State<VoiceFooter>
   );
 }
 
+/// A [ChangeNotifier] whose only job is to say "paint again".
+class _FrameNotifier extends ChangeNotifier {
+  void tick() => notifyListeners();
+}
+
+/// What the meter shows on a frame: the lobes, the level that scales them,
+/// whose colour they wear and the clock they breathe to. The footer owns one
+/// and mutates it in place; the painter reads it.
+class VoiceMeterModel {
+  final List<VoiceLobe> lobes = List.generate(voiceLobeCount, VoiceLobe.spent);
+  double level = 0;
+  VoiceSpeaker speaker = VoiceSpeaker.nobody;
+  double now = 0;
+}
+
+/// The bump `(2 / (2 + u⁴))³` tabulated over |u| in [0, [_bumpReach]) so a
+/// point on a lobe costs a lookup and a multiply, not a `pow`. Past the
+/// reach the bump is under 1e-5 of its peak and is drawn as flat.
+const double _bumpReach = 4.0;
+const int _bumpSteps = 512;
+final List<double> _bumpTable = List.generate(_bumpSteps + 1, (i) {
+  final u = i / _bumpSteps * _bumpReach;
+  return math.pow(2 / (2 + u * u * u * u), 3).toDouble();
+}, growable: false);
+
+double _bump(double u) {
+  final a = u.abs();
+  if (a >= _bumpReach) return 0;
+  final pos = a / _bumpReach * _bumpSteps;
+  final i = pos.floor();
+  final t = pos - i;
+  return _bumpTable[i] * (1 - t) + _bumpTable[i + 1] * t;
+}
+
 /// Soft lobes on a support line, drawn additively.
 ///
 /// Each lobe is a bump shaped like `(2 / (2 + u⁴))³` around its own centre,
@@ -366,22 +425,24 @@ class _VoiceFooterState extends State<VoiceFooter>
 /// the line in one of the brand tints, and the whole set is composited with
 /// [BlendMode.plus] inside one layer so crossings go brighter, the way light
 /// does. At level zero nothing is drawn but the line.
+///
+/// It repaints when [repaint] says so and never because it was rebuilt:
+/// the model is the same object frame to frame, so a rebuild of the footer
+/// costs the meter nothing.
 class VoiceLobesPainter extends CustomPainter {
-  final List<VoiceLobe> lobes;
-  final double level;
-  final VoiceSpeaker speaker;
-  final double now;
-  const VoiceLobesPainter({
-    required this.lobes,
-    required this.level,
-    required this.speaker,
-    required this.now,
-  });
+  final VoiceMeterModel model;
+  const VoiceLobesPainter({required this.model, super.repaint});
+
+  /// Points along a lobe are this far apart on screen. The bump is smooth
+  /// enough that four points to the millimetre read as a curve.
+  static const double _pointSpacing = 4;
 
   @override
   void paint(Canvas canvas, Size size) {
     if (size.width <= 0 || size.height <= 0) return;
     final middle = size.height / 2;
+    final level = model.level;
+    final now = model.now;
     final speaking = level > 0;
     canvas.drawRRect(
       RRect.fromRectAndRadius(
@@ -391,10 +452,15 @@ class VoiceLobesPainter extends CustomPainter {
       Paint()..color = Colors.white.withValues(alpha: speaking ? 0.9 : 0.55),
     );
     if (!speaking) return;
-    final tints = speaker == VoiceSpeaker.bot
+    final tints = model.speaker == VoiceSpeaker.bot
         ? voiceLobeTintsBot
         : voiceLobeTintsPerson;
-    final bounds = Offset.zero & size;
+    final lobes = model.lobes;
+    final points = math.max(24, (size.width / _pointSpacing).ceil());
+    // The layer is only as tall as the tallest lobe can reach, above and
+    // below the line, so the additive pass is cheap on a phone.
+    final reach = 34 * 1.12 + 1;
+    final bounds = Rect.fromLTRB(0, middle - reach, size.width, middle + reach);
     canvas.saveLayer(bounds, Paint());
     for (var i = 0; i < lobes.length; i++) {
       final lobe = lobes[i];
@@ -405,13 +471,18 @@ class VoiceLobesPainter extends CustomPainter {
       final paint = Paint()
         ..color = tints[i % tints.length].withValues(alpha: 0.55)
         ..blendMode = BlendMode.plus;
+      final phase = now * 6 + lobe.seed;
       for (final sign in const [1.0, -1.0]) {
         final path = Path()..moveTo(0, middle);
-        for (var x = -3.0; x <= 3.0001; x += 0.05) {
-          final px = (x + 3) / 6 * size.width;
-          final u = (x - lobe.offset) / lobe.width;
-          final bump = math.pow(2 / (2 + u * u * u * u), 3).toDouble();
-          final ripple = 1 + 0.12 * math.sin(x * 5 + now * 6 + lobe.seed);
+        for (var p = 0; p <= points; p++) {
+          final x = p / points * 6 - 3;
+          final px = p / points * size.width;
+          final bump = _bump((x - lobe.offset) / lobe.width);
+          if (bump < 1e-3) {
+            path.lineTo(px, middle);
+            continue;
+          }
+          final ripple = 1 + 0.12 * math.sin(x * 5 + phase);
           path.lineTo(px, middle - sign * height * bump * ripple);
         }
         path
@@ -424,11 +495,7 @@ class VoiceLobesPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(VoiceLobesPainter old) =>
-      old.level != level ||
-      old.speaker != speaker ||
-      old.now != now ||
-      !identical(old.lobes, lobes);
+  bool shouldRepaint(VoiceLobesPainter old) => !identical(old.model, model);
 }
 
 /// Bars whose heights are a short rolling history of the real level.
