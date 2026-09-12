@@ -33,6 +33,7 @@ import { frockbotToolCallPrompt } from "./harness/miniflare.ts";
 
 interface BotRpc {
   run(command: unknown): Promise<{ runId: string }>;
+  setBotPluginEnabled(input: unknown): Promise<{ status: string }>;
   listApprovals(input: unknown): Promise<{
     pending: number;
     approvals: Array<{ approvalId: string; decision: string; action: string }>;
@@ -238,7 +239,48 @@ async function identityFor(prefix: string) {
   return identity;
 }
 
+/** The Bot's own Plugins switch, flipped exactly as its page does. */
+async function switchOffForBot(
+  identity: { userId: string; botId: string },
+  pluginId: string,
+): Promise<void> {
+  expect(
+    await botRpc(identity).setBotPluginEnabled({
+      schemaVersion: 1,
+      ...identity,
+      command: {
+        schemaVersion: 1,
+        kind: "set-plugin-enabled",
+        commandId: crypto.randomUUID(),
+        pluginId,
+        enabled: false,
+        expectedRevision: 0,
+      },
+    }),
+  ).toMatchObject({ status: "applied" });
+}
+
 describe("the Messages gate in Workerd", () => {
+  test("the Bot's own switch is a fourth gate: off, the tools are absent", async () => {
+    const identity = await identityFor("messages-bot-off");
+    await enableMessages(identity.userId);
+    const machine = await enrolled(identity.userId);
+    await reportPermissions(identity, machine, "bot-off-check", granted);
+    // Every account-wide gate is open, so only this Bot's switch can refuse.
+    await switchOffForBot(identity, "machine-messages");
+    // The permission check above wrote its own intent; nothing may join it.
+    const before = await intents(identity);
+
+    await ask(identity, "bot-off-1", "machine_messages_find_chats", {
+      machineId: machine.machineId,
+      query: "mum",
+      limit: 5,
+    });
+
+    expect(await queued(identity.userId, machine.machineId)).toEqual([]);
+    expect(await intents(identity)).toEqual(before);
+  });
+
   test("with the setting off, the tools are absent and nothing is queued", async () => {
     const identity = await identityFor("messages-off");
     const machine = await enrolled(identity.userId);

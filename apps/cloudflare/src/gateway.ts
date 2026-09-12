@@ -1024,9 +1024,9 @@ export function createGateway(dependencies: GatewayDependencies) {
       /^\/api\/bots\/([^/]+)\/plugins$/,
     );
     if (botPluginsMatch) {
-      const botId = decodeBotPathSegment(botPluginsMatch[1]);
-      const binding = dependencies.botConfigurationFor(userId, botId);
       try {
+        const botId = decodeBotPathSegment(botPluginsMatch[1]);
+        const binding = dependencies.botConfigurationFor(userId, botId);
         if (request.method === "GET") {
           const frame = await binding.readBotPluginsFrame({
             schemaVersion: 1,
@@ -1043,9 +1043,20 @@ export function createGateway(dependencies: GatewayDependencies) {
         if (request.method !== "POST") {
           return jsonError(405, "method not allowed");
         }
-        const command = decodeSetBotPluginEnabledCommandV1(
-          await request.json(),
-        );
+        // The command's own decode is the only failure that is the caller's
+        // fault; everything past it is ours, and echoing its message would
+        // report a storage failure as a bad request.
+        let command;
+        try {
+          command = decodeSetBotPluginEnabledCommandV1(await request.json());
+        } catch (error) {
+          return jsonError(
+            400,
+            error instanceof Error && !(error instanceof SyntaxError)
+              ? error.message
+              : "invalid plugin command",
+          );
+        }
         return Response.json(
           await binding.setBotPluginEnabled({
             schemaVersion: 1,
@@ -1056,11 +1067,8 @@ export function createGateway(dependencies: GatewayDependencies) {
           { headers: { "cache-control": "no-store" } },
         );
       } catch (error) {
-        if (error instanceof SyntaxError || request.method === "POST") {
-          return jsonError(
-            400,
-            error instanceof Error ? error.message : "invalid plugin command",
-          );
+        if (error instanceof ConfigurationDecodeError) {
+          return jsonError(400, "invalid bot id");
         }
         return jsonError(503, "Plugins are temporarily unavailable.");
       }

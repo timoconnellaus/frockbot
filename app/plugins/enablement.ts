@@ -12,7 +12,12 @@ export const PLUGIN_ENABLEMENT_KEY_V1 = "plugins:enablement";
 export interface PluginEnablementV1 {
   schemaVersion: 1;
   revision: number;
-  /** Only the Plugins a person switched; absent is on. */
+  /**
+   * Only the Plugins a person switched, on or off. Absent is the Plugin's own
+   * default: what the generation installed, and what a seeded Plugin's seed
+   * state says (`catalog.ts`) — so an explicit `true` is what turns a
+   * `default-off` Plugin on.
+   */
   enabled: Record<string, boolean>;
   updatedAt: string;
 }

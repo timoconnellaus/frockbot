@@ -7,7 +7,6 @@
     "./contracts": "./contracts/index.ts",
     "./contracts/contributions": "./contracts/contributions.ts",
     "./durable": "./durable/index.ts",
-    "./durable/memory-storage.fixture": "./durable/memory-storage.fixture.ts",
     "./durable/composition-failure": "./durable/composition/failure.ts",
     "./durable/testing": "./durable/memory-storage.fixture.ts",
     "./agent-loop": "./agent-loop/index.ts",

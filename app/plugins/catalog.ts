@@ -21,6 +21,7 @@ import type {
   ArtifactRefV1,
   CompositionMemberV1,
 } from "@frockbot/core/durable";
+import { CAPABILITY_DESCRIPTIONS } from "@frockbot/app/settings/catalog-copy";
 import type { PluginEnablementV1 } from "./enablement.js";
 
 export const PLUGIN_SEED_STATES_V1 = [
@@ -38,55 +39,31 @@ export interface SeededPluginV1 {
   displayName: string;
   description: string;
   seed: PluginSeedStateV1;
-  /**
-   * Off the Plugins page entirely. Allowed only when a User could not switch
-   * it anyway: a `locked` Plugin, or an `admin-gated` one the admin has not
-   * opened. A hidden Plugin a User could enable would be a switch nobody can
-   * find.
-   */
-  hidden: boolean;
   artifact: ArtifactRefV1;
   descriptor: PluginDescriptorV1;
 }
 
 /**
- * The first-party features a User may switch per Bot, with the words the page
- * shows for each. Ids are Package ids; the runtime masks a Package's
- * Capabilities out of a Bot's plan when the Bot's map says it is off.
+ * The first-party features a User may switch per Bot, in the order the page
+ * shows them. Ids are Package ids; the runtime masks a Package's Capabilities
+ * out of a Bot's plan, and leaves its hosted seam unmounted, when the Bot's
+ * map says it is off. The words each card shows are the Account features
+ * surface's own, so the two cannot drift.
  */
 export const FIRST_PARTY_TOGGLEABLE_PLUGINS_V1: readonly {
   packageId: string;
   displayName: string;
   description: string;
 }[] = [
-  {
-    packageId: "web",
-    displayName: "Web",
-    description: "Read public web pages to help answer your questions.",
-  },
-  {
-    packageId: "routines",
-    displayName: "Routines",
-    description: "Run a Bot’s instructions at scheduled times.",
-  },
-  {
-    packageId: "image",
-    displayName: "Image",
-    description: "Create images from a description.",
-  },
-  {
-    packageId: "subagents",
-    displayName: "Subagents",
-    description:
-      "Let a Bot delegate parts of a task to helper agents. May use additional model calls.",
-  },
-  {
-    packageId: "machine-messages",
-    displayName: "Messages",
-    description:
-      "Read and send Messages through your Mac. Setup and your approval are required.",
-  },
-];
+  { packageId: "web", displayName: "Web" },
+  { packageId: "routines", displayName: "Routines" },
+  { packageId: "image", displayName: "Image" },
+  { packageId: "subagents", displayName: "Subagents" },
+  { packageId: "machine-messages", displayName: "Messages" },
+].map((feature) => ({
+  ...feature,
+  description: CAPABILITY_DESCRIPTIONS[feature.packageId] ?? "",
+}));
 
 export function isFirstPartyToggleableV1(packageId: string): boolean {
   return FIRST_PARTY_TOGGLEABLE_PLUGINS_V1.some(
@@ -128,7 +105,6 @@ export function decodeSeededPluginV1(
       "description",
       "descriptor",
       "displayName",
-      "hidden",
       "pluginId",
       "seed",
     ].join(",")
@@ -138,18 +114,15 @@ export function decodeSeededPluginV1(
   const pluginId = boundedString(value.pluginId, `${label}.pluginId`, 64);
   if (!PLUGIN_ID.test(pluginId))
     throw new Error(`${label}.pluginId is invalid`);
+  // The enable map is one flat record keyed by id, so a seeded Plugin sharing
+  // an id with a first-party feature would share its switch.
+  if (isFirstPartyToggleableV1(pluginId)) {
+    throw new Error(`${label}.pluginId names a first-party feature`);
+  }
   const seed = PLUGIN_SEED_STATES_V1.find(
     (candidate) => candidate === value.seed,
   );
   if (!seed) throw new Error(`${label}.seed is not a seed state`);
-  if (typeof value.hidden !== "boolean") {
-    throw new Error(`${label}.hidden must be a boolean`);
-  }
-  if (value.hidden && seed !== "locked" && seed !== "admin-gated") {
-    throw new Error(
-      `${label} is hidden but a User could enable it; only a locked or admin-gated Plugin may be hidden`,
-    );
-  }
   const descriptor = decodePluginDescriptorV1(
     value.descriptor,
     `${label}.descriptor`,
@@ -182,7 +155,6 @@ export function decodeSeededPluginV1(
       1_024,
     ),
     seed,
-    hidden: value.hidden,
     artifact: {
       contentHash,
       size: artifact.size as number,
@@ -304,7 +276,21 @@ export function maskPlanForBotV1<
     capabilities: plan.capabilities.filter(
       (capability) =>
         !isFirstPartyToggleableV1(capability.packageId) ||
-        enablement.enabled[capability.packageId] !== false,
+        firstPartyFeatureOnForBotV1(capability.packageId, enablement),
     ),
   };
+}
+
+/**
+ * Whether one first-party feature runs for this Bot. Absent is on, as for any
+ * Plugin the catalog does not seed. The plan mask above reads it, and so does
+ * every hosted seam whose Package is one of these features: a feature mounted
+ * through `runtime.hosted` never touches the plan, so masking alone would
+ * leave its tools registered on a Turn the page reports as off.
+ */
+export function firstPartyFeatureOnForBotV1(
+  packageId: string,
+  enablement: PluginEnablementV1,
+): boolean {
+  return enablement.enabled[packageId] !== false;
 }

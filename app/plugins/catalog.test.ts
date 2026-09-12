@@ -4,6 +4,7 @@ import {
   decodeSeededPluginV1,
   enabledSeededPluginIdsV1,
   FIRST_PARTY_TOGGLEABLE_PLUGINS_V1,
+  firstPartyFeatureOnForBotV1,
   isFirstPartyToggleableV1,
   maskPlanForBotV1,
   pluginRunsForBotV1,
@@ -13,18 +14,17 @@ import {
   type SeededPluginV1,
 } from "./catalog.js";
 import { emptyPluginEnablementV1 } from "./enablement.js";
+import { CAPABILITY_DESCRIPTIONS } from "@frockbot/app/settings/catalog-copy";
 
 function seeded(
   pluginId: string,
   seed: SeededPluginV1["seed"],
-  hidden = false,
 ): Record<string, unknown> {
   return {
     pluginId,
     displayName: pluginId,
     description: `The ${pluginId} plugin`,
     seed,
-    hidden,
     artifact: {
       contentHash: "a".repeat(64),
       size: 12,
@@ -49,19 +49,20 @@ function enablement(enabled: Record<string, boolean>) {
 }
 
 describe("a seeded plugin's record", () => {
-  test("decodes exactly, and hides only what a User could not switch anyway", () => {
-    const locked = decodeSeededPluginV1(seeded("audit-log", "locked", true));
-    expect(locked.seed).toBe("locked");
-    expect(locked.hidden).toBe(true);
-    expect(
-      decodeSeededPluginV1(seeded("gated", "admin-gated", true)).hidden,
-    ).toBe(true);
-    expect(() =>
-      decodeSeededPluginV1(seeded("weather", "default-on", true)),
-    ).toThrow(/could enable it/);
-    expect(() =>
-      decodeSeededPluginV1(seeded("weather", "default-off", true)),
-    ).toThrow(/could enable it/);
+  test("decodes exactly, and never under a first-party feature's id", () => {
+    expect(decodeSeededPluginV1(seeded("audit-log", "locked")).seed).toBe(
+      "locked",
+    );
+    expect(decodeSeededPluginV1(seeded("gated", "admin-gated")).seed).toBe(
+      "admin-gated",
+    );
+    // One flat enable map keyed by id: a seeded "web" would share the Web
+    // feature's switch.
+    for (const feature of FIRST_PARTY_TOGGLEABLE_PLUGINS_V1) {
+      expect(() =>
+        decodeSeededPluginV1(seeded(feature.packageId, "default-off")),
+      ).toThrow(/first-party feature/);
+    }
     expect(() =>
       decodeSeededPluginV1(
         seeded("weather", "sometimes" as SeededPluginV1["seed"]),
@@ -185,6 +186,22 @@ describe("first-party features a Bot may switch", () => {
       FIRST_PARTY_TOGGLEABLE_PLUGINS_V1.map((plugin) => plugin.packageId),
     ).toEqual(["web", "routines", "image", "subagents", "machine-messages"]);
     expect(isFirstPartyToggleableV1("custom-models")).toBe(false);
+    // The page and Account features describe the same feature in one voice.
+    for (const feature of FIRST_PARTY_TOGGLEABLE_PLUGINS_V1) {
+      expect(feature.description).toBe(
+        CAPABILITY_DESCRIPTIONS[feature.packageId],
+      );
+    }
+  });
+
+  test("absent is on, and an explicit off is what turns a feature off", () => {
+    expect(firstPartyFeatureOnForBotV1("image", enablement({}))).toBe(true);
+    expect(
+      firstPartyFeatureOnForBotV1("image", enablement({ image: true })),
+    ).toBe(true);
+    expect(
+      firstPartyFeatureOnForBotV1("image", enablement({ image: false })),
+    ).toBe(false);
   });
 
   test("a feature switched off contributes none of its capabilities to the Bot's plan", () => {

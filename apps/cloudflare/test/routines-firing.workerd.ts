@@ -39,6 +39,10 @@ interface FiringRpc {
     entries: Array<{ entryId: string; runId: string; text: string }>;
   }>;
   run(command: unknown): Promise<{ runId: string }>;
+  setBotPluginEnabled(input: unknown): Promise<{ status: string }>;
+  listRoutines(input: unknown): Promise<{
+    routines: Array<{ routineId: string; runLog?: Array<{ status: string }> }>;
+  }>;
 }
 
 interface StoredRunProbe {
@@ -111,6 +115,39 @@ async function storedRuns(identity: {
 }
 
 describe("a firing's durable consequences in Workerd", () => {
+  test("a Bot with Routines switched off admits no Turn for a firing", async () => {
+    const suffix = crypto.randomUUID();
+    const identity = {
+      userId: `firing-off-${suffix}`,
+      botId: `firing-off-bot-${suffix}`,
+    };
+    await provisionBot(identity);
+    await createFiringRoutine(identity);
+    expect(
+      await rpc(identity).setBotPluginEnabled({
+        schemaVersion: 1,
+        ...identity,
+        command: {
+          schemaVersion: 1,
+          kind: "set-plugin-enabled",
+          commandId: crypto.randomUUID(),
+          pluginId: "routines",
+          enabled: false,
+          expectedRevision: 0,
+        },
+      }),
+    ).toMatchObject({ status: "applied" });
+
+    await fireOnce(identity);
+
+    // No run at all: the occurrence was consumed without admitting a Turn, so
+    // no model call was spent and the hand-off the cue scripts never happened.
+    expect(await storedRuns(identity)).toEqual([]);
+    expect(
+      await rpc(identity).listRoutineInbox({ schemaVersion: 1, ...identity }),
+    ).toMatchObject({ unacknowledged: 0, entries: [] });
+  });
+
   test("recovery re-mounts an interrupted firing on its recorded turn type", async () => {
     const suffix = crypto.randomUUID();
     const identity = {

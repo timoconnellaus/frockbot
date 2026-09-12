@@ -11,6 +11,7 @@ import { userConfigurationV1 } from "@frockbot/app/settings/bot";
 import {
   DEPLOYMENT_PLUGIN_CATALOG_V1,
   FIRST_PARTY_TOGGLEABLE_PLUGINS_V1,
+  firstPartyFeatureOnForBotV1,
   pluginRunsForBotV1,
   pluginSwitchableV1,
   type SeededPluginV1,
@@ -53,7 +54,8 @@ export async function readBotPluginsFrameV1(
       displayName: feature.displayName,
       description: feature.description,
       kind: "first-party",
-      on: installed && enablement.enabled[feature.packageId] !== false,
+      on:
+        installed && firstPartyFeatureOnForBotV1(feature.packageId, enablement),
       switchable: true,
       ...(installed
         ? {}
@@ -68,7 +70,6 @@ export async function readBotPluginsFrameV1(
     const seeded = catalog.find(
       (plugin) => plugin.pluginId === member.packageId,
     );
-    if (seeded?.hidden) continue;
     rows.push({
       pluginId: member.packageId,
       displayName: seeded?.displayName ?? member.descriptor.displayName,

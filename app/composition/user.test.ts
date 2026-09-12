@@ -3,7 +3,7 @@ import {
   bootstrapGeneration,
   DurableCompositionStore,
 } from "@frockbot/core/durable";
-import { MemoryStorage } from "@frockbot/core/durable/memory-storage.fixture";
+import { MemoryStorage } from "@frockbot/core/durable/testing";
 import {
   decodeSeededPluginV1,
   type SeededPluginV1,
@@ -27,7 +27,6 @@ function seeded(
     displayName: pluginId,
     description: `The ${pluginId} plugin`,
     seed: "default-on",
-    hidden: false,
     artifact: {
       contentHash,
       size: 12,
