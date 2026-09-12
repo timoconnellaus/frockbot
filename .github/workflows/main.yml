@@ -264,7 +264,7 @@ jobs:
         if: failure() || cancelled()
         run: |
           echo "::group::Memory now"
-          free -m
+          free -m || true
           echo "::endgroup::"
           echo "::group::Kernel log (killed, oom, segfault, workerd)"
           sudo dmesg -T 2>/dev/null | grep -iE 'killed process|out of memory|oom|segfault|workerd|traps' | tail -n 80 || true

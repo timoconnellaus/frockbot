@@ -10,15 +10,17 @@
 // ProxyWorker forwards every browser request to the Worker's own runtime, and
 // treats one forwarded request whose connection is lost as a fatal error of
 // the dev server (cloudflare/workers-sdk#15317): the whole process exits with
-// an empty `✘ [ERROR]`. On a CI runner the lost connection is the browser's —
-// a page torn down at a test boundary with a request still in flight, which
-// workerd's own log names as "stream disconnected prematurely". The patch in
-// `patches/wrangler@*.patch` makes that request's failure a 503 for that one
-// request instead. This supervisor is the backstop for whatever else takes
-// the child down: on an exit nobody asked for it starts a fresh one on the
-// same port and the same `--persist-to` directory, waits for it to serve
-// again, and prints the tail of what the dead one said. A spec in flight
-// still fails; the ones after it do not.
+// an empty `✘ [ERROR]`. On a CI runner that lost connection is between the
+// proxy and the Worker runtime — the shape of a keep-alive connection reused
+// as the other side closed it — and it lands on ordinary requests the browser
+// is still waiting on, not on a client abort. The patch in
+// `patches/wrangler@*.patch` re-forwards such a request on a fresh connection,
+// and only if every attempt drops does it answer 503 for that one request
+// instead of stopping the server. This supervisor is the backstop for
+// whatever else takes the child down: on an exit nobody asked for it starts a
+// fresh one on the same port and the same `--persist-to` directory, waits for
+// it to serve again, and prints the tail of what the dead one said. A spec in
+// flight still fails; the ones after it do not.
 import type { ChildProcess } from "node:child_process";
 
 /** How many unexpected exits are tolerated inside `RESTART_WINDOW_MS`. */
