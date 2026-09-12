@@ -273,23 +273,79 @@ void main() {
                 'orientation': 'column',
                 'title': 'Counter · Made by your Bot',
                 'children': [
-                  {'type': 'text', 'text': 'Count: $loads'},
                   {
-                    'type': 'action',
-                    'actionId': 'plugin-tool',
-                    'label': 'Add two',
-                    'input': {
-                      'kind': 'plugin-tool',
-                      'pluginId': 'counter',
-                      'tool': 'counter_bump',
-                      'arguments': '{"by":2}',
-                    },
+                    'type': 'text',
+                    'text': 'Version 0.0.1, written by your Bot.',
+                  },
+                  // The shape botPluginsDocumentV1 emits: the section root is
+                  // nested inside a wrapper group on the card.
+                  {
+                    'type': 'group',
+                    'orientation': 'column',
+                    'children': [
+                      {
+                        'type': 'group',
+                        'orientation': 'column',
+                        'children': [
+                          {'type': 'text', 'text': 'Count: $loads'},
+                          {
+                            'type': 'action',
+                            'actionId': 'plugin-tool',
+                            'label': 'Add two',
+                            'input': {
+                              'kind': 'plugin-tool',
+                              'pluginId': 'counter',
+                              'tool': 'counter_bump',
+                              'arguments': '{"by":2}',
+                            },
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                  {
+                    'type': 'group',
+                    'orientation': 'row',
+                    'children': [
+                      {
+                        'type': 'action',
+                        'actionId': 'set-package-enabled',
+                        'label': 'Turn off',
+                        'input': {
+                          'kind': 'set-plugin-enabled',
+                          'pluginId': 'counter',
+                          'enabled': false,
+                          'expectedRevision': 3,
+                        },
+                      },
+                    ],
                   },
                 ],
               },
             ],
           },
           'actions': [
+            {
+              'id': 'set-package-enabled',
+              'schema': {
+                'type': 'object',
+                'properties': {
+                  'kind': {
+                    'type': 'string',
+                    'enum': ['set-plugin-enabled'],
+                  },
+                  'pluginId': {'type': 'string', 'maxLength': 128},
+                  'enabled': {'type': 'boolean'},
+                  'expectedRevision': {
+                    'type': 'number',
+                    'minimum': 0,
+                    'maximum': 1000000,
+                  },
+                },
+                'required': ['kind', 'pluginId', 'enabled', 'expectedRevision'],
+                'additionalProperties': false,
+              },
+            },
             {
               'id': 'plugin-tool',
               'schema': {
