@@ -12,6 +12,7 @@ import 'package:flutter/material.dart';
 import '../flock/sheep.dart';
 import '../protocol/client_wire.generated.dart' as wire;
 import '../theme/frock_theme.dart';
+import 'focus.dart';
 import 'semantics.dart';
 
 /// What the sidebar's voice control offers right now. [ending] is the window
@@ -174,13 +175,6 @@ String formatSidebarMessageTime(String at, [DateTime? clock]) {
   return '${message.month}/${message.day}';
 }
 
-/// How many unread a badge says, or nothing where the row shows no badge.
-String? unreadBadgeLabel(wire.UnreadView? view) {
-  if (view == null || !view.unread) return null;
-  if (view.count == 0) return view.manuallyUnread ? "•" : null;
-  return view.capped ? '${view.count}+' : '${view.count}';
-}
-
 // ------------------------------------------------------------ the widget
 
 class ShellSidebar extends StatelessWidget {
@@ -189,6 +183,12 @@ class ShellSidebar extends StatelessWidget {
   final Map<String, wire.UnreadView> unread;
   final Set<String> archived;
   final String? activeBotId;
+
+  /// The Bot the User is actually reading: its chat is open, this window holds
+  /// focus, and nothing is covering it. Its row draws no count, because the
+  /// read receipt for the message that raised one is still in flight. See
+  /// [sidebarUnreadFor].
+  final String? focusedBotId;
 
   /// The Bot the shell knows is working, which it learns a poll sooner than
   /// the unread fan-out does.
@@ -225,6 +225,7 @@ class ShellSidebar extends StatelessWidget {
     required this.unread,
     required this.archived,
     required this.activeBotId,
+    required this.focusedBotId,
     required this.workingBotId,
     required this.loaded,
     required this.showHidden,
@@ -255,6 +256,11 @@ class ShellSidebar extends StatelessWidget {
       ? _id(bot) == workingBotId
       : unread[_id(bot)]?.working == true;
 
+  /// Every badge, bold name and total on this list reads the fan-out through
+  /// the focus rule, so no surface of it can disagree with another.
+  SidebarUnread _unread(String botId) =>
+      sidebarUnreadFor(unread[botId], focused: botId == focusedBotId);
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -270,7 +276,7 @@ class ShellSidebar extends StatelessWidget {
     final grouped = groupSidebarBots(partitioned.rest, _id, profiles);
     final hiddenUnread = hidden.fold(
       0,
-      (total, bot) => total + (unread[_id(bot)]?.count ?? 0),
+      (total, bot) => total + _unread(_id(bot)).count,
     );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -313,7 +319,7 @@ class ShellSidebar extends StatelessWidget {
                               name: _name(bot),
                               background: bot.sheep.background,
                               active: _id(bot) == activeBotId,
-                              unread: unread[_id(bot)]?.unread == true,
+                              unread: _unread(_id(bot)).unread,
                               working: _working(bot),
                               onTap: () => onSelect(_id(bot)),
                             ),
@@ -385,7 +391,8 @@ class ShellSidebar extends StatelessWidget {
     final view = unread[botId];
     final preview = view?.lastMessage?['text'] as String?;
     final at = view?.lastMessage?['at'] as String?;
-    final badge = unreadBadgeLabel(view);
+    final shown = _unread(botId);
+    final badge = shown.label;
     final isArchived = archived.contains(botId);
     // The row's rounded selected tint must sit inside the column rather than
     // run to its edges, so the tile is inset and its own padding shrunk by
@@ -412,7 +419,7 @@ class ShellSidebar extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.bodyLarge?.copyWith(
-                    fontWeight: view?.unread == true
+                    fontWeight: shown.unread
                         ? FontWeight.w700
                         : FontWeight.w600,
                   ),
