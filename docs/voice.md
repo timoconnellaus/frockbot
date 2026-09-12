@@ -259,6 +259,26 @@ socket without `end_call` does the same. A Bot Turn the assistant already
 admitted keeps running; its answer is spoken on the next call or dropped after
 24 h.
 
+The client closes with a code and a reason that name the path that ended the
+call, because the server's log is the only record of it: `1000` with `ended`,
+`end-button` or `lifecycle:<state>` when the person or the app ended it, `4001`
+with the failure sentence when the client failed on its own, `4002` `disposed`
+when the controller was torn down mid-call. The server closes with `4403` when
+the socket is not the account's.
+
+### Tracing a call
+
+The object writes one `voice assistant {json}` line per step, readable in
+`wrangler tail` and Workers Logs: `connected`, `call-admitted`, `upstream`
+(`starting` | `awake` | `asleep`), `listening`, `utterance` (length and whether
+it reached the model, never the words), `turn`, `turn-settled`, `refused`
+(with the code and sentence the client was sent), `stt-failed`, `call-ended`
+and `closed` (the client's code and reason). Every line carries the connection
+id, the device key and, once admitted, the call id and elapsed milliseconds. A
+call that reaches `listening` and then `closed` with no `utterance` in between
+was ended by the client before anything was heard; the `closed` reason says
+by which path.
+
 ### Text turns
 
 `{type:"text_message",text}` runs a turn without STT. Not used by the footer;

@@ -173,6 +173,8 @@ interface ConnectionIdentity {
 
 interface LiveCall {
   callId: string;
+  /** When the call was admitted, so every later line can say how far in. */
+  startedAt: number;
   system: Promise<string>;
   session?: SleepingTranscriberSessionV1;
   /** Awake seconds already reconciled against the meter. */
@@ -346,6 +348,36 @@ export class VoiceAssistant extends VoiceAgentBase<
     return state && typeof state.userId === "string" ? state : undefined;
   }
 
+  /**
+   * One line per step of a call, as `wrangler tail` and Workers Logs show
+   * it. The happy path is otherwise silent — the SDK logs only its own
+   * failures, and a refusal reaches the client without a trace — so a call
+   * that went nowhere used to look, from every log, like a call nobody made.
+   * Never the words spoken: lengths and ids only.
+   */
+  private trace(
+    connection: Connection,
+    event: string,
+    fields: Record<string, unknown> = {},
+  ): void {
+    const call = this.#calls.get(connection.id);
+    const line = {
+      event,
+      connection: connection.id,
+      device: this.identity(connection)?.deviceKey,
+      ...(call
+        ? {
+            call: call.callId,
+            elapsedMs: Math.max(0, Date.now() - call.startedAt),
+          }
+        : {}),
+      ...fields,
+    };
+    (event.startsWith("refused") || event === "stt-failed"
+      ? console.warn
+      : console.info)("voice assistant", JSON.stringify(line));
+  }
+
   override async onConnect(
     connection: Connection,
     context: ConnectionContext,
@@ -357,10 +389,12 @@ export class VoiceAssistant extends VoiceAgentBase<
     const deviceKey =
       context.request.headers.get(VOICE_ASSISTANT_DEVICE_HEADER) ?? "unknown";
     if (!userId || userId !== this.name) {
+      this.trace(connection, "refused-identity", { deviceKey });
       connection.close(4403, "voice session is not yours");
       return;
     }
     connection.setState({ userId, deviceKey } satisfies ConnectionIdentity);
+    this.trace(connection, "connected");
   }
 
   override async onClose(
@@ -369,6 +403,15 @@ export class VoiceAssistant extends VoiceAgentBase<
     reason: string,
     wasClean: boolean,
   ): Promise<void> {
+    // The client names its own reason for going: a close code above 4000 and
+    // the path that closed it (docs/voice.md). This is the line that says
+    // whether the person hung up, the app left the foreground, or the
+    // client failed on its own.
+    this.trace(connection, "closed", {
+      code,
+      reason: reason.slice(0, 200),
+      wasClean,
+    });
     await this.releaseCall(connection);
     await super.onClose?.(connection, code, reason, wasClean);
   }
@@ -416,6 +459,7 @@ export class VoiceAssistant extends VoiceAgentBase<
     code: VoiceAssistantRefusalCodeV1,
     message: string,
   ) {
+    this.trace(connection, "refused", { code, message });
     this.send(connection, {
       schemaVersion: 1,
       type: "voice/refusal",
@@ -491,6 +535,7 @@ export class VoiceAssistant extends VoiceAgentBase<
     const unspoken = await ledger.unspokenDelegations();
     const call: LiveCall = {
       callId: admission.call.callId,
+      startedAt: Date.now(),
       system: this.buildSystemPrompt(identity.userId, unspoken),
       lastAwakeSeconds: 0,
       reservedSeconds: 0,
@@ -499,6 +544,11 @@ export class VoiceAssistant extends VoiceAgentBase<
       quotaSaid: false,
     };
     this.#calls.set(connection.id, call);
+    this.trace(connection, "call-admitted", {
+      admission: admission.status,
+      replaced: admission.replaced?.connectionId,
+      unspoken: unspoken.length,
+    });
     return true;
   }
 
@@ -534,6 +584,7 @@ export class VoiceAssistant extends VoiceAgentBase<
             // session. Without it a call that loses its ears looks, from
             // every log, like a person who said nothing.
             console.error("voice assistant stt failed", error.message);
+            this.trace(connection, "stt-failed", { message: error.message });
             options.onFatalError?.(error);
           },
         });
@@ -563,6 +614,7 @@ export class VoiceAssistant extends VoiceAgentBase<
     call: LiveCall,
     state: VoiceAssistantUpstreamStateV1,
   ): Promise<void> {
+    this.trace(connection, "upstream", { state });
     this.sendState(connection, call);
     if (state === "starting") {
       await this.openSttWindow(connection, call);
@@ -627,6 +679,7 @@ export class VoiceAssistant extends VoiceAgentBase<
   override async onCallStart(connection: Connection): Promise<void> {
     const call = this.#calls.get(connection.id);
     if (!call) return;
+    this.trace(connection, "listening");
     this.sendState(connection, call);
     // Answers that settled while nobody was listening are read out first.
     const unspoken = await this.ledger().unspokenDelegations();
@@ -636,6 +689,7 @@ export class VoiceAssistant extends VoiceAgentBase<
   }
 
   override async onCallEnd(connection: Connection): Promise<void> {
+    this.trace(connection, "call-ended");
     await this.releaseCall(connection);
   }
 
@@ -664,7 +718,12 @@ export class VoiceAssistant extends VoiceAgentBase<
     // A grunt, a cough, or a fragment the model would answer at length is
     // not a turn. Nothing shorter than two characters reaches the model.
     const trimmed = transcript.replace(/[^\p{L}\p{N}]+/gu, " ").trim();
-    return trimmed.length < 2 ? null : transcript.trim();
+    const accepted = trimmed.length >= 2;
+    this.trace(_connection, "utterance", {
+      chars: transcript.length,
+      accepted,
+    });
+    return accepted ? transcript.trim() : null;
   }
 
   override async beforeSynthesize(
@@ -710,6 +769,7 @@ export class VoiceAssistant extends VoiceAgentBase<
     }
     const turnId = admitted.turn.turnId;
     call.turnId = turnId;
+    this.trace(connection, "turn", { turn: turnId, chars: transcript.length });
     const system = await call.system;
     const host = this.turnHost(identity.userId, turnId);
     const self = this;
@@ -748,8 +808,16 @@ export class VoiceAssistant extends VoiceAgentBase<
         // Durable before the generator returns, so the SDK's own history
         // write and the ledger never disagree about whether this turn ended.
         await ledger.settleTurn(turnId, settlement);
+        // Read through a fresh binding: the callbacks above assign
+        // `settlement`, which control flow cannot see.
+        const settled = settlement as { answer?: string; failure?: string };
+        self.trace(connection, "turn-settled", {
+          turn: turnId,
+          ...(settled.answer !== undefined
+            ? { answerChars: settled.answer.length }
+            : { failure: (settled.failure ?? "").slice(0, 200) }),
+        });
       }
-      void self;
     })();
   }
 

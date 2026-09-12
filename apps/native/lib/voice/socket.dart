@@ -11,6 +11,7 @@
 library;
 
 import 'dart:async';
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:web_socket_channel/web_socket_channel.dart';
@@ -24,7 +25,27 @@ abstract interface class VoiceSocket {
   Stream<Object?> get messages;
   void sendText(String text);
   void sendBinary(Uint8List bytes);
-  Future<void> close();
+
+  /// Closes with a code and a reason the server logs: the one record, from
+  /// the server's side, of which path on this device ended the socket.
+  Future<void> close({int code = voiceCloseNormalV1, String reason = ''});
+}
+
+/// The person, or the app, ended the call on purpose.
+const voiceCloseNormalV1 = 1000;
+
+/// The controller failed on its own and closed; the reason is its message.
+const voiceCloseFailedV1 = 4001;
+
+/// The controller was disposed while the socket was still open.
+const voiceCloseDisposedV1 = 4002;
+
+/// A close reason may be at most 123 bytes on the wire.
+String voiceCloseReasonV1(String reason) {
+  const limit = 120;
+  final bytes = utf8.encode(reason);
+  if (bytes.length <= limit) return reason;
+  return utf8.decode(bytes.sublist(0, limit), allowMalformed: true);
 }
 
 typedef VoiceSocketOpener = Future<VoiceSocket> Function();
@@ -43,9 +64,12 @@ class ChannelVoiceSocket implements VoiceSocket {
   void sendBinary(Uint8List bytes) => channel.sink.add(bytes);
 
   @override
-  Future<void> close() async {
+  Future<void> close({
+    int code = voiceCloseNormalV1,
+    String reason = '',
+  }) async {
     try {
-      await channel.sink.close();
+      await channel.sink.close(code, voiceCloseReasonV1(reason));
     } on Object {
       // A socket the network already closed needs no goodbye.
     }

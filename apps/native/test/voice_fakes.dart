@@ -24,6 +24,8 @@ class FakeVoiceSocket implements VoiceSocket {
       StreamController<Object?>.broadcast();
   final List<Object> sent = [];
   bool closed = false;
+  int? closeCode;
+  String? closeReason;
 
   @override
   Stream<Object?> get messages => _incoming.stream;
@@ -35,8 +37,13 @@ class FakeVoiceSocket implements VoiceSocket {
   void sendBinary(Uint8List bytes) => sent.add(bytes);
 
   @override
-  Future<void> close() async {
+  Future<void> close({
+    int code = voiceCloseNormalV1,
+    String reason = '',
+  }) async {
     closed = true;
+    closeCode = code;
+    closeReason = reason;
     if (!_incoming.isClosed) await _incoming.close();
   }
 

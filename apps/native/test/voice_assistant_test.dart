@@ -276,20 +276,38 @@ void main() {
     expect(harness.capture.stops, 1);
     expect(harness.player.closed, isTrue);
     expect(harness.socket.closed, isTrue);
+    // The server's log is the only record of why this device hung up.
+    expect(harness.socket.closeCode, voiceCloseFailedV1);
+    expect(
+      harness.socket.closeReason,
+      voiceRefusalMessage(VoiceRefusalCodeV1.quota),
+    );
     harness.controller.dispose();
   });
 
   test('ending says end_call and takes everything down', () async {
     final harness = Harness();
     await harness.live();
-    await harness.controller.end();
+    await harness.controller.end(reason: 'lifecycle:paused');
     expect(harness.texts.last, encodeAssistantEndCallV1());
     expect(harness.controller.phase, VoiceSessionPhase.ended);
     expect(harness.controller.status, VoiceStatusV1.idle);
     expect(harness.capture.stops, 1);
     expect(harness.player.closed, isTrue);
     expect(harness.socket.closed, isTrue);
+    expect(harness.socket.closeCode, voiceCloseNormalV1);
+    expect(harness.socket.closeReason, 'lifecycle:paused');
     harness.controller.dispose();
+  });
+
+  test('disposing a live call closes the socket as disposed', () async {
+    final harness = Harness();
+    await harness.live();
+    harness.controller.dispose();
+    await settle();
+    expect(harness.socket.closed, isTrue);
+    expect(harness.socket.closeCode, voiceCloseDisposedV1);
+    expect(harness.socket.closeReason, 'disposed');
   });
 
   group('the microphone loan', () {
