@@ -155,13 +155,17 @@ export const hooks: PluginHooks = {
   can set; read them with `ctx.settings.read()`. Never put a secret in it.
 - `provides` / `consumes` (optional) name services by `{ "name", "version" }`
   for Plugins that share values with each other through `export const services`.
+- `triggers` (optional) name `{ "name", "description" }`, one per function
+  `export const triggers` holds, and must match it name for name the way
+  `tools` and `hooks` do. See [Triggers](#triggers).
 - `contextKeys` is always all three.
 
 ## Triggers
 
 A Plugin can receive deliveries from outside — a webhook from another
 service — and decide what a Routine runs on. Export `triggers`, one function
-per trigger name, and declare each in `plugin.json`:
+per trigger name, and declare each one's name and description in
+`plugin.json`:
 
 ```ts
 export const triggers = {

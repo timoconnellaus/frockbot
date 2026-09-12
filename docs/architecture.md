@@ -660,8 +660,8 @@ Three more projections in the settings-document family:
   thirty-two declared actions on each of them. Which form is open is
   navigation, so it is asked for on the read and written nowhere, and naming a
   different Routine moves the revision so the host adopts a controller whose
-  field values are answers to the form now on screen. A webhook Routine also
-  gets its two key controls, and only a webhook one: the route refuses a key
+  field values are answers to the form now on screen. A triggered Routine also
+  gets its two key controls, and only a triggered one: the route refuses a key
   for a scheduled Routine, so the control is absent rather than offered.
 
 **A secret the authority minted once is never in a document.** A webhook key

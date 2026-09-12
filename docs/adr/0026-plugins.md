@@ -186,6 +186,19 @@ the Plugin verifies any provider signature through a Connection secret it
 reaches by loopback and returns Turn input or a drop. The app enqueues the
 Routine firing. A Plugin never binds a route and never enqueues a Turn.
 
+> Amended 2026-09-12, in step 8. There is no `/hooks/<token>` route and no
+> `trigger.receive`. A Plugin-triggered Routine's trigger names the Plugin and
+> the trigger (`RoutineTriggerV1`, `app/routines/records.ts`), and it enters
+> through the Routine webhook door that already exists — the same signed key,
+> digest and replay guard — so the token names the Routine rather than the
+> Plugin, and every triggered Routine is keyed at creation. The app calls the trigger the Plugin exports
+> under `triggers`, through `receiveTrigger` on the Plugin worker
+> (`app/plugins/triggers-bot.ts`), between the door's checks and the firing's
+> write; the Plugin answers with text to fire on or a drop, and the drop and its
+> reason go on the delivery receipt so a replay answers the same. The connection
+> trigger kind this named beside schedule and webhook is gone (`docs/plan.md`,
+> cut 3).
+
 ### Slots
 
 `settings.sections` opens in this change: a Plugin's card renders a

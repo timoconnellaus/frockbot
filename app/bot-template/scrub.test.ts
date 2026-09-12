@@ -248,6 +248,34 @@ describe("routines", () => {
     expect(document).not.toContain("key");
     expect(document).not.toContain("digest");
   });
+
+  it("carries a Plugin-triggered Routine as a webhook and names no Plugin", () => {
+    const { template } = buildBotTemplateV1(
+      source({
+        routines: [
+          {
+            routineId: "r-3",
+            name: "On alert",
+            prompt: "Handle the alert.",
+            trigger: { kind: "plugin", pluginId: "alerts", trigger: "inbound" },
+            timezone: "UTC",
+          },
+        ],
+      }),
+    );
+    // The Plugin the Routine names is this account's, and an import lands the
+    // Routine disabled and unkeyed either way, so the template says only that
+    // it fires on a delivery.
+    expect(template.routines).toEqual([
+      {
+        slug: "on-alert",
+        name: "On alert",
+        prompt: "Handle the alert.",
+        triggerKind: "webhook",
+      },
+    ]);
+    expect(JSON.stringify(template)).not.toContain("alerts");
+  });
 });
 
 describe("packages", () => {

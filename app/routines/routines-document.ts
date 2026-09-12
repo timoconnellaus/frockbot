@@ -222,7 +222,7 @@ function routineFacts(routine: RoutineViewV1): string {
     ? `Last ${routineMomentV1(routine.lastRunAt, routine.timezone)}`
     : "Never run";
   // Absent is the authority saying it has armed no alarm — a paused Routine,
-  // or a webhook one — so the line says that rather than inventing a moment.
+  // or a triggered one — so the line says that rather than inventing a moment.
   const next = routine.nextRunAt
     ? `Next ${routineMomentV1(routine.nextRunAt, routine.timezone)}`
     : routine.enabled
@@ -259,9 +259,9 @@ function routineNode(routine: RoutineViewV1): ViewNode {
             routineId: id,
           }),
           press("open-runs", "Run log", { kind: "open-runs", routineId: id }),
-          // A key belongs to a webhook Routine and to nothing else, and the
-          // route refuses one for a scheduled Routine — so the controls are
-          // absent rather than offered and then refused.
+          // A key belongs to a triggered Routine — webhook or Plugin — and to
+          // nothing else, and the route refuses one for a scheduled Routine, so
+          // the controls are absent rather than offered and then refused.
           ...(webhook
             ? [
                 press(

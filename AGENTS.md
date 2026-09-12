@@ -32,7 +32,7 @@ A plugin can only reach what the app deliberately opened. The full surface:
 - **Slots** — where a plugin may render: composer toolbar, message actions, sidebar entries, settings sections, bot profile. Trust chrome is never a slot. Only settings sections is open today.
 - **Grants** — authority a plugin may hold: `storage` (a key-value store per Bot per plugin), `http` (the hosts the descriptor declares, or open network access, either one approved by the User on the plugin's card; credentials attached server-side), `schedule`, `ai` (model calls on the Bot's budget, attributed to the plugin), `files`, `memory`, `workspace`, `computer`.
 - **Provides and consumes** — typed services a plugin offers other plugins and the ones it needs, mounted in dependency order; an unmet need disables that plugin alone.
-- **Triggers** — `trigger.receive`: the app owns the inbound route and enqueues the firing; the plugin verifies and shapes the event.
+- **Triggers** — the named triggers a plugin exports under `triggers`: the app owns the inbound route and enqueues the firing; the plugin verifies and shapes the event, or drops it.
 - **Settings** — a JSON Schema in the descriptor; values live per Bot and never hold a secret.
 - **Context keys** — `user`, `bot`, `session`.
 
