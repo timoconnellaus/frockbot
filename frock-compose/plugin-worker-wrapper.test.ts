@@ -13,6 +13,7 @@ import {
   BOT_ISOLATE_MODEL_SOURCE,
   BOT_ISOLATE_NARROW_CONTEXT_KEYS_V1,
   BOT_ISOLATE_NARROW_CONTEXT_SOURCE_V1,
+  BOT_ISOLATE_TRIGGER_SOURCE,
   PLUGIN_WORKER_MAIN_MODULE,
   pluginWorkerIndexSourceV1,
   pluginWorkerModuleMap,
@@ -540,5 +541,197 @@ describe("the generated wrapper's declaration checks", () => {
     expect(() =>
       declarations.declaredServices({ services: 1 }, "weather"),
     ).toThrow(/"services" must be an object/);
+  });
+});
+
+type TriggerResult = {
+  schemaVersion: number;
+  status: string;
+  text?: string;
+  reason?: string;
+};
+
+const runTrigger = new Function(
+  [
+    BOT_ISOLATE_DEADLINE_SOURCE,
+    BOT_ISOLATE_ERROR_TEXT_SOURCE,
+    BOT_ISOLATE_TRIGGER_SOURCE,
+    "return runTrigger;",
+  ].join("\n"),
+)() as (
+  invocation: Record<string, unknown>,
+  resolve: (pluginId: string) => unknown,
+  contextFor: (
+    identity: Record<string, string>,
+    plugin: unknown,
+    deadlineMs: number,
+  ) => unknown,
+) => Promise<TriggerResult>;
+
+describe("the generated wrapper's trigger delivery", () => {
+  function triggerInvocation(overrides: Record<string, unknown> = {}) {
+    return {
+      schemaVersion: 1,
+      pluginId: "weather",
+      trigger: "inbound",
+      headers: { "x-source": "hook" },
+      body: '{"city":"Wollongong"}',
+      botId: "bot-1",
+      routineId: "routine-1",
+      deadlineMs: 1_000,
+      ...overrides,
+    };
+  }
+
+  function triggerPlugin(
+    handler: (event: { headers: unknown; body: string }, ctx: unknown) => unknown,
+    triggers: string[] = ["inbound"],
+  ) {
+    return {
+      pluginId: "weather",
+      triggers,
+      module: { triggers: { inbound: handler } },
+    };
+  }
+
+  const identities: Record<string, string>[] = [];
+  function contextFor(
+    identity: Record<string, string>,
+    _plugin: unknown,
+    deadlineMs: number,
+  ) {
+    identities.push(identity);
+    return { deadlineMs };
+  }
+
+  test("a returned string fires whole, with the event and a routine identity", async () => {
+    identities.length = 0;
+    const seen: { event: unknown; ctx: unknown }[] = [];
+    const result = await runTrigger(
+      triggerInvocation(),
+      () =>
+        triggerPlugin((event, ctx) => {
+          seen.push({ event, ctx });
+          return "a".repeat(2_000_000);
+        }),
+      contextFor,
+    );
+    expect(result).toEqual({
+      schemaVersion: 1,
+      status: "fire",
+      text: "a".repeat(2_000_000),
+    });
+    expect(seen).toEqual([
+      {
+        event: {
+          headers: { "x-source": "hook" },
+          body: '{"city":"Wollongong"}',
+        },
+        ctx: { deadlineMs: 1_000 },
+      },
+    ]);
+    expect(identities).toEqual([
+      {
+        botId: "bot-1",
+        sessionId: "trigger:routine-1",
+        runId: "trigger:routine-1",
+        turnId: "trigger:routine-1",
+        generationId: "trigger",
+      },
+    ]);
+  });
+
+  test("an explicit drop keeps its reason and an implicit one names the silence", async () => {
+    expect(
+      await runTrigger(
+        triggerInvocation(),
+        () => triggerPlugin(() => ({ drop: true, reason: "not for this bot" })),
+        contextFor,
+      ),
+    ).toEqual({
+      schemaVersion: 1,
+      status: "drop",
+      reason: "not for this bot",
+    });
+    expect(
+      await runTrigger(
+        triggerInvocation(),
+        () => triggerPlugin(() => ({ drop: true })),
+        contextFor,
+      ),
+    ).toEqual({ schemaVersion: 1, status: "drop" });
+    expect(
+      await runTrigger(
+        triggerInvocation(),
+        () => triggerPlugin(() => undefined),
+        contextFor,
+      ),
+    ).toEqual({
+      schemaVersion: 1,
+      status: "drop",
+      reason: "the trigger returned no text",
+    });
+    expect(
+      await runTrigger(
+        triggerInvocation(),
+        () => triggerPlugin(() => ""),
+        contextFor,
+      ),
+    ).toEqual({
+      schemaVersion: 1,
+      status: "drop",
+      reason: "the trigger returned no text",
+    });
+  });
+
+  test("an undeclared trigger, an unmounted plugin and a throw all drop with a reason", async () => {
+    expect(
+      await runTrigger(
+        triggerInvocation(),
+        () => triggerPlugin(() => "fired", ["other"]),
+        contextFor,
+      ),
+    ).toEqual({
+      schemaVersion: 1,
+      status: "drop",
+      reason: 'plugin "weather" did not declare trigger "inbound"',
+    });
+    expect(
+      await runTrigger(
+        triggerInvocation(),
+        () => {
+          throw new Error('plugin "weather" is not mounted');
+        },
+        contextFor,
+      ),
+    ).toEqual({
+      schemaVersion: 1,
+      status: "drop",
+      reason: 'plugin "weather" is not mounted',
+    });
+    expect(
+      await runTrigger(
+        triggerInvocation(),
+        () =>
+          triggerPlugin(() => {
+            throw new Error("the routine exploded");
+          }),
+        contextFor,
+      ),
+    ).toEqual({
+      schemaVersion: 1,
+      status: "drop",
+      reason: "the routine exploded",
+    });
+  });
+
+  test("a trigger that overruns its deadline is dropped, never left running", async () => {
+    const result = await runTrigger(
+      triggerInvocation({ deadlineMs: 25 }),
+      () => triggerPlugin(() => never()),
+      contextFor,
+    );
+    expect(result.status).toBe("drop");
+    expect(result.reason).toMatch(/exceeded its deadline of 25ms/);
   });
 });

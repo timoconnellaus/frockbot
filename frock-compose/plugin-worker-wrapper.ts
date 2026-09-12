@@ -15,7 +15,6 @@ import {
   BOT_ISOLATE_HOOK_EVENTS_V1,
   ISOLATE_CONTRACT_VERSION,
   MAX_FAILURE_REASON_V1,
-  MAX_TRIGGER_BODY_BYTES_V1,
   type BotPackageContextV1,
 } from "@frockbot/core/contracts";
 
@@ -372,6 +371,51 @@ async function runHookChain(plugins, invocation, contextFor) {
     : { schemaVersion: 1, status: "unchanged", failures: failures };
 }`;
 
+/**
+ * One trigger delivered to one Plugin, shared verbatim between the generated
+ * wrapper and the Bun test that proves it. A trigger runs outside any Turn, so
+ * the identity it narrows its context with is synthesised from the routine.
+ * The fired text is returned whole: the Durable Object holds the contract's
+ * bound and names the Plugin when a body exceeds it.
+ */
+export const BOT_ISOLATE_TRIGGER_SOURCE = `async function runTrigger(invocation, resolve, contextFor) {
+  try {
+    const plugin = resolve(invocation.pluginId);
+    if (!plugin.triggers.includes(invocation.trigger)) {
+      throw new Error('plugin "' + invocation.pluginId + '" did not declare trigger "' + invocation.trigger + '"');
+    }
+    const context = contextFor(
+      {
+        botId: invocation.botId,
+        sessionId: "trigger:" + invocation.routineId,
+        runId: "trigger:" + invocation.routineId,
+        turnId: "trigger:" + invocation.routineId,
+        generationId: "trigger",
+      },
+      plugin,
+      invocation.deadlineMs,
+    );
+    const value = await withIsolateDeadline(function () {
+      return plugin.module.triggers[invocation.trigger](
+        { headers: invocation.headers, body: invocation.body },
+        context,
+      );
+    }, invocation.deadlineMs);
+    if (typeof value === "string" && value.length > 0) {
+      return { schemaVersion: 1, status: "fire", text: value };
+    }
+    if (value && typeof value === "object" && value.drop === true) {
+      return Object.assign(
+        { schemaVersion: 1, status: "drop" },
+        typeof value.reason === "string" ? { reason: errorText(value.reason) } : {},
+      );
+    }
+    return { schemaVersion: 1, status: "drop", reason: "the trigger returned no text" };
+  } catch (error) {
+    return { schemaVersion: 1, status: "drop", reason: errorText(error) };
+  }
+}`;
+
 /** What one Plugin's module must export, checked once at mount. */
 export const BOT_ISOLATE_DECLARATION_SOURCE = `function declaredTools(module, pluginId) {
   const declared = Array.isArray(module.tools) ? module.tools : [];
@@ -497,6 +541,8 @@ ${BOT_ISOLATE_ERROR_TEXT_SOURCE}
 
 ${BOT_ISOLATE_HOOK_CHAIN_SOURCE}
 
+${BOT_ISOLATE_TRIGGER_SOURCE}
+
 /**
  * Every Plugin the identity names, mounted once in identity order. A Plugin
  * whose module does not declare itself correctly is carried as not ok and
@@ -621,44 +667,16 @@ export default class extends WorkerEntrypoint {
 
   async receiveTrigger(rawInvocation) {
     const invocation = decodeTriggerInvocation(rawInvocation);
-    try {
-      const plugin = findPlugin(this.env, invocation.pluginId);
-      if (!plugin.triggers.includes(invocation.trigger)) {
-        throw new Error('plugin "' + invocation.pluginId + '" did not declare trigger "' + invocation.trigger + '"');
-      }
-      const context = narrowContext(
-        this.env,
-        {
-          botId: invocation.botId,
-          sessionId: "trigger:" + invocation.routineId,
-          runId: "trigger:" + invocation.routineId,
-          turnId: "trigger:" + invocation.routineId,
-          generationId: "trigger",
-        },
-        plugin,
-        invocation.deadlineMs,
-      );
-      const value = await withIsolateDeadline(function () {
-        return plugin.module.triggers[invocation.trigger](
-          { headers: invocation.headers, body: invocation.body },
-          context,
-        );
-      }, invocation.deadlineMs);
-      if (typeof value === "string" && value.length > 0) {
-        return { schemaVersion: 1, status: "fire", text: value.slice(0, ${MAX_TRIGGER_BODY_BYTES_V1}) };
-      }
-      if (value && typeof value === "object" && value.drop === true) {
-        return Object.assign(
-          { schemaVersion: 1, status: "drop" },
-          typeof value.reason === "string"
-            ? { reason: errorText(value.reason) }
-            : {},
-        );
-      }
-      return { schemaVersion: 1, status: "drop", reason: "the trigger returned no text" };
-    } catch (error) {
-      return { schemaVersion: 1, status: "drop", reason: errorText(error) };
-    }
+    const env = this.env;
+    return runTrigger(
+      invocation,
+      function (pluginId) {
+        return findPlugin(env, pluginId);
+      },
+      function (identity, plugin, deadlineMs) {
+        return narrowContext(env, identity, plugin, deadlineMs);
+      },
+    );
   }
 }
 `;

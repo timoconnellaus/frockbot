@@ -4,6 +4,7 @@ import {
   decodePluginDescriptorV1,
   ISOLATE_CONTRACT_VERSION,
   LoopHookListV1,
+  MAX_TRIGGER_BODY_BYTES_V1,
 } from "@frockbot/core/contracts";
 import type {
   BotCapabilitiesStub,
@@ -691,6 +692,35 @@ describe("what the worker reports at mount", () => {
     expect(result.status === "drop" ? result.reason : "").toMatch(
       /plugin "weather" trigger result\.text/,
     );
+    await active.dispose();
+  });
+
+  test("a fired trigger body over the contract's limit is dropped, not truncated", async () => {
+    const subject = harness({
+      receiveTrigger: () =>
+        Promise.resolve({
+          schemaVersion: 1,
+          status: "fire",
+          text: "a".repeat(MAX_TRIGGER_BODY_BYTES_V1 + 1),
+        } as PluginWorkerTriggerResultV1),
+    });
+    const prepared = await subject.host.mount([member("weather")]);
+    const active = await prepared.commit();
+    const result = await active.deliverTrigger({
+      schemaVersion: 1,
+      pluginId: "weather",
+      trigger: "inbound",
+      headers: {},
+      body: "{}",
+      botId: "bot-1",
+      routineId: "routine-1",
+      deadlineMs: 1_000,
+    });
+    expect(result).toEqual({
+      schemaVersion: 1,
+      status: "drop",
+      reason: `plugin "weather" fired a trigger body over the ${MAX_TRIGGER_BODY_BYTES_V1} character limit`,
+    });
     await active.dispose();
   });
 

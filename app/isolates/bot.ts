@@ -77,17 +77,17 @@ export interface IsolateCallScopeV1 {
 }
 
 /**
- * Everything a Bot isolate member needs. Package identity is attribution only;
- * Connections and model are resolved once for the Bot and every member receives
- * the same list.
- */
-/**
  * The attribution every Plugin's capability call carries. Package id on the
  * props is attribution only — every Plugin in the worker holds the same
  * authority — and the worker is one binding, so it is one name.
  */
 export const PLUGIN_WORKER_PACKAGE_ID = "plugin-worker";
 
+/**
+ * Everything a Bot isolate member needs. Package identity is attribution only;
+ * Connections and model are resolved once for the Bot and every member receives
+ * the same list.
+ */
 export async function isolateMountOptions(
   state: ShellBotStateV1,
   identity: BotIdentity,

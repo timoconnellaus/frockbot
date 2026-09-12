@@ -20,6 +20,7 @@ import {
   ISOLATE_CONTRACT_VERSION,
   ISOLATE_MAX_DEADLINE_MS,
   MAX_FAILURE_REASON_V1,
+  MAX_TRIGGER_BODY_BYTES_V1,
   pluginWorkerLoaderIdV1,
   pluginWorkerModuleSetHashV1,
   type BotCapabilitiesStub,
@@ -571,11 +572,19 @@ export class PluginWorkerHost {
               return droppedTrigger(invocation.pluginId);
             }
             try {
+              const raw = await raceDeadline(
+                () => entrypoint.receiveTrigger(invocation),
+                invocation.deadlineMs,
+              );
+              const oversized = firedTextLength(raw) > MAX_TRIGGER_BODY_BYTES_V1;
+              if (oversized) {
+                return droppedTrigger(
+                  invocation.pluginId,
+                  `plugin "${invocation.pluginId}" fired a trigger body over the ${MAX_TRIGGER_BODY_BYTES_V1} character limit`,
+                );
+              }
               return decodePluginWorkerTriggerResultV1(
-                await raceDeadline(
-                  () => entrypoint.receiveTrigger(invocation),
-                  invocation.deadlineMs,
-                ),
+                raw,
                 `plugin "${invocation.pluginId}" trigger result`,
               );
             } catch (error) {
@@ -984,6 +993,19 @@ export class PluginWorkerHost {
       },
     };
   }
+}
+
+/**
+ * How long a fired trigger body is, or zero for anything that is not a fire.
+ * The worker returns what the Plugin produced whole; the bound is the Durable
+ * Object's, so the caller is told which Plugin overran it and by what limit
+ * rather than reading a body truncated mid-sentence.
+ */
+function firedTextLength(value: unknown): number {
+  if (!value || typeof value !== "object") return 0;
+  const result = value as { status?: unknown; text?: unknown };
+  if (result.status !== "fire" || typeof result.text !== "string") return 0;
+  return result.text.length;
 }
 
 /** The one statement of what a caller is told when no live Plugin answers. */
