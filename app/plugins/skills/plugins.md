@@ -230,10 +230,12 @@ export const views = {
 ```
 
 The host draws the tree with its own widgets: `text`, `group`, `list` and
-`action` nodes, at most 64 of them. A control's `actionId` names one of your
-tools; pressing it runs that tool with the control's `input`, outside any
-Turn, and the section is drawn again. A `field` or `embed` node, or a tool
-you do not declare, is refused and the card says so instead of the section.
+`action` nodes, at most 64 of them and at most 8 deep. A control's `actionId`
+names one of your tools; pressing it runs that tool with the control's
+`input`, outside any Turn, and the section is drawn again. A `field` or
+`embed` node, a tool you do not declare, an empty string where a node wants
+text, a title or a label, or a tree past those limits is refused and the card
+says so instead of the section.
 A section runs with the same `ctx` a tool call gets and is drawn only while
 the Plugin is on for that Bot. Outside a Turn — a section, a control, a
 trigger — `ctx.schedule` answers unavailable; everything else works.

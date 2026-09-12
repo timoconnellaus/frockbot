@@ -28,7 +28,11 @@ Plugins is the selected Bot's page: one list of what that Bot could run —
 the Plugins its User installed, what the deployment seeded, and the
 first-party features a User may turn off — with one switch per row, and the
 switches are that Bot's own. A locked Plugin is shown without a switch, and a
-feature the account has not installed says so instead of offering one. The
+feature the account has not installed says so instead of offering one. A
+Plugin that is on may draw a section of its own on its card, below what it
+does — its own status and its own controls, drawn by the app; pressing a
+control runs that Plugin's tool and the page is read again. A section that
+cannot be shown says so on the card in words, and the switch stays. The
 profile entry names the Bot it will open. With no Bot selected it falls back
 to the account's list of extensions, with visible purpose and status, search,
 and collapsed version/configuration/enablement controls; the current
