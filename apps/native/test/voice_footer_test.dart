@@ -161,6 +161,68 @@ void main() {
     }
   });
 
+  group('the level follower', () {
+    /// Runs [seconds] of frames at 60 Hz with the same raw levels.
+    void run(
+      VoiceLevelFollower follower, {
+      required double from,
+      required double seconds,
+      double mic = 0,
+      double playback = 0,
+    }) {
+      const dt = 1 / 60;
+      for (var t = from; t < from + seconds; t += dt) {
+        follower.step(now: t + dt, dt: dt, mic: mic, playback: playback);
+      }
+    }
+
+    test('chases a word up quickly and lets it go slowly', () {
+      final f = VoiceLevelFollower();
+      run(f, from: 0, seconds: 0.1, mic: 0.5);
+      expect(f.speaker, VoiceSpeaker.person);
+      final peak = f.level;
+      expect(peak, greaterThan(VoiceLevelFollower.shape(0.5) * 0.85));
+      // Two frames of silence: still most of the way up, not gone.
+      run(f, from: 0.1, seconds: 2 / 60);
+      expect(f.level, greaterThan(peak * 0.7));
+      expect(f.speaker, VoiceSpeaker.person);
+      // A second and a half of silence: gone, and nobody's.
+      run(f, from: 0.14, seconds: 1.5);
+      expect(f.level, 0);
+      expect(f.speaker, VoiceSpeaker.nobody);
+    });
+
+    test('never steps: each frame moves a bounded part of the way', () {
+      final f = VoiceLevelFollower();
+      var last = 0.0;
+      const dt = 1 / 60;
+      for (var i = 1; i <= 30; i++) {
+        f.step(now: i * dt, dt: dt, mic: i.isEven ? 0.9 : 0.0, playback: 0);
+        expect((f.level - last).abs(), lessThan(0.4));
+        last = f.level;
+      }
+    });
+
+    test('the person wins over the Bot, and the Bot holds through a gap', () {
+      final f = VoiceLevelFollower();
+      run(f, from: 0, seconds: 0.3, playback: 0.4);
+      expect(f.speaker, VoiceSpeaker.bot);
+      run(f, from: 0.3, seconds: 0.1, playback: 0.4, mic: 0.3);
+      expect(f.speaker, VoiceSpeaker.person);
+      run(f, from: 0.4, seconds: 0.3, playback: 0.4);
+      expect(f.speaker, VoiceSpeaker.bot);
+      // A short gap in the reply keeps the Bot's colour.
+      run(f, from: 0.7, seconds: 0.1);
+      expect(f.speaker, VoiceSpeaker.bot);
+    });
+
+    test('a bad level is silence, not a crash', () {
+      final f = VoiceLevelFollower();
+      f.step(now: 1, dt: 1 / 60, mic: double.nan, playback: double.infinity);
+      expect(f.level.isFinite, isTrue);
+    });
+  });
+
   test('a spent lobe is over; a spawned one lives out its life', () {
     final lobes = List.generate(voiceLobeCount, VoiceLobe.spent);
     expect(lobes.every((l) => l.isOver(0)), isTrue);
