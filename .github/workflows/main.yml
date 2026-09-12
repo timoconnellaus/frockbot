@@ -227,6 +227,10 @@ jobs:
         # local bucket and starts a fake Ollama server on loopback, so this
         # needs no Cloudflare credential and no provider key.
         working-directory: apps/cloudflare
+        env:
+          # Diagnostic: workerd's own lifecycle log, for the isolate that
+          # drops the Applets publish Turn on this runner and nowhere else.
+          E2E_WRANGLER_LOG_LEVEL: debug
         run: >-
           bun run test:e2e
           --shard=${{ matrix.shard }}/${{ strategy.job-total }}

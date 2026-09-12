@@ -562,6 +562,20 @@ async function waitForManifest(baseUrl: string): Promise<void> {
   );
 }
 
+/**
+ * The `--log-level` of the app's `wrangler dev`. `warn` by default; set
+ * `E2E_WRANGLER_LOG_LEVEL=debug` to hear workerd itself.
+ */
+export function workerLogLevel(): string {
+  const level = process.env.E2E_WRANGLER_LOG_LEVEL;
+  return level === "debug" ||
+    level === "info" ||
+    level === "log" ||
+    level === "error"
+    ? level
+    : "warn";
+}
+
 /** The bearer token `/api/debug/*` accepts in an end-to-end run. */
 export const E2E_DEBUG_TOKEN = "e2e-debug-token";
 
@@ -864,9 +878,12 @@ export async function startHarness(
         `APPLET_BUILD_TOKEN:${E2E_APPLET_BUILD_TOKEN}`,
         "--persist-to",
         persistDirectory,
-        // As above: the per-request log is the flood, not the signal.
+        // As above: the per-request log is the flood, not the signal. `debug`
+        // is the one level that also passes `--verbose` to workerd, whose
+        // own lifecycle log is the only witness when it tears an isolate
+        // down without a word on stderr.
         "--log-level",
-        "warn",
+        workerLogLevel(),
       ],
       // `detached` puts wrangler in its own process group so the whole tree can
       // be signalled at once: killing the Node parent alone leaves it free to
