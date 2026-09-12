@@ -1,0 +1,42 @@
+diff --git a/wrangler-dist/ProxyWorker.js b/wrangler-dist/ProxyWorker.js
+index 2631ee69aa0d96a99d35e7e1d0535c50019c45ec..aaafceda4521a0f2f6fc30008a4f4d893909726c 100644
+--- a/wrangler-dist/ProxyWorker.js
++++ b/wrangler-dist/ProxyWorker.js
+@@ -154,6 +154,27 @@ var ProxyWorker = class {
+         deferredResponse.resolve(res);
+       }).catch((error) => {
+         if (isSameUserWorkerOrigin(userWorkerUrl, this.proxyData?.userWorkerUrl)) {
++          if (isDroppedConnection(error)) {
++            void sendMessageToProxyController(this.env, {
++              type: "debug-log",
++              args: [
++                "A forwarded request lost its connection; answering 503 rather than stopping the dev server.",
++                request.method,
++                request.url,
++                error.message
++              ]
++            });
++            deferredResponse.resolve(
++              new Response(
++                "The connection to the Worker was lost mid-request. Please try sending the request again.",
++                {
++                  status: 503,
++                  headers: { "Retry-After": "0" }
++                }
++              )
++            );
++            return;
++          }
+           void sendMessageToProxyController(this.env, {
+             type: "error",
+             error: {
+@@ -181,6 +202,9 @@ var ProxyWorker = class {
+     }
+   }
+ };
++function isDroppedConnection(error) {
++  return error instanceof Error && error.message === "Network connection lost.";
++}
+ function isRequestFromProxyController(req, env) {
+   return req.headers.get("Authorization") === env.PROXY_CONTROLLER_AUTH_SECRET;
+ }

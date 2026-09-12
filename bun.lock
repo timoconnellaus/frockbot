@@ -206,6 +206,9 @@
       },
     },
   },
+  "patchedDependencies": {
+    "wrangler@4.129.0": "patches/wrangler@4.129.0.patch",
+  },
   "overrides": {
     "file-type": "^21.3.1",
     "uuid": "^11.1.1",
