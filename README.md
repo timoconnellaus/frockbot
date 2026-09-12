@@ -220,7 +220,7 @@ Register `https://staging-bot.frockbot.com/api/auth/callback/google` as an autho
 After a version tag's packages are published, `release.yml` deploys four Cloudflare Workers — marketing, the Applet build service, the Computer host and the app — through the GitHub `production` environment. Merging to `main` deploys nothing — a tag is the only thing that reaches production, so code can be integrated freely and released deliberately:
 
 - `apps/marketing` serves the public marketing site at `https://frockbot.com` and redirects `www.frockbot.com` to the apex domain;
-- `apps/applet-build` is the Applet build service: an internal Worker with no public route and a Cloudflare Container that type-checks, lints, bundles and boots an Applet's source. It deploys before the app because that binding must resolve. Dark for now — nothing calls it;
+- `apps/applet-build` is the Applet build service: an internal Worker with no public route and a Cloudflare Container that type-checks, lints, bundles and boots an Applet's source, and builds a Plugin's the same way without the lint stage. It deploys before the app because that binding must resolve. Dark for now — nothing calls it;
 - `apps/computer-host` is the shared Computer host: an internal Worker with no public route, a bounded pool of Cloudflare Containers, and the only place `SPRITES_TOKEN` is used. It deploys before the app because that binding must resolve, and because a stale host would be serving a current app;
 - `apps/cloudflare` serves the authenticated application and API at `https://bot.frockbot.com`.
 

@@ -37,7 +37,7 @@ Two Turn verbs call it, both in `mode: "build"` and both through the `buildServi
 
 ## The rule the hashes keep
 
-There is **one** implementation of the pipeline, `applets/sdk/src/build/`, and no second entry point onto it. A second derivation of the bundle — or of `this.tool(...)` by static analysis — is exactly the thing that would pass its own tests and fail a publish, because the kernel admits a generation by comparing the manifest to the mounted facet's own `health()`.
+There is **one** implementation of each pipeline, both in `applets/sdk/src/build/`, and no second entry point onto either. A second derivation of the bundle — or of `this.tool(...)` by static analysis — is exactly the thing that would pass its own tests and fail a publish, because the kernel admits a generation by comparing the manifest to the mounted facet's own `health()`.
 
 What `container/build.test.ts` asserts is the property that makes one implementation enough: the same source posted to the service and built beside it produces the same manifest hashes.
 
@@ -45,14 +45,15 @@ For that to hold anywhere, the artifact has to be independent of where it was bu
 
 ## Layout
 
-| Path                                                                  | What it is                                                                                                     |
-| --------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| `src/router.ts`                                                       | Token check, decode, shard, forward. Decoding here means a malformed body never starts a container.            |
-| `src/index.ts`                                                        | The Container Durable Object and the Worker entrypoint.                                                        |
-| `container/build.ts`                                                  | One build: posted files into a temp directory, the SDK pipeline over it, the artifact ceilings as diagnostics. |
-| `container/server.ts`                                                 | Node HTTP glue. Owns the second token check and the one-at-a-time queue.                                       |
-| [`@frockbot/applets/build-contract`](../../applets/build-contract.ts) | The v1 DTOs and decoders both sides import.                                                                    |
-| [`@frockbot/applet-sdk/build`](../../applets/sdk/src/build)           | The pipeline: five named stages over one directory. Nothing else runs it.                                      |
+| Path                                                                         | What it is                                                                                                                              |
+| ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/router.ts`                                                              | Token check, decode, shard, forward. Decoding here means a malformed body never starts a container.                                     |
+| `src/index.ts`                                                               | The Container Durable Object and the Worker entrypoint.                                                                                 |
+| `container/build.ts`                                                         | One build: posted files into a temp directory, the SDK pipeline for the request's `kind` over it, the artifact ceilings as diagnostics. |
+| `container/server.ts`                                                        | Node HTTP glue. Owns the second token check and the one-at-a-time queue.                                                                |
+| [`@frockbot/applets/build-contract`](../../applets/build-contract.ts)        | The v1 DTOs and decoders both sides import.                                                                                             |
+| [`@frockbot/applet-sdk/build`](../../applets/sdk/src/build)                  | The Applet pipeline: five named stages over one directory. Nothing else runs it.                                                        |
+| [`@frockbot/applet-sdk/build/plugin`](../../applets/sdk/src/build/plugin.ts) | The Plugin pipeline: four named stages, no lint. Nothing else runs it.                                                                  |
 
 ## Checks
 
