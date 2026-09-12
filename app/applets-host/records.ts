@@ -306,7 +306,7 @@ export interface AppletCapabilityHostOptionsV1 {
    * the tools and the diagnostics are the answer either way.
    */
   appOrigin?: string;
-  composition: Pick<CompositionStore, "current" | "lastKnownGood" | "propose">;
+  composition: Pick<CompositionStore, "current" | "propose">;
   now?(): Date;
 }
 

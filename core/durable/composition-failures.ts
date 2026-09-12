@@ -39,22 +39,28 @@ interface CompositionFailureStreakV1 {
 
 /**
  * One sitting. Repair attempts arrive minutes apart, so an hour is long enough
- * to span a Bot's whole attempt to fix itself and short enough that yesterday's
- * unrelated failure does not count towards today's quarantine.
+ * to span a whole attempt to fix the Composition and short enough that
+ * yesterday's unrelated failure does not count towards today's quarantine.
  */
 const COMPOSITION_FAILURE_STREAK_WINDOW_MS = 60 * 60 * 1000;
 
 /**
- * `CompositionFailureLog` over the Bot object's prefixed keys:
+ * `CompositionFailureLog` over the owning object's prefixed keys:
  * `composition:failure:<generationId>:<attempt>`,
  * `composition:failure-count:<generationId>`, and
  * `composition:quarantine:<generationId>`.
  *
- * Quarantine is *marked* per generation, never per Bot: a generation an earlier
- * one's quarantine does not implicate is unaffected, and lifting a quarantine
- * is a decision about one generation. What earns a quarantine is either
- * counter reaching the threshold — this generation's own retries, or the Bot's
- * consecutive failures across however many generations the repairs minted.
+ * The owner is the User Durable Object, which is where the Composition lives
+ * (ADR 0026), so every counter here is that User's — the streak included. A
+ * generation is installed once for the User and mounted by each of their Bots,
+ * so failures to activate it are one incident however many Bots hit it.
+ *
+ * Quarantine is *marked* per generation, never per object: a generation an
+ * earlier one's quarantine does not implicate is unaffected, and lifting a
+ * quarantine is a decision about one generation. What earns a quarantine is
+ * either counter reaching the threshold — this generation's own retries, or
+ * the User's consecutive failures across however many generations the repairs
+ * minted.
  */
 export class DurableCompositionFailureLog implements CompositionFailureLog {
   private readonly ctx: DurableObjectState;
@@ -83,7 +89,7 @@ export class DurableCompositionFailureLog implements CompositionFailureLog {
       const attempt = previous + 1;
       const recorded = decodeCompositionFailureV1({ ...failure, attempt });
       // Two counters, one threshold. `attempt` is this generation's own
-      // retries; `streak` is the Bot's consecutive failures however many
+      // retries; `streak` is the User's consecutive failures however many
       // generations they are spread over. Only the second one ever moves when
       // the model repairs by authoring a *new* generation, which is what it
       // always does — so without it the safeguard never fired and the

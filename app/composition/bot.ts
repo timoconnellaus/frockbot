@@ -8,9 +8,11 @@
 // commits and fails against the User and refreshes the mirror after; the
 // views the settings page reads come from the User directly.
 import {
+  type BotTurnCompletion,
   type CompositionActivationStore,
   type CompositionFailureLog,
   type CompositionGenerationV1,
+  type OwnedBotTurnCommand,
 } from "@frockbot/core/durable";
 import type { BotIdentity } from "@frockbot/core/durable";
 import type { ShellBotStateV1 } from "@frockbot/app/shell/backend-state";
@@ -20,33 +22,31 @@ import type {
 } from "./user.js";
 
 /**
- * The User object's Composition RPCs, addressed by this Bot's User, or
- * `undefined` where no User object serves them — a host without the namespace,
- * or a test harness whose User stub knows only settings. The Bot's own store
- * is then the authority, exactly as before the store moved.
+ * The User object's Composition RPCs, addressed by this Bot's User. The User
+ * owns the Composition outright: there is no second authority to fall back
+ * to, so everything here goes through this one stub.
  */
 export function userCompositionRpcV1(
   state: ShellBotStateV1,
   userId: string,
-): UserCompositionRpcV1 | undefined {
-  const namespace = state.env.USER_CONFIGURATIONS as
-    ShellBotStateV1["env"]["USER_CONFIGURATIONS"] | undefined;
-  if (!namespace) return undefined;
-  const stub = namespace.get(
+): UserCompositionRpcV1 {
+  const namespace = state.env.USER_CONFIGURATIONS;
+  // SAFETY: this namespace is bound to UserConfiguration; generated Worker
+  // types do not expose its Composition RPC surface.
+  return namespace.get(
     namespace.idFromName(userId),
-  ) as unknown as Partial<UserCompositionRpcV1>;
-  return typeof stub.readComposition === "function"
-    ? (stub as UserCompositionRpcV1)
-    : undefined;
+  ) as unknown as UserCompositionRpcV1;
 }
 
-function requireUserCompositionRpcV1(
+/** The User's pin and fallback, read together and written nowhere. */
+export function readUserCompositionSnapshotV1(
   state: ShellBotStateV1,
-  userId: string,
-): UserCompositionRpcV1 {
-  const rpc = userCompositionRpcV1(state, userId);
-  if (!rpc) throw new Error("the User object serves no Composition here");
-  return rpc;
+  identity: BotIdentity,
+): Promise<UserCompositionSnapshotV1> {
+  return userCompositionRpcV1(state, identity.userId).readComposition({
+    schemaVersion: 1,
+    userId: identity.userId,
+  });
 }
 
 /** Reads the User's Composition and takes it as this Bot's mirror. */
@@ -54,10 +54,7 @@ export async function adoptUserCompositionV1(
   state: ShellBotStateV1,
   identity: BotIdentity,
 ): Promise<UserCompositionSnapshotV1> {
-  const snapshot = await requireUserCompositionRpcV1(
-    state,
-    identity.userId,
-  ).readComposition({ schemaVersion: 1, userId: identity.userId });
+  const snapshot = await readUserCompositionSnapshotV1(state, identity);
   await state.authority.composition.adopt(snapshot);
   return snapshot;
 }
@@ -71,12 +68,28 @@ export async function syncCompositionFromUser(
   state: ShellBotStateV1,
   identity: BotIdentity,
 ): Promise<void> {
-  if (!userCompositionRpcV1(state, identity.userId)) return;
   try {
     await adoptUserCompositionV1(state, identity);
   } catch {
     // Visible on the User's generation records; never a wedged Turn.
   }
+}
+
+/**
+ * Admission. Every Turn enters the kernel through here — a chat Turn, a
+ * Routine firing, a Package-UI tool, a Subagent task — so the pin the
+ * admission transaction takes inside the Bot is always the User's current
+ * generation mirrored a moment earlier, never one this Bot minted alone.
+ */
+export async function admitTurnV1(
+  state: ShellBotStateV1,
+  command: OwnedBotTurnCommand,
+): Promise<BotTurnCompletion> {
+  await syncCompositionFromUser(state, {
+    userId: command.userId,
+    botId: command.botId,
+  });
+  return state.authority.run(command);
 }
 
 /**
@@ -90,15 +103,6 @@ export function compositionActivationStoreV1(
   identity: BotIdentity,
 ): CompositionActivationStore {
   const rpc = userCompositionRpcV1(state, identity.userId);
-  if (!rpc) {
-    const local = state.authority.composition;
-    return {
-      read: (generationId) => local.read(generationId),
-      lastKnownGood: () => local.lastKnownGood(),
-      commit: (generationId) => local.commit(generationId),
-      fail: (generationId, options) => local.fail(generationId, options),
-    };
-  }
   const refresh = async () => {
     try {
       await adoptUserCompositionV1(state, identity);
@@ -107,15 +111,8 @@ export function compositionActivationStoreV1(
     }
   };
   return {
-    read: async (generationId) => {
-      const mirrored = await state.authority.composition.read(generationId);
-      if (mirrored) return mirrored;
-      return rpc.readCompositionGeneration({
-        schemaVersion: 1,
-        userId: identity.userId,
-        generationId,
-      });
-    },
+    read: (generationId) =>
+      readPinnedCompositionGenerationV1(state, identity, generationId),
     lastKnownGood: () => state.authority.composition.lastKnownGood(),
     commit: async (generationId) => {
       await rpc.commitComposition({
@@ -137,13 +134,27 @@ export function compositionActivationStoreV1(
   };
 }
 
+/**
+ * A generation a Turn already pinned: the mirror first, the User second. An
+ * in-flight Turn keeps the pin it was admitted under even once a later
+ * admission has adopted a newer one over the mirror.
+ */
+export async function readPinnedCompositionGenerationV1(
+  state: ShellBotStateV1,
+  identity: BotIdentity,
+  generationId: string,
+): Promise<CompositionGenerationV1 | undefined> {
+  const mirrored = await state.authority.composition.read(generationId);
+  if (mirrored) return mirrored;
+  return readUserCompositionGenerationV1(state, identity, generationId);
+}
+
 /** The User's failure log, reached from the Bot. */
 export function compositionFailureLogV1(
   state: ShellBotStateV1,
   identity: BotIdentity,
 ): CompositionFailureLog {
   const rpc = userCompositionRpcV1(state, identity.userId);
-  if (!rpc) return state.authority.compositionFailures;
   const userId = identity.userId;
   return {
     record: (failure) =>
@@ -162,17 +173,10 @@ export async function currentUserCompositionV1(
   state: ShellBotStateV1,
   identity: BotIdentity,
 ): Promise<CompositionGenerationV1> {
-  const rpc = userCompositionRpcV1(state, identity.userId);
-  if (!rpc) return state.authority.composition.current();
-  return (
-    await rpc.readComposition({
-      schemaVersion: 1,
-      userId: identity.userId,
-    })
-  ).current;
+  return (await readUserCompositionSnapshotV1(state, identity)).current;
 }
 
-/** Proposes a generation on the User, or on the Bot's own store where no User serves one. */
+/** Proposes a generation on the User, where the installed set lives. */
 export async function proposeUserCompositionV1(
   state: ShellBotStateV1,
   identity: BotIdentity,
@@ -182,22 +186,14 @@ export async function proposeUserCompositionV1(
     expectedCurrentGenerationId?: string;
   },
 ): Promise<void> {
-  const rpc = userCompositionRpcV1(state, identity.userId);
-  const options = {
+  await userCompositionRpcV1(state, identity.userId).proposeComposition({
+    schemaVersion: 1,
+    userId: identity.userId,
+    generation: input.generation,
     ...(input.pin === undefined ? {} : { pin: input.pin }),
     ...(input.expectedCurrentGenerationId === undefined
       ? {}
       : { expectedCurrentGenerationId: input.expectedCurrentGenerationId }),
-  };
-  if (!rpc) {
-    await state.authority.composition.propose(input.generation, options);
-    return;
-  }
-  await rpc.proposeComposition({
-    schemaVersion: 1,
-    userId: identity.userId,
-    generation: input.generation,
-    ...options,
   });
 }
 
@@ -206,13 +202,13 @@ export async function readUserCompositionGenerationV1(
   identity: BotIdentity,
   generationId: string,
 ): Promise<CompositionGenerationV1 | undefined> {
-  const rpc = userCompositionRpcV1(state, identity.userId);
-  if (!rpc) return state.authority.composition.read(generationId);
-  return rpc.readCompositionGeneration({
-    schemaVersion: 1,
-    userId: identity.userId,
-    generationId,
-  });
+  return userCompositionRpcV1(state, identity.userId).readCompositionGeneration(
+    {
+      schemaVersion: 1,
+      userId: identity.userId,
+      generationId,
+    },
+  );
 }
 
 export async function listUserCompositionGenerationsV1(
@@ -220,9 +216,10 @@ export async function listUserCompositionGenerationsV1(
   identity: BotIdentity,
   query: { limit: number; cursor?: string },
 ): Promise<{ generations: CompositionGenerationV1[]; cursor?: string }> {
-  const rpc = userCompositionRpcV1(state, identity.userId);
-  if (!rpc) return state.authority.composition.list(query);
-  return rpc.listCompositionGenerations({
+  return userCompositionRpcV1(
+    state,
+    identity.userId,
+  ).listCompositionGenerations({
     schemaVersion: 1,
     userId: identity.userId,
     ...query,
@@ -234,17 +231,14 @@ export async function revertUserCompositionV1(
   identity: BotIdentity,
   toGenerationId: string,
 ): Promise<CompositionGenerationV1> {
-  const origin = {
-    kind: "revert" as const,
-    revertsTo: toGenerationId,
-    userId: identity.userId,
-  };
-  const rpc = userCompositionRpcV1(state, identity.userId);
-  if (!rpc) return state.authority.composition.revert(toGenerationId, origin);
-  return rpc.revertComposition({
+  return userCompositionRpcV1(state, identity.userId).revertComposition({
     schemaVersion: 1,
     userId: identity.userId,
     toGenerationId,
-    origin,
+    origin: {
+      kind: "revert",
+      revertsTo: toGenerationId,
+      userId: identity.userId,
+    },
   });
 }

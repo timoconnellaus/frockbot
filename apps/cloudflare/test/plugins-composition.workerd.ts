@@ -2,10 +2,11 @@
 //
 // Two claims against the real User and Bot Durable Objects: a generation the
 // User pins is what the next admitted Turn on any of that User's Bots runs
-// under, and the outcome of that activation lands on the User's record, not
+// under — whichever way that Turn is admitted, a chat Turn or a Routine
+// firing — and the outcome of that activation lands on the User's record, not
 // the Bot's.
 import { env } from "cloudflare:workers";
-import { runInDurableObject } from "cloudflare:test";
+import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { describe, expect, test } from "vitest";
 import { provisionBot, provisionSiblingBot } from "./provision-bot.ts";
 import { hydratedStoredRunsV1 } from "./session-log-probe.ts";
@@ -26,6 +27,7 @@ interface CompositionRpc {
 
 interface BotRpc {
   run(command: unknown): Promise<{ runId: string }>;
+  executeRoutineCommand(input: unknown): Promise<{ status: string }>;
   readPluginEnablement(input: unknown): Promise<{ revision: number }>;
   setPluginEnabled(input: unknown): Promise<
     | {
@@ -79,6 +81,35 @@ async function turn(
       text: "hello",
     },
   });
+}
+
+/**
+ * The pin each admitted run took, by run id. `pinnedGeneration` answers for
+ * one known run; a firing mints its own id, so this returns the lot.
+ */
+async function pinnedGenerations(identity: {
+  userId: string;
+  botId: string;
+}): Promise<Array<{ runId: string; compositionGenerationId?: string }>> {
+  return runInDurableObject(
+    env.BOT_STATES.getByName(`${identity.userId}:${identity.botId}`),
+    async (_instance, state) => {
+      const runs = await hydratedStoredRunsV1<{
+        runId: string;
+        sessionId: string;
+        compositionGenerationId?: string;
+        admission?: { origin?: { routineId?: string } };
+      }>(state.storage);
+      return runs
+        .filter((run) => run.admission?.origin?.routineId === "brief")
+        .map((run) => ({
+          runId: run.runId,
+          ...(run.compositionGenerationId === undefined
+            ? {}
+            : { compositionGenerationId: run.compositionGenerationId }),
+        }));
+    },
+  );
 }
 
 describe("the User-owned Composition", () => {
@@ -185,5 +216,91 @@ describe("the User-owned Composition", () => {
     expect(
       await bot(sibling).readPluginEnablement({ schemaVersion: 1, ...sibling }),
     ).toMatchObject({ revision: 0, enabled: {} });
+  });
+
+  test("a Bot whose first admission is a Routine firing pins the User's generation", async () => {
+    // A chat Turn is not the only way in. A firing is admitted from inside the
+    // object's own alarm, and if the Bot has not mirrored the User's pin by
+    // then it bootstraps a generation of its own and pins that — an id the
+    // User has never heard of, which fails the moment activation commits.
+    const userId = `user-${crypto.randomUUID()}`;
+    const identity = { userId, botId: "bot-1" };
+    await provisionBot(identity);
+
+    const bootstrap = (
+      await user(userId).readComposition({ schemaVersion: 1, userId })
+    ).current;
+    const createdAt = "2026-09-12T01:00:00.000Z";
+    const pinned = {
+      ...bootstrap,
+      generationId: `${createdAt}:${bootstrap.generationId.split(":").at(-1)}`,
+      parentGenerationId: bootstrap.generationId,
+      createdAt,
+      origin: {
+        kind: "bot-authored",
+        runId: "install-1",
+        sessionId: `${userId}:bot-1`,
+        turnId: "install-1",
+      },
+      status: "pending",
+    };
+    await user(userId).proposeComposition({
+      schemaVersion: 1,
+      userId,
+      generation: pinned,
+      pin: true,
+      expectedCurrentGenerationId: bootstrap.generationId,
+    });
+
+    // The Bot has admitted nothing at this point; the firing is its first.
+    expect(
+      await bot(identity).executeRoutineCommand({
+        schemaVersion: 1,
+        ...identity,
+        command: {
+          schemaVersion: 1,
+          botId: identity.botId,
+          type: "routine/create",
+          commandId: `create-${userId}`,
+          routineId: "brief",
+          name: "Hourly brief",
+          prompt: "Summarize overnight email.",
+          schedule: "0 * * * *",
+        },
+      }),
+    ).toMatchObject({ status: "applied" });
+    await runInDurableObject(
+      env.BOT_STATES.getByName(`${userId}:${identity.botId}`),
+      async (_instance, state) => {
+        const record = await state.storage.get<{ updatedAt: string }>(
+          "routine:brief",
+        );
+        await state.storage.put("routine-schedule:brief", {
+          schemaVersion: 1,
+          routineId: "brief",
+          anchor: record!.updatedAt,
+          dueAt: Date.now() - 60 * 60_000,
+        });
+      },
+    );
+    expect(
+      await runDurableObjectAlarm(
+        env.BOT_STATES.getByName(`${userId}:${identity.botId}`),
+      ),
+    ).toBe(true);
+
+    const fired = await pinnedGenerations(identity);
+    expect(fired).toHaveLength(1);
+    expect(fired[0]?.compositionGenerationId).toBe(pinned.generationId);
+    // And the activation landed on the User, which is the only place the
+    // generation exists.
+    const after = await user(userId).readComposition({
+      schemaVersion: 1,
+      userId,
+    });
+    expect(after.current).toMatchObject({
+      generationId: pinned.generationId,
+      status: "active",
+    });
   });
 });

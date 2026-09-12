@@ -7,6 +7,7 @@ import type { UserSettingsViewV1 } from "@frockbot/core/configuration";
 import { SessionEventLog } from "@frockbot/core/durable";
 import { createShellBotBackendContribution } from "@frockbot/app/shell/backend";
 import type { StoredRun } from "@frockbot/app/shell/backend-contracts";
+import { memoryUserCompositionV1 } from "@frockbot/app/composition/user.fixture";
 import { foundationShellApplicationV1 } from "./runtime.js";
 
 class MemoryStorage {
@@ -139,6 +140,8 @@ describe("Bot recovery on this application", () => {
         providerModelId: "glm-5.3-flash:cloud",
       },
     };
+    // The Composition is the User's, so the Bot mirrors it from here.
+    const userComposition = memoryUserCompositionV1();
     const leasedRequests: Array<Record<string, unknown>> = [];
     const settledEffects: string[] = [];
     let settlementFailures = 0;
@@ -228,7 +231,7 @@ describe("Bot recovery on this application", () => {
           CREDENTIAL_KEYRING: credentialKeyring,
           USER_CONFIGURATIONS: {
             idFromName: () => "user-configuration-id",
-            get: () => rpc,
+            get: () => ({ ...rpc, ...userComposition }),
           },
           MEMORY_FILES: {},
           MEMORY_INDEX: {},

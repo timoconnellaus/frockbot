@@ -28,9 +28,9 @@ import {
 import type { BotSettingsViewV1 } from "@frockbot/core/configuration";
 import { resolveAppletComposition } from "@frockbot/app/applets-host/bot";
 import {
+  admitTurnV1,
   compositionActivationStoreV1,
   compositionFailureLogV1,
-  syncCompositionFromUser,
 } from "@frockbot/app/composition/bot";
 import {
   enabledPluginIdsV1,
@@ -102,18 +102,14 @@ export async function run(
   // from the previous Turn has already handed the log back.
   await yieldCompactionWorkV1(command.sessionId);
   // Before admission, so the pin this Turn takes already carries whatever
-  // the User's Applet directory says now, and then the User's Composition as
-  // it stands after that — the pin is taken from this Bot's mirror of it.
+  // the User's Applet directory says now; `admitTurnV1` then mirrors the
+  // User's Composition as it stands after that, and the pin is taken from it.
   await resolveAppletComposition(
     state,
     { userId: command.userId, botId: command.botId },
     command,
   );
-  await syncCompositionFromUser(state, {
-    userId: command.userId,
-    botId: command.botId,
-  });
-  return projectClientTurnV1(await state.authority.run(command));
+  return projectClientTurnV1(await admitTurnV1(state, command));
 }
 
 /**

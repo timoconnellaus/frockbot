@@ -38,6 +38,7 @@ describe("which plugins a Bot runs", () => {
     const off = await setPluginEnabledV1(store, {
       pluginId: "greeter",
       enabled: false,
+      expectedRevision: 0,
       now: new Date("2026-09-12T00:00:00Z"),
     });
     expect(off).toEqual({
@@ -65,7 +66,11 @@ describe("which plugins a Bot runs", () => {
 
   test("a stale revision is refused, and a bad id never lands", async () => {
     const store = storage();
-    await setPluginEnabledV1(store, { pluginId: "weather", enabled: false });
+    await setPluginEnabledV1(store, {
+      pluginId: "weather",
+      enabled: false,
+      expectedRevision: 0,
+    });
     await expect(
       setPluginEnabledV1(store, {
         pluginId: "weather",
@@ -74,7 +79,11 @@ describe("which plugins a Bot runs", () => {
       }),
     ).rejects.toBeInstanceOf(PluginEnablementConflictError);
     await expect(
-      setPluginEnabledV1(store, { pluginId: "Weather", enabled: false }),
+      setPluginEnabledV1(store, {
+        pluginId: "Weather",
+        enabled: false,
+        expectedRevision: 1,
+      }),
     ).rejects.toThrow(/invalid/);
     expect(await readPluginEnablementV1(store)).toMatchObject({ revision: 1 });
   });

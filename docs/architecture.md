@@ -216,11 +216,11 @@ Composition is the untrusted layer and nothing else. First-party Packages are or
 
 The User Durable Object owns the Composition (ADR 0026): `DurableCompositionStore` (`core/durable/composition-store.ts`) and `DurableCompositionFailureLog` write into the User object under `composition:current` (a `{generationId, artifactSetHash}` pin), `composition:generation:<id>`, `composition:index:<createdAt>:<id>`, `composition:last-known-good`, plus failure, failure-count and quarantine keys, reached through the `readComposition`, `proposeComposition`, `commitComposition`, `failComposition`, `revertComposition` and failure-log RPCs (`app/composition/user.ts`). Pinning is compare-and-swap; a lost race raises `CompositionPinConflictError` and the caller re-reads and re-derives (four attempts).
 
-A Bot admits a Turn inside its own storage transaction, which cannot make a cross-object call, so before every admission `syncCompositionFromUser` (`app/composition/bot.ts`) reads the User's pin and fallback and `adopt`s them into the Bot's own `composition:` records — a mirror the admission pins from, never a second truth. A stale mirror is replaced whole, which is also what retires the records a Bot held from before the store moved. Activation reads the mirror, commits and fails against the User, and refreshes the mirror after; the settings views read the User directly.
+A Bot admits a Turn inside its own storage transaction, which cannot make a cross-object call, so every admission goes through `admitTurnV1` (`app/composition/bot.ts`) — a chat Turn, a Routine firing, a Package-UI tool, a Subagent task — which first reads the User's pin and fallback and `adopt`s them into the Bot's own `composition:` records: a mirror the admission pins from, never a second truth. A stale mirror is replaced whole, which is also what retires the records a Bot held from before the store moved. Activation reads the mirror, commits and fails against the User, and refreshes the mirror after; the settings views read the User directly.
 
 Which of the User's installed Plugins a Bot runs is the Bot's own revisioned enable map, `plugins:enablement` (`app/plugins/enablement.ts`), read at every mount; absent is on. The list it yields is what the Plugin worker registers tools for and passes as the enabled list on every hook.
 
-An in-flight Turn keeps the generation it pinned. Activation takes effect at the next admitted Turn.
+An in-flight Turn keeps the generation it pinned — a read of that pin falls back to the User when a later admission has already adopted a newer one over the mirror. Activation takes effect at the next admitted Turn.
 
 ### Activation and failure — `core/durable/composition/activation.ts`
 

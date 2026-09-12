@@ -133,10 +133,18 @@ function appletCapabilityHost(
       ? { appOrigin: state.env.BETTER_AUTH_URL }
       : {}),
     composition: {
-      current: () => state.authority.composition.current(),
-      lastKnownGood: () => state.authority.composition.lastKnownGood(),
+      current: () => currentUserCompositionV1(state, identity),
       propose: (generation, options) =>
-        state.authority.composition.propose(generation, options),
+        proposeUserCompositionV1(state, identity, {
+          generation,
+          ...(options?.pin === undefined ? {} : { pin: options.pin }),
+          ...(options?.expectedCurrentGenerationId === undefined
+            ? {}
+            : {
+                expectedCurrentGenerationId:
+                  options.expectedCurrentGenerationId,
+              }),
+        }),
     },
   });
 }

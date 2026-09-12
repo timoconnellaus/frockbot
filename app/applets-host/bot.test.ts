@@ -191,6 +191,12 @@ function gatedHarness(options: {
         })),
       });
     },
+    // The Composition is the User's, so a proposal a Turn makes lands here.
+    readComposition: () => Promise.resolve({ current, lastKnownGood: current }),
+    proposeComposition: (request: { generation: unknown }) => {
+      proposed.push(request.generation);
+      return Promise.resolve();
+    },
   };
   const current = {
     generationId: "g0",
@@ -217,16 +223,7 @@ function gatedHarness(options: {
       APPLICATION_ARTIFACTS: {},
       WORKSPACE_FILES: {},
     },
-    authority: {
-      validateIdentity: () => Promise.resolve(),
-      composition: {
-        current: () => Promise.resolve(current),
-        propose: (generation: unknown) => {
-          proposed.push(generation);
-          return Promise.resolve();
-        },
-      },
-    },
+    authority: { validateIdentity: () => Promise.resolve() },
   } as unknown as ShellBotStateV1;
   return { state, proposed, directoryReads: () => directoryReads };
 }

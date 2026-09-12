@@ -18,7 +18,9 @@ export interface PluginEnablementV1 {
   updatedAt: string;
 }
 
-const PLUGIN_ID = /^[a-z][a-z0-9-]{0,63}$/;
+/** A Plugin id, one rule: the decoder here and the RPC envelope share it. */
+export const PLUGIN_ID_V1 = /^[a-z][a-z0-9-]{0,63}$/;
+export const PLUGIN_ID_MAX_LENGTH_V1 = 64;
 const MAX_PLUGIN_SWITCHES_V1 = 256;
 
 export function decodePluginEnablementV1(input: unknown): PluginEnablementV1 {
@@ -60,7 +62,7 @@ export function decodePluginEnablementV1(input: unknown): PluginEnablementV1 {
     throw new Error("plugin enablement exceeds its bound");
   }
   for (const [pluginId, flag] of entries) {
-    if (!PLUGIN_ID.test(pluginId)) {
+    if (!PLUGIN_ID_V1.test(pluginId)) {
       throw new Error(
         `plugin enablement names an invalid plugin "${pluginId}"`,
       );
@@ -114,28 +116,26 @@ export class PluginEnablementConflictError extends Error {
 }
 
 /**
- * Switches one Plugin for this Bot. Fenced on the revision the caller read,
- * so two people flipping switches from stale pages do not silently undo each
- * other. Switching a Plugin back to on removes its entry: absent is on, and
- * the map holds only what someone changed.
+ * Switches one Plugin for this Bot. Always fenced on the revision the caller
+ * read, so two people flipping switches from stale pages do not silently undo
+ * each other; there is no unfenced way in. Switching a Plugin back to on
+ * removes its entry: absent is on, and the map holds only what someone
+ * changed.
  */
 export async function setPluginEnabledV1(
   storage: PluginEnablementStorageV1,
   input: {
     pluginId: string;
     enabled: boolean;
-    expectedRevision?: number;
+    expectedRevision: number;
     now?: Date;
   },
 ): Promise<PluginEnablementV1> {
-  if (!PLUGIN_ID.test(input.pluginId)) {
+  if (!PLUGIN_ID_V1.test(input.pluginId)) {
     throw new Error(`plugin id "${input.pluginId}" is invalid`);
   }
   const current = await readPluginEnablementV1(storage);
-  if (
-    input.expectedRevision !== undefined &&
-    input.expectedRevision !== current.revision
-  ) {
+  if (input.expectedRevision !== current.revision) {
     throw new PluginEnablementConflictError(
       input.expectedRevision,
       current.revision,

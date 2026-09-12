@@ -14,6 +14,7 @@ import {
   isolateAuthoritySnapshot,
   isolateConnection,
 } from "@frockbot/app/isolates/bot";
+import { memoryUserCompositionV1 } from "@frockbot/app/composition/user.fixture";
 import { listNotifications } from "@frockbot/app/notifications/bot";
 import {
   executeConfiguration,
@@ -122,6 +123,8 @@ function configuredUser(): UserSettingsViewV1 {
 
 function host(storage: MemoryStorage, readUser: () => UserSettingsViewV1) {
   let completionCalls = 0;
+  // The Composition is the User's, so the Bot mirrors it from here.
+  const userComposition = memoryUserCompositionV1();
   return createShellBotBackendContribution({
     ...foundationShellApplicationV1,
     state: { storage } as unknown as DurableObjectState,
@@ -134,6 +137,7 @@ function host(storage: MemoryStorage, readUser: () => UserSettingsViewV1) {
           readConfiguration: () => Promise.resolve(structuredClone(readUser())),
           listBots: () =>
             Promise.resolve({ schemaVersion: 1, revision: 0, bots: [] }),
+          ...userComposition,
         }),
       },
       MEMORY_FILES: {},

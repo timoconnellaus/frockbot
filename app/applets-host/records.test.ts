@@ -559,7 +559,6 @@ describe("ctx.applets", () => {
         ...(options.appOrigin ? { appOrigin: options.appOrigin } : {}),
         composition: {
           current: () => bootstrap(),
-          lastKnownGood: () => bootstrap(),
           propose: () => Promise.resolve(),
         },
       }),

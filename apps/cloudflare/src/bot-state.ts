@@ -295,6 +295,8 @@ import {
 } from "./durable-rpc.js";
 import { answeredEntryV1, loggedEntryV1 } from "./entry-boundary.js";
 import {
+  PLUGIN_ID_MAX_LENGTH_V1,
+  PLUGIN_ID_V1,
   PluginEnablementConflictError,
   readPluginEnablementV1,
   setPluginEnabledV1,
@@ -1066,16 +1068,13 @@ export class BotState extends DurableObject<BotStateEnv> {
    * decides again, the way every other revision-fenced command answers.
    */
   async setPluginEnabled(input: unknown) {
-    const request = decodeRpcEnvelopeV1(
-      input,
-      {
-        userId: rpcIdentifier,
-        botId: rpcBotId,
-        pluginId: rpcPattern(/^[a-z][a-z0-9-]{0,63}$/, 64),
-        enabled: rpcBoolean,
-      },
-      { expectedRevision: rpcInteger({ minimum: 0, maximum: 1_000_000 }) },
-    );
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      pluginId: rpcPattern(PLUGIN_ID_V1, PLUGIN_ID_MAX_LENGTH_V1),
+      enabled: rpcBoolean,
+      expectedRevision: rpcInteger({ minimum: 0, maximum: 1_000_000 }),
+    });
     const identity = {
       userId: request.userId as string,
       botId: request.botId as string,
@@ -1086,9 +1085,7 @@ export class BotState extends DurableObject<BotStateEnv> {
       const enablement = await setPluginEnabledV1(shell.state.ctx.storage, {
         pluginId: request.pluginId as string,
         enabled: request.enabled as boolean,
-        ...(request.expectedRevision === undefined
-          ? {}
-          : { expectedRevision: request.expectedRevision as number }),
+        expectedRevision: request.expectedRevision as number,
       });
       return { status: "applied" as const, enablement };
     } catch (error) {
