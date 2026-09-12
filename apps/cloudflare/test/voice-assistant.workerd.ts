@@ -346,8 +346,120 @@ describe("the voice session object", () => {
     }[];
     expect(meters[0]).toMatchObject({ turns: 1 });
     expect(meters[0]!.ttsCharacters).toBeGreaterThan(0);
+    // The tail can prove speech left the object: one `audio` line per
+    // sentence, and the call's total on the way out.
+    const audio = (await stub.probeTraces()).filter((t) => t.event === "audio");
+    expect(audio).toHaveLength(1);
+    expect(audio[0]).toMatchObject({
+      chars: "You said: what time is it.".length,
+      chunk: 1,
+    });
+    expect(Number(audio[0]!.bytes)).toBeGreaterThan(0);
+    // The phone's interrupt is on record, with no upstream `speech-started`
+    // before it: that is how the tail tells the two detectors apart.
+    opened.socket.send(JSON.stringify({ type: "interrupt" }));
+    await eventually(
+      async () =>
+        (await stub.probeTraces()).find((t) => t.event === "interrupted"),
+      (line) => Boolean(line),
+      "the interrupted trace",
+    );
+    expect(
+      (await stub.probeTraces()).some((t) => t.event === "speech-started"),
+    ).toBe(false);
     opened.socket.send(JSON.stringify({ type: "end_call" }));
     await opened.waitFor(status("idle"), "idle");
+    const ended = (await stub.probeTraces()).find(
+      (t) => t.event === "call-ended",
+    );
+    expect(ended).toMatchObject({ sentencesSpoken: 1 });
+    expect(Number(ended!.audioChunks)).toBeGreaterThan(0);
+    opened.socket.close();
+  });
+
+  test("a repeated sentence is still traced, and a superseded call keeps its totals", async () => {
+    const userId = `voice-audio-${crypto.randomUUID()}`;
+    const stub = assistant(userId);
+    // Two sentences the reply says identically: the audio line has to come
+    // from the sentence being accepted, not from the previous chunk's text.
+    await stub.probeSetScript({ reply: "Right away. Right away." });
+    const phone = await open(userId, {}, "phone");
+    await startCall(phone);
+    await phone.waitFor(state("awake"), "awake");
+    expect(await stub.probeUtterance("say it twice")).toBe(true);
+    await eventually(
+      async () => await stub.probeSynthesized(),
+      (spoken) => spoken.length === 2,
+      "both sentences synthesized",
+    );
+    expect(await stub.probeSynthesized()).toEqual([
+      "Right away.",
+      "Right away.",
+    ]);
+    const audio = (await stub.probeTraces()).filter((t) => t.event === "audio");
+    expect(audio).toHaveLength(2);
+    expect(audio.map((t) => t.chars)).toEqual([11, 11]);
+    expect(audio.map((t) => t.chunk)).toEqual([1, 2]);
+    // And every chunk the lines count is a frame the phone received: the
+    // hook that counts them hands the chunk back as it found it.
+    await eventually(
+      async () => phone.audio.length,
+      (frames) => frames === audio.length,
+      "an audio frame on the socket for every counted chunk",
+    );
+
+    // The laptop displaces the phone: the phone's call record is released
+    // before the SDK ends the call, so its totals have to outlive it.
+    const laptop = await open(userId, {}, "laptop");
+    await startCall(laptop);
+    await phone.waitFor(
+      (f) => f.type === "voice/refusal" && f.code === "superseded",
+      "superseded refusal",
+    );
+    const ended = await eventually(
+      async () =>
+        (await stub.probeTraces()).find(
+          (t) => t.event === "call-ended" && t.device === "phone",
+        ),
+      (line) => Boolean(line),
+      "the phone's call-ended trace",
+    );
+    expect(ended).toMatchObject({ audioChunks: 2, sentencesSpoken: 2 });
+    expect(Number(ended!.audioBytes)).toBeGreaterThan(0);
+    for (const opened of [phone, laptop]) opened.socket.close();
+  });
+
+  test("the upstream's own detector is on record before the reply stops", async () => {
+    const userId = `voice-vad-${crypto.randomUUID()}`;
+    const stub = assistant(userId);
+    const opened = await open(userId);
+    await startCall(opened);
+    await opened.waitFor(state("awake"), "awake");
+    // The transcription service heard someone. That line is what tells the
+    // pair apart later: an `interrupted` with this line before it is the
+    // upstream's barge-in, without it the phone's own energy gate.
+    expect(await stub.probeSpeechStart()).toBe(true);
+    const started = await eventually(
+      async () =>
+        (await stub.probeTraces()).find((t) => t.event === "speech-started"),
+      (line) => Boolean(line),
+      "the speech-started trace",
+    );
+    expect(started).toMatchObject({ device: "phone" });
+    expect(started!.call).toBeTruthy();
+    expect(started!.elapsedMs).toBeGreaterThanOrEqual(0);
+    // The utterance still lands: the trace wrapper passes the hook through.
+    expect(await stub.probeUtterance("what time is it")).toBe(true);
+    await opened.waitFor(status("speaking"), "speaking");
+    opened.socket.send(JSON.stringify({ type: "interrupt" }));
+    const tail = await eventually(
+      async () => await stub.probeTraces(),
+      (lines) => lines.some((t) => t.event === "interrupted"),
+      "the interrupted trace",
+    );
+    expect(tail.findIndex((t) => t.event === "speech-started")).toBeLessThan(
+      tail.findIndex((t) => t.event === "interrupted"),
+    );
     opened.socket.close();
   });
 

@@ -253,7 +253,24 @@ export class VoiceAssistant extends VoiceAgentBase<
    * so the `closed` line would otherwise name no call and measure nothing.
    * Dropped at the end of `onClose`, once that line is written.
    */
-  #traced = new Map<string, { callId: string; startedAt: number }>();
+  #traced = new Map<
+    string,
+    {
+      callId: string;
+      startedAt: number;
+      /** Synthesized audio handed down this socket, so silence has a number. */
+      audioChunks: number;
+      audioBytes: number;
+      sentencesSpoken: number;
+      /**
+       * Sentences accepted for synthesis whose first chunk has not arrived,
+       * counted per sentence: the SDK pumps several sentences at once, so
+       * their chunks interleave and the previous chunk's text says nothing
+       * about which sentence this one starts.
+       */
+      awaitingFirstChunk: Map<string, number>;
+    }
+  >();
 
   tts: (TTSProvider & Partial<StreamingTTSProvider>) | undefined =
     this.createTts();
@@ -557,6 +574,10 @@ export class VoiceAssistant extends VoiceAgentBase<
     this.#traced.set(connection.id, {
       callId: call.callId,
       startedAt: call.startedAt,
+      audioChunks: 0,
+      audioBytes: 0,
+      sentencesSpoken: 0,
+      awaitingFirstChunk: new Map(),
     });
     this.trace(connection, "call-admitted", {
       admission: admission.status,
@@ -591,6 +612,13 @@ export class VoiceAssistant extends VoiceAgentBase<
       createSession: (options = {}) => {
         const session = sleeping.createSession({
           ...options,
+          onSpeechStart: () => {
+            // The upstream's own voice detector heard someone. While the
+            // assistant is speaking this is the barge-in that aborts the
+            // reply, so it is the line that says why synthesis stopped.
+            this.trace(connection, "speech-started");
+            options.onSpeechStart?.();
+          },
           onFatalError: (error) => {
             // The SDK logs its own record of any transcriber fatal; this one
             // names it as the assistant's ears and, sitting outside the
@@ -705,8 +733,52 @@ export class VoiceAssistant extends VoiceAgentBase<
   }
 
   override async onCallEnd(connection: Connection): Promise<void> {
-    this.trace(connection, "call-ended");
+    const traced = this.#traced.get(connection.id);
+    this.trace(connection, "call-ended", {
+      audioChunks: traced?.audioChunks ?? 0,
+      audioBytes: traced?.audioBytes ?? 0,
+      sentencesSpoken: traced?.sentencesSpoken ?? 0,
+    });
     await this.releaseCall(connection);
+  }
+
+  /**
+   * The SDK stopped a reply. It does this for the upstream's own detector
+   * (a `speech-started` line lands just before) and for the phone's local
+   * energy gate sending `interrupt` (no such line: the SDK consumes that
+   * frame before `onMessage`). Between the two the log names which side
+   * cut a reply short.
+   */
+  override onInterrupt(connection: Connection): void {
+    this.trace(connection, "interrupted");
+  }
+
+  /**
+   * Every chunk of synthesized audio on its way down, counted; the first
+   * chunk of each sentence is traced on its own so the tail shows whether
+   * speech ever left the object and how long the first byte took.
+   */
+  override async afterSynthesize(
+    audio: ArrayBuffer,
+    text: string,
+    connection: Connection,
+  ): Promise<ArrayBuffer | null> {
+    const traced = this.#traced.get(connection.id);
+    if (!traced) return audio;
+    traced.audioChunks += 1;
+    traced.audioBytes += audio.byteLength;
+    const awaiting = traced.awaitingFirstChunk.get(text) ?? 0;
+    if (awaiting > 0) {
+      if (awaiting > 1) traced.awaitingFirstChunk.set(text, awaiting - 1);
+      else traced.awaitingFirstChunk.delete(text);
+      traced.sentencesSpoken += 1;
+      this.trace(connection, "audio", {
+        chars: text.length,
+        bytes: audio.byteLength,
+        chunk: traced.audioChunks,
+      });
+    }
+    return audio;
   }
 
   private async releaseCall(connection: Connection): Promise<void> {
@@ -766,6 +838,13 @@ export class VoiceAssistant extends VoiceAgentBase<
       return null;
     }
     await ledger.addMeter(now, { ttsCharacters: text.length });
+    const traced = this.#traced.get(connection.id);
+    if (traced) {
+      traced.awaitingFirstChunk.set(
+        text,
+        (traced.awaitingFirstChunk.get(text) ?? 0) + 1,
+      );
+    }
     return text;
   }
 
