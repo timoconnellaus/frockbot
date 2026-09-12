@@ -1147,9 +1147,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// The Bot's page, GrokBot's: one scroll from its face to its danger zone.
   ///
   /// Its settings, then the rows for what else it holds — Routines, Applets,
-  /// the pages its Packages mount — then Advanced. The rows are read off the
-  /// slot registry live, so a Computer or a Package entry that registers
-  /// after the page opened appears on it rather than on the next visit.
+  /// the pages its Packages mount — then Advanced. The Computer's row is read
+  /// off the slot registry live and the Package rows off `catalogRevision`, so
+  /// either arriving after the page opened appears on it rather than on the
+  /// next visit.
   Widget _botPage(wire.BotRegistration bot, BotSettingsController controller) {
     final botId = bot.botId.value;
     return Scaffold(
@@ -1424,7 +1425,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                             panelShown: tier == ShellTier.triple
                                 ? !panelCollapsed
                                 : panelOpen,
-                            packageEntries: _packageEntryActions(),
+                            packageEntries: single
+                                ? const []
+                                : _packageEntryActions(),
                             onApplets: single || appletCanvas == null
                                 ? null
                                 : () async {

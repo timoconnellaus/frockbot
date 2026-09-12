@@ -70,6 +70,15 @@ void main() {
       findsNothing,
     );
 
+    // A phone's bar is GrokBot's three things: the entry is a row on the Bot's
+    // own page there, as it was before the entries ever reached a bar.
+    tester.view.physicalSize = const Size(400, 900);
+    await tester.pumpAndSettle();
+    expect(
+      find.descendant(of: find.byType(ChatHeader), matching: entry),
+      findsNothing,
+    );
+
     await tester.pumpWidget(const SizedBox());
     sessions.clear();
     links.dispose();
