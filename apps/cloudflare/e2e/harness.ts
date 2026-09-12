@@ -700,6 +700,13 @@ export async function startHarness(
   let worker: SupervisedProcess | undefined;
 
   const stop = async (): Promise<void> => {
+    // Together, not one after another: each `stopProcessTree` now waits for a
+    // whole process group to empty, so a service that is slow to release
+    // SIGTERM costs up to the grace period plus its escalation. Three of those
+    // in sequence would outlast the `webServer` `gracefulShutdown` budget in
+    // `playwright.config.ts`, and whichever service had not been reached yet
+    // would be left behind with its workerd when Playwright SIGKILLs this
+    // process.
     await Promise.allSettled(
       [worker, appletBuild, frockAi].map((service) => service?.stop()),
     );
