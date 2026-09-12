@@ -77,6 +77,20 @@ test("a Bot's Plugins page is its own, and a switch it holds is the Bot's", asyn
     body: await page.screenshot(),
     contentType: "image/png",
   });
+  // And the entry opens that account list: what is installed, with none of
+  // the Bot's own first-party switches on it.
+  await tap(page, "profile-plugins").click();
+  await expect(sem(page, "plugins-document")).toBeVisible({
+    timeout: SHELL_TIMEOUT_MS,
+  });
+  await settle(page);
+  await expect(says(page, "Plugins · Plugged")).toHaveCount(0);
+  await expect(cardSwitch(page, "Web · Built in")).toHaveCount(0);
+  await testInfo.attach("profile-plugins-page.png", {
+    body: await page.screenshot(),
+    contentType: "image/png",
+  });
+
   await closeOverlay(page);
   await settle(page);
 

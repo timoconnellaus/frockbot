@@ -399,12 +399,15 @@ Screens (no router; `MaterialApp(home:)` plus `Navigator.push`):
 - `BotSettingsView` — `lib/settings/bot_settings.dart`: one Bot's identity,
   notifications and model, written as they are edited rather than on a Save
   button; in the `right-panel` slot at wide widths, and on the phone the top
-  of the Bot's page, above the rows for its Routines, Applets and Package
-  pages
+  of the Bot's page, above the rows for its Routines, Plugins, Applets and
+  Package pages
 - `ConnectionsPage` — `lib/connections/page.dart`: a host over
   `ViewDocumentView` for the accounts a User authorizes once for every Bot
 - `PluginsPage` — `lib/plugins/page.dart`: the same host over the Plugins
-  document, plus the controller that carries enablement to the settings route
+  document, plus the controller that carries enablement to the settings route.
+  A Bot's page is in the `right-panel` slot beside Routines and Bot settings,
+  keyed per Bot and drawn without chrome because the panel names it, and a row
+  on the Bot's page on the phone; the Profile's entry is the account's list
 - `AdminPage` — `lib/admin/page.dart`: the deployment's signups switch, over
   `/api/admin/policy`, and, per account, an Applets switch and a
   `Bots may write Plugins` switch, over `/api/admin/users` and
