@@ -663,4 +663,77 @@ void main() {
       expect(find.byType(Dialog), findsNothing);
     },
   );
+
+  testWidgets('turning an account off says so at once, and one row waits', (
+    tester,
+  ) async {
+    final store = MemoryStore();
+    final sent = <Map<String, Object?>>[];
+    final gate = Completer<void>();
+    var state = 'ready';
+    final api = SettingsApi(store, (path, body) async {
+      if (body == null) {
+        return connectionsFrame(
+          twoApps: true,
+          connected: 1,
+          accounts: [
+            {
+              'id': 'conn-1',
+              'label': 'Gmail account',
+              'state': state,
+              'packageId': 'connect',
+              'connectionTypeId': 'connect-gmail',
+              'kind': 'connector',
+              'authorization': 'grant',
+            },
+            {
+              'id': 'conn-2',
+              'label': 'Slack account',
+              'packageId': 'connect',
+              'connectionTypeId': 'connect-slack',
+              'kind': 'connector',
+              'authorization': 'grant',
+            },
+          ],
+        );
+      }
+      sent.add((body as Map).cast<String, Object?>());
+      await gate.future;
+      state = 'disabled';
+      return {
+        'schemaVersion': 1,
+        'commandId': body['commandId'],
+        'connectionId': 'conn-1',
+        'status': 'applied',
+      };
+    });
+    await tester.pumpWidget(page(api, store));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Gmail'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Slack'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Manage Gmail account'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Turn off'));
+    await tester.pumpAndSettle();
+    // The command is still in flight: what the row says is what this client
+    // sent, and only that row is waiting on it.
+    expect(sent.single['type'], 'connection/set-enabled');
+    expect(sent.single['enabled'], isFalse);
+    expect(find.text('Turned off'), findsOneWidget);
+    PopupMenuButton<String> manage(String label) =>
+        tester.widget<PopupMenuButton<String>>(
+          find.ancestor(
+            of: find.byTooltip('Manage $label'),
+            matching: find.byType(PopupMenuButton<String>),
+          ),
+        );
+    expect(manage('Gmail account').enabled, isFalse);
+    expect(manage('Slack account').enabled, isTrue);
+    gate.complete();
+    await tester.pumpAndSettle();
+    expect(find.text('Turned off'), findsOneWidget);
+    expect(manage('Gmail account').enabled, isTrue);
+  });
 }

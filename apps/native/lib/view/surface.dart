@@ -90,6 +90,9 @@ class _ViewSurfacePageState extends State<ViewSurfacePage>
   int? shown;
   bool reloadWanted = false;
 
+  /// Whether a read was in flight when this page was last told something.
+  bool reading = false;
+
   @override
   void initState() {
     super.initState();
@@ -121,6 +124,13 @@ class _ViewSurfacePageState extends State<ViewSurfacePage>
   void _adopt() {
     final document = widget.controller.document;
     if (!mounted) return;
+    // A read that lands is the authority speaking, so what this client drew
+    // for itself while its command was in flight stops being drawn. Usually
+    // the revision moves and the new controller carries no predictions at
+    // all; this is the case where it did not move, and a prediction must not
+    // outlive the read that answered it.
+    if (reading && !widget.controller.busy) view?.predicted.clear();
+    reading = widget.controller.busy;
     if (document == null || document.revision == shown) {
       setState(() {});
       return;

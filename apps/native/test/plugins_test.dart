@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/client/transport.dart';
@@ -249,6 +251,56 @@ void main() {
     expect(sent.single['type'], 'user/set-package-enabled');
     expect(sent.single['expectedRevision'], 1);
     expect(tester.widget<Switch>(find.byType(Switch)).value, isFalse);
+  });
+
+  testWidgets('the switch moves on the press, and the read agrees later', (
+    tester,
+  ) async {
+    final store = MemoryStore();
+    final gate = Completer<void>();
+    var state = 'installed';
+    var revision = 1;
+    final api = SettingsApi(store, (path, body) async {
+      if (body == null) {
+        return pluginsDocument(
+          revision: revision,
+          state: state,
+          surfaceId: 'capabilities',
+        );
+      }
+      await gate.future;
+      state = 'disabled';
+      revision = 2;
+      return {
+        'schemaVersion': 1,
+        'commandId': (body as Map)['commandId'],
+        'revision': revision,
+        'status': 'applied',
+      };
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: FrockTheme.theme(Brightness.dark),
+        home: PluginsPage(
+          api: api,
+          store: store,
+          userId: 'tim',
+          capabilities: true,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.widget<Switch>(find.byType(Switch)).value, isTrue);
+    await tester.tap(find.byType(Switch));
+    await tester.pumpAndSettle();
+    // The command has not been answered and the document still says On: what
+    // the switch shows is what this client sent.
+    expect(tester.widget<Switch>(find.byType(Switch)).value, isFalse);
+    expect(find.text('On'), findsOneWidget);
+    gate.complete();
+    await tester.pumpAndSettle();
+    expect(tester.widget<Switch>(find.byType(Switch)).value, isFalse);
+    expect(find.text('Off'), findsOneWidget);
   });
 
   testWidgets('a section control on a Bot page posts the tool it names', (

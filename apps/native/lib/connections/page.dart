@@ -69,6 +69,17 @@ class _ConnectionsPageState extends State<ConnectionsPage>
   /// but only the row that was pressed shows it: the rest stay as they are,
   /// and a press on them while this one settles simply does nothing.
   String? pendingRow;
+
+  /// The account this client just turned on or off, and which way.
+  ///
+  /// `connection/set-enabled` is a boolean this client chose and sent, and the
+  /// pill and the dot read it straight off the account, so the row says it at
+  /// once rather than a round trip later. Nothing else here is the client's to
+  /// say: a key has to be checked, a door has to be opened, a disconnection
+  /// has a `revoking` state of the authority's own — those wait for the read.
+  String? toggledConnection;
+  bool toggledOn = false;
+
   String? loadFailure;
   String? notice;
   int commands = 0;
@@ -149,9 +160,15 @@ class _ConnectionsPageState extends State<ConnectionsPage>
   /// refused. `row` is the row that was pressed, the one that shows the wait.
   Future<void> _send(Map<String, Object?> command, String row) async {
     if (pendingRow != null) return;
+    final input = ((command['input'] as Map?) ?? const {})
+        .cast<String, Object?>();
     setState(() {
       pendingRow = row;
       notice = null;
+      if (input['kind'] == 'set-enabled') {
+        toggledConnection = input['connectionId'] as String?;
+        toggledOn = input['enabled'] == true;
+      }
     });
     try {
       if (connectionActionKindV1(command) == 'authorize') {
@@ -161,17 +178,26 @@ class _ConnectionsPageState extends State<ConnectionsPage>
         await widget.api.request(request.path, body: request.body);
       }
     } on FormatException catch (error) {
-      if (mounted) setState(() => notice = error.message);
+      if (mounted) {
+        setState(() {
+          notice = error.message;
+          toggledConnection = null;
+        });
+      }
     } catch (_) {
       if (mounted) {
-        setState(
-          () => notice =
-              'That didn’t go through. Check your connection and try again.',
-        );
+        setState(() {
+          notice =
+              'That didn’t go through. Check your connection and try again.';
+          toggledConnection = null;
+        });
       }
     } finally {
       if (mounted) setState(() => pendingRow = null);
       await load();
+      // The read is the authority on what the command did, so what this client
+      // drew for itself stops being drawn the moment that read lands.
+      if (mounted) setState(() => toggledConnection = null);
     }
   }
 
@@ -243,6 +269,11 @@ class _ConnectionsPageState extends State<ConnectionsPage>
           (account) =>
               account['packageId'] as String == packageId &&
               account['connectionTypeId'] as String == connectionTypeId,
+        )
+        .map(
+          (account) => account['id'] == toggledConnection
+              ? {...account, 'state': toggledOn ? 'ready' : 'disabled'}
+              : account,
         )
         .toList();
   }
