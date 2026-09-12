@@ -1870,4 +1870,217 @@ export async function execute() {
       ).quarantined,
     ).toBeUndefined();
   });
+  /**
+   * Seeds one Plugin as the current pinned generation of `userId`, and
+   * answers the generation id so the next proposal can parent itself on it.
+   */
+  async function seedPlugin(
+    identity: { userId: string; botId: string },
+    parentGenerationId: string,
+    createdAt: string,
+    pluginId: string,
+    source: string,
+    descriptor: ReturnType<typeof decodePluginDescriptorV1>,
+  ): Promise<string> {
+    const contentHash = await sha256Hex(source);
+    await env.APPLICATION_ARTIFACTS.put(`packages/${contentHash}.mjs`, source);
+    const members: CompositionMemberV1[] = [
+      {
+        packageId: pluginId,
+        version: "0.0.1",
+        descriptor,
+        provenance: {
+          kind: "bot",
+          packageId: pluginId,
+          version: "0.0.1",
+          botId: identity.botId,
+          sessionId: `${identity.userId}:${identity.botId}`,
+          turnId: "run-0",
+          runId: "run-0",
+          authoredAt: createdAt,
+        },
+        artifact: {
+          contentHash,
+          size: source.length,
+          mediaType: "application/javascript",
+          bundlerVersion: "probe-seed",
+        },
+      },
+    ];
+    const artifactSetHash = await compositionArtifactSetHashV1(members);
+    const generationId = compositionGenerationIdV1(createdAt, artifactSetHash);
+    await user(identity.userId).proposeComposition({
+      schemaVersion: 1,
+      userId: identity.userId,
+      generation: {
+        schemaVersion: 1,
+        generationId,
+        artifactSetHash,
+        parentGenerationId,
+        createdAt,
+        origin: {
+          kind: "bot-authored",
+          runId: "run-0",
+          sessionId: `${identity.userId}:${identity.botId}`,
+          turnId: "run-0",
+        },
+        members,
+        status: "pending",
+      },
+      pin: true,
+      expectedCurrentGenerationId: parentGenerationId,
+    });
+    return generationId;
+  }
+
+  const NOOP_SOURCE = `
+export const tools = [
+  { name: "steady_noop", description: "Does nothing", inputSchema: {}, idempotent: true },
+];
+export async function execute() {
+  return "ok";
+}
+`;
+  const THROWING_SOURCE = `
+export const tools = [
+  { name: "steady_noop", description: "Does nothing", inputSchema: {}, idempotent: true },
+];
+export const hooks = {
+  "agent/tool-exposure": async function () {
+    throw new Error("the hook exploded");
+  },
+};
+export async function execute() {
+  return "ok";
+}
+`;
+  const steadyDescriptor = (contractVersion: number, hooks: string[]) =>
+    decodePluginDescriptorV1({
+      id: "steady",
+      displayName: "Steady",
+      version: "0.0.1",
+      contractVersion,
+      tools: [
+        { name: "steady_noop", description: "Does nothing", inputSchema: {} },
+      ],
+      hooks,
+      grants: [],
+      contextKeys: ["user", "bot", "session"],
+    });
+
+  test("a Plugin built against a retired contract is refused at resolve, noticed, and turned off at three", async () => {
+    const userId = `user-${crypto.randomUUID()}`;
+    const identity = { userId, botId: "bot-1" };
+    await provisionBot(identity);
+    await turn(identity, "run-0");
+    const bootstrap = (
+      await user(userId).readComposition({ schemaVersion: 1, userId })
+    ).current;
+    await seedPlugin(
+      identity,
+      bootstrap.generationId,
+      "2026-09-12T05:00:00.000Z",
+      "steady",
+      NOOP_SOURCE,
+      // Contract 2: two majors behind what this deployment serves.
+      steadyDescriptor(2, []),
+    );
+    await switchPlugin(identity, "steady", true);
+
+    const enabledFlag = async () =>
+      (
+        await bot(identity).readPluginEnablement({
+          schemaVersion: 1,
+          ...identity,
+        })
+      ).enabled.steady;
+    const notices = async () =>
+      await bot(identity).listNotifications({ schemaVersion: 1, ...identity });
+
+    await turn(identity, "run-1");
+    const skipped = (await notices()).filter(
+      (notice) => notice.title === "A plugin was skipped",
+    );
+    expect(skipped).toHaveLength(1);
+    expect(skipped[0]?.body).toContain("could not be admitted");
+    expect(skipped[0]?.body).toContain("no longer serves");
+    expect(await enabledFlag()).toBe(true);
+
+    await turn(identity, "run-2");
+    expect(await enabledFlag()).toBe(true);
+    await turn(identity, "run-3");
+    expect(await enabledFlag()).toBe(false);
+    expect((await notices()).map((notice) => notice.title)).toContain(
+      "A plugin was turned off",
+    );
+    const page = await bot(identity).readBotPluginsFrame({
+      schemaVersion: 1,
+      ...identity,
+    });
+    const row = page.plugins.find(
+      (candidate) => candidate.pluginId === "steady",
+    ) as { on: boolean; quarantined?: string } | undefined;
+    expect(row).toMatchObject({ on: false });
+    expect(row?.quarantined).toContain("Turned off after 3 Turns in a row");
+  });
+
+  test("a Turn the Plugin ran clean settles its record, so failing Turns must be in a row to turn it off", async () => {
+    const userId = `user-${crypto.randomUUID()}`;
+    const identity = { userId, botId: "bot-1" };
+    await provisionBot(identity);
+    await turn(identity, "run-0");
+    const bootstrap = (
+      await user(userId).readComposition({ schemaVersion: 1, userId })
+    ).current;
+    const broken = await seedPlugin(
+      identity,
+      bootstrap.generationId,
+      "2026-09-12T06:00:00.000Z",
+      "steady",
+      THROWING_SOURCE,
+      steadyDescriptor(4, ["agent/tool-exposure"]),
+    );
+    await switchPlugin(identity, "steady", true);
+
+    const enabledFlag = async () =>
+      (
+        await bot(identity).readPluginEnablement({
+          schemaVersion: 1,
+          ...identity,
+        })
+      ).enabled.steady;
+
+    // Two failing Turns, then a Turn the Plugin runs clean, then two more
+    // failing Turns: five failing-or-not Turns, never three in a row.
+    await turn(identity, "run-1");
+    await turn(identity, "run-2");
+    expect(await enabledFlag()).toBe(true);
+    const healed = await seedPlugin(
+      identity,
+      broken,
+      "2026-09-12T06:10:00.000Z",
+      "steady",
+      NOOP_SOURCE,
+      steadyDescriptor(4, []),
+    );
+    await turn(identity, "run-3");
+    await seedPlugin(
+      identity,
+      healed,
+      "2026-09-12T06:20:00.000Z",
+      "steady",
+      THROWING_SOURCE,
+      steadyDescriptor(4, ["agent/tool-exposure"]),
+    );
+    await turn(identity, "run-4");
+    await turn(identity, "run-5");
+    expect(await enabledFlag()).toBe(true);
+    const page = await bot(identity).readBotPluginsFrame({
+      schemaVersion: 1,
+      ...identity,
+    });
+    expect(
+      page.plugins.find((candidate) => candidate.pluginId === "steady"),
+    ).toMatchObject({ on: true });
+  });
 });
