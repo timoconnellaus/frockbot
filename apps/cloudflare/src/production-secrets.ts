@@ -120,11 +120,11 @@ export const REQUIRED_PRODUCTION_SECRETS_V1: readonly ProductionSecretV1[] = [
   },
   {
     name: "OPENAI_API_KEY",
-    why: "Opens every realtime transcription session: the composer's dictation and the voice session's listening. Absent, both answer that voice is not set up.",
+    why: "Opens the composer's dictation session, and the voice session's listening when VOICE_ASSISTANT_STT=openai. Absent, dictation answers that voice is not set up.",
   },
   {
     name: "ELEVENLABS_API_KEY",
-    why: "Speaks the account-wide voice session's replies. Absent, the voice session refuses to start.",
+    why: "Hears and speaks the account-wide voice session: Scribe v2 Realtime listening and Flash v2.5 replies, so it needs speech-to-text as well as text-to-speech permission. Absent, the voice session refuses to start.",
   },
 ];
 

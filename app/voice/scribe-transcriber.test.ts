@@ -4,6 +4,7 @@ import {
   voiceAssistantSttKeyV1,
   voiceAssistantSttProviderV1,
 } from "./scribe-transcriber.js";
+import { VOICE_ASSISTANT_INPUT_SAMPLE_RATE_V1 } from "./shared.js";
 
 describe("the assistant's choice of ears", () => {
   test("listens through Scribe unless told otherwise", () => {
@@ -16,7 +17,10 @@ describe("the assistant's choice of ears", () => {
     ).toBe("scribe");
     expect(
       voiceAssistantSttProviderV1({ VOICE_ASSISTANT_STT: " OpenAI " }),
-    ).toBe("openai");
+    ).toBe("scribe");
+    expect(voiceAssistantSttProviderV1({ VOICE_ASSISTANT_STT: "openai" })).toBe(
+      "openai",
+    );
   });
 
   test("the key follows the provider", () => {
@@ -39,7 +43,9 @@ describe("the assistant's choice of ears", () => {
 
   test("Scribe hears what the clients send and ends a turn on half a second", () => {
     expect(VOICE_ASSISTANT_SCRIBE_OPTIONS_V1.audioFormat).toBe("pcm_16000");
-    expect(VOICE_ASSISTANT_SCRIBE_OPTIONS_V1.sampleRate).toBe(16_000);
+    expect(VOICE_ASSISTANT_SCRIBE_OPTIONS_V1.sampleRate).toBe(
+      VOICE_ASSISTANT_INPUT_SAMPLE_RATE_V1,
+    );
     expect(VOICE_ASSISTANT_SCRIBE_OPTIONS_V1.vadSilenceThresholdSecs).toBe(0.5);
     expect(VOICE_ASSISTANT_SCRIBE_OPTIONS_V1.enableLogging).toBe(false);
   });

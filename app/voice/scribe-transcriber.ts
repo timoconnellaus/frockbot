@@ -10,6 +10,7 @@
 // then sends them all at once. The adapter itself lives in
 // `@cloudflare/voice-elevenlabs`; this module is the assistant's settings for
 // it and the choice between the two providers, kept pure so both are tested.
+import { VOICE_ASSISTANT_INPUT_SAMPLE_RATE_V1 } from "./shared.js";
 
 /** Which provider the assistant listens through. */
 export type VoiceAssistantSttProviderV1 = "scribe" | "openai";
@@ -30,7 +31,7 @@ export const VOICE_ASSISTANT_STT_DEFAULT_PROVIDER_V1: VoiceAssistantSttProviderV
 export const VOICE_ASSISTANT_SCRIBE_OPTIONS_V1 = {
   modelId: "scribe_v2_realtime",
   audioFormat: "pcm_16000",
-  sampleRate: 16_000,
+  sampleRate: VOICE_ASSISTANT_INPUT_SAMPLE_RATE_V1,
   vadSilenceThresholdSecs: 0.5,
   vadThreshold: 0.4,
   minSpeechDurationMs: 100,
@@ -39,7 +40,7 @@ export const VOICE_ASSISTANT_SCRIBE_OPTIONS_V1 = {
 } as const;
 
 export interface VoiceAssistantSttEnvV1 {
-  /** `scribe` (the default) or `openai`; anything else reads as the default. */
+  /** Exactly `openai` listens through OpenAI; anything else is the default. */
   VOICE_ASSISTANT_STT?: string;
   OPENAI_API_KEY?: string;
   ELEVENLABS_API_KEY?: string;
@@ -49,8 +50,7 @@ export interface VoiceAssistantSttEnvV1 {
 export function voiceAssistantSttProviderV1(
   env: Pick<VoiceAssistantSttEnvV1, "VOICE_ASSISTANT_STT">,
 ): VoiceAssistantSttProviderV1 {
-  const asked = env.VOICE_ASSISTANT_STT?.trim().toLowerCase();
-  return asked === "openai"
+  return env.VOICE_ASSISTANT_STT === "openai"
     ? "openai"
     : VOICE_ASSISTANT_STT_DEFAULT_PROVIDER_V1;
 }

@@ -434,24 +434,29 @@ rather than opening a new one. Raw audio is never stored anywhere.
 
 ## Credentials
 
-| Name                           | Where             | Required | What it enables                                                                                                    |
-| ------------------------------ | ----------------- | -------- | ------------------------------------------------------------------------------------------------------------------ |
-| `OPENAI_API_KEY`               | Worker secret     | optional | All listening: composer dictation and the continuous session's STT. Absent: both report that voice is unavailable. |
-| `ELEVENLABS_API_KEY`           | Worker secret     | optional | The continuous voice session's speech. Absent: starting a session reports that voice is unavailable.               |
-| `ELEVENLABS_VOICE_ID`          | Worker var        | optional | Voice id; default is ElevenLabs "George" (`JBFqnCBsd6RMkjVDRZzb`).                                                 |
-| `VOICE_DICTATION_UPSTREAM_URL` | test harness only | —        | Points dictation at a local fake; never set in production.                                                         |
+| Name                           | Where             | Required | What it enables                                                                                                                                                                                     |
+| ------------------------------ | ----------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `OPENAI_API_KEY`               | Worker secret     | optional | Composer dictation, and the continuous session's STT only when `VOICE_ASSISTANT_STT=openai`. Absent: dictation reports that voice is unavailable.                                                   |
+| `ELEVENLABS_API_KEY`           | Worker secret     | optional | The continuous voice session's ears (Scribe v2 Realtime) and speech, so it needs speech-to-text as well as text-to-speech permission. Absent: starting a session reports that voice is unavailable. |
+| `VOICE_ASSISTANT_STT`          | Worker var        | optional | `openai` listens through `gpt-transcribe`; anything else (and unset) is Scribe.                                                                                                                     |
+| `ELEVENLABS_VOICE_ID`          | Worker var        | optional | Voice id; default is ElevenLabs "George" (`JBFqnCBsd6RMkjVDRZzb`).                                                                                                                                  |
+| `VOICE_DICTATION_UPSTREAM_URL` | test harness only | —        | Points dictation at a local fake; never set in production.                                                                                                                                          |
 
 Declared in `apps/cloudflare/src/production-secrets.ts`, carried by the release
 workflow, listed in `.dev.vars.example`. The `AI` binding is still required
 for the continuous session — it is the Frock AI gateway transport for the chat
 model — but nothing is transcribed through it any more.
 
-What listening costs, from OpenAI's pricing page on 2026-09-11:
-`gpt-transcribe` is $0.0045 per minute of audio and `gpt-live-transcribe`,
-which dictation needs for its live deltas, is $0.017. The assistant meters
-_awake_ seconds rather than seconds of speech, because a session that is awake
-is being charged whether or not anyone is talking; the 240 min/day cap is
-therefore about $1.08 a day at most.
+What listening costs: from OpenAI's pricing page on 2026-09-11,
+`gpt-live-transcribe`, which dictation needs for its live deltas, is $0.017
+per minute of audio, and `gpt-transcribe` — the assistant's ears only under
+`VOICE_ASSISTANT_STT=openai` — is $0.0045, which puts the assistant's
+240 min/day cap at about $1.08 a day through that path. By default the
+assistant's listening bills ElevenLabs for Scribe v2 Realtime instead; that
+rate is not recorded here, so size the cap against the ElevenLabs plan's
+realtime speech-to-text price. The assistant meters _awake_ seconds rather
+than seconds of speech, because a session that is awake is being charged
+whether or not anyone is talking.
 
 ## Clients
 
