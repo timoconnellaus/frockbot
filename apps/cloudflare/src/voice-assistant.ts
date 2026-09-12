@@ -737,6 +737,10 @@ export class VoiceAssistant extends VoiceAgentBase<
     const now = this.now();
     const cap = await ledger.exceededCap(now);
     if (cap === "ttsCharacters") {
+      this.trace(connection, "speech-suppressed", {
+        cap,
+        chars: text.length,
+      });
       if (call && !call.quotaSaid) {
         call.quotaSaid = true;
         this.refuse(

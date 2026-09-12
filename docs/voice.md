@@ -279,8 +279,10 @@ SDK started listening with no call record, so nothing was booked), `utterance`
 `turn-dropped` (a transcript arrived with no identity or no call record and was
 never given to the model — the reason says which), `turn-settled` (the outcome,
 the delegation count and the answer's length, or a failure classification —
-never a provider's error sentence), `refused` (with the code and sentence the
-client was sent), `stt-failed`, `call-ended` and `closed` (the client's code
+never a provider's error sentence), `speech-suppressed` (the speech allowance is
+used up, so a sentence of the reply was never turned into audio — the cap and
+the sentence's length, never its words), `refused` (with the code and sentence
+the client was sent), `stt-failed`, `call-ended` and `closed` (the client's code
 and reason). Every line carries the connection id, the device key and, once
 admitted, the call id and elapsed milliseconds. A call that reaches
 `listening` and then `closed` with no `utterance` in between was ended by the
