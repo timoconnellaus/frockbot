@@ -415,11 +415,16 @@ async function composioStub(request: Request, url: URL): Promise<Response> {
     }
     const id = `ca_${++composioAccountCounter}`;
     composioAccounts.set(id, { toolkit, status: "INITIATED" });
+    // The sign-in the provider hands back carries the callback it was given,
+    // so a suite in workerd can see the return page the gateway named without
+    // reaching into this Node-side stub's state.
+    const redirect = new URL(`https://connect.example.test/${id}`);
+    redirect.searchParams.set("callback", body.callback_url);
     return Response.json(
       {
         link_token: `lt_${id}`,
         connected_account_id: id,
-        redirect_url: `https://connect.example.test/${id}`,
+        redirect_url: redirect.toString(),
         expires_at: new Date(Date.now() + 600_000).toISOString(),
       },
       { status: 201 },
