@@ -27,7 +27,10 @@ import {
   type IsolateToolResultV1,
 } from "./isolate.js";
 import type { BotIsolateHookEventNameV1 } from "./loop-events.js";
-import type { PluginServiceV1 } from "./plugin-descriptor.js";
+import {
+  servedPluginContractVersionsV1,
+  type PluginServiceV1,
+} from "./plugin-descriptor.js";
 
 const PLUGIN_ID = /^[a-z][a-z0-9-]{0,63}$/;
 const PLUGIN_TRIGGER_NAME = /^[a-z][a-z0-9_-]{0,63}$/;
@@ -37,17 +40,22 @@ const MAX_TRIGGER_HEADERS_V1 = 64;
 const MAX_TRIGGER_HEADER_BYTES_V1 = 8_192;
 export const MAX_TRIGGER_BODY_BYTES_V1 = 1_000_000;
 
-/** One Plugin's artifact in the worker's module set. */
+/** One Plugin's artifact and identity in the worker's module set. */
 export interface PluginWorkerMemberV1 {
   pluginId: string;
   contentHash: string;
+  /** The grants `env.IDENTITY` carries for this Plugin. */
+  grants: readonly string[];
+  /** The service names `env.IDENTITY` carries for this Plugin. */
+  consumes: readonly string[];
 }
 
 /**
  * The module-set hash the loader id is derived from. A reused loader id
  * silently serves the first code and `env`, so it covers everything the load
  * depends on: the contract the wrapper speaks, the generated index's own
- * version, every artifact by content in mount order, and the digest of the
+ * version, every artifact by content in mount order, each Plugin's grants and
+ * consumed services as `env.IDENTITY` carries them, and the digest of the
  * bindings baked into `env`. Mount order is part of the load: the index
  * imports and `IDENTITY.plugins` follow it, and it decides which Plugin
  * provides a service to which and how the hook chain runs. A deploy that
@@ -62,6 +70,8 @@ export async function pluginWorkerModuleSetHashV1(input: {
   const members = input.members.map((member) => ({
     pluginId: boundedString(member.pluginId, "plugin worker member id", 64),
     contentHash: hex(member.contentHash, "plugin worker member hash"),
+    grants: canonicalNames(member.grants, "plugin worker member grants"),
+    consumes: canonicalNames(member.consumes, "plugin worker member consumes"),
   }));
   if (
     new Set(members.map((member) => member.pluginId)).size !== members.length
@@ -80,6 +90,16 @@ export async function pluginWorkerModuleSetHashV1(input: {
       bindingDigest: hex(input.bindingDigest, "plugin worker binding digest"),
     }),
   );
+}
+
+/** A member's declared names, ordered so only the set itself moves the hash. */
+function canonicalNames(values: readonly string[], label: string): string[] {
+  if (!Array.isArray(values) || values.length > 64) {
+    throw new Error(`${label} must be a bounded array`);
+  }
+  return values
+    .map((value, index) => boundedString(value, `${label}[${index}]`, 64))
+    .toSorted();
 }
 
 export function pluginWorkerLoaderIdV1(input: {
@@ -290,6 +310,9 @@ export function decodePluginWorkerHealthV1(
     value.contractVersion,
     label,
   );
+  if (!servedPluginContractVersionsV1().includes(contractVersion)) {
+    throw new Error(`${label}.contractVersion is no longer served`);
+  }
   // A report entry is decoded on its own so a single Plugin that reports
   // something out of bounds fails only itself: it becomes a not-ok entry
   // carrying the decode error, which the host charges to that Plugin at
@@ -354,16 +377,7 @@ function decodePluginHealthEntryV1(
   const plugin = record(entry, itemLabel);
   exactKeys(
     plugin,
-    [
-      "pluginId",
-      "ok",
-      "tools",
-      // Hooks are a contract-3 capability; an older worker does not name them.
-      ...(contractVersion >= 3 ? ["hooks"] : []),
-      "provides",
-      "consumes",
-      "triggers",
-    ],
+    ["pluginId", "ok", "tools", "hooks", "provides", "consumes", "triggers"],
     itemLabel,
     ["reason"],
   );
@@ -382,7 +396,7 @@ function decodePluginHealthEntryV1(
       packageId: plugin.pluginId,
       contractVersion,
       tools: plugin.tools,
-      ...(contractVersion >= 3 ? { hooks: plugin.hooks } : {}),
+      hooks: plugin.hooks,
     },
     itemLabel,
   );

@@ -202,6 +202,16 @@ interface ResolvedPlugin {
   source: string;
 }
 
+function pluginIdentityV1(member: BotIsolateMemberV1): {
+  grants: string[];
+  consumes: string[];
+} {
+  return {
+    grants: [...member.descriptor.grants],
+    consumes: (member.descriptor.consumes ?? []).map((service) => service.name),
+  };
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -426,6 +436,7 @@ export class PluginWorkerHost {
         members: resolved.map(({ member }) => ({
           pluginId: member.packageId,
           contentHash: member.artifact.contentHash,
+          ...pluginIdentityV1(member),
         })),
         bindingDigest: this.options.bindingDigest,
       }),
@@ -576,7 +587,8 @@ export class PluginWorkerHost {
                 () => entrypoint.receiveTrigger(invocation),
                 invocation.deadlineMs,
               );
-              const oversized = firedTextLength(raw) > MAX_TRIGGER_BODY_BYTES_V1;
+              const oversized =
+                firedTextLength(raw) > MAX_TRIGGER_BODY_BYTES_V1;
               if (oversized) {
                 return droppedTrigger(
                   invocation.pluginId,
@@ -688,10 +700,7 @@ export class PluginWorkerHost {
       generationId: this.options.generationId,
       plugins: resolved.map(({ member }) => ({
         pluginId: member.packageId,
-        grants: [...member.descriptor.grants],
-        consumes: (member.descriptor.consumes ?? []).map(
-          (service) => service.name,
-        ),
+        ...pluginIdentityV1(member),
       })),
     };
     return this.options.loader.get(loaderId, () =>

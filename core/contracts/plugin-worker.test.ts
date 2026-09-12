@@ -13,25 +13,31 @@ import {
 const HASH_A = "a".repeat(64);
 const HASH_B = "b".repeat(64);
 const DIGEST = "c".repeat(64);
+const MEMBER_A = {
+  pluginId: "weather",
+  contentHash: HASH_A,
+  grants: ["workspace.read"],
+  consumes: [],
+};
+const MEMBER_B = {
+  pluginId: "greeter",
+  contentHash: HASH_B,
+  grants: [],
+  consumes: ["weather-data"],
+};
 
 describe("the plugin worker's identity", () => {
   test("hashes the same module set differently when the mount order differs", async () => {
     const forward = await pluginWorkerModuleSetHashV1({
       contractVersion: 3,
       indexVersion: "index-v1",
-      members: [
-        { pluginId: "weather", contentHash: HASH_A },
-        { pluginId: "greeter", contentHash: HASH_B },
-      ],
+      members: [MEMBER_A, MEMBER_B],
       bindingDigest: DIGEST,
     });
     const reversed = await pluginWorkerModuleSetHashV1({
       contractVersion: 3,
       indexVersion: "index-v1",
-      members: [
-        { pluginId: "greeter", contentHash: HASH_B },
-        { pluginId: "weather", contentHash: HASH_A },
-      ],
+      members: [MEMBER_B, MEMBER_A],
       bindingDigest: DIGEST,
     });
     expect(forward).not.toBe(reversed);
@@ -43,14 +49,16 @@ describe("the plugin worker's identity", () => {
     const base = {
       contractVersion: 3 as const,
       indexVersion: "index-v1",
-      members: [{ pluginId: "weather", contentHash: HASH_A }],
+      members: [MEMBER_A],
       bindingDigest: DIGEST,
     };
     const reference = await pluginWorkerModuleSetHashV1(base);
     for (const variant of [
       { ...base, contractVersion: 2 as const },
       { ...base, indexVersion: "index-v2" },
-      { ...base, members: [{ pluginId: "weather", contentHash: HASH_B }] },
+      { ...base, members: [{ ...MEMBER_A, contentHash: HASH_B }] },
+      { ...base, members: [{ ...MEMBER_A, grants: ["workspace.write"] }] },
+      { ...base, members: [{ ...MEMBER_A, consumes: ["weather-data"] }] },
       { ...base, bindingDigest: "d".repeat(64) },
       { ...base, members: [] },
     ]) {
@@ -63,10 +71,7 @@ describe("the plugin worker's identity", () => {
       pluginWorkerModuleSetHashV1({
         contractVersion: 3,
         indexVersion: "index-v1",
-        members: [
-          { pluginId: "weather", contentHash: HASH_A },
-          { pluginId: "weather", contentHash: HASH_B },
-        ],
+        members: [MEMBER_A, { ...MEMBER_A, contentHash: HASH_B }],
         bindingDigest: DIGEST,
       }),
     ).rejects.toThrow(/duplicate/);
@@ -74,7 +79,7 @@ describe("the plugin worker's identity", () => {
       pluginWorkerModuleSetHashV1({
         contractVersion: 3,
         indexVersion: "index-v1",
-        members: [{ pluginId: "weather", contentHash: "not hex" }],
+        members: [{ ...MEMBER_A, contentHash: "not hex" }],
         bindingDigest: DIGEST,
       }),
     ).rejects.toThrow(/hex/);
@@ -158,20 +163,23 @@ describe("plugin worker health", () => {
     ).toThrow(/contractVersion/);
   });
 
-  test("a worker on the previous contract reports health without hooks", () => {
-    const { hooks: _hooks, ...hooklessPlugin } = healthyPlugin;
-    const health = decodePluginWorkerHealthV1({
-      schemaVersion: 1,
-      contractVersion: 2,
-      plugins: [hooklessPlugin],
-    });
-    expect(health.contractVersion).toBe(2);
-    expect(health.plugins[0]!.hooks).toEqual([]);
-    expect(
+  test("refuses a report from a contract this deployment no longer serves", () => {
+    expect(() =>
       decodePluginWorkerHealthV1({
         schemaVersion: 1,
         contractVersion: 2,
         plugins: [healthyPlugin],
+      }),
+    ).toThrow(/no longer served/);
+  });
+
+  test("a plugin that names no hooks fails only itself", () => {
+    const { hooks: _hooks, ...hooklessPlugin } = healthyPlugin;
+    expect(
+      decodePluginWorkerHealthV1({
+        schemaVersion: 1,
+        contractVersion: 3,
+        plugins: [hooklessPlugin],
       }).plugins[0],
     ).toMatchObject({
       ok: false,
