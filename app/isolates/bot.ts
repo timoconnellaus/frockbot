@@ -680,9 +680,11 @@ function activeIsolateTurn(
     active.sessionId !== input.sessionId ||
     active.turnId !== input.turnId ||
     active.generationId !== input.generationId ||
-    !active.mounted.generation.members.some(
-      (member) => member.packageId === input.packageId && member.artifact,
-    )
+    input.packageId !== PLUGIN_WORKER_PACKAGE_ID ||
+    // Every capability call arrives from the one Plugin worker the Turn
+    // mounted, under the shared attribution id, so the gate is that this
+    // generation put at least one Plugin in that worker.
+    !active.mounted.generation.members.some((member) => member.artifact)
   ) {
     return undefined;
   }

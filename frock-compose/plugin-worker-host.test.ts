@@ -500,6 +500,49 @@ describe("what the worker reports at mount", () => {
     expect(subject.namespaces).toEqual(["weather", "absent"]);
   });
 
+  test("a consumer is excluded when its provider fails health", async () => {
+    const subject = harness({
+      health: (plugins) => ({
+        schemaVersion: 1,
+        contractVersion: ISOLATE_CONTRACT_VERSION,
+        plugins: plugins.map((pluginId) =>
+          pluginId === "weather"
+            ? healthy(pluginId, {
+                ok: false,
+                reason: 'plugin "weather" must export an "execute" function',
+                tools: [],
+              })
+            : healthy(pluginId, {
+                consumes:
+                  pluginId === "greeter"
+                    ? [{ name: "weather-data", version: 1 }]
+                    : [],
+              }),
+        ),
+      }),
+    });
+    const prepared = await subject.host.mount([
+      member("weather", { provides: [{ name: "weather-data", version: 1 }] }),
+      member("greeter", {
+        consumes: [{ name: "weather-data", version: 1 }],
+        contentHash: "c".repeat(64),
+      }),
+      member("unrelated", { contentHash: "d".repeat(64) }),
+    ]);
+    expect(prepared.mounted).toEqual(["unrelated"]);
+    expect(
+      prepared.failures.map((failure) => [failure.pluginId, failure.phase]),
+    ).toEqual([
+      ["weather", "health"],
+      ["greeter", "resolve"],
+    ]);
+    expect(prepared.failures[1]!.message).toMatch(
+      /consumes "weather-data", which "weather" did not mount/,
+    );
+    await (await prepared.commit()).dispose();
+    expect(subject.namespaces).toEqual(["unrelated"]);
+  });
+
   test("a report missing a plugin, or speaking another contract, is refused", async () => {
     const missing = harness({
       health: () => ({

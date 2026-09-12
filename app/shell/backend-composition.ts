@@ -22,6 +22,7 @@ import {
 import {
   PluginWorkerHost,
   type ActivePluginWorker,
+  type PluginMountFailureV1,
   type BotIsolateArtifactStore,
   type BotIsolateLimits,
   type BotIsolateLoader,
@@ -49,6 +50,12 @@ export function bootstrapCompositionGeneration(
 
 export interface ShellMountedComposition extends MountedComposition {
   readonly runtime: FoundationRuntime;
+  /**
+   * The Plugins this generation named that the worker refused, each with the
+   * phase it failed at. A Plugin fails alone: the generation stays active and
+   * its siblings stay mounted, so these never reach `verify()`.
+   */
+  readonly pluginFailures: readonly PluginMountFailureV1[];
 }
 
 /** Everything the Bot Durable Object supplies for isolate members. */
@@ -177,6 +184,7 @@ export function createShellCompositionHost(
       });
       const active: ActivePluginWorker[] = [];
       const failures: MemberVerificationFailure[] = [];
+      const pluginFailures: PluginMountFailureV1[] = [];
       if (generation.members.length > 0) {
         if (!options.isolate) {
           failures.push({
@@ -224,9 +232,7 @@ export function createShellCompositionHost(
             });
             // Mount and health-check are one guarded phase (Worker Loader spike).
             const prepared = await host.mount(generation.members);
-            for (const failure of prepared.failures) {
-              failures.push({ phase: failure.phase, message: failure.message });
-            }
+            pluginFailures.push(...prepared.failures);
             active.push(await prepared.commit());
           } catch (error) {
             failures.push(memberFailure(error));
@@ -289,6 +295,7 @@ export function createShellCompositionHost(
       return {
         generation,
         runtime,
+        pluginFailures,
         // A member that failed to resolve, mount, or answer `health()`
         // surfaces here, carrying the load site it failed at so
         // `activateCompositionV1` records the phase rather than guessing it.

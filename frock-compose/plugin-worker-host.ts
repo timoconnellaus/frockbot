@@ -436,14 +436,46 @@ export class PluginWorkerHost {
       verified.push({ member, health: reported! });
     }
 
+    // A Plugin excluded at `health` still has its module in the index, so a
+    // consumer mounted after it would be handed its services. Drop those
+    // consumers too, naming the provider that did not survive; mount order
+    // already puts every provider ahead of its consumers.
+    const providerOf = new Map<string, string>();
+    for (const member of ordered.order) {
+      for (const service of member.descriptor.provides ?? []) {
+        providerOf.set(service.name, member.packageId);
+      }
+    }
+    const enabled: typeof verified = [];
+    const live = new Set<string>();
+    for (const entry of verified) {
+      const pluginId = entry.member.packageId;
+      const broken = (entry.member.descriptor.consumes ?? []).find(
+        (service) => {
+          const provider = providerOf.get(service.name);
+          return provider === undefined || !live.has(provider);
+        },
+      );
+      if (broken) {
+        failures.push({
+          pluginId,
+          phase: "resolve",
+          message: `plugin "${pluginId}" consumes "${broken.name}", which "${providerOf.get(broken.name) ?? "no plugin"}" did not mount`,
+        });
+        continue;
+      }
+      live.add(pluginId);
+      enabled.push(entry);
+    }
+
     let disposed = false;
     const registered: (() => void)[] = [];
-    const mounted = verified.map(({ member }) => member.packageId);
+    const mounted = enabled.map(({ member }) => member.packageId);
     return {
       mounted,
       failures,
       commit: (): Promise<ActivePluginWorker> => {
-        for (const { member, health: plugin } of verified) {
+        for (const { member, health: plugin } of enabled) {
           registered.push(
             this.options.tools.registerNamespace({
               name: member.packageId,
@@ -463,7 +495,7 @@ export class PluginWorkerHost {
           }
         }
         const declaring = new Map<BotIsolateHookEventNameV1, string[]>();
-        for (const { member, health: plugin } of verified) {
+        for (const { member, health: plugin } of enabled) {
           for (const event of plugin.hooks) {
             declaring.set(event, [
               ...(declaring.get(event) ?? []),
