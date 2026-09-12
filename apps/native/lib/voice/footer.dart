@@ -27,7 +27,7 @@ class VoiceFooter extends StatefulWidget {
 }
 
 class _VoiceFooterState extends State<VoiceFooter> {
-  late (bool, String?, VoiceSessionPhase) _presentation;
+  late (bool, String?, String?, VoiceSessionPhase) _presentation;
 
   @override
   void initState() {
@@ -36,8 +36,12 @@ class _VoiceFooterState extends State<VoiceFooter> {
     widget.session.addListener(_changed);
   }
 
-  (bool, String?, VoiceSessionPhase) _readPresentation() =>
-      (widget.session.muted, widget.session.error, widget.session.phase);
+  (bool, String?, String?, VoiceSessionPhase) _readPresentation() => (
+    widget.session.muted,
+    widget.session.error,
+    widget.session.notice,
+    widget.session.phase,
+  );
 
   void _changed() {
     final next = _readPresentation();
@@ -66,6 +70,9 @@ class _VoiceFooterState extends State<VoiceFooter> {
     final theme = Theme.of(context);
     final session = widget.session;
     final failure = session.error;
+    // A failure ends the call and takes the stage for good; a notice borrows
+    // it for a few seconds while the call goes on, controls and all.
+    final text = failure ?? session.notice;
     return identified(
       VoiceIds.footer,
       Material(
@@ -79,7 +86,7 @@ class _VoiceFooterState extends State<VoiceFooter> {
             child: Stack(
               children: [
                 Positioned.fill(
-                  child: failure == null
+                  child: text == null
                       ? _stage()
                       : Padding(
                           padding: const EdgeInsets.fromLTRB(24, 16, 96, 16),
@@ -87,7 +94,7 @@ class _VoiceFooterState extends State<VoiceFooter> {
                             child: Semantics(
                               liveRegion: true,
                               child: Text(
-                                failure,
+                                text,
                                 maxLines: 2,
                                 overflow: TextOverflow.ellipsis,
                                 style: theme.textTheme.bodySmall?.copyWith(

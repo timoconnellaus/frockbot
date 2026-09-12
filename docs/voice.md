@@ -200,12 +200,35 @@ Two detectors, both stop playback:
 - Server: the upstream's `input_audio_buffer.speech_started` — its own VAD
   hearing someone — aborts the reply and sends `playback_interrupt`.
 - Client: the local energy gate sees a sustained onset (stricter than the
-  wake onset) while `status` is `speaking` → stop the speaker immediately and
-  send `{type:"interrupt"}`. Background noise below the adapted floor does not
-  trip it; this is an energy heuristic, not verified speech detection.
+  wake onset) while the reply is playing (`status` is `speaking`, or the
+  speaker still has audio after the server moved on) → stop the speaker
+  immediately and send `{type:"interrupt"}`. Background noise below the
+  adapted floor does not trip it; this is an energy heuristic, not verified
+  speech detection.
+
+While the reply plays the client sends **silent** frames at the usual cadence
+and holds the last 500 ms of real audio, so the upstream's detector never
+hears the speaker's own echo and takes it for the person. On a client barge-in
+the interrupt goes first, then the held audio, then live frames — so the
+server's `speech-started` follows the client's `interrupted`, and the person's
+words are transcribed from their first syllable.
 
 An interrupt stops audio and the assistant's own reply. It never cancels a Bot
 Turn the assistant already delegated: that work is durable in the Bot.
+
+### A reply that fails
+
+A turn that produces no text, or a sentence the speech provider answers with
+nothing (a refused key, a spent quota), reaches the client as the SDK's
+`{type:"error",message}` followed by `status: listening`. The server is still
+listening, so the client shows the sentence on the footer for four seconds and
+keeps the call; it does **not** hang up. The provider is wrapped so that a
+sentence with no audio throws rather than returns (`app/voice/tts-guard.ts`);
+without that the turn settles as answered and the silence has no record.
+
+A Bot answer that settles while a reply is being produced or, for six seconds
+after, still being heard is held rather than read out over it (`speak` would
+abort the reply in flight); it is read out once that window has passed.
 
 ### Sleep and wake (cost control)
 
@@ -219,9 +242,10 @@ policy:
   onset that needs several consecutive loud frames, and a 500 ms pre-roll
   ring. It is an energy gate, not verified speech detection; it decides only
   when to **wake** a sleeping upstream and when to **barge in**.
-- While the upstream is awake the client sends **every** frame, speech and
-  silence alike, through pauses inside a sentence and while the assistant is
-  thinking or speaking. Turn boundaries are the server's to find.
+- While the upstream is awake the client sends a frame every 40 ms, speech
+  and silence alike, through pauses inside a sentence and while the assistant
+  is thinking. While the reply plays the frames are silent ones (see
+  Barge-in). Turn boundaries are the server's to find.
 - When `status` is `listening` (no reply in flight) and the gate has been
   closed for **20 s** continuously, the client stops sending frames and sends
   `{type:"voice/sleep",schemaVersion:1}`. The server closes the upstream STT
@@ -282,20 +306,29 @@ was not the account's and was closed with `4403`), `call-admitted`, `upstream`
 SDK started listening with no call record, so nothing was booked), `utterance`
 (length and whether it reached the model, never the words), `turn`,
 `turn-dropped` (a transcript arrived with no identity or no call record and was
-never given to the model — the reason says which), `turn-settled` (the outcome,
-the delegation count and the answer's length, or a failure classification —
-never a provider's error sentence), `speech-suppressed` (the speech allowance is
-used up, so a sentence of the reply was never turned into audio — the cap and
-the sentence's length, never its words), `refused` (with the code and sentence
-the client was sent), `stt-failed`, `speech-started` (the transcription
-service's own voice detector heard someone), `interrupted` (the SDK stopped
-the reply in flight: preceded by `speech-started`, the upstream's detector cut
-it; on its own, the phone's local energy gate sent `interrupt`), `audio` (the
-first synthesized chunk of each sentence reached the socket — the sentence's
-length in characters, the chunk's bytes and the running chunk count; a reply
-with a `turn-settled` but no `audio` never became sound), `call-ended` (with
-the call's total synthesized chunks, bytes and sentences) and `closed` (the
-client's code and reason). Every line carries the connection id, and — once
+never given to the model — the reason says which), `model-first-text` (the
+model's first word, with `ms` since the turn began: everything before it is
+what the person waited through in silence), `turn-settled` (the outcome, the
+delegation count and the answer's length, or a failure classification — never
+a provider's error sentence — and `ms`, the turn's whole model time),
+`speech-suppressed` (the speech allowance is used up, so a sentence of the
+reply was never turned into audio — the cap and the sentence's length, never
+its words), `tts-failed` (the speech provider answered a sentence with no
+audio — the sentence's length; the SDK has told the client and moved on),
+`refused` (with the code and sentence the client was sent), `stt-failed`,
+`speech-started` (the transcription service's own voice detector heard
+someone), `interrupted` (the SDK stopped the reply in flight: preceded by
+`speech-started`, the upstream's detector cut it; on its own, the phone's
+local energy gate sent `interrupt` — and since the phone sends silence while
+the reply plays, a `speech-started` _after_ it is the person's own barge-in
+being heard), `delegation-held` (a Bot answer settled mid-reply and waits for
+it to finish), `audio` (the first synthesized chunk of each sentence reached
+the socket — the sentence's length in characters, the chunk's bytes, the
+running chunk count, the turn and `sinceTurnMs`, how long after the turn began
+this sentence's sound left; the first `audio` of a turn is its time to first
+word; a reply with a `turn-settled` but no `audio` and no `tts-failed` never
+became sound), `call-ended` (with the call's total synthesized chunks, bytes
+and sentences) and `closed` (the client's code and reason). Every line carries the connection id, and — once
 `onConnect` accepted the socket — the device key; `refused-identity` carries
 the device key from the header it just rejected, and the `closed` line for a
 refused socket has none. Once admitted, every line also carries the call id

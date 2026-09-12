@@ -8,6 +8,12 @@
 /// platform would keep talking over the person, so the device queue is torn
 /// down and rebuilt.
 ///
+/// A device that will not set up is tried again a little later rather than
+/// written off for the call: a platform without the plugin (the web build)
+/// keeps failing quietly, while a track that was busy for a moment comes
+/// back. Until it does, what arrives is held — a few seconds of it — so the
+/// first successful setup plays the reply rather than its tail.
+///
 /// [VoicePlayer] is an interface for the same reason the capture is: an
 /// assistant test must run without a speaker.
 library;
@@ -50,15 +56,22 @@ class PcmVoicePlayer extends VoicePlayer {
   /// the level the footer draws is the level being heard.
   static const _feedFrames = 30;
 
+  /// How long after a failed setup the next chunk tries again.
+  static const retryAfter = Duration(seconds: 2);
+
+  /// How much audio is held while the device is not set up: five seconds.
+  static const _heldSeconds = 5;
+
   final ListQueue<Uint8List> _chunks = ListQueue<Uint8List>();
   int _offset = 0;
   int _available = 0;
   int? _carry;
   int _sampleRate = voiceAssistantOutputSampleRateV1;
   bool _configured = false;
+  bool _settingUp = false;
   bool _idle = true;
   bool _closed = false;
-  bool _unavailable = false;
+  DateTime? _retryAt;
   double _level = 0;
 
   @override
@@ -75,19 +88,23 @@ class PcmVoicePlayer extends VoicePlayer {
   }
 
   Future<void> _setUpDevice() async {
-    if (_unavailable) return;
+    if (_settingUp) return;
+    _settingUp = true;
     try {
       if (_configured) await FlutterPcmSound.release();
       FlutterPcmSound.setFeedCallback((_) => _pump());
       await FlutterPcmSound.setup(sampleRate: _sampleRate, channelCount: 1);
       await FlutterPcmSound.setFeedThreshold(_sampleRate ~/ _feedFrames);
       _configured = true;
+      _retryAt = null;
       _idle = true;
     } on Object {
-      // A platform without the plugin (the web build) keeps the call: the
-      // person still speaks and is still heard, they just hear nothing back.
-      _unavailable = true;
+      // The call keeps going: the person still speaks and is still heard.
+      // The next chunk after [retryAfter] tries the device again.
       _configured = false;
+      _retryAt = DateTime.now().add(retryAfter);
+    } finally {
+      _settingUp = false;
     }
   }
 
@@ -110,15 +127,28 @@ class PcmVoicePlayer extends VoicePlayer {
     if (bytes.isEmpty) return;
     _chunks.addLast(bytes);
     _available += bytes.length;
-    if (!_configured && !_unavailable) {
+    if (!_configured) {
+      _dropBeyondHeld();
+      final retryAt = _retryAt;
+      if (retryAt != null && DateTime.now().isBefore(retryAt)) return;
       unawaited(_setUpDevice().then((_) => _pump()));
       return;
     }
     if (_idle) _pump();
   }
 
+  /// Without a device only the newest [_heldSeconds] of audio is kept.
+  void _dropBeyondHeld() {
+    final limit = _sampleRate * 2 * _heldSeconds;
+    while (_available > limit && _chunks.isNotEmpty) {
+      final head = _chunks.removeFirst();
+      _available -= head.length - _offset;
+      _offset = 0;
+    }
+  }
+
   void _pump() {
-    if (_closed || _unavailable || !_configured) return;
+    if (_closed || !_configured) return;
     if (_available <= 0) {
       _idle = true;
       _setLevel(0);
@@ -132,7 +162,7 @@ class PcmVoicePlayer extends VoicePlayer {
         FlutterPcmSound.feed(PcmArrayInt16(bytes: ByteData.sublistView(take))),
       );
     } on Object {
-      _unavailable = true;
+      // This slice is lost; the next feed callback tries the next one.
     }
   }
 
@@ -168,7 +198,7 @@ class PcmVoicePlayer extends VoicePlayer {
     _available = 0;
     _carry = null;
     _setLevel(0);
-    if (!_configured || _unavailable) return;
+    if (!_configured) return;
     await _setUpDevice();
   }
 
@@ -181,7 +211,7 @@ class PcmVoicePlayer extends VoicePlayer {
     _available = 0;
     _carry = null;
     _setLevel(0);
-    if (_configured && !_unavailable) {
+    if (_configured) {
       try {
         await FlutterPcmSound.release();
       } on Object {

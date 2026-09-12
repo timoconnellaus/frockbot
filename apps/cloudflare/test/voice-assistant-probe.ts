@@ -27,6 +27,8 @@ export interface VoiceProbeScript {
   botId?: string;
   /** The whole model reply, so a test can choose its sentences. */
   reply?: string;
+  /** The speech provider answers every sentence with nothing, as a refused key does. */
+  silentTts?: boolean;
 }
 
 function sse(events: unknown[]): ReadableStream<Uint8Array> {
@@ -63,6 +65,9 @@ export interface VoiceTraceLine {
   audioChunks?: number;
   audioBytes?: number;
   sentencesSpoken?: number;
+  turn?: string;
+  ms?: number;
+  sinceTurnMs?: number;
 }
 
 export class WorkerdVoiceAssistant extends VoiceAssistant {
@@ -77,6 +82,11 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
   /** A one-second window, so a cap can bite inside a test's patience. */
   protected override sttWindowSeconds(): number {
     return 1;
+  }
+
+  /** A short drain window, so a held answer is read out inside a test. */
+  protected override replyDrainQuietMs(): number {
+    return 300;
   }
 
   /** Drops the next N dispatches: the intent is durable, the send is lost. */
@@ -124,6 +134,7 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
     return {
       synthesize: async (text: string) => {
         this.#synthesized.push(text);
+        if (this.#script.silentTts) return null;
         // 20 ms of silence at 24 kHz: enough to be a real binary frame.
         return new ArrayBuffer(24_000 * 2 * 0.02);
       },

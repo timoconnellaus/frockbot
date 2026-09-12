@@ -1,14 +1,15 @@
 /// The continuous voice session: the handshake, the meter, and the interrupt.
 ///
-/// The audio policy is the thing under test. An awake upstream gets every
-/// frame — OpenAI's server VAD decides where a turn ends and it needs the
-/// 700 ms of silence after the words (`silence_duration_ms`) to decide it —
-/// and the only thing that stops the audio is twenty
-/// continuous seconds of quiet, or the person muting.
+/// The audio policy is the thing under test. An awake upstream gets a frame
+/// every 40 ms — OpenAI's server VAD decides where a turn ends and it needs
+/// the 700 ms of silence after the words (`silence_duration_ms`) to decide
+/// it — silent frames while the reply plays, and the only thing that stops
+/// the audio is twenty continuous seconds of quiet, or the person muting.
 library;
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/voice/assistant.dart';
@@ -109,7 +110,7 @@ void main() {
     },
   );
 
-  test('an awake upstream gets every frame, pauses and all', () async {
+  test('an awake upstream gets a frame every 40 ms, pauses and all', () async {
     final harness = Harness();
     await harness.live();
     await harness.feed(_speech, 400);
@@ -121,14 +122,114 @@ void main() {
     await harness.feed(_quiet, 3000);
     expect(harness.audioCount, spoken + 75);
 
-    // So does the audio while the assistant thinks and speaks.
+    // So does the audio while the assistant thinks.
     harness.status('thinking');
     await settle();
     await harness.feed(_quiet, 200);
+    expect(harness.audioCount, spoken + 75 + 5);
+    expect(
+      harness.socket.audioMarks.sublist(spoken + 75),
+      everyElement(isNot(0)),
+    );
+
+    // While it speaks the cadence holds but the frames are silent: the
+    // upstream stays awake and its detector never hears the speaker.
     harness.status('speaking');
     await settle();
     await harness.feed(_quiet, 200);
     expect(harness.audioCount, spoken + 75 + 10);
+    final whileSpeaking = harness.socket.binaries.sublist(spoken + 75 + 5);
+    expect(whileSpeaking, everyElement(everyElement(0)));
+    harness.controller.dispose();
+  });
+
+  test('a barge-in sends the held audio first, then the live frames', () async {
+    final harness = Harness();
+    await harness.live();
+    await harness.feed(_quiet, 600);
+    harness.status('speaking');
+    await settle();
+    // Half a second of talking at the strict margin: the first frames go
+    // up as silence while the gate makes up its mind.
+    final before = harness.audioCount;
+    await harness.feed(0.3, 400);
+    expect(harness.player.interrupts, 1);
+    final interruptAt = harness.socket.sent.indexOf(
+      encodeAssistantInterruptV1(),
+    );
+    expect(interruptAt, greaterThan(0));
+    // Everything before the interrupt was silence; everything after it is
+    // the real audio, the held frames leading and no frame repeated.
+    final frames = harness.socket.sent;
+    final silent = frames
+        .sublist(0, interruptAt)
+        .whereType<Uint8List>()
+        .skip(before);
+    expect(silent, everyElement(everyElement(0)));
+    final real = frames.sublist(interruptAt + 1).whereType<Uint8List>();
+    expect(real, isNotEmpty);
+    final marks = [for (final frame in real) frame.first];
+    expect(marks, everyElement(isNot(0)));
+    for (var i = 1; i < marks.length; i++) {
+      expect(marks[i], (marks[i - 1] + 1) % 251, reason: 'frame $i');
+    }
+    // The held frames reach back before the interrupt: the whole 400 ms.
+    expect(marks.length, 10);
+
+    // Once the reply is over, ordinary frames again.
+    harness.status('listening');
+    await settle();
+    final resumed = harness.audioCount;
+    await harness.feed(_speech, 80);
+    expect(harness.audioCount, resumed + 2);
+    expect(harness.socket.audioMarks.sublist(resumed), everyElement(isNot(0)));
+    harness.controller.dispose();
+  });
+
+  test(
+    'the speaker still playing after the server moved on counts as a reply',
+    () async {
+      final harness = Harness();
+      await harness.live();
+      harness.status('speaking');
+      await settle();
+      harness.status('listening');
+      harness.player.level = 0.2;
+      await settle();
+      final before = harness.audioCount;
+      await harness.feed(_quiet, 200);
+      expect(
+        harness.socket.binaries.sublist(before),
+        everyElement(everyElement(0)),
+      );
+      harness.player.level = 0;
+      await settle();
+      final after = harness.audioCount;
+      await harness.feed(_quiet, 80);
+      expect(harness.socket.audioMarks.sublist(after), everyElement(isNot(0)));
+      harness.controller.dispose();
+    },
+  );
+
+  test('a reply that fails is a notice, not the end of the call', () async {
+    final harness = Harness();
+    await harness.live();
+    harness.socket.deliver(
+      jsonEncode({'type': 'error', 'message': 'TTS failed for a sentence'}),
+    );
+    await settle();
+    expect(harness.controller.phase, VoiceSessionPhase.live);
+    expect(harness.controller.error, isNull);
+    expect(harness.controller.notice, contains('didn’t come through'));
+    expect(harness.controller.active, isTrue);
+    expect(harness.socket.closed, isFalse);
+    expect(harness.capture.stops, 0);
+    // The call still hears the person.
+    final before = harness.audioCount;
+    await harness.feed(_speech, 80);
+    expect(harness.audioCount, before + 2);
+    await harness.controller.end(reason: 'end-button');
+    expect(harness.controller.notice, isNull);
     harness.controller.dispose();
   });
 
