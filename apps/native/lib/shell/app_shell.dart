@@ -614,6 +614,24 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       ),
       label: 'Routines',
     );
+    // What this Bot could run, and whether it does: Bot settings, so it sits
+    // beside Routines and Settings rather than under the Profile.
+    slots.register(
+      ShellSlot.rightPanel,
+      'plugins',
+      // Keyed by Bot: the surface binds to the controller it was created
+      // with, so a Bot switch must be a new page rather than a rebuilt one.
+      (context) => PluginsPage(
+        key: ValueKey('plugins-$botId'),
+        api: widget.api,
+        store: widget.store,
+        userId: widget.userId,
+        botId: botId,
+        botName: name,
+        chrome: false,
+      ),
+      label: 'Plugins',
+    );
     appletCanvas?.dispose();
     computer?.dispose();
     appletCanvas = null;
@@ -1014,6 +1032,18 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     final bot = selected;
     final controller = botSettings;
     if (bot == null) return;
+    if (key == 'plugins') {
+      _push(
+        PluginsPage(
+          api: widget.api,
+          store: widget.store,
+          userId: widget.userId,
+          botId: bot.botId.value,
+          botName: _name(bot),
+        ),
+      );
+      return;
+    }
     if (key == 'routines') {
       _push(
         RoutinesView(
@@ -1159,6 +1189,16 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                         ),
                       ),
                 onTap: () => _openPanel('routines'),
+              ),
+            ),
+            const Divider(height: 1),
+            identified(
+              PluginIds.panelToggle,
+              ListTile(
+                leading: const Icon(Icons.extension_outlined),
+                title: const Text('Plugins'),
+                trailing: chevron,
+                onTap: () => _openPanel('plugins'),
               ),
             ),
             if (canvas != null) ...[
@@ -1333,6 +1373,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                             onRoutines: single
                                 ? null
                                 : () => _openPanel('routines'),
+                            onPlugins: single
+                                ? null
+                                : () => _openPanel('plugins'),
                             onTogglePanel: single || rightPanel == null
                                 ? null
                                 : _togglePanel,
@@ -1629,21 +1672,17 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                             ),
                           ),
                         ),
+                        // The account's list: what is installed. A Bot's own
+                        // switches are Bot settings, in the panel beside it.
                         _profileRow(
                           PluginIds.profileEntry,
                           Icons.extension_outlined,
-                          selected == null
-                              ? 'Plugins'
-                              : 'Plugins · ${_name(selected!)}',
+                          'Plugins',
                           () => _push(
                             PluginsPage(
                               api: widget.api,
                               store: widget.store,
                               userId: widget.userId,
-                              botId: selected?.botId.value,
-                              botName: selected == null
-                                  ? null
-                                  : _name(selected!),
                             ),
                           ),
                         ),

@@ -30,6 +30,10 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
   final VoidCallback? onComputer;
   final bool computerRunning;
   final VoidCallback? onRoutines;
+
+  /// The Bot's Plugins: what it could run and whether it does. Bot settings,
+  /// so it is a door beside Routines and never a Profile entry.
+  final VoidCallback? onPlugins;
   final ConnectionState connection;
   final VoidCallback? onApplets;
 
@@ -49,6 +53,7 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
     this.onComputer,
     this.computerRunning = false,
     this.onRoutines,
+    this.onPlugins,
     this.connection = ConnectionState.initializing,
     this.onApplets,
     this.onTogglePanel,
@@ -151,6 +156,11 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
           identified(
             RoutineIds.panelToggle,
             _destination('Routines', ChatIconKind.routines, onRoutines),
+          ),
+        if (onPlugins != null)
+          identified(
+            PluginIds.panelToggle,
+            _destination('Plugins', ChatIconKind.plugins, onPlugins),
           ),
         if (onSettings != null)
           identified(

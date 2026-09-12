@@ -192,7 +192,7 @@ class PluginsController extends ViewSurfaceController {
 /// Enablement only, as on the web. Nothing a Package declares — its accounts,
 /// its credentials, its settings — is edited here: each lives on the surface
 /// that owns what it configures, and a row offers the way there.
-class PluginsPage extends StatelessWidget {
+class PluginsPage extends StatefulWidget {
   final NativeApi api;
   final LocalStore store;
   final String userId;
@@ -202,6 +202,9 @@ class PluginsPage extends StatelessWidget {
   final String? botId;
   final String? botName;
 
+  /// Off inside the panel beside the conversation, which names it already.
+  final bool chrome;
+
   const PluginsPage({
     super.key,
     required this.api,
@@ -210,7 +213,30 @@ class PluginsPage extends StatelessWidget {
     this.capabilities = false,
     this.botId,
     this.botName,
+    this.chrome = true,
   });
+
+  @override
+  State<PluginsPage> createState() => _PluginsPageState();
+}
+
+class _PluginsPageState extends State<PluginsPage> {
+  NativeApi get api => widget.api;
+  LocalStore get store => widget.store;
+  String get userId => widget.userId;
+  bool get capabilities => widget.capabilities;
+  String? get botId => widget.botId;
+  String? get botName => widget.botName;
+
+  /// One controller for the page's life: the surface below binds to the
+  /// controller it was created with, so a rebuild must hand it the same one.
+  late final PluginsController controller = PluginsController(
+    api,
+    userId,
+    capabilities: capabilities,
+    botId: botId,
+    openHome: (home, packageId) => _openHome(context, home, packageId),
+  );
 
   void _openHome(BuildContext context, String home, String? packageId) {
     final page = switch (home) {
@@ -238,13 +264,6 @@ class PluginsPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final controller = PluginsController(
-      api,
-      userId,
-      capabilities: capabilities,
-      botId: botId,
-      openHome: (home, packageId) => _openHome(context, home, packageId),
-    );
     return ViewSurfacePage(
       title: botId != null
           ? (botName == null ? 'Plugins' : 'Plugins · $botName')
@@ -252,6 +271,7 @@ class PluginsPage extends StatelessWidget {
           ? 'Account features'
           : 'Plugins',
       cardGroups: capabilities || botId != null,
+      chrome: widget.chrome,
       store: store,
       userId: userId,
       documentId: PluginIds.document,

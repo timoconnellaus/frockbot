@@ -50,16 +50,9 @@ function cardSwitch(page: Page, title: string): Locator {
 }
 
 async function openBotPlugins(page: Page): Promise<void> {
-  // Backing out of the page lands on the profile sheet it was opened from, so
-  // the sheet is only opened when it is not already the surface.
-  if (
-    !(await sem(page, "profile-menu")
-      .isVisible()
-      .catch(() => false))
-  ) {
-    await openProfileMenu(page);
-  }
-  await tap(page, "profile-plugins").click();
+  // The Bot's own door: the Plugins button in its header, which opens the
+  // panel beside the conversation at this width.
+  await tap(page, "plugins-panel-toggle").click();
   await expect(sem(page, "plugins-document")).toBeVisible({
     timeout: SHELL_TIMEOUT_MS,
   });
@@ -74,24 +67,23 @@ test("a Bot's Plugins page is its own, and a switch it holds is the Bot's", asyn
   await createBot(page, "Plugged");
   await settle(page);
 
-  // The profile sheet names the Bot whose Plugins the entry opens, and the old
-  // Bot capabilities list is now the account's.
+  // The Profile holds what applies to the whole account — the installed
+  // list and Account features — and never a Bot's own switches.
   await openProfileMenu(page);
-  await expect(says(page, "Plugins · Plugged").first()).toBeVisible();
   await expect(says(page, "Account features").first()).toBeVisible();
+  await expect(says(page, "Plugins · Plugged")).toHaveCount(0);
   await testInfo.attach("profile-menu.png", {
     body: await page.screenshot(),
     contentType: "image/png",
   });
-
-  await tap(page, "profile-plugins").click();
-  await expect(sem(page, "plugins-document")).toBeVisible({
-    timeout: SHELL_TIMEOUT_MS,
-  });
+  await closeOverlay(page);
   await settle(page);
 
-  // What the page says it is, and the five first-party features it offers.
-  await expect(says(page, "Plugins · Plugged").first()).toBeVisible();
+  // The Bot's Plugins are Bot settings: the door is in its header.
+  await openBotPlugins(page);
+
+  // What the panel says it is, and the five first-party features it offers.
+  await expect(says(page, "Plugins").first()).toBeVisible();
   for (const slug of [
     "web-built-in",
     "routines-built-in",
@@ -122,7 +114,10 @@ test("a Bot's Plugins page is its own, and a switch it holds is the Bot's", asyn
   });
 
   // Read the page again from the Bot: the switch is stored, not painted.
-  await page.goBack();
+  await page.reload();
+  await expect(sem(page, "shell-conversation")).toBeVisible({
+    timeout: SHELL_TIMEOUT_MS,
+  });
   await settle(page);
   await openBotPlugins(page);
   await expect(cardSwitch(page, "Web · Built in")).toHaveAttribute(
@@ -139,12 +134,9 @@ test("a Bot's Plugins page is its own, and a switch it holds is the Bot's", asyn
   });
 
   // A second Bot of the same account is untouched: the switch was this Bot's.
-  await closeOverlay(page);
-  await settle(page);
   await createBot(page, "Untouched");
   await settle(page);
   await openBotPlugins(page);
-  await expect(says(page, "Plugins · Untouched").first()).toBeVisible();
   await expect(cardSwitch(page, "Web · Built in")).toHaveAttribute(
     "aria-checked",
     "true",

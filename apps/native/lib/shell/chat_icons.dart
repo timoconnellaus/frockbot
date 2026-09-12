@@ -2,7 +2,16 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
-enum ChatIconKind { computer, routines, settings, applet, panel, send, mic }
+enum ChatIconKind {
+  computer,
+  routines,
+  settings,
+  plugins,
+  applet,
+  panel,
+  send,
+  mic,
+}
 
 /// One light stroke weight for the compact chat chrome, independent of the
 /// platform's bundled Material glyph weight.
@@ -109,6 +118,18 @@ class _ChatIconPainter extends CustomPainter {
         path.lineTo(12, 21);
         path.moveTo(9, 21);
         path.lineTo(15, 21);
+      case ChatIconKind.plugins:
+        // A piece with two tabs: the square, and the knobs that make it a
+        // Plugin rather than an Applet's window.
+        path.moveTo(5, 9);
+        path.lineTo(9, 9);
+        path.arcToPoint(const Offset(13, 9), radius: const Radius.circular(2));
+        path.lineTo(17, 9);
+        path.lineTo(17, 13);
+        path.arcToPoint(const Offset(17, 17), radius: const Radius.circular(2));
+        path.lineTo(17, 21);
+        path.lineTo(5, 21);
+        path.close();
       case ChatIconKind.applet:
         canvas.drawRRect(
           RRect.fromRectAndRadius(
