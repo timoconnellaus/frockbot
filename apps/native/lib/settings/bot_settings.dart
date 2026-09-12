@@ -7,6 +7,7 @@ import '../client/transport.dart';
 import '../flock/sheep.dart';
 import '../protocol/client_wire.generated.dart' as wire;
 import '../shell/semantics.dart';
+import '../shell/sidebar.dart' show SidebarProfile;
 import '../theme/frock_theme.dart';
 import '../theme/states.dart';
 import 'model_picker.dart';
@@ -52,6 +53,14 @@ class BotSettingsController extends ChangeNotifier {
   Object? model;
   bool modelAvailable = false;
 
+  /// What the authority is known to hold: the last values a read reported or a
+  /// command of ours landed. A command whose values match this is not sent —
+  /// pinning a Bot is one round trip rather than three — and it is where the
+  /// sidebar's prediction goes back to when a save is refused.
+  Map<String, Object?> _saved = const {};
+  bool _savedNotifications = true;
+  Object? _savedModel;
+
   BotSettingsController(this.api, this.botId);
 
   void _changed() {
@@ -82,6 +91,9 @@ class BotSettingsController extends ChangeNotifier {
               as Map?)?['model'];
       loaded = true;
       loads += 1;
+      _saved = _profileBody(pinnedAt);
+      _savedNotifications = notifications;
+      _savedModel = model;
       await _loadAccount();
     } catch (_) {
       message = 'Couldn’t load this Bot’s settings. Check your connection and try again.';
@@ -128,18 +140,57 @@ class BotSettingsController extends ChangeNotifier {
     return page;
   }
 
+  Map<String, Object?> _profileBody(String pinInstant) => {
+    'name': name.trim(),
+    'label': label.trim(),
+    'description': description,
+    'title': title.trim(),
+    'hiddenFromSidebar': hidden,
+    'pinnedAt': pinInstant,
+  };
+
+  /// The instant the sidebar orders a pinned Bot by. It is minted once and
+  /// kept, so the tile drawn before the command lands and the one the command
+  /// carries are the same pin rather than two instants a millisecond apart.
+  String _pinInstant() {
+    if (!pinned) return '';
+    if (pinnedAt.isEmpty) pinnedAt = DateTime.now().toUtc().toIso8601String();
+    return pinnedAt;
+  }
+
+  static SidebarProfile _profileOf(Map<String, Object?> body) => SidebarProfile(
+    name: body['name'] as String?,
+    title: body['title'] as String?,
+    label: body['label'] as String?,
+    pinnedAt: body['pinnedAt'] as String?,
+    hiddenFromSidebar: body['hiddenFromSidebar'] == true,
+  );
+
+  /// The profile the sidebar would draw for what is on screen, which is what
+  /// the next save is about to send. Predicting it is honest because the
+  /// client computed every one of these values itself.
+  SidebarProfile predictedProfile() => _profileOf(_profileBody(_pinInstant()));
+
+  /// What the authority last accepted, so a refusal has somewhere to go back
+  /// to.
+  SidebarProfile get savedProfile => _profileOf(_saved);
+
   void edit(void Function() change) {
     change();
     _changed();
   }
 
-  /// Three commands, each idempotent by its own id: the profile, the
-  /// notification policy, and the Bot's model override. A failure leaves what
-  /// already landed in place and says so, rather than pretending nothing did.
+  /// Up to three commands, each idempotent by its own id: the profile, the
+  /// notification policy, and the Bot's model override. Only the ones whose
+  /// values actually changed are sent, so flipping the pin switch is one
+  /// request rather than three. A failure leaves what already landed in place
+  /// and says so, rather than pretending nothing did.
   ///
-  /// Every configuration command is fenced on a revision, and each of these
-  /// three moves it — so the revision the receipt reports is what the next one
-  /// fences on rather than the one the read returned.
+  /// Every configuration command is fenced on a revision, and each one that is
+  /// sent moves it — so the revision the receipt reports is what the next one
+  /// fences on rather than the one the read returned. A command that is
+  /// skipped sends nothing and moves nothing, so the fence stays current
+  /// either way.
   ///
   /// What the fields show is not read back afterwards. The surface saves as
   /// the person edits, and a read landing under a field they are still typing
@@ -149,35 +200,33 @@ class BotSettingsController extends ChangeNotifier {
     saving = true;
     message = null;
     _changed();
-    final pinInstant = pinned
-        ? (pinnedAt.isEmpty ? DateTime.now().toUtc().toIso8601String() : pinnedAt)
-        : '';
+    final profile = _profileBody(_pinInstant());
     try {
-      await _command({
-        'schemaVersion': 1,
-        'commandId': randomId(),
-        'type': 'bot/set-profile',
-        'botId': botId,
-        'profile': {
-          'name': name.trim(),
-          'label': label.trim(),
-          'description': description,
-          'title': title.trim(),
-          'hiddenFromSidebar': hidden,
-          'pinnedAt': pinInstant,
-        },
-      });
+      // Both maps are built by [_profileBody], so their encodings compare.
+      if (jsonEncode(profile) != jsonEncode(_saved)) {
+        await _command({
+          'schemaVersion': 1,
+          'commandId': randomId(),
+          'type': 'bot/set-profile',
+          'botId': botId,
+          'profile': profile,
+        });
+        _saved = profile;
+      }
       // The instant the sidebar orders by is now the one that was written, so
       // the next save keeps it rather than minting a newer one.
-      pinnedAt = pinInstant;
-      await _command({
-        'schemaVersion': 1,
-        'commandId': randomId(),
-        'type': 'bot/update-notifications',
-        'botId': botId,
-        'notifications': {'enabled': notifications},
-      });
-      if (modelAvailable) {
+      pinnedAt = profile['pinnedAt']! as String;
+      if (notifications != _savedNotifications) {
+        await _command({
+          'schemaVersion': 1,
+          'commandId': randomId(),
+          'type': 'bot/update-notifications',
+          'botId': botId,
+          'notifications': {'enabled': notifications},
+        });
+        _savedNotifications = notifications;
+      }
+      if (modelAvailable && jsonEncode(model) != jsonEncode(_savedModel)) {
         await _command({
           'schemaVersion': 1,
           'commandId': randomId(),
@@ -186,6 +235,7 @@ class BotSettingsController extends ChangeNotifier {
           'packageId': 'custom-models',
           if (model != null) 'values': {'model': model} else 'unset': ['model'],
         });
+        _savedModel = model;
       }
       message = 'Saved.';
       return true;
@@ -264,6 +314,12 @@ class BotSettingsView extends StatefulWidget {
   final VoidCallback? onClose;
   final Future<void> Function()? onSaved;
 
+  /// Draws a profile change where the Bot is listed — its tile, its group, its
+  /// name — the moment it is made, and is handed the last accepted profile
+  /// again if the authority refuses the save. Only values this client computed
+  /// and is about to send are predicted.
+  final void Function(SidebarProfile profile)? onPredict;
+
   /// What the host mounts between the Bot's own settings and Advanced: on the
   /// phone, the rows for its Routines, its Applets and its Package pages.
   final List<Widget> sections;
@@ -284,6 +340,7 @@ class BotSettingsView extends StatefulWidget {
     required this.controller,
     this.onClose,
     this.onSaved,
+    this.onPredict,
     this.background,
     this.onEditAvatar,
     this.dangerZone,
@@ -340,7 +397,13 @@ class _BotSettingsViewState extends State<BotSettingsView> {
       return;
     }
     _dirty = false;
+    final predict = widget.onPredict;
+    // Where the sidebar goes back to if this save is refused: what the
+    // authority last accepted, read before the save moves that baseline.
+    final accepted = state.savedProfile;
+    predict?.call(state.predictedProfile());
     final saved = await state.save();
+    if (!saved) predict?.call(accepted);
     if (saved) await widget.onSaved?.call();
     if (_dirty && mounted) {
       _pending = Timer(botSettingsAutosaveDelay, () => unawaited(_save()));
@@ -626,19 +689,16 @@ class _BotSettingsViewState extends State<BotSettingsView> {
         ),
         trailing: const Icon(Icons.expand_more_rounded),
         onTap: () async {
-                final choice = await Navigator.of(context)
-                    .push<wire.SettingChoice>(
-                      MaterialPageRoute(
-                        builder: (_) => ModelPicker(
-                          load: state.options,
-                          selected: state.model,
-                        ),
-                      ),
-                    );
-                if (choice != null) {
-                  _chose(() => state.model = choice.value.value);
-                }
-              },
+          final choice = await Navigator.of(context).push<wire.SettingChoice>(
+            MaterialPageRoute(
+              builder: (_) =>
+                  ModelPicker(load: state.options, selected: state.model),
+            ),
+          );
+          if (choice != null) {
+            _chose(() => state.model = choice.value.value);
+          }
+        },
       ),
     ),
   );
