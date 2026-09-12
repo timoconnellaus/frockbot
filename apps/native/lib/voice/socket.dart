@@ -49,7 +49,11 @@ String voiceCloseReasonV1(String reason) {
   const limit = 120;
   final bytes = utf8.encode(reason);
   if (bytes.length <= limit) return reason;
-  return utf8.decode(bytes.sublist(0, limit), allowMalformed: true);
+  var end = limit;
+  while (end > 0 && (bytes[end] & 0xc0) == 0x80) {
+    end--;
+  }
+  return utf8.decode(bytes.sublist(0, end));
 }
 
 typedef VoiceSocketOpener = Future<VoiceSocket> Function();
