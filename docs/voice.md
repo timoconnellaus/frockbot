@@ -269,7 +269,9 @@ when the controller was torn down mid-call, `4003` `abandoned-connect` when a
 socket that finished connecting is no longer wanted — either the call ended
 while it was connecting, or the connect attempt timed out and the client had
 already moved on, so the server sees `connected` followed by `4003` with no
-`hello`. The server closes with `4403` when the socket is not the account's.
+`hello`. A reason longer than 120 UTF-8 bytes is cut on a character boundary
+to stay inside the wire's 123-byte limit. The server closes with `4403` when
+the socket is not the account's.
 
 ### Tracing a call
 
@@ -294,10 +296,10 @@ milliseconds. A call that reaches `listening` and then `closed` with no
 `utterance` in between means nothing reached transcription; read the `upstream`
 lines first. No `awake` line (with or without `stt-failed`) means the STT
 socket never became ready — the connect stalled or was refused — and the
-`closed` code and reason then say who gave up. An `awake` line and still no `utterance` means
-the upstream heard nothing it would transcribe, or the client left before the
-turn detector committed a transcript. Only the `closed` code and reason say
-which side closed the socket.
+`closed` code and reason then say who gave up. An `awake` line and still no
+`utterance` means the upstream heard nothing it would transcribe, or the client
+left before the turn detector committed a transcript. Only the `closed` code
+and reason say which side closed the socket.
 
 ### Text turns
 
