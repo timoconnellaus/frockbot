@@ -1,8 +1,8 @@
 import type { ModelBilling } from "../billing/model.js";
 // The Shell Package owns the Composition a Turn runs on. First-party code is
 // the foundation runtime, ordinary imports in this bundle and never a
-// Composition member; every member is untrusted and mounts through
-// `BotIsolateContributionHost` as a loaded Dynamic Worker with
+// Composition member; every member is untrusted and mounts through the
+// `PluginWorkerHost` into the User's one loaded Dynamic Worker with
 // `globalOutbound` disabled.
 import {
   createFoundationRuntime,
@@ -17,12 +17,12 @@ import {
   type CompositionFailurePhaseV1,
   type CompositionGenerationV1,
   type CompositionHost,
-  type CompositionMemberV1,
   type MountedComposition,
 } from "@frockbot/core/durable";
 import {
-  BotIsolateContributionHost,
-  type ActiveContribution,
+  PluginWorkerHost,
+  type ActivePluginWorker,
+  type PluginMountFailureV1,
   type BotIsolateArtifactStore,
   type BotIsolateLimits,
   type BotIsolateLoader,
@@ -50,6 +50,12 @@ export function bootstrapCompositionGeneration(
 
 export interface ShellMountedComposition extends MountedComposition {
   readonly runtime: FoundationRuntime;
+  /**
+   * The Plugins this generation named that the worker refused, each with the
+   * phase it failed at. A Plugin fails alone: the generation stays active and
+   * its siblings stay mounted, so these never reach `verify()`.
+   */
+  readonly pluginFailures: readonly PluginMountFailureV1[];
 }
 
 /** Everything the Bot Durable Object supplies for isolate members. */
@@ -60,10 +66,10 @@ export interface ShellIsolateMountOptions {
   loader: BotIsolateLoader;
   artifacts: BotIsolateArtifactStore;
   /**
-   * Mints the loopback `CAPABILITIES` service binding for one Package —
-   * `ctx.exports.BotCapabilities({ props })` in the Durable Object.
+   * The loopback `CAPABILITIES` service binding every Plugin in the worker
+   * shares — `ctx.exports.BotCapabilities({ props })` in the Durable Object.
    */
-  capabilitiesFor(member: CompositionMemberV1): BotCapabilitiesStub;
+  capabilities: BotCapabilitiesStub;
   /**
    * Content address of the User-enabled bindings this isolate is granted — the
    * enabled set *and* the Composition generation whose `CAPABILITIES` stub is
@@ -176,56 +182,61 @@ export function createShellCompositionHost(
         ...(options.turnType ? { turnType: options.turnType } : {}),
         ...(options.subagentRole ? { subagentRole: options.subagentRole } : {}),
       });
-      const active: ActiveContribution[] = [];
+      const active: ActivePluginWorker[] = [];
       const failures: MemberVerificationFailure[] = [];
-      for (const member of generation.members) {
+      const pluginFailures: PluginMountFailureV1[] = [];
+      if (generation.members.length > 0) {
         if (!options.isolate) {
           failures.push({
             phase: "mount",
-            message: `package "${member.packageId}" needs a Bot isolate and this host has no loader`,
+            message: `the generation's plugins need a Plugin worker and this host has no loader`,
           });
-          continue;
-        }
-        const isolate = options.isolate;
-        try {
-          signal.throwIfAborted();
-          const host = new BotIsolateContributionHost({
-            loader: isolate.loader,
-            artifacts: isolate.artifacts,
-            tools: runtime.services.tools,
-            hooks: runtime.services.hooks,
-            userId: isolate.userId,
-            botId: options.botId,
-            sessionId: options.sessionId,
-            runId: isolate.runId,
-            turnId: isolate.turnId,
-            generationId: generation.generationId,
-            turnType: options.turnType ?? "chat",
-            ...(options.subagentRole === undefined
-              ? {}
-              : { subagentRole: options.subagentRole }),
-            recordHookFailure: async (failure) => {
-              const session = runtime.services.sessions.get(options.sessionId);
-              if (!session) {
-                throw new Error(
-                  `session "${options.sessionId}" is unavailable for hook failure recording`,
+        } else {
+          const isolate = options.isolate;
+          try {
+            signal.throwIfAborted();
+            const host = new PluginWorkerHost({
+              loader: isolate.loader,
+              artifacts: isolate.artifacts,
+              tools: runtime.services.tools,
+              hooks: runtime.services.hooks,
+              userId: isolate.userId,
+              botId: options.botId,
+              sessionId: options.sessionId,
+              runId: isolate.runId,
+              turnId: isolate.turnId,
+              generationId: generation.generationId,
+              turnType: options.turnType ?? "chat",
+              ...(options.subagentRole === undefined
+                ? {}
+                : { subagentRole: options.subagentRole }),
+              recordHookFailure: async (failure) => {
+                const session = runtime.services.sessions.get(
+                  options.sessionId,
                 );
-              }
-              session.append({ type: "package/hook-failed", ...failure });
-              await session.flush();
-            },
-            capabilities: isolate.capabilitiesFor(member),
-            compatibilityDate: isolate.compatibilityDate,
-            bindingDigest: isolate.bindingDigest,
-            ...(isolate.limits ? { limits: isolate.limits } : {}),
-            ...(isolate.deadlineMs === undefined
-              ? {}
-              : { deadlineMs: isolate.deadlineMs }),
-          });
-          // Mount and health-check are one guarded phase (Worker Loader spike).
-          active.push(await (await host.prepare(member)).commit());
-        } catch (error) {
-          failures.push(memberFailure(error));
+                if (!session) {
+                  throw new Error(
+                    `session "${options.sessionId}" is unavailable for hook failure recording`,
+                  );
+                }
+                session.append({ type: "package/hook-failed", ...failure });
+                await session.flush();
+              },
+              capabilities: isolate.capabilities,
+              compatibilityDate: isolate.compatibilityDate,
+              bindingDigest: isolate.bindingDigest,
+              ...(isolate.limits ? { limits: isolate.limits } : {}),
+              ...(isolate.deadlineMs === undefined
+                ? {}
+                : { deadlineMs: isolate.deadlineMs }),
+            });
+            // Mount and health-check are one guarded phase (Worker Loader spike).
+            const prepared = await host.mount(generation.members);
+            pluginFailures.push(...prepared.failures);
+            active.push(await prepared.commit());
+          } catch (error) {
+            failures.push(memberFailure(error));
+          }
         }
       }
 
@@ -284,6 +295,7 @@ export function createShellCompositionHost(
       return {
         generation,
         runtime,
+        pluginFailures,
         // A member that failed to resolve, mount, or answer `health()`
         // surfaces here, carrying the load site it failed at so
         // `activateCompositionV1` records the phase rather than guessing it.

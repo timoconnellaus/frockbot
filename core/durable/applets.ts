@@ -446,7 +446,7 @@ export function decodeFocusedAppletV1(
 
 /**
  * The health contract of an Instance Contribution, mirrored on
- * `BotIsolateContributionHost`: an Applet that will not say what it exposes
+ * `PluginWorkerHost`: an Applet that will not say what it exposes
  * does not activate.
  */
 export function decodeAppletHealthV1(

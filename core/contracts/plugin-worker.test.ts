@@ -4,6 +4,7 @@ import {
   decodePluginWorkerHookInvocationV1,
   decodePluginWorkerHookResultV1,
   decodePluginWorkerToolInvocationV1,
+  MAX_TRIGGER_BODY_BYTES_V1,
   decodePluginWorkerTriggerInvocationV1,
   decodePluginWorkerTriggerResultV1,
   pluginWorkerLoaderIdV1,
@@ -13,43 +14,52 @@ import {
 const HASH_A = "a".repeat(64);
 const HASH_B = "b".repeat(64);
 const DIGEST = "c".repeat(64);
+const MEMBER_A = {
+  pluginId: "weather",
+  contentHash: HASH_A,
+  grants: ["workspace.read"],
+  consumes: [],
+};
+const MEMBER_B = {
+  pluginId: "greeter",
+  contentHash: HASH_B,
+  grants: [],
+  consumes: ["weather-data"],
+};
 
 describe("the plugin worker's identity", () => {
-  test("hashes the same module set the same way whatever order it was listed in", async () => {
+  test("hashes the same module set differently when the mount order differs", async () => {
     const forward = await pluginWorkerModuleSetHashV1({
       contractVersion: 3,
       indexVersion: "index-v1",
-      members: [
-        { pluginId: "weather", contentHash: HASH_A },
-        { pluginId: "greeter", contentHash: HASH_B },
-      ],
+      members: [MEMBER_A, MEMBER_B],
       bindingDigest: DIGEST,
     });
     const reversed = await pluginWorkerModuleSetHashV1({
       contractVersion: 3,
       indexVersion: "index-v1",
-      members: [
-        { pluginId: "greeter", contentHash: HASH_B },
-        { pluginId: "weather", contentHash: HASH_A },
-      ],
+      members: [MEMBER_B, MEMBER_A],
       bindingDigest: DIGEST,
     });
-    expect(forward).toBe(reversed);
+    expect(forward).not.toBe(reversed);
     expect(forward).toMatch(/^[0-9a-f]{64}$/);
+    expect(reversed).toMatch(/^[0-9a-f]{64}$/);
   });
 
   test("changes with the contract, the index, an artifact or the bindings", async () => {
     const base = {
       contractVersion: 3 as const,
       indexVersion: "index-v1",
-      members: [{ pluginId: "weather", contentHash: HASH_A }],
+      members: [MEMBER_A],
       bindingDigest: DIGEST,
     };
     const reference = await pluginWorkerModuleSetHashV1(base);
     for (const variant of [
       { ...base, contractVersion: 2 as const },
       { ...base, indexVersion: "index-v2" },
-      { ...base, members: [{ pluginId: "weather", contentHash: HASH_B }] },
+      { ...base, members: [{ ...MEMBER_A, contentHash: HASH_B }] },
+      { ...base, members: [{ ...MEMBER_A, grants: ["workspace.write"] }] },
+      { ...base, members: [{ ...MEMBER_A, consumes: ["weather-data"] }] },
       { ...base, bindingDigest: "d".repeat(64) },
       { ...base, members: [] },
     ]) {
@@ -62,10 +72,7 @@ describe("the plugin worker's identity", () => {
       pluginWorkerModuleSetHashV1({
         contractVersion: 3,
         indexVersion: "index-v1",
-        members: [
-          { pluginId: "weather", contentHash: HASH_A },
-          { pluginId: "weather", contentHash: HASH_B },
-        ],
+        members: [MEMBER_A, { ...MEMBER_A, contentHash: HASH_B }],
         bindingDigest: DIGEST,
       }),
     ).rejects.toThrow(/duplicate/);
@@ -73,7 +80,7 @@ describe("the plugin worker's identity", () => {
       pluginWorkerModuleSetHashV1({
         contractVersion: 3,
         indexVersion: "index-v1",
-        members: [{ pluginId: "weather", contentHash: "not hex" }],
+        members: [{ ...MEMBER_A, contentHash: "not hex" }],
         bindingDigest: DIGEST,
       }),
     ).rejects.toThrow(/hex/);
@@ -157,39 +164,45 @@ describe("plugin worker health", () => {
     ).toThrow(/contractVersion/);
   });
 
-  test("a worker on the previous contract reports health without hooks", () => {
-    const { hooks: _hooks, ...hooklessPlugin } = healthyPlugin;
-    const health = decodePluginWorkerHealthV1({
-      schemaVersion: 1,
-      contractVersion: 2,
-      plugins: [hooklessPlugin],
-    });
-    expect(health.contractVersion).toBe(2);
-    expect(health.plugins[0]!.hooks).toEqual([]);
+  test("refuses a report from a contract this deployment no longer serves", () => {
     expect(() =>
       decodePluginWorkerHealthV1({
         schemaVersion: 1,
         contractVersion: 2,
         plugins: [healthyPlugin],
       }),
-    ).toThrow(/invalid fields/);
+    ).toThrow(/no longer served/);
+  });
+
+  test("a plugin that names no hooks fails only itself", () => {
+    const { hooks: _hooks, ...hooklessPlugin } = healthyPlugin;
+    expect(
+      decodePluginWorkerHealthV1({
+        schemaVersion: 1,
+        contractVersion: 3,
+        plugins: [hooklessPlugin],
+      }).plugins[0],
+    ).toMatchObject({
+      ok: false,
+      reason: expect.stringMatching(/invalid fields/),
+    });
   });
 
   test("a reason is present exactly when a plugin is not ok, and ids are unique", () => {
-    expect(() =>
+    expect(
       decodePluginWorkerHealthV1({
         schemaVersion: 1,
         contractVersion: 3,
         plugins: [{ ...healthyPlugin, reason: "fine" }],
-      }),
-    ).toThrow(/reason/);
-    expect(() =>
+      }).plugins[0],
+    ).toMatchObject({ ok: false, reason: expect.stringMatching(/reason/) });
+    expect(
       decodePluginWorkerHealthV1({
         schemaVersion: 1,
         contractVersion: 3,
         plugins: [{ ...healthyPlugin, ok: false }],
-      }),
-    ).toThrow(/reason/);
+      }).plugins[0],
+    ).toMatchObject({ ok: false, reason: expect.stringMatching(/reason/) });
     expect(() =>
       decodePluginWorkerHealthV1({
         schemaVersion: 1,
@@ -199,28 +212,38 @@ describe("plugin worker health", () => {
     ).toThrow(/duplicate/);
   });
 
-  test("refuses an undeclared hook, a bad trigger name and extra fields", () => {
-    expect(() =>
+  test("contains an undeclared hook, a bad trigger name or extra fields to the plugin that reported them", () => {
+    expect(
       decodePluginWorkerHealthV1({
         schemaVersion: 1,
         contractVersion: 3,
         plugins: [{ ...healthyPlugin, hooks: ["agent/request-error"] }],
-      }),
-    ).toThrow(/hooks/);
-    expect(() =>
+      }).plugins[0],
+    ).toMatchObject({ ok: false, reason: expect.stringMatching(/hooks/) });
+    expect(
       decodePluginWorkerHealthV1({
         schemaVersion: 1,
         contractVersion: 3,
         plugins: [{ ...healthyPlugin, triggers: ["Forecast Ready"] }],
-      }),
-    ).toThrow(/triggers/);
-    expect(() =>
+      }).plugins[0],
+    ).toMatchObject({ ok: false, reason: expect.stringMatching(/triggers/) });
+    expect(
       decodePluginWorkerHealthV1({
         schemaVersion: 1,
         contractVersion: 3,
         plugins: [{ ...healthyPlugin, extra: true }],
-      }),
-    ).toThrow(/invalid fields/);
+      }).plugins[0],
+    ).toMatchObject({
+      ok: false,
+      reason: expect.stringMatching(/invalid fields/),
+    });
+    expect(
+      decodePluginWorkerHealthV1({
+        schemaVersion: 1,
+        contractVersion: 3,
+        plugins: [{ ...healthyPlugin, pluginId: "Not An Id" }, healthyPlugin],
+      }).plugins.map((plugin) => plugin.pluginId),
+    ).toEqual(["weather"]);
   });
 });
 
@@ -379,6 +402,27 @@ describe("plugin worker triggers", () => {
         deadlineMs: 60_001,
       }),
     ).toThrow(/deadlineMs/);
+  });
+
+  test("bound the body and the fired text in UTF-8 bytes, not code units", () => {
+    // 300_000 emoji is 600_000 UTF-16 code units but 1_200_000 UTF-8 bytes,
+    // so a code-unit bound would let it past the 1_000_000 byte ceiling.
+    const emoji = "\u{1F600}".repeat(300_000);
+    expect(emoji.length).toBeLessThan(MAX_TRIGGER_BODY_BYTES_V1);
+    expect(() =>
+      decodePluginWorkerTriggerInvocationV1({ ...invocation, body: emoji }),
+    ).toThrow(/body/);
+    expect(() =>
+      decodePluginWorkerTriggerResultV1({
+        schemaVersion: 1,
+        status: "fire",
+        text: emoji,
+      }),
+    ).toThrow(/text/);
+    const fits = "\u{1F600}".repeat(MAX_TRIGGER_BODY_BYTES_V1 / 4);
+    expect(
+      decodePluginWorkerTriggerInvocationV1({ ...invocation, body: fits }).body,
+    ).toBe(fits);
   });
 
   test("a result either fires with text or drops with an optional reason", () => {

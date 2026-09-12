@@ -4,8 +4,8 @@
 //
 // It stands in for the Bot's Durable Object the way `CompositionProbe` stands
 // in for the kernel authority: the code under test is production
-// (`createShellCompositionHost`, `BotIsolateContributionHost`,
-// `BOT_ISOLATE_WRAPPER_SOURCE`, `BotCapabilities`), and only the Turn's
+// (`createShellCompositionHost`, `PluginWorkerHost`, the generated index,
+// `BotCapabilities`), and only the Turn's
 // surrounding configuration is fixture.
 import { DurableObject } from "cloudflare:workers";
 import { decodePluginDescriptorV1 } from "@frockbot/core/contracts";
@@ -23,9 +23,10 @@ import {
   type CompositionGenerationV1,
   type CompositionMemberV1,
 } from "@frockbot/core/durable";
-import type {
-  BotIsolateLoader,
-  BotIsolateWorkerCode,
+import {
+  PluginWorkerHost,
+  type BotIsolateLoader,
+  type BotIsolateWorkerCode,
 } from "@frockbot/frock-compose";
 import {
   createShellCompositionHost,
@@ -39,6 +40,7 @@ import {
 import type {
   IsolateConnectionV1,
   IsolateModelBindingV1,
+  PluginWorkerTriggerResultV1,
 } from "@frockbot/core/contracts";
 import type { FoundationAgentPackage } from "@frockbot/app/agent-runtime";
 import type { BotCapabilities } from "../src/bot-capabilities.ts";
@@ -238,6 +240,136 @@ function probePackageDescriptor(hooks: string[]) {
   });
 }
 
+/**
+ * Two Plugins that only make sense together: the provider exports a service
+ * and a prompt hook, the consumer reads the service in a tool and wraps the
+ * same hook after the provider, so a Turn proves mount order, services and
+ * the chain inside one worker.
+ */
+export const PROBE_PROVIDER_ID = "probe-provider";
+export const PROBE_CONSUMER_ID = "probe-consumer";
+
+export const PROBE_PROVIDER_SOURCE = `
+export const tools = [
+  { name: "provider_ping", description: "Answers", inputSchema: {}, idempotent: true },
+];
+export const services = { "greeting": { word: "hello" } };
+export const hooks = {
+  "agent/tool-exposure": async function (payload) {
+    return [...payload.tools, { name: "from_provider", description: "", inputSchema: {} }];
+  },
+};
+export async function execute(tool) {
+  return tool === "provider_ping" ? "pong" : "unknown tool";
+}
+`;
+
+export const PROBE_CONSUMER_SOURCE = `
+export const tools = [
+  { name: "read_service", description: "Reads the provider's service", inputSchema: {}, idempotent: true },
+];
+export const hooks = {
+  "agent/tool-exposure": async function (payload) {
+    return [...payload.tools, { name: "from_consumer", description: "", inputSchema: {} }];
+  },
+};
+export async function execute(tool, input, ctx) {
+  if (tool !== "read_service") return "unknown tool";
+  return JSON.stringify({ services: Object.keys(ctx.services), word: ctx.services.greeting.word, packageId: ctx.packageId });
+}
+`;
+
+const PROBE_PROVIDER_DESCRIPTOR = decodePluginDescriptorV1({
+  id: PROBE_PROVIDER_ID,
+  displayName: "Probe provider",
+  version: "0.0.1",
+  tools: [{ name: "provider_ping", description: "Answers", inputSchema: {} }],
+  contractVersion: 4,
+  hooks: ["agent/tool-exposure"],
+  grants: [],
+  provides: [{ name: "greeting", version: 1 }],
+  contextKeys: ["user", "bot", "session"],
+});
+
+const PROBE_CONSUMER_DESCRIPTOR = decodePluginDescriptorV1({
+  id: PROBE_CONSUMER_ID,
+  displayName: "Probe consumer",
+  version: "0.0.1",
+  tools: [
+    {
+      name: "read_service",
+      description: "Reads the provider's service",
+      inputSchema: {},
+    },
+  ],
+  contractVersion: 4,
+  hooks: ["agent/tool-exposure"],
+  grants: [],
+  consumes: [{ name: "greeting", version: 1 }],
+  contextKeys: ["user", "bot", "session"],
+});
+
+/**
+ * A Plugin that exports `triggers`, the contract-4 surface an app-owned
+ * delivery reaches. One trigger per answer the kernel has to tell apart: a
+ * body it fires on, a refusal it authored, a silent return, one that never
+ * answers, and one whose text is small in UTF-16 units but far over the
+ * contract's byte bound.
+ */
+export const PROBE_TRIGGER_ID = "probe-trigger";
+
+export const PROBE_TRIGGER_SOURCE = `
+export const tools = [
+  { name: "trigger_noop", description: "Does nothing", inputSchema: {}, idempotent: true },
+];
+export const triggers = {
+  "inbound": async function (delivery, ctx) {
+    return JSON.stringify({
+      packageId: ctx.packageId,
+      botId: ctx.bot.botId,
+      sessionId: ctx.session.sessionId,
+      signature: delivery.headers["x-probe-signature"],
+      city: JSON.parse(delivery.body).city,
+    });
+  },
+  "refuse": async function () {
+    return { drop: true, reason: "nothing in this delivery is for me" };
+  },
+  "silent": async function () {
+    return undefined;
+  },
+  "wedged": async function () {
+    await new Promise(function () {});
+  },
+  // 300,000 astral code points: 600,000 UTF-16 units, under the bound if it
+  // were counted in units, and 1.2 MB once encoded as the bytes it arrives as.
+  "oversized": async function () {
+    return "\u{1F600}".repeat(300000);
+  },
+};
+export async function execute(tool) {
+  return tool === "trigger_noop" ? "ok" : "unknown tool";
+}
+`;
+
+const PROBE_TRIGGER_DESCRIPTOR = decodePluginDescriptorV1({
+  id: PROBE_TRIGGER_ID,
+  displayName: "Probe trigger",
+  version: "0.0.1",
+  tools: [
+    { name: "trigger_noop", description: "Does nothing", inputSchema: {} },
+  ],
+  contractVersion: 4,
+  hooks: [],
+  grants: [],
+  // The descriptor names every trigger the module exports: a report that
+  // differs is a health failure, so this pair is what makes the module mount.
+  triggers: ["inbound", "refuse", "silent", "wedged", "oversized"].map(
+    (name) => ({ name, description: name }),
+  ),
+  contextKeys: ["user", "bot", "session"],
+});
+
 /** A deliberate syntax error: `prepare()` must fail with a diagnostic, not hang. */
 export const PROBE_BROKEN_SOURCE = `
 export const tools = [{ name: "broken", description: "", inputSchema: {} }];
@@ -343,9 +475,7 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
     return this.loadedCode.map((code) => ({
       globalOutbound: code.globalOutbound,
       envKeys: Object.keys(code.env).sort(),
-      identityKeys: Object.keys(
-        code.env.IDENTITY as Record<string, unknown>,
-      ).sort(),
+      identityKeys: Object.keys(code.env.IDENTITY).sort(),
       limits: code.limits,
     }));
   }
@@ -368,27 +498,57 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
     artifact?: ArtifactRefV1,
     createdAt = "2026-08-31T00:00:00.000Z",
     hooks: string[] = ["agent/tool-exposure"],
+    pair?: { provider?: ArtifactRefV1; consumer: ArtifactRefV1 },
   ): Promise<CompositionGenerationV1> {
     const base = await bootstrapGeneration({ createdAt });
-    if (!artifact) return base;
+    if (!artifact && !pair) return base;
+    const authored = (
+      packageId: string,
+      descriptor: CompositionMemberV1["descriptor"],
+      ref: ArtifactRefV1,
+    ): CompositionMemberV1 => ({
+      packageId,
+      version: "0.0.1",
+      descriptor,
+      provenance: {
+        kind: "bot" as const,
+        packageId,
+        version: "0.0.1",
+        botId: "probe",
+        sessionId: "user-1:probe",
+        turnId: "turn-1",
+        runId: "run-1",
+        authoredAt: createdAt,
+      },
+      artifact: ref,
+    });
     const members: CompositionMemberV1[] = [
       ...base.members,
-      {
-        packageId: PROBE_PACKAGE_ID,
-        version: "0.0.1",
-        descriptor: probePackageDescriptor(hooks),
-        provenance: {
-          kind: "bot" as const,
-          packageId: PROBE_PACKAGE_ID,
-          version: "0.0.1",
-          botId: "probe",
-          sessionId: "user-1:probe",
-          turnId: "turn-1",
-          runId: "run-1",
-          authoredAt: createdAt,
-        },
-        artifact,
-      },
+      ...(artifact
+        ? [authored(PROBE_PACKAGE_ID, probePackageDescriptor(hooks), artifact)]
+        : []),
+      // The generation lists members by id, consumer before provider, so the
+      // host's ordering — not the listing — is what puts the provider first.
+      ...(pair
+        ? [
+            authored(
+              PROBE_CONSUMER_ID,
+              PROBE_CONSUMER_DESCRIPTOR,
+              pair.consumer,
+            ),
+            // A pair with no provider artifact is the unmet-need case: the
+            // consumer names a service the generation has nobody to meet.
+            ...(pair.provider
+              ? [
+                  authored(
+                    PROBE_PROVIDER_ID,
+                    PROBE_PROVIDER_DESCRIPTOR,
+                    pair.provider,
+                  ),
+                ]
+              : []),
+          ]
+        : []),
     ].sort((left, right) => left.packageId.localeCompare(right.packageId));
     const artifactSetHash = await compositionArtifactSetHashV1(members);
     return {
@@ -404,6 +564,7 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
     userId: string;
     botId: string;
     artifact?: ArtifactRefV1;
+    pair?: { provider?: ArtifactRefV1; consumer: ArtifactRefV1 };
     connections?: IsolateConnectionV1[];
     model?: IsolateModelBindingV1;
     memory?: boolean;
@@ -421,6 +582,7 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
       input.artifact,
       input.generationCreatedAt,
       input.hooks,
+      input.pair,
     );
     // SAFETY: exported WorkerEntrypoints are materialized on ctx.exports;
     // workers-types cannot infer the generated local RPC stubs.
@@ -461,22 +623,21 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
             return module;
           },
         },
-        capabilitiesFor: (member) =>
-          exports.BotCapabilities({
-            props: {
-              userId: input.userId,
-              botId: input.botId,
-              runId: "run-1",
-              sessionId: `${input.userId}:${input.botId}`,
-              turnId: "turn-1",
-              generationId: generation.generationId,
-              packageId: member.packageId,
-              connections: structuredClone(input.connections ?? []),
-              ...(input.model ? { model: structuredClone(input.model) } : {}),
-              memory: input.memory ?? false,
-              workspace: input.workspace ?? false,
-            },
-          }),
+        capabilities: exports.BotCapabilities({
+          props: {
+            userId: input.userId,
+            botId: input.botId,
+            runId: "run-1",
+            sessionId: `${input.userId}:${input.botId}`,
+            turnId: "turn-1",
+            generationId: generation.generationId,
+            packageId: "plugin-worker",
+            connections: structuredClone(input.connections ?? []),
+            ...(input.model ? { model: structuredClone(input.model) } : {}),
+            memory: input.memory ?? false,
+            workspace: input.workspace ?? false,
+          },
+        }),
         bindingDigest: await isolateBindingDigestV1({
           userId: input.userId,
           botId: input.botId,
@@ -499,6 +660,186 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
     createdAt?: string,
   ): Promise<CompositionGenerationV1> {
     return await this.generation(artifact, createdAt);
+  }
+
+  /**
+   * Mounts the provider and consumer pair as one worker, calls the consumer's
+   * tool, and runs one tool-exposure hook through the chain.
+   */
+  async probePair(input: {
+    userId: string;
+    botId: string;
+    provider: ArtifactRefV1;
+    consumer: ArtifactRefV1;
+  }): Promise<{
+    loaderCalls: number;
+    pluginOrder: string[];
+    serviceRead: { content: string; isError: boolean };
+    exposedTools: string[];
+  }> {
+    this.loaderIds = [];
+    this.loadedCode = [];
+    const { composition, generation } = await this.mount({
+      userId: input.userId,
+      botId: input.botId,
+      pair: { provider: input.provider, consumer: input.consumer },
+    });
+    try {
+      await composition.verify(new AbortController().signal);
+      const identity = this.loadedCode[0]?.env.IDENTITY;
+      const call = dynamicToolCallV1("call-1", {
+        namespace: PROBE_CONSUMER_ID,
+        toolName: "read_service",
+        input: {},
+      });
+      const context = {
+        botId: input.botId,
+        agentId: input.botId,
+        sessionId: `${input.userId}:${input.botId}`,
+        compositionGenerationId: generation.generationId,
+        turnType: "chat" as const,
+        effectId: "tool:1:1:0",
+        signal: new AbortController().signal,
+      };
+      const preparation = await composition.runtime.services.tools.prepare(
+        call,
+        { ...context, toolCall: call },
+      );
+      const serviceRead =
+        preparation.kind !== "ready"
+          ? preparation.result
+          : await composition.runtime.services.tools.executePrepared(
+              preparation,
+              context,
+            );
+      const exposed = await composition.runtime.services.hooks.toolExposure(
+        composition.runtime.agent.agent as never,
+        [],
+        1,
+        1,
+        new AbortController().signal,
+        () => Promise.resolve([]),
+      );
+      return {
+        loaderCalls: this.loaderIds.length,
+        pluginOrder: identity?.plugins.map((plugin) => plugin.pluginId) ?? [],
+        serviceRead,
+        exposedTools: exposed.map((tool) => tool.name),
+      };
+    } finally {
+      await composition.dispose();
+    }
+  }
+
+  /**
+   * Mounts a Plugin whose consumed service no sibling provides, alongside one
+   * that needs nothing. The unmet Plugin must be excluded and named while the
+   * sibling still mounts and still wraps the hook.
+   */
+  async probeUnmetService(input: {
+    userId: string;
+    botId: string;
+    artifact: ArtifactRefV1;
+    consumer: ArtifactRefV1;
+  }): Promise<{
+    verified: boolean;
+    pluginFailures: { pluginId: string; phase: string; message: string }[];
+    pluginOrder: string[];
+    exposedTools: string[];
+  }> {
+    this.loaderIds = [];
+    this.loadedCode = [];
+    const { composition } = await this.mount({
+      userId: input.userId,
+      botId: input.botId,
+      artifact: input.artifact,
+      pair: { consumer: input.consumer },
+    });
+    try {
+      let verified = true;
+      try {
+        await composition.verify(new AbortController().signal);
+      } catch {
+        verified = false;
+      }
+      const identity = this.loadedCode[0]?.env.IDENTITY;
+      const exposed = await composition.runtime.services.hooks.toolExposure(
+        composition.runtime.agent.agent as never,
+        [],
+        1,
+        1,
+        new AbortController().signal,
+        () => Promise.resolve([]),
+      );
+      return {
+        verified,
+        pluginFailures: composition.pluginFailures.map((failure) => ({
+          pluginId: failure.pluginId,
+          phase: failure.phase,
+          message: failure.message,
+        })),
+        pluginOrder: identity?.plugins.map((plugin) => plugin.pluginId) ?? [],
+        exposedTools: exposed.map((tool) => tool.name),
+      };
+    } finally {
+      await composition.dispose();
+    }
+  }
+
+  /**
+   * Mounts three Plugins where one reports health that does not match the
+   * descriptor the generation pinned. That Plugin alone must be excluded and
+   * named; the other two still mount and still chain their hooks.
+   */
+  async probeHealthMismatch(input: {
+    userId: string;
+    botId: string;
+    artifact: ArtifactRefV1;
+    provider: ArtifactRefV1;
+    consumer: ArtifactRefV1;
+  }): Promise<{
+    verified: boolean;
+    pluginFailures: { pluginId: string; phase: string; message: string }[];
+    exposedTools: string[];
+  }> {
+    this.loaderIds = [];
+    this.loadedCode = [];
+    const { composition } = await this.mount({
+      userId: input.userId,
+      botId: input.botId,
+      artifact: input.artifact,
+      // The descriptor claims a hook the module does not export, so the
+      // worker's health report cannot match what the generation pinned.
+      hooks: ["agent/tool-exposure", "agent/request"],
+      pair: { provider: input.provider, consumer: input.consumer },
+    });
+    try {
+      let verified = true;
+      try {
+        await composition.verify(new AbortController().signal);
+      } catch {
+        verified = false;
+      }
+      const exposed = await composition.runtime.services.hooks.toolExposure(
+        composition.runtime.agent.agent as never,
+        [],
+        1,
+        1,
+        new AbortController().signal,
+        () => Promise.resolve([]),
+      );
+      return {
+        verified,
+        pluginFailures: composition.pluginFailures.map((failure) => ({
+          pluginId: failure.pluginId,
+          phase: failure.phase,
+          message: failure.message,
+        })),
+        exposedTools: exposed.map((tool) => tool.name),
+      };
+    } finally {
+      await composition.dispose();
+    }
   }
 
   /** Mounts, verifies, and calls one isolate tool through `ctx.tools`. */
@@ -659,6 +1000,134 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
     const { composition } = await this.mount(input);
     await composition.dispose();
     return [...this.loaderIds];
+  }
+
+  /**
+   * Delivers app-owned triggers to a Plugin mounted in a real loaded Worker.
+   * Nothing in the product produces a trigger yet (step 9 of ADR 0026 owns
+   * that), so this stands in for that caller: the host, the generated index
+   * and the Plugin's own `triggers` export are all production code, and only
+   * the delivery is fixture.
+   */
+  async probeTriggers(input: {
+    userId: string;
+    botId: string;
+    artifact: ArtifactRefV1;
+    deliveries: {
+      pluginId?: string;
+      trigger: string;
+      deadlineMs?: number;
+      headers?: Record<string, string>;
+      body?: string;
+    }[];
+    disposeFirst?: boolean;
+  }): Promise<{
+    mounted: string[];
+    failures: { pluginId: string; phase: string; message: string }[];
+    results: PluginWorkerTriggerResultV1[];
+  }> {
+    // An empty generation: the runtime this host registers into, with no
+    // Plugin worker of its own.
+    const { composition, generation } = await this.mount({
+      userId: input.userId,
+      botId: input.botId,
+    });
+    // SAFETY: exported WorkerEntrypoints are materialized on ctx.exports;
+    // workers-types cannot infer the generated local RPC stubs.
+    const exports = this.ctx.exports as unknown as ProbeExports;
+    const member: CompositionMemberV1 = {
+      packageId: PROBE_TRIGGER_ID,
+      version: "0.0.1",
+      descriptor: PROBE_TRIGGER_DESCRIPTOR,
+      provenance: {
+        kind: "bot" as const,
+        packageId: PROBE_TRIGGER_ID,
+        version: "0.0.1",
+        botId: "probe",
+        sessionId: `${input.userId}:probe`,
+        turnId: "turn-1",
+        runId: "run-1",
+        authoredAt: "2026-08-31T00:00:00.000Z",
+      },
+      artifact: input.artifact,
+    };
+    const host = new PluginWorkerHost({
+      loader: this.countingLoader(),
+      artifacts: {
+        loadPackageArtifact: async (contentHash) => {
+          const object = await this.env.APPLICATION_ARTIFACTS.get(
+            `packages/${contentHash}.mjs`,
+          );
+          if (!object) {
+            throw new Error(`package artifact "${contentHash}" is missing`);
+          }
+          return await object.text();
+        },
+      },
+      tools: composition.runtime.services.tools,
+      hooks: composition.runtime.services.hooks,
+      userId: input.userId,
+      botId: input.botId,
+      sessionId: `${input.userId}:${input.botId}`,
+      runId: "run-1",
+      turnId: "turn-1",
+      generationId: generation.generationId,
+      turnType: "chat",
+      recordHookFailure: () => Promise.resolve(),
+      capabilities: exports.BotCapabilities({
+        props: {
+          userId: input.userId,
+          botId: input.botId,
+          runId: "run-1",
+          sessionId: `${input.userId}:${input.botId}`,
+          turnId: "turn-1",
+          generationId: generation.generationId,
+          packageId: "plugin-worker",
+          connections: [],
+          memory: false,
+          workspace: false,
+        },
+      }),
+      compatibilityDate: BOT_ISOLATE_COMPATIBILITY_DATE,
+      bindingDigest: await isolateBindingDigestV1({
+        userId: input.userId,
+        botId: input.botId,
+        connections: [],
+        compositionGenerationId: generation.generationId,
+      }),
+    });
+    try {
+      const prepared = await host.mount([member]);
+      const active = await prepared.commit();
+      if (input.disposeFirst) await active.dispose();
+      const results: PluginWorkerTriggerResultV1[] = [];
+      for (const delivery of input.deliveries) {
+        results.push(
+          await active.deliverTrigger({
+            schemaVersion: 1,
+            pluginId: delivery.pluginId ?? PROBE_TRIGGER_ID,
+            trigger: delivery.trigger,
+            headers: delivery.headers ?? {},
+            body: delivery.body ?? "{}",
+            botId: input.botId,
+            routineId: "routine-1",
+            deadlineMs: delivery.deadlineMs ?? 2_000,
+          }),
+        );
+      }
+      if (!input.disposeFirst) await active.dispose();
+      return {
+        mounted: [...prepared.mounted],
+        failures: prepared.failures.map((failure) => ({
+          pluginId: failure.pluginId,
+          phase: failure.phase,
+          message: failure.message,
+        })),
+        results,
+      };
+    } finally {
+      await composition.dispose();
+    }
   }
 
   /** Proves the Durable Object still owns storage the isolate cannot see. */

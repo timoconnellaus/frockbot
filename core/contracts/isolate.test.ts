@@ -13,7 +13,6 @@ import {
   decodeIsolateToolInvocationV1,
   decodeIsolateToolResultV1,
   encodeIsolateModelEventLineV1,
-  isolateLoaderIdV1,
   isolateToolSchemaV1,
   ISOLATE_MAX_DEADLINE_MS,
   type IsolateHookInvocationV1,
@@ -163,7 +162,7 @@ describe("isolate health v1", () => {
 
   test("rejects an unsupported contract version", () => {
     expect(() =>
-      decodeIsolateHealthV1({ ...health, contractVersion: 4 }),
+      decodeIsolateHealthV1({ ...health, contractVersion: 5 }),
     ).toThrow(/contractVersion is unsupported/);
     expect(() =>
       decodeIsolateHealthV1({ ...health, contractVersion: 0 }),
@@ -298,8 +297,30 @@ describe("isolate hook v1", () => {
 });
 
 describe("isolate identity and capabilities", () => {
-  test("decodes the identity binding", () => {
+  test("decodes the identity binding, keeping the plugins in mount order", () => {
     expect(
+      decodeIsolateIdentityV1({
+        userId: "user-1",
+        botId: "bot-1",
+        generationId: "gen-1",
+        plugins: [
+          { pluginId: "weather", grants: ["http"], consumes: [] },
+          { pluginId: "greeter", grants: ["ai"], consumes: ["forecast"] },
+        ],
+      }),
+    ).toEqual({
+      userId: "user-1",
+      botId: "bot-1",
+      generationId: "gen-1",
+      plugins: [
+        { pluginId: "weather", grants: ["http"], consumes: [] },
+        { pluginId: "greeter", grants: ["ai"], consumes: ["forecast"] },
+      ],
+    });
+  });
+
+  test("refuses an identity carrying the retired per-member shape", () => {
+    expect(() =>
       decodeIsolateIdentityV1({
         userId: "user-1",
         botId: "bot-1",
@@ -307,13 +328,35 @@ describe("isolate identity and capabilities", () => {
         packageId: "pkg-1",
         grants: ["ai"],
       }),
-    ).toEqual({
+    ).toThrow(/invalid fields/);
+  });
+
+  test("refuses a plugin entry that is not bounded", () => {
+    const identity = (plugins: unknown) => ({
       userId: "user-1",
       botId: "bot-1",
       generationId: "gen-1",
-      packageId: "pkg-1",
-      grants: ["ai"],
+      plugins,
     });
+    expect(() =>
+      decodeIsolateIdentityV1(
+        identity([{ pluginId: "weather", grants: "http", consumes: [] }]),
+      ),
+    ).toThrow(/grants must be a bounded array/);
+    expect(() =>
+      decodeIsolateIdentityV1(
+        identity([
+          {
+            pluginId: "weather",
+            grants: [],
+            consumes: Array.from({ length: 65 }, (_, index) => `s${index}`),
+          },
+        ]),
+      ),
+    ).toThrow(/consumes must be a bounded array/);
+    expect(() =>
+      decodeIsolateIdentityV1(identity([{ pluginId: "weather", grants: [] }])),
+    ).toThrow(/invalid fields/);
   });
 
   test("decodes a capability list", () => {
@@ -483,48 +526,5 @@ describe("isolate capability failure v1", () => {
         reason: "r".repeat(513),
       }),
     ).toThrow(/reason must be a bounded string/);
-  });
-});
-
-describe("isolate loader identity", () => {
-  test("is the User and binding-addressed module set — nothing else", () => {
-    expect(
-      isolateLoaderIdV1({
-        userId: "user-1",
-        artifactSetHash: "a".repeat(64),
-      }),
-    ).toBe(`bot-package:user-1:${"a".repeat(64)}`);
-  });
-
-  test("different binding digests produce different ids", () => {
-    expect(
-      isolateLoaderIdV1({
-        userId: "user-1",
-        artifactSetHash: "b".repeat(64),
-      }),
-    ).not.toBe(
-      isolateLoaderIdV1({
-        userId: "user-1",
-        artifactSetHash: "c".repeat(64),
-      }),
-    );
-  });
-
-  test("rejects a component that could forge another Bot's id", () => {
-    expect(() =>
-      isolateLoaderIdV1({
-        userId: "user-1:bot-2",
-        artifactSetHash: "c".repeat(64),
-      }),
-    ).toThrow(/components are invalid/);
-  });
-
-  test("rejects a hash that is not a content address", () => {
-    expect(() =>
-      isolateLoaderIdV1({
-        userId: "user-1",
-        artifactSetHash: "not-a-hash",
-      }),
-    ).toThrow(/components are invalid/);
   });
 });

@@ -3,11 +3,15 @@ import { describe, expect, test } from "vitest";
 import { BOT_ISOLATE_CONTEXT_KEYS_V1 } from "@frockbot/core/contracts";
 import {
   PROBE_BROKEN_SOURCE,
+  PROBE_CONSUMER_SOURCE,
   PROBE_PACKAGE_SOURCE,
+  PROBE_PROVIDER_SOURCE,
   PROBE_REQUEST_HOOK_SOURCE,
   PROBE_REQUEST_HOOKS,
   PROBE_REQUEST_REDIRECT_HOOK_SOURCE,
   PROBE_THROWING_HOOK_SOURCE,
+  PROBE_TRIGGER_ID,
+  PROBE_TRIGGER_SOURCE,
   PROBE_TIMEOUT_HOOK_SOURCE,
   PROBE_UNDECODABLE_HOOK_SOURCE,
 } from "./bot-isolate-probe.ts";
@@ -185,7 +189,13 @@ describe("a Bot Package in a loaded Dynamic Worker", () => {
         botId: "bot-1",
         artifact,
         text: "abcd",
-        deadlineMs: 10,
+        // The Turn's deadline is now the budget for the whole hook chain, and
+        // the index refuses to start a Plugin with less than its minimum slice
+        // left. A deadline under that slice skips every Plugin before it runs,
+        // so the failure under test here — the Plugin's own throw, timeout or
+        // undecodable value — would never happen. Keep it comfortably above
+        // the slice and let the Plugin reach the failure it is named for.
+        deadlineMs: 100,
       });
 
       expect(result.text).toBe("tool:dcba");
@@ -236,8 +246,7 @@ describe("a Bot Package in a loaded Dynamic Worker", () => {
     expect(loaded[0]?.identityKeys).toEqual([
       "botId",
       "generationId",
-      "grants",
-      "packageId",
+      "plugins",
       "userId",
     ]);
     expect(loaded[0]?.limits.subRequests).toBeGreaterThan(0);
@@ -332,9 +341,187 @@ describe("a Bot Package in a loaded Dynamic Worker", () => {
 
     expect(first).toHaveLength(1);
     expect(second).toHaveLength(1);
-    expect(first[0]).toMatch(/^bot-package:user-1:[0-9a-f]{64}$/);
-    expect(second[0]).toMatch(/^bot-package:user-1:[0-9a-f]{64}$/);
+    expect(first[0]).toMatch(/^plugin-worker:user-1:[0-9a-f]{64}$/);
+    expect(second[0]).toMatch(/^plugin-worker:user-1:[0-9a-f]{64}$/);
     expect(first[0]).not.toBe(second[0]);
+  });
+
+  test("two plugins share one worker: provider first, its service handed on, hooks chained", async () => {
+    const stub = probe(`pair-${crypto.randomUUID()}`);
+    const provider = await stub.seedArtifact(PROBE_PROVIDER_SOURCE);
+    const consumer = await stub.seedArtifact(PROBE_CONSUMER_SOURCE);
+
+    const result = await stub.probePair({
+      userId: `user-${crypto.randomUUID()}`,
+      botId: "bot-1",
+      provider,
+      consumer,
+    });
+
+    expect(result.loaderCalls).toBe(1);
+    expect(result.pluginOrder).toEqual(["probe-provider", "probe-consumer"]);
+    expect(result.serviceRead.isError).toBe(false);
+    expect(JSON.parse(result.serviceRead.content)).toEqual({
+      services: ["greeting"],
+      word: "hello",
+      packageId: "probe-consumer",
+    });
+    expect(result.exposedTools).toEqual(["from_provider", "from_consumer"]);
+  });
+
+  test("a plugin whose consumed service nobody provides is excluded and named, and its sibling still mounts", async () => {
+    const stub = probe(`unmet-${crypto.randomUUID()}`);
+    const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);
+    const consumer = await stub.seedArtifact(PROBE_CONSUMER_SOURCE);
+
+    const result = await stub.probeUnmetService({
+      userId: `user-${crypto.randomUUID()}`,
+      botId: "bot-1",
+      artifact,
+      consumer,
+    });
+
+    // A Plugin fails alone: the generation still mounts.
+    expect(result.verified).toBe(true);
+    expect(result.pluginFailures).toEqual([
+      {
+        pluginId: "probe-consumer",
+        phase: "resolve",
+        message:
+          'plugin "probe-consumer" consumes "greeting", which no installed plugin provides',
+      },
+    ]);
+    // The excluded Plugin never reaches the worker, and the sibling still
+    // wraps the hook it declared.
+    expect(result.pluginOrder).toEqual(["bot-authored"]);
+    expect(result.exposedTools).toEqual(["hook_marker"]);
+  });
+
+  test("a plugin whose health report differs from its descriptor is excluded while the others mount", async () => {
+    const stub = probe(`health-${crypto.randomUUID()}`);
+    const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);
+    const provider = await stub.seedArtifact(PROBE_PROVIDER_SOURCE);
+    const consumer = await stub.seedArtifact(PROBE_CONSUMER_SOURCE);
+
+    const result = await stub.probeHealthMismatch({
+      userId: `user-${crypto.randomUUID()}`,
+      botId: "bot-1",
+      artifact,
+      provider,
+      consumer,
+    });
+
+    expect(result.verified).toBe(true);
+    expect(result.pluginFailures).toHaveLength(1);
+    expect(result.pluginFailures[0]).toMatchObject({
+      pluginId: "bot-authored",
+      phase: "health",
+    });
+    expect(result.pluginFailures[0]?.message).toMatch(
+      /hooks do not match its declared hooks/,
+    );
+    // The mismatched Plugin contributes nothing — no `hook_marker` — while the
+    // pair beside it still mounts in order and chains.
+    expect(result.exposedTools).toEqual(["from_provider", "from_consumer"]);
+  });
+
+  test("an app-owned trigger reaches the Plugin that declared it and fires its text", async () => {
+    const stub = probe(`trigger-${crypto.randomUUID()}`);
+    const artifact = await stub.seedArtifact(PROBE_TRIGGER_SOURCE);
+
+    const result = await stub.probeTriggers({
+      userId: `user-${crypto.randomUUID()}`,
+      botId: "bot-1",
+      artifact,
+      deliveries: [
+        {
+          trigger: "inbound",
+          headers: { "x-probe-signature": "sig-1" },
+          body: JSON.stringify({ city: "Wollongong" }),
+        },
+      ],
+    });
+
+    expect(result.failures).toEqual([]);
+    expect(result.mounted).toEqual([PROBE_TRIGGER_ID]);
+    const fired = result.results[0];
+    expect(fired?.status).toBe("fire");
+    expect(JSON.parse(fired?.status === "fire" ? fired.text : "null")).toEqual({
+      packageId: PROBE_TRIGGER_ID,
+      botId: "bot-1",
+      // A trigger runs outside any Turn: the index synthesises the identity
+      // from the routine it was delivered for.
+      sessionId: "trigger:routine-1",
+      signature: "sig-1",
+      city: "Wollongong",
+    });
+  });
+
+  test.each([
+    [
+      "names a trigger the Plugin never declared",
+      { trigger: "unknown" },
+      /did not declare trigger "unknown"/,
+    ],
+    [
+      "is authored as a refusal by the Plugin",
+      { trigger: "refuse" },
+      /nothing in this delivery is for me/,
+    ],
+    ["returns no text", { trigger: "silent" }, /returned no text/],
+    [
+      "is never answered before its deadline",
+      { trigger: "wedged", deadlineMs: 50 },
+      /deadline/,
+    ],
+    [
+      "fires a body over the contract's byte limit",
+      { trigger: "oversized" },
+      /over the 1000000 byte limit/,
+    ],
+    [
+      "names a Plugin this worker never mounted",
+      { pluginId: "not-installed", trigger: "inbound" },
+      /did not mount in this generation/,
+    ],
+  ])(
+    "a trigger that %s is dropped with a reason",
+    async (_label, delivery, reason) => {
+      const stub = probe(`trigger-drop-${crypto.randomUUID()}`);
+      const artifact = await stub.seedArtifact(PROBE_TRIGGER_SOURCE);
+
+      const result = await stub.probeTriggers({
+        userId: `user-${crypto.randomUUID()}`,
+        botId: "bot-1",
+        artifact,
+        deliveries: [delivery],
+      });
+
+      const dropped = result.results[0];
+      expect(dropped?.status).toBe("drop");
+      expect(dropped?.status === "drop" ? (dropped.reason ?? "") : "").toMatch(
+        reason,
+      );
+    },
+  );
+
+  test("a trigger delivered after the Turn's worker is disposed is dropped, not run", async () => {
+    const stub = probe(`trigger-disposed-${crypto.randomUUID()}`);
+    const artifact = await stub.seedArtifact(PROBE_TRIGGER_SOURCE);
+
+    const result = await stub.probeTriggers({
+      userId: `user-${crypto.randomUUID()}`,
+      botId: "bot-1",
+      artifact,
+      disposeFirst: true,
+      deliveries: [{ trigger: "inbound" }],
+    });
+
+    const dropped = result.results[0];
+    expect(dropped?.status).toBe("drop");
+    expect(dropped?.status === "drop" ? (dropped.reason ?? "") : "").toMatch(
+      /no longer mounted/,
+    );
   });
 
   test("a broken package.js fails verification with a diagnostic, not a hang", async () => {
@@ -347,8 +534,8 @@ describe("a Bot Package in a loaded Dynamic Worker", () => {
       artifact,
     });
 
-    expect(failure).toContain("failed to mount in its isolate");
-    expect(failure).toMatch(/package\.js/);
+    expect(failure).toContain("plugin worker failed to mount");
+    expect(failure).toMatch(/plugins: bot-authored/);
   });
 });
 

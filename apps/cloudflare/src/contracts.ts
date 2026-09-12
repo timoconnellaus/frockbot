@@ -5,8 +5,8 @@ import type {
   SettingsChangeCommand,
 } from "@frockbot/core/protocol-schemas";
 import {
-  type BotIsolateEntrypoint,
   type BotIsolateEnv,
+  type PluginWorkerEntrypoint,
   type SessionEvent,
 } from "@frockbot/core/contracts";
 import type { MachineResultDeliveryV1 } from "@frockbot/app/machine/delivery";
@@ -348,7 +348,7 @@ export interface UserApplicationEnv {
 /**
  * The loader-side `WorkerCode`. `env` is generic because two kinds of isolate
  * are loaded from this Worker: a user application (`UserApplicationEnv`) and a
- * Bot Package (`BotIsolateEnv`, from `@frockbot/core/contracts`), which sees
+ * Plugin worker (`BotIsolateEnv`, from `@frockbot/core/contracts`), which sees
  * only `IDENTITY` and the loopback `CAPABILITIES` service binding.
  */
 export interface WorkerCode<Env = UserApplicationEnv> {
@@ -381,10 +381,10 @@ export interface WorkerLoader<
   ): LoadedWorker<Entrypoint>;
 }
 
-/** The `BOT_PACKAGES` loader: Bot Package isolates, never user applications. */
+/** The `BOT_PACKAGES` loader: Plugin workers, never user applications. */
 export type BotPackageLoader = WorkerLoader<
   BotIsolateEnv,
-  BotIsolateEntrypoint
+  PluginWorkerEntrypoint
 >;
 
 export interface ApplicationArtifactStore {

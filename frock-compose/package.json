@@ -3,7 +3,7 @@
   "version": "0.0.1",
   "private": true,
   "type": "module",
-  "description": "The FrockBot Bot isolate host: loads a Composition member's artifact as a Dynamic Worker.",
+  "description": "The FrockBot Plugin worker host: loads a User's Plugins as one Dynamic Worker behind a generated index.",
   "exports": {
     ".": "./index.ts",
     "./package.json": "./package.json"

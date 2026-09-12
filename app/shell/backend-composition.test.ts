@@ -7,12 +7,19 @@
 // and provenance the model was shown.
 import { describe, expect, test } from "bun:test";
 import {
+  decodePluginDescriptorV1,
+  ISOLATE_CONTRACT_VERSION,
+  type BotCapabilitiesStub,
+  type PluginWorkerEntrypoint,
+} from "@frockbot/core/contracts";
+import {
   compositionArtifactSetHashV1,
   decodeCompositionGenerationV1,
   type CompositionAppletMemberV1,
   type CompositionGenerationV1,
   type CompositionMemberV1,
 } from "@frockbot/core/durable";
+import type { BotIsolateLoader } from "@frockbot/frock-compose";
 import { createShellCompositionHost } from "./backend-composition.js";
 
 const USER = "user-1";
@@ -111,6 +118,150 @@ describe("Applet tools mounted into a Turn's Composition", () => {
       expect(calls).toEqual([
         { appletId: APPLET, generationId: APPLET_MEMBER.generationId },
       ]);
+    } finally {
+      await mounted.dispose();
+    }
+  });
+});
+
+function pluginMember(id: string, contentHash: string): CompositionMemberV1 {
+  return {
+    packageId: id,
+    version: "0.0.1",
+    provenance: {
+      kind: "user",
+      packageId: id,
+      version: "0.0.1",
+      userId: USER,
+      authoredAt: "2026-09-05T00:00:00.000Z",
+    },
+    artifact: {
+      contentHash,
+      size: 32,
+      mediaType: "application/javascript",
+      bundlerVersion: "1",
+    },
+    descriptor: decodePluginDescriptorV1({
+      id,
+      displayName: id,
+      version: "0.0.1",
+      contractVersion: ISOLATE_CONTRACT_VERSION,
+      tools: [
+        {
+          name: `${id}_tool`,
+          description: `${id} tool`,
+          inputSchema: { type: "object" },
+        },
+      ],
+      hooks: [],
+      grants: [],
+      contextKeys: ["user", "bot", "session"],
+    }),
+  };
+}
+
+async function generationWithPlugins(): Promise<CompositionGenerationV1> {
+  const members = [
+    pluginMember("good", "a".repeat(64)),
+    pluginMember("bad", "b".repeat(64)),
+  ];
+  const artifactSetHash = await compositionArtifactSetHashV1(members, []);
+  return decodeCompositionGenerationV1({
+    schemaVersion: 1,
+    generationId: `2026-09-05T00:00:00.000Z:${artifactSetHash.slice(0, 16)}`,
+    artifactSetHash,
+    createdAt: "2026-09-05T00:00:00.000Z",
+    origin: { kind: "bootstrap" },
+    members,
+    status: "active",
+  });
+}
+
+describe("a Plugin that the worker refuses", () => {
+  // ADR 0026: a Plugin whose report differs from its descriptor fails alone.
+  // Escalating that to the generation would quarantine nine healthy Plugins
+  // because a tenth mis-declared one tool.
+  test("fails alone: the generation still verifies and its siblings still mount", async () => {
+    const generation = await generationWithPlugins();
+    const { signal } = new AbortController();
+    const entrypoint: PluginWorkerEntrypoint = {
+      health: () =>
+        Promise.resolve({
+          schemaVersion: 1,
+          contractVersion: ISOLATE_CONTRACT_VERSION,
+          plugins: [
+            {
+              pluginId: "good",
+              ok: true,
+              tools: [
+                {
+                  name: "good_tool",
+                  description: "good tool",
+                  inputSchema: { type: "object" },
+                  idempotent: true,
+                },
+              ],
+              hooks: [],
+              provides: [],
+              consumes: [],
+              triggers: [],
+            },
+            {
+              pluginId: "bad",
+              ok: false,
+              reason: 'plugin "bad" must export an "execute" function',
+              tools: [],
+              hooks: [],
+              provides: [],
+              consumes: [],
+              triggers: [],
+            },
+          ],
+        }),
+      hook: () =>
+        Promise.resolve({
+          schemaVersion: 1,
+          status: "unchanged",
+          failures: [],
+        }),
+      execute: () =>
+        Promise.resolve({ schemaVersion: 1, content: "ok", isError: false }),
+      receiveTrigger: () =>
+        Promise.resolve({ schemaVersion: 1, status: "drop" as const }),
+    };
+    const loader: BotIsolateLoader = {
+      get: () => ({ getEntrypoint: () => entrypoint }),
+    };
+    const mounted = await createShellCompositionHost({
+      botId: "bot-1",
+      sessionId: `${USER}:bot-1`,
+      sessionEvents: [],
+      admitEffect: () => Promise.resolve(true),
+      isolate: {
+        userId: USER,
+        runId: "run-1",
+        turnId: "run-1",
+        loader,
+        artifacts: {
+          loadPackageArtifact: () =>
+            Promise.resolve("export const tools = [];"),
+        },
+        capabilities: {} as BotCapabilitiesStub,
+        bindingDigest: "c".repeat(64),
+        compatibilityDate: "2026-01-01",
+      },
+    }).mount(generation, signal);
+    try {
+      await mounted.verify(signal);
+      expect(
+        mounted.pluginFailures.map((failure) => [
+          failure.pluginId,
+          failure.phase,
+        ]),
+      ).toEqual([["bad", "health"]]);
+      const names = mounted.runtime.services.tools.registeredNames?.() ?? [];
+      expect(names).toContain("good/good_tool");
+      expect(names).not.toContain("bad/bad_tool");
     } finally {
       await mounted.dispose();
     }

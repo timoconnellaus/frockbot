@@ -10,6 +10,7 @@ import { createShellBotBackendContribution } from "@frockbot/app/shell/backend";
 import type { ActiveTurnV1 } from "@frockbot/app/shell/backend-state";
 import { createIsolateCapabilityHost } from "@frockbot/app/isolates/capabilities";
 import {
+  PLUGIN_WORKER_PACKAGE_ID,
   isolateAuthoritySnapshot,
   isolateConnection,
 } from "@frockbot/app/isolates/bot";
@@ -516,7 +517,7 @@ describe("generic per-Turn model resolution", () => {
         runId: "run-1",
         sessionId: "session-1",
         turnId: "turn-1",
-        packageId: "bot-authored",
+        packageId: PLUGIN_WORKER_PACKAGE_ID,
         generationId: "composition-1",
         request: "flock-ai-ambient",
       }),
@@ -532,7 +533,7 @@ describe("generic per-Turn model resolution", () => {
         notificationId: notificationIdV1(
           "package-connection-unavailable",
           "run-1",
-          "bot-authored",
+          PLUGIN_WORKER_PACKAGE_ID,
           "flock-ai-ambient",
         ),
         title: "Connection unavailable",
