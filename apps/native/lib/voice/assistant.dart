@@ -389,7 +389,7 @@ class AssistantSessionController extends ChangeNotifier {
   Future<void> _ended() async {
     if (!active) return;
     _generation++;
-    await _teardown();
+    await _teardown(reason: 'server-closed');
     _status = VoiceStatusV1.idle;
     _set(VoiceSessionPhase.ended);
   }

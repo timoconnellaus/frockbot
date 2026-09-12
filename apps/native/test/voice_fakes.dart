@@ -49,6 +49,12 @@ class FakeVoiceSocket implements VoiceSocket {
 
   void deliver(Object? message) => _incoming.add(message);
 
+  /// The server's end going away: the stream finishes without the client
+  /// having asked for it.
+  Future<void> finish() async {
+    if (!_incoming.isClosed) await _incoming.close();
+  }
+
   List<String> get texts => sent.whereType<String>().toList();
   List<Uint8List> get binaries => sent.whereType<Uint8List>().toList();
 

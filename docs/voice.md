@@ -261,7 +261,9 @@ admitted keeps running; its answer is spoken on the next call or dropped after
 
 The client closes with a code and a reason that name the path that ended the
 call, because the server's log is the only record of it: `1000` with
-`end-button` or `lifecycle:<state>` when the person or the app ended it, `4001`
+`end-button` or `lifecycle:<state>` when the person or the app ended it, `1000`
+`server-closed` when the server's end of the socket finished first (mostly
+inert — the peer has already closed, so the frame rarely reaches it), `4001`
 with the failure sentence when the client failed on its own, `4002` `disposed`
 when the controller was torn down mid-call, `4003` `abandoned-connect` when the
 call ended while the socket was still connecting and the socket that arrived
@@ -283,8 +285,11 @@ never a provider's error sentence), `speech-suppressed` (the speech allowance is
 used up, so a sentence of the reply was never turned into audio — the cap and
 the sentence's length, never its words), `refused` (with the code and sentence
 the client was sent), `stt-failed`, `call-ended` and `closed` (the client's code
-and reason). Every line carries the connection id, the device key and, once
-admitted, the call id and elapsed milliseconds. A call that reaches
+and reason). Every line carries the connection id, and — once `onConnect`
+accepted the socket — the device key; `refused-identity` carries the device key
+from the header it just rejected, and the `closed` line for a refused socket has
+none. Once admitted, every line also carries the call id and elapsed
+milliseconds. A call that reaches
 `listening` and then `closed` with no `utterance` in between was ended by the
 client before anything was heard; the `closed` reason says by which path.
 

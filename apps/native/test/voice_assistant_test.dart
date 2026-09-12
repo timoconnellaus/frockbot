@@ -300,6 +300,18 @@ void main() {
     harness.controller.dispose();
   });
 
+  test('a server that closes first names the path', () async {
+    final harness = Harness();
+    await harness.live();
+    await harness.socket.finish();
+    await settle();
+    expect(harness.controller.phase, VoiceSessionPhase.ended);
+    expect(harness.socket.closed, isTrue);
+    expect(harness.socket.closeCode, voiceCloseNormalV1);
+    expect(harness.socket.closeReason, 'server-closed');
+    harness.controller.dispose();
+  });
+
   test('a socket that arrives after the call ended is abandoned', () async {
     final deferred = Completer<VoiceSocket>();
     final harness = Harness(deferred: deferred);
