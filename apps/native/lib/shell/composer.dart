@@ -61,7 +61,7 @@ bool get enterSends => !isNativeMobile;
 
 /// The field's vertical inset, in one place because the corner button is
 /// centred against the one-line field this produces.
-const EdgeInsets composerFieldPadding = EdgeInsets.fromLTRB(15, 14, 4, 14);
+const EdgeInsets composerFieldPadding = EdgeInsets.fromLTRB(16, 12, 4, 12);
 
 /// An [AnimatedSwitcher] layout where the outgoing child is only a picture:
 /// it stays visible for the cross-fade but cannot be pressed, and a screen
@@ -244,83 +244,98 @@ class _ComposerState extends State<Composer> {
     BuildContext context, {
     required bool dictatable,
     required bool canSend,
-  }) => KeyedSubtree(
-    key: ValueKey(
-      widget.dictating
-          ? 'recording-action'
-          : dictatable
-          ? 'dictate-action'
-          : 'send-action',
-    ),
-    child: widget.dictating
-        ? identified(
-            VoiceIds.composerDictationStop,
-            IconButton.filled(
-              key: const ValueKey('dictation-stop'),
-              tooltip: widget.dictationState == DictationState.stopping
-                  ? 'Finishing dictation'
-                  : 'Stop dictation',
-              onPressed: widget.dictationState == DictationState.stopping
-                  ? null
-                  : widget.onStopDictation,
-              style: IconButton.styleFrom(
-                shape: const CircleBorder(),
-                minimumSize: const Size(48, 48),
-              ),
-              icon: voiceIconTransition(
-                context,
-                widget.dictationState == DictationState.stopping
-                    ? SizedBox(
-                        key: const ValueKey('finishing'),
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          value: MediaQuery.disableAnimationsOf(context)
-                              ? 0.75
-                              : null,
+  }) {
+    final theme = Theme.of(context);
+    return KeyedSubtree(
+      key: ValueKey(
+        widget.dictating
+            ? 'recording-action'
+            : dictatable
+            ? 'dictate-action'
+            : 'send-action',
+      ),
+      child: widget.dictating
+          ? identified(
+              VoiceIds.composerDictationStop,
+              IconButton.filled(
+                key: const ValueKey('dictation-stop'),
+                tooltip: widget.dictationState == DictationState.stopping
+                    ? 'Finishing dictation'
+                    : 'Stop dictation',
+                onPressed: widget.dictationState == DictationState.stopping
+                    ? null
+                    : widget.onStopDictation,
+                style: IconButton.styleFrom(
+                  shape: const CircleBorder(),
+                  minimumSize: const Size(40, 40),
+                  fixedSize: const Size(40, 40),
+                  padding: EdgeInsets.zero,
+                ),
+                icon: voiceIconTransition(
+                  context,
+                  widget.dictationState == DictationState.stopping
+                      ? SizedBox(
+                          key: const ValueKey('finishing'),
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            value: MediaQuery.disableAnimationsOf(context)
+                                ? 0.75
+                                : null,
+                          ),
+                        )
+                      : const Icon(
+                          Icons.stop_rounded,
+                          key: ValueKey('recording'),
+                          size: 24,
                         ),
-                      )
-                    : const Icon(
-                        Icons.stop_rounded,
-                        key: ValueKey('recording'),
-                        size: 24,
-                      ),
-              ),
-            ),
-          )
-        : dictatable
-        ? identified(
-            VoiceIds.composerDictate,
-            IconButton.filled(
-              key: const ValueKey('dictate'),
-              tooltip: 'Dictate message',
-              onPressed: widget.onDictate,
-              style: IconButton.styleFrom(
-                minimumSize: const Size(48, 48),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
                 ),
               ),
-              icon: const ChatIcon(ChatIconKind.mic),
-            ),
-          )
-        : identified(
-            ShellIds.sendButton,
-            IconButton.filled(
-              key: const ValueKey('send'),
-              tooltip: 'Send',
-              onPressed: canSend ? _send : null,
-              style: IconButton.styleFrom(
-                minimumSize: const Size(48, 48),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
+            )
+          : dictatable
+          ? identified(
+              VoiceIds.composerDictate,
+              IconButton.filled(
+                key: const ValueKey('dictate'),
+                tooltip: 'Dictate message',
+                onPressed: widget.onDictate,
+                style: IconButton.styleFrom(
+                  minimumSize: const Size(40, 40),
+                  fixedSize: const Size(40, 40),
+                  padding: EdgeInsets.zero,
+                  iconSize: 20,
+                  backgroundColor: theme.colorScheme.onSurface.withValues(
+                    alpha: 0.08,
+                  ),
+                  foregroundColor: theme.colorScheme.onSurface,
+                  shape: const CircleBorder(),
                 ),
+                icon: const ChatIcon(ChatIconKind.mic),
               ),
-              icon: const ChatIcon(ChatIconKind.send),
+            )
+          : identified(
+              ShellIds.sendButton,
+              IconButton.filled(
+                key: const ValueKey('send'),
+                tooltip: 'Send',
+                onPressed: canSend ? _send : null,
+                style: IconButton.styleFrom(
+                  minimumSize: const Size(40, 40),
+                  fixedSize: const Size(40, 40),
+                  padding: EdgeInsets.zero,
+                  iconSize: 20,
+                  shape: const CircleBorder(),
+                  disabledBackgroundColor: theme.colorScheme.onSurface
+                      .withValues(alpha: 0.06),
+                  disabledForegroundColor: theme.colorScheme.onSurfaceVariant
+                      .withValues(alpha: 0.5),
+                ),
+                icon: const ChatIcon(ChatIconKind.send),
+              ),
             ),
-          ),
-  );
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -329,7 +344,7 @@ class _ComposerState extends State<Composer> {
     final canSend =
         !widget.dictating && widget.ready && draftSendable(text.trim());
     final fieldStyle = theme.textTheme.bodyLarge?.copyWith(
-      fontWeight: FontWeight.w300,
+      fontWeight: FontWeight.w400,
     );
     // The height of the field with one line in it, as the decorator sizes
     // it: the inset around one line, adjusted for the theme's density and
@@ -345,7 +360,7 @@ class _ComposerState extends State<Composer> {
           theme.visualDensity.baseSizeAdjustment.dy,
     );
     Widget corner(Widget button) => Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 3),
+      padding: const EdgeInsets.symmetric(horizontal: 5),
       child: SizedBox(
         height: oneLine,
         child: Center(child: button),
@@ -363,7 +378,7 @@ class _ComposerState extends State<Composer> {
           identified(
             ShellIds.skillChips,
             Padding(
-              padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
               child: Wrap(
                 spacing: 6,
                 runSpacing: 6,
@@ -384,10 +399,10 @@ class _ComposerState extends State<Composer> {
           Align(
             alignment: Alignment.centerRight,
             child: Padding(
-              padding: const EdgeInsets.only(right: 12),
+              padding: const EdgeInsets.fromLTRB(0, 0, 16, 6),
               child: identified(
                 ShellIds.stopButton,
-                TextButton.icon(
+                OutlinedButton.icon(
                   key: const ValueKey('stop'),
                   onPressed: widget.stopping
                       ? null
@@ -397,29 +412,37 @@ class _ComposerState extends State<Composer> {
                         },
                   icon: const Icon(Icons.stop_rounded, size: 14),
                   label: Text(widget.stopping ? 'Stopping…' : 'Stop'),
-                  style: TextButton.styleFrom(
-                    foregroundColor: theme.colorScheme.onSurfaceVariant,
-                    textStyle: theme.textTheme.bodySmall,
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: theme.colorScheme.onSurface,
+                    minimumSize: const Size(0, 30),
+                    padding: const EdgeInsets.fromLTRB(10, 0, 12, 0),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    shape: const StadiumBorder(),
+                    side: BorderSide(
+                      color: FrockTheme.hairline(theme.colorScheme),
+                    ),
+                    textStyle: theme.textTheme.labelMedium,
+                    backgroundColor: theme.colorScheme.surface,
                   ),
                 ),
               ),
             ),
           ),
         Padding(
-          padding: const EdgeInsets.fromLTRB(14, 4, 14, 10),
+          padding: const EdgeInsets.fromLTRB(12, 4, 12, 10),
           child: AnimatedContainer(
             duration: FrockTheme.motion(context, voiceEnterDuration),
             curve: Curves.easeOutCubic,
             decoration: BoxDecoration(
               color: theme.colorScheme.surfaceContainerHighest,
-              borderRadius: BorderRadius.circular(19),
+              borderRadius: BorderRadius.circular(22),
               border: Border.all(
                 color: widget.focus.hasFocus
                     ? Color.alphaBlend(
-                        theme.colorScheme.primary.withValues(alpha: 0.4),
+                        theme.colorScheme.primary.withValues(alpha: 0.55),
                         theme.colorScheme.outlineVariant,
                       )
-                    : theme.colorScheme.outlineVariant,
+                    : FrockTheme.hairline(theme.colorScheme),
               ),
             ),
             child: Column(

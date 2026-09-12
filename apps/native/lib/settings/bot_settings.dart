@@ -9,6 +9,7 @@ import '../protocol/client_wire.generated.dart' as wire;
 import '../shell/semantics.dart';
 import '../shell/sidebar.dart' show SidebarProfile;
 import '../theme/frock_theme.dart';
+import '../theme/rows.dart';
 import '../theme/states.dart';
 import 'model_picker.dart';
 
@@ -432,19 +433,36 @@ class _BotSettingsViewState extends State<BotSettingsView> {
     bool required = false,
   }) => identified(
     id,
-    TextFormField(
-      key: ValueKey('$id.${state.loads}'),
-      initialValue: value,
-      minLines: lines,
-      maxLines: lines,
-      maxLength: maxLength,
-      decoration: InputDecoration(labelText: label, helperText: hint),
-      onChanged: (next) => _typed(() => onChanged(next)),
-      validator: required
-          ? (next) => (next ?? '').trim().isEmpty
-                ? 'Enter a name for this Bot.'
-                : null
-          : null,
+    Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: TextFormField(
+        key: ValueKey('$id.${state.loads}'),
+        initialValue: value,
+        minLines: lines,
+        maxLines: lines,
+        maxLength: maxLength,
+        // The counter is news only as the budget runs out; a "7/100" under
+        // every name is a ledger nobody asked for.
+        decoration: InputDecoration(labelText: label, helperText: hint),
+        buildCounter:
+            (
+              context, {
+              required currentLength,
+              required isFocused,
+              required maxLength,
+            }) => maxLength != null && currentLength >= maxLength * 0.9
+            ? Text(
+                '$currentLength/$maxLength',
+                style: Theme.of(context).textTheme.bodySmall,
+              )
+            : null,
+        onChanged: (next) => _typed(() => onChanged(next)),
+        validator: required
+            ? (next) => (next ?? '').trim().isEmpty
+                  ? 'Enter a name for this Bot.'
+                  : null
+            : null,
+      ),
     ),
   );
 
@@ -456,12 +474,16 @@ class _BotSettingsViewState extends State<BotSettingsView> {
     required void Function(bool) onChanged,
   }) => identified(
     id,
-    SwitchListTile(
-      contentPadding: EdgeInsets.zero,
-      title: Text(title),
-      subtitle: Text(detail),
-      value: value,
-      onChanged: (next) => _chose(() => onChanged(next)),
+    Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: SwitchListTile(
+        contentPadding: const EdgeInsets.fromLTRB(2, 0, 0, 0),
+        visualDensity: VisualDensity.compact,
+        title: Text(title),
+        subtitle: Text(detail),
+        value: value,
+        onChanged: (next) => _chose(() => onChanged(next)),
+      ),
     ),
   );
 
@@ -520,23 +542,27 @@ class _BotSettingsViewState extends State<BotSettingsView> {
                   onTap: widget.onEditAvatar,
                   borderRadius: BorderRadius.circular(16),
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    padding: const EdgeInsets.symmetric(vertical: 10),
                     child: Column(
                       children: [
-                        SheepAvatar(size: 72, background: widget.background),
-                        const SizedBox(height: 8),
+                        SheepAvatar(size: 76, background: widget.background),
+                        const SizedBox(height: 10),
                         Text(
                           widget.onEditAvatar == null
                               ? '${state.name.isEmpty ? 'This Bot' : state.name} avatar'
                               : 'Change colour',
-                          style: type.bodySmall,
+                          style: type.labelMedium?.copyWith(
+                            color: widget.onEditAvatar == null
+                                ? Theme.of(context).colorScheme.onSurfaceVariant
+                                : Theme.of(context).colorScheme.primary,
+                          ),
                         ),
                       ],
                     ),
                   ),
                 ),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 12),
               _field(
                 id: SettingsIds.botName,
                 label: 'Name',
@@ -565,7 +591,7 @@ class _BotSettingsViewState extends State<BotSettingsView> {
                 label: 'Description',
                 value: state.description,
                 maxLength: 10000,
-                lines: 6,
+                lines: 4,
                 onChanged: (next) => state.description = next,
               ),
               _switch(
@@ -581,10 +607,17 @@ class _BotSettingsViewState extends State<BotSettingsView> {
               identified(
                 SettingsIds.botAdvanced,
                 ExpansionTile(
-                  title: const Text('Advanced'),
+                  title: Text(
+                    'Advanced',
+                    style: type.bodyMedium?.copyWith(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
                   initiallyExpanded: advanced,
-                  tilePadding: EdgeInsets.zero,
+                  tilePadding: const EdgeInsets.symmetric(horizontal: 2),
                   childrenPadding: EdgeInsets.zero,
+                  dense: true,
                   onExpansionChanged: (open) => setState(() => advanced = open),
                   children: [
                     _field(
@@ -605,7 +638,10 @@ class _BotSettingsViewState extends State<BotSettingsView> {
                     identified(
                       SettingsIds.botIdentity,
                       ListTile(
-                        contentPadding: EdgeInsets.zero,
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 2,
+                        ),
+                        dense: true,
                         title: const Text('Identity'),
                         subtitle: Text(
                           state.name.isEmpty ? 'This Bot' : state.name,
@@ -621,7 +657,8 @@ class _BotSettingsViewState extends State<BotSettingsView> {
                     identified(
                       SettingsIds.botMembers,
                       const ListTile(
-                        contentPadding: EdgeInsets.zero,
+                        contentPadding: EdgeInsets.symmetric(horizontal: 2),
+                        dense: true,
                         title: Text('Members'),
                         subtitle: Text(
                           'This Bot uses what you enable for all of your Bots.',
@@ -673,32 +710,34 @@ class _BotSettingsViewState extends State<BotSettingsView> {
 
   Widget _model(BuildContext context) => identified(
     SettingsIds.botModel,
-    Card(
-      margin: const EdgeInsets.symmetric(vertical: 8),
-      child: ListTile(
-        leading: const Icon(Icons.memory_rounded),
-        title: Text(
-          state.model == null
-              ? 'Follow the account model'
-              : 'This Bot’s own model',
-        ),
-        subtitle: Text(
-          state.model == null
-              ? 'Change it to give this Bot a model of its own.'
-              : jsonEncode(state.model),
-        ),
-        trailing: const Icon(Icons.expand_more_rounded),
-        onTap: () async {
-          final choice = await Navigator.of(context).push<wire.SettingChoice>(
-            MaterialPageRoute(
-              builder: (_) =>
-                  ModelPicker(load: state.options, selected: state.model),
-            ),
-          );
-          if (choice != null) {
-            _chose(() => state.model = choice.value.value);
-          }
-        },
+    Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: FrockRowGroup(
+        rows: [
+          FrockRow(
+            icon: Icons.memory_rounded,
+            title: state.model == null
+                ? 'Follow the account model'
+                : 'This Bot’s own model',
+            subtitle: state.model == null
+                ? 'Change it to give this Bot a model of its own.'
+                : jsonEncode(state.model),
+            onTap: () async {
+              final choice = await Navigator.of(context)
+                  .push<wire.SettingChoice>(
+                    MaterialPageRoute(
+                      builder: (_) => ModelPicker(
+                        load: state.options,
+                        selected: state.model,
+                      ),
+                    ),
+                  );
+              if (choice != null) {
+                _chose(() => state.model = choice.value.value);
+              }
+            },
+          ),
+        ],
       ),
     ),
   );

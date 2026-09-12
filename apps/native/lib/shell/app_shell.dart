@@ -40,6 +40,7 @@ import '../settings/credit.dart';
 import '../settings/bot_settings.dart';
 import '../settings/page.dart';
 import '../templates/page.dart';
+import '../theme/rows.dart';
 import '../update/app_version.dart';
 import '../view/sample_page.dart';
 import '../voice/assistant.dart';
@@ -904,31 +905,44 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           // The panel names what it holds and offers the way out. Choosing
           // what it holds is the chat header's job: its icons are the one set
           // of doors, and a second row of them here was the same doors twice.
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 4, 4),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    slots.labelOf(ShellSlot.rightPanel, key) ?? key,
-                    style: Theme.of(context).textTheme.titleMedium
-                        ?.copyWith(fontWeight: FontWeight.w500),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+          SizedBox(
+            height: 52,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 8, 0),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      slots.labelOf(ShellSlot.rightPanel, key) ?? key,
+                      style: Theme.of(context).textTheme.titleSmall
+                          ?.copyWith(fontSize: 14, fontWeight: FontWeight.w600),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
-                ),
-                identified(
-                  ShellIds.rightPanelClose,
-                  IconButton(
-                    tooltip: 'Close the panel',
-                    onPressed: () => setState(() {
-                      panelOpen = false;
-                      panelCollapsed = true;
-                    }),
-                    icon: const Icon(Icons.close),
+                  identified(
+                    ShellIds.rightPanelClose,
+                    IconButton(
+                      tooltip: 'Close the panel',
+                      onPressed: () => setState(() {
+                        panelOpen = false;
+                        panelCollapsed = true;
+                      }),
+                      style: IconButton.styleFrom(
+                        foregroundColor: Theme.of(context)
+                            .colorScheme
+                            .onSurfaceVariant,
+                        iconSize: 18,
+                        minimumSize: const Size(32, 32),
+                        fixedSize: const Size(32, 32),
+                        padding: EdgeInsets.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      icon: const Icon(Icons.close_rounded),
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
           const Divider(height: 1),
@@ -1197,76 +1211,59 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         if (canvas == null || entry.entry.label.toLowerCase() != 'applets')
           entry,
     ];
-    const chevron = Icon(Icons.chevron_right_rounded);
     return [
-      const SizedBox(height: 12),
-      Card(
-        margin: EdgeInsets.zero,
-        child: Column(
-          children: [
+      const SizedBox(height: 16),
+      FrockRowGroup(
+        rows: [
+          identified(
+            RoutineIds.panelToggle,
+            FrockRow(
+              icon: Icons.history_rounded,
+              title: 'Routines',
+              trailing: inbox == null
+                  ? null
+                  : AnimatedBuilder(
+                      animation: inbox,
+                      builder: (context, _) => inbox.unacknowledged > 0
+                          ? Badge(label: Text(inbox.badge))
+                          : const SizedBox.shrink(),
+                    ),
+              onTap: () => _openPanel('routines'),
+            ),
+          ),
+          identified(
+            PluginIds.panelToggle,
+            FrockRow(
+              icon: Icons.extension_outlined,
+              title: 'Plugins',
+              onTap: () => _openPanel('plugins'),
+            ),
+          ),
+          if (canvas != null)
             identified(
-              RoutineIds.panelToggle,
-              ListTile(
-                leading: const Icon(Icons.history_rounded),
-                title: const Text('Routines'),
-                trailing: inbox == null
-                    ? chevron
-                    : AnimatedBuilder(
-                        animation: inbox,
-                        builder: (context, _) => Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            if (inbox.unacknowledged > 0)
-                              Badge(label: Text(inbox.badge)),
-                            chevron,
-                          ],
-                        ),
-                      ),
-                onTap: () => _openPanel('routines'),
+              AppletIds.chip,
+              FrockRow(
+                icon: Icons.widgets_outlined,
+                title: 'Applets',
+                onTap: () async {
+                  final id = await showDialog<String>(
+                    context: context,
+                    builder: (_) => AppletPicker(controller: canvas),
+                  );
+                  if (id != null && mounted) await _openApplet(id);
+                },
               ),
             ),
-            const Divider(height: 1),
+          for (final entry in entries)
             identified(
-              PluginIds.panelToggle,
-              ListTile(
-                leading: const Icon(Icons.extension_outlined),
-                title: const Text('Plugins'),
-                trailing: chevron,
-                onTap: () => _openPanel('plugins'),
+              PackageIds.entry(entry.contribution.packageId, entry.entry.id),
+              FrockRow(
+                icon: _packageIcon(entry.entry.icon),
+                title: entry.entry.label,
+                onTap: () => _openPackagePage(entry),
               ),
             ),
-            if (canvas != null) ...[
-              const Divider(height: 1),
-              identified(
-                AppletIds.chip,
-                ListTile(
-                  leading: const Icon(Icons.widgets_outlined),
-                  title: const Text('Applets'),
-                  trailing: chevron,
-                  onTap: () async {
-                    final id = await showDialog<String>(
-                      context: context,
-                      builder: (_) => AppletPicker(controller: canvas),
-                    );
-                    if (id != null && mounted) await _openApplet(id);
-                  },
-                ),
-              ),
-            ],
-            for (final entry in entries) ...[
-              const Divider(height: 1),
-              identified(
-                PackageIds.entry(entry.contribution.packageId, entry.entry.id),
-                ListTile(
-                  leading: Icon(_packageIcon(entry.entry.icon)),
-                  title: Text(entry.entry.label),
-                  trailing: chevron,
-                  onTap: () => _openPackagePage(entry),
-                ),
-              ),
-            ],
-          ],
-        ),
+        ],
       ),
     ];
   }
@@ -1389,9 +1386,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                 children: [
                   ShellLayout(
                     header: bot == null
-                        ? (single
-                              ? null
-                              : AppBar(title: const Text('FrockBot')))
+                        ? null
                         : ChatHeader(
                             name: _name(bot),
                             connection: selectedConnection,
@@ -1644,18 +1639,59 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                     children: [
                       identified(
                         SettingsIds.profileName,
-                        ListTile(
-                          contentPadding: EdgeInsets.zero,
-                          leading: const CircleAvatar(
-                            radius: 24,
-                            child: Icon(Icons.person_outline),
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(4, 8, 4, 8),
+                          child: Row(
+                            children: [
+                              Container(
+                                width: 44,
+                                height: 44,
+                                decoration: BoxDecoration(
+                                  color: Theme.of(context).colorScheme.onSurface
+                                      .withValues(alpha: 0.08),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: Icon(
+                                  Icons.person_rounded,
+                                  size: 22,
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .onSurfaceVariant,
+                                ),
+                              ),
+                              const SizedBox(width: 14),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    FutureBuilder<String>(
+                                      future: _displayName(),
+                                      builder: (context, answer) => Text(
+                                        answer.data ?? widget.userId,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .titleMedium,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      'Signed in',
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodySmall
+                                          ?.copyWith(
+                                            color: Theme.of(context)
+                                                .colorScheme
+                                                .onSurfaceVariant,
+                                          ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
                           ),
-                          title: FutureBuilder<String>(
-                            future: _displayName(),
-                            builder: (context, answer) =>
-                                Text(answer.data ?? widget.userId),
-                          ),
-                          subtitle: const Text('Signed in'),
                         ),
                       ),
                       // What the account can spend, first, because it is the
@@ -1810,17 +1846,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                           identified(
                             SettingsIds.profileSignOut,
                             Builder(
-                              builder: (context) => ListTile(
-                                leading: Icon(
-                                  Icons.logout,
-                                  color: Theme.of(context).colorScheme.error,
-                                ),
-                                title: Text(
-                                  'Sign out',
-                                  style: TextStyle(
-                                    color: Theme.of(context).colorScheme.error,
-                                  ),
-                                ),
+                              builder: (context) => FrockRow(
+                                icon: Icons.logout_rounded,
+                                title: 'Sign out',
+                                color: Theme.of(context).colorScheme.error,
+                                chevron: false,
                                 onTap: () {
                                   Navigator.of(context).pop();
                                   unawaited(
@@ -1868,31 +1898,21 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// One card of rows, with the name of what they have in common above it.
   Widget _profileGroup(String? title, List<Widget> rows) => Builder(
     builder: (context) => Padding(
-      padding: const EdgeInsets.only(top: 16),
+      padding: const EdgeInsets.only(top: 18),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           if (title != null)
             Padding(
-              padding: const EdgeInsets.fromLTRB(4, 0, 4, 6),
+              padding: const EdgeInsets.fromLTRB(12, 0, 4, 6),
               child: Text(
-                title,
-                style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                title.toUpperCase(),
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
               ),
             ),
-          Card(
-            margin: EdgeInsets.zero,
-            child: Column(
-              children: [
-                for (var index = 0; index < rows.length; index++) ...[
-                  if (index > 0) const Divider(height: 1),
-                  rows[index],
-                ],
-              ],
-            ),
-          ),
+          FrockRowGroup(rows: rows),
         ],
       ),
     ),
@@ -1903,15 +1923,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     IconData icon,
     String title,
     VoidCallback onTap,
-  ) => identified(
-    id,
-    ListTile(
-      leading: Icon(icon),
-      title: Text(title),
-      trailing: const Icon(Icons.chevron_right_rounded),
-      onTap: onTap,
-    ),
-  );
+  ) => identified(id, FrockRow(icon: icon, title: title, onTap: onTap));
 
   /// The saved profile name, falling back to the account this session holds.
   /// A name is a courtesy: a read that fails leaves the page usable.

@@ -255,8 +255,8 @@ void main() {
       expect(find.text(text), findsOneWidget);
     }
     final heading = tester.widget<Text>(find.text('Heading')).style!;
-    expect(heading.fontSize, 16);
-    expect(heading.fontWeight, FontWeight.w700);
+    expect(heading.fontSize, 14.5);
+    expect(heading.fontWeight, FontWeight.w600);
   });
 
   testWidgets('group titles its children and collapses when it says so', (

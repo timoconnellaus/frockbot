@@ -53,7 +53,7 @@ Map<String, String> packageThemeTokensV1(BuildContext context) {
     'focus-ring': hex(scheme.primary),
     'radius-control': '10px',
     'radius-card': '12px',
-    'font-sans': 'Manrope, ui-sans-serif, system-ui, sans-serif',
+    'font-sans': 'Inter, ui-sans-serif, system-ui, sans-serif',
     'font-mono': 'ui-monospace, SFMono-Regular, Menlo, monospace',
     'text-xs': '12px',
     'text-sm': '13px',

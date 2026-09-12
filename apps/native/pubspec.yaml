@@ -43,6 +43,16 @@ flutter:
     - assets/connectors/
     - shorebird.yaml
   fonts:
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/inter-latin-400.ttf
+          weight: 400
+        - asset: assets/fonts/inter-latin-500.ttf
+          weight: 500
+        - asset: assets/fonts/inter-latin-600.ttf
+          weight: 600
+        - asset: assets/fonts/inter-latin-700.ttf
+          weight: 700
     - family: Manrope
       fonts:
         - asset: assets/fonts/manrope-latin.ttf
