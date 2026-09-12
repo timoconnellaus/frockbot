@@ -1,11 +1,33 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/shell/composer.dart';
+import 'package:frockbot_native/shell/sidebar.dart';
 import 'package:frockbot_native/theme/frock_theme.dart';
+import 'package:frockbot_native/voice/assistant.dart';
 import 'package:frockbot_native/voice/dictation.dart';
 import 'package:frockbot_native/voice/motion.dart';
+import 'package:frockbot_native/voice/socket.dart';
 import 'package:frockbot_native/voice/waveform.dart';
+
+import 'voice_fakes.dart';
+
+/// A socket whose close does not finish until the test says so: the window
+/// where the footer has gone but the call is still tearing down.
+class SlowCloseSocket extends FakeVoiceSocket {
+  final Completer<void> gate = Completer<void>();
+
+  @override
+  Future<void> close({
+    int code = voiceCloseNormalV1,
+    String reason = '',
+  }) async {
+    await gate.future;
+    await super.close(code: code, reason: reason);
+  }
+}
 
 void main() {
   test(
@@ -350,4 +372,88 @@ void main() {
       },
     );
   }
+
+  test('a call is still active while its teardown is in flight', () async {
+    final socket = SlowCloseSocket();
+    final controller = AssistantSessionController(
+      openSocket: () async => socket,
+      capture: FakeVoiceCapture(),
+      player: FakeVoicePlayer(),
+    );
+    addTearDown(controller.dispose);
+    await controller.start();
+    expect(
+      voiceControlStateV1(footerOpen: true, sessionActive: controller.active),
+      VoiceControlState.active,
+    );
+
+    // End takes the footer away at once; the socket is still closing.
+    final ending = controller.end(reason: 'test');
+    await settle();
+    expect(controller.phase, VoiceSessionPhase.ending);
+    expect(
+      voiceControlStateV1(footerOpen: false, sessionActive: controller.active),
+      VoiceControlState.ending,
+    );
+
+    socket.gate.complete();
+    await ending;
+    expect(
+      voiceControlStateV1(footerOpen: false, sessionActive: controller.active),
+      VoiceControlState.idle,
+    );
+  });
+
+  testWidgets(
+    'the voice control cannot invite a start while a call is ending',
+    (tester) async {
+      var starts = 0;
+      Future<void> show(VoiceControlState state) => tester.pumpWidget(
+        MaterialApp(
+          theme: FrockTheme.theme(Brightness.dark),
+          home: Scaffold(
+            body: ShellSidebar(
+              bots: const [],
+              profiles: const {},
+              unread: const {},
+              archived: const {},
+              activeBotId: null,
+              workingBotId: null,
+              loaded: true,
+              showHidden: false,
+              onSelect: (_) {},
+              onCreateBot: () {},
+              onSearch: () {},
+              onProfile: () {},
+              onMarketplace: () {},
+              onVoice: () => starts++,
+              voiceControl: state,
+              onToggleHidden: () {},
+              onRetry: () async {},
+            ),
+          ),
+        ),
+      );
+
+      await show(VoiceControlState.ending);
+      final button = find.byTooltip('Ending voice session…');
+      expect(button, findsOneWidget);
+      expect(
+        tester
+            .widget<IconButton>(
+              find.ancestor(of: button, matching: find.byType(IconButton)),
+            )
+            .onPressed,
+        isNull,
+      );
+      await tester.tap(button, warnIfMissed: false);
+      await tester.pump();
+      expect(starts, 0);
+
+      await show(VoiceControlState.idle);
+      await tester.tap(find.byTooltip('Start voice session'));
+      await tester.pump();
+      expect(starts, 1);
+    },
+  );
 }

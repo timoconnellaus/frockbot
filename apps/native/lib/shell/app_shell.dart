@@ -1386,7 +1386,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                             onMarketplace: _openMarketplace,
                             phone: single,
                             onVoice: () => unawaited(_startVoice()),
-                            voiceActive: footerOpen,
+                            voiceControl: voiceControlStateV1(
+                              footerOpen: footerOpen,
+                              sessionActive: voiceSession?.active == true,
+                            ),
                             onToggleHidden: () =>
                                 setState(() => showHidden = !showHidden),
                             onRetry: load,

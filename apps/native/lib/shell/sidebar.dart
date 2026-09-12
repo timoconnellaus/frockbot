@@ -14,6 +14,23 @@ import '../protocol/client_wire.generated.dart' as wire;
 import '../theme/frock_theme.dart';
 import 'semantics.dart';
 
+/// What the sidebar's voice control offers right now. [ending] is the window
+/// between the footer leaving and the previous call's teardown finishing: a
+/// start in it would be dropped, so the control says so instead of inviting
+/// one.
+enum VoiceControlState { idle, active, ending }
+
+/// Mirrors the shell's own start guard — a start is refused while the session
+/// is still active — so the control cannot promise what the guard would drop.
+VoiceControlState voiceControlStateV1({
+  required bool footerOpen,
+  required bool sessionActive,
+}) => footerOpen
+    ? VoiceControlState.active
+    : sessionActive
+    ? VoiceControlState.ending
+    : VoiceControlState.idle;
+
 /// The mutable half of a Bot's identity, as the sidebar reads it.
 class SidebarProfile {
   final String? name;
@@ -197,8 +214,8 @@ class ShellSidebar extends StatelessWidget {
   /// Opens the voice footer and starts the call, in the one gesture.
   final VoidCallback onVoice;
 
-  /// Whether a call is live, which is what the control's pressed state says.
-  final bool voiceActive;
+  /// What the control says and whether it can be pressed.
+  final VoiceControlState voiceControl;
   final VoidCallback onToggleHidden;
   final Future<void> Function() onRetry;
   const ShellSidebar({
@@ -217,7 +234,7 @@ class ShellSidebar extends StatelessWidget {
     required this.onProfile,
     required this.onMarketplace,
     required this.onVoice,
-    required this.voiceActive,
+    required this.voiceControl,
     required this.onToggleHidden,
     required this.onRetry,
     this.phone = false,
@@ -264,7 +281,7 @@ class ShellSidebar extends StatelessWidget {
           onProfile: onProfile,
           onMarketplace: phone ? onMarketplace : null,
           onVoice: onVoice,
-          voiceActive: voiceActive,
+          voiceControl: voiceControl,
         ),
         Expanded(
           child: ListView(
@@ -460,12 +477,12 @@ class _Header extends StatelessWidget {
   /// the call starts, because a footer that opens and then waits to be
   /// started again is two gestures for one intention.
   final VoidCallback onVoice;
-  final bool voiceActive;
+  final VoiceControlState voiceControl;
   const _Header({
     required this.onCreateBot,
     required this.onSearch,
     required this.onVoice,
-    required this.voiceActive,
+    required this.voiceControl,
     required this.onProfile,
     this.onMarketplace,
   });
@@ -503,11 +520,15 @@ class _Header extends StatelessWidget {
           identified(
             VoiceIds.sidebarStart,
             IconButton.filledTonal(
-              tooltip: voiceActive
-                  ? 'Voice session active'
-                  : 'Start voice session',
-              isSelected: voiceActive,
-              onPressed: onVoice,
+              tooltip: switch (voiceControl) {
+                VoiceControlState.active => 'Voice session active',
+                VoiceControlState.ending => 'Ending voice session…',
+                VoiceControlState.idle => 'Start voice session',
+              },
+              isSelected: voiceControl == VoiceControlState.active,
+              onPressed: voiceControl == VoiceControlState.ending
+                  ? null
+                  : onVoice,
               icon: const Icon(Icons.graphic_eq),
             ),
           ),

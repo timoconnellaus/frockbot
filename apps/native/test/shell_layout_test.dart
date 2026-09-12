@@ -454,7 +454,7 @@ void main() {
             onProfile: () {},
             onMarketplace: () {},
             onVoice: () {},
-            voiceActive: false,
+            voiceControl: VoiceControlState.idle,
             onToggleHidden: () {},
             onRetry: () async {},
           ),
@@ -512,7 +512,7 @@ void main() {
             onProfile: () {},
             onMarketplace: () => opened++,
             onVoice: () {},
-            voiceActive: false,
+            voiceControl: VoiceControlState.idle,
             onToggleHidden: () {},
             onRetry: () async {},
           ),
@@ -559,7 +559,7 @@ void main() {
             onProfile: () {},
             onMarketplace: () {},
             onVoice: () {},
-            voiceActive: false,
+            voiceControl: VoiceControlState.idle,
             onToggleHidden: () {},
             onRetry: () async {
               retries++;

@@ -63,6 +63,19 @@ bool get enterSends => !isNativeMobile;
 /// centred against the one-line field this produces.
 const EdgeInsets composerFieldPadding = EdgeInsets.fromLTRB(15, 14, 4, 14);
 
+/// An [AnimatedSwitcher] layout where the outgoing child is only a picture:
+/// it stays visible for the cross-fade but cannot be pressed, and a screen
+/// reader is not read the label it is leaving behind on top of the new one.
+Widget _quietOutgoing(Widget? currentChild, List<Widget> previousChildren) =>
+    Stack(
+      alignment: Alignment.center,
+      children: [
+        for (final child in previousChildren)
+          ExcludeSemantics(child: IgnorePointer(child: child)),
+        ?currentChild,
+      ],
+    );
+
 /// One submission in flight, and the draft generation it displaced.
 class ComposerSubmission {
   final int generation;
@@ -132,10 +145,7 @@ class Composer extends StatefulWidget {
 
   /// Whether this composer's Bot is the one being dictated into.
   final DictationState dictationState;
-  bool get dictating =>
-      dictationState == DictationState.starting ||
-      dictationState == DictationState.capturing ||
-      dictationState == DictationState.stopping;
+  bool get dictating => dictationState.active;
 
   /// The capture level, 0..1, which is what the bars are drawn from.
   final ValueListenable<double>? dictationLevel;
@@ -492,17 +502,7 @@ class _ComposerState extends State<Composer> {
                         switchOutCurve: Curves.easeInCubic,
                         // Outgoing controls remain visible, but cannot be pressed
                         // or announced after the current action has changed.
-                        layoutBuilder: (currentChild, previousChildren) =>
-                            Stack(
-                              alignment: Alignment.center,
-                              children: [
-                                for (final child in previousChildren)
-                                  ExcludeSemantics(
-                                    child: IgnorePointer(child: child),
-                                  ),
-                                ?currentChild,
-                              ],
-                            ),
+                        layoutBuilder: _quietOutgoing,
                         transitionBuilder: (child, animation) => FadeTransition(
                           opacity: animation,
                           child: ScaleTransition(
@@ -536,6 +536,7 @@ class _ComposerState extends State<Composer> {
                                 context,
                                 FrockTheme.fast,
                               ),
+                              layoutBuilder: _quietOutgoing,
                               child: Text(
                                 switch (widget.dictationState) {
                                   DictationState.starting => 'Starting…',
