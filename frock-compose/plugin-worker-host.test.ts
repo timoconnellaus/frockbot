@@ -399,6 +399,23 @@ describe("mount order from provides and consumes", () => {
     ]);
   });
 
+  test("a consumer of a duplicate provider is named for the plugin that did not mount", () => {
+    const a = member("a", { provides: [{ name: "x", version: 1 }] });
+    const b = member("b", {
+      provides: [
+        { name: "x", version: 1 },
+        { name: "y", version: 1 },
+      ],
+    });
+    const c = member("c", { consumes: [{ name: "y", version: 1 }] });
+    const ordered = pluginMountOrderV1([a, b, c]);
+    expect(ordered.order.map((entry) => entry.packageId)).toEqual(["a"]);
+    expect(ordered.failures.map((failure) => failure.message)).toEqual([
+      'plugin "b" provides "x", which "a" already provides',
+      'plugin "c" consumes a service from a plugin that did not mount',
+    ]);
+  });
+
   test("a plugin downstream of a cycle is named for the cycle it is not in", () => {
     const a = member("a", {
       provides: [{ name: "a-data", version: 1 }],

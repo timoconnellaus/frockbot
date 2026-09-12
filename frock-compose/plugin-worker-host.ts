@@ -221,7 +221,7 @@ export function pluginMountOrderV1(members: readonly BotIsolateMemberV1[]): {
     const upstream: BotIsolateMemberV1[] = [];
     for (const service of member.descriptor.consumes ?? []) {
       const provider = providers.get(service.name);
-      if (!provider || excluded.has(provider.member.packageId)) {
+      if (!provider) {
         failures.push({
           pluginId: member.packageId,
           phase: "resolve",
