@@ -276,20 +276,66 @@ void main() {
     expect(harness.capture.stops, 1);
     expect(harness.player.closed, isTrue);
     expect(harness.socket.closed, isTrue);
+    // The server's log is the only record of why this device hung up.
+    expect(harness.socket.closeCode, voiceCloseFailedV1);
+    expect(
+      harness.socket.closeReason,
+      voiceRefusalMessage(VoiceRefusalCodeV1.quota),
+    );
     harness.controller.dispose();
   });
 
   test('ending says end_call and takes everything down', () async {
     final harness = Harness();
     await harness.live();
-    await harness.controller.end();
+    await harness.controller.end(reason: 'lifecycle:paused');
     expect(harness.texts.last, encodeAssistantEndCallV1());
     expect(harness.controller.phase, VoiceSessionPhase.ended);
     expect(harness.controller.status, VoiceStatusV1.idle);
     expect(harness.capture.stops, 1);
     expect(harness.player.closed, isTrue);
     expect(harness.socket.closed, isTrue);
+    expect(harness.socket.closeCode, voiceCloseNormalV1);
+    expect(harness.socket.closeReason, 'lifecycle:paused');
     harness.controller.dispose();
+  });
+
+  test('a server that closes first names the path', () async {
+    final harness = Harness();
+    await harness.live();
+    await harness.socket.finish();
+    await settle();
+    expect(harness.controller.phase, VoiceSessionPhase.ended);
+    expect(harness.socket.closed, isTrue);
+    expect(harness.socket.closeCode, voiceCloseNormalV1);
+    expect(harness.socket.closeReason, 'server-closed');
+    harness.controller.dispose();
+  });
+
+  test('a socket that arrives after the call ended is abandoned', () async {
+    final deferred = Completer<VoiceSocket>();
+    final harness = Harness(deferred: deferred);
+    unawaited(harness.controller.start());
+    await settle();
+    await harness.controller.end(reason: 'lifecycle:paused');
+    expect(harness.socket.closed, isFalse);
+
+    deferred.complete(harness.socket);
+    await settle();
+    expect(harness.socket.closed, isTrue);
+    expect(harness.socket.closeCode, voiceCloseAbandonedV1);
+    expect(harness.socket.closeReason, 'abandoned-connect');
+    harness.controller.dispose();
+  });
+
+  test('disposing a live call closes the socket as disposed', () async {
+    final harness = Harness();
+    await harness.live();
+    harness.controller.dispose();
+    await settle();
+    expect(harness.socket.closed, isTrue);
+    expect(harness.socket.closeCode, voiceCloseDisposedV1);
+    expect(harness.socket.closeReason, 'disposed');
   });
 
   group('the microphone loan', () {
@@ -381,7 +427,7 @@ void main() {
         expect(harness.capture.active, isFalse, reason: 'still at the prompt');
 
         // The person gives up on the prompt and closes the footer.
-        await harness.controller.end();
+        await harness.controller.end(reason: 'end-button');
         harness.capture.permission!.complete();
         await settle();
 
@@ -413,6 +459,31 @@ void main() {
       expect(harness.capture.active, isFalse);
       expect(harness.socket.binaries, isEmpty);
     });
+  });
+
+  test('a socket that arrives after the connect window is abandoned', () async {
+    final pending = <Completer<VoiceSocket>>[];
+    final socket = FakeVoiceSocket();
+    final controller = AssistantSessionController(
+      openSocket: () {
+        final opening = Completer<VoiceSocket>();
+        pending.add(opening);
+        return opening.future;
+      },
+      capture: FakeVoiceCapture(),
+      player: FakeVoicePlayer(),
+      connectRetryWindow: const Duration(milliseconds: 20),
+    );
+    await controller.start();
+    await settle();
+    expect(controller.phase, VoiceSessionPhase.error);
+
+    pending.first.complete(socket);
+    await settle();
+    expect(socket.closed, isTrue);
+    expect(socket.closeCode, voiceCloseAbandonedV1);
+    expect(socket.closeReason, 'abandoned-connect');
+    controller.dispose();
   });
 
   test('a connect that never works is an error, not a loop', () async {

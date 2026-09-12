@@ -24,6 +24,8 @@ class FakeVoiceSocket implements VoiceSocket {
       StreamController<Object?>.broadcast();
   final List<Object> sent = [];
   bool closed = false;
+  int? closeCode;
+  String? closeReason;
 
   @override
   Stream<Object?> get messages => _incoming.stream;
@@ -35,12 +37,23 @@ class FakeVoiceSocket implements VoiceSocket {
   void sendBinary(Uint8List bytes) => sent.add(bytes);
 
   @override
-  Future<void> close() async {
+  Future<void> close({
+    int code = voiceCloseNormalV1,
+    String reason = '',
+  }) async {
     closed = true;
+    closeCode = code;
+    closeReason = reason;
     if (!_incoming.isClosed) await _incoming.close();
   }
 
   void deliver(Object? message) => _incoming.add(message);
+
+  /// The server's end going away: the stream finishes without the client
+  /// having asked for it.
+  Future<void> finish() async {
+    if (!_incoming.isClosed) await _incoming.close();
+  }
 
   List<String> get texts => sent.whereType<String>().toList();
   List<Uint8List> get binaries => sent.whereType<Uint8List>().toList();

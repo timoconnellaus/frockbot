@@ -130,7 +130,10 @@ class AssistantSessionController extends ChangeNotifier {
     final socket = await _connect(generation);
     if (socket == null) return;
     if (generation != _generation || _disposed || !active) {
-      await socket.close();
+      await socket.close(
+        code: voiceCloseAbandonedV1,
+        reason: 'abandoned-connect',
+      );
       await _closeCapture();
       return;
     }
@@ -151,9 +154,20 @@ class AssistantSessionController extends ChangeNotifier {
   Future<VoiceSocket?> _connect(int generation) async {
     final began = DateTime.now();
     for (var attempt = 0; attempt < 2; attempt++) {
+      final pending = openSocket();
       try {
-        return await openSocket().timeout(connectRetryWindow);
+        return await pending.timeout(connectRetryWindow);
       } on Object {
+        unawaited(
+          pending
+              .then(
+                (socket) => socket.close(
+                  code: voiceCloseAbandonedV1,
+                  reason: 'abandoned-connect',
+                ),
+              )
+              .catchError((Object _) {}),
+        );
         if (generation != _generation || _disposed) return null;
         final elapsed = DateTime.now().difference(began);
         if (attempt == 1 || elapsed >= connectRetryWindow) break;
@@ -356,14 +370,18 @@ class AssistantSessionController extends ChangeNotifier {
 
   /// Ends the call. A Bot Turn already delegated keeps running; that work is
   /// durable in the Bot and is not this socket's to cancel.
-  Future<void> end() async {
+  ///
+  /// [reason] names the path that ended it — the End button, the app leaving
+  /// the foreground — and travels in the socket's close frame, where the
+  /// server logs it.
+  Future<void> end({required String reason}) async {
     if (_phase == VoiceSessionPhase.idle || _phase == VoiceSessionPhase.ended) {
       return;
     }
     _generation++;
     _set(VoiceSessionPhase.ending);
     _socket?.sendText(encodeAssistantEndCallV1());
-    await _teardown();
+    await _teardown(reason: reason);
     _status = VoiceStatusV1.idle;
     _set(VoiceSessionPhase.ended);
   }
@@ -371,7 +389,7 @@ class AssistantSessionController extends ChangeNotifier {
   Future<void> _ended() async {
     if (!active) return;
     _generation++;
-    await _teardown();
+    await _teardown(reason: 'server-closed');
     _status = VoiceStatusV1.idle;
     _set(VoiceSessionPhase.ended);
   }
@@ -383,12 +401,15 @@ class AssistantSessionController extends ChangeNotifier {
     // Say so now, before the teardown's awaits: the footer shows the failure
     // the moment it is known, not after the socket has finished closing.
     _notify();
-    await _teardown();
+    await _teardown(code: voiceCloseFailedV1, reason: message);
     _status = VoiceStatusV1.idle;
     _set(VoiceSessionPhase.error);
   }
 
-  Future<void> _teardown() async {
+  Future<void> _teardown({
+    int code = voiceCloseNormalV1,
+    String reason = '',
+  }) async {
     _startTimer?.cancel();
     _startTimer = null;
     await _closeCapture();
@@ -398,7 +419,7 @@ class AssistantSessionController extends ChangeNotifier {
     _socket = null;
     await player.close();
     player.removeListener(_notify);
-    await socket?.close();
+    await socket?.close(code: code, reason: reason);
     _micLevel = 0;
     _opening.clear();
     _openingBytes = 0;
@@ -419,7 +440,7 @@ class AssistantSessionController extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _generation++;
-    unawaited(_teardown());
+    unawaited(_teardown(code: voiceCloseDisposedV1, reason: 'disposed'));
     super.dispose();
   }
 }

@@ -9,6 +9,7 @@ import type {
   VoiceTranscriberSessionOptionsV1,
   VoiceTranscriberV1,
 } from "@frockbot/app/voice/sleeping-transcriber";
+import type { Connection } from "agents";
 import { VoiceAssistant } from "../src/voice-assistant.ts";
 import type { VoiceDelegationRecordV1 } from "@frockbot/app/voice/ledger";
 
@@ -41,6 +42,21 @@ function sse(events: unknown[]): ReadableStream<Uint8Array> {
   });
 }
 
+/**
+ * One emitted trace line, with the fields a test reads declared explicitly:
+ * an index signature of `unknown` collapses to `never` across the Workers RPC
+ * stub, which costs the array its element type at the call site.
+ */
+export interface VoiceTraceLine {
+  event: string;
+  connection?: string;
+  device?: string;
+  call?: string;
+  elapsedMs?: number;
+  code?: number;
+  reason?: string;
+}
+
 export class WorkerdVoiceAssistant extends VoiceAssistant {
   #sessions: ProbeSession[] = [];
   #synthesized: string[] = [];
@@ -48,6 +64,7 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
   #script: VoiceProbeScript = {};
   #dropDispatches = 0;
   #dispatched: string[] = [];
+  #traces: VoiceTraceLine[] = [];
 
   /** A one-second window, so a cap can bite inside a test's patience. */
   protected override sttWindowSeconds(): number {
@@ -66,6 +83,33 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
     }
     this.#dispatched.push(`sent:${delegation.runId}`);
     super.dispatchDelegation(userId, delegation);
+  }
+
+  /**
+   * Records the line the object actually emits — the JSON string handed to
+   * the console — so a test reads the telemetry an operator would read,
+   * not a second construction of it.
+   */
+  protected override trace(
+    connection: Connection,
+    event: string,
+    fields: Record<string, unknown> = {},
+  ): void {
+    const { info, warn } = console;
+    const capture = (...args: unknown[]) => {
+      const payload = args[1];
+      if (typeof payload === "string") {
+        this.#traces.push(JSON.parse(payload) as VoiceTraceLine);
+      }
+    };
+    console.info = capture;
+    console.warn = capture;
+    try {
+      super.trace(connection, event, fields);
+    } finally {
+      console.info = info;
+      console.warn = warn;
+    }
   }
 
   protected override createTts() {
@@ -155,6 +199,10 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
   }
 
   // -- probe RPCs -----------------------------------------------------------
+
+  async probeTraces(): Promise<VoiceTraceLine[]> {
+    return [...this.#traces];
+  }
 
   async probeSetScript(script: VoiceProbeScript): Promise<void> {
     this.#script = script;

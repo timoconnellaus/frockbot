@@ -265,7 +265,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     if (appIsAwayV1(state)) {
       // Voice is foreground-only by decision. Leaving the app ends capture,
       // playback and the call; in-app navigation does not.
-      unawaited(_endVoice());
+      unawaited(_endVoice(reason: 'lifecycle:${state.name}'));
       unawaited(_stopDictation());
       return;
     }
@@ -299,10 +299,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
 
   /// Ends capture, playback and the call, and takes the footer away. It
   /// navigates nowhere.
-  Future<void> _endVoice() async {
+  Future<void> _endVoice({required String reason}) async {
     final session = voiceSession;
     if (session == null) return;
-    await session.end();
+    await session.end(reason: reason);
     session.dispose();
     microphone.releaseAssistant();
     if (!mounted) {
@@ -1457,7 +1457,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
             ),
           ),
           if (footerOpen && session != null)
-            VoiceFooter(session: session, onEnd: () => unawaited(_endVoice())),
+            VoiceFooter(
+              session: session,
+              onEnd: () => unawaited(_endVoice(reason: 'end-button')),
+            ),
         ],
       ),
     );
