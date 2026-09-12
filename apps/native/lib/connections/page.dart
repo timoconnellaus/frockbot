@@ -626,13 +626,30 @@ class _Pill extends StatelessWidget {
   });
 
   /// The pill's height, and so the spinner's, in both states.
-  static const height = 32.0;
+  static const height = 30.0;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    // Quiet by default: the row's name is the loud part. The primary pill
+    // wears the accent as a tint rather than a slab, so six of them in a
+    // column read as six doors and not six alarms.
     final style = ButtonStyle(
       visualDensity: VisualDensity.standard,
+      shape: WidgetStatePropertyAll(
+        RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
+      ),
+      backgroundColor: WidgetStatePropertyAll(
+        primary
+            ? scheme.primary.withValues(alpha: 0.16)
+            : scheme.onSurface.withValues(alpha: 0.07),
+      ),
+      foregroundColor: WidgetStatePropertyAll(
+        primary ? scheme.primary : scheme.onSurface,
+      ),
+      overlayColor: WidgetStatePropertyAll(
+        (primary ? scheme.primary : scheme.onSurface).withValues(alpha: 0.08),
+      ),
       // A fixed height with the label centred on its cap height: the line
       // box the theme's label style carries leaves more room below the
       // letters than above, and the word sat low in the pill.
@@ -644,7 +661,8 @@ class _Pill extends StatelessWidget {
       fixedSize: const WidgetStatePropertyAll(Size.fromHeight(height)),
       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
       textStyle: WidgetStatePropertyAll(
-        Theme.of(context).textTheme.labelLarge?.copyWith(
+        Theme.of(context).textTheme.labelMedium?.copyWith(
+          fontWeight: FontWeight.w600,
           height: 1.0,
           leadingDistribution: TextLeadingDistribution.even,
         ),
@@ -685,9 +703,7 @@ class _Pill extends StatelessWidget {
                   height: 16,
                   child: CircularProgressIndicator(
                     strokeWidth: 2,
-                    color: primary
-                        ? scheme.onPrimary
-                        : scheme.onSecondaryContainer,
+                    color: primary ? scheme.primary : scheme.onSurface,
                   ),
                 ),
               ),

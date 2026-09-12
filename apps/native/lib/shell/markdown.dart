@@ -52,7 +52,7 @@ class _ShellMarkdownState extends State<ShellMarkdown> {
     final theme = Theme.of(context);
     final base =
         widget.style ??
-        theme.textTheme.bodyLarge!.copyWith(fontWeight: FontWeight.w300);
+        theme.textTheme.bodyLarge!.copyWith(fontWeight: FontWeight.w400);
     final blocks = parseMarkdownBlocks(widget.text);
     final children = <Widget>[];
     for (final block in blocks) {

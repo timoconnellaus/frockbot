@@ -6,6 +6,7 @@ import 'package:flutter/rendering.dart';
 import '../protocol/client_wire.generated.dart' as wire;
 import '../shell/semantics.dart';
 import 'action.dart';
+import '../theme/rows.dart';
 import 'document.dart';
 import 'embed.dart';
 
@@ -58,7 +59,7 @@ class ViewCardGroups extends StatelessWidget {
                     key: ValueKey(card['title']),
                     margin: EdgeInsets.zero,
                     child: Padding(
-                      padding: const EdgeInsets.all(16),
+                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
                       child: _CapabilityCard(node: card),
                     ),
                   ),
@@ -131,7 +132,7 @@ class ViewGridGroups extends StatelessWidget {
                     key: ValueKey(card['title']),
                     margin: EdgeInsets.zero,
                     child: Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+                      padding: const EdgeInsets.fromLTRB(16, 6, 16, 12),
                       child: ViewNodeView(node: card),
                     ),
                   ),
@@ -236,10 +237,13 @@ class _CapabilityCard extends StatelessWidget {
                 children: [
                   Expanded(
                     child: Padding(
-                      padding: const EdgeInsets.only(top: 10),
+                      padding: const EdgeInsets.only(top: 6),
                       child: Text(
                         node['title'] as String,
-                        style: Theme.of(context).textTheme.titleMedium,
+                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ),
                   ),
@@ -273,12 +277,12 @@ class _CapabilityCard extends StatelessWidget {
                     ),
                 ],
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 6),
               for (final child in children.where(
                 (child) => !_isCardControls(child),
               ))
                 Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
+                  padding: const EdgeInsets.only(bottom: 6),
                   child: ViewNodeView(node: child),
                 ),
             ],
@@ -401,17 +405,27 @@ class ViewTextNode extends StatelessWidget {
   Widget build(BuildContext context) {
     final text = node['text']! as String;
     final type = Theme.of(context).textTheme;
+    final scheme = Theme.of(context).colorScheme;
     return switch (node['style']) {
       'heading' => Semantics(
         header: true,
         child: Text(text, style: type.titleMedium),
       ),
-      'label' => Text(text, style: type.labelLarge),
+      'label' => Text(
+        text,
+        style: type.labelMedium?.copyWith(color: scheme.onSurfaceVariant),
+      ),
       'status' => Semantics(
         liveRegion: true,
-        child: Text(text, style: type.bodySmall),
+        child: Text(
+          text,
+          style: type.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+        ),
       ),
-      _ => Text(text, style: type.bodyLarge),
+      _ => Text(
+        text,
+        style: type.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
+      ),
     };
   }
 }
@@ -465,7 +479,7 @@ class _ViewGroupNodeState extends State<ViewGroupNode> {
       for (final child in (widget.node['children']! as List).cast<Map>())
         if (!viewNodeGoneV1(child.cast<String, Object?>(), predicted))
           Padding(
-            padding: const EdgeInsets.symmetric(vertical: 6),
+            padding: const EdgeInsets.symmetric(vertical: 5),
             child: ViewNodeView(node: child.cast<String, Object?>()),
           ),
     ];
@@ -487,6 +501,7 @@ class _ViewGroupNodeState extends State<ViewGroupNode> {
             onTap: widget.node.containsKey('collapsed')
                 ? () => setState(() => open = !open)
                 : null,
+            borderRadius: BorderRadius.circular(8),
             child: Padding(
               padding: const EdgeInsets.symmetric(vertical: 8),
               child: Row(
@@ -496,12 +511,21 @@ class _ViewGroupNodeState extends State<ViewGroupNode> {
                       header: true,
                       child: Text(
                         title,
-                        style: Theme.of(context).textTheme.titleMedium,
+                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ),
                   ),
                   if (widget.node.containsKey('collapsed'))
-                    Icon(open ? Icons.expand_less : Icons.expand_more),
+                    Icon(
+                      open
+                          ? Icons.expand_less_rounded
+                          : Icons.expand_more_rounded,
+                      size: 20,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
                 ],
               ),
             ),
@@ -564,6 +588,7 @@ class ViewFieldNode extends StatelessWidget {
     if (field.kind == 'boolean') {
       return SwitchListTile(
         contentPadding: EdgeInsets.zero,
+        visualDensity: VisualDensity.compact,
         title: Text(field.label),
         subtitle: field.hint == null ? null : Text(field.hint!),
         value: value == true,
@@ -673,15 +698,34 @@ class ViewActionNode extends StatelessWidget {
         // changes nothing and the button still sits left.
         widthFactor: 1,
         child: switch (node['style']) {
-          'primary' => FilledButton(onPressed: press, child: Text(label)),
-          'danger' => OutlinedButton(
+          'primary' => FilledButton(
             onPressed: press,
-            style: OutlinedButton.styleFrom(
-              foregroundColor: Theme.of(context).colorScheme.error,
+            style: FilledButton.styleFrom(
+              minimumSize: const Size(0, 34),
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              textStyle: Theme.of(context).textTheme.labelMedium
+                  ?.copyWith(fontWeight: FontWeight.w600),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(9),
+              ),
             ),
             child: Text(label),
           ),
-          _ => OutlinedButton(onPressed: press, child: Text(label)),
+          'danger' => OutlinedButton(
+            onPressed: press,
+            style: frockCompactButton(context).copyWith(
+              foregroundColor: WidgetStatePropertyAll(
+                Theme.of(context).colorScheme.error,
+              ),
+            ),
+            child: Text(label),
+          ),
+          _ => OutlinedButton(
+            onPressed: press,
+            style: frockCompactButton(context),
+            child: Text(label),
+          ),
         },
       ),
     );
@@ -724,11 +768,18 @@ class ViewListNode extends StatelessWidget {
               return ListTile(
                 key: ValueKey('view-row-${row['id']}'),
                 selected: selected,
+                dense: true,
                 contentPadding: const EdgeInsets.symmetric(horizontal: 12),
                 title: ViewNodeView(
                   node: (row['node']! as Map).cast<String, Object?>(),
                 ),
-                trailing: selected ? const Icon(Icons.check_rounded) : null,
+                trailing: selected
+                    ? Icon(
+                        Icons.check_rounded,
+                        size: 18,
+                        color: Theme.of(context).colorScheme.primary,
+                      )
+                    : null,
                 onTap:
                     schema == null ||
                         chosen != null ||

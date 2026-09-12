@@ -176,8 +176,33 @@ class _TranscriptViewState extends State<TranscriptView> {
         rows.add(
           Padding(
             key: ValueKey('unread:${line.id}'),
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            child: const Center(child: Text('Unread from here')),
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Divider(
+                    color: Theme.of(context).colorScheme.primary
+                        .withValues(alpha: 0.45),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                  child: Text(
+                    'Unread from here',
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                      color: Theme.of(context).colorScheme.primary,
+                      letterSpacing: 0.3,
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: Divider(
+                    color: Theme.of(context).colorScheme.primary
+                        .withValues(alpha: 0.45),
+                  ),
+                ),
+              ],
+            ),
           ),
         );
       }
@@ -240,9 +265,18 @@ class _TranscriptViewState extends State<TranscriptView> {
                 key: const ValueKey('row:earlier'),
                 child: identified(
                   ShellIds.transcriptEarlier,
-                  TextButton(
-                    onPressed: loading ? null : () => onRefresh(older: true),
-                    child: const Text('Earlier messages'),
+                  Center(
+                    child: TextButton(
+                      onPressed: loading ? null : () => onRefresh(older: true),
+                      style: TextButton.styleFrom(
+                        foregroundColor: Theme.of(context)
+                            .colorScheme
+                            .onSurfaceVariant,
+                        textStyle: Theme.of(context).textTheme.labelMedium,
+                        minimumSize: const Size(0, 32),
+                      ),
+                      child: const Text('Earlier messages'),
+                    ),
                   ),
                 ),
               ),
@@ -276,7 +310,7 @@ class _TranscriptViewState extends State<TranscriptView> {
       // words: a Stop the person asked for and is now waiting on, and a Turn
       // still waiting behind the one it displaced.
       return Padding(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+        padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
         child: WorkingIndicator(
           line: line,
           background: widget.background,
@@ -372,31 +406,37 @@ class _Bubble extends StatelessWidget {
               child: Container(
                 constraints: const BoxConstraints(maxWidth: 720),
                 margin: EdgeInsets.fromLTRB(
-                  mine ? 56 : 20,
-                  6,
-                  mine ? 16 : 20,
-                  6,
+                  mine ? 64 : 16,
+                  5,
+                  mine ? 16 : 16,
+                  5,
                 ),
                 padding: mine
-                    ? const EdgeInsets.symmetric(horizontal: 14, vertical: 11)
-                    : const EdgeInsets.symmetric(vertical: 10),
+                    ? const EdgeInsets.symmetric(horizontal: 13, vertical: 9)
+                    : const EdgeInsets.symmetric(vertical: 8),
                 decoration: BoxDecoration(
+                  // The person's words sit on a tinted slab of the raised
+                  // surface — pink enough to be theirs, never a poster.
                   color: mine
-                      ? theme.colorScheme.primary.withValues(alpha: 0.16)
+                      ? Color.alphaBlend(
+                          theme.colorScheme.primary.withValues(alpha: 0.2),
+                          theme.colorScheme.surfaceContainerHighest,
+                        )
                       : Colors.transparent,
                   border: failed
                       ? Border.all(color: theme.colorScheme.error)
                       : null,
                   borderRadius: BorderRadius.only(
-                    topLeft: const Radius.circular(16),
-                    topRight: const Radius.circular(16),
-                    bottomLeft: Radius.circular(mine ? 16 : 6),
-                    bottomRight: Radius.circular(mine ? 6 : 16),
+                    topLeft: const Radius.circular(18),
+                    topRight: const Radius.circular(18),
+                    bottomLeft: Radius.circular(mine ? 18 : 4),
+                    bottomRight: Radius.circular(mine ? 4 : 18),
                   ),
                 ),
                 child: DefaultTextStyle.merge(
                   style: theme.textTheme.bodyLarge?.copyWith(
-                    fontWeight: FontWeight.w300,
+                    fontWeight: FontWeight.w400,
+                    height: 1.5,
                   ),
                   child: Semantics(label: mine ? 'You' : 'Bot', child: child),
                 ),
@@ -465,13 +505,15 @@ class _Announcement extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
+    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
     child: Center(
       child: Text(
         text,
         textAlign: TextAlign.center,
-        style: Theme.of(context).textTheme.bodySmall
-            ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
+        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+          color: Theme.of(context).colorScheme.onSurfaceVariant
+              .withValues(alpha: 0.8),
+        ),
       ),
     ),
   );
@@ -495,10 +537,10 @@ class _EmptyThread extends StatelessWidget {
               'What would you like to work on?',
               style: theme.textTheme.headlineMedium,
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
             Text(
               'Ask a question, make a plan, or give your Bot something to do.',
-              style: theme.textTheme.bodyLarge?.copyWith(
+              style: theme.textTheme.bodyMedium?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
               ),
             ),

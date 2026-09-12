@@ -178,9 +178,23 @@ class _ChatPaneState extends State<ChatPane> {
     }
   }
 
+  /// How wide the thread and its composer may grow. A conversation is read
+  /// like a page, and a line that runs the width of a desk is not a line
+  /// anyone reads twice; a phone is narrower than this and never notices.
+  static const double readingWidth = 860;
+
   @override
   Widget build(BuildContext context) {
     final c = controller;
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: readingWidth),
+        child: _column(context, c),
+      ),
+    );
+  }
+
+  Widget _column(BuildContext context, ChatController c) {
     return Column(
       children: [
         if (c.connection == ConnectionState.disconnected ||

@@ -307,10 +307,10 @@ class ShellSidebar extends StatelessWidget {
               else ...[
                 if (partitioned.pinned.isNotEmpty)
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+                    padding: const EdgeInsets.fromLTRB(10, 4, 10, 6),
                     child: Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
+                      spacing: 4,
+                      runSpacing: 4,
                       children: [
                         for (final bot in partitioned.pinned)
                           identified(
@@ -335,12 +335,12 @@ class ShellSidebar extends StatelessWidget {
                       children: [
                         if (grouped.showHeadings && group.label.isNotEmpty)
                           Padding(
-                            padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
+                            padding: const EdgeInsets.fromLTRB(20, 14, 16, 4),
                             child: Text(
                               group.label.toUpperCase(),
                               style: theme.textTheme.labelSmall?.copyWith(
-                                color: theme.colorScheme.onSurfaceVariant,
-                                letterSpacing: 0.8,
+                                color: theme.colorScheme.onSurfaceVariant
+                                    .withValues(alpha: 0.85),
                               ),
                             ),
                           ),
@@ -349,15 +349,27 @@ class ShellSidebar extends StatelessWidget {
                     ),
                   ),
                 if (hidden.isNotEmpty)
-                  identified(
-                    ShellIds.sidebarHiddenToggle,
-                    TextButton(
-                      onPressed: onToggleHidden,
-                      child: Text(
-                        showHidden
-                            ? 'Hide ${hidden.length} hidden'
-                            : 'Show ${hidden.length} hidden'
-                                  '${hiddenUnread > 0 ? ' ($hiddenUnread)' : ''}',
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: identified(
+                        ShellIds.sidebarHiddenToggle,
+                        TextButton(
+                          onPressed: onToggleHidden,
+                          style: TextButton.styleFrom(
+                            foregroundColor: theme.colorScheme.onSurfaceVariant,
+                            minimumSize: const Size(0, 32),
+                            padding: const EdgeInsets.symmetric(horizontal: 8),
+                            textStyle: theme.textTheme.labelMedium,
+                          ),
+                          child: Text(
+                            showHidden
+                                ? 'Hide ${hidden.length} hidden'
+                                : 'Show ${hidden.length} hidden'
+                                      '${hiddenUnread > 0 ? ' ($hiddenUnread)' : ''}',
+                          ),
+                        ),
                       ),
                     ),
                   ),
@@ -369,12 +381,25 @@ class ShellSidebar extends StatelessWidget {
               // thing known.
               if (error != null && bots.isNotEmpty)
                 Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Text(
-                    error!,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.colorScheme.error,
-                    ),
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(
+                        Icons.cloud_off_rounded,
+                        size: 16,
+                        color: theme.colorScheme.error.withValues(alpha: 0.9),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          error!,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
             ],
@@ -394,71 +419,171 @@ class ShellSidebar extends StatelessWidget {
     final shown = _unread(botId);
     final badge = shown.label;
     final isArchived = archived.contains(botId);
-    // The row's rounded selected tint must sit inside the column rather than
-    // run to its edges, so the tile is inset and its own padding shrunk by
-    // the same amount: the avatar and badge stay where they were.
+    final isUnread = shown.unread;
+    final selected = botId == activeBotId;
     return identified(
       ShellIds.sidebarBot(botId),
-      Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8),
-        child: ListTile(
-          key: ValueKey('bot-$botId'),
-          contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-          selected: botId == activeBotId,
-          enabled: !isArchived,
-          leading: SheepAvatar(
-            size: 34,
-            background: bot.sheep.background,
-            working: _working(bot),
-          ),
-          title: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  _name(bot),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodyLarge?.copyWith(
-                    fontWeight: shown.unread
-                        ? FontWeight.w700
-                        : FontWeight.w600,
-                  ),
-                ),
+      _BotRow(
+        key: ValueKey('bot-$botId'),
+        selected: selected,
+        enabled: !isArchived,
+        onTap: isArchived ? null : () => onSelect(botId),
+        avatar: SheepAvatar(
+          size: 36,
+          background: bot.sheep.background,
+          working: _working(bot),
+        ),
+        name: _name(bot),
+        nameStyle: theme.textTheme.bodyMedium?.copyWith(
+          fontSize: 14,
+          fontWeight: isUnread ? FontWeight.w600 : FontWeight.w500,
+          letterSpacing: -0.1,
+          color: isArchived
+              ? theme.colorScheme.onSurfaceVariant
+              : theme.colorScheme.onSurface,
+        ),
+        time: at == null ? null : formatSidebarMessageTime(at),
+        preview: preview ?? profiles[botId]?.title ?? 'No messages yet',
+        previewStyle: theme.textTheme.bodySmall?.copyWith(
+          fontSize: 12.5,
+          color: isUnread
+              ? theme.colorScheme.onSurface.withValues(alpha: 0.78)
+              : theme.colorScheme.onSurfaceVariant,
+        ),
+        // One slot, one meaning. The row's own selected state already says
+        // which Bot is open, so the slot carries unread and archived — the two
+        // things a row can say that its appearance does not.
+        trailing: badge == null && !isArchived
+            ? null
+            : Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (isArchived)
+                    Text(
+                      'Archived',
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                        letterSpacing: 0.2,
+                      ),
+                    ),
+                  if (badge != null) ...[
+                    if (isArchived) const SizedBox(width: 6),
+                    Badge(label: Text(badge)),
+                  ],
+                ],
               ),
-              if (at != null)
-                Text(
-                  formatSidebarMessageTime(at),
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                ),
-            ],
-          ),
-          // A selected tile paints its text in the selection colour by default,
-          // which turns the preview pink; the tint behind the row already says
-          // it is open, so the preview keeps the quiet colour of every other.
-          subtitle: Text(
-            preview ?? profiles[botId]?.title ?? 'No messages yet',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
-          ),
-          // One slot, one meaning. The row's own selected state already says
-          // which Bot is open, so the slot carries unread and archived — the two
-          // things a row can say that its appearance does not.
-          trailing: badge == null && !isArchived
-              ? null
-              : Row(
-                  mainAxisSize: MainAxisSize.min,
+      ),
+    );
+  }
+}
+
+/// One Bot in the list: the face, the name and the last thing said, in a row
+/// no taller than it has to be. The selected tint is inset from the column's
+/// edges so the list reads as a list and not as a table.
+class _BotRow extends StatelessWidget {
+  final bool selected;
+  final bool enabled;
+  final VoidCallback? onTap;
+  final Widget avatar;
+  final String name;
+  final TextStyle? nameStyle;
+  final String? time;
+  final String preview;
+  final TextStyle? previewStyle;
+  final Widget? trailing;
+  const _BotRow({
+    super.key,
+    required this.selected,
+    required this.enabled,
+    required this.onTap,
+    required this.avatar,
+    required this.name,
+    required this.nameStyle,
+    required this.time,
+    required this.preview,
+    required this.previewStyle,
+    required this.trailing,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      child: Semantics(
+        selected: selected,
+        button: enabled,
+        child: Material(
+          color: selected
+              ? theme.colorScheme.onSurface.withValues(alpha: 0.06)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(10),
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(10),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(10, 8, 12, 8),
+              child: Opacity(
+                opacity: enabled ? 1 : 0.6,
+                child: Row(
                   children: [
-                    if (isArchived)
-                      Text('Archived', style: theme.textTheme.labelSmall),
-                    if (badge != null) Badge(label: Text(badge)),
+                    avatar,
+                    const SizedBox(width: 11),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.baseline,
+                            textBaseline: TextBaseline.alphabetic,
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  name,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: nameStyle,
+                                ),
+                              ),
+                              if (time case final String stamp) ...[
+                                const SizedBox(width: 8),
+                                Text(
+                                  stamp,
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    fontSize: 11.5,
+                                    color: theme.colorScheme.onSurfaceVariant
+                                        .withValues(alpha: 0.9),
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                          const SizedBox(height: 2),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  preview,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: previewStyle,
+                                ),
+                              ),
+                              if (trailing case final Widget end) ...[
+                                const SizedBox(width: 8),
+                                end,
+                              ],
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
                   ],
                 ),
-          onTap: isArchived ? null : () => onSelect(botId),
+              ),
+            ),
+          ),
         ),
       ),
     );
@@ -497,8 +622,26 @@ class _Header extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    // Quiet controls: a glyph and nothing round it until it is pressed. The
+    // one exception is the new-Bot button, which is the row's one invitation
+    // and wears the accent.
+    final quiet = IconButton.styleFrom(
+      foregroundColor: scheme.onSurfaceVariant,
+      minimumSize: const Size(34, 34),
+      fixedSize: const Size(34, 34),
+      padding: EdgeInsets.zero,
+      iconSize: 20,
+      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
+    );
+    final active = quiet.copyWith(
+      foregroundColor: WidgetStatePropertyAll(scheme.primary),
+      backgroundColor: WidgetStatePropertyAll(
+        scheme.primary.withValues(alpha: 0.14),
+      ),
+    );
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 8, 8, 4),
+      padding: const EdgeInsets.fromLTRB(12, 10, 10, 6),
       child: Row(
         children: [
           identified(
@@ -506,55 +649,72 @@ class _Header extends StatelessWidget {
             IconButton(
               tooltip: 'You',
               onPressed: onProfile,
-              icon: CircleAvatar(
-                radius: 18,
-                backgroundColor: scheme.surfaceContainerHighest,
-                foregroundColor: scheme.onSurface,
-                child: const Icon(Icons.person_outline, size: 22),
+              style: quiet,
+              icon: Container(
+                width: 28,
+                height: 28,
+                decoration: BoxDecoration(
+                  color: scheme.onSurface.withValues(alpha: 0.08),
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: scheme.onSurface.withValues(alpha: 0.08),
+                  ),
+                ),
+                child: Icon(
+                  Icons.person_rounded,
+                  size: 17,
+                  color: scheme.onSurfaceVariant,
+                ),
               ),
             ),
           ),
-          if (onMarketplace case final VoidCallback open)
+          if (onMarketplace case final VoidCallback open) ...[
+            const SizedBox(width: 2),
             identified(
               ShellIds.sidebarMarketplace,
               IconButton(
                 tooltip: 'Marketplace',
                 onPressed: open,
+                style: quiet,
                 icon: const Icon(Icons.storefront_outlined),
               ),
             ),
+          ],
           const Spacer(),
           identified(
             VoiceIds.sidebarStart,
-            IconButton.filledTonal(
+            IconButton(
               tooltip: switch (voiceControl) {
                 VoiceControlState.active => 'Voice session active',
                 VoiceControlState.ending => 'Ending voice session…',
                 VoiceControlState.idle => 'Start voice session',
               },
               isSelected: voiceControl == VoiceControlState.active,
+              style: voiceControl == VoiceControlState.active ? active : quiet,
               onPressed: voiceControl == VoiceControlState.ending
                   ? null
                   : onVoice,
-              icon: const Icon(Icons.graphic_eq),
+              icon: const Icon(Icons.graphic_eq_rounded),
             ),
           ),
-          const SizedBox(width: 4),
+          const SizedBox(width: 2),
           identified(
             ShellIds.sidebarSearch,
-            IconButton.filledTonal(
+            IconButton(
               tooltip: 'Search',
               onPressed: onSearch,
-              icon: const Icon(Icons.search),
+              style: quiet,
+              icon: const Icon(Icons.search_rounded),
             ),
           ),
-          const SizedBox(width: 4),
+          const SizedBox(width: 2),
           identified(
             ShellIds.sidebarCreateBot,
-            IconButton.filledTonal(
+            IconButton(
               tooltip: 'Add a sheep',
               onPressed: onCreateBot,
-              icon: const Icon(Icons.add),
+              style: active,
+              icon: const Icon(Icons.add_rounded),
             ),
           ),
         ],
@@ -578,18 +738,44 @@ class _Foot extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
       children: [
-        Divider(height: 1, color: theme.colorScheme.outlineVariant),
-        identified(
-          ShellIds.sidebarMarketplace,
-          ListTile(
-            leading: const Icon(Icons.storefront_outlined),
-            title: Text(
-              'Marketplace',
-              style: theme.textTheme.bodyLarge?.copyWith(
-                fontWeight: FontWeight.w600,
+        const Divider(height: 1),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(8, 6, 8, 8),
+          child: identified(
+            ShellIds.sidebarMarketplace,
+            InkWell(
+              onTap: onMarketplace,
+              borderRadius: BorderRadius.circular(10),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 9, 12, 9),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.storefront_outlined,
+                      size: 19,
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                    const SizedBox(width: 11),
+                    Expanded(
+                      child: Text(
+                        'Marketplace',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w500,
+                          letterSpacing: -0.1,
+                        ),
+                      ),
+                    ),
+                    Icon(
+                      Icons.chevron_right_rounded,
+                      size: 18,
+                      color: theme.colorScheme.onSurfaceVariant.withValues(
+                        alpha: 0.6,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
-            onTap: onMarketplace,
           ),
         ),
       ],
@@ -616,47 +802,62 @@ class _PinnedTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        width: 76,
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        decoration: BoxDecoration(
-          color: active
-              ? theme.colorScheme.primary.withValues(alpha: 0.14)
-              : null,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Stack(
-              children: [
-                SheepAvatar(size: 40, background: background, working: working),
-                if (unread)
-                  Positioned(
-                    right: 0,
-                    top: 0,
-                    child: Container(
-                      width: 10,
-                      height: 10,
-                      decoration: BoxDecoration(
-                        color: theme.colorScheme.primary,
-                        shape: BoxShape.circle,
+    return Material(
+      color: active
+          ? theme.colorScheme.onSurface.withValues(alpha: 0.06)
+          : Colors.transparent,
+      borderRadius: BorderRadius.circular(10),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: Container(
+          width: 66,
+          padding: const EdgeInsets.fromLTRB(4, 8, 4, 6),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  SheepAvatar(
+                    size: 40,
+                    background: background,
+                    working: working,
+                  ),
+                  if (unread)
+                    Positioned(
+                      right: -3,
+                      top: -3,
+                      child: Container(
+                        width: 12,
+                        height: 12,
+                        decoration: BoxDecoration(
+                          color: theme.colorScheme.primary,
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: theme.colorScheme.surface,
+                            width: 2,
+                          ),
+                        ),
                       ),
                     ),
+                ],
+              ),
+              const SizedBox(height: 5),
+              Text(
+                name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  fontSize: 11.5,
+                  fontWeight: unread ? FontWeight.w600 : FontWeight.w500,
+                  color: theme.colorScheme.onSurface.withValues(
+                    alpha: unread ? 1 : 0.85,
                   ),
-              ],
-            ),
-            const SizedBox(height: 6),
-            Text(
-              name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.bodySmall,
-            ),
-          ],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -674,12 +875,20 @@ class _Error extends StatelessWidget {
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(message, style: Theme.of(context).textTheme.bodyMedium),
-        const SizedBox(height: 8),
+        Text(
+          message,
+          style: Theme.of(context).textTheme.bodyMedium
+              ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
+        ),
+        const SizedBox(height: 10),
         identified(
           ShellIds.sidebarRetry,
-          FilledButton.tonal(
+          OutlinedButton(
             onPressed: () => onRetry(),
+            style: OutlinedButton.styleFrom(
+              minimumSize: const Size(0, 34),
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+            ),
             child: const Text('Retry'),
           ),
         ),
@@ -701,12 +910,21 @@ class _Skeleton extends StatelessWidget {
       children: [
         for (var row = 0; row < 3; row++)
           const Padding(
-            padding: EdgeInsets.fromLTRB(16, 10, 16, 0),
+            padding: EdgeInsets.fromLTRB(18, 10, 20, 2),
             child: Row(
               children: [
-                FrockSkeleton(width: 34, height: 34),
-                SizedBox(width: 12),
-                Expanded(child: FrockSkeleton(height: 34)),
+                FrockSkeleton(width: 36, height: 36),
+                SizedBox(width: 11),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      FrockSkeleton(width: 120, height: 12),
+                      SizedBox(height: 8),
+                      FrockSkeleton(width: 180, height: 10),
+                    ],
+                  ),
+                ),
               ],
             ),
           ),
@@ -720,7 +938,7 @@ class _NoBots extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.all(24),
+    padding: const EdgeInsets.fromLTRB(20, 24, 20, 24),
     child: Text(
       'No Bots yet. Add your first sheep.',
       style: Theme.of(context).textTheme.bodyMedium
