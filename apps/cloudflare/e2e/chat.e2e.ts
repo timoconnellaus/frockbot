@@ -170,10 +170,8 @@ async function threadOrder(page: Page): Promise<string[]> {
  * Turn it belongs to has already settled.
  */
 async function beginTurn(page: Page, text: string): Promise<void> {
-  // Typed through the retry the engine needs: keys sent before it has opened
-  // the field's editing session are dropped, and a draft that arrives with its
-  // first characters missing is a different message — which, when the draft
-  // carries a tool script, is a different Turn.
+  // Typed through `answerComposer`, which is where the engine's dropped keys
+  // and the corner button that tells them apart are explained.
   await answerComposer(page, text);
   // Send closes while a submission is in flight and while the client is still
   // confirming the last one, and a click on a closed button is a no-op that

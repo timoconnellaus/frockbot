@@ -1142,10 +1142,8 @@ export async function sendMessage(
       : ((await messages.last().getAttribute("flt-semantics-identifier")) ??
         "");
   const newestBefore = await newest();
-  // Typed through the same retry the connect form needs: the engine drops keys
-  // sent before it has opened the field's editing session, and a draft that
-  // arrives with its first few characters missing is a different message —
-  // which, when the draft carries a tool script, is a different Turn.
+  // Typed through `answerComposer`, which is where the engine's dropped keys
+  // and the corner button that tells them apart are explained.
   await answerComposer(page, text);
   await press(sem(page, "send-button"));
   await expect(composer).toHaveValue("", { timeout: 120_000 });
