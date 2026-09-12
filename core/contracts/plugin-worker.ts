@@ -35,7 +35,7 @@ const MAX_PLUGINS_V1 = 64;
 export const MAX_FAILURE_REASON_V1 = 1_024;
 const MAX_TRIGGER_HEADERS_V1 = 64;
 const MAX_TRIGGER_HEADER_BYTES_V1 = 8_192;
-const MAX_TRIGGER_BODY_BYTES_V1 = 1_000_000;
+export const MAX_TRIGGER_BODY_BYTES_V1 = 1_000_000;
 
 /** One Plugin's artifact in the worker's module set. */
 export interface PluginWorkerMemberV1 {

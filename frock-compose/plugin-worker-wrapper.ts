@@ -15,6 +15,7 @@ import {
   BOT_ISOLATE_HOOK_EVENTS_V1,
   ISOLATE_CONTRACT_VERSION,
   MAX_FAILURE_REASON_V1,
+  MAX_TRIGGER_BODY_BYTES_V1,
   type BotPackageContextV1,
 } from "@frockbot/core/contracts";
 
@@ -644,7 +645,7 @@ export default class extends WorkerEntrypoint {
         );
       }, invocation.deadlineMs);
       if (typeof value === "string" && value.length > 0) {
-        return { schemaVersion: 1, status: "fire", text: value };
+        return { schemaVersion: 1, status: "fire", text: value.slice(0, ${MAX_TRIGGER_BODY_BYTES_V1}) };
       }
       if (value && typeof value === "object" && value.drop === true) {
         return Object.assign(

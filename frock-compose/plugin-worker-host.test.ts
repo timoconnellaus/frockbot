@@ -15,6 +15,7 @@ import type {
   PluginWorkerPluginHealthV1,
   PluginWorkerToolInvocationV1,
   PluginWorkerTriggerInvocationV1,
+  PluginWorkerTriggerResultV1,
   ToolDefinition,
   ToolExecutionContext,
   ToolRegistration,
@@ -139,6 +140,7 @@ function harness(
   input: {
     health?: (plugins: string[]) => PluginWorkerHealthV1;
     hook?: PluginWorkerEntrypoint["hook"];
+    receiveTrigger?: PluginWorkerEntrypoint["receiveTrigger"];
     healthThrows?: string;
     deadlineMs?: number;
     artifacts?: Record<string, string>;
@@ -184,6 +186,7 @@ function harness(
     },
     receiveTrigger: (invocation) => {
       triggerInvocations.push(invocation);
+      if (input.receiveTrigger) return input.receiveTrigger(invocation);
       return Promise.resolve({
         schemaVersion: 1,
         status: "fire" as const,
@@ -661,6 +664,55 @@ describe("what the worker reports at mount", () => {
     expect(
       subject.triggerInvocations.map((entry) => entry.pluginId),
     ).toEqual(["weather"]);
+  });
+
+  test("a trigger answer the kernel cannot decode is dropped, not passed on", async () => {
+    const subject = harness({
+      receiveTrigger: () =>
+        Promise.resolve({
+          schemaVersion: 1,
+          status: "fire",
+          text: "",
+        } as unknown as PluginWorkerTriggerResultV1),
+    });
+    const prepared = await subject.host.mount([member("weather")]);
+    const active = await prepared.commit();
+    const result = await active.deliverTrigger({
+      schemaVersion: 1,
+      pluginId: "weather",
+      trigger: "inbound",
+      headers: {},
+      body: "{}",
+      botId: "bot-1",
+      routineId: "routine-1",
+      deadlineMs: 1_000,
+    });
+    expect(result.status).toBe("drop");
+    expect(result.status === "drop" ? result.reason : "").toMatch(
+      /plugin "weather" trigger result\.text/,
+    );
+    await active.dispose();
+  });
+
+  test("a trigger the worker never answers is dropped at the deadline", async () => {
+    const subject = harness({
+      receiveTrigger: () => new Promise<PluginWorkerTriggerResultV1>(() => {}),
+    });
+    const prepared = await subject.host.mount([member("weather")]);
+    const active = await prepared.commit();
+    const result = await active.deliverTrigger({
+      schemaVersion: 1,
+      pluginId: "weather",
+      trigger: "inbound",
+      headers: {},
+      body: "{}",
+      botId: "bot-1",
+      routineId: "routine-1",
+      deadlineMs: 25,
+    });
+    expect(result.status).toBe("drop");
+    expect(result.status === "drop" ? result.reason : "").toMatch(/deadline/);
+    await active.dispose();
   });
 
   test("a consumer is excluded when its provider fails health", async () => {

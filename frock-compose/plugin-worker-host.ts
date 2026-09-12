@@ -15,6 +15,7 @@ import {
   decodeIsolateToolResultV1,
   decodePluginWorkerHealthV1,
   decodePluginWorkerHookResultV1,
+  decodePluginWorkerTriggerResultV1,
   isolateToolSchemaV1,
   ISOLATE_CONTRACT_VERSION,
   ISOLATE_MAX_DEADLINE_MS,
@@ -410,15 +411,7 @@ export class PluginWorkerHost {
         commit: () =>
           Promise.resolve({
             deliverTrigger: (invocation: PluginWorkerTriggerInvocationV1) =>
-              Promise.resolve<PluginWorkerTriggerResultV1>({
-                schemaVersion: 1,
-                status: "drop",
-                reason:
-                  `plugin "${invocation.pluginId}" did not mount in this generation`.slice(
-                    0,
-                    MAX_FAILURE_REASON_V1,
-                  ),
-              }),
+              Promise.resolve(droppedTrigger(invocation.pluginId)),
             dispose: () => Promise.resolve(),
           }),
       };
@@ -565,22 +558,29 @@ export class PluginWorkerHost {
           );
         }
         return Promise.resolve({
-          deliverTrigger: (
+          deliverTrigger: async (
             invocation: PluginWorkerTriggerInvocationV1,
           ): Promise<PluginWorkerTriggerResultV1> => {
-            const reason = disposed
-              ? "the plugin worker for this generation is no longer mounted"
-              : live.has(invocation.pluginId)
-                ? undefined
-                : `plugin "${invocation.pluginId}" did not mount in this generation`;
-            if (reason !== undefined) {
-              return Promise.resolve({
-                schemaVersion: 1,
-                status: "drop",
-                reason: reason.slice(0, MAX_FAILURE_REASON_V1),
-              });
+            if (disposed) {
+              return droppedTrigger(
+                invocation.pluginId,
+                "the plugin worker for this generation is no longer mounted",
+              );
             }
-            return entrypoint.receiveTrigger(invocation);
+            if (!live.has(invocation.pluginId)) {
+              return droppedTrigger(invocation.pluginId);
+            }
+            try {
+              return decodePluginWorkerTriggerResultV1(
+                await raceDeadline(
+                  () => entrypoint.receiveTrigger(invocation),
+                  invocation.deadlineMs,
+                ),
+                `plugin "${invocation.pluginId}" trigger result`,
+              );
+            } catch (error) {
+              return droppedTrigger(invocation.pluginId, errorMessage(error));
+            }
           },
           dispose: () => {
             if (disposed) return Promise.resolve();
@@ -984,6 +984,20 @@ export class PluginWorkerHost {
       },
     };
   }
+}
+
+/** The one statement of what a caller is told when no live Plugin answers. */
+function droppedTrigger(
+  pluginId: string,
+  reason?: string,
+): PluginWorkerTriggerResultV1 {
+  return {
+    schemaVersion: 1,
+    status: "drop",
+    reason: (
+      reason ?? `plugin "${pluginId}" did not mount in this generation`
+    ).slice(0, MAX_FAILURE_REASON_V1),
+  };
 }
 
 /** The Durable Object half of the deadline: a race the worker cannot escape. */
