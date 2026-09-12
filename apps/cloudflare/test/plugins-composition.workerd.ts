@@ -124,6 +124,9 @@ interface BotRpc {
       }
     | { status: "conflict"; currentRevision: number }
   >;
+  listNotifications(
+    input: unknown,
+  ): Promise<Array<{ notificationId: string; title: string; body: string }>>;
   executeRoutineCommand(input: unknown): Promise<{
     status: string;
     hook?: { token: string; keyVersion: number };
@@ -1724,5 +1727,147 @@ export async function execute() {
     const [cue] = await cuesFor("twice");
     expect(cue).toContain("Storm over Wollongong");
     expect(cue).not.toContain('{"city":"Wollongong"}');
+  });
+
+  test("a Plugin that fails three Turns in a row is noticed each time and then turned off for this Bot", async () => {
+    const userId = `user-${crypto.randomUUID()}`;
+    const identity = { userId, botId: "bot-1" };
+    await provisionBot(identity);
+    await turn(identity, "run-0");
+    const bootstrap = (
+      await user(userId).readComposition({ schemaVersion: 1, userId })
+    ).current;
+
+    const FLAKY_ID = "flaky";
+    const FLAKY_SOURCE = `
+export const tools = [
+  { name: "flaky_noop", description: "Does nothing", inputSchema: {}, idempotent: true },
+];
+export const hooks = {
+  "agent/tool-exposure": async function () {
+    throw new Error("the flaky hook exploded");
+  },
+};
+export async function execute() {
+  return "ok";
+}
+`;
+    const descriptor = decodePluginDescriptorV1({
+      id: FLAKY_ID,
+      displayName: "Flaky",
+      version: "0.0.1",
+      contractVersion: 4,
+      tools: [
+        { name: "flaky_noop", description: "Does nothing", inputSchema: {} },
+      ],
+      hooks: ["agent/tool-exposure"],
+      grants: [],
+      contextKeys: ["user", "bot", "session"],
+    });
+    const contentHash = await sha256Hex(FLAKY_SOURCE);
+    await env.APPLICATION_ARTIFACTS.put(
+      `packages/${contentHash}.mjs`,
+      FLAKY_SOURCE,
+    );
+    const createdAt = "2026-09-12T04:00:00.000Z";
+    const members: CompositionMemberV1[] = [
+      {
+        packageId: FLAKY_ID,
+        version: "0.0.1",
+        descriptor,
+        provenance: {
+          kind: "bot",
+          packageId: FLAKY_ID,
+          version: "0.0.1",
+          botId: "bot-1",
+          sessionId: `${userId}:bot-1`,
+          turnId: "run-0",
+          runId: "run-0",
+          authoredAt: createdAt,
+        },
+        artifact: {
+          contentHash,
+          size: FLAKY_SOURCE.length,
+          mediaType: "application/javascript",
+          bundlerVersion: "probe-seed",
+        },
+      },
+    ];
+    const artifactSetHash = await compositionArtifactSetHashV1(members);
+    await user(userId).proposeComposition({
+      schemaVersion: 1,
+      userId,
+      generation: {
+        schemaVersion: 1,
+        generationId: compositionGenerationIdV1(createdAt, artifactSetHash),
+        artifactSetHash,
+        parentGenerationId: bootstrap.generationId,
+        createdAt,
+        origin: {
+          kind: "bot-authored",
+          runId: "run-0",
+          sessionId: `${userId}:bot-1`,
+          turnId: "run-0",
+        },
+        members,
+        status: "pending",
+      },
+      pin: true,
+      expectedCurrentGenerationId: bootstrap.generationId,
+    });
+    await switchPlugin(identity, FLAKY_ID, true);
+
+    const enabledFlag = async () =>
+      (
+        await bot(identity).readPluginEnablement({
+          schemaVersion: 1,
+          ...identity,
+        })
+      ).enabled[FLAKY_ID];
+    const notices = async () =>
+      (
+        await bot(identity).listNotifications({ schemaVersion: 1, ...identity })
+      ).map((notice) => notice.title);
+
+    // Two failing Turns: skipped, noticed, still on.
+    await turn(identity, "run-1");
+    await turn(identity, "run-2");
+    expect(await enabledFlag()).toBe(true);
+    expect(
+      (await notices()).filter((title) => title === "A plugin was skipped"),
+    ).toHaveLength(2);
+    expect(await notices()).not.toContain("A plugin was turned off");
+
+    // The third turns it off for this Bot, and says so.
+    await turn(identity, "run-3");
+    expect(await enabledFlag()).toBe(false);
+    expect(await notices()).toContain("A plugin was turned off");
+    const page = await bot(identity).readBotPluginsFrame({
+      schemaVersion: 1,
+      ...identity,
+    });
+    const row = page.plugins.find(
+      (candidate) => candidate.pluginId === FLAKY_ID,
+    ) as { on: boolean; quarantined?: string } | undefined;
+    expect(row).toMatchObject({ on: false });
+    expect(row?.quarantined).toContain("Turned off after 3 Turns in a row");
+
+    // A Turn with it off raises nothing new; switching it on clears the history.
+    await turn(identity, "run-4");
+    expect(
+      (await notices()).filter((title) => title === "A plugin was skipped"),
+    ).toHaveLength(3);
+    await switchPlugin(identity, FLAKY_ID, true);
+    const again = await bot(identity).readBotPluginsFrame({
+      schemaVersion: 1,
+      ...identity,
+    });
+    expect(
+      (
+        again.plugins.find((candidate) => candidate.pluginId === FLAKY_ID) as {
+          quarantined?: string;
+        }
+      ).quarantined,
+    ).toBeUndefined();
   });
 });

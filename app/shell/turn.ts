@@ -39,6 +39,7 @@ import {
 import { readPluginEnablementV1 } from "@frockbot/app/plugins/enablement";
 import { createAppletInstanceBindingV1 } from "@frockbot/app/applets-host/records";
 import { isolateMountOptions } from "@frockbot/app/isolates/bot";
+import { settleTurnPluginHealthV1 } from "@frockbot/app/plugins/health-bot";
 import { pendingBotInputPreambleV1 } from "@frockbot/app/routines/inbox";
 import { resolveExecutionContextV1 } from "@frockbot/app/settings/bot";
 import {
@@ -413,6 +414,14 @@ export async function executeTurn(
     });
   } finally {
     state.turn.clear(active);
+    // The Plugins that ran through this Turn without failing are well again;
+    // a failing one keeps its count toward the quarantine.
+    await settleTurnPluginHealthV1(state, {
+      runId: input.command.runId,
+      ran: activation.mounted.generation.members.map(
+        (member) => member.packageId,
+      ),
+    }).catch(() => undefined);
   }
 }
 

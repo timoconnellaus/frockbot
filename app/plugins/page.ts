@@ -32,6 +32,8 @@ export interface BotPluginRowV1 {
   network?: PluginNetworkV1;
   /** A first-party feature the account has not installed cannot be switched on. */
   unavailable?: string;
+  /** Off after failing Turns in a row; the switch turns it on again (ADR 0026). */
+  quarantined?: string;
 }
 
 export interface BotPluginsFrameV1 {
@@ -140,6 +142,9 @@ function pluginNode(row: BotPluginRowV1, revision: number): ViewNode {
   if (reach) lines.push({ type: "text", text: reach, style: "status" });
   if (row.unavailable) {
     lines.push({ type: "text", text: row.unavailable, style: "status" });
+  }
+  if (row.quarantined) {
+    lines.push({ type: "text", text: row.quarantined, style: "status" });
   }
   const controls: ViewNode[] = [];
   if (row.switchable && !row.unavailable) {

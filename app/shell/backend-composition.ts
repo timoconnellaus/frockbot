@@ -88,6 +88,16 @@ export interface ShellIsolateMountOptions {
    * leaves the worker with no outbound at all.
    */
   egress?: unknown;
+  /**
+   * Where every Plugin failure goes (ADR 0026 step 9): a notice, the per-Bot
+   * quarantine count, and the verdict. A `fatal` verdict — a locked Plugin's
+   * failure — fails the generation's mount, or the hook it was raised in.
+   */
+  onPluginFailure?(failure: {
+    pluginId: string;
+    phase: "resolve" | "mount" | "health" | "hook";
+    message: string;
+  }): Promise<{ fatal: boolean }>;
 }
 
 /**
@@ -229,6 +239,16 @@ export function createShellCompositionHost(
                 }
                 session.append({ type: "package/hook-failed", ...failure });
                 await session.flush();
+                const verdict = await isolate.onPluginFailure?.({
+                  pluginId: failure.packageId,
+                  phase: "hook",
+                  message: failure.message,
+                });
+                if (verdict?.fatal) {
+                  throw new Error(
+                    `plugin "${failure.packageId}" is always on for this Bot and failed at ${failure.event}: ${failure.message}`,
+                  );
+                }
               },
               capabilities: isolate.capabilities,
               compatibilityDate: isolate.compatibilityDate,
@@ -247,6 +267,20 @@ export function createShellCompositionHost(
             // Mount and health-check are one guarded phase (Worker Loader spike).
             const prepared = await host.mount(generation.members);
             pluginFailures.push(...prepared.failures);
+            for (const failure of prepared.failures) {
+              const verdict = await isolate.onPluginFailure?.({
+                pluginId: failure.pluginId,
+                // The host names `bundle` for a module that does not parse;
+                // to the count it is a mount that did not happen.
+                phase: failure.phase === "bundle" ? "mount" : failure.phase,
+                message: failure.message,
+              });
+              if (verdict?.fatal) {
+                throw new Error(
+                  `plugin "${failure.pluginId}" is always on for this Bot and failed at ${failure.phase}: ${failure.message}`,
+                );
+              }
+            }
             active.push(await prepared.commit());
           } catch (error) {
             failures.push(memberFailure(error));

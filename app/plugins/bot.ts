@@ -16,6 +16,8 @@ import {
   pluginSwitchableV1,
   type SeededPluginV1,
 } from "./catalog.js";
+import { pluginQuarantineCopyV1, readPluginHealthMapV1 } from "./health.js";
+import { clearBotPluginHealthV1 } from "./health-bot.js";
 import {
   PluginEnablementConflictError,
   readPluginEnablementV1,
@@ -66,11 +68,16 @@ export async function readBotPluginsFrameV1(
     });
   }
   const composition = await currentUserCompositionV1(state, identity);
+  const health = await readPluginHealthMapV1(state.ctx.storage);
   for (const member of composition.members) {
     const seeded = catalog.find(
       (plugin) => plugin.pluginId === member.packageId,
     );
+    const quarantine = health.get(member.packageId);
     rows.push({
+      ...(quarantine?.quarantinedAt !== undefined
+        ? { quarantined: pluginQuarantineCopyV1(quarantine) }
+        : {}),
       pluginId: member.packageId,
       displayName: seeded?.displayName ?? member.descriptor.displayName,
       description:
@@ -126,6 +133,9 @@ export async function setBotPluginEnabledV1(
       enabled: command.enabled,
       expectedRevision: command.expectedRevision,
     });
+    // Switching a Plugin on is a person's answer to a quarantine: its
+    // history starts over.
+    if (command.enabled) await clearBotPluginHealthV1(state, command.pluginId);
     return { status: "applied", revision: next.revision };
   } catch (error) {
     if (error instanceof PluginEnablementConflictError) {
