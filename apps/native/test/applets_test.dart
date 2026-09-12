@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/applets/canvas.dart';
+import 'package:frockbot_native/applets/picker.dart';
 import 'package:frockbot_native/applets/client.dart';
 import 'package:frockbot_native/applets/failure.dart';
 import 'package:frockbot_native/applets/progress.dart';
@@ -630,5 +633,116 @@ void main() {
       expect(find.text('server.ts'), findsOneWidget);
       controller.dispose();
     });
+  });
+
+  group('the picker answers the tap, not the round trip', () {
+    Map<String, Object?> summary(String appletId, String name) => {
+      'appletId': appletId,
+      'displayName': name,
+      'status': 'published',
+      'currentGenerationId': 'g1',
+      'tools': <String>[],
+      'createdAt': '2026-09-05T01:00:00.000Z',
+    };
+
+    testWidgets('a confirmed delete takes the row now and restores it if the '
+        'delete genuinely failed', (tester) async {
+      final deletes = Completer<void>();
+      final api = SettingsApi(MemoryStore(), (path, body) async {
+        if (path.endsWith('/applets/open')) {
+          return {
+            'schemaVersion': 1,
+            'applets': [
+              summary('todo.applet', 'Weekly Todos'),
+              summary('notes.applet', 'Field Notes'),
+            ],
+          };
+        }
+        if (path == '/api/applets/todo.applet/delete') {
+          await deletes.future;
+          throw const RequestFailure('synthetic backend detail', 500);
+        }
+        throw const RequestFailure('unexpected', 404);
+      });
+      final controller = AppletCanvasController(api, 'bot-1');
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: FrockTheme.theme(Brightness.dark),
+          home: Scaffold(body: AppletPicker(controller: controller)),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Weekly Todos'), findsOneWidget);
+
+      await tester.tap(find.byTooltip('Delete Weekly Todos'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, 'Delete'));
+      await tester.pump();
+
+      // One frame, and the row is gone: the confirmation was the decision.
+      expect(find.text('Weekly Todos'), findsNothing);
+      // Nothing else waited on it — a single flag used to disable every row.
+      expect(find.text('Field Notes'), findsOneWidget);
+      expect(
+        tester
+            .widget<IconButton>(
+              find.ancestor(
+                of: find.byTooltip('Delete Field Notes'),
+                matching: find.byType(IconButton),
+              ),
+            )
+            .onPressed,
+        isNotNull,
+      );
+
+      deletes.complete();
+      await tester.pumpAndSettle();
+      expect(find.text('Weekly Todos'), findsOneWidget);
+      expect(
+        find.text('Couldn’t delete this Applet. Try again.'),
+        findsOneWidget,
+      );
+      controller.dispose();
+    });
+
+    test(
+      'the focus moves on the choice and reconciles against what was kept',
+      () async {
+        final kept = Completer<String>();
+        var focus = 'todo.applet';
+        final api = SettingsApi(MemoryStore(), (path, body) async {
+          if (path.endsWith('/applets/open')) {
+            return {
+              'schemaVersion': 1,
+              'applets': [
+                summary('todo.applet', 'Weekly Todos'),
+                summary('notes.applet', 'Field Notes'),
+              ],
+              'focused': {'appletId': focus, ...openViewer()},
+            };
+          }
+          if (path.endsWith('/applets/focus')) {
+            focus = await kept.future;
+            return {'appletId': focus};
+          }
+          throw const RequestFailure('unexpected', 404);
+        });
+        final controller = AppletCanvasController(api, 'bot-1');
+        await controller.load();
+        expect(controller.focusedId, 'todo.applet');
+
+        final moving = controller.setFocus('notes.applet');
+        // The canvas is on the chosen Applet before either request answers.
+        expect(controller.focusedId, 'notes.applet');
+        expect(controller.viewer, isNull);
+
+        // The backend answers with what it kept, which need not be what was
+        // asked, and that answer is what the canvas ends up on.
+        kept.complete('todo.applet');
+        await moving;
+        expect(controller.focusedId, 'todo.applet');
+        controller.dispose();
+      },
+    );
   });
 }

@@ -253,21 +253,35 @@ class AppletCanvasController extends ChangeNotifier {
     await load();
   }
 
+  /// Moves the canvas onto the chosen Applet before the write that records it.
+  ///
+  /// The picker already decided which Applet this is, so drawing it now shows
+  /// the choice rather than guessing at an answer. The backend answers with
+  /// what it *kept*, which need not be what was asked, so [setFocus]
+  /// reconciles against that answer and the caller compares the two.
+  void predictFocus(String? appletId) {
+    if (focusedId == appletId) return;
+    focusedId = appletId;
+    // What the focus opens onto is another Applet's, so nothing of the last
+    // one survives the change.
+    source = null;
+    build = null;
+    viewer = null;
+    _changed();
+  }
+
   /// Records the focus, then reads the open route: the frame for the new
   /// Applet is loading before its code is asked for, and a picker tap is one
   /// write and one read.
   Future<void> setFocus(String? appletId) async {
+    final before = focusedId;
+    predictFocus(appletId);
     try {
-      final kept = await applets.setFocus(botId, appletId);
-      focusedId = kept;
-      // What the focus opens onto is another Applet's, so nothing of the last
-      // one survives the change.
-      source = null;
-      build = null;
-      viewer = null;
+      focusedId = await applets.setFocus(botId, appletId);
       _changed();
       await load();
     } catch (error) {
+      predictFocus(before);
       failure = appletCanvasFailureV1(error);
       _changed();
     }

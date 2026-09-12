@@ -194,6 +194,10 @@ class BotSearchController extends ChangeNotifier {
   /// A rebuild changes no durable fact, only the projection of facts the Bots
   /// already hold.
   Future<void> rebuild() async {
+    // The state the index was in if nobody ever started rebuilding it. A
+    // refused request left "rebuilding" on screen for an index that was not,
+    // and nothing afterwards took it off.
+    final before = indexState;
     rebuilding = true;
     indexState = 'rebuilding';
     error = null;
@@ -203,6 +207,7 @@ class BotSearchController extends ChangeNotifier {
       indexState = ((receipt as Map?)?['indexState'] as String?) ?? 'ready';
       await run();
     } catch (_) {
+      indexState = before;
       error = 'Couldn’t rebuild the search index. Please try again.';
     } finally {
       rebuilding = false;
