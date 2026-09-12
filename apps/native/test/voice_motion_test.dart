@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:ui' show SemanticsFlag;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -124,7 +123,7 @@ void main() {
         }
         final starting = tester.getSemantics(
             find.bySemanticsLabel('Starting dictation'));
-        expect(starting.hasFlag(SemanticsFlag.isLiveRegion), isTrue);
+        expect(starting.flagsCollection.isLiveRegion, isTrue);
         harness.dictationCapture.permission!.complete();
         await tester.pump();
         harness.dictationSocket.deliver(
