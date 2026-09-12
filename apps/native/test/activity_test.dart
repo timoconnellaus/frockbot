@@ -205,7 +205,10 @@ void main() {
       final marking = controller.mark('alpha', read: true);
       expect(controller.unread['alpha']!.count, 0);
       expect(controller.unread['alpha']!.unread, isFalse);
-      expect(sidebarUnreadFor(controller.unread['alpha'], focused: false).label, isNull);
+      expect(
+        sidebarUnreadFor(controller.unread['alpha'], focused: false).label,
+        isNull,
+      );
 
       receipts.complete();
       await marking;
@@ -233,7 +236,10 @@ void main() {
         fromMessageId: 'run-1:send:0',
       );
       expect(controller.unread['alpha']!.manuallyUnread, isTrue);
-      expect(sidebarUnreadFor(controller.unread['alpha'], focused: false).label, '•');
+      expect(
+        sidebarUnreadFor(controller.unread['alpha'], focused: false).label,
+        '•',
+      );
 
       receipts.complete();
       await marking;
@@ -254,7 +260,10 @@ void main() {
       await controller.mark('alpha', read: true);
       expect(controller.unread['alpha']!.count, 2);
       expect(controller.unread['alpha']!.unread, isTrue);
-      expect(sidebarUnreadFor(controller.unread['alpha'], focused: false).label, '2');
+      expect(
+        sidebarUnreadFor(controller.unread['alpha'], focused: false).label,
+        '2',
+      );
       // What the shell puts in its SnackBar when the mark comes back refused.
       expect(controller.error, isNotNull);
       controller.dispose();
