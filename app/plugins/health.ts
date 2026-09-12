@@ -145,13 +145,11 @@ export async function recordPluginFailureV1(
     phase: PluginFailurePhaseV1;
     message: string;
     now?: Date;
-    threshold?: number;
   },
 ): Promise<{ health: PluginHealthRecordV1; quarantined: boolean }> {
   if (!PLUGIN_ID.test(input.pluginId)) {
     throw new Error(`plugin id "${input.pluginId}" is invalid`);
   }
-  const threshold = input.threshold ?? PLUGIN_QUARANTINE_THRESHOLD_V1;
   const at = (input.now ?? new Date()).toISOString();
   const previous = await readPluginHealthV1(storage, input.pluginId);
   const sameTurn = previous?.lastFailure.runId === input.runId;
@@ -161,7 +159,7 @@ export async function recordPluginFailureV1(
   const crossed =
     previous?.quarantinedAt === undefined &&
     !sameTurn &&
-    consecutiveFailures >= threshold;
+    consecutiveFailures >= PLUGIN_QUARANTINE_THRESHOLD_V1;
   const health: PluginHealthRecordV1 = {
     schemaVersion: 1,
     pluginId: input.pluginId,

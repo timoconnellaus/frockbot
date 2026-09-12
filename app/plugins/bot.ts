@@ -16,8 +16,11 @@ import {
   pluginSwitchableV1,
   type SeededPluginV1,
 } from "./catalog.js";
-import { pluginQuarantineCopyV1, readPluginHealthMapV1 } from "./health.js";
-import { clearBotPluginHealthV1 } from "./health-bot.js";
+import {
+  clearPluginHealthV1,
+  pluginQuarantineCopyV1,
+  readPluginHealthMapV1,
+} from "./health.js";
 import {
   PluginEnablementConflictError,
   readPluginEnablementV1,
@@ -135,7 +138,9 @@ export async function setBotPluginEnabledV1(
     });
     // Switching a Plugin on is a person's answer to a quarantine: its
     // history starts over.
-    if (command.enabled) await clearBotPluginHealthV1(state, command.pluginId);
+    if (command.enabled) {
+      await clearPluginHealthV1(state.ctx.storage, command.pluginId);
+    }
     return { status: "applied", revision: next.revision };
   } catch (error) {
     if (error instanceof PluginEnablementConflictError) {

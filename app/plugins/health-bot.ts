@@ -1,15 +1,14 @@
 // The Bot Durable Object's side of Plugin health (ADR 0026 step 9): a
 // failure becomes a notice in the User's inbox, counts toward the per-Bot
 // quarantine, and — for a locked Plugin — fails the Turn instead.
-import type { BotIdentity } from "@frockbot/core/durable";
 import { notificationIdV1 } from "@frockbot/app/shell/notification-id";
 import type { ShellBotStateV1 } from "@frockbot/app/shell/backend-state";
 import { DEPLOYMENT_PLUGIN_CATALOG_V1 } from "./catalog.js";
 import { switchPluginForBotV1 } from "./authoring.js";
 import {
-  clearPluginHealthV1,
+  PLUGIN_QUARANTINE_THRESHOLD_V1,
+  readPluginHealthV1,
   recordPluginFailureV1,
-  settlePluginHealthV1,
   type PluginFailurePhaseV1,
 } from "./health.js";
 
@@ -22,16 +21,6 @@ export interface PluginFailureNoticeV1 {
 
 /** What the mount host does with the failure: carry on without the Plugin, or not. */
 export type PluginFailureVerdictV1 = { fatal: false } | { fatal: true };
-
-/**
- * The seam the mount host calls for every Plugin failure it names. Bound to
- * the Turn, so the notice names the run and the count is per Turn.
- */
-export interface PluginFailureSeamV1 {
-  onPluginFailure(
-    failure: PluginFailureNoticeV1,
-  ): Promise<PluginFailureVerdictV1>;
-}
 
 function locked(pluginId: string): boolean {
   return DEPLOYMENT_PLUGIN_CATALOG_V1.some(
@@ -60,7 +49,6 @@ function phaseWords(phase: PluginFailurePhaseV1): string {
  */
 export async function notePluginFailureV1(
   state: ShellBotStateV1,
-  identity: BotIdentity,
   turn: { runId: string; generationId: string },
   failure: PluginFailureNoticeV1,
   now: () => Date = () => new Date(),
@@ -84,6 +72,14 @@ export async function notePluginFailureV1(
     });
     return { fatal: true };
   }
+  // A Plugin that is already off has been answered: its failures neither
+  // count again nor raise a notice the User has dismissed, until a person
+  // turns it back on and its history starts over.
+  const existing = await readPluginHealthV1(
+    state.ctx.storage,
+    failure.pluginId,
+  );
+  if (existing?.quarantinedAt !== undefined) return { fatal: false };
   const { health, quarantined } = await recordPluginFailureV1(
     state.ctx.storage,
     {
@@ -109,7 +105,7 @@ export async function notePluginFailureV1(
     body: `The plugin "${failure.pluginId}" ${phaseWords(failure.phase)}: ${failure.message}. This Bot carried on without it.${
       quarantined
         ? ""
-        : ` ${health.consecutiveFailures} of ${3} failing Turns in a row before it is turned off.`
+        : ` ${health.consecutiveFailures} of ${PLUGIN_QUARANTINE_THRESHOLD_V1} failing Turns in a row before it is turned off.`
     }`.slice(0, 2_000),
   });
   if (quarantined) {
@@ -135,32 +131,4 @@ export async function notePluginFailureV1(
     });
   }
   return { fatal: false };
-}
-
-/** The seam for one Turn, over this Bot's authority. */
-export function pluginFailureSeamV1(
-  state: ShellBotStateV1,
-  identity: BotIdentity,
-  turn: { runId: string; generationId: string },
-): PluginFailureSeamV1 {
-  return {
-    onPluginFailure: (failure) =>
-      notePluginFailureV1(state, identity, turn, failure),
-  };
-}
-
-/** After a Turn: the Plugins that ran through it cleanly are well again. */
-export async function settleTurnPluginHealthV1(
-  state: ShellBotStateV1,
-  turn: { runId: string; ran: readonly string[] },
-): Promise<void> {
-  await settlePluginHealthV1(state.ctx.storage, turn);
-}
-
-/** A person switched the Plugin on again. */
-export async function clearBotPluginHealthV1(
-  state: ShellBotStateV1,
-  pluginId: string,
-): Promise<void> {
-  await clearPluginHealthV1(state.ctx.storage, pluginId);
 }

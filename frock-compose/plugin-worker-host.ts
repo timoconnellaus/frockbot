@@ -127,6 +127,16 @@ export interface IsolateHookFailureV1 {
   message: string;
 }
 
+/**
+ * A Plugin failure the host must not swallow: a Plugin that cannot be skipped
+ * failed, so the Turn fails with it. Raised by `recordHookFailure` and carried
+ * out past the catches that keep an ordinary Plugin's failure from wedging the
+ * loop.
+ */
+export class PluginFatalFailureError extends Error {
+  readonly name = "PluginFatalFailureError";
+}
+
 /** One Plugin the worker could not mount, with the phase it failed at. */
 export interface PluginMountFailureV1 {
   pluginId: string;
@@ -956,6 +966,7 @@ export class PluginWorkerHost {
         original,
       );
     } catch (error) {
+      if (error instanceof PluginFatalFailureError) throw error;
       // The worker as a whole did not answer in time, or answered with a value
       // the kernel cannot decode. The index names a Plugin it skipped itself;
       // here nothing says which one, so every Plugin that wraps this event is
@@ -981,9 +992,12 @@ export class PluginWorkerHost {
         generationId: this.options.generationId,
         message: message.slice(0, 2_048),
       });
-    } catch {
+    } catch (error) {
       // Failure recording is itself an external durability boundary. A
-      // broken hook still cannot wedge the loop if that boundary is down.
+      // broken hook still cannot wedge the loop if that boundary is down —
+      // except when it answers that this Plugin cannot be skipped, which is
+      // the Turn's verdict and not a recording failure at all.
+      if (error instanceof PluginFatalFailureError) throw error;
     }
   }
 

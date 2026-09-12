@@ -20,6 +20,7 @@ import {
   type MountedComposition,
 } from "@frockbot/core/durable";
 import {
+  PluginFatalFailureError,
   PluginWorkerHost,
   type ActivePluginWorker,
   type PluginMountFailureV1,
@@ -245,7 +246,7 @@ export function createShellCompositionHost(
                   message: failure.message,
                 });
                 if (verdict?.fatal) {
-                  throw new Error(
+                  throw new PluginFatalFailureError(
                     `plugin "${failure.packageId}" is always on for this Bot and failed at ${failure.event}: ${failure.message}`,
                   );
                 }
@@ -276,7 +277,7 @@ export function createShellCompositionHost(
                 message: failure.message,
               });
               if (verdict?.fatal) {
-                throw new Error(
+                throw new PluginFatalFailureError(
                   `plugin "${failure.pluginId}" is always on for this Bot and failed at ${failure.phase}: ${failure.message}`,
                 );
               }

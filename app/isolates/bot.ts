@@ -48,7 +48,7 @@ import {
 import type { BotIdentity } from "@frockbot/core/durable";
 import { frockbotToolCallV1 } from "@frockbot/core/tools";
 import { memoryScopeRootV1 } from "@frockbot/app/memory/roots";
-import { pluginFailureSeamV1 } from "@frockbot/app/plugins/health-bot";
+import { notePluginFailureV1 } from "@frockbot/app/plugins/health-bot";
 import {
   readBotSettingsV1,
   userConfigurationV1,
@@ -158,10 +158,12 @@ export async function isolateMountOptions(
     }),
     compatibilityDate: BOT_ISOLATE_COMPATIBILITY_DATE,
     enabled: turn.enabled,
-    onPluginFailure: pluginFailureSeamV1(state, identity, {
-      runId: turn.runId,
-      generationId: turn.generationId,
-    }).onPluginFailure,
+    onPluginFailure: (failure) =>
+      notePluginFailureV1(
+        state,
+        { runId: turn.runId, generationId: turn.generationId },
+        failure,
+      ),
   };
 }
 
