@@ -1036,6 +1036,45 @@ export async function provisionThroughUi(
 }
 
 /**
+ * Put a draft into the composer and prove the *widget* holds it, not only the
+ * element.
+ *
+ * `answerInputs` reads the draft back from the DOM, which is the very value
+ * the engine ignores when the keys arrived before it had opened the field's
+ * editing session — and the composer is the one field where that shows: the
+ * corner button is the microphone while the widget's draft is empty and Send
+ * once it is not. So the draft is typed until the corner agrees with it — Send
+ * standing for a draft, the microphone for a clear — and retyped through the
+ * same path when the engine dropped it. A Main run failed three retries in a
+ * row with the whole prompt in the element and the microphone still in the
+ * corner; this is what tells the two apart.
+ */
+export async function answerComposer(page: Page, text: string): Promise<void> {
+  const composer = composerInput(page);
+  const sendsStanding = text.length > 0 ? 1 : 0;
+  for (let attempt = 0; ; attempt += 1) {
+    await answerInputs([[composer, text]]);
+    try {
+      await expect(sem(page, "send-button")).toHaveCount(sendsStanding, {
+        timeout: 8_000,
+      });
+      return;
+    } catch (error) {
+      if (attempt >= 2) throw error;
+      // The engine dropped the keys; put the element back and go again. Every
+      // call is bounded the way `answerInputs` bounds its own reads: the state
+      // being recovered from is the engine having torn the field's editing
+      // session down, so the element may be gone — and this project sets no
+      // action timeout, so an unbounded wait for it would spend the whole
+      // test's budget and report an opaque timeout instead of this failure.
+      await composer.focus({ timeout: 15_000 });
+      await composer.press("ControlOrMeta+a", { timeout: 15_000 });
+      await composer.press("Backspace", { timeout: 15_000 });
+    }
+  }
+}
+
+/**
  * Wait until this client could start a Turn.
  *
  * The composer's field is never disabled — readiness is about the transport,
@@ -1043,39 +1082,6 @@ export async function provisionThroughUi(
  * Send too, so readiness is asked with something in the composer and the draft
  * is put back afterwards.
  */
-/**
- * Type a draft into the composer and prove the *widget* holds it, not only
- * the element.
- *
- * `answerInputs` reads the draft back from the DOM, which is the very value
- * the engine ignores when the keys arrived before it had opened the field's
- * editing session — and the composer is the one field where that shows: the
- * corner button is the microphone while the widget's draft is empty and Send
- * once it is not. So a non-empty draft is typed until Send stands, retyping
- * through the same path when the engine dropped it. A Main run failed three
- * retries in a row with the whole prompt in the element and the microphone
- * still in the corner; this is what tells the two apart.
- */
-export async function answerComposer(page: Page, text: string): Promise<void> {
-  const composer = composerInput(page);
-  for (let attempt = 0; ; attempt += 1) {
-    await answerInputs([[composer, text]]);
-    if (text.length === 0) return;
-    try {
-      await expect(sem(page, "send-button")).toHaveCount(1, {
-        timeout: 8_000,
-      });
-      return;
-    } catch (error) {
-      if (attempt >= 2) throw error;
-      // The engine dropped the keys; put the element back and go again.
-      await composer.focus();
-      await composer.press("ControlOrMeta+a");
-      await composer.press("Backspace");
-    }
-  }
-}
-
 export async function expectReadyToSend(page: Page): Promise<void> {
   const composer = composerInput(page);
   await expect(composer).toBeVisible({ timeout: 60_000 });
@@ -1084,10 +1090,10 @@ export async function expectReadyToSend(page: Page): Promise<void> {
   await expect
     .poll(() => pressDisabled(sem(page, "send-button")), { timeout: 60_000 })
     .toBe(false);
-  // Put back through the same path it was typed through. A `fill` here writes
-  // the element and not the widget, so the question this asked would be left
-  // in the composer for the next spec to find its own message typed onto.
-  await answerInputs([[composer, draft]]);
+  // Put back through the same path it was typed through, corner and all. A
+  // clear that reached the element alone leaves the widget still holding the
+  // question this asked, and the next spec's message goes out typed onto it.
+  await answerComposer(page, draft);
 }
 
 /** The message composer's own input. */
