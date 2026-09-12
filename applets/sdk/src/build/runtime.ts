@@ -10,6 +10,8 @@
 
 import { convertV4MiniflareOptions, Miniflare } from "miniflare";
 
+import { bootedWithin } from "./boot.js";
+
 /** Pinned with the SDK: the runtime an Applet is checked against. */
 export const APPLET_COMPATIBILITY_DATE = "2026-08-27";
 
@@ -110,7 +112,14 @@ export async function startAppletRuntime(
     }),
   );
 
-  const url = await miniflare.ready;
+  let url: URL;
+  try {
+    url = await bootedWithin(miniflare.ready);
+  } catch (error) {
+    // A runtime that never started is let go of rather than waited on.
+    void miniflare.dispose().catch(() => {});
+    throw error;
+  }
   return {
     url,
     fetch: (path, init) =>

@@ -20,6 +20,7 @@ const MANAGED_PATHS = [
   "managed/export-bot-template/SKILL.md",
   "managed/import-bot-template/SKILL.md",
   "managed/learn-from-demonstration/SKILL.md",
+  "managed/plugins/SKILL.md",
 ];
 
 function bot(name: string) {
