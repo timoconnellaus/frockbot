@@ -1,7 +1,19 @@
+diff --git a/node_modules/wrangler/.bun-tag-938fa8e2037c02fb b/.bun-tag-938fa8e2037c02fb
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
 diff --git a/wrangler-dist/ProxyWorker.js b/wrangler-dist/ProxyWorker.js
-index 2631ee69aa0d96a99d35e7e1d0535c50019c45ec..aaafceda4521a0f2f6fc30008a4f4d893909726c 100644
+index 2631ee69aa0d96a99d35e7e1d0535c50019c45ec..d5a9d2191410637e3a6104b92a735b0b3ea3c6d6 100644
 --- a/wrangler-dist/ProxyWorker.js
 +++ b/wrangler-dist/ProxyWorker.js
+@@ -139,7 +139,7 @@ var ProxyWorker = class {
+           headers.set(key, value);
+         }
+       }
+-      void fetch(userWorkerUrl, new Request(request, { headers })).then(async (res) => {
++      void forwardWithRetry(this.env, userWorkerUrl, request, headers, () => this.proxyData?.userWorkerUrl).then(async (res) => {
+         res = new Response(res.body, res);
+         rewriteUrlRelatedHeaders(res.headers, innerUrl, outerUrl);
+         await checkForPreviewTokenError(res, this.env, proxyData);
 @@ -154,6 +154,27 @@ var ProxyWorker = class {
          deferredResponse.resolve(res);
        }).catch((error) => {
@@ -10,7 +22,7 @@ index 2631ee69aa0d96a99d35e7e1d0535c50019c45ec..aaafceda4521a0f2f6fc30008a4f4d89
 +            void sendMessageToProxyController(this.env, {
 +              type: "debug-log",
 +              args: [
-+                "A forwarded request lost its connection; answering 503 rather than stopping the dev server.",
++                "A forwarded request lost its connection on every attempt; answering 503 rather than stopping the dev server.",
 +                request.method,
 +                request.url,
 +                error.message
@@ -30,12 +42,42 @@ index 2631ee69aa0d96a99d35e7e1d0535c50019c45ec..aaafceda4521a0f2f6fc30008a4f4d89
            void sendMessageToProxyController(this.env, {
              type: "error",
              error: {
-@@ -181,6 +202,9 @@ var ProxyWorker = class {
+@@ -181,6 +202,39 @@ var ProxyWorker = class {
      }
    }
  };
 +function isDroppedConnection(error) {
 +  return error instanceof Error && error.message === "Network connection lost.";
++}
++var DROPPED_CONNECTION_RETRY_DELAYS_MS = [25, 100, 250];
++async function forwardWithRetry(env, userWorkerUrl, request, headers, currentUserWorkerUrl) {
++  const body = request.body === null ? null : await request.arrayBuffer();
++  const forward = () => fetch(userWorkerUrl, {
++    method: request.method,
++    headers,
++    body,
++    redirect: request.redirect,
++    cf: request.cf
++  });
++  for (let attempt = 0; ; attempt++) {
++    try {
++      return await forward();
++    } catch (error) {
++      const delay = DROPPED_CONNECTION_RETRY_DELAYS_MS[attempt];
++      if (!isDroppedConnection(error) || delay === void 0 || !isSameUserWorkerOrigin(userWorkerUrl, currentUserWorkerUrl())) {
++        throw error;
++      }
++      void sendMessageToProxyController(env, {
++        type: "debug-log",
++        args: [
++          `A forwarded request lost its connection; retrying on a fresh one (attempt ${attempt + 2}).`,
++          request.method,
++          request.url
++        ]
++      });
++      await new Promise((resolve) => setTimeout(resolve, delay));
++    }
++  }
 +}
  function isRequestFromProxyController(req, env) {
    return req.headers.get("Authorization") === env.PROXY_CONTROLLER_AUTH_SECRET;
