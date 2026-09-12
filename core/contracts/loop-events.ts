@@ -13,6 +13,7 @@
 // is added only to the mounted Bot's hook list and is additionally
 // fenced by botId and Composition generation, so it cannot reach another Bot
 // or an in-flight Turn pinned to another generation.
+import { canonicalJson } from "./canonical-json.js";
 import type {
   PromptAssembly,
   PromptAssemblyContext,
@@ -370,6 +371,13 @@ function sameHookCall(left: ToolCall, right: ToolCall): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
+/** An absent binding is its own value: absent has to stay absent. */
+function modelBindingKey(
+  binding: NormalizedModelRequest["modelBinding"],
+): string {
+  return binding === undefined ? "absent" : canonicalJson(binding);
+}
+
 /** Exact, event-specific decoding for an untrusted isolate replacement. */
 export function decodeBotIsolateHookReplacementV1<
   Event extends BotIsolateHookEventNameV1,
@@ -427,16 +435,19 @@ export function decodeBotIsolateHookReplacementV1<
     }
     case "agent/request": {
       // The request id is the idempotency key a spend record and a credential
-      // lease are held under, and the provider and model are what the Bot's
-      // authority resolved; a plugin shapes the request it was handed, it does
-      // not redirect it. Everything else — system, messages, tools, params —
-      // is the plugin's to replace.
+      // lease are held under, and the provider, model and model binding are
+      // what the Bot's authority resolved — the binding names the Connection
+      // whose credential the lease hangs off. A plugin shapes the request it
+      // was handed, it does not redirect it. Everything else — system,
+      // messages, tools, params — is the plugin's to replace.
       const prior = original as NormalizedModelRequest;
       const request = decodeNormalizedModelRequestV1(input, label);
       if (
         request.requestId !== prior.requestId ||
         request.provider !== prior.provider ||
-        request.model !== prior.model
+        request.model !== prior.model ||
+        modelBindingKey(request.modelBinding) !==
+          modelBindingKey(prior.modelBinding)
       ) {
         throw new Error(`${label} cannot redirect the request`);
       }

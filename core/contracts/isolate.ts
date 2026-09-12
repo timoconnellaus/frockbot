@@ -757,6 +757,19 @@ export function decodeIsolateHookResultV1(
   };
 }
 
+export function decodeIsolateContractVersionV1(
+  value: unknown,
+  label: string,
+): IsolateContractVersion {
+  const contractVersion = ISOLATE_CONTRACT_VERSIONS.find(
+    (candidate) => candidate === value,
+  );
+  if (contractVersion === undefined) {
+    throw new Error(`${label}.contractVersion is unsupported`);
+  }
+  return contractVersion;
+}
+
 export function decodeIsolateHealthV1(
   input: unknown,
   label = "isolate health",
@@ -765,12 +778,10 @@ export function decodeIsolateHealthV1(
   if (value.schemaVersion !== 1) {
     throw new Error(`${label}.schemaVersion is unsupported`);
   }
-  const contractVersion = ISOLATE_CONTRACT_VERSIONS.find(
-    (candidate) => candidate === value.contractVersion,
+  const contractVersion = decodeIsolateContractVersionV1(
+    value.contractVersion,
+    label,
   );
-  if (contractVersion === undefined) {
-    throw new Error(`${label}.contractVersion is unsupported`);
-  }
   exactKeys(
     value,
     [

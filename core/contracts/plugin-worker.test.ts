@@ -157,6 +157,24 @@ describe("plugin worker health", () => {
     ).toThrow(/contractVersion/);
   });
 
+  test("a worker on the previous contract reports health without hooks", () => {
+    const { hooks: _hooks, ...hooklessPlugin } = healthyPlugin;
+    const health = decodePluginWorkerHealthV1({
+      schemaVersion: 1,
+      contractVersion: 2,
+      plugins: [hooklessPlugin],
+    });
+    expect(health.contractVersion).toBe(2);
+    expect(health.plugins[0]!.hooks).toEqual([]);
+    expect(() =>
+      decodePluginWorkerHealthV1({
+        schemaVersion: 1,
+        contractVersion: 2,
+        plugins: [healthyPlugin],
+      }),
+    ).toThrow(/invalid fields/);
+  });
+
   test("a reason is present exactly when a plugin is not ok, and ids are unique", () => {
     expect(() =>
       decodePluginWorkerHealthV1({
@@ -329,6 +347,15 @@ describe("plugin worker triggers", () => {
     expect(
       decodePluginWorkerTriggerInvocationV1({ ...invocation, body: "" }).body,
     ).toBe("");
+  });
+
+  test("refuse two header names that collide once lowercased", () => {
+    expect(() =>
+      decodePluginWorkerTriggerInvocationV1({
+        ...invocation,
+        headers: { "X-Signature": "good", "x-signature": "bad" },
+      }),
+    ).toThrow(/duplicate/);
   });
 
   test("refuse a bad trigger name, too many headers and an out-of-range deadline", () => {

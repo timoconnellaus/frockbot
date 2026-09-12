@@ -12,6 +12,7 @@
 // the health report.
 import { canonicalJson, sha256 } from "./canonical-json.js";
 import {
+  decodeIsolateContractVersionV1,
   decodeIsolateHealthV1,
   decodeIsolateHookInvocationV1,
   decodeIsolateHookResultV1,
@@ -285,13 +286,25 @@ export function decodePluginWorkerHealthV1(
   if (!Array.isArray(value.plugins) || value.plugins.length > MAX_PLUGINS_V1) {
     throw new Error(`${label}.plugins must be a bounded array`);
   }
-  let contractVersion: IsolateContractVersion | undefined;
+  const contractVersion = decodeIsolateContractVersionV1(
+    value.contractVersion,
+    label,
+  );
   const plugins = value.plugins.map((entry, index) => {
     const itemLabel = `${label}.plugins[${index}]`;
     const plugin = record(entry, itemLabel);
     exactKeys(
       plugin,
-      ["pluginId", "ok", "tools", "hooks", "provides", "consumes", "triggers"],
+      [
+        "pluginId",
+        "ok",
+        "tools",
+        // Hooks are a contract-3 capability; an older worker does not name them.
+        ...(contractVersion >= 3 ? ["hooks"] : []),
+        "provides",
+        "consumes",
+        "triggers",
+      ],
       itemLabel,
       ["reason"],
     );
@@ -308,13 +321,12 @@ export function decodePluginWorkerHealthV1(
         schemaVersion: 1,
         ok: plugin.ok,
         packageId: plugin.pluginId,
-        contractVersion: value.contractVersion,
+        contractVersion,
         tools: plugin.tools,
-        hooks: plugin.hooks,
+        ...(contractVersion >= 3 ? { hooks: plugin.hooks } : {}),
       },
       itemLabel,
     );
-    contractVersion = health.contractVersion;
     if (!Array.isArray(plugin.triggers) || plugin.triggers.length > 16) {
       throw new Error(`${itemLabel}.triggers must be a bounded array`);
     }
@@ -355,20 +367,6 @@ export function decodePluginWorkerHealthV1(
     new Set(plugins.map((plugin) => plugin.pluginId)).size !== plugins.length
   ) {
     throw new Error(`${label}.plugins contains duplicate ids`);
-  }
-  if (contractVersion === undefined) {
-    // An empty worker still names the contract it speaks.
-    contractVersion = decodeIsolateHealthV1(
-      {
-        schemaVersion: 1,
-        ok: true,
-        packageId: "none",
-        contractVersion: value.contractVersion,
-        tools: [],
-        hooks: [],
-      },
-      label,
-    ).contractVersion;
   }
   return { schemaVersion: 1, contractVersion, plugins };
 }
@@ -454,13 +452,16 @@ export function decodePluginWorkerTriggerInvocationV1(
   for (const [name, headerValue] of headerEntries) {
     // Lowercased on the way in: the provider's casing is not a signal, and a
     // plugin comparing names should not have to guess.
-    headers[boundedString(name, `${label}.headers`, 256).toLowerCase()] =
-      boundedString(
-        headerValue,
-        `${label}.headers.${name}`,
-        MAX_TRIGGER_HEADER_BYTES_V1,
-        true,
-      );
+    const lowered = boundedString(name, `${label}.headers`, 256).toLowerCase();
+    if (Object.hasOwn(headers, lowered)) {
+      throw new Error(`${label}.headers contains duplicate names`);
+    }
+    headers[lowered] = boundedString(
+      headerValue,
+      `${label}.headers.${name}`,
+      MAX_TRIGGER_HEADER_BYTES_V1,
+      true,
+    );
   }
   const deadlineMs = value.deadlineMs;
   if (

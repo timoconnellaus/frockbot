@@ -136,14 +136,6 @@ export function servedPluginContractVersionsV1(): IsolateContractVersion[] {
     : [ISOLATE_CONTRACT_VERSION];
 }
 
-export function isServedPluginContractVersionV1(
-  version: number,
-): version is IsolateContractVersion {
-  return servedPluginContractVersionsV1().some(
-    (candidate) => candidate === version,
-  );
-}
-
 function record(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error(`${label} must be an object`);

@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 import { ISOLATE_CONTRACT_VERSION } from "./isolate.js";
 import {
   decodePluginDescriptorV1,
-  isServedPluginContractVersionV1,
   PLUGIN_SLOTS_V1,
   pluginNetworkAdmitsHostV1,
   servedPluginContractVersionsV1,
@@ -136,10 +135,6 @@ describe("a plugin's hooks and contract", () => {
       ISOLATE_CONTRACT_VERSION - 1,
       ISOLATE_CONTRACT_VERSION,
     ]);
-    expect(isServedPluginContractVersionV1(ISOLATE_CONTRACT_VERSION)).toBe(
-      true,
-    );
-    expect(isServedPluginContractVersionV1(1)).toBe(false);
   });
 });
 
