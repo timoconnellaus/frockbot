@@ -250,7 +250,9 @@ otherwise; the bridge is spoken, not answered, so a turn that ends in the
 bridge alone still settles as `no_output`. `VOICE_ASSISTANT_MODEL` pins a
 gateway model for voice turns (`workers-ai/@cf/...` or a provider the gateway
 holds a key for) instead of the platform's Auto route; the `turn` trace line
-says which was used, and `model-first-text` says how long it took to start.
+says which was used, and `model-first-text` says how long the model took to
+say its first word — the bridge is timed separately on `turn-bridge`, so a
+tool-first turn never reads as a fast first token.
 
 ### A reply that fails
 
@@ -351,7 +353,9 @@ SDK started listening with no call record, so nothing was booked), `utterance`
 `turn-dropped` (a transcript arrived with no identity or no call record and was
 never given to the model — the reason says which), `model-first-text` (the
 model's first word, with `ms` since the turn began: everything before it is
-what the person waited through in silence), `turn-settled` (the outcome, the
+what the person waited through in silence), `turn-bridge` (the turn said
+`"One moment."` before a tool step, with `ms` since the turn began — filler,
+not the model's own words), `turn-settled` (the outcome, the
 delegation count and the answer's length, or a failure classification — never
 a provider's error sentence — and `ms`, the turn's whole model time),
 `speech-suppressed` (the speech allowance is used up, so a sentence of the

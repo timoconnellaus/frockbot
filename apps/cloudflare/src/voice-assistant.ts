@@ -1005,7 +1005,14 @@ export class VoiceAssistant extends VoiceAgentBase<
               : { failure: result.outcome };
           },
         )) {
-          if (firstText) {
+          if (chunk.kind === "bridge") {
+            // The filler, not the model: timed on its own line so the
+            // model's own first word stays one measurement.
+            self.trace(connection, "turn-bridge", {
+              turn: turnId,
+              ms: Date.now() - startedAt,
+            });
+          } else if (firstText) {
             // The model's first word: everything before it is what the
             // person waited through in silence.
             firstText = false;
@@ -1014,7 +1021,7 @@ export class VoiceAssistant extends VoiceAgentBase<
               ms: Date.now() - startedAt,
             });
           }
-          yield chunk;
+          yield chunk.text;
         }
       } catch (error) {
         settlement = {

@@ -53,6 +53,16 @@ export const VOICE_ANSWER_MAX_CHARS_V1 = 1_200;
  */
 export const VOICE_TURN_BRIDGE_V1 = "One moment.";
 
+/**
+ * One thing to say. `bridge` is the turn's own filler, `text` is the model's
+ * own words: a caller that times the model must not count the bridge as the
+ * model having spoken.
+ */
+export interface VoiceTurnChunkV1 {
+  kind: "bridge" | "text";
+  text: string;
+}
+
 function clip(text: string, max: number): string {
   const line = text.replace(/\s+/g, " ").trim();
   return line.length <= max ? line : `${line.slice(0, max - 1)}…`;
@@ -279,7 +289,7 @@ export async function* runVoiceTurnV1(
     signal: AbortSignal;
   },
   onResult: (result: VoiceTurnResultV1) => void,
-): AsyncGenerator<string> {
+): AsyncGenerator<VoiceTurnChunkV1> {
   const messages: VoiceModelMessageV1[] = [
     { role: "system", content: input.system },
     ...input.history
@@ -319,7 +329,7 @@ export async function* runVoiceTurnV1(
         text += event.text;
         if (spoken.length + text.length <= VOICE_ANSWER_MAX_CHARS_V1) {
           spoken += event.text;
-          yield event.text;
+          yield { kind: "text", text: event.text };
         }
       } else if (event.type === "tool-call") {
         calls.push(event.call);
@@ -335,7 +345,7 @@ export async function* runVoiceTurnV1(
     }
     if (!spoken.trim() && !bridged) {
       bridged = true;
-      yield `${VOICE_TURN_BRIDGE_V1} `;
+      yield { kind: "bridge", text: `${VOICE_TURN_BRIDGE_V1} ` };
     }
     messages.push({
       role: "assistant",
