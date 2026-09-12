@@ -412,12 +412,18 @@ alone.
 
 ### Voice controls and motion
 
-Dictation expands a recording lane inside the composer, with a larger waveform
-and explicit starting, listening and finishing states. Stop commits to the
-editable draft; the finishing control is disabled until transcription ends.
-The realtime footer opens and closes with coordinated size, slide and fade
-transitions. Closing begins microphone and playback teardown immediately and
-keeps the outgoing visual mounted only through its exit. Bottom system insets
+Dictation replaces the message field with a text-free dock spanning the chat
+width and meeting the bottom edge. Its waveform and 48-point Stop control share
+one row with 24-point internal padding; only the top corners are rounded.
+Starting, listening and finishing are announced through live semantics and
+control tooltips. Real errors remain visible. Stop commits to the editable
+draft without sending; the finishing control is disabled until transcription
+ends. The realtime footer spans the whole shell with the same inset controls,
+reserved waveform space and background covering the bottom system inset.
+Both docks open and close with coordinated size, slide and fade transitions.
+The complete controls paint throughout the transition without a shrinking clip.
+Closing begins microphone and playback teardown immediately and keeps the
+outgoing visual mounted only through its exit. Bottom system insets
 transfer back to the conversation without a final layout jump.
 
 Both meters use the same continuous ribbons, driven only by audio levels.

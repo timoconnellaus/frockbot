@@ -55,7 +55,7 @@ class _VoiceRevealState extends State<VoiceReveal>
     reverseCurve: Curves.easeInOutCubic,
   );
   late final Animation<Offset> _slide = Tween(
-    begin: const Offset(0, 0.18),
+    begin: const Offset(0, 0.04),
     end: Offset.zero,
   ).animate(_curve);
 
@@ -96,17 +96,17 @@ class _VoiceRevealState extends State<VoiceReveal>
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              ClipRect(
-                child: SizeTransition(
-                  sizeFactor: _curve,
-                  alignment: Alignment.bottomCenter,
-                  child: FadeTransition(
-                    opacity: _curve,
-                    child: SlideTransition(position: _slide, child: child),
-                  ),
+              SizedBox(height: widget.bottomInset * (1 - _curve.value)),
+              // Paint the complete dock above the space being opened. Clipping
+              // a shrinking row would slice through its controls on every exit.
+              Align(
+                heightFactor: _curve.value,
+                alignment: Alignment.bottomCenter,
+                child: FadeTransition(
+                  opacity: _curve,
+                  child: SlideTransition(position: _slide, child: child),
                 ),
               ),
-              SizedBox(height: widget.bottomInset * (1 - _curve.value)),
             ],
           ),
         ),

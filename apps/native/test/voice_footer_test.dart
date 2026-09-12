@@ -17,6 +17,7 @@ import 'package:frockbot_native/voice/socket.dart';
 import 'package:frockbot_native/theme/frock_theme.dart';
 
 import 'voice_fakes.dart';
+import 'voice_shell_harness.dart';
 
 AssistantSessionController session(FakeVoiceSocket socket) =>
     AssistantSessionController(
@@ -50,8 +51,70 @@ Future<void> mount(
 }
 
 void main() {
+  for (final width in [390.0, 1280.0]) {
+    for (final brightness in Brightness.values) {
+      testWidgets('realtime dock below the actual shell: $width $brightness',
+          (tester) async {
+        final harness = VoiceShellHarness();
+        await harness.mount(tester, width: width, brightness: brightness);
+        final safeBottom = width == 390 ? 34.0 : 0.0;
+        final composer = find.byKey(const ValueKey('composer'));
+        final restingBottom = tester.getBottomLeft(composer).dy;
+        await harness.call.start();
+        harness.showCall();
+        await tester.pump();
+        final footer = find.byType(VoiceFooter);
+        final end = find.descendant(
+            of: footer, matching: find.widgetWithIcon(IconButton, Icons.close));
+        void checkFrame() {
+          final rect = tester.getRect(footer);
+          expect(rect.left, 0);
+          expect(rect.width, width);
+          expect(rect.bottom, greaterThanOrEqualTo(800));
+          final button = tester.getRect(end);
+          expect(button.right, lessThanOrEqualTo(width - 16));
+          expect(button.bottom, lessThanOrEqualTo(800 - safeBottom - 16));
+          expectUnclippedControl(tester, end);
+          final stage = tester.getRect(find.byKey(voiceFooterAnimationKey));
+          final mute = tester.getRect(find.byTooltip('Mute microphone'));
+          expect(stage.right + 16, lessThanOrEqualTo(mute.left));
+          expect(find.descendant(of: footer, matching: find.byType(Text)),
+              findsNothing);
+          expect(tester.takeException(), isNull);
+        }
+        for (var frame = 0; frame < 24; frame++) {
+          await tester.pump(const Duration(milliseconds: 16));
+          checkFrame();
+        }
+        expect(tester.getRect(footer).bottom, 800);
+        expect(tester.getRect(footer).height, 96 + safeBottom);
+        final dockComposerBottom = tester.getBottomLeft(composer).dy;
+        expect(dockComposerBottom, restingBottom - 96);
+        await tester.tap(find.byTooltip('End voice session'));
+        await tester.runAsync(() => settle());
+        await tester.pump();
+        for (var frame = 0; frame < 14; frame++) {
+          await tester.pump(const Duration(milliseconds: 16));
+          checkFrame();
+        }
+        await tester.pump(const Duration(milliseconds: 15));
+        final almostClosed = tester.getBottomLeft(composer).dy;
+        await tester.pump(const Duration(milliseconds: 1));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 16));
+        expect(footer, findsNothing);
+        expect(tester.getBottomLeft(composer).dy, restingBottom);
+        expect(restingBottom, closeTo(almostClosed, 0.1));
+        expect(harness.callSocket.closed, isTrue);
+        expect(harness.player.closed, isTrue);
+        expect(harness.shell.voiceSession, isNull);
+        await harness.dispose(tester);
+      });
+    }
+  }
+
   testWidgets(
-    'is 84 points tall; on a phone the stage fills what is beside the controls',
+    'is 96 points tall; on a phone the stage fills what is beside the controls',
     (tester) async {
       final socket = FakeVoiceSocket();
       final controller = session(socket);
@@ -100,7 +163,7 @@ void main() {
     addTearDown(controller.dispose);
     // Narrower than the inset plus the controls: there is no lane left for
     // the meter, and the footer still lays out.
-    await mount(tester, controller, width: 120);
+    await mount(tester, controller, width: 160);
 
     expect(tester.takeException(), isNull);
     expect(find.byKey(voiceFooterAnimationKey), findsNothing);

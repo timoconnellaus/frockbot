@@ -309,12 +309,16 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       footerOpen = false;
       footerExiting = true;
     });
-    await session.end(reason: reason);
-    microphone.releaseAssistant();
-    if (!mounted) return;
-    session.dispose();
-    if (identical(voiceSession, session)) {
-      setState(() => voiceSession = null);
+    try {
+      await session.end(reason: reason);
+    } finally {
+      microphone.releaseAssistant();
+      if (mounted) {
+        session.dispose();
+        if (identical(voiceSession, session)) {
+          setState(() => voiceSession = null);
+        }
+      }
     }
   }
 
@@ -1282,7 +1286,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     final bot = selected;
     final session = voiceSession;
     final rightPanel = _rightPanel();
-    return ShellSlotScope(
+    final shell = ShellSlotScope(
       slots: slots,
       // The footer is drawn below the whole three-tier layout, so it survives
       // a Bot switch, a page and a drawer, and the app above it stays usable.
@@ -1480,6 +1484,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           ),
         ],
       ),
+    );
+    return ColoredBox(
+      color: Theme.of(context).colorScheme.surface,
+      child: shell,
     );
   }
 

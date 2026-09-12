@@ -11,10 +11,10 @@ import 'assistant.dart';
 import 'motion.dart';
 import 'waveform.dart';
 
-const double voiceFooterHeight = 84;
+const double voiceFooterHeight = 96;
 const double voiceFooterStageMaxWidth = 420;
-const double voiceFooterStageInset = 20;
-const double voiceFooterControlsWidth = 128;
+const double voiceFooterStageInset = 24;
+const double voiceFooterControlsWidth = 144;
 const Key voiceFooterAnimationKey = ValueKey('voice-footer-animation');
 
 class VoiceFooter extends StatefulWidget {
@@ -82,7 +82,7 @@ class _VoiceFooterState extends State<VoiceFooter> {
                   child: failure == null
                       ? _stage()
                       : Padding(
-                          padding: const EdgeInsets.fromLTRB(24, 8, 80, 8),
+                          padding: const EdgeInsets.fromLTRB(24, 16, 96, 16),
                           child: Center(
                             child: Semantics(
                               liveRegion: true,
@@ -130,7 +130,7 @@ class _VoiceFooterState extends State<VoiceFooter> {
                           icon: Icons.close,
                         ),
                       ),
-                      const SizedBox(width: 16),
+                      const SizedBox(width: 24),
                     ],
                   ),
                 ),

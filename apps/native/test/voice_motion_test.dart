@@ -1,9 +1,11 @@
 import 'dart:async';
+import 'dart:ui' show SemanticsFlag;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/shell/composer.dart';
+import 'package:frockbot_native/shell/semantics.dart';
 import 'package:frockbot_native/shell/sidebar.dart';
 import 'package:frockbot_native/theme/frock_theme.dart';
 import 'package:frockbot_native/voice/assistant.dart';
@@ -13,6 +15,7 @@ import 'package:frockbot_native/voice/socket.dart';
 import 'package:frockbot_native/voice/waveform.dart';
 
 import 'voice_fakes.dart';
+import 'voice_shell_harness.dart';
 
 /// A socket whose close does not finish until the test says so: the window
 /// where the footer has gone but the call is still tearing down.
@@ -48,7 +51,151 @@ class ClosedSinkSocket extends FakeVoiceSocket {
   void sendText(String text) => throw StateError('sink');
 }
 
+/// The worst device an end can meet: nothing it is asked to do succeeds.
+class HostileSocket extends FakeVoiceSocket {
+  @override
+  void sendText(String text) => throw StateError('sink');
+
+  @override
+  Future<void> close({
+    int code = voiceCloseNormalV1,
+    String reason = '',
+  }) async {
+    await super.close(code: code, reason: reason);
+    throw StateError('socket');
+  }
+}
+
+/// A recorder that fails to stop and remembers it was asked.
+class HostileCapture extends FakeVoiceCapture {
+  int stopAttempts = 0;
+
+  @override
+  Future<void> stop() {
+    stopAttempts++;
+    return super.stop();
+  }
+}
+
+class FailingClosePlayer extends FakeVoicePlayer {
+  @override
+  Future<void> close() async {
+    await super.close();
+    throw StateError('speaker');
+  }
+}
+
 void main() {
+  for (final width in [390.0, 1280.0]) {
+    for (final brightness in Brightness.values) {
+      testWidgets('dictation dock in the real shell: $width $brightness',
+          (tester) async {
+        final semantics = tester.ensureSemantics();
+        final harness = VoiceShellHarness();
+        await harness.mount(tester, width: width, brightness: brightness);
+        final safeBottom = width == 390 ? 34.0 : 0.0;
+        final conversation = find.byWidgetPredicate((widget) =>
+            widget is Semantics &&
+            widget.properties.identifier == ShellIds.conversation);
+        final chat = tester.getRect(conversation);
+        final dock = find.byKey(const ValueKey('dictation-dock'));
+        final stop = find.byKey(const ValueKey('dictation-stop'));
+        void checkFrame() {
+          final rect = tester.getRect(dock);
+          expect(rect.left, chat.left);
+          expect(rect.right, chat.right);
+          expect(rect.bottom, greaterThanOrEqualTo(800));
+          final button = tester.getRect(stop);
+          expect(button.right, lessThanOrEqualTo(chat.right - 16));
+          expect(button.bottom, lessThanOrEqualTo(800 - safeBottom - 16));
+          expect(button.top - rect.top, greaterThanOrEqualTo(16));
+          expectUnclippedControl(tester, stop);
+          expect(tester.takeException(), isNull);
+        }
+        harness.dictationCapture.permission = Completer<void>();
+        unawaited(harness.dictation.start('voice-bot'));
+        await tester.pump();
+        for (var frame = 0; frame < 24; frame++) {
+          await tester.pump(const Duration(milliseconds: 16));
+          checkFrame();
+          expect(find.byType(TextField), findsNothing);
+          expect(find.descendant(of: dock, matching: find.byType(Text)),
+              findsNothing);
+        }
+        final starting = tester.getSemantics(
+            find.bySemanticsLabel('Starting dictation'));
+        expect(starting.hasFlag(SemanticsFlag.isLiveRegion), isTrue);
+        harness.dictationCapture.permission!.complete();
+        await tester.pump();
+        harness.dictationSocket.deliver(
+            '{"schemaVersion":1,"type":"ready"}');
+        await tester.pump();
+        expect(find.bySemanticsLabel('Listening for dictation'), findsOneWidget);
+        harness.dictation.level.value = 0.6;
+        await tester.pump(const Duration(milliseconds: 100));
+        await tester.tap(stop);
+        await tester.pump();
+        expect(harness.dictation.state, DictationState.stopping);
+        expect(tester.widget<IconButton>(stop).onPressed, isNull);
+        expect(find.bySemanticsLabel('Finishing dictation'), findsWidgets);
+        harness.dictationSocket.deliver(
+            '{"schemaVersion":1,"type":"segment","text":"Keep this editable"}');
+        harness.dictationSocket.deliver(
+            '{"schemaVersion":1,"type":"final"}');
+        await tester.runAsync(() => settle());
+        await tester.pump();
+        for (var frame = 0; frame < 14; frame++) {
+          await tester.pump(const Duration(milliseconds: 16));
+          checkFrame();
+        }
+        final before = tester.getBottomLeft(find.byType(Composer)).dy;
+        await tester.pump(const Duration(milliseconds: 32));
+        expect(tester.getBottomLeft(find.byType(Composer)).dy, before);
+        expect(dock, findsNothing);
+        final field = find.byType(TextField);
+        expect(tester.widget<TextField>(field).controller!.text,
+            'Keep this editable');
+        await tester.enterText(field, 'Keep this editable, with a correction');
+        await tester.pump();
+        expect(harness.sessions.open('voice-user', 'voice-bot').controller.draft,
+            'Keep this editable, with a correction');
+        expect(harness.sessions.open('voice-user', 'voice-bot').controller.pending,
+            isEmpty);
+
+        // Stop during entry, then enable reduced motion during the exit.
+        await harness.dictation.start('voice-bot');
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 64));
+        checkFrame();
+        unawaited(harness.dictation.stop());
+        harness.dictationSocket.deliver(
+            '{"schemaVersion":1,"type":"final"}');
+        await tester.runAsync(() => settle());
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 32));
+        checkFrame();
+        // Reduced motion changed during exit completes in this one frame.
+        harness.reducedMotion.value = true;
+        await tester.pump();
+        expect(dock, findsNothing);
+        await harness.dictation.start('voice-bot');
+        await tester.pump();
+        checkFrame();
+        expect(tester.getRect(dock).height, 96 + safeBottom);
+        await tester.pump(const Duration(milliseconds: 300));
+        final restingTickers = tester.binding.transientCallbackCount;
+        harness.dictation.level.value = 0.8;
+        await tester.pump();
+        expect(
+          tester.binding.transientCallbackCount,
+          lessThanOrEqualTo(restingTickers),
+        );
+        await harness.dispose(tester);
+        semantics.dispose();
+      });
+    }
+  }
+
   test(
     'speech attacks smoothly and releases more gently at any refresh rate',
     () {
@@ -363,10 +510,12 @@ void main() {
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 120));
         expect(
-          tester.getSize(find.byType(Composer)).height,
-          greaterThan(initial),
+          tester.getSize(find.byKey(const ValueKey('dictation-stop'))),
+          const Size(48, 48),
         );
-        expect(find.text('Starting…'), findsOneWidget);
+        expect(find.bySemanticsLabel('Starting dictation'), findsOneWidget);
+        expect(find.byType(TextField), findsNothing);
+        expect(find.byType(Text), findsNothing);
         // Stop is usable even before microphone permission completes.
         await tester.tap(find.byTooltip('Stop dictation'));
         await tester.pump(const Duration(milliseconds: 200));
@@ -484,6 +633,101 @@ void main() {
       await settle();
     },
     timeout: const Timeout(Duration(seconds: 10)),
+  );
+
+  test(
+    'an end whose every device step fails still frees the control and the '
+    'microphone',
+    () async {
+      final capture = HostileCapture()..stopFailure = StateError('recorder');
+      final socket = HostileSocket();
+      final player = FailingClosePlayer();
+      final controller = AssistantSessionController(
+        openSocket: () async => socket,
+        capture: capture,
+        player: player,
+      );
+      await controller.start();
+      await settle();
+      expect(capture.starts, 1);
+
+      await controller.end(reason: 'end-button');
+
+      expect(controller.phase, VoiceSessionPhase.ended);
+      expect(controller.active, isFalse);
+      expect(
+        voiceControlStateV1(
+          footerOpen: false,
+          sessionActive: controller.active,
+        ),
+        VoiceControlState.idle,
+      );
+      expect(capture.stopAttempts, greaterThan(0));
+      expect(player.closed, isTrue);
+      expect(socket.closed, isTrue);
+      expect(socket.closeReason, 'end-button');
+      controller.dispose();
+      await settle();
+    },
+    timeout: const Timeout(Duration(seconds: 10)),
+  );
+
+  testWidgets(
+    'a draft that arrived since the last frame still sends on Cmd+Enter',
+    (tester) async {
+      final editor = TextEditingController();
+      final focus = FocusNode();
+      addTearDown(editor.dispose);
+      addTearDown(focus.dispose);
+      var sends = 0;
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: FrockTheme.theme(Brightness.dark),
+          home: Scaffold(
+            body: Align(
+              alignment: Alignment.bottomCenter,
+              child: Composer(
+                editor: editor,
+                focus: focus,
+                ready: true,
+                stoppable: false,
+                stopping: false,
+                skills: null,
+                onSend: () async => sends++,
+                onStop: () async {},
+                onChanged: (_) {},
+                dictationState: DictationState.idle,
+              ),
+            ),
+          ),
+        ),
+      );
+      focus.requestFocus();
+      await tester.pump();
+
+      // A paste or a last keystroke lands in the editor; the shortcut fires
+      // inside the same vsync, before any rebuild has seen the new draft.
+      editor.text = 'Ship it';
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+      expect(sends, 1);
+
+      // An emptied draft is still refused by the same one guard.
+      editor.text = '   ';
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      expect(sends, 1);
+
+      // A visible Send button uses the same live guard as the shortcuts.
+      editor.text = 'Ready to send';
+      await tester.pump();
+      editor.clear();
+      await tester.tap(find.byTooltip('Send'));
+      expect(sends, 1);
+      expect(tester.takeException(), isNull);
+    },
   );
 
   testWidgets(

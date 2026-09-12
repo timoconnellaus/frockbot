@@ -178,6 +178,12 @@ class _ComposerState extends State<Composer> {
     widget.focus.addListener(_changed);
   }
 
+  @override
+  void didUpdateWidget(Composer oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.dictating && !oldWidget.dictating) widget.focus.unfocus();
+  }
+
   void _changed() {
     if (mounted) setState(() {});
   }
@@ -304,7 +310,7 @@ class _ComposerState extends State<Composer> {
             IconButton.filled(
               key: const ValueKey('send'),
               tooltip: 'Send',
-              onPressed: canSend ? widget.onSend : null,
+              onPressed: canSend ? _send : null,
               style: IconButton.styleFrom(
                 minimumSize: const Size(48, 48),
                 shape: RoundedRectangleBorder(
@@ -347,7 +353,7 @@ class _ComposerState extends State<Composer> {
     );
     final dictatable = widget.onDictate != null && text.trim().isEmpty;
     final skills = widget.skills;
-    return Column(
+    final draft = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -405,15 +411,10 @@ class _ComposerState extends State<Composer> {
             duration: FrockTheme.motion(context, voiceEnterDuration),
             curve: Curves.easeOutCubic,
             decoration: BoxDecoration(
-              color: Color.alphaBlend(
-                theme.colorScheme.primary.withValues(
-                  alpha: widget.dictating ? 0.07 : 0,
-                ),
-                theme.colorScheme.surfaceContainerHighest,
-              ),
+              color: theme.colorScheme.surfaceContainerHighest,
               borderRadius: BorderRadius.circular(19),
               border: Border.all(
-                color: widget.dictating || widget.focus.hasFocus
+                color: widget.focus.hasFocus
                     ? Color.alphaBlend(
                         theme.colorScheme.primary.withValues(alpha: 0.4),
                         theme.colorScheme.outlineVariant,
@@ -513,71 +514,16 @@ class _ComposerState extends State<Composer> {
                             child: child,
                           ),
                         ),
-                        child: _actionButton(
-                          context,
-                          dictatable: dictatable,
-                          canSend: canSend,
-                        ),
+                        child: widget.dictating
+                            ? const SizedBox(width: 48, height: 48)
+                            : _actionButton(
+                                context,
+                                dictatable: dictatable,
+                                canSend: canSend,
+                              ),
                       ),
                     ),
                   ],
-                ),
-                VoiceReveal(
-                  visible: widget.dictating,
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(18, 0, 18, 10),
-                    child: Row(
-                      children: [
-                        Flexible(
-                          child: Semantics(
-                            liveRegion: true,
-                            child: AnimatedSwitcher(
-                              duration: FrockTheme.motion(
-                                context,
-                                FrockTheme.fast,
-                              ),
-                              layoutBuilder: _quietOutgoing,
-                              child: Text(
-                                switch (widget.dictationState) {
-                                  DictationState.starting => 'Starting…',
-                                  DictationState.stopping => 'Finishing…',
-                                  _ => 'Listening',
-                                },
-                                key: ValueKey(widget.dictationState),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: theme.textTheme.labelMedium?.copyWith(
-                                  color: theme.brightness == Brightness.dark
-                                      ? FrockTheme.accentSoft
-                                      : theme.colorScheme.primary,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 20),
-                        Expanded(
-                          flex: 2,
-                          child: SizedBox(
-                            height: 44,
-                            child: widget.dictationLevel != null
-                                ? identified(
-                                    VoiceIds.composerDictationLevel,
-                                    VoiceWaveform(
-                                      source: widget.dictationLevel!,
-                                      microphone: () =>
-                                          widget.dictationLevel!.value,
-                                      enabled:
-                                          widget.dictationState ==
-                                          DictationState.capturing,
-                                    ),
-                                  )
-                                : const SizedBox.shrink(),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
                 ),
               ],
             ),
@@ -593,6 +539,70 @@ class _ComposerState extends State<Composer> {
               ),
             ),
           ),
+      ],
+    );
+    return Stack(
+      alignment: Alignment.bottomCenter,
+      clipBehavior: Clip.none,
+      children: [
+        // Reserve the resting composer height while its editor is offstage.
+        // The dock can grow from it without collapsing the conversation first.
+        SizedBox(height: oneLine + 14 + MediaQuery.paddingOf(context).bottom),
+        Visibility(
+          visible: !widget.dictating,
+          maintainState: true,
+          child: SafeArea(top: false, child: draft),
+        ),
+        VoiceReveal(
+          visible: widget.dictating,
+          child: Material(
+            key: const ValueKey('dictation-dock'),
+            color: Color.alphaBlend(
+              theme.colorScheme.primary.withValues(alpha: 0.07),
+              theme.colorScheme.surfaceContainerHighest,
+            ),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+            child: SafeArea(
+              top: false,
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Semantics(
+                  container: true,
+                  liveRegion: true,
+                  label: switch (widget.dictationState) {
+                    DictationState.starting => 'Starting dictation',
+                    DictationState.stopping => 'Finishing dictation',
+                    _ => 'Listening for dictation',
+                  },
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: SizedBox(
+                          height: 48,
+                          child: widget.dictationLevel == null
+                              ? const SizedBox.shrink()
+                              : identified(
+                                  VoiceIds.composerDictationLevel,
+                                  VoiceWaveform(
+                                    source: widget.dictationLevel!,
+                                    microphone: () =>
+                                        widget.dictationLevel!.value,
+                                    enabled:
+                                        widget.dictationState ==
+                                        DictationState.capturing,
+                                  ),
+                                ),
+                        ),
+                      ),
+                      const SizedBox(width: 24),
+                      _actionButton(context, dictatable: false, canSend: false),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
       ],
     );
   }
