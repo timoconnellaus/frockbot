@@ -7,8 +7,8 @@
 /// seconds of quiet and wake it on the next onset.
 ///
 /// An awake upstream gets a frame every 40 ms — speech, pauses and the
-/// silence after a sentence alike. OpenAI's server VAD decides where a turn
-/// ends and it needs that silence — 700 ms of it, `silence_duration_ms` — to
+/// silence after a sentence alike. The server's transcriber decides where a
+/// turn ends and it needs that silence — about half a second of it — to
 /// decide it. While the reply is playing the frames sent are silent ones:
 /// the upstream's own detector would otherwise take the speaker's echo for
 /// the person and cut the reply off. The energy gate here is only ever asked
@@ -298,9 +298,9 @@ class AssistantSessionController extends ChangeNotifier {
       return;
     }
     // Awake means a frame every 40 ms, speech and silence alike, through
-    // pauses and while the assistant is thinking. OpenAI's server VAD decides
-    // where a turn ends and needs the silence after the words to decide it —
-    // 700 ms, `silence_duration_ms`; a client that cut the audio off a second
+    // pauses and while the assistant is thinking. The server's transcriber
+    // decides where a turn ends and needs the silence after the words to
+    // decide it — about half a second; a client that cut the audio off right
     // after the last syllable would leave the transcript hanging until the
     // upstream timed out. While the reply plays the frame is a silent one, so
     // that detector never hears the speaker; the real audio is held for a

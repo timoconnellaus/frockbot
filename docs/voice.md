@@ -3,11 +3,11 @@
 Two voice features, two transports, one credential rule: provider keys never
 leave the Worker.
 
-| Feature                                 | Route                                | Server                                                                    | Providers                                                                                                                   |
-| --------------------------------------- | ------------------------------------ | ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| Composer dictation (one Bot's composer) | `GET /api/voice/dictation` WebSocket | Worker-level relay, `apps/cloudflare/src/voice-dictation.ts`              | OpenAI Realtime transcription, model `gpt-live-transcribe`                                                                  |
-| Continuous voice session (all Bots)     | `GET /api/voice/assistant` WebSocket | `VoiceAssistant` Durable Object, `apps/cloudflare/src/voice-assistant.ts` | OpenAI Realtime transcription, model `gpt-transcribe` with server VAD → Frock AI gateway (chat) → ElevenLabs Flash v2.5 TTS |
-| Capability probe                        | `GET /api/voice/capabilities`        | Gateway                                                                   | —                                                                                                                           |
+| Feature                                 | Route                                | Server                                                                    | Providers                                                                                                            |
+| --------------------------------------- | ------------------------------------ | ------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| Composer dictation (one Bot's composer) | `GET /api/voice/dictation` WebSocket | Worker-level relay, `apps/cloudflare/src/voice-dictation.ts`              | OpenAI Realtime transcription, model `gpt-live-transcribe`                                                           |
+| Continuous voice session (all Bots)     | `GET /api/voice/assistant` WebSocket | `VoiceAssistant` Durable Object, `apps/cloudflare/src/voice-assistant.ts` | ElevenLabs Scribe v2 Realtime (streaming partials, VAD commit) → Frock AI gateway (chat) → ElevenLabs Flash v2.5 TTS |
+| Capability probe                        | `GET /api/voice/capabilities`        | Gateway                                                                   | —                                                                                                                    |
 
 Both WebSocket routes are authenticated exactly like `/api/bots/:id/state-channel`:
 the browser's better-auth cookie, or the native app's `Authorization: Bearer
@@ -193,12 +193,30 @@ them in order and measures amplitude from what it is playing.
 speaker now. Transcript frames (`transcript`, `transcript_interim`,
 `transcript_start/delta/end`) arrive too; the footer shows none of them.
 
+### Ears
+
+The session listens through ElevenLabs Scribe v2 Realtime: the adapter is
+`ElevenLabsSTT` from `@cloudflare/voice-elevenlabs`, and
+`app/voice/scribe-transcriber.ts` holds the assistant's settings for it —
+`pcm_16000` as both clients send it (nothing is resampled),
+`commit_strategy=vad` with `vad_silence_threshold_secs` 0.5, provider logging
+off. Partial transcripts stream while the person is still speaking (the SDK
+forwards them as `transcript_interim`, which the footer ignores), the first
+partial of a segment is the speech-start the SDK's barge-in hangs on, and the
+committed segment is the turn — so the model can be reading the words before
+the sentence is over, and the turn begins about half a second after it is.
+`VOICE_ASSISTANT_STT=openai` switches back to OpenAI `gpt-transcribe` with
+server VAD (700 ms of silence, and no text at all before the commit), which
+then needs `OPENAI_API_KEY`; the capability probe reports the assistant only
+when the chosen provider's key and the ElevenLabs key are both present.
+
 ### Barge-in
 
 Two detectors, both stop playback:
 
-- Server: the upstream's `input_audio_buffer.speech_started` — its own VAD
-  hearing someone — aborts the reply and sends `playback_interrupt`.
+- Server: the transcriber's speech-start — Scribe's first partial of a new
+  segment; OpenAI's `input_audio_buffer.speech_started` when listening
+  through it — aborts the reply and sends `playback_interrupt`.
 - Client: the local energy gate sees a sustained onset (stricter than the
   wake onset) while the reply is playing (`status` is `speaking`, or the
   speaker still has audio after the server moved on) → stop the speaker
@@ -240,9 +258,10 @@ abort the reply in flight); it is read out once that window has passed.
 
 The SDK forwards every audio frame to the transcriber, and the upstream bills
 every second it hears, silence included. It also needs the silence _after_
-speech to decide a turn has ended (700 ms of it, `silence_duration_ms`), so a
-client must never cut audio a few hundred milliseconds after a phrase. The
-policy:
+speech to decide a turn has ended (half a second of it,
+`vad_silence_threshold_secs`; 700 ms, `silence_duration_ms`, through OpenAI),
+so a client must never cut audio a few hundred milliseconds after a phrase.
+The policy:
 
 - The client runs an energy gate on every frame: an adaptive noise floor, an
   onset that needs several consecutive loud frames, and a 500 ms pre-roll
@@ -526,9 +545,10 @@ endpoint for `server_vad` or `semantic_vad` instead answers
 and a 73-second capture that is never committed produces no transcript at all.
 Still unverified: a real microphone, a browser, and the Flutter client.
 
-The continuous session listens through the same endpoint but the other way
-round: `gpt-transcribe` with server VAD, which finds turn boundaries itself
-and says nothing until it has. Its session frame, verified the same day:
+Until 2026-09-12 the continuous session listened through the same endpoint
+the other way round, and `VOICE_ASSISTANT_STT=openai` still does:
+`gpt-transcribe` with server VAD, which finds turn boundaries itself and says
+nothing until it has. Its session frame, verified the same day:
 
 ```json
 {

@@ -222,6 +222,7 @@
     "./voice/shared": "./voice/shared.ts",
     "./voice/sleeping-transcriber": "./voice/sleeping-transcriber.ts",
     "./voice/tts-guard": "./voice/tts-guard.ts",
+    "./voice/scribe-transcriber": "./voice/scribe-transcriber.ts",
     "./voice/speech-gate": "./voice/speech-gate.ts",
     "./web": "./web/index.ts",
     "./web/agent": "./web/agent.ts",
