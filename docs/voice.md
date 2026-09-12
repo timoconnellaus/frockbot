@@ -264,6 +264,13 @@ keeps the call; it does **not** hang up. The provider is wrapped so that a
 sentence with no audio throws rather than returns (`app/voice/tts-guard.ts`);
 without that the turn settles as answered and the silence has no record.
 
+The one turn that produces no answer and yet carries no error frame is the
+bridge-only turn: once `"One moment."` has been spoken the SDK has seen text,
+so it treats the turn as a success even though the ledger settles it as
+`no_output`. The person hears the bridge and then nothing, and the call goes
+back to listening with no footer message; only the `turn` trace line records
+the dead end.
+
 An error frame that carries a `code` is a different thing: the SDK sends one
 only when the call itself has failed — speech recognition lost, a startup that
 never worked — and has already torn the call down behind it. The client ends
