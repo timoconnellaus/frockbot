@@ -520,6 +520,7 @@ class _ShellState extends State<_Shell> {
               unread: const {},
               archived: const {},
               activeBotId: 'alpha',
+              focusedBotId: 'alpha',
               workingBotId: null,
               loaded: true,
               showHidden: false,
