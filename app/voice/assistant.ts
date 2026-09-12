@@ -45,6 +45,23 @@ export const VOICE_PROMPT_HISTORY_MESSAGES_V1 = 12;
 export const VOICE_TURN_MAX_STEPS_V1 = 4;
 export const VOICE_TURN_MAX_TOKENS_V1 = 400;
 export const VOICE_ANSWER_MAX_CHARS_V1 = 1_200;
+/**
+ * Said aloud when the model goes to a tool without having said anything: a
+ * tool step is a second model round-trip plus the tool itself, which is
+ * seconds of silence to the person if nothing fills them. It is spoken, not
+ * answered — the ledger's answer is the model's own words only.
+ */
+export const VOICE_TURN_BRIDGE_V1 = "One moment.";
+
+/**
+ * One thing to say. `bridge` is the turn's own filler, `text` is the model's
+ * own words: a caller that times the model must not count the bridge as the
+ * model having spoken.
+ */
+export interface VoiceTurnChunkV1 {
+  kind: "bridge" | "text";
+  text: string;
+}
 
 function clip(text: string, max: number): string {
   const line = text.replace(/\s+/g, " ").trim();
@@ -257,8 +274,9 @@ export interface VoiceTurnResultV1 {
  * Runs one spoken turn: the model, its tool calls, the model again, bounded.
  *
  * Text is yielded as it streams so the caller can start synthesising at
- * once; a step that ends in tool calls yields nothing and runs the tools
- * before the next step. Tool results are appended to the messages the caller
+ * once; a step that ends in tool calls runs the tools before the next step,
+ * and if nothing has been said yet in the turn it yields the bridge first so
+ * the wait is not silent. Tool results are appended to the messages the caller
  * owns, so the next turn sees them through the SDK's own history only as the
  * final spoken answer — tool chatter never enters the durable history.
  */
@@ -271,7 +289,7 @@ export async function* runVoiceTurnV1(
     signal: AbortSignal;
   },
   onResult: (result: VoiceTurnResultV1) => void,
-): AsyncGenerator<string> {
+): AsyncGenerator<VoiceTurnChunkV1> {
   const messages: VoiceModelMessageV1[] = [
     { role: "system", content: input.system },
     ...input.history
@@ -281,6 +299,7 @@ export async function* runVoiceTurnV1(
   ];
   let delegations = 0;
   let spoken = "";
+  let bridged = false;
   for (let step = 0; step < VOICE_TURN_MAX_STEPS_V1; step += 1) {
     if (input.signal.aborted) {
       onResult({ answer: spoken, delegations, outcome: "aborted" });
@@ -310,7 +329,7 @@ export async function* runVoiceTurnV1(
         text += event.text;
         if (spoken.length + text.length <= VOICE_ANSWER_MAX_CHARS_V1) {
           spoken += event.text;
-          yield event.text;
+          yield { kind: "text", text: event.text };
         }
       } else if (event.type === "tool-call") {
         calls.push(event.call);
@@ -323,6 +342,10 @@ export async function* runVoiceTurnV1(
         outcome: spoken.trim() ? "answered" : "no_output",
       });
       return;
+    }
+    if (!spoken.trim() && !bridged) {
+      bridged = true;
+      yield { kind: "bridge", text: `${VOICE_TURN_BRIDGE_V1} ` };
     }
     messages.push({
       role: "assistant",

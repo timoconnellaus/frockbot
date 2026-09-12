@@ -72,10 +72,7 @@ import {
   userMemoryRootV1,
   isMemoryProjectIdV1,
 } from "@frockbot/app/memory/roots";
-import {
-  decodeDirectoryViewV1,
-  decodeBotMembershipViewV1,
-} from "@frockbot/app/flock/shared";
+import { decodeDirectoryViewV1 } from "@frockbot/app/flock/shared";
 import type {
   ClientRunLookupV1,
   ClientRunV1,
@@ -156,6 +153,12 @@ export interface VoiceAssistantEnv {
   ELEVENLABS_VOICE_ID?: string;
   /** `scribe` (default) or `openai`: which provider the assistant listens through. */
   VOICE_ASSISTANT_STT?: string;
+  /**
+   * A gateway model to answer voice turns with, e.g.
+   * `workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast` or
+   * `openai/gpt-5-mini`; unset, turns go to the platform's Auto route.
+   */
+  VOICE_ASSISTANT_MODEL?: string;
   USER_CONFIGURATIONS: DurableObjectNamespace;
   BOT_STATES: DurableObjectNamespace;
   MEMORY_FILES?: R2Bucket;
@@ -376,14 +379,26 @@ export class VoiceAssistant extends VoiceAgentBase<
       token: this.workerVar("FROCK_AI_GATEWAY_TOKEN"),
     });
     return host.runChatCompletion(
-      gatewayModelForFrockRequestV1(
-        FROCK_AI_DEFAULT_MODEL,
-        false,
-        host.autoRoute,
-      ),
+      this.voiceModel() ??
+        gatewayModelForFrockRequestV1(
+          FROCK_AI_DEFAULT_MODEL,
+          false,
+          host.autoRoute,
+        ),
       body,
       signal,
     );
+  }
+
+  /**
+   * The model pinned for voice turns, if the deployment pinned one. A voice
+   * turn wants a fast first token above all, which the platform's Auto route
+   * does not promise; the pin is a Worker var so it can follow what the
+   * `model-first-text` lines show without a code change.
+   */
+  protected voiceModel(): string | undefined {
+    const pinned = this.env.VOICE_ASSISTANT_MODEL?.trim();
+    return pinned ? pinned : undefined;
   }
 
   protected now(): Date {
@@ -944,7 +959,11 @@ export class VoiceAssistant extends VoiceAgentBase<
     call.turnId = turnId;
     call.turnStartedAt = startedAt;
     call.turnSettledAt = undefined;
-    this.trace(connection, "turn", { turn: turnId, chars: transcript.length });
+    this.trace(connection, "turn", {
+      turn: turnId,
+      chars: transcript.length,
+      model: this.voiceModel() ?? "auto",
+    });
     const system = await call.system;
     const host = this.turnHost(identity.userId, turnId);
     const self = this;
@@ -986,7 +1005,14 @@ export class VoiceAssistant extends VoiceAgentBase<
               : { failure: result.outcome };
           },
         )) {
-          if (firstText) {
+          if (chunk.kind === "bridge") {
+            // The filler, not the model: timed on its own line so the
+            // model's own first word stays one measurement.
+            self.trace(connection, "turn-bridge", {
+              turn: turnId,
+              ms: Date.now() - startedAt,
+            });
+          } else if (firstText) {
             // The model's first word: everything before it is what the
             // person waited through in silence.
             firstText = false;
@@ -995,7 +1021,7 @@ export class VoiceAssistant extends VoiceAgentBase<
               ms: Date.now() - startedAt,
             });
           }
-          yield chunk;
+          yield chunk.text;
         }
       } catch (error) {
         settlement = {
@@ -1321,7 +1347,6 @@ export class VoiceAssistant extends VoiceAgentBase<
     // SAFETY: the binding names UserConfiguration; these are its reviewed RPCs.
     return stub as unknown as UserMemoryRpc & {
       listBots(input: unknown): Promise<unknown>;
-      hasBot(input: unknown): Promise<unknown>;
     };
   }
 
@@ -1365,48 +1390,47 @@ export class VoiceAssistant extends VoiceAgentBase<
     };
   }
 
-  protected async listBots(userId: string): Promise<VoiceBotSummaryV1[]> {
-    const directory = decodeDirectoryViewV1(
+  private async directory(userId: string) {
+    return decodeDirectoryViewV1(
       rpcJsonSnapshotV1(
         await this.userRpc(userId).listBots({ schemaVersion: 1, userId }),
       ),
     );
-    const summaries: VoiceBotSummaryV1[] = [];
-    for (const bot of directory.bots) {
-      let activity: VoiceBotSummaryV1["activity"];
-      try {
-        const runs = await this.recentRuns(userId, bot.botId);
-        activity = runs.some((run) => run.status === "running")
-          ? "working"
-          : "idle";
-      } catch {
-        activity = undefined;
-      }
-      summaries.push({
-        botId: bot.botId,
-        name: bot.initialName,
-        ...(bot.initialDescription
-          ? { description: bot.initialDescription }
-          : {}),
-        ...(activity ? { activity } : {}),
-      });
-    }
-    return summaries;
   }
 
+  /**
+   * Every Bot with what it is doing now. The activity look-ups go to each
+   * Bot's own object, so they go out together: a person with a dozen Bots
+   * waits one round trip, not twelve, before the first turn can start.
+   */
+  protected async listBots(userId: string): Promise<VoiceBotSummaryV1[]> {
+    const directory = await this.directory(userId);
+    return Promise.all(
+      directory.bots.map(async (bot): Promise<VoiceBotSummaryV1> => {
+        let activity: VoiceBotSummaryV1["activity"];
+        try {
+          const runs = await this.recentRuns(userId, bot.botId);
+          activity = runs.some((run) => run.status === "running")
+            ? "working"
+            : "idle";
+        } catch {
+          activity = undefined;
+        }
+        return {
+          botId: bot.botId,
+          name: bot.initialName,
+          ...(bot.initialDescription
+            ? { description: bot.initialDescription }
+            : {}),
+          ...(activity ? { activity } : {}),
+        };
+      }),
+    );
+  }
+
+  /** The account's directory is the authority on membership: one round trip. */
   private async ownedBot(userId: string, botId: string) {
-    const membership = decodeBotMembershipViewV1(
-      rpcJsonSnapshotV1(
-        await this.userRpc(userId).hasBot({ schemaVersion: 1, userId, botId }),
-      ),
-    );
-    if (!membership.registered)
-      throw new Error("that Bot is not in this account");
-    const directory = decodeDirectoryViewV1(
-      rpcJsonSnapshotV1(
-        await this.userRpc(userId).listBots({ schemaVersion: 1, userId }),
-      ),
-    );
+    const directory = await this.directory(userId);
     const bot = directory.bots.find((entry) => entry.botId === botId);
     if (!bot) throw new Error("that Bot is not in this account");
     return bot;

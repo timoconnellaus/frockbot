@@ -507,7 +507,7 @@ describe("the voice session object", () => {
     expect(await stub.probeUtterance("please plan my week")).toBe(true);
     await opened.waitFor(
       (f) =>
-        f.type === "transcript_end" && String(f.text).startsWith("Done: Asked"),
+        f.type === "transcript_end" && String(f.text).includes("Done: Asked"),
       "delegation acknowledged aloud",
     );
     const delegations = Object.values(
@@ -652,7 +652,7 @@ describe("the voice session object", () => {
     expect(await stub.probeUtterance("please plan my week")).toBe(true);
     await opened.waitFor(
       (f) =>
-        f.type === "transcript_end" && String(f.text).startsWith("Done: Asked"),
+        f.type === "transcript_end" && String(f.text).includes("Done: Asked"),
       "delegation acknowledged aloud",
     );
     const [delegation] = Object.values(
@@ -723,7 +723,7 @@ describe("the voice session object", () => {
     expect(await stub.probeUtterance("please plan my week")).toBe(true);
     await opened.waitFor(
       (f) =>
-        f.type === "transcript_end" && String(f.text).startsWith("Done: Asked"),
+        f.type === "transcript_end" && String(f.text).includes("Done: Asked"),
       "delegation acknowledged aloud",
     );
     const [delegation] = Object.values(
@@ -802,7 +802,7 @@ describe("the voice session object", () => {
     await opened.waitFor(state("awake"), "awake");
     expect(await stub.probeUtterance("plan the trip")).toBe(true);
     await opened.waitFor(
-      (f) => f.type === "transcript_end" && String(f.text).startsWith("Done:"),
+      (f) => f.type === "transcript_end" && String(f.text).includes("Done:"),
       "first ask",
     );
     const first = Object.keys(await stub.probeStorage("voice:delegation:"));
@@ -817,7 +817,7 @@ describe("the voice session object", () => {
         f.type === "transcript_end" &&
         opened.frames.filter(
           (x) =>
-            x.type === "transcript_end" && String(x.text).startsWith("Done:"),
+            x.type === "transcript_end" && String(x.text).includes("Done:"),
         ).length >= 2,
       "second ask",
     );
@@ -962,7 +962,7 @@ describe("the voice session object", () => {
     await opened.waitFor(state("awake"), "awake");
     expect(await stub.probeUtterance("plan the launch")).toBe(true);
     await opened.waitFor(
-      (f) => f.type === "transcript_end" && String(f.text).startsWith("Done:"),
+      (f) => f.type === "transcript_end" && String(f.text).includes("Done:"),
       "acknowledged",
     );
     opened.socket.close();
@@ -1027,7 +1027,7 @@ describe("the voice session object", () => {
     await opened.waitFor(state("awake"), "awake");
     expect(await stub.probeUtterance("plan the launch")).toBe(true);
     await opened.waitFor(
-      (f) => f.type === "transcript_end" && String(f.text).startsWith("Done:"),
+      (f) => f.type === "transcript_end" && String(f.text).includes("Done:"),
       "acknowledged",
     );
     opened.socket.close();

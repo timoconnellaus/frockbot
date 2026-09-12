@@ -236,6 +236,24 @@ words are transcribed from their first syllable.
 An interrupt stops audio and the assistant's own reply. It never cancels a Bot
 Turn the assistant already delegated: that work is durable in the Bot.
 
+### The turn stays thin
+
+Everything between the end of the person's words and the first sound is
+what they wait through, so the turn does as little as it can in that gap.
+The Bot activity look-ups behind the system prompt and `list_bots` go to
+every Bot's object together, not one after another; a Bot lookup for
+`bot_status`, `ask_bot` and `cancel_bot` is one directory read. When the
+model goes to a tool without having said anything, the session speaks
+`"One moment."` before running it (`VOICE_TURN_BRIDGE_V1`) — a tool step is a
+second model round trip plus the tool, and that is seconds of silence
+otherwise; the bridge is spoken, not answered, so a turn that ends in the
+bridge alone still settles as `no_output`. `VOICE_ASSISTANT_MODEL` pins a
+gateway model for voice turns (`workers-ai/@cf/...` or a provider the gateway
+holds a key for) instead of the platform's Auto route; the `turn` trace line
+says which was used, and `model-first-text` says how long the model took to
+say its first word — the bridge is timed separately on `turn-bridge`, so a
+tool-first turn never reads as a fast first token.
+
 ### A reply that fails
 
 A turn that produces no text, or a sentence the speech provider answers with
@@ -245,6 +263,13 @@ listening, so the client shows the sentence on the footer for four seconds and
 keeps the call; it does **not** hang up. The provider is wrapped so that a
 sentence with no audio throws rather than returns (`app/voice/tts-guard.ts`);
 without that the turn settles as answered and the silence has no record.
+
+The one turn that produces no answer and yet carries no error frame is the
+bridge-only turn: once `"One moment."` has been spoken the SDK has seen text,
+so it treats the turn as a success even though the ledger settles it as
+`no_output`. The person hears the bridge and then nothing, and the call goes
+back to listening with no footer message; only the `turn` trace line records
+the dead end.
 
 An error frame that carries a `code` is a different thing: the SDK sends one
 only when the call itself has failed — speech recognition lost, a startup that
@@ -335,7 +360,9 @@ SDK started listening with no call record, so nothing was booked), `utterance`
 `turn-dropped` (a transcript arrived with no identity or no call record and was
 never given to the model — the reason says which), `model-first-text` (the
 model's first word, with `ms` since the turn began: everything before it is
-what the person waited through in silence), `turn-settled` (the outcome, the
+what the person waited through in silence), `turn-bridge` (the turn said
+`"One moment."` before a tool step, with `ms` since the turn began — filler,
+not the model's own words), `turn-settled` (the outcome, the
 delegation count and the answer's length, or a failure classification — never
 a provider's error sentence — and `ms`, the turn's whole model time),
 `speech-suppressed` (the speech allowance is used up, so a sentence of the
@@ -442,6 +469,7 @@ rather than opening a new one. Raw audio is never stored anywhere.
 | `ELEVENLABS_API_KEY`           | Worker secret     | optional | The continuous voice session's ears (Scribe v2 Realtime) and speech, so it needs speech-to-text as well as text-to-speech permission. Absent: starting a session reports that voice is unavailable. |
 | `VOICE_ASSISTANT_STT`          | Worker var        | optional | `openai` listens through `gpt-transcribe`; anything else (and unset) is Scribe.                                                                                                                     |
 | `ELEVENLABS_VOICE_ID`          | Worker var        | optional | Voice id; default is ElevenLabs "George" (`JBFqnCBsd6RMkjVDRZzb`).                                                                                                                                  |
+| `VOICE_ASSISTANT_MODEL`        | Worker var        | optional | Pins a gateway model for voice turns (e.g. `workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast`); unset, turns take the platform's Auto route.                                                     |
 | `VOICE_DICTATION_UPSTREAM_URL` | test harness only | —        | Points dictation at a local fake; never set in production.                                                                                                                                          |
 
 Declared in `apps/cloudflare/src/production-secrets.ts`, carried by the release

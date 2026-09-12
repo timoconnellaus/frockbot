@@ -5,8 +5,10 @@ import {
   runVoiceTurnV1,
   VOICE_ANSWER_MAX_CHARS_V1,
   VOICE_PROMPT_MAX_LOG_FACTS_V1,
+  VOICE_TURN_BRIDGE_V1,
   VOICE_TURN_MAX_STEPS_V1,
   type VoiceAssistantHostV1,
+  type VoiceTurnChunkV1,
   type VoiceTurnResultV1,
 } from "./assistant.js";
 import type { MemoryTierReadV1 } from "@frockbot/app/memory/store";
@@ -47,6 +49,12 @@ async function collect<T>(iterable: AsyncIterable<T>): Promise<T[]> {
   const out: T[] = [];
   for await (const item of iterable) out.push(item);
   return out;
+}
+
+async function said(
+  iterable: AsyncIterable<VoiceTurnChunkV1>,
+): Promise<string[]> {
+  return (await collect(iterable)).map((chunk) => chunk.text);
 }
 
 describe("the chat completion stream parser", () => {
@@ -146,7 +154,7 @@ describe("one voice turn", () => {
   test("streams a plain answer and reports it", async () => {
     const h = host([() => [text("Sure, "), text("it is ten.")]]);
     let result: VoiceTurnResultV1 | undefined;
-    const chunks = await collect(
+    const chunks = await said(
       runVoiceTurnV1(h, baseInput("what time is it"), (r) => {
         result = r;
       }),
@@ -183,7 +191,14 @@ describe("one voice turn", () => {
         result = r;
       }),
     );
-    expect(chunks).toEqual(["I've asked Remy to plan your week."]);
+    // The tool step is bridged aloud; the bridge is spoken, not answered,
+    // and it is labelled as filler so a caller timing the model does not
+    // read it as the model's first word.
+    expect(chunks).toEqual([
+      { kind: "bridge", text: `${VOICE_TURN_BRIDGE_V1} ` },
+      { kind: "text", text: "I've asked Remy to plan your week." },
+    ]);
+    expect(result?.answer).toBe("I've asked Remy to plan your week.");
     expect(h.asked).toEqual(["remy:plan my week"]);
     expect(result?.delegations).toBe(1);
     const second = h.bodies[1]!.messages as {
@@ -211,8 +226,11 @@ describe("one voice turn", () => {
         },
       },
     );
-    const chunks = await collect(runVoiceTurnV1(h, baseInput("x"), () => {}));
-    expect(chunks).toEqual(["I couldn't find that Bot."]);
+    const chunks = await said(runVoiceTurnV1(h, baseInput("x"), () => {}));
+    expect(chunks).toEqual([
+      `${VOICE_TURN_BRIDGE_V1} `,
+      "I couldn't find that Bot.",
+    ]);
     const second = h.bodies[1]!.messages as { content: string }[];
     expect(second.at(-1)?.content).toBe("That failed: no such Bot");
   });
@@ -220,14 +238,29 @@ describe("one voice turn", () => {
   test("the last step offers no tools so the model cannot loop forever", async () => {
     const h = host([() => [toolCall(0, "c", "list_bots", "{}")]]);
     let result: VoiceTurnResultV1 | undefined;
-    await collect(
+    const chunks = await said(
       runVoiceTurnV1(h, baseInput("loop"), (r) => {
         result = r;
       }),
     );
     expect(h.bodies).toHaveLength(VOICE_TURN_MAX_STEPS_V1);
     expect(h.bodies.at(-1)!.tools).toBeUndefined();
+    // The bridge was said once, and on its own it is not an answer.
+    expect(chunks).toEqual([`${VOICE_TURN_BRIDGE_V1} `]);
     expect(result?.outcome).toBe("no_output");
+    expect(result?.answer).toBe("");
+  });
+
+  test("a tool step the model has already spoken into is not bridged", async () => {
+    const h = host([
+      () => [
+        text("Let me check. "),
+        toolCall(0, "c1", "bot_status", '{"bot_id":"remy"}'),
+      ],
+      () => [text("Remy is idle.")],
+    ]);
+    const chunks = await said(runVoiceTurnV1(h, baseInput("x"), () => {}));
+    expect(chunks).toEqual(["Let me check. ", "Remy is idle."]);
   });
 
   test("refuses to delegate past the per-turn bound", async () => {
@@ -261,7 +294,7 @@ describe("one voice turn", () => {
         result = r;
       },
     )) {
-      chunks.push(chunk);
+      chunks.push(chunk.text);
       controller.abort();
     }
     expect(chunks).toEqual(["one "]);
@@ -272,7 +305,7 @@ describe("one voice turn", () => {
     const long = "a".repeat(VOICE_ANSWER_MAX_CHARS_V1 + 50);
     const h = host([() => [text(long.slice(0, 700)), text(long.slice(700))]]);
     let result: VoiceTurnResultV1 | undefined;
-    const chunks = await collect(
+    const chunks = await said(
       runVoiceTurnV1(h, baseInput("x"), (r) => {
         result = r;
       }),
