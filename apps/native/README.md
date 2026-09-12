@@ -98,6 +98,12 @@ The app uses Apple team `Q444L76529`, bundle `com.frockbot.mobile`, the default 
 
 The main Mac app is distributed directly rather than through the Mac App Store, with Messages built into Registered machines; the website links a download only once a signed, notarized release is published. Build, signing, notarization and associated-domain requirements are in [the Mac release guide](macos/README.md). The bundle remains `com.frockbot.mobile`; public distribution requires Developer ID signing and a matching profile. Development builds do not prove verified sign-in or distribution readiness. iOS is not a target in this slice.
 
+## Search
+
+The sidebar Search field and Cmd+K (Ctrl+K on other keyboards) open one search palette. Desktop has category tabs and keyboard selection; phones use a full-screen page with a filter menu above the results. Bots appear immediately, with their descriptions and unread indicators. Search includes conversation messages, shared attachments, links, Routines across Bots and shortcuts to the app's existing settings. Group chats are not yet available.
+
+Files and Links return to the source conversation. They index attachments sent with `send_to_user` and URLs in visible conversation text; tool output stays behind an explicit filter. Recent items appear when those categories have no query. Search options also offer archived Bots and rebuilding the index from stored conversations, which adds existing shared attachments and links to the index after this update.
+
 ## Web
 
 `bun run --filter @frockbot/cloudflare client:build` is what a deploy runs: it builds this target and stages the payload under `apps/cloudflare/dist/web/_flutter/<buildHash>/`, which is the app Worker's `assets` directory. `bun run dev` from the repository root does the same and serves it. To point a build at another stack:

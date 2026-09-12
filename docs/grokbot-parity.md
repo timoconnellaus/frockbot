@@ -1071,16 +1071,15 @@ than a silent absence. Row 44 is the only one.
   resolve-then-connect hook, so host classification is exact for IP literals
   and known-internal name shapes and **best-effort against DNS rebinding**.
 
-- **52** — the transcript half is landed and the media half cannot be. A
-  User's Durable Object holds a rebuildable index over every one of their Bots'
-  transcripts (`app/search`), reached through a route and a search
-  overlay, and the row's own parenthesis is matched: the agent gets no tool over
-  it. `SearchRowKindV1` declares `"media"` beside `user`, `assistant` and
-  `tool` and **nothing writes it**, deliberately — FrockBot has no attachment
-  concept for a User to have sent, so the schema carries the slot rather than
-  changing when one arrives. `computer_screenshot` and `generate_image`
-  attachments are Workspace files referenced from a tool result, not indexed
-  media, so the row stays `partial` until there is media to find.
+- **52** — conversation text, shared attachments and links are searchable in
+  the User's rebuildable index (`app/search`); the agent gets no tool over it.
+  The search palette opens from the sidebar or Cmd/Ctrl+K, with desktop tabs
+  and a phone filter menu. Bots, Routines and navigation actions are included.
+  Files indexes attachments explicitly sent to the User, and Links indexes
+  URLs from conversation text. Both return to their source conversation and
+  can show recent items before typing. Tool output stays an explicit opt-in.
+  Workspace files that have not been shared are not indexed, and Group chats
+  remain unavailable, so the broader GrokBot search surface stays `partial`.
 - **37** — landed. The five roles exist as a real ceiling, not a label. A
   `Task` names `type` (GrokBot's `subagent_type`), the child Turn is admitted
   with it, and `ToolRegistry.schemas` takes a second coordinate beside the turn

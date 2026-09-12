@@ -283,12 +283,59 @@ class ShellSidebar extends StatelessWidget {
       children: [
         _Header(
           onCreateBot: onCreateBot,
-          onSearch: onSearch,
+          onSearch: phone ? onSearch : null,
           onProfile: onProfile,
           onMarketplace: phone ? onMarketplace : null,
           onVoice: onVoice,
           voiceControl: voiceControl,
         ),
+        if (!phone)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 4, 12, 14),
+            child: identified(
+              ShellIds.sidebarSearch,
+              Material(
+                color: Theme.of(context).colorScheme.surfaceContainerHigh,
+                borderRadius: BorderRadius.circular(11),
+                child: InkWell(
+                  onTap: onSearch,
+                  borderRadius: BorderRadius.circular(11),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 11,
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.search_rounded,
+                          size: 19,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Search',
+                            style: TextStyle(
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onSurfaceVariant,
+                            ),
+                          ),
+                        ),
+                        Text(
+                          Theme.of(context).platform == TargetPlatform.macOS
+                              ? '⌘K'
+                              : 'Ctrl+K',
+                          style: Theme.of(context).textTheme.labelSmall,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
         Expanded(
           child: ListView(
             padding: const EdgeInsets.only(bottom: 12),
@@ -598,7 +645,7 @@ class _BotRow extends StatelessWidget {
 /// what it is.
 class _Header extends StatelessWidget {
   final VoidCallback onCreateBot;
-  final VoidCallback onSearch;
+  final VoidCallback? onSearch;
   final VoidCallback onProfile;
 
   /// The Marketplace, where the header is the place for it; null where the
@@ -698,15 +745,16 @@ class _Header extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 2),
-          identified(
-            ShellIds.sidebarSearch,
-            IconButton(
-              tooltip: 'Search',
-              onPressed: onSearch,
-              style: quiet,
-              icon: const Icon(Icons.search_rounded),
+          if (onSearch != null)
+            identified(
+              ShellIds.sidebarSearch,
+              IconButton(
+                tooltip: 'Search',
+                onPressed: onSearch,
+                style: quiet,
+                icon: const Icon(Icons.search_rounded),
+              ),
             ),
-          ),
           const SizedBox(width: 2),
           identified(
             ShellIds.sidebarCreateBot,
