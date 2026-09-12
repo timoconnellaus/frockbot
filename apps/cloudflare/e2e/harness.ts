@@ -566,14 +566,8 @@ async function waitForManifest(baseUrl: string): Promise<void> {
  * The `--log-level` of the app's `wrangler dev`. `warn` by default; set
  * `E2E_WRANGLER_LOG_LEVEL=debug` to hear workerd itself.
  */
-export function workerLogLevel(): string {
-  const level = process.env.E2E_WRANGLER_LOG_LEVEL;
-  return level === "debug" ||
-    level === "info" ||
-    level === "log" ||
-    level === "error"
-    ? level
-    : "warn";
+export function workerLogLevel(): "debug" | "warn" {
+  return process.env.E2E_WRANGLER_LOG_LEVEL === "debug" ? "debug" : "warn";
 }
 
 /** The bearer token `/api/debug/*` accepts in an end-to-end run. */
