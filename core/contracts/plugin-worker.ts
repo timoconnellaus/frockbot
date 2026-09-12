@@ -47,9 +47,11 @@ export interface PluginWorkerMemberV1 {
  * The module-set hash the loader id is derived from. A reused loader id
  * silently serves the first code and `env`, so it covers everything the load
  * depends on: the contract the wrapper speaks, the generated index's own
- * version, every artifact by content, and the digest of the bindings baked
- * into `env`. A deploy that changes none of these leaves every User's worker
- * where it is.
+ * version, every artifact by content in mount order, and the digest of the
+ * bindings baked into `env`. Mount order is part of the load: the index
+ * imports and `IDENTITY.plugins` follow it, and it decides which Plugin
+ * provides a service to which and how the hook chain runs. A deploy that
+ * changes none of these leaves every User's worker where it is.
  */
 export async function pluginWorkerModuleSetHashV1(input: {
   contractVersion: IsolateContractVersion;
@@ -57,12 +59,10 @@ export async function pluginWorkerModuleSetHashV1(input: {
   members: readonly PluginWorkerMemberV1[];
   bindingDigest: string;
 }): Promise<string> {
-  const members = input.members
-    .map((member) => ({
-      pluginId: boundedString(member.pluginId, "plugin worker member id", 64),
-      contentHash: hex(member.contentHash, "plugin worker member hash"),
-    }))
-    .toSorted((left, right) => left.pluginId.localeCompare(right.pluginId));
+  const members = input.members.map((member) => ({
+    pluginId: boundedString(member.pluginId, "plugin worker member id", 64),
+    contentHash: hex(member.contentHash, "plugin worker member hash"),
+  }));
   if (
     new Set(members.map((member) => member.pluginId)).size !== members.length
   ) {

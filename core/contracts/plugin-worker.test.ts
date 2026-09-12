@@ -15,7 +15,7 @@ const HASH_B = "b".repeat(64);
 const DIGEST = "c".repeat(64);
 
 describe("the plugin worker's identity", () => {
-  test("hashes the same module set the same way whatever order it was listed in", async () => {
+  test("hashes the same module set differently when the mount order differs", async () => {
     const forward = await pluginWorkerModuleSetHashV1({
       contractVersion: 3,
       indexVersion: "index-v1",
@@ -34,8 +34,9 @@ describe("the plugin worker's identity", () => {
       ],
       bindingDigest: DIGEST,
     });
-    expect(forward).toBe(reversed);
+    expect(forward).not.toBe(reversed);
     expect(forward).toMatch(/^[0-9a-f]{64}$/);
+    expect(reversed).toMatch(/^[0-9a-f]{64}$/);
   });
 
   test("changes with the contract, the index, an artifact or the bindings", async () => {

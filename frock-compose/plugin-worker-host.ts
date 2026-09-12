@@ -21,7 +21,9 @@ import {
   pluginWorkerLoaderIdV1,
   pluginWorkerModuleSetHashV1,
   type BotCapabilitiesStub,
+  type BotIsolateEnv,
   type BotIsolateHookEventNameV1,
+  type IsolateIdentityV1,
   type IsolateToolDescriptorV1,
   type LoopAgentRuntimeV1,
   type LoopEventPayloadMapV1,
@@ -83,7 +85,7 @@ export interface BotIsolateWorkerCode {
   mainModule: string;
   modules: Record<string, { js: string }>;
   globalOutbound: null;
-  env: { IDENTITY: unknown; CAPABILITIES: unknown };
+  env: BotIsolateEnv;
   limits: { cpuMs: number; subRequests: number };
 }
 
@@ -269,13 +271,38 @@ export function pluginMountOrderV1(members: readonly BotIsolateMemberV1[]): {
       }
     }
   }
-  for (const member of members) {
+  // What is left when Kahn stalls is a cycle plus whatever hangs off it. Only
+  // a Plugin that can reach itself is in the cycle; the rest simply consume a
+  // service from a Plugin that could not be ordered.
+  const stalled = members.filter(
+    (member) =>
+      !placed.has(member.packageId) && !excluded.has(member.packageId),
+  );
+  const stalledIds = new Set(stalled.map((member) => member.packageId));
+  const inCycle = (start: string): boolean => {
+    const seen = new Set<string>();
+    const pending = (needs.get(start) ?? []).map(
+      (dependency) => dependency.packageId,
+    );
+    while (pending.length > 0) {
+      const id = pending.pop()!;
+      if (id === start) return true;
+      if (seen.has(id) || !stalledIds.has(id)) continue;
+      seen.add(id);
+      for (const dependency of needs.get(id) ?? []) {
+        pending.push(dependency.packageId);
+      }
+    }
+    return false;
+  };
+  for (const member of stalled) {
     const id = member.packageId;
-    if (placed.has(id) || excluded.has(id)) continue;
     failures.push({
       pluginId: id,
       phase: "resolve",
-      message: `plugin "${id}" consumes a service in a cycle`,
+      message: inCycle(id)
+        ? `plugin "${id}" consumes a service in a cycle`
+        : `plugin "${id}" consumes a service from a plugin that did not mount`,
     });
   }
   return { order, failures };
@@ -542,7 +569,7 @@ export class PluginWorkerHost {
     resolved: readonly ResolvedPlugin[],
   ): BotIsolateLoadedWorker {
     const limits = this.options.limits ?? BOT_ISOLATE_DEFAULT_LIMITS;
-    const identity = {
+    const identity: IsolateIdentityV1 = {
       userId: this.options.userId,
       botId: this.options.botId,
       generationId: this.options.generationId,

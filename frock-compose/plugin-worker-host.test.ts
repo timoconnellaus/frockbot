@@ -128,10 +128,9 @@ function harness(
     health: () => {
       if (input.healthThrows) throw new Error(input.healthThrows);
       const last = loads.at(-1)!;
-      const identity = last.code.env.IDENTITY as {
-        plugins: { pluginId: string }[];
-      };
-      const plugins = identity.plugins.map((plugin) => plugin.pluginId);
+      const plugins = last.code.env.IDENTITY.plugins.map(
+        (plugin) => plugin.pluginId,
+      );
       return Promise.resolve(
         input.health?.(plugins) ?? {
           schemaVersion: 1,
@@ -285,7 +284,7 @@ describe("one worker per User", () => {
     await active.dispose();
   });
 
-  test("the loader id follows the artifacts and the bindings, not the plugin order", async () => {
+  test("the loader id follows the artifacts, the bindings and the mount order", async () => {
     const first = harness();
     await first.host.mount([
       member("weather"),
@@ -301,8 +300,13 @@ describe("one worker per User", () => {
       member("weather"),
       member("greeter", { contentHash: "d".repeat(64) }),
     ]);
-    expect(first.loads[0]!.loaderId).toBe(second.loads[0]!.loaderId);
+    // The same Plugins in a different mount order are a different load: the
+    // index, `IDENTITY.plugins` and the hook chain all follow that order.
+    expect(first.loads[0]!.loaderId).not.toBe(second.loads[0]!.loaderId);
     expect(first.loads[0]!.loaderId).not.toBe(third.loads[0]!.loaderId);
+    expect(first.loads[0]!.code.env.IDENTITY).not.toEqual(
+      second.loads[0]!.code.env.IDENTITY,
+    );
   });
 
   test("no plugins means no loader call and nothing registered", async () => {
@@ -395,6 +399,25 @@ describe("mount order from provides and consumes", () => {
     ]);
   });
 
+  test("a plugin downstream of a cycle is named for the cycle it is not in", () => {
+    const a = member("a", {
+      provides: [{ name: "a-data", version: 1 }],
+      consumes: [{ name: "b-data", version: 1 }],
+    });
+    const b = member("b", {
+      provides: [{ name: "b-data", version: 1 }],
+      consumes: [{ name: "a-data", version: 1 }],
+    });
+    const c = member("c", { consumes: [{ name: "a-data", version: 1 }] });
+    const ordered = pluginMountOrderV1([a, b, c]);
+    expect(ordered.order).toEqual([]);
+    expect(ordered.failures.map((failure) => failure.message)).toEqual([
+      'plugin "a" consumes a service in a cycle',
+      'plugin "b" consumes a service in a cycle',
+      'plugin "c" consumes a service from a plugin that did not mount',
+    ]);
+  });
+
   test("the identity tells the index what each plugin consumes", async () => {
     const subject = harness({
       health: (plugins) => ({
@@ -423,9 +446,7 @@ describe("mount order from provides and consumes", () => {
     ]);
     expect(prepared.failures).toEqual([]);
     expect(prepared.mounted).toEqual(["weather", "greeter"]);
-    expect(
-      (subject.loads[0]!.code.env.IDENTITY as { plugins: unknown[] }).plugins,
-    ).toEqual([
+    expect(subject.loads[0]!.code.env.IDENTITY.plugins).toEqual([
       { pluginId: "weather", grants: [], consumes: [] },
       { pluginId: "greeter", grants: [], consumes: ["weather-data"] },
     ]);

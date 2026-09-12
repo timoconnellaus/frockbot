@@ -1,13 +1,17 @@
 # `@frockbot/frock-compose`
 
-The Bot isolate host. Untrusted code — Bot-authored and third-party — runs in a
-loaded Worker with `globalOutbound` disabled and only its named grants; this
+The Plugin worker host. Untrusted code — Bot-authored and third-party — runs in
+a loaded Worker with `globalOutbound` disabled and only its named grants; this
 module is what loads it.
 
-It mounts one Composition member's content-addressed artifact as a Dynamic
-Worker, generates the wrapper that narrows the capability stub into the `ctx` a
-Package author writes against, and registers the tools the isolate's health
-report declares.
+It mounts every Plugin a Composition generation names into one Dynamic Worker
+per User, behind a generated index (`plugin-worker-wrapper.ts`) that imports
+each Plugin's content-addressed artifact, narrows the capability stub into the
+`ctx` a Plugin author writes against, hands a provider's services to the
+Plugins mounted after it, and runs an open hook over every enabled Plugin that
+declared it. The host orders providers before consumers, registers the tools
+and hooks each Plugin's health report declares, and names the Plugins it could
+not mount instead of failing the whole generation.
 
 What a member declares about itself is a contract, not a host concern:
 `PluginDescriptorV1` and the vocabularies it names live in
@@ -15,5 +19,5 @@ What a member declares about itself is a contract, not a host concern:
 `@frockbot/core/durable/composition-failure`.
 
 ```ts
-import { BotIsolateContributionHost } from "@frockbot/frock-compose";
+import { PluginWorkerHost } from "@frockbot/frock-compose";
 ```

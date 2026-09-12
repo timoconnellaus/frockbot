@@ -2,8 +2,11 @@ import { describe, expect, test } from "bun:test";
 import { BOT_ISOLATE_CONTEXT_KEYS_V1 } from "@frockbot/core/contracts";
 import {
   BOT_ISOLATE_DEADLINE_SOURCE,
+  BOT_ISOLATE_DECLARATION_SOURCE,
   BOT_ISOLATE_INVOCATION_SOURCE,
+  BOT_ISOLATE_MODEL_SOURCE,
   BOT_ISOLATE_NARROW_CONTEXT_KEYS_V1,
+  BOT_ISOLATE_NARROW_CONTEXT_SOURCE_V1,
   PLUGIN_WORKER_MAIN_MODULE,
   pluginWorkerIndexSourceV1,
   pluginWorkerModuleMap,
@@ -29,6 +32,25 @@ const decodeHookInvocation = new Function(
 const decodeTriggerInvocation = new Function(
   `${BOT_ISOLATE_INVOCATION_SOURCE}\nreturn decodeTriggerInvocation;`,
 )() as Decode;
+
+type NarrowContext = (
+  env: Record<string, unknown>,
+  invocation: Record<string, unknown>,
+  plugin: Record<string, unknown>,
+) => Record<string, unknown>;
+
+const narrowContext = new Function(
+  `${BOT_ISOLATE_MODEL_SOURCE}\n${BOT_ISOLATE_NARROW_CONTEXT_SOURCE_V1}\nreturn narrowContext;`,
+)() as NarrowContext;
+
+const declarations = new Function(
+  `${BOT_ISOLATE_INVOCATION_SOURCE}\n${BOT_ISOLATE_DECLARATION_SOURCE}\nreturn { declaredTools, declaredHooks, declaredServices, declaredTriggers };`,
+)() as {
+  declaredTools: (module: unknown, pluginId: string) => unknown[];
+  declaredHooks: (module: unknown, pluginId: string) => string[];
+  declaredServices: (module: unknown, pluginId: string) => unknown;
+  declaredTriggers: (module: unknown, pluginId: string) => string[];
+};
 
 function invocation(overrides: Record<string, unknown> = {}) {
   return {
@@ -172,27 +194,169 @@ describe("the generated index module map", () => {
     expect(modules[pluginWorkerModulePathV1("weather")]?.js).toBe(
       "export const tools = [];",
     );
-    const index = modules[PLUGIN_WORKER_MAIN_MODULE]!.js;
-    expect(index).toBe(pluginWorkerIndexSourceV1(["weather", "greeter"]));
-    expect(index.indexOf('"./plugins/weather.js"')).toBeLessThan(
-      index.indexOf('"./plugins/greeter.js"'),
+    expect(modules[PLUGIN_WORKER_MAIN_MODULE]!.js).toBe(
+      pluginWorkerIndexSourceV1(["weather", "greeter"]),
+    );
+    // The order the index actually runs is proven in a real isolate by the
+    // two-Plugin workerd probe, which mounts a provider and its consumer.
+    expect(pluginWorkerIndexSourceV1(["weather", "greeter"])).not.toBe(
+      pluginWorkerIndexSourceV1(["greeter", "weather"]),
     );
   });
+});
 
-  test("exposes only the wrapper entrypoint to the loader", () => {
-    const index = pluginWorkerIndexSourceV1(["weather"]);
-    expect(index).toContain(
-      'import { WorkerEntrypoint } from "cloudflare:workers";',
-    );
-    for (const method of [
-      "async health()",
-      "async execute(rawInvocation)",
-      "async hook(rawInvocation)",
-      "async receiveTrigger(rawInvocation)",
+describe("the generated wrapper's narrowed context", () => {
+  const env = () => {
+    const calls: { method: string; argument: unknown }[] = [];
+    return {
+      calls,
+      env: {
+        IDENTITY: { userId: "user-1" },
+        CAPABILITIES: {
+          list: () => {
+            calls.push({ method: "list", argument: undefined });
+            return Promise.resolve({ status: "available" });
+          },
+          schedule: (request: unknown) => {
+            calls.push({ method: "schedule", argument: request });
+            return Promise.resolve({ status: "scheduled" });
+          },
+        },
+      } as unknown as Record<string, unknown>,
+    };
+  };
+
+  const invocation = {
+    tool: "reverse_text",
+    event: undefined,
+    botId: "bot-1",
+    sessionId: "user-1:bot-1",
+    runId: "run-1",
+    turnId: "turn-1",
+    generationId: "gen-1",
+    deadlineMs: 1_000,
+  };
+
+  test("builds no grant member for a plugin that declared no grants", () => {
+    const subject = env();
+    const context = narrowContext(subject.env, invocation, {
+      pluginId: "weather",
+      grants: [],
+      services: {},
+    });
+    for (const key of [
+      "model",
+      "memory",
+      "workspace",
+      "connection",
+      "schedule",
     ]) {
-      expect(index).toContain(method);
+      expect(context[key]).toBeUndefined();
     }
-    expect(index).toContain("return capabilities.schedule(request);");
-    expect(index).not.toContain("globalThis");
+    expect(context.packageId).toBe("weather");
+    expect(context.deadlineMs).toBe(1_000);
+    expect(context.session).toEqual({
+      sessionId: "user-1:bot-1",
+      runId: "run-1",
+      turnId: "turn-1",
+      generationId: "gen-1",
+    });
+  });
+
+  test("builds exactly the declared grant's member, wired to the stub", async () => {
+    const subject = env();
+    const context = narrowContext(subject.env, invocation, {
+      pluginId: "weather",
+      grants: ["schedule"],
+      services: { forecast: { at: () => "noon" } },
+    });
+    expect(typeof context.schedule).toBe("function");
+    expect(context.memory).toBeUndefined();
+    await expect(
+      (context.schedule as (request: unknown) => Promise<unknown>)({
+        in: 60,
+      }),
+    ).resolves.toEqual({ status: "scheduled" });
+    await (context.capabilities as { list: () => Promise<unknown> }).list();
+    expect(subject.calls).toEqual([
+      { method: "schedule", argument: { in: 60 } },
+      { method: "list", argument: undefined },
+    ]);
+    expect(
+      (context.services as { forecast: { at: () => string } }).forecast.at(),
+    ).toBe("noon");
+  });
+
+  test("holds every catalogued key when every grant is declared", () => {
+    const subject = env();
+    const context = narrowContext(subject.env, invocation, {
+      pluginId: "weather",
+      grants: ["ai", "memory", "workspace", "http", "schedule"],
+      services: {},
+    });
+    expect(Object.keys(context).toSorted()).toEqual(
+      [...BOT_ISOLATE_NARROW_CONTEXT_KEYS_V1].toSorted(),
+    );
+  });
+});
+
+describe("the generated wrapper's declaration checks", () => {
+  test("accepts a well-formed module and normalizes its tools", () => {
+    expect(
+      declarations.declaredTools(
+        {
+          tools: [{ name: "reverse_text" }],
+          execute: () => undefined,
+        },
+        "weather",
+      ),
+    ).toEqual([
+      {
+        name: "reverse_text",
+        description: "",
+        inputSchema: {},
+        idempotent: false,
+      },
+    ]);
+    expect(
+      declarations.declaredHooks(
+        { hooks: { "agent/request": () => undefined } },
+        "weather",
+      ),
+    ).toEqual(["agent/request"]);
+    expect(
+      declarations.declaredTriggers(
+        { triggers: { forecast_ready: () => undefined } },
+        "weather",
+      ),
+    ).toEqual(["forecast_ready"]);
+    expect(declarations.declaredServices({}, "weather")).toEqual({});
+  });
+
+  test("refuses a module that does not declare itself", () => {
+    expect(() => declarations.declaredTools({ tools: [] }, "weather")).toThrow(
+      /non-empty "tools" array/,
+    );
+    expect(() =>
+      declarations.declaredTools({ tools: [{ name: "ok" }] }, "weather"),
+    ).toThrow(/"execute" function/);
+    expect(() =>
+      declarations.declaredTools(
+        { tools: [{ name: "Bad Name" }], execute: () => undefined },
+        "weather",
+      ),
+    ).toThrow(/invalid name/);
+    expect(() =>
+      declarations.declaredHooks(
+        { hooks: { "agent/nope": () => 1 } },
+        "weather",
+      ),
+    ).toThrow(/unsupported hook/);
+    expect(() =>
+      declarations.declaredTriggers({ triggers: { Bad: () => 1 } }, "weather"),
+    ).toThrow(/invalid name/);
+    expect(() =>
+      declarations.declaredServices({ services: 1 }, "weather"),
+    ).toThrow(/"services" must be an object/);
   });
 });

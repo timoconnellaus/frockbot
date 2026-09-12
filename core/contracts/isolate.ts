@@ -111,18 +111,29 @@ export interface IsolateHealthV1 {
   hooks?: BotIsolateHookEventNameV1[];
 }
 
-/** What `IDENTITY` carries into the isolate. Structured-clonable, never a stub. */
+/** One Plugin the worker mounts, as `IDENTITY` names it. */
+export interface IsolatePluginIdentityV1 {
+  pluginId: string;
+  /**
+   * The grants this Plugin declared and the host opened. The wrapper builds
+   * `ctx` from exactly these, so a Plugin that never asked for the Workspace
+   * has no `ctx.workspace` to call rather than a call that refuses.
+   */
+  grants: readonly string[];
+  /** The services this Plugin consumes, filled from Plugins mounted before it. */
+  consumes: readonly string[];
+}
+
+/**
+ * What `IDENTITY` carries into the worker. Structured-clonable, never a stub.
+ * `plugins` is in mount order: providers before the Plugins consuming them,
+ * which is also the order the generated index runs a hook in.
+ */
 export interface IsolateIdentityV1 {
   userId: string;
   botId: string;
   generationId: string;
-  packageId: string;
-  /**
-   * The grants this member declared and the host opened. The wrapper builds
-   * `ctx` from exactly these, so a plugin that never asked for the Workspace
-   * has no `ctx.workspace` to call rather than a call that refuses.
-   */
-  grants: readonly string[];
+  plugins: readonly IsolatePluginIdentityV1[];
 }
 
 /**
@@ -250,16 +261,6 @@ export type IsolateModelInvocationV1 =
   | IsolateCapabilityFailureV1;
 
 export type IsolateModelOutcomeV1 = IsolateModelInvocationV1;
-
-/**
- * The wrapper `WorkerEntrypoint` the kernel generates. Bot code never
- * implements this; it exports `tools` and `execute` and the wrapper adapts.
- */
-export interface BotIsolateEntrypoint {
-  health(): Promise<IsolateHealthV1>;
-  execute(invocation: IsolateToolInvocationV1): Promise<IsolateToolResultV1>;
-  hook(invocation: IsolateHookInvocationV1): Promise<IsolateHookResultV1>;
-}
 
 /**
  * The loopback service binding the Bot's Durable Object mints for one isolate.
@@ -407,46 +408,6 @@ export interface BotPackageHookContextV1 extends BotPackageContextV1 {
 export interface BotIsolateEnv {
   IDENTITY: IsolateIdentityV1;
   CAPABILITIES: BotCapabilitiesStub;
-}
-
-export interface IsolateModuleMap {
-  [path: string]: { js: string };
-}
-
-export interface IsolateLoadInputV1 {
-  loaderId: string;
-  modules: IsolateModuleMap;
-  env: BotIsolateEnv;
-  limits: { cpuMs: number; subRequests: number };
-  compatibilityDate: string;
-}
-
-/** The kernel-declared isolate host. A runtime adapter implements it. */
-export interface IsolateHost {
-  load(input: IsolateLoadInputV1): BotIsolateEntrypoint;
-}
-
-/**
- * D2. The loader identity, and nothing else — a reused id silently serves the
- * first code and `env`, so every component here is content- or owner-derived.
- * The hash covers the mounted wrapper and Package artifact plus the digest of
- * every baked-in binding: User, Bot, Composition generation, Connections, and
- * resolved model. The User prefix independently prevents cross-User reuse.
- */
-export function isolateLoaderIdV1(input: {
-  userId: string;
-  artifactSetHash: string;
-}): string {
-  const userId = boundedString(input.userId, "isolate loader userId", 256);
-  const hash = boundedString(
-    input.artifactSetHash,
-    "isolate loader artifactSetHash",
-    128,
-  );
-  if (/[:\s]/.test(userId) || !/^[0-9a-f]+$/.test(hash)) {
-    throw new Error("isolate loader id components are invalid");
-  }
-  return `bot-package:${userId}:${hash}`;
 }
 
 function record(value: unknown, label: string): Record<string, unknown> {
@@ -857,13 +818,9 @@ export function decodeIsolateIdentityV1(
   label = "isolate identity",
 ): IsolateIdentityV1 {
   const value = record(input, label);
-  exactKeys(
-    value,
-    ["userId", "botId", "generationId", "packageId", "grants"],
-    label,
-  );
-  if (!Array.isArray(value.grants) || value.grants.length > 16) {
-    throw new Error(`${label}.grants must be a bounded array`);
+  exactKeys(value, ["userId", "botId", "generationId", "plugins"], label);
+  if (!Array.isArray(value.plugins) || value.plugins.length > 64) {
+    throw new Error(`${label}.plugins must be a bounded array`);
   }
   return {
     userId: boundedString(value.userId, `${label}.userId`, 256),
@@ -873,9 +830,31 @@ export function decodeIsolateIdentityV1(
       `${label}.generationId`,
       256,
     ),
-    packageId: boundedString(value.packageId, `${label}.packageId`, 128),
+    plugins: value.plugins.map((plugin, index) =>
+      decodeIsolatePluginIdentityV1(plugin, `${label}.plugins[${index}]`),
+    ),
+  };
+}
+
+function decodeIsolatePluginIdentityV1(
+  input: unknown,
+  label: string,
+): IsolatePluginIdentityV1 {
+  const value = record(input, label);
+  exactKeys(value, ["pluginId", "grants", "consumes"], label);
+  if (!Array.isArray(value.grants) || value.grants.length > 16) {
+    throw new Error(`${label}.grants must be a bounded array`);
+  }
+  if (!Array.isArray(value.consumes) || value.consumes.length > 64) {
+    throw new Error(`${label}.consumes must be a bounded array`);
+  }
+  return {
+    pluginId: boundedString(value.pluginId, `${label}.pluginId`, 128),
     grants: value.grants.map((grant, index) =>
       boundedString(grant, `${label}.grants[${index}]`, 32),
+    ),
+    consumes: value.consumes.map((service, index) =>
+      boundedString(service, `${label}.consumes[${index}]`, 64),
     ),
   };
 }

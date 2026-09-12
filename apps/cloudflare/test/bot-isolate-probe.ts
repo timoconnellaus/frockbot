@@ -412,9 +412,7 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
     return this.loadedCode.map((code) => ({
       globalOutbound: code.globalOutbound,
       envKeys: Object.keys(code.env).sort(),
-      identityKeys: Object.keys(
-        code.env.IDENTITY as Record<string, unknown>,
-      ).sort(),
+      identityKeys: Object.keys(code.env.IDENTITY).sort(),
       limits: code.limits,
     }));
   }
@@ -619,8 +617,7 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
     });
     try {
       await composition.verify(new AbortController().signal);
-      const identity = this.loadedCode[0]?.env.IDENTITY as
-        { plugins: { pluginId: string }[] } | undefined;
+      const identity = this.loadedCode[0]?.env.IDENTITY;
       const call = dynamicToolCallV1("call-1", {
         namespace: PROBE_CONSUMER_ID,
         toolName: "read_service",
