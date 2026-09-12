@@ -26,11 +26,10 @@ import { join, relative, resolve } from "node:path";
 
 import { build as esbuild } from "esbuild";
 import { convertV4MiniflareOptions, Miniflare } from "miniflare";
-
-import { bootedWithin, withOneMoreBoot } from "./boot.js";
 import ts from "typescript";
 
 import type { AppletDiagnostic } from "../lint/index.js";
+import { bootedWithin, withOneMoreBoot } from "./boot.js";
 import { APPLET_COMPATIBILITY_DATE } from "./runtime.js";
 import { SDK_PLUGIN_TYPES } from "./paths.js";
 
