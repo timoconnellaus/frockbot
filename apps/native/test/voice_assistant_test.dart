@@ -300,6 +300,22 @@ void main() {
     harness.controller.dispose();
   });
 
+  test('a socket that arrives after the call ended is abandoned', () async {
+    final deferred = Completer<VoiceSocket>();
+    final harness = Harness(deferred: deferred);
+    unawaited(harness.controller.start());
+    await settle();
+    await harness.controller.end(reason: 'lifecycle:paused');
+    expect(harness.socket.closed, isFalse);
+
+    deferred.complete(harness.socket);
+    await settle();
+    expect(harness.socket.closed, isTrue);
+    expect(harness.socket.closeCode, voiceCloseAbandonedV1);
+    expect(harness.socket.closeReason, 'abandoned-connect');
+    harness.controller.dispose();
+  });
+
   test('disposing a live call closes the socket as disposed', () async {
     final harness = Harness();
     await harness.live();
@@ -399,7 +415,7 @@ void main() {
         expect(harness.capture.active, isFalse, reason: 'still at the prompt');
 
         // The person gives up on the prompt and closes the footer.
-        await harness.controller.end();
+        await harness.controller.end(reason: 'end-button');
         harness.capture.permission!.complete();
         await settle();
 

@@ -214,7 +214,7 @@ void main() {
         }
         await settle();
         expect(callSocket.binaries.length, greaterThan(heard));
-        await call.end();
+        await call.end(reason: 'end-button');
         dictation.dispose();
         call.dispose();
       },

@@ -299,7 +299,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
 
   /// Ends capture, playback and the call, and takes the footer away. It
   /// navigates nowhere.
-  Future<void> _endVoice({String reason = 'ended'}) async {
+  Future<void> _endVoice({required String reason}) async {
     final session = voiceSession;
     if (session == null) return;
     await session.end(reason: reason);

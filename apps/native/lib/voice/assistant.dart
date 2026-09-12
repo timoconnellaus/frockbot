@@ -130,7 +130,10 @@ class AssistantSessionController extends ChangeNotifier {
     final socket = await _connect(generation);
     if (socket == null) return;
     if (generation != _generation || _disposed || !active) {
-      await socket.close();
+      await socket.close(
+        code: voiceCloseAbandonedV1,
+        reason: 'abandoned-connect',
+      );
       await _closeCapture();
       return;
     }
@@ -360,7 +363,7 @@ class AssistantSessionController extends ChangeNotifier {
   /// [reason] names the path that ended it — the End button, the app leaving
   /// the foreground — and travels in the socket's close frame, where the
   /// server logs it.
-  Future<void> end({String reason = 'ended'}) async {
+  Future<void> end({required String reason}) async {
     if (_phase == VoiceSessionPhase.idle || _phase == VoiceSessionPhase.ended) {
       return;
     }

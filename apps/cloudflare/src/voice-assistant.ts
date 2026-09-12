@@ -583,7 +583,6 @@ export class VoiceAssistant extends VoiceAgentBase<
             // sleeping wrapper, also catches an upgrade that never became a
             // session. Without it a call that loses its ears looks, from
             // every log, like a person who said nothing.
-            console.error("voice assistant stt failed", error.message);
             this.trace(connection, "stt-failed", { message: error.message });
             options.onFatalError?.(error);
           },
@@ -780,6 +779,9 @@ export class VoiceAssistant extends VoiceAgentBase<
       let settlement: { answer: string } | { failure: string } = {
         failure: "no settlement",
       };
+      let traced: Record<string, string | number> = {
+        failure: "no settlement",
+      };
       try {
         yield* runVoiceTurnV1(
           host,
@@ -793,30 +795,34 @@ export class VoiceAssistant extends VoiceAgentBase<
             signal: context.signal,
           },
           (result) => {
-            settlement =
-              result.outcome === "answered" || result.delegations > 0
-                ? { answer: result.answer }
-                : { failure: result.outcome };
+            const spoke =
+              result.outcome === "answered" || result.delegations > 0;
+            settlement = spoke
+              ? { answer: result.answer }
+              : { failure: result.outcome };
+            traced = spoke
+              ? { answerChars: result.answer.length }
+              : { failure: result.outcome };
           },
         );
       } catch (error) {
         settlement = {
           failure: error instanceof Error ? error.message : String(error),
         };
+        traced = {
+          failure: "exception",
+          error: error instanceof Error ? error.name : typeof error,
+        };
         throw error;
       } finally {
         // Durable before the generator returns, so the SDK's own history
         // write and the ledger never disagree about whether this turn ended.
         await ledger.settleTurn(turnId, settlement);
-        // Read through a fresh binding: the callbacks above assign
-        // `settlement`, which control flow cannot see.
-        const settled = settlement as { answer?: string; failure?: string };
-        self.trace(connection, "turn-settled", {
-          turn: turnId,
-          ...(settled.answer !== undefined
-            ? { answerChars: settled.answer.length }
-            : { failure: (settled.failure ?? "").slice(0, 200) }),
-        });
+        // The trace carries a length or a classification, never the
+        // settlement's own failure sentence: that sentence can be a
+        // provider's echo of the request, and the request carries what the
+        // person said.
+        self.trace(connection, "turn-settled", { turn: turnId, ...traced });
       }
     })();
   }

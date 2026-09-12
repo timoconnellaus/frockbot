@@ -40,6 +40,10 @@ const voiceCloseFailedV1 = 4001;
 /// The controller was disposed while the socket was still open.
 const voiceCloseDisposedV1 = 4002;
 
+/// The call ended while the socket was still connecting, so the socket that
+/// arrived belongs to nothing.
+const voiceCloseAbandonedV1 = 4003;
+
 /// A close reason may be at most 123 bytes on the wire.
 String voiceCloseReasonV1(String reason) {
   const limit = 120;
