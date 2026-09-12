@@ -42,6 +42,21 @@ function sse(events: unknown[]): ReadableStream<Uint8Array> {
   });
 }
 
+/**
+ * One emitted trace line, with the fields a test reads declared explicitly:
+ * an index signature of `unknown` collapses to `never` across the Workers RPC
+ * stub, which costs the array its element type at the call site.
+ */
+export interface VoiceTraceLine {
+  event: string;
+  connection?: string;
+  device?: string;
+  call?: string;
+  elapsedMs?: number;
+  code?: number;
+  reason?: string;
+}
+
 export class WorkerdVoiceAssistant extends VoiceAssistant {
   #sessions: ProbeSession[] = [];
   #synthesized: string[] = [];
@@ -49,7 +64,7 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
   #script: VoiceProbeScript = {};
   #dropDispatches = 0;
   #dispatched: string[] = [];
-  #traces: Record<string, unknown>[] = [];
+  #traces: VoiceTraceLine[] = [];
 
   /** A one-second window, so a cap can bite inside a test's patience. */
   protected override sttWindowSeconds(): number {
@@ -84,7 +99,7 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
     const capture = (...args: unknown[]) => {
       const payload = args[1];
       if (typeof payload === "string") {
-        this.#traces.push(JSON.parse(payload) as Record<string, unknown>);
+        this.#traces.push(JSON.parse(payload) as VoiceTraceLine);
       }
     };
     console.info = capture;
@@ -185,7 +200,7 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
 
   // -- probe RPCs -----------------------------------------------------------
 
-  async probeTraces(): Promise<Record<string, unknown>[]> {
+  async probeTraces(): Promise<VoiceTraceLine[]> {
     return [...this.#traces];
   }
 
