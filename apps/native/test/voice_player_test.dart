@@ -74,4 +74,55 @@ void main() {
     expect(player.level, greaterThan(0));
     await player.close();
   });
+
+  test('a device that will not set up is tried again, holding five seconds '
+      'of the newest audio', () async {
+    var setupFails = true;
+    var setups = 0;
+    var fedBytes = 0;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(_channel, (call) async {
+          if (call.method == 'setup') {
+            setups += 1;
+            if (setupFails) throw PlatformException(code: 'no-device');
+          }
+          if (call.method == 'feed') {
+            fedBytes +=
+                ((call.arguments as Map)['buffer'] as Uint8List).length;
+          }
+          return null;
+        });
+    final player = PcmVoicePlayer();
+    // The first setup fails, as it does on a platform without the plugin or a
+    // track another app is holding.
+    await player.configure(16000);
+    expect(setups, 1);
+    expect(player.level, 0);
+
+    // Ten seconds of reply arrives with nowhere to play it. Nothing is tried
+    // again inside the retry window, and only the newest five seconds is kept.
+    for (var second = 0; second < 10; second++) {
+      player.write(_loud(16000 * 2));
+    }
+    await Future<void>.delayed(Duration.zero);
+    expect(setups, 1, reason: 'not retried inside the window');
+
+    // Past the window the next chunk tries the device again, and this time it
+    // takes: the reply is heard rather than written off for the call.
+    setupFails = false;
+    await Future<void>.delayed(
+      PcmVoicePlayer.retryAfter + const Duration(milliseconds: 100),
+    );
+    player.write(_loud(16000 * 2));
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    expect(setups, 2);
+    expect(player.level, greaterThan(0), reason: 'playing again');
+    for (var i = 0; i < 400; i++) {
+      await _askForMore();
+    }
+    // Five seconds is all that survived the wait: the older six were dropped
+    // rather than queued, so what plays is the reply, not its beginning.
+    expect(fedBytes, 16000 * 2 * 5);
+    await player.close();
+  });
 }

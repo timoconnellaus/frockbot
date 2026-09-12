@@ -1205,11 +1205,17 @@ export class VoiceAssistant extends VoiceAgentBase<
           this.trace(connection, "delegation-held", {
             reason: "reply-in-flight",
           });
+          // A fresh row every hold, never `idempotent`: an idempotent insert
+          // matches on callback and payload alone, so a re-hold from inside
+          // this very wake-up would dedup onto the row being executed, which
+          // the scheduler then deletes — and the answer would never be read
+          // out. This method re-reads the record and returns unless it is
+          // still `settled`, so an extra row is a harmless no-op.
           await this.schedule<SpeakDelegationPayload>(
             Math.max(1, Math.ceil(this.replyDrainQuietMs() / 1000)),
             "speakSettledDelegation",
             { runId: delegation.runId },
-            { idempotent: true },
+            { idempotent: false },
           );
           return;
         }
