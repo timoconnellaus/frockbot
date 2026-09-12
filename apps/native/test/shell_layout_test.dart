@@ -876,6 +876,38 @@ void main() {
       expect(find.text('workspace_write'), findsOneWidget);
     });
 
+    testWidgets('the run view itemises what each Plugin spent', (tester) async {
+      final line = projectRuns([
+        {
+          'runId': 'run-a',
+          'input': 'forecast?',
+          'status': 'completed',
+          'admittedAt': '2026-09-05T00:00:00.000Z',
+          'events': [
+            {
+              'type': 'plugin/model-usage',
+              'pluginId': 'weather',
+              'requestId': 'req-1',
+              'model': 'glm-5.3-flash:cloud',
+              'inputTokens': 120,
+              'outputTokens': 40,
+              'costMicros': 1200,
+            },
+          ],
+        },
+      ]).last;
+
+      await tester.pumpWidget(host(RunView(line: line)));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Plugins'), findsOneWidget);
+      expect(find.text('weather'), findsOneWidget);
+      expect(
+        find.text('glm-5.3-flash:cloud · 120 in, 40 out · US\$0.0012'),
+        findsOneWidget,
+      );
+    });
+
     testWidgets('a reply that used no tools says so rather than nothing', (
       tester,
     ) async {

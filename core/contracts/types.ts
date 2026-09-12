@@ -465,6 +465,28 @@ export interface SessionEventMap {
     isError: boolean;
   };
   /**
+   * One model call a Plugin made through the `ai` grant, in this Turn
+   * (ADR 0026). The same accounting as `model/usage`, attributed to the
+   * Plugin, and costed at the Bot's rate when the deployment bills, so the
+   * Work view can itemise what each Plugin spent. Content never travels here.
+   */
+  "package/model-usage": {
+    turn: number;
+    step: number;
+    packageId: string;
+    requestId: string;
+    provider: string;
+    model: string;
+    inputTokens: number;
+    outputTokens: number;
+    cachedInputTokens?: number;
+    reasoningTokens?: number;
+    latencyMs: number;
+    estimated: boolean;
+    /** What the call cost the account, in micros; absent when unbilled. */
+    costMicros?: number;
+  };
+  /**
    * The Bot recorded the intent to author a Package, before the bundler ran.
    * Constitution, Durable effects: intent is recorded before the effect.
    */
@@ -1671,6 +1693,79 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
         throw new Error("session event.isError must be a boolean");
       }
       break;
+    case "package/model-usage": {
+      requireEventKeys(
+        event,
+        keys(
+          "turn",
+          "step",
+          "packageId",
+          "requestId",
+          "provider",
+          "model",
+          "inputTokens",
+          "outputTokens",
+          ...(Object.hasOwn(event, "cachedInputTokens")
+            ? ["cachedInputTokens"]
+            : []),
+          ...(Object.hasOwn(event, "reasoningTokens")
+            ? ["reasoningTokens"]
+            : []),
+          "latencyMs",
+          "estimated",
+          ...(Object.hasOwn(event, "costMicros") ? ["costMicros"] : []),
+        ),
+        "session event",
+      );
+      turn();
+      step();
+      eventString(event.packageId, "session event.packageId");
+      requestId();
+      eventString(event.provider, "session event.provider");
+      eventString(event.model, "session event.model");
+      const inputTokens = eventInteger(
+        event.inputTokens,
+        "session event.inputTokens",
+        0,
+      );
+      const outputTokens = eventInteger(
+        event.outputTokens,
+        "session event.outputTokens",
+        0,
+      );
+      if (event.cachedInputTokens !== undefined) {
+        const cached = eventInteger(
+          event.cachedInputTokens,
+          "session event.cachedInputTokens",
+          0,
+        );
+        if (cached > inputTokens) {
+          throw new Error(
+            "session event.cachedInputTokens cannot exceed inputTokens",
+          );
+        }
+      }
+      if (event.reasoningTokens !== undefined) {
+        const reasoning = eventInteger(
+          event.reasoningTokens,
+          "session event.reasoningTokens",
+          0,
+        );
+        if (reasoning > outputTokens) {
+          throw new Error(
+            "session event.reasoningTokens cannot exceed outputTokens",
+          );
+        }
+      }
+      eventInteger(event.latencyMs, "session event.latencyMs", 0);
+      if (typeof event.estimated !== "boolean") {
+        throw new Error("session event.estimated must be a boolean");
+      }
+      if (event.costMicros !== undefined) {
+        eventInteger(event.costMicros, "session event.costMicros", 0);
+      }
+      break;
+    }
     case "package/author-intent":
       requireEventKeys(
         event,

@@ -1569,6 +1569,87 @@ describe("client run protocol v1", () => {
   });
 });
 
+describe("a Plugin's model call in the run projection", () => {
+  const usage: SessionEvent = {
+    type: "package/model-usage",
+    seq: 4,
+    timestamp,
+    turn: 1,
+    step: 1,
+    packageId: "weather",
+    requestId: "req-1",
+    provider: "ollama-cloud",
+    model: "glm-5.3-flash:cloud",
+    inputTokens: 120,
+    outputTokens: 40,
+    latencyMs: 350,
+    estimated: false,
+    costMicros: 1_200,
+  };
+
+  test("projects the Plugin, the model, the tokens and the cost, and round-trips", () => {
+    const projected = projectClientRunV1(storedRun([usage]));
+    expect(projected.events).toEqual([
+      {
+        type: "plugin/model-usage",
+        pluginId: "weather",
+        requestId: "req-1",
+        model: "glm-5.3-flash:cloud",
+        inputTokens: 120,
+        outputTokens: 40,
+        costMicros: 1_200,
+      },
+    ]);
+    const page = createClientRunListV1([projected], { truncated: false });
+    expect(
+      decodeClientRunPageV1(structuredClone(page)).runs[0]?.events,
+    ).toEqual(projected.events);
+  });
+
+  test("an unbilled call carries no cost, and stands clear of the tool walk", () => {
+    const { costMicros: _unbilled, ...unbilled } = usage as SessionEvent & {
+      costMicros?: number;
+    };
+    const projected = projectClientRunV1(
+      storedRun([...toolEvents(1), unbilled as SessionEvent]),
+    );
+    const page = createClientRunListV1([projected], { truncated: false });
+    const events = decodeClientRunPageV1(structuredClone(page)).runs[0]?.events;
+    expect(events).toHaveLength(3);
+    expect(events?.[2]).toEqual({
+      type: "plugin/model-usage",
+      pluginId: "weather",
+      requestId: "req-1",
+      model: "glm-5.3-flash:cloud",
+      inputTokens: 120,
+      outputTokens: 40,
+    });
+  });
+
+  test("degrades a line with a negative count or a field it does not have", () => {
+    const page = createClientRunListV1(
+      [projectClientRunV1(storedRun([usage]))],
+      { truncated: false },
+    );
+    const negative = structuredClone(page) as {
+      runs: Array<{ events: Array<Record<string, unknown>> }>;
+    };
+    negative.runs[0]!.events[0]!.inputTokens = -1;
+    expect(decodeClientRunPageV1(negative).runs[0]).toMatchObject({
+      status: "failed",
+      events: [],
+    });
+    const extra = structuredClone(page) as {
+      runs: Array<{ events: Array<Record<string, unknown>> }>;
+    };
+    extra.runs[0]!.events[0]!.prompt = "the plugin's prompt";
+    expect(decodeClientRunPageV1(extra).runs[0]).toMatchObject({
+      status: "failed",
+      events: [],
+    });
+  });
+});
+
 describe("dispatched subagents in the run projection", () => {
   const dispatched: SessionEvent = {
     type: "task/dispatched",

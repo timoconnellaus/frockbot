@@ -113,6 +113,9 @@ export const hooks: PluginHooks = {
   simply absent. `ctx.settings.read()` and `ctx.capabilities.list()` are
   always there. Every call answers `{ status: "unavailable", reason }` rather
   than throwing when the authority refuses it.
+- `ctx.model.invoke(...)` (the `ai` grant) calls the Bot's own model at the
+  Bot's rates. Each call is itemised under your Plugin's name on the Turn's
+  Work view, tokens and cost, so a User can see what it spent.
 - `ctx.deadlineMs` is how long the call may run. A hook that overruns is
   skipped for the Turn; three failures in a row take the Plugin out of this
   Bot until a person turns it back on.

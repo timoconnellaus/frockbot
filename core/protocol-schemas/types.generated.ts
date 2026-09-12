@@ -245,6 +245,15 @@ export type RunEvent =
       description: string;
       model: string;
       background: boolean;
+    }
+  | {
+      type: "plugin/model-usage";
+      pluginId: string;
+      requestId: string;
+      model: string;
+      inputTokens: number;
+      outputTokens: number;
+      costMicros?: number;
     };
 export type RunOutcome =
   | { type: "completed"; text: string }

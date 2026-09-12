@@ -105,6 +105,36 @@ test("a degraded Computer sync records bounded exclusions and decodes legacy row
   );
 });
 
+test("a Plugin's model call is an exact durable session event", () => {
+  const usage = {
+    type: "package/model-usage",
+    turn: 2,
+    step: 1,
+    packageId: "weather",
+    requestId: "req-1",
+    provider: "ollama-cloud",
+    model: "glm-5.3-flash:cloud",
+    inputTokens: 120,
+    outputTokens: 40,
+    cachedInputTokens: 20,
+    latencyMs: 350,
+    estimated: false,
+    costMicros: 1200,
+    seq: 0,
+    timestamp,
+  } as const;
+  expect(decodeSessionEvent(usage)).toEqual(usage);
+  expect(() =>
+    decodeSessionEvent({ ...usage, cachedInputTokens: 121 }),
+  ).toThrow(/cachedInputTokens/);
+  expect(() => decodeSessionEvent({ ...usage, costMicros: -1 })).toThrow(
+    /costMicros/,
+  );
+  expect(() => decodeSessionEvent({ ...usage, prompt: "hi" })).toThrow(
+    /invalid fields/,
+  );
+});
+
 test("a compaction is an exact durable session event", () => {
   const intent = {
     type: "conversation/compaction-intent",

@@ -33,6 +33,11 @@ export interface ModelBilling {
   rates: Record<string, ModelRate>;
   botId: string;
   sessionId: string;
+  /**
+   * Who inside the Bot made the call, when it was not the Bot's own loop —
+   * a Plugin, named on the operation's description (ADR 0026).
+   */
+  attribution?: string;
 }
 export function decodeModelRates(
   raw: string | undefined,
@@ -158,7 +163,9 @@ export class BilledLlmRegistry extends LlmRegistry {
         maximumMicros: maximumCost * 2,
         botId: this.billing.botId,
         sessionId: this.billing.sessionId,
-        description: `${request.model}${hosted ? "" : " · own model account"}`,
+        description: `${request.model}${hosted ? "" : " · own model account"}${
+          this.billing.attribution ? ` · ${this.billing.attribution}` : ""
+        }`,
         pricingVersion: BILLING_PLAN.pricingVersion,
         ...(rate
           ? {
