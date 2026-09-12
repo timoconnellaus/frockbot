@@ -4,7 +4,7 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/activity/controller.dart';
 import 'package:frockbot_native/protocol/client_wire.generated.dart' as wire;
-import 'package:frockbot_native/shell/sidebar.dart' show unreadBadgeLabel;
+import 'package:frockbot_native/shell/focus.dart' show sidebarUnreadFor;
 
 import 'settings_test.dart' show SettingsApi;
 import 'widget_test.dart' show MemoryStore;
@@ -205,7 +205,7 @@ void main() {
       final marking = controller.mark('alpha', read: true);
       expect(controller.unread['alpha']!.count, 0);
       expect(controller.unread['alpha']!.unread, isFalse);
-      expect(unreadBadgeLabel(controller.unread['alpha']), isNull);
+      expect(sidebarUnreadFor(controller.unread['alpha'], focused: false).label, isNull);
 
       receipts.complete();
       await marking;
@@ -233,7 +233,7 @@ void main() {
         fromMessageId: 'run-1:send:0',
       );
       expect(controller.unread['alpha']!.manuallyUnread, isTrue);
-      expect(unreadBadgeLabel(controller.unread['alpha']), '•');
+      expect(sidebarUnreadFor(controller.unread['alpha'], focused: false).label, '•');
 
       receipts.complete();
       await marking;
@@ -254,7 +254,7 @@ void main() {
       await controller.mark('alpha', read: true);
       expect(controller.unread['alpha']!.count, 2);
       expect(controller.unread['alpha']!.unread, isTrue);
-      expect(unreadBadgeLabel(controller.unread['alpha']), '2');
+      expect(sidebarUnreadFor(controller.unread['alpha'], focused: false).label, '2');
       // What the shell puts in its SnackBar when the mark comes back refused.
       expect(controller.error, isNotNull);
       controller.dispose();
