@@ -5,7 +5,7 @@
 //
 //   POST /api/plugins/connect/connections                       start
 //   POST /api/plugins/connect/connections/:connectionId/revoke  disconnect
-//   GET  /api/connect/callback                                  the return page
+//   GET  /api/connect/callback[/android|/macos]                 the return page
 //
 // The start is a `connection/oauth` command in the User Durable Object, which
 // is where the sign-in link is minted and the Connection written; this route
@@ -25,7 +25,9 @@ import {
   CONNECT_PACKAGE_ID,
   connectToolkitForConnectionTypeV1,
 } from "./catalog.js";
-import { CONNECT_CALLBACK_PATH } from "./user.js";
+import { returnPageV1 } from "@frockbot/app/return-page";
+import { connectCallbackPathV1, connectReturnClientV1 } from "./user.js";
+import type { ConnectionReturnClientV1 } from "@frockbot/core/configuration";
 
 export interface ConnectGatewayHost {
   executeConnection(
@@ -58,21 +60,53 @@ function jsonError(status: number, error: string): Response {
   return Response.json({ error }, { status });
 }
 
-/** The page a person lands on after the app's sign-in. No session, no state. */
-export function connectCallbackPageV1(): Response {
-  const nonce = crypto.randomUUID();
-  return new Response(
-    `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Back to FrockBot · FrockBot</title><style nonce="${nonce}">body{font:17px system-ui;background:#faf8f4;color:#242323;max-width:38rem;margin:10vh auto;padding:24px}h1{font-size:1.6rem}</style><main><h1>Back to FrockBot</h1><p>You can close this page and return to FrockBot. It will show whether the app connected.</p></main></html>`,
-    {
-      status: 200,
-      headers: {
-        "Content-Type": "text/html; charset=utf-8",
-        "Cache-Control": "no-store",
-        "Referrer-Policy": "no-referrer",
-        "Content-Security-Policy": `default-src 'none'; style-src 'nonce-${nonce}'; frame-ancestors 'none'; base-uri 'none'`,
-      },
-    },
-  );
+/** The Mac app's custom scheme; the same one its sign-in return uses. */
+const MACOS_SCHEME = "frockbot";
+
+/**
+ * The page a person lands on after the app's sign-in. No session, no state:
+ * it says to go back, and the next settings read settles the Connection.
+ *
+ * Which way back depends on the page they were sent to. On Android the
+ * verified App Link has already opened the app by the time this renders, and
+ * the page is what the browser keeps. On a Mac no browser but Safari opens a
+ * Universal Link from a redirect, so the page hands over on the app's scheme
+ * with nothing from the query attached. A browser tab is told to return.
+ */
+export function connectCallbackPageV1(
+  client: ConnectionReturnClientV1 | undefined,
+  origin: string,
+): Response {
+  const heading = "Back to FrockBot";
+  const footnote =
+    "FrockBot shows whether the app connected. If it did not, connect it again from the Marketplace.";
+  if (client === "macos") {
+    const target = `${MACOS_SCHEME}://${new URL(origin).host}${connectCallbackPathV1("macos")}`;
+    return returnPageV1({
+      title: "Back to FrockBot",
+      heading,
+      lead: "Your browser is handing you back to the FrockBot app. Once it opens, you can close this tab.",
+      status: "Opening FrockBot",
+      action: { label: "Open FrockBot", href: target, id: "open" },
+      footnote,
+      script: `location.replace(${JSON.stringify(target)});`,
+    });
+  }
+  if (client === "android") {
+    return returnPageV1({
+      title: "Back to FrockBot",
+      heading,
+      lead: "Head back to the FrockBot app. You can close this page.",
+      footnote,
+    });
+  }
+  return returnPageV1({
+    title: "Back to FrockBot",
+    heading,
+    lead: "You can close this tab and return to FrockBot.",
+    action: { label: "Open FrockBot", href: `${origin}/` },
+    footnote,
+  });
 }
 
 export function createConnectBackendContribution(
@@ -81,12 +115,12 @@ export function createConnectBackendContribution(
   return {
     packageId: CONNECT_PACKAGE_ID,
     publicRoute(request, url) {
-      if (url.pathname !== CONNECT_CALLBACK_PATH)
-        return Promise.resolve(undefined);
+      const client = connectReturnClientV1(url.pathname);
+      if (client === null) return Promise.resolve(undefined);
       if (request.method !== "GET") {
         return Promise.resolve(jsonError(405, "method not allowed"));
       }
-      return Promise.resolve(connectCallbackPageV1());
+      return Promise.resolve(connectCallbackPageV1(client, url.origin));
     },
     async route(request, url, context) {
       const revoke = REVOKE.exec(url.pathname);
@@ -127,6 +161,9 @@ export function createConnectBackendContribution(
             packageId: CONNECT_PACKAGE_ID,
             action: "start",
             connectionTypeId: command.connectionTypeId,
+            // Which return page the client can come back through; the User
+            // Durable Object keeps only the path and names its own origin.
+            callbackUrl: `${url.origin}${connectCallbackPathV1(command.returnClient)}`,
           }),
         );
         const redirectUrl = receipt.oauth?.authorizationUrl;

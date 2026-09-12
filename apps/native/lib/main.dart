@@ -21,6 +21,7 @@ import 'client/bot_sessions.dart';
 import 'client/identity.dart';
 import 'client/plain_store.dart';
 import 'client/transport.dart';
+import 'connections/document.dart' show connectReturns, isConnectReturnV1;
 import 'orientation.dart';
 import 'shell/app_shell.dart';
 import 'theme/frock_theme.dart';
@@ -88,6 +89,12 @@ class _FrockBotAppState extends State<FrockBotApp> {
     final target = botLink(uri);
     if (target != null) {
       botLinks.value = target;
+      return;
+    }
+    // A hosted door closing: the Marketplace is still where the person left
+    // it, and it reads its frame again to show what they did there.
+    if (isConnectReturnV1(uri)) {
+      connectReturns.value += 1;
       return;
     }
     try {

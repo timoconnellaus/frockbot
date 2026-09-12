@@ -108,8 +108,10 @@ class FakeClient {
     this.authConfigs.push(config);
     return Promise.resolve(config);
   }
-  createConnectLink(input: { authConfigId: string }) {
+  callbacks: string[] = [];
+  createConnectLink(input: { authConfigId: string; callbackUrl: string }) {
     this.links.push(input.authConfigId);
+    this.callbacks.push(input.callbackUrl);
     const id = `ca_${++this.counter}`;
     this.accounts.set(id, {
       id,
@@ -167,7 +169,11 @@ function fixture(
   return { storage, settings, client, contribution, clock };
 }
 
-function start(commandId: string, connectionTypeId = "connect-gmail") {
+function start(
+  commandId: string,
+  connectionTypeId = "connect-gmail",
+  callbackUrl?: string,
+) {
   return {
     schemaVersion: 1 as const,
     type: "connection/oauth" as const,
@@ -176,6 +182,7 @@ function start(commandId: string, connectionTypeId = "connect-gmail") {
     packageId: "connect",
     action: "start" as const,
     connectionTypeId,
+    ...(callbackUrl === undefined ? {} : { callbackUrl }),
   };
 }
 
@@ -208,6 +215,42 @@ describe("starting a connected app", () => {
     const again = await contribution.executeConnection("tim", start("s1"));
     expect(again).toEqual(receipt);
     expect(client.links).toHaveLength(1);
+  });
+
+  test("the return page is the client's, on the deployment's own origin", async () => {
+    const { contribution, client } = fixture();
+    await contribution.executeConnection("tim", start("s1"));
+    await contribution.executeConnection(
+      "tim",
+      start(
+        "s2",
+        "connect-gmail",
+        "https://gateway.example/api/connect/callback/android",
+      ),
+    );
+    await contribution.executeConnection(
+      "tim",
+      start(
+        "s3",
+        "connect-gmail",
+        "https://gateway.example/api/connect/callback/macos",
+      ),
+    );
+    // A path that names no return page of ours falls back to the plain one.
+    await contribution.executeConnection(
+      "tim",
+      start(
+        "s4",
+        "connect-gmail",
+        "https://gateway.example/api/model-oauth/callback",
+      ),
+    );
+    expect(client.callbacks).toEqual([
+      "https://bot.frockbot.com/api/connect/callback",
+      "https://bot.frockbot.com/api/connect/callback/android",
+      "https://bot.frockbot.com/api/connect/callback/macos",
+      "https://bot.frockbot.com/api/connect/callback",
+    ]);
   });
 
   test("a second account of the same app gets its own namespace and label", async () => {

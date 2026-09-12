@@ -601,8 +601,12 @@ test("gateway serves public associations and exact returns without loading the a
   expect(macReturn.status).toBe(200);
   expect(macReturn.headers.get("content-type")).toContain("text/html");
   expect(macReturn.headers.get("cache-control")).toBe("no-store");
-  expect(macReturn.headers.get("content-security-policy")).toContain(
-    "script-src 'unsafe-inline'",
+  // The hand-off script runs under the page's own nonce, never inline-anything.
+  expect(macReturn.headers.get("content-security-policy")).toMatch(
+    /script-src 'nonce-[0-9a-f-]{36}'/,
+  );
+  expect(macReturn.headers.get("content-security-policy")).not.toContain(
+    "unsafe-inline",
   );
   const page = await macReturn.text();
   expect(page).toContain(

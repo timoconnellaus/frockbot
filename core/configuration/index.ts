@@ -203,7 +203,17 @@ export interface StartConnectionCommandV1 {
   connectionTypeId: string;
   alias?: string;
   nativeReturnNonce?: string;
+  /**
+   * The app the person is pressing from, when it is one a hosted flow can
+   * hand back to: the verified link on Android, the custom scheme on a Mac.
+   * A browser tab names nothing and is told to return by hand.
+   */
+  returnClient?: ConnectionReturnClientV1;
 }
+
+export type ConnectionReturnClientV1 = "android" | "macos";
+export const CONNECTION_RETURN_CLIENTS_V1: readonly ConnectionReturnClientV1[] =
+  ["android", "macos"];
 
 export interface RevokeConnectionCommandV1 {
   schemaVersion: 1;
@@ -947,7 +957,7 @@ export function decodeStartConnectionCommandV1(
     input,
     "Connection start command",
     ["schemaVersion", "type", "commandId", "connectionTypeId"],
-    ["alias", "nativeReturnNonce", "connectorId"],
+    ["alias", "nativeReturnNonce", "connectorId", "returnClient"],
   );
   if (value.schemaVersion !== 1 || value.type !== "connection/start") {
     throw new ConfigurationDecodeError("unsupported Connection start command");
@@ -957,6 +967,14 @@ export function decodeStartConnectionCommandV1(
     (typeof value.alias !== "string" || value.alias.length > 100)
   ) {
     throw new ConfigurationDecodeError("alias is invalid");
+  }
+  if (
+    value.returnClient !== undefined &&
+    !CONNECTION_RETURN_CLIENTS_V1.includes(
+      value.returnClient as ConnectionReturnClientV1,
+    )
+  ) {
+    throw new ConfigurationDecodeError("returnClient is invalid");
   }
   return {
     schemaVersion: 1,
@@ -980,6 +998,9 @@ export function decodeStartConnectionCommandV1(
             "nativeReturnNonce",
           ),
         }),
+    ...(value.returnClient === undefined
+      ? {}
+      : { returnClient: value.returnClient as ConnectionReturnClientV1 }),
   };
 }
 

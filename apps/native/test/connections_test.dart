@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/client/transport.dart';
@@ -17,6 +19,7 @@ Map<String, Object?> connectionsFrame({
   List<Map<String, Object?>> accounts = const [],
   bool mayConnect = true,
   int connected = 0,
+  bool twoApps = false,
 }) => {
   'schemaVersion': 1,
   'ownerId': 'tim',
@@ -67,6 +70,18 @@ Map<String, Object?> connectionsFrame({
       'description': 'Read, search, label and send email in a Gmail account.',
       'icon': 'gmail',
     },
+    if (twoApps)
+      {
+        'packageId': 'connect',
+        'connectionTypeId': 'connect-slack',
+        'displayName': 'Slack',
+        'kind': 'connector',
+        'authorization': 'grant',
+        'connected': 0,
+        'mayConnect': true,
+        'description': 'Read and post messages in Slack.',
+        'icon': 'slack',
+      },
   ],
 };
 
@@ -275,7 +290,79 @@ void main() {
     expect(sent.single['path'], '/api/plugins/connect/connections');
     expect(sent.single['type'], 'connection/start');
     expect(sent.single['connectionTypeId'], 'connect-gmail');
+    // The test platform is Android: the app names the verified link as the
+    // page it can come back through.
+    expect(sent.single['returnClient'], 'android');
     expect(opened.single.toString(), 'https://connect.example/go');
+  });
+
+  testWidgets(
+    'only the pressed Connect shows the wait; the rest stay as they are',
+    (tester) async {
+      final store = MemoryStore();
+      final settle = Completer<Object?>();
+      final api = SettingsApi(store, (path, body) async {
+        if (body == null) return connectionsFrame(twoApps: true);
+        return settle.future;
+      });
+      await tester.pumpWidget(page(api, store, openBrowser: (_) async => true));
+      await tester.pumpAndSettle();
+      expect(find.text('Connect'), findsNWidgets(2));
+      await tester.tap(find.text('Connect').first);
+      await tester.pump();
+      // Gmail's pill spins and keeps its colour; Slack's is untouched and
+      // still enabled — a press on it while Gmail settles does nothing.
+      expect(find.bySemanticsLabel('Connecting'), findsOneWidget);
+      final pills = tester.widgetList<FilledButton>(find.byType(FilledButton));
+      expect(pills.every((pill) => pill.onPressed != null), isTrue);
+      await tester.tap(find.text('Connect').last, warnIfMissed: false);
+      await tester.pump();
+      expect(find.bySemanticsLabel('Connecting'), findsOneWidget);
+      settle.complete({
+        'schemaVersion': 1,
+        'status': 'authorization-required',
+        'connectionId': 'conn-2',
+        'redirectUrl': 'https://connect.example/go',
+        'expiresAt': '2026-09-11T00:10:00.000Z',
+      });
+      await tester.pumpAndSettle();
+      expect(find.bySemanticsLabel('Connecting'), findsNothing);
+    },
+  );
+
+  testWidgets('a hosted door closing into the app reads the frame again', (
+    tester,
+  ) async {
+    final store = MemoryStore();
+    var reads = 0;
+    final api = SettingsApi(store, (path, body) async {
+      reads += 1;
+      return connectionsFrame();
+    });
+    await tester.pumpWidget(page(api, store));
+    await tester.pumpAndSettle();
+    expect(reads, 1);
+    connectReturns.value += 1;
+    await tester.pumpAndSettle();
+    expect(reads, 2);
+  });
+
+  test('a return link is the callback under our origin, and nothing else', () {
+    for (final link in [
+      'https://bot.frockbot.com/api/connect/callback/android?status=success',
+      'https://bot.frockbot.com/api/connect/callback?status=success',
+      'frockbot://bot.frockbot.com/api/connect/callback/macos',
+    ]) {
+      expect(isConnectReturnV1(Uri.parse(link)), isTrue, reason: link);
+    }
+    for (final link in [
+      'https://bot.frockbot.com/native/return/android?code=1&state=2',
+      'https://bot.frockbot.com/?bot=primary',
+      'https://bot.frockbot.com/api/connect/callbacks',
+      'http://bot.frockbot.com/api/connect/callback',
+    ]) {
+      expect(isConnectReturnV1(Uri.parse(link)), isFalse, reason: link);
+    }
   });
 
   testWidgets('a second account is offered once one is connected', (

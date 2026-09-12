@@ -721,6 +721,17 @@ describe("configuration DTO seam", () => {
       connectionTypeId: "gmail",
       alias: "Work",
     });
+    // The app names which return page it can come back through, from a
+    // closed list; a browser names none.
+    expect(
+      decodeStartConnectionCommandV1({
+        schemaVersion: 1,
+        type: "connection/start",
+        commandId: "connection-1",
+        connectionTypeId: "gmail",
+        returnClient: "android",
+      }).returnClient,
+    ).toBe("android");
     expect(
       decodeRevokeConnectionCommandV1({
         schemaVersion: 1,
@@ -733,6 +744,13 @@ describe("configuration DTO seam", () => {
         type: "connection/start",
         commandId: "connection-1",
         connectionTypeId: "gmail",
+      },
+      {
+        schemaVersion: 1,
+        type: "connection/start",
+        commandId: "connection-1",
+        connectionTypeId: "gmail",
+        returnClient: "https://evil.test/",
       },
       {
         schemaVersion: 1,
