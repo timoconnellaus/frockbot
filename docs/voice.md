@@ -271,9 +271,13 @@ account's.
 ### Tracing a call
 
 The object writes one `voice assistant {json}` line per step, readable in
-`wrangler tail` and Workers Logs: `connected`, `call-admitted`, `upstream`
-(`starting` | `awake` | `asleep`), `listening`, `utterance` (length and whether
-it reached the model, never the words), `turn`, `turn-settled` (the outcome,
+`wrangler tail` and Workers Logs: `connected`, `refused-identity` (the socket
+was not the account's and was closed with `4403`), `call-admitted`, `upstream`
+(`starting` | `awake` | `asleep`), `listening`, `listening-without-call` (the
+SDK started listening with no call record, so nothing was booked), `utterance`
+(length and whether it reached the model, never the words), `turn`,
+`turn-dropped` (a transcript arrived with no identity or no call record and was
+never given to the model — the reason says which), `turn-settled` (the outcome,
 the delegation count and the answer's length, or a failure classification —
 never a provider's error sentence), `refused` (with the code and sentence the
 client was sent), `stt-failed`, `call-ended` and `closed` (the client's code

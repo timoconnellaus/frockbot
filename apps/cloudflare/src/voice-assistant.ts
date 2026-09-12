@@ -677,7 +677,10 @@ export class VoiceAssistant extends VoiceAgentBase<
 
   override async onCallStart(connection: Connection): Promise<void> {
     const call = this.#calls.get(connection.id);
-    if (!call) return;
+    if (!call) {
+      this.trace(connection, "listening-without-call");
+      return;
+    }
     this.trace(connection, "listening");
     this.sendState(connection, call);
     // Answers that settled while nobody was listening are read out first.
@@ -756,7 +759,12 @@ export class VoiceAssistant extends VoiceAgentBase<
     const identity = this.identity(connection);
     const call = this.#calls.get(connection.id);
     const ledger = this.ledger();
-    if (!identity || !call) return "";
+    if (!identity || !call) {
+      this.trace(connection, "turn-dropped", {
+        reason: identity ? "no-call" : "no-identity",
+      });
+      return "";
+    }
     const admitted = await ledger.admitTurn({
       connectionId: connection.id,
       transcript,
