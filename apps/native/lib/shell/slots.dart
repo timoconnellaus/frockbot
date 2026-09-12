@@ -5,9 +5,10 @@
 /// feature: a registry a feature registers a builder into, and a [SlotRegion]
 /// the shell places where the region belongs.
 ///
-/// Three regions, because three is what the shell actually opens. Trust chrome
+/// Two regions, because two is what the shell actually opens. Trust chrome
 /// is never a slot: the transcript, the composer and the Bot list are the
-/// shell's own and no entry can displace them.
+/// shell's own and no entry can displace them. What one Bot holds belongs to
+/// that Bot's page, not to a region drawn over the list of every Bot.
 library;
 
 import 'package:flutter/widgets.dart';
@@ -19,10 +20,7 @@ enum ShellSlot {
   rightPanel('right-panel'),
 
   /// Full-window layers: dialogs, sheets, the search overlay.
-  overlays('overlays'),
-
-  /// Actions beside the conversation title.
-  headerActions('header-actions');
+  overlays('overlays');
 
   const ShellSlot(this.id);
 
@@ -43,7 +41,7 @@ class ShellSlots extends ChangeNotifier {
   /// Registers under [key], replacing any entry the same key already holds.
   ///
   /// [label] is what a region that shows one entry at a time calls this one.
-  /// A region that draws every entry — the header actions — ignores it.
+  /// A region that draws every entry ignores it.
   void register(
     ShellSlot slot,
     String key,
@@ -100,14 +98,8 @@ class ShellSlotScope extends InheritedNotifier<ShellSlots> {
 /// layout does not reserve space for a feature that is not there.
 class SlotRegion extends StatelessWidget {
   final ShellSlot slot;
-  final Axis direction;
   final double gap;
-  const SlotRegion(
-    this.slot, {
-    super.key,
-    this.direction = Axis.vertical,
-    this.gap = 12,
-  });
+  const SlotRegion(this.slot, {super.key, this.gap = 12});
 
   @override
   Widget build(BuildContext context) {
@@ -116,23 +108,12 @@ class SlotRegion extends StatelessWidget {
     if (children.isEmpty) return const SizedBox.shrink();
     final spaced = <Widget>[];
     for (final child in children) {
-      if (spaced.isNotEmpty) {
-        spaced.add(
-          direction == Axis.vertical
-              ? SizedBox(height: gap)
-              : SizedBox(width: gap),
-        );
-      }
+      if (spaced.isNotEmpty) spaced.add(SizedBox(height: gap));
       spaced.add(child);
     }
     return identified(
       ShellIds.slot(slot.id),
-      direction == Axis.vertical
-          ? Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: spaced,
-            )
-          : Row(mainAxisSize: MainAxisSize.min, children: spaced),
+      Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: spaced),
     );
   }
 }

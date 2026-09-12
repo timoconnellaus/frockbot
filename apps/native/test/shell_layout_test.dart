@@ -302,10 +302,10 @@ void main() {
       expect(find.text('Bot panel'), findsNothing);
     });
 
-    test('names its three regions', () {
+    test('names its two regions', () {
       expect(
         [for (final slot in ShellSlot.values) slot.id],
-        ['right-panel', 'overlays', 'header-actions'],
+        ['right-panel', 'overlays'],
       );
     });
   });

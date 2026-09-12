@@ -37,6 +37,11 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
   final ConnectionState connection;
   final VoidCallback? onApplets;
 
+  /// The doors this Bot's Packages declare, already built and identified.
+  /// They belong to the Bot, so they are drawn in the Bot's own bar rather
+  /// than over the list of every Bot.
+  final List<Widget> packageEntries;
+
   /// Shows or hides the panel beside the conversation. Null on a phone, where
   /// the panel's entries are pages and there is no column to hide.
   final VoidCallback? onTogglePanel;
@@ -56,6 +61,7 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
     this.onPlugins,
     this.connection = ConnectionState.initializing,
     this.onApplets,
+    this.packageEntries = const [],
     this.onTogglePanel,
     this.panelShown = false,
   });
@@ -140,6 +146,7 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
               ),
             ),
       actions: [
+        ...packageEntries,
         if (onApplets != null)
           identified(
             AppletIds.chip,
