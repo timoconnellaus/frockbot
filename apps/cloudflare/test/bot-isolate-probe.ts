@@ -184,6 +184,9 @@ const PROBE_PACKAGE_DESCRIPTOR = decodePluginDescriptorV1({
   contractVersion: 3,
   hooks: ["agent/tool-exposure"],
   grants: ["ai", "http", "schedule", "memory", "workspace"],
+  // The probe's `reach_network` tool proves egress is refused whatever the
+  // descriptor declares: `globalOutbound` is null and no egress stub exists yet.
+  network: { hosts: ["example.com"] },
   contextKeys: ["user", "bot", "session"],
 });
 
