@@ -71,7 +71,7 @@ class _BillingPageState extends State<BillingPage> with WidgetsBindingObserver {
         body: {
           'id': id,
           if (kind != 'portal') 'kind': kind,
-          if (cents != null) 'cents': cents,
+          'cents': ?cents,
         },
       );
       if (response is! Map || response['url'] is! String) {

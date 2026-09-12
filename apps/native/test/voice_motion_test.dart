@@ -87,15 +87,18 @@ class FailingClosePlayer extends FakeVoicePlayer {
 void main() {
   for (final width in [390.0, 1280.0]) {
     for (final brightness in Brightness.values) {
-      testWidgets('dictation dock in the real shell: $width $brightness',
-          (tester) async {
+      testWidgets('dictation dock in the real shell: $width $brightness', (
+        tester,
+      ) async {
         final semantics = tester.ensureSemantics();
         final harness = VoiceShellHarness();
         await harness.mount(tester, width: width, brightness: brightness);
         final safeBottom = width == 390 ? 34.0 : 0.0;
-        final conversation = find.byWidgetPredicate((widget) =>
-            widget is Semantics &&
-            widget.properties.identifier == ShellIds.conversation);
+        final conversation = find.byWidgetPredicate(
+          (widget) =>
+              widget is Semantics &&
+              widget.properties.identifier == ShellIds.conversation,
+        );
         final chat = tester.getRect(conversation);
         final dock = find.byKey(const ValueKey('dictation-dock'));
         final stop = find.byKey(const ValueKey('dictation-stop'));
@@ -111,6 +114,7 @@ void main() {
           expectUnclippedControl(tester, stop);
           expect(tester.takeException(), isNull);
         }
+
         harness.dictationCapture.permission = Completer<void>();
         unawaited(harness.dictation.start('voice-bot'));
         await tester.pump();
@@ -118,18 +122,23 @@ void main() {
           await tester.pump(const Duration(milliseconds: 16));
           checkFrame();
           expect(find.byType(TextField), findsNothing);
-          expect(find.descendant(of: dock, matching: find.byType(Text)),
-              findsNothing);
+          expect(
+            find.descendant(of: dock, matching: find.byType(Text)),
+            findsNothing,
+          );
         }
         final starting = tester.getSemantics(
-            find.bySemanticsLabel('Starting dictation'));
+          find.bySemanticsLabel('Starting dictation'),
+        );
         expect(starting.flagsCollection.isLiveRegion, isTrue);
         harness.dictationCapture.permission!.complete();
         await tester.pump();
-        harness.dictationSocket.deliver(
-            '{"schemaVersion":1,"type":"ready"}');
+        harness.dictationSocket.deliver('{"schemaVersion":1,"type":"ready"}');
         await tester.pump();
-        expect(find.bySemanticsLabel('Listening for dictation'), findsOneWidget);
+        expect(
+          find.bySemanticsLabel('Listening for dictation'),
+          findsOneWidget,
+        );
         harness.dictation.level.value = 0.6;
         await tester.pump(const Duration(milliseconds: 100));
         await tester.tap(stop);
@@ -138,9 +147,9 @@ void main() {
         expect(tester.widget<IconButton>(stop).onPressed, isNull);
         expect(find.bySemanticsLabel('Finishing dictation'), findsWidgets);
         harness.dictationSocket.deliver(
-            '{"schemaVersion":1,"type":"segment","text":"Keep this editable"}');
-        harness.dictationSocket.deliver(
-            '{"schemaVersion":1,"type":"final"}');
+          '{"schemaVersion":1,"type":"segment","text":"Keep this editable"}',
+        );
+        harness.dictationSocket.deliver('{"schemaVersion":1,"type":"final"}');
         await tester.runAsync(() => settle());
         await tester.pump();
         for (var frame = 0; frame < 14; frame++) {
@@ -152,14 +161,20 @@ void main() {
         expect(tester.getBottomLeft(find.byType(Composer)).dy, before);
         expect(dock, findsNothing);
         final field = find.byType(TextField);
-        expect(tester.widget<TextField>(field).controller!.text,
-            'Keep this editable');
+        expect(
+          tester.widget<TextField>(field).controller!.text,
+          'Keep this editable',
+        );
         await tester.enterText(field, 'Keep this editable, with a correction');
         await tester.pump();
-        expect(harness.sessions.open('voice-user', 'voice-bot').controller.draft,
-            'Keep this editable, with a correction');
-        expect(harness.sessions.open('voice-user', 'voice-bot').controller.pending,
-            isEmpty);
+        expect(
+          harness.sessions.open('voice-user', 'voice-bot').controller.draft,
+          'Keep this editable, with a correction',
+        );
+        expect(
+          harness.sessions.open('voice-user', 'voice-bot').controller.pending,
+          isEmpty,
+        );
 
         // Stop during entry, then enable reduced motion during the exit.
         await harness.dictation.start('voice-bot');
@@ -167,8 +182,7 @@ void main() {
         await tester.pump(const Duration(milliseconds: 64));
         checkFrame();
         unawaited(harness.dictation.stop());
-        harness.dictationSocket.deliver(
-            '{"schemaVersion":1,"type":"final"}');
+        harness.dictationSocket.deliver('{"schemaVersion":1,"type":"final"}');
         await tester.runAsync(() => settle());
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 32));
@@ -521,7 +535,11 @@ void main() {
         expect(stops, 1);
         await tester.tap(find.byTooltip('Finishing dictation'));
         expect(stops, 1);
-        editor.text = 'A dictated draft';
+        // One line at 320 in the test font, where every glyph is a full em:
+        // the height check below is about the dock leaving without a jump,
+        // and a draft that wraps would make the composer taller for its own
+        // reasons.
+        editor.text = 'Dictated';
         focus.requestFocus();
         await tester.pump();
         await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
@@ -531,7 +549,7 @@ void main() {
         update(() => phase = DictationState.done);
         await tester.pumpAndSettle();
         expect(tester.getSize(find.byType(Composer)).height, initial);
-        expect(editor.text, 'A dictated draft');
+        expect(editor.text, 'Dictated');
         expect(find.byTooltip('Stop dictation'), findsNothing);
         await tester.tap(find.byTooltip('Send'));
         expect(sends, 1);
@@ -600,76 +618,62 @@ void main() {
     timeout: const Timeout(Duration(seconds: 10)),
   );
 
-  test(
-    'a goodbye frame that cannot be sent still ends the call and frees the '
-    'microphone',
-    () async {
-      final capture = FakeVoiceCapture();
-      final socket = ClosedSinkSocket();
-      final controller = AssistantSessionController(
-        openSocket: () async => socket,
-        capture: capture,
-        player: FakeVoicePlayer(),
-      );
-      await controller.start();
-      await settle();
-      expect(capture.starts, 1);
+  test('a goodbye frame that cannot be sent still ends the call and frees the '
+      'microphone', () async {
+    final capture = FakeVoiceCapture();
+    final socket = ClosedSinkSocket();
+    final controller = AssistantSessionController(
+      openSocket: () async => socket,
+      capture: capture,
+      player: FakeVoicePlayer(),
+    );
+    await controller.start();
+    await settle();
+    expect(capture.starts, 1);
 
-      await controller.end(reason: 'lifecycle:paused');
-      expect(controller.phase, VoiceSessionPhase.ended);
-      expect(controller.active, isFalse);
-      expect(
-        voiceControlStateV1(
-          footerOpen: false,
-          sessionActive: controller.active,
-        ),
-        VoiceControlState.idle,
-      );
-      expect(capture.stops, 1);
-      expect(socket.closed, isTrue);
-      expect(socket.closeReason, 'lifecycle:paused');
-      controller.dispose();
-      await settle();
-    },
-    timeout: const Timeout(Duration(seconds: 10)),
-  );
+    await controller.end(reason: 'lifecycle:paused');
+    expect(controller.phase, VoiceSessionPhase.ended);
+    expect(controller.active, isFalse);
+    expect(
+      voiceControlStateV1(footerOpen: false, sessionActive: controller.active),
+      VoiceControlState.idle,
+    );
+    expect(capture.stops, 1);
+    expect(socket.closed, isTrue);
+    expect(socket.closeReason, 'lifecycle:paused');
+    controller.dispose();
+    await settle();
+  }, timeout: const Timeout(Duration(seconds: 10)));
 
-  test(
-    'an end whose every device step fails still frees the control and the '
-    'microphone',
-    () async {
-      final capture = HostileCapture()..stopFailure = StateError('recorder');
-      final socket = HostileSocket();
-      final player = FailingClosePlayer();
-      final controller = AssistantSessionController(
-        openSocket: () async => socket,
-        capture: capture,
-        player: player,
-      );
-      await controller.start();
-      await settle();
-      expect(capture.starts, 1);
+  test('an end whose every device step fails still frees the control and the '
+      'microphone', () async {
+    final capture = HostileCapture()..stopFailure = StateError('recorder');
+    final socket = HostileSocket();
+    final player = FailingClosePlayer();
+    final controller = AssistantSessionController(
+      openSocket: () async => socket,
+      capture: capture,
+      player: player,
+    );
+    await controller.start();
+    await settle();
+    expect(capture.starts, 1);
 
-      await controller.end(reason: 'end-button');
+    await controller.end(reason: 'end-button');
 
-      expect(controller.phase, VoiceSessionPhase.ended);
-      expect(controller.active, isFalse);
-      expect(
-        voiceControlStateV1(
-          footerOpen: false,
-          sessionActive: controller.active,
-        ),
-        VoiceControlState.idle,
-      );
-      expect(capture.stopAttempts, greaterThan(0));
-      expect(player.closed, isTrue);
-      expect(socket.closed, isTrue);
-      expect(socket.closeReason, 'end-button');
-      controller.dispose();
-      await settle();
-    },
-    timeout: const Timeout(Duration(seconds: 10)),
-  );
+    expect(controller.phase, VoiceSessionPhase.ended);
+    expect(controller.active, isFalse);
+    expect(
+      voiceControlStateV1(footerOpen: false, sessionActive: controller.active),
+      VoiceControlState.idle,
+    );
+    expect(capture.stopAttempts, greaterThan(0));
+    expect(player.closed, isTrue);
+    expect(socket.closed, isTrue);
+    expect(socket.closeReason, 'end-button');
+    controller.dispose();
+    await settle();
+  }, timeout: const Timeout(Duration(seconds: 10)));
 
   testWidgets(
     'a draft that arrived since the last frame still sends on Cmd+Enter',

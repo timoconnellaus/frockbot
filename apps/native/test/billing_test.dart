@@ -142,7 +142,7 @@ void main() {
   ) async {
     final api = SettingsApi(
       MemoryStore(),
-      (_, __) async => {
+      (_, _) async => {
         'paymentsAvailable': false,
         'canSpend': false,
         'subscription': null,
