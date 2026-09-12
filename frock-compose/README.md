@@ -1,8 +1,8 @@
 # `@frockbot/frock-compose`
 
 The Plugin worker host. Untrusted code — Bot-authored and third-party — runs in
-a loaded Worker with `globalOutbound` disabled and only its named grants; this
-module is what loads it.
+a loaded Worker with only its named grants and no network beyond what the User
+approved; this module is what loads it.
 
 It mounts every Plugin a Composition generation names into one Dynamic Worker
 per User, behind a generated index (`plugin-worker-wrapper.ts`) that imports

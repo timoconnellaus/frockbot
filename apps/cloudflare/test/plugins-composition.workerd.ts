@@ -247,6 +247,256 @@ async function storeRoundtrip(
   ) as Record<string, unknown>;
 }
 
+/**
+ * A Plugin that pushes on the storage grant's declared bound: it stores a
+ * value whose UTF-16 length is inside 64 KiB but whose UTF-8 encoding is not,
+ * then one that fits, so a Turn shows which of the two the bound is measured
+ * in.
+ */
+const BOUND_PLUGIN_ID = "probe-bound";
+const BOUND_PLUGIN_SOURCE = `
+export const tools = [
+  { name: "bound_probe", description: "Pushes on the value bound", inputSchema: { type: "object" }, idempotent: false },
+];
+export async function execute(tool, input, ctx) {
+  if (tool !== "bound_probe") return "unknown tool";
+  // 40,000 UTF-16 units, ~120,000 bytes once encoded.
+  const oversized = await ctx.storage.put({ key: "big", value: "\u5B57".repeat(40000) });
+  const readBack = await ctx.storage.get({ key: "big" });
+  // 20,000 UTF-16 units, ~60,000 bytes: inside the bound either way.
+  const fits = await ctx.storage.put({ key: "fits", value: "\u5B57".repeat(20000) });
+  const listed = await ctx.storage.list({});
+  return JSON.stringify({
+    put: oversized.status,
+    oversized: oversized.status,
+    oversizedReason: oversized.status === "unavailable" ? oversized.reason : null,
+    readBack: readBack.status === "available" ? readBack.value : readBack.status,
+    fits: fits.status,
+    keys: listed.status === "available" ? listed.entries.map((entry) => entry.key) : listed,
+  });
+}
+`;
+const BOUND_PLUGIN_DESCRIPTOR = decodePluginDescriptorV1({
+  id: BOUND_PLUGIN_ID,
+  displayName: "Probe bound",
+  version: "0.0.1",
+  contractVersion: 4,
+  tools: [
+    {
+      name: "bound_probe",
+      description: "Pushes on the value bound",
+      inputSchema: { type: "object" },
+    },
+  ],
+  hooks: [],
+  grants: ["storage"],
+  contextKeys: ["user", "bot", "session"],
+});
+
+/** A Plugin that declared no grants at all, and so holds no storage surface. */
+const UNGRANTED_PLUGIN_ID = "probe-ungranted";
+const UNGRANTED_PLUGIN_SOURCE = `
+export const tools = [
+  { name: "grant_probe", description: "Reports the surfaces it holds", inputSchema: { type: "object" }, idempotent: true },
+];
+export async function execute(tool, input, ctx) {
+  if (tool !== "grant_probe") return "unknown tool";
+  let reached = "absent";
+  try {
+    const outcome = await ctx.storage.put({ key: "sneak", value: 1 });
+    reached = outcome.status;
+  } catch (error) {
+    reached = "threw:" + String(error && error.name);
+  }
+  return JSON.stringify({
+    put: "n/a",
+    storage: typeof ctx.storage,
+    reached,
+  });
+}
+`;
+const UNGRANTED_PLUGIN_DESCRIPTOR = decodePluginDescriptorV1({
+  id: UNGRANTED_PLUGIN_ID,
+  displayName: "Probe ungranted",
+  version: "0.0.1",
+  contractVersion: 4,
+  tools: [
+    {
+      name: "grant_probe",
+      description: "Reports the surfaces it holds",
+      inputSchema: { type: "object" },
+    },
+  ],
+  hooks: [],
+  grants: [],
+  contextKeys: ["user", "bot", "session"],
+});
+
+/**
+ * A Plugin the User approved for open network access: whatever host it
+ * reaches, the egress loopback minted for the worker admits.
+ */
+const OPEN_PLUGIN_ID = "probe-open";
+const OPEN_PLUGIN_SOURCE = `
+export const tools = [
+  { name: "open_probe", description: "Reaches an arbitrary host", inputSchema: { type: "object" }, idempotent: false },
+];
+export async function execute(tool, input, ctx) {
+  if (tool !== "open_probe") return "unknown tool";
+  let put = "n/a";
+  try {
+    const response = await fetch("https://nowhere.example/probe");
+    return JSON.stringify({ put, admitted: true, status: response.status });
+  } catch (error) {
+    return JSON.stringify({ put, admitted: false, reason: String(error && error.message) });
+  }
+}
+`;
+const OPEN_PLUGIN_DESCRIPTOR = decodePluginDescriptorV1({
+  id: OPEN_PLUGIN_ID,
+  displayName: "Probe open",
+  version: "0.0.1",
+  contractVersion: 4,
+  tools: [
+    {
+      name: "open_probe",
+      description: "Reaches an arbitrary host",
+      inputSchema: { type: "object" },
+    },
+  ],
+  hooks: [],
+  grants: ["http"],
+  network: { open: true },
+  contextKeys: ["user", "bot", "session"],
+});
+
+/**
+ * Seeds each Plugin's artifact the way a build would store it and pins one
+ * generation holding the lot, so the Bot's next Turn mounts them.
+ */
+async function pinGeneration(
+  userId: string,
+  plugins: Array<{ id: string; source: string; descriptor: unknown }>,
+): Promise<void> {
+  const bootstrap = (
+    await user(userId).readComposition({ schemaVersion: 1, userId })
+  ).current;
+  const createdAt = "2026-09-12T01:00:00.000Z";
+  const members: CompositionMemberV1[] = [];
+  for (const plugin of plugins) {
+    const contentHash = await sha256Hex(plugin.source);
+    await env.APPLICATION_ARTIFACTS.put(
+      `packages/${contentHash}.mjs`,
+      plugin.source,
+    );
+    members.push({
+      packageId: plugin.id,
+      version: "0.0.1",
+      descriptor: plugin.descriptor as CompositionMemberV1["descriptor"],
+      provenance: {
+        kind: "bot",
+        packageId: plugin.id,
+        version: "0.0.1",
+        botId: "bot-1",
+        sessionId: `${userId}:bot-1`,
+        turnId: "run-0",
+        runId: "run-0",
+        authoredAt: createdAt,
+      },
+      artifact: {
+        contentHash,
+        size: plugin.source.length,
+        mediaType: "application/javascript",
+        bundlerVersion: "probe-seed",
+      },
+    });
+  }
+  const artifactSetHash = await compositionArtifactSetHashV1(members);
+  await user(userId).proposeComposition({
+    schemaVersion: 1,
+    userId,
+    generation: {
+      schemaVersion: 1,
+      generationId: compositionGenerationIdV1(createdAt, artifactSetHash),
+      artifactSetHash,
+      parentGenerationId: bootstrap.generationId,
+      createdAt,
+      origin: {
+        kind: "bot-authored",
+        runId: "run-0",
+        sessionId: `${userId}:bot-1`,
+        turnId: "run-0",
+      },
+      members,
+      status: "pending",
+    },
+    pin: true,
+    expectedCurrentGenerationId: bootstrap.generationId,
+  });
+}
+
+/** Runs one Plugin tool as a real Turn and returns the JSON it answered. */
+async function callPluginTool(
+  identity: { userId: string; botId: string },
+  runId: string,
+  namespace: string,
+  toolName: string,
+  input: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  await bot(identity).run({
+    schemaVersion: 1,
+    ...identity,
+    command: {
+      runId,
+      sessionId: `${identity.userId}:${identity.botId}`,
+      acceptedAt: new Date().toISOString(),
+      text: toolCallTriggerPrompt([
+        "call_dynamic_tool",
+        dynamicToolInputV1({ namespace, toolName, input }),
+      ]),
+    },
+  });
+
+  const runs = await runInDurableObject(
+    env.BOT_STATES.getByName(`${identity.userId}:${identity.botId}`),
+    (_instance, state) =>
+      hydratedStoredRunsV1<{
+        runId: string;
+        sessionId: string;
+        events: Array<{ type: string; content?: string; name?: string }>;
+      }>(state.storage),
+  );
+  const run = runs.find((candidate) => candidate.runId === runId);
+  const result = run?.events.find(
+    (event) =>
+      event.type === "tool/result" &&
+      typeof event.content === "string" &&
+      event.content.includes('"put"'),
+  );
+  expect(
+    result,
+    JSON.stringify(run?.events.map((event) => event.type)),
+  ).toBeDefined();
+  const raw = (result as { content?: string }).content ?? "";
+  const outer = JSON.parse(raw) as { content?: string };
+  return JSON.parse(
+    typeof outer.content === "string" ? outer.content : raw,
+  ) as Record<string, unknown>;
+}
+
+/** What any Plugin storage key holds in a Bot's own Durable Object. */
+async function storedValue(
+  identity: { userId: string; botId: string },
+  pluginId: string,
+  key: string,
+): Promise<unknown> {
+  return runInDurableObject(
+    env.BOT_STATES.getByName(`${identity.userId}:${identity.botId}`),
+    (_instance, state) =>
+      state.storage.get(`plugin:storage:${pluginId}:${key}`),
+  );
+}
+
 /** What one Plugin's storage key holds in a Bot's own Durable Object. */
 async function storedGreeting(identity: {
   userId: string;
@@ -680,5 +930,95 @@ describe("the User-owned Composition", () => {
     });
     expect(await storedGreeting(second)).toEqual({ word: "world" });
     expect(await storedGreeting(identity)).toEqual({ word: "hello" });
+  });
+
+  test("the storage value bound is measured in encoded bytes, and an over-bound value is refused rather than stored", async () => {
+    const userId = `user-${crypto.randomUUID()}`;
+    const identity = { userId, botId: "bot-1" };
+    await provisionBot(identity);
+    await turn(identity, "run-0");
+    await pinGeneration(userId, [
+      {
+        id: BOUND_PLUGIN_ID,
+        source: BOUND_PLUGIN_SOURCE,
+        descriptor: BOUND_PLUGIN_DESCRIPTOR,
+      },
+    ]);
+
+    const seen = await callPluginTool(
+      identity,
+      "run-1",
+      BOUND_PLUGIN_ID,
+      "bound_probe",
+      {},
+    );
+
+    // 40,000 CJK characters are inside 64 Ki UTF-16 units and outside 64 KiB
+    // encoded: the bound the Plugin was told about is the encoded one.
+    expect(seen).toMatchObject({
+      oversized: "unavailable",
+      readBack: null,
+      fits: "available",
+      keys: ["fits"],
+    });
+    expect(await storedValue(identity, BOUND_PLUGIN_ID, "big")).toBeUndefined();
+    expect(await storedValue(identity, BOUND_PLUGIN_ID, "fits")).toEqual(
+      "\u5B57".repeat(20000),
+    );
+  });
+
+  test("a plugin that declared no storage grant holds no storage surface at all", async () => {
+    const userId = `user-${crypto.randomUUID()}`;
+    const identity = { userId, botId: "bot-1" };
+    await provisionBot(identity);
+    await turn(identity, "run-0");
+    await pinGeneration(userId, [
+      {
+        id: UNGRANTED_PLUGIN_ID,
+        source: UNGRANTED_PLUGIN_SOURCE,
+        descriptor: UNGRANTED_PLUGIN_DESCRIPTOR,
+      },
+    ]);
+
+    const seen = await callPluginTool(
+      identity,
+      "run-1",
+      UNGRANTED_PLUGIN_ID,
+      "grant_probe",
+      {},
+    );
+
+    expect(seen).toMatchObject({ storage: "undefined" });
+    expect(String(seen.reached)).toMatch(/^threw:/);
+    expect(
+      await storedValue(identity, UNGRANTED_PLUGIN_ID, "sneak"),
+    ).toBeUndefined();
+  });
+
+  test("a plugin the User approved for open access reaches any host through the egress loopback", async () => {
+    const userId = `user-${crypto.randomUUID()}`;
+    const identity = { userId, botId: "bot-1" };
+    await provisionBot(identity);
+    await turn(identity, "run-0");
+    await pinGeneration(userId, [
+      {
+        id: OPEN_PLUGIN_ID,
+        source: OPEN_PLUGIN_SOURCE,
+        descriptor: OPEN_PLUGIN_DESCRIPTOR,
+      },
+    ]);
+
+    const seen = await callPluginTool(
+      identity,
+      "run-1",
+      OPEN_PLUGIN_ID,
+      "open_probe",
+      {},
+    );
+
+    // The host is declared by nobody; open access admits it anyway. The
+    // suite's outbound stands in for the outside and answers 403, which only
+    // a request the loopback let out can see — a refusal throws instead.
+    expect(seen).toMatchObject({ admitted: true, status: 403 });
   });
 });

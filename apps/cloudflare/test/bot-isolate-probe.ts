@@ -92,6 +92,7 @@ export const tools = [
   { name: "env_keys", description: "Reports the bindings this isolate can see", inputSchema: {}, idempotent: true },
   { name: "leak_probe", description: "Reports whether host state leaked in", inputSchema: {}, idempotent: true },
   { name: "reach_network", description: "Attempts egress", inputSchema: {}, idempotent: false },
+  { name: "reach_declared", description: "Reaches a declared host", inputSchema: {}, idempotent: false },
   { name: "call_model", description: "Calls the model binding", inputSchema: {}, idempotent: false },
   { name: "list_capabilities", description: "Lists the Bot's authority", inputSchema: {}, idempotent: true },
   { name: "connection_lease", description: "Requests a lease for one Connection", inputSchema: {}, idempotent: true },
@@ -131,6 +132,12 @@ export async function execute(tool, input, ctx) {
       // A host no enabled plugin declared: the egress loopback refuses it.
       await fetch("https://undeclared.invalid/");
       return "egress-allowed";
+    case "reach_declared": {
+      // A host this Plugin's descriptor declared: the loopback admits it and
+      // the request reaches the outside, which answers with a status.
+      const response = await fetch("https://example.com/probe");
+      return JSON.stringify({ status: response.status });
+    }
     case "list_capabilities":
       return JSON.stringify(await ctx.capabilities.list());
     case "connection_lease":
@@ -229,6 +236,7 @@ function probePackageDescriptor(hooks: string[]) {
       "env_keys",
       "leak_probe",
       "reach_network",
+      "reach_declared",
       "call_model",
       "list_capabilities",
       "connection_lease",

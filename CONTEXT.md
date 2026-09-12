@@ -147,7 +147,7 @@ The package a Bot writes an Applet against on the Computer: the server base clas
 _Avoid_: Framework, runtime
 
 **Isolate**:
-A Dynamic Worker loaded to execute code that was not in the deploy — the User's Plugin worker, an Applet's server — with `globalOutbound` disabled and only the loopback bindings its User's authority grants, masked per Bot per Turn.
+A Dynamic Worker loaded to execute code that was not in the deploy — the User's Plugin worker, an Applet's server — with no ambient network and only the loopback bindings its User's authority grants, masked per Bot per Turn.
 _Avoid_: Sandbox, container, worker
 
 **Keyring**:

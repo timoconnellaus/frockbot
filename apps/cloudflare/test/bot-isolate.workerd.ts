@@ -265,6 +265,25 @@ describe("a Bot Package in a loaded Dynamic Worker", () => {
     expect(result.content).toMatch(/not declared by any enabled plugin/i);
   });
 
+  test("fetch() to a host an enabled plugin declared is admitted by the egress loopback", async () => {
+    const stub = probe(`egress-allowed-${crypto.randomUUID()}`);
+    const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);
+
+    const result = await stub.callTool({
+      userId: "user-1",
+      botId: "bot-1",
+      artifact,
+      tool: "reach_declared",
+    });
+
+    // `example.com` is in the probe descriptor's declared hosts, so the
+    // loopback lets the request out; the suite's outbound stands in for the
+    // outside and answers 403, which only a request that left can see. A
+    // refusal would have thrown instead.
+    expect(result.isError).toBe(false);
+    expect(JSON.parse(result.content)).toEqual({ status: 403 });
+  });
+
   test("the isolate sees exactly CAPABILITIES and IDENTITY", async () => {
     const stub = probe(`bindings-${crypto.randomUUID()}`);
     const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);

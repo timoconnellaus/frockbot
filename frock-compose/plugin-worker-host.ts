@@ -3,8 +3,10 @@
 // declares.
 //
 // First-party code is ordinary imports in the kernel isolate; everything else
-// runs in one loaded Worker per User with `globalOutbound` disabled and only
-// the loopback bindings the Bot's authority grants, and this is what loads it.
+// runs in one loaded Worker per User with only the loopback bindings the Bot's
+// authority grants — `globalOutbound` among them, bound to the egress loopback
+// when the enabled Plugins declared network and null when they did not — and
+// this is what loads it.
 //
 // Two loader behaviours are load-bearing here: `.get()` never throws, so mount
 // and `health()` are a single guarded phase; and a reused loader id silently
