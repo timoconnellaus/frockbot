@@ -1012,6 +1012,113 @@ describe("the voice session object", () => {
     expect(settled.attempts).toBe(3);
   });
 
+  // The `agents` 0.23 upgrade moves scheduled work into a new `cf_agents_jobs`
+  // queue on a Durable Object's first wake and drops the legacy table, so a
+  // schedule can be stranded — by that one-way migration, or by a rollback
+  // across it. What makes that safe is that the schedule is disposable:
+  // `onStart` re-books every pending delegation from the ledger. This drives
+  // that against the real scheduler — the queue is emptied under the object's
+  // feet, and nothing below runs the look-up by hand.
+  test("a delegation whose scheduled check is lost is re-booked on the next call and settled by the alarm", async () => {
+    const suffix = crypto.randomUUID();
+    const identity = {
+      userId: `voice-reschedule-${suffix}`,
+      botId: `voice-bot-${suffix}`,
+    };
+    await provisionBot(identity);
+    const stub = assistant(identity.userId);
+    await stub.probeSetScript({ delegateWord: "plan", botId: identity.botId });
+    const opened = await open(identity.userId);
+    await startCall(opened);
+    await opened.waitFor(state("awake"), "awake");
+    expect(await stub.probeUtterance("please plan my week")).toBe(true);
+    await opened.waitFor(
+      (f) =>
+        f.type === "transcript_end" && String(f.text).includes("Done: Asked"),
+      "delegation acknowledged aloud",
+    );
+    const [delegation] = Object.values(
+      await stub.probeStorage("voice:delegation:"),
+    ) as VoiceDelegationRecordV1[];
+    expect(delegation!.state).toBe("admitted");
+    opened.socket.close();
+    await settle(100);
+
+    // Every trace of the scheduled look-up goes: the queue rows the SDK keeps
+    // and the alarm that would run them.
+    const emptied = await runInDurableObject(
+      stub,
+      async (_instance, doState) => {
+        const before = [
+          ...doState.storage.sql.exec<{ fn: string }>(
+            "SELECT fn FROM cf_agents_jobs",
+          ),
+        ].map((row) => row.fn);
+        doState.storage.sql.exec("DELETE FROM cf_agents_jobs");
+        await doState.storage.deleteAlarm();
+        return before;
+      },
+    );
+    console.log("[evidence] scheduled work deleted:", JSON.stringify(emptied));
+    expect(emptied).toContain("checkDelegation");
+    await evictDurableObject(stub);
+
+    // The person calls back. The call is the wake-up, and `onStart` books the
+    // look-up again from the ledger alone.
+    const next = await open(identity.userId);
+    await startCall(next);
+    const rebooked = await eventually(
+      () =>
+        runInDurableObject(stub, (_instance, doState) =>
+          [
+            ...doState.storage.sql.exec<{ fn: string; payload: string | null }>(
+              "SELECT fn, payload FROM cf_agents_jobs",
+            ),
+          ].map((row) => ({ callback: row.fn, payload: row.payload ?? "" })),
+        ),
+      (rows) =>
+        rows.some(
+          (row) =>
+            row.callback === "checkDelegation" &&
+            row.payload.includes(delegation!.runId),
+        ),
+      "the look-up to be booked again on wake",
+      10_000,
+    );
+    console.log("[evidence] re-booked on wake:", JSON.stringify(rebooked));
+
+    // Nothing here runs the look-up: the delegation settles only if the 0.23
+    // scheduler fires the named callback with its payload, and the answer is
+    // then read out on the live call.
+    await next.waitFor(
+      (f) =>
+        f.type === "transcript_end" && String(f.text).startsWith("Workerd Bot"),
+      "answer read out after the scheduled look-up",
+      60_000,
+    );
+    const settled = await eventually(
+      async () =>
+        (
+          Object.values(
+            await stub.probeStorage("voice:delegation:"),
+          ) as VoiceDelegationRecordV1[]
+        )[0]!,
+      (record) => record.state === "spoken",
+      "the delegation to be marked spoken",
+      10_000,
+    );
+    console.log(
+      "[evidence] settled and spoken with no hand-run look-up:",
+      JSON.stringify({
+        state: settled.state,
+        attempts: settled.attempts,
+        answer: settled.answer,
+      }),
+    );
+    expect(typeof settled.answer).toBe("string");
+    next.socket.close();
+  });
+
   test("a delegation no Bot ever accepts is settled as a failure the person hears", async () => {
     const suffix = crypto.randomUUID();
     const identity = {
