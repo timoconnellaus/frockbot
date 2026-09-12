@@ -158,6 +158,24 @@ describe("a Plugin's section", () => {
     );
   });
 
+  test("an empty string is a refusal, because no node the page draws holds one", () => {
+    const failure = (root: unknown) =>
+      pluginSectionV1(source, rendered(root)).failure;
+    expect(failure({ type: "text", text: "" })).toMatch(/is empty/);
+    expect(
+      failure({
+        type: "group",
+        orientation: "column",
+        title: "",
+        children: [],
+      }),
+    ).toMatch(/is empty/);
+    expect(failure({ type: "action", actionId: "refresh", label: "" })).toMatch(
+      /is empty/,
+    );
+    expect(failure({ type: "list", empty: "", rows: [] })).toMatch(/is empty/);
+  });
+
   test("text is bounded, not refused", () => {
     const section = pluginSectionV1(
       source,

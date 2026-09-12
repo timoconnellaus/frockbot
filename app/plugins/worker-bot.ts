@@ -59,9 +59,10 @@ export type PluginWorkerMountV1 =
 /**
  * Mounts this Bot's enabled Plugins for one standalone call. The caller runs
  * what it came for on `active` and must `dispose` it; `withPluginWorkerV1`
- * does both.
+ * does both. A worker that does not come up is the `unavailable` answer, so
+ * a broken Plugin never throws out of a standalone call.
  */
-export async function mountPluginWorkerV1(
+async function mountPluginWorkerV1(
   state: ShellBotStateV1,
   identity: BotIdentity,
   roster: BotPluginRosterV1,
@@ -109,17 +110,23 @@ export async function mountPluginWorkerV1(
     deadlineMs: call.deadlineMs,
   });
   let prepared: Awaited<ReturnType<typeof host.mount>>;
+  let active: ActivePluginWorker;
   try {
     prepared = await host.mount(
       roster.members.filter((candidate) =>
         roster.enabled.includes(candidate.packageId),
       ),
     );
+    active = await prepared.commit();
   } catch (error) {
     release();
-    throw error;
+    return {
+      status: "unavailable",
+      reason: `this Bot's plugin worker did not mount: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    };
   }
-  const active = await prepared.commit();
   return {
     status: "mounted",
     active: {

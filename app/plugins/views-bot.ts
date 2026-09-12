@@ -53,43 +53,43 @@ export async function renderBotPluginSectionsV1(
     roster,
     { runId, deadlineMs: PLUGIN_VIEW_DEADLINE_MS },
     async (worker) => {
-      for (const { member, surfaces } of wanted) {
-        const tools = member.descriptor.tools.map((tool) => tool.name);
-        const rendered: BotPluginSectionV1[] = [];
-        for (const surfaceId of surfaces) {
-          const source = { pluginId: member.packageId, surfaceId, tools };
+      // Every surface is asked at once, so the page waits one deadline in
+      // all rather than one per Plugin.
+      await Promise.all(
+        wanted.map(async ({ member, surfaces }) => {
+          const tools = member.descriptor.tools.map((tool) => tool.name);
           const failure = worker.failures.find(
             (candidate) => candidate.pluginId === member.packageId,
           );
-          if (failure) {
-            rendered.push(
-              pluginSectionV1(source, {
-                schemaVersion: 1,
-                status: "drop",
-                reason: failure.message,
-              }),
-            );
-            continue;
-          }
-          rendered.push(
-            pluginSectionV1(
-              source,
-              await worker.active.renderView({
-                schemaVersion: 1,
-                pluginId: member.packageId,
-                surfaceId,
-                botId: identity.botId,
-                sessionId: `${identity.userId}:${identity.botId}`,
-                runId,
-                turnId: runId,
-                generationId: roster.generationId,
-                deadlineMs: PLUGIN_VIEW_DEADLINE_MS,
-              }),
-            ),
+          const rendered: BotPluginSectionV1[] = await Promise.all(
+            surfaces.map(async (surfaceId) => {
+              const source = { pluginId: member.packageId, surfaceId, tools };
+              if (failure) {
+                return pluginSectionV1(source, {
+                  schemaVersion: 1,
+                  status: "drop",
+                  reason: failure.message,
+                });
+              }
+              return pluginSectionV1(
+                source,
+                await worker.active.renderView({
+                  schemaVersion: 1,
+                  pluginId: member.packageId,
+                  surfaceId,
+                  botId: identity.botId,
+                  sessionId: `${identity.userId}:${identity.botId}`,
+                  runId,
+                  turnId: runId,
+                  generationId: roster.generationId,
+                  deadlineMs: PLUGIN_VIEW_DEADLINE_MS,
+                }),
+              );
+            }),
           );
-        }
-        sections.set(member.packageId, rendered);
-      }
+          sections.set(member.packageId, rendered);
+        }),
+      );
       return undefined;
     },
   );

@@ -62,7 +62,9 @@ function record(value: unknown, what: string): Record<string, unknown> {
 
 function text(value: unknown, what: string, max: number): string {
   if (typeof value !== "string") refuse(`${what} is not text`);
-  return value.slice(0, max);
+  const trimmed = value.slice(0, max);
+  if (trimmed === "") refuse(`${what} is empty`);
+  return trimmed;
 }
 
 /**
@@ -70,7 +72,7 @@ function text(value: unknown, what: string, max: number): string {
  * the tool, and the tool's input as one JSON string, because an action's
  * input is flat by the client wire schema.
  */
-export function pluginToolActionInputV1(
+function pluginToolActionInputV1(
   pluginId: string,
   tool: string,
   input: unknown,

@@ -2259,4 +2259,97 @@ export const views = {
       failure: '"Counter" has no "counter_other" control',
     });
   });
+
+  test("a Plugin whose module does not parse leaves the page and its switch standing", async () => {
+    const userId = `user-${crypto.randomUUID()}`;
+    const identity = { userId, botId: "bot-1" };
+    await provisionBot(identity);
+    await turn(identity, "run-0");
+    const bootstrap = (
+      await user(userId).readComposition({ schemaVersion: 1, userId })
+    ).current;
+
+    const BROKEN_ID = "broken-view";
+    // A module the worker's index cannot parse: the whole worker fails to
+    // mount, which is the page's worst case for a section.
+    const BROKEN_SOURCE = `export const tools = [ ;`;
+    const descriptor = decodePluginDescriptorV1({
+      id: BROKEN_ID,
+      displayName: "Broken",
+      version: "0.0.1",
+      contractVersion: 4,
+      tools: [
+        { name: "broken_noop", description: "Does nothing", inputSchema: {} },
+      ],
+      hooks: [],
+      grants: [],
+      views: [{ slot: "settings.sections", surfaceId: "broken.settings" }],
+      contextKeys: ["user", "bot", "session"],
+    });
+    const contentHash = await sha256Hex(BROKEN_SOURCE);
+    await env.APPLICATION_ARTIFACTS.put(
+      `packages/${contentHash}.mjs`,
+      BROKEN_SOURCE,
+    );
+    const createdAt = "2026-09-12T06:00:00.000Z";
+    const members: CompositionMemberV1[] = [
+      {
+        packageId: BROKEN_ID,
+        version: "0.0.1",
+        descriptor,
+        provenance: {
+          kind: "bot",
+          packageId: BROKEN_ID,
+          version: "0.0.1",
+          botId: "bot-1",
+          sessionId: `${userId}:bot-1`,
+          turnId: "run-0",
+          runId: "run-0",
+          authoredAt: createdAt,
+        },
+        artifact: {
+          contentHash,
+          size: BROKEN_SOURCE.length,
+          mediaType: "application/javascript",
+          bundlerVersion: "probe-seed",
+        },
+      },
+    ];
+    const artifactSetHash = await compositionArtifactSetHashV1(members);
+    await user(userId).proposeComposition({
+      schemaVersion: 1,
+      userId,
+      generation: {
+        schemaVersion: 1,
+        generationId: compositionGenerationIdV1(createdAt, artifactSetHash),
+        artifactSetHash,
+        parentGenerationId: bootstrap.generationId,
+        createdAt,
+        origin: {
+          kind: "bot-authored",
+          runId: "run-0",
+          sessionId: `${userId}:bot-1`,
+          turnId: "run-0",
+        },
+        members,
+        status: "pending",
+      },
+      pin: true,
+      expectedCurrentGenerationId: bootstrap.generationId,
+    });
+    await switchPlugin(identity, BROKEN_ID, true);
+
+    const frame = await bot(identity).readBotPluginsFrame({
+      schemaVersion: 1,
+      ...identity,
+    });
+    const row = frame.plugins.find(
+      (candidate) => candidate.pluginId === BROKEN_ID,
+    );
+    expect(row?.on).toBe(true);
+    expect(row?.switchable).toBe(true);
+    expect(row?.sections?.[0]?.failure).toMatch(/could not show its section/);
+    // The switch the User needs to turn it off still works.
+    await switchPlugin(identity, BROKEN_ID, false);
+  });
 });
