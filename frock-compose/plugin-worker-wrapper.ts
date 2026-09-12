@@ -313,6 +313,62 @@ export const BOT_ISOLATE_HOOK_VALUE_KEYS_V1 = {
   string | null
 >;
 
+/** How an error anywhere in the index is reduced to text for the kernel. */
+export const BOT_ISOLATE_ERROR_TEXT_SOURCE = `function errorText(error) {
+  return String((error && error.message) || error);
+}`;
+
+/**
+ * The hook chain, shared verbatim between the generated wrapper and the Bun
+ * test that proves it. The invocation's deadline is the budget for the whole
+ * chain, because the Durable Object races the single `hook()` call against
+ * that same number: each Plugin is given only what is left of it, and a
+ * Plugin the chain reaches with nothing left is skipped and named rather
+ * than started on borrowed time the kernel would charge to everyone.
+ */
+export const BOT_ISOLATE_HOOK_CHAIN_SOURCE = `var HOOK_MIN_SLICE_MS = 25;
+async function runHookChain(plugins, invocation, contextFor) {
+  const startedAt = Date.now();
+  const valueKey = HOOK_VALUE_KEYS[invocation.event];
+  const failures = [];
+  let replacement;
+  let replaced = false;
+  for (const plugin of plugins) {
+    if (!plugin.ok || !invocation.enabled.includes(plugin.pluginId)) continue;
+    if (!plugin.hooks.includes(invocation.event)) continue;
+    const remaining = invocation.deadlineMs - (Date.now() - startedAt);
+    if (remaining < HOOK_MIN_SLICE_MS) {
+      failures.push({
+        pluginId: plugin.pluginId,
+        reason: "the hook chain exhausted its deadline of " + invocation.deadlineMs + "ms before this plugin ran",
+      });
+      continue;
+    }
+    const payload =
+      replaced && valueKey
+        ? Object.assign({}, invocation.payload, { [valueKey]: replacement })
+        : invocation.payload;
+    const context = contextFor(plugin);
+    try {
+      const value = await withIsolateDeadline(function () {
+        return plugin.module.hooks[invocation.event](payload, context);
+      }, remaining);
+      if (value !== undefined) {
+        if (!valueKey) {
+          throw new Error("a notification hook cannot replace a value");
+        }
+        replacement = value;
+        replaced = true;
+      }
+    } catch (error) {
+      failures.push({ pluginId: plugin.pluginId, reason: errorText(error) });
+    }
+  }
+  return replaced
+    ? { schemaVersion: 1, status: "replaced", replacement: replacement, failures: failures }
+    : { schemaVersion: 1, status: "unchanged", failures: failures };
+}`;
+
 /** What one Plugin's module must export, checked once at mount. */
 export const BOT_ISOLATE_DECLARATION_SOURCE = `function declaredTools(module, pluginId) {
   const declared = Array.isArray(module.tools) ? module.tools : [];
@@ -434,9 +490,9 @@ ${BOT_ISOLATE_DECLARATION_SOURCE}
 
 ${BOT_ISOLATE_NARROW_CONTEXT_SOURCE_V1}
 
-function errorText(error) {
-  return String((error && error.message) || error);
-}
+${BOT_ISOLATE_ERROR_TEXT_SOURCE}
+
+${BOT_ISOLATE_HOOK_CHAIN_SOURCE}
 
 /**
  * Every Plugin the identity names, mounted once in identity order. A Plugin
@@ -554,36 +610,10 @@ export default class extends WorkerEntrypoint {
    */
   async hook(rawInvocation) {
     const invocation = decodeHookInvocation(rawInvocation);
-    const valueKey = HOOK_VALUE_KEYS[invocation.event];
-    const failures = [];
-    let replacement;
-    let replaced = false;
-    for (const plugin of mountAll(this.env)) {
-      if (!plugin.ok || !invocation.enabled.includes(plugin.pluginId)) continue;
-      if (!plugin.hooks.includes(invocation.event)) continue;
-      const payload =
-        replaced && valueKey
-          ? Object.assign({}, invocation.payload, { [valueKey]: replacement })
-          : invocation.payload;
-      const context = narrowContext(this.env, invocation, plugin);
-      try {
-        const value = await withIsolateDeadline(function () {
-          return plugin.module.hooks[invocation.event](payload, context);
-        }, invocation.deadlineMs);
-        if (value !== undefined) {
-          if (!valueKey) {
-            throw new Error("a notification hook cannot replace a value");
-          }
-          replacement = value;
-          replaced = true;
-        }
-      } catch (error) {
-        failures.push({ pluginId: plugin.pluginId, reason: errorText(error) });
-      }
-    }
-    return replaced
-      ? { schemaVersion: 1, status: "replaced", replacement: replacement, failures: failures }
-      : { schemaVersion: 1, status: "unchanged", failures: failures };
+    const env = this.env;
+    return runHookChain(mountAll(env), invocation, function (plugin) {
+      return narrowContext(env, invocation, plugin);
+    });
   }
 
   async receiveTrigger(rawInvocation) {

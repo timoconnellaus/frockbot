@@ -2,6 +2,9 @@ import { describe, expect, test } from "bun:test";
 import { BOT_ISOLATE_CONTEXT_KEYS_V1 } from "@frockbot/core/contracts";
 import {
   BOT_ISOLATE_DEADLINE_SOURCE,
+  BOT_ISOLATE_ERROR_TEXT_SOURCE,
+  BOT_ISOLATE_HOOK_CHAIN_SOURCE,
+  BOT_ISOLATE_HOOK_VALUE_KEYS_V1,
   BOT_ISOLATE_DECLARATION_SOURCE,
   BOT_ISOLATE_INVOCATION_SOURCE,
   BOT_ISOLATE_MODEL_SOURCE,
@@ -105,6 +108,114 @@ describe("the generated wrapper's deadline", () => {
     const started = Date.now();
     await withIsolateDeadline(() => "done", 50_000);
     expect(Date.now() - started).toBeLessThan(1_000);
+  });
+});
+
+type HookPlugin = {
+  pluginId: string;
+  ok: boolean;
+  hooks: string[];
+  module: { hooks: Record<string, (payload: unknown) => unknown> };
+};
+
+type RunHookChain = (
+  plugins: HookPlugin[],
+  invocation: Record<string, unknown>,
+  contextFor: (plugin: HookPlugin) => unknown,
+) => Promise<{
+  status: string;
+  replacement?: unknown;
+  failures: { pluginId: string; reason: string }[];
+}>;
+
+const runHookChain = new Function(
+  [
+    `const HOOK_VALUE_KEYS = ${JSON.stringify(BOT_ISOLATE_HOOK_VALUE_KEYS_V1)};`,
+    BOT_ISOLATE_DEADLINE_SOURCE,
+    BOT_ISOLATE_ERROR_TEXT_SOURCE,
+    BOT_ISOLATE_HOOK_CHAIN_SOURCE,
+    "return runHookChain;",
+  ].join("\n"),
+)() as RunHookChain;
+
+function hookPlugin(
+  pluginId: string,
+  hook: (payload: unknown) => unknown,
+): HookPlugin {
+  return {
+    pluginId,
+    ok: true,
+    hooks: ["agent/tool-exposure"],
+    module: { hooks: { "agent/tool-exposure": hook } },
+  };
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+describe("the generated wrapper's hook chain", () => {
+  function hookInvocation(deadlineMs: number, enabled: string[]) {
+    return {
+      event: "agent/tool-exposure",
+      payload: { tools: ["base"] },
+      enabled,
+      deadlineMs,
+    };
+  }
+
+  test("hands each plugin the value the one before it left", async () => {
+    const seen: unknown[] = [];
+    const result = await runHookChain(
+      [
+        hookPlugin("first", (payload) => {
+          seen.push((payload as { tools: string[] }).tools);
+          return ["first"];
+        }),
+        hookPlugin("second", (payload) => {
+          seen.push((payload as { tools: string[] }).tools);
+          return ["first", "second"];
+        }),
+      ],
+      hookInvocation(5_000, ["first", "second"]),
+      () => ({}),
+    );
+    expect(seen).toEqual([["base"], ["first"]]);
+    expect(result).toMatchObject({
+      status: "replaced",
+      replacement: ["first", "second"],
+      failures: [],
+    });
+  });
+
+  test("spends one deadline across the chain, naming a plugin left no time", async () => {
+    const ran: string[] = [];
+    const started = Date.now();
+    const result = await runHookChain(
+      [
+        hookPlugin("slow", async () => {
+          ran.push("slow");
+          await sleep(400);
+          return ["slow"];
+        }),
+        hookPlugin("starved", () => {
+          ran.push("starved");
+          return ["starved"];
+        }),
+      ],
+      hookInvocation(150, ["slow", "starved"]),
+      () => ({}),
+    );
+    expect(Date.now() - started).toBeLessThan(400);
+    expect(ran).toEqual(["slow"]);
+    expect(result.status).toBe("unchanged");
+    expect(result.failures.map((failure) => failure.pluginId)).toEqual([
+      "slow",
+      "starved",
+    ]);
+    expect(result.failures[1]!.reason).toBe(
+      "the hook chain exhausted its deadline of 150ms before this plugin ran",
+    );
   });
 });
 

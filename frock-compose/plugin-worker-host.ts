@@ -477,16 +477,13 @@ export class PluginWorkerHost {
     for (const entry of verified) {
       const pluginId = entry.member.packageId;
       const broken = (entry.member.descriptor.consumes ?? []).find(
-        (service) => {
-          const provider = providerOf.get(service.name);
-          return provider === undefined || !live.has(provider);
-        },
+        (service) => !live.has(providerOf.get(service.name)!),
       );
       if (broken) {
         failures.push({
           pluginId,
-          phase: "resolve",
-          message: `plugin "${pluginId}" consumes "${broken.name}", which "${providerOf.get(broken.name) ?? "no plugin"}" did not mount`,
+          phase: "health",
+          message: `plugin "${pluginId}" consumes "${broken.name}", which "${providerOf.get(broken.name)}" did not mount`,
         });
         continue;
       }

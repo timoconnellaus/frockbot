@@ -569,7 +569,7 @@ describe("what the worker reports at mount", () => {
       prepared.failures.map((failure) => [failure.pluginId, failure.phase]),
     ).toEqual([
       ["weather", "health"],
-      ["greeter", "resolve"],
+      ["greeter", "health"],
     ]);
     expect(prepared.failures[1]!.message).toMatch(
       /consumes "weather-data", which "weather" did not mount/,
