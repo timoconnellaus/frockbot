@@ -153,6 +153,11 @@ account, the Account feature rule). A seeded Plugin may also be `hidden`, which
 removes it from the Plugins page entirely and is allowed only when it is not
 enableable — `locked` or `admin-gated` off.
 
+> Amended 2026-09-12, in step 6. `hidden` did not ship: `PLUGIN_SEED_STATES_V1`
+> in `app/plugins/catalog.ts` carries the four states only. A seeded Plugin the
+> page should not show is left out of the catalog, or kept `admin-gated` and
+> unopened, which the page already omits.
+
 The master toggle is an admin-held Account feature that gates Bot authoring
 only. Turning seeded Plugins on and off is open to every User. Off keeps the
 account's authored Plugins and their data.
@@ -208,6 +213,12 @@ seeded and authored Plugins. `Package` stays the term for a build-time
 substitution and for the artifact a Plugin is built into; `Capability` stays
 the term for what a Package or Plugin makes available.
 
+> Amended 2026-09-12, in step 6. The rename was a split, not a retitle. Plugins
+> is a Bot's page — what that Bot could run and whether it does, each switch
+> that Bot's own — and the account-wide page that installs and uninstalls the
+> built-in features stayed, retitled **Account features**. `docs/profile-settings.md`
+> owns what each of the two surfaces is for.
+
 ## Amendments to the constitution
 
 Three sentences in `AGENTS.md` change with this decision.
@@ -236,7 +247,8 @@ Three sentences in `AGENTS.md` change with this decision.
 - `BotCapabilities` grows key-value storage, an egress stub that enforces
   declared hosts, a model call attributed to a Plugin, and settings reads.
 - The Plugins page replaces Bot capabilities, and the Flutter host and the
-  browser suite that name it change in the same pull request.
+  browser suite that name it change in the same pull request. (Amended in step
+  6; see Naming.)
 - Routines gain a `plugin` trigger kind and the app gains the `/hooks/<token>`
   route.
 - `docs/architecture.md` §5 is rewritten around the two layers when the host
