@@ -168,7 +168,9 @@ per trigger name, and declare each one's name and description in
 `plugin.json`:
 
 ```ts
-export const triggers = {
+import type { PluginTriggers } from "@frockbot/applet-sdk/plugin";
+
+export const triggers: PluginTriggers = {
   alert: async (delivery, ctx) => {
     const event = JSON.parse(delivery.body);
     if (event.severity !== "severe") return { drop: true, reason: "minor" };

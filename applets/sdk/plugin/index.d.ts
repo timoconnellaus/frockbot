@@ -347,11 +347,37 @@ export type PluginHooks = {
   [Event in PluginHookEvent]?: PluginHook<Event>;
 };
 
-/** A trigger handler: what it returns, when non-empty, is what the Bot reads. */
+/**
+ * One delivery handed to a trigger: the posted body as it arrived, and the
+ * headers lower-cased with the door's own credential removed.
+ */
+export interface PluginTriggerDelivery {
+  headers: Record<string, string>;
+  body: string;
+}
+
+/** A trigger's refusal: the Routine does not fire, and the receipt says why. */
+export interface PluginTriggerDrop {
+  drop: true;
+  reason?: string;
+}
+
+/**
+ * A trigger handler: a non-empty string fires the Routine with that text.
+ * A `{ drop: true }` — or nothing at all — leaves it unfired.
+ */
 export type PluginTrigger = (
-  event: { [key: string]: unknown },
+  delivery: PluginTriggerDelivery,
   ctx: PluginContext,
-) => Promise<string | undefined | void> | string | undefined | void;
+) =>
+  | Promise<string | PluginTriggerDrop | undefined | void>
+  | string
+  | PluginTriggerDrop
+  | undefined
+  | void;
+
+/** Every trigger the module exports, by the name `plugin.json` declares. */
+export type PluginTriggers = Record<string, PluginTrigger>;
 
 /**
  * A tool call's answer. A string is handed to the Bot as it is; anything else
@@ -382,5 +408,5 @@ export interface PluginModule {
   hooks?: PluginHooks;
   /** Values other Plugins that `consume` a service of the same name receive. */
   services?: Record<string, unknown>;
-  triggers?: Record<string, PluginTrigger>;
+  triggers?: PluginTriggers;
 }
