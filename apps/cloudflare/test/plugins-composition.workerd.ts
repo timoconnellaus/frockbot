@@ -109,13 +109,30 @@ interface BotRpc {
     generations: { generationId: string; isCurrent: boolean }[];
   }>;
   executeRoutineCommand(input: unknown): Promise<{ status: string }>;
-  readPluginEnablement(input: unknown): Promise<{ revision: number }>;
   setPluginEnabled(input: unknown): Promise<
     | {
         status: "applied";
         enablement: { revision: number; enabled: Record<string, boolean> };
       }
     | { status: "conflict"; currentRevision: number }
+  >;
+  readPluginEnablement(input: unknown): Promise<{ revision: number }>;
+  readBotPluginsFrame(input: unknown): Promise<{
+    revision: number;
+    plugins: Array<{
+      pluginId: string;
+      kind: string;
+      on: boolean;
+      switchable: boolean;
+      unavailable?: string;
+    }>;
+  }>;
+  setBotPluginEnabled(
+    input: unknown,
+  ): Promise<
+    | { status: "applied"; revision: number }
+    | { status: "conflict"; currentRevision: number }
+    | { status: "rejected"; failure: string }
   >;
 }
 
@@ -744,6 +761,69 @@ describe("the User-owned Composition", () => {
         expectedRevision: 0,
       }),
     ).toEqual({ status: "conflict", currentRevision: 1 });
+    // The other Bot of the same User is untouched.
+    const sibling = { userId, botId: "bot-2" };
+    await provisionSiblingBot(sibling, 1);
+    expect(
+      await bot(sibling).readPluginEnablement({ schemaVersion: 1, ...sibling }),
+    ).toMatchObject({ revision: 0, enabled: {} });
+  });
+
+  test("a Bot's Plugins page lists what it could run, and its switches are its own", async () => {
+    const userId = `user-${crypto.randomUUID()}`;
+    const identity = { userId, botId: "bot-1" };
+    await provisionBot(identity);
+    const rpc = bot(identity);
+    const frame = await rpc.readBotPluginsFrame({
+      schemaVersion: 1,
+      ...identity,
+    });
+    expect(frame.revision).toBe(0);
+    const web = frame.plugins.find((row) => row.pluginId === "web");
+    expect(web).toMatchObject({ kind: "first-party", switchable: true });
+    expect(frame.plugins.map((row) => row.pluginId)).not.toContain(
+      "custom-models",
+    );
+    const switchWeb = (enabled: boolean, expectedRevision: number) =>
+      rpc.setBotPluginEnabled({
+        schemaVersion: 1,
+        ...identity,
+        command: {
+          schemaVersion: 1,
+          kind: "set-plugin-enabled",
+          commandId: crypto.randomUUID(),
+          pluginId: "web",
+          enabled,
+          expectedRevision,
+        },
+      });
+    expect(await switchWeb(false, 0)).toEqual({
+      status: "applied",
+      revision: 1,
+    });
+    expect(
+      (
+        await rpc.readBotPluginsFrame({ schemaVersion: 1, ...identity })
+      ).plugins.find((row) => row.pluginId === "web")?.on,
+    ).toBe(false);
+    expect(await switchWeb(true, 0)).toEqual({
+      status: "conflict",
+      currentRevision: 1,
+    });
+    expect(
+      await rpc.setBotPluginEnabled({
+        schemaVersion: 1,
+        ...identity,
+        command: {
+          schemaVersion: 1,
+          kind: "set-plugin-enabled",
+          commandId: crypto.randomUUID(),
+          pluginId: "nothing-here",
+          enabled: true,
+          expectedRevision: 1,
+        },
+      }),
+    ).toMatchObject({ status: "rejected" });
     // The other Bot of the same User is untouched.
     const sibling = { userId, botId: "bot-2" };
     await provisionSiblingBot(sibling, 1);

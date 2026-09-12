@@ -312,6 +312,11 @@ import {
   readPluginEnablementV1,
   setPluginEnabledV1,
 } from "@frockbot/app/plugins/enablement";
+import {
+  readBotPluginsFrameV1,
+  setBotPluginEnabledV1,
+} from "@frockbot/app/plugins/bot";
+import { decodeSetBotPluginEnabledCommandV1 } from "@frockbot/app/plugins/page";
 
 function isFrockAiGatewayBindingV1(
   value: BotStateEnv["AI"],
@@ -1108,6 +1113,45 @@ export class BotState extends DurableObject<BotStateEnv> {
       }
       throw error;
     }
+  }
+
+  /** This Bot's Plugins page: one row per Plugin it could run, and whether it does. */
+  async readBotPluginsFrame(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { shell } = await this.materialized(identity);
+    await shell.validateIdentity(identity);
+    return readBotPluginsFrameV1(shell.state, identity);
+  }
+
+  /**
+   * Flips one switch for this Bot, fenced on the revision the page read. A
+   * stale revision, a locked Plugin or an unavailable feature is a receipt,
+   * not a thrown error: the page re-reads and says why.
+   */
+  async setBotPluginEnabled(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      command: rpcDecoded(decodeSetBotPluginEnabledCommandV1),
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { shell } = await this.materialized(identity);
+    await shell.validateIdentity(identity);
+    return setBotPluginEnabledV1(
+      shell.state,
+      identity,
+      request.command as ReturnType<typeof decodeSetBotPluginEnabledCommandV1>,
+    );
   }
 
   /** A non-waking projection of this Bot's durable Computer presence. */

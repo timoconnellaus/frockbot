@@ -33,6 +33,8 @@ import {
   routineHookDigestV1,
 } from "@frockbot/app/routines/hook";
 import { routineHookPathV1 } from "@frockbot/app/routines/shared";
+import { firstPartyFeatureOnForBotV1 } from "@frockbot/app/plugins/catalog";
+import { readPluginEnablementV1 } from "@frockbot/app/plugins/enablement";
 import type { RoutinesRuntimeHostV1 } from "@frockbot/app/routines/agent";
 import { routineHandoffTextV1 } from "@frockbot/app/routines/inbox";
 import {
@@ -633,8 +635,23 @@ async function settleRoutineFirings(state: ShellBotStateV1): Promise<void> {
     );
     return;
   }
+  // Routines is one of the first-party features a User may switch off for one
+  // Bot, and the switch has to reach the scheduler: masking the Package out of
+  // the Turn would still have fired the Routine and spent the model call. The
+  // occurrence is consumed rather than deferred, so the clock advances to the
+  // next one and the Routine simply resumes when the switch goes back on.
+  const routinesOn = firstPartyFeatureOnForBotV1(
+    "routines",
+    await readPluginEnablementV1(state.ctx.storage),
+  );
   await state.routineScheduler.settle(
     async (fire) => {
+      if (!routinesOn) {
+        return {
+          status: "ok",
+          summary: "Routines is switched off for this Bot.",
+        };
+      }
       const outcome = await runOneFiring(state, identity, fire);
       await notifyFailedFiring(state, identity, fire, outcome);
       return outcome;

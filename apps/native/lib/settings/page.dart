@@ -284,7 +284,7 @@ class _SettingsPageState extends State<SettingsPage>
                                     )
                                     .then((_) => state.load()),
                                 child: const Text(
-                                  'Manage this feature in Bot capabilities',
+                                  'Manage this feature in Account features',
                                 ),
                               ),
                           ],

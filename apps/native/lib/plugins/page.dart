@@ -9,10 +9,16 @@ import '../view/surface.dart';
 import 'document.dart';
 
 /// Reads the Plugins document and carries one action to the settings route.
+///
+/// With a [botId] the page is that Bot's: what it could run and whether it
+/// does, one switch per row, per Bot (ADR 0026). Without one it is the
+/// account's list — what is installed — and the account-wide switches for
+/// built-in features when [capabilities] is set.
 class PluginsController extends ViewSurfaceController {
   final NativeApi api;
   final String userId;
   final bool capabilities;
+  final String? botId;
 
   /// Where a row's "Set up in …" goes. Navigation is not a command, so the
   /// host answers it itself rather than sending it anywhere.
@@ -58,6 +64,7 @@ class PluginsController extends ViewSurfaceController {
     this.userId, {
     this.openHome,
     this.capabilities = false,
+    this.botId,
   });
 
   @override
@@ -67,7 +74,15 @@ class PluginsController extends ViewSurfaceController {
   @override
   String? get message => _message;
   @override
-  String get surfaceId => capabilities ? 'capabilities' : 'plugins';
+  String get surfaceId => botId != null
+      ? 'bot-plugins'
+      : capabilities
+      ? 'capabilities'
+      : 'plugins';
+
+  String get _path => botId != null
+      ? '/api/bots/${Uri.encodeComponent(botId!)}/plugins'
+      : '/api/settings/${capabilities ? 'capabilities' : 'plugins'}';
 
   void _changed() {
     if (!_closed) notifyListeners();
@@ -81,9 +96,7 @@ class PluginsController extends ViewSurfaceController {
     _changed();
     try {
       final next = wire.ViewDocument.fromJson(
-        await api.request(
-          '/api/settings/${capabilities ? 'capabilities' : 'plugins'}?as=document',
-        ),
+        await api.request('$_path?as=document'),
       );
       if (next.surfaceId.value != surfaceId) {
         throw const FormatException('Plugins surface mismatch');
@@ -101,6 +114,31 @@ class PluginsController extends ViewSurfaceController {
 
   @override
   Future<Map<String, Object?>> dispatch(Map<String, Object?> command) async {
+    if (botId != null) {
+      // A Bot's switch: the command names the Plugin and the revision the
+      // page read, and the Bot answers applied, conflict or rejected.
+      final input = ((command['input'] as Map?) ?? const {})
+          .cast<String, Object?>();
+      final answer = await api.request(
+        _path,
+        body: {
+          'schemaVersion': 1,
+          'kind': 'set-plugin-enabled',
+          'commandId': command['commandId'],
+          'pluginId': input['pluginId'],
+          'enabled': input['enabled'] == true,
+          'expectedRevision': input['expectedRevision'] ?? command['revision'],
+        },
+      );
+      final receipt = ((answer as Map?) ?? const {}).cast<String, Object?>();
+      return {
+        'commandId': command['commandId'],
+        'status': receipt['status'] == 'applied' ? 'applied' : 'rejected',
+        if (receipt['failure'] is String) 'failure': receipt['failure'],
+        if (receipt['status'] == 'conflict')
+          'failure': 'This page was out of date. Refreshed — try again.',
+      };
+    }
     if (pluginActionKindV1(command) == 'open-home') {
       openHome?.call(
         pluginHomeV1(command) ?? 'none',
@@ -133,12 +171,18 @@ class PluginsPage extends StatelessWidget {
   final String userId;
   final bool capabilities;
 
+  /// The Bot whose Plugins this page shows; absent, the account's list.
+  final String? botId;
+  final String? botName;
+
   const PluginsPage({
     super.key,
     required this.api,
     required this.store,
     required this.userId,
     this.capabilities = false,
+    this.botId,
+    this.botName,
   });
 
   void _openHome(BuildContext context, String home, String? packageId) {
@@ -171,11 +215,16 @@ class PluginsPage extends StatelessWidget {
       api,
       userId,
       capabilities: capabilities,
+      botId: botId,
       openHome: (home, packageId) => _openHome(context, home, packageId),
     );
     return ViewSurfacePage(
-      title: capabilities ? 'Bot capabilities' : 'Plugins',
-      cardGroups: capabilities,
+      title: botId != null
+          ? (botName == null ? 'Plugins' : 'Plugins · $botName')
+          : capabilities
+          ? 'Account features'
+          : 'Plugins',
+      cardGroups: capabilities || botId != null,
       store: store,
       userId: userId,
       documentId: PluginIds.document,
@@ -186,7 +235,9 @@ class PluginsPage extends StatelessWidget {
         child: TextField(
           decoration: InputDecoration(
             prefixIcon: const Icon(Icons.search),
-            hintText: capabilities ? 'Find a feature' : 'Find a plugin',
+            hintText: capabilities && botId == null
+                ? 'Find a feature'
+                : 'Find a plugin',
           ),
           onChanged: controller.search,
         ),

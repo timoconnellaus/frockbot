@@ -211,6 +211,8 @@ describe("foundation application", () => {
         Promise.resolve({
           schemaVersion: 1 as const,
           applets: false,
+          pluginAuthoring: false,
+          plugins: [],
           updatedAt: "2026-09-01T00:00:00.000Z",
           updatedBy: "deployment-default",
         }),

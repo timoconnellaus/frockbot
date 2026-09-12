@@ -92,6 +92,7 @@ import {
   userCompositionFailuresV1,
   userCompositionStoreV1,
 } from "@frockbot/app/composition/user";
+import { DEPLOYMENT_PLUGIN_CATALOG_V1 } from "@frockbot/app/plugins/catalog";
 import {
   decodeAppletProvenanceV1,
   decodeAppletToolDeclarationV1,
@@ -608,9 +609,18 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
   async setFeatures(input: unknown): Promise<UserFeaturesV1> {
     const request = decodeSetUserFeaturesRequestV1(input);
     await this.addressedUser(request.userId);
+    const current = decodeUserFeaturesV1(
+      (await this.ctx.storage.get<unknown>(USER_FEATURES_KEY)) ??
+        defaultUserFeaturesV1(),
+    );
     const next: UserFeaturesV1 = {
       schemaVersion: 1,
       applets: request.command.applets,
+      // Absent means unchanged: the Applets switch is one command, and the
+      // Plugin fields ride along only when the admin set them.
+      pluginAuthoring:
+        request.command.pluginAuthoring ?? current.pluginAuthoring,
+      plugins: request.command.plugins ?? current.plugins,
       updatedAt: new Date().toISOString(),
       updatedBy: request.updatedBy,
     };
@@ -642,8 +652,19 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
 
   async readComposition(input: unknown) {
     const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
-    await this.assertUserIdentity(request.userId as string);
-    return readUserCompositionV1({ ctx: this.ctx });
+    const userId = await this.assertUserIdentity(request.userId as string);
+    const features = decodeUserFeaturesV1(
+      (await this.ctx.storage.get<unknown>(USER_FEATURES_KEY)) ??
+        defaultUserFeaturesV1(),
+    );
+    return readUserCompositionV1(
+      { ctx: this.ctx },
+      {
+        userId,
+        catalog: DEPLOYMENT_PLUGIN_CATALOG_V1,
+        adminOpened: features.plugins,
+      },
+    );
   }
 
   async readCompositionGeneration(input: unknown) {

@@ -5,6 +5,10 @@ import {
   capabilityIsOfferedV1,
 } from "@frockbot/app/settings/catalog-copy";
 import { pluginsDocumentV1 } from "@frockbot/app/settings/plugins-document";
+import {
+  botPluginsDocumentV1,
+  decodeSetBotPluginEnabledCommandV1,
+} from "@frockbot/app/plugins/page";
 import { accountIsAdmitted } from "./account-admission.js";
 import { isNativeAuthPath, readNativeJsonBody } from "./native-auth.js";
 import { clientCompatibilityResponse } from "./client-compatibility.js";
@@ -1013,6 +1017,60 @@ export function createGateway(dependencies: GatewayDependencies) {
         if (error instanceof Error && error.name === "ConfigurationDecodeError")
           return jsonError(400, "Check these settings and try again.");
         return jsonError(503, "Settings are temporarily unavailable.");
+      }
+    }
+
+    const botPluginsMatch = url.pathname.match(
+      /^\/api\/bots\/([^/]+)\/plugins$/,
+    );
+    if (botPluginsMatch) {
+      try {
+        const botId = decodeBotPathSegment(botPluginsMatch[1]);
+        const binding = dependencies.botConfigurationFor(userId, botId);
+        if (request.method === "GET") {
+          const frame = await binding.readBotPluginsFrame({
+            schemaVersion: 1,
+            userId,
+            botId,
+          });
+          return Response.json(
+            url.searchParams.get("as") === "document"
+              ? botPluginsDocumentV1(frame)
+              : frame,
+            { headers: { "cache-control": "no-store" } },
+          );
+        }
+        if (request.method !== "POST") {
+          return jsonError(405, "method not allowed");
+        }
+        // The command's own decode is the only failure that is the caller's
+        // fault; everything past it is ours, and echoing its message would
+        // report a storage failure as a bad request.
+        let command;
+        try {
+          command = decodeSetBotPluginEnabledCommandV1(await request.json());
+        } catch (error) {
+          return jsonError(
+            400,
+            error instanceof Error && !(error instanceof SyntaxError)
+              ? error.message
+              : "invalid plugin command",
+          );
+        }
+        return Response.json(
+          await binding.setBotPluginEnabled({
+            schemaVersion: 1,
+            userId,
+            botId,
+            command,
+          }),
+          { headers: { "cache-control": "no-store" } },
+        );
+      } catch (error) {
+        if (error instanceof ConfigurationDecodeError) {
+          return jsonError(400, "invalid bot id");
+        }
+        return jsonError(503, "Plugins are temporarily unavailable.");
       }
     }
 

@@ -33,9 +33,10 @@ import {
   compositionFailureLogV1,
 } from "@frockbot/app/composition/bot";
 import {
-  enabledPluginIdsV1,
-  readPluginEnablementV1,
-} from "@frockbot/app/plugins/enablement";
+  DEPLOYMENT_PLUGIN_CATALOG_V1,
+  enabledSeededPluginIdsV1,
+} from "@frockbot/app/plugins/catalog";
+import { readPluginEnablementV1 } from "@frockbot/app/plugins/enablement";
 import { createAppletInstanceBindingV1 } from "@frockbot/app/applets-host/records";
 import { isolateMountOptions } from "@frockbot/app/isolates/bot";
 import { pendingBotInputPreambleV1 } from "@frockbot/app/routines/inbox";
@@ -268,7 +269,11 @@ export async function executeTurn(
       // The User installed the set; which of it this Bot runs is its own map,
       // and that is also what decides the worker's egress policy.
       const enablement = await readPluginEnablementV1(state.ctx.storage);
-      const enabled = enabledPluginIdsV1(mounting.members, enablement);
+      const enabled = enabledSeededPluginIdsV1(
+        mounting.members,
+        enablement,
+        DEPLOYMENT_PLUGIN_CATALOG_V1,
+      );
       const isolate = await isolateMountOptions(state, input.identity, {
         runId: input.command.runId,
         sessionId: input.command.sessionId,

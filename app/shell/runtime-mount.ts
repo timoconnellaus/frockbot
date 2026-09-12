@@ -23,6 +23,11 @@ import {
   type PackageSettingValueV1,
   type ResolvedModelBindingV1,
 } from "@frockbot/core/configuration";
+import {
+  firstPartyFeatureOnForBotV1,
+  maskPlanForBotV1,
+} from "@frockbot/app/plugins/catalog";
+import { readPluginEnablementV1 } from "@frockbot/app/plugins/enablement";
 import type {
   FoundationAgentPackage,
   RuntimeModelSelection,
@@ -123,11 +128,24 @@ export async function agentRuntime(
     user.revision,
   );
   const packageDefinitions = executionPackagesV1(state.application);
-  const plan = resolveBotExecutionPlanV1({
-    bot: settings,
-    user,
-    packages: packageDefinitions,
-  });
+  // The account installed the set; which first-party features this Bot runs
+  // is its own map, read here so a feature switched off for one Bot
+  // contributes nothing to its Turn (ADR 0026). Two things read it: the plan,
+  // for the features that mount as enabled Contributions, and the hosted
+  // seams below, which never see a plan — a switch that only masked the plan
+  // would leave image, routines, subagents and machine messages registering
+  // their tools on a Turn the Plugins page reports as off.
+  const enablement = await readPluginEnablementV1(state.ctx.storage);
+  const featureOn = (packageId: string): boolean =>
+    firstPartyFeatureOnForBotV1(packageId, enablement);
+  const plan = maskPlanForBotV1(
+    resolveBotExecutionPlanV1({
+      bot: settings,
+      user,
+      packages: packageDefinitions,
+    }),
+    enablement,
+  );
   // The durable roots this User's enabled Packages declare, read from the
   // same installations the Composition is resolved from. Handed to the
   // Computer sync below; nothing else reads it.
@@ -198,12 +216,13 @@ export async function agentRuntime(
   // tools exist and refuse would still have told the model they were there.
   // The registry is read only when the setting is on.
   const machines = turn ? machineSeam(state, identity) : undefined;
-  const messagesGate = machines
-    ? await resolveBotMachineMessagesGateV1(
-        primitivePackageSettings("machine-messages"),
-        () => machines.list(),
-      )
-    : ({ status: "off" } as const);
+  const messagesGate =
+    machines && featureOn("machine-messages")
+      ? await resolveBotMachineMessagesGateV1(
+          primitivePackageSettings("machine-messages"),
+          () => machines.list(),
+        )
+      : ({ status: "off" } as const);
   // A Bot builds an Applet only inside an admitted Turn: the publish is a
   // durable effect whose intent record has to name the Session and Turn that
   // asked for it, and the scaffold write names the same writer. Resolved
@@ -229,7 +248,7 @@ export async function agentRuntime(
         : {}),
       // A Bot generates an image only inside an admitted Turn, whose Session
       // and Turn the Workspace write names as its writer.
-      ...(turn
+      ...(turn && featureOn("image")
         ? {
             image: createBotImageHost(
               identity,
@@ -315,7 +334,7 @@ export async function agentRuntime(
         : {}),
       // A Bot writes a Routine only inside a Turn, so the record's writer can
       // name the Session and Turn that produced it.
-      ...(turn
+      ...(turn && featureOn("routines")
         ? {
             routines: {
               ...createBotRoutinesHost(identity, turn),
@@ -328,7 +347,10 @@ export async function agentRuntime(
       // A Bot dispatches a subagent only inside an admitted Turn, whose run
       // the task record names, and only where a Subagent Durable Object can
       // actually be addressed.
-      ...(turn && turn.compositionGenerationId && state.subagentBinding
+      ...(turn &&
+      turn.compositionGenerationId &&
+      state.subagentBinding &&
+      featureOn("subagents")
         ? {
             subagents: subagentsRuntimeHost(
               state,

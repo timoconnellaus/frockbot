@@ -1,4 +1,9 @@
 import type {
+  BotPluginsFrameV1,
+  SetBotPluginEnabledCommandV1,
+} from "@frockbot/app/plugins/page";
+import type { SetBotPluginEnabledReceiptV1 } from "@frockbot/app/plugins/bot";
+import type {
   SettingsFrame,
   ConnectionsFrame,
   PluginsFrame,
@@ -579,6 +584,17 @@ export interface BotConfigurationBinding {
   executeConfiguration(
     request: BotConfigurationExecuteRpcV1,
   ): Promise<OperationReceiptV1>;
+  readBotPluginsFrame(request: {
+    schemaVersion: 1;
+    userId: string;
+    botId: string;
+  }): Promise<BotPluginsFrameV1>;
+  setBotPluginEnabled(request: {
+    schemaVersion: 1;
+    userId: string;
+    botId: string;
+    command: SetBotPluginEnabledCommandV1;
+  }): Promise<SetBotPluginEnabledReceiptV1>;
   listCompositionGenerations(request: {
     schemaVersion: 1;
     userId: string;

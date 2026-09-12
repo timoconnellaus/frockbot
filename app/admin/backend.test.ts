@@ -72,6 +72,8 @@ function accountsHost(
       const next: UserFeaturesV1 = {
         schemaVersion: 1,
         applets: command.applets,
+        pluginAuthoring: command.pluginAuthoring ?? false,
+        plugins: command.plugins ?? [],
         updatedAt: "2026-09-11T00:00:00.000Z",
         updatedBy,
       };

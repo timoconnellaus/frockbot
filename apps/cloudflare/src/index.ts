@@ -489,6 +489,8 @@ function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
     updateSheep: (request) => rpc.updateSheep(request),
     readConfiguration: (request) => rpc.readConfiguration(request),
     executeConfiguration: (request) => rpc.executeConfiguration(request),
+    readBotPluginsFrame: (request) => rpc.readBotPluginsFrame(request),
+    setBotPluginEnabled: (request) => rpc.setBotPluginEnabled(request),
     listRoutines: (request) => rpc.listRoutines(request),
     listTasks: (request) => rpc.listTasks(request),
     readTask: (request) => rpc.readTask(request),

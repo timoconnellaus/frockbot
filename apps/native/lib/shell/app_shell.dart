@@ -1604,19 +1604,25 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                         _profileRow(
                           PluginIds.profileEntry,
                           Icons.extension_outlined,
-                          'Plugins',
+                          selected == null
+                              ? 'Plugins'
+                              : 'Plugins · ${_name(selected!)}',
                           () => _push(
                             PluginsPage(
                               api: widget.api,
                               store: widget.store,
                               userId: widget.userId,
+                              botId: selected?.botId.value,
+                              botName: selected == null
+                                  ? null
+                                  : _name(selected!),
                             ),
                           ),
                         ),
                         _profileRow(
                           'profile-capabilities',
                           Icons.tune_outlined,
-                          'Bot capabilities',
+                          'Account features',
                           () => _push(
                             PluginsPage(
                               api: widget.api,

@@ -8,6 +8,7 @@ import {
   type CompositionOriginV1,
 } from "@frockbot/core/durable";
 import { MemoryStorage } from "@frockbot/core/durable/testing";
+import { DEPLOYMENT_PLUGIN_CATALOG_V1 } from "@frockbot/app/plugins/catalog";
 import {
   readUserCompositionV1,
   userCompositionFailuresV1,
@@ -23,7 +24,14 @@ export function memoryUserCompositionV1(
   const failures = () => userCompositionFailuresV1(state);
   return {
     storage,
-    readComposition: () => readUserCompositionV1(state),
+    // The unit harness reconciles against the deployment catalog with no
+    // admin-opened Plugins, the way a fresh account reads.
+    readComposition: (request) =>
+      readUserCompositionV1(state, {
+        userId: request.userId,
+        catalog: DEPLOYMENT_PLUGIN_CATALOG_V1,
+        adminOpened: [],
+      }),
     readCompositionGeneration: (request) => store().read(request.generationId),
     proposeComposition: (request) =>
       store().propose(decodeCompositionGenerationV1(request.generation), {

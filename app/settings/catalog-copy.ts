@@ -17,7 +17,7 @@ export const CAPABILITY_DESCRIPTIONS: Record<string, string> = {
 };
 
 /**
- * Which built-in Packages the Bot capabilities surface offers.
+ * Which built-in Packages the Account features surface offers.
  *
  * The described capabilities are the offer. A built-in a User turned off while
  * Plugins still listed it is offered too: Plugins no longer shows a built-in,
