@@ -14,6 +14,7 @@ import type {
   PluginWorkerHookInvocationV1,
   PluginWorkerPluginHealthV1,
   PluginWorkerToolInvocationV1,
+  PluginWorkerTriggerInvocationV1,
   ToolDefinition,
   ToolExecutionContext,
   ToolRegistration,
@@ -131,6 +132,7 @@ interface Harness {
   hookFailures: IsolateHookFailureV1[];
   hookInvocations: PluginWorkerHookInvocationV1[];
   toolInvocations: PluginWorkerToolInvocationV1[];
+  triggerInvocations: PluginWorkerTriggerInvocationV1[];
 }
 
 function harness(
@@ -149,6 +151,7 @@ function harness(
   const hookFailures: IsolateHookFailureV1[] = [];
   const hookInvocations: PluginWorkerHookInvocationV1[] = [];
   const toolInvocations: PluginWorkerToolInvocationV1[] = [];
+  const triggerInvocations: PluginWorkerTriggerInvocationV1[] = [];
   const entrypoint: PluginWorkerEntrypoint = {
     health: () => {
       if (input.healthThrows) throw new Error(input.healthThrows);
@@ -179,8 +182,14 @@ function harness(
         isError: false,
       });
     },
-    receiveTrigger: () =>
-      Promise.resolve({ schemaVersion: 1, status: "drop" as const }),
+    receiveTrigger: (invocation) => {
+      triggerInvocations.push(invocation);
+      return Promise.resolve({
+        schemaVersion: 1,
+        status: "fire" as const,
+        text: `${invocation.pluginId}:${invocation.trigger}`,
+      });
+    },
   };
   const worker: BotIsolateLoadedWorker = { getEntrypoint: () => entrypoint };
   const options: PluginWorkerHostOptions = {
@@ -235,6 +244,7 @@ function harness(
     hookFailures,
     hookInvocations,
     toolInvocations,
+    triggerInvocations,
   };
 }
 
@@ -591,6 +601,66 @@ describe("what the worker reports at mount", () => {
     ).toEqual([["greeter", "health"]]);
     await (await prepared.commit()).dispose();
     expect(subject.namespaces).toEqual(["weather"]);
+  });
+
+  test("a trigger naming a plugin excluded at health is dropped without reaching the worker", async () => {
+    const subject = harness({
+      health: (plugins) => ({
+        schemaVersion: 1,
+        contractVersion: ISOLATE_CONTRACT_VERSION,
+        plugins: plugins.map((pluginId) =>
+          pluginId === "greeter"
+            ? healthy(pluginId, {
+                ok: false,
+                reason: 'plugin "greeter" must export an "execute" function',
+                tools: [],
+              })
+            : healthy(pluginId),
+        ),
+      }),
+    });
+    const prepared = await subject.host.mount([
+      member("weather"),
+      member("greeter", { contentHash: "c".repeat(64) }),
+    ]);
+    expect(prepared.mounted).toEqual(["weather"]);
+    const active = await prepared.commit();
+
+    const invocation = (pluginId: string): PluginWorkerTriggerInvocationV1 => ({
+      schemaVersion: 1,
+      pluginId,
+      trigger: "inbound",
+      headers: {},
+      body: "{}",
+      botId: "bot-1",
+      routineId: "routine-1",
+      deadlineMs: 1_000,
+    });
+    expect(await active.deliverTrigger(invocation("greeter"))).toEqual({
+      schemaVersion: 1,
+      status: "drop",
+      reason: 'plugin "greeter" did not mount in this generation',
+    });
+    expect(subject.triggerInvocations).toEqual([]);
+
+    expect(await active.deliverTrigger(invocation("weather"))).toEqual({
+      schemaVersion: 1,
+      status: "fire",
+      text: "weather:inbound",
+    });
+    expect(
+      subject.triggerInvocations.map((entry) => entry.pluginId),
+    ).toEqual(["weather"]);
+
+    await active.dispose();
+    expect(await active.deliverTrigger(invocation("weather"))).toEqual({
+      schemaVersion: 1,
+      status: "drop",
+      reason: "the plugin worker for this generation is no longer mounted",
+    });
+    expect(
+      subject.triggerInvocations.map((entry) => entry.pluginId),
+    ).toEqual(["weather"]);
   });
 
   test("a consumer is excluded when its provider fails health", async () => {

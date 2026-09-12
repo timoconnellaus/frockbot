@@ -18,6 +18,7 @@ import {
   isolateToolSchemaV1,
   ISOLATE_CONTRACT_VERSION,
   ISOLATE_MAX_DEADLINE_MS,
+  MAX_FAILURE_REASON_V1,
   pluginWorkerLoaderIdV1,
   pluginWorkerModuleSetHashV1,
   type BotCapabilitiesStub,
@@ -35,6 +36,8 @@ import {
   type PluginWorkerHookInvocationV1,
   type PluginWorkerPluginHealthV1,
   type PluginWorkerToolInvocationV1,
+  type PluginWorkerTriggerInvocationV1,
+  type PluginWorkerTriggerResultV1,
   type ToolDefinition,
   type ToolExecutionContext,
   type ToolExecutionResult,
@@ -180,6 +183,15 @@ export interface PreparedPluginWorker {
 }
 
 export interface ActivePluginWorker {
+  /**
+   * Delivers an app-owned trigger to one Plugin. Only a Plugin this worker
+   * verified and enabled runs: the index knows nothing of the host's verified
+   * set, so the gate lives here, and a trigger naming any other Plugin is
+   * dropped with the reason rather than thrown.
+   */
+  deliverTrigger(
+    invocation: PluginWorkerTriggerInvocationV1,
+  ): Promise<PluginWorkerTriggerResultV1>;
   dispose(): Promise<void>;
 }
 
@@ -395,7 +407,20 @@ export class PluginWorkerHost {
       return {
         mounted: [],
         failures,
-        commit: () => Promise.resolve({ dispose: () => Promise.resolve() }),
+        commit: () =>
+          Promise.resolve({
+            deliverTrigger: (invocation: PluginWorkerTriggerInvocationV1) =>
+              Promise.resolve<PluginWorkerTriggerResultV1>({
+                schemaVersion: 1,
+                status: "drop",
+                reason:
+                  `plugin "${invocation.pluginId}" did not mount in this generation`.slice(
+                    0,
+                    MAX_FAILURE_REASON_V1,
+                  ),
+              }),
+            dispose: () => Promise.resolve(),
+          }),
       };
     }
 
@@ -540,6 +565,23 @@ export class PluginWorkerHost {
           );
         }
         return Promise.resolve({
+          deliverTrigger: (
+            invocation: PluginWorkerTriggerInvocationV1,
+          ): Promise<PluginWorkerTriggerResultV1> => {
+            const reason = disposed
+              ? "the plugin worker for this generation is no longer mounted"
+              : live.has(invocation.pluginId)
+                ? undefined
+                : `plugin "${invocation.pluginId}" did not mount in this generation`;
+            if (reason !== undefined) {
+              return Promise.resolve({
+                schemaVersion: 1,
+                status: "drop",
+                reason: reason.slice(0, MAX_FAILURE_REASON_V1),
+              });
+            }
+            return entrypoint.receiveTrigger(invocation);
+          },
           dispose: () => {
             if (disposed) return Promise.resolve();
             disposed = true;
@@ -863,8 +905,8 @@ export class PluginWorkerHost {
       // here nothing says which one, so every Plugin that wraps this event is
       // charged — for one Plugin, exactly right, and for several, honest.
       const message = errorMessage(error);
+      // `declaring` is built from `enabled` at commit, so it is a subset.
       for (const pluginId of declaring) {
-        if (!enabled.includes(pluginId)) continue;
         await this.recordFailure(pluginId, event, message);
       }
       return original;

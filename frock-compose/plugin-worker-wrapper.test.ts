@@ -251,12 +251,12 @@ describe("the generated wrapper's hook chain", () => {
       hookInvocation(1_000, ["provider", "consumer"]),
       () => ({}),
     );
-    const decoded = decodePluginWorkerHookResultV1(result);
-    expect(decoded.status).toBe("replaced");
-    expect(decoded.replacement).toEqual(["provider"]);
-    expect(decoded.failures).toEqual([
-      { pluginId: "consumer", reason: "unknown error" },
-    ]);
+    expect(decodePluginWorkerHookResultV1(result)).toEqual({
+      schemaVersion: 1,
+      status: "replaced",
+      replacement: ["provider"],
+      failures: [{ pluginId: "consumer", reason: "unknown error" }],
+    });
   });
 
   test("hands each plugin the deadline it actually has, not the chain's", async () => {

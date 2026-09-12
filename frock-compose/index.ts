@@ -7,4 +7,3 @@
 // narrows the capability stub into the `ctx` a Plugin author writes against,
 // and the tool and hook registrations its health report declares.
 export * from "./plugin-worker-host.ts";
-export * from "./plugin-worker-wrapper.ts";
