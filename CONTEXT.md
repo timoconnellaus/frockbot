@@ -59,7 +59,7 @@ A model-facing group of dynamic tools disclosed by name in the system prompt and
 _Avoid_: Package, Connection, tool prefix
 
 **Enablement**:
-A User-owned grant turning a Package or Connection on for every one of that user's bots. There is no per-bot grant.
+A User-owned grant turning a Package or Connection on for every one of that user's bots. A Plugin is the one exception: installed per User, enabled per Bot.
 _Avoid_: Assignment, installation, per-bot permission
 
 **Connectors**:
@@ -71,8 +71,24 @@ One environment-specific part of a package, such as desktop-host behavior, agent
 _Avoid_: Package
 
 **Plugin**:
-Code that runs at runtime and was not there at build time: Bot-authored extensions, Applets, third-party installs. It declares itself with a Frock Compose descriptor and reaches only the actions, grants, slots and context keys `AGENTS.md` names.
-_Avoid_: Package
+Code that wraps a Bot's loop, adds tools, keeps its own data or reaches the network, and was not there at build time: seeded by the deployment at runtime or written by a Bot. It declares itself with a Frock Compose descriptor — hooks, tools, hosts, grants, slots, settings schema, provides and consumes, triggers, contract version — and is installed per User, enabled per Bot. The user-facing noun for the Plugins page, which also lists the first-party features a User may turn off per Bot; those are app code with a flag, never a Plugin.
+_Avoid_: Package, extension, capability
+
+**Plugin worker**:
+The one Dynamic Worker per User that holds every installed Plugin as a module map behind a generated index. Its identity is the hash of the artifacts, the index, the binding digest and the hook contract version; a deploy leaves it alone unless the contract version changes. The Bot Durable Object calls it once per open hook per Turn with the Bot's enabled list.
+_Avoid_: Isolate per plugin, runtime bundle
+
+**Hook**:
+One of the six loop events a Plugin may wrap — `system-prompt/assemble`, `agent/tool-exposure`, `tools/pre-execute`, `tools/post-execute`, `agent/turn-stopping`, `agent/request` — each answering with a plain patch, chained in Plugin order.
+_Avoid_: Middleware, interceptor, action
+
+**Seed state**:
+How the deployment ships a Plugin: `locked`, `default-on`, `default-off` or `admin-gated`. A seeded Plugin that is not enableable may also be `hidden` from the Plugins page.
+_Avoid_: Tier, preinstall flag
+
+**Plugin trigger**:
+A Routine trigger kind whose event arrives on the app-owned `/hooks/<token>` route, is verified and shaped by the Plugin's `trigger.receive` hook, and is enqueued as a firing by the app. The Plugin never binds a route and never enqueues a Turn.
+_Avoid_: Webhook plugin, inbound handler
 
 **Computer**:
 A User's working environment: one persistent Workspace with compute attached on demand, shared by all of that User's Bots, each with its own directories and desktop, all sharing the User's browser profile.
@@ -107,7 +123,7 @@ A small real-time application a Bot builds for its User and the User opens besid
 _Avoid_: App, gadget, application, widget
 
 **Account feature**:
-A capability an administrator turns on for one account from Site administration; Applets is the first. Off is silence on every surface — no tools, no Composition members, no canvas, no managed Skill — and the account's data is kept. Held by the User, set only by an admin.
+A capability an administrator turns on for one account from Site administration; Applets is the first, Plugin authoring the second. Off is silence on every surface — no tools, no Composition members, no canvas, no managed Skill — and the account's data is kept. Held by the User, set only by an admin.
 _Avoid_: Feature flag, beta, entitlement, plan
 
 **Instance Contribution**:
@@ -131,7 +147,7 @@ The package a Bot writes an Applet against on the Computer: the server base clas
 _Avoid_: Framework, runtime
 
 **Isolate**:
-A Dynamic Worker the Bot's Durable Object loads to execute non-first-party Package code with only the bindings its User's enabled Packages and Connections grant.
+A Dynamic Worker loaded to execute code that was not in the deploy — the User's Plugin worker, an Applet's server — with `globalOutbound` disabled and only the loopback bindings its User's authority grants, masked per Bot per Turn.
 _Avoid_: Sandbox, container, worker
 
 **Keyring**:
@@ -143,7 +159,7 @@ The only non-Package code: Durable Object authority, the Agent loop, and Package
 _Avoid_: Core, host
 
 **Composition**:
-The durable, versioned set of plugin generations a Bot mounts: Bot-authored Packages and the User's Applets, never first-party code. Every admitted Turn records the Composition it ran under.
+The durable, versioned set of Plugins a User has installed, held by the User Durable Object with its last-known-good and quarantine, never first-party code. A Bot mounts it through its own enable map. Every admitted Turn records the Composition generation and the enable map it ran under.
 _Avoid_: Configuration, bundle, profile
 
 **Generation**:
