@@ -7,6 +7,7 @@
 library;
 
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -53,8 +54,9 @@ Future<void> mount(
 void main() {
   for (final width in [390.0, 1280.0]) {
     for (final brightness in Brightness.values) {
-      testWidgets('realtime dock below the actual shell: $width $brightness',
-          (tester) async {
+      testWidgets('realtime dock below the actual shell: $width $brightness', (
+        tester,
+      ) async {
         final harness = VoiceShellHarness();
         await harness.mount(tester, width: width, brightness: brightness);
         final safeBottom = width == 390 ? 34.0 : 0.0;
@@ -65,7 +67,9 @@ void main() {
         await tester.pump();
         final footer = find.byType(VoiceFooter);
         final end = find.descendant(
-            of: footer, matching: find.widgetWithIcon(IconButton, Icons.close));
+          of: footer,
+          matching: find.widgetWithIcon(IconButton, Icons.close),
+        );
         void checkFrame() {
           final rect = tester.getRect(footer);
           expect(rect.left, 0);
@@ -78,10 +82,13 @@ void main() {
           final stage = tester.getRect(find.byKey(voiceFooterAnimationKey));
           final mute = tester.getRect(find.byTooltip('Mute microphone'));
           expect(stage.right + 16, lessThanOrEqualTo(mute.left));
-          expect(find.descendant(of: footer, matching: find.byType(Text)),
-              findsNothing);
+          expect(
+            find.descendant(of: footer, matching: find.byType(Text)),
+            findsNothing,
+          );
           expect(tester.takeException(), isNull);
         }
+
         for (var frame = 0; frame < 24; frame++) {
           await tester.pump(const Duration(milliseconds: 16));
           checkFrame();
@@ -194,6 +201,35 @@ void main() {
     );
     // Mute is gone in the error state; the way out is not.
     expect(find.bySemanticsLabel('Mute microphone'), findsNothing);
+  });
+
+  testWidgets('a notice borrows the stage and keeps both controls', (
+    tester,
+  ) async {
+    final socket = FakeVoiceSocket();
+    final controller = session(socket);
+    addTearDown(controller.dispose);
+    await mount(tester, controller, width: 390);
+    unawaited(controller.start());
+    await tester.pump();
+    socket.deliver(jsonEncode({'type': 'welcome', 'protocol_version': 1}));
+    socket.deliver(jsonEncode({'type': 'status', 'status': 'listening'}));
+    await tester.pump();
+    socket.deliver(jsonEncode({'type': 'error', 'message': 'no audio'}));
+    await tester.pump();
+
+    expect(controller.error, isNull);
+    expect(controller.notice, isNotNull);
+    expect(find.text(controller.notice!), findsOneWidget);
+    expect(find.byKey(voiceFooterAnimationKey), findsNothing);
+    // The call goes on: mute is still there, and so is the way out.
+    expect(find.bySemanticsLabel('Mute microphone'), findsOneWidget);
+    expect(find.byTooltip('End voice session'), findsOneWidget);
+
+    await tester.pump(AssistantSessionController.noticeDuration);
+    await tester.pump();
+    expect(controller.notice, isNull);
+    expect(find.byKey(voiceFooterAnimationKey), findsOneWidget);
   });
 
   testWidgets('the slab is the brand pink, with no top border', (tester) async {

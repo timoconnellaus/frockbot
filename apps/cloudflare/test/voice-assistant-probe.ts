@@ -27,6 +27,8 @@ export interface VoiceProbeScript {
   botId?: string;
   /** The whole model reply, so a test can choose its sentences. */
   reply?: string;
+  /** The speech provider answers every sentence with nothing, as a refused key does. */
+  silentTts?: boolean;
 }
 
 function sse(events: unknown[]): ReadableStream<Uint8Array> {
@@ -63,6 +65,9 @@ export interface VoiceTraceLine {
   audioChunks?: number;
   audioBytes?: number;
   sentencesSpoken?: number;
+  turn?: string;
+  ms?: number;
+  sinceTurnMs?: number;
 }
 
 export class WorkerdVoiceAssistant extends VoiceAssistant {
@@ -73,10 +78,17 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
   #dropDispatches = 0;
   #dispatched: string[] = [];
   #traces: VoiceTraceLine[] = [];
+  #stalled: Promise<void> | undefined;
+  #release: (() => void) | undefined;
 
   /** A one-second window, so a cap can bite inside a test's patience. */
   protected override sttWindowSeconds(): number {
     return 1;
+  }
+
+  /** A short drain window, so a held answer is read out inside a test. */
+  protected override replyDrainQuietMs(): number {
+    return 300;
   }
 
   /** Drops the next N dispatches: the intent is durable, the send is lost. */
@@ -124,6 +136,7 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
     return {
       synthesize: async (text: string) => {
         this.#synthesized.push(text);
+        if (this.#script.silentTts) return null;
         // 20 ms of silence at 24 kHz: enough to be a real binary frame.
         return new ArrayBuffer(24_000 * 2 * 0.02);
       },
@@ -158,6 +171,7 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
     body: Record<string, unknown>,
   ): Promise<ReadableStream<Uint8Array>> {
     this.#chats.push(body);
+    if (this.#stalled) await this.#stalled;
     const messages = body.messages as { role: string; content: string }[];
     const last = messages.at(-1)!;
     if (last.role === "tool") {
@@ -263,6 +277,24 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
 
   async probePutStorage(key: string, value: unknown): Promise<void> {
     await this.ctx.storage.put(key, value);
+  }
+
+  /**
+   * Holds the model's answer open, so the call has a reply in flight for as
+   * long as the test wants one.
+   */
+  async probeStallChat(): Promise<void> {
+    this.#stalled = new Promise<void>((resolve) => {
+      this.#release = resolve;
+    });
+  }
+
+  /** Lets the held answer through. */
+  async probeReleaseChat(): Promise<void> {
+    const release = this.#release;
+    this.#stalled = undefined;
+    this.#release = undefined;
+    release?.();
   }
 
   /** Runs the scheduled look-up by hand, as the alarm would. */

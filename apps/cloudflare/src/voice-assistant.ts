@@ -48,6 +48,7 @@ import {
   type SleepingTranscriberSessionV1,
   type VoiceTranscriberV1,
 } from "@frockbot/app/voice/sleeping-transcriber";
+import { guardSpeechProviderV1 } from "@frockbot/app/voice/tts-guard";
 import {
   decodeVoiceAssistantClientMessageV1,
   VOICE_ASSISTANT_OUTPUT_SAMPLE_RATE_V1,
@@ -134,6 +135,13 @@ const PENDING_AUDIO_BYTES = 10 * 16_000 * 2;
 /** How long a delegation look-up waits before the first check, and its ceiling. */
 const DELEGATION_FIRST_CHECK_SECONDS = 8;
 const DELEGATION_MAX_CHECK_SECONDS = 5 * 60;
+/**
+ * How long after a turn settles its speech is assumed to still be draining.
+ * The SDK's `speak` aborts whatever reply is in flight, and it has no hook
+ * for the moment the last chunk leaves, so a Bot answer that lands inside
+ * this window is held rather than read out over the reply it would cut.
+ */
+const REPLY_DRAIN_QUIET_MS = 6_000;
 
 export interface VoiceAssistantEnv {
   AI?: Ai;
@@ -186,7 +194,15 @@ interface LiveCall {
   /** The day's transcription allowance ran out; the upstream stays shut. */
   exhausted: boolean;
   turnId?: string;
+  /** When the current or last turn began, so its lines can say how long it took. */
+  turnStartedAt?: number;
+  /** When that turn's model finished; unset while it is in flight. */
+  turnSettledAt?: number;
   quotaSaid: boolean;
+}
+
+interface SpeakDelegationPayload {
+  runId: string;
 }
 
 /** Look-ups a delegation gets before it is settled as never accepted. */
@@ -273,7 +289,33 @@ export class VoiceAssistant extends VoiceAgentBase<
   >();
 
   tts: (TTSProvider & Partial<StreamingTTSProvider>) | undefined =
-    this.createTts();
+    this.guardTts(this.createTts());
+
+  /**
+   * The provider never answers with silence: a sentence that produces no
+   * audio throws, the SDK tells the client and moves to the next sentence,
+   * and the line below names the sentence that went unheard.
+   */
+  private guardTts(
+    inner: (TTSProvider & Partial<StreamingTTSProvider>) | undefined,
+  ): (TTSProvider & Partial<StreamingTTSProvider>) | undefined {
+    if (!inner) return undefined;
+    return guardSpeechProviderV1(inner, (text) =>
+      this.synthesisFailed(text),
+    ) as TTSProvider & Partial<StreamingTTSProvider>;
+  }
+
+  private synthesisFailed(text: string): void {
+    for (const connection of this.getConnections()) {
+      const traced = this.#traced.get(connection.id);
+      const awaiting = traced?.awaitingFirstChunk.get(text) ?? 0;
+      if (!traced || awaiting === 0) continue;
+      if (awaiting > 1) traced.awaitingFirstChunk.set(text, awaiting - 1);
+      else traced.awaitingFirstChunk.delete(text);
+      this.trace(connection, "tts-failed", { chars: text.length });
+      return;
+    }
+  }
 
   // -- seams a test subclass overrides ---------------------------------------
 
@@ -339,6 +381,11 @@ export class VoiceAssistant extends VoiceAgentBase<
     return VOICE_ASSISTANT_STT_RESERVE_SECONDS_V1;
   }
 
+  /** How long a settled reply is left to finish playing; a test shortens it. */
+  protected replyDrainQuietMs(): number {
+    return REPLY_DRAIN_QUIET_MS;
+  }
+
   private workerVar(name: `FROCK_AI_${string}`): string | undefined {
     const twin =
       `FLOCK_AI_${name.slice("FROCK_AI_".length)}` as keyof VoiceAssistantEnv;
@@ -399,7 +446,9 @@ export class VoiceAssistant extends VoiceAgentBase<
         : {}),
       ...fields,
     };
-    (event.startsWith("refused") || event === "stt-failed"
+    (event.startsWith("refused") ||
+      event === "stt-failed" ||
+      event === "tts-failed"
       ? console.warn
       : console.info)("voice assistant", JSON.stringify(line));
   }
@@ -772,10 +821,15 @@ export class VoiceAssistant extends VoiceAgentBase<
       if (awaiting > 1) traced.awaitingFirstChunk.set(text, awaiting - 1);
       else traced.awaitingFirstChunk.delete(text);
       traced.sentencesSpoken += 1;
+      const call = this.#calls.get(connection.id);
       this.trace(connection, "audio", {
         chars: text.length,
         bytes: audio.byteLength,
         chunk: traced.audioChunks,
+        ...(call?.turnId ? { turn: call.turnId } : {}),
+        ...(call?.turnStartedAt
+          ? { sinceTurnMs: Math.max(0, Date.now() - call.turnStartedAt) }
+          : {}),
       });
     }
     return audio;
@@ -872,7 +926,10 @@ export class VoiceAssistant extends VoiceAgentBase<
       return "";
     }
     const turnId = admitted.turn.turnId;
+    const startedAt = Date.now();
     call.turnId = turnId;
+    call.turnStartedAt = startedAt;
+    call.turnSettledAt = undefined;
     this.trace(connection, "turn", { turn: turnId, chars: transcript.length });
     const system = await call.system;
     const host = this.turnHost(identity.userId, turnId);
@@ -887,8 +944,9 @@ export class VoiceAssistant extends VoiceAgentBase<
       let traced: Record<string, string | number> = {
         failure: "no settlement",
       };
+      let firstText = true;
       try {
-        yield* runVoiceTurnV1(
+        for await (const chunk of runVoiceTurnV1(
           host,
           {
             system,
@@ -913,7 +971,18 @@ export class VoiceAssistant extends VoiceAgentBase<
                 }
               : { failure: result.outcome };
           },
-        );
+        )) {
+          if (firstText) {
+            // The model's first word: everything before it is what the
+            // person waited through in silence.
+            firstText = false;
+            self.trace(connection, "model-first-text", {
+              turn: turnId,
+              ms: Date.now() - startedAt,
+            });
+          }
+          yield chunk;
+        }
       } catch (error) {
         settlement = {
           failure: error instanceof Error ? error.message : String(error),
@@ -924,6 +993,7 @@ export class VoiceAssistant extends VoiceAgentBase<
         };
         throw error;
       } finally {
+        call.turnSettledAt = Date.now();
         // Durable before the generator returns, so the SDK's own history
         // write and the ledger never disagree about whether this turn ended.
         await ledger.settleTurn(turnId, settlement);
@@ -931,9 +1001,20 @@ export class VoiceAssistant extends VoiceAgentBase<
         // settlement's own failure sentence: that sentence can be a
         // provider's echo of the request, and the request carries what the
         // person said.
-        self.trace(connection, "turn-settled", { turn: turnId, ...traced });
+        self.trace(connection, "turn-settled", {
+          turn: turnId,
+          ms: Date.now() - startedAt,
+          ...traced,
+        });
       }
     })();
+  }
+
+  /** Whether a reply is being produced or, most likely, still being heard. */
+  private replyInFlight(call: LiveCall): boolean {
+    if (call.turnStartedAt === undefined) return false;
+    if (call.turnSettledAt === undefined) return true;
+    return Date.now() - call.turnSettledAt < this.replyDrainQuietMs();
   }
 
   private turnHost(userId: string, turnId: string): VoiceAssistantHostV1 {
@@ -1104,10 +1185,41 @@ export class VoiceAssistant extends VoiceAgentBase<
       this.now(),
     );
     if (!settled || settled.state !== "settled") return;
-    for (const [connectionId] of this.#calls) {
+    await this.speakSettledDelegation({ runId: settled.runId });
+  }
+
+  /**
+   * Reads a settled answer out on the live call, unless the assistant is
+   * mid-reply: the SDK's `speak` would cut that reply off, so the answer is
+   * held and this runs again once the reply has had time to finish. With no
+   * live call it stays `settled` and is read out at the next call's start.
+   * Public because the scheduler calls it by name.
+   */
+  async speakSettledDelegation(payload: SpeakDelegationPayload): Promise<void> {
+    const delegation = await this.ledger().readDelegation(payload.runId);
+    if (!delegation || delegation.state !== "settled") return;
+    for (const [connectionId, call] of this.#calls) {
       for (const connection of this.getConnections()) {
         if (connection.id !== connectionId) continue;
-        await this.speakDelegation(connection, settled);
+        if (this.replyInFlight(call)) {
+          this.trace(connection, "delegation-held", {
+            reason: "reply-in-flight",
+          });
+          // A fresh row every hold, never `idempotent`: an idempotent insert
+          // matches on callback and payload alone, so a re-hold from inside
+          // this very wake-up would dedup onto the row being executed, which
+          // the scheduler then deletes — and the answer would never be read
+          // out. This method re-reads the record and returns unless it is
+          // still `settled`, so an extra row is a harmless no-op.
+          await this.schedule<SpeakDelegationPayload>(
+            Math.max(1, Math.ceil(this.replyDrainQuietMs() / 1000)),
+            "speakSettledDelegation",
+            { runId: delegation.runId },
+            { idempotent: false },
+          );
+          return;
+        }
+        await this.speakDelegation(connection, delegation);
         return;
       }
     }
@@ -1120,6 +1232,14 @@ export class VoiceAssistant extends VoiceAgentBase<
     const text = delegation.answer
       ? `${delegation.botName} says: ${delegation.answer.slice(0, 600)}`
       : `${delegation.botName} could not finish that: ${delegation.failure ?? "it stopped"}.`;
+    // This sound belongs to no turn: the last one is over, and its clock
+    // would make this read-out look like a reply that took minutes.
+    const call = this.#calls.get(connection.id);
+    if (call) {
+      call.turnId = undefined;
+      call.turnStartedAt = undefined;
+      call.turnSettledAt = undefined;
+    }
     try {
       await this.speak(connection, text);
       await this.ledger().markSpoken(delegation.runId, this.now());
