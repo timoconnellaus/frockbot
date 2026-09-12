@@ -83,6 +83,16 @@ import {
   DurableWorkspaceGenerations,
 } from "@frockbot/core/durable";
 import {
+  decodeCompositionGenerationV1,
+  type CompositionFailureInputV1,
+  type CompositionOriginV1,
+} from "@frockbot/core/durable";
+import {
+  readUserCompositionV1,
+  userCompositionFailuresV1,
+  userCompositionStoreV1,
+} from "@frockbot/app/composition/user";
+import {
   decodeAppletProvenanceV1,
   decodeAppletToolDeclarationV1,
   type AppletSummaryV1,
@@ -122,6 +132,7 @@ import type { WorkerLoader } from "./contracts.js";
 import {
   decodeRpcEnvelopeV1,
   rpcBotId,
+  rpcBoolean,
   rpcDecoded,
   rpcIdentifier,
   rpcInteger,
@@ -622,6 +633,161 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     await this.assertUserIdentity(request.userId as string);
     return (await this.settingsContribution()).readConnectionsFrame(
       request.userId as string,
+    );
+  }
+
+  // The User's Composition (ADR 0026): the installed Plugin set, its
+  // generations, last known good and quarantine. A Bot mirrors the pin
+  // before every admission and records activation outcomes here.
+
+  async readComposition(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
+    await this.assertUserIdentity(request.userId as string);
+    return readUserCompositionV1({ ctx: this.ctx });
+  }
+
+  async readCompositionGeneration(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      generationId: rpcString(256),
+    });
+    await this.assertUserIdentity(request.userId as string);
+    return userCompositionStoreV1({ ctx: this.ctx }).read(
+      request.generationId as string,
+    );
+  }
+
+  async proposeComposition(input: unknown) {
+    const request = decodeRpcEnvelopeV1(
+      input,
+      {
+        userId: rpcIdentifier,
+        generation: rpcDecoded(decodeCompositionGenerationV1),
+      },
+      {
+        pin: rpcBoolean,
+        expectedCurrentGenerationId: rpcString(256),
+      },
+    );
+    await this.assertUserIdentity(request.userId as string);
+    await userCompositionStoreV1({ ctx: this.ctx }).propose(
+      request.generation as ReturnType<typeof decodeCompositionGenerationV1>,
+      {
+        ...(request.pin === undefined ? {} : { pin: request.pin as boolean }),
+        ...(request.expectedCurrentGenerationId === undefined
+          ? {}
+          : {
+              expectedCurrentGenerationId:
+                request.expectedCurrentGenerationId as string,
+            }),
+      },
+    );
+  }
+
+  async commitComposition(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      generationId: rpcString(256),
+    });
+    await this.assertUserIdentity(request.userId as string);
+    await userCompositionStoreV1({ ctx: this.ctx }).commit(
+      request.generationId as string,
+    );
+  }
+
+  async failComposition(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      generationId: rpcString(256),
+      quarantined: rpcBoolean,
+    });
+    await this.assertUserIdentity(request.userId as string);
+    await userCompositionStoreV1({ ctx: this.ctx }).fail(
+      request.generationId as string,
+      { quarantined: request.quarantined as boolean },
+    );
+  }
+
+  async revertComposition(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      toGenerationId: rpcString(256),
+      origin: rpcJsonRecord,
+    });
+    await this.assertUserIdentity(request.userId as string);
+    const origin = request.origin as Record<string, unknown>;
+    if (
+      origin.kind !== "revert" ||
+      origin.revertsTo !== request.toGenerationId ||
+      origin.userId !== request.userId
+    ) {
+      throw new Error("Composition revert origin does not match its request");
+    }
+    return userCompositionStoreV1({ ctx: this.ctx }).revert(
+      request.toGenerationId as string,
+      origin as Extract<CompositionOriginV1, { kind: "revert" }>,
+    );
+  }
+
+  async listCompositionGenerations(input: unknown) {
+    const request = decodeRpcEnvelopeV1(
+      input,
+      {
+        userId: rpcIdentifier,
+        limit: rpcInteger({ minimum: 1, maximum: 100 }),
+      },
+      { cursor: rpcString(512) },
+    );
+    await this.assertUserIdentity(request.userId as string);
+    return userCompositionStoreV1({ ctx: this.ctx }).list({
+      limit: request.limit as number,
+      ...(request.cursor === undefined
+        ? {}
+        : { cursor: request.cursor as string }),
+    });
+  }
+
+  async recordCompositionFailure(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      failure: rpcJsonRecord,
+    });
+    await this.assertUserIdentity(request.userId as string);
+    return userCompositionFailuresV1({ ctx: this.ctx }).record(
+      request.failure as unknown as CompositionFailureInputV1,
+    );
+  }
+
+  async listCompositionFailures(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      generationId: rpcString(256),
+    });
+    await this.assertUserIdentity(request.userId as string);
+    return userCompositionFailuresV1({ ctx: this.ctx }).list(
+      request.generationId as string,
+    );
+  }
+
+  async readCompositionQuarantine(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      generationId: rpcString(256),
+    });
+    await this.assertUserIdentity(request.userId as string);
+    return userCompositionFailuresV1({ ctx: this.ctx }).quarantine(
+      request.generationId as string,
+    );
+  }
+
+  async clearCompositionFailures(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      generationId: rpcString(256),
+    });
+    await this.assertUserIdentity(request.userId as string);
+    await userCompositionFailuresV1({ ctx: this.ctx }).clear(
+      request.generationId as string,
     );
   }
 

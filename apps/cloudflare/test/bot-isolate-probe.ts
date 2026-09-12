@@ -33,6 +33,11 @@ import {
   type ShellMountedComposition,
 } from "@frockbot/app/shell/backend-composition";
 import {
+  enabledPluginIdsV1,
+  readPluginEnablementV1,
+  setPluginEnabledV1,
+} from "@frockbot/app/plugins/enablement";
+import {
   BOT_ISOLATE_COMPATIBILITY_DATE,
   isolateBindingDigestV1,
   type BotCapabilitiesPropsV1,
@@ -584,6 +589,12 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
       input.hooks,
       input.pair,
     );
+    // The Plugins this Bot runs, read from its own storage at mount time —
+    // the same two calls `executeTurn` makes before it mounts.
+    const enabled = enabledPluginIdsV1(
+      generation.members,
+      await readPluginEnablementV1(this.ctx.storage),
+    );
     // SAFETY: exported WorkerEntrypoints are materialized on ctx.exports;
     // workers-types cannot infer the generated local RPC stubs.
     const exports = this.ctx.exports as unknown as ProbeExports;
@@ -646,12 +657,27 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
           compositionGenerationId: generation.generationId,
         }),
         compatibilityDate: BOT_ISOLATE_COMPATIBILITY_DATE,
+        enabled,
         ...(input.deadlineMs === undefined
           ? {}
           : { deadlineMs: input.deadlineMs }),
       },
     }).mount(generation, new AbortController().signal);
     return { composition, generation };
+  }
+
+  /**
+   * Switches one Plugin off for this Bot, through the production enable map
+   * on this object's own storage. The next mount reads it.
+   */
+  async switchPluginOff(pluginId: string): Promise<number> {
+    const current = await readPluginEnablementV1(this.ctx.storage);
+    const next = await setPluginEnabledV1(this.ctx.storage, {
+      pluginId,
+      enabled: false,
+      expectedRevision: current.revision,
+    });
+    return next.revision;
   }
 
   /** The Composition generation this probe mounts, for the Bot Durable Object to pin. */

@@ -245,9 +245,21 @@ export class BotDurableAuthority<Snapshot> {
   readonly ctx: DurableObjectState;
   private readonly codec: StoredRunCodecV1<Snapshot>;
   private readonly hooks: BotDurableAuthorityHooks<Snapshot>;
-  /** Durable Composition generations; every admitted Turn pins the current one. */
+  /**
+   * The Composition records this object holds — on a Bot, the mirror of the
+   * User's that the admission adopted; every admitted Turn pins the current
+   * one (ADR 0026).
+   */
   readonly composition: DurableCompositionStore;
-  /** Why a generation failed to activate, and whether it is quarantined. */
+  /**
+   * Why a generation failed to activate, and whether it is quarantined —
+   * against this object's own storage. Since the Composition moved to the
+   * User (ADR 0026) no production path on a Bot reads this one: activation,
+   * the settings views and `debugSnapshot` all go through
+   * `compositionFailureLogV1` (`app/composition/bot.ts`) against the User's
+   * log, which is the authority. This field survives for the test harnesses
+   * that drive the authority directly.
+   */
   readonly compositionFailures: DurableCompositionFailureLog;
   private executingRunId: string | undefined;
   /**

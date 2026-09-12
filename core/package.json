@@ -8,6 +8,7 @@
     "./contracts/contributions": "./contracts/contributions.ts",
     "./durable": "./durable/index.ts",
     "./durable/composition-failure": "./durable/composition/failure.ts",
+    "./durable/testing": "./durable/memory-storage.fixture.ts",
     "./agent-loop": "./agent-loop/index.ts",
     "./agent-loop/agent": "./agent-loop/agent.ts",
     "./configuration": "./configuration/index.ts",

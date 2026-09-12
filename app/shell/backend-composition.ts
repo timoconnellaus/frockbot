@@ -80,6 +80,8 @@ export interface ShellIsolateMountOptions {
   compatibilityDate: string;
   limits?: BotIsolateLimits;
   deadlineMs?: number;
+  /** The Plugins this Bot runs; absent means every installed one. */
+  enabled?: readonly string[];
 }
 
 /**
@@ -229,6 +231,9 @@ export function createShellCompositionHost(
               ...(isolate.deadlineMs === undefined
                 ? {}
                 : { deadlineMs: isolate.deadlineMs }),
+              ...(isolate.enabled === undefined
+                ? {}
+                : { enabled: isolate.enabled }),
             });
             // Mount and health-check are one guarded phase (Worker Loader spike).
             const prepared = await host.mount(generation.members);

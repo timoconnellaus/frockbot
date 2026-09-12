@@ -250,8 +250,9 @@ suite, and is merged when green.
 1. This document, the terms in `CONTEXT.md`, the amendments to `AGENTS.md`.
 2. The descriptor and the Plugin worker contract, decoders and tests only.
 3. The per-User Plugin worker host in `frock-compose`.
-4. The generation store on the User Durable Object; per-Bot flags, settings
-   and quarantine on the Bot.
+4. The generation store on the User Durable Object, last known good and the
+   generation quarantine with it, as Records says; per-Bot flags and settings
+   on the Bot. The per-Plugin failure count and quarantine are step 9's.
 5. The loopback capabilities: storage, egress, model, settings.
 6. The catalog, seed states, the Plugins page and per-Bot toggles.
 7. Bot authoring: the Tool Namespace, the managed Skill, the build, the

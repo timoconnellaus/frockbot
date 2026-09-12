@@ -42,7 +42,7 @@ Five classes in the app Worker, exported from `apps/cloudflare/src/index.ts`. `c
 ### `BotState` — `apps/cloudflare/src/bot-state.ts:369`
 
 - Binding `BOT_STATES`; id `idFromName("<userId>:<botId>")` (`apps/cloudflare/src/index.ts:456`, `:571`).
-- Authoritative for all Bot-scoped state: identity, runs, admission fences, the pending and agent-lane queues, the session event log, notifications, conversations, Composition generations and pointers, Workspace file generations and conflicts, the memory vector purge journal. Keys are enumerated in `core/durable/storage-keys.ts:1-177`.
+- Authoritative for all Bot-scoped state: identity, runs, admission fences, the pending and agent-lane queues, the session event log, notifications, conversations, its Plugin enable map, Workspace file generations and conflicts, the memory vector purge journal. Its `composition:` records are a mirror of the User's Composition, not an authority over it (§5). Keys are enumerated in `core/durable/storage-keys.ts:1-177`.
 - Storage is key-value only — `ctx.storage.get/put/list/delete/transaction`. The class contains no `sql.exec`.
 - Roughly 90 RPC methods (`bot-state.ts:920-2350`), each taking `input: unknown` and decoding through an envelope decoder. They include `run`/`runAgent`, the `isolate*` loopback surface, Composition reads and reverts, routines, tasks, approvals, notifications, `debugSnapshot` and `fenceRunAdmission`.
 - `alarm()` drains the memory purge journal, then the mounted contribution's alarm, then the audit outbox.
@@ -51,6 +51,7 @@ Five classes in the app Worker, exported from `apps/cloudflare/src/index.ts`. `c
 ### `UserConfiguration` — `apps/cloudflare/src/user-configuration.ts:221`
 
 - Binding `USER_CONFIGURATIONS`; id `idFromName(userId)`.
+- Authoritative for the User's Composition — the installed Plugin set, its generations, last known good and quarantine — reached through the composition RPCs a Bot calls (§5).
 - The only class that uses SQLite, and it does not own the tables. `ctx.storage.sql` is handed to two plugin stores: transcript search FTS5 (`app/search/index-store.ts:143-177`) and audit (`app/audit/store.ts:166-175`). All other state is key-value.
 - One `alarm()` at `:1739` serving credential leases, publisher and template recovery, flock sagas and archived-Bot sweeps.
 - No `fetch()`, no WebSockets.
@@ -95,7 +96,7 @@ The composer's dictation relay (`apps/cloudflare/src/voice-dictation.ts`) is not
 
 5. **Bot Durable Object.** `apps/cloudflare/src/bot-state.ts:1168` `run()` decodes the envelope, materializes the identity and calls `shell.run(...)`.
 
-6. **Shell.** `app/shell/turn.ts:88` `run()` yields any in-flight compaction, calls `followDeploymentComposition()` and `resolveAppletComposition()`, then delegates to `BotDurableAuthority.run` (`core/durable/authority.ts:293`): recover whatever the object holds, check for a settled replay, then `acceptRun`. An accepted run executes inline; otherwise it is durably queued — one user-lane slot, FIFO agent lane — and promoted by `runQueuedRun` (`:332`).
+6. **Shell.** `app/shell/turn.ts:97` `run()` yields any in-flight compaction, calls `resolveAppletComposition()`, then delegates to `admitTurnV1`, which mirrors the User's Composition and calls `BotDurableAuthority.run` (`core/durable/authority.ts:293`): recover whatever the object holds, check for a settled replay, then `acceptRun`. An accepted run executes inline; otherwise it is durably queued — one user-lane slot, FIFO agent lane — and promoted by `runQueuedRun` (`:332`).
 
 7. **Mount.** `activateCompositionV1` reads the pin and builds the Turn's runtime through `createShellCompositionHost` (`app/shell/backend-composition.ts:274`).
 
@@ -192,9 +193,9 @@ Provider-reported token counts are used when present. Otherwise `estimateModelUs
 
 Composition is the untrusted layer and nothing else. First-party Packages are ordinary imports: `app/packages.ts` lists the 30 the deployment ships as `PackageDefinitionV1` records, and a Package that carries data (settings, Capabilities, Connection Types, durable roots, dependencies) exports its own definition from its own package. There is no manifest, no compiler and no application hash over a plan.
 
-1. On first use the Bot Durable Object receives an empty bootstrap generation (`app/shell/backend-composition.ts`; `core/durable/composition/generation.ts`). A Bot that has installed and authored nothing composes nothing, which is why a release no longer has to rewrite every Bot's generation to follow the deploy.
-2. At admission, `activateCompositionV1` (`app/shell/turn.ts:299`) reads the pin, mounts, verifies, commits and records last-known-good.
-3. Mounting builds one runtime per Turn (`backend-composition.ts`): the registries, a `LoopHookListV1`, and the features the host lists, mounted in that order by `mountRuntimeFeaturesV1`. Neither the Shell nor `app/agent-runtime.ts` imports an application: the Shell's Bot host carries the deployment's `PackageDefinitionV1` list, its one Package version, and four factories — `base`, `hosted`, `enabled`, `model` — that turn a Package id into a mounted feature (`app/shell/backend-runtime.ts`). `app/runtime.ts` fills them in as `foundationShellApplicationV1`, and `apps/cloudflare/src/bot-state.ts` spreads that into the host. The base Packages — identity, the built-in model, the two demo tools and the Shell's own voice — are appended last, so a provider an earlier Package registered is already there. Every member goes through `PluginWorkerHost`, which mounts the generation's Plugins as one Dynamic Worker per User; each open hook event is registered once on the same list after the app's, over every mounted Plugin that declared it. Applet members register as tools routed to `APPLET_STATES`.
+1. On first use the User Durable Object materializes an empty bootstrap generation (`app/composition/user.ts`; `core/durable/composition/generation.ts`), and a Bot's first admission mirrors it. A User who has installed nothing composes nothing, which is why a release no longer has to rewrite every generation to follow the deploy.
+2. At admission, `activateCompositionV1` (`app/shell/turn.ts:317`) reads the mirrored pin, mounts, verifies, then commits and records last-known-good on the User.
+3. Mounting builds one runtime per Turn (`backend-composition.ts`): the registries, a `LoopHookListV1`, and the features the host lists, mounted in that order by `mountRuntimeFeaturesV1`. Neither the Shell nor `app/agent-runtime.ts` imports an application: the Shell's Bot host carries the deployment's `PackageDefinitionV1` list, its one Package version, and four factories — `base`, `hosted`, `enabled`, `model` — that turn a Package id into a mounted feature (`app/shell/backend-runtime.ts`). `app/runtime.ts` fills them in as `foundationShellApplicationV1`, and `apps/cloudflare/src/bot-state.ts` spreads that into the host. The base Packages — identity, the built-in model, the two demo tools and the Shell's own voice — are appended last, so a provider an earlier Package registered is already there. Every member goes through `PluginWorkerHost`, which mounts the generation's Plugins as one Dynamic Worker per User; each open hook event is registered once on the same list after the app's, over the Plugins this Bot's enable map leaves on that declared it. Applet members register as tools routed to `APPLET_STATES`.
 
 ### Generation shape
 
@@ -214,9 +215,13 @@ Composition is the untrusted layer and nothing else. First-party Packages are or
 
 ### Where the pin lives
 
-`DurableCompositionStore` (`core/durable/composition-store.ts:74`) writes into the Bot Durable Object: `composition:current` (a `{generationId, artifactSetHash}` pin), `composition:generation:<id>`, `composition:index:<createdAt>:<id>`, `composition:last-known-good`, plus failure, failure-count and quarantine keys. Pinning is compare-and-swap; a lost race raises `CompositionPinConflictError` and the caller re-reads and re-derives (four attempts).
+The User Durable Object owns the Composition (ADR 0026): `DurableCompositionStore` (`core/durable/composition-store.ts`) and `DurableCompositionFailureLog` write into the User object under `composition:current` (a `{generationId, artifactSetHash}` pin), `composition:generation:<id>`, `composition:index:<createdAt>:<id>`, `composition:last-known-good`, plus failure, failure-count and quarantine keys, reached through the `readComposition`, `proposeComposition`, `commitComposition`, `failComposition`, `revertComposition` and failure-log RPCs (`app/composition/user.ts`). Pinning is compare-and-swap; a lost race raises `CompositionPinConflictError` and the caller re-reads and re-derives (four attempts).
 
-An in-flight Turn keeps the generation it pinned. Activation takes effect at the next admitted Turn.
+A Bot admits a Turn inside its own storage transaction, which cannot make a cross-object call, so every admission goes through `admitTurnV1` (`app/composition/bot.ts`) — a chat Turn, a Routine firing, a Package-UI tool, a Subagent task — which first reads the User's pin and fallback and `adopt`s them into the Bot's own `composition:` records: a mirror the admission pins from, never a second truth. A stale mirror is replaced whole, which is also what retires the records a Bot held from before the store moved. Activation reads the mirror, commits and fails against the User, and refreshes the mirror after; the settings views read the User directly.
+
+Which of the User's installed Plugins a Bot runs is the Bot's own revisioned enable map, `plugins:enablement` (`app/plugins/enablement.ts`), read at every mount; absent is on. The list it yields is what the Plugin worker registers tools for and passes as the enabled list on every hook.
+
+An in-flight Turn keeps the generation it pinned — a read of that pin falls back to the User when a later admission has already adopted a newer one over the mirror. Activation takes effect at the next admitted Turn.
 
 ### Activation and failure — `core/durable/composition/activation.ts`
 

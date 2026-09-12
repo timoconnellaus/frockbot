@@ -27,6 +27,8 @@ export const SESSION_EVENT_LOG_PAGE_PREFIX = "session-events:page:";
 export const SESSION_EVENT_PAYLOAD_PREFIX = "session-events:payload:";
 export const IDENTITY_KEY = "identity";
 export const NOTIFICATION_PREFIX = "notification:";
+// The Composition keys below are the User Durable Object's records (ADR 0026)
+// and, on a Bot, the mirror of them its admission pins from.
 export const COMPOSITION_CURRENT_KEY = "composition:current";
 export const COMPOSITION_GENERATION_PREFIX = "composition:generation:";
 export const COMPOSITION_INDEX_PREFIX = "composition:index:";

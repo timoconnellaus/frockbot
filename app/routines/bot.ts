@@ -75,6 +75,7 @@ import {
   decodeApprovalRecordV1,
 } from "@frockbot/app/shell/approvals";
 import type { ShellBotStateV1 } from "@frockbot/app/shell/backend-state";
+import { admitTurnV1 } from "@frockbot/app/composition/bot";
 import { notificationIdV1 } from "@frockbot/app/shell/notification-id";
 import {
   reconcileOverdueTasks,
@@ -648,7 +649,8 @@ async function runOneFiring(
   fire: RoutineFireV1,
 ): Promise<RoutineFireOutcomeV1> {
   try {
-    await state.authority.run(
+    await admitTurnV1(
+      state,
       routineTurnCommandV1(identity, fire, new Date().toISOString()),
     );
   } catch (error) {

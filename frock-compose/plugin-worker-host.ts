@@ -159,6 +159,13 @@ export interface PluginWorkerHostOptions {
   limits?: BotIsolateLimits;
   deadlineMs?: number;
   healthDeadlineMs?: number;
+  /**
+   * The Plugins this Bot runs, out of the ones its User installed. Absent
+   * means every mounted Plugin. A Plugin the User installed but this Bot has
+   * off is still in the module set — the worker is per User — but registers
+   * no tools here and is left out of every hook's enabled list.
+   */
+  enabled?: readonly string[];
 }
 
 export const BOT_ISOLATE_DEFAULT_LIMITS: BotIsolateLimits = {
@@ -511,7 +518,7 @@ export class PluginWorkerHost {
         providerOf.set(service.name, member.packageId);
       }
     }
-    const enabled: typeof verified = [];
+    const surviving: typeof verified = [];
     const live = new Set<string>();
     for (const entry of verified) {
       const pluginId = entry.member.packageId;
@@ -527,17 +534,26 @@ export class PluginWorkerHost {
         continue;
       }
       live.add(pluginId);
-      enabled.push(entry);
+      surviving.push(entry);
     }
 
     let disposed = false;
     const registered: (() => void)[] = [];
-    const mounted = enabled.map(({ member }) => member.packageId);
+    const mounted = surviving.map(({ member }) => member.packageId);
+    // Of the Plugins that mounted and survived, this Bot runs the ones its
+    // own enable map allows. The others stay in the worker — it is per User
+    // — but register no tools here and are left out of every hook's list.
+    const enabledHere = this.options.enabled;
+    const running = surviving.filter(
+      ({ member }) =>
+        enabledHere === undefined || enabledHere.includes(member.packageId),
+    );
+    const enabled = running.map(({ member }) => member.packageId);
     return {
       mounted,
       failures,
       commit: (): Promise<ActivePluginWorker> => {
-        for (const { member, health: plugin } of enabled) {
+        for (const { member, health: plugin } of running) {
           registered.push(
             this.options.tools.registerNamespace({
               name: member.packageId,
@@ -557,7 +573,7 @@ export class PluginWorkerHost {
           }
         }
         const declaring = new Map<BotIsolateHookEventNameV1, string[]>();
-        for (const { member, health: plugin } of enabled) {
+        for (const { member, health: plugin } of running) {
           for (const event of plugin.hooks) {
             declaring.set(event, [
               ...(declaring.get(event) ?? []),
@@ -567,7 +583,7 @@ export class PluginWorkerHost {
         }
         for (const [event, plugins] of declaring) {
           registered.push(
-            this.registerHook(entrypoint, mounted, plugins, event),
+            this.registerHook(entrypoint, enabled, plugins, event),
           );
         }
         return Promise.resolve({

@@ -39,6 +39,7 @@ import {
 } from "@frockbot/app/skills/catalog";
 import { writeSkillDocumentV1 } from "@frockbot/app/skills/write";
 import type { ShellBotStateV1 } from "@frockbot/app/shell/backend-state";
+import { admitTurnV1 } from "@frockbot/app/composition/bot";
 import { projectFirstPartyPackageIframeV1 } from "@frockbot/app/shell/composition-views";
 import { appletsEnabled } from "@frockbot/app/applets-host/bot";
 import { APPLETS_SKILL_SLUG_V1 } from "@frockbot/app/skills/managed";
@@ -163,7 +164,7 @@ export async function runPackageUiTool(
   const catalog = await listPackageUi(state, identity);
   const contribution = requirePackageUiToolDeclarationV1(catalog, command);
   return projectClientTurnV1(
-    await state.authority.run({
+    await admitTurnV1(state, {
       ...identity,
       runId: command.commandId,
       sessionId: `${identity.userId}:${identity.botId}`,

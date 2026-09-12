@@ -6,6 +6,7 @@ import {
 import type { UserSettingsViewV1 } from "@frockbot/core/configuration";
 import type { StoredRun } from "@frockbot/app/shell/backend-contracts";
 import { randomSheepRecipeV1 } from "@frockbot/app/flock/shared";
+import { memoryUserCompositionV1 } from "@frockbot/app/composition/user.fixture";
 import type { BotStateEnv } from "./bot-state.js";
 import { hydrateStoredRunEventsV1 } from "../test/session-log-probe.js";
 
@@ -254,12 +255,15 @@ describe("BotState Ollama execution", () => {
         ),
       );
     }) as typeof fetch;
+    // The Composition is the User's, so the Bot mirrors it from here.
+    const userComposition = memoryUserCompositionV1();
     const env = {
       CREDENTIAL_KEYRING: credentialKeyring,
       USER_CONFIGURATIONS: {
         idFromName: () => "user-configuration-id",
         get: () => ({
           ...rpc,
+          ...userComposition,
           // The Memory half of the User Durable Object: the shared-root
           // generation ledger and Project membership. This Bot writes no
           // shared root in the test, so only the read paths are exercised.

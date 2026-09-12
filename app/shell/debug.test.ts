@@ -4,6 +4,7 @@ import { initializeBotSettingsV1 } from "@frockbot/core/configuration";
 import { SessionEventLog, storedRunRecordV2 } from "@frockbot/core/durable";
 import { createShellBotBackendContribution } from "./backend.js";
 import type { StoredRun } from "./backend-contracts.js";
+import { memoryUserCompositionV1 } from "@frockbot/app/composition/user.fixture";
 
 class MemoryStorage {
   readonly values = new Map<string, unknown>();
@@ -82,10 +83,14 @@ function storedRun(overrides: Partial<StoredRun> = {}): StoredRun {
 }
 
 function contributionOver(storage: MemoryStorage) {
+  // The Composition is the User's; the snapshot reads it from there.
+  const user = memoryUserCompositionV1();
   return createShellBotBackendContribution({
     ...shellTestApplicationV1(),
     state: { storage } as unknown as DurableObjectState,
-    env: {} as never,
+    env: {
+      USER_CONFIGURATIONS: { idFromName: () => "user-1", get: () => user },
+    } as never,
   });
 }
 

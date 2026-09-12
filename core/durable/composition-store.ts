@@ -1,8 +1,10 @@
 /// <reference types="@cloudflare/workers-types" />
-// The Bot Durable Object is the authority for the Composition generations its
-// Turns pin. Generations are durable records: proposing or committing one never
-// mutates a recorded generation, and an in-flight Turn keeps the pin it was
-// admitted under.
+// The store over one object's Composition records. The authority is the User
+// Durable Object, which owns the generations (ADR 0026); the same store runs
+// on a Bot over the two generations `adopt` mirrors there for admission.
+// Generations are durable records: proposing or committing one never mutates a
+// recorded generation, and an in-flight Turn keeps the pin it was admitted
+// under.
 import type { CompositionPinV1 } from "@frockbot/core/contracts";
 import { decodeCompositionFailureV1 } from "./composition/activation.js";
 import {
@@ -232,6 +234,63 @@ export class DurableCompositionStore implements CompositionStore {
           ? { [COMPOSITION_CURRENT_KEY]: compositionPinV1(proposed) }
           : {}),
       });
+    });
+  }
+
+  /**
+   * Takes another store's current and last-known-good generations as this
+   * object's own, verbatim. The Bot Durable Object mirrors the User's
+   * Composition this way before every admission: admission pins the pointer
+   * inside its own storage transaction, which cannot make a cross-object call,
+   * so the pointer it reads has to be here. A pointer that already names the
+   * User's current generation is left alone; one that does not — a stale
+   * mirror, or records from before the store moved to the User — is replaced
+   * with every `composition:` record this object held, so nothing unreadable
+   * or unowned lingers beside the mirror.
+   */
+  async adopt(input: {
+    current: CompositionGenerationV1;
+    lastKnownGood: CompositionGenerationV1;
+  }): Promise<CompositionPinV1> {
+    const current = decodeCompositionGenerationV1(input.current);
+    const lastKnownGood = decodeCompositionGenerationV1(input.lastKnownGood);
+    await assertCompositionArtifactSetHashV1(current);
+    const pin = compositionPinV1(current);
+    return this.ctx.storage.transaction(async (transaction) => {
+      const existing = await transaction.get<unknown>(COMPOSITION_CURRENT_KEY);
+      const stale =
+        existing === undefined ||
+        decodeCompositionPinV1(existing).generationId !== pin.generationId ||
+        (await transaction.get<string>(COMPOSITION_LAST_KNOWN_GOOD_KEY)) !==
+          lastKnownGood.generationId;
+      if (!stale) {
+        // The pin is right; the records under it may still have moved status
+        // on the User (a commit, a failure), so they are rewritten.
+        await transaction.put({
+          [compositionGenerationKey(current.generationId)]: current,
+          [compositionGenerationKey(lastKnownGood.generationId)]: lastKnownGood,
+        });
+        this.verified = true;
+        return pin;
+      }
+      const keys = [
+        ...(await transaction.list<unknown>({ prefix: "composition:" })).keys(),
+      ];
+      if (keys.length > 0) await transaction.delete(keys);
+      await transaction.put({
+        [compositionGenerationKey(current.generationId)]: current,
+        [compositionIndexKey(current.createdAt, current.generationId)]:
+          current.generationId,
+        [compositionGenerationKey(lastKnownGood.generationId)]: lastKnownGood,
+        [compositionIndexKey(
+          lastKnownGood.createdAt,
+          lastKnownGood.generationId,
+        )]: lastKnownGood.generationId,
+        [COMPOSITION_CURRENT_KEY]: pin,
+        [COMPOSITION_LAST_KNOWN_GOOD_KEY]: lastKnownGood.generationId,
+      });
+      this.verified = true;
+      return pin;
     });
   }
 

@@ -283,6 +283,7 @@ import {
   decodeBotRunRpcV1,
   decodeRpcEnvelopeV1,
   rpcAppletIdOrNull,
+  rpcBoolean,
   rpcBotId,
   rpcDecoded,
   rpcIdentifier,
@@ -293,6 +294,13 @@ import {
   rpcString,
 } from "./durable-rpc.js";
 import { answeredEntryV1, loggedEntryV1 } from "./entry-boundary.js";
+import {
+  PLUGIN_ID_MAX_LENGTH_V1,
+  PLUGIN_ID_V1,
+  PluginEnablementConflictError,
+  readPluginEnablementV1,
+  setPluginEnabledV1,
+} from "@frockbot/app/plugins/enablement";
 
 function isFrockAiGatewayBindingV1(
   value: BotStateEnv["AI"],
@@ -1037,6 +1045,58 @@ export class BotState extends DurableObject<BotStateEnv> {
       botId: request.botId,
     });
     return executeConfiguration(shell.state, request);
+  }
+
+  /** Which of the User's installed Plugins this Bot runs (ADR 0026). */
+  async readPluginEnablement(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { shell } = await this.materialized(identity);
+    await shell.validateIdentity(identity);
+    return readPluginEnablementV1(shell.state.ctx.storage);
+  }
+
+  /**
+   * Switches one Plugin for this Bot, fenced on the revision the caller read.
+   * A stale revision is a receipt, not a thrown error: the caller re-reads and
+   * decides again, the way every other revision-fenced command answers.
+   */
+  async setPluginEnabled(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      pluginId: rpcPattern(PLUGIN_ID_V1, PLUGIN_ID_MAX_LENGTH_V1),
+      enabled: rpcBoolean,
+      expectedRevision: rpcInteger({ minimum: 0, maximum: 1_000_000 }),
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { shell } = await this.materialized(identity);
+    await shell.validateIdentity(identity);
+    try {
+      const enablement = await setPluginEnabledV1(shell.state.ctx.storage, {
+        pluginId: request.pluginId as string,
+        enabled: request.enabled as boolean,
+        expectedRevision: request.expectedRevision as number,
+      });
+      return { status: "applied" as const, enablement };
+    } catch (error) {
+      if (error instanceof PluginEnablementConflictError) {
+        return {
+          status: "conflict" as const,
+          currentRevision: error.currentRevision,
+        };
+      }
+      throw error;
+    }
   }
 
   /** A non-waking projection of this Bot's durable Computer presence. */

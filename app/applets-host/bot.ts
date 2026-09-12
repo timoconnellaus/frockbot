@@ -30,6 +30,10 @@ import {
   type OwnedBotTurnCommand,
 } from "@frockbot/core/durable";
 import type { ShellBotStateV1 } from "@frockbot/app/shell/backend-state";
+import {
+  currentUserCompositionV1,
+  proposeUserCompositionV1,
+} from "@frockbot/app/composition/bot";
 import { decodeUserFeaturesV1 } from "@frockbot/app/admin/shared";
 import {
   createAppletCapabilityHostV1,
@@ -129,10 +133,18 @@ function appletCapabilityHost(
       ? { appOrigin: state.env.BETTER_AUTH_URL }
       : {}),
     composition: {
-      current: () => state.authority.composition.current(),
-      lastKnownGood: () => state.authority.composition.lastKnownGood(),
+      current: () => currentUserCompositionV1(state, identity),
       propose: (generation, options) =>
-        state.authority.composition.propose(generation, options),
+        proposeUserCompositionV1(state, identity, {
+          generation,
+          ...(options?.pin === undefined ? {} : { pin: options.pin }),
+          ...(options?.expectedCurrentGenerationId === undefined
+            ? {}
+            : {
+                expectedCurrentGenerationId:
+                  options.expectedCurrentGenerationId,
+              }),
+        }),
     },
   });
 }
@@ -377,9 +389,18 @@ export async function resolveAppletComposition(
             }),
           },
       composition: {
-        current: () => state.authority.composition.current(),
+        current: () => currentUserCompositionV1(state, identity),
         propose: (generation, options) =>
-          state.authority.composition.propose(generation, options),
+          proposeUserCompositionV1(state, identity, {
+            generation,
+            ...(options?.pin === undefined ? {} : { pin: options.pin }),
+            ...(options?.expectedCurrentGenerationId === undefined
+              ? {}
+              : {
+                  expectedCurrentGenerationId:
+                    options.expectedCurrentGenerationId,
+                }),
+          }),
       },
       storage: {
         get: (key) => state.ctx.storage.get(key),

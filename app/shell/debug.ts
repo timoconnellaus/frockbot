@@ -5,6 +5,11 @@ import type { BotSettingsViewV1 } from "@frockbot/core/configuration";
 import type { BotIdentity } from "@frockbot/core/durable";
 import type { ShellBotStateV1 } from "./backend-state.js";
 import {
+  compositionFailureLogV1,
+  listUserCompositionGenerationsV1,
+  readUserCompositionSnapshotV1,
+} from "@frockbot/app/composition/bot";
+import {
   BOT_DEBUG_DEFAULT_RUN_LIMIT_V1,
   BOT_DEBUG_EVENT_BYTES_V1,
   BOT_DEBUG_GENERATION_LIMIT_V1,
@@ -30,24 +35,24 @@ export async function debugSnapshot(
   input: unknown = { schemaVersion: 1 },
 ): Promise<BotDebugSnapshotV1> {
   const query = decodeBotDebugQueryV1(input);
-  const [activeRunId, current, notifications] = await Promise.all([
+  // The Composition is the User's; the Bot holds only the pin it mirrored.
+  // Read from the User, and read only: looking at a wedged Bot must not be
+  // what re-points its mirror.
+  const failures = compositionFailureLogV1(state, identity);
+  const [activeRunId, composition, notifications] = await Promise.all([
     state.authority.readActiveRunId(),
-    state.authority.composition.current(),
+    readUserCompositionSnapshotV1(state, identity),
     state.authority.listNotifications(),
   ]);
-  let lastKnownGoodGenerationId: string | undefined;
-  try {
-    lastKnownGoodGenerationId = (
-      await state.authority.composition.lastKnownGood()
-    ).generationId;
-  } catch {
-    // A Bot whose first generation never mounted has no last known good;
-    // that absence is itself a finding, not an error to propagate.
-    lastKnownGoodGenerationId = undefined;
-  }
-  const generationPage = await state.authority.composition.list({
-    limit: BOT_DEBUG_GENERATION_LIMIT_V1,
-  });
+  const current = composition.current;
+  // A Bot whose first generation never mounted falls back to its bootstrap;
+  // the pair is read together, so there is nothing here that can be absent.
+  const lastKnownGoodGenerationId = composition.lastKnownGood.generationId;
+  const generationPage = await listUserCompositionGenerationsV1(
+    state,
+    identity,
+    { limit: BOT_DEBUG_GENERATION_LIMIT_V1 },
+  );
   const generations = await Promise.all(
     generationPage.generations.map(async (generation) => ({
       generationId: generation.generationId,
@@ -59,13 +64,9 @@ export async function debugSnapshot(
         ? {}
         : { parentGenerationId: generation.parentGenerationId }),
       memberCount: generation.members.length,
-      failures: await state.authority.compositionFailures.list(
-        generation.generationId,
-      ),
+      failures: await failures.list(generation.generationId),
       quarantined:
-        (await state.authority.compositionFailures.quarantine(
-          generation.generationId,
-        )) !== undefined,
+        (await failures.quarantine(generation.generationId)) !== undefined,
     })),
   );
 

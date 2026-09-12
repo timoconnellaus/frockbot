@@ -58,6 +58,7 @@ import {
   taskContextKeyV1,
 } from "@frockbot/app/subagents/storage-keys";
 import type { ShellBotStateV1 } from "@frockbot/app/shell/backend-state";
+import { admitTurnV1 } from "@frockbot/app/composition/bot";
 import { appendAnnouncement } from "@frockbot/app/shell/reads";
 import { notificationIdV1 } from "@frockbot/app/shell/notification-id";
 import {
@@ -952,7 +953,7 @@ export async function runOwedSubagentTurns(
     await state.ctx.storage.put(key, { ...context, status: "running" });
     let outcome: TaskOutcomeV1;
     try {
-      await state.authority.run({
+      await admitTurnV1(state, {
         ...identity,
         runId: context.taskId,
         sessionId: context.sessionId,

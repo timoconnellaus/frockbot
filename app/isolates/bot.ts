@@ -43,6 +43,7 @@ import {
   userConfigurationV1,
 } from "@frockbot/app/settings/bot";
 import { createShellCompositionHost } from "@frockbot/app/shell/backend-composition";
+import { readPinnedCompositionGenerationV1 } from "@frockbot/app/composition/bot";
 import type { ShellIsolateMountOptions } from "@frockbot/app/shell/backend-composition";
 import { createBotMemoryHost } from "@frockbot/app/shell/backend-memory";
 import { agentRuntime } from "@frockbot/app/shell/runtime-mount";
@@ -790,7 +791,11 @@ function isolateModelPath(
 ): IsolateModelPath {
   return {
     async *stream(request, signal) {
-      const generation = await state.authority.composition.read(generationId);
+      const generation = await readPinnedCompositionGenerationV1(
+        state,
+        identity,
+        generationId,
+      );
       if (!generation) {
         throw new Error(
           `isolate model invocation pins unknown Composition generation "${generationId}"`,
