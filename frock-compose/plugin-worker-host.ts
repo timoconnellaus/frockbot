@@ -21,6 +21,7 @@ import {
   ISOLATE_MAX_DEADLINE_MS,
   MAX_FAILURE_REASON_V1,
   MAX_TRIGGER_BODY_BYTES_V1,
+  pluginWorkerUtf8LengthV1,
   pluginWorkerLoaderIdV1,
   pluginWorkerModuleSetHashV1,
   type BotCapabilitiesStub,
@@ -582,17 +583,23 @@ export class PluginWorkerHost {
             if (!live.has(invocation.pluginId)) {
               return droppedTrigger(invocation.pluginId);
             }
+            // The worker gets the whole budget the caller asked for, less the
+            // margin the host keeps for the answer's return trip, so a trigger
+            // that spends its budget still answers before the race fires.
+            const deadlineMs = Math.min(
+              invocation.deadlineMs,
+              ISOLATE_MAX_DEADLINE_MS - PLUGIN_WORKER_HOOK_RACE_MARGIN_MS,
+            );
             try {
               const raw = await raceDeadline(
-                () => entrypoint.receiveTrigger(invocation),
-                invocation.deadlineMs,
+                () => entrypoint.receiveTrigger({ ...invocation, deadlineMs }),
+                deadlineMs + PLUGIN_WORKER_HOOK_RACE_MARGIN_MS,
               );
-              const oversized =
-                firedTextLength(raw) > MAX_TRIGGER_BODY_BYTES_V1;
+              const oversized = firedTextBytes(raw) > MAX_TRIGGER_BODY_BYTES_V1;
               if (oversized) {
                 return droppedTrigger(
                   invocation.pluginId,
-                  `plugin "${invocation.pluginId}" fired a trigger body over the ${MAX_TRIGGER_BODY_BYTES_V1} character limit`,
+                  `plugin "${invocation.pluginId}" fired a trigger body over the ${MAX_TRIGGER_BODY_BYTES_V1} byte limit`,
                 );
               }
               return decodePluginWorkerTriggerResultV1(
@@ -1005,16 +1012,16 @@ export class PluginWorkerHost {
 }
 
 /**
- * How long a fired trigger body is, or zero for anything that is not a fire.
- * The worker returns what the Plugin produced whole; the bound is the Durable
- * Object's, so the caller is told which Plugin overran it and by what limit
- * rather than reading a body truncated mid-sentence.
+ * How many UTF-8 bytes a fired trigger body is, or zero for anything that is
+ * not a fire. The worker returns what the Plugin produced whole; the bound is
+ * the Durable Object's, so the caller is told which Plugin overran it and by
+ * what limit rather than reading a body truncated mid-sentence.
  */
-function firedTextLength(value: unknown): number {
+function firedTextBytes(value: unknown): number {
   if (!value || typeof value !== "object") return 0;
   const result = value as { status?: unknown; text?: unknown };
   if (result.status !== "fire" || typeof result.text !== "string") return 0;
-  return result.text.length;
+  return pluginWorkerUtf8LengthV1(result.text);
 }
 
 /** The one statement of what a caller is told when no live Plugin answers. */

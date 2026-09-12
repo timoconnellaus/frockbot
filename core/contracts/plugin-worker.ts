@@ -37,6 +37,7 @@ const PLUGIN_TRIGGER_NAME = /^[a-z][a-z0-9_-]{0,63}$/;
 const MAX_PLUGINS_V1 = 64;
 export const MAX_FAILURE_REASON_V1 = 1_024;
 const MAX_TRIGGER_HEADERS_V1 = 64;
+const UTF8 = new TextEncoder();
 const MAX_TRIGGER_HEADER_BYTES_V1 = 8_192;
 export const MAX_TRIGGER_BODY_BYTES_V1 = 1_000_000;
 
@@ -207,6 +208,33 @@ function exactKeys(
   ) {
     throw new Error(`${label} has invalid fields`);
   }
+}
+
+/**
+ * UTF-8 byte length. A trigger's headers and body arrive from the network as
+ * bytes, so the bounds they are held to are counted in bytes, not in the
+ * UTF-16 code units a JavaScript string reports.
+ */
+export function pluginWorkerUtf8LengthV1(value: string): number {
+  return UTF8.encode(value).length;
+}
+
+/**
+ * A string held to a bound counted in UTF-8 bytes. A byte is never shorter
+ * than a code unit, so the cheap code-unit check rejects first and the encoder
+ * only runs on a string that already fits.
+ */
+function boundedBytes(
+  value: unknown,
+  label: string,
+  maximum: number,
+  allowEmpty = false,
+): string {
+  const text = boundedString(value, label, maximum, allowEmpty);
+  if (pluginWorkerUtf8LengthV1(text) > maximum) {
+    throw new Error(`${label} must be a bounded string`);
+  }
+  return text;
 }
 
 function boundedString(
@@ -522,7 +550,7 @@ export function decodePluginWorkerTriggerInvocationV1(
     if (Object.hasOwn(headers, lowered)) {
       throw new Error(`${label}.headers contains duplicate names`);
     }
-    headers[lowered] = boundedString(
+    headers[lowered] = boundedBytes(
       headerValue,
       `${label}.headers.${name}`,
       MAX_TRIGGER_HEADER_BYTES_V1,
@@ -542,7 +570,7 @@ export function decodePluginWorkerTriggerInvocationV1(
     pluginId: pluginId(value.pluginId, `${label}.pluginId`),
     trigger,
     headers,
-    body: boundedString(
+    body: boundedBytes(
       value.body,
       `${label}.body`,
       MAX_TRIGGER_BODY_BYTES_V1,
@@ -583,6 +611,6 @@ export function decodePluginWorkerTriggerResultV1(
   return {
     schemaVersion: 1,
     status: "fire",
-    text: boundedString(value.text, `${label}.text`, MAX_TRIGGER_BODY_BYTES_V1),
+    text: boundedBytes(value.text, `${label}.text`, MAX_TRIGGER_BODY_BYTES_V1),
   };
 }

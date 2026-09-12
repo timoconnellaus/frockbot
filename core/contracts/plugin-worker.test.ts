@@ -4,6 +4,7 @@ import {
   decodePluginWorkerHookInvocationV1,
   decodePluginWorkerHookResultV1,
   decodePluginWorkerToolInvocationV1,
+  MAX_TRIGGER_BODY_BYTES_V1,
   decodePluginWorkerTriggerInvocationV1,
   decodePluginWorkerTriggerResultV1,
   pluginWorkerLoaderIdV1,
@@ -401,6 +402,27 @@ describe("plugin worker triggers", () => {
         deadlineMs: 60_001,
       }),
     ).toThrow(/deadlineMs/);
+  });
+
+  test("bound the body and the fired text in UTF-8 bytes, not code units", () => {
+    // 300_000 emoji is 600_000 UTF-16 code units but 1_200_000 UTF-8 bytes,
+    // so a code-unit bound would let it past the 1_000_000 byte ceiling.
+    const emoji = "\u{1F600}".repeat(300_000);
+    expect(emoji.length).toBeLessThan(MAX_TRIGGER_BODY_BYTES_V1);
+    expect(() =>
+      decodePluginWorkerTriggerInvocationV1({ ...invocation, body: emoji }),
+    ).toThrow(/body/);
+    expect(() =>
+      decodePluginWorkerTriggerResultV1({
+        schemaVersion: 1,
+        status: "fire",
+        text: emoji,
+      }),
+    ).toThrow(/text/);
+    const fits = "\u{1F600}".repeat(MAX_TRIGGER_BODY_BYTES_V1 / 4);
+    expect(
+      decodePluginWorkerTriggerInvocationV1({ ...invocation, body: fits }).body,
+    ).toBe(fits);
   });
 
   test("a result either fires with text or drops with an optional reason", () => {

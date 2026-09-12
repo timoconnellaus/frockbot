@@ -652,9 +652,9 @@ describe("what the worker reports at mount", () => {
       status: "fire",
       text: "weather:inbound",
     });
-    expect(
-      subject.triggerInvocations.map((entry) => entry.pluginId),
-    ).toEqual(["weather"]);
+    expect(subject.triggerInvocations.map((entry) => entry.pluginId)).toEqual([
+      "weather",
+    ]);
 
     await active.dispose();
     expect(await active.deliverTrigger(invocation("weather"))).toEqual({
@@ -662,9 +662,9 @@ describe("what the worker reports at mount", () => {
       status: "drop",
       reason: "the plugin worker for this generation is no longer mounted",
     });
-    expect(
-      subject.triggerInvocations.map((entry) => entry.pluginId),
-    ).toEqual(["weather"]);
+    expect(subject.triggerInvocations.map((entry) => entry.pluginId)).toEqual([
+      "weather",
+    ]);
   });
 
   test("a trigger answer the kernel cannot decode is dropped, not passed on", async () => {
@@ -719,7 +719,42 @@ describe("what the worker reports at mount", () => {
     expect(result).toEqual({
       schemaVersion: 1,
       status: "drop",
-      reason: `plugin "weather" fired a trigger body over the ${MAX_TRIGGER_BODY_BYTES_V1} character limit`,
+      reason: `plugin "weather" fired a trigger body over the ${MAX_TRIGGER_BODY_BYTES_V1} byte limit`,
+    });
+    await active.dispose();
+  });
+
+  test("a trigger answered inside the host's margin still fires", async () => {
+    const subject = harness({
+      receiveTrigger: (invocation: PluginWorkerTriggerInvocationV1) =>
+        new Promise<PluginWorkerTriggerResultV1>((resolve) =>
+          setTimeout(
+            () =>
+              resolve({
+                schemaVersion: 1,
+                status: "fire",
+                text: `answered after ${invocation.deadlineMs}ms`,
+              }),
+            120,
+          ),
+        ),
+    });
+    const prepared = await subject.host.mount([member("weather")]);
+    const active = await prepared.commit();
+    const result = await active.deliverTrigger({
+      schemaVersion: 1,
+      pluginId: "weather",
+      trigger: "inbound",
+      headers: {},
+      body: "{}",
+      botId: "bot-1",
+      routineId: "routine-1",
+      deadlineMs: 100,
+    });
+    expect(result).toEqual({
+      schemaVersion: 1,
+      status: "fire",
+      text: "answered after 100ms",
     });
     await active.dispose();
   });
