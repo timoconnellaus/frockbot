@@ -278,6 +278,7 @@ app/              The product: `runtime.ts`, the Contribution tables, and one di
   auth/           Authenticated identity contributions for the hosted gateway
   bot-template/   Bot template export, share records, and guarded import
   clock/          Reference feature with agent and host contributions
+  composition/    The User's Composition store and RPCs, and the Bot's mirror of them
   connect/        Connected apps: the connection backend, its app tools, and the curated app list
   credentials/    Per-User Connection credential encryption and leases
   custom-models/  Opt-in Bot model override setting, default-disabled
@@ -290,6 +291,7 @@ app/              The product: `runtime.ts`, the Contribution tables, and one di
   machine-messages/ Message delivery to and from a User's registered machines
   memory/         Bot, User and Project Markdown memory over the Workspace store
   notifications/  User-visible messages, their unread cursors, and the push outbox
+  plugins/        The per-Bot Plugin enable map and its revision fence
   routines/       Durable Routines, the alarm scheduler, and the webhook door
   search/         Per-User transcript index, search route, and overlay
   settings/       Bot, Package, and User settings surfaces
@@ -314,7 +316,7 @@ computer/          The Computer: tools, prompt, state, and the ComputerHostV1 in
   fly/             The production host implementation: Fly Sprites, its runtime and takeover adapter
 core/
   contracts/        Session, LLM, prompt, and tool execution contracts
-  durable/          Bot Durable Object admission, log, cursor, scheduling, and Composition generations
+  durable/          Bot Durable Object admission, log, cursor, scheduling, and the Composition generation store
   agent-loop/       Concrete event-sourced durable agent loop and Agent registry
   configuration/    Versioned durable User/Bot settings contracts
   connection/       Provider-neutral Connection transport result contracts

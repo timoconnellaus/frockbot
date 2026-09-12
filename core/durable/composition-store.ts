@@ -1,8 +1,10 @@
 /// <reference types="@cloudflare/workers-types" />
-// The Bot Durable Object is the authority for the Composition generations its
-// Turns pin. Generations are durable records: proposing or committing one never
-// mutates a recorded generation, and an in-flight Turn keeps the pin it was
-// admitted under.
+// The store over one object's Composition records. The authority is the User
+// Durable Object, which owns the generations (ADR 0026); the same store runs
+// on a Bot over the two generations `adopt` mirrors there for admission.
+// Generations are durable records: proposing or committing one never mutates a
+// recorded generation, and an in-flight Turn keeps the pin it was admitted
+// under.
 import type { CompositionPinV1 } from "@frockbot/core/contracts";
 import { decodeCompositionFailureV1 } from "./composition/activation.js";
 import {

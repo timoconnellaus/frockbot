@@ -369,6 +369,25 @@ describe("a Bot Package in a loaded Dynamic Worker", () => {
     expect(result.exposedTools).toEqual(["from_provider", "from_consumer"]);
   });
 
+  test("a plugin this Bot switched off registers no tools at the next mount", async () => {
+    const stub = probe(`enable-map-${crypto.randomUUID()}`);
+    const provider = await stub.seedArtifact(PROBE_PROVIDER_SOURCE);
+    const consumer = await stub.seedArtifact(PROBE_CONSUMER_SOURCE);
+    const identity = { userId: `user-${crypto.randomUUID()}`, botId: "bot-1" };
+
+    // The User installed both; this Bot switches one off under the fence.
+    expect(await stub.switchPluginOff("probe-consumer")).toBe(1);
+
+    const result = await stub.probePair({ ...identity, provider, consumer });
+
+    // It is still in the worker — the worker is per User — but it registers
+    // no tools here and wraps no hook.
+    expect(result.pluginOrder).toEqual(["probe-provider", "probe-consumer"]);
+    expect(result.exposedTools).toEqual(["from_provider"]);
+    expect(result.serviceRead.isError).toBe(true);
+    expect(result.serviceRead.content).toMatch(/probe-consumer/);
+  });
+
   test("a plugin whose consumed service nobody provides is excluded and named, and its sibling still mounts", async () => {
     const stub = probe(`unmet-${crypto.randomUUID()}`);
     const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);

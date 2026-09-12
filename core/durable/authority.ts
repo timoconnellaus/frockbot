@@ -245,7 +245,11 @@ export class BotDurableAuthority<Snapshot> {
   readonly ctx: DurableObjectState;
   private readonly codec: StoredRunCodecV1<Snapshot>;
   private readonly hooks: BotDurableAuthorityHooks<Snapshot>;
-  /** Durable Composition generations; every admitted Turn pins the current one. */
+  /**
+   * The Composition records this object holds — on a Bot, the mirror of the
+   * User's that the admission adopted; every admitted Turn pins the current
+   * one (ADR 0026).
+   */
   readonly composition: DurableCompositionStore;
   /** Why a generation failed to activate, and whether it is quarantined. */
   readonly compositionFailures: DurableCompositionFailureLog;

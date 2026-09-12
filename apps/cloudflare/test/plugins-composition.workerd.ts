@@ -23,10 +23,18 @@ interface CompositionRpc {
   listCompositionGenerations(
     input: unknown,
   ): Promise<{ generations: { generationId: string; status: string }[] }>;
+  setFeatures(input: unknown): Promise<unknown>;
+  createApplet(input: unknown): Promise<{ appletId: string }>;
+  recordAppletGeneration(input: unknown): Promise<{ appletId: string }>;
 }
 
 interface BotRpc {
   run(command: unknown): Promise<{ runId: string }>;
+  listCompositionGenerations(input: unknown): Promise<{
+    botId: string;
+    currentGenerationId: string;
+    generations: { generationId: string; isCurrent: boolean }[];
+  }>;
   executeRoutineCommand(input: unknown): Promise<{ status: string }>;
   readPluginEnablement(input: unknown): Promise<{ revision: number }>;
   setPluginEnabled(input: unknown): Promise<
@@ -177,6 +185,143 @@ describe("the User-owned Composition", () => {
     ).toBe("superseded");
     // The Turn that ran before the proposal keeps the generation it pinned.
     expect(await pinnedGeneration(first, "run-1")).toBe(bootstrap.generationId);
+  });
+
+  test("the Composition each Bot lists is the User's whole history, not its mirror", async () => {
+    // The mirror a Bot keeps is two generations deep. The settings list has
+    // to answer from the User, so a third generation must still be there.
+    const userId = `user-${crypto.randomUUID()}`;
+    const first = { userId, botId: "bot-1" };
+    const second = { userId, botId: "bot-2" };
+    await provisionBot(first);
+    await provisionSiblingBot(second, 1);
+    await turn(first, "run-1");
+
+    let parent = (
+      await user(userId).readComposition({ schemaVersion: 1, userId })
+    ).current;
+    const proposedIds: string[] = [];
+    for (const hour of ["02", "03"]) {
+      const createdAt = `2026-09-12T${hour}:00:00.000Z`;
+      const generation = {
+        ...parent,
+        generationId: `${createdAt}:${parent.generationId.split(":").at(-1)}`,
+        parentGenerationId: parent.generationId,
+        createdAt,
+        origin: {
+          kind: "bot-authored",
+          runId: `install-${hour}`,
+          sessionId: `${userId}:bot-1`,
+          turnId: `install-${hour}`,
+        },
+        status: "pending",
+      };
+      await user(userId).proposeComposition({
+        schemaVersion: 1,
+        userId,
+        generation,
+        pin: true,
+        expectedCurrentGenerationId: parent.generationId,
+      });
+      proposedIds.push(generation.generationId);
+      parent = { ...generation, status: "active" };
+    }
+    const listing = await bot(first).listCompositionGenerations({
+      schemaVersion: 1,
+      ...first,
+      query: { limit: 10 },
+    });
+    expect(listing.botId).toBe("bot-1");
+    expect(listing.currentGenerationId).toBe(proposedIds.at(-1));
+    expect(listing.generations.map((entry) => entry.generationId)).toEqual(
+      expect.arrayContaining(proposedIds),
+    );
+    expect(listing.generations.length).toBeGreaterThanOrEqual(3);
+    expect(
+      listing.generations
+        .filter((entry) => entry.isCurrent)
+        .map((entry) => entry.generationId),
+    ).toEqual([proposedIds.at(-1)]);
+
+    // The sibling Bot, which has admitted nothing, lists the same history.
+    const sibling = await bot(second).listCompositionGenerations({
+      schemaVersion: 1,
+      ...second,
+      query: { limit: 10 },
+    });
+    expect(sibling.botId).toBe("bot-2");
+    expect(sibling.generations.map((entry) => entry.generationId)).toEqual(
+      listing.generations.map((entry) => entry.generationId),
+    );
+  });
+
+  test("an Applet the User's directory gained lands in the User's Composition", async () => {
+    // Publishing an Applet proposes a new generation. It has to be proposed
+    // into the User's store, or the id the next Turn pins is one the User has
+    // never heard of.
+    const userId = `user-${crypto.randomUUID()}`;
+    const identity = { userId, botId: "bot-1" };
+    await provisionBot(identity);
+    // What an admin does before an account's Bots see Applets at all.
+    await user(userId).setFeatures({
+      schemaVersion: 1,
+      userId,
+      command: { schemaVersion: 1, type: "user/set-features", applets: true },
+      updatedBy: "workerd-admin",
+    });
+    await turn(identity, "run-1");
+    const before = (
+      await user(userId).readComposition({ schemaVersion: 1, userId })
+    ).current;
+
+    const applet = await user(userId).createApplet({
+      schemaVersion: 1,
+      userId,
+      displayName: "Expenses",
+      provenance: { kind: "user" },
+    });
+    await user(userId).recordAppletGeneration({
+      schemaVersion: 1,
+      userId,
+      appletId: applet.appletId,
+      generationId: "applet-g1",
+      tools: [
+        {
+          name: "file_expense",
+          description: "Files an expense",
+          inputSchema: { type: "object" },
+        },
+      ],
+    });
+
+    await turn(identity, "run-2");
+
+    const after = await user(userId).readComposition({
+      schemaVersion: 1,
+      userId,
+    });
+    expect(after.current.generationId).not.toBe(before.generationId);
+    expect(after.current.status).toBe("active");
+    expect(await pinnedGeneration(identity, "run-2")).toBe(
+      after.current.generationId,
+    );
+    const generation = await user(userId).readCompositionGeneration({
+      schemaVersion: 1,
+      userId,
+      generationId: after.current.generationId,
+    });
+    expect(
+      (
+        generation as unknown as {
+          applets?: { appletId: string; generationId: string }[];
+        }
+      ).applets,
+    ).toEqual([
+      expect.objectContaining({
+        appletId: applet.appletId,
+        generationId: "applet-g1",
+      }),
+    ]);
   });
 
   test("a Bot's enable map is its own", async () => {
