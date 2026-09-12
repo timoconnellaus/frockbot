@@ -400,6 +400,13 @@ describe("the voice session object", () => {
     expect(audio).toHaveLength(2);
     expect(audio.map((t) => t.chars)).toEqual([11, 11]);
     expect(audio.map((t) => t.chunk)).toEqual([1, 2]);
+    // And every chunk the lines count is a frame the phone received: the
+    // hook that counts them hands the chunk back as it found it.
+    await eventually(
+      async () => phone.audio.length,
+      (frames) => frames === audio.length,
+      "an audio frame on the socket for every counted chunk",
+    );
 
     // The laptop displaces the phone: the phone's call record is released
     // before the SDK ends the call, so its totals have to outlive it.
@@ -420,6 +427,40 @@ describe("the voice session object", () => {
     expect(ended).toMatchObject({ audioChunks: 2, sentencesSpoken: 2 });
     expect(Number(ended!.audioBytes)).toBeGreaterThan(0);
     for (const opened of [phone, laptop]) opened.socket.close();
+  });
+
+  test("the upstream's own detector is on record before the reply stops", async () => {
+    const userId = `voice-vad-${crypto.randomUUID()}`;
+    const stub = assistant(userId);
+    const opened = await open(userId);
+    await startCall(opened);
+    await opened.waitFor(state("awake"), "awake");
+    // The transcription service heard someone. That line is what tells the
+    // pair apart later: an `interrupted` with this line before it is the
+    // upstream's barge-in, without it the phone's own energy gate.
+    expect(await stub.probeSpeechStart()).toBe(true);
+    const started = await eventually(
+      async () =>
+        (await stub.probeTraces()).find((t) => t.event === "speech-started"),
+      (line) => Boolean(line),
+      "the speech-started trace",
+    );
+    expect(started).toMatchObject({ device: "phone" });
+    expect(started!.call).toBeTruthy();
+    expect(started!.elapsedMs).toBeGreaterThanOrEqual(0);
+    // The utterance still lands: the trace wrapper passes the hook through.
+    expect(await stub.probeUtterance("what time is it")).toBe(true);
+    await opened.waitFor(status("speaking"), "speaking");
+    opened.socket.send(JSON.stringify({ type: "interrupt" }));
+    const tail = await eventually(
+      async () => await stub.probeTraces(),
+      (lines) => lines.some((t) => t.event === "interrupted"),
+      "the interrupted trace",
+    );
+    expect(tail.findIndex((t) => t.event === "speech-started")).toBeLessThan(
+      tail.findIndex((t) => t.event === "interrupted"),
+    );
+    opened.socket.close();
   });
 
   test("a newer device takes the call and the older one is told", async () => {

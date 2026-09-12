@@ -290,18 +290,18 @@ the sentence's length, never its words), `refused` (with the code and sentence
 the client was sent), `stt-failed`, `speech-started` (the transcription
 service's own voice detector heard someone), `interrupted` (the SDK stopped
 the reply in flight: preceded by `speech-started`, the upstream's detector cut
-it; on its own, the phone's local energy gate sent `interrupt`), `audio` (the first synthesized
-chunk of each sentence reached the socket — the sentence's length in
-characters, the chunk's bytes and the running chunk count; a reply with a
-`turn-settled` but no `audio` never became sound), `call-ended` (with the
-call's total synthesized chunks, bytes and sentences) and `closed` (the
-client's code and reason). Every line carries the connection id, and — once `onConnect`
-accepted the socket — the device key; `refused-identity` carries the device key
-from the header it just rejected, and the `closed` line for a refused socket has
-none. Once admitted, every line also carries the call id and elapsed
-milliseconds. A call that reaches `listening` and then `closed` with no
-`utterance` in between means nothing reached transcription; read the `upstream`
-lines first. No `awake` line (with or without `stt-failed`) means the STT
+it; on its own, the phone's local energy gate sent `interrupt`), `audio` (the
+first synthesized chunk of each sentence reached the socket — the sentence's
+length in characters, the chunk's bytes and the running chunk count; a reply
+with a `turn-settled` but no `audio` never became sound), `call-ended` (with
+the call's total synthesized chunks, bytes and sentences) and `closed` (the
+client's code and reason). Every line carries the connection id, and — once
+`onConnect` accepted the socket — the device key; `refused-identity` carries
+the device key from the header it just rejected, and the `closed` line for a
+refused socket has none. Once admitted, every line also carries the call id
+and elapsed milliseconds. A call that reaches `listening` and then `closed`
+with no `utterance` in between means nothing reached transcription; read the
+`upstream` lines first. No `awake` line (with or without `stt-failed`) means the STT
 socket never became ready — the connect stalled or was refused — and the
 `closed` code and reason then say who gave up. An `awake` line and still no
 `utterance` means the upstream heard nothing it would transcribe, or the client
