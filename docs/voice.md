@@ -489,6 +489,16 @@ What was run on 2026-09-10 in the crew worktree, with the results as they
 came back. Except for the live run recorded directly below, nothing here
 involved a real microphone or a real provider.
 
+The counts and scenario lists in this section are that evidence, unchanged:
+they predate the reply-failure and latency work described under "A reply that
+fails", which adds bun tests for the speech guard, two voice workerd scenarios
+(a sentence that never becomes sound; a Bot answer held over one reply and
+over two) and Flutter tests for the silent frames sent while the reply plays,
+barge-in ordering, the playback tail, a feed the device rejects, the
+device-setup retry and the error-frame notice. The numbers below are therefore
+understated; the next run of the suites should replace them wholesale rather
+than add to them.
+
 ### The live endpoint, 2026-09-11
 
 `gpt-live-transcribe` was driven against
