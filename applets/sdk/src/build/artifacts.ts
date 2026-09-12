@@ -29,6 +29,7 @@ import { build as esbuild, type Metafile } from "esbuild";
 import type { AppletDescriptionV1 } from "../server/applet.js";
 import { readDescriptor, type AppletBuildManifestV1 } from "./manifest.js";
 import { bundlerNodePaths, SDK_ENTRIES, SDK_ROOT } from "./paths.js";
+import { withOneMoreBoot } from "./boot.js";
 import { startAppletRuntime } from "./runtime.js";
 
 export interface AppletArtifactsV1 {
@@ -160,8 +161,18 @@ function page(title: string, script: string): string {
   ].join("\n");
 }
 
-/** Ask the built module what it declares, by running it. */
-export async function readDescription(
+/**
+ * Ask the built module what it declares, by running it. A boot that never
+ * reports ready is tried once more (`boot.ts`) before the build gives up.
+ */
+export function readDescription(
+  serverCode: string,
+  appletId: string,
+): Promise<AppletDescriptionV1> {
+  return withOneMoreBoot(() => describeInRuntime(serverCode, appletId));
+}
+
+async function describeInRuntime(
   serverCode: string,
   appletId: string,
 ): Promise<AppletDescriptionV1> {

@@ -26,6 +26,8 @@ import { join, relative, resolve } from "node:path";
 
 import { build as esbuild } from "esbuild";
 import { convertV4MiniflareOptions, Miniflare } from "miniflare";
+
+import { bootedWithin, withOneMoreBoot } from "./boot.js";
 import ts from "typescript";
 
 import type { AppletDiagnostic } from "../lint/index.js";
@@ -317,28 +319,15 @@ export default {
 };
 `;
 
-/** How long a workerd boot is given before the build gives up on it. */
-const BOOT_DEADLINE_MS = 30_000;
-
-/** A workerd that never reported ready; the boot, not the Plugin, failed. */
-class RuntimeDidNotStart extends Error {}
-
 /**
- * Ask the built module what it exports, by running it.
- *
- * Each build spawns its own workerd, and a spawn occasionally never reports
- * ready. A boot that misses the deadline is let go of and tried once more, so
- * a build answers rather than hanging on a runtime that never came up.
+ * Ask the built module what it exports, by running it. The boot is bounded
+ * and tried once more (`boot.ts`), so a build answers rather than hanging on
+ * a runtime that never came up.
  */
-export async function describePlugin(
+export function describePlugin(
   moduleCode: string,
 ): Promise<PluginDescriptionV1> {
-  try {
-    return await describeInWorkerd(moduleCode);
-  } catch (error) {
-    if (!(error instanceof RuntimeDidNotStart)) throw error;
-    return await describeInWorkerd(moduleCode);
-  }
+  return withOneMoreBoot(() => describeInWorkerd(moduleCode));
 }
 
 async function describeInWorkerd(
@@ -379,26 +368,6 @@ async function describeInWorkerd(
     // A runtime that never started is let go of rather than waited on.
     if (started) await miniflare.dispose();
     else void miniflare.dispose().catch(() => {});
-  }
-}
-
-async function bootedWithin(ready: Promise<URL>): Promise<URL> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const deadline = new Promise<never>((_, reject) => {
-    timer = setTimeout(
-      () =>
-        reject(
-          new RuntimeDidNotStart(
-            `The Workers runtime did not start within ${BOOT_DEADLINE_MS}ms`,
-          ),
-        ),
-      BOOT_DEADLINE_MS,
-    );
-  });
-  try {
-    return await Promise.race([ready, deadline]);
-  } finally {
-    clearTimeout(timer);
   }
 }
 
