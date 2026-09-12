@@ -145,6 +145,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   bool _appletPagePresented = false;
   ComputerController? computer;
   PackageCatalog? catalog;
+
+  /// Bumped whenever [catalog] changes. A Bot page pushed as its own route
+  /// is a subtree the shell's `setState` does not reach, so the page listens
+  /// to this to redraw the rows its Packages contribute.
+  final ValueNotifier<int> catalogRevision = ValueNotifier(0);
   String? error;
   bool loaded = false;
 
@@ -663,10 +668,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     computer?.dispose();
     appletCanvas = null;
     computer = null;
-    catalog = null;
+    _setCatalog(null);
     slots.remove(ShellSlot.rightPanel, 'applet');
     slots.remove(ShellSlot.rightPanel, 'computer');
-    slots.remove(ShellSlot.headerActions, 'package-entries');
     unawaited(controller.load());
     unawaited(inbox.load());
     unawaited(_adoptComposition(botId));
@@ -679,7 +683,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   Future<void> _adoptComposition(String botId) async {
     final read = await readPackageCatalogV1(widget.api, botId);
     if (!mounted || selected?.botId.value != botId) return;
-    setState(() => catalog = read);
+    setState(() => _setCatalog(read));
     if (read != null && read.appletsAvailable) {
       final canvas = AppletCanvasController(widget.api, botId);
       appletCanvas = canvas;
@@ -716,28 +720,14 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       _repaint();
     });
     unawaited(machine.read());
-    final entries = packageIframeEntriesV1(read);
-    if (entries.isNotEmpty) {
-      slots.register(
-        ShellSlot.headerActions,
-        'package-entries',
-        (context) => Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            for (final entry in entries)
-              identified(
-                PackageIds.entry(entry.contribution.packageId, entry.entry.id),
-                IconButton(
-                  tooltip: entry.entry.label,
-                  icon: Icon(_packageIcon(entry.entry.icon)),
-                  onPressed: () => _openPackagePage(entry),
-                ),
-              ),
-          ],
-        ),
-      );
-    }
     if (mounted) setState(() {});
+  }
+
+  /// The Composition this Bot is showing, and the one signal a pushed page
+  /// watches for it.
+  void _setCatalog(PackageCatalog? read) {
+    catalog = read;
+    catalogRevision.value++;
   }
 
   /// The icon set a Package may name. A Package naming one this client does
@@ -1154,7 +1144,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         child: identified(
           SettingsIds.botPage,
           ListenableBuilder(
-            listenable: slots,
+            listenable: Listenable.merge([slots, catalogRevision]),
             builder: (context, _) => SingleChildScrollView(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
               child: Column(
@@ -1439,51 +1429,38 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                     panelCollapsed: panelCollapsed,
                     onDismiss: () => setState(() => panelOpen = false),
                     rightPanel: rightPanel,
-                    sidebar: Column(
-                      children: [
-                        // The Package entries beside the list belong to the
-                        // column layout; on a phone they are rows on the Bot's page.
-                        if (!single)
-                          const SlotRegion(
-                            ShellSlot.headerActions,
-                            direction: Axis.horizontal,
-                          ),
-                        Expanded(
-                          child: ShellSidebar(
-                            bots: bots,
-                            profiles: profiles,
-                            unread: activity.unread,
-                            archived: archived,
-                            // The count for the Bot being read is suppressed
-                            // here rather than waited out: the receipt that
-                            // clears it is a round trip behind the message.
-                            focusedBotId: _focusedBotId,
-                            // A phone's list is a list of doors, not a selection: no row
-                            // is the current one once the conversation is a page.
-                            activeBotId: single ? null : bot?.botId.value,
-                            workingBotId: workingRunId == null
-                                ? null
-                                : bot?.botId.value,
-                            loaded: loaded,
-                            error: error,
-                            showHidden: showHidden,
-                            onSelect: _select,
-                            onCreateBot: () => unawaited(_createBot()),
-                            onSearch: _openSearch,
-                            onProfile: _openProfile,
-                            onMarketplace: _openMarketplace,
-                            phone: single,
-                            onVoice: () => unawaited(_startVoice()),
-                            voiceControl: voiceControlStateV1(
-                              footerOpen: footerOpen,
-                              sessionActive: voiceSession?.active == true,
-                            ),
-                            onToggleHidden: () =>
-                                setState(() => showHidden = !showHidden),
-                            onRetry: load,
-                          ),
-                        ),
-                      ],
+                    sidebar: ShellSidebar(
+                      bots: bots,
+                      profiles: profiles,
+                      unread: activity.unread,
+                      archived: archived,
+                      // The count for the Bot being read is suppressed
+                      // here rather than waited out: the receipt that
+                      // clears it is a round trip behind the message.
+                      focusedBotId: _focusedBotId,
+                      // A phone's list is a list of doors, not a selection: no row
+                      // is the current one once the conversation is a page.
+                      activeBotId: single ? null : bot?.botId.value,
+                      workingBotId: workingRunId == null
+                          ? null
+                          : bot?.botId.value,
+                      loaded: loaded,
+                      error: error,
+                      showHidden: showHidden,
+                      onSelect: _select,
+                      onCreateBot: () => unawaited(_createBot()),
+                      onSearch: _openSearch,
+                      onProfile: _openProfile,
+                      onMarketplace: _openMarketplace,
+                      phone: single,
+                      onVoice: () => unawaited(_startVoice()),
+                      voiceControl: voiceControlStateV1(
+                        footerOpen: footerOpen,
+                        sessionActive: voiceSession?.active == true,
+                      ),
+                      onToggleHidden: () =>
+                          setState(() => showHidden = !showHidden),
+                      onRetry: load,
                     ),
                     conversation: bot == null
                         ? NoConversation(
@@ -1954,6 +1931,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     appletCanvas?.dispose();
     computer?.dispose();
     slots.dispose();
+    catalogRevision.dispose();
     voiceSession?.dispose();
     dictation?.removeListener(_repaint);
     dictation?.dispose();

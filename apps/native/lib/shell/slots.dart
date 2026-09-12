@@ -5,9 +5,10 @@
 /// feature: a registry a feature registers a builder into, and a [SlotRegion]
 /// the shell places where the region belongs.
 ///
-/// Three regions, because three is what the shell actually opens. Trust chrome
+/// Two regions, because two is what the shell actually opens. Trust chrome
 /// is never a slot: the transcript, the composer and the Bot list are the
-/// shell's own and no entry can displace them.
+/// shell's own and no entry can displace them. What one Bot holds belongs to
+/// that Bot's page, not to a region drawn over the list of every Bot.
 library;
 
 import 'package:flutter/widgets.dart';
@@ -19,10 +20,7 @@ enum ShellSlot {
   rightPanel('right-panel'),
 
   /// Full-window layers: dialogs, sheets, the search overlay.
-  overlays('overlays'),
-
-  /// Actions beside the conversation title.
-  headerActions('header-actions');
+  overlays('overlays');
 
   const ShellSlot(this.id);
 
@@ -43,7 +41,7 @@ class ShellSlots extends ChangeNotifier {
   /// Registers under [key], replacing any entry the same key already holds.
   ///
   /// [label] is what a region that shows one entry at a time calls this one.
-  /// A region that draws every entry — the header actions — ignores it.
+  /// A region that draws every entry ignores it.
   void register(
     ShellSlot slot,
     String key,
