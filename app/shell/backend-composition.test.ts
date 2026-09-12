@@ -205,6 +205,7 @@ describe("a Plugin that the worker refuses", () => {
               provides: [],
               consumes: [],
               triggers: [],
+              views: [],
             },
             {
               pluginId: "bad",
@@ -215,6 +216,7 @@ describe("a Plugin that the worker refuses", () => {
               provides: [],
               consumes: [],
               triggers: [],
+              views: [],
             },
           ],
         }),
@@ -227,6 +229,8 @@ describe("a Plugin that the worker refuses", () => {
       execute: () =>
         Promise.resolve({ schemaVersion: 1, content: "ok", isError: false }),
       receiveTrigger: () =>
+        Promise.resolve({ schemaVersion: 1, status: "drop" as const }),
+      view: () =>
         Promise.resolve({ schemaVersion: 1, status: "drop" as const }),
     };
     const loader: BotIsolateLoader = {

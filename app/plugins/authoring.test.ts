@@ -160,6 +160,7 @@ function buildsCleanly(
           hooks: [],
           services: [],
           triggers: [],
+          views: [],
           hashes: { module: await sha256Hex(MODULE) },
         },
         module: MODULE,
@@ -403,6 +404,7 @@ describe("checking and publishing", () => {
           hooks: [],
           services: [],
           triggers: [],
+          views: [],
           hashes: { module: "f".repeat(64) },
         },
         module: MODULE,
@@ -488,6 +490,7 @@ describe("the manifest against the descriptor", () => {
     hooks: ["agent/request" as const],
     services: ["lookup"],
     triggers: ["alert"],
+    views: [],
     hashes: { module: "a".repeat(64) },
   };
 
@@ -505,6 +508,14 @@ describe("the manifest against the descriptor", () => {
         triggers: ["alert", "other"],
       }),
     ).toMatch(/triggers \[alert\] but plugin.ts exports \[alert, other\]/);
+    expect(
+      pluginManifestDisagreementV1(descriptor, {
+        ...manifest,
+        views: ["weather.settings"],
+      }),
+    ).toMatch(
+      /declares views \[\] but plugin.ts exports views \[weather.settings\]/,
+    );
   });
 });
 

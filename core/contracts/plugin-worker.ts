@@ -34,6 +34,12 @@ import {
 
 const PLUGIN_ID = /^[a-z][a-z0-9-]{0,63}$/;
 const PLUGIN_TRIGGER_NAME = /^[a-z][a-z0-9_-]{0,63}$/;
+/** The `Identifier` a `ViewDocument.surfaceId` is, as the descriptor bounds it. */
+const PLUGIN_SURFACE_ID = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
+/** Views one Plugin may export, matching the descriptor's bound. */
+const MAX_PLUGIN_VIEWS_V1 = 16;
+/** A rendered view, serialized. A card, not a page. */
+export const MAX_PLUGIN_VIEW_DOCUMENT_BYTES_V1 = 256_000;
 const MAX_PLUGINS_V1 = 64;
 export const MAX_FAILURE_REASON_V1 = 1_024;
 const MAX_TRIGGER_HEADERS_V1 = 64;
@@ -125,6 +131,8 @@ export interface PluginWorkerPluginHealthV1 {
   provides: PluginServiceV1[];
   consumes: PluginServiceV1[];
   triggers: string[];
+  /** The surfaces the module renders, by id; the descriptor's `views` must match. */
+  views: string[];
 }
 
 export interface PluginWorkerHealthV1 {
@@ -171,6 +179,28 @@ export type PluginWorkerTriggerResultV1 =
   | { schemaVersion: 1; status: "fire"; text: string };
 
 /**
+ * One slot render (ADR 0026 step 9): the Plugin returns a `ViewDocument` for
+ * a surface it declared, and the host renders it with the host's own widgets.
+ * Outside a Turn, so the identity is the page's, shaped like a Turn's.
+ */
+export interface PluginWorkerViewInvocationV1 {
+  schemaVersion: 1;
+  pluginId: string;
+  surfaceId: string;
+  botId: string;
+  sessionId: string;
+  runId: string;
+  turnId: string;
+  generationId: string;
+  deadlineMs: number;
+}
+
+/** The document is carried opaque and bounded; the host decodes it as a `ViewDocument`. */
+export type PluginWorkerViewResultV1 =
+  | { schemaVersion: 1; status: "drop"; reason?: string }
+  | { schemaVersion: 1; status: "rendered"; document: Record<string, unknown> };
+
+/**
  * The wrapper `WorkerEntrypoint` the kernel generates over the index. Plugin
  * code never implements this; each Plugin exports `tools`, `execute`, and
  * optionally `hooks`, `provides` and `triggers`, and the index adapts.
@@ -186,6 +216,9 @@ export interface PluginWorkerEntrypoint {
   receiveTrigger(
     invocation: PluginWorkerTriggerInvocationV1,
   ): Promise<PluginWorkerTriggerResultV1>;
+  view(
+    invocation: PluginWorkerViewInvocationV1,
+  ): Promise<PluginWorkerViewResultV1>;
 }
 
 function record(value: unknown, label: string): Record<string, unknown> {
@@ -366,6 +399,7 @@ export function decodePluginWorkerHealthV1(
           provides: [],
           consumes: [],
           triggers: [],
+          views: [],
         });
       }
     }
@@ -405,7 +439,16 @@ function decodePluginHealthEntryV1(
   const plugin = record(entry, itemLabel);
   exactKeys(
     plugin,
-    ["pluginId", "ok", "tools", "hooks", "provides", "consumes", "triggers"],
+    [
+      "pluginId",
+      "ok",
+      "tools",
+      "hooks",
+      "provides",
+      "consumes",
+      "triggers",
+      "views",
+    ],
     itemLabel,
     ["reason"],
   );
@@ -445,7 +488,28 @@ function decodePluginHealthEntryV1(
   if (new Set(triggers).size !== triggers.length) {
     throw new Error(`${itemLabel}.triggers contains duplicates`);
   }
+  if (
+    !Array.isArray(plugin.views) ||
+    plugin.views.length > MAX_PLUGIN_VIEWS_V1
+  ) {
+    throw new Error(`${itemLabel}.views must be a bounded array`);
+  }
+  const views = plugin.views.map((view, viewIndex) => {
+    const surfaceId = boundedString(
+      view,
+      `${itemLabel}.views[${viewIndex}]`,
+      128,
+    );
+    if (!PLUGIN_SURFACE_ID.test(surfaceId)) {
+      throw new Error(`${itemLabel}.views[${viewIndex}] is invalid`);
+    }
+    return surfaceId;
+  });
+  if (new Set(views).size !== views.length) {
+    throw new Error(`${itemLabel}.views contains duplicates`);
+  }
   return {
+    views,
     pluginId: pluginId(plugin.pluginId, `${itemLabel}.pluginId`),
     ok: plugin.ok,
     ...(plugin.reason === undefined
@@ -612,5 +676,107 @@ export function decodePluginWorkerTriggerResultV1(
     schemaVersion: 1,
     status: "fire",
     text: boundedBytes(value.text, `${label}.text`, MAX_TRIGGER_BODY_BYTES_V1),
+  };
+}
+
+export function decodePluginWorkerViewInvocationV1(
+  input: unknown,
+  label = "plugin worker view invocation",
+): PluginWorkerViewInvocationV1 {
+  const value = record(input, label);
+  exactKeys(
+    value,
+    [
+      "schemaVersion",
+      "pluginId",
+      "surfaceId",
+      "botId",
+      "sessionId",
+      "runId",
+      "turnId",
+      "generationId",
+      "deadlineMs",
+    ],
+    label,
+  );
+  if (value.schemaVersion !== 1) {
+    throw new Error(`${label}.schemaVersion is unsupported`);
+  }
+  const surfaceId = boundedString(value.surfaceId, `${label}.surfaceId`, 128);
+  if (!PLUGIN_SURFACE_ID.test(surfaceId)) {
+    throw new Error(`${label}.surfaceId is invalid`);
+  }
+  const deadlineMs = value.deadlineMs;
+  if (
+    !Number.isSafeInteger(deadlineMs) ||
+    (deadlineMs as number) <= 0 ||
+    (deadlineMs as number) > ISOLATE_MAX_DEADLINE_MS
+  ) {
+    throw new Error(`${label}.deadlineMs is out of range`);
+  }
+  return {
+    schemaVersion: 1,
+    pluginId: pluginId(value.pluginId, `${label}.pluginId`),
+    surfaceId,
+    botId: boundedString(value.botId, `${label}.botId`, 256),
+    sessionId: boundedString(value.sessionId, `${label}.sessionId`, 257),
+    runId: boundedString(value.runId, `${label}.runId`, 128),
+    turnId: boundedString(value.turnId, `${label}.turnId`, 128),
+    generationId: boundedString(
+      value.generationId,
+      `${label}.generationId`,
+      256,
+    ),
+    deadlineMs: deadlineMs as number,
+  };
+}
+
+export function decodePluginWorkerViewResultV1(
+  input: unknown,
+  label = "plugin worker view result",
+): PluginWorkerViewResultV1 {
+  const value = record(input, label);
+  if (value.schemaVersion !== 1) {
+    throw new Error(`${label}.schemaVersion is unsupported`);
+  }
+  if (value.status === "drop") {
+    exactKeys(value, ["schemaVersion", "status"], label, ["reason"]);
+    return {
+      schemaVersion: 1,
+      status: "drop",
+      ...(value.reason === undefined
+        ? {}
+        : {
+            reason: boundedString(
+              value.reason,
+              `${label}.reason`,
+              MAX_FAILURE_REASON_V1,
+            ),
+          }),
+    };
+  }
+  exactKeys(value, ["schemaVersion", "status", "document"], label);
+  if (value.status !== "rendered") {
+    throw new Error(`${label}.status is invalid`);
+  }
+  const document = record(value.document, `${label}.document`);
+  let serialized: string;
+  try {
+    serialized = JSON.stringify(document);
+  } catch {
+    throw new Error(`${label}.document is not JSON`);
+  }
+  if (
+    new TextEncoder().encode(serialized).length >
+    MAX_PLUGIN_VIEW_DOCUMENT_BYTES_V1
+  ) {
+    throw new Error(
+      `${label}.document exceeds ${MAX_PLUGIN_VIEW_DOCUMENT_BYTES_V1} bytes`,
+    );
+  }
+  return {
+    schemaVersion: 1,
+    status: "rendered",
+    document: JSON.parse(serialized) as Record<string, unknown>,
   };
 }

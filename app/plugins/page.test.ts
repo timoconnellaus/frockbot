@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
   botPluginsDocumentV1,
+  decodeBotPluginsCommandV1,
+  decodePluginToolCommandV1,
   decodeSetBotPluginEnabledCommandV1,
   pluginNetworkCopyV1,
   type BotPluginsFrameV1,
@@ -99,6 +101,7 @@ describe("a Bot's Plugins document", () => {
     expect(weatherLines).toContain("Reaches api.weather.example.");
     expect(document.actions.map((action) => action.id)).toEqual([
       "set-package-enabled",
+      "plugin-tool",
     ]);
   });
 
@@ -107,6 +110,66 @@ describe("a Bot's Plugins document", () => {
       /every plugin on this account/,
     );
     expect(pluginNetworkCopyV1(undefined)).toBe("");
+  });
+
+  test("a plugin's sections are drawn on its card, and a failed one is said in words", () => {
+    const document = botPluginsDocumentV1({
+      ...frame,
+      plugins: [
+        {
+          ...frame.plugins[0]!,
+          sections: [
+            {
+              surfaceId: "web.settings",
+              nodes: 2,
+              root: {
+                type: "group",
+                orientation: "column",
+                children: [
+                  {
+                    type: "action",
+                    actionId: "plugin-tool",
+                    label: "Clear cache",
+                    input: {
+                      kind: "plugin-tool",
+                      pluginId: "web",
+                      tool: "clear_cache",
+                      arguments: "{}",
+                    },
+                  },
+                ],
+              },
+            },
+            {
+              surfaceId: "web.status",
+              nodes: 0,
+              failure: "This plugin could not show its section: offline",
+            },
+          ],
+        },
+      ],
+    });
+    const card = groups(document)[0]!;
+    const section = card.children.find(
+      (child) => child.type === "group" && child.orientation === "column",
+    ) as { children: Array<Record<string, unknown>> };
+    expect(section.children[0]).toMatchObject({
+      type: "group",
+      children: [
+        { type: "action", actionId: "plugin-tool", label: "Clear cache" },
+      ],
+    });
+    expect(
+      card.children.some(
+        (child) =>
+          child.type === "text" &&
+          child.text === "This plugin could not show its section: offline",
+      ),
+    ).toBe(true);
+    expect(document.actions.map((action) => action.id)).toEqual([
+      "set-package-enabled",
+      "plugin-tool",
+    ]);
   });
 
   test("an empty frame says so", () => {
@@ -144,5 +207,43 @@ describe("a switch command", () => {
     expect(() =>
       decodeSetBotPluginEnabledCommandV1({ ...command, kind: "other" }),
     ).toThrow(/not a plugin switch/);
+  });
+});
+
+describe("a control command", () => {
+  const command = {
+    schemaVersion: 1 as const,
+    kind: "plugin-tool" as const,
+    commandId: "c-2",
+    pluginId: "weather",
+    tool: "refresh",
+    arguments: '{"city":"Wollongong"}',
+  };
+
+  test("decodes exactly, and the page's decoder tells the two kinds apart", () => {
+    expect(decodePluginToolCommandV1(command)).toEqual(command);
+    expect(decodeBotPluginsCommandV1(command)).toEqual(command);
+    expect(
+      decodeBotPluginsCommandV1({
+        schemaVersion: 1,
+        kind: "set-plugin-enabled",
+        commandId: "c-1",
+        pluginId: "weather",
+        enabled: true,
+        expectedRevision: 4,
+      }),
+    ).toMatchObject({ kind: "set-plugin-enabled" });
+    expect(() =>
+      decodePluginToolCommandV1({ ...command, tool: "Refresh" }),
+    ).toThrow(/tool is invalid/);
+    expect(() =>
+      decodePluginToolCommandV1({ ...command, arguments: "a".repeat(8_001) }),
+    ).toThrow(/arguments are invalid/);
+    expect(() => decodePluginToolCommandV1({ ...command, extra: 1 })).toThrow(
+      /invalid fields/,
+    );
+    expect(() =>
+      decodeBotPluginsCommandV1({ ...command, kind: "other" }),
+    ).toThrow(/invalid fields/);
   });
 });

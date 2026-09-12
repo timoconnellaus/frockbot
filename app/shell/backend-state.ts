@@ -157,15 +157,45 @@ export interface ActiveTurnV1 {
 }
 
 /**
+ * A Plugin worker mounted outside any Turn — a trigger delivery, a section
+ * render, a control's press (ADR 0026 steps 8–9). It is shaped like a Turn
+ * so every loopback call still names what it is for, and the grants admit it
+ * the way they admit the resident Turn: only for a Plugin it mounted.
+ */
+export interface StandaloneIsolateCallV1 {
+  runId: string;
+  sessionId: string;
+  turnId: string;
+  generationId: string;
+  members: readonly { packageId: string; artifact?: unknown }[];
+}
+
+/**
  * The one resident Turn slot. Turn execution writes it; the Applets host and
  * the isolate grants read it, which is why it is a named accessor rather than
- * a private field of the composing class.
+ * a private field of the composing class. Standalone calls sit beside the
+ * Turn, keyed by run: several may be in flight, none of them is the Turn.
  */
 export class ActiveTurnSlotV1 {
   #active: ActiveTurnV1 | undefined;
+  readonly #standalone = new Map<string, StandaloneIsolateCallV1>();
 
   get current(): ActiveTurnV1 | undefined {
     return this.#active;
+  }
+
+  /** Registers a standalone call; the answer releases it. */
+  beginStandalone(call: StandaloneIsolateCallV1): () => void {
+    this.#standalone.set(call.runId, call);
+    return () => {
+      if (this.#standalone.get(call.runId) === call) {
+        this.#standalone.delete(call.runId);
+      }
+    };
+  }
+
+  standalone(runId: string): StandaloneIsolateCallV1 | undefined {
+    return this.#standalone.get(runId);
   }
 
   set(active: ActiveTurnV1): void {

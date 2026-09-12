@@ -164,6 +164,22 @@ class ViewGridGroups extends StatelessWidget {
   }
 }
 
+/// The actions a capability card draws itself — a switch beside the title and
+/// a settings press at the foot — rather than as body content.
+const _cardControlIds = {'set-package-enabled', 'install-package', 'open-home'};
+
+/// Whether a card child is the group holding the card's own controls. Any
+/// other group child (a Plugin's settings section, say) is body content and is
+/// drawn in place.
+bool _isCardControls(Map<String, Object?> child) {
+  if (child['type'] != 'group') return false;
+  return (child['children'] as List).every(
+    (raw) =>
+        (raw as Map)['type'] == 'action' &&
+        _cardControlIds.contains(raw['actionId']),
+  );
+}
+
 class _CapabilityCard extends StatelessWidget {
   final Map<String, Object?> node;
   const _CapabilityCard({required this.node});
@@ -174,7 +190,7 @@ class _CapabilityCard extends StatelessWidget {
         .map((child) => (child as Map).cast<String, Object?>())
         .toList();
     final actions = children
-        .where((child) => child['type'] == 'group')
+        .where(_isCardControls)
         .expand(
           (group) => (group['children'] as List).map(
             (action) => (action as Map).cast<String, Object?>(),
@@ -239,7 +255,7 @@ class _CapabilityCard extends StatelessWidget {
               ),
               const SizedBox(height: 12),
               for (final child in children.where(
-                (child) => child['type'] != 'group',
+                (child) => !_isCardControls(child),
               ))
                 Padding(
                   padding: const EdgeInsets.only(bottom: 8),

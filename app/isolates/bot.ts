@@ -173,7 +173,7 @@ export async function isolateAuthority(
   identity: BotIdentity,
   input: IsolateCallScopeV1,
 ): Promise<IsolateCapabilityListOutcomeV1> {
-  if (!activeIsolateTurn(state, input)) {
+  if (!isolateCallAdmittedV1(state, input)) {
     return {
       status: "unavailable",
       reason: "the Package is not running in this Bot's active Composition",
@@ -195,7 +195,7 @@ export async function isolateStorageGet(
   state: ShellBotStateV1,
   input: IsolateCallScopeV1,
 ): Promise<IsolateStorageOutcomeV1> {
-  if (!activeIsolateTurn(state, input)) {
+  if (!isolateCallAdmittedV1(state, input)) {
     return { status: "unavailable", reason: "storage is unavailable" };
   }
   const request = decodeIsolateStorageGetRequestV1(input.request);
@@ -209,7 +209,7 @@ export async function isolateStoragePut(
   state: ShellBotStateV1,
   input: IsolateCallScopeV1,
 ): Promise<IsolateStorageOutcomeV1> {
-  if (!activeIsolateTurn(state, input)) {
+  if (!isolateCallAdmittedV1(state, input)) {
     return { status: "unavailable", reason: "storage is unavailable" };
   }
   const request = decodeIsolateStoragePutRequestV1(input.request);
@@ -222,7 +222,7 @@ export async function isolateStorageDelete(
   state: ShellBotStateV1,
   input: IsolateCallScopeV1,
 ): Promise<IsolateStorageOutcomeV1> {
-  if (!activeIsolateTurn(state, input)) {
+  if (!isolateCallAdmittedV1(state, input)) {
     return { status: "unavailable", reason: "storage is unavailable" };
   }
   const request = decodeIsolateStorageDeleteRequestV1(input.request);
@@ -236,7 +236,7 @@ export async function isolateStorageList(
   state: ShellBotStateV1,
   input: IsolateCallScopeV1,
 ): Promise<IsolateStorageListOutcomeV1> {
-  if (!activeIsolateTurn(state, input)) {
+  if (!isolateCallAdmittedV1(state, input)) {
     return { status: "unavailable", reason: "storage is unavailable" };
   }
   const request = decodeIsolateStorageListRequestV1(input.request ?? {});
@@ -266,7 +266,7 @@ export async function isolateSettings(
   state: ShellBotStateV1,
   input: IsolateCallScopeV1,
 ): Promise<IsolateSettingsOutcomeV1> {
-  if (!activeIsolateTurn(state, input)) {
+  if (!isolateCallAdmittedV1(state, input)) {
     return { status: "unavailable", reason: "settings are unavailable" };
   }
   const stored = await state.ctx.storage.get<unknown>(
@@ -353,7 +353,7 @@ export async function isolateInvokeModel(
     request: NormalizedModelRequest;
   },
 ): Promise<IsolateModelInvocationV1> {
-  if (!activeIsolateTurn(state, input)) {
+  if (!isolateCallAdmittedV1(state, input)) {
     return {
       status: "unavailable",
       reason: "the Package is not running in this Bot's active Composition",
@@ -631,9 +631,8 @@ export async function isolateWorkspaceRead(
   state: ShellBotStateV1,
   input: IsolateCallScopeV1,
 ): Promise<IsolateWorkspaceOutcomeV1> {
-  const active = activeIsolateTurn(state, input);
   const files = state.env.WORKSPACE_FILES;
-  if (!active || !files) {
+  if (!isolateCallAdmittedV1(state, input) || !files) {
     return { status: "unavailable", reason: "Workspace is unavailable" };
   }
   const path = isolateWorkspacePath(
@@ -647,9 +646,8 @@ export async function isolateWorkspaceList(
   state: ShellBotStateV1,
   input: IsolateCallScopeV1,
 ): Promise<IsolateWorkspaceOutcomeV1> {
-  const active = activeIsolateTurn(state, input);
   const files = state.env.WORKSPACE_FILES;
-  if (!active || !files) {
+  if (!isolateCallAdmittedV1(state, input) || !files) {
     return { status: "unavailable", reason: "Workspace is unavailable" };
   }
   const request = decodeIsolateWorkspaceListRequestV1(input.request);
@@ -669,9 +667,8 @@ export async function isolateWorkspaceStat(
   state: ShellBotStateV1,
   input: IsolateCallScopeV1,
 ): Promise<IsolateWorkspaceOutcomeV1> {
-  const active = activeIsolateTurn(state, input);
   const files = state.env.WORKSPACE_FILES;
-  if (!active || !files) {
+  if (!isolateCallAdmittedV1(state, input) || !files) {
     return { status: "unavailable", reason: "Workspace is unavailable" };
   }
   const path = isolateWorkspacePath(
@@ -685,9 +682,8 @@ export async function isolateWorkspaceWrite(
   state: ShellBotStateV1,
   input: IsolateCallScopeV1,
 ): Promise<IsolateWorkspaceOutcomeV1> {
-  const active = activeIsolateTurn(state, input);
   const files = state.env.WORKSPACE_FILES;
-  if (!active || !files) {
+  if (!isolateCallAdmittedV1(state, input) || !files) {
     return { status: "unavailable", reason: "Workspace is unavailable" };
   }
   const request = decodeIsolateWorkspaceWriteRequestV1(input.request);
@@ -707,9 +703,8 @@ export async function isolateWorkspaceDelete(
   state: ShellBotStateV1,
   input: IsolateCallScopeV1,
 ): Promise<IsolateWorkspaceOutcomeV1> {
-  const active = activeIsolateTurn(state, input);
   const files = state.env.WORKSPACE_FILES;
-  if (!active || !files) {
+  if (!isolateCallAdmittedV1(state, input) || !files) {
     return { status: "unavailable", reason: "Workspace is unavailable" };
   }
   const request = decodeIsolateWorkspaceDeleteRequestV1(input.request);
@@ -727,7 +722,10 @@ export async function isolateConnection(
   state: ShellBotStateV1,
   input: IsolateCallScopeV1,
 ): Promise<IsolateConnectionOutcomeV1> {
-  if (!activeIsolateTurn(state, input) || typeof input.request !== "string") {
+  if (
+    !isolateCallAdmittedV1(state, input) ||
+    typeof input.request !== "string"
+  ) {
     return { status: "unavailable", reason: "the Connection is unavailable" };
   }
   const identity = { userId: input.userId, botId: input.botId };
@@ -788,7 +786,7 @@ async function isolateMemoryHost(
   input: IsolateCallScopeV1,
   request: { scope: "bot" | "user" | "project"; projectId?: string },
 ) {
-  if (!activeIsolateTurn(state, input)) return undefined;
+  if (!isolateCallAdmittedV1(state, input)) return undefined;
   const host = createBotMemoryHost(
     { userId: input.userId, botId: input.botId },
     {
@@ -809,6 +807,37 @@ async function isolateMemoryHost(
     }
   }
   return host;
+}
+
+/**
+ * Whether a loopback call is admitted at all: it names the resident Turn, or
+ * a standalone call this object registered (a trigger delivery, a section
+ * render, a control's press), and that Turn or call mounted the Plugin the
+ * scope names. Grants that need nothing but the Bot's own storage or
+ * authority gate on this; the `schedule` grant needs the Turn's runtime and
+ * gates on {@link activeIsolateTurn}.
+ */
+function isolateCallAdmittedV1(
+  state: ShellBotStateV1,
+  input: {
+    runId: string;
+    sessionId: string;
+    turnId: string;
+    packageId: string;
+    generationId: string;
+  },
+): boolean {
+  if (activeIsolateTurn(state, input)) return true;
+  const call = state.turn.standalone(input.runId);
+  return (
+    call !== undefined &&
+    call.sessionId === input.sessionId &&
+    call.turnId === input.turnId &&
+    call.generationId === input.generationId &&
+    call.members.some(
+      (member) => member.packageId === input.packageId && member.artifact,
+    )
+  );
 }
 
 function activeIsolateTurn(

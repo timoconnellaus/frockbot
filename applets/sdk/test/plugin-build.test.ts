@@ -78,12 +78,13 @@ describe("build", () => {
     expect(outcome.manifest.hooks).toEqual([]);
     expect(outcome.manifest.services).toEqual([]);
     expect(outcome.manifest.triggers).toEqual([]);
+    expect(outcome.manifest.views).toEqual([]);
     expect(outcome.manifest.hashes.module).toMatch(/^[0-9a-f]{64}$/);
     expect(outcome.module).toContain("export {");
     expect(outcome.module).not.toContain("import ");
   }, 180_000);
 
-  it("reads hooks, services and triggers off the module's exports", async () => {
+  it("reads hooks, services, triggers and views off the module's exports", async () => {
     const directory = await scaffold();
     await writeFile(
       join(directory, "plugin.ts"),
@@ -98,6 +99,7 @@ describe("build", () => {
         "};",
         "export const services = { lookup: { version: 1 } };",
         "export const triggers = { alert: () => undefined };",
+        'export const views = { "ping.settings": () => undefined };',
         "",
       ].join("\n"),
       "utf8",
@@ -109,6 +111,7 @@ describe("build", () => {
     expect(outcome.manifest.hooks).toEqual(["agent/tool-exposure"]);
     expect(outcome.manifest.services).toEqual(["lookup"]);
     expect(outcome.manifest.triggers).toEqual(["alert"]);
+    expect(outcome.manifest.views).toEqual(["ping.settings"]);
   }, 180_000);
 
   it("refuses an import the bundle cannot inline, and a value import of the SDK", async () => {

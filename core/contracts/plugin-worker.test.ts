@@ -114,6 +114,7 @@ const healthyPlugin = {
   provides: [{ name: "weather-data", version: 1 }],
   consumes: [],
   triggers: ["forecast_ready"],
+  views: ["weather.settings"],
 };
 
 describe("plugin worker health", () => {
@@ -132,6 +133,7 @@ describe("plugin worker health", () => {
           provides: [],
           consumes: [{ name: "weather-data", version: 1 }],
           triggers: [],
+          views: [],
         },
       ],
     });

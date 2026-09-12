@@ -31,17 +31,24 @@ import type {
   BotPluginsFrameV1,
   SetBotPluginEnabledCommandV1,
 } from "./page.js";
+import { renderBotPluginSectionsV1 } from "./views-bot.js";
+import { readBotPluginRosterV1 } from "./worker-bot.js";
 
 export type SetBotPluginEnabledReceiptV1 =
   | { status: "applied"; revision: number }
   | { status: "conflict"; currentRevision: number }
   | { status: "rejected"; failure: string };
 
-/** What this Bot's page shows, from what its User installed and its own map. */
+/**
+ * What this Bot's page shows, from what its User installed and its own map.
+ * With `sections`, every Plugin that is on and declares a settings section
+ * is asked to draw it (ADR 0026 step 9); a switch never needs that.
+ */
 export async function readBotPluginsFrameV1(
   state: ShellBotStateV1,
   identity: BotIdentity,
   catalog: readonly SeededPluginV1[] = DEPLOYMENT_PLUGIN_CATALOG_V1,
+  options: { sections?: boolean } = {},
 ): Promise<BotPluginsFrameV1> {
   const enablement = await readPluginEnablementV1(state.ctx.storage);
   const user = await userConfigurationV1(state, identity).readConfiguration({
@@ -94,6 +101,14 @@ export async function readBotPluginsFrameV1(
         ? { network: member.descriptor.network }
         : {}),
     });
+  }
+  if (options.sections) {
+    const roster = await readBotPluginRosterV1(state, identity);
+    const sections = await renderBotPluginSectionsV1(state, identity, roster);
+    for (const row of rows) {
+      const drawn = sections.get(row.pluginId);
+      if (drawn && drawn.length > 0) row.sections = drawn;
+    }
   }
   return {
     schemaVersion: 1,

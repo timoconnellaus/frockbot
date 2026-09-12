@@ -17,6 +17,7 @@ import type {
   PluginWorkerToolInvocationV1,
   PluginWorkerTriggerInvocationV1,
   PluginWorkerTriggerResultV1,
+  PluginWorkerViewInvocationV1,
   ToolDefinition,
   ToolExecutionContext,
   ToolRegistration,
@@ -67,6 +68,7 @@ function member(
     hooks?: BotIsolateHookEventNameV1[];
     grants?: PluginGrantV1[];
     slots?: string[];
+    views?: { slot: string; surfaceId: string }[];
     tools?: string[];
     provides?: { name: string; version: number }[];
     consumes?: { name: string; version: number }[];
@@ -92,6 +94,7 @@ function member(
       grants: overrides.grants ?? [],
       ...(overrides.provides ? { provides: overrides.provides } : {}),
       ...(overrides.consumes ? { consumes: overrides.consumes } : {}),
+      ...(overrides.views ? { views: overrides.views } : {}),
       ...(overrides.slots ? { slots: overrides.slots } : {}),
       contextKeys: ["user", "bot", "session"],
     }),
@@ -117,6 +120,7 @@ function healthy(
     provides: [],
     consumes: [],
     triggers: [],
+    views: [],
     ...overrides,
   };
 }
@@ -143,6 +147,7 @@ function harness(
     health?: (plugins: string[]) => PluginWorkerHealthV1;
     hook?: PluginWorkerEntrypoint["hook"];
     receiveTrigger?: PluginWorkerEntrypoint["receiveTrigger"];
+    view?: PluginWorkerEntrypoint["view"];
     healthThrows?: string;
     deadlineMs?: number;
     artifacts?: Record<string, string>;
@@ -187,6 +192,13 @@ function harness(
         isError: false,
       });
     },
+    view: (invocation) =>
+      input.view?.(invocation) ??
+      Promise.resolve({
+        schemaVersion: 1 as const,
+        status: "drop" as const,
+        reason: "this fake renders nothing",
+      }),
     receiveTrigger: (invocation) => {
       triggerInvocations.push(invocation);
       if (input.receiveTrigger) return input.receiveTrigger(invocation);
@@ -468,7 +480,7 @@ describe("mount order from provides and consumes", () => {
     expect(prepared.mounted).toEqual([]);
     expect(subject.loads).toHaveLength(0);
     expect(prepared.failures.map((failure) => failure.message)).toEqual([
-      'plugin "provider" declares slots, which open when the settings section lands',
+      'plugin "provider" declares slots this deployment has not opened: composer.toolbar',
       'plugin "consumer" consumes a service from a plugin that did not mount',
     ]);
   });
@@ -780,6 +792,104 @@ describe("what the worker reports at mount", () => {
     await active.dispose();
   });
 
+  test("a view renders on a mounted plugin, is dropped for one that did not mount, and refused after dispose", async () => {
+    const subject = harness({
+      health: (plugins) => ({
+        schemaVersion: 1,
+        contractVersion: ISOLATE_CONTRACT_VERSION,
+        plugins: plugins.map((pluginId) =>
+          healthy(pluginId, { views: ["weather.settings"] }),
+        ),
+      }),
+      view: (invocation) =>
+        Promise.resolve({
+          schemaVersion: 1 as const,
+          status: "rendered" as const,
+          document: { root: { type: "text", text: invocation.surfaceId } },
+        }),
+    });
+    const prepared = await subject.host.mount([
+      member("weather", {
+        views: [{ slot: "settings.sections", surfaceId: "weather.settings" }],
+      }),
+    ]);
+    const active = await prepared.commit();
+    const invocation = (pluginId: string): PluginWorkerViewInvocationV1 => ({
+      schemaVersion: 1,
+      pluginId,
+      surfaceId: "weather.settings",
+      botId: "bot-1",
+      sessionId: "user-1:bot-1",
+      runId: "view:1",
+      turnId: "view:1",
+      generationId: "gen-1",
+      deadlineMs: 1_000,
+    });
+    expect(await active.renderView(invocation("weather"))).toEqual({
+      schemaVersion: 1,
+      status: "rendered",
+      document: { root: { type: "text", text: "weather.settings" } },
+    });
+    expect(await active.renderView(invocation("absent"))).toEqual({
+      schemaVersion: 1,
+      status: "drop",
+      reason: 'plugin "absent" did not mount in this generation',
+    });
+    await active.dispose();
+    expect(await active.renderView(invocation("weather"))).toEqual({
+      schemaVersion: 1,
+      status: "drop",
+      reason: "the plugin worker for this generation is no longer mounted",
+    });
+  });
+
+  test("a tool runs outside a Turn only when the plugin mounted and reported it", async () => {
+    const subject = harness();
+    const prepared = await subject.host.mount([member("weather")]);
+    const active = await prepared.commit();
+    const invocation = (
+      pluginId: string,
+      tool: string,
+    ): PluginWorkerToolInvocationV1 => ({
+      schemaVersion: 1,
+      pluginId,
+      tool,
+      input: { text: "abc" },
+      botId: "bot-1",
+      sessionId: "user-1:bot-1",
+      runId: "action:1",
+      turnId: "action:1",
+      generationId: "gen-1",
+      deadlineMs: 1_000,
+    });
+    expect(
+      await active.executeTool(invocation("weather", "reverse_text")),
+    ).toEqual({
+      schemaVersion: 1,
+      content: "weather:reverse_text",
+      isError: false,
+    });
+    expect(await active.executeTool(invocation("weather", "other"))).toEqual({
+      schemaVersion: 1,
+      content: 'plugin "weather" declares no tool "other"',
+      isError: true,
+    });
+    expect(
+      await active.executeTool(invocation("absent", "reverse_text")),
+    ).toEqual({
+      schemaVersion: 1,
+      content: 'plugin "absent" did not mount in this generation',
+      isError: true,
+    });
+    expect(subject.toolInvocations.map((entry) => entry.tool)).toEqual([
+      "reverse_text",
+    ]);
+    await active.dispose();
+    expect(
+      (await active.executeTool(invocation("weather", "reverse_text"))).isError,
+    ).toBe(true);
+  });
+
   test("a consumer is excluded when its provider fails health", async () => {
     const subject = harness({
       health: (plugins) => ({
@@ -899,12 +1009,47 @@ describe("what a descriptor may declare", () => {
     expect(subject.loads).toHaveLength(0);
   });
 
-  test("slots are refused until the settings section lands", async () => {
+  test("only the settings section slot is open; the others are refused by name", async () => {
     const subject = harness();
     const prepared = await subject.host.mount([
       member("weather", { slots: ["composer.toolbar"] }),
+      member("panel", {
+        contentHash: "c".repeat(64),
+        views: [{ slot: "bot.profile", surfaceId: "panel.profile" }],
+      }),
     ]);
-    expect(prepared.failures[0]!.message).toMatch(/declares slots/);
+    expect(prepared.failures.map((failure) => failure.message)).toEqual([
+      'plugin "weather" declares slots this deployment has not opened: composer.toolbar',
+      'plugin "panel" declares slots this deployment has not opened: bot.profile',
+    ]);
+    expect(subject.loads).toHaveLength(0);
+  });
+
+  test("a settings section view mounts when the worker reports it, and is a health failure when it does not", async () => {
+    const subject = harness({
+      health: (plugins) => ({
+        schemaVersion: 1,
+        contractVersion: ISOLATE_CONTRACT_VERSION,
+        plugins: plugins.map((pluginId) =>
+          pluginId === "weather"
+            ? healthy(pluginId, { views: ["weather.settings"] })
+            : healthy(pluginId),
+        ),
+      }),
+    });
+    const prepared = await subject.host.mount([
+      member("weather", {
+        views: [{ slot: "settings.sections", surfaceId: "weather.settings" }],
+      }),
+      member("panel", {
+        contentHash: "c".repeat(64),
+        views: [{ slot: "settings.sections", surfaceId: "panel.settings" }],
+      }),
+    ]);
+    expect(prepared.mounted).toEqual(["weather"]);
+    expect(prepared.failures.map((failure) => failure.message)).toEqual([
+      'plugin "panel" views do not match its declared views (declared:panel.settings reported:)',
+    ]);
   });
 
   test("a retired contract is refused with the reason; the previous one is served", async () => {
