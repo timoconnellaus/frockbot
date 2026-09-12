@@ -80,6 +80,11 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
   #traces: VoiceTraceLine[] = [];
   #stalled: Promise<void> | undefined;
   #release: (() => void) | undefined;
+  #now: string | undefined;
+
+  protected override now(): Date {
+    return this.#now ? new Date(this.#now) : super.now();
+  }
 
   /** A one-second window, so a cap can bite inside a test's patience. */
   protected override sttWindowSeconds(): number {
@@ -260,6 +265,17 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
 
   async probeChats(): Promise<number> {
     return this.#chats.length;
+  }
+
+  async probeSystemPrompts(): Promise<string[]> {
+    return this.#chats.map((body) => {
+      const messages = body.messages as { role: string; content: string }[];
+      return messages.find((message) => message.role === "system")!.content;
+    });
+  }
+
+  async probeSetNow(now: string): Promise<void> {
+    this.#now = now;
   }
 
   async probeStorage(prefix: string): Promise<Record<string, unknown>> {

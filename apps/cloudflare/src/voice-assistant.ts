@@ -31,6 +31,7 @@ import {
   renderVoiceSystemPromptV1,
   runVoiceTurnV1,
   type VoiceAssistantHostV1,
+  type VoiceAssistantPromptInputV1,
   type VoiceBotSummaryV1,
 } from "@frockbot/app/voice/assistant";
 import {
@@ -89,6 +90,10 @@ import {
 import { fetchVoiceUpstreamSocketV1 } from "./voice-dictation.js";
 import { createDurableWorkspaceFilesV1 } from "./workspace.js";
 import { rpcJsonSnapshotV1 } from "./durable-rpc.js";
+import {
+  userTimezoneV1,
+  type UserSettingsViewV1,
+} from "@frockbot/core/configuration";
 
 export const VOICE_ASSISTANT_INTERNAL_PATH = "/internal/voice-assistant/v1";
 
@@ -192,7 +197,7 @@ interface LiveCall {
   callId: string;
   /** When the call was admitted, so every later line can say how far in. */
   startedAt: number;
-  system: Promise<string>;
+  promptContext: Promise<Omit<VoiceAssistantPromptInputV1, "now">>;
   session?: SleepingTranscriberSessionV1;
   /** Awake seconds already reconciled against the meter. */
   lastAwakeSeconds: number;
@@ -641,7 +646,7 @@ export class VoiceAssistant extends VoiceAgentBase<
     const call: LiveCall = {
       callId: admission.call.callId,
       startedAt: Date.now(),
-      system: this.buildSystemPrompt(identity.userId, unspoken),
+      promptContext: this.buildPromptContext(identity.userId, unspoken),
       lastAwakeSeconds: 0,
       reservedSeconds: 0,
       muted: false,
@@ -964,7 +969,9 @@ export class VoiceAssistant extends VoiceAgentBase<
       chars: transcript.length,
       model: this.voiceModel() ?? "auto",
     });
-    const system = await call.system;
+    const system = call.promptContext.then((promptContext) =>
+      renderVoiceSystemPromptV1({ ...promptContext, now: this.now() }),
+    );
     const host = this.turnHost(identity.userId, turnId);
     const self = this;
     // The SDK consumes this generator sentence by sentence into TTS; the
@@ -1347,6 +1354,7 @@ export class VoiceAssistant extends VoiceAgentBase<
     // SAFETY: the binding names UserConfiguration; these are its reviewed RPCs.
     return stub as unknown as UserMemoryRpc & {
       listBots(input: unknown): Promise<unknown>;
+      readConfiguration(input: unknown): Promise<UserSettingsViewV1>;
     };
   }
 
@@ -1461,11 +1469,11 @@ export class VoiceAssistant extends VoiceAgentBase<
     return new MemoryStore({ files, owner: { userId, botId: "voice" } });
   }
 
-  private async buildSystemPrompt(
+  private async buildPromptContext(
     userId: string,
     unspoken: VoiceDelegationRecordV1[],
-  ): Promise<string> {
-    const [bots, memory] = await Promise.all([
+  ): Promise<Omit<VoiceAssistantPromptInputV1, "now">> {
+    const [bots, memory, timezone] = await Promise.all([
       this.listBots(userId).catch(() => [] as VoiceBotSummaryV1[]),
       (async () => {
         const store = this.memoryStore(userId);
@@ -1483,9 +1491,14 @@ export class VoiceAssistant extends VoiceAgentBase<
           };
         }
       })(),
+      this.userRpc(userId)
+        .readConfiguration({ schemaVersion: 1, userId })
+        .then((settings) => userTimezoneV1(rpcJsonSnapshotV1(settings).profile))
+        .catch(() => "UTC"),
     ]);
-    return renderVoiceSystemPromptV1({
+    return {
       bots,
+      timezone,
       memory: {
         ...(memory ? { user: memory } : {}),
         logDays: VOICE_ASSISTANT_MEMORY_LOG_DAYS,
@@ -1494,7 +1507,6 @@ export class VoiceAssistant extends VoiceAgentBase<
         botName: delegation.botName,
         text: delegation.answer ?? delegation.failure ?? "",
       })),
-      now: this.now(),
-    });
+    };
   }
 }

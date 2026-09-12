@@ -244,15 +244,24 @@ The Bot activity look-ups behind the system prompt and `list_bots` go to
 every Bot's object together, not one after another; a Bot lookup for
 `bot_status`, `ask_bot` and `cancel_bot` is one directory read. When the
 model goes to a tool without having said anything, the session speaks
-`"One moment."` before running it (`VOICE_TURN_BRIDGE_V1`) — a tool step is a
-second model round trip plus the tool, and that is seconds of silence
-otherwise; the bridge is spoken, not answered, so a turn that ends in the
-bridge alone still settles as `no_output`. `VOICE_ASSISTANT_MODEL` pins a
+`"One second."` before running it (`VOICE_TURN_BRIDGE_V1`). The same
+acknowledgment starts after one second if the first output is still pending,
+including while initial context loads or the model connects. It is emitted
+at most once per turn; a quick answer goes straight to speech. The prompt
+also asks the model to acknowledge checks and delegations briefly. The
+bridge is spoken, not answered, so a turn that ends in the bridge alone still
+settles as `no_output`. `VOICE_ASSISTANT_MODEL` pins a
 gateway model for voice turns (`workers-ai/@cf/...` or a provider the gateway
 holds a key for) instead of the platform's Auto route; the `turn` trace line
 says which was used, and `model-first-text` says how long the model took to
 say its first word — the bridge is timed separately on `turn-bridge`, so a
 tool-first turn never reads as a fast first token.
+
+The call loads the User's Profile timezone with its memory and Bot directory.
+Every turn renders a fresh clock in the system prompt: the full UTC instant
+and the local date, time and UTC offset, including daylight saving. An unset
+timezone defaults to UTC. Relative dates such as "today" use that local
+clock, and time-sensitive delegations must carry the resolved dates and zone.
 
 ### A reply that fails
 
