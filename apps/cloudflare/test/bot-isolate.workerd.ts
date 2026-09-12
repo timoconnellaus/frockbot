@@ -262,9 +262,7 @@ describe("a Bot Package in a loaded Dynamic Worker", () => {
 
     expect(result.isError).toBe(true);
     expect(result.content).not.toContain("egress-allowed");
-    expect(result.content).toMatch(
-      /not declared by any enabled plugin|not permitted to access the internet/i,
-    );
+    expect(result.content).toMatch(/not declared by any enabled plugin/i);
   });
 
   test("the isolate sees exactly CAPABILITIES and IDENTITY", async () => {

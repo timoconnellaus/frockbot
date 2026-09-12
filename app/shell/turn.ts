@@ -273,7 +273,6 @@ export async function executeTurn(
         runId: input.command.runId,
         sessionId: input.command.sessionId,
         generationId: mounting.generationId,
-        settings,
         members: mounting.members,
         enabled,
       });

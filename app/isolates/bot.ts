@@ -87,8 +87,6 @@ export function pluginSettingsKeyV1(pluginId: string): string {
   return `plugin:settings:${pluginId}`;
 }
 
-const MAX_PLUGIN_STORAGE_ENTRIES_V1 = 4_096;
-
 /** The Turn a grant call names, and the member making it. */
 export interface IsolateCallScopeV1 {
   userId: string;
@@ -113,7 +111,6 @@ export async function isolateMountOptions(
     runId: string;
     sessionId: string;
     generationId: string;
-    settings: BotSettingsViewV1;
     /** The generation's Plugins and which of them this Bot runs. */
     members: readonly { packageId: string; descriptor: PluginDescriptorV1 }[];
     enabled: readonly string[];
@@ -210,19 +207,6 @@ export async function isolateStoragePut(
   }
   const request = decodeIsolateStoragePutRequestV1(input.request);
   const key = pluginStorageKeyV1(input.packageId, request.key);
-  const existing = await state.ctx.storage.get<unknown>(key);
-  if (existing === undefined) {
-    const held = await state.ctx.storage.list({
-      prefix: pluginStorageKeyV1(input.packageId, ""),
-      limit: MAX_PLUGIN_STORAGE_ENTRIES_V1,
-    });
-    if (held.size >= MAX_PLUGIN_STORAGE_ENTRIES_V1) {
-      return {
-        status: "unavailable",
-        reason: `storage holds its ${MAX_PLUGIN_STORAGE_ENTRIES_V1} entries for this plugin already`,
-      };
-    }
-  }
   await state.ctx.storage.put(key, request.value);
   return { status: "available", value: request.value };
 }

@@ -964,7 +964,8 @@ export function decodeIsolateStoragePutRequestV1(
   const serialized = JSON.stringify(value.value);
   if (
     serialized === undefined ||
-    serialized.length > MAX_ISOLATE_STORAGE_VALUE_BYTES_V1
+    new TextEncoder().encode(serialized).length >
+      MAX_ISOLATE_STORAGE_VALUE_BYTES_V1
   ) {
     throw new Error(`${label}.value exceeds its bound`);
   }

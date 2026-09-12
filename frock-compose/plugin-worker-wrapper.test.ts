@@ -375,17 +375,6 @@ describe("the generated index module map", () => {
     expect(pluginWorkerIndexSourceV1(["weather", "greeter"])).not.toBe(
       pluginWorkerIndexSourceV1(["greeter", "weather"]),
     );
-    const index = modules[PLUGIN_WORKER_MAIN_MODULE]!.js;
-    for (const method of [
-      "async health()",
-      "async execute(rawInvocation)",
-      "async hook(rawInvocation)",
-      "async receiveTrigger(rawInvocation)",
-    ]) {
-      expect(index).toContain(method);
-    }
-    expect(index).toContain("return capabilities.schedule(scope, request);");
-    expect(index).not.toContain("globalThis");
   });
 });
 

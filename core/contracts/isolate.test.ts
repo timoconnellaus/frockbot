@@ -370,6 +370,20 @@ describe("isolate identity and capabilities", () => {
     expect(() =>
       decodeIsolateStoragePutRequestV1({ key: "k", value: "x".repeat(70_000) }),
     ).toThrow(/bound/);
+    // The bound is bytes, so a value under it in code units but over it once
+    // encoded is refused rather than handed on to storage.
+    expect(() =>
+      decodeIsolateStoragePutRequestV1({
+        key: "k",
+        value: "\u4e2d".repeat(30_000),
+      }),
+    ).toThrow(/bound/);
+    expect(
+      decodeIsolateStoragePutRequestV1({
+        key: "k",
+        value: "\u4e2d".repeat(20_000),
+      }),
+    ).toEqual({ key: "k", value: "\u4e2d".repeat(20_000) });
     expect(decodeIsolateStorageListRequestV1({})).toEqual({});
     expect(
       decodeIsolateStorageListRequestV1({ prefix: "notes/", limit: 10 }),

@@ -193,6 +193,72 @@ async function pinnedGenerations(identity: {
   );
 }
 
+/**
+ * Runs `store_roundtrip` as a real Turn of `identity` and returns what the
+ * Plugin saw through the loopback.
+ */
+async function storeRoundtrip(
+  identity: { userId: string; botId: string },
+  runId: string,
+  word: string,
+): Promise<Record<string, unknown>> {
+  await bot(identity).run({
+    schemaVersion: 1,
+    ...identity,
+    command: {
+      runId,
+      sessionId: `${identity.userId}:${identity.botId}`,
+      acceptedAt: new Date().toISOString(),
+      text: toolCallTriggerPrompt([
+        "call_dynamic_tool",
+        dynamicToolInputV1({
+          namespace: STORE_PLUGIN_ID,
+          toolName: "store_roundtrip",
+          input: { word },
+        }),
+      ]),
+    },
+  });
+
+  const runs = await runInDurableObject(
+    env.BOT_STATES.getByName(`${identity.userId}:${identity.botId}`),
+    (_instance, state) =>
+      hydratedStoredRunsV1<{
+        runId: string;
+        sessionId: string;
+        events: Array<{ type: string; content?: string; name?: string }>;
+      }>(state.storage),
+  );
+  const run = runs.find((candidate) => candidate.runId === runId);
+  const result = run?.events.find(
+    (event) =>
+      event.type === "tool/result" &&
+      typeof event.content === "string" &&
+      event.content.includes('"put"'),
+  );
+  expect(
+    result,
+    JSON.stringify(run?.events.map((event) => event.type)),
+  ).toBeDefined();
+  const raw = (result as { content?: string }).content ?? "";
+  const outer = JSON.parse(raw) as { content?: string };
+  return JSON.parse(
+    typeof outer.content === "string" ? outer.content : raw,
+  ) as Record<string, unknown>;
+}
+
+/** What one Plugin's storage key holds in a Bot's own Durable Object. */
+async function storedGreeting(identity: {
+  userId: string;
+  botId: string;
+}): Promise<unknown> {
+  return runInDurableObject(
+    env.BOT_STATES.getByName(`${identity.userId}:${identity.botId}`),
+    (_instance, state) =>
+      state.storage.get(`plugin:storage:${STORE_PLUGIN_ID}:greeting`),
+  );
+}
+
 describe("the User-owned Composition", () => {
   test("a generation the User pins is what every Bot's next Turn runs under, and it activates on the User", async () => {
     const userId = `user-${crypto.randomUUID()}`;
@@ -525,7 +591,9 @@ describe("the User-owned Composition", () => {
   test("a plugin in a real Turn reaches storage, settings and the Bot's authority through the loopback", async () => {
     const userId = `user-${crypto.randomUUID()}`;
     const identity = { userId, botId: "bot-1" };
+    const second = { userId, botId: "bot-2" };
     await provisionBot(identity);
+    await provisionSiblingBot(second, 1);
     await turn(identity, "run-0");
     const bootstrap = (
       await user(userId).readComposition({ schemaVersion: 1, userId })
@@ -584,49 +652,7 @@ describe("the User-owned Composition", () => {
       expectedCurrentGenerationId: bootstrap.generationId,
     });
 
-    await bot(identity).run({
-      schemaVersion: 1,
-      ...identity,
-      command: {
-        runId: "run-1",
-        sessionId: `${userId}:bot-1`,
-        acceptedAt: new Date().toISOString(),
-        text: toolCallTriggerPrompt([
-          "call_dynamic_tool",
-          dynamicToolInputV1({
-            namespace: STORE_PLUGIN_ID,
-            toolName: "store_roundtrip",
-            input: { word: "hello" },
-          }),
-        ]),
-      },
-    });
-
-    const runs = await runInDurableObject(
-      env.BOT_STATES.getByName(`${userId}:bot-1`),
-      (_instance, state) =>
-        hydratedStoredRunsV1<{
-          runId: string;
-          sessionId: string;
-          events: Array<{ type: string; content?: string; name?: string }>;
-        }>(state.storage),
-    );
-    const run = runs.find((candidate) => candidate.runId === "run-1");
-    const result = run?.events.find(
-      (event) =>
-        event.type === "tool/result" &&
-        typeof event.content === "string" &&
-        event.content.includes('"put"'),
-    );
-    expect(
-      result,
-      JSON.stringify(run?.events.map((event) => event.type)),
-    ).toBeDefined();
-    const raw = (result as { content?: string }).content ?? "";
-    const outer = JSON.parse(raw) as { content?: string };
-    const inner = JSON.parse(
-      typeof outer.content === "string" ? outer.content : raw,
-    );
+    const inner = await storeRoundtrip(identity, "run-1", "hello");
     expect(inner).toMatchObject({
       put: "available",
       got: { word: "hello" },
@@ -637,6 +663,22 @@ describe("the User-owned Composition", () => {
       bot: "bot-1",
       user: userId,
     });
-    expect(inner.connections).toBeGreaterThanOrEqual(1);
+    expect(inner.connections as number).toBeGreaterThanOrEqual(1);
+
+    // The binding digest names only the User, so this Bot is served the worker
+    // the first Bot's object loaded — including the `CAPABILITIES` stub minted
+    // there. The stub must still answer, and it must route by the scope's Bot:
+    // this Turn's writes land in this Bot's own object, not the first one's.
+    const sibling = await storeRoundtrip(second, "run-2", "world");
+    expect(sibling).toMatchObject({
+      put: "available",
+      got: { word: "world" },
+      keys: ["greeting"],
+      authority: "available",
+      bot: "bot-2",
+      user: userId,
+    });
+    expect(await storedGreeting(second)).toEqual({ word: "world" });
+    expect(await storedGreeting(identity)).toEqual({ word: "hello" });
   });
 });
