@@ -265,10 +265,11 @@ call, because the server's log is the only record of it: `1000` with
 `server-closed` when the server's end of the socket finished first (mostly
 inert — the peer has already closed, so the frame rarely reaches it), `4001`
 with the failure sentence when the client failed on its own, `4002` `disposed`
-when the controller was torn down mid-call, `4003` `abandoned-connect` when the
-call ended while the socket was still connecting and the socket that arrived
-belongs to nothing. The server closes with `4403` when the socket is not the
-account's.
+when the controller was torn down mid-call, `4003` `abandoned-connect` when a
+socket that finished connecting is no longer wanted — either the call ended
+while it was connecting, or the connect attempt timed out and the client had
+already moved on, so the server sees `connected` followed by `4003` with no
+`hello`. The server closes with `4403` when the socket is not the account's.
 
 ### Tracing a call
 
@@ -289,9 +290,14 @@ and reason). Every line carries the connection id, and — once `onConnect`
 accepted the socket — the device key; `refused-identity` carries the device key
 from the header it just rejected, and the `closed` line for a refused socket has
 none. Once admitted, every line also carries the call id and elapsed
-milliseconds. A call that reaches
-`listening` and then `closed` with no `utterance` in between was ended by the
-client before anything was heard; the `closed` reason says by which path.
+milliseconds. A call that reaches `listening` and then `closed` with no
+`utterance` in between means nothing reached transcription; read the `upstream`
+lines first. No `awake` line (with or without `stt-failed`) means the STT
+socket never became ready — the connect stalled or was refused — and the
+`closed` code and reason then say who gave up. An `awake` line and still no `utterance` means
+the upstream heard nothing it would transcribe, or the client left before the
+turn detector committed a transcript. Only the `closed` code and reason say
+which side closed the socket.
 
 ### Text turns
 
