@@ -214,15 +214,15 @@ export type LoopEventNameV1 = keyof LoopEventPayloadMapV1;
 
 /**
  * The loop seams a plugin may wrap, and only these. They are exactly the
- * actions `AGENTS.md` names — `context.assemble`, `tools.expose`, `tool.call`
- * (both halves) and `turn.terminate` — and adding one is a deliberate widening
- * of the plugin surface. Operational wrappers that carry an AbortSignal, an
- * async stream, or an effect body stay first-party: the isolate receives
- * policy DTOs, never control of the durable skeleton.
+ * hooks `AGENTS.md` names, and adding one is a deliberate widening of the
+ * plugin surface. Operational wrappers that carry an AbortSignal, an async
+ * stream, or an effect body stay first-party: the isolate receives policy
+ * DTOs, never control of the durable skeleton.
  */
 export const BOT_ISOLATE_HOOK_EVENTS_V1 = [
   "system-prompt/assemble",
   "agent/tool-exposure",
+  "agent/request",
   "tools/pre-execute",
   "tools/post-execute",
   "agent/turn-stopping",
@@ -425,6 +425,24 @@ export function decodeBotIsolateHookReplacementV1<
       ).tools;
       break;
     }
+    case "agent/request": {
+      // The request id is the idempotency key a spend record and a credential
+      // lease are held under, and the provider and model are what the Bot's
+      // authority resolved; a plugin shapes the request it was handed, it does
+      // not redirect it. Everything else — system, messages, tools, params —
+      // is the plugin's to replace.
+      const prior = original as NormalizedModelRequest;
+      const request = decodeNormalizedModelRequestV1(input, label);
+      if (
+        request.requestId !== prior.requestId ||
+        request.provider !== prior.provider ||
+        request.model !== prior.model
+      ) {
+        throw new Error(`${label} cannot redirect the request`);
+      }
+      decoded = request;
+      break;
+    }
     case "tools/pre-execute": {
       const prior = original as ToolPreparation;
       const preparation = hookRecord(input, label);
@@ -540,7 +558,7 @@ export const LOOP_EVENTS_V1 = {
     mode: "waterfall",
     payload: "{ step, request }",
     returns: "NormalizedModelRequest",
-    isolateHook: false,
+    isolateHook: true,
   },
   "agent/request-error": {
     mode: "waterfall",

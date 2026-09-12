@@ -249,7 +249,7 @@ describe("AgentLoop", () => {
     };
     const runtime = mountRuntime(provider);
     runtime.hooks.add({
-      request: async (_agent, _request, _signal, next) => ({
+      request: async (_agent, _request, _turn, _step, _signal, next) => ({
         ...(await next()),
         responseFormat: {
           type: "json_schema",

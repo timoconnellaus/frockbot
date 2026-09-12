@@ -60,7 +60,7 @@ function conversational(events: readonly SessionEvent[], turn: number) {
 
 /** Delivery is application policy; the loop still owns execution and settlement. */
 export const conversationDeliveryHooksV1: LoopHooksV1 = {
-  async request(agent, _request, _signal, next) {
+  async request(agent, _request, _turn, _step, _signal, next) {
     const request = await next();
     const start = agent.session.events.findLast((e) => e.type === "turn/start");
     if (

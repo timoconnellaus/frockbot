@@ -181,7 +181,8 @@ const PROBE_PACKAGE_DESCRIPTOR = decodePluginDescriptorV1({
     "schedule_surface",
     "context_keys",
   ].map((name) => ({ name, description: name, inputSchema: {} })),
-  actions: ["tools.expose"],
+  contractVersion: 3,
+  hooks: ["agent/tool-exposure"],
   grants: ["ai", "http", "schedule", "memory", "workspace"],
   contextKeys: ["user", "bot", "session"],
 });

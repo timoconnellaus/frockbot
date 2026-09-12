@@ -213,7 +213,7 @@ describe("isolate health v1", () => {
       decodeIsolateHealthV1({
         ...health,
         contractVersion: 3,
-        hooks: ["agent/request"],
+        hooks: ["agent/request-error"],
       }),
     ).toThrow(/hooks\[0\] is invalid/);
   });
@@ -284,7 +284,7 @@ describe("isolate hook v1", () => {
     expect(() =>
       decodeIsolateHookInvocationV1({
         ...hookInvocation,
-        event: "agent/request",
+        event: "agent/request-error",
       }),
     ).toThrow(/event is invalid/);
     expect(() =>

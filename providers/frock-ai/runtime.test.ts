@@ -174,6 +174,8 @@ describe("Frock AI runtime Contribution", () => {
     const fallback = await root.hooks.request(
       agent,
       manual,
+      1,
+      1,
       new AbortController().signal,
       () => Promise.resolve(manual),
     );
@@ -226,6 +228,8 @@ describe("Frock AI runtime Contribution", () => {
     const retried = await root.hooks.request(
       agent,
       manual,
+      1,
+      1,
       new AbortController().signal,
       () => Promise.resolve(manual),
     );

@@ -13,13 +13,12 @@ import type {
   ToolDefinition,
   ToolExecutionContext,
   ToolNamespaceRegistration,
-  PluginActionV1,
+  BotIsolateHookEventNameV1,
   PluginGrantV1,
 } from "@frockbot/core/contracts";
 import {
   BotIsolateContributionHost,
   botIsolateModuleSetHashV1,
-  pluginHookEventsV1,
   raceDeadline,
   type BotIsolateHostOptions,
   type BotIsolateLoadedWorker,
@@ -31,7 +30,7 @@ const CONTENT_HASH = "a".repeat(64);
 
 function member(
   overrides: {
-    actions?: PluginActionV1[];
+    hooks?: BotIsolateHookEventNameV1[];
     grants?: PluginGrantV1[];
     slots?: string[];
     tools?: { name: string; description: string; inputSchema: object }[];
@@ -52,7 +51,8 @@ function member(
           inputSchema: { type: "object" },
         },
       ],
-      actions: overrides.actions ?? [],
+      contractVersion: 3,
+      hooks: overrides.hooks ?? [],
       grants: overrides.grants ?? [],
       ...(overrides.slots ? { slots: overrides.slots } : {}),
       contextKeys: ["user", "bot", "session"],
@@ -306,7 +306,7 @@ describe("Bot isolate contribution host", () => {
     );
   });
 
-  test("rejects isolate hooks that differ from the declared actions", async () => {
+  test("rejects isolate hooks that differ from the declared hooks", async () => {
     const { host: subject } = host({
       entrypoint: {
         health: () =>
@@ -318,8 +318,8 @@ describe("Bot isolate contribution host", () => {
       },
     });
     await expect(
-      subject.prepare(member({ actions: ["tools.expose"] })),
-    ).rejects.toThrow(/hooks do not match its declared actions/);
+      subject.prepare(member({ hooks: ["agent/tool-exposure"] })),
+    ).rejects.toThrow(/hooks do not match its declared hooks/);
   });
 
   test("runs a declared action after first-party policy with a snapshot", async () => {
@@ -359,7 +359,7 @@ describe("Bot isolate contribution host", () => {
       },
     });
     const prepared = await subject.prepare(
-      member({ actions: ["tools.expose"] }),
+      member({ hooks: ["agent/tool-exposure"] }),
     );
     const active = await prepared.commit();
     const original = [
@@ -420,7 +420,7 @@ describe("Bot isolate contribution host", () => {
     await active.dispose();
   });
 
-  test("bridges every action in the vocabulary", async () => {
+  test("bridges every hook in the vocabulary", async () => {
     const hooks = new LoopHookListV1();
     const seen: string[] = [];
     const replacement: Record<string, unknown> = {
@@ -429,6 +429,14 @@ describe("Bot isolate contribution host", () => {
         sections: [{ id: "hook", text: "hook prompt" }],
       },
       "agent/tool-exposure": [],
+      "agent/request": {
+        requestId: "request-1",
+        provider: "scripted",
+        model: "scripted-v1",
+        system: "hook system",
+        messages: [],
+        tools: [],
+      },
       "tools/pre-execute": {
         kind: "denied",
         call: { id: "call-1", name: "reverse_text", input: {} },
@@ -436,12 +444,6 @@ describe("Bot isolate contribution host", () => {
       },
       "tools/post-execute": { content: "hook result", isError: false },
     };
-    const actions: PluginActionV1[] = [
-      "context.assemble",
-      "tools.expose",
-      "tool.call",
-      "turn.terminate",
-    ];
     const { host: subject } = host({
       hooks,
       entrypoint: {
@@ -461,7 +463,9 @@ describe("Bot isolate contribution host", () => {
         },
       },
     });
-    const prepared = await subject.prepare(member({ actions }));
+    const prepared = await subject.prepare(
+      member({ hooks: [...BOT_ISOLATE_HOOK_EVENTS_V1] }),
+    );
     const active = await prepared.commit();
     const agent = {
       id: "bot-1",
@@ -489,6 +493,19 @@ describe("Bot isolate contribution host", () => {
         Promise.resolve([]),
       ),
     ).toEqual([]);
+    const proposedRequest = {
+      requestId: "request-1",
+      provider: "scripted",
+      model: "scripted-v1",
+      system: "core",
+      messages: [],
+      tools: [],
+    };
+    expect(
+      await hooks.request(agent, proposedRequest, 1, 1, signal, () =>
+        Promise.resolve(proposedRequest),
+      ),
+    ).toMatchObject({ system: "hook system" });
     expect(
       await hooks.prepareTool(call, toolContext, () =>
         Promise.resolve({ kind: "ready", call, idempotent: true }),
@@ -504,11 +521,7 @@ describe("Bot isolate contribution host", () => {
     ).toMatchObject({ content: "hook result" });
     await hooks.turnStopping(agent, 1);
 
-    // The four actions cover all five loop seams: `tool.call` is both halves.
     expect(seen.toSorted()).toEqual([...BOT_ISOLATE_HOOK_EVENTS_V1].toSorted());
-    expect(pluginHookEventsV1(actions).toSorted()).toEqual(
-      [...BOT_ISOLATE_HOOK_EVENTS_V1].toSorted(),
-    );
 
     await active.dispose();
   });
@@ -538,7 +551,7 @@ describe("Bot isolate contribution host", () => {
         },
       });
       const prepared = await subject.prepare(
-        member({ actions: ["tools.expose"] }),
+        member({ hooks: ["agent/tool-exposure"] }),
       );
       await prepared.commit();
       const original = [
@@ -671,13 +684,6 @@ describe("the extension points this deployment has not opened", () => {
     await expect(
       subject.prepare(member({ grants: ["storage", "ai"] })),
     ).rejects.toThrow(/has not opened: storage/);
-  });
-
-  test("refuses the Memory actions until Memory is an app module", async () => {
-    const { host: subject } = host();
-    await expect(
-      subject.prepare(member({ actions: ["memory.read", "memory.write"] })),
-    ).rejects.toThrow(/no loop seam yet: memory\.read, memory\.write/);
   });
 
   test("refuses slots until the renderer lands", async () => {

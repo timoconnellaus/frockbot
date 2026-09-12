@@ -154,6 +154,8 @@ describe("Ollama Cloud runtime Contribution", () => {
     const authorizedRequest = await root.hooks.request(
       {} as LoopAgentRuntimeV1,
       request,
+      1,
+      1,
       signal,
       () => Promise.resolve(request),
     );
