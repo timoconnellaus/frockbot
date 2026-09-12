@@ -219,6 +219,18 @@ test("the shell is usable on a phone", async ({
   await expectNothingRunsOffTheEdge(page);
   await expectWithinViewport(page, "bot-name");
 
+  // A Bot's Plugins are Bot settings, so a phone finds them here rather than
+  // under the Profile: the row opens the Bot's own Plugins page.
+  await expect(sem(page, "plugins-panel-toggle")).toBeVisible();
+  await sem(page, "plugins-panel-toggle").click();
+  await expect(sem(page, "plugins-document")).toBeVisible();
+  // The page arrives with a transition; the shot is of where it lands.
+  await page.waitForTimeout(700);
+  await shot(page, "04b-bot-plugins");
+  await expectNothingRunsOffTheEdge(page);
+  await page.goBack();
+  await expect(sem(page, "bot-settings")).toBeVisible();
+
   // And the way back gives the conversation the whole window again.
   await page.goBack();
   await expect(sem(page, "shell-conversation")).toBeVisible();

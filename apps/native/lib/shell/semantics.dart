@@ -185,7 +185,13 @@ String viewGroupIdentifierV1(String title) =>
 abstract final class PluginIds {
   static const document = 'plugins-document';
   static const refresh = 'plugins-refresh';
+
+  /// The Profile's entry: the account's list, what is installed.
   static const profileEntry = 'profile-plugins';
+
+  /// The Bot's door: the header button beside Routines on a desktop, the row
+  /// on the Bot's page on a phone. A Bot's switches are Bot settings.
+  static const panelToggle = 'plugins-panel-toggle';
 }
 
 /// Routines: what a Bot does on its own, and what it left behind.

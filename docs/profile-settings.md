@@ -24,7 +24,11 @@ list; a desktop opens it as a dialog over the shell, the same providers laid
 out as a grid of cards, three across at full width. It links to Messages on
 your Mac. What Plugins calls "Set up in Marketplace" lands here.
 
-Plugins is the selected Bot's page: one list of what that Bot could run —
+A Bot's Plugins are Bot settings, so their door is beside its conversation —
+the Plugins button in the Bot's header on a desktop, which opens the panel,
+and a row on the Bot's page on a phone — and never the Profile, which holds
+only what applies to the whole account: the installed list under Plugins, and
+Account features. The Bot's page is one list of what that Bot could run —
 the Plugins its User installed, what the deployment seeded, and the
 first-party features a User may turn off — with one switch per row, and the
 switches are that Bot's own. A locked Plugin is shown without a switch, and a

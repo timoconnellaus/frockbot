@@ -232,4 +232,42 @@ void main() {
       },
     );
   }
+
+  testWidgets('the Plugins door sits in the header beside Routines', (
+    tester,
+  ) async {
+    var opened = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: FrockTheme.theme(Brightness.dark),
+        home: Scaffold(
+          appBar: ChatHeader(
+            name: 'Rosemary',
+            onSettings: () {},
+            onRoutines: () {},
+            onPlugins: () => opened += 1,
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(find.byTooltip('Plugins'), findsOneWidget);
+    await tester.tap(find.byTooltip('Plugins'));
+    expect(opened, 1);
+  });
+
+  testWidgets('a header given no Plugins callback draws no Plugins door', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: FrockTheme.theme(Brightness.dark),
+        home: Scaffold(
+          appBar: ChatHeader(name: 'Rosemary', onOpenBot: () {}),
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(find.byTooltip('Plugins'), findsNothing);
+  });
 }
