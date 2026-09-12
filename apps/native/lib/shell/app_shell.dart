@@ -470,6 +470,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   void _adopt(List<wire.BotRegistration> active, Set<String> archivedIds) {
     setState(() {
       bots = active;
+      // The directory is authority on what a Bot wears; whatever it says now
+      // replaces anything drawn ahead of it.
+      _predictedSheep.clear();
       archived = archivedIds;
       // The cached directory is an answer, so the skeleton goes now rather
       // than waiting on a read that only replaces it.
@@ -512,6 +515,14 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       // The registration seed is still a name; nothing is lost but the label.
     }
   }
+
+  /// Draws a Bot profile change before the round trip that confirms it: the
+  /// tile moves, the group changes, the name updates with the control instead
+  /// of six requests later. [_loadIdentities] replaces this map wholesale, so
+  /// the authority's answer reconciles the prediction by overwriting it, and
+  /// a refused save hands back the profile it started from.
+  void predictProfile(String botId, SidebarProfile profile) =>
+      setState(() => profiles = {...profiles, botId: profile});
 
   String _name(wire.BotRegistration bot) =>
       profiles[bot.botId.value]?.name ?? bot.initialName;
@@ -588,7 +599,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           children: [
             BotSettingsView(
               controller: controller,
-              onSaved: load,
+              // A profile save changes no Bot's lifecycle and no Bot's place
+              // in the directory, so the identities are the only thing worth
+              // reading back.
+              onSaved: _loadIdentities,
+              onPredict: (profile) => predictProfile(botId, profile),
               background: _background(botId),
               onEditAvatar: () => unawaited(_editAvatar(botId, name)),
               dangerZone: _dangerZone(botId, name),
@@ -1135,7 +1150,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                 children: [
                   BotSettingsView(
                     controller: controller,
-                    onSaved: load,
+                    onSaved: _loadIdentities,
+                    onPredict: (profile) => predictProfile(botId, profile),
                     background: _background(botId),
                     onEditAvatar: () =>
                         unawaited(_editAvatar(botId, _name(bot))),
@@ -1264,22 +1280,31 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     ];
   }
 
-  /// The sheep a Bot wears, from the registration the directory carries.
-  String? _background(String botId) => bots
-      .where((bot) => bot.botId.value == botId)
-      .map((bot) => bot.sheep.background)
-      .firstOrNull;
+  /// Colours chosen here that the directory has not reported back yet. The
+  /// Flock owns what a Bot looks like, and the client picked the recipe it
+  /// sent, so drawing it now is showing what was chosen rather than guessing.
+  final Map<String, String> _predictedSheep = {};
 
-  /// The Bot's colour, which the Flock owns and the directory carries — so a
-  /// change is read back with everything else rather than patched in here.
+  /// The sheep a Bot wears, from the registration the directory carries — or
+  /// the colour just chosen for it, until the read that confirms it lands.
+  String? _background(String botId) =>
+      _predictedSheep[botId] ??
+      bots
+          .where((bot) => bot.botId.value == botId)
+          .map((bot) => bot.sheep.background)
+          .firstOrNull;
+
   Future<void> _editAvatar(String botId, String botName) async {
     final chosen = await SheepColourSheet.show(
       context,
       api: widget.api,
       botId: botId,
       botName: botName,
+      background: _background(botId),
     );
-    if (chosen != null) await load();
+    if (chosen == null || !mounted) return;
+    setState(() => _predictedSheep[botId] = chosen);
+    await load();
   }
 
   Widget _dangerZone(String botId, String botName) => BotDangerZone(

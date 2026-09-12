@@ -4,9 +4,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/client/transport.dart';
 import 'package:frockbot_native/settings/bot_settings.dart';
+import 'package:frockbot_native/shell/semantics.dart';
+import 'package:frockbot_native/shell/sidebar.dart';
 import 'package:frockbot_native/theme/frock_theme.dart';
 
 import 'settings_test.dart' show SettingsApi;
+import 'shell_layout_test.dart' show bot, byIdentifier;
 import 'widget_test.dart' show MemoryStore;
 
 Map<String, Object?> botSettings({
@@ -60,11 +63,17 @@ NativeApi api(
 
 /// The debounce, elapsed: what a person's pause in typing costs.
 Future<void> settle(WidgetTester tester) async {
-  await tester.pump(botSettingsAutosaveDelay + const Duration(milliseconds: 50));
+  await tester.pump(
+    botSettingsAutosaveDelay + const Duration(milliseconds: 50),
+  );
   await tester.pumpAndSettle();
 }
 
-Future<void> open(WidgetTester tester, BotSettingsController state) async {
+Future<void> open(
+  WidgetTester tester,
+  BotSettingsController state, {
+  void Function(SidebarProfile profile)? onPredict,
+}) async {
   tester.view.physicalSize = const Size(390, 2200);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
@@ -72,7 +81,9 @@ Future<void> open(WidgetTester tester, BotSettingsController state) async {
     MaterialApp(
       theme: FrockTheme.theme(Brightness.dark),
       home: Scaffold(
-        body: SingleChildScrollView(child: BotSettingsView(controller: state)),
+        body: SingleChildScrollView(
+          child: BotSettingsView(controller: state, onPredict: onPredict),
+        ),
       ),
     ),
   );
@@ -125,7 +136,7 @@ void main() {
     state.dispose();
   });
 
-  testWidgets('a pause in typing writes the profile, the policy and the model', (
+  testWidgets('a pause in typing writes the profile and nothing else', (
     tester,
   ) async {
     final store = MemoryStore();
@@ -138,22 +149,40 @@ void main() {
     expect(commands, isEmpty);
     await tester.enterText(find.byType(TextFormField).first, 'Renamed');
     await settle(tester);
-    expect(commands.map((command) => command['type']), [
-      'bot/set-profile',
-      'bot/update-notifications',
-      'bot/set-package-settings',
-    ]);
-    final profile = commands.first['profile']! as Map;
-    expect(profile['name'], 'Renamed');
-    // No model was chosen, so the override is removed rather than written.
-    expect(commands.last['unset'], ['model']);
+    // The policy and the model are what the read reported, so they are not
+    // written again to say so: a rename is one request.
+    expect(commands.map((command) => command['type']), ['bot/set-profile']);
+    expect((commands.first['profile']! as Map)['name'], 'Renamed');
     expect(find.text('Saved.'), findsOneWidget);
     // The field kept the person's focus and text through the write: what
     // they typed is what it shows, and nothing was read back over it.
     expect(
-      tester.widget<TextFormField>(find.byType(TextFormField).first).initialValue,
+      tester
+          .widget<TextFormField>(find.byType(TextFormField).first)
+          .initialValue,
       'Renamed',
     );
+    state.dispose();
+  });
+
+  testWidgets('a model of this Bot’s own is written when it is chosen', (
+    tester,
+  ) async {
+    final store = MemoryStore();
+    final commands = <Map<String, Object?>>[];
+    final state = BotSettingsController(api(store, commands), 'alpha');
+    await open(tester, state);
+    state.edit(() => state.model = {'connectionId': 'work'});
+    await state.save();
+    expect(commands.map((command) => command['type']), [
+      'bot/set-package-settings',
+    ]);
+    expect(commands.single['values'], {
+      'model': {'connectionId': 'work'},
+    });
+    // And a save that changes nothing after it sends nothing at all.
+    await state.save();
+    expect(commands, hasLength(1));
     state.dispose();
   });
 
@@ -164,13 +193,121 @@ void main() {
     await open(tester, state);
     await tester.tap(find.text('Pinned'));
     await tester.pumpAndSettle();
+    // A pin is one request, not three: nothing else on this surface changed.
+    expect(commands.map((command) => command['type']), ['bot/set-profile']);
     final profile = commands.first['profile']! as Map;
     expect(profile['pinnedAt'], isNot(''));
     // A second write keeps the instant the first one minted, so the tile the
     // sidebar orders by does not move each time something else is saved.
-    await tester.tap(find.text('Notifications'));
+    await tester.enterText(find.byType(TextFormField).first, 'Renamed');
+    await settle(tester);
+    expect((commands[1]['profile']! as Map)['pinnedAt'], profile['pinnedAt']);
+    state.dispose();
+  });
+
+  testWidgets('the sidebar is given the pin before the command lands', (
+    tester,
+  ) async {
+    final store = MemoryStore();
+    final commands = <Map<String, Object?>>[];
+    final gate = Completer<void>();
+    final predicted = <SidebarProfile>[];
+    final state = BotSettingsController(
+      SettingsApi(store, (path, body) async {
+        if (body != null) {
+          commands.add(Map<String, Object?>.from(body as Map));
+          await gate.future;
+          return {
+            'schemaVersion': 1,
+            'commandId': body['commandId'],
+            'status': 'applied',
+          };
+        }
+        if (path.startsWith('/api/settings')) return account();
+        return botSettings();
+      }),
+      'alpha',
+    );
+    await open(tester, state, onPredict: predicted.add);
+    await tester.tap(find.text('Pinned'));
+    await tester.pump();
+    // The command is still on the wire, and the sidebar already has the pin.
+    expect(commands, hasLength(1));
+    expect(predicted.single.pinnedAt, isNotEmpty);
+    // The instant predicted is the one the command carries, so the tile does
+    // not jump when the authority answers.
+    expect(
+      predicted.single.pinnedAt,
+      (commands.single['profile']! as Map)['pinnedAt'],
+    );
+    gate.complete();
     await tester.pumpAndSettle();
-    expect((commands[3]['profile']! as Map)['pinnedAt'], profile['pinnedAt']);
+    expect(predicted, hasLength(1));
+    state.dispose();
+  });
+
+  testWidgets('a refused save puts the profile back', (tester) async {
+    final store = MemoryStore();
+    final predicted = <SidebarProfile>[];
+    final state = BotSettingsController(
+      SettingsApi(store, (path, body) async {
+        if (body != null) {
+          return {
+            'schemaVersion': 1,
+            'commandId': (body as Map)['commandId'],
+            'status': 'rejected',
+            'failure': 'Not yours to pin.',
+          };
+        }
+        if (path.startsWith('/api/settings')) return account();
+        return botSettings();
+      }),
+      'alpha',
+    );
+    await open(tester, state, onPredict: predicted.add);
+    await tester.tap(find.text('Pinned'));
+    await tester.pumpAndSettle();
+    // Predicted, then handed back what the authority still holds.
+    expect(predicted, hasLength(2));
+    expect(predicted.first.pinnedAt, isNotEmpty);
+    expect(predicted.last.pinnedAt, '');
+    expect(find.text('Not yours to pin.'), findsOneWidget);
+    state.dispose();
+  });
+
+  testWidgets('the pinned tile moves before the save lands', (tester) async {
+    final store = MemoryStore();
+    final gate = Completer<void>();
+    final state = BotSettingsController(
+      SettingsApi(store, (path, body) async {
+        if (body != null) {
+          await gate.future;
+          return {
+            'schemaVersion': 1,
+            'commandId': (body as Map)['commandId'],
+            'status': 'applied',
+          };
+        }
+        if (path.startsWith('/api/settings')) return account();
+        return botSettings();
+      }),
+      'alpha',
+    );
+    tester.view.physicalSize = const Size(900, 2400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(_Shell(state: state));
+    await tester.pumpAndSettle();
+    expect(byIdentifier(ShellIds.sidebarBot('alpha')), findsOneWidget);
+    expect(byIdentifier(ShellIds.sidebarPinned('alpha')), findsNothing);
+    await tester.tap(find.text('Pinned'));
+    await tester.pump();
+    // The tile is above the list while the command is still on the wire.
+    expect(byIdentifier(ShellIds.sidebarPinned('alpha')), findsOneWidget);
+    expect(byIdentifier(ShellIds.sidebarBot('alpha')), findsNothing);
+    gate.complete();
+    await tester.pumpAndSettle();
+    expect(byIdentifier(ShellIds.sidebarPinned('alpha')), findsOneWidget);
     state.dispose();
   });
 
@@ -244,10 +381,18 @@ void main() {
       'alpha',
     );
     await open(tester, state);
+    // Two values changed in the one save, so two commands are sent — and the
+    // second fences on what the first left rather than on the read.
+    await tester.enterText(find.byType(TextFormField).first, 'Renamed');
+    await tester.pump(const Duration(milliseconds: 100));
     await tester.tap(find.text('Notifications'));
     await tester.pumpAndSettle();
+    expect(commands.map((command) => command['type']), [
+      'bot/set-profile',
+      'bot/update-notifications',
+    ]);
     // The read was at 3, and each applied command moved it.
-    expect(commands.map((command) => command['expectedRevision']), [3, 4, 5]);
+    expect(commands.map((command) => command['expectedRevision']), [3, 4]);
     state.dispose();
   });
 
@@ -283,13 +428,8 @@ void main() {
     await tester.tap(find.text('Notifications'));
     await tester.pumpAndSettle();
     // The refused command is the same command, asked again at the revision the
-    // authority reported; the two after it fence on what that one left.
-    expect(commands.map((command) => command['expectedRevision']), [
-      3,
-      7,
-      8,
-      8,
-    ]);
+    // authority reported.
+    expect(commands.map((command) => command['expectedRevision']), [3, 7]);
     expect(commands[0]['commandId'], commands[1]['commandId']);
     state.dispose();
   });
@@ -346,9 +486,65 @@ void main() {
     await tester.tap(find.text('Notifications'));
     await tester.pumpAndSettle();
     expect(commands.map((command) => command['type']), [
-      'bot/set-profile',
       'bot/update-notifications',
     ]);
     state.dispose();
   });
+}
+
+/// The shell's own wiring, in miniature: the sidebar draws what the profile
+/// map says, and the settings surface predicts into that map the way
+/// `_AppShellState.predictProfile` does.
+class _Shell extends StatefulWidget {
+  final BotSettingsController state;
+  const _Shell({required this.state});
+
+  @override
+  State<_Shell> createState() => _ShellState();
+}
+
+class _ShellState extends State<_Shell> {
+  Map<String, SidebarProfile> profiles = const {};
+
+  @override
+  Widget build(BuildContext context) => MaterialApp(
+    theme: FrockTheme.theme(Brightness.dark),
+    home: Scaffold(
+      body: Row(
+        children: [
+          SizedBox(
+            width: 260,
+            child: ShellSidebar(
+              bots: [bot('alpha', 'Inspected')],
+              profiles: profiles,
+              unread: const {},
+              archived: const {},
+              activeBotId: 'alpha',
+              workingBotId: null,
+              loaded: true,
+              showHidden: false,
+              onSelect: (_) {},
+              onCreateBot: () {},
+              onSearch: () {},
+              onProfile: () {},
+              onMarketplace: () {},
+              onVoice: () {},
+              voiceControl: VoiceControlState.idle,
+              onToggleHidden: () {},
+              onRetry: () async {},
+            ),
+          ),
+          Expanded(
+            child: SingleChildScrollView(
+              child: BotSettingsView(
+                controller: widget.state,
+                onPredict: (profile) =>
+                    setState(() => profiles = {...profiles, 'alpha': profile}),
+              ),
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
 }
