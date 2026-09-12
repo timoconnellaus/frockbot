@@ -5,6 +5,7 @@ import {
   runVoiceTurnV1,
   VOICE_ANSWER_MAX_CHARS_V1,
   VOICE_PROMPT_MAX_LOG_FACTS_V1,
+  VOICE_TURN_BRIDGE_V1,
   VOICE_TURN_MAX_STEPS_V1,
   type VoiceAssistantHostV1,
   type VoiceTurnResultV1,
@@ -183,7 +184,12 @@ describe("one voice turn", () => {
         result = r;
       }),
     );
-    expect(chunks).toEqual(["I've asked Remy to plan your week."]);
+    // The tool step is bridged aloud; the bridge is spoken, not answered.
+    expect(chunks).toEqual([
+      `${VOICE_TURN_BRIDGE_V1} `,
+      "I've asked Remy to plan your week.",
+    ]);
+    expect(result?.answer).toBe("I've asked Remy to plan your week.");
     expect(h.asked).toEqual(["remy:plan my week"]);
     expect(result?.delegations).toBe(1);
     const second = h.bodies[1]!.messages as {
@@ -212,7 +218,10 @@ describe("one voice turn", () => {
       },
     );
     const chunks = await collect(runVoiceTurnV1(h, baseInput("x"), () => {}));
-    expect(chunks).toEqual(["I couldn't find that Bot."]);
+    expect(chunks).toEqual([
+      `${VOICE_TURN_BRIDGE_V1} `,
+      "I couldn't find that Bot.",
+    ]);
     const second = h.bodies[1]!.messages as { content: string }[];
     expect(second.at(-1)?.content).toBe("That failed: no such Bot");
   });
@@ -220,14 +229,29 @@ describe("one voice turn", () => {
   test("the last step offers no tools so the model cannot loop forever", async () => {
     const h = host([() => [toolCall(0, "c", "list_bots", "{}")]]);
     let result: VoiceTurnResultV1 | undefined;
-    await collect(
+    const chunks = await collect(
       runVoiceTurnV1(h, baseInput("loop"), (r) => {
         result = r;
       }),
     );
     expect(h.bodies).toHaveLength(VOICE_TURN_MAX_STEPS_V1);
     expect(h.bodies.at(-1)!.tools).toBeUndefined();
+    // The bridge was said once, and on its own it is not an answer.
+    expect(chunks).toEqual([`${VOICE_TURN_BRIDGE_V1} `]);
     expect(result?.outcome).toBe("no_output");
+    expect(result?.answer).toBe("");
+  });
+
+  test("a tool step the model has already spoken into is not bridged", async () => {
+    const h = host([
+      () => [
+        text("Let me check. "),
+        toolCall(0, "c1", "bot_status", '{"bot_id":"remy"}'),
+      ],
+      () => [text("Remy is idle.")],
+    ]);
+    const chunks = await collect(runVoiceTurnV1(h, baseInput("x"), () => {}));
+    expect(chunks).toEqual(["Let me check. ", "Remy is idle."]);
   });
 
   test("refuses to delegate past the per-turn bound", async () => {

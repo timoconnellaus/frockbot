@@ -236,6 +236,22 @@ words are transcribed from their first syllable.
 An interrupt stops audio and the assistant's own reply. It never cancels a Bot
 Turn the assistant already delegated: that work is durable in the Bot.
 
+### The turn stays thin
+
+Everything between the end of the person's words and the first sound is
+what they wait through, so the turn does as little as it can in that gap.
+The Bot activity look-ups behind the system prompt and `list_bots` go to
+every Bot's object together, not one after another; a Bot lookup for
+`bot_status`, `ask_bot` and `cancel_bot` is one directory read. When the
+model goes to a tool without having said anything, the session speaks
+`"One moment."` before running it (`VOICE_TURN_BRIDGE_V1`) — a tool step is a
+second model round trip plus the tool, and that is seconds of silence
+otherwise; the bridge is spoken, not answered, so a turn that ends in the
+bridge alone still settles as `no_output`. `VOICE_ASSISTANT_MODEL` pins a
+gateway model for voice turns (`workers-ai/@cf/...` or a provider the gateway
+holds a key for) instead of the platform's Auto route; the `turn` trace line
+says which was used, and `model-first-text` says how long it took to start.
+
 ### A reply that fails
 
 A turn that produces no text, or a sentence the speech provider answers with

@@ -214,6 +214,10 @@ export const NON_SECRET_WORKER_SETTINGS_V1: readonly NonSecretWorkerSettingV1[] 
       why: "An optional `vars` entry choosing the assistant's ears: `openai` for gpt-transcribe, otherwise ElevenLabs Scribe.",
     },
     {
+      name: "VOICE_ASSISTANT_MODEL",
+      why: "An optional `vars` entry pinning a gateway model for voice turns; the platform's Auto route when unset.",
+    },
+    {
       name: "VOICE_DICTATION_UPSTREAM_URL",
       why: "Points dictation at a local stand-in; set by the test harness only.",
       forbiddenLive:

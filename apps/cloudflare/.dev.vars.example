@@ -33,6 +33,9 @@ ELEVENLABS_API_KEY=replace-with-an-elevenlabs-api-key
 # Optional: listen through OpenAI `gpt-transcribe` (server VAD, no live text)
 # instead of Scribe. Then the session needs OPENAI_API_KEY too.
 # VOICE_ASSISTANT_STT=openai
+# Optional: a gateway model for voice turns instead of the platform's Auto
+# route, when the `model-first-text` trace lines say Auto is slow to start.
+# VOICE_ASSISTANT_MODEL=workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast
 # Optional: the ElevenLabs voice id; the default is George.
 # ELEVENLABS_VOICE_ID=JBFqnCBsd6RMkjVDRZzb
 
