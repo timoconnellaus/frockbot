@@ -57,13 +57,15 @@ String? _label(wire.UnreadView view) {
 ///
 /// `manuallyUnread` is the exception: a Bot the User deliberately marked
 /// unread stays bold while they look at it, because that flag is intent rather
-/// than arithmetic, and only opening the Bot again clears it.
-SidebarUnread sidebarUnreadFor(
-  wire.UnreadView? view, {
-  required bool focused,
-}) {
+/// than arithmetic, and only opening the Bot again clears it. It is only the
+/// bold dot, though — the count beside it is arithmetic like any other, so a
+/// reply settling into the open chat still draws nothing.
+SidebarUnread sidebarUnreadFor(wire.UnreadView? view, {required bool focused}) {
   if (view == null) return const SidebarUnread.quiet();
-  if (focused && !view.manuallyUnread) return const SidebarUnread.quiet();
+  if (focused) {
+    if (!view.manuallyUnread) return const SidebarUnread.quiet();
+    return const SidebarUnread(label: '•', count: 0, unread: true);
+  }
   return SidebarUnread(
     label: _label(view),
     count: view.count,

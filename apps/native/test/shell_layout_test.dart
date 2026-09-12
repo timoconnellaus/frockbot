@@ -427,6 +427,21 @@ void main() {
       expect(shown.label, '•');
     });
 
+    test(
+      'a hand-marked Bot still draws no count for a reply it is open on',
+      () {
+        // The flag survives the reply settling, the arithmetic does not: the
+        // row the User is reading never paints a number or feeds a group total.
+        final shown = sidebarUnreadFor(
+          unread(botId: 'a', count: 1, isUnread: true, manual: true),
+          focused: true,
+        );
+        expect(shown.label, '•');
+        expect(shown.count, 0);
+        expect(shown.unread, isTrue);
+      },
+    );
+
     test('says a time today, a weekday this week, a date beyond it', () {
       final now = DateTime(2026, 9, 8, 15, 0);
       expect(
