@@ -10,6 +10,7 @@ import {
   verifyRoutineHookTokenV1,
 } from "./hook.js";
 import { RoutineScheduler } from "./scheduler.js";
+import { ROUTINE_DELIVERY_PREFIX } from "./storage-keys.js";
 import {
   RoutineStore,
   type RoutinePluginTriggerDeliveryV1,
@@ -56,14 +57,13 @@ function harness(seam?: RoutinePluginTriggerSeamV1) {
   return { storage, scheduler, store, create };
 }
 
-async function deliver(
-  store: RoutineStore,
+async function prepare(
   token: string,
   body: string,
   options: { idempotencyKey?: string; headers?: Record<string, string> } = {},
 ) {
   const claims = await verifyRoutineHookTokenV1(SECRET, token);
-  return store.deliverHook({
+  return {
     routineId: claims.r,
     keyVersion: claims.v,
     digest: await routineHookDigestV1(token),
@@ -75,7 +75,16 @@ async function deliver(
     body,
     contentType: "application/json",
     ...(options.headers ? { headers: options.headers } : {}),
-  });
+  };
+}
+
+async function deliver(
+  store: RoutineStore,
+  token: string,
+  body: string,
+  options: { idempotencyKey?: string; headers?: Record<string, string> } = {},
+) {
+  return store.deliverHook(await prepare(token, body, options));
 }
 
 describe("a Plugin-triggered Routine", () => {
@@ -159,15 +168,106 @@ describe("a Plugin-triggered Routine", () => {
     expect(asked).toBe(1);
   });
 
-  test("with no Plugin seam the delivery is dropped, and says so", async () => {
-    const { store, create } = harness();
+  test("with no Plugin seam the delivery is refused, never recorded", async () => {
+    const { storage, store, create } = harness();
     const token = (
       (await store.execute(create, USER, "UTC")) as { hook: { token: string } }
     ).hook.token;
-    expect(await deliver(store, token, "{}")).toEqual({
-      status: "dropped",
-      reason: "this Bot cannot reach its Plugins",
+    await expect(deliver(store, token, "{}")).rejects.toMatchObject({
+      status: 500,
+      message: "this Bot cannot reach its Plugins",
     });
+    expect((await storage.list({ prefix: ROUTINE_DELIVERY_PREFIX })).size).toBe(
+      0,
+    );
+  });
+
+  test("paused while the Plugin answers, the firing is refused", async () => {
+    let entered = () => {};
+    const asking = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { scheduler, store, create } = harness({
+      async deliver() {
+        entered();
+        await held;
+        return { status: "fire", text: "Storm warning" };
+      },
+    });
+    const token = (
+      (await store.execute(create, USER, "UTC")) as { hook: { token: string } }
+    ).hook.token;
+    const delivering = deliver(store, token, "{}", { idempotencyKey: "evt-3" });
+    await asking;
+    expect(
+      await store.execute(
+        {
+          schemaVersion: 1,
+          type: "routine/pause",
+          commandId: "cmd-pause",
+          botId: "scout",
+          routineId: "alerts",
+        },
+        USER,
+        "UTC",
+      ),
+    ).toMatchObject({ status: "applied" });
+    release();
+    await expect(delivering).rejects.toMatchObject({
+      status: 409,
+      message: "Routine is paused",
+    });
+    let fired = 0;
+    await scheduler.settle(async () => {
+      fired += 1;
+      return { status: "ok" };
+    }, "UTC");
+    expect(fired).toBe(0);
+  });
+
+  test("two copies of one delivery ask the Plugin once", async () => {
+    let asked = 0;
+    let entered = () => {};
+    const asking = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { scheduler, store, create } = harness({
+      async deliver() {
+        asked += 1;
+        entered();
+        await held;
+        return { status: "fire", text: "Storm warning" };
+      },
+    });
+    const token = (
+      (await store.execute(create, USER, "UTC")) as { hook: { token: string } }
+    ).hook.token;
+    const input = await prepare(token, "{}", { idempotencyKey: "evt-4" });
+    const first = store.deliverHook(input);
+    await asking;
+    const second = store.deliverHook(input);
+    release();
+    const [one, two] = await Promise.all([first, second]);
+    expect(asked).toBe(1);
+    expect(one).toMatchObject({ status: "accepted" });
+    expect(two).toEqual({
+      status: "duplicate",
+      fireId: (one as { fireId: string }).fireId,
+    });
+    let fired = 0;
+    await scheduler.settle(async () => {
+      fired += 1;
+      return { status: "ok" };
+    }, "UTC");
+    expect(fired).toBe(1);
   });
 
   test("a webhook Routine never asks a Plugin", async () => {

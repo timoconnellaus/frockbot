@@ -32,6 +32,7 @@ import {
   RoutineDecodeError,
   type RoutineRecordV1,
   type RoutineRunEntryV1,
+  type RoutineTriggerV1,
   type RoutineWriterV1,
 } from "./records.js";
 import {
@@ -183,7 +184,7 @@ export interface RoutineStoreOptionsV1 {
   firings?: RoutineFiringSeamV1;
   /** Absent means a webhook Routine gets no key, and says so. */
   hookKeys?: RoutineHookMinterV1;
-  /** Absent means a Plugin-triggered Routine drops every delivery, and says so. */
+  /** Absent means a delivery to a Plugin-triggered Routine is refused. */
   pluginTriggers?: RoutinePluginTriggerSeamV1;
 }
 
@@ -280,6 +281,7 @@ export class RoutineStore {
   readonly #firings: RoutineFiringSeamV1 | undefined;
   readonly #hookKeys: RoutineHookMinterV1 | undefined;
   readonly #pluginTriggers: RoutinePluginTriggerSeamV1 | undefined;
+  readonly #inFlight = new Map<string, Promise<RoutineHookDeliveryReceiptV1>>();
 
   constructor(storage: RoutineStorageV1, options: RoutineStoreOptionsV1 = {}) {
     this.#storage = storage;
@@ -398,11 +400,75 @@ export class RoutineStore {
    * its signature is perfectly good — which is what makes rotation and
    * revocation real rather than cosmetic.
    *
-   * Everything else the door promises happens in one transaction: the replay
-   * guard, the firing, and the receipt that lets a replay answer with the
-   * firing it already made.
+   * The replay guard, the firing and the receipt that lets a replay answer
+   * with the firing already made are written in one transaction. A Plugin
+   * trigger is asked in between, so the checks are read once before it is
+   * asked and again before the firing is written.
    */
   async deliverHook(input: {
+    routineId: string;
+    keyVersion?: number;
+    digest?: string;
+    deliveryId: string;
+    body: string;
+    contentType?: string | null;
+    headers?: Record<string, string>;
+  }): Promise<RoutineHookDeliveryReceiptV1> {
+    // A sender can have two copies of one event in the door at once, and the
+    // Plugin is asked between the checks and the write. Without this the
+    // second copy would ask the Plugin again for the firing the first is
+    // already making; the replay guard only catches the copy that arrives
+    // after that firing is written.
+    const joined = this.#inFlight.get(input.deliveryId);
+    if (joined !== undefined) {
+      const already = await joined;
+      return already.status === "accepted"
+        ? { status: "duplicate", fireId: already.fireId }
+        : already;
+    }
+    const delivering = this.#deliverHook(input).finally(() => {
+      this.#inFlight.delete(input.deliveryId);
+    });
+    this.#inFlight.set(input.deliveryId, delivering);
+    return delivering;
+  }
+
+  /**
+   * The door's checks, all read in the one transaction so a key rotated or a
+   * Routine paused between two reads cannot be seen half-way.
+   */
+  async #admitDelivery(
+    transaction: RoutineStorageReadsV1,
+    input: { routineId: string; keyVersion?: number; digest?: string },
+  ): Promise<RoutineTriggerV1> {
+    const stored = await transaction.get<unknown>(
+      routineKeyV1(input.routineId),
+    );
+    if (stored === undefined) {
+      throw new RoutineHookError(404, "Routine not found");
+    }
+    const record = decodeRoutineRecordV1(stored);
+    const held = await transaction.get<unknown>(
+      routineHookKeyRecordV1(input.routineId),
+    );
+    if (record.trigger === undefined || held === undefined)
+      throw new RoutineHookError(401, "webhook key is invalid");
+    const key = decodeRoutineHookKeyV1(held);
+    if (
+      key.keyVersion !== input.keyVersion ||
+      !input.digest ||
+      !constantTimeEqualsV1(key.digest, input.digest)
+    )
+      throw new RoutineHookError(401, "webhook key is invalid");
+    if (!record.enabled) {
+      // The key is good and the Routine is real; it is simply paused. That
+      // is worth telling the caller, so a delivery can be retried later.
+      throw new RoutineHookError(409, "Routine is paused");
+    }
+    return record.trigger;
+  }
+
+  async #deliverHook(input: {
     routineId: string;
     keyVersion?: number;
     digest?: string;
@@ -422,34 +488,9 @@ export class RoutineStore {
       seen.fireId !== undefined
         ? { status: "duplicate", fireId: seen.fireId }
         : { status: "dropped", reason: seen.dropped ?? "dropped" };
-    // The door's checks. Read in one transaction so a key rotated or a
-    // Routine paused between two reads cannot be seen half-way.
     const admitted = await this.#storage.transaction(async (transaction) => {
       const now = this.#now();
-      const stored = await transaction.get<unknown>(
-        routineKeyV1(input.routineId),
-      );
-      if (stored === undefined) {
-        throw new RoutineHookError(404, "Routine not found");
-      }
-      const record = decodeRoutineRecordV1(stored);
-      const held = await transaction.get<unknown>(
-        routineHookKeyRecordV1(input.routineId),
-      );
-      if (record.trigger === undefined || held === undefined)
-        throw new RoutineHookError(401, "webhook key is invalid");
-      const key = decodeRoutineHookKeyV1(held);
-      if (
-        key.keyVersion !== input.keyVersion ||
-        !input.digest ||
-        !constantTimeEqualsV1(key.digest, input.digest)
-      )
-        throw new RoutineHookError(401, "webhook key is invalid");
-      if (!record.enabled) {
-        // The key is good and the Routine is real; it is simply paused. That
-        // is worth telling the caller, so a delivery can be retried later.
-        throw new RoutineHookError(409, "Routine is paused");
-      }
+      const trigger = await this.#admitDelivery(transaction, input);
       const seen = await transaction.get<RoutineDeliveryReceiptV1>(receiptKey);
       if (
         seen &&
@@ -457,7 +498,7 @@ export class RoutineStore {
       ) {
         return { replayed: replay(seen) };
       }
-      return { trigger: record.trigger };
+      return { trigger };
     });
     if (admitted.replayed !== undefined) return admitted.replayed;
 
@@ -467,18 +508,16 @@ export class RoutineStore {
     let dropped: string | undefined;
     if (admitted.trigger.kind === "plugin") {
       const seam = this.#pluginTriggers;
-      const answer = seam
-        ? await seam.deliver({
-            routineId: input.routineId,
-            pluginId: admitted.trigger.pluginId,
-            trigger: admitted.trigger.trigger,
-            headers: input.headers ?? {},
-            body: input.body,
-          })
-        : ({
-            status: "drop",
-            reason: "this Bot cannot reach its Plugins",
-          } as const);
+      if (!seam) {
+        throw new RoutineHookError(500, "this Bot cannot reach its Plugins");
+      }
+      const answer = await seam.deliver({
+        routineId: input.routineId,
+        pluginId: admitted.trigger.pluginId,
+        trigger: admitted.trigger.trigger,
+        headers: input.headers ?? {},
+        body: input.body,
+      });
       if (answer.status === "drop") {
         dropped = (answer.reason ?? "the Plugin dropped the delivery").slice(
           0,
@@ -491,6 +530,10 @@ export class RoutineStore {
 
     return this.#storage.transaction(async (transaction) => {
       const now = this.#now();
+      // The checks are read again: the Plugin held the delivery for as long as
+      // it liked, and a Routine paused or re-keyed while it answered must not
+      // be fired on the strength of a check that has gone stale.
+      await this.#admitDelivery(transaction, input);
       const seen = await transaction.get<RoutineDeliveryReceiptV1>(receiptKey);
       if (
         seen &&
