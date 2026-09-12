@@ -52,6 +52,7 @@ describe("the Connected apps gateway routes", () => {
         type: "connection/start",
         commandId: "start-1",
         connectionTypeId: "connect-gmail",
+        returnClient: "android",
       }),
       CONTEXT,
     );
@@ -70,6 +71,8 @@ describe("the Connected apps gateway routes", () => {
       packageId: "connect",
       commandId: "start-1",
       connectionTypeId: "connect-gmail",
+      // The app's own return page, on this gateway's origin.
+      callbackUrl: "https://bot.frockbot.com/api/connect/callback/android",
     });
   });
 
@@ -171,6 +174,50 @@ describe("the Connected apps gateway routes", () => {
     );
     expect(await failed?.text()).toContain("Back to FrockBot");
     expect(commands).toHaveLength(0);
+    // Each app's own page: Android's verified link has already opened the
+    // app, so its page carries no script; the Mac page hands over on the
+    // app's scheme, under a nonce, with nothing from the query attached.
+    const android = await backend.publicRoute!(
+      new Request(
+        "https://bot.frockbot.com/api/connect/callback/android?status=success&connectedAccountId=ca_1",
+      ),
+      new URL(
+        "https://bot.frockbot.com/api/connect/callback/android?status=success&connectedAccountId=ca_1",
+      ),
+      {},
+    );
+    const androidPage = await android!.text();
+    expect(androidPage).toContain("Head back to the FrockBot app");
+    expect(androidPage).not.toContain("<script");
+    expect(androidPage).not.toContain("ca_1");
+    expect(android!.headers.get("content-security-policy")).not.toContain(
+      "script-src",
+    );
+    const mac = await backend.publicRoute!(
+      new Request(
+        "https://bot.frockbot.com/api/connect/callback/macos?status=success&connectedAccountId=ca_1",
+      ),
+      new URL(
+        "https://bot.frockbot.com/api/connect/callback/macos?status=success&connectedAccountId=ca_1",
+      ),
+      {},
+    );
+    const macPage = await mac!.text();
+    expect(macPage).toContain(
+      "frockbot://bot.frockbot.com/api/connect/callback/macos",
+    );
+    expect(macPage).not.toContain("ca_1");
+    expect(mac!.headers.get("content-security-policy")).toMatch(
+      /script-src 'nonce-[0-9a-f-]{36}'/,
+    );
+    // Not a page of ours.
+    expect(
+      await backend.publicRoute!(
+        new Request("https://bot.frockbot.com/api/connect/callback/ios"),
+        new URL("https://bot.frockbot.com/api/connect/callback/ios"),
+        {},
+      ),
+    ).toBeUndefined();
     const other = await backend.publicRoute!(
       new Request("https://bot.frockbot.com/api/other"),
       new URL("https://bot.frockbot.com/api/other"),

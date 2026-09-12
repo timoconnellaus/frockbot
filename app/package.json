@@ -34,6 +34,7 @@
     "./clock": "./clock/index.ts",
     "./clock/agent": "./clock/agent.ts",
     "./connect": "./connect/index.ts",
+    "./return-page": "./return-page.ts",
     "./connect/agent": "./connect/agent.ts",
     "./connect/backend": "./connect/backend.ts",
     "./connect/catalog": "./connect/catalog.ts",

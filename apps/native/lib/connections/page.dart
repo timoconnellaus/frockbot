@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart'
+    show defaultTargetPlatform, kIsWeb, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -62,10 +64,19 @@ class _ConnectionsPageState extends State<ConnectionsPage>
     with WidgetsBindingObserver {
   wire.ConnectionsFrame? frame;
   bool loading = false;
-  bool pending = false;
+
+  /// The row whose command is in flight, if one is. One command at a time,
+  /// but only the row that was pressed shows it: the rest stay as they are,
+  /// and a press on them while this one settles simply does nothing.
+  String? pendingRow;
   String? loadFailure;
   String? notice;
   int commands = 0;
+
+  /// A read asked for while one was already in flight. The answer in flight
+  /// was taken before the thing that asked — a return link landing during
+  /// the resume read — so it is taken again once that one settles.
+  bool reread = false;
 
   String get title =>
       widget.models ? 'Provider accounts' : ConnectionsPage.marketplaceTitle;
@@ -75,11 +86,13 @@ class _ConnectionsPageState extends State<ConnectionsPage>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    connectReturns.addListener(_returned);
     unawaited(load());
   }
 
   @override
   void dispose() {
+    connectReturns.removeListener(_returned);
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -91,23 +104,38 @@ class _ConnectionsPageState extends State<ConnectionsPage>
     if (phase == AppLifecycleState.resumed) unawaited(load());
   }
 
+  /// The hosted door closed straight into the app, on its verified link or
+  /// its own scheme: the same read, without waiting on the window to resume.
+  void _returned() => unawaited(load());
+
   Future<void> load() async {
-    if (loading) return;
+    if (loading) {
+      reread = true;
+      return;
+    }
     setState(() {
       loading = true;
       loadFailure = null;
     });
     try {
-      final next = wire.ConnectionsFrame.fromJson(
-        await widget.api.request('/api/settings/connections'),
-      );
-      if (!mounted) return;
-      setState(() => frame = next);
-    } catch (_) {
-      if (!mounted) return;
-      const message =
-          'Couldn’t load your connectors. Check your connection and try again.';
-      setState(() => loadFailure = message);
+      do {
+        reread = false;
+        try {
+          final next = wire.ConnectionsFrame.fromJson(
+            await widget.api.request('/api/settings/connections'),
+          );
+          if (!mounted) return;
+          setState(() {
+            frame = next;
+            loadFailure = null;
+          });
+        } catch (_) {
+          if (!mounted) return;
+          const message =
+              'Couldn’t load your connectors. Check your connection and try again.';
+          setState(() => loadFailure = message);
+        }
+      } while (reread);
     } finally {
       if (mounted) setState(() => loading = false);
     }
@@ -118,11 +146,11 @@ class _ConnectionsPageState extends State<ConnectionsPage>
 
   /// One press, one request, one read back. What the command did is what the
   /// frame says afterwards, so the frame is read again whether it applied or
-  /// refused.
-  Future<void> _send(Map<String, Object?> command) async {
-    if (pending) return;
+  /// refused. `row` is the row that was pressed, the one that shows the wait.
+  Future<void> _send(Map<String, Object?> command, String row) async {
+    if (pendingRow != null) return;
     setState(() {
-      pending = true;
+      pendingRow = row;
       notice = null;
     });
     try {
@@ -142,16 +170,39 @@ class _ConnectionsPageState extends State<ConnectionsPage>
         );
       }
     } finally {
-      if (mounted) setState(() => pending = false);
+      if (mounted) setState(() => pendingRow = null);
       await load();
     }
+  }
+
+  /// Which return page this app can come back through once a hosted door
+  /// closes: the verified link on Android, the app's scheme on a Mac. A
+  /// browser tab, and any other platform, is told to return by hand.
+  static String? get returnClient {
+    if (kIsWeb) return null;
+    return switch (defaultTargetPlatform) {
+      TargetPlatform.android => 'android',
+      TargetPlatform.macOS => 'macos',
+      _ => null,
+    };
   }
 
   /// Starts a hosted grant and sends the person to it in the system browser.
   /// The destination is checked before it is opened, so a tampered answer
   /// cannot send them somewhere else wearing our name.
   Future<void> _authorize(Map<String, Object?> command) async {
-    final request = startConnectionRequestV1(command);
+    final client = returnClient;
+    final request = startConnectionRequestV1(
+      client == null
+          ? command
+          : {
+              ...command,
+              'input': {
+                ...(command['input'] as Map).cast<String, Object?>(),
+                'returnClient': client,
+              },
+            },
+    );
     final answer =
         ((await widget.api.request(request.path, body: request.body) as Map?) ??
                 const {})
@@ -180,6 +231,9 @@ class _ConnectionsPageState extends State<ConnectionsPage>
         )
         .toList();
   }
+
+  String _rowKey(Map<String, Object?> provider) =>
+      '${provider['packageId']}/${provider['connectionTypeId']}';
 
   List<Map<String, Object?>> accountsOf(Map<String, Object?> provider) {
     final packageId = provider['packageId'] as String;
@@ -268,8 +322,9 @@ class _ConnectionsPageState extends State<ConnectionsPage>
                             provider: provider,
                             accounts: accountsOf(provider),
                             models: widget.models,
-                            busy: pending,
-                            send: _send,
+                            busy: pendingRow == _rowKey(provider),
+                            send: (command) =>
+                                _send(command, _rowKey(provider)),
                             commandId: _commandId,
                           ),
                         ),
@@ -521,28 +576,48 @@ class _IconTile extends StatelessWidget {
 
 /// The small pill at the end of a row: the way in when nothing is
 /// connected, the state once something is.
+///
+/// A pressed pill keeps its colour and shows a spinner in place of its label
+/// until the command settles: the wait belongs to the row that was pressed,
+/// not to the page.
 class _Pill extends StatelessWidget {
   final String label;
   final IconData? icon;
   final bool primary;
+  final bool busy;
   final VoidCallback? onPressed;
   const _Pill({
     required this.label,
     this.icon,
     this.primary = false,
+    this.busy = false,
     this.onPressed,
   });
+
+  /// The pill's height, and so the spinner's, in both states.
+  static const height = 32.0;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final style = ButtonStyle(
-      visualDensity: VisualDensity.compact,
+      visualDensity: VisualDensity.standard,
+      // A fixed height with the label centred on its cap height: the line
+      // box the theme's label style carries leaves more room below the
+      // letters than above, and the word sat low in the pill.
       padding: const WidgetStatePropertyAll(
-        EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        EdgeInsets.symmetric(horizontal: 14),
       ),
-      minimumSize: const WidgetStatePropertyAll(Size(0, 32)),
+      minimumSize: const WidgetStatePropertyAll(Size(0, height)),
+      maximumSize: const WidgetStatePropertyAll(Size.fromHeight(height)),
+      fixedSize: const WidgetStatePropertyAll(Size.fromHeight(height)),
       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      textStyle: WidgetStatePropertyAll(
+        Theme.of(context).textTheme.labelLarge?.copyWith(
+          height: 1.0,
+          leadingDistribution: TextLeadingDistribution.even,
+        ),
+      ),
     );
     if (onPressed == null) {
       return Row(
@@ -565,9 +640,35 @@ class _Pill extends StatelessWidget {
       );
     }
     final text = Text(label, maxLines: 1, overflow: TextOverflow.ellipsis);
+    // While busy the label stays in the layout, unseen, so the pill keeps
+    // its width; the spinner takes the foreground colour the label had.
+    final child = busy
+        ? Stack(
+            alignment: Alignment.center,
+            children: [
+              Opacity(opacity: 0, child: text),
+              Semantics(
+                label: 'Connecting',
+                child: SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: primary
+                        ? scheme.onPrimary
+                        : scheme.onSecondaryContainer,
+                  ),
+                ),
+              ),
+            ],
+          )
+        : text;
+    // A busy pill is still enabled, so it keeps its colour; the press it
+    // would take is the one already in flight.
+    final press = busy ? () {} : onPressed;
     return primary
-        ? FilledButton(onPressed: onPressed, style: style, child: text)
-        : FilledButton.tonal(onPressed: onPressed, style: style, child: text);
+        ? FilledButton(onPressed: press, style: style, child: child)
+        : FilledButton.tonal(onPressed: press, style: style, child: child);
   }
 }
 
@@ -633,47 +734,71 @@ class _ProviderRowState extends State<_ProviderRow> {
     }
   }
 
-  Widget? _trailing() {
-    if (hasAccounts) {
-      final ready = widget.accounts.where((a) => a['state'] == 'ready').length;
-      final failed = widget.accounts.any(
-        (a) =>
-            a['state'] == 'failed' || a['state'] == 'reconciliation-required',
+  /// The state of the accounts held, as one pill.
+  Widget _state() {
+    final ready = widget.accounts.where((a) => a['state'] == 'ready').length;
+    final failed = widget.accounts.any(
+      (a) => a['state'] == 'failed' || a['state'] == 'reconciliation-required',
+    );
+    if (failed) {
+      return const _Pill(label: 'Needs attention', icon: Icons.error_outline);
+    }
+    if (widget.accounts.length > 1) {
+      return _Pill(
+        label: '${widget.accounts.length} accounts',
+        icon: ready > 0 ? Icons.check_rounded : Icons.hourglass_top_rounded,
       );
-      if (failed) {
-        return const _Pill(label: 'Needs attention', icon: Icons.error_outline);
-      }
-      if (widget.accounts.length > 1) {
-        return _Pill(
-          label: '${widget.accounts.length} accounts',
-          icon: ready > 0 ? Icons.check_rounded : Icons.hourglass_top_rounded,
+    }
+    switch (widget.accounts.single['state']) {
+      case 'ready':
+        return const _Pill(label: 'Connected', icon: Icons.check_rounded);
+      case 'disabled':
+        return const _Pill(
+          label: 'Turned off',
+          icon: Icons.pause_circle_outline,
         );
-      }
-      switch (widget.accounts.single['state']) {
-        case 'ready':
-          return const _Pill(label: 'Connected', icon: Icons.check_rounded);
-        case 'disabled':
-          return const _Pill(
-            label: 'Turned off',
-            icon: Icons.pause_circle_outline,
-          );
-        case 'revoking':
-          return const _Pill(
-            label: 'Disconnecting…',
-            icon: Icons.hourglass_top_rounded,
-          );
-        default:
-          return const _Pill(
-            label: 'Connecting…',
-            icon: Icons.hourglass_top_rounded,
-          );
-      }
+      case 'revoking':
+        return const _Pill(
+          label: 'Disconnecting…',
+          icon: Icons.hourglass_top_rounded,
+        );
+      default:
+        return const _Pill(
+          label: 'Connecting…',
+          icon: Icons.hourglass_top_rounded,
+        );
+    }
+  }
+
+  /// Whether the row opens on a tap to show its accounts and the way to add
+  /// another; a keyed provider with nothing yet opens straight to its form.
+  bool get opens => hasAccounts || (mayConnect && authorization == 'api-key');
+
+  Widget? _trailing(BuildContext context) {
+    if (hasAccounts) {
+      // The state, and beside it the sign that the row opens: the accounts
+      // and "Add another account" are one tap away, not hidden.
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Flexible(child: _state()),
+          const SizedBox(width: 6),
+          Icon(
+            open ? Icons.expand_less_rounded : Icons.expand_more_rounded,
+            size: 20,
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
+        ],
+      );
     }
     if (!mayConnect) return null;
+    // A press on a Connect while another row's command is settling does
+    // nothing; the page's send refuses it, and this pill stays as it is.
     return _Pill(
       label: 'Connect',
       primary: true,
-      onPressed: widget.busy ? null : _begin,
+      busy: widget.busy && authorization != 'api-key',
+      onPressed: _begin,
     );
   }
 
@@ -698,10 +823,8 @@ class _ProviderRowState extends State<_ProviderRow> {
         ),
         title: displayName,
         subtitle: subtitle,
-        trailing: _trailing(),
-        onTap: hasAccounts || (mayConnect && authorization == 'api-key')
-            ? () => setState(() => open = !open)
-            : null,
+        trailing: _trailing(context),
+        onTap: opens ? () => setState(() => open = !open) : null,
         open: open,
         below: _details(context),
       ),

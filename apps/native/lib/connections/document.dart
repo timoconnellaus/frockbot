@@ -16,6 +16,8 @@
 /// command and nowhere else.
 library;
 
+import 'package:flutter/foundation.dart' show ValueNotifier;
+
 /// The action kinds a Connectors press can mean.
 const connectionActionKindsV1 = <String>{
   'connect-api-key',
@@ -149,9 +151,14 @@ ConnectionRequestV1 connectionRequestV1(Map<String, Object?> command) {
 }
 
 /// The `connection/start` command that opens a provider's hosted door.
+///
+/// `returnClient` names which return page this app can come back through
+/// once the door closes: `android` for the verified link, `macos` for the
+/// app's scheme. A browser tab names none and is told to return by hand.
 ConnectionRequestV1 startConnectionRequestV1(Map<String, Object?> command) {
   final input = _input(command);
   final packageId = _string(input, 'packageId');
+  final returnClient = input['returnClient'];
   return ConnectionRequestV1(
     '/api/plugins/${Uri.encodeComponent(packageId)}/connections',
     {
@@ -159,6 +166,26 @@ ConnectionRequestV1 startConnectionRequestV1(Map<String, Object?> command) {
       'type': 'connection/start',
       'commandId': command['commandId'],
       'connectionTypeId': _string(input, 'connectionTypeId'),
+      if (returnClient is String) 'returnClient': returnClient,
     },
   );
 }
+
+/// The path a hosted door sends the person back to, under this app's own
+/// segment; the page there is what the browser keeps once the app has opened.
+const connectReturnPathV1 = '/api/connect/callback';
+
+/// Whether a link the app was opened with is a hosted door closing. There
+/// are exactly two such links: the verified App Link under this app's own
+/// segment on Android, and the same page handed over on the app's scheme on
+/// a Mac. Nothing on the link is read — the next settings read is what
+/// settles the Connection.
+bool isConnectReturnV1(Uri uri) => switch (uri.scheme) {
+  'https' => uri.path == '$connectReturnPathV1/android',
+  'frockbot' => uri.path == '$connectReturnPathV1/macos',
+  _ => false,
+};
+
+/// Bumped each time a hosted door closes into the app, so the page that
+/// opened it reads its frame again without waiting on a lifecycle resume.
+final connectReturns = ValueNotifier<int>(0);

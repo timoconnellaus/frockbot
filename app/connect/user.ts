@@ -18,7 +18,11 @@
 // what a Bot presents beside that key. Rigor is proportional to consequence:
 // a start and a disconnect are external effects keyed by their command id and
 // replayed from their stored receipt, and everything else is a setting.
-import type { ConnectionView } from "@frockbot/core/configuration";
+import {
+  CONNECTION_RETURN_CLIENTS_V1,
+  type ConnectionReturnClientV1,
+  type ConnectionView,
+} from "@frockbot/core/configuration";
 import {
   decodeConnectionCommandV1,
   type ConnectionCommandReceiptV1,
@@ -51,6 +55,32 @@ const AUTHORIZATION_TIMEOUT_MS = 30 * 60_000;
 /** How long a settings read may wait on the provider before moving on. */
 const BOOTSTRAP_DEADLINE_MS = 5_000;
 export const CONNECT_CALLBACK_PATH = "/api/connect/callback";
+
+/**
+ * Where the app's sign-in sends the person afterwards: the plain page for a
+ * browser tab, or the page under the client's own segment — the one the
+ * Android app claims as a verified link, the one the Mac page hands to the
+ * app's scheme. Deployment policy names the origin; the client names only
+ * which of these pages it can come back through.
+ */
+export function connectCallbackPathV1(
+  client?: ConnectionReturnClientV1,
+): string {
+  return client === undefined
+    ? CONNECT_CALLBACK_PATH
+    : `${CONNECT_CALLBACK_PATH}/${client}`;
+}
+
+/** The client a callback path names, or `undefined` for the plain page. */
+export function connectReturnClientV1(
+  pathname: string,
+): ConnectionReturnClientV1 | undefined | null {
+  if (pathname === CONNECT_CALLBACK_PATH) return undefined;
+  const client = CONNECTION_RETURN_CLIENTS_V1.find(
+    (candidate) => pathname === connectCallbackPathV1(candidate),
+  );
+  return client ?? null;
+}
 
 /** What a Connection of this Package keeps beside its state. Never a secret. */
 export interface ConnectSafeMetadataV1 {
@@ -309,10 +339,15 @@ export class ConnectUserBackendContribution {
       return failed();
     }
     const authConfigId = await this.authConfigId(toolkit);
+    // The gateway names which return page the client can come back through;
+    // the origin is this deployment's own, whatever the command carried.
+    const requested = command.callbackUrl
+      ? connectReturnClientV1(URL.parse(command.callbackUrl)?.pathname ?? "")
+      : undefined;
     const link = await this.client.createConnectLink({
       userId: accountId,
       authConfigId,
-      callbackUrl: `${this.host.callbackBaseUrl.replace(/\/$/, "")}${CONNECT_CALLBACK_PATH}`,
+      callbackUrl: `${this.host.callbackBaseUrl.replace(/\/$/, "")}${connectCallbackPathV1(requested ?? undefined)}`,
     });
     const snapshot = await this.host.settings.readSnapshot();
     const siblings = snapshot.connections.filter(

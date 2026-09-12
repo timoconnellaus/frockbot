@@ -35,13 +35,24 @@ async function connections(userId: string): Promise<ConnectionRow[]> {
   return settings.connections.filter((row) => row.packageId === "connect");
 }
 
-function startApp(userId: string, commandId: string, app: string) {
+function startApp(
+  userId: string,
+  commandId: string,
+  app: string,
+  returnClient?: string,
+) {
   return postAsUser(userId, "/api/plugins/connect/connections", {
     schemaVersion: 1,
     type: "connection/start",
     commandId,
     connectionTypeId: `connect-${app}`,
+    ...(returnClient === undefined ? {} : { returnClient }),
   });
+}
+
+/** The return page the gateway named on the sign-in it handed the person. */
+function callbackOf(redirectUrl: string): string | null {
+  return new URL(redirectUrl).searchParams.get("callback");
 }
 
 describe("Connected apps", () => {
@@ -108,6 +119,87 @@ describe("Connected apps", () => {
     )) as { connectionId: string };
     expect(replay.connectionId).toBe(started.connectionId);
     expect(await connections(userId)).toHaveLength(1);
+  });
+
+  it("sends each app back through its own return page, and serves it", async () => {
+    const userId = freshUserId("connect-return");
+    await provisionThroughGateway({ userId, botId: "return" });
+
+    // What each client asks for is the page it can come back through, on
+    // this deployment's own origin — never one the caller supplies.
+    const phone = (await expectOkJson(
+      await startApp(userId, "start-android", "github", "android"),
+    )) as { redirectUrl: string };
+    expect(callbackOf(phone.redirectUrl)).toBe(
+      `${ORIGIN}/api/connect/callback/android`,
+    );
+    const mac = (await expectOkJson(
+      await startApp(userId, "start-macos", "slack", "macos"),
+    )) as { redirectUrl: string };
+    expect(callbackOf(mac.redirectUrl)).toBe(
+      `${ORIGIN}/api/connect/callback/macos`,
+    );
+    const tab = (await expectOkJson(
+      await startApp(userId, "start-tab", "gmail"),
+    )) as { redirectUrl: string };
+    expect(callbackOf(tab.redirectUrl)).toBe(`${ORIGIN}/api/connect/callback`);
+
+    // The phone's page: the verified link has already opened the app, so the
+    // page carries no script and nothing from the query.
+    const android = await SELF.fetch(
+      `${ORIGIN}/api/connect/callback/android?status=success&connectedAccountId=ca_9`,
+    );
+    expect(android.status).toBe(200);
+    const androidPage = await android.text();
+    expect(androidPage).toContain("Head back to the FrockBot app");
+    expect(androidPage).not.toContain("safe to close");
+    expect(androidPage).not.toContain("<script");
+    expect(androidPage).not.toContain("ca_9");
+    expect(android.headers.get("content-security-policy")).not.toContain(
+      "script-src",
+    );
+
+    // The Mac's page hands over on the app's scheme, under its own nonce.
+    const macos = await SELF.fetch(
+      `${ORIGIN}/api/connect/callback/macos?status=success&connectedAccountId=ca_9`,
+    );
+    const macPage = await macos.text();
+    expect(macPage).toContain(
+      "frockbot://bot.frockbot.com/api/connect/callback/macos",
+    );
+    expect(macPage).toContain("Open FrockBot");
+    expect(macPage).not.toContain("ca_9");
+    expect(macos.headers.get("content-security-policy")).toMatch(
+      /script-src 'nonce-[0-9a-f-]{36}'/,
+    );
+    expect(macos.headers.get("content-security-policy")).not.toContain(
+      "unsafe-inline",
+    );
+
+    // A browser tab is given the way back by hand.
+    const plain = await SELF.fetch(`${ORIGIN}/api/connect/callback`);
+    const plainPage = await plain.text();
+    expect(plainPage).toContain(`href="${ORIGIN}/"`);
+    expect(plainPage).not.toContain("<script");
+
+    // Nothing else under the callback path is a page of ours, and the pages
+    // that exist are read, never posted to.
+    const notOurs = await SELF.fetch(`${ORIGIN}/api/connect/callback/ios`);
+    // Not a public page: it never reaches the return page at all, it hits
+    // the gateway's door like any other unknown path.
+    expect(notOurs.status).toBe(401);
+    expect(await notOurs.text()).not.toContain("Back to FrockBot");
+    expect(
+      (
+        await SELF.fetch(`${ORIGIN}/api/connect/callback/android`, {
+          method: "POST",
+        })
+      ).status,
+    ).toBe(405);
+    // A client naming a return page that is not ours is refused outright.
+    expect(
+      (await startApp(userId, "start-ios", "gmail", "ios")).status,
+    ).toBeGreaterThanOrEqual(400);
   });
 
   it("tells the person when a sign-in did not finish", async () => {
