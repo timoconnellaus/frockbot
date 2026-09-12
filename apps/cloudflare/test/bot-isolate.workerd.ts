@@ -4,6 +4,9 @@ import { BOT_ISOLATE_CONTEXT_KEYS_V1 } from "@frockbot/core/contracts";
 import {
   PROBE_BROKEN_SOURCE,
   PROBE_PACKAGE_SOURCE,
+  PROBE_REQUEST_HOOK_SOURCE,
+  PROBE_REQUEST_HOOKS,
+  PROBE_REQUEST_REDIRECT_HOOK_SOURCE,
   PROBE_THROWING_HOOK_SOURCE,
   PROBE_TIMEOUT_HOOK_SOURCE,
   PROBE_UNDECODABLE_HOOK_SOURCE,
@@ -86,6 +89,81 @@ describe("a Bot Package in a loaded Dynamic Worker", () => {
     expect(result.firstStepToolNames).toContain("hook_marker");
     expect(result.secondStepToolNames).not.toContain("hook_marker");
     expect(result.durableHookFailures).toEqual([]);
+  });
+
+  test("the agent/request hook shapes the request it was handed", async () => {
+    const stub = probe(`request-hook-${crypto.randomUUID()}`);
+    const artifact = await stub.seedArtifact(PROBE_REQUEST_HOOK_SOURCE);
+
+    const result = await stub.runTurn({
+      userId: "user-1",
+      botId: "bot-1",
+      artifact,
+      text: "abcd",
+      hooks: PROBE_REQUEST_HOOKS,
+    });
+
+    const requests = JSON.parse(result.providerRequestsJson) as {
+      requestId: string;
+      provider: string;
+      model: string;
+      system: string;
+    }[];
+    expect(result.text).toBe("tool:dcba");
+    expect(result.durableHookFailures).toEqual([]);
+    expect(requests.length).toBeGreaterThan(0);
+    // The hook is handed turn and step, like `agent/tool-exposure` is.
+    expect(requests[0]?.system).toContain(
+      "[shaped by the plugin at turn 1 step 1]",
+    );
+    // The widened signature is real per-step data, not a constant: every
+    // request carries the step it was shaped at.
+    expect(
+      requests.map(
+        (request) =>
+          /\[shaped by the plugin at turn (\d+) step (\d+)\]/.exec(
+            request.system,
+          )?.[0],
+      ),
+    ).toEqual(
+      requests.map(
+        (_request, index) =>
+          `[shaped by the plugin at turn 1 step ${index + 1}]`,
+      ),
+    );
+    // What it may not touch: the identity the spend record and the lease hang
+    // off.
+    for (const request of requests) {
+      expect(request.provider).toBe("scripted");
+      expect(request.model).toBe("scripted-v1");
+      expect(request.requestId).not.toBe("");
+    }
+    expect(result.providerRequestsJson).toBe(result.loggedRequestsJson);
+  });
+
+  test("an agent/request hook cannot redirect the request's model binding", async () => {
+    const stub = probe(`request-redirect-${crypto.randomUUID()}`);
+    const artifact = await stub.seedArtifact(
+      PROBE_REQUEST_REDIRECT_HOOK_SOURCE,
+    );
+
+    const result = await stub.runTurn({
+      userId: "user-1",
+      botId: "bot-1",
+      artifact,
+      text: "abcd",
+      hooks: PROBE_REQUEST_HOOKS,
+    });
+
+    // The Turn still completes on the request the Bot's authority resolved.
+    expect(result.text).toBe("tool:dcba");
+    expect(result.providerRequestsJson).not.toContain("smuggled-connection");
+    expect(result.providerRequestsJson).toBe(result.loggedRequestsJson);
+    expect(result.durableHookFailures.length).toBeGreaterThan(0);
+    for (const failure of result.durableHookFailures) {
+      expect(failure.event).toBe("agent/request");
+      expect(failure.message).toMatch(/cannot redirect the request/);
+    }
   });
 
   test.each([

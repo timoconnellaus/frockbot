@@ -144,7 +144,7 @@ describe("the public loop event declaration", () => {
       { ...bound, modelBinding: { ...binding, connectionId: "connection-2" } },
       { ...bound, modelBinding: { ...binding, connectionGeneration: "2" } },
       { ...bound, modelBinding: { connectionId: "connection-1" } },
-      { requestId: "request-1", ...bound, modelBinding: undefined },
+      { ...bound, modelBinding: undefined },
     ]) {
       expect(() =>
         decodeBotIsolateHookReplacementV1("agent/request", redirect, bound),

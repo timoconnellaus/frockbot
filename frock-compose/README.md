@@ -10,7 +10,7 @@ Package author writes against, and registers the tools the isolate's health
 report declares.
 
 What a member declares about itself is a contract, not a host concern:
-`PluginDescriptorV1` and the four vocabularies it names live in
+`PluginDescriptorV1` and the vocabularies it names live in
 `@frockbot/core/contracts`, and the failure phases activation records live in
 `@frockbot/core/durable/composition-failure`.
 
