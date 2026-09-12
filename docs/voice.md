@@ -27,8 +27,10 @@ import no Cloudflare SDK. The two Worker modules above are the adapters.
 
 - `dictation` is true when `OPENAI_API_KEY` (or the test override
   `VOICE_DICTATION_UPSTREAM_URL`) is set.
-- `assistant` is true when `ELEVENLABS_API_KEY` is set and the `AI` binding
-  exists.
+- `assistant` is true when `ELEVENLABS_API_KEY` is set, the `AI` binding
+  exists, and the chosen STT provider's key is present (see "Ears": that is
+  the same ElevenLabs key by default, `OPENAI_API_KEY` under
+  `VOICE_ASSISTANT_STT=openai`).
 
 Both keys are **required production secrets**: a release without them fails
 the secrets gate, because the hosted product must work with zero User
@@ -519,8 +521,10 @@ fails", which adds bun tests for the speech guard, two voice workerd scenarios
 (a sentence that never becomes sound; a Bot answer held over one reply and
 over two) and Flutter tests for the silent frames sent while the reply plays,
 barge-in ordering, the playback tail, a feed the device rejects, the
-device-setup retry and the error-frame notice. The numbers below are therefore
-understated; the next run of the suites should replace them wholesale rather
+device-setup retry and the error-frame notice. They also predate the swap of
+the assistant's ears to ElevenLabs Scribe v2 Realtime described under "Ears",
+which adds bun tests for the provider and key resolution and for the Scribe
+options. The numbers below are therefore understated; the next run of the suites should replace them wholesale rather
 than add to them.
 
 ### The live endpoint, 2026-09-11

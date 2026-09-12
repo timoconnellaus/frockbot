@@ -359,6 +359,35 @@ const WEB_STUB_PAGE = `<!doctype html>
 const blockedAddressCalls = new Map<string, number>();
 
 /**
+ * Every realtime speech-to-text upgrade the outbound seam saw, in order.
+ *
+ * The assistant's ears open their own socket with a `fetch` upgrade, and this
+ * suite lets nothing out, so the attempt itself is the only place a test can
+ * read which provider the session chose and on what terms. The URL is the
+ * provider's own connection contract — model, audio format and voice-detector
+ * settings all travel on it — so it is recorded verbatim and read back through
+ * the stub origin, the same way the blocked-address counter is.
+ */
+const voiceSttUpgrades: {
+  url: string;
+  xiApiKey: string | null;
+  authorization: string | null;
+}[] = [];
+
+function recordVoiceSttUpgrade(request: Request, url: URL): void {
+  const realtimeStt =
+    (url.hostname === "api.elevenlabs.io" &&
+      url.pathname.startsWith("/v1/speech-to-text/realtime")) ||
+    (url.hostname === "api.openai.com" && url.pathname.includes("realtime"));
+  if (!realtimeStt) return;
+  voiceSttUpgrades.push({
+    url: request.url,
+    xiApiKey: request.headers.get("xi-api-key"),
+    authorization: request.headers.get("authorization"),
+  });
+}
+
+/**
  * The Connected apps provider, as the User and Bot objects reach it. The key
  * is what `vitest.*.config.ts` binds as `COMPOSIO_API_KEY`; anything else is
  * refused as the real service would.
@@ -511,6 +540,13 @@ async function composioStub(request: Request, url: URL): Promise<Response> {
 }
 
 function webStub(url: URL): Response {
+  if (url.pathname === "/voice-stt-upgrades") {
+    return Response.json({ upgrades: voiceSttUpgrades });
+  }
+  if (url.pathname === "/forget-voice-stt-upgrades") {
+    voiceSttUpgrades.length = 0;
+    return Response.json({ upgrades: [] });
+  }
   if (url.pathname === "/counters") {
     return Response.json({
       metadata: blockedAddressCalls.get("169.254.169.254") ?? 0,
@@ -575,6 +611,7 @@ export async function ollamaCloudStub(request: Request): Promise<Response> {
       interval: 5,
     });
   }
+  recordVoiceSttUpgrade(request, url);
   if (!url.hostname.includes("ollama.com")) {
     // Anything a Bot should never reach is counted before it is refused, so a
     // test can prove the request was not made rather than only that it failed.
