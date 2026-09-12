@@ -39,21 +39,15 @@ export class SearchDecodeError extends Error {
   }
 }
 
-/**
- * What produced one indexed row.
- *
- * `media` exists because the parity register's `search-index.db` carries a
- * `media` table beside `messages`. FrockBot has no attachment concept yet, so
- * the kind is declared and never written: the schema does not change when
- * attachments arrive.
- */
-export type SearchRowKindV1 = "user" | "assistant" | "tool" | "media";
+/** Messages, shared attachments and links; tool output is an explicit opt-in. */
+export type SearchRowKindV1 = "user" | "assistant" | "tool" | "media" | "link";
 
 export const SEARCH_ROW_KINDS_V1: readonly SearchRowKindV1[] = [
   "user",
   "assistant",
   "tool",
   "media",
+  "link",
 ];
 
 /**

@@ -319,7 +319,9 @@ export class SearchIndexV1 {
       truncated: false,
       indexState,
     };
-    if (!match) return empty;
+    // An empty field browses recent items; punctuation alone is still a query
+    // that matches nothing, not an invitation to show unrelated messages.
+    if (!match && request.query.trim()) return empty;
     const kinds = (request.kinds ?? SEARCH_DEFAULT_ROW_KINDS_V1).filter(
       (kind): kind is SearchRowKindV1 => SEARCH_ROW_KINDS_V1.includes(kind),
     );
@@ -329,8 +331,8 @@ export class SearchIndexV1 {
       : [...new Set(directory.archivedBotIds)];
     const offset = decodeOffset(request.before);
 
-    const bindings: unknown[] = [match, ...kinds];
-    let where = `${ROWS_TABLE} MATCH ? AND kind IN (${kinds.map(() => "?").join(", ")})`;
+    const bindings: unknown[] = [...(match ? [match] : []), ...kinds];
+    let where = `${match ? `${ROWS_TABLE} MATCH ? AND ` : ""}kind IN (${kinds.map(() => "?").join(", ")})`;
     if (request.botId) {
       where += " AND bot_id = ?";
       bindings.push(request.botId);
@@ -350,8 +352,10 @@ export class SearchIndexV1 {
         snippet: string;
       }>(
         `SELECT bot_id, run_id, seq, kind, at, ` +
-          `snippet(${ROWS_TABLE}, 0, '', '', '…', 24) AS snippet ` +
-          `FROM ${ROWS_TABLE} WHERE ${where} ORDER BY rank LIMIT ? OFFSET ?`,
+          (match
+            ? `snippet(${ROWS_TABLE}, 0, '', '', '…', 24) AS snippet `
+            : `substr(body, 1, ${SEARCH_MAX_SNIPPET_LENGTH_V1}) AS snippet `) +
+          `FROM ${ROWS_TABLE} WHERE ${where} ORDER BY ${match ? "rank, " : ""}at DESC, bot_id, run_id, seq LIMIT ? OFFSET ?`,
         ...bindings,
         limit + 1,
         offset,

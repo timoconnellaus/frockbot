@@ -8,21 +8,113 @@ import {
   type SearchProjectableRunV1,
 } from "./bot.ts";
 
-function run(
-  overrides: Partial<SearchProjectableRunV1> = {},
-): SearchProjectableRunV1 {
+type TestRun = SearchProjectableRunV1 & { responseText?: string };
+function run(overrides: Partial<TestRun> = {}): TestRun {
   return {
     runId: "run-1",
     admittedAt: "2026-08-31T00:00:00.000Z",
     input: "How is the gym build going?",
     status: "completed",
-    events: [],
+    events: [
+      {
+        type: "send/to-user",
+        payload: { type: "text", text: "Framing is done." },
+      },
+    ],
     responseText: "Framing is done.",
     ...overrides,
   };
 }
 
 describe("the settled-run projection", () => {
+  test("a completion with no explicit send contributes no assistant message", () => {
+    const rows = searchRowsFromClientRunV1(
+      "bot-a",
+      run({
+        events: [],
+        responseText: "Private https://private.example/completion",
+      }),
+    );
+    expect(rows.map((row) => row.kind)).toEqual(["user"]);
+  });
+  test("indexes sent messages and attachments instead of unspoken model text", () => {
+    const rows = searchRowsFromClientRunV1(
+      "bot-a",
+      run({
+        responseText: "private model completion",
+        events: [
+          {
+            type: "send/to-user",
+            payload: {
+              type: "text",
+              text: "The school report is ready: https://school.example/report.",
+            },
+          },
+          {
+            type: "send/to-user",
+            payload: {
+              type: "attachment",
+              name: "school-report.pdf",
+              mediaType: "application/pdf",
+              url: "https://files.example/report.pdf",
+            },
+          },
+          {
+            type: "send/to-user",
+            payload: { type: "text", text: "Second message" },
+          },
+          { type: "tool/call", call: { id: "call-1", name: "fetch" } },
+          {
+            type: "tool/result",
+            callId: "call-1",
+            content: "https://private.example/tool-result",
+          },
+        ],
+      }),
+    );
+    expect(
+      rows.filter((row) => row.kind === "assistant").map((row) => row.body),
+    ).toEqual([
+      "The school report is ready: https://school.example/report.",
+      "Second message",
+    ]);
+    expect(
+      rows.filter((row) => row.kind === "media").map((row) => row.body),
+    ).toEqual([
+      "school-report.pdf\napplication/pdf\nhttps://files.example/report.pdf",
+    ]);
+    expect(
+      rows.filter((row) => row.kind === "link").map((row) => row.body),
+    ).toEqual(["https://school.example/report"]);
+    expect(
+      rows.some((row) => row.body.includes("private model completion")),
+    ).toBe(false);
+  });
+
+  test("retains sends made before a failed turn, and deduplicates public links", () => {
+    const rows = searchRowsFromClientRunV1(
+      "bot-a",
+      run({
+        status: "failed",
+        input:
+          "Read [this](https://example.com/report) and https://user:password@example.com/private",
+        events: [
+          {
+            type: "send/to-user",
+            payload: {
+              type: "text",
+              text: "Received https://example.com/report",
+            },
+          },
+        ],
+      }),
+    );
+    expect(
+      rows.filter((row) => row.kind === "link").map((row) => row.body),
+    ).toEqual(["https://example.com/report"]);
+    expect(rows.some((row) => row.kind === "assistant")).toBe(true);
+  });
+
   test("projects the user input and the assistant answer", () => {
     expect(searchRowsFromClientRunV1("bot-a", run())).toEqual([
       {
@@ -51,6 +143,10 @@ describe("the settled-run projection", () => {
         events: [
           { type: "tool/call", call: { id: "tool-1", name: "shell" } },
           { type: "tool/result", callId: "tool-1", content: "ok" },
+          {
+            type: "send/to-user",
+            payload: { type: "text", text: "Framing is done." },
+          },
         ],
       }),
     );
@@ -133,6 +229,7 @@ describe("the settled-run projection", () => {
       run({
         status: "failed",
         responseText: undefined,
+        events: [],
       }),
     );
     expect(rows.map((entry) => entry.kind)).toEqual(["user"]);
@@ -153,7 +250,11 @@ describe("the settled-run projection", () => {
   test("drops empty bodies without leaving a gap in `seq`", () => {
     const rows = searchRowsFromClientRunV1(
       "bot-a",
-      run({ responseText: "   " }),
+      run({
+        events: [
+          { type: "send/to-user", payload: { type: "text", text: "   " } },
+        ],
+      }),
     );
     expect(rows.map((entry) => entry.seq)).toEqual([0]);
   });
