@@ -59,6 +59,7 @@ function registry(
   account = new UsageSpy(),
   hooks = new LoopHookListV1(),
   providerId = "flock-ai",
+  attribution?: string,
 ) {
   let calls = 0;
   const provider: LlmProvider = {
@@ -73,6 +74,7 @@ function registry(
     rates: { "model-a": rate },
     botId: "bot-1",
     sessionId: "session-1",
+    ...(attribution ? { attribution } : {}),
   });
   llm.register(provider);
   return { llm, account, calls: () => calls };
@@ -232,6 +234,49 @@ describe("model billing", () => {
       providerCalls: calls(),
       settlements: account.settlements.length,
     }).toEqual({ hooksCalled: 1, providerCalls: 0, settlements: 0 });
+  });
+
+  // ADR 0026 step 9c: a Plugin spends the Bot's budget under the Turn's own
+  // Session, and the operation the User reads has to say which Plugin did it.
+  test("a Plugin's call is billed to the Turn's Session, named on the operation", async () => {
+    const { llm, account } = registry(
+      [
+        { type: "usage", usage: { inputTokens: 10, outputTokens: 3 } },
+        { type: "finish", reason: "completed" },
+      ],
+      new UsageSpy(),
+      new LoopHookListV1(),
+      "flock-ai",
+      "plugin weather",
+    );
+    await collect(llm);
+    expect(account.reservations[0]).toMatchObject({
+      botId: "bot-1",
+      sessionId: "session-1",
+      description: "model-a · plugin weather",
+    });
+    expect(account.settlements[0]).toMatchObject({
+      costMicros: 45,
+      chargeMicros: 90,
+    });
+  });
+
+  test("a Plugin on its own model account is named beside the connection", async () => {
+    const { llm, account } = registry(
+      [
+        { type: "usage", usage: { inputTokens: 500, outputTokens: 20 } },
+        { type: "finish", reason: "completed" },
+      ],
+      new UsageSpy(),
+      new LoopHookListV1(),
+      "own-provider",
+      "plugin weather",
+    );
+    await collect(llm, request("own-provider"));
+    expect(account.reservations[0]).toMatchObject({
+      maximumMicros: 0,
+      description: "model-a · own model account · plugin weather",
+    });
   });
 
   test("a connected model account settles at zero even when it reports usage", async () => {
