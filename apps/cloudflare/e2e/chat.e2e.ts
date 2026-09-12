@@ -17,6 +17,7 @@
 import {
   test,
   expect,
+  answerComposer,
   answerInputs,
   composerInput,
   createBot,
@@ -174,7 +175,7 @@ async function beginTurn(page: Page, text: string): Promise<void> {
   // the field's editing session are dropped, and a draft that arrives with its
   // first characters missing is a different message — which, when the draft
   // carries a tool script, is a different Turn.
-  await answerInputs([[composerInput(page), text]]);
+  await answerComposer(page, text);
   // Send closes while a submission is in flight and while the client is still
   // confirming the last one, and a click on a closed button is a no-op that
   // reads afterwards as a message the product lost. Waiting for it to open
@@ -735,7 +736,7 @@ test("a send the server refuses for size keeps the draft and says why", async ({
   });
 
   const prompt = "this one is refused";
-  await answerInputs([[composer, prompt]]);
+  await answerComposer(page, prompt);
   await sem(page, "send-button").click();
 
   // The server's own sentence, not "Agent request failed" and not a guess.
@@ -778,7 +779,7 @@ test("a Bot the client cannot reach settles with a reason and a Retry", async ({
 
   const composer = composerInput(page);
   const prompt = "are you there";
-  await answerInputs([[composer, prompt]]);
+  await answerComposer(page, prompt);
   await sem(page, "send-button").click();
 
   // The bound is several seconds of backoff, and then it settles by itself,

@@ -18,9 +18,9 @@ import {
   test,
   expect,
   action,
-  answerInputs,
   closeOverlay,
   connectOllama,
+  answerComposer,
   chooseDefaultModel,
   createBot,
   enableApplets,
@@ -137,9 +137,10 @@ async function runTool(
   // is a different message, and when the draft carries a tool script it is a
   // Turn that calls no tool at all — which is what "the directory never held
   // the Applet" looked like from here.
-  await answerInputs([
-    [composer, `${text}\n${e2eFrockbotToolCallPrompt(name, input)}`],
-  ]);
+  await answerComposer(
+    page,
+    `${text}\n${e2eFrockbotToolCallPrompt(name, input)}`,
+  );
   await press(sem(page, "send-button"));
   // The composer keeps the draft until the submission is accepted, so an empty
   // composer — not a click that returned — is the Turn being admitted.

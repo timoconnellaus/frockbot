@@ -1043,11 +1043,44 @@ export async function provisionThroughUi(
  * Send too, so readiness is asked with something in the composer and the draft
  * is put back afterwards.
  */
+/**
+ * Type a draft into the composer and prove the *widget* holds it, not only
+ * the element.
+ *
+ * `answerInputs` reads the draft back from the DOM, which is the very value
+ * the engine ignores when the keys arrived before it had opened the field's
+ * editing session — and the composer is the one field where that shows: the
+ * corner button is the microphone while the widget's draft is empty and Send
+ * once it is not. So a non-empty draft is typed until Send stands, retyping
+ * through the same path when the engine dropped it. A Main run failed three
+ * retries in a row with the whole prompt in the element and the microphone
+ * still in the corner; this is what tells the two apart.
+ */
+export async function answerComposer(page: Page, text: string): Promise<void> {
+  const composer = composerInput(page);
+  for (let attempt = 0; ; attempt += 1) {
+    await answerInputs([[composer, text]]);
+    if (text.length === 0) return;
+    try {
+      await expect(sem(page, "send-button")).toHaveCount(1, {
+        timeout: 8_000,
+      });
+      return;
+    } catch (error) {
+      if (attempt >= 2) throw error;
+      // The engine dropped the keys; put the element back and go again.
+      await composer.focus();
+      await composer.press("ControlOrMeta+a");
+      await composer.press("Backspace");
+    }
+  }
+}
+
 export async function expectReadyToSend(page: Page): Promise<void> {
   const composer = composerInput(page);
   await expect(composer).toBeVisible({ timeout: 60_000 });
   const draft = await composer.inputValue();
-  await answerInputs([[composer, draft.length > 0 ? draft : "ready?"]]);
+  await answerComposer(page, draft.length > 0 ? draft : "ready?");
   await expect
     .poll(() => pressDisabled(sem(page, "send-button")), { timeout: 60_000 })
     .toBe(false);
@@ -1107,7 +1140,7 @@ export async function sendMessage(
   // sent before it has opened the field's editing session, and a draft that
   // arrives with its first few characters missing is a different message —
   // which, when the draft carries a tool script, is a different Turn.
-  await answerInputs([[composer, text]]);
+  await answerComposer(page, text);
   await press(sem(page, "send-button"));
   await expect(composer).toHaveValue("", { timeout: 120_000 });
   // The person's own bubble, which is a row in the thread rather than text in
