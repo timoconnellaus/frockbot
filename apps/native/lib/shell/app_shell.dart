@@ -723,6 +723,21 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     if (mounted) setState(() {});
   }
 
+  /// The doors this Bot's Packages declare, as buttons for its own bar.
+  /// A Package naming an icon this client does not have still gets a
+  /// button, so a declared door is never silently missing.
+  List<Widget> _packageEntryActions() => [
+    for (final entry in packageIframeEntriesV1(catalog))
+      identified(
+        PackageIds.entry(entry.contribution.packageId, entry.entry.id),
+        IconButton(
+          tooltip: entry.entry.label,
+          icon: Icon(_packageIcon(entry.entry.icon)),
+          onPressed: () => _openPackagePage(entry),
+        ),
+      ),
+  ];
+
   /// The Composition this Bot is showing, and the one signal a pushed page
   /// watches for it.
   void _setCatalog(PackageCatalog? read) {
@@ -1409,6 +1424,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                             panelShown: tier == ShellTier.triple
                                 ? !panelCollapsed
                                 : panelOpen,
+                            packageEntries: _packageEntryActions(),
                             onApplets: single || appletCanvas == null
                                 ? null
                                 : () async {
