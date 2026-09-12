@@ -1226,6 +1226,14 @@ export class VoiceAssistant extends VoiceAgentBase<
     const text = delegation.answer
       ? `${delegation.botName} says: ${delegation.answer.slice(0, 600)}`
       : `${delegation.botName} could not finish that: ${delegation.failure ?? "it stopped"}.`;
+    // This sound belongs to no turn: the last one is over, and its clock
+    // would make this read-out look like a reply that took minutes.
+    const call = this.#calls.get(connection.id);
+    if (call) {
+      call.turnId = undefined;
+      call.turnStartedAt = undefined;
+      call.turnSettledAt = undefined;
+    }
     try {
       await this.speak(connection, text);
       await this.ledger().markSpoken(delegation.runId, this.now());

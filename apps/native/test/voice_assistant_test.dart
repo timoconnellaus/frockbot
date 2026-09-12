@@ -233,6 +233,32 @@ void main() {
     harness.controller.dispose();
   });
 
+  test('a call the server has already ended is not a notice', () async {
+    final harness = Harness();
+    await harness.live();
+    harness.socket.deliver(
+      jsonEncode({
+        'type': 'error',
+        'message': 'Speech recognition connection was lost',
+        'code': 'stt_connection_lost',
+        'stage': 'stt',
+        'retryable': true,
+      }),
+    );
+    await settle();
+    expect(harness.controller.phase, VoiceSessionPhase.error);
+    expect(harness.controller.error, isNotNull);
+    expect(harness.controller.notice, isNull);
+    expect(harness.controller.active, isFalse);
+    expect(harness.socket.closed, isTrue);
+    expect(harness.capture.stops, 1);
+    // Nothing more is sent into a call nobody is listening on.
+    final before = harness.audioCount;
+    await harness.feed(_speech, 80);
+    expect(harness.audioCount, before);
+    harness.controller.dispose();
+  });
+
   test('twenty seconds of quiet while listening sleeps the upstream', () async {
     final harness = Harness();
     await harness.live();

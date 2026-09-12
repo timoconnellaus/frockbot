@@ -226,6 +226,12 @@ keeps the call; it does **not** hang up. The provider is wrapped so that a
 sentence with no audio throws rather than returns (`app/voice/tts-guard.ts`);
 without that the turn settles as answered and the silence has no record.
 
+An error frame that carries a `code` is a different thing: the SDK sends one
+only when the call itself has failed — speech recognition lost, a startup that
+never worked — and has already torn the call down behind it. The client ends
+the call and shows the failure, rather than leaving a live-looking footer over
+a socket nobody is listening on.
+
 A Bot answer that settles while a reply is being produced or, for six seconds
 after, still being heard is held rather than read out over it (`speak` would
 abort the reply in flight); it is read out once that window has passed.

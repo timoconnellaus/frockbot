@@ -697,6 +697,14 @@ describe("the voice session object", () => {
       await stub.probeStorage("voice:delegation:"),
     ) as VoiceDelegationRecordV1[];
     expect(spoken!.state).toBe("spoken");
+    // The read-out is nobody's turn: it must not borrow the last turn's
+    // clock and report a time to first word of minutes.
+    const audioLines = (await stub.probeTraces()).filter(
+      (t) => t.event === "audio",
+    );
+    expect(audioLines.some((t) => t.turn !== undefined)).toBe(true);
+    expect(audioLines.at(-1)!.turn).toBeUndefined();
+    expect(audioLines.at(-1)!.sinceTurnMs).toBeUndefined();
     opened.socket.close();
   });
 

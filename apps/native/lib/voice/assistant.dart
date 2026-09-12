@@ -17,8 +17,9 @@
 ///
 /// A per-turn error from the server — a reply that produced no text, a
 /// sentence that never became sound — is a notice on the footer for a few
-/// seconds, not the end of the call. Only the server closing the socket, a
-/// refusal, or this client's own failure ends it.
+/// seconds, not the end of the call. An error that carries a `code` is the
+/// call itself failing — the server has already ended it — and so is the
+/// server closing the socket, a refusal, or this client's own failure.
 ///
 /// Nothing here caps how long a call may last. A sleeping upstream costs
 /// nothing, so the footer may stay open silently for hours; what the server
@@ -368,7 +369,14 @@ class AssistantSessionController extends ChangeNotifier {
         _notify();
       case AssistantRefusalV1(:final code):
         unawaited(_fail(voiceRefusalMessage(code)));
-      case AssistantErrorV1():
+      case AssistantErrorV1(:final code):
+        if (code != null) {
+          // A coded error is the call itself failing — the server has already
+          // torn it down and stopped listening. Only a per-turn error, which
+          // carries no code, is a notice.
+          unawaited(_fail('Voice stopped. Try again.'));
+          return;
+        }
         // One reply failed — no text, or a sentence that never became sound.
         // The server is still listening; so is this client.
         _showNotice('That reply didn’t come through. Say it again.');

@@ -159,11 +159,23 @@ class PcmVoicePlayer extends VoicePlayer {
     _setLevel(pcm16Rms(take));
     try {
       unawaited(
-        FlutterPcmSound.feed(PcmArrayInt16(bytes: ByteData.sublistView(take))),
+        FlutterPcmSound.feed(
+          PcmArrayInt16(bytes: ByteData.sublistView(take)),
+        ).catchError((Object _) => _feedFailed()),
       );
     } on Object {
-      // This slice is lost; the next feed callback tries the next one.
+      _feedFailed();
     }
+  }
+
+  /// A slice the device never took is audio nobody hears, so the level must
+  /// say so — the controller reads it to decide whether the person is being
+  /// heard, and a level stuck above zero mutes them for the rest of the call.
+  /// The next chunk pumps again.
+  void _feedFailed() {
+    if (_closed) return;
+    _idle = true;
+    _setLevel(0);
   }
 
   Uint8List _take(int wanted) {
