@@ -254,6 +254,22 @@ jobs:
           path: apps/cloudflare/e2e/test-results
           retention-days: 7
 
+      - name: Print the kernel log
+        # `wrangler dev` exits when one forwarded request drops, and the
+        # runtime that dropped it says nothing on its own stderr. The kernel
+        # knows whether it killed workerd for memory or it died on a signal.
+        if: failure() || cancelled()
+        run: |
+          echo "::group::Memory now"
+          free -m
+          echo "::endgroup::"
+          echo "::group::Kernel log (killed, oom, segfault, workerd)"
+          sudo dmesg -T 2>/dev/null | grep -iE 'killed process|out of memory|oom|segfault|workerd|traps' | tail -n 80 || true
+          echo "::endgroup::"
+          echo "::group::Kernel log tail"
+          sudo dmesg -T 2>/dev/null | tail -n 120 || true
+          echo "::endgroup::"
+
       - name: Print the tail of the harness log
         # The `[WebServer]` stream in the job log stops the moment Playwright
         # tears the server down, so a crash at the end of a shard leaves no
