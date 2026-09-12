@@ -380,6 +380,9 @@ class AssistantSessionController extends ChangeNotifier {
     if (_phase == VoiceSessionPhase.error) return;
     _generation++;
     _error = message;
+    // Say so now, before the teardown's awaits: the footer shows the failure
+    // the moment it is known, not after the socket has finished closing.
+    _notify();
     await _teardown();
     _status = VoiceStatusV1.idle;
     _set(VoiceSessionPhase.error);
