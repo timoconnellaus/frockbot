@@ -240,6 +240,25 @@ describe("the generated wrapper's hook chain", () => {
     ]);
   });
 
+  test("names a plugin that threw a value with no message", async () => {
+    const result = await runHookChain(
+      [
+        hookPlugin("provider", () => ["provider"]),
+        hookPlugin("consumer", () => {
+          throw "";
+        }),
+      ],
+      hookInvocation(1_000, ["provider", "consumer"]),
+      () => ({}),
+    );
+    const decoded = decodePluginWorkerHookResultV1(result);
+    expect(decoded.status).toBe("replaced");
+    expect(decoded.replacement).toEqual(["provider"]);
+    expect(decoded.failures).toEqual([
+      { pluginId: "consumer", reason: "unknown error" },
+    ]);
+  });
+
   test("hands each plugin the deadline it actually has, not the chain's", async () => {
     const slices: number[] = [];
     await runHookChain(

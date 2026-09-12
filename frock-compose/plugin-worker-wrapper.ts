@@ -316,7 +316,8 @@ export const BOT_ISOLATE_HOOK_VALUE_KEYS_V1 = {
 
 /** How an error anywhere in the index is reduced to text for the kernel. */
 export const BOT_ISOLATE_ERROR_TEXT_SOURCE = `function errorText(error) {
-  return String((error && error.message) || error).slice(0, ${MAX_FAILURE_REASON_V1});
+  var text = String((error && error.message) || error).slice(0, ${MAX_FAILURE_REASON_V1});
+  return text.length > 0 ? text : "unknown error";
 }`;
 
 /**
@@ -648,7 +649,9 @@ export default class extends WorkerEntrypoint {
       if (value && typeof value === "object" && value.drop === true) {
         return Object.assign(
           { schemaVersion: 1, status: "drop" },
-          typeof value.reason === "string" ? { reason: value.reason } : {},
+          typeof value.reason === "string"
+            ? { reason: errorText(value.reason) }
+            : {},
         );
       }
       return { schemaVersion: 1, status: "drop", reason: "the trigger returned no text" };
