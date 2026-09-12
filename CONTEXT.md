@@ -83,7 +83,7 @@ One of the six loop events a Plugin may wrap — `system-prompt/assemble`, `agen
 _Avoid_: Middleware, interceptor, action
 
 **Seed state**:
-How the deployment ships a Plugin: `locked`, `default-on`, `default-off` or `admin-gated`. A seeded Plugin that is not enableable may also be `hidden` from the Plugins page.
+How the deployment ships a Plugin: `locked` (on for every Bot, no switch), `default-on` (on unless a Bot switches it off), `default-off` (off until a Bot switches it on) or `admin-gated` (absent from the account until an admin opens it, then on unless a Bot switches it off).
 _Avoid_: Tier, preinstall flag
 
 **Plugin trigger**:

@@ -41,6 +41,7 @@ function child(identity: Identity, taskId: string) {
 interface SubagentRpc {
   run(command: unknown): Promise<{ runId: string; events: unknown[] }>;
   listTasks(input: unknown): Promise<TaskListViewV1>;
+  setBotPluginEnabled(input: unknown): Promise<{ status: string }>;
 }
 
 function rpc(identity: Identity): SubagentRpc {
@@ -118,6 +119,41 @@ async function settleTask(identity: Identity, taskId: string): Promise<void> {
 }
 
 describe("subagent dispatch across two Durable Objects", () => {
+  test("a Bot with Subagents switched off dispatches nothing", async () => {
+    // Subagents is one of the first-party features the Bot's own Plugins page
+    // switches, and it reaches a Turn through a hosted seam rather than the
+    // plan: off, the seam is unmounted, so the tool the model scripts is not
+    // there to dispatch a task with and no second object is ever addressed.
+    const suffix = crypto.randomUUID();
+    const identity = {
+      userId: `sub-off-${suffix}`,
+      botId: `sub-off-bot-${suffix}`,
+    };
+    await provisionBot(identity);
+    expect(
+      await rpc(identity).setBotPluginEnabled({
+        schemaVersion: 1,
+        ...identity,
+        command: {
+          schemaVersion: 1,
+          kind: "set-plugin-enabled",
+          commandId: crypto.randomUUID(),
+          pluginId: "subagents",
+          enabled: false,
+          expectedRevision: 0,
+        },
+      }),
+    ).toMatchObject({ status: "applied" });
+
+    await dispatch(identity, "dispatch-off", [
+      { description: "Read the changelog", prompt: "Read the changelog." },
+    ]);
+
+    const dispatched = await tasks(identity);
+    expect(dispatched.tasks).toEqual([]);
+    expect(dispatched.active).toBe(0);
+  });
+
   test("the child runs a subagent Turn in its own object and the parent records it", async () => {
     const suffix = crypto.randomUUID();
     const identity = {

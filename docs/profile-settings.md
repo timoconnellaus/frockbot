@@ -24,16 +24,24 @@ list; a desktop opens it as a dialog over the shell, the same providers laid
 out as a grid of cards, three across at full width. It links to Messages on
 your Mac. What Plugins calls "Set up in Marketplace" lands here.
 
-Plugins lists extensions, with visible purpose and status, search, and
-collapsed version/configuration/enablement controls. The current deployment
-catalog contains built-in definitions, so the extension list is empty. It
-says so rather than presenting deployment infrastructure as installable
-plugins. This page does not introduce an extension marketplace or remove
-Bot-authored composition controls. Optional built-in features remain in Bot
-capabilities, including per-Bot model overrides, web, routines, image
-generation, Mac Messages, and helper agents. Capabilities use cards with visible controls, two columns on wide screens and
-one column on phones or with large text. Core identity, history, search, memory,
-computer infrastructure and site administration are not plugin switches.
+Plugins is the selected Bot's page: one list of what that Bot could run —
+the Plugins its User installed, what the deployment seeded, and the
+first-party features a User may turn off — with one switch per row, and the
+switches are that Bot's own. A locked Plugin is shown without a switch, and a
+feature the account has not installed says so instead of offering one. The
+profile entry names the Bot it will open. With no Bot selected it falls back
+to the account's list of extensions, with visible purpose and status, search,
+and collapsed version/configuration/enablement controls; the current
+deployment catalog seeds nothing, so that list is empty and says so rather
+than presenting deployment infrastructure as installable plugins. This page
+does not introduce an extension marketplace or remove Bot-authored
+composition controls. Account features is the account-wide switchboard for
+optional built-in features, including per-Bot model overrides, web, routines,
+image generation, Mac Messages, and helper agents; an account-wide switch off
+there is the precondition a Bot's switch cannot override. Its cards use
+visible controls, two columns on wide screens and one column on phones or
+with large text. Core identity, history, search, memory, computer
+infrastructure and site administration are not plugin switches.
 
 Activity & history starts with all Bots from Profile. A visible Bot filter
 and plain activity-type labels narrow it. Each activity link carries its Bot
