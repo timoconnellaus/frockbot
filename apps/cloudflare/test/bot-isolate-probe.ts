@@ -435,7 +435,7 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
     artifact?: ArtifactRefV1,
     createdAt = "2026-08-31T00:00:00.000Z",
     hooks: string[] = ["agent/tool-exposure"],
-    pair?: { provider: ArtifactRefV1; consumer: ArtifactRefV1 },
+    pair?: { provider?: ArtifactRefV1; consumer: ArtifactRefV1 },
   ): Promise<CompositionGenerationV1> {
     const base = await bootstrapGeneration({ createdAt });
     if (!artifact && !pair) return base;
@@ -473,11 +473,17 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
               PROBE_CONSUMER_DESCRIPTOR,
               pair.consumer,
             ),
-            authored(
-              PROBE_PROVIDER_ID,
-              PROBE_PROVIDER_DESCRIPTOR,
-              pair.provider,
-            ),
+            // A pair with no provider artifact is the unmet-need case: the
+            // consumer names a service the generation has nobody to meet.
+            ...(pair.provider
+              ? [
+                  authored(
+                    PROBE_PROVIDER_ID,
+                    PROBE_PROVIDER_DESCRIPTOR,
+                    pair.provider,
+                  ),
+                ]
+              : []),
           ]
         : []),
     ].sort((left, right) => left.packageId.localeCompare(right.packageId));
@@ -495,7 +501,7 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
     userId: string;
     botId: string;
     artifact?: ArtifactRefV1;
-    pair?: { provider: ArtifactRefV1; consumer: ArtifactRefV1 };
+    pair?: { provider?: ArtifactRefV1; consumer: ArtifactRefV1 };
     connections?: IsolateConnectionV1[];
     model?: IsolateModelBindingV1;
     memory?: boolean;
@@ -655,6 +661,117 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
         loaderCalls: this.loaderIds.length,
         pluginOrder: identity?.plugins.map((plugin) => plugin.pluginId) ?? [],
         serviceRead,
+        exposedTools: exposed.map((tool) => tool.name),
+      };
+    } finally {
+      await composition.dispose();
+    }
+  }
+
+  /**
+   * Mounts a Plugin whose consumed service no sibling provides, alongside one
+   * that needs nothing. The unmet Plugin must be excluded and named while the
+   * sibling still mounts and still wraps the hook.
+   */
+  async probeUnmetService(input: {
+    userId: string;
+    botId: string;
+    artifact: ArtifactRefV1;
+    consumer: ArtifactRefV1;
+  }): Promise<{
+    verified: boolean;
+    pluginFailures: { pluginId: string; phase: string; message: string }[];
+    pluginOrder: string[];
+    exposedTools: string[];
+  }> {
+    this.loaderIds = [];
+    this.loadedCode = [];
+    const { composition } = await this.mount({
+      userId: input.userId,
+      botId: input.botId,
+      artifact: input.artifact,
+      pair: { consumer: input.consumer },
+    });
+    try {
+      let verified = true;
+      try {
+        await composition.verify(new AbortController().signal);
+      } catch {
+        verified = false;
+      }
+      const identity = this.loadedCode[0]?.env.IDENTITY;
+      const exposed = await composition.runtime.services.hooks.toolExposure(
+        composition.runtime.agent.agent as never,
+        [],
+        1,
+        1,
+        new AbortController().signal,
+        () => Promise.resolve([]),
+      );
+      return {
+        verified,
+        pluginFailures: composition.pluginFailures.map((failure) => ({
+          pluginId: failure.pluginId,
+          phase: failure.phase,
+          message: failure.message,
+        })),
+        pluginOrder: identity?.plugins.map((plugin) => plugin.pluginId) ?? [],
+        exposedTools: exposed.map((tool) => tool.name),
+      };
+    } finally {
+      await composition.dispose();
+    }
+  }
+
+  /**
+   * Mounts three Plugins where one reports health that does not match the
+   * descriptor the generation pinned. That Plugin alone must be excluded and
+   * named; the other two still mount and still chain their hooks.
+   */
+  async probeHealthMismatch(input: {
+    userId: string;
+    botId: string;
+    artifact: ArtifactRefV1;
+    provider: ArtifactRefV1;
+    consumer: ArtifactRefV1;
+  }): Promise<{
+    verified: boolean;
+    pluginFailures: { pluginId: string; phase: string; message: string }[];
+    exposedTools: string[];
+  }> {
+    this.loaderIds = [];
+    this.loadedCode = [];
+    const { composition } = await this.mount({
+      userId: input.userId,
+      botId: input.botId,
+      artifact: input.artifact,
+      // The descriptor claims a hook the module does not export, so the
+      // worker's health report cannot match what the generation pinned.
+      hooks: ["agent/tool-exposure", "agent/request"],
+      pair: { provider: input.provider, consumer: input.consumer },
+    });
+    try {
+      let verified = true;
+      try {
+        await composition.verify(new AbortController().signal);
+      } catch {
+        verified = false;
+      }
+      const exposed = await composition.runtime.services.hooks.toolExposure(
+        composition.runtime.agent.agent as never,
+        [],
+        1,
+        1,
+        new AbortController().signal,
+        () => Promise.resolve([]),
+      );
+      return {
+        verified,
+        pluginFailures: composition.pluginFailures.map((failure) => ({
+          pluginId: failure.pluginId,
+          phase: failure.phase,
+          message: failure.message,
+        })),
         exposedTools: exposed.map((tool) => tool.name),
       };
     } finally {

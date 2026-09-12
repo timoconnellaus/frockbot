@@ -187,7 +187,13 @@ describe("a Bot Package in a loaded Dynamic Worker", () => {
         botId: "bot-1",
         artifact,
         text: "abcd",
-        deadlineMs: 10,
+        // The Turn's deadline is now the budget for the whole hook chain, and
+        // the index refuses to start a Plugin with less than its minimum slice
+        // left. A deadline under that slice skips every Plugin before it runs,
+        // so the failure under test here — the Plugin's own throw, timeout or
+        // undecodable value — would never happen. Keep it comfortably above
+        // the slice and let the Plugin reach the failure it is named for.
+        deadlineMs: 100,
       });
 
       expect(result.text).toBe("tool:dcba");
@@ -358,6 +364,62 @@ describe("a Bot Package in a loaded Dynamic Worker", () => {
       word: "hello",
       packageId: "probe-consumer",
     });
+    expect(result.exposedTools).toEqual(["from_provider", "from_consumer"]);
+  });
+
+  test("a plugin whose consumed service nobody provides is excluded and named, and its sibling still mounts", async () => {
+    const stub = probe(`unmet-${crypto.randomUUID()}`);
+    const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);
+    const consumer = await stub.seedArtifact(PROBE_CONSUMER_SOURCE);
+
+    const result = await stub.probeUnmetService({
+      userId: `user-${crypto.randomUUID()}`,
+      botId: "bot-1",
+      artifact,
+      consumer,
+    });
+
+    // A Plugin fails alone: the generation still mounts.
+    expect(result.verified).toBe(true);
+    expect(result.pluginFailures).toEqual([
+      {
+        pluginId: "probe-consumer",
+        phase: "resolve",
+        message:
+          'plugin "probe-consumer" consumes "greeting", which no installed plugin provides',
+      },
+    ]);
+    // The excluded Plugin never reaches the worker, and the sibling still
+    // wraps the hook it declared.
+    expect(result.pluginOrder).toEqual(["bot-authored"]);
+    expect(result.exposedTools).toEqual(["hook_marker"]);
+  });
+
+  test("a plugin whose health report differs from its descriptor is excluded while the others mount", async () => {
+    const stub = probe(`health-${crypto.randomUUID()}`);
+    const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);
+    const provider = await stub.seedArtifact(PROBE_PROVIDER_SOURCE);
+    const consumer = await stub.seedArtifact(PROBE_CONSUMER_SOURCE);
+
+    const result = await stub.probeHealthMismatch({
+      userId: `user-${crypto.randomUUID()}`,
+      botId: "bot-1",
+      artifact,
+      provider,
+      consumer,
+    });
+
+    expect(result.verified).toBe(true);
+    expect(result.pluginFailures).toHaveLength(1);
+    expect(result.pluginFailures[0]).toMatchObject({
+      pluginId: "bot-authored",
+      phase: "health",
+    });
+    expect(result.pluginFailures[0]?.message).toMatch(
+      /hooks do not match its declared hooks/,
+    );
+    // The mismatched Plugin contributes nothing — no `hook_marker` — while the
+    // pair beside it still mounts in order and chains.
     expect(result.exposedTools).toEqual(["from_provider", "from_consumer"]);
   });
 
