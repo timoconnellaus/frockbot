@@ -27,6 +27,15 @@ import {
 } from "@frockbot/core/durable";
 import type { BotSettingsViewV1 } from "@frockbot/core/configuration";
 import { resolveAppletComposition } from "@frockbot/app/applets-host/bot";
+import {
+  compositionActivationStoreV1,
+  compositionFailureLogV1,
+  syncCompositionFromUser,
+} from "@frockbot/app/composition/bot";
+import {
+  enabledPluginIdsV1,
+  readPluginEnablementV1,
+} from "@frockbot/app/plugins/enablement";
 import { createAppletInstanceBindingV1 } from "@frockbot/app/applets-host/records";
 import { isolateMountOptions } from "@frockbot/app/isolates/bot";
 import { pendingBotInputPreambleV1 } from "@frockbot/app/routines/inbox";
@@ -93,12 +102,17 @@ export async function run(
   // from the previous Turn has already handed the log back.
   await yieldCompactionWorkV1(command.sessionId);
   // Before admission, so the pin this Turn takes already carries whatever
-  // the User's Applet directory says now.
+  // the User's Applet directory says now, and then the User's Composition as
+  // it stands after that — the pin is taken from this Bot's mirror of it.
   await resolveAppletComposition(
     state,
     { userId: command.userId, botId: command.botId },
     command,
   );
+  await syncCompositionFromUser(state, {
+    userId: command.userId,
+    botId: command.botId,
+  });
   return projectClientTurnV1(await state.authority.run(command));
 }
 
@@ -261,6 +275,9 @@ export async function executeTurn(
         generationId: mounting.generationId,
         settings,
       });
+      // The User installed the set; which of it this Bot runs is its own map.
+      const enablement = await readPluginEnablementV1(state.ctx.storage);
+      const enabled = enabledPluginIdsV1(mounting.members, enablement);
       const mounted = await createShellCompositionHost({
         botId: input.identity.botId,
         sessionId: input.command.sessionId,
@@ -291,7 +308,7 @@ export async function executeTurn(
             input.command.sessionId,
             effect,
           ),
-        ...(isolate ? { isolate } : {}),
+        ...(isolate ? { isolate: { ...isolate, enabled } } : {}),
         ...(appletRouting ? { applets: appletRouting } : {}),
       }).mount(mounting, signal);
       return mounted;
@@ -303,15 +320,8 @@ export async function executeTurn(
   // failure, raises a visible one, and the Turn is admitted anyway.
   const activation = await activateCompositionV1({
     generationId: input.compositionGenerationId,
-    store: {
-      read: (generationId) => state.authority.composition.read(generationId),
-      lastKnownGood: () => state.authority.composition.lastKnownGood(),
-      commit: (generationId) =>
-        state.authority.composition.commit(generationId),
-      fail: (generationId, options) =>
-        state.authority.composition.fail(generationId, options),
-    },
-    failures: state.authority.compositionFailures,
+    store: compositionActivationStoreV1(state, input.identity),
+    failures: compositionFailureLogV1(state, input.identity),
     host,
     signal: controller.signal,
     onFailure: (failure, fallback) =>

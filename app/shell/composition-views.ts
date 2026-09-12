@@ -15,6 +15,13 @@ import {
   type RevertCompositionCommandV1,
 } from "@frockbot/core/configuration";
 import type { BotIdentity } from "@frockbot/core/durable";
+import {
+  compositionFailureLogV1,
+  currentUserCompositionV1,
+  listUserCompositionGenerationsV1,
+  readUserCompositionGenerationV1,
+  revertUserCompositionV1,
+} from "@frockbot/app/composition/bot";
 import type { ShellBotStateV1 } from "./backend-state.js";
 import type { PackageIframeCompositionV1 } from "@frockbot/core/contracts";
 import { FIRST_PARTY_PACKAGE_UI_V1 } from "@frockbot/applets/pages";
@@ -184,8 +191,9 @@ export async function listCompositionGenerations(
   identity: BotIdentity,
   query: { limit: number; cursor?: string },
 ): Promise<CompositionGenerationListViewV1> {
-  const current = await state.authority.composition.current();
-  const page = await state.authority.composition.list({
+  const failures = compositionFailureLogV1(state, identity);
+  const current = await currentUserCompositionV1(state, identity);
+  const page = await listUserCompositionGenerationsV1(state, identity, {
     limit: Math.min(query.limit, MAX_COMPOSITION_GENERATION_PAGE_V1),
     ...(query.cursor === undefined ? {} : { cursor: query.cursor }),
   });
@@ -194,15 +202,17 @@ export async function listCompositionGenerations(
     botId: identity.botId,
     currentGenerationId: current.generationId,
     generations: await Promise.all(
-      page.generations.map(async (generation) =>
+      page.generations.map(async (generation: CompositionGenerationV1) =>
         projectCompositionGenerationV1({
           botId: identity.botId,
           generation,
           currentGenerationId: current.generationId,
-          failures: await state.authority.compositionFailures.list(
+          failures: await failures.list(generation.generationId),
+          ...(await compositionQuarantineView(
+            state,
+            identity,
             generation.generationId,
-          ),
-          ...(await compositionQuarantineView(state, generation.generationId)),
+          )),
         }),
       ),
     ),
@@ -216,25 +226,31 @@ export async function getCompositionGeneration(
   identity: BotIdentity,
   generationId: string,
 ): Promise<CompositionGenerationViewV1 | undefined> {
-  const generation = await state.authority.composition.read(generationId);
+  const generation = await readUserCompositionGenerationV1(
+    state,
+    identity,
+    generationId,
+  );
   if (!generation) return undefined;
-  const current = await state.authority.composition.current();
+  const current = await currentUserCompositionV1(state, identity);
   return projectCompositionGenerationV1({
     botId: identity.botId,
     generation,
     currentGenerationId: current.generationId,
-    failures: await state.authority.compositionFailures.list(generationId),
-    ...(await compositionQuarantineView(state, generationId)),
+    failures: await compositionFailureLogV1(state, identity).list(generationId),
+    ...(await compositionQuarantineView(state, identity, generationId)),
   });
 }
 
 /** Spread into a projection: absent unless the generation is quarantined. */
 async function compositionQuarantineView(
   state: ShellBotStateV1,
+  identity: BotIdentity,
   generationId: string,
 ): Promise<{ quarantine?: CompositionQuarantineV1 }> {
-  const quarantine =
-    await state.authority.compositionFailures.quarantine(generationId);
+  const quarantine = await compositionFailureLogV1(state, identity).quarantine(
+    generationId,
+  );
   return quarantine === undefined ? {} : { quarantine };
 }
 
@@ -257,7 +273,7 @@ export async function revertComposition(
   const recorded =
     await state.ctx.storage.get<CompositionCommandReceiptV1>(receiptKey);
   if (recorded) return decodeCompositionCommandReceiptV1(recorded);
-  const current = await state.authority.composition.current();
+  const current = await currentUserCompositionV1(state, identity);
   const reject = async (
     failure: string,
   ): Promise<CompositionCommandReceiptV1> => {
@@ -276,13 +292,10 @@ export async function revertComposition(
   }
   let generationId: string;
   try {
-    const reverted = await state.authority.composition.revert(
+    const reverted = await revertUserCompositionV1(
+      state,
+      identity,
       command.toGenerationId,
-      {
-        kind: "revert",
-        revertsTo: command.toGenerationId,
-        userId: identity.userId,
-      },
     );
     generationId = reverted.generationId;
   } catch (error) {
