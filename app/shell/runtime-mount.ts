@@ -33,6 +33,7 @@ import type {
   RuntimeModelSelection,
 } from "@frockbot/app/agent-runtime";
 import { appletsRuntimeHost } from "@frockbot/app/applets-host/bot";
+import { pluginAuthoringRuntimeHost } from "@frockbot/app/plugins/authoring-bot";
 import { decodeAgentTurnSlotReceiptV1 } from "@frockbot/app/flock/quota";
 import {
   createBotMachineHost,
@@ -231,6 +232,11 @@ export async function agentRuntime(
   const applets = turn
     ? await appletsRuntimeHost(state, identity, turn)
     : undefined;
+  // A Bot writes a Plugin only inside an admitted Turn, for the same reason,
+  // and only behind the account's Plugin-authoring switch (ADR 0026).
+  const plugins = turn
+    ? await pluginAuthoringRuntimeHost(state, identity, turn)
+    : undefined;
   // Filled in once this Turn's model binding is resolved, below. The tool
   // and the prompt section both read it lazily, from inside the Turn.
   const subagentModels: SubagentModelOptionV1[] = [];
@@ -261,6 +267,7 @@ export async function agentRuntime(
           }
         : {}),
       ...(applets ? { applets } : {}),
+      ...(plugins ? { plugins } : {}),
       // A Bot changes its own identity, or adds a Bot to its User's flock,
       // only inside an admitted Turn whose Session and Turn the write names.
       ...(turn

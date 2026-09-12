@@ -136,11 +136,32 @@ void main() {
       matching: find.byType(SwitchListTile),
     );
     expect(tester.widget<SwitchListTile>(tim).value, isTrue);
+
+    // The Plugin-authoring switch (ADR 0026) sends the account's Applets
+    // value along unchanged, so flipping one never resets the other.
+    sent.clear();
+    final authoring = find.descendant(
+      of: find.bySemanticsIdentifier(AdminIds.pluginAuthoring('guest-id')),
+      matching: find.byType(SwitchListTile),
+    );
+    expect(tester.widget<SwitchListTile>(authoring).value, isFalse);
+    await tester.tap(authoring);
+    await tester.pumpAndSettle();
+    expect(sent, {
+      'schemaVersion': 1,
+      'type': 'user/set-features',
+      'applets': true,
+      'pluginAuthoring': true,
+    });
   });
 
   testWidgets('an admin grants an account credit, once, with a reason', (
     tester,
   ) async {
+    // Each account is three rows now; the list is lazy, so the rows this
+    // test reaches need a surface tall enough to build them.
+    await tester.binding.setSurfaceSize(const Size(800, 2000));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
     var guestCredit = 0;
     final sent = <Map<String, Object?>>[];
     final api = SettingsApi(MemoryStore(), (path, body) async {
@@ -217,6 +238,10 @@ void main() {
   testWidgets(
     'an account whose Applets setting could not be read is unreadable, not off',
     (tester) async {
+      // Each account is three rows now; the list is lazy, so the rows this
+      // test reaches need a surface tall enough to build them.
+      await tester.binding.setSurfaceSize(const Size(800, 2000));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
       var reads = 0;
       final api = SettingsApi(MemoryStore(), (path, body) async {
         if (path == '/api/admin/policy') return policy();

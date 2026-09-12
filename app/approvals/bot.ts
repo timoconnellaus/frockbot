@@ -11,6 +11,11 @@ import {
   machineSeam,
 } from "@frockbot/app/machine/bot";
 import type { MachineIntentRecordV1 } from "@frockbot/app/machine/intent";
+import {
+  settlePluginIntentV1,
+  type PluginIntentRecordV1,
+} from "@frockbot/app/plugins/approval";
+import { applyApprovedPluginIntentV1 } from "@frockbot/app/plugins/authoring-bot";
 import { enqueuePendingBotInputV1 } from "@frockbot/app/routines/inbox-store";
 import {
   approvalKeyV1,
@@ -70,6 +75,8 @@ async function settleApproval(
   status: "recorded" | "replayed";
   /** Present when the card was a machine command's. */
   machineIntent?: MachineIntentRecordV1;
+  /** Present when the card was a Plugin publish or enable (ADR 0026). */
+  pluginIntent?: PluginIntentRecordV1;
 }> {
   const key = approvalKeyV1(approvalId);
   const at = new Date().toISOString();
@@ -111,10 +118,19 @@ async function settleApproval(
       decision,
       at,
     );
+    // ADR 0026: or a Plugin waiting to join the Composition and this Bot's
+    // enable map. Same rule: settled here, applied after the commit.
+    const pluginIntent = await settlePluginIntentV1(
+      transaction,
+      approvalId,
+      decision,
+      at,
+    );
     return {
       approval: decided,
       status: "recorded" as const,
       ...(machineIntent === undefined ? {} : { machineIntent }),
+      ...(pluginIntent === undefined ? {} : { pluginIntent }),
     };
   });
 }
@@ -181,6 +197,15 @@ export async function decideApproval(
       settled.machineIntent,
       machineSeam(state, identity),
     );
+  }
+  // A Plugin approval proposes the generation on the User and switches the
+  // Plugin on for this Bot — after the commit, idempotent on what the
+  // Composition already holds, so a retry never makes a second generation.
+  if (
+    settled.status === "recorded" &&
+    settled.pluginIntent?.decision === "approved"
+  ) {
+    await applyApprovedPluginIntentV1(state, identity, settled.pluginIntent);
   }
   return {
     schemaVersion: 1,

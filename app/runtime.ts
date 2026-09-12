@@ -100,6 +100,7 @@ import {
   type AppletsRuntimeHostV1,
 } from "@frockbot/applets/feature";
 export type { AppletsRuntimeHostV1 } from "@frockbot/applets/feature";
+import { createPluginsFeature } from "@frockbot/app/plugins/feature";
 
 export { FOUNDATION_MODEL, FOUNDATION_PROVIDER };
 import {
@@ -502,6 +503,9 @@ export function createFoundationHostedRuntimePackages(
       : []),
     ...(host.applets
       ? [runtimePackage("applets", createAppletsFeature(host.applets))]
+      : []),
+    ...(host.plugins
+      ? [runtimePackage("plugins", createPluginsFeature(host.plugins))]
       : []),
     runtimePackage(
       "credentials",

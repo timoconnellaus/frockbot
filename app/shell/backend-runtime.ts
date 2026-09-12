@@ -17,6 +17,7 @@ import type {
   ComputerProcessStorageV1,
 } from "@frockbot/computer/agent";
 import type { AppletsRuntimeHostV1 } from "@frockbot/applets/feature";
+import type { PluginAuthoringRuntimeHostV1 } from "@frockbot/app/plugins/feature";
 import type { BotTemplateRuntimeHostV1 } from "@frockbot/app/bot-template/agent";
 import type { FlockSelfRuntimeHostV1 } from "@frockbot/app/flock/agent";
 import type { ImageRuntimeHostV1 } from "@frockbot/app/image/agent";
@@ -171,6 +172,12 @@ export interface ShellHostedRuntimeHostV1 {
    * whose intent record has to name the Turn that asked for it.
    */
   applets?: AppletsRuntimeHostV1;
+  /**
+   * The Plugin authoring seam (ADR 0026), supplied by the Bot Durable Object
+   * for one admitted Turn behind the account's Plugin-authoring switch.
+   * Absent, and the `plugin_*` tools are not mounted at all.
+   */
+  plugins?: PluginAuthoringRuntimeHostV1;
 }
 
 /** What the Shell hands the application to mount one Turn's enabled Packages. */

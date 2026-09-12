@@ -293,7 +293,18 @@ class _AdminPageState extends State<AdminPage> {
     await grantCredit(userId, grant.cents, grant.reason);
   }
 
-  Future<void> setApplets(String userId, bool enabled) async {
+  Future<void> setApplets(String userId, bool enabled) =>
+      _setFeature(userId, {'applets': enabled});
+
+  /// The Plugin-authoring switch. The command always carries `applets`, so
+  /// the account's current value travels with it unchanged.
+  Future<void> setPluginAuthoring(
+    String userId,
+    bool enabled, {
+    required bool applets,
+  }) => _setFeature(userId, {'applets': applets, 'pluginAuthoring': enabled});
+
+  Future<void> _setFeature(String userId, Map<String, Object?> fields) async {
     if (busy) return;
     setState(() {
       busy = true;
@@ -305,7 +316,7 @@ class _AdminPageState extends State<AdminPage> {
         body: {
           'schemaVersion': 1,
           'type': 'user/set-features',
-          'applets': enabled,
+          ...fields,
         },
       );
       if (mounted) {
@@ -469,6 +480,7 @@ class _AdminPageState extends State<AdminPage> {
       return _unreadableAccount(userId, title, detail);
     }
     final enabled = features['applets'] == true;
+    final authoring = features['pluginAuthoring'] == true;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -480,6 +492,20 @@ class _AdminPageState extends State<AdminPage> {
             subtitle: detail.isEmpty ? null : Text(detail),
             value: enabled,
             onChanged: busy ? null : (value) => setApplets(userId, value),
+          ),
+        ),
+        // The account's Bots may write Plugins. Off keeps what they wrote.
+        identified(
+          AdminIds.pluginAuthoring(userId),
+          SwitchListTile(
+            contentPadding: const EdgeInsets.only(left: 16),
+            dense: true,
+            title: const Text('Bots may write Plugins'),
+            value: authoring,
+            onChanged: busy
+                ? null
+                : (value) =>
+                      setPluginAuthoring(userId, value, applets: enabled),
           ),
         ),
         _credit(account, userId, title),

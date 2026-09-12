@@ -78,6 +78,7 @@ describe("the Skill catalog", () => {
         { path: "managed/export-bot-template/SKILL.md" },
         { path: "managed/import-bot-template/SKILL.md" },
         { path: "managed/learn-from-demonstration/SKILL.md" },
+        { path: "managed/plugins/SKILL.md" },
       ],
     });
     expect(

@@ -368,6 +368,10 @@ abstract final class AdminIds {
   /// The retry under an account whose Applets setting could not be read.
   static String appletsRetry(String userId) => 'admin-applets-retry-$userId';
 
+  /// One account's Plugin-authoring switch (ADR 0026's master toggle).
+  static String pluginAuthoring(String userId) =>
+      'admin-plugin-authoring-$userId';
+
   /// One account's credit line and its Add credit door.
   static String credit(String userId) => 'admin-credit-$userId';
   static String addCredit(String userId) => 'admin-add-credit-$userId';

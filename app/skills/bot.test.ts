@@ -12,6 +12,9 @@ const TURN = { runId: "run-9", turnId: "turn-4", sessionId: "user-1:bot-1" };
  */
 function botState(options: {
   applets: boolean | "unreachable";
+  pluginAuthoring?: boolean;
+  /** The artifact bucket a Plugin's module is stored in; bound by default. */
+  artifacts?: boolean;
   workspace?: FakeWorkspace;
 }): ShellBotStateV1 {
   const rpc = {
@@ -22,6 +25,7 @@ function botState(options: {
       return Promise.resolve({
         schemaVersion: 1,
         applets: options.applets,
+        pluginAuthoring: options.pluginAuthoring ?? true,
         updatedAt: "2026-09-11T00:00:00.000Z",
         updatedBy: "owner",
       });
@@ -33,6 +37,7 @@ function botState(options: {
         idFromName: (name: string) => name,
         get: () => rpc,
       },
+      ...(options.artifacts === false ? {} : { APPLICATION_ARTIFACTS: {} }),
       ...(options.workspace ? { WORKSPACE_FILES: options.workspace } : {}),
     },
     authority: { validateIdentity: () => Promise.resolve() },
@@ -85,7 +90,36 @@ describe("the Bot Skills seam", () => {
       IDENTITY,
       TURN,
     );
-    expect(unreachable?.withheldManagedSlugs).toEqual(["applets"]);
+    expect(unreachable?.withheldManagedSlugs).toEqual(["applets", "plugins"]);
+  });
+
+  test("withholds the managed Plugins Skill exactly when authoring is off", async () => {
+    const workspace = new FakeWorkspace();
+    const off = await createBotSkillsHost(
+      botState({ applets: true, pluginAuthoring: false, workspace }),
+      IDENTITY,
+      TURN,
+    );
+    expect(off?.withheldManagedSlugs).toEqual(["plugins"]);
+    const on = await createBotSkillsHost(
+      botState({ applets: true, pluginAuthoring: true, workspace }),
+      IDENTITY,
+      TURN,
+    );
+    expect(on?.withheldManagedSlugs).toEqual([]);
+    // The Skill goes exactly where the tools go, and the tools need the
+    // bucket a published module is stored in.
+    const unbound = await createBotSkillsHost(
+      botState({
+        applets: true,
+        pluginAuthoring: true,
+        artifacts: false,
+        workspace,
+      }),
+      IDENTITY,
+      TURN,
+    );
+    expect(unbound?.withheldManagedSlugs).toEqual(["plugins"]);
   });
 });
 

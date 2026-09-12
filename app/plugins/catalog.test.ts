@@ -146,9 +146,11 @@ describe("which plugins one Bot runs", () => {
     expect(pluginRunsForBotV1("default-off", "c", on)).toBe(true);
     expect(pluginRunsForBotV1("admin-gated", "d", none)).toBe(true);
     expect(pluginRunsForBotV1("admin-gated", "d", off)).toBe(false);
-    // A plugin a Bot wrote is not in the catalog: on unless switched off.
-    expect(pluginRunsForBotV1(undefined, "x", none)).toBe(true);
+    // A plugin a Bot wrote is not in the catalog: off until a person — the
+    // approval card, or a sibling Bot's Plugins page — switches it on.
+    expect(pluginRunsForBotV1(undefined, "x", none)).toBe(false);
     expect(pluginRunsForBotV1(undefined, "x", off)).toBe(false);
+    expect(pluginRunsForBotV1(undefined, "x", on)).toBe(true);
     expect(pluginSwitchableV1("locked")).toBe(false);
     expect(pluginSwitchableV1("default-on")).toBe(true);
     expect(pluginSwitchableV1(undefined)).toBe(true);
@@ -174,6 +176,13 @@ describe("which plugins one Bot runs", () => {
       enabledSeededPluginIdsV1(
         [{ packageId: "authored" }, { packageId: "quiet" }],
         enablement({ quiet: true }),
+        catalog,
+      ),
+    ).toEqual(["quiet"]);
+    expect(
+      enabledSeededPluginIdsV1(
+        [{ packageId: "authored" }, { packageId: "quiet" }],
+        enablement({ quiet: true, authored: true }),
         catalog,
       ),
     ).toEqual(["authored", "quiet"]);
