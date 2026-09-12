@@ -6,6 +6,14 @@
  * the app Worker encodes a request here, the Node container decodes it here,
  * and the container's answer travels back through the same decoders.
  *
+ * The service builds two kinds of thing. An Applet — `server.ts` and `ui.tsx`
+ * — comes back as a server module, a page and a manifest of the tools the
+ * booted server declared. A Plugin (ADR 0026) — `plugin.ts` beside a
+ * `plugin.json` — comes back as one ESM module and a manifest of what that
+ * module exports: its tools, hooks, services and triggers, read by running it.
+ * The request says which with `kind`; the response says which by what it
+ * carries.
+ *
  * Source travels inline. The service holds no storage authority — it is given
  * bytes and returns bytes, and the caller hash-verifies and stores them — so
  * the request carries the whole Applet and the response carries the whole
@@ -32,7 +40,7 @@ export const APPLET_BUILD_ROUTE = "/build";
 export const APPLET_BUILD_LIMITS = {
   /** Identifiers: the effect id. */
   identifier: 200,
-  /** `<ownerUserId>.<slug>`, as `APPLET_ID_V1` mints it. */
+  /** `<ownerUserId>.<slug>`, as `APPLET_ID_V1` mints it; a Plugin id is shorter. */
   appletId: 129,
   /** A source path relative to the Applet's root. */
   path: 256,
@@ -55,10 +63,16 @@ export const APPLET_BUILD_LIMITS = {
   serverBytes: 2 * 1_024 * 1_024,
   uiBytes: 4 * 1_024 * 1_024,
   manifestBytes: 64 * 1_024,
-  /** Declared tools, matching `APPLET_MAX_TOOLS_V1`. */
+  /** Declared tools, matching `APPLET_MAX_TOOLS_V1` and the Plugin descriptor. */
   tools: 64,
   toolName: 64,
   toolDescription: 1_024,
+  /** A Plugin's built module. One file, bundled, no imports. */
+  moduleBytes: 2 * 1_024 * 1_024,
+  /** Hooks, services and triggers one Plugin module may export. */
+  hooks: 6,
+  services: 32,
+  triggers: 16,
   /** Diagnostics one failure may carry. */
   diagnostics: 200,
   /** Failure text on a diagnostic or a problem response. */
@@ -66,8 +80,23 @@ export const APPLET_BUILD_LIMITS = {
 } as const;
 
 const APPLET_ID = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,95}\.[a-z0-9-]{1,64}$/;
+/** A Plugin id, as `PluginDescriptorV1.id` is shaped. */
+const PLUGIN_ID = /^[a-z][a-z0-9-]{0,63}$/;
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:@-]*$/;
 const TOOL_NAME = /^[a-z][a-z0-9_]{0,63}$/;
+const SERVICE_NAME = /^[a-z][a-z0-9-]{0,63}$/;
+const TRIGGER_NAME = /^[a-z][a-z0-9_-]{0,63}$/;
+/** The loop events a Plugin may hook, as `BOT_ISOLATE_HOOK_EVENTS_V1` lists them. */
+export const PLUGIN_BUILD_HOOK_EVENTS_V1 = [
+  "system-prompt/assemble",
+  "agent/tool-exposure",
+  "agent/request",
+  "tools/pre-execute",
+  "tools/post-execute",
+  "agent/turn-stopping",
+] as const;
+export type PluginBuildHookEventV1 =
+  (typeof PLUGIN_BUILD_HOOK_EVENTS_V1)[number];
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/;
 
 export type AppletBuildErrorCodeV1 =
@@ -90,6 +119,11 @@ const ERROR_CODES: readonly AppletBuildErrorCodeV1[] = [
  * bundle and to ask the built Durable Object what it declares.
  */
 export type AppletBuildModeV1 = "check" | "build";
+
+/** What the posted source is: an Applet, or a Plugin (ADR 0026). */
+export type AppletBuildKindV1 = "applet" | "plugin";
+
+const KINDS: readonly AppletBuildKindV1[] = ["applet", "plugin"];
 
 /** Where a failed run stopped. */
 export type AppletBuildStageV1 =
@@ -118,7 +152,9 @@ export interface AppletBuildRequestV1 {
    * a retry under the same key re-derives the same artifact.
    */
   effectId: string;
-  appletId: string;
+  kind: AppletBuildKindV1;
+  /** The Applet's id, or the Plugin's. Shaped by `kind`. */
+  id: string;
   mode: AppletBuildModeV1;
   files: AppletBuildSourceFileV1[];
 }
@@ -141,6 +177,21 @@ export interface AppletBuildManifestV1 {
   contract: 1;
   tools: AppletBuildToolDeclarationV1[];
   hashes: { server: string; ui: string };
+}
+
+/**
+ * What a built Plugin module exports, read by running it. The app compares
+ * this with the Plugin's own `plugin.json` before anything is stored: a
+ * descriptor that promises a tool the module does not export is refused at
+ * publish, not discovered at mount.
+ */
+export interface PluginBuildManifestV1 {
+  contract: 1;
+  tools: AppletBuildToolDeclarationV1[];
+  hooks: PluginBuildHookEventV1[];
+  services: string[];
+  triggers: string[];
+  hashes: { module: string };
 }
 
 export interface AppletBuildDiagnosticV1 {
@@ -167,6 +218,13 @@ export interface AppletBuiltResponseV1 {
   ui?: string;
 }
 
+/** A Plugin build that produced its module. A passing check carries none. */
+export interface PluginBuiltResponseV1 {
+  status: "built";
+  manifest: PluginBuildManifestV1;
+  module: string;
+}
+
 export interface AppletBuildFailedResponseV1 {
   status: "failed";
   stage: AppletBuildStageV1;
@@ -175,7 +233,14 @@ export interface AppletBuildFailedResponseV1 {
 
 /** A run that finished, either way. */
 export type AppletBuildResponseV1 =
-  AppletBuiltResponseV1 | AppletBuildFailedResponseV1;
+  AppletBuiltResponseV1 | PluginBuiltResponseV1 | AppletBuildFailedResponseV1;
+
+/** True for the Plugin shape of a built response. */
+export function isPluginBuiltResponseV1(
+  response: AppletBuildResponseV1,
+): response is PluginBuiltResponseV1 {
+  return response.status === "built" && "module" in response;
+}
 
 /** The one failure shape the service returns on every non-2xx answer. */
 export interface AppletBuildProblemV1 {
@@ -312,7 +377,7 @@ export function decodeAppletBuildRequestV1(
   const value = object(input, "Applet build request");
   exactly(
     value,
-    ["version", "effectId", "appletId", "mode", "files"],
+    ["version", "effectId", "kind", "id", "mode", "files"],
     "Applet build request",
   );
   if (value.version !== APPLET_BUILD_PROTOCOL_VERSION) {
@@ -324,19 +389,27 @@ export function decodeAppletBuildRequestV1(
     "Applet build effect id",
   );
   if (!IDENTIFIER.test(effectId)) fail("Applet build effect id is invalid");
-  const appletId = boundedString(
-    value.appletId,
+  if (!KINDS.includes(value.kind as AppletBuildKindV1)) {
+    fail("Applet build kind must be applet or plugin");
+  }
+  const kind = value.kind as AppletBuildKindV1;
+  const noun = kind === "plugin" ? "Plugin" : "Applet";
+  const id = boundedString(
+    value.id,
     APPLET_BUILD_LIMITS.appletId,
-    "Applet build applet id",
+    `${noun} build id`,
   );
-  if (!APPLET_ID.test(appletId)) fail("Applet build applet id is invalid");
+  if (!(kind === "plugin" ? PLUGIN_ID : APPLET_ID).test(id)) {
+    fail(`${noun} build id is invalid`);
+  }
   if (!MODES.includes(value.mode as AppletBuildModeV1)) {
     fail("Applet build mode must be check or build");
   }
   return {
     version: APPLET_BUILD_PROTOCOL_VERSION,
     effectId,
-    appletId,
+    kind,
+    id,
     mode: value.mode as AppletBuildModeV1,
     files: decodeFiles(value.files),
   };
@@ -348,7 +421,8 @@ export function encodeAppletBuildRequestV1(
   return {
     version: APPLET_BUILD_PROTOCOL_VERSION,
     effectId: request.effectId,
-    appletId: request.appletId,
+    kind: request.kind,
+    id: request.id,
     mode: request.mode,
     files: request.files.map((file) => ({ path: file.path, text: file.text })),
   };
@@ -545,6 +619,78 @@ export function decodeAppletBuildManifestV1(
   };
 }
 
+function boundedNames(
+  input: unknown,
+  pattern: RegExp,
+  limit: number,
+  label: string,
+): string[] {
+  if (!Array.isArray(input)) fail(`${label} must be an array`);
+  const entries = input as unknown[];
+  if (entries.length > limit) exceeded(`${label} exceeds ${limit} entries`);
+  const names = entries.map((entry, index) => {
+    const name = boundedString(entry, 64, `${label}[${index}]`);
+    if (!pattern.test(name)) fail(`${label}[${index}] is invalid`);
+    return name;
+  });
+  if (new Set(names).size !== names.length) fail(`${label} repeats a name`);
+  return names;
+}
+
+export function decodePluginBuildManifestV1(
+  input: unknown,
+): PluginBuildManifestV1 {
+  const label = "Plugin build manifest";
+  const value = object(input, label);
+  exactly(
+    value,
+    ["contract", "tools", "hooks", "services", "triggers", "hashes"],
+    label,
+  );
+  if (value.contract !== 1) fail(`${label} contract is not 1`);
+  if (!Array.isArray(value.tools)) fail(`${label} tools must be an array`);
+  if (value.tools.length > APPLET_BUILD_LIMITS.tools) {
+    exceeded(`${label} declares more than ${APPLET_BUILD_LIMITS.tools} tools`);
+  }
+  const tools = value.tools.map((tool, index) =>
+    decodeAppletBuildToolDeclarationV1(tool, `Plugin build tool ${index}`),
+  );
+  if (new Set(tools.map((tool) => tool.name)).size !== tools.length) {
+    fail(`${label} repeats a tool name`);
+  }
+  if (!Array.isArray(value.hooks)) fail(`${label} hooks must be an array`);
+  if (value.hooks.length > APPLET_BUILD_LIMITS.hooks) {
+    exceeded(`${label} declares more than ${APPLET_BUILD_LIMITS.hooks} hooks`);
+  }
+  const hooks = value.hooks.map((hook) => {
+    if (!PLUGIN_BUILD_HOOK_EVENTS_V1.includes(hook as PluginBuildHookEventV1)) {
+      fail(`${label} names a hook this contract does not serve`);
+    }
+    return hook as PluginBuildHookEventV1;
+  });
+  if (new Set(hooks).size !== hooks.length) fail(`${label} repeats a hook`);
+  const hashes = object(value.hashes, `${label} hashes`);
+  exactly(hashes, ["module"], `${label} hashes`);
+  return {
+    contract: 1,
+    tools,
+    hooks,
+    services: boundedNames(
+      value.services,
+      SERVICE_NAME,
+      APPLET_BUILD_LIMITS.services,
+      `${label} services`,
+    ),
+    triggers: boundedNames(
+      value.triggers,
+      TRIGGER_NAME,
+      APPLET_BUILD_LIMITS.triggers,
+      `${label} triggers`,
+    ),
+    hashes: { module: hash(hashes.module, `${label} module hash`) },
+  };
+}
+
 export function decodeAppletBuildDiagnosticV1(
   input: unknown,
   label = "Applet build diagnostic",
@@ -596,6 +742,18 @@ export function decodeAppletBuildResponseV1(
     };
   }
   if (value.status !== "built") fail("Applet build response status is invalid");
+  if (Object.hasOwn(value, "module")) {
+    exactly(value, ["status", "manifest", "module"], "Plugin build response");
+    return {
+      status: "built",
+      manifest: decodePluginBuildManifestV1(value.manifest),
+      module: boundedText(
+        value.module,
+        APPLET_BUILD_LIMITS.moduleBytes,
+        "Plugin build module artifact",
+      ),
+    };
+  }
   exactly(
     value,
     ["status", "manifest", "server", "ui"],
@@ -637,6 +795,13 @@ export function encodeAppletBuildResponseV1(
         message: diagnostic.message,
         severity: diagnostic.severity,
       })),
+    };
+  }
+  if (isPluginBuiltResponseV1(response)) {
+    return {
+      status: "built",
+      manifest: response.manifest,
+      module: response.module,
     };
   }
   if (response.manifest === undefined) return { status: "built" };

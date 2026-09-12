@@ -1,0 +1,25 @@
+{
+  "id": "__PLUGIN_ID__",
+  "displayName": "__PLUGIN_NAME__",
+  "version": "1",
+  "contractVersion": 4,
+  "tools": [
+    {
+      "name": "note_count",
+      "description": "How many notes this Plugin has kept for this Bot.",
+      "inputSchema": { "type": "object", "properties": {} }
+    },
+    {
+      "name": "note_add",
+      "description": "Keep one short note for this Bot.",
+      "inputSchema": {
+        "type": "object",
+        "properties": { "text": { "type": "string" } },
+        "required": ["text"]
+      }
+    }
+  ],
+  "hooks": [],
+  "grants": ["storage"],
+  "contextKeys": ["user", "bot", "session"]
+}

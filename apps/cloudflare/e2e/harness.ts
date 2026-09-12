@@ -39,6 +39,7 @@ import { fileURLToPath } from "node:url";
 import {
   APPLET_BUILD_ROUTE,
   APPLET_BUILD_TOKEN_HEADER,
+  encodeAppletBuildRequestV1,
 } from "@frockbot/applets/build-contract";
 import { reserveFreePort } from "./ports.ts";
 import {
@@ -978,13 +979,16 @@ async function waitForAppletBuild(baseUrl: string): Promise<void> {
           "content-type": "application/json",
           [APPLET_BUILD_TOKEN_HEADER]: E2E_APPLET_BUILD_TOKEN,
         },
-        body: JSON.stringify({
-          version: 1,
-          effectId: "e2e-harness-warmup",
-          appletId: "e2e.warmup",
-          mode: "check",
-          files: [{ path: "server.ts", text: "export default {};\n" }],
-        }),
+        body: JSON.stringify(
+          encodeAppletBuildRequestV1({
+            version: 1,
+            effectId: "e2e-harness-warmup",
+            kind: "applet",
+            id: "e2e.warmup",
+            mode: "check",
+            files: [{ path: "server.ts", text: "export default {};\n" }],
+          }),
+        ),
       });
       const body = (await response.json()) as { status?: string };
       if (response.ok && typeof body.status === "string") return;

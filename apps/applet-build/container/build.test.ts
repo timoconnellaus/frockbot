@@ -14,6 +14,7 @@ import { describe, expect, test } from "bun:test";
 import type { AppletBuildSourceFileV1 } from "@frockbot/applets/build-contract";
 import { runAppletBuildV1 } from "@frockbot/applet-sdk/build";
 import { scaffoldTemplateV1 } from "../../../applets/sdk/test/scaffold.ts";
+import { scaffoldPluginTemplateV1 } from "../../../applets/sdk/test/plugin-scaffold.ts";
 import { buildAppletRequestV1 } from "./build.ts";
 
 const APPLET_ID = "vgpqfaCcwnPlzjYdb2mI.weekly-todos";
@@ -36,14 +37,15 @@ describe("the Applet build service", () => {
     const service = await buildAppletRequestV1({
       version: 1,
       effectId: "effect-1",
-      appletId: APPLET_ID,
+      kind: "applet",
+      id: APPLET_ID,
       mode: "build",
       files,
     });
     const local = await runAppletBuildV1(directory, { mode: "build" });
 
     expect(service.status).toBe("built");
-    if (service.status !== "built") return;
+    if (service.status !== "built" || "module" in service) return;
     if (local.status !== "built") throw new Error("the local build failed");
     expect(service.manifest?.hashes).toEqual(local.manifest.hashes);
     expect(service.manifest?.tools.map((tool) => tool.name)).toEqual(
@@ -59,7 +61,8 @@ describe("the Applet build service", () => {
       await buildAppletRequestV1({
         version: 1,
         effectId: "effect-2",
-        appletId: APPLET_ID,
+        kind: "applet",
+        id: APPLET_ID,
         mode: "check",
         files,
       }),
@@ -72,7 +75,8 @@ describe("the Applet build service", () => {
     const noDescriptor = await buildAppletRequestV1({
       version: 1,
       effectId: "effect-3",
-      appletId: APPLET_ID,
+      kind: "applet",
+      id: APPLET_ID,
       mode: "check",
       files: files.filter((file) => file.path !== "applet.json"),
     });
@@ -84,7 +88,8 @@ describe("the Applet build service", () => {
     const badTypes = await buildAppletRequestV1({
       version: 1,
       effectId: "effect-4",
-      appletId: APPLET_ID,
+      kind: "applet",
+      id: APPLET_ID,
       mode: "check",
       files: files.map((file) =>
         file.path === "server.ts"
@@ -100,7 +105,8 @@ describe("the Applet build service", () => {
     const network = await buildAppletRequestV1({
       version: 1,
       effectId: "effect-5",
-      appletId: APPLET_ID,
+      kind: "applet",
+      id: APPLET_ID,
       mode: "check",
       files: files.map((file) =>
         file.path === "ui.tsx"
@@ -112,5 +118,80 @@ describe("the Applet build service", () => {
       ),
     });
     expect(network).toMatchObject({ status: "failed", stage: "lint" });
+  }, 180_000);
+
+  test("builds a Plugin from the same route: one module, and what it exports", async () => {
+    const { files } = await scaffoldPluginTemplateV1({
+      prefix: "plugin-build-golden-",
+    });
+    const built = await buildAppletRequestV1({
+      version: 1,
+      effectId: "effect-6",
+      kind: "plugin",
+      id: "notes",
+      mode: "build",
+      files,
+    });
+    expect(built.status).toBe("built");
+    if (built.status !== "built" || !("module" in built)) {
+      throw new Error("expected a Plugin build");
+    }
+    expect(built.manifest.tools.map((tool) => tool.name)).toEqual([
+      "note_count",
+      "note_add",
+    ]);
+    expect(built.manifest.hashes.module).toMatch(/^[0-9a-f]{64}$/);
+    expect(
+      await buildAppletRequestV1({
+        version: 1,
+        effectId: "effect-7",
+        kind: "plugin",
+        id: "notes",
+        mode: "check",
+        files,
+      }),
+    ).toEqual({ status: "built" });
+    expect(
+      await buildAppletRequestV1({
+        version: 1,
+        effectId: "effect-8",
+        kind: "plugin",
+        id: "weather",
+        mode: "check",
+        files,
+      }),
+    ).toMatchObject({ status: "failed", stage: "descriptor" });
+  }, 180_000);
+
+  test("refuses a Plugin manifest over the ceiling a publish stores", async () => {
+    const { files } = await scaffoldPluginTemplateV1({
+      prefix: "plugin-build-oversize-",
+    });
+    const oversize = await buildAppletRequestV1({
+      version: 1,
+      effectId: "effect-9",
+      kind: "plugin",
+      id: "notes",
+      mode: "build",
+      files: files.map((file) =>
+        file.path === "plugin.ts"
+          ? {
+              ...file,
+              text: [
+                'import type { PluginTool } from "@frockbot/applet-sdk/plugin";',
+                "export const tools: PluginTool[] = [",
+                '  { name: "big", description: "Big.", inputSchema: { type: "object", title: "x".repeat(120_000) } },',
+                "];",
+                'export const execute = () => "x";',
+                "",
+              ].join("\n"),
+            }
+          : file,
+      ),
+    });
+    expect(oversize).toMatchObject({ status: "failed", stage: "bundle" });
+    if (oversize.status === "failed") {
+      expect(oversize.diagnostics[0]?.message).toContain("manifest.json");
+    }
   }, 180_000);
 });

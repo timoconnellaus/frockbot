@@ -35,6 +35,7 @@ import type {
 import {
   APPLET_BUILD_LIMITS,
   APPLET_BUILD_PROTOCOL_VERSION,
+  isPluginBuiltResponseV1,
   type AppletBuildDiagnosticV1,
   type AppletBuildManifestV1,
   type AppletBuildRequestV1,
@@ -663,7 +664,8 @@ export function createAppletCapabilityHostV1(
     const request: AppletBuildRequestV1 = {
       version: APPLET_BUILD_PROTOCOL_VERSION,
       effectId,
-      appletId,
+      kind: "applet",
+      id: appletId,
       mode: "build",
       files: source.files,
     };
@@ -684,6 +686,7 @@ export function createAppletCapabilityHostV1(
       };
     }
     if (
+      isPluginBuiltResponseV1(response) ||
       !response.manifest ||
       response.server === undefined ||
       response.ui === undefined

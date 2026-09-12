@@ -97,7 +97,7 @@ export async function routeAppletBuildRequestV1(
   if (!decoded.ok) return decoded.response;
 
   const container = resolveContainer(
-    appletBuildShardV1(decoded.value.appletId, configuration.shards),
+    appletBuildShardV1(decoded.value.id, configuration.shards),
   );
   return container.fetch(
     new Request(`http://applet-build.internal${APPLET_BUILD_ROUTE}`, {

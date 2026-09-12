@@ -23,7 +23,8 @@ const BODY = JSON.stringify(
   encodeAppletBuildRequestV1({
     version: 1,
     effectId: "effect-1",
-    appletId: APPLET_ID,
+    kind: "applet",
+    id: APPLET_ID,
     mode: "build",
     files: [
       { path: "applet.json", text: "{}" },
