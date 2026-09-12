@@ -359,7 +359,7 @@ inert to the pointer, to assistive technology and to its own tickers, and one
 scrim serves whichever drawer is open.
 
 **The slot registry.** `lib/shell/slots.dart` is where a feature reaches the
-shell: three named regions — `right-panel`, `overlays`, `header-actions` — that
+shell: two named regions — `right-panel` and `overlays` — that
 a feature registers a `WidgetBuilder` into and the shell draws where the region
 belongs. An empty region draws nothing, so the layout reserves no space for a
 feature that is not there. Trust chrome is never

@@ -98,14 +98,8 @@ class ShellSlotScope extends InheritedNotifier<ShellSlots> {
 /// layout does not reserve space for a feature that is not there.
 class SlotRegion extends StatelessWidget {
   final ShellSlot slot;
-  final Axis direction;
   final double gap;
-  const SlotRegion(
-    this.slot, {
-    super.key,
-    this.direction = Axis.vertical,
-    this.gap = 12,
-  });
+  const SlotRegion(this.slot, {super.key, this.gap = 12});
 
   @override
   Widget build(BuildContext context) {
@@ -114,23 +108,12 @@ class SlotRegion extends StatelessWidget {
     if (children.isEmpty) return const SizedBox.shrink();
     final spaced = <Widget>[];
     for (final child in children) {
-      if (spaced.isNotEmpty) {
-        spaced.add(
-          direction == Axis.vertical
-              ? SizedBox(height: gap)
-              : SizedBox(width: gap),
-        );
-      }
+      if (spaced.isNotEmpty) spaced.add(SizedBox(height: gap));
       spaced.add(child);
     }
     return identified(
       ShellIds.slot(slot.id),
-      direction == Axis.vertical
-          ? Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: spaced,
-            )
-          : Row(mainAxisSize: MainAxisSize.min, children: spaced),
+      Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: spaced),
     );
   }
 }
