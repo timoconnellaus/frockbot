@@ -14,6 +14,7 @@
 import {
   BOT_ISOLATE_HOOK_EVENTS_V1,
   ISOLATE_CONTRACT_VERSION,
+  MAX_FAILURE_REASON_V1,
   type BotPackageContextV1,
 } from "@frockbot/core/contracts";
 
@@ -315,7 +316,7 @@ export const BOT_ISOLATE_HOOK_VALUE_KEYS_V1 = {
 
 /** How an error anywhere in the index is reduced to text for the kernel. */
 export const BOT_ISOLATE_ERROR_TEXT_SOURCE = `function errorText(error) {
-  return String((error && error.message) || error);
+  return String((error && error.message) || error).slice(0, ${MAX_FAILURE_REASON_V1});
 }`;
 
 /**

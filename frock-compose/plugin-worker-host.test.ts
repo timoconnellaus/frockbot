@@ -560,6 +560,39 @@ describe("what the worker reports at mount", () => {
     expect(subject.namespaces).toEqual(["weather", "absent"]);
   });
 
+  test("a plugin whose reported entry cannot be decoded fails alone", async () => {
+    const subject = harness({
+      health: (plugins) => ({
+        schemaVersion: 1,
+        contractVersion: ISOLATE_CONTRACT_VERSION,
+        plugins: plugins.map((pluginId) =>
+          pluginId === "greeter"
+            ? healthy(pluginId, {
+                tools: [
+                  {
+                    name: "reverse_text",
+                    description: "x".repeat(3_000),
+                    inputSchema: { type: "object" },
+                    idempotent: true,
+                  },
+                ],
+              })
+            : healthy(pluginId),
+        ),
+      }),
+    });
+    const prepared = await subject.host.mount([
+      member("weather"),
+      member("greeter", { contentHash: "c".repeat(64) }),
+    ]);
+    expect(prepared.mounted).toEqual(["weather"]);
+    expect(
+      prepared.failures.map((failure) => [failure.pluginId, failure.phase]),
+    ).toEqual([["greeter", "health"]]);
+    await (await prepared.commit()).dispose();
+    expect(subject.namespaces).toEqual(["weather"]);
+  });
+
   test("a consumer is excluded when its provider fails health", async () => {
     const subject = harness({
       health: (plugins) => ({

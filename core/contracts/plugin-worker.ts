@@ -32,7 +32,7 @@ import type { PluginServiceV1 } from "./plugin-descriptor.js";
 const PLUGIN_ID = /^[a-z][a-z0-9-]{0,63}$/;
 const PLUGIN_TRIGGER_NAME = /^[a-z][a-z0-9_-]{0,63}$/;
 const MAX_PLUGINS_V1 = 64;
-const MAX_FAILURE_REASON_V1 = 1_024;
+export const MAX_FAILURE_REASON_V1 = 1_024;
 const MAX_TRIGGER_HEADERS_V1 = 64;
 const MAX_TRIGGER_HEADER_BYTES_V1 = 8_192;
 const MAX_TRIGGER_BODY_BYTES_V1 = 1_000_000;
@@ -290,85 +290,137 @@ export function decodePluginWorkerHealthV1(
     value.contractVersion,
     label,
   );
-  const plugins = value.plugins.map((entry, index) => {
+  // A report entry is decoded on its own so a single Plugin that reports
+  // something out of bounds fails only itself: it becomes a not-ok entry
+  // carrying the decode error, which the host charges to that Plugin at
+  // `health` while its siblings still mount. An entry too broken to even name
+  // a Plugin is dropped, and every Plugin that expected it is then missing
+  // from the report, which the host also reports one Plugin at a time.
+  const plugins: PluginWorkerPluginHealthV1[] = [];
+  for (const [index, entry] of value.plugins.entries()) {
     const itemLabel = `${label}.plugins[${index}]`;
-    const plugin = record(entry, itemLabel);
-    exactKeys(
-      plugin,
-      [
-        "pluginId",
-        "ok",
-        "tools",
-        // Hooks are a contract-3 capability; an older worker does not name them.
-        ...(contractVersion >= 3 ? ["hooks"] : []),
-        "provides",
-        "consumes",
-        "triggers",
-      ],
-      itemLabel,
-      ["reason"],
-    );
-    if (typeof plugin.ok !== "boolean") {
-      throw new Error(`${itemLabel}.ok must be a boolean`);
-    }
-    if ((plugin.reason !== undefined) === plugin.ok) {
-      throw new Error(`${itemLabel}.reason is present exactly when not ok`);
-    }
-    // The per-plugin tool and hook lists are the single-isolate health report's
-    // shape, decoded by the decoder that already knows its bounds.
-    const health: IsolateHealthV1 = decodeIsolateHealthV1(
-      {
-        schemaVersion: 1,
-        ok: plugin.ok,
-        packageId: plugin.pluginId,
-        contractVersion,
-        tools: plugin.tools,
-        ...(contractVersion >= 3 ? { hooks: plugin.hooks } : {}),
-      },
-      itemLabel,
-    );
-    if (!Array.isArray(plugin.triggers) || plugin.triggers.length > 16) {
-      throw new Error(`${itemLabel}.triggers must be a bounded array`);
-    }
-    const triggers = plugin.triggers.map((trigger, triggerIndex) => {
-      const name = boundedString(
-        trigger,
-        `${itemLabel}.triggers[${triggerIndex}]`,
-        64,
+    try {
+      plugins.push(
+        decodePluginHealthEntryV1(entry, contractVersion, itemLabel),
       );
-      if (!PLUGIN_TRIGGER_NAME.test(name)) {
-        throw new Error(`${itemLabel}.triggers[${triggerIndex}] is invalid`);
+    } catch (error) {
+      const named = entryPluginId(entry);
+      if (named !== undefined) {
+        plugins.push({
+          pluginId: named,
+          ok: false,
+          reason: failureReason(error),
+          tools: [],
+          hooks: [],
+          provides: [],
+          consumes: [],
+          triggers: [],
+        });
       }
-      return name;
-    });
-    if (new Set(triggers).size !== triggers.length) {
-      throw new Error(`${itemLabel}.triggers contains duplicates`);
     }
-    return {
-      pluginId: pluginId(plugin.pluginId, `${itemLabel}.pluginId`),
-      ok: plugin.ok,
-      ...(plugin.reason === undefined
-        ? {}
-        : {
-            reason: boundedString(
-              plugin.reason,
-              `${itemLabel}.reason`,
-              MAX_FAILURE_REASON_V1,
-            ),
-          }),
-      tools: health.tools,
-      hooks: health.hooks ?? [],
-      provides: decodeServices(plugin.provides, `${itemLabel}.provides`),
-      consumes: decodeServices(plugin.consumes, `${itemLabel}.consumes`),
-      triggers,
-    };
-  });
+  }
   if (
     new Set(plugins.map((plugin) => plugin.pluginId)).size !== plugins.length
   ) {
     throw new Error(`${label}.plugins contains duplicate ids`);
   }
   return { schemaVersion: 1, contractVersion, plugins };
+}
+
+/** The Plugin an entry names, when the entry names one decodably. */
+function entryPluginId(entry: unknown): string | undefined {
+  try {
+    return pluginId(
+      (entry as { pluginId?: unknown }).pluginId,
+      "plugin worker health plugin id",
+    );
+  } catch {
+    return undefined;
+  }
+}
+
+function failureReason(error: unknown): string {
+  return (error instanceof Error ? error.message : String(error)).slice(
+    0,
+    MAX_FAILURE_REASON_V1,
+  );
+}
+
+function decodePluginHealthEntryV1(
+  entry: unknown,
+  contractVersion: number,
+  itemLabel: string,
+): PluginWorkerPluginHealthV1 {
+  const plugin = record(entry, itemLabel);
+  exactKeys(
+    plugin,
+    [
+      "pluginId",
+      "ok",
+      "tools",
+      // Hooks are a contract-3 capability; an older worker does not name them.
+      ...(contractVersion >= 3 ? ["hooks"] : []),
+      "provides",
+      "consumes",
+      "triggers",
+    ],
+    itemLabel,
+    ["reason"],
+  );
+  if (typeof plugin.ok !== "boolean") {
+    throw new Error(`${itemLabel}.ok must be a boolean`);
+  }
+  if ((plugin.reason !== undefined) === plugin.ok) {
+    throw new Error(`${itemLabel}.reason is present exactly when not ok`);
+  }
+  // The per-plugin tool and hook lists are the single-isolate health report's
+  // shape, decoded by the decoder that already knows its bounds.
+  const health: IsolateHealthV1 = decodeIsolateHealthV1(
+    {
+      schemaVersion: 1,
+      ok: plugin.ok,
+      packageId: plugin.pluginId,
+      contractVersion,
+      tools: plugin.tools,
+      ...(contractVersion >= 3 ? { hooks: plugin.hooks } : {}),
+    },
+    itemLabel,
+  );
+  if (!Array.isArray(plugin.triggers) || plugin.triggers.length > 16) {
+    throw new Error(`${itemLabel}.triggers must be a bounded array`);
+  }
+  const triggers = plugin.triggers.map((trigger, triggerIndex) => {
+    const name = boundedString(
+      trigger,
+      `${itemLabel}.triggers[${triggerIndex}]`,
+      64,
+    );
+    if (!PLUGIN_TRIGGER_NAME.test(name)) {
+      throw new Error(`${itemLabel}.triggers[${triggerIndex}] is invalid`);
+    }
+    return name;
+  });
+  if (new Set(triggers).size !== triggers.length) {
+    throw new Error(`${itemLabel}.triggers contains duplicates`);
+  }
+  return {
+    pluginId: pluginId(plugin.pluginId, `${itemLabel}.pluginId`),
+    ok: plugin.ok,
+    ...(plugin.reason === undefined
+      ? {}
+      : {
+          reason: boundedString(
+            plugin.reason,
+            `${itemLabel}.reason`,
+            MAX_FAILURE_REASON_V1,
+          ),
+        }),
+    tools: health.tools,
+    hooks: health.hooks ?? [],
+    provides: decodeServices(plugin.provides, `${itemLabel}.provides`),
+    consumes: decodeServices(plugin.consumes, `${itemLabel}.consumes`),
+    triggers,
+  };
 }
 
 export function decodePluginWorkerHookInvocationV1(

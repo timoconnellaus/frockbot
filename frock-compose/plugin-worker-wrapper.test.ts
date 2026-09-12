@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { BOT_ISOLATE_CONTEXT_KEYS_V1 } from "@frockbot/core/contracts";
+import {
+  BOT_ISOLATE_CONTEXT_KEYS_V1,
+  decodePluginWorkerHookResultV1,
+} from "@frockbot/core/contracts";
 import {
   BOT_ISOLATE_DEADLINE_SOURCE,
   BOT_ISOLATE_ERROR_TEXT_SOURCE,
@@ -217,6 +220,24 @@ describe("the generated wrapper's hook chain", () => {
     expect(result.failures[1]!.reason).toBe(
       "the hook chain exhausted its deadline of 150ms before this plugin ran",
     );
+  });
+
+  test("bounds a plugin's failure reason to what the kernel will decode", async () => {
+    const result = await runHookChain(
+      [
+        hookPlugin("provider", () => ["provider"]),
+        hookPlugin("consumer", () => {
+          throw new Error("x".repeat(4_000));
+        }),
+      ],
+      hookInvocation(1_000, ["provider", "consumer"]),
+      () => ({}),
+    );
+    const decoded = decodePluginWorkerHookResultV1(result);
+    expect(decoded.status).toBe("replaced");
+    expect(decoded.failures.map((failure) => failure.pluginId)).toEqual([
+      "consumer",
+    ]);
   });
 
   test("hands each plugin the deadline it actually has, not the chain's", async () => {

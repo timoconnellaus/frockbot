@@ -167,30 +167,33 @@ describe("plugin worker health", () => {
     });
     expect(health.contractVersion).toBe(2);
     expect(health.plugins[0]!.hooks).toEqual([]);
-    expect(() =>
+    expect(
       decodePluginWorkerHealthV1({
         schemaVersion: 1,
         contractVersion: 2,
         plugins: [healthyPlugin],
-      }),
-    ).toThrow(/invalid fields/);
+      }).plugins[0],
+    ).toMatchObject({
+      ok: false,
+      reason: expect.stringMatching(/invalid fields/),
+    });
   });
 
   test("a reason is present exactly when a plugin is not ok, and ids are unique", () => {
-    expect(() =>
+    expect(
       decodePluginWorkerHealthV1({
         schemaVersion: 1,
         contractVersion: 3,
         plugins: [{ ...healthyPlugin, reason: "fine" }],
-      }),
-    ).toThrow(/reason/);
-    expect(() =>
+      }).plugins[0],
+    ).toMatchObject({ ok: false, reason: expect.stringMatching(/reason/) });
+    expect(
       decodePluginWorkerHealthV1({
         schemaVersion: 1,
         contractVersion: 3,
         plugins: [{ ...healthyPlugin, ok: false }],
-      }),
-    ).toThrow(/reason/);
+      }).plugins[0],
+    ).toMatchObject({ ok: false, reason: expect.stringMatching(/reason/) });
     expect(() =>
       decodePluginWorkerHealthV1({
         schemaVersion: 1,
@@ -200,28 +203,38 @@ describe("plugin worker health", () => {
     ).toThrow(/duplicate/);
   });
 
-  test("refuses an undeclared hook, a bad trigger name and extra fields", () => {
-    expect(() =>
+  test("contains an undeclared hook, a bad trigger name or extra fields to the plugin that reported them", () => {
+    expect(
       decodePluginWorkerHealthV1({
         schemaVersion: 1,
         contractVersion: 3,
         plugins: [{ ...healthyPlugin, hooks: ["agent/request-error"] }],
-      }),
-    ).toThrow(/hooks/);
-    expect(() =>
+      }).plugins[0],
+    ).toMatchObject({ ok: false, reason: expect.stringMatching(/hooks/) });
+    expect(
       decodePluginWorkerHealthV1({
         schemaVersion: 1,
         contractVersion: 3,
         plugins: [{ ...healthyPlugin, triggers: ["Forecast Ready"] }],
-      }),
-    ).toThrow(/triggers/);
-    expect(() =>
+      }).plugins[0],
+    ).toMatchObject({ ok: false, reason: expect.stringMatching(/triggers/) });
+    expect(
       decodePluginWorkerHealthV1({
         schemaVersion: 1,
         contractVersion: 3,
         plugins: [{ ...healthyPlugin, extra: true }],
-      }),
-    ).toThrow(/invalid fields/);
+      }).plugins[0],
+    ).toMatchObject({
+      ok: false,
+      reason: expect.stringMatching(/invalid fields/),
+    });
+    expect(
+      decodePluginWorkerHealthV1({
+        schemaVersion: 1,
+        contractVersion: 3,
+        plugins: [{ ...healthyPlugin, pluginId: "Not An Id" }, healthyPlugin],
+      }).plugins.map((plugin) => plugin.pluginId),
+    ).toEqual(["weather"]);
   });
 });
 
