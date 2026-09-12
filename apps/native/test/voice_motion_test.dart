@@ -41,6 +41,13 @@ class FailingCloseSocket extends FakeVoiceSocket {
   }
 }
 
+/// A socket whose outgoing sink the peer or the OS has already closed, while
+/// the stream's `done` has not been delivered yet: sends throw, closing works.
+class ClosedSinkSocket extends FakeVoiceSocket {
+  @override
+  void sendText(String text) => throw StateError('sink');
+}
+
 void main() {
   test(
     'speech attacks smoothly and releases more gently at any refresh rate',
@@ -439,6 +446,40 @@ void main() {
         VoiceControlState.idle,
       );
       expect(socket.closeReason, 'end-button');
+      controller.dispose();
+      await settle();
+    },
+    timeout: const Timeout(Duration(seconds: 10)),
+  );
+
+  test(
+    'a goodbye frame that cannot be sent still ends the call and frees the '
+    'microphone',
+    () async {
+      final capture = FakeVoiceCapture();
+      final socket = ClosedSinkSocket();
+      final controller = AssistantSessionController(
+        openSocket: () async => socket,
+        capture: capture,
+        player: FakeVoicePlayer(),
+      );
+      await controller.start();
+      await settle();
+      expect(capture.starts, 1);
+
+      await controller.end(reason: 'lifecycle:paused');
+      expect(controller.phase, VoiceSessionPhase.ended);
+      expect(controller.active, isFalse);
+      expect(
+        voiceControlStateV1(
+          footerOpen: false,
+          sessionActive: controller.active,
+        ),
+        VoiceControlState.idle,
+      );
+      expect(capture.stops, 1);
+      expect(socket.closed, isTrue);
+      expect(socket.closeReason, 'lifecycle:paused');
       controller.dispose();
       await settle();
     },

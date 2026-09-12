@@ -380,7 +380,8 @@ class AssistantSessionController extends ChangeNotifier {
     }
     _generation++;
     _set(VoiceSessionPhase.ending);
-    _socket?.sendText(encodeAssistantEndCallV1());
+    final socket = _socket;
+    await _settled(() async => socket?.sendText(encodeAssistantEndCallV1()));
     await _teardown(reason: reason);
     _status = VoiceStatusV1.idle;
     _set(VoiceSessionPhase.ended);
@@ -427,7 +428,8 @@ class AssistantSessionController extends ChangeNotifier {
     _started = false;
   }
 
-  /// A recorder, a speaker or a socket that fails to close is not a reason
+  /// A recorder, a speaker or a socket that fails to close — or to carry the
+  /// goodbye frame — is not a reason
   /// to strand the call in [VoiceSessionPhase.ending] with the microphone
   /// still held: every step runs and the phase still lands.
   Future<void> _settled(Future<void> Function() step) =>

@@ -223,6 +223,10 @@ class _ComposerState extends State<Composer> {
       }
       return;
     }
+    _send();
+  }
+
+  void _send() {
     if (!widget.dictating &&
         widget.ready &&
         draftSendable(widget.editor.text.trim())) {
@@ -429,15 +433,11 @@ class _ComposerState extends State<Composer> {
                           const SingleActivator(
                             LogicalKeyboardKey.enter,
                             meta: true,
-                          ): () {
-                            if (canSend) widget.onSend();
-                          },
+                          ): _send,
                           const SingleActivator(
                             LogicalKeyboardKey.enter,
                             control: true,
-                          ): () {
-                            if (canSend) widget.onSend();
-                          },
+                          ): _send,
                           // A bare Enter (Shift+Enter is left to the field, which
                           // breaks the line) sends, or takes the highlighted Skill
                           // while the popover is up. An empty or oversized draft
