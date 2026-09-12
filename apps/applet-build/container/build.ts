@@ -17,13 +17,16 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 import { runAppletBuildV1 } from "@frockbot/applet-sdk/build";
+import { runPluginBuildV1 } from "@frockbot/applet-sdk/build/plugin";
 import {
   APPLET_BUILD_LIMITS,
   decodeAppletBuildManifestV1,
+  decodePluginBuildManifestV1,
   type AppletBuildDiagnosticV1,
   type AppletBuildManifestV1,
   type AppletBuildRequestV1,
   type AppletBuildResponseV1,
+  type PluginBuildManifestV1,
 } from "@frockbot/applets/build-contract";
 
 async function materialize(request: AppletBuildRequestV1): Promise<string> {
@@ -66,11 +69,74 @@ function oversize(artifacts: {
     }));
 }
 
+/**
+ * A Plugin build: the same seam, a different pipeline. The module is one
+ * file, so the only ceiling is its own; the manifest came out of the built
+ * module run in Miniflare, so it is decoded here before it is believed.
+ */
+async function buildPlugin(
+  directory: string,
+  request: AppletBuildRequestV1,
+): Promise<AppletBuildResponseV1> {
+  const outcome = await runPluginBuildV1(directory, {
+    mode: request.mode,
+    id: request.id,
+  });
+  if (outcome.status === "failed") {
+    return {
+      status: "failed",
+      stage: outcome.stage,
+      diagnostics: outcome.diagnostics.slice(
+        0,
+        APPLET_BUILD_LIMITS.diagnostics,
+      ),
+    };
+  }
+  if (outcome.status === "checked") return { status: "built" };
+  let manifest: PluginBuildManifestV1;
+  try {
+    manifest = decodePluginBuildManifestV1(
+      JSON.parse(JSON.stringify(outcome.manifest)),
+    );
+  } catch (error) {
+    return {
+      status: "failed",
+      stage: "describe",
+      diagnostics: [
+        {
+          file: "plugin.ts",
+          line: 1,
+          column: 1,
+          message: `The Plugin declared exports this contract refuses: ${error instanceof Error ? error.message : String(error)}`,
+          severity: "error",
+        },
+      ],
+    };
+  }
+  if (outcome.module.length > APPLET_BUILD_LIMITS.moduleBytes) {
+    return {
+      status: "failed",
+      stage: "bundle",
+      diagnostics: [
+        {
+          file: "plugin.ts",
+          line: 1,
+          column: 1,
+          message: `The built module is ${outcome.module.length} bytes, over the ${APPLET_BUILD_LIMITS.moduleBytes}-byte ceiling a publish will store.`,
+          severity: "error",
+        },
+      ],
+    };
+  }
+  return { status: "built", manifest, module: outcome.module };
+}
+
 export async function buildAppletRequestV1(
   request: AppletBuildRequestV1,
 ): Promise<AppletBuildResponseV1> {
   const directory = await materialize(request);
   try {
+    if (request.kind === "plugin") return await buildPlugin(directory, request);
     const outcome = await runAppletBuildV1(directory, { mode: request.mode });
     if (outcome.status === "failed") {
       return {

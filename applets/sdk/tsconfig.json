@@ -13,6 +13,7 @@
   },
   "include": [
     "types/**/*.d.ts",
+    "plugin/index.d.ts",
     "src/**/*.ts",
     "src/**/*.tsx",
     "test/**/*.ts",

@@ -8,13 +8,14 @@ An Applet used to be built on the User's Computer — the SDK npm-installed on a
 frockbot-cloudflare (app Worker)
    │  service binding APPLET_BUILD, plus x-frockbot-applet-build-token
    ▼
-src/index.ts → src/router.ts  →  shard = fnv1a(appletId) % APPLET_BUILD_SHARDS
-   ▼                              (appletId, so a check and its publish land warm)
+src/index.ts → src/router.ts  →  shard = fnv1a(id) % APPLET_BUILD_SHARDS
+   ▼                              (the Applet's or Plugin's id, so a check and its publish land warm)
 AppletBuildContainer  ×  max_instances 3, standard, sleepAfter 10m, no egress
    ▼  :8080
 container/server.ts → container/build.ts → @frockbot/applet-sdk/build
    ▼
-descriptor → typecheck → lint → bundle → describe
+descriptor → typecheck → lint → bundle → describe        (kind: "applet")
+descriptor → typecheck → bundle → describe               (kind: "plugin")
 ```
 
 ## The contract
@@ -22,10 +23,13 @@ descriptor → typecheck → lint → bundle → describe
 One route, `POST /build`, defined in [`@frockbot/applets/build-contract`](../../applets/build-contract.ts) and imported by both sides:
 
 ```
-{ version: 1, effectId, appletId, mode: "check" | "build", files: [{ path, text }] }
-→ { status: "built", manifest, server, ui }     // artifacts absent for a passing check
+{ version: 1, effectId, kind: "applet" | "plugin", id, mode: "check" | "build", files: [{ path, text }] }
+→ { status: "built", manifest, server, ui }     // an Applet; artifacts absent for a passing check
+| { status: "built", manifest, module }         // a Plugin: one ESM module and what it exports
 | { status: "failed", stage, diagnostics }      // stage names where it stopped
 ```
+
+A Plugin (ADR 0026) is `plugin.ts` beside `plugin.json`, built by `@frockbot/applet-sdk/build/plugin` into one module with no imports. Its manifest — tools, hooks, services, triggers — is read by running the bundle in Miniflare with no outbound network, never by importing it into the container's own process, which holds the service token. The container does not decode `plugin.json` beyond its `id`: the app Worker holds the descriptor decoder and refuses a publish whose descriptor and manifest disagree.
 
 `effectId` is carried, not journalled: a build is pure, so a retry under the same key re-derives the same bytes and the caller's own record is the only one that has to exist. The container holds no storage and no credential — the app Worker keeps the R2 write and the hash verification, so a compromised builder can only return bytes the app then refuses.
 

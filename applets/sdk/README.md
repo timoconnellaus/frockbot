@@ -12,14 +12,16 @@ at any point.
 
 ## Entry points
 
-| Import                          | For                                                      |
-| ------------------------------- | -------------------------------------------------------- |
-| `@frockbot/applet-sdk/server`   | `Applet`, `table`, `t` — the Applet's `server.ts`        |
-| `@frockbot/applet-sdk/client`   | `createApplet`, `mount`, `newId` — the Applet's `ui.tsx` |
-| `@frockbot/applet-sdk/kit`      | the fourteen components (`src/kit/README.md`)            |
-| `@frockbot/applet-sdk/lint`     | the flat ESLint config and the five custom rules         |
-| `@frockbot/applet-sdk/protocol` | wire protocol v1, for the kernel and for tests           |
-| `@frockbot/applet-sdk/build`    | `runAppletBuildV1` — the five stages, for the service    |
+| Import                              | For                                                                  |
+| ----------------------------------- | -------------------------------------------------------------------- |
+| `@frockbot/applet-sdk/server`       | `Applet`, `table`, `t` — the Applet's `server.ts`                    |
+| `@frockbot/applet-sdk/client`       | `createApplet`, `mount`, `newId` — the Applet's `ui.tsx`             |
+| `@frockbot/applet-sdk/kit`          | the fourteen components (`src/kit/README.md`)                        |
+| `@frockbot/applet-sdk/lint`         | the flat ESLint config and the five custom rules                     |
+| `@frockbot/applet-sdk/protocol`     | wire protocol v1, for the kernel and for tests                       |
+| `@frockbot/applet-sdk/build`        | `runAppletBuildV1` — the five stages, for the service                |
+| `@frockbot/applet-sdk/plugin`       | types only: `PluginModule`, `PluginContext` — a Plugin's `plugin.ts` |
+| `@frockbot/applet-sdk/build/plugin` | `runPluginBuildV1` — the four Plugin stages, for the service         |
 
 ## The build
 
@@ -37,6 +39,19 @@ with the code.
 `template/` is the scaffold a new Applet starts as.
 `scripts/build-applets-assets.ts` turns it into `applets/template.generated.ts`,
 which `applet_create` writes through the Workspace.
+
+## Plugins
+
+A Plugin (ADR 0026) is written against `@frockbot/applet-sdk/plugin`, which
+is declarations only: `plugin.ts` exports `tools` and `execute`, and may
+export `hooks`, `services` and `triggers`, beside a `plugin.json` descriptor.
+`runPluginBuildV1(directory, { mode, id })` is four stages — `descriptor`,
+`typecheck`, `bundle`, `describe` — with no lint stage, because a Plugin's
+reach is a grant the descriptor declares and the kernel enforces. The bundle
+is one ESM module with every import inlined, and the manifest is read by
+running that module in Miniflare with no outbound network. `plugin/template/`
+is the scaffold a new Plugin starts as. `PluginContext` is held to the
+kernel's own `ctx` keys by `app/plugins/sdk-types.test.ts`.
 
 ## What runs where
 

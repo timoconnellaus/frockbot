@@ -12,12 +12,15 @@
     "./lint": "./src/lint/index.ts",
     "./protocol": "./src/protocol/index.ts",
     "./build": "./src/build/pipeline.ts",
+    "./build/plugin": "./src/build/plugin.ts",
+    "./plugin": "./plugin/index.d.ts",
     "./package.json": "./package.json"
   },
   "files": [
     "src",
     "types",
     "template",
+    "plugin",
     "README.md"
   ],
   "scripts": {

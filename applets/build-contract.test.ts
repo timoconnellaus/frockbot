@@ -4,6 +4,7 @@ import {
   APPLET_BUILD_LIMITS,
   APPLET_BUILD_ROUTE,
   APPLET_BUILD_TOKEN_HEADER,
+  AppletBuildDecodeError,
   appletBuildProblemResponseV1,
   decodeAppletBuildHttpRequestV1,
   decodeAppletBuildManifestV1,
@@ -11,8 +12,10 @@ import {
   decodeAppletBuildRequestV1,
   decodeAppletBuildResponseV1,
   decodeAppletSourcePathV1,
+  decodePluginBuildManifestV1,
   encodeAppletBuildRequestV1,
   encodeAppletBuildResponseV1,
+  isPluginBuiltResponseV1,
   type AppletBuildRequestV1,
   type AppletBuildResponseV1,
 } from "./build-contract.ts";
@@ -25,7 +28,8 @@ function request(
   return {
     version: 1,
     effectId: "effect-1",
-    appletId: APPLET_ID,
+    kind: "applet",
+    id: APPLET_ID,
     mode: "build",
     files: [
       { path: "applet.json", text: "{}" },
@@ -82,9 +86,34 @@ describe("the Applet build request", () => {
   test("refuses an Applet id that is not `<owner>.<slug>`", () => {
     expect(() =>
       decodeAppletBuildRequestV1(
-        encodeAppletBuildRequestV1(request({ appletId: "weekly-todos" })),
+        encodeAppletBuildRequestV1(request({ id: "weekly-todos" })),
       ),
-    ).toThrow(/applet id is invalid/);
+    ).toThrow(/Applet build id is invalid/);
+  });
+
+  test("a Plugin build names a Plugin id, and nothing else", () => {
+    const plugin = request({
+      kind: "plugin",
+      id: "weather",
+      files: [
+        { path: "plugin.json", text: "{}" },
+        { path: "plugin.ts", text: "export const tools = [];\n" },
+      ],
+    });
+    expect(
+      decodeAppletBuildRequestV1(encodeAppletBuildRequestV1(plugin)),
+    ).toEqual(plugin);
+    expect(() =>
+      decodeAppletBuildRequestV1(
+        encodeAppletBuildRequestV1(request({ kind: "plugin", id: APPLET_ID })),
+      ),
+    ).toThrow(/Plugin build id is invalid/);
+    expect(() =>
+      decodeAppletBuildRequestV1({
+        ...encodeAppletBuildRequestV1(request()),
+        kind: "worker",
+      }),
+    ).toThrow(/kind must be applet or plugin/);
   });
 
   test("refuses a mode it does not serve", () => {
@@ -157,7 +186,7 @@ describe("the Applet build HTTP seam", () => {
       post(encodeAppletBuildRequestV1(request())),
     );
     expect(decoded.ok).toBe(true);
-    if (decoded.ok) expect(decoded.value.appletId).toBe(APPLET_ID);
+    if (decoded.ok) expect(decoded.value.id).toBe(APPLET_ID);
   });
 
   test("answers a problem, never an exception", async () => {
@@ -258,6 +287,71 @@ describe("the Applet build response", () => {
         ui: "",
       }),
     ).toThrow(/server artifact exceeds/);
+  });
+});
+
+describe("the Plugin build response", () => {
+  const manifest = {
+    contract: 1 as const,
+    tools: [
+      {
+        name: "forecast",
+        description: "Read a forecast.",
+        inputSchema: { type: "object", properties: {} },
+      },
+    ],
+    hooks: ["agent/tool-exposure" as const],
+    services: ["weather-lookup"],
+    triggers: ["weather_alert"],
+    hashes: { module: "b".repeat(64) },
+  };
+
+  test("round-trips a built module and its manifest", () => {
+    const response = {
+      status: "built" as const,
+      manifest,
+      module: "export const tools = [];\n",
+    };
+    const decoded = decodeAppletBuildResponseV1(
+      encodeAppletBuildResponseV1(response),
+    );
+    expect(decoded).toEqual(response);
+    expect(isPluginBuiltResponseV1(decoded)).toBe(true);
+  });
+
+  test("refuses a hook the contract does not serve, and a repeated one", () => {
+    expect(() =>
+      decodePluginBuildManifestV1({ ...manifest, hooks: ["agent/created"] }),
+    ).toThrow(/hook this contract does not serve/);
+    expect(() =>
+      decodePluginBuildManifestV1({
+        ...manifest,
+        hooks: ["agent/request", "agent/request"],
+      }),
+    ).toThrow(/repeats a hook/);
+  });
+
+  test("refuses a service or trigger name the descriptor would not admit", () => {
+    expect(() =>
+      decodePluginBuildManifestV1({ ...manifest, services: ["Weather"] }),
+    ).toThrow(/services\[0\] is invalid/);
+    expect(() =>
+      decodePluginBuildManifestV1({ ...manifest, triggers: ["a b"] }),
+    ).toThrow(/triggers\[0\] is invalid/);
+  });
+
+  test("refuses a module past its ceiling with the limit-exceeded code", () => {
+    try {
+      decodeAppletBuildResponseV1({
+        status: "built",
+        manifest,
+        module: "x".repeat(APPLET_BUILD_LIMITS.moduleBytes + 1),
+      });
+      throw new Error("expected a refusal");
+    } catch (error) {
+      expect(error).toBeInstanceOf(AppletBuildDecodeError);
+      expect((error as AppletBuildDecodeError).code).toBe("limit-exceeded");
+    }
   });
 });
 

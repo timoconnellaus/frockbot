@@ -60,6 +60,9 @@ export const SDK_WORKERS_TYPES = join(
   "types/cloudflare-workers.d.ts",
 );
 
+/** The Plugin declarations (`@frockbot/applet-sdk/plugin`), types only. */
+export const SDK_PLUGIN_TYPES = join(SDK_ROOT, "plugin/index.d.ts");
+
 function packageDirectory(specifier: string): string {
   return dirname(require.resolve(`${specifier}/package.json`));
 }
