@@ -23,9 +23,10 @@ import {
   type CompositionGenerationV1,
   type CompositionMemberV1,
 } from "@frockbot/core/durable";
-import type {
-  BotIsolateLoader,
-  BotIsolateWorkerCode,
+import {
+  PluginWorkerHost,
+  type BotIsolateLoader,
+  type BotIsolateWorkerCode,
 } from "@frockbot/frock-compose";
 import {
   createShellCompositionHost,
@@ -39,6 +40,7 @@ import {
 import type {
   IsolateConnectionV1,
   IsolateModelBindingV1,
+  PluginWorkerTriggerResultV1,
 } from "@frockbot/core/contracts";
 import type { FoundationAgentPackage } from "@frockbot/app/agent-runtime";
 import type { BotCapabilities } from "../src/bot-capabilities.ts";
@@ -304,6 +306,67 @@ const PROBE_CONSUMER_DESCRIPTOR = decodePluginDescriptorV1({
   hooks: ["agent/tool-exposure"],
   grants: [],
   consumes: [{ name: "greeting", version: 1 }],
+  contextKeys: ["user", "bot", "session"],
+});
+
+/**
+ * A Plugin that exports `triggers`, the contract-4 surface an app-owned
+ * delivery reaches. One trigger per answer the kernel has to tell apart: a
+ * body it fires on, a refusal it authored, a silent return, one that never
+ * answers, and one whose text is small in UTF-16 units but far over the
+ * contract's byte bound.
+ */
+export const PROBE_TRIGGER_ID = "probe-trigger";
+
+export const PROBE_TRIGGER_SOURCE = `
+export const tools = [
+  { name: "trigger_noop", description: "Does nothing", inputSchema: {}, idempotent: true },
+];
+export const triggers = {
+  "inbound": async function (delivery, ctx) {
+    return JSON.stringify({
+      packageId: ctx.packageId,
+      botId: ctx.bot.botId,
+      sessionId: ctx.session.sessionId,
+      signature: delivery.headers["x-probe-signature"],
+      city: JSON.parse(delivery.body).city,
+    });
+  },
+  "refuse": async function () {
+    return { drop: true, reason: "nothing in this delivery is for me" };
+  },
+  "silent": async function () {
+    return undefined;
+  },
+  "wedged": async function () {
+    await new Promise(function () {});
+  },
+  // 300,000 astral code points: 600,000 UTF-16 units, under the bound if it
+  // were counted in units, and 1.2 MB once encoded as the bytes it arrives as.
+  "oversized": async function () {
+    return "\u{1F600}".repeat(300000);
+  },
+};
+export async function execute(tool) {
+  return tool === "trigger_noop" ? "ok" : "unknown tool";
+}
+`;
+
+const PROBE_TRIGGER_DESCRIPTOR = decodePluginDescriptorV1({
+  id: PROBE_TRIGGER_ID,
+  displayName: "Probe trigger",
+  version: "0.0.1",
+  tools: [
+    { name: "trigger_noop", description: "Does nothing", inputSchema: {} },
+  ],
+  contractVersion: 4,
+  hooks: [],
+  grants: [],
+  // The descriptor names every trigger the module exports: a report that
+  // differs is a health failure, so this pair is what makes the module mount.
+  triggers: ["inbound", "refuse", "silent", "wedged", "oversized"].map(
+    (name) => ({ name, description: name }),
+  ),
   contextKeys: ["user", "bot", "session"],
 });
 
@@ -937,6 +1000,134 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
     const { composition } = await this.mount(input);
     await composition.dispose();
     return [...this.loaderIds];
+  }
+
+  /**
+   * Delivers app-owned triggers to a Plugin mounted in a real loaded Worker.
+   * Nothing in the product produces a trigger yet (step 9 of ADR 0026 owns
+   * that), so this stands in for that caller: the host, the generated index
+   * and the Plugin's own `triggers` export are all production code, and only
+   * the delivery is fixture.
+   */
+  async probeTriggers(input: {
+    userId: string;
+    botId: string;
+    artifact: ArtifactRefV1;
+    deliveries: {
+      pluginId?: string;
+      trigger: string;
+      deadlineMs?: number;
+      headers?: Record<string, string>;
+      body?: string;
+    }[];
+    disposeFirst?: boolean;
+  }): Promise<{
+    mounted: string[];
+    failures: { pluginId: string; phase: string; message: string }[];
+    results: PluginWorkerTriggerResultV1[];
+  }> {
+    // An empty generation: the runtime this host registers into, with no
+    // Plugin worker of its own.
+    const { composition, generation } = await this.mount({
+      userId: input.userId,
+      botId: input.botId,
+    });
+    // SAFETY: exported WorkerEntrypoints are materialized on ctx.exports;
+    // workers-types cannot infer the generated local RPC stubs.
+    const exports = this.ctx.exports as unknown as ProbeExports;
+    const member: CompositionMemberV1 = {
+      packageId: PROBE_TRIGGER_ID,
+      version: "0.0.1",
+      descriptor: PROBE_TRIGGER_DESCRIPTOR,
+      provenance: {
+        kind: "bot" as const,
+        packageId: PROBE_TRIGGER_ID,
+        version: "0.0.1",
+        botId: "probe",
+        sessionId: `${input.userId}:probe`,
+        turnId: "turn-1",
+        runId: "run-1",
+        authoredAt: "2026-08-31T00:00:00.000Z",
+      },
+      artifact: input.artifact,
+    };
+    const host = new PluginWorkerHost({
+      loader: this.countingLoader(),
+      artifacts: {
+        loadPackageArtifact: async (contentHash) => {
+          const object = await this.env.APPLICATION_ARTIFACTS.get(
+            `packages/${contentHash}.mjs`,
+          );
+          if (!object) {
+            throw new Error(`package artifact "${contentHash}" is missing`);
+          }
+          return await object.text();
+        },
+      },
+      tools: composition.runtime.services.tools,
+      hooks: composition.runtime.services.hooks,
+      userId: input.userId,
+      botId: input.botId,
+      sessionId: `${input.userId}:${input.botId}`,
+      runId: "run-1",
+      turnId: "turn-1",
+      generationId: generation.generationId,
+      turnType: "chat",
+      recordHookFailure: () => Promise.resolve(),
+      capabilities: exports.BotCapabilities({
+        props: {
+          userId: input.userId,
+          botId: input.botId,
+          runId: "run-1",
+          sessionId: `${input.userId}:${input.botId}`,
+          turnId: "turn-1",
+          generationId: generation.generationId,
+          packageId: "plugin-worker",
+          connections: [],
+          memory: false,
+          workspace: false,
+        },
+      }),
+      compatibilityDate: BOT_ISOLATE_COMPATIBILITY_DATE,
+      bindingDigest: await isolateBindingDigestV1({
+        userId: input.userId,
+        botId: input.botId,
+        connections: [],
+        compositionGenerationId: generation.generationId,
+      }),
+    });
+    try {
+      const prepared = await host.mount([member]);
+      const active = await prepared.commit();
+      if (input.disposeFirst) await active.dispose();
+      const results: PluginWorkerTriggerResultV1[] = [];
+      for (const delivery of input.deliveries) {
+        results.push(
+          await active.deliverTrigger({
+            schemaVersion: 1,
+            pluginId: delivery.pluginId ?? PROBE_TRIGGER_ID,
+            trigger: delivery.trigger,
+            headers: delivery.headers ?? {},
+            body: delivery.body ?? "{}",
+            botId: input.botId,
+            routineId: "routine-1",
+            deadlineMs: delivery.deadlineMs ?? 2_000,
+          }),
+        );
+      }
+      if (!input.disposeFirst) await active.dispose();
+      return {
+        mounted: [...prepared.mounted],
+        failures: prepared.failures.map((failure) => ({
+          pluginId: failure.pluginId,
+          phase: failure.phase,
+          message: failure.message,
+        })),
+        results,
+      };
+    } finally {
+      await composition.dispose();
+    }
   }
 
   /** Proves the Durable Object still owns storage the isolate cannot see. */

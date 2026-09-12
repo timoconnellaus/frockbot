@@ -10,6 +10,8 @@ import {
   PROBE_REQUEST_HOOKS,
   PROBE_REQUEST_REDIRECT_HOOK_SOURCE,
   PROBE_THROWING_HOOK_SOURCE,
+  PROBE_TRIGGER_ID,
+  PROBE_TRIGGER_SOURCE,
   PROBE_TIMEOUT_HOOK_SOURCE,
   PROBE_UNDECODABLE_HOOK_SOURCE,
 } from "./bot-isolate-probe.ts";
@@ -421,6 +423,105 @@ describe("a Bot Package in a loaded Dynamic Worker", () => {
     // The mismatched Plugin contributes nothing — no `hook_marker` — while the
     // pair beside it still mounts in order and chains.
     expect(result.exposedTools).toEqual(["from_provider", "from_consumer"]);
+  });
+
+  test("an app-owned trigger reaches the Plugin that declared it and fires its text", async () => {
+    const stub = probe(`trigger-${crypto.randomUUID()}`);
+    const artifact = await stub.seedArtifact(PROBE_TRIGGER_SOURCE);
+
+    const result = await stub.probeTriggers({
+      userId: `user-${crypto.randomUUID()}`,
+      botId: "bot-1",
+      artifact,
+      deliveries: [
+        {
+          trigger: "inbound",
+          headers: { "x-probe-signature": "sig-1" },
+          body: JSON.stringify({ city: "Wollongong" }),
+        },
+      ],
+    });
+
+    expect(result.failures).toEqual([]);
+    expect(result.mounted).toEqual([PROBE_TRIGGER_ID]);
+    const fired = result.results[0];
+    expect(fired?.status).toBe("fire");
+    expect(JSON.parse(fired?.status === "fire" ? fired.text : "null")).toEqual({
+      packageId: PROBE_TRIGGER_ID,
+      botId: "bot-1",
+      // A trigger runs outside any Turn: the index synthesises the identity
+      // from the routine it was delivered for.
+      sessionId: "trigger:routine-1",
+      signature: "sig-1",
+      city: "Wollongong",
+    });
+  });
+
+  test.each([
+    [
+      "names a trigger the Plugin never declared",
+      { trigger: "unknown" },
+      /did not declare trigger "unknown"/,
+    ],
+    [
+      "is authored as a refusal by the Plugin",
+      { trigger: "refuse" },
+      /nothing in this delivery is for me/,
+    ],
+    ["returns no text", { trigger: "silent" }, /returned no text/],
+    [
+      "is never answered before its deadline",
+      { trigger: "wedged", deadlineMs: 50 },
+      /deadline/,
+    ],
+    [
+      "fires a body over the contract's byte limit",
+      { trigger: "oversized" },
+      /over the 1000000 byte limit/,
+    ],
+    [
+      "names a Plugin this worker never mounted",
+      { pluginId: "not-installed", trigger: "inbound" },
+      /did not mount in this generation/,
+    ],
+  ])(
+    "a trigger that %s is dropped with a reason",
+    async (_label, delivery, reason) => {
+      const stub = probe(`trigger-drop-${crypto.randomUUID()}`);
+      const artifact = await stub.seedArtifact(PROBE_TRIGGER_SOURCE);
+
+      const result = await stub.probeTriggers({
+        userId: `user-${crypto.randomUUID()}`,
+        botId: "bot-1",
+        artifact,
+        deliveries: [delivery],
+      });
+
+      const dropped = result.results[0];
+      expect(dropped?.status).toBe("drop");
+      expect(dropped?.status === "drop" ? (dropped.reason ?? "") : "").toMatch(
+        reason,
+      );
+    },
+  );
+
+  test("a trigger delivered after the Turn's worker is disposed is dropped, not run", async () => {
+    const stub = probe(`trigger-disposed-${crypto.randomUUID()}`);
+    const artifact = await stub.seedArtifact(PROBE_TRIGGER_SOURCE);
+
+    const result = await stub.probeTriggers({
+      userId: `user-${crypto.randomUUID()}`,
+      botId: "bot-1",
+      artifact,
+      disposeFirst: true,
+      deliveries: [{ trigger: "inbound" }],
+    });
+
+    const dropped = result.results[0];
+    expect(dropped?.status).toBe("drop");
+    expect(dropped?.status === "drop" ? (dropped.reason ?? "") : "").toMatch(
+      /no longer mounted/,
+    );
   });
 
   test("a broken package.js fails verification with a diagnostic, not a hang", async () => {

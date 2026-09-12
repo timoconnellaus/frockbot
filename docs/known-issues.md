@@ -34,7 +34,7 @@ at the cited location. Items the re-orientation already removes are marked; see
 
 15. ~~**The `genui` / `a2ui_core` dependency is inert.**~~ **Fixed.** The A2UI path is gone: both packages, the vendored `0.9.1` schemas, the catalog adapter, `FormPreview`, the three `A2ui*` wire types and the qualification-form route the preview posted to. The `ViewNode` renderer (`apps/native/lib/view/`) replaces it.
 
-16. **The dynamic Package system has no dynamic member.** No Composition member carries an `artifact`. The isolate host, the `BOT_PACKAGES` loader and the capability contract are all still here; nothing produces a Package artifact until the step 8 build service.
+16. **The dynamic Package system has no dynamic member.** No Composition member carries an `artifact`. The Plugin worker host, the `BOT_PACKAGES` loader and the contracts are all still here and exercised by the isolate probe; nothing produces a member until the deployment catalog and Bot authoring land ([architecture.md, "Built-in versus dynamic"](architecture.md#built-in-versus-dynamic), [ADR 0026](adr/0026-plugins.md) steps 6 and 7).
 
 17. **Applet members carry a `provenance: PackageProvenanceV1` field** (`core/durable/composition/generation.ts`) whose variants describe Packages, two lines below a comment stating that an Applet is not a Package member.
 

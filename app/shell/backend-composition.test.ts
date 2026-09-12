@@ -124,7 +124,6 @@ describe("Applet tools mounted into a Turn's Composition", () => {
   });
 });
 
-
 function pluginMember(id: string, contentHash: string): CompositionMemberV1 {
   return {
     packageId: id,
@@ -220,7 +219,11 @@ describe("a Plugin that the worker refuses", () => {
           ],
         }),
       hook: () =>
-        Promise.resolve({ schemaVersion: 1, status: "unchanged", failures: [] }),
+        Promise.resolve({
+          schemaVersion: 1,
+          status: "unchanged",
+          failures: [],
+        }),
       execute: () =>
         Promise.resolve({ schemaVersion: 1, content: "ok", isError: false }),
       receiveTrigger: () =>
@@ -240,7 +243,8 @@ describe("a Plugin that the worker refuses", () => {
         turnId: "run-1",
         loader,
         artifacts: {
-          loadPackageArtifact: () => Promise.resolve("export const tools = [];"),
+          loadPackageArtifact: () =>
+            Promise.resolve("export const tools = [];"),
         },
         capabilities: {} as BotCapabilitiesStub,
         bindingDigest: "c".repeat(64),

@@ -711,7 +711,7 @@ A plugin does not ship UI. It returns a `ViewDocument` and the host draws it, wh
 
 **Budgets**, checked by `ViewDocumentView` before it builds a widget (`lib/view/budgets.dart`): 512 nodes, depth 16, 262,144 bytes. A document past any of them is refused whole rather than half-rendered. The schema's own shape caps are separate — 256 children per `group`, 256 rows per `list`, 32 declared actions.
 
-**The plugin declaration.** `PluginDescriptorV1.views` is `{slot, surfaceId}[]` (`core/contracts/plugin-descriptor.ts`), account-scoped, with `PLUGIN_SLOTS_V1` as the slot vocabulary and at most 16 entries with distinct surface ids. Rendering is not wired into the isolate host yet; that lands with the surfaces that use it.
+**The plugin declaration.** `PluginDescriptorV1.views` is `{slot, surfaceId}[]` (`core/contracts/plugin-descriptor.ts`), account-scoped, with `PLUGIN_SLOTS_V1` as the slot vocabulary and at most 16 entries with distinct surface ids. Rendering is not wired into the Plugin worker host yet; that lands with the surfaces that use it.
 
 The renderer is `apps/native/lib/view/`: `budgets.dart`, `action.dart` (input assembly and the retained command envelope), `document.dart` (`ViewDocumentView`, `ViewScope`), `nodes.dart` (one widget per node type), `embed.dart` (the frame registry) and `sample_page.dart` (a development-only page, so the renderer can be looked at on a device before a plugin produces a document).
 
@@ -880,7 +880,7 @@ Bindings are declared in `apps/cloudflare/wrangler.jsonc`.
 | Binding                                                                   | Kind               | Contents                                                                                                                                              |
 | ------------------------------------------------------------------------- | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `USER_APPLICATIONS` (:20)                                                 | Worker Loader      | The per-user foundation application artifact (`apps/cloudflare/src/index.ts:2229`, `src/user-configuration.ts:201`, `src/package-publication.ts:120`) |
-| `BOT_PACKAGES` (:26)                                                      | Worker Loader      | Bot Package isolates, loaded with `globalOutbound` disabled (`app/isolates/bot.ts:99`)                                                                |
+| `BOT_PACKAGES` (:26)                                                      | Worker Loader      | The per-User Plugin worker, loaded with `globalOutbound` disabled (`app/isolates/bot.ts:91`)                                                          |
 | `APPLETS` (:33)                                                           | Worker Loader      | Applet server artifacts, mounted as facets (`apps/cloudflare/src/applet-state.ts:94`, `:249`)                                                         |
 | `COMPUTER_HOST` (:47)                                                     | Service            | `frockbot-computer-host` (`apps/cloudflare/src/bot-state.ts:465-474`)                                                                                 |
 | `APPLICATION_ARTIFACTS` (:53)                                             | R2                 | Application, Package and Applet artifacts, content-addressed                                                                                          |

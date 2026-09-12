@@ -327,7 +327,7 @@ core/
   models/           Model role bindings and the provider-neutral model registry
   prompt/           System prompt assembly from Package contributions
   tools/            The trusted tool registry and its guards
-frock-compose/     Frock Compose: the Bot isolate host that loads an untrusted member's artifact
+frock-compose/     Frock Compose: the Plugin worker host that loads a User's Plugins as one Dynamic Worker
 providers/
   openai-compatible/ Shared model transport: request mapping, deadlines, AI SDK decoding
   frock-ai/         Built-in credential-free Frock AI model provider

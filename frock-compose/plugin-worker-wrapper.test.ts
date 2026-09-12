@@ -584,7 +584,10 @@ describe("the generated wrapper's trigger delivery", () => {
   }
 
   function triggerPlugin(
-    handler: (event: { headers: unknown; body: string }, ctx: unknown) => unknown,
+    handler: (
+      event: { headers: unknown; body: string },
+      ctx: unknown,
+    ) => unknown,
     triggers: string[] = ["inbound"],
   ) {
     return {
