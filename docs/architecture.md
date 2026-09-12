@@ -359,11 +359,12 @@ inert to the pointer, to assistive technology and to its own tickers, and one
 scrim serves whichever drawer is open.
 
 **The slot registry.** `lib/shell/slots.dart` is where a feature reaches the
-shell: two named regions — `right-panel` and `overlays` — that
-a feature registers a `WidgetBuilder` into and the shell draws where the region
-belongs. An empty region draws nothing, so the layout reserves no space for a
-feature that is not there. Trust chrome is never
-a slot: the transcript, the composer and the Bot list are the shell's own.
+shell: two named regions — `right-panel` and `overlays` — that a feature
+registers a `WidgetBuilder` into and the shell draws where the region belongs.
+An empty region draws nothing, so the layout reserves no space for a feature
+that is not there. Trust chrome is never a slot: the transcript, the composer
+and the Bot list are the shell's own, and what one Bot holds belongs to that
+Bot's own surfaces rather than to a region over the list of every Bot.
 
 **Semantics identifiers.** Flutter Web draws to a canvas, so a browser spec can
 only select the engine's accessibility tree. Every interactive widget carries a
@@ -603,12 +604,17 @@ removal without migration on 2026-09-08.
 The native header is one row: Bot identity and direct Bot settings, then
 Applets, Computer and Routines as destinations. Applets is one entry rather
 than a strip of per-Bot Applet buttons — it opens the account-wide directory as
-a picker, so a header holding many Applets is still one control. Bot messages
-have no avatar or tool-count row; the in-chat avatar is reserved for the working
-indicator and its comet trails. Message long-press opens work details or records
-“Mark unread from here”. That boundary names a validated chat message in the
-Bot-owned unread record, is included in the command fingerprint and receipt,
-and is projected to the native transcript after reconnect. An explicit mark-read
+a picker, so a header holding many Applets is still one control. The doors this
+Bot's Packages declare join the same row at the wider tiers, built straight from
+the Package catalog the shell holds (`ChatHeader.packageEntries`): they belong
+to one Bot, so they are never drawn over the list of every Bot. A phone's bar
+stays GrokBot's three things and those doors are rows on the Bot's page instead.
+Bot messages have no avatar or tool-count row; the in-chat avatar is reserved
+for the working indicator and its comet trails. Message long-press opens work
+details or records “Mark unread from here”. That boundary names a validated
+chat message in the Bot-owned unread record, is included in the command
+fingerprint and receipt, and is projected to the native transcript after
+reconnect. An explicit mark-read
 clears it. Applets and Computer continue through their existing backend surfaces;
 header navigation adds no authority or credentials.
 
