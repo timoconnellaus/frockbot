@@ -61,6 +61,7 @@ import 'chat_pane.dart';
 import 'chat_header.dart';
 import 'desktop_layout.dart';
 import 'lifecycle.dart';
+import 'message_actions.dart';
 import 'run_view.dart';
 import 'semantics.dart';
 import 'sidebar.dart';
@@ -1002,7 +1003,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     });
   }
 
-  Future<void> _messageActions(TranscriptLine line) async {
+  Future<void> _messageActions(TranscriptLine line, {Offset? position}) async {
     final bot = selected;
     if (bot == null) return;
     final copyText = [
@@ -1011,45 +1012,16 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         if (send.type == 'text' && send.payload?['text'] is String)
           send.payload!['text'] as String,
     ].join('\n\n');
-    final action = await showModalBottomSheet<String>(
+    final action = await showMessageActions(
       context: context,
-      showDragHandle: true,
-      builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (activity.unread[bot.botId.value]?.unread == true)
-              ListTile(
-                leading: const Icon(Icons.mark_chat_read_outlined),
-                title: const Text('Mark as read'),
-                enabled: !activity.busy(bot.botId.value) && !activity.loading,
-                onTap: () => Navigator.pop(context, 'read'),
-              ),
-
-            if (copyText.isNotEmpty)
-              ListTile(
-                leading: const Icon(Icons.copy),
-                title: const Text('Copy'),
-                onTap: () => Navigator.pop(context, 'copy'),
-              ),
-
-            if (line.id.endsWith(':user') ||
-                line.id.endsWith(':failed') ||
-                line.id.contains(':send:'))
-              ListTile(
-                leading: const Icon(Icons.mark_chat_unread_outlined),
-                title: const Text('Mark unread from here'),
-                enabled: !activity.busy(bot.botId.value) && !activity.loading,
-                onTap: () => Navigator.pop(context, 'unread'),
-              ),
-            ListTile(
-              leading: const Icon(Icons.receipt_long_outlined),
-              title: const Text('Work details'),
-              onTap: () => Navigator.pop(context, 'work'),
-            ),
-          ],
-        ),
-      ),
+      position: position,
+      canCopy: copyText.isNotEmpty,
+      canMarkUnread:
+          line.id.endsWith(':user') ||
+          line.id.endsWith(':failed') ||
+          line.id.contains(':send:'),
+      hasUnread: activity.unread[bot.botId.value]?.unread == true,
+      readActionsEnabled: !activity.busy(bot.botId.value) && !activity.loading,
     );
     if (!mounted || selected?.botId.value != bot.botId.value) return;
     if (action == 'work') {
@@ -1515,8 +1487,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                             onOpenSettings: _openSettings,
                             outOfCredit: credit?.canSpend == false,
                             onOpenBilling: () => unawaited(_openBilling()),
-                            onMessageActions: (line) =>
-                                unawaited(_messageActions(line)),
+                            onMessageActions: (line, {position}) => unawaited(
+                              _messageActions(line, position: position),
+                            ),
                             onReadLatest: (messageId) =>
                                 _readLatest(bot.botId.value, messageId),
                             unreadFromMessageId: activity

@@ -37,7 +37,7 @@ class TranscriptView extends StatefulWidget {
   final VoidCallback? onOpenBilling;
   final void Function(String url)? onOpenLink;
   final VoidCallback? onOpenSettings;
-  final void Function(TranscriptLine)? onMessageActions;
+  final void Function(TranscriptLine, {Offset? position})? onMessageActions;
   final String? unreadFromMessageId;
   final void Function(String?)? onReadLatest;
   final String storageKey;
@@ -93,14 +93,22 @@ class _TranscriptViewState extends State<TranscriptView> {
   String? _newestSendId(List<TranscriptLine> ordered) {
     _latestSendSource = widget.lines;
     _latestSendId = null;
+    String? newestAt;
     for (final line in ordered) {
-      // What the cloud counts as a message: a send, or a Turn's failure that
-      // is drawn as its own notice. A failure already said as a message — a
-      // firing that broke before it could speak — is counted by that send.
-      if (line.role == LineRole.assistant &&
-          (line.id.contains(':send:') ||
-              (line.id.endsWith(':failed') && line.notice != null))) {
-        _latestSendId = line.id;
+      final messageId =
+          line.failureMessageId ??
+          (line.role == LineRole.assistant &&
+                  (line.id.contains(':send:') ||
+                      (line.id.endsWith(':failed') && line.notice != null))
+              ? line.id
+              : null);
+      if (messageId == null) continue;
+      // A retry is displayed with its original message, but read order is the
+      // order of the actual attempts, including a reply to an older message.
+      final at = line.readAt ?? line.at ?? '';
+      if (newestAt == null || at.compareTo(newestAt) >= 0) {
+        newestAt = at;
+        _latestSendId = messageId;
       }
     }
     return _latestSendId;
@@ -170,9 +178,18 @@ class _TranscriptViewState extends State<TranscriptView> {
             widget.onMessageActions == null || line.role == LineRole.system
             ? null
             : () => widget.onMessageActions!(line),
+        onSecondaryTapUp:
+            widget.onMessageActions == null || line.role == LineRole.system
+            ? null
+            : (details) => widget.onMessageActions!(
+                line,
+                position: details.globalPosition,
+              ),
         child: content,
       );
-      if (line.id == widget.unreadFromMessageId) {
+      if (line.id == widget.unreadFromMessageId ||
+          (line.failureMessageId != null &&
+              line.failureMessageId == widget.unreadFromMessageId)) {
         rows.add(
           Padding(
             key: ValueKey('unread:${line.id}'),
@@ -302,7 +319,20 @@ class _TranscriptViewState extends State<TranscriptView> {
         id: line.id,
         mine: true,
         pending: line.pending,
-        child: Text(line.text),
+        failed: line.status == LineStatus.error,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(line.text),
+            if (line.notice != null)
+              _Notice(
+                line: line,
+                onRetry: onRetryTurn,
+                onOpenBilling: onOpenBilling,
+              ),
+          ],
+        ),
       );
     }
     if (line.status == LineStatus.streaming && line.empty) {

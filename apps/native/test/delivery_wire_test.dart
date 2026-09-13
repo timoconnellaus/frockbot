@@ -72,13 +72,19 @@ void main() {
       expect(completed[1].sends.single.payload?['text'], 'Hi!');
       api.status = 'failed';
       await controller.refresh();
-      final failed = projectRuns(controller.runs).last;
-      expect(failed.text, '');
+      final failed = projectRuns(controller.runs)
+          .firstWhere((line) => line.role == LineRole.user);
+      expect(failed.text, 'hi');
       expect(failed.notice, 'The model finished without sending a reply.');
       expect(failed.retry, LineRetry.resendTurn);
       controller.pending = const [PendingSend('send-1', 'do it')];
       await controller.checkDelivery();
-      expect(projectRuns(controller.runs).last.notice, failed.notice);
+      expect(
+        projectRuns(controller.runs)
+            .firstWhere((line) => line.role == LineRole.user)
+            .notice,
+        failed.notice,
+      );
     } finally {
       controller.dispose();
       api.close();
@@ -232,6 +238,7 @@ class HeldSendTransport implements ChatTransport {
     String id,
     String text, {
     String? supersedes,
+    String? retryOf,
   }) async {
     observedSupersedes.add(supersedes);
     await _held.future;

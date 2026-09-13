@@ -41,7 +41,7 @@ class ChatPane extends StatefulWidget {
   /// a page, because that is a layout question and not this pane's.
   final void Function(TranscriptLine line)? onOpenRun;
   final VoidCallback? onOpenSettings;
-  final void Function(TranscriptLine)? onMessageActions;
+  final void Function(TranscriptLine, {Offset? position})? onMessageActions;
   final String? unreadFromMessageId;
   final void Function(String?)? onReadLatest;
   final void Function(String? runId)? onWorkingChanged;
@@ -147,21 +147,7 @@ class _ChatPaneState extends State<ChatPane> {
     if (mounted) focus.requestFocus();
   }
 
-  /// Sends this Turn's own message again, unchanged, as a new Turn. The words
-  /// come off the person's own line in the thread, not out of the composer,
-  /// which is why an empty composer does not disable it.
-  Future<void> _retry(TranscriptLine line) async {
-    final original = controller.runs
-        .where((run) => run['runId'] == line.runId)
-        .map((run) => run['input'] as String?)
-        .firstOrNull;
-    final text = resendableTurnText(
-      original,
-      maxCharacters: turnTextMaxCharacters,
-    );
-    if (text == null || !controller.canSend) return;
-    await controller.send(text);
-  }
+  Future<void> _retry(TranscriptLine line) => controller.retryRun(line.runId);
 
   Future<void> _refresh({bool older = false}) async {
     try {
@@ -310,7 +296,7 @@ class ConversationView extends StatefulWidget {
   final String botId;
   final void Function(TranscriptLine line) onOpenRun;
   final VoidCallback? onOpenSettings;
-  final void Function(TranscriptLine)? onMessageActions;
+  final void Function(TranscriptLine, {Offset? position})? onMessageActions;
   final String? unreadFromMessageId;
   final void Function(String?)? onReadLatest;
   final void Function(String? runId)? onWorkingChanged;

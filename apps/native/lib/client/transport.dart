@@ -32,7 +32,7 @@ extension on String {
 const clientHello = <String, Object>{
   'schemaVersion': 1,
   'protocolVersion': 1,
-  'nativeVersion': '1.2.0',
+  'nativeVersion': '1.3.0',
   'catalogs': <Object>[],
 };
 String randomId() {
@@ -220,7 +220,13 @@ abstract interface class ChatTransport {
 
   /// Starts a Turn. [supersedes] names the run this client had observed, where
   /// it had observed one; the intent itself goes on every send.
-  Future<void> send(String botId, String id, String text, {String? supersedes});
+  Future<void> send(
+    String botId,
+    String id,
+    String text, {
+    String? supersedes,
+    String? retryOf,
+  });
   Future<Map<String, dynamic>?> lookup(
     String botId,
     String id, {
@@ -255,6 +261,7 @@ class BackendChatTransport implements ChatTransport {
     String id,
     String text, {
     String? supersedes,
+    String? retryOf,
   }) async {
     if (utf8.encode(text).length > 32000) {
       throw const RequestFailure(
@@ -266,6 +273,7 @@ class BackendChatTransport implements ChatTransport {
       'schemaVersion': 1,
       'commandId': id,
       'text': text,
+      if (retryOf != null) 'retryOf': retryOf,
       // Present on every send: the field's presence is the intent, and its
       // empty form says this client had observed no run to name.
       'supersedes': supersedes == null

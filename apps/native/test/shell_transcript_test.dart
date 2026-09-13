@@ -219,8 +219,7 @@ void main() {
     });
 
     test('leaves an ordinary broken reply saying why it broke', () {
-      // The suppression is only for the message that already is the failure. A
-      // reply that spoke and then broke keeps the reason under what it said.
+      // Actual sends remain visible; the failed input owns the retry action.
       final lines = projectRuns([
         run(
           runId: 'run-a',
@@ -230,11 +229,8 @@ void main() {
           sentText: 'Half an answer',
         ),
       ]);
-      expect(thread(lines), [
-        'user: Hello',
-        'assistant: Half an answer',
-        "assistant: This Bot couldn't finish its reply.",
-      ]);
+      expect(thread(lines), ['user: Hello', 'assistant: Half an answer']);
+      expect(lines.first.notice, "This Bot couldn't finish its reply.");
       expect(
         lines.where((line) => line.retry == LineRetry.resendTurn),
         isNotEmpty,
@@ -253,8 +249,9 @@ void main() {
             failure: refusal,
           ),
         ]);
-        expect(thread(lines), ['user: Hello', 'assistant: $refusal']);
-        final failed = lines.firstWhere((line) => line.id == 'run-a:failed');
+        expect(thread(lines), ['user: Hello']);
+        final failed = lines.firstWhere((line) => line.id == 'run-a:user');
+        expect(failed.notice, refusal);
         expect(failed.retry, LineRetry.openBilling);
       }
     });
@@ -604,9 +601,9 @@ void main() {
           responseText: 'Half an answer',
           failure: "The model couldn't finish its reply. Try again.",
         ),
-      ]).last;
+      ]).firstWhere((line) => line.role == LineRole.user);
 
-      expect(line.text, '');
+      expect(line.text, 'do it');
       expect(line.notice, "The model couldn't finish its reply.");
       expect(line.retry, LineRetry.resendTurn);
       expect(line.status, LineStatus.error);
@@ -674,21 +671,6 @@ void main() {
       ]).last;
 
       expect(line.stopRequested, isTrue);
-    });
-  });
-
-  group('what a failed Turn would be sent again as', () {
-    test('the retry sends the original words, not what is typed', () {
-      expect(
-        resendableTurnText('  book it  ', maxCharacters: 32000),
-        'book it',
-      );
-    });
-
-    test('a Turn with nothing to say again is not offered again', () {
-      expect(resendableTurnText(null, maxCharacters: 32000), isNull);
-      expect(resendableTurnText('   ', maxCharacters: 32000), isNull);
-      expect(resendableTurnText('x' * 32001, maxCharacters: 32000), isNull);
     });
   });
 

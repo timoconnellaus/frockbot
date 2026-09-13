@@ -25,16 +25,47 @@ enum ConnectionState {
 class PendingSend {
   final String id;
   final String text;
-  const PendingSend(this.id, this.text);
+  final String? retryOf;
+  final String? messageRunId;
+  final String? messageAdmittedAt;
+  const PendingSend(
+    this.id,
+    this.text, {
+    this.retryOf,
+    this.messageRunId,
+    this.messageAdmittedAt,
+  });
 
-  Map<String, Object?> toJson() => {'id': id, 'text': text};
+  Map<String, Object?> toJson() => {
+    'id': id,
+    'text': text,
+    if (retryOf != null) 'retryOf': retryOf,
+    if (messageRunId != null) 'messageRunId': messageRunId,
+    if (messageAdmittedAt != null) 'messageAdmittedAt': messageAdmittedAt,
+  };
 
   static PendingSend? decode(Object? value) {
     if (value is! Map) return null;
     final id = value['id'];
     final text = value['text'];
     if (id is! String || text is! String) return null;
-    return PendingSend(id, text);
+    final retryOf = value['retryOf'];
+    final messageRunId = value['messageRunId'];
+    final messageAdmittedAt = value['messageAdmittedAt'];
+    if ((retryOf != null && retryOf is! String) ||
+        (messageRunId != null && messageRunId is! String) ||
+        (messageAdmittedAt != null && messageAdmittedAt is! String) ||
+        (retryOf != null &&
+            (messageRunId == null || messageAdmittedAt == null))) {
+      return null;
+    }
+    return PendingSend(
+      id,
+      text,
+      retryOf: retryOf as String?,
+      messageRunId: messageRunId as String?,
+      messageAdmittedAt: messageAdmittedAt as String?,
+    );
   }
 }
 
@@ -135,7 +166,8 @@ class ChatController extends ChangeNotifier {
   /// several are in flight: it is the one they are watching for.
   String? get visiblePendingText {
     for (final submission in pending.reversed) {
-      if (!_runs.containsKey(submission.id)) return submission.text;
+      if (submission.retryOf == null && !_runs.containsKey(submission.id))
+        return submission.text;
     }
     return null;
   }
@@ -173,6 +205,10 @@ class ChatController extends ChangeNotifier {
       for (final entry in (value['pending'] as List? ?? const []))
         ?PendingSend.decode(entry),
     ];
+    for (final submission in pending) {
+      if (submission.retryOf != null)
+        _putOptimisticRun(submission, queued: false);
+    }
     stopId = value['stopId'] as String?;
     stopTarget = value['stopTarget'] as String?;
   }
@@ -244,7 +280,7 @@ class ChatController extends ChangeNotifier {
   /// submission behind one turns out never to have been admitted.
   final _optimisticRunIds = <String>{};
 
-  void _putOptimisticQueuedRun(PendingSend submission) {
+  void _putOptimisticRun(PendingSend submission, {bool queued = true}) {
     // Never over a run authority already told this client about.
     if (_runs.containsKey(submission.id)) return;
     _optimisticRunIds.add(submission.id);
@@ -253,7 +289,12 @@ class ChatController extends ChangeNotifier {
       'input': submission.text,
       'admittedAt': DateTime.now().toUtc().toIso8601String(),
       'status': 'running',
-      'queued': true,
+      'queued': queued,
+      if (submission.retryOf != null) ...{
+        'retryOf': submission.retryOf,
+        'messageRunId': submission.messageRunId,
+        'messageAdmittedAt': submission.messageAdmittedAt,
+      },
       'events': const <Object?>[],
     };
   }
@@ -300,16 +341,10 @@ class ChatController extends ChangeNotifier {
         // Never the rows this client drew for itself: a cache that holds one
         // reopens the conversation with a Turn that may never have existed.
         unawaited(
-          writePageCache(
-            store,
-            userId,
-            botId,
-            [
-              for (final run in runs)
-                if (!_optimisticRunIds.contains(run['runId'])) run,
-            ],
-            before,
-          ),
+          writePageCache(store, userId, botId, [
+            for (final run in runs)
+              if (!_optimisticRunIds.contains(run['runId'])) run,
+          ], before),
         );
       }
     } finally {
@@ -326,9 +361,37 @@ class ChatController extends ChangeNotifier {
 
   Future<void> send(String text) async {
     if (!canSend || text.trim().isEmpty) return;
+    await _submit(PendingSend(nextId(), text));
+  }
+
+  /// A fresh attempt over the same visible message, without touching the composer.
+  Future<void> retryRun(String runId) async {
+    if (!canSend || pending.any((send) => send.retryOf == runId)) return;
+    final run = _runs[runId];
+    if (run == null ||
+        run['status'] != 'failed' ||
+        run['retriedBy'] != null ||
+        _runs.values.any((attempt) => attempt['retryOf'] == runId)) {
+      return;
+    }
+    final text = run['input'] as String?;
+    if (text == null || text.trim().isEmpty) return;
+    await _submit(
+      PendingSend(
+        nextId(),
+        text,
+        retryOf: runId,
+        messageRunId: run['messageRunId'] as String? ?? runId,
+        messageAdmittedAt:
+            run['messageAdmittedAt'] as String? ?? run['admittedAt'] as String,
+      ),
+    );
+  }
+
+  Future<void> _submit(PendingSend submission) async {
+    final text = submission.text;
     _inFlight += 1;
     error = null;
-    final submission = PendingSend(nextId(), text);
     // The intent goes with every send, and the run this client had observed
     // rides along as provenance where there is one. Whether a Turn was showing
     // as running is a race — the transcript is a poll behind — so gating the
@@ -346,14 +409,15 @@ class ChatController extends ChangeNotifier {
     // drain — the only window in which the thread has anything to say about
     // it — is over by the time authority could have told this client. The
     // durable projection replaces this by run id the moment it arrives.
-    if (waitsBehind) _putOptimisticQueuedRun(submission);
+    if (waitsBehind || submission.retryOf != null)
+      _putOptimisticRun(submission, queued: waitsBehind);
     changed();
-    draft = '';
+    if (submission.retryOf == null) draft = '';
     try {
       await _persist(); // No transport call can precede this durable local write.
     } catch (_) {
       _forget(submission);
-      _restoreSubmission(text);
+      _restoreSubmission(submission);
       _inFlight -= 1;
       error = 'Couldn’t save your message. Please try again.';
       changed();
@@ -361,12 +425,18 @@ class ChatController extends ChangeNotifier {
     }
     changed();
     try {
-      await transport.send(botId, submission.id, text, supersedes: supersedes);
+      await transport.send(
+        botId,
+        submission.id,
+        text,
+        supersedes: supersedes,
+        retryOf: submission.retryOf,
+      );
       await checkDelivery();
     } on RequestFailure catch (failure) {
       if (failure.refused) {
         _forget(submission);
-        _restoreSubmission(text);
+        _restoreSubmission(submission);
         await _persist();
         error = failure.message;
       } else {
@@ -382,7 +452,9 @@ class ChatController extends ChangeNotifier {
     }
   }
 
-  void _restoreSubmission(String text) {
+  void _restoreSubmission(PendingSend submission) {
+    if (submission.retryOf != null) return;
+    final text = submission.text;
     draft = draft.isEmpty ? text : '$text\n\n$draft';
   }
 
@@ -427,8 +499,10 @@ class ChatController extends ChangeNotifier {
         _put(run);
         error = null;
       } else {
-        _restoreSubmission(submission.text);
-        error = 'Your message didn’t go through. You can send it again.';
+        _restoreSubmission(submission);
+        error = submission.retryOf == null
+            ? 'Your message didn’t go through. You can send it again.'
+            : 'Your retry didn’t go through. Try again on the original message.';
       }
       final reconciledDraft = draft;
       final kept = pending;
@@ -437,6 +511,8 @@ class ChatController extends ChangeNotifier {
         await _persist();
       } catch (_) {
         pending = kept;
+        if (submission.retryOf != null)
+          _putOptimisticRun(submission, queued: false);
         if (draft == reconciledDraft) draft = previousDraft;
         rethrow;
       }
