@@ -47,12 +47,19 @@ export const VOICE_TURN_MAX_STEPS_V1 = 4;
 export const VOICE_TURN_MAX_TOKENS_V1 = 400;
 export const VOICE_ANSWER_MAX_CHARS_V1 = 1_200;
 /**
- * Said aloud when the model goes to a tool without having said anything: a
- * tool step is a second model round-trip plus the tool itself, which is
+ * Said aloud when the model goes to a tool without having said anything, and
+ * when nothing at all has been produced yet after VOICE_TURN_ACK_DELAY_MS_V1:
+ * a tool step is a second model round-trip plus the tool itself, and loading
+ * the turn's context or reaching the model can stall just as long, which is
  * seconds of silence to the person if nothing fills them. It is spoken, not
- * answered — the ledger's answer is the model's own words only.
+ * answered — the ledger's answer is the model's own words only, and it is
+ * emitted at most once per turn however both paths race.
  */
 export const VOICE_TURN_BRIDGE_V1 = "One second.";
+/**
+ * How long the turn may stay silent before the bridge fills it. Short enough
+ * that a stall is covered, long enough that a quick answer streams unbroken.
+ */
 export const VOICE_TURN_ACK_DELAY_MS_V1 = 1_000;
 
 /**
