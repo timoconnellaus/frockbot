@@ -35,7 +35,7 @@ test("search opens from the field or keyboard and selects a Bot without sending 
   const query = field(page, "search-field");
   await query.focus();
   await query.pressSequentially("School");
-  const bot = overlay.locator('[flt-semantics-identifier^="search-bot-"]');
+  const bot = page.locator('[flt-semantics-identifier^="search-bot-"]');
   await expect(bot).toHaveCount(1);
   await page.keyboard.press("Enter");
   await expect(overlay).toBeHidden();
@@ -43,7 +43,7 @@ test("search opens from the field or keyboard and selects a Bot without sending 
     '[flt-semantics-identifier^="sidebar-bot-"]',
   );
   await expect(sidebarBots.filter({ hasText: "School" })).toHaveAttribute(
-    "aria-selected",
+    "aria-current",
     "true",
   );
   await press(sidebarBots.filter({ hasText: "Housework" }));

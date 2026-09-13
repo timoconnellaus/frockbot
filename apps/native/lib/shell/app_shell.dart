@@ -34,7 +34,9 @@ import '../packages/frame.dart';
 import '../plugins/page.dart';
 import '../recovery/page.dart';
 import '../routines/page.dart';
+import '../routines/runs.dart';
 import '../search/controller.dart';
+import '../search/archived_conversation.dart';
 import '../search/overlay.dart';
 import '../settings/billing.dart';
 import '../settings/credit.dart';
@@ -122,6 +124,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   bool resumed = true;
   Timer? _activityTimer;
   List<wire.BotRegistration> bots = [];
+  List<wire.BotRegistration> searchableBots = [];
   Map<String, SidebarProfile> profiles = {};
   Set<String> archived = {};
   wire.BotRegistration? selected;
@@ -463,10 +466,19 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         }),
       );
       if (!mounted) return;
-      _adopt(active, {
-        for (final entry in unavailable.entries)
-          if (entry.value == 'archived') entry.key,
-      });
+      _adopt(
+        active,
+        {
+          for (final entry in unavailable.entries)
+            if (entry.value == 'archived') entry.key,
+        },
+        readable: [
+          for (final bot in directory.bots)
+            if (unavailable[bot.botId.value] == null ||
+                unavailable[bot.botId.value] == 'archived')
+              bot,
+        ],
+      );
       unawaited(_loadIdentities());
       unawaited(activity.load());
       unawaited(
@@ -487,9 +499,14 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     }
   }
 
-  void _adopt(List<wire.BotRegistration> active, Set<String> archivedIds) {
+  void _adopt(
+    List<wire.BotRegistration> active,
+    Set<String> archivedIds, {
+    List<wire.BotRegistration>? readable,
+  }) {
     setState(() {
       bots = active;
+      searchableBots = readable ?? active;
       // The directory is authority on what a Bot wears; whatever it says now
       // replaces anything drawn ahead of it.
       _predictedSheep.clear();
@@ -1580,7 +1597,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         context,
         widget.api,
         bots: [
-          for (final bot in bots)
+          for (final bot in searchableBots)
             SearchBot(
               id: bot.botId.value,
               name: _name(bot),
@@ -1664,11 +1681,39 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     }
     final botId = hit.botId;
     if (botId == null) return;
-    if (bots.every((bot) => bot.botId.value != botId)) await load();
+    if (searchableBots.every((bot) => bot.botId.value != botId)) await load();
     if (!mounted) return;
     // A desktop destination may be covered by the page from which Cmd+K was
     // used. Return to the shell before selecting the conversation behind it.
     Navigator.of(context).popUntil((route) => route.isFirst);
+    final matchedBot = searchableBots
+        .where((bot) => bot.botId.value == botId)
+        .firstOrNull;
+    if (matchedBot == null) {
+      _say('That Bot is no longer available.');
+      return;
+    }
+    if (archived.contains(botId)) {
+      if (hit.routineId case final String routineId) {
+        _push(
+          RoutineRunsPage(api: widget.api, botId: botId, routineId: routineId),
+        );
+      } else {
+        _push(
+          ArchivedConversationPage(
+            api: widget.api,
+            bot: SearchBot(
+              id: botId,
+              name: _name(matchedBot),
+              background: matchedBot.sheep.background,
+              archived: true,
+            ),
+            runId: hit.runId,
+          ),
+        );
+      }
+      return;
+    }
     _select(botId);
     if (hit.routineId case final String routineId) {
       _push(

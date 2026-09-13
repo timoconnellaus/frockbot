@@ -323,11 +323,33 @@ class ShellSidebar extends StatelessWidget {
                             ),
                           ),
                         ),
-                        Text(
-                          Theme.of(context).platform == TargetPlatform.macOS
-                              ? '⌘K'
-                              : 'Ctrl+K',
-                          style: Theme.of(context).textTheme.labelSmall,
+                        Semantics(
+                          label:
+                              Theme.of(context).platform == TargetPlatform.macOS
+                              ? 'Command K'
+                              : 'Control K',
+                          excludeSemantics: true,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (Theme.of(context).platform ==
+                                  TargetPlatform.macOS)
+                                Icon(
+                                  Icons.keyboard_command_key,
+                                  size: 13,
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .onSurfaceVariant,
+                                ),
+                              Text(
+                                Theme.of(context).platform ==
+                                        TargetPlatform.macOS
+                                    ? 'K'
+                                    : 'Ctrl+K',
+                                style: Theme.of(context).textTheme.labelSmall,
+                              ),
+                            ],
+                          ),
                         ),
                       ],
                     ),

@@ -749,11 +749,26 @@ class _SearchOverlayState extends State<SearchOverlay> {
                         ),
                         color: scheme.surface.withValues(alpha: 0.55),
                       ),
-                      child: Text(
-                        '${mac ? '⌘' : 'Ctrl+'}${index + 1}',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: scheme.onSurfaceVariant,
+                      child: Semantics(
+                        label: '${mac ? 'Command' : 'Control'} ${index + 1}',
+                        excludeSemantics: true,
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (mac)
+                              Icon(
+                                Icons.keyboard_command_key,
+                                size: 12,
+                                color: scheme.onSurfaceVariant,
+                              ),
+                            Text(
+                              '${mac ? '' : 'Ctrl+'}${index + 1}',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: scheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ),

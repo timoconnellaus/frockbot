@@ -294,6 +294,7 @@ abstract final class AuditIds {
 abstract final class SearchIds {
   static const trigger = ShellIds.sidebarSearch;
   static const overlay = 'search-overlay';
+  static const archivedConversation = 'search-archived-conversation';
   static const field = 'search-field';
   static const rebuild = 'search-rebuild';
   static const includeArchived = 'search-include-archived';
