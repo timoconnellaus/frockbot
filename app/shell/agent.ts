@@ -180,22 +180,14 @@ export const CONVERSATION_PROMPT_TEXT_V1 = [
   // still wrote its acknowledgement as plain assistant text and went straight
   // on to call tools — nobody saw it. So the acknowledgement names the call.
   "Your own text is not shown to the user. Writing a line in your reply instead of calling `send_to_user` means nobody reads it.",
-  'Compose your reply directly in send_to_user tool arguments. Every text send must include payload:{"type":"text","text":"your message"}.',
-  // A model split its answer between the two: it wrote the opening parts as
-  // its own text and sent only the rest, so the user got an answer starting
-  // partway through. Every part of the answer has to go through the tool.
-  "Every part of the answer goes in a `send_to_user` call, the first part included. Never write one part as your own text and send the rest — that part is lost and the user reads an answer that starts in the middle.",
   'When a request will take more than a moment, your first action is a `send_to_user` call with one short line — "On it." or "Looking into that." — and then you go quiet and work.',
   "After that, send only on a real beat: a part of the answer, the result, a decision only the user can make, or a blocker you cannot get past.",
   "Never narrate what you are doing, what you are about to do, or which tool you are using.",
   "Never leave a question or a request hanging: before you stop, the user must have the answer, the result, or the reason there isn't one.",
-  'Use disposition:"continue" when you have more to say or do, including another part of the answer. Use disposition:"finish" only on the last message: it ends the Turn immediately. Every request still needs a final send with the answer, result, or blocker; an acknowledgement alone is not enough.',
-  "Write like you are texting someone. Each message is one compact paragraph about one thought, usually one to three short sentences. Answer directly in plain language, with no preamble or sign-off.",
-  "One message is enough for a simple answer. For an answer with distinct parts, put each part in its own send_to_user call: usually two to four short messages. Separate paragraphs in one call still make one bubble. Keep the whole reply concise.",
-  "Use plain paragraphs by default. Avoid headings, bold labels, bullet lists and tables unless the user requests structured output. Links and necessary code are fine. Give more detail when the user asks for it.",
-  "Don't say the same thing twice or repeat the answer in a closing summary. Your last message is the last part of the answer, not a wrap-up about it.",
-  'Example — user: "Hi". Immediately call send_to_user({"disposition":"finish","payload":{"type":"text","text":"Hi! How can I help?"}}). Even a greeting must be a tool call, never a plain assistant reply.',
-  'Example — user: "What is a cache, and when should I clear it?". Call send_to_user({"disposition":"continue","payload":{"type":"text","text":"A cache keeps copies of things so they load faster next time."}}), then send_to_user({"disposition":"finish","payload":{"type":"text","text":"Clear it if an app or page keeps showing outdated or broken content. It may load a little slower the next time."}}). These are two parts of one answer; no other work is needed between them.',
+  'Use disposition:"continue" when you have more to say, including another part of the answer. When the reply is finished, call send_to_user with disposition:"finish" and the result itself. For a greeting, immediately call send_to_user({"disposition":"finish","payload":{"type":"text","text":"Hi! How can I help?"}}). Even a greeting must be a tool call, never a plain assistant reply. Finish ends the Turn immediately; never send another reply for the same result.',
+  "Keep every message short — a line or two of plain prose about one thought, no preamble and no sign-off. Headings, bold labels, lists and tables are only for structured output the user asked for; give more detail when they ask for it.",
+  "One message is enough for a simple answer. When an answer has distinct parts, send each part in its own call — two to four short messages; separate paragraphs in one call still make one bubble.",
+  "Don't say the same thing twice or close with a summary of the answer.",
 ].join("\n");
 
 const SEND_TO_USER_DESCRIPTION = [
@@ -204,14 +196,11 @@ const SEND_TO_USER_DESCRIPTION = [
   "more than a moment, then work in silence. Call it again only on a real",
   "beat: the result, a decision only the user can make, or a blocker. Do not",
   "call it to narrate a step or a tool, and never end your Turn leaving the",
-  "user's question unanswered. Each call is one message; keep it short,",
-  "usually one to three sentences about one thought. Use one message for a",
-  "simple answer, or two to four separate calls for distinct parts. Keep the",
-  "whole reply concise. Write plain paragraphs; avoid headings, bold labels,",
-  "lists and tables unless the user requests structured output. Links and",
-  "necessary code are fine. Give more detail when asked; do not add a recap.",
+  "user's question unanswered. Each call is one message; keep it short —",
+  "a line or two of plain prose. Use one message for a simple answer, or",
+  "separate calls for the distinct parts of a longer one.",
   "The payload is one of:",
-  'payload.type is required on every send. For text, always include payload:{"type":"text","text":"your message"}; replace "your message" with the answer to the current user request.',
+  'payload.type is required on every send. A complete greeting call is {"disposition":"finish","payload":{"type":"text","text":"Hi! How can I help?"}}.',
   '{"type":"text","text":"…"}',
   '{"type":"attachment","url":"https://…","name":"…","mediaType":"…"}',
   '{"type":"widget","widget":{"prompt":"…","helpText":"…","options":["…"],"allowCustom":false,"dismissOnMoveOn":false}}',
@@ -223,7 +212,7 @@ const SEND_TO_USER_DESCRIPTION = [
   "their answer arrives as a new Turn. An approval asks the user to allow one",
   "action you must not take without them; it also ends your Turn, and their",
   "decision — or its expiry — reaches you as input on a later Turn.",
-  'Use disposition:"continue" when you have more to say or do, including another part of the answer. Set disposition:"finish" only on the last message with the answer, result, or blocker: this ends the Turn immediately. Widgets and approvals always end the Turn.',
+  'Set disposition to "finish" for the answer, result, or blocker: this ends the Turn immediately. Use "continue" only for an interim update before more work. Widgets and approvals always end the Turn.',
 ].join(" ");
 
 const SEND_TO_USER_INPUT_SCHEMA = {
@@ -233,7 +222,7 @@ const SEND_TO_USER_INPUT_SCHEMA = {
       type: "string",
       enum: ["finish", "continue"],
       description:
-        "finish ends this Turn after the last message; continue sends a message when there is more to say or do, including another part of the answer.",
+        "finish ends this Turn after the last message; continue sends a message when there is more to say, including another part of the answer.",
     },
     payload: {
       type: "object",
@@ -243,8 +232,6 @@ const SEND_TO_USER_INPUT_SCHEMA = {
         type: {
           type: "string",
           enum: SEND_TO_USER_PAYLOAD_TYPES_V1,
-          description:
-            'Required on every payload. Set to "text" for a written message.',
         },
       },
       oneOf: [
@@ -256,7 +243,7 @@ const SEND_TO_USER_INPUT_SCHEMA = {
               type: "string",
               minLength: 1,
               description:
-                "One chat bubble: one compact paragraph, usually one to three short sentences about one thought. Send distinct answer parts through separate calls. Plain prose by default; requested detail, structured output, links and necessary code are allowed.",
+                "One chat bubble: a line or two about one thought. Send distinct answer parts through separate calls.",
             },
           },
           required: ["type", "text"],
@@ -373,7 +360,7 @@ function createSendToUserTool(
         record.disposition !== "continue"
       ) {
         return refusal(
-          `${name} requires disposition: "finish" for the last message or "continue" when there is more to say or do.`,
+          `${name} requires disposition: "finish" for the final reply or "continue" for an interim update.`,
         );
       }
       let payload: SendToUserPayloadV1;
