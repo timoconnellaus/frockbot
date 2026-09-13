@@ -112,6 +112,15 @@ for (const scenario of cases) {
       const messages = sends.flatMap((e) =>
         e.payload.type === "text" ? [e.payload.text] : [],
       );
+      // Judge the delivery the user got, not every attempt: a refused call
+      // delivers nothing, and the model correcting the payload shape and
+      // resending is the runtime safeguard working. `refusedCalls` keeps the
+      // attempts visible without failing a Turn that reached the user.
+      const deliveredCalls = sends.flatMap((send) => {
+        const call = calls.find((c) => c.occurrenceId === send.occurrenceId);
+        return call ? [call] : [];
+      });
+      const refusedCalls = calls.length - deliveredCalls.length;
       const words = messages.map((text) => text.trim().split(/\s+/u).length);
       const text = messages.join("\n\n");
       const totalWords = words.reduce((sum, count) => sum + count, 0);
@@ -121,15 +130,15 @@ for (const scenario of cases) {
           "completed",
         onlyTextSends:
           sends.length === messages.length &&
-          calls.length === sends.length &&
           calls.every((call) => call.name === "send_to_user"),
         deliveryOrder:
-          calls.length > 0 &&
-          calls.every((call, index) => {
-            const input = call.input as { disposition?: string } | null;
+          deliveredCalls.length === sends.length &&
+          deliveredCalls.length > 0 &&
+          deliveredCalls.every((call, index) => {
+            const input = call?.input as { disposition?: string } | null;
             return (
               input?.disposition ===
-              (index === calls.length - 1 ? "finish" : "continue")
+              (index === deliveredCalls.length - 1 ? "finish" : "continue")
             );
           }),
         messageCount:
@@ -154,6 +163,7 @@ for (const scenario of cases) {
         messages,
         words,
         modelCalls,
+        refusedCalls,
         elapsedMs: Math.round(performance.now() - started),
         events,
       };

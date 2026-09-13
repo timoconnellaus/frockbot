@@ -47,8 +47,9 @@ checkout's `.dev.vars` and accepts `OLLAMA_BASE_URL` and `OLLAMA_MODEL` override
 It uses the configured model account and is a development check, never a CI test.
 
 The report in `.eval-results/` records the model, source revision, requests,
-ordered sends and mechanical checks for delivery, message count, length and
-formatting. Its bounds apply to those example questions, not to product payloads.
+ordered sends, refused send attempts, and mechanical checks for delivery,
+message count, length and formatting. Its bounds apply to those example
+questions, not to product payloads.
 Read the saved replies as well: correctness, completeness, natural message
 boundaries and repeated ideas need human review.
 
