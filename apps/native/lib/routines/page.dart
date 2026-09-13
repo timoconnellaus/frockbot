@@ -201,6 +201,7 @@ class RoutinesView extends StatefulWidget {
 
   /// Off inside the right panel, which draws its own header. On as a page.
   final bool chrome;
+  final String? initialRoutineId;
   const RoutinesView({
     super.key,
     required this.api,
@@ -212,6 +213,7 @@ class RoutinesView extends StatefulWidget {
     this.onInbox,
     this.onClose,
     this.chrome = true,
+    this.initialRoutineId,
   });
 
   @override
@@ -263,7 +265,7 @@ class _RoutinesViewState extends State<RoutinesView> {
     openRuns: _openRuns,
     confirmDelete: _confirmDelete,
     onInbox: widget.onInbox,
-  );
+  )..editing = widget.initialRoutineId;
 
   @override
   Widget build(BuildContext context) => identified(

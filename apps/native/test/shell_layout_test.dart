@@ -510,7 +510,7 @@ void main() {
       // account is behind the first and each Bot's own affairs are on its
       // page. The Marketplace is the column's foot, a named row below the
       // list rather than a fifth icon in its bar.
-      expect(find.byType(IconButton), findsNWidgets(4));
+      expect(find.byType(IconButton), findsNWidgets(3));
       final foot = byIdentifier(ShellIds.sidebarMarketplace);
       expect(foot, findsOneWidget);
       expect(

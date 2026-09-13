@@ -581,7 +581,7 @@ primary-source evidence, the Package proposed to own it, and status against `doc
 | 49  | Shell/Read/AwaitShell targeted at a machine by id with local-exec approval; copy files both ways                                                                                              | `machineId`; `CopyToBox`/`CopyFromBox`                                                                                                                             | §2.16, §2A         | `plugin-user-machine`: `machine_exec`/`machine_read`/`machine_copy_*`/`machine_command_check`, per-call approval, `machine:<id>` audit — chat turns only, and `copy_from_computer` refuses (protocol v1 carries no Workspace bytes)                                                        | partial                                             |
 | 50  | **UI** — settings tabs with per-row deep links the agent may cite but never invent                                                                                                            | `grokbot://app/v1/settings?id=<anchor>`                                                                                                                            | §2A                | `plugin-shell/settings-links` + `plugin-settings`                                                                                                                                                                                                                                          | landed                                              |
 | 51  | Default Bot panel: live computer preview + Routines list; settings cog swaps the panel to Bot settings                                                                                        | right panel / settings cog                                                                                                                                         | §2A                | `plugin-settings` frame + `computer` / `plugin-routines` slots                                                                                                                                                                                                                             | landed                                              |
-| 52  | Search across every Bot's transcript and media (the agent gets no tool over it)                                                                                                               | `search-index.db` `messages` / `media`                                                                                                                             | §2.4               | new `plugin-search`                                                                                                                                                                                                                                                                        | partial                                             |
+| 52  | Search across every Bot's transcript and media (the agent gets no tool over it)                                                                                                               | `search-index.db` `messages` / `media`                                                                                                                             | §2.4               | `app/search` + `apps/native/lib/search`                                                                                                                                                                                                                                                    | partial                                             |
 | 53  | Approval cards for the Bot's own risky actions (Auto-review)                                                                                                                                  | harness "when your own action needs approval"                                                                                                                      | §2.17              | `plugin-shell` (card, record, decision, expiry) + WebUI                                                                                                                                                                                                                                    | partial                                             |
 | 54  | **Learn from demonstration** — a screen recording becomes a user-global skill, then the video is deleted                                                                                      | `learn-from-demonstration`: teach queue → `session.json` → `watchVideo` → `update_state skill write`                                                               | §3.9               | `plugin-skills` + capture UI                                                                                                                                                                                                                                                               | not started                                         |
 | 55  | Guided connector install: catalog → setup fields → confirm widget → host-authored connect card → raw-MCP fallback                                                                             | `add-connector`: `SearchPlugins`/`GetPlugin`/`InstallPlugin{values}`/`AddMcpServer`/`SetMcpInstructions`                                                           | §3.10              | `plugin-settings` + `plugin-mcp` (no catalog step: the Skill points at the Connectors surface)                                                                                                                                                                                             | regressed                                           |
@@ -658,9 +658,8 @@ the rows whose status the code moved:
   Bot-callable tool reaches either. A Bot may hide itself and rename itself; it
   cannot archive itself, restore itself, or remove any Bot.
 
-- **4** — landed, with one shape difference: GrokBot keeps a hidden Bot
-  reachable through a command palette, and FrockBot has no palette, so the Flock
-  sidebar grows a "Show N hidden" group instead
+- **4** — landed. Hidden Bots remain reachable through the search palette
+  and the Flock sidebar’s "Show N hidden" group
   (`apps/native/lib/shell/sidebar.dart`). The
   durable field is `BotProfile.hiddenFromSidebar`, beside — not inside — the
   notification policy, because it describes how the Bot presents itself rather
@@ -669,7 +668,7 @@ the rows whose status the code moved:
   browser notification permission without blocking or changing that durable
   intent when the browser refuses.
   The same hosted sidebar now matches GrokBot's
-  organisational shape: Search and Create Bot share its top row, visible Bots
+  organisational shape: Search sits below the Create Bot header, visible Bots
   group by the case-insensitive trimmed `BotProfile.label` with Unassigned last,
   and each row reads a bounded `shell:preview` written atomically with settled
   unread activity for its latest message and time. Labels remain presentation
@@ -1071,16 +1070,16 @@ than a silent absence. Row 44 is the only one.
   resolve-then-connect hook, so host classification is exact for IP literals
   and known-internal name shapes and **best-effort against DNS rebinding**.
 
-- **52** — the transcript half is landed and the media half cannot be. A
-  User's Durable Object holds a rebuildable index over every one of their Bots'
-  transcripts (`app/search`), reached through a route and a search
-  overlay, and the row's own parenthesis is matched: the agent gets no tool over
-  it. `SearchRowKindV1` declares `"media"` beside `user`, `assistant` and
-  `tool` and **nothing writes it**, deliberately — FrockBot has no attachment
-  concept for a User to have sent, so the schema carries the slot rather than
-  changing when one arrives. `computer_screenshot` and `generate_image`
-  attachments are Workspace files referenced from a tool result, not indexed
-  media, so the row stays `partial` until there is media to find.
+- **52** — conversation text, shared attachments and links are searchable in
+  the User's rebuildable index (`app/search`); the agent gets no tool over it.
+  The search palette opens from the sidebar or Cmd/Ctrl+K, with desktop tabs
+  and a phone filter menu. Bots, Routines and navigation actions are included.
+  Files indexes attachments explicitly sent to the User, and Links indexes
+  URLs from conversation text. Both return to their source conversation and
+  can show recent items before typing. Archived results open read-only history
+  when explicitly included. Tool output stays an explicit opt-in.
+  Workspace files that have not been shared are not indexed, and Group chats
+  remain unavailable, so the broader GrokBot search surface stays `partial`.
 - **37** — landed. The five roles exist as a real ceiling, not a label. A
   `Task` names `type` (GrokBot's `subagent_type`), the child Turn is admitted
   with it, and `ToolRegistry.schemas` takes a second coordinate beside the turn

@@ -57,20 +57,8 @@ export interface SearchProjectableRunV1 {
     };
     callId?: string;
     content?: string;
+    payload?: unknown;
   }[];
-  /**
-   * The settled assistant text. The wire DTO carries it as
-   * `outcome.text` and the decoded client value as `responseText`; both are
-   * read here so a Turn's settlement-time projection and a rebuild's cannot
-   * diverge on which shape they happened to be handed.
-   */
-  responseText?: string;
-  outcome?: { type: string; text?: string };
-}
-
-function assistantText(run: SearchProjectableRunV1): string | undefined {
-  if (run.responseText !== undefined) return run.responseText;
-  return run.outcome?.type === "completed" ? run.outcome.text : undefined;
 }
 
 /** A run is projected once it can no longer change. */
@@ -133,7 +121,60 @@ export function searchRowsFromClientRunV1(
     const name = clientToolCallNameV1(event.call);
     push("tool", result ? `${name}\n${result}` : name);
   }
-  const answer = run.status === "completed" ? assistantText(run) : undefined;
-  if (answer) push("assistant", answer);
+  const sends = run.events.filter((event) => event.type === "send/to-user");
+  const sharedText: string[] = [run.input];
+  for (const event of sends) {
+    const payload = event.payload;
+    if (typeof payload !== "object" || payload === null) continue;
+    if (
+      "type" in payload &&
+      payload.type === "text" &&
+      "text" in payload &&
+      typeof payload.text === "string"
+    ) {
+      push("assistant", payload.text);
+      sharedText.push(payload.text);
+    } else if (
+      "type" in payload &&
+      payload.type === "attachment" &&
+      "url" in payload &&
+      typeof payload.url === "string"
+    ) {
+      const name =
+        "name" in payload && typeof payload.name === "string"
+          ? payload.name
+          : undefined;
+      const mediaType =
+        "mediaType" in payload && typeof payload.mediaType === "string"
+          ? payload.mediaType
+          : undefined;
+      push(
+        "media",
+        [name ?? "Attachment", mediaType, payload.url]
+          .filter(Boolean)
+          .join("\n"),
+      );
+    }
+  }
+  // Links belong to things the reader saw, never a tool result. Selection
+  // returns to the source message, so indexing does not fetch or open a URL.
+  const links = new Set<string>();
+  for (const text of sharedText) {
+    for (const match of boundSearchBodyV1(text).matchAll(
+      /https?:\/\/[^\s<>"\[\]]+/giu,
+    )) {
+      const url = match[0].replace(/[.,;:!?)}]+$/u, "");
+      try {
+        const parsed = new URL(url);
+        if (parsed.username || parsed.password || !parsed.hostname) continue;
+        links.add(url);
+      } catch {
+        continue;
+      }
+      if (links.size >= 32) break;
+    }
+    if (links.size >= 32) break;
+  }
+  for (const link of links) push("link", link);
   return rows;
 }

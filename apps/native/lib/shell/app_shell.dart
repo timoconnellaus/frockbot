@@ -34,6 +34,9 @@ import '../packages/frame.dart';
 import '../plugins/page.dart';
 import '../recovery/page.dart';
 import '../routines/page.dart';
+import '../routines/runs.dart';
+import '../search/controller.dart';
+import '../search/archived_conversation.dart';
 import '../search/overlay.dart';
 import '../settings/billing.dart';
 import '../settings/credit.dart';
@@ -121,6 +124,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   bool resumed = true;
   Timer? _activityTimer;
   List<wire.BotRegistration> bots = [];
+  List<wire.BotRegistration> searchableBots = [];
   Map<String, SidebarProfile> profiles = {};
   Set<String> archived = {};
   wire.BotRegistration? selected;
@@ -153,6 +157,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   final ValueNotifier<int> catalogRevision = ValueNotifier(0);
   String? error;
   bool loaded = false;
+  bool _searchOpen = false;
 
   /// On a phone the Bot list is the first screen and a conversation is a
   /// page over it; this is whether that page is up. At the wider tiers the
@@ -461,10 +466,19 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         }),
       );
       if (!mounted) return;
-      _adopt(active, {
-        for (final entry in unavailable.entries)
-          if (entry.value == 'archived') entry.key,
-      });
+      _adopt(
+        active,
+        {
+          for (final entry in unavailable.entries)
+            if (entry.value == 'archived') entry.key,
+        },
+        readable: [
+          for (final bot in directory.bots)
+            if (unavailable[bot.botId.value] == null ||
+                unavailable[bot.botId.value] == 'archived')
+              bot,
+        ],
+      );
       unawaited(_loadIdentities());
       unawaited(activity.load());
       unawaited(
@@ -485,9 +499,14 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     }
   }
 
-  void _adopt(List<wire.BotRegistration> active, Set<String> archivedIds) {
+  void _adopt(
+    List<wire.BotRegistration> active,
+    Set<String> archivedIds, {
+    List<wire.BotRegistration>? readable,
+  }) {
     setState(() {
       bots = active;
+      searchableBots = readable ?? active;
       // The directory is authority on what a Bot wears; whatever it says now
       // replaces anything drawn ahead of it.
       _predictedSheep.clear();
@@ -1560,28 +1579,162 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         ],
       ),
     );
-    return ColoredBox(
-      color: Theme.of(context).colorScheme.surface,
-      child: shell,
+    return SearchShortcutListener(
+      onOpen: () => unawaited(_openSearch()),
+      child: ColoredBox(
+        color: Theme.of(context).colorScheme.surface,
+        child: shell,
+      ),
     );
   }
 
-  /// Search over every conversation this account has, which is the backend's
-  /// index rather than the names the sidebar happens to hold. A chosen hit is
-  /// its Bot and its Turn: the shell opens the Bot and the transcript scrolls
-  /// to the Turn.
   Future<void> _openSearch() async {
-    final hit = await showSearchOverlayV1(context, widget.api);
+    if (_searchOpen) return;
+    _searchOpen = true;
+    SearchSelection? hit;
+    try {
+      hit = await showSearchOverlayV1(
+        context,
+        widget.api,
+        bots: [
+          for (final bot in searchableBots)
+            SearchBot(
+              id: bot.botId.value,
+              name: _name(bot),
+              description:
+                  profiles[bot.botId.value]?.title ??
+                  bot.initialDescription ??
+                  '',
+              background: bot.sheep.background,
+              unread: activity.unread[bot.botId.value]?.unread == true,
+              archived: archived.contains(bot.botId.value),
+              hidden: profiles[bot.botId.value]?.hiddenFromSidebar == true,
+            ),
+        ],
+        actions: [
+          if (selected != null)
+            const SearchAction(
+              'chat-settings',
+              'Chat Settings',
+              'Current chat',
+            ),
+          const SearchAction(
+            'settings',
+            'Settings: General',
+            'Personal details',
+          ),
+          if (computer?.available == true)
+            const SearchAction(
+              'computer',
+              'Settings: Computer',
+              'Current chat',
+            ),
+          const SearchAction('billing', 'Settings: Usage & Billing', 'Account'),
+          const SearchAction('plugins', 'Plugins', 'Account'),
+          const SearchAction(
+            'marketplace',
+            'Marketplace',
+            'Connections and services',
+          ),
+          const SearchAction('machines', 'Your computers', 'Account'),
+          if (selected != null)
+            const SearchAction('routines', 'Routines', 'Current chat'),
+        ],
+      );
+    } finally {
+      _searchOpen = false;
+    }
     if (hit == null || !mounted) return;
-    if (bots.every((bot) => bot.botId.value != hit.botId)) await load();
+    if (hit.actionId case final String action) {
+      Navigator.of(context).popUntil((route) => route.isFirst);
+      switch (action) {
+        case 'chat-settings':
+          _openPanel('bot-settings');
+        case 'settings':
+          _openSettings();
+        case 'computer':
+          _openPanel('computer');
+        case 'billing':
+          unawaited(_openBilling());
+        case 'plugins':
+          _push(
+            PluginsPage(
+              api: widget.api,
+              store: widget.store,
+              userId: widget.userId,
+            ),
+          );
+        case 'marketplace':
+          _openMarketplace();
+        case 'machines':
+          _push(
+            MachinesPage(
+              api: widget.api,
+              store: widget.store,
+              userId: widget.userId,
+            ),
+          );
+        case 'routines':
+          _openPanel('routines');
+      }
+      return;
+    }
+    final botId = hit.botId;
+    if (botId == null) return;
+    if (searchableBots.every((bot) => bot.botId.value != botId)) await load();
     if (!mounted) return;
-    _select(hit.botId);
-    // The Turn may sit further back than the newest page, so the transcript is
-    // asked to reach it and says so itself when it cannot.
-    widget.sessions
-        .open(widget.userId, hit.botId)
-        .controller
-        .focusRun(hit.runId);
+    // A desktop destination may be covered by the page from which Cmd+K was
+    // used. Return to the shell before selecting the conversation behind it.
+    Navigator.of(context).popUntil((route) => route.isFirst);
+    final matchedBot = searchableBots
+        .where((bot) => bot.botId.value == botId)
+        .firstOrNull;
+    if (matchedBot == null) {
+      _say('That Bot is no longer available.');
+      return;
+    }
+    if (archived.contains(botId)) {
+      if (hit.routineId case final String routineId) {
+        _push(
+          RoutineRunsPage(api: widget.api, botId: botId, routineId: routineId),
+        );
+      } else {
+        _push(
+          ArchivedConversationPage(
+            api: widget.api,
+            bot: SearchBot(
+              id: botId,
+              name: _name(matchedBot),
+              background: matchedBot.sheep.background,
+              archived: true,
+            ),
+            runId: hit.runId,
+          ),
+        );
+      }
+      return;
+    }
+    _select(botId);
+    if (hit.routineId case final String routineId) {
+      _push(
+        RoutinesView(
+          api: widget.api,
+          store: widget.store,
+          userId: widget.userId,
+          botId: botId,
+          botName:
+              bots
+                  .where((bot) => bot.botId.value == botId)
+                  .map(_name)
+                  .firstOrNull ??
+              botId,
+          initialRoutineId: routineId,
+          onInbox: routineInbox?.adopt,
+        ),
+      );
+    } else if (hit.runId case final String runId) {
+      widget.sessions.open(widget.userId, botId).controller.focusRun(runId);
+    }
   }
 
   /// The Marketplace: a page and a list on a phone, where the list of Bots is

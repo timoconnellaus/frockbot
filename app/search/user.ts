@@ -13,7 +13,6 @@
 //    Durable Object holds, and a rebuild must read them from that authority
 //    rather than from anything this object remembers.
 import {
-  SEARCH_REBUILD_PAGE_V1,
   SearchIndexV1,
   type SearchRebuildOutcomeV1,
   type SearchRowSourceV1,
@@ -97,7 +96,7 @@ export class SearchUserBackendContribution {
           await this.host.projectBotRows(botId, cursor),
         );
         return {
-          rows: page.rows.slice(0, SEARCH_REBUILD_PAGE_V1 * 8),
+          rows: page.rows,
           ...(page.nextCursor === undefined
             ? {}
             : { nextCursor: page.nextCursor }),
