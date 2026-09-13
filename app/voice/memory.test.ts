@@ -1858,6 +1858,85 @@ describe("the order the finalizer is shown", () => {
   });
 });
 
+describe("a fact that came back", () => {
+  test("renders only as remembered while its fence stays stored", async () => {
+    const { memory, storage } = ledger();
+    const first = conversation(
+      "call-1",
+      CALL_ONE,
+      2,
+      "2026-09-05T09:00:00.000Z",
+    );
+    // They asked for short answers, then dropped it in the same call.
+    await memory.apply({
+      operations: [
+        {
+          kind: "durable/add",
+          id: "short-answers",
+          text: "Keep answers to a sentence.",
+          source: "call-1:1",
+        },
+      ],
+      sources: first,
+      now: new Date("2026-09-05T09:05:00.000Z"),
+    });
+    await memory.apply({
+      operations: [
+        { kind: "durable/remove", id: "short-answers", source: "call-1:2" },
+      ],
+      sources: first,
+      now: new Date("2026-09-05T09:06:00.000Z"),
+    });
+
+    // A later call brings it back under the same id.
+    const second = conversation(
+      "call-2",
+      CALL_TWO,
+      1,
+      "2026-09-06T09:00:00.000Z",
+    );
+    await memory.apply({
+      operations: [
+        {
+          kind: "durable/add",
+          id: "short-answers",
+          text: "Keep answers to a sentence.",
+          source: "call-2:1",
+        },
+      ],
+      sources: second,
+      now: new Date("2026-09-06T09:05:00.000Z"),
+    });
+
+    const record = await memory.read();
+    expect(record.durable.map((entry) => entry.id)).toContain("short-answers");
+    // The fence is still on record and still stored: it is what refuses a
+    // stale summary that writes the removed text back.
+    expect(record.forgotten.map((fence) => fence.id)).toContain(
+      "short-answers",
+    );
+    expect(
+      [...storage.entries.keys()].filter((key) =>
+        key.startsWith(VOICE_MEMORY_FORGOTTEN_PREFIX_V1),
+      ),
+    ).toHaveLength(1);
+
+    const instruction = renderVoiceMemoryRequestMessagesV1({
+      turns: second,
+      record,
+      progress: { from: 0, total: second.length },
+    }).at(-1)!.content;
+
+    expect(instruction).toContain(
+      "- durable (short-answers) Keep answers to a sentence.",
+    );
+    expect(instruction).not.toContain("(short-answers) [dropped");
+    expect(instruction).not.toContain(
+      "What they have since dropped or replaced",
+    );
+  });
+});
+
 describe("where the removal fences are kept", () => {
   /** Every fence record stored, and how much of it the memory record holds. */
   async function fences(storage: ReturnType<typeof ledger>["storage"]) {

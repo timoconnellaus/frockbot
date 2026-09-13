@@ -946,7 +946,16 @@ export function renderVoiceMemoryInstructionV1(input: {
       : "You remember nothing yet.",
   );
   lines.push(...remembered);
+  // A fence stays on record after its id is re-added, because it is what
+  // refuses a stale summary that writes the old text back. Showing it here as
+  // well would put the same fact under "remembered" and "dropped" at once.
+  const live = new Set(
+    (["durable", "ongoing", "recent"] as const).flatMap((kind) =>
+      input.record[kind].map((entry) => `${kind} ${entry.id}`),
+    ),
+  );
   const dropped = [...input.record.forgotten]
+    .filter((tombstone) => !live.has(`${tombstone.kind} ${tombstone.id}`))
     .sort((left, right) => compareVoiceMemoryStampV1(left.stamp, right.stamp))
     .slice(-VOICE_MEMORY_INSTRUCTION_DROPPED_V1);
   if (dropped.length > 0) {
@@ -1260,8 +1269,10 @@ export class VoiceMemoryLedgerV1 {
       if (job.attempts >= VOICE_MEMORY_MAX_ATTEMPTS_V1) return undefined;
       const own = await input.read(job.callId);
       const totals = [{ callId: job.callId, total: own.length }];
-      // An earlier call nobody finished is read with this one, oldest first,
-      // so nothing it held is lost and the order stays the order it happened.
+      // Earlier calls nobody finished are read with this one — the newest of
+      // them first, since a call that finishes leaves the `failed` set and the
+      // backlog still drains completely. Within the window that is read, the
+      // turns stay in the order they happened, so nothing it held is lost.
       const carried: VoiceMemorySourceTurnV1[] = [];
       // Only calls that have given up on their own. A `pending` one still has
       // its own scheduled path, and reading it here as well would put two

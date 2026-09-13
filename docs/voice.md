@@ -625,7 +625,9 @@ was dispatched is never issued again:
   the same way.
 
 A finalization also reads up to two earlier `failed` calls alongside its own,
-oldest first. A call still `pending` is left alone — it has its own scheduled
+taking the newest of them first and ordering the turns it reads oldest first.
+A call that finishes leaves the `failed` set, so the backlog still drains
+completely. A call still `pending` is left alone — it has its own scheduled
 path, and reading it here too would put two finalizations over one call's
 source. Carried cursors advance to the highest turn actually covered, never by
 a count added to whatever the cursor says, so two readers that overlap settle
