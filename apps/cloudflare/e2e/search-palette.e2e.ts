@@ -2,6 +2,7 @@ import {
   test,
   expect,
   createBot,
+  answerComposer,
   field,
   openApplication,
   press,
@@ -26,8 +27,7 @@ test("search opens from the field or keyboard and selects a Bot without sending 
   await expect(overlay).toBeHidden();
 
   const composer = field(page, "chat-composer");
-  await composer.focus();
-  await composer.pressSequentially("Unsent draft");
+  await answerComposer(page, "Unsent draft");
   await page.keyboard.press("ControlOrMeta+k");
   await expect(overlay).toBeVisible();
   await page.keyboard.press("ControlOrMeta+k");
@@ -47,6 +47,10 @@ test("search opens from the field or keyboard and selects a Bot without sending 
     "true",
   );
   await press(sidebarBots.filter({ hasText: "Housework" }));
+  await expect(sidebarBots.filter({ hasText: "Housework" })).toHaveAttribute(
+    "aria-current",
+    "true",
+  );
   await composer.focus();
   await expect(composer).toHaveValue("Unsent draft");
 });
