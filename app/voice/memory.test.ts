@@ -2071,7 +2071,8 @@ describe("where the removal fences are kept", () => {
     // record: the earliest fact of the backlog cannot come back.
     const after = await memory.read();
     const fenced = new Set(after.forgotten.map((fence) => fence.id));
-    for (const fence of before.forgotten) expect(fenced.has(fence.id)).toBe(true);
+    for (const fence of before.forgotten)
+      expect(fenced.has(fence.id)).toBe(true);
 
     // And the fence for the first fact still refuses the stale summary of the
     // conversation that stated it.
