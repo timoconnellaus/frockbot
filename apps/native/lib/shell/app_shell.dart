@@ -20,7 +20,7 @@ import '../applets/picker.dart';
 import '../audit/page.dart';
 import '../client/auth.dart' show developmentAuth;
 import '../client/bot_sessions.dart';
-import '../client/chat_controller.dart' show ConnectionState;
+import '../client/chat_controller.dart' show ChatController, ConnectionState;
 import '../client/transport.dart';
 import '../computer/card.dart';
 import '../computer/client.dart';
@@ -149,6 +149,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// holder builds nothing, so the one key is in one place.
   bool _appletPagePresented = false;
   ComputerController? computer;
+  ChatController? _headerChat;
   PackageCatalog? catalog;
 
   /// Bumped whenever [catalog] changes. A Bot page pushed as its own route
@@ -621,6 +622,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         botId;
     botSettings?.dispose();
     routineInbox?.dispose();
+    _headerChat?.removeListener(_repaint);
+    _headerChat = widget.sessions.open(widget.userId, botId).controller
+      ..addListener(_repaint);
     final controller = BotSettingsController(widget.api, botId);
     final inbox = RoutineInboxController(widget.api, botId);
     botSettings = controller;
@@ -1423,7 +1427,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                                 : () => _openPanel('bot-settings'),
                             computerRunning:
                                 computer?.available == true &&
-                                computer!.state.running,
+                                (computer!.state.running ||
+                                    botComputerRunningV1(
+                                      _headerChat?.runs ??
+                                          const <Map<String, dynamic>>[],
+                                    )),
                             onComputer: computer?.available == true
                                 ? () => _openPanel('computer')
                                 : null,
@@ -2114,6 +2122,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     routineInbox?.dispose();
     appletCanvas?.dispose();
     computer?.dispose();
+    _headerChat?.removeListener(_repaint);
     slots.dispose();
     catalogRevision.dispose();
     voiceSession?.dispose();

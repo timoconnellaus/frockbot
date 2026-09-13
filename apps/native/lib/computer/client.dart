@@ -169,6 +169,35 @@ class ComputerProjection {
   }
 }
 
+/// Whether the live Turn has reached one of the hosted Computer tools.
+///
+/// A Bot wakes the Computer through its tools without minting the viewer
+/// session that makes [ComputerProjection.running] true. The conversation is
+/// already the live projection of that work, so the header can show the same
+/// running affordance while such a call is in flight.
+bool botComputerRunningV1(Iterable<Map<String, dynamic>> runs) {
+  for (final run in runs) {
+    if (run['status'] != 'running') continue;
+    for (final event in (run['events'] as List? ?? const [])) {
+      if (event is! Map || event['type'] != 'tool/call') continue;
+      final call = event['call'];
+      if (call is! Map) continue;
+      final name = call['name'];
+      if (name is String && name.startsWith('computer_')) return true;
+      if (name == 'call_dynamic_tool') {
+        final input = call['input'];
+        if (input is Map &&
+            input['namespace'] == 'frockbot' &&
+            input['toolName'] is String &&
+            (input['toolName'] as String).startsWith('computer_')) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
 /// What the opening card and overlay call this run.
 String computerOpeningHeadingV1(ComputerProjection state) {
   final progress = state.progress;
