@@ -174,7 +174,7 @@ class ComputerProjection {
 /// A Bot wakes the Computer through its tools without minting the viewer
 /// session that makes [ComputerProjection.running] true. The conversation is
 /// already the live projection of that work, so the header can show the same
-/// running affordance while such a call is in flight.
+/// running affordance while that Turn is running.
 bool botComputerRunningV1(Iterable<Map<String, dynamic>> runs) {
   for (final run in runs) {
     if (run['status'] != 'running') continue;

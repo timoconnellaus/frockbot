@@ -150,6 +150,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   bool _appletPagePresented = false;
   ComputerController? computer;
   ChatController? _headerChat;
+  bool _botComputerRunning = false;
   PackageCatalog? catalog;
 
   /// Bumped whenever [catalog] changes. A Bot page pushed as its own route
@@ -227,6 +228,18 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   void _repaint() {
     if (mounted) setState(() {});
     unawaited(push.syncRead());
+  }
+
+  void _repaintHeader() {
+    final running = botComputerRunningV1(
+      _headerChat?.runs ?? const <Map<String, dynamic>>[],
+    );
+    if (running == _botComputerRunning) return;
+    _botComputerRunning = running;
+    // Restoring a cached conversation can notify while its pane is building.
+    scheduleMicrotask(() {
+      if (mounted) setState(() {});
+    });
   }
 
   /// The Bot the User is reading right now, or null when none is: the open
@@ -622,9 +635,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         botId;
     botSettings?.dispose();
     routineInbox?.dispose();
-    _headerChat?.removeListener(_repaint);
+    _headerChat?.removeListener(_repaintHeader);
     _headerChat = widget.sessions.open(widget.userId, botId).controller
-      ..addListener(_repaint);
+      ..addListener(_repaintHeader);
+    _repaintHeader();
     final controller = BotSettingsController(widget.api, botId);
     final inbox = RoutineInboxController(widget.api, botId);
     botSettings = controller;
@@ -1428,10 +1442,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                             computerRunning:
                                 computer?.available == true &&
                                 (computer!.state.running ||
-                                    botComputerRunningV1(
-                                      _headerChat?.runs ??
-                                          const <Map<String, dynamic>>[],
-                                    )),
+                                    _botComputerRunning),
                             onComputer: computer?.available == true
                                 ? () => _openPanel('computer')
                                 : null,
@@ -2122,7 +2133,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     routineInbox?.dispose();
     appletCanvas?.dispose();
     computer?.dispose();
-    _headerChat?.removeListener(_repaint);
+    _headerChat?.removeListener(_repaintHeader);
     slots.dispose();
     catalogRevision.dispose();
     voiceSession?.dispose();
