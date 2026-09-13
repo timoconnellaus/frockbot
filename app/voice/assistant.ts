@@ -34,6 +34,7 @@ export interface VoiceAssistantPromptInputV1 {
   /** Answers from Bots that settled while nobody was listening. */
   unspoken: readonly { botName: string; text: string }[];
   now: Date;
+  timezone?: string;
 }
 
 /** Bounds on what the prompt carries; spoken context should stay short. */
@@ -46,12 +47,20 @@ export const VOICE_TURN_MAX_STEPS_V1 = 4;
 export const VOICE_TURN_MAX_TOKENS_V1 = 400;
 export const VOICE_ANSWER_MAX_CHARS_V1 = 1_200;
 /**
- * Said aloud when the model goes to a tool without having said anything: a
- * tool step is a second model round-trip plus the tool itself, which is
+ * Said aloud when the model goes to a tool without having said anything, and
+ * when nothing at all has been produced yet after VOICE_TURN_ACK_DELAY_MS_V1:
+ * a tool step is a second model round-trip plus the tool itself, and loading
+ * the turn's context or reaching the model can stall just as long, which is
  * seconds of silence to the person if nothing fills them. It is spoken, not
- * answered — the ledger's answer is the model's own words only.
+ * answered — the ledger's answer is the model's own words only, and it is
+ * emitted at most once per turn however both paths race.
  */
-export const VOICE_TURN_BRIDGE_V1 = "One moment.";
+export const VOICE_TURN_BRIDGE_V1 = "One second.";
+/**
+ * How long the turn may stay silent before the bridge fills it. Short enough
+ * that a stall is covered, long enough that a quick answer streams unbroken.
+ */
+export const VOICE_TURN_ACK_DELAY_MS_V1 = 1_000;
 
 /**
  * One thing to say. `bridge` is the turn's own filler, `text` is the model's
@@ -80,11 +89,27 @@ export function renderVoiceSystemPromptV1(
     "You are FrockBot's voice assistant. You are speaking aloud with the person who owns this account, across every Bot they have.",
     "Rules:",
     "- Answer in one to three short spoken sentences. No markdown, no lists, no code.",
+    "- Before checking something or delegating work, briefly acknowledge the request aloud, for example: Let me check that. Do not claim success before the tool succeeds.",
     "- Do only light work yourself: answer from what you know, summarise, check on Bots. Anything substantial — research, writing, running tools, changing settings — you delegate with ask_bot to the Bot whose job it is, then say you have asked them.",
     "- Use list_bots or bot_status before claiming what a Bot is doing. Never guess a Bot's state from memory.",
     "- Only cancel a Bot when the person clearly asks you to stop that Bot by name, and confirm which one.",
     "- If you did not understand, say so briefly instead of guessing.",
-    `The date is ${input.now.toISOString().slice(0, 10)}.`,
+    `The current instant is ${input.now.toISOString()} (UTC).`,
+    `The person's current local date and time is ${new Intl.DateTimeFormat(
+      "en-CA",
+      {
+        timeZone: input.timezone ?? "UTC",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hourCycle: "h23",
+        timeZoneName: "longOffset",
+      },
+    ).format(input.now)} (${input.timezone ?? "UTC"}).`,
+    "Interpret today, yesterday, tomorrow and relative times in this local timezone. Include the resolved dates and timezone when handing time-sensitive requests to a Bot.",
   ];
   const bots = input.bots.slice(0, VOICE_PROMPT_MAX_BOTS_V1);
   if (bots.length > 0) {
@@ -283,7 +308,48 @@ export interface VoiceTurnResultV1 {
 export async function* runVoiceTurnV1(
   host: VoiceAssistantHostV1,
   input: {
-    system: string;
+    system: string | Promise<string>;
+    history: readonly { role: "user" | "assistant"; content: string }[];
+    transcript: string;
+    signal: AbortSignal;
+  },
+  onResult: (result: VoiceTurnResultV1) => void,
+): AsyncGenerator<VoiceTurnChunkV1> {
+  const turn = voiceTurnChunks(host, input, onResult);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let bridged = false;
+  try {
+    const first = turn.next();
+    const delayed = Symbol("delayed");
+    const ready = await Promise.race([
+      first,
+      new Promise<typeof delayed>((resolve) => {
+        timer = setTimeout(() => resolve(delayed), VOICE_TURN_ACK_DELAY_MS_V1);
+      }),
+    ]);
+    clearTimeout(timer);
+    if (ready === delayed && !input.signal.aborted) {
+      bridged = true;
+      yield { kind: "bridge", text: `${VOICE_TURN_BRIDGE_V1} ` };
+    }
+    let next = ready === delayed ? await first : ready;
+    while (!next.done) {
+      if (!input.signal.aborted && !(bridged && next.value.kind === "bridge")) {
+        if (next.value.kind === "bridge") bridged = true;
+        yield next.value;
+      }
+      next = await turn.next();
+    }
+  } finally {
+    clearTimeout(timer);
+    await turn.return(undefined);
+  }
+}
+
+async function* voiceTurnChunks(
+  host: VoiceAssistantHostV1,
+  input: {
+    system: string | Promise<string>;
     history: readonly { role: "user" | "assistant"; content: string }[];
     transcript: string;
     signal: AbortSignal;
@@ -291,7 +357,7 @@ export async function* runVoiceTurnV1(
   onResult: (result: VoiceTurnResultV1) => void,
 ): AsyncGenerator<VoiceTurnChunkV1> {
   const messages: VoiceModelMessageV1[] = [
-    { role: "system", content: input.system },
+    { role: "system", content: await input.system },
     ...input.history
       .slice(-VOICE_PROMPT_HISTORY_MESSAGES_V1)
       .map((message) => ({ role: message.role, content: message.content })),
@@ -357,6 +423,10 @@ export async function* runVoiceTurnV1(
       })),
     });
     for (const call of calls) {
+      if (input.signal.aborted) {
+        onResult({ answer: spoken, delegations, outcome: "aborted" });
+        return;
+      }
       let result: string;
       try {
         const args = parseArguments(call.arguments);

@@ -13,6 +13,7 @@ import {
   type VoiceMeterV1,
 } from "@frockbot/app/voice/ledger";
 import { provisionBot } from "./provision-bot.ts";
+import { VOICE_TURN_BRIDGE_V1 } from "@frockbot/app/voice/assistant";
 
 const touched = new Set<string>();
 const sockets = new Set<WebSocket>();
@@ -181,6 +182,98 @@ async function eventually<T>(
 }
 
 describe("the voice session object", () => {
+  test("refreshes the User's local clock for each turn of an open call", async () => {
+    const userId = `voice-clock-${crypto.randomUUID()}`;
+    const stub = assistant(userId);
+    const configuration = env.USER_CONFIGURATIONS.getByName(userId);
+    // SAFETY: name only the field read here to avoid the recursive RPC stub type.
+    const settingsRpc = configuration as unknown as {
+      readConfiguration(input: unknown): Promise<{ revision: number }>;
+    };
+    const current = await settingsRpc.readConfiguration({
+      schemaVersion: 1,
+      userId,
+    });
+    await configuration.executeConfiguration({
+      schemaVersion: 1,
+      userId,
+      command: {
+        schemaVersion: 1,
+        type: "user/update-profile",
+        commandId: "set-timezone",
+        expectedRevision: current.revision,
+        profile: { name: "Tim", timezone: "Australia/Sydney" },
+      },
+    });
+    await stub.probeSetNow("2026-09-12T13:59:00.000Z");
+    const opened = await open(userId);
+    await startCall(opened);
+    await opened.waitFor(state("awake"), "awake");
+    for (const [now, transcript, local] of [
+      ["2026-09-12T13:59:00.000Z", "what time is it", "2026-09-12, 23:59:00"],
+      [
+        "2026-09-12T14:01:00.000Z",
+        "what time is it now",
+        "2026-09-13, 00:01:00",
+      ],
+    ]) {
+      await stub.probeSetNow(now!);
+      const after = opened.frames.length;
+      await stub.probeUtterance(transcript!);
+      await opened.waitFor(
+        (f) => opened.frames.indexOf(f) >= after && f.type === "transcript_end",
+        "spoken answer",
+      );
+      await opened.waitFor(
+        (f) => opened.frames.indexOf(f) >= after && status("listening")(f),
+        "ready for next turn",
+      );
+      const prompt = (await stub.probeSystemPrompts()).at(-1)!;
+      expect(prompt).toContain(now!);
+      expect(prompt).toContain(local!);
+      expect(prompt).toContain("Australia/Sydney");
+    }
+    expect(await stub.probeChats()).toBe(2);
+  });
+
+  test("sends acknowledgment audio while the model is still pending", async () => {
+    const userId = `voice-ack-${crypto.randomUUID()}`;
+    const stub = assistant(userId);
+    const opened = await open(userId);
+    await startCall(opened);
+    await opened.waitFor(state("awake"), "awake");
+    await stub.probeStallChat();
+    await stub.probeUtterance("what emails do I have today");
+    try {
+      await eventually(
+        () => stub.probeSynthesized(),
+        (sentences) => sentences.includes(VOICE_TURN_BRIDGE_V1),
+        "acknowledgment before the model answers",
+      );
+      await eventually(
+        async () => opened.audio.length,
+        (count) => count > 0,
+        "acknowledgment audio",
+      );
+      expect(await stub.probeChats()).toBe(1);
+      expect(opened.frames.some((f) => f.type === "transcript_end")).toBe(
+        false,
+      );
+    } finally {
+      await stub.probeReleaseChat();
+    }
+    await opened.waitFor((f) => f.type === "transcript_end", "finished reply");
+    const turns = Object.values(await stub.probeStorage("voice:turn:")) as {
+      answer?: string;
+    }[];
+    expect(turns[0]?.answer).toBe("You said: what emails do I have today.");
+    expect(
+      (await stub.probeSynthesized()).filter(
+        (sentence) => sentence === VOICE_TURN_BRIDGE_V1,
+      ),
+    ).toHaveLength(1);
+  });
+
   test("refuses a socket for anyone but the User it is named for", async () => {
     const userId = `voice-owner-${crypto.randomUUID()}`;
     const intruder = await open(userId, {

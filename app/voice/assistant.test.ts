@@ -151,6 +151,40 @@ const baseInput = (transcript: string) => ({
 });
 
 describe("one voice turn", () => {
+  test("acknowledges a request while its first model response is still pending", async () => {
+    const pending = Promise.withResolvers<ReadableStream<Uint8Array>>();
+    const h = host([], { chat: () => pending.promise });
+    let result: VoiceTurnResultV1 | undefined;
+    const turn = runVoiceTurnV1(
+      h,
+      baseInput("what emails do I have today"),
+      (r) => {
+        result = r;
+      },
+    );
+    const first = turn.next();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const chunk = await Promise.race([
+        first,
+        new Promise((resolve) => {
+          timer = setTimeout(() => resolve("silent"), 2_000);
+        }),
+      ]);
+      expect(chunk).toEqual({
+        done: false,
+        value: { kind: "bridge", text: `${VOICE_TURN_BRIDGE_V1} ` },
+      });
+      expect(result).toBeUndefined();
+    } finally {
+      clearTimeout(timer);
+      pending.resolve(sse([text("I'll check your emails.")]));
+      await first;
+      await collect(turn);
+    }
+    expect(result?.answer).toBe("I'll check your emails.");
+  });
+
   test("streams a plain answer and reports it", async () => {
     const h = host([() => [text("Sure, "), text("it is ten.")]]);
     let result: VoiceTurnResultV1 | undefined;
@@ -263,6 +297,62 @@ describe("one voice turn", () => {
     expect(chunks).toEqual(["Let me check. ", "Remy is idle."]);
   });
 
+  test("an interruption after the acknowledgment prevents delegation", async () => {
+    const controller = new AbortController();
+    const h = host([
+      () => [
+        toolCall(
+          0,
+          "c1",
+          "ask_bot",
+          '{"bot_id":"remy","message":"check emails"}',
+        ),
+      ],
+    ]);
+    let result: VoiceTurnResultV1 | undefined;
+    const turn = runVoiceTurnV1(
+      h,
+      { ...baseInput("check my emails"), signal: controller.signal },
+      (r) => {
+        result = r;
+      },
+    );
+    expect((await turn.next()).value?.kind).toBe("bridge");
+    controller.abort();
+    expect(await collect(turn)).toEqual([]);
+    expect(h.asked).toEqual([]);
+    expect(result?.outcome).toBe("aborted");
+  });
+
+  test("a slow tool-first response gets only one fallback acknowledgment", async () => {
+    const pending = Promise.withResolvers<ReadableStream<Uint8Array>>();
+    let calls = 0;
+    const h = host([], {
+      chat: async () =>
+        ++calls === 1 ? pending.promise : sse([text("I've asked Remy.")]),
+    });
+    let result: VoiceTurnResultV1 | undefined;
+    const turn = runVoiceTurnV1(h, baseInput("check my emails"), (r) => {
+      result = r;
+    });
+    expect((await turn.next()).value?.kind).toBe("bridge");
+    pending.resolve(
+      sse([
+        toolCall(
+          0,
+          "c1",
+          "ask_bot",
+          '{"bot_id":"remy","message":"check emails"}',
+        ),
+      ]),
+    );
+    expect(await collect(turn)).toEqual([
+      { kind: "text", text: "I've asked Remy." },
+    ]);
+    expect(h.asked).toEqual(["remy:check emails"]);
+    expect(result?.answer).toBe("I've asked Remy.");
+  });
+
   test("refuses to delegate past the per-turn bound", async () => {
     const calls = Array.from({ length: 9 }, (_, i) =>
       toolCall(i, `c${i}`, "ask_bot", `{"bot_id":"remy","message":"job ${i}"}`),
@@ -328,6 +418,51 @@ describe("one voice turn", () => {
 });
 
 describe("the system prompt", () => {
+  test("supplies the full current instant and the User's local date and time", () => {
+    const input = {
+      bots: [],
+      memory: { logDays: 30 },
+      unspoken: [],
+      now: new Date("2026-09-12T23:35:42.000Z"),
+      timezone: "Australia/Sydney",
+    };
+    const prompt = renderVoiceSystemPromptV1(input);
+    expect(prompt).toContain("2026-09-12T23:35:42.000Z");
+    expect(prompt).toContain("Australia/Sydney");
+    expect(prompt).toContain("2026-09-13");
+    expect(prompt).toContain("09:35:42");
+  });
+
+  test.each([
+    ["2026-10-03T15:59:00.000Z", "01:59:00", "GMT+10:00"],
+    ["2026-10-03T16:01:00.000Z", "03:01:00", "GMT+11:00"],
+  ])(
+    "uses the local daylight-saving offset at %s",
+    (instant, local, offset) => {
+      const prompt = renderVoiceSystemPromptV1({
+        bots: [],
+        memory: { logDays: 30 },
+        unspoken: [],
+        now: new Date(instant),
+        timezone: "Australia/Sydney",
+      });
+      expect(prompt).toContain("2026-10-04");
+      expect(prompt).toContain(local);
+      expect(prompt).toContain(offset);
+    },
+  );
+
+  test("uses an explicit UTC clock when no User timezone is set", () => {
+    const prompt = renderVoiceSystemPromptV1({
+      bots: [],
+      memory: { logDays: 30 },
+      unspoken: [],
+      now: new Date("2026-09-12T23:35:42.000Z"),
+    });
+    expect(prompt).toContain("2026-09-12, 23:35:42");
+    expect(prompt).toContain("(UTC).");
+  });
+
   const tier = (
     facts: { date: string; text: string; kind: "profile" | "log" }[],
   ): MemoryTierReadV1 => ({

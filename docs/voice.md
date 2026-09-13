@@ -233,8 +233,10 @@ the interrupt goes first, then the held audio, then live frames — so the
 server's `speech-started` follows the client's `interrupted`, and the person's
 words are transcribed from their first syllable.
 
-An interrupt stops audio and the assistant's own reply. It never cancels a Bot
-Turn the assistant already delegated: that work is durable in the Bot.
+An interrupt stops audio and the assistant's own reply, including a tool step
+the model had not reached yet — an interrupt during the acknowledgment settles
+the turn without delegating. It never cancels a Bot Turn the assistant already
+delegated: that work is durable in the Bot.
 
 ### The turn stays thin
 
@@ -244,15 +246,24 @@ The Bot activity look-ups behind the system prompt and `list_bots` go to
 every Bot's object together, not one after another; a Bot lookup for
 `bot_status`, `ask_bot` and `cancel_bot` is one directory read. When the
 model goes to a tool without having said anything, the session speaks
-`"One moment."` before running it (`VOICE_TURN_BRIDGE_V1`) — a tool step is a
-second model round trip plus the tool, and that is seconds of silence
-otherwise; the bridge is spoken, not answered, so a turn that ends in the
-bridge alone still settles as `no_output`. `VOICE_ASSISTANT_MODEL` pins a
+`"One second."` before running it (`VOICE_TURN_BRIDGE_V1`). The same
+acknowledgment starts after one second if the first output is still pending,
+including while initial context loads or the model connects. It is emitted
+at most once per turn; a quick answer goes straight to speech. The prompt
+also asks the model to acknowledge checks and delegations briefly. The
+bridge is spoken, not answered, so a turn that ends in the bridge alone still
+settles as `no_output`. `VOICE_ASSISTANT_MODEL` pins a
 gateway model for voice turns (`workers-ai/@cf/...` or a provider the gateway
 holds a key for) instead of the platform's Auto route; the `turn` trace line
 says which was used, and `model-first-text` says how long the model took to
 say its first word — the bridge is timed separately on `turn-bridge`, so a
 tool-first turn never reads as a fast first token.
+
+The call loads the User's Profile timezone with its memory and Bot directory.
+Every turn renders a fresh clock in the system prompt: the full UTC instant
+and the local date, time and UTC offset, including daylight saving. An unset
+timezone defaults to UTC. Relative dates such as "today" use that local
+clock, and time-sensitive delegations must carry the resolved dates and zone.
 
 ### A reply that fails
 
@@ -265,7 +276,7 @@ sentence with no audio throws rather than returns (`app/voice/tts-guard.ts`);
 without that the turn settles as answered and the silence has no record.
 
 The one turn that produces no answer and yet carries no error frame is the
-bridge-only turn: once `"One moment."` has been spoken the SDK has seen text,
+bridge-only turn: once `"One second."` has been spoken the SDK has seen text,
 so it treats the turn as a success even though the ledger settles it as
 `no_output`. The person hears the bridge and then nothing, and the call goes
 back to listening with no footer message; only the `turn` trace line records
@@ -361,8 +372,9 @@ SDK started listening with no call record, so nothing was booked), `utterance`
 never given to the model — the reason says which), `model-first-text` (the
 model's first word, with `ms` since the turn began: everything before it is
 what the person waited through in silence), `turn-bridge` (the turn said
-`"One moment."` before a tool step, with `ms` since the turn began — filler,
-not the model's own words), `turn-settled` (the outcome, the
+`"One second."` before a tool step or while the first output was still
+pending, with `ms` since the turn began — filler, not the model's own
+words), `turn-settled` (the outcome, the
 delegation count and the answer's length, or a failure classification — never
 a provider's error sentence — and `ms`, the turn's whole model time),
 `speech-suppressed` (the speech allowance is used up, so a sentence of the
