@@ -212,7 +212,7 @@ const SEND_TO_USER_DESCRIPTION = [
   "their answer arrives as a new Turn. An approval asks the user to allow one",
   "action you must not take without them; it also ends your Turn, and their",
   "decision — or its expiry — reaches you as input on a later Turn.",
-  'Set disposition to "finish" for the answer, result, or blocker: this ends the Turn immediately. Use "continue" only for an interim update before more work. Widgets and approvals always end the Turn.',
+  'Set disposition to "finish" on the last message; it ends the Turn immediately. Use "continue" when there is more to say or do. Widgets and approvals always end the Turn.',
 ].join(" ");
 
 const SEND_TO_USER_INPUT_SCHEMA = {
