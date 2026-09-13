@@ -25,6 +25,7 @@ apps/native/vendor/
 apps/native/build/
 apps/native/.dart_tool/
 apps/native/macos/Flutter/ephemeral/
+apps/native/macos/Pods/
 apps/native/android/.gradle/
 apps/native/android/build/
 apps/native/android/local.properties
