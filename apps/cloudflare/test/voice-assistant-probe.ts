@@ -12,6 +12,10 @@ import type {
 import type { Connection } from "agents";
 import { VoiceAssistant } from "../src/voice-assistant.ts";
 import type { VoiceDelegationRecordV1 } from "@frockbot/app/voice/ledger";
+import type {
+  VoiceMemoryJobV1,
+  VoiceMemoryRecordV1,
+} from "@frockbot/app/voice/memory";
 
 interface ProbeSession {
   id: number;
@@ -29,6 +33,38 @@ export interface VoiceProbeScript {
   reply?: string;
   /** The speech provider answers every sentence with nothing, as a refused key does. */
   silentTts?: boolean;
+  /**
+   * What the end-of-call memory request answers with. `operations` is
+   * serialised as the update envelope; `raw` is sent exactly as given, so a
+   * test can send something that is not an update at all; `fail` makes the
+   * request itself throw, as an unreachable gateway does.
+   */
+  memory?: {
+    operations?: Record<string, unknown>[];
+    raw?: string;
+    fail?: boolean;
+  };
+  /** Transcripts containing this word become a `remember` tool call. */
+  rememberWord?: string;
+  remember?: Record<string, unknown>;
+  /** Transcripts containing this word become a `forget` tool call. */
+  forgetWord?: string;
+  forget?: string;
+}
+
+/** One scheduled row, with its payload as JSON. */
+export interface VoiceScheduleRow {
+  callback: string;
+  payload: string;
+}
+
+/** One memory request the object made, as a test reads it back. */
+export interface VoiceMemoryRequest {
+  system?: string;
+  /** Every message's content in order, so a test can look for a turn's words. */
+  contents: string[];
+  /** The instruction the request ends with. */
+  instruction: string;
 }
 
 function sse(events: unknown[]): ReadableStream<Uint8Array> {
@@ -81,6 +117,7 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
   #stalled: Promise<void> | undefined;
   #release: (() => void) | undefined;
   #now: string | undefined;
+  #memoryRequests: VoiceMemoryRequest[] = [];
 
   protected override now(): Date {
     return this.#now ? new Date(this.#now) : super.now();
@@ -175,10 +212,37 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
   protected override async chatCompletion(
     body: Record<string, unknown>,
   ): Promise<ReadableStream<Uint8Array>> {
-    this.#chats.push(body);
-    if (this.#stalled) await this.#stalled;
     const messages = body.messages as { role: string; content: string }[];
     const last = messages.at(-1)!;
+    // The end-of-call memory request is recorded on its own: it belongs to no
+    // spoken turn, and counting it as one would make every call look like it
+    // asked the model once more than it did.
+    if (last.content.includes("[end of conversation]")) {
+      const script = this.#script.memory ?? {};
+      this.#memoryRequests.push({
+        ...(messages[0]?.role === "system"
+          ? { system: messages[0].content }
+          : {}),
+        contents: messages.map((message) => message.content),
+        instruction: last.content,
+      });
+      if (script.fail) throw new Error("the model gateway is unavailable");
+      return sse([
+        {
+          choices: [
+            {
+              delta: {
+                content:
+                  script.raw ??
+                  JSON.stringify({ operations: script.operations ?? [] }),
+              },
+            },
+          ],
+        },
+      ]);
+    }
+    this.#chats.push(body);
+    if (this.#stalled) await this.#stalled;
     if (last.role === "tool") {
       return sse([
         {
@@ -189,6 +253,41 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
       ]);
     }
     const script = this.#script;
+    const tool = (name: string, args: unknown) =>
+      sse([
+        {
+          choices: [
+            {
+              delta: {
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: "call_1",
+                    function: { name, arguments: JSON.stringify(args) },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ]);
+    if (
+      script.rememberWord &&
+      body.tools !== undefined &&
+      last.content.includes(script.rememberWord)
+    ) {
+      return tool(
+        "remember",
+        script.remember ?? { text: last.content, kind: "preference" },
+      );
+    }
+    if (
+      script.forgetWord &&
+      body.tools !== undefined &&
+      last.content.includes(script.forgetWord)
+    ) {
+      return tool("forget", { text: script.forget ?? last.content });
+    }
     if (
       script.delegateWord &&
       script.botId &&
@@ -267,10 +366,19 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
     return this.#chats.length;
   }
 
+  /** Every request's messages, so a test can prove what a call carried. */
+  async probeChatMessages(): Promise<{ role: string; content: string }[][]> {
+    return this.#chats.map(
+      (body) => body.messages as { role: string; content: string }[],
+    );
+  }
+
   async probeSystemPrompts(): Promise<string[]> {
     return this.#chats.map((body) => {
       const messages = body.messages as { role: string; content: string }[];
-      return messages.find((message) => message.role === "system")!.content;
+      return (
+        messages.find((message) => message.role === "system")?.content ?? ""
+      );
     });
   }
 
@@ -316,5 +424,56 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
   /** Runs the scheduled look-up by hand, as the alarm would. */
   async probeCheckDelegation(runId: string): Promise<void> {
     await this.checkDelegation({ runId });
+  }
+
+  // -- session memory -------------------------------------------------------
+
+  /** Records the memory lines too, so a test reads what an operator would. */
+  protected override traceMemory(
+    event: string,
+    fields: Record<string, unknown> = {},
+    level: "info" | "warn" = "info",
+  ): void {
+    this.#traces.push({ event, ...fields } as VoiceTraceLine);
+    void level;
+  }
+
+  async probeMemory(): Promise<VoiceMemoryRecordV1> {
+    return this.memory().read();
+  }
+
+  async probeMemoryJobs(): Promise<VoiceMemoryJobV1[]> {
+    return this.memory().jobs();
+  }
+
+  async probeMemoryRequests(): Promise<VoiceMemoryRequest[]> {
+    return this.#memoryRequests.map((request) => ({ ...request }));
+  }
+
+  /** Runs the scheduled finalization by hand, as the alarm would. */
+  async probeFinalizeMemory(callId: string): Promise<void> {
+    await this.finalizeVoiceMemory({ callId });
+  }
+
+  /** Runs the abandoned-call alarm by hand. */
+  async probeAbandonCall(callId: string): Promise<void> {
+    await this.abandonVoiceCall({ callId });
+  }
+
+  /**
+   * Every scheduled row, so a test can prove one end produced one job. The
+   * payload is JSON rather than an object: an unknown crossing the RPC stub
+   * collapses to `never` and costs the array its element type.
+   */
+  async probeSchedules(): Promise<VoiceScheduleRow[]> {
+    return [...this.getSchedules()].map((schedule) => ({
+      callback: schedule.callback,
+      payload: JSON.stringify(schedule.payload ?? null),
+    }));
+  }
+
+  /** Re-runs what waking does, without tearing the object down. */
+  async probeRestart(): Promise<void> {
+    await this.onStart();
   }
 }

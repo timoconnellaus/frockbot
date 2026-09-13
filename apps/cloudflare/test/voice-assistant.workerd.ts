@@ -1256,3 +1256,454 @@ describe("the voice session object", () => {
     next.socket.close();
   });
 });
+
+describe("what the session remembers between calls", () => {
+  /**
+   * Ends the call the way the person does — `end_call`, then the socket —
+   * and runs the scheduled finalization by hand, as the alarm would.
+   */
+  async function hangUpAndFinalize(
+    stub: ReturnType<typeof assistant>,
+    opened: Opened,
+  ): Promise<string> {
+    const callId = (await eventually(
+      async () =>
+        (await stub.probeTraces()).find((t) => t.event === "call-admitted"),
+      (line) => Boolean(line?.call),
+      "the call-admitted trace",
+    ))!.call!;
+    opened.socket.send(JSON.stringify({ type: "end_call" }));
+    await opened.waitFor(status("idle"), "idle");
+    opened.socket.close(1000, "end-button");
+    await eventually(
+      async () => await stub.probeMemoryJobs(),
+      (jobs) => jobs.some((job) => job.callId === callId),
+      "the memory job",
+    );
+    await stub.probeFinalizeMemory(callId);
+    return callId;
+  }
+
+  test("a preference said in one call is in the next call's prompt", async () => {
+    const userId = `voice-memory-across-${crypto.randomUUID()}`;
+    const stub = assistant(userId);
+    await stub.probeSetScript({
+      reply: "Of course.",
+      memory: {
+        operations: [
+          {
+            kind: "durable/add",
+            id: "short-answers",
+            text: "Keep answers to one sentence.",
+            source: "SOURCE",
+          },
+        ],
+      },
+    });
+    const first = await open(userId, {}, "phone");
+    await startCall(first);
+    await stub.probeUtterance("keep your answers to one sentence from now on");
+    await first.waitFor((f) => f.type === "transcript_end", "spoken answer");
+    // The operation cites the turn it came from; the probe cannot know the
+    // id in advance, so it is filled in from the request the object made.
+    const callId = (await eventually(
+      async () =>
+        (await stub.probeTraces()).find((t) => t.event === "call-admitted"),
+      (line) => Boolean(line?.call),
+      "the call-admitted trace",
+    ))!.call!;
+    await stub.probeSetScript({
+      reply: "Of course.",
+      memory: {
+        operations: [
+          {
+            kind: "durable/add",
+            id: "short-answers",
+            text: "Keep answers to one sentence.",
+            source: `${callId}:1`,
+          },
+        ],
+      },
+    });
+    await hangUpAndFinalize(stub, first);
+
+    const remembered = await stub.probeMemory();
+    expect(remembered.durable).toHaveLength(1);
+    expect(remembered.durable[0]).toMatchObject({
+      id: "short-answers",
+      sourceTurnId: `${callId}:1`,
+    });
+
+    // A new call, from another device so it is a new call and not a rejoin.
+    const second = await open(userId, {}, "laptop");
+    await startCall(second);
+    await stub.probeUtterance("hello again");
+    await second.waitFor((f) => f.type === "transcript_end", "spoken answer");
+    const prompt = (await stub.probeSystemPrompts()).at(-1)!;
+    expect(prompt).toContain("(short-answers) Keep answers to one sentence.");
+    second.socket.close();
+  });
+
+  test("a new call starts fresh, and a rejoin keeps the conversation", async () => {
+    const userId = `voice-memory-fresh-${crypto.randomUUID()}`;
+    const stub = assistant(userId);
+    await stub.probeSetScript({ reply: "Right." });
+    const first = await open(userId, {}, "phone");
+    await startCall(first);
+    await stub.probeUtterance("the first thing I said");
+    await first.waitFor((f) => f.type === "transcript_end", "spoken answer");
+
+    // The same device, straight back: the same call, and the conversation is
+    // still behind it.
+    const rejoined = await open(userId, {}, "phone");
+    await startCall(rejoined);
+    await stub.probeUtterance("and the second thing");
+    await rejoined.waitFor((f) => f.type === "transcript_end", "spoken answer");
+    const admissions = (await stub.probeTraces()).filter(
+      (t) => t.event === "call-admitted",
+    );
+    expect(admissions[1]).toMatchObject({ rejoined: true });
+    expect(JSON.stringify(await stub.probeChatMessages())).toContain(
+      "the first thing I said",
+    );
+
+    await hangUpAndFinalize(stub, rejoined);
+    first.socket.close();
+
+    // Another device is a new call: nothing that was said before is in it.
+    const fresh = await open(userId, {}, "laptop");
+    await startCall(fresh);
+    const before = await stub.probeChats();
+    await stub.probeUtterance("a brand new conversation");
+    await fresh.waitFor((f) => f.type === "transcript_end", "spoken answer");
+    const messages = (await stub.probeChatMessages()).slice(before);
+    expect(JSON.stringify(messages)).not.toContain("the first thing I said");
+    expect(JSON.stringify(messages)).toContain("a brand new conversation");
+    fresh.socket.close();
+  });
+
+  test("hanging up mid-answer still gives memory what was said", async () => {
+    const userId = `voice-memory-unanswered-${crypto.randomUUID()}`;
+    const stub = assistant(userId);
+    await stub.probeSetScript({ memory: { operations: [] } });
+    const opened = await open(userId, {}, "phone");
+    await startCall(opened);
+    // The model never answers this one; the person hangs up over the top.
+    await stub.probeStallChat();
+    await stub.probeUtterance("remember that I prefer mornings");
+    await eventually(
+      async () => await stub.probeChats(),
+      (count) => count > 0,
+      "the turn to reach the model",
+    );
+    // The stall is on the model seam, which the memory request shares: it is
+    // released before the finalization, not after it.
+    opened.socket.send(JSON.stringify({ type: "end_call" }));
+    await opened.waitFor(status("idle"), "idle");
+    opened.socket.close(1000, "end-button");
+    const callId = await eventually(
+      async () => (await stub.probeMemoryJobs())[0]?.callId,
+      (id) => Boolean(id),
+      "the memory job",
+    );
+    await stub.probeReleaseChat();
+    await stub.probeFinalizeMemory(callId!);
+
+    const requests = await stub.probeMemoryRequests();
+    expect(requests).toHaveLength(1);
+    // The transcript was admitted before the model was asked anything, so it
+    // is source material even though nothing ever answered it.
+    expect(requests[0]!.contents).toContain("remember that I prefer mornings");
+    expect(requests[0]!.instruction).toContain(`${callId!}:1`);
+  });
+
+  test("the hang-up and the close that follows it queue one job", async () => {
+    const userId = `voice-memory-once-${crypto.randomUUID()}`;
+    const stub = assistant(userId);
+    await stub.probeSetScript({ reply: "Sure.", memory: { operations: [] } });
+    const opened = await open(userId, {}, "phone");
+    await startCall(opened);
+    await stub.probeUtterance("something worth remembering");
+    await opened.waitFor((f) => f.type === "transcript_end", "spoken answer");
+    const callId = await hangUpAndFinalize(stub, opened);
+    await settle(100);
+
+    expect(await stub.probeMemoryJobs()).toHaveLength(1);
+    expect(
+      (await stub.probeSchedules()).filter(
+        (row) => row.callback === "finalizeVoiceMemory",
+      ).length,
+    ).toBeLessThanOrEqual(1);
+    // A second finalization for the same call finds nothing left to claim.
+    await stub.probeFinalizeMemory(callId);
+    expect(await stub.probeMemoryRequests()).toHaveLength(1);
+  });
+
+  test("a socket that just drops keeps the call, and the alarm finishes it", async () => {
+    const userId = `voice-memory-abandoned-${crypto.randomUUID()}`;
+    const stub = assistant(userId);
+    await stub.probeSetScript({ reply: "Mm.", memory: { operations: [] } });
+    const opened = await open(userId, {}, "phone");
+    await startCall(opened);
+    await stub.probeUtterance("something said before the network went");
+    await opened.waitFor((f) => f.type === "transcript_end", "spoken answer");
+    const callId = (await eventually(
+      async () =>
+        (await stub.probeTraces()).find((t) => t.event === "call-admitted"),
+      (line) => Boolean(line?.call),
+      "the call-admitted trace",
+    ))!.call!;
+
+    // No end_call: the socket simply goes.
+    opened.socket.close(4001, "network lost");
+    await settle(100);
+    // The call is still there, so a client coming straight back rejoins it.
+    expect(Object.keys(await stub.probeStorage("voice:call:"))).toHaveLength(1);
+    expect(await stub.probeMemoryJobs()).toEqual([]);
+    // An alarm was scheduled for it rather than left to a future request.
+    expect(
+      (await stub.probeSchedules()).some(
+        (row) => row.callback === "abandonVoiceCall",
+      ),
+    ).toBe(true);
+
+    // Nobody comes back, and the rejoin window passes.
+    await stub.probeSetNow(new Date(Date.now() + 10 * 60_000).toISOString());
+    await stub.probeAbandonCall(callId);
+    expect(Object.keys(await stub.probeStorage("voice:call:"))).toEqual([]);
+    const jobs = await stub.probeMemoryJobs();
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]).toMatchObject({ callId, state: "pending" });
+    await stub.probeFinalizeMemory(callId);
+    expect((await stub.probeMemoryRequests())[0]!.contents).toContain(
+      "something said before the network went",
+    );
+  });
+
+  test("a request whose answer never came is never sent again", async () => {
+    const userId = `voice-memory-uncertain-${crypto.randomUUID()}`;
+    const stub = assistant(userId);
+    await stub.probeSetScript({ reply: "Mm.", memory: { fail: true } });
+    const opened = await open(userId, {}, "phone");
+    await startCall(opened);
+    await stub.probeUtterance("something worth remembering");
+    await opened.waitFor((f) => f.type === "transcript_end", "spoken answer");
+    const callId = await hangUpAndFinalize(stub, opened);
+
+    const failed = (await stub.probeMemoryJobs())[0]!;
+    expect(failed).toMatchObject({ callId, state: "failed", cursor: 0 });
+    expect(await stub.probeMemoryRequests()).toHaveLength(1);
+    // Asked again — by an alarm, by waking, by anything — it stays put.
+    await stub.probeFinalizeMemory(callId);
+    await stub.probeRestart();
+    await stub.probeFinalizeMemory(callId);
+    expect(await stub.probeMemoryRequests()).toHaveLength(1);
+    expect((await stub.probeMemoryJobs())[0]).toMatchObject({
+      state: "failed",
+    });
+
+    // The next conversation carries what was never summarised.
+    await stub.probeSetScript({ reply: "Mm.", memory: { operations: [] } });
+    const next = await open(userId, {}, "laptop");
+    await startCall(next);
+    await stub.probeUtterance("hello again");
+    await next.waitFor((f) => f.type === "transcript_end", "spoken answer");
+    expect((await stub.probeSystemPrompts()).at(-1)).toContain(
+      "something worth remembering",
+    );
+    next.socket.close();
+  });
+
+  test("an answer that is not an update is asked again, then given up on", async () => {
+    const userId = `voice-memory-malformed-${crypto.randomUUID()}`;
+    const stub = assistant(userId);
+    await stub.probeSetScript({
+      reply: "Mm.",
+      memory: { raw: "I don't think there's anything to record." },
+    });
+    const opened = await open(userId, {}, "phone");
+    await startCall(opened);
+    await stub.probeUtterance("something worth remembering");
+    await opened.waitFor((f) => f.type === "transcript_end", "spoken answer");
+    const callId = await hangUpAndFinalize(stub, opened);
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      await stub.probeFinalizeMemory(callId);
+    }
+    // Bounded: a complete answer may be asked for again, but not forever.
+    expect((await stub.probeMemoryRequests()).length).toBe(3);
+    expect((await stub.probeMemoryJobs())[0]).toMatchObject({
+      state: "failed",
+      cursor: 0,
+    });
+    expect((await stub.probeMemory()).durable).toEqual([]);
+  });
+
+  test("a credential the model tried to remember is refused", async () => {
+    const userId = `voice-memory-secret-${crypto.randomUUID()}`;
+    const stub = assistant(userId);
+    const opened = await open(userId, {}, "phone");
+    await startCall(opened);
+    await stub.probeSetScript({ reply: "Mm." });
+    await stub.probeUtterance("my key is sk-proj-abcdef");
+    await opened.waitFor((f) => f.type === "transcript_end", "spoken answer");
+    const callId = (await eventually(
+      async () =>
+        (await stub.probeTraces()).find((t) => t.event === "call-admitted"),
+      (line) => Boolean(line?.call),
+      "the call-admitted trace",
+    ))!.call!;
+    await stub.probeSetScript({
+      reply: "Mm.",
+      memory: {
+        operations: [
+          {
+            kind: "durable/add",
+            id: "key",
+            text: "Their key is sk-proj-abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGH",
+            source: `${callId}:1`,
+          },
+          {
+            kind: "durable/add",
+            id: "mornings",
+            text: "Prefers mornings.",
+            source: `${callId}:1`,
+          },
+        ],
+      },
+    });
+    await hangUpAndFinalize(stub, opened);
+    const remembered = await stub.probeMemory();
+    expect(remembered.durable.map((entry) => entry.id)).toEqual(["mornings"]);
+  });
+
+  test("a spoken remember holds for the rest of the call and is acknowledged", async () => {
+    const userId = `voice-memory-tool-${crypto.randomUUID()}`;
+    const stub = assistant(userId);
+    await stub.probeSetScript({
+      rememberWord: "remember",
+      remember: {
+        text: "Keep answers to one sentence.",
+        kind: "preference",
+      },
+    });
+    const opened = await open(userId, {}, "phone");
+    await startCall(opened);
+    await stub.probeUtterance("please remember to keep answers short");
+    await opened.waitFor((f) => f.type === "transcript_end", "spoken answer");
+    expect((await stub.probeMemory()).durable[0]).toMatchObject({
+      text: "Keep answers to one sentence.",
+    });
+
+    // The next turn of the same call already carries it, without waiting for
+    // the call to end and without depending on the history window.
+    await stub.probeSetScript({ reply: "Right." });
+    await stub.probeUtterance("what next");
+    await opened.waitFor(
+      (f) => f.type === "transcript_end" && String(f.text).includes("Right."),
+      "the next answer",
+    );
+    expect((await stub.probeSystemPrompts()).at(-1)).toContain(
+      "Keep answers to one sentence.",
+    );
+    opened.socket.close();
+  });
+
+  test("a just-for-today request holds today and is not made permanent", async () => {
+    const userId = `voice-memory-today-${crypto.randomUUID()}`;
+    const stub = assistant(userId);
+    await stub.probeSetNow("2026-09-12T03:00:00.000Z");
+    await stub.probeSetScript({
+      rememberWord: "today",
+      remember: {
+        text: "Skip the small talk.",
+        kind: "temporary",
+        until: "today",
+      },
+    });
+    const opened = await open(userId, {}, "phone");
+    await startCall(opened);
+    await stub.probeUtterance("just for today, skip the small talk");
+    await opened.waitFor((f) => f.type === "transcript_end", "spoken answer");
+
+    const spoken = await stub.probeMemory();
+    expect(spoken.durable).toEqual([]);
+    expect(spoken.recent).toHaveLength(1);
+    const expiresAt = spoken.recent[0]!.expiresAt!;
+    expect(expiresAt).toBeTruthy();
+
+    // The end-of-call update reads the same turn and must not promote it.
+    const callId = (await eventually(
+      async () =>
+        (await stub.probeTraces()).find((t) => t.event === "call-admitted"),
+      (line) => Boolean(line?.call),
+      "the call-admitted trace",
+    ))!.call!;
+    await stub.probeSetScript({
+      memory: {
+        operations: [
+          {
+            kind: "recent/add",
+            text: "Skip the small talk.",
+            source: `${callId}:1`,
+            until: "today",
+          },
+        ],
+      },
+    });
+    await hangUpAndFinalize(stub, opened);
+    const summarised = await stub.probeMemory();
+    expect(summarised.durable).toEqual([]);
+    expect(summarised.recent).toHaveLength(1);
+    expect(summarised.recent[0]?.expiresAt).toBe(expiresAt);
+
+    // A later call the same day still has it; the next day does not.
+    await stub.probeSetNow("2026-09-12T09:00:00.000Z");
+    const sameDay = await open(userId, {}, "laptop");
+    await startCall(sameDay);
+    await stub.probeSetScript({ reply: "Right." });
+    await stub.probeUtterance("hello");
+    await sameDay.waitFor((f) => f.type === "transcript_end", "spoken answer");
+    expect((await stub.probeSystemPrompts()).at(-1)).toContain(
+      "Skip the small talk.",
+    );
+    sameDay.socket.close();
+
+    await stub.probeSetNow("2026-09-14T09:00:00.000Z");
+    const nextDay = await open(userId, {}, "desktop");
+    await startCall(nextDay);
+    await stub.probeUtterance("hello again");
+    await nextDay.waitFor((f) => f.type === "transcript_end", "spoken answer");
+    expect((await stub.probeSystemPrompts()).at(-1)).not.toContain(
+      "Skip the small talk.",
+    );
+    nextDay.socket.close();
+  });
+
+  test("a spoken forget takes effect at once", async () => {
+    const userId = `voice-memory-forget-${crypto.randomUUID()}`;
+    const stub = assistant(userId);
+    await stub.probeSetScript({
+      rememberWord: "remember",
+      remember: { text: "Drinks flat whites.", kind: "preference" },
+    });
+    const opened = await open(userId, {}, "phone");
+    await startCall(opened);
+    await stub.probeUtterance("remember that I drink flat whites");
+    await opened.waitFor((f) => f.type === "transcript_end", "spoken answer");
+    expect((await stub.probeMemory()).durable).toHaveLength(1);
+
+    await stub.probeSetScript({
+      forgetWord: "forget",
+      forget: "flat whites",
+    });
+    await stub.probeUtterance("forget the flat whites thing");
+    await opened.waitFor(
+      (f) => f.type === "transcript_end" && String(f.text).includes("Dropped"),
+      "the acknowledgment",
+    );
+    const after = await stub.probeMemory();
+    expect(after.durable).toEqual([]);
+    expect(after.forgotten).toHaveLength(1);
+    opened.socket.close();
+  });
+});
