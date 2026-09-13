@@ -709,12 +709,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       final canvas = AppletCanvasController(widget.api, botId);
       appletCanvas = canvas;
       canvas.addListener(_repaint);
-      slots.register(
-        ShellSlot.rightPanel,
-        'applet',
-        (context) => _appletCanvas(botId, canvas),
-        label: 'Applet',
-      );
+      // The Applet is a window of its own at every width, so it is not a
+      // right-panel entry: a page with its own back and its own name, and the
+      // Applet filling everything under that one row.
       unawaited(canvas.load());
     }
     final machine = ComputerController(widget.api, botId);
@@ -744,11 +741,23 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     if (mounted) setState(() {});
   }
 
+  /// The Package doors worth drawing beside the native ones.
+  ///
+  /// The Applets Package declares an entry of its own called Applets. Where
+  /// this client has the built-in Applets entry — the outlined window in the
+  /// bar, the row on the Bot's page — that is the same door, so the Package's
+  /// copy of it is left out and every other destination is kept.
+  List<PackageEntryPage> _packageEntries() => [
+    for (final entry in packageIframeEntriesV1(catalog))
+      if (appletCanvas == null || entry.entry.label.toLowerCase() != 'applets')
+        entry,
+  ];
+
   /// The doors this Bot's Packages declare, as buttons for its own bar.
   /// A Package naming an icon this client does not have still gets a
   /// button, so a declared door is never silently missing.
   List<Widget> _packageEntryActions() => [
-    for (final entry in packageIframeEntriesV1(catalog))
+    for (final entry in _packageEntries())
       identified(
         PackageIds.entry(entry.contribution.packageId, entry.entry.id),
         IconButton(
@@ -843,7 +852,42 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     );
   }
 
-  /// The live frame, pre-mounted off stage on a phone.
+  /// The Applet, full window, at every width.
+  ///
+  /// One row of chrome — back, the Applet's name, the switch to its code —
+  /// and the Applet under it for the rest of the page. The page takes the
+  /// pre-mounted frame over: the holder lets go in the same frame the page is
+  /// built, so the key moves rather than doubles. It takes the frame back
+  /// only once the page has finished leaving — a route on its way out is
+  /// still in the tree and is not rebuilt, so a holder that reclaimed the key
+  /// on the pop itself would double it.
+  void _pushApplet() {
+    final bot = selected;
+    final canvas = appletCanvas;
+    if (bot == null || canvas == null) return;
+    final route = MaterialPageRoute<void>(
+      builder: (_) => Scaffold(
+        body: SafeArea(
+          child: _appletCanvas(
+            bot.botId.value,
+            canvas,
+            onClose: () => Navigator.of(context).maybePop(),
+            holdsFrame: true,
+          ),
+        ),
+      ),
+    );
+    setState(() => _appletPagePresented = true);
+    push.reading(null);
+    unawaited(Navigator.of(context).push(route));
+    unawaited(
+      route.completed.then((_) {
+        if (mounted) setState(() => _appletPagePresented = false);
+      }),
+    );
+  }
+
+  /// The live frame, pre-mounted off stage behind the conversation.
   ///
   /// Built as soon as the adopted Bot's canvas has a viewer and until the
   /// canvas page takes the frame over. Off stage it is laid out and never
@@ -857,10 +901,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     final canvas = appletCanvas;
     final viewer = canvas?.viewer;
     if (canvas == null || viewer == null || _appletPagePresented) return null;
-    if (shellTierForWidth(MediaQuery.sizeOf(context).width) !=
-        ShellTier.single) {
-      return null;
-    }
     final size = MediaQuery.sizeOf(context);
     return Positioned(
       left: 0,
@@ -976,6 +1016,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// over a full-width conversation is the same thing with less room and a
   /// scrim in the way.
   void _openPanel(String key) {
+    // The Applet is never a panel: it is a full window at every width.
+    if (key == 'applet') {
+      _pushApplet();
+      return;
+    }
     if (shellTierForWidth(MediaQuery.sizeOf(context).width) ==
         ShellTier.single) {
       _pushPanel(key);
@@ -1094,37 +1139,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       );
       return;
     }
-    // On the phone the right panel's entries are pages, which is the same
-    // rule Routines and Bot settings already follow: a drawer over a
-    // full-width conversation is the same thing with less room.
-    if (key == 'applet' && appletCanvas != null) {
-      // The page takes the pre-mounted frame over: the holder lets go in the
-      // same frame the page is built, so the key moves rather than doubles.
-      // It takes the frame back only once the page has finished leaving — a
-      // route on its way out is still in the tree and is not rebuilt, so a
-      // holder that reclaimed the key on the pop itself would double it.
-      final route = MaterialPageRoute<void>(
-        builder: (_) => Scaffold(
-          appBar: AppBar(title: const Text('Applet')),
-          body: SafeArea(
-            top: false,
-            child: _appletCanvas(
-              bot.botId.value,
-              appletCanvas!,
-              onClose: () => Navigator.of(context).maybePop(),
-              holdsFrame: true,
-            ),
-          ),
-        ),
-      );
-      setState(() => _appletPagePresented = true);
-      push.reading(null);
-      unawaited(Navigator.of(context).push(route));
-      unawaited(
-        route.completed.then((_) {
-          if (mounted) setState(() => _appletPagePresented = false);
-        }),
-      );
+    if (key == 'applet') {
+      _pushApplet();
       return;
     }
     if (key == 'computer' && computer != null) {
@@ -1195,13 +1211,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   List<Widget> _botRows() {
     final inbox = routineInbox;
     final canvas = appletCanvas;
-    // The Applets Package declares an entry of its own called Applets. The
-    // row above is the same door, so one of them is enough on a page.
-    final entries = [
-      for (final entry in packageIframeEntriesV1(catalog))
-        if (canvas == null || entry.entry.label.toLowerCase() != 'applets')
-          entry,
-    ];
+    final entries = _packageEntries();
     return [
       const SizedBox(height: 16),
       FrockRowGroup(

@@ -487,7 +487,7 @@ void main() {
       ]);
 
       // The code is read when it is looked at.
-      await tester.tap(find.text('Code'));
+      await tester.tap(find.byTooltip('Code'));
       await tester.pumpAndSettle();
       expect(requested.skip(2), [
         '/api/bots/bot-1/applets/todo.applet/source',
@@ -570,7 +570,8 @@ void main() {
       expect(find.text('server.ts'), findsOneWidget);
       expect(find.text('ui.tsx'), findsOneWidget);
       // Nothing to run yet, so there is no view to toggle to.
-      expect(find.text('App'), findsNothing);
+      expect(find.byTooltip('App'), findsNothing);
+      expect(find.byTooltip('Code'), findsNothing);
     });
 
     testWidgets(
@@ -626,12 +627,104 @@ void main() {
       tester,
     ) async {
       final controller = await open(tester);
-      expect(find.textContaining('Live since'), findsOneWidget);
-      expect(find.text('App'), findsOneWidget);
-      await tester.tap(find.text('Code'));
+      // One row: the way back, the Applet's own name, and the switch to its
+      // code. No generation decoration, no second title, no close beside the
+      // back.
+      expect(find.text('Weekly Todos'), findsOneWidget);
+      expect(find.textContaining('Live since'), findsNothing);
+      expect(find.text('Applet'), findsNothing);
+      expect(find.byType(SegmentedButton<bool>), findsNothing);
+      expect(find.byTooltip('Close this Applet'), findsNothing);
+
+      // Showing the Applet, the switch offers the code.
+      expect(find.byTooltip('Code'), findsOneWidget);
+      expect(find.byTooltip('App'), findsNothing);
+      await tester.tap(find.byTooltip('Code'));
       await tester.pumpAndSettle();
       expect(find.text('server.ts'), findsOneWidget);
+
+      // Showing the code, it offers the Applet back.
+      expect(find.byTooltip('App'), findsOneWidget);
+      expect(find.byTooltip('Code'), findsNothing);
+      await tester.tap(find.byTooltip('App'));
+      await tester.pumpAndSettle();
+      expect(find.byTooltip('Code'), findsOneWidget);
       controller.dispose();
+    });
+
+    testWidgets('the Applet fills the page under its one row of chrome', (
+      tester,
+    ) async {
+      final controller = await open(tester);
+      final page = tester.getRect(find.byType(Scaffold));
+      final frame = tester.getRect(find.byType(AppletViewerFrame));
+      expect(frame.width, page.width);
+      // Everything below the row, and nothing above it.
+      expect(frame.bottom, page.bottom);
+      expect(frame.top, lessThan(page.top + 60));
+      expect(frame.top, greaterThan(page.top));
+      controller.dispose();
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('back leaves the Applet for what pushed it', (tester) async {
+      var left = 0;
+      final api = SettingsApi(MemoryStore(), (path, body) async {
+        if (path.endsWith('/applets/open')) {
+          return {
+            'schemaVersion': 1,
+            'applets': [applet(generationId: 'g1').toJson()],
+            'focused': {'appletId': 'todo.applet', ...openViewer()},
+          };
+        }
+        throw const RequestFailure('unexpected', 404);
+      });
+      final controller = AppletCanvasController(api, 'bot-1');
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: FrockTheme.theme(Brightness.dark),
+          home: Scaffold(
+            body: AppletCanvas(controller: controller, onClose: () => left++),
+          ),
+        ),
+      );
+      await controller.load();
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Back'));
+      await tester.pumpAndSettle();
+      expect(left, 1);
+      // The focus is left alone: leaving the page is not un-choosing the
+      // Applet, and the frame behind it is kept.
+      expect(controller.focusedId, 'todo.applet');
+      controller.dispose();
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('an Applet that is not there says so, with no chrome to work', (
+      tester,
+    ) async {
+      final api = SettingsApi(MemoryStore(), (path, body) async {
+        if (path.endsWith('/applets/open')) {
+          return {'schemaVersion': 1, 'applets': <Object?>[]};
+        }
+        throw const RequestFailure('unexpected', 404);
+      });
+      final controller = AppletCanvasController(api, 'bot-1');
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: FrockTheme.theme(Brightness.dark),
+          home: Scaffold(body: AppletCanvas(controller: controller)),
+        ),
+      );
+      await controller.load();
+      await tester.pumpAndSettle();
+      expect(find.text('No Applet here yet'), findsOneWidget);
+      // The way back is still there; there is nothing to switch between.
+      expect(find.byTooltip('Back'), findsOneWidget);
+      expect(find.byTooltip('Code'), findsNothing);
+      expect(find.byTooltip('App'), findsNothing);
+      controller.dispose();
+      await tester.pumpWidget(const SizedBox());
     });
   });
 

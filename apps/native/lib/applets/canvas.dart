@@ -25,6 +25,7 @@ import 'package:flutter/material.dart';
 import '../client/transport.dart';
 import '../packages/frame.dart';
 import '../protocol/client_wire.generated.dart' as wire;
+import '../shell/chat_icons.dart';
 import '../shell/semantics.dart';
 import '../shell/transcript_model.dart';
 import '../theme/states.dart';
@@ -520,38 +521,22 @@ class _AppletCanvasState extends State<AppletCanvas> {
   bool get _showingApp =>
       controller.viewer != null && (_chosenApp ?? _followedApp);
 
-  /// A generation id is `<ISO time>:<hash prefix>`, which is exact and
-  /// unreadable. The header says when it went live and keeps the short hash.
-  String _generationLabel(String generationId) {
-    final separator = generationId.lastIndexOf(':');
-    final stamp = separator > 0 ? generationId.substring(0, separator) : '';
-    final hash = separator > 0
-        ? generationId.substring(separator + 1)
-        : generationId;
-    final at = DateTime.tryParse(stamp);
-    if (at == null) {
-      return 'Live · ${hash.substring(0, hash.length < 7 ? hash.length : 7)}';
+  /// The reader asked for one side of the Applet. The code is read when it is
+  /// looked at, never ahead of the frame.
+  void _show({required bool app}) {
+    setState(() => _chosenApp = app);
+    controller.codeView = !app;
+    if (!app && !controller.codeRead) unawaited(controller.readCode());
+  }
+
+  /// The way out of the Applet: back to whatever pushed it, which is the
+  /// conversation the reader came from.
+  void _leave() {
+    if (widget.onClose case final VoidCallback close) {
+      close();
+      return;
     }
-    final local = at.toLocal();
-    final hour = local.hour % 12 == 0 ? 12 : local.hour % 12;
-    const months = [
-      'Jan',
-      'Feb',
-      'Mar',
-      'Apr',
-      'May',
-      'Jun',
-      'Jul',
-      'Aug',
-      'Sep',
-      'Oct',
-      'Nov',
-      'Dec',
-    ];
-    final minute = local.minute.toString().padLeft(2, '0');
-    final meridiem = local.hour < 12 ? 'am' : 'pm';
-    return 'Live since ${months[local.month - 1]} ${local.day}, '
-        '$hour:$minute$meridiem';
+    unawaited(controller.setFocus(null));
   }
 
   @override
@@ -602,14 +587,27 @@ class _AppletCanvasState extends State<AppletCanvas> {
                     ? _empty(context)
                     : Stack(
                         children: [
-                          Positioned.fill(child: _code(context)),
-                          if (_showingApp)
+                          Positioned.fill(
+                            child: Offstage(
+                              offstage: _showingApp,
+                              child: _code(context),
+                            ),
+                          ),
+                          // The running Applet is kept, not rebuilt, while the
+                          // reader looks at the code: taking the frame out of
+                          // the tree would drop the document and its socket,
+                          // and coming back would be a fresh load of a page
+                          // that never stopped being live.
+                          if (viewer != null)
                             Positioned.fill(
-                              child: ColoredBox(
-                                color: scheme.surface,
-                                child: AppletViewerFrame(
-                                  key: widget.frameKey,
-                                  viewer: viewer!,
+                              child: Offstage(
+                                offstage: !_showingApp,
+                                child: ColoredBox(
+                                  color: scheme.surface,
+                                  child: AppletViewerFrame(
+                                    key: widget.frameKey,
+                                    viewer: viewer,
+                                  ),
                                 ),
                               ),
                             ),
@@ -623,74 +621,68 @@ class _AppletCanvasState extends State<AppletCanvas> {
     );
   }
 
+  /// The Applet's one row of chrome: the way back and the Applet's own name at
+  /// the left, the switch between the Applet and its code at the right, and
+  /// the Applet itself filling everything below it.
+  ///
+  /// The name is the Applet's, not the word "Applet": a full window belongs to
+  /// the thing in it. There is no second title and no close beside the back —
+  /// one way out is enough, and it is where a thumb already reaches for it.
   Widget _header(
     BuildContext context,
     wire.AppletSummary? applet,
     AppletViewer? viewer,
-  ) => Padding(
-    padding: const EdgeInsets.fromLTRB(12, 6, 4, 6),
-    child: Row(
-      children: [
-        Icon(
-          Icons.widgets_outlined,
-          color: Theme.of(context).colorScheme.primary,
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
+  ) {
+    final theme = Theme.of(context);
+    // A floor rather than a height: at a large text scale the name is taller
+    // than 52 points and the row grows with it rather than clipping it.
+    return ConstrainedBox(
+      constraints: const BoxConstraints(minHeight: 52),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(4, 0, 4, 0),
+        child: Row(
+          children: [
+            identified(
+              AppletIds.close,
+              IconButton(
+                tooltip: 'Back',
+                onPressed: _leave,
+                icon: const Icon(
+                  Icons.arrow_back_rounded,
+                  size: chatIconSizeV1,
+                ),
+              ),
+            ),
+            const SizedBox(width: 2),
+            Expanded(
+              child: Text(
                 applet?.displayName ?? 'Applet',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              if (viewer != null)
-                Text(
-                  _generationLabel(viewer.generationId),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.bodySmall,
+                style: theme.textTheme.titleSmall?.copyWith(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w500,
+                  letterSpacing: -0.15,
                 ),
-            ],
-          ),
-        ),
-        if (viewer != null)
-          identified(
-            AppletIds.tabs,
-            SegmentedButton<bool>(
-              showSelectedIcon: false,
-              segments: const [
-                ButtonSegment(value: true, label: Text('App')),
-                ButtonSegment(value: false, label: Text('Code')),
-              ],
-              selected: {_showingApp},
-              onSelectionChanged: (next) {
-                setState(() => _chosenApp = next.first);
-                // The code is read when it is looked at, never ahead of the
-                // frame.
-                controller.codeView = !next.first;
-                if (!next.first && !controller.codeRead) {
-                  unawaited(controller.readCode());
-                }
-              },
+              ),
             ),
-          ),
-        identified(
-          AppletIds.close,
-          IconButton(
-            tooltip: 'Close this Applet',
-            onPressed: () => widget.onClose == null
-                ? unawaited(controller.setFocus(null))
-                : widget.onClose!(),
-            icon: const Icon(Icons.close),
-          ),
+            if (viewer != null)
+              identified(
+                AppletIds.tabs,
+                IconButton(
+                  tooltip: _showingApp ? 'Code' : 'App',
+                  color: theme.colorScheme.onSurfaceVariant,
+                  onPressed: () => _show(app: !_showingApp),
+                  icon: _showingApp
+                      ? const Icon(Icons.code_rounded, size: chatIconSizeV1)
+                      : const ChatIcon(ChatIconKind.applet),
+                ),
+              ),
+          ],
         ),
-      ],
-    ),
-  );
+      ),
+    );
+  }
 
   /// Where the work has got to, pinned under the header while the Applet is
   /// still being built: one line a person can read, the reason it stopped when

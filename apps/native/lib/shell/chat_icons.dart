@@ -15,10 +15,19 @@ enum ChatIconKind {
 
 /// One light stroke weight for the compact chat chrome, independent of the
 /// platform's bundled Material glyph weight.
+///
+/// [chatIconSizeV1] is the one dimension every drawn glyph in the chrome
+/// takes, painted or bundled: the Material icons beside these are given the
+/// same box, so a row of chrome reads as one set rather than two weights at
+/// two sizes. It is Material's own default, which the compact 19 this started
+/// at was well under — the glyphs read as small on a phone against every
+/// other app's, and the buttons round them carry at least a 44-point target.
+const chatIconSizeV1 = 24.0;
+
 class ChatIcon extends StatelessWidget {
   final ChatIconKind kind;
   final double size;
-  const ChatIcon(this.kind, {super.key, this.size = 19});
+  const ChatIcon(this.kind, {super.key, this.size = chatIconSizeV1});
 
   @override
   Widget build(BuildContext context) {
@@ -68,7 +77,7 @@ class _ChatIconPainter extends CustomPainter {
         path.lineTo(12, 12);
         path.lineTo(16, 14);
       case ChatIconKind.settings:
-        // Eight shallow teeth keep the gear legible at 19 logical pixels.
+        // Eight shallow teeth keep the gear legible at the chrome's size.
         for (var i = 0; i < 32; i++) {
           final angle = i * math.pi / 16 - math.pi / 2;
           final radius = i % 4 < 2 ? 9.5 : 7.5;

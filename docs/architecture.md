@@ -429,8 +429,11 @@ Screens (no router; `MaterialApp(home:)` plus `Navigator.push`):
 - `TemplatesPage` — `lib/templates/page.dart`: the same host twice, a tab
   apiece — what this Bot is packed into, and what this account has imported
 - `AppletCanvas` — `lib/applets/canvas.dart`: the Applet directory, its focus,
-  the building states and the live Applet, in the `right-panel` slot beside Bot
-  settings and a page on the phone
+  the building states and the live Applet, as a page of its own at every width.
+  One row of chrome — the way back, the Applet's own name, and the switch
+  between the Applet and its code — and the Applet filling everything under it.
+  It is not a `right-panel` entry: a 380-point column is not where you read an
+  Applet
 - `AppletPicker` — `lib/applets/picker.dart`: the account's Applets as a
   dialog behind the header's one Applets entry — a row opens an Applet on the
   canvas, and a row's delete asks for confirmation before it destroys the
@@ -835,7 +838,7 @@ Source is the durable root, in R2 through the Workspace store, keyed by `workspa
 
 - **Server.** `env.APPLETS.get(...)` with `globalOutbound: null`, an env of exactly `IDENTITY` and `CAPABILITIES`, and `limits {cpuMs: 5000, subRequests: 10}` (`applet-state.ts`, `#load`). The loaded stub is held per Durable Object instance by loader id, so a socket or a tool call after the first in an instance reads nothing from R2. The loaded class is mounted as a Durable Object facet (`#facet`) under a snapshot, trial and commit publish protocol with `facets.clone` rollback (`#activate`). `AppletState.open({ warm: true })`, which the open route calls, mounts the resident generation behind its answer so the socket that follows finds the facet and its schema up.
 - **UI.** `ui.html` is served from the anonymous origin `ui.<host>` (`apps/cloudflare/src/gateway.ts:139-176`) and nested in an `<iframe sandbox="allow-scripts">` inside the Applets Package's own `canvas.html`, handshaken by postMessage, then connected over a WebSocket gated by an HMAC viewer token (`gateway.ts:434-516`).
-- **Opening.** The canvas reads `GET /api/bots/:bot/applets/open` (`AppletOpenViewV1`): the directory, the Session's focus, and for a published focus the generation, the page URL and a viewer token, from one `AppletState.open` read beside a parallel directory listing and focus read. The frame is given its page before the source or the last build is asked for; those are the code view's, read when it is shown. `/api/applets/:id/ui` and `/token` remain for the chat card and read one directory entry each. The frame's identity is the generation and the page URL; a token re-minted three minutes before expiry reaches the running page as an `init`-shaped `refresh` and the transport reconnects in place. On a phone the frame is held off stage from the moment the Bot is adopted (`_appletFrameHolder`) and moved into the canvas page under one `GlobalKey` when that is pushed. ADR 0025 records why.
+- **Opening.** The canvas reads `GET /api/bots/:bot/applets/open` (`AppletOpenViewV1`): the directory, the Session's focus, and for a published focus the generation, the page URL and a viewer token, from one `AppletState.open` read beside a parallel directory listing and focus read. The frame is given its page before the source or the last build is asked for; those are the code view's, read when it is shown. `/api/applets/:id/ui` and `/token` remain for the chat card and read one directory entry each. The frame's identity is the generation and the page URL; a token re-minted three minutes before expiry reaches the running page as an `init`-shaped `refresh` and the transport reconnects in place. The frame is held off stage from the moment the Bot is adopted (`_appletFrameHolder`) and moved into the canvas page under one `GlobalKey` when that is pushed — at every width, since the canvas is a page everywhere. Looking at the code puts the frame off stage rather than taking it out of the tree, so the document and its socket outlive the switch. ADR 0025 records why.
 
 ### First-party pages
 

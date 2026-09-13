@@ -8,6 +8,7 @@ Map<String, Object?> catalog({
   List<String> tools = const ['applet_focus'],
   int? order,
   String provenance = 'FrockBot',
+  String entryLabel = 'Applets',
 }) => {
   'schemaVersion': 1,
   'botId': 'bot-1',
@@ -49,7 +50,7 @@ Map<String, Object?> catalog({
           'id': 'open',
           'slot': 'frockbot.sidebar-actions',
           'order': ?order,
-          'label': 'Applets',
+          'label': entryLabel,
           'icon': 'applets',
           'opens': {'kind': 'surface', 'page': 'list'},
         },

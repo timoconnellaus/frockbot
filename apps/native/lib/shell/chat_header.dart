@@ -125,7 +125,10 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
               IconButton(
                 tooltip: 'Your Bots',
                 onPressed: onBack,
-                icon: const Icon(Icons.arrow_back_rounded, size: 20),
+                icon: const Icon(
+                  Icons.arrow_back_rounded,
+                  size: chatIconSizeV1,
+                ),
               ),
             ),
       // With no back arrow the avatar is the first thing in the bar, and it
@@ -216,9 +219,9 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
       onPressed: open,
       icon: ChatIcon(icon),
       style: IconButton.styleFrom(
-        minimumSize: const Size(38, 44),
-        maximumSize: const Size(38, 44),
-        iconSize: 20,
+        minimumSize: const Size(44, 46),
+        maximumSize: const Size(44, 46),
+        iconSize: chatIconSizeV1,
         padding: EdgeInsets.zero,
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
       ),
