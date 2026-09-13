@@ -259,8 +259,11 @@ export function voiceMemoryHorizonEndV1(
       wallAt(now.getTime()) - (wallAt(now.getTime()) % 86_400_000) + 86_400_000;
     // Two passes: the first from the offset in force now, the second from the
     // offset in force at the candidate, which is what settles a clock change.
-    let end = midnight - offsetAt(now.getTime());
-    end = midnight - offsetAt(end);
+    // Where the clock changes at midnight itself that local time never
+    // happens, and the first candidate is the instant the new day begins.
+    const first = midnight - offsetAt(now.getTime());
+    const second = midnight - offsetAt(first);
+    const end = wallAt(second) === midnight ? second : first;
     return new Date(end).toISOString();
   } catch {
     return new Date(now.getTime() + 24 * 60 * 60_000).toISOString();
@@ -734,6 +737,28 @@ export function matchVoiceMemoryV1(
   ];
 }
 
+/**
+ * What a correction drops when it names the thing it is replacing.
+ *
+ * Whatever is in the record now — and, when nothing is, the name itself in
+ * all three kinds. Nothing matching usually means the conversation that
+ * stated the old fact has not been summarised yet, and the removal has to be
+ * on record before that summary lands or it writes the contradiction back.
+ */
+export function voiceMemoryCorrectionTargetsV1(
+  record: VoiceMemoryRecordV1,
+  replaces: string,
+): { kind: VoiceMemoryKindV1; id: string }[] {
+  const matched = matchVoiceMemoryV1(record, replaces);
+  if (matched.length > 0) return matched;
+  const id = voiceMemoryTextKeyV1(replaces);
+  return [
+    { kind: "durable", id },
+    { kind: "ongoing", id },
+    { kind: "recent", id },
+  ];
+}
+
 // ---------------------------------------------------------------------------
 // Rendering
 
@@ -998,13 +1023,17 @@ export class VoiceMemoryLedgerV1 {
   ): Promise<VoiceMemoryApplyResultV1> {
     return this.serial(async () => {
       // Source that has not been read yet is the only thing that can write a
-      // forgotten fact back, so the oldest such job is where the removal
-      // fences stop being disposable.
-      const oldestUnread = (await this.unsummarisedJobs()).at(0);
+      // forgotten fact back, so the oldest of it is where the removal fences
+      // stop being disposable. That is the oldest unsummarised job and also
+      // the call being spoken, which has no job at all until it ends.
+      const unread = [
+        (await this.unsummarisedJobs()).at(0)?.sequence,
+        ...input.sources.map((turn) => turn.sequence),
+      ].filter((sequence): sequence is number => sequence !== undefined);
       const result = applyVoiceMemoryUpdateV1(await this.read(), {
         ...input,
-        ...(oldestUnread
-          ? { fence: { sequence: oldestUnread.sequence, turn: 0 } }
+        ...(unread.length > 0
+          ? { fence: { sequence: Math.min(...unread), turn: 0 } }
           : {}),
       });
       const pruned = pruneVoiceMemoryV1(result.record, input.now);

@@ -50,6 +50,7 @@ import {
   pruneVoiceMemoryV1,
   renderVoiceMemoryRequestMessagesV1,
   VoiceMemoryLedgerV1,
+  voiceMemoryCorrectionTargetsV1,
   voiceMemoryTextKeyV1,
   VOICE_MEMORY_MAX_OUTPUT_CHARS_V1,
   VOICE_MEMORY_MAX_OPERATIONS_V1,
@@ -1572,11 +1573,12 @@ export class VoiceAssistant extends VoiceAgentBase<
         const operations: VoiceMemoryOperationV1[] = [];
         if (replaces) {
           // A correction leaves one answer, not two: whatever it named is
-          // dropped in the same write that adds its replacement. Only what is
-          // actually there is dropped — a removal fence outlives the entry it
-          // fenced, and one for a line nobody ever remembered says nothing.
+          // dropped in the same write that adds its replacement.
           const record = await this.memory().read();
-          for (const target of matchVoiceMemoryV1(record, replaces)) {
+          for (const target of voiceMemoryCorrectionTargetsV1(
+            record,
+            replaces,
+          )) {
             operations.push({
               kind: `${target.kind}/remove`,
               id: target.id,

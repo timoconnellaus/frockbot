@@ -8,6 +8,7 @@ import {
   pruneVoiceMemoryV1,
   renderVoiceMemoryLinesV1,
   renderVoiceMemoryRequestMessagesV1,
+  voiceMemoryCorrectionTargetsV1,
   voiceMemoryHorizonEndV1,
   VoiceMemoryLedgerV1,
   VOICE_MEMORY_CHUNK_TURNS_V1,
@@ -510,6 +511,43 @@ describe("freshness", () => {
     ).toEqual([]);
   });
 
+  test("a day that begins when the clock changes ends when it begins", () => {
+    // Chile puts its clocks forward at midnight, so 00:00 on 6 September 2026
+    // never happens there and the day begins an hour later.
+    const now = new Date("2026-09-05T18:00:00.000Z");
+    const end = voiceMemoryHorizonEndV1("today", now, "America/Santiago");
+    expect(end).toBe("2026-09-06T04:00:00.000Z");
+    const kept = applyVoiceMemoryUpdateV1(emptyVoiceMemoryRecordV1(), {
+      operations: [
+        {
+          kind: "recent/add",
+          text: "Skip the small talk.",
+          source: "call-1:1",
+          until: "today",
+        },
+      ],
+      sources: [turn({ at: now.toISOString() })],
+      timezone: "America/Santiago",
+    }).record;
+    expect(kept.recent[0]?.expiresAt).toBe(end);
+    // Half past eleven on their 5th: still their day.
+    expect(
+      pruneVoiceMemoryV1(kept, new Date("2026-09-06T03:30:00.000Z")).recent,
+    ).toHaveLength(1);
+    // Their 6th.
+    expect(
+      pruneVoiceMemoryV1(kept, new Date("2026-09-06T04:00:01.000Z")).recent,
+    ).toEqual([]);
+    // Lebanon changes at midnight too, going the other way round the world.
+    expect(
+      voiceMemoryHorizonEndV1(
+        "today",
+        new Date("2026-03-28T12:00:00.000Z"),
+        "Asia/Beirut",
+      ),
+    ).toBe("2026-03-28T22:00:00.000Z");
+  });
+
   test("something asked for within a timeframe stops at its own end", () => {
     const today = voiceMemoryHorizonEndV1(
       "today",
@@ -828,14 +866,170 @@ describe("the end-of-call job", () => {
     expect(stale.skipped.join(" ")).toContain("dropped more recently");
   });
 
+  test("a correction fences a fact whose conversation was never read", async () => {
+    const { memory, calls, read } = ledger();
+    // They asked for long answers in the first call, and that call's
+    // finalization was dispatched and never came back.
+    calls["call-1"] = conversation("call-1", CALL_ONE, 1);
+    await memory.createJob({
+      callId: "call-1",
+      sequence: CALL_ONE,
+      at: new Date("2026-09-01T11:00:00.000Z"),
+    });
+    await memory.claimChunk({
+      callId: "call-1",
+      at: new Date("2026-09-01T11:00:02.000Z"),
+      read,
+    });
+    await memory.abandonChunk(
+      "call-1",
+      "the connection failed",
+      new Date("2026-09-01T11:00:30.000Z"),
+    );
+
+    // In the next call they correct it. Nothing in the record matches what
+    // they are replacing, because nothing has been written down yet.
+    const [correcting] = conversation(
+      "call-2",
+      CALL_TWO,
+      1,
+      "2026-09-05T10:00:00.000Z",
+    );
+    const record = await memory.read();
+    const replaced = "Give me long answers.";
+    expect(matchVoiceMemoryV1(record, replaced)).toEqual([]);
+    await memory.apply({
+      operations: [
+        ...voiceMemoryCorrectionTargetsV1(record, replaced).map(
+          (target): VoiceMemoryOperationV1 =>
+            target.kind === "durable"
+              ? {
+                  kind: "durable/remove",
+                  id: target.id,
+                  source: correcting!.id,
+                }
+              : target.kind === "ongoing"
+                ? {
+                    kind: "ongoing/remove",
+                    id: target.id,
+                    source: correcting!.id,
+                  }
+                : {
+                    kind: "recent/remove",
+                    id: target.id,
+                    source: correcting!.id,
+                  },
+        ),
+        {
+          kind: "durable/add",
+          id: "short-answers",
+          text: "Keep answers short.",
+          source: correcting!.id,
+        },
+      ],
+      sources: [correcting!],
+      now: new Date("2026-09-05T10:00:00.000Z"),
+    });
+
+    // The first call is finally summarised and says the old preference.
+    const stale = await memory.apply({
+      operations: [
+        {
+          kind: "durable/add",
+          id: "give-me-long-answers",
+          text: replaced,
+          source: calls["call-1"]![0]!.id,
+        },
+      ],
+      sources: calls["call-1"]!,
+      now: new Date("2026-09-07T10:00:00.000Z"),
+    });
+    expect(stale.record.durable.map((entry) => entry.id)).toEqual([
+      "short-answers",
+    ]);
+    expect(stale.skipped.join(" ")).toContain("dropped more recently");
+  });
+
+  test("a correction made mid-call outlives that call's own summary", async () => {
+    const { memory, calls, read } = ledger();
+    // One live call: they state a preference, take it back, and then say
+    // enough other things to push past the fence count.
+    const turns = conversation(
+      "call-1",
+      CALL_ONE,
+      VOICE_MEMORY_MAX_TOMBSTONES_V1 + 4,
+      "2026-09-01T10:00:00.000Z",
+    );
+    calls["call-1"] = turns;
+    await memory.apply({
+      operations: [
+        {
+          kind: "durable/add",
+          id: "long-answers",
+          text: "Give long answers.",
+          source: turns[0]!.id,
+        },
+      ],
+      sources: [turns[0]!],
+      now: new Date(turns[0]!.at),
+    });
+    for (const source of turns.slice(1)) {
+      await memory.apply({
+        operations: [
+          {
+            kind: "durable/remove",
+            id:
+              source.ordinal === 2 ? "long-answers" : `fact-${source.ordinal}`,
+            source: source.id,
+          },
+        ],
+        sources: [source],
+        now: new Date(source.at),
+      });
+    }
+
+    // Only now does the call end and its finalization read the turn that
+    // first stated the preference.
+    await memory.createJob({
+      callId: "call-1",
+      sequence: CALL_ONE,
+      at: new Date("2026-09-01T14:00:00.000Z"),
+    });
+    const chunk = await memory.claimChunk({
+      callId: "call-1",
+      at: new Date("2026-09-01T14:00:01.000Z"),
+      read,
+    });
+    const applied = await memory.applyChunk({
+      callId: "call-1",
+      chunk: chunk!,
+      update: {
+        operations: [
+          {
+            kind: "durable/add",
+            id: "long-answers",
+            text: "Give long answers.",
+            source: turns[0]!.id,
+          },
+        ],
+        refusals: [],
+        malformed: false,
+      },
+      at: new Date("2026-09-01T14:00:02.000Z"),
+    });
+    expect(applied.status).toBe("applied");
+    expect((await memory.read()).durable).toEqual([]);
+  });
+
   test("with nothing left unread the removal fences are held to their count", async () => {
-    const { memory } = ledger();
+    const { memory, calls, read } = ledger();
     const later = conversation(
       "call-1",
       CALL_ONE,
       VOICE_MEMORY_MAX_TOMBSTONES_V1 + 20,
       "2026-09-06T10:00:00.000Z",
     );
+    calls["call-1"] = later;
     await memory.apply({
       operations: later.map((source) => ({
         kind: "durable/remove" as const,
@@ -844,6 +1038,44 @@ describe("the end-of-call job", () => {
       })),
       sources: later,
       now: new Date("2026-09-06T12:00:00.000Z"),
+    });
+    // Its own finalization reads every one of those turns, so nothing is
+    // left that could argue with the fences they wrote.
+    await memory.createJob({
+      callId: "call-1",
+      sequence: CALL_ONE,
+      at: new Date("2026-09-06T12:30:00.000Z"),
+    });
+    for (let pass = 0; pass < 20; pass += 1) {
+      const chunk = await memory.claimChunk({
+        callId: "call-1",
+        at: new Date("2026-09-06T12:30:01.000Z"),
+        read,
+      });
+      if (!chunk) break;
+      const result = await memory.applyChunk({
+        callId: "call-1",
+        chunk,
+        update: { operations: [], refusals: [], malformed: false },
+        at: new Date("2026-09-06T12:30:02.000Z"),
+      });
+      if (result.status !== "applied" || result.done) break;
+    }
+    expect((await memory.readJob("call-1"))?.state).toBe("applied");
+
+    // The next conversation is where the count is finally applied.
+    const next = conversation(
+      "call-2",
+      CALL_TWO,
+      1,
+      "2026-09-07T10:00:00.000Z",
+    );
+    await memory.apply({
+      operations: [
+        { kind: "durable/remove", id: "anything", source: next[0]!.id },
+      ],
+      sources: next,
+      now: new Date("2026-09-07T10:00:00.000Z"),
     });
     expect((await memory.read()).forgotten).toHaveLength(
       VOICE_MEMORY_MAX_TOMBSTONES_V1,
