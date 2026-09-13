@@ -94,7 +94,11 @@ describe("voice reads of Bot conversation", () => {
             via: { kind: "voice" },
             events: [
               { type: "reply/to-caller", caller: "voice", text: "First half." },
-              { type: "reply/to-caller", caller: "voice", text: "Second half." },
+              {
+                type: "reply/to-caller",
+                caller: "voice",
+                text: "Second half.",
+              },
             ],
           }),
         ],
