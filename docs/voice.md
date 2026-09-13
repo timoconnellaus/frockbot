@@ -487,7 +487,11 @@ entry carries a stamp of `(call start, turn number)`, and every removal leaves
 a tombstone carrying the same. A write is refused when something newer already
 stands where it would go, so a summary that arrives after the conversation
 that corrected it cannot undo the correction, and re-reading an old
-conversation cannot resurrect a fact the person has since dropped.
+conversation cannot resurrect a fact the person has since dropped. The
+tombstones are counted, but a tombstone is only ever dropped when it sits
+before every call whose turns nothing has finished reading: while an
+unfinished job could still summarise the conversation that stated the fact,
+the fence that would refuse it is kept however many corrections follow.
 
 ### During the call
 

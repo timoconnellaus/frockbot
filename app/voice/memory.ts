@@ -225,29 +225,46 @@ export function voiceMemoryHorizonEndV1(
   if (horizon === "week") {
     return new Date(now.getTime() + 7 * 24 * 60 * 60_000).toISOString();
   }
-  let local = now;
   try {
     // The person's own midnight, not UTC's: "today" in Sydney is not today
-    // in London, and the session already knows which one they are in.
-    const parts = new Intl.DateTimeFormat("en-CA", {
+    // in London, and the session already knows which one they are in. The
+    // next calendar midnight is found rather than a fixed number of hours
+    // added, because the day a clock change falls in is not 24 hours long.
+    const format = new Intl.DateTimeFormat("en-CA", {
       timeZone: timezone ?? "UTC",
       year: "numeric",
       month: "2-digit",
       day: "2-digit",
       hour: "2-digit",
       minute: "2-digit",
+      second: "2-digit",
       hourCycle: "h23",
-    }).formatToParts(now);
-    const field = (type: string) =>
-      Number(parts.find((part) => part.type === type)?.value ?? "0");
-    const minutesIntoDay = field("hour") * 60 + field("minute");
-    return new Date(
-      now.getTime() + (24 * 60 - minutesIntoDay) * 60_000,
-    ).toISOString();
+    });
+    const wallAt = (instant: number): number => {
+      const parts = format.formatToParts(new Date(instant));
+      const field = (type: string) =>
+        Number(parts.find((part) => part.type === type)?.value ?? "0");
+      return Date.UTC(
+        field("year"),
+        field("month") - 1,
+        field("day"),
+        field("hour"),
+        field("minute"),
+        field("second"),
+      );
+    };
+    const offsetAt = (instant: number): number =>
+      wallAt(instant) - Math.floor(instant / 1000) * 1000;
+    const midnight =
+      wallAt(now.getTime()) - (wallAt(now.getTime()) % 86_400_000) + 86_400_000;
+    // Two passes: the first from the offset in force now, the second from the
+    // offset in force at the candidate, which is what settles a clock change.
+    let end = midnight - offsetAt(now.getTime());
+    end = midnight - offsetAt(end);
+    return new Date(end).toISOString();
   } catch {
-    local = now;
+    return new Date(now.getTime() + 24 * 60 * 60_000).toISOString();
   }
-  return new Date(local.getTime() + 24 * 60 * 60_000).toISOString();
 }
 
 /**
@@ -401,6 +418,12 @@ export interface VoiceMemoryApplyInputV1 {
   sources: readonly VoiceMemorySourceTurnV1[];
   /** The person's own zone, so "today" ends at their midnight and not UTC's. */
   timezone?: string;
+  /**
+   * The oldest place in session order that unread source still sits at. A
+   * removal fence at or after it is kept whatever the count, because the
+   * conversation that could write the fact back has not been read yet.
+   */
+  fence?: VoiceMemoryStampV1;
 }
 
 export interface VoiceMemoryApplyResultV1 {
@@ -413,6 +436,36 @@ export interface VoiceMemoryApplyResultV1 {
 
 function stampOf(turn: VoiceMemorySourceTurnV1): VoiceMemoryStampV1 {
   return { sequence: turn.sequence, turn: turn.ordinal };
+}
+
+/**
+ * Holds the removal fences to their count, oldest first — but only the ones
+ * nothing can still argue with.
+ *
+ * A fence older than every unread conversation can never be needed again: for
+ * it to matter, some unread turn would have to sit before it in session order,
+ * and by definition none does. A fence at or after that point is kept even
+ * past the cap, because dropping it is what lets a stale summary write a
+ * corrected fact back.
+ */
+function trimVoiceMemoryTombstonesV1(
+  forgotten: readonly VoiceMemoryTombstoneV1[],
+  fence: VoiceMemoryStampV1 | undefined,
+): VoiceMemoryTombstoneV1[] {
+  let over = forgotten.length - VOICE_MEMORY_MAX_TOMBSTONES_V1;
+  if (over <= 0) return [...forgotten];
+  const kept: VoiceMemoryTombstoneV1[] = [];
+  for (const tombstone of forgotten) {
+    const prunable =
+      fence === undefined ||
+      compareVoiceMemoryStampV1(tombstone.stamp, fence) < 0;
+    if (over > 0 && prunable) {
+      over -= 1;
+      continue;
+    }
+    kept.push(tombstone);
+  }
+  return kept;
 }
 
 function forgottenAfter(
@@ -513,7 +566,7 @@ export function applyVoiceMemoryUpdateV1(
             ),
         ),
         { kind, id, at: turn.at, stamp },
-      ].slice(-VOICE_MEMORY_MAX_TOMBSTONES_V1),
+      ],
     };
     if (existing) changed += 1;
   };
@@ -601,7 +654,11 @@ export function applyVoiceMemoryUpdateV1(
     }
   }
   return {
-    record: { ...next, ...(newest ? { updatedAt: newest } : {}) },
+    record: {
+      ...next,
+      forgotten: trimVoiceMemoryTombstonesV1(next.forgotten, input.fence),
+      ...(newest ? { updatedAt: newest } : {}),
+    },
     skipped,
     changed,
   };
@@ -940,7 +997,16 @@ export class VoiceMemoryLedgerV1 {
     input: VoiceMemoryApplyInputV1 & { now: Date },
   ): Promise<VoiceMemoryApplyResultV1> {
     return this.serial(async () => {
-      const result = applyVoiceMemoryUpdateV1(await this.read(), input);
+      // Source that has not been read yet is the only thing that can write a
+      // forgotten fact back, so the oldest such job is where the removal
+      // fences stop being disposable.
+      const oldestUnread = (await this.unsummarisedJobs()).at(0);
+      const result = applyVoiceMemoryUpdateV1(await this.read(), {
+        ...input,
+        ...(oldestUnread
+          ? { fence: { sequence: oldestUnread.sequence, turn: 0 } }
+          : {}),
+      });
       const pruned = pruneVoiceMemoryV1(result.record, input.now);
       await this.storage.put(VOICE_MEMORY_RECORD_KEY_V1, pruned);
       return { ...result, record: pruned };

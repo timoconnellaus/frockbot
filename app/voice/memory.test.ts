@@ -13,6 +13,7 @@ import {
   VOICE_MEMORY_CHUNK_TURNS_V1,
   VOICE_MEMORY_MAX_ATTEMPTS_V1,
   VOICE_MEMORY_MAX_DURABLE_V1,
+  VOICE_MEMORY_MAX_TOMBSTONES_V1,
   VOICE_MEMORY_RECENT_DAYS_V1,
   VOICE_MEMORY_UNCERTAIN_FAILURE_V1,
   type VoiceMemoryOperationV1,
@@ -465,6 +466,50 @@ describe("freshness", () => {
     expect(summarised.record.durable).toEqual([]);
   });
 
+  test("a timeframe set on a clock-change day still stops at their midnight", () => {
+    // Sydney starts daylight saving at 2am on 4 October 2026, so that local
+    // day is twenty-three hours long: a fixed twenty-four minus the minutes
+    // already gone lands an hour past their midnight, on the wrong day.
+    const spring = new Date("2026-10-03T15:30:17.500Z");
+    const springEnd = voiceMemoryHorizonEndV1(
+      "today",
+      spring,
+      "Australia/Sydney",
+    );
+    // 01:30 on the 4th, local; midnight starting the 5th, local.
+    expect(springEnd).toBe("2026-10-04T13:00:00.000Z");
+
+    // And back the other way: 4 April 2027 is twenty-five hours long.
+    const autumn = new Date("2027-04-03T13:30:00.000Z");
+    expect(voiceMemoryHorizonEndV1("today", autumn, "Australia/Sydney")).toBe(
+      "2027-04-04T14:00:00.000Z",
+    );
+
+    // What the person asked for holds for the whole of their day and not
+    // past it.
+    const kept = applyVoiceMemoryUpdateV1(emptyVoiceMemoryRecordV1(), {
+      operations: [
+        {
+          kind: "recent/add",
+          text: "Skip the small talk.",
+          source: "call-1:1",
+          until: "today",
+        },
+      ],
+      sources: [turn({ at: spring.toISOString() })],
+      timezone: "Australia/Sydney",
+    }).record;
+    expect(kept.recent[0]?.expiresAt).toBe(springEnd);
+    // Late on their 4th — past the twenty-four hours the old arithmetic gave.
+    expect(
+      pruneVoiceMemoryV1(kept, new Date("2026-10-04T12:59:00.000Z")).recent,
+    ).toHaveLength(1);
+    // Their 5th.
+    expect(
+      pruneVoiceMemoryV1(kept, new Date("2026-10-04T13:00:01.000Z")).recent,
+    ).toEqual([]);
+  });
+
   test("something asked for within a timeframe stops at its own end", () => {
     const today = voiceMemoryHorizonEndV1(
       "today",
@@ -690,6 +735,119 @@ describe("the end-of-call job", () => {
     expect((await memory.createJob(input)).status).toBe("created");
     expect((await memory.createJob(input)).status).toBe("existing");
     expect(await memory.jobs()).toHaveLength(1);
+  });
+
+  test("a fact dropped long ago is not written back by a job that never finished", async () => {
+    const { memory, calls, read } = ledger();
+    // The first call's summary was dispatched and never came back, so its
+    // turns are still unread source that could yet be summarised.
+    calls["call-1"] = conversation("call-1", CALL_ONE, 1);
+    await memory.createJob({
+      callId: "call-1",
+      sequence: CALL_ONE,
+      at: new Date("2026-09-01T11:00:00.000Z"),
+    });
+    await memory.claimChunk({
+      callId: "call-1",
+      at: new Date("2026-09-01T11:00:02.000Z"),
+      read,
+    });
+    await memory.abandonChunk(
+      "call-1",
+      "the connection failed",
+      new Date("2026-09-01T11:00:30.000Z"),
+    );
+    expect((await memory.readJob("call-1"))?.state).toBe("failed");
+
+    // In a later call they state the fact and then take it back.
+    const [said, took] = conversation(
+      "call-2",
+      CALL_TWO,
+      2,
+      "2026-09-05T10:00:00.000Z",
+    );
+    await memory.apply({
+      operations: [
+        {
+          kind: "durable/add",
+          id: "flat-whites",
+          text: "Drinks flat whites.",
+          source: said!.id,
+        },
+      ],
+      sources: [said!],
+      now: new Date("2026-09-05T10:00:00.000Z"),
+    });
+    await memory.apply({
+      operations: [
+        { kind: "durable/remove", id: "flat-whites", source: took!.id },
+      ],
+      sources: [took!],
+      now: new Date("2026-09-05T10:01:00.000Z"),
+    });
+
+    // Then far more corrections than the fences are counted to.
+    const later = conversation(
+      "call-3",
+      3_000,
+      VOICE_MEMORY_MAX_TOMBSTONES_V1 + 20,
+      "2026-09-06T10:00:00.000Z",
+    );
+    await memory.apply({
+      operations: later.flatMap((source) => [
+        {
+          kind: "durable/add" as const,
+          id: `fact-${source.ordinal}`,
+          text: `Fact ${source.ordinal}.`,
+          source: source.id,
+        },
+        {
+          kind: "durable/remove" as const,
+          id: `fact-${source.ordinal}`,
+          source: source.id,
+        },
+      ]),
+      sources: later,
+      now: new Date("2026-09-06T12:00:00.000Z"),
+    });
+
+    // The first call finally gets summarised, and says the fact again.
+    const stale = await memory.apply({
+      operations: [
+        {
+          kind: "durable/add",
+          id: "flat-whites",
+          text: "Drinks flat whites.",
+          source: calls["call-1"]![0]!.id,
+        },
+      ],
+      sources: calls["call-1"]!,
+      now: new Date("2026-09-07T10:00:00.000Z"),
+    });
+    expect(stale.record.durable).toEqual([]);
+    expect(stale.skipped.join(" ")).toContain("dropped more recently");
+  });
+
+  test("with nothing left unread the removal fences are held to their count", async () => {
+    const { memory } = ledger();
+    const later = conversation(
+      "call-1",
+      CALL_ONE,
+      VOICE_MEMORY_MAX_TOMBSTONES_V1 + 20,
+      "2026-09-06T10:00:00.000Z",
+    );
+    await memory.apply({
+      operations: later.map((source) => ({
+        kind: "durable/remove" as const,
+        id: `fact-${source.ordinal}`,
+        source: source.id,
+      })),
+      sources: later,
+      now: new Date("2026-09-06T12:00:00.000Z"),
+    });
+    expect((await memory.read()).forgotten).toHaveLength(
+      VOICE_MEMORY_MAX_TOMBSTONES_V1,
+    );
   });
 
   test("a call with nothing said finishes without spending anything", async () => {

@@ -52,6 +52,7 @@ import {
   VoiceMemoryLedgerV1,
   voiceMemoryTextKeyV1,
   VOICE_MEMORY_MAX_OUTPUT_CHARS_V1,
+  VOICE_MEMORY_MAX_OPERATIONS_V1,
   VOICE_MEMORY_MAX_TEXT_CHARS_V1,
   type VoiceMemoryChunkV1,
   type VoiceMemoryOperationV1,
@@ -279,7 +280,18 @@ interface MemoryFinalizationPayload {
  * two of them is the point.
  */
 const MEMORY_FINALIZE_DELAY_SECONDS = 2;
-const MEMORY_UPDATE_MAX_TOKENS = 800;
+/**
+ * Room for the whole update the instruction authorises, not less: an answer
+ * cut off mid-array is unreadable, and asking again only truncates again at
+ * the same place. Derived from the caps the instruction states — every
+ * operation at its full text, plus its envelope and the turn id it cites —
+ * so the two cannot drift apart.
+ */
+const MEMORY_UPDATE_MAX_TOKENS = Math.ceil(
+  (VOICE_MEMORY_MAX_OPERATIONS_V1 * (VOICE_MEMORY_MAX_TEXT_CHARS_V1 + 128) +
+    64) /
+    3,
+);
 /**
  * How long the memory request may take before its stream is cancelled. A
  * request past this is abandoned, not retried: it has already been dispatched
@@ -569,16 +581,13 @@ export class VoiceAssistant extends VoiceAgentBase<
   private memorySource(): VoiceMemorySourceReaderV1 {
     return async (callId: string) => {
       const job = await this.memory().readJob(callId);
-      const sequence =
-        job?.sequence ??
-        Date.parse((await this.ledger().currentCall())?.startedAt ?? "") ??
-        0;
+      const sequence = job?.sequence ?? 0;
       const turns = await this.ledger().turnsForCall(callId);
       return turns.map((turn, index) => ({
         id: turn.turnId,
         ordinal: index + 1,
         callId,
-        sequence: Number.isFinite(sequence) ? sequence : 0,
+        sequence,
         at: turn.admittedAt,
         said: turn.transcript,
         ...(turn.answer ? { answered: turn.answer } : {}),
@@ -797,7 +806,6 @@ export class VoiceAssistant extends VoiceAgentBase<
       if (abort.signal.aborted) {
         throw new Error("the memory update was cut short");
       }
-      if (!text.trim()) throw new Error("the memory update produced no output");
       return text;
     } finally {
       clearTimeout(deadline);
@@ -1563,15 +1571,17 @@ export class VoiceAssistant extends VoiceAgentBase<
         const id = voiceMemoryTextKeyV1(sentence);
         const operations: VoiceMemoryOperationV1[] = [];
         if (replaces) {
-          // A correction leaves one answer, not two: whatever the id named is
-          // dropped in the same write that adds its replacement.
-          const target = voiceMemoryTextKeyV1(replaces);
-          for (const id of new Set([replaces, target])) {
-            operations.push(
-              { kind: "durable/remove", id, source: turnId },
-              { kind: "ongoing/remove", id, source: turnId },
-              { kind: "recent/remove", id, source: turnId },
-            );
+          // A correction leaves one answer, not two: whatever it named is
+          // dropped in the same write that adds its replacement. Only what is
+          // actually there is dropped — a removal fence outlives the entry it
+          // fenced, and one for a line nobody ever remembered says nothing.
+          const record = await this.memory().read();
+          for (const target of matchVoiceMemoryV1(record, replaces)) {
+            operations.push({
+              kind: `${target.kind}/remove`,
+              id: target.id,
+              source: turnId,
+            });
           }
         }
         // "Just for today" has to stop tomorrow. The horizon is named here
