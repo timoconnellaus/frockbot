@@ -1925,6 +1925,8 @@ describe("Cloudflare user application gateway", () => {
       "admittedAt",
       "events",
       "input",
+      "messageAdmittedAt",
+      "messageRunId",
       "outcome",
       "runId",
       "schemaVersion",
