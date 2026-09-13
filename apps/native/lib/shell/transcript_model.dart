@@ -452,7 +452,11 @@ List<TranscriptLine> projectRuns(List<Map<String, dynamic>> runs) {
               current['status'] == 'running' &&
               (current['queued'] == true || current['retryOf'] != null),
           notice: failure?.notice,
-          retry: failure?.action,
+          retry:
+              failure?.action == LineRetry.resendTurn &&
+                  current['canRetry'] != true
+              ? null
+              : failure?.action,
           failureMessageId: failed ? '$currentId:failed' : null,
         ),
       );
@@ -563,8 +567,13 @@ List<TranscriptLine> projectRuns(List<Map<String, dynamic>> runs) {
             at: admittedAt,
             readAt: run['admittedAt'] as String?,
             status: LineStatus.error,
+            failureMessageId: run['retriedBy'] != null ? '$runId:failed' : null,
             notice: input.isNotEmpty || spoken ? null : failure.notice,
-            retry: input.isNotEmpty || spoken || run['retriedBy'] != null
+            retry:
+                input.isNotEmpty ||
+                    spoken ||
+                    (failure.action == LineRetry.resendTurn &&
+                        run['canRetry'] != true)
                 ? null
                 : failure.action,
             tools: tools,

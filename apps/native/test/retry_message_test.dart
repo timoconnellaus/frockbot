@@ -21,6 +21,7 @@ Map<String, dynamic> attempt(
   'runId': id,
   'input': 'Please help',
   'status': status,
+  'canRetry': status == 'failed' && retriedBy == null,
   'admittedAt': at ?? originalAt,
   'messageRunId': 'original',
   'messageAdmittedAt': originalAt,
@@ -86,6 +87,60 @@ class RetryTransport implements ChatTransport {
 }
 
 void main() {
+  test('only a server-authorized user message can be retried', () async {
+    final transport = RetryTransport();
+    final c = ChatController(
+      transport: transport,
+      store: MemoryStore(),
+      userId: 'u',
+      botId: 'b',
+    );
+    addTearDown(c.dispose);
+    for (final eligibility in [false, null]) {
+      transport.rows['original'] = attempt('original')
+        ..['canRetry'] = eligibility;
+      await c.initialize();
+      await c.refresh();
+      expect(projectRuns(c.runs).first.retry, isNull);
+      await c.retryRun('original');
+      expect(transport.sent, isEmpty);
+    }
+  });
+
+  for (final status in ['running', 'cancelled', 'completed']) {
+    testWidgets('a $status retry still reads the original failure', (
+      tester,
+    ) async {
+      final reports = <String?>[];
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: TranscriptView(
+              lines: projectRuns([
+                attempt('original', retriedBy: 'retry'),
+                attempt(
+                  'retry',
+                  status: status,
+                  retryOf: 'original',
+                  at: '2026-09-13T02:00:00.000Z',
+                ),
+              ]),
+              loading: false,
+              hasEarlier: false,
+              onRefresh: ({older = false}) async {},
+              onOpenRun: (_) {},
+              onReadLatest: reports.add,
+              storageKey: 'hidden-failure-$status',
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(reports.last, 'original:failed');
+      await tester.pumpWidget(const SizedBox());
+    });
+  }
+
   testWidgets('a retry of an older message advances the read boundary', (
     tester,
   ) async {

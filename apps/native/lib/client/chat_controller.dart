@@ -371,6 +371,7 @@ class ChatController extends ChangeNotifier {
     if (!canSend || pending.any((send) => send.retryOf == runId)) return;
     final run = _runs[runId];
     if (run == null ||
+        run['canRetry'] != true ||
         run['status'] != 'failed' ||
         run['retriedBy'] != null ||
         _runs.values.any((attempt) => attempt['retryOf'] == runId)) {

@@ -30,6 +30,7 @@ Map<String, dynamic> run({
   'runId': runId,
   'input': input,
   'status': status,
+  'canRetry': status == 'failed' && input.isNotEmpty,
   'admittedAt': admittedAt,
   'events': [
     if (sentText != null)
@@ -619,7 +620,7 @@ void main() {
       ]).last;
 
       expect(line.notice, "This Bot couldn't finish its reply.");
-      expect(line.retry, LineRetry.resendTurn);
+      expect(line.retry, isNull);
     });
 
     // The deadline sentences say something the outcome alone cannot, so they

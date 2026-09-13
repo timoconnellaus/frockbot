@@ -37,6 +37,7 @@ class WireApi extends NativeApi {
       'retryOf': ?retryOf,
       'input': 'hi',
       'status': status,
+      'canRetry': status == 'failed',
       'events': [
         {
           'type': 'send/to-user',
