@@ -491,7 +491,14 @@ conversation cannot resurrect a fact the person has since dropped. The
 tombstones are counted, but a tombstone is only ever dropped when it sits
 before every call whose turns nothing has finished reading: while an
 unfinished job could still summarise the conversation that stated the fact,
-the fence that would refuse it is kept however many corrections follow.
+the fence that would refuse it is kept however many corrections follow. That
+makes the count a soft one, so the tombstones are not kept in the record at
+all: they live in bounded segments of 25 under `voice:memory:forgotten:`, and
+a write puts the segments before the record and deletes the ones the new list
+no longer occupies after it. A backlog of protected fences therefore costs
+storage keys rather than growing one value until memory can no longer be
+written; a failure between the two steps leaves a removal fenced but its entry
+still present, which the person hears as a failed write and says again.
 
 That refusal is exact, and it needs both sides to name the same thing. When
 the fact is already remembered it has an id, and the id is what the removal
@@ -520,8 +527,10 @@ the end of the call:
 
 - `remember(text, kind, replaces?, until?)` — `kind` is `preference`
   (durable), `open` (ongoing) or `temporary` (recent, with an end). `replaces`
-  names the id this one supersedes, so a corrected preference leaves one
-  answer and not two. `until` is `today` or `week`; the _host_ works out the
+  names the id this one supersedes — an id only, never wording, because a
+  correction deletes and matching on wording would take unrelated facts with
+  it — so a corrected preference leaves one answer and not two. An id the
+  record does not hold is fenced under its own slug in all three kinds. `until` is `today` or `week`; the _host_ works out the
   date from the person's own timezone, because "just for today" has to stop
   tomorrow and a model cannot be trusted with a clock.
 - `forget(text)` — matched by id or by their own words, literally; nothing

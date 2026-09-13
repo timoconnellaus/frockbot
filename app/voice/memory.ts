@@ -50,6 +50,14 @@ import type { VoiceLedgerStorageV1 } from "./ledger.js";
 
 export const VOICE_MEMORY_RECORD_KEY_V1 = "voice:memory:record";
 export const VOICE_MEMORY_JOB_PREFIX_V1 = "voice:memory:job:";
+/**
+ * Where the removal fences live, in bounded pieces. A fence that unread
+ * source could still argue with is never dropped, so the list has no ceiling
+ * — and a list with no ceiling must not share a storage value with the
+ * memory it fences, or a long backlog eventually makes that value unwritable
+ * and memory stops accepting anything at all.
+ */
+export const VOICE_MEMORY_FORGOTTEN_PREFIX_V1 = "voice:memory:forgotten:";
 
 /** How long a handover line stays before it drops off, expiry or no expiry. */
 export const VOICE_MEMORY_RECENT_DAYS_V1 = 14;
@@ -64,6 +72,8 @@ export const VOICE_MEMORY_MAX_ONGOING_V1 = 30;
 export const VOICE_MEMORY_MAX_RECENT_V1 = 30;
 /** Removals remembered, so an old reading cannot bring one back. */
 export const VOICE_MEMORY_MAX_TOMBSTONES_V1 = 200;
+/** Removals per stored segment: what bounds each value, not the list. */
+export const VOICE_MEMORY_TOMBSTONE_SEGMENT_V1 = 25;
 /** Removals the end-of-call instruction shows, newest last. */
 export const VOICE_MEMORY_INSTRUCTION_DROPPED_V1 = 10;
 
@@ -163,7 +173,7 @@ interface VoiceMemoryOperationBaseV1 {
 
 export type VoiceMemoryOperationV1 = VoiceMemoryOperationBaseV1 &
   (
-    | { kind: "durable/add" | "durable/update"; id: string; text: string }
+    | { kind: "durable/add"; id: string; text: string }
     | { kind: "durable/remove"; id: string }
     | { kind: "ongoing/add"; id: string; text: string }
     | { kind: "ongoing/remove"; id: string }
@@ -340,10 +350,7 @@ export function decodeVoiceMemoryUpdateV1(raw: string): VoiceMemoryUpdateV1 {
       continue;
     }
     const needsText =
-      kind === "durable/add" ||
-      kind === "durable/update" ||
-      kind === "ongoing/add" ||
-      kind === "recent/add";
+      kind === "durable/add" || kind === "ongoing/add" || kind === "recent/add";
     if (needsText) {
       if (!sentence) {
         refusals.push(`${kind} carried no text`);
@@ -358,7 +365,6 @@ export function decodeVoiceMemoryUpdateV1(raw: string): VoiceMemoryUpdateV1 {
     }
     switch (kind) {
       case "durable/add":
-      case "durable/update":
       case "ongoing/add":
         operations.push({
           kind,
@@ -457,6 +463,10 @@ function stampOf(turn: VoiceMemorySourceTurnV1): VoiceMemoryStampV1 {
  * and by definition none does. A fence at or after that point is kept even
  * past the cap, because dropping it is what lets a stale summary write a
  * corrected fact back.
+ *
+ * So the cap is a soft one and the list has no ceiling. What keeps that from
+ * becoming a storage problem is where the fences live: `VoiceMemoryLedgerV1`
+ * writes them as bounded segments of their own, never inside the record.
  */
 function trimVoiceMemoryTombstonesV1(
   forgotten: readonly VoiceMemoryTombstoneV1[],
@@ -601,7 +611,6 @@ export function applyVoiceMemoryUpdateV1(
     });
     switch (operation.kind) {
       case "durable/add":
-      case "durable/update":
         add(
           "durable",
           { ...entry(operation.text), id: operation.id },
@@ -747,27 +756,45 @@ export function matchVoiceMemoryV1(
 /**
  * What a correction drops when it names the thing it is replacing.
  *
- * Whatever is in the record now — and, when nothing is, the name itself in
- * all three kinds. Nothing matching usually means the conversation that
- * stated the old fact has not been summarised yet, and the removal has to be
- * on record before that summary lands or it writes the contradiction back.
+ * By id and by id alone. `replaces` is an id — the tool says so and the
+ * end-of-call instruction lists the ids to correct — and a correction is a
+ * deletion, so it never matches on wording: "the morning" would take the
+ * open question about the morning standup along with the preference about
+ * morning calls, and nothing would say out loud that it had gone. An id the
+ * person said in their own casing or spacing still lands, because that is
+ * the same normalisation ids are made with.
+ *
+ * When the record holds no such id the name itself is fenced in all three
+ * kinds. Nothing matching usually means the conversation that stated the old
+ * fact has not been summarised yet, and the removal has to be on record
+ * before that summary lands or it writes the contradiction back.
  *
  * The fence from that second case is best-effort: it only refuses the later
  * summary if the summary happens to choose the same id for the fact that the
  * person's own words slug to. Nothing here can make two independent model
- * calls agree on a name, and no fuzzy match is attempted, because one would
- * drop facts nobody asked to drop. The end-of-call instruction carries the
- * weight instead: it shows what is remembered with its dates, what has been
- * dropped since, and says that these turns being older is never a reason to
- * write a remembered fact back.
+ * calls agree on a name. The end-of-call instruction carries the weight
+ * instead: it shows what is remembered with its times, what has been dropped
+ * since, and says that these turns being older is never a reason to write a
+ * remembered fact back.
  */
 export function voiceMemoryCorrectionTargetsV1(
   record: VoiceMemoryRecordV1,
   replaces: string,
 ): { kind: VoiceMemoryKindV1; id: string }[] {
-  const matched = matchVoiceMemoryV1(record, replaces);
-  if (matched.length > 0) return matched;
   const id = voiceMemoryTextKeyV1(replaces);
+  const named = (entry: VoiceMemoryEntryV1) => entry.id === id;
+  const matched: { kind: VoiceMemoryKindV1; id: string }[] = [
+    ...record.durable
+      .filter(named)
+      .map((entry) => ({ kind: "durable" as const, id: entry.id })),
+    ...record.ongoing
+      .filter(named)
+      .map((entry) => ({ kind: "ongoing" as const, id: entry.id })),
+    ...record.recent
+      .filter(named)
+      .map((entry) => ({ kind: "recent" as const, id: entry.id })),
+  ];
+  if (matched.length > 0) return matched;
   return [
     { kind: "durable", id },
     { kind: "ongoing", id },
@@ -843,6 +870,16 @@ function day(at: string): string {
 }
 
 /**
+ * Where something sits in this person's spoken history, for the end-of-call
+ * request: the time it was admitted, and the stamp that orders it. A day is
+ * not enough there — a correction and the turn it corrects are usually the
+ * same calendar day, and the model is being asked which came first.
+ */
+function moment(at: string, stamp: VoiceMemoryStampV1): string {
+  return `${at}, call ${stamp.sequence} turn ${stamp.turn}`;
+}
+
+/**
  * What the finalization asks for, appended after the conversation.
  *
  * The ids it lists are read at the moment the request is made, not at the
@@ -866,30 +903,30 @@ export function renderVoiceMemoryInstructionV1(input: {
     "That conversation is over. Do not speak. Reply with JSON and nothing else, recording what you should remember for the next one.",
     '{"operations":[{"kind":"durable/add","id":"short-slug","text":"...","source":"<turn id>"}]}',
     "Kinds:",
-    "- durable/add, durable/update, durable/remove — how this person wants spoken conversations to work, and facts about them that stay true until they say otherwise. Add one only when they said it. Correct one with durable/update under the same id. Use durable/remove when they asked you to forget it, or when what they said replaced it.",
+    "- durable/add, durable/remove — how this person wants spoken conversations to work, and facts about them that stay true until they say otherwise. Add one only when they said it. Correct one by issuing durable/add again under the same id. Use durable/remove when they asked you to forget it, or when what they said replaced it.",
     "- ongoing/add, ongoing/remove — a question left open, a decision not made, work not finished. Remove it under the same id once it is resolved, cancelled or replaced.",
     '- recent/add — at most three short lines about what this conversation was, so the next one can pick it up. For something they asked for within a timeframe ("just for today", "while I\'m away this week"), use recent/add with "until":"today" or "until":"week" — never a date of your own, and never durable/add. A request with a timeframe is never a standing preference.',
     "Every operation must carry `source`: the id of the turn below that the person said it in. An operation without one is discarded.",
     "Rules: record only what the person said or asked for, never your own guesses and never a Bot's status. Do not re-record anything already remembered below. Never record a password, key or token. Ids are lowercase words joined by hyphens. At most " +
       `${VOICE_MEMORY_MAX_OPERATIONS_V1} operations, each under ${VOICE_MEMORY_MAX_TEXT_CHARS_V1} characters.`,
-    "This conversation may be older than what you already remember: what is remembered below is dated, and these turns are dated too. If a turn says something that a newer remembered line already changed — in different words, or under a name you would have chosen differently — leave the remembered line alone and record nothing for it. Record a change only where these turns are this person's own later word on it.",
+    "This conversation may be older than what you already remember: every line below carries the time it was admitted and the call and turn that ordered it, and the turns you may cite carry the same. Compare those, not the calendar day. If a turn says something that a newer remembered line already changed — in different words, or under a name you would have chosen differently — leave the remembered line alone and record nothing for it. Record a change only where these turns are this person's own later word on it.",
     'If there is nothing worth remembering, answer {"operations":[]}.',
   ];
   const remembered = [
     ...input.record.durable.map(
       (entry) =>
-        `- durable (${entry.id}) ${entry.text} [said ${day(entry.at)}]`,
+        `- durable (${entry.id}) ${entry.text} [said ${moment(entry.at, entry.stamp)}]`,
     ),
     ...input.record.ongoing.map(
       (entry) =>
-        `- ongoing (${entry.id}) ${entry.text} [since ${day(entry.at)}]`,
+        `- ongoing (${entry.id}) ${entry.text} [since ${moment(entry.at, entry.stamp)}]`,
     ),
     // The handover too, and what already has an end on it: without this the
     // same "just for today" gets recorded again every call, and the one that
     // is already there looks like something nobody asked for.
     ...input.record.recent.map(
       (entry) =>
-        `- recent (${entry.id}) ${day(entry.at)}: ${entry.text}${
+        `- recent (${entry.id}) ${entry.text} [said ${moment(entry.at, entry.stamp)}]${
           entry.expiresAt ? ` [until ${day(entry.expiresAt)}]` : ""
         }`,
     ),
@@ -907,13 +944,17 @@ export function renderVoiceMemoryInstructionV1(input: {
     lines.push("What they have since dropped or replaced, and when:");
     for (const tombstone of dropped) {
       lines.push(
-        `- ${tombstone.kind} (${tombstone.id}) [dropped ${day(tombstone.at)}]`,
+        `- ${tombstone.kind} (${tombstone.id}) [dropped ${moment(tombstone.at, tombstone.stamp)}]`,
       );
     }
   }
-  lines.push("The turns you may cite:");
+  lines.push(
+    "The turns you may cite, oldest first, each with when it was said:",
+  );
   for (const turn of input.turns) {
-    lines.push(`- ${turn.id}: ${clip(turn.said, 160)}`);
+    lines.push(
+      `- ${turn.id} [${moment(turn.at, { sequence: turn.sequence, turn: turn.ordinal })}]: ${clip(turn.said, 160)}`,
+    );
   }
   if (input.progress.total > input.turns.length) {
     lines.push(
@@ -1042,11 +1083,59 @@ export class VoiceMemoryLedgerV1 {
   }
 
   async read(): Promise<VoiceMemoryRecordV1> {
-    return (
-      (await this.storage.get<VoiceMemoryRecordV1>(
-        VOICE_MEMORY_RECORD_KEY_V1,
-      )) ?? emptyVoiceMemoryRecordV1()
+    return this.compose(await this.readForgotten());
+  }
+
+  /** The stored fence segments, oldest first; `list` returns them in key order. */
+  private async readForgotten(): Promise<
+    Map<string, VoiceMemoryTombstoneV1[]>
+  > {
+    return this.storage.list<VoiceMemoryTombstoneV1[]>({
+      prefix: VOICE_MEMORY_FORGOTTEN_PREFIX_V1,
+    });
+  }
+
+  /** The record as the pure applier and the prompt want it: fences included. */
+  private async compose(
+    segments: Map<string, VoiceMemoryTombstoneV1[]>,
+  ): Promise<VoiceMemoryRecordV1> {
+    const stored = await this.storage.get<VoiceMemoryRecordV1>(
+      VOICE_MEMORY_RECORD_KEY_V1,
     );
+    return {
+      ...(stored ?? emptyVoiceMemoryRecordV1()),
+      forgotten: [...segments.values()].flatMap((segment) => segment ?? []),
+    };
+  }
+
+  /**
+   * Writes the fences, one bounded segment at a time, and says which keys the
+   * new list occupies. Only a segment whose contents changed is written, so an
+   * ordinary removal touches the tail and nothing else.
+   */
+  private async writeForgotten(
+    before: Map<string, VoiceMemoryTombstoneV1[]>,
+    forgotten: readonly VoiceMemoryTombstoneV1[],
+  ): Promise<Set<string>> {
+    const keys = new Set<string>();
+    for (
+      let at = 0;
+      at < forgotten.length;
+      at += VOICE_MEMORY_TOMBSTONE_SEGMENT_V1
+    ) {
+      const segment = forgotten.slice(
+        at,
+        at + VOICE_MEMORY_TOMBSTONE_SEGMENT_V1,
+      );
+      const key = forgottenKey(at / VOICE_MEMORY_TOMBSTONE_SEGMENT_V1);
+      keys.add(key);
+      const existing = before.get(key);
+      if (existing && JSON.stringify(existing) === JSON.stringify(segment)) {
+        continue;
+      }
+      await this.storage.put(key, segment);
+    }
+    return keys;
   }
 
   /**
@@ -1067,14 +1156,28 @@ export class VoiceMemoryLedgerV1 {
         (await this.unsummarisedJobs()).at(0)?.sequence,
         ...input.sources.map((turn) => turn.sequence),
       ].filter((sequence): sequence is number => sequence !== undefined);
-      const result = applyVoiceMemoryUpdateV1(await this.read(), {
+      const before = await this.readForgotten();
+      const result = applyVoiceMemoryUpdateV1(await this.compose(before), {
         ...input,
         ...(unread.length > 0
           ? { fence: { sequence: Math.min(...unread), turn: 0 } }
           : {}),
       });
       const pruned = pruneVoiceMemoryV1(result.record, input.now);
-      await this.storage.put(VOICE_MEMORY_RECORD_KEY_V1, pruned);
+      // Fences first, then the memory they fence, and only then the segments
+      // the new list no longer occupies. A failure between the steps leaves a
+      // removal recorded against an entry that is still there — the person
+      // hears that the write failed and says it again — where the other order
+      // would drop the entry and lose the fence that keeps a stale summary
+      // from writing it back.
+      const written = await this.writeForgotten(before, pruned.forgotten);
+      await this.storage.put(VOICE_MEMORY_RECORD_KEY_V1, {
+        ...pruned,
+        forgotten: [],
+      });
+      for (const key of before.keys()) {
+        if (!written.has(key)) await this.storage.delete(key);
+      }
       return { ...result, record: pruned };
     });
   }
@@ -1405,4 +1508,8 @@ export class VoiceMemoryLedgerV1 {
 
 function jobKey(callId: string): string {
   return `${VOICE_MEMORY_JOB_PREFIX_V1}${callId}`;
+}
+
+function forgottenKey(index: number): string {
+  return `${VOICE_MEMORY_FORGOTTEN_PREFIX_V1}${String(index).padStart(6, "0")}`;
 }

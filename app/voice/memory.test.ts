@@ -12,10 +12,13 @@ import {
   voiceMemoryHorizonEndV1,
   VoiceMemoryLedgerV1,
   VOICE_MEMORY_CHUNK_TURNS_V1,
+  VOICE_MEMORY_FORGOTTEN_PREFIX_V1,
   VOICE_MEMORY_MAX_ATTEMPTS_V1,
   VOICE_MEMORY_MAX_DURABLE_V1,
   VOICE_MEMORY_MAX_TOMBSTONES_V1,
   VOICE_MEMORY_RECENT_DAYS_V1,
+  VOICE_MEMORY_RECORD_KEY_V1,
+  VOICE_MEMORY_TOMBSTONE_SEGMENT_V1,
   VOICE_MEMORY_UNCERTAIN_FAILURE_V1,
   type VoiceMemoryOperationV1,
   type VoiceMemoryRecordV1,
@@ -225,7 +228,7 @@ describe("what memory keeps", () => {
       first.record,
       [
         {
-          kind: "durable/update",
+          kind: "durable/add",
           id: "length",
           text: "Explain things more fully.",
           source: "call-2:1",
@@ -616,7 +619,7 @@ describe("order", () => {
       corrected,
       [
         {
-          kind: "durable/update",
+          kind: "durable/add",
           id: "length",
           text: "Keep answers short.",
           source: "call-2:0",
@@ -727,6 +730,78 @@ describe("what a spoken forget names", () => {
 
   test("names nothing when nothing is like it", () => {
     expect(matchVoiceMemoryV1(record, "my sister's birthday")).toEqual([]);
+  });
+});
+
+describe("what a correction drops", () => {
+  const record = apply(
+    emptyVoiceMemoryRecordV1(),
+    [
+      {
+        kind: "durable/add",
+        id: "mornings",
+        text: "Prefers calls in the morning.",
+        source: "call-1:1",
+      },
+      {
+        kind: "ongoing/add",
+        id: "standup-time",
+        text: "Deciding whether to move the morning standup.",
+        source: "call-1:1",
+      },
+    ],
+    [turn({ at: "2026-09-01T10:00:00.000Z" })],
+  ).record;
+
+  test("the id it names, and nothing that merely says the same words", () => {
+    expect(voiceMemoryCorrectionTargetsV1(record, "mornings")).toEqual([
+      { kind: "durable", id: "mornings" },
+    ]);
+    // A spoken forget is deliberately literal, so this wording finds both.
+    expect(matchVoiceMemoryV1(record, "the morning")).toHaveLength(2);
+    // A correction is a deletion, so it takes neither: it fences its own
+    // slug instead, which no entry here answers to.
+    expect(voiceMemoryCorrectionTargetsV1(record, "the morning")).toEqual([
+      { kind: "durable", id: "the-morning" },
+      { kind: "ongoing", id: "the-morning" },
+      { kind: "recent", id: "the-morning" },
+    ]);
+  });
+
+  test("the open question survives a correction worded over it", () => {
+    const corrected = apply(
+      record,
+      [
+        ...voiceMemoryCorrectionTargetsV1(record, "the morning").map(
+          (target): VoiceMemoryOperationV1 =>
+            target.kind === "durable"
+              ? { kind: "durable/remove", id: target.id, source: "call-2:1" }
+              : target.kind === "ongoing"
+                ? { kind: "ongoing/remove", id: target.id, source: "call-2:1" }
+                : { kind: "recent/remove", id: target.id, source: "call-2:1" },
+        ),
+        {
+          kind: "durable/add",
+          id: "afternoons",
+          text: "Prefers calls in the afternoon.",
+          source: "call-2:1",
+        },
+      ],
+      [turn({ call: "call-2", at: "2026-09-05T10:00:00.000Z" })],
+    ).record;
+    expect(corrected.ongoing.map((entry) => entry.id)).toEqual([
+      "standup-time",
+    ]);
+    expect(corrected.durable.map((entry) => entry.id)).toEqual([
+      "mornings",
+      "afternoons",
+    ]);
+  });
+
+  test("an id said in their own casing still lands", () => {
+    expect(voiceMemoryCorrectionTargetsV1(record, " Standup-Time ")).toEqual([
+      { kind: "ongoing", id: "standup-time" },
+    ]);
   });
 });
 
@@ -1038,7 +1113,7 @@ describe("the end-of-call job", () => {
       progress: { from: chunk!.from, total: chunk!.total },
     }).at(-1)!.content;
     expect(instruction).toContain(
-      "durable (short-answers) Keep answers short. [said 2026-09-05]",
+      `durable (short-answers) Keep answers short. [said 2026-09-05T10:00:00.000Z, call ${CALL_TWO} turn 1]`,
     );
     expect(instruction).toContain("durable (give-me-long-answers) [dropped");
     expect(instruction).toContain(
@@ -1676,5 +1751,315 @@ describe("the end-of-call job", () => {
     // What it already remembers, with the ids to correct — read now, not at
     // the call's start.
     expect(instruction).toContain("durable (short-answers) Keep it short.");
+  });
+});
+
+describe("the order the finalizer is shown", () => {
+  test("an earlier turn and a newer correction on the same day are told apart", async () => {
+    const { memory, calls, read } = ledger();
+    // The first call said something in the morning and its finalization never
+    // landed, so its turns are still unread.
+    calls["call-1"] = conversation(
+      "call-1",
+      CALL_ONE,
+      1,
+      "2026-09-05T09:00:00.000Z",
+    );
+    await memory.createJob({
+      callId: "call-1",
+      sequence: CALL_ONE,
+      at: new Date("2026-09-05T09:30:00.000Z"),
+    });
+    await memory.claimChunk({
+      callId: "call-1",
+      at: new Date("2026-09-05T09:30:01.000Z"),
+      read,
+    });
+    await memory.abandonChunk(
+      "call-1",
+      "the connection failed",
+      new Date("2026-09-05T09:30:30.000Z"),
+    );
+
+    // That same afternoon they correct it in a second call.
+    calls["call-2"] = conversation(
+      "call-2",
+      CALL_TWO,
+      1,
+      "2026-09-05T14:00:00.000Z",
+    );
+    await memory.apply({
+      operations: [
+        { kind: "durable/remove", id: "long-answers", source: "call-2:1" },
+        {
+          kind: "durable/add",
+          id: "short-answers",
+          text: "Keep answers short.",
+          source: "call-2:1",
+        },
+      ],
+      sources: calls["call-2"]!,
+      now: new Date("2026-09-05T14:00:00.000Z"),
+    });
+
+    await memory.createJob({
+      callId: "call-2",
+      sequence: CALL_TWO,
+      at: new Date("2026-09-05T15:00:00.000Z"),
+    });
+    const chunk = await memory.claimChunk({
+      callId: "call-2",
+      at: new Date("2026-09-05T15:00:01.000Z"),
+      read,
+    });
+    const instruction = renderVoiceMemoryRequestMessagesV1({
+      turns: chunk!.turns,
+      record: await memory.read(),
+      progress: { from: chunk!.from, total: chunk!.total },
+    }).at(-1)!.content;
+
+    // The carried turn is the morning one; the correction is the afternoon
+    // one. On a calendar day alone they are the same date, so the request
+    // carries the admission time and the ordering stamp of both.
+    expect(instruction).toContain(
+      `- call-1:1 [2026-09-05T09:00:00.000Z, call ${CALL_ONE} turn 1]:`,
+    );
+    expect(instruction).toContain(
+      `- call-2:1 [2026-09-05T14:00:00.000Z, call ${CALL_TWO} turn 1]:`,
+    );
+    expect(instruction).toContain(
+      `durable (short-answers) Keep answers short. [said 2026-09-05T14:00:00.000Z, call ${CALL_TWO} turn 1]`,
+    );
+    expect(instruction).toContain(
+      `durable (long-answers) [dropped 2026-09-05T14:00:00.000Z, call ${CALL_TWO} turn 1]`,
+    );
+  });
+});
+
+describe("where the removal fences are kept", () => {
+  /** Every fence the record composes, and the widest value they are stored in. */
+  async function fences(storage: ReturnType<typeof ledger>["storage"]) {
+    const segments = [...storage.entries.entries()].filter(([key]) =>
+      key.startsWith(VOICE_MEMORY_FORGOTTEN_PREFIX_V1),
+    );
+    return {
+      segments: segments.length,
+      widest: Math.max(
+        0,
+        ...segments.map(([, value]) => (value as unknown[]).length),
+      ),
+      recordHolds: (
+        (
+          storage.entries.get(VOICE_MEMORY_RECORD_KEY_V1) as
+            VoiceMemoryRecordV1 | undefined
+        )?.forgotten ?? []
+      ).length,
+    };
+  }
+
+  /**
+   * A backlog of protected fences: one call ends and its finalization keeps
+   * failing, so every removal after it is at or past the unread fence and
+   * none can be pruned.
+   */
+  async function backlog(count: number) {
+    const context = ledger();
+    const { memory, calls, read } = context;
+    calls["call-1"] = conversation("call-1", CALL_ONE, 1);
+    await memory.createJob({
+      callId: "call-1",
+      sequence: CALL_ONE,
+      at: new Date("2026-09-01T11:00:00.000Z"),
+    });
+    await memory.claimChunk({
+      callId: "call-1",
+      at: new Date("2026-09-01T11:00:02.000Z"),
+      read,
+    });
+    await memory.abandonChunk(
+      "call-1",
+      "the model gateway is down",
+      new Date("2026-09-01T11:00:30.000Z"),
+    );
+    const later = conversation(
+      "call-2",
+      CALL_TWO,
+      count,
+      "2026-09-05T10:00:00.000Z",
+    );
+    calls["call-2"] = later;
+    for (const source of later) {
+      await memory.apply({
+        operations: [
+          {
+            kind: "durable/remove",
+            id: `fact-${source.ordinal}`,
+            source: source.id,
+          },
+        ],
+        sources: [source],
+        now: new Date(source.at),
+      });
+    }
+    return { ...context, later };
+  }
+
+  test("a backlog no value could hold is still written, and still fences", async () => {
+    const wanted = VOICE_MEMORY_MAX_TOMBSTONES_V1 + 60;
+    const { memory, storage, later } = await backlog(wanted);
+    const record = await memory.read();
+    // Nothing was dropped: every one of these fences sits at or after the
+    // unread call, so the soft count does not apply to any of them.
+    expect(record.forgotten).toHaveLength(wanted);
+    const stored = await fences(storage);
+    expect(stored.recordHolds).toBe(0);
+    expect(stored.widest).toBe(VOICE_MEMORY_TOMBSTONE_SEGMENT_V1);
+    expect(stored.segments).toBeGreaterThan(1);
+
+    // Memory is not locked out: another write lands normally.
+    const next = later.at(-1)!;
+    const after = await memory.apply({
+      operations: [
+        {
+          kind: "durable/add",
+          id: "flat-whites",
+          text: "Drinks flat whites.",
+          source: next.id,
+        },
+      ],
+      sources: [next],
+      now: new Date(next.at),
+    });
+    expect(after.record.durable.map((entry) => entry.id)).toEqual([
+      "flat-whites",
+    ]);
+
+    // And the oldest fence in the backlog still refuses a stale summary.
+    const stale = await memory.apply({
+      operations: [
+        {
+          kind: "durable/add",
+          id: "fact-1",
+          text: "Fact one.",
+          source: "call-1:1",
+        },
+      ],
+      sources: [turn({ at: "2026-09-01T10:00:00.000Z" })],
+      now: new Date("2026-09-06T10:00:00.000Z"),
+    });
+    expect(stale.record.durable.map((entry) => entry.id)).toEqual([
+      "flat-whites",
+    ]);
+    expect(stale.skipped.join(" ")).toContain("dropped more recently");
+  });
+
+  test("a fence outlives the write it was part of failing", async () => {
+    const { memory, storage, calls } = ledger();
+    calls["call-1"] = conversation("call-1", CALL_ONE, 2);
+    const [said, took] = calls["call-1"]!;
+    await memory.apply({
+      operations: [
+        {
+          kind: "durable/add",
+          id: "flat-whites",
+          text: "Drinks flat whites.",
+          source: said!.id,
+        },
+      ],
+      sources: [said!],
+      now: new Date(said!.at),
+    });
+
+    // The removal's fence is written, and then the record put fails.
+    const put = storage.put;
+    storage.put = async (key: string, value: unknown) => {
+      if (key === VOICE_MEMORY_RECORD_KEY_V1) throw new Error("storage full");
+      return put(key, value);
+    };
+    await expect(
+      memory.apply({
+        operations: [
+          { kind: "durable/remove", id: "flat-whites", source: took!.id },
+        ],
+        sources: [took!],
+        now: new Date(took!.at),
+      }),
+    ).rejects.toThrow("storage full");
+    storage.put = put;
+
+    // The entry is still there — the person hears that it failed and says it
+    // again — but the fence survived, so the recovery is a repeat and not a
+    // resurrection.
+    const recovered = await memory.read();
+    expect(recovered.durable.map((entry) => entry.id)).toEqual(["flat-whites"]);
+    expect(recovered.forgotten).toHaveLength(1);
+    const again = await memory.apply({
+      operations: [
+        { kind: "durable/remove", id: "flat-whites", source: took!.id },
+      ],
+      sources: [took!],
+      now: new Date(took!.at),
+    });
+    expect(again.record.durable).toEqual([]);
+
+    // A later summary of the conversation that stated it is still refused.
+    const stale = await memory.apply({
+      operations: [
+        {
+          kind: "durable/add",
+          id: "flat-whites",
+          text: "Drinks flat whites.",
+          source: said!.id,
+        },
+      ],
+      sources: [said!],
+      now: new Date("2026-09-02T10:00:00.000Z"),
+    });
+    expect(stale.record.durable).toEqual([]);
+    expect(stale.skipped.join(" ")).toContain("dropped more recently");
+  });
+
+  test("fences pruned by the count leave no segment behind", async () => {
+    const { memory, storage, calls } = ledger();
+    const turns = conversation(
+      "call-1",
+      CALL_ONE,
+      VOICE_MEMORY_MAX_TOMBSTONES_V1 + 30,
+      "2026-09-06T10:00:00.000Z",
+    );
+    calls["call-1"] = turns;
+    // No unread source at all, so the soft count applies to every fence.
+    await memory.apply({
+      operations: turns.map((source) => ({
+        kind: "durable/remove" as const,
+        id: `fact-${source.ordinal}`,
+        source: source.id,
+      })),
+      sources: turns,
+      now: new Date("2026-09-06T12:00:00.000Z"),
+    });
+    // The next conversation is where the count is finally applied: nothing
+    // before it is unread, so those fences are all disposable.
+    const next = conversation(
+      "call-2",
+      CALL_TWO,
+      1,
+      "2026-09-07T10:00:00.000Z",
+    );
+    await memory.apply({
+      operations: [
+        { kind: "durable/remove", id: "anything", source: next[0]!.id },
+      ],
+      sources: next,
+      now: new Date("2026-09-07T10:00:00.000Z"),
+    });
+    expect((await memory.read()).forgotten).toHaveLength(
+      VOICE_MEMORY_MAX_TOMBSTONES_V1,
+    );
+    const stored = await fences(storage);
+    expect(stored.segments).toBe(
+      VOICE_MEMORY_MAX_TOMBSTONES_V1 / VOICE_MEMORY_TOMBSTONE_SEGMENT_V1,
+    );
+    expect(stored.widest).toBe(VOICE_MEMORY_TOMBSTONE_SEGMENT_V1);
   });
 });
