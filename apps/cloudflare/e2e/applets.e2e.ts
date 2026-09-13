@@ -330,6 +330,12 @@ test("the Applets canvas fills the phone window", async ({
   );
 
   await page.setViewportSize(PHONE);
+  await press(
+    sem(page, "shell-sidebar")
+      .locator('[flt-semantics-identifier^="sidebar-bot-"]')
+      .filter({ hasText: "Builder" })
+      .first(),
+  );
   await press(sem(page, "bot-panel-toggle"));
 
   // On a phone nothing opens itself: the focused Applet is a control in the

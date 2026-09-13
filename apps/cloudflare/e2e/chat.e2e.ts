@@ -705,6 +705,8 @@ test("a provider that stops accepting the key ends the Turn with a reason", asyn
       "flt-semantics-identifier",
       messageId!,
     );
+    // Flutter restores the painted draft before opening its DOM editing session.
+    await composerInput(page).focus();
     await expect(composerInput(page)).toHaveValue("Keep my next message");
   } finally {
     // Switched off however the test ended, not only when it passed.
