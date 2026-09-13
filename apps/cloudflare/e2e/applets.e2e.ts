@@ -6,8 +6,8 @@
 // Bot Turn calls `applet_create`, and everything after that is production —
 // the artifact-backed Applets member mounted through the isolate host, the
 // User's Applet directory, the durable source root the scaffold is written
-// into, the focus the create sets, the surface page served from the anonymous
-// artifact origin, and the canvas reading the source back.
+// into, the focus the create sets, the native picker, and the full-window
+// canvas reading the source back.
 //
 // What is not here, and why: publishing. `applets-publish.e2e.ts` is the whole
 // of that half — write, check, publish, and the live Applet — and it pays for a
@@ -17,15 +17,12 @@ import type { Locator, Page, TestInfo } from "@playwright/test";
 import {
   test,
   expect,
-  action,
-  closeOverlay,
   connectOllama,
   answerComposer,
   chooseDefaultModel,
   createBot,
   enableApplets,
   expectReadyToSend,
-  group,
   openApplication,
   enablePackage,
   press,
@@ -201,7 +198,7 @@ async function openCanvas(page: Page): Promise<Locator> {
   return canvas;
 }
 
-test("a Bot creates an Applet, the canvas shows its source, and the surface lists it", async ({
+test("a Bot creates an Applet, the native picker opens its source, and deletion removes it", async ({
   page,
   userId,
   ollamaBaseUrl,
@@ -219,10 +216,8 @@ test("a Bot creates an Applet, the canvas shows its source, and the surface list
   });
   await page.setViewportSize(DESKTOP);
 
-  // The Applets entry is a manifest declaration carried by an artifact-backed
-  // first-party member: no client code of this Package runs in the app origin.
-  const entry = sem(page, "package-entry-applets-open");
-  await expect(entry).toBeVisible();
+  await expect(sem(page, "package-entry-applets-open")).toHaveCount(0);
+  await expect(sem(page, "applet-chip")).toHaveCount(1);
 
   await runTool(
     page,
@@ -262,32 +257,31 @@ test("a Bot creates an Applet, the canvas shows its source, and the surface list
   await expectNoHorizontalOverflow(page);
   await page.screenshot({ path: testInfo.outputPath("applets-created.png") });
 
-  // The entry opens the Package's own list page, served from the anonymous
-  // artifact origin and fed the Applets state over bridge v2.
-  await press(entry);
-  const surface = sem(page, "package-page-applets-list");
-  await expect(surface).toBeVisible({ timeout: 60_000 });
-  // A first-party page carries no provenance line: there is nobody to credit.
-  await expect(page.getByText("Built by this Bot")).toHaveCount(0);
-  // The page itself, by the name the host frames it under. A framed page is a
-  // platform view: the engine puts its iframe in the scene rather than inside
-  // the semantics node the surface is named by, so it is reached from the page
-  // rather than from that node.
-  const listFrame = page.frameLocator('iframe[title="Applets"]');
-  await expect(listFrame.getByText("Weekly Todos")).toBeVisible({
-    timeout: 30_000,
-  });
-  await expect(listFrame.getByText(/not published yet/)).toBeVisible();
+  const box = await canvas.boundingBox();
+  expect(box?.width ?? 0).toBeGreaterThan(DESKTOP.width - 24);
+  expect(box?.height ?? 0).toBeGreaterThan(DESKTOP.height - 24);
+  await expect(sem(page, "shell-conversation")).not.toBeVisible();
+  await press(sem(page, "applet-canvas-close"));
+  await expect(sem(page, "shell-conversation")).toBeVisible();
+
+  // The native directory lists the durable Applet the Bot created.
+  const appletId = await appletIdFromDirectory(page);
+  await press(sem(page, "applet-chip"));
+  const choice = sem(page, `applet-choice-${appletId}`);
+  await expect(choice).toBeVisible();
+  await expect(choice).toContainText("Weekly Todos");
   await expectNoHorizontalOverflow(page);
-  await page.screenshot({ path: testInfo.outputPath("applets-surface.png") });
-  await page.goBack();
+  await page.screenshot({
+    path: testInfo.outputPath("applets-picker-real.png"),
+  });
+  await press(page.getByRole("button", { name: "Close", exact: true }));
 
   // And deleting it takes the canvas and the row with it.
   await runTool(
     page,
     "Delete it.",
     "applet_delete",
-    { appletId: await appletIdFromSurface(page) },
+    { appletId },
     async () => !(await directoryHolds(page, "Weekly Todos")),
   );
   await expect(sem(page, "applet-chip")).toBeVisible();
@@ -300,8 +294,8 @@ test("a Bot creates an Applet, the canvas shows its source, and the surface list
   ).toBeVisible();
 });
 
-/** The Applet's id, read from the directory the Package itself renders. */
-async function appletIdFromSurface(page: Page): Promise<string> {
+/** The Applet's id, read from the same directory as the native picker. */
+async function appletIdFromDirectory(page: Page): Promise<string> {
   const response = await page.request.get("/api/applets");
   const body = (await response.json()) as {
     applets: Array<{ appletId: string; displayName: string }>;
@@ -313,7 +307,7 @@ async function appletIdFromSurface(page: Page): Promise<string> {
   return applet.appletId;
 }
 
-test("the Applets canvas is a full-height sheet on a phone", async ({
+test("the Applets canvas fills the phone window", async ({
   page,
   userId,
   ollamaBaseUrl,
@@ -321,7 +315,6 @@ test("the Applets canvas is a full-height sheet on a phone", async ({
 }, testInfo: TestInfo) => {
   allowedFailures.requests.push(/\/api\/applets\/[^/]+\/ui$/u);
   allowedFailures.console.push(/Failed to load resource.*404/u);
-  await page.setViewportSize(PHONE);
   await provision(page, {
     userId,
     apiBaseUrl: ollamaBaseUrl,
@@ -336,8 +329,11 @@ test("the Applets canvas is a full-height sheet on a phone", async ({
     () => directoryHolds(page, "Weekly Todos"),
   );
 
+  await page.setViewportSize(PHONE);
+  await press(sem(page, "bot-panel-toggle"));
+
   // On a phone nothing opens itself: the focused Applet is a control in the
-  // header, not a screen the User did not ask for.
+  // Bot page, not a screen the User did not ask for.
   const chip = sem(page, "applet-chip");
   await expect(chip).toBeVisible({ timeout: 60_000 });
   await expect(sem(page, "applet-canvas")).toHaveCount(0);
@@ -351,6 +347,7 @@ test("the Applets canvas is a full-height sheet on a phone", async ({
   await expect(named(canvas, "Weekly Todos")).toBeVisible();
   const box = await canvas.boundingBox();
   expect(box?.width ?? 0).toBeGreaterThan(PHONE.width - 24);
+  expect(box?.height ?? 0).toBeGreaterThan(PHONE.height - 24);
   await expectNoHorizontalOverflow(page);
   await page.screenshot({
     path: testInfo.outputPath("applets-phone-real.png"),
