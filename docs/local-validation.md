@@ -38,6 +38,21 @@ and rejects merge commits introduced on the branch; a branch behind main may
 push, because `main.yml` checks the merge commit itself once it lands. A fetch
 failure blocks the push.
 
+## Conversation evaluation
+
+`bun run eval:conversation` exercises the assembled Bot runtime against a live
+model for a simple answer, a multipart explanation and an explicitly requested
+detailed checklist, three times each. Like `eval:greeting`, it reads the main
+checkout's `.dev.vars` and accepts `OLLAMA_BASE_URL` and `OLLAMA_MODEL` overrides.
+It uses the configured model account and is a development check, never a CI test.
+
+The report in `.eval-results/` records the model, source revision, requests,
+ordered sends, refused send attempts, and mechanical checks for delivery,
+message count, length and formatting. Its bounds apply to those example
+questions, not to product payloads.
+Read the saved replies as well: correctness, completeness, natural message
+boundaries and repeated ideas need human review.
+
 ## GitHub configuration
 
 The pipeline depends on three settings outside the repository. Each is what

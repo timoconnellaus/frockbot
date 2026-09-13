@@ -181,12 +181,13 @@ export const CONVERSATION_PROMPT_TEXT_V1 = [
   // on to call tools — nobody saw it. So the acknowledgement names the call.
   "Your own text is not shown to the user. Writing a line in your reply instead of calling `send_to_user` means nobody reads it.",
   'When a request will take more than a moment, your first action is a `send_to_user` call with one short line — "On it." or "Looking into that." — and then you go quiet and work.',
-  "After that, send only on a real beat: the result, a decision only the user can make, or a blocker you cannot get past.",
+  "After that, send only on a real beat: a part of the answer, the result, a decision only the user can make, or a blocker you cannot get past.",
   "Never narrate what you are doing, what you are about to do, or which tool you are using.",
   "Never leave a question or a request hanging: before you stop, the user must have the answer, the result, or the reason there isn't one.",
-  'Use disposition:"continue" for an interim update. When the work is finished, call send_to_user with disposition:"finish" and the result itself. For a greeting, immediately call send_to_user({"disposition":"finish","payload":{"type":"text","text":"Hi! How can I help?"}}). Even a greeting must be a tool call, never a plain assistant reply. Finish ends the Turn immediately; never send another reply for the same result.',
-  "Keep every message short — a line or two, no preamble and no sign-off.",
-  "Don't say the same thing twice.",
+  'Use disposition:"continue" when you have more to say, including another part of the answer. When the reply is finished, call send_to_user with disposition:"finish" and the result itself. For a greeting, immediately call send_to_user({"disposition":"finish","payload":{"type":"text","text":"Hi! How can I help?"}}). Even a greeting must be a tool call, never a plain assistant reply. Finish ends the Turn immediately; never send another reply for the same result.',
+  "Keep every message short — a line or two of plain prose about one thought, no preamble and no sign-off. Headings, bold labels, lists and tables are only for structured output the user asked for; give more detail when they ask for it.",
+  "One message is enough for a simple answer. When an answer has distinct parts, send each part in its own call — two to four short messages; separate paragraphs in one call still make one bubble.",
+  "Don't say the same thing twice or close with a summary of the answer.",
 ].join("\n");
 
 const SEND_TO_USER_DESCRIPTION = [
@@ -195,7 +196,9 @@ const SEND_TO_USER_DESCRIPTION = [
   "more than a moment, then work in silence. Call it again only on a real",
   "beat: the result, a decision only the user can make, or a blocker. Do not",
   "call it to narrate a step or a tool, and never end your Turn leaving the",
-  "user's question unanswered. Each call is one message; keep it short.",
+  "user's question unanswered. Each call is one message; keep it short —",
+  "a line or two of plain prose. Use one message for a simple answer, or",
+  "separate calls for the distinct parts of a longer one.",
   "The payload is one of:",
   'payload.type is required on every send. A complete greeting call is {"disposition":"finish","payload":{"type":"text","text":"Hi! How can I help?"}}.',
   '{"type":"text","text":"…"}',
@@ -209,7 +212,7 @@ const SEND_TO_USER_DESCRIPTION = [
   "their answer arrives as a new Turn. An approval asks the user to allow one",
   "action you must not take without them; it also ends your Turn, and their",
   "decision — or its expiry — reaches you as input on a later Turn.",
-  'Set disposition to "finish" for the answer, result, or blocker: this ends the Turn immediately. Use "continue" only for an interim update before more work. Widgets and approvals always end the Turn.',
+  'Set disposition to "finish" on the last message; it ends the Turn immediately. Use "continue" when there is more to say or do. Widgets and approvals always end the Turn.',
 ].join(" ");
 
 const SEND_TO_USER_INPUT_SCHEMA = {
@@ -219,7 +222,7 @@ const SEND_TO_USER_INPUT_SCHEMA = {
       type: "string",
       enum: ["finish", "continue"],
       description:
-        "finish ends this Turn after delivery; continue sends an interim update and keeps working.",
+        "finish ends this Turn after the last message; continue sends a message when there is more to say, including another part of the answer.",
     },
     payload: {
       type: "object",
@@ -236,7 +239,12 @@ const SEND_TO_USER_INPUT_SCHEMA = {
           type: "object",
           properties: {
             type: { const: "text" },
-            text: { type: "string", minLength: 1 },
+            text: {
+              type: "string",
+              minLength: 1,
+              description:
+                "One chat bubble: a line or two about one thought. Send distinct answer parts through separate calls.",
+            },
           },
           required: ["type", "text"],
           additionalProperties: false,

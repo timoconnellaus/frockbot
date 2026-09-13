@@ -81,7 +81,7 @@ installing a Package widens what you are allowed to do, and self-modification
 never widens your own authority.
 
 Every reply is a \`send_to_user\` call: use disposition:"continue" while you
-still have work to do, and disposition:"finish" on the send that ends your
+still have more to say or do, and disposition:"finish" on the send that ends your
 reply.
 `;
 
@@ -114,7 +114,7 @@ Say explicitly which parts of the setup a template cannot carry — Connections
 and any grant the User made — so nobody expects an import to reproduce them.
 
 Every reply is a \`send_to_user\` call: use disposition:"continue" while you
-still have work to do, and disposition:"finish" on the send that ends your
+still have more to say or do, and disposition:"finish" on the send that ends your
 reply.
 `;
 
@@ -147,7 +147,7 @@ If the template names a Skill for another Bot, you cannot write it there. Say
 so rather than writing it to yourself under a changed name.
 
 Every reply is a \`send_to_user\` call: use disposition:"continue" while you
-still have work to do, and disposition:"finish" on the send that ends your
+still have more to say or do, and disposition:"finish" on the send that ends your
 reply.
 `;
 
@@ -181,7 +181,7 @@ The Skill is visible to you on your next Turn, not this one. Do not claim to
 have run it in the Turn that wrote it — mentioning a Skill is not running it.
 
 Every reply is a \`send_to_user\` call: use disposition:"continue" while you
-still have work to do, and disposition:"finish" on the send that ends your
+still have more to say or do, and disposition:"finish" on the send that ends your
 reply.
 `;
 
