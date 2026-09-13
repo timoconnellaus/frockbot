@@ -654,7 +654,8 @@ something — the kind and the turn, never the words), `memory-abandoned` (a
 dispatched request that never answered; not repeated), `memory-malformed` (a
 complete answer that was not an update, and whether it will be asked again),
 `memory-uncertain` (found mid-request on waking), `memory-unreadable` (the
-record could not be read, so the assistant promises nothing) and
+record could not be read, so the assistant promises nothing), `call-memory`
+(this connection's `end_call` left the call's memory work behind it) and
 `call-abandoned` (the rejoin window passed with nobody back).
 
 Caps meter what costs money, never how long the footer has been open: a
@@ -767,7 +768,10 @@ barge-in ordering, the playback tail, a feed the device rejects, the
 device-setup retry and the error-frame notice. They also predate the swap of
 the assistant's ears to ElevenLabs Scribe v2 Realtime described under "Ears",
 which adds bun tests for the provider and key resolution and for the Scribe
-options. The numbers below are therefore understated; the next run of the suites should replace them wholesale rather
+options. They also predate session memory, which adds bun tests for the
+memory record, its ordering fences and the finalization job, and workerd
+scenarios driving the scheduler through a long call, a malformed answer and
+an abandoned call. The numbers below are therefore understated; the next run of the suites should replace them wholesale rather
 than add to them.
 
 ### The live endpoint, 2026-09-11
