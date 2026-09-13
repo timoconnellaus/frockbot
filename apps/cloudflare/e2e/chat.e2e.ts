@@ -640,7 +640,7 @@ test("a provider that stops accepting the key ends the Turn with a reason", asyn
   // Turns failed with a 401 they never asked for. One failure should report
   // one failure.
   try {
-    await startTurn(page, "will not work");
+    await startTurn(page, `will not work\n${says("Recovered after retry")}`);
 
     /*
      * A failed Turn is a notice, not the Bot speaking.
@@ -668,15 +668,44 @@ test("a provider that stops accepting the key ends the Turn with a reason", asyn
       .toContain(notice);
     // The sentence used to end by telling the person to try again with nothing
     // to press; the retry is beside it now, and it sends the same message.
-    await expect(
-      sem(page, "chat-transcript").locator(
-        '[flt-semantics-identifier^="retry-turn-"]',
-      ),
-    ).toBeVisible();
+    const originalMessage = saidByUser(page);
+    await expect(originalMessage).toHaveCount(1);
+    const messageId = await originalMessage.getAttribute(
+      "flt-semantics-identifier",
+    );
+    const retry = originalMessage.locator(
+      '[flt-semantics-identifier^="retry-turn-"]',
+    );
+    await expect(retry).toBeVisible();
     const transcript = (await sem(page, "chat-transcript").textContent()) ?? "";
     expect(transcript).not.toContain("model-error");
     expect(transcript).not.toContain("outcome");
     expect(transcript).not.toContain("401");
+
+    await answerComposer(page, "Keep my next message");
+    await setFakeOllamaChatMode(page, ollamaBaseUrl, "ok");
+    await press(retry);
+    await expect
+      .poll(() => sendTexts(page), { timeout: 120_000 })
+      .toEqual(["Recovered after retry"]);
+    await expect(retry).toHaveCount(0);
+    await expect(originalMessage).toHaveCount(1);
+    await expect(originalMessage).toHaveAttribute(
+      "flt-semantics-identifier",
+      messageId!,
+    );
+    await expect(composerInput(page)).toHaveValue("Keep my next message");
+
+    await page.reload();
+    await expect
+      .poll(() => sendTexts(page), { timeout: 120_000 })
+      .toEqual(["Recovered after retry"]);
+    await expect(saidByUser(page)).toHaveCount(1);
+    await expect(saidByUser(page)).toHaveAttribute(
+      "flt-semantics-identifier",
+      messageId!,
+    );
+    await expect(composerInput(page)).toHaveValue("Keep my next message");
   } finally {
     // Switched off however the test ended, not only when it passed.
     await setFakeOllamaChatMode(page, ollamaBaseUrl, "ok");

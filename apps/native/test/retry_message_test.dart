@@ -24,8 +24,8 @@ Map<String, dynamic> attempt(
   'admittedAt': at ?? originalAt,
   'messageRunId': 'original',
   'messageAdmittedAt': originalAt,
-  if (retryOf != null) 'retryOf': retryOf,
-  if (retriedBy != null) 'retriedBy': retriedBy,
+  'retryOf': ?retryOf,
+  'retriedBy': ?retriedBy,
   'events': <Object?>[],
   'outcome': {
     'type': status,
@@ -108,7 +108,14 @@ void main() {
           },
         ],
       },
-      attempt('retry', retryOf: 'original', at: '2026-09-13T03:00:00.000Z'),
+      attempt('retry', retryOf: 'original', at: '2026-09-13T03:00:00.000Z')
+        ..['events'] = [
+          {
+            'type': 'send/to-user',
+            'ordinal': 0,
+            'payload': {'type': 'text', 'text': 'Partial reply before failure'},
+          },
+        ],
     ]);
     await tester.pumpWidget(
       MaterialApp(
@@ -127,6 +134,21 @@ void main() {
     );
     await tester.pump();
     expect(reports.last, 'retry:failed');
+  });
+
+  test('a queued retry uses the attempt time for its stopping notice', () {
+    final lines = projectRuns([
+      attempt(
+        'retry',
+        status: 'running',
+        retryOf: 'original',
+        at: '2026-09-13T03:00:00.000Z',
+      )..['queued'] = true,
+    ]);
+    expect(
+      supersedeDrainState(lines, DateTime.parse('2026-09-13T03:00:01.000Z')),
+      SupersedeDrainState.stopping,
+    );
   });
 
   test(

@@ -13,15 +13,7 @@ enum ChatIconKind {
   mic,
 }
 
-/// One light stroke weight for the compact chat chrome, independent of the
-/// platform's bundled Material glyph weight.
-///
-/// [chatIconSizeV1] is the one dimension every drawn glyph in the chrome
-/// takes, painted or bundled: the Material icons beside these are given the
-/// same box, so a row of chrome reads as one set rather than two weights at
-/// two sizes. It is Material's own default, which the compact 19 this started
-/// at was well under — the glyphs read as small on a phone against every
-/// other app's, and the buttons round them carry at least a 44-point target.
+/// Shared sizing keeps custom and Material icons consistent across clients.
 const chatIconSizeV1 = 24.0;
 
 class ChatIcon extends StatelessWidget {

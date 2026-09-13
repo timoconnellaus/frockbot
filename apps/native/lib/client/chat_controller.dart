@@ -166,8 +166,9 @@ class ChatController extends ChangeNotifier {
   /// several are in flight: it is the one they are watching for.
   String? get visiblePendingText {
     for (final submission in pending.reversed) {
-      if (submission.retryOf == null && !_runs.containsKey(submission.id))
+      if (submission.retryOf == null && !_runs.containsKey(submission.id)) {
         return submission.text;
+      }
     }
     return null;
   }
@@ -206,8 +207,9 @@ class ChatController extends ChangeNotifier {
         ?PendingSend.decode(entry),
     ];
     for (final submission in pending) {
-      if (submission.retryOf != null)
+      if (submission.retryOf != null) {
         _putOptimisticRun(submission, queued: false);
+      }
     }
     stopId = value['stopId'] as String?;
     stopTarget = value['stopTarget'] as String?;
@@ -409,8 +411,9 @@ class ChatController extends ChangeNotifier {
     // drain — the only window in which the thread has anything to say about
     // it — is over by the time authority could have told this client. The
     // durable projection replaces this by run id the moment it arrives.
-    if (waitsBehind || submission.retryOf != null)
+    if (waitsBehind || submission.retryOf != null) {
       _putOptimisticRun(submission, queued: waitsBehind);
+    }
     changed();
     if (submission.retryOf == null) draft = '';
     try {
@@ -511,8 +514,9 @@ class ChatController extends ChangeNotifier {
         await _persist();
       } catch (_) {
         pending = kept;
-        if (submission.retryOf != null)
+        if (submission.retryOf != null) {
           _putOptimisticRun(submission, queued: false);
+        }
         if (draft == reconciledDraft) draft = previousDraft;
         rethrow;
       }

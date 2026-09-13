@@ -273,7 +273,7 @@ class BackendChatTransport implements ChatTransport {
       'schemaVersion': 1,
       'commandId': id,
       'text': text,
-      if (retryOf != null) 'retryOf': retryOf,
+      'retryOf': ?retryOf,
       // Present on every send: the field's presence is the intent, and its
       // empty form says this client had observed no run to name.
       'supersedes': supersedes == null

@@ -106,7 +106,10 @@ class _TranscriptViewState extends State<TranscriptView> {
       // A retry is displayed with its original message, but read order is the
       // order of the actual attempts, including a reply to an older message.
       final at = line.readAt ?? line.at ?? '';
-      if (newestAt == null || at.compareTo(newestAt) >= 0) {
+      final followsFailure =
+          at == newestAt && _latestSendId == '${line.runId}:failed';
+      if (newestAt == null ||
+          (at.compareTo(newestAt) >= 0 && !followsFailure)) {
         newestAt = at;
         _latestSendId = messageId;
       }

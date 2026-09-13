@@ -202,7 +202,8 @@ SupersedeDrainState supersedeDrainState(
     }
   }
   if (waiting == null) return SupersedeDrainState.none;
-  final startedAt = waiting.at == null ? null : DateTime.tryParse(waiting.at!);
+  final admittedAt = waiting.readAt ?? waiting.at;
+  final startedAt = admittedAt == null ? null : DateTime.tryParse(admittedAt);
   if (startedAt == null) return SupersedeDrainState.stopping;
   return now.difference(startedAt) >= supersedeDrainSlowAfter
       ? SupersedeDrainState.slow
@@ -557,8 +558,7 @@ List<TranscriptLine> projectRuns(List<Map<String, dynamic>> runs) {
             id: '$runId:failed',
             runId: runId,
             role: LineRole.assistant,
-            // A Turn that broke after it had started talking keeps what it
-            // said, with the reason underneath it.
+            // Chat failures live on the input; background failures need a notice.
             text: text,
             at: admittedAt,
             readAt: run['admittedAt'] as String?,

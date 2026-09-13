@@ -827,12 +827,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     );
   }
 
-  /// The canvas, over the thread the progress line is read from.
-  ///
-  /// `holdsFrame` puts the shell's one frame key on the live frame: the
-  /// pushed canvas page on a phone. The panel column at the desk tiers keeps
-  /// its own frame alive by staying built, and never shares the key with a
-  /// page that could be up at the same time across a resize.
+  /// The page takes over the frame pre-mounted behind the conversation.
   Widget _appletCanvas(
     String botId,
     AppletCanvasController canvas, {
@@ -864,7 +859,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   void _pushApplet() {
     final bot = selected;
     final canvas = appletCanvas;
-    if (bot == null || canvas == null) return;
+    if (bot == null || canvas == null || _appletPagePresented) return;
     final route = MaterialPageRoute<void>(
       builder: (_) => Scaffold(
         body: SafeArea(

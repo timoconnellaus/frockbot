@@ -10,6 +10,8 @@ import 'widget_test.dart' show MemoryStore;
 class WireApi extends NativeApi {
   WireApi(super.store);
   String status = 'completed';
+  String? retryOf;
+  Map<String, Object?>? sentCommand;
   @override
   Future<Object?> request(
     String path, {
@@ -17,10 +19,22 @@ class WireApi extends NativeApi {
     int limit = 512000,
     bool authenticated = true,
   }) async {
+    if (body is Map<String, Object?>) {
+      sentCommand = body;
+      return {
+        'schemaVersion': 1,
+        'runId': body['commandId'],
+        'text': '',
+        'events': [],
+      };
+    }
     final run = {
-      'schemaVersion': 3,
+      'schemaVersion': 4,
       'runId': 'send-1',
       'admittedAt': '2026-09-07T23:49:45.395Z',
+      'messageRunId': retryOf ?? 'send-1',
+      'messageAdmittedAt': '2026-09-07T23:49:45.395Z',
+      'retryOf': ?retryOf,
       'input': 'hi',
       'status': status,
       'events': [
@@ -40,7 +54,7 @@ class WireApi extends NativeApi {
             },
     };
     return path.endsWith('/send-1')
-        ? {'schemaVersion': 1, 'run': run}
+        ? {'schemaVersion': 1, 'state': 'terminal', 'run': run}
         : {
             'schemaVersion': 1,
             'runs': [run],
@@ -50,6 +64,28 @@ class WireApi extends NativeApi {
 }
 
 void main() {
+  test(
+    'the wire carries retry intent and preserves its message identity',
+    () async {
+      final api = WireApi(MemoryStore())..retryOf = 'original';
+      addTearDown(api.close);
+      final transport = BackendChatTransport(api);
+      await transport.send('bot', 'retry-command', 'hi', retryOf: 'original');
+      expect(api.sentCommand, {
+        'schemaVersion': 1,
+        'commandId': 'retry-command',
+        'text': 'hi',
+        'retryOf': 'original',
+        'supersedes': <String, Object?>{},
+      });
+      final run = await transport.lookup('bot', 'send-1');
+      expect(run!['messageRunId'], 'original');
+      expect(projectRuns([run]).first.id, 'original:user');
+      await transport.send('bot', 'ordinary', 'hi');
+      expect(api.sentCommand!.containsKey('retryOf'), isFalse);
+    },
+  );
+
   test('real wire maps through transport and controller keep sends and failure reasons, never scratch text', () async {
     final store = MemoryStore();
     final api = WireApi(store);
