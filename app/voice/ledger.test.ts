@@ -39,7 +39,7 @@ describe("voice ledger calls", () => {
     expect(second.previous.connectionId).toBe("c1");
     expect((await l.currentCall())?.callId).toBe("call-2");
     // The old connection can no longer end the newer call.
-    expect(await l.endCall("c1")).toBe(false);
+    expect(await l.endCall("c1")).toBeUndefined();
     expect((await l.currentCall())?.callId).toBe("call-2");
   });
 
