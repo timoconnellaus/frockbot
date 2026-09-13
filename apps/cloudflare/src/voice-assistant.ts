@@ -1944,8 +1944,7 @@ export class VoiceAssistant extends VoiceAgentBase<
         const bot = await this.ownedBot(userId, botId);
         const page = await this.botDoor(userId, botId).listRuns();
         const runs = page.runs.slice(
-          0,
-          Math.min(limit, VOICE_HISTORY_MAX_LIMIT_V1),
+          -Math.max(1, Math.min(limit, VOICE_HISTORY_MAX_LIMIT_V1)),
         );
         return {
           botId,

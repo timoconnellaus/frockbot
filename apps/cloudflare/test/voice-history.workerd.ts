@@ -89,3 +89,48 @@ test("voice reads and searches owned conversation records without admitting Bot 
   });
   expect(refused).toEqual([true, true, true]);
 });
+
+test("voice history reads the newest turns when a Bot has more than the limit", async () => {
+  const suffix = crypto.randomUUID();
+  const identity = {
+    userId: `recent-${suffix}`,
+    botId: `recent-bot-${suffix}`,
+  };
+  await provisionBot(identity);
+  const bot = env.BOT_STATES.getByName(`${identity.userId}:${identity.botId}`);
+  const turns = ["oldest question", "second question", "third question"];
+  const runIds = turns.map((_, index) => `turn-${index}-${suffix}`);
+  for (const [index, text] of turns.entries()) {
+    await bot.run({
+      schemaVersion: 1,
+      ...identity,
+      command: {
+        runId: runIds[index],
+        sessionId: `${identity.userId}:${identity.botId}`,
+        acceptedAt: new Date(Date.now() + index).toISOString(),
+        text,
+      },
+    });
+  }
+  const voice = env.VOICE_ASSISTANTS.getByName(identity.userId);
+  const history = await runInDurableObject(voice, async (instance) => {
+    const adapter = instance as unknown as {
+      turnHost(userId: string, turnId: string): VoiceAssistantHostV1;
+    };
+    const host = adapter.turnHost(identity.userId, "read-only");
+    return renderVoiceBotHistoryV1(
+      await host.readBotHistory(identity.botId, 1),
+      1,
+    );
+  });
+  const messages = JSON.parse(history).messages as {
+    runId: string;
+    text: string;
+  }[];
+  expect(messages.length).toBeGreaterThan(0);
+  expect(messages.map((message) => message.runId)).toEqual(
+    messages.map(() => runIds[runIds.length - 1]),
+  );
+  expect(history).not.toContain("oldest question");
+  expect(history).not.toContain("second question");
+});
