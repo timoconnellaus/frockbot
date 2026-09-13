@@ -1160,6 +1160,7 @@ function createUserApplicationRoute() {
             sessionId: `${env.DEPLOYMENT.userId}:${botId}`,
             acceptedAt: new Date().toISOString(),
             text: turnCommand.text,
+            ...(turnCommand.retryOf ? { retryOf: turnCommand.retryOf } : {}),
             // Refs only: the client names a Skill and never carries its text,
             // so what a Turn runs on is still whatever the instruction root
             // holds at the generation the Turn resolves.

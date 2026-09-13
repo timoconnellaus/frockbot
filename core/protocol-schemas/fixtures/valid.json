@@ -908,7 +908,7 @@
     "value": {
       "schemaVersion": 1,
       "commandId": "command-1",
-      "text": "Hello \ud83d\udc11 \u3053\u3093\u306b\u3061\u306f"
+      "text": "Hello 🐑 こんにちは"
     }
   },
   {
@@ -1221,7 +1221,7 @@
           ]
         }
       ],
-      "modelInUse": "Auto \u00b7 Frock AI"
+      "modelInUse": "Auto · Frock AI"
     }
   },
   {
@@ -1377,5 +1377,90 @@
     "name": "MessageCursor valid",
     "schema": "MessageCursor",
     "value": "message-00000000000000000001"
+  },
+  {
+    "name": "TurnCommand retry targets an existing failed attempt",
+    "schema": "TurnCommand",
+    "value": {
+      "schemaVersion": 1,
+      "commandId": "attempt-2",
+      "retryOf": "attempt-1",
+      "text": "Check the build"
+    }
+  },
+  {
+    "name": "Run V4 retry is self-contained when its predecessor is off-page",
+    "schema": "Run",
+    "value": {
+      "schemaVersion": 4,
+      "runId": "attempt-2",
+      "admittedAt": "2026-09-13T01:00:00.000Z",
+      "messageRunId": "attempt-1",
+      "messageAdmittedAt": "2026-09-13T00:00:00.000Z",
+      "retryOf": "attempt-1",
+      "input": "Check the build",
+      "status": "running",
+      "events": [],
+      "canRetry": false
+    }
+  },
+  {
+    "name": "Run V4 failed predecessor names its retry",
+    "schema": "Run",
+    "value": {
+      "schemaVersion": 4,
+      "runId": "attempt-1",
+      "admittedAt": "2026-09-13T00:00:00.000Z",
+      "messageRunId": "attempt-1",
+      "messageAdmittedAt": "2026-09-13T00:00:00.000Z",
+      "input": "Check the build",
+      "status": "failed",
+      "events": [],
+      "retriedBy": "attempt-2",
+      "outcome": {
+        "type": "failed",
+        "message": "Provider unavailable"
+      },
+      "canRetry": false
+    }
+  },
+  {
+    "name": "Run V4 completed retry keeps the root message identity",
+    "schema": "Run",
+    "value": {
+      "schemaVersion": 4,
+      "runId": "attempt-2",
+      "admittedAt": "2026-09-13T01:00:00.000Z",
+      "messageRunId": "attempt-1",
+      "messageAdmittedAt": "2026-09-13T00:00:00.000Z",
+      "retryOf": "attempt-1",
+      "input": "Check the build",
+      "status": "completed",
+      "events": [],
+      "outcome": {
+        "type": "completed",
+        "text": ""
+      },
+      "canRetry": false
+    }
+  },
+  {
+    "name": "Run V4 failed user message can retry",
+    "schema": "Run",
+    "value": {
+      "schemaVersion": 4,
+      "runId": "attempt-1",
+      "admittedAt": "2026-09-13T00:00:00.000Z",
+      "messageRunId": "attempt-1",
+      "messageAdmittedAt": "2026-09-13T00:00:00.000Z",
+      "input": "Check the build",
+      "status": "failed",
+      "events": [],
+      "outcome": {
+        "type": "failed",
+        "message": "Provider unavailable"
+      },
+      "canRetry": true
+    }
   }
 ]

@@ -289,6 +289,7 @@ export interface DecodedBotRunRpcV1 {
     acceptedAt: string;
     text: string;
     skills?: SkillRefV1[];
+    retryOf?: string;
     /** The lane this command asks for. Only `user` crosses this seam. */
     lane?: "user";
     /** Explicit intent to replace the Turn the client observed running. */
@@ -310,6 +311,7 @@ export const rpcBotTurnCommandOptionalsV1: Readonly<
   Record<string, RpcValueDecoder>
 > = {
   skills: (value, label) => decodeSkillRefsV1(value, label),
+  retryOf: (value) => decodeRunIdV1(value),
   lane: (value, label) => {
     if (value !== "user") throw new Error(`${label} is invalid`);
     return "user" as const;

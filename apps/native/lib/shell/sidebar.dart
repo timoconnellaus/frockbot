@@ -12,6 +12,7 @@ import 'package:flutter/material.dart';
 import '../flock/sheep.dart';
 import '../protocol/client_wire.generated.dart' as wire;
 import '../theme/frock_theme.dart';
+import 'chat_icons.dart';
 import 'focus.dart';
 import 'semantics.dart';
 
@@ -309,7 +310,7 @@ class ShellSidebar extends StatelessWidget {
                       children: [
                         Icon(
                           Icons.search_rounded,
-                          size: 19,
+                          size: chatIconSizeV1,
                           color: Theme.of(context).colorScheme.onSurfaceVariant,
                         ),
                         const SizedBox(width: 8),
@@ -696,10 +697,10 @@ class _Header extends StatelessWidget {
     // and wears the accent.
     final quiet = IconButton.styleFrom(
       foregroundColor: scheme.onSurfaceVariant,
-      minimumSize: const Size(34, 34),
-      fixedSize: const Size(34, 34),
+      minimumSize: const Size(44, 44),
+      fixedSize: const Size(44, 44),
       padding: EdgeInsets.zero,
-      iconSize: 20,
+      iconSize: chatIconSizeV1,
       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
     );
@@ -720,8 +721,8 @@ class _Header extends StatelessWidget {
               onPressed: onProfile,
               style: quiet,
               icon: Container(
-                width: 28,
-                height: 28,
+                width: 32,
+                height: 32,
                 decoration: BoxDecoration(
                   color: scheme.onSurface.withValues(alpha: 0.08),
                   shape: BoxShape.circle,
@@ -731,7 +732,7 @@ class _Header extends StatelessWidget {
                 ),
                 child: Icon(
                   Icons.person_rounded,
-                  size: 17,
+                  size: 20,
                   color: scheme.onSurfaceVariant,
                 ),
               ),
@@ -822,22 +823,24 @@ class _Foot extends StatelessWidget {
                   children: [
                     Icon(
                       Icons.storefront_outlined,
-                      size: 19,
+                      size: chatIconSizeV1,
                       color: theme.colorScheme.onSurfaceVariant,
                     ),
                     const SizedBox(width: 11),
                     Expanded(
                       child: Text(
                         'Marketplace',
+                        // The foot is a door, not a heading: normal weight,
+                        // the same as the words in the list above it.
                         style: theme.textTheme.bodyMedium?.copyWith(
-                          fontWeight: FontWeight.w500,
+                          fontWeight: FontWeight.w400,
                           letterSpacing: -0.1,
                         ),
                       ),
                     ),
                     Icon(
                       Icons.chevron_right_rounded,
-                      size: 18,
+                      size: 20,
                       color: theme.colorScheme.onSurfaceVariant.withValues(
                         alpha: 0.6,
                       ),

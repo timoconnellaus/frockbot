@@ -156,6 +156,7 @@ export type TurnCommand = {
   text: string;
   skills?: Array<SkillRef>;
   supersedes?: { runId?: Identifier };
+  retryOf?: Identifier;
 };
 export type StopCommand = {
   schemaVersion: 1;
@@ -264,7 +265,7 @@ export type RunOutcome =
     };
 export type Run =
   | {
-      schemaVersion: 1 | 2 | 3;
+      schemaVersion: 1 | 2 | 3 | 4;
       runId: Identifier;
       admittedAt: Instant;
       input: string;
@@ -274,9 +275,14 @@ export type Run =
       queued?: true;
       partialText?: string;
       via?: { kind: "bot"; name: string; botId: BotId };
+      messageRunId?: Identifier;
+      messageAdmittedAt?: Instant;
+      retryOf?: Identifier;
+      retriedBy?: Identifier;
+      canRetry?: boolean;
     }
   | {
-      schemaVersion: 1 | 2 | 3;
+      schemaVersion: 1 | 2 | 3 | 4;
       runId: Identifier;
       admittedAt: Instant;
       input: string;
@@ -285,9 +291,14 @@ export type Run =
       stopRequestedAt?: Instant;
       outcome: { type: "completed"; text: string };
       via?: { kind: "bot"; name: string; botId: BotId };
+      messageRunId?: Identifier;
+      messageAdmittedAt?: Instant;
+      retryOf?: Identifier;
+      retriedBy?: Identifier;
+      canRetry?: boolean;
     }
   | {
-      schemaVersion: 1 | 2 | 3;
+      schemaVersion: 1 | 2 | 3 | 4;
       runId: Identifier;
       admittedAt: Instant;
       input: string;
@@ -296,9 +307,14 @@ export type Run =
       stopRequestedAt?: Instant;
       outcome: { type: "failed"; message: string; text?: string };
       via?: { kind: "bot"; name: string; botId: BotId };
+      messageRunId?: Identifier;
+      messageAdmittedAt?: Instant;
+      retryOf?: Identifier;
+      retriedBy?: Identifier;
+      canRetry?: boolean;
     }
   | {
-      schemaVersion: 1 | 2 | 3;
+      schemaVersion: 1 | 2 | 3 | 4;
       runId: Identifier;
       admittedAt: Instant;
       input: string;
@@ -307,9 +323,14 @@ export type Run =
       stopRequestedAt: Instant;
       outcome: { type: "cancelled"; message: string; text?: string };
       via?: { kind: "bot"; name: string; botId: BotId };
+      messageRunId?: Identifier;
+      messageAdmittedAt?: Instant;
+      retryOf?: Identifier;
+      retriedBy?: Identifier;
+      canRetry?: boolean;
     }
   | {
-      schemaVersion: 1 | 2 | 3;
+      schemaVersion: 1 | 2 | 3 | 4;
       runId: Identifier;
       admittedAt: Instant;
       input: string;
@@ -318,6 +339,11 @@ export type Run =
       stopRequestedAt?: Instant;
       outcome: { type: "superseded"; message: string; text?: string };
       via?: { kind: "bot"; name: string; botId: BotId };
+      messageRunId?: Identifier;
+      messageAdmittedAt?: Instant;
+      retryOf?: Identifier;
+      retriedBy?: Identifier;
+      canRetry?: boolean;
     };
 export type Announcement =
   | {

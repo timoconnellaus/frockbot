@@ -1260,3 +1260,45 @@ describe("Applet deletion", () => {
     expect(response.status).toBe(503);
   });
 });
+
+test("the public turn route forwards a retry target under its fresh command id", async () => {
+  const calls: unknown[] = [];
+  const binding = rpcBindingFor({} as BotStateBinding);
+  binding.run = async (request) => {
+    calls.push(request);
+    return {
+      schemaVersion: 1,
+      runId: request.command.runId,
+      text: "",
+      events: [],
+    };
+  };
+  const response = await createUserApplication()(
+    new Request("https://app.example/api/bots/primary/turns", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        schemaVersion: 1,
+        commandId: "attempt-2",
+        retryOf: "attempt-1",
+        text: "Check the build",
+      }),
+    }),
+    {
+      BOT_STATE: binding,
+      DEPLOYMENT: { userId: "alice", applicationHash: "foundation-v1" },
+    },
+  );
+  expect(response.status).toBe(200);
+  expect(calls).toEqual([
+    expect.objectContaining({
+      botId: "primary",
+      command: expect.objectContaining({
+        runId: "attempt-2",
+        retryOf: "attempt-1",
+        text: "Check the build",
+        sessionId: "alice:primary",
+      }),
+    }),
+  ]);
+});

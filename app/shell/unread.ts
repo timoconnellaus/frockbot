@@ -956,6 +956,7 @@ export async function executeUnreadCommand(
           (kind === "failed"
             ? run.status === "failed"
             : isVisibleRunV1(run) &&
+              (kind !== "user" || run.retryOf === undefined) &&
               (kind !== "send" ||
                 Number(position) <
                   run.events.filter((event) => event.type === "send/to-user")

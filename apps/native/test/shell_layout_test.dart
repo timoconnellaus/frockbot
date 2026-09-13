@@ -909,7 +909,7 @@ void main() {
             storageKey: 'test',
             onRefresh: ({bool older = false}) async {},
             onOpenRun: (_) {},
-            onMessageActions: (line) => opened = line,
+            onMessageActions: (line, {position}) => opened = line,
           ),
         ),
       );

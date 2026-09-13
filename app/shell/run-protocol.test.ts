@@ -108,7 +108,7 @@ describe("client run protocol v1", () => {
     expect(isVisibleRunV1(agent)).toBe(true);
     const projected = projectClientRunV1(agent);
     expect(projected).toMatchObject({
-      schemaVersion: 3,
+      schemaVersion: 4,
       input: "continue",
       via: { kind: "bot", name: "Researcher", botId: "researcher" },
     });
@@ -842,9 +842,12 @@ describe("client run protocol v1", () => {
       schemaVersion: 1,
       runs: [
         {
-          schemaVersion: 3,
+          schemaVersion: 4,
           runId: "run-1",
           admittedAt: timestamp,
+          messageRunId: "run-1",
+          messageAdmittedAt: timestamp,
+          canRetry: false,
           input: "continue",
           status: "running",
           events: [
@@ -867,6 +870,9 @@ describe("client run protocol v1", () => {
       {
         runId: "run-1",
         admittedAt: timestamp,
+        messageRunId: "run-1",
+        messageAdmittedAt: timestamp,
+        canRetry: false,
         input: "continue",
         status: "running",
         events: projected.runs[0]?.events,
@@ -1149,7 +1155,7 @@ describe("client run protocol v1", () => {
     );
 
     // Version 3 carries agent-origin markers; older bodies still decode.
-    expect(projected.schemaVersion).toBe(3);
+    expect(projected.schemaVersion).toBe(4);
     expect(projected.events).toEqual([
       {
         type: "send/to-user",
@@ -2173,5 +2179,127 @@ describe("a transcript page a client cannot fully read", () => {
     expect(() => decodeClientRunListV1({ schemaVersion: 2, runs: [] })).toThrow(
       "run list.schemaVersion is invalid",
     );
+  });
+});
+
+describe("message identity across retry pages", () => {
+  test("retry eligibility follows authority rather than the presence of input", () => {
+    const failed = storedRun([], "failed");
+    expect(projectClientRunV1(failed).canRetry).toBe(true);
+    expect(
+      projectClientRunV1({
+        ...failed,
+        admission: { schemaVersion: 1, turnType: "chat", lane: "user" },
+      }).canRetry,
+    ).toBe(true);
+    const ineligible: StoredRun[] = [
+      storedRun([], "running"),
+      storedRun([], "completed"),
+      storedRun([], "cancelled"),
+      { ...failed, input: "   " },
+      { ...failed, retriedBy: "next-attempt" },
+      {
+        ...failed,
+        admission: { schemaVersion: 1, turnType: "agent" },
+      },
+      {
+        ...failed,
+        admission: { schemaVersion: 1, turnType: "automation" },
+      },
+      {
+        ...failed,
+        admission: { schemaVersion: 1, turnType: "chat", lane: "background" },
+      },
+      {
+        ...failed,
+        admission: {
+          schemaVersion: 1,
+          turnType: "chat",
+          origin: {
+            kind: "bot",
+            fromBotId: "researcher",
+            fromBotName: "Researcher",
+            messageId: "message-1",
+          },
+        },
+      },
+      {
+        ...failed,
+        directTool: { packageId: "test", name: "write", input: {} },
+      },
+    ];
+    for (const run of ineligible) {
+      expect(projectClientRunV1(run).canRetry).toBe(false);
+    }
+  });
+
+  test("v4 requires boolean retry eligibility and older runs cannot carry it", () => {
+    const run = projectClientRunV1(storedRun([], "failed"));
+    const lookup = (value: unknown) =>
+      decodeClientRunLookupV1({
+        schemaVersion: 1,
+        state: "terminal",
+        run: value,
+      });
+    expect(lookup(run)).toMatchObject({ run: { canRetry: true } });
+    expect(() => lookup({ ...run, canRetry: undefined })).toThrow(/canRetry/);
+    expect(() => lookup({ ...run, canRetry: "true" })).toThrow(/canRetry/);
+    const { messageRunId, messageAdmittedAt, canRetry, ...legacy } = run;
+    expect(lookup({ ...legacy, schemaVersion: 3 })).not.toHaveProperty(
+      "run.canRetry",
+    );
+    expect(() => lookup({ ...legacy, schemaVersion: 3, canRetry })).toThrow(
+      /schemaVersion 4/,
+    );
+  });
+
+  test("a retry alone carries the original message identity and its own sends", () => {
+    const retry = {
+      ...storedRun([]),
+      runId: "attempt-2",
+      acceptedAt: "2026-09-13T01:00:00.000Z",
+      retryOf: "attempt-1",
+      messageRunId: "attempt-1",
+      messageAdmittedAt: timestamp,
+    };
+    const projected = projectClientRunV1(retry);
+    expect(projected).toMatchObject({
+      schemaVersion: 4,
+      runId: "attempt-2",
+      messageRunId: "attempt-1",
+      messageAdmittedAt: timestamp,
+      retryOf: "attempt-1",
+    });
+    expect(
+      decodeClientRunListV1(projectClientRunListV1([retry]))[0],
+    ).toMatchObject({
+      runId: "attempt-2",
+      messageRunId: "attempt-1",
+      messageAdmittedAt: timestamp,
+      retryOf: "attempt-1",
+    });
+    expect(() =>
+      decodeClientRunLookupV1({
+        schemaVersion: 1,
+        state: "terminal",
+        run: { ...projected, messageRunId: "attempt-2" },
+      }),
+    ).toThrow(/own message root/);
+  });
+
+  test("only the retry target crosses the client command boundary", () => {
+    const command = {
+      schemaVersion: 1 as const,
+      commandId: "attempt-2",
+      text: "same message",
+      retryOf: "attempt-1",
+    };
+    expect(decodeClientTurnCommandV1(command)).toEqual(command);
+    expect(() =>
+      decodeClientTurnCommandV1({ ...command, messageRunId: "another" }),
+    ).toThrow();
+    expect(() =>
+      decodeClientTurnCommandV1({ ...command, retryOf: "attempt-2" }),
+    ).toThrow(/itself/);
   });
 });

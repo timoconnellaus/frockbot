@@ -140,7 +140,7 @@ async function expectSaid(scope: Locator, copy: string): Promise<void> {
     .toBe(true);
 }
 
-/** The canvas, wherever this width puts it: a column, or a page of its own. */
+/** The full-window canvas at every width. */
 function canvasOf(page: Page): Locator {
   return sem(page, "applet-canvas");
 }
@@ -149,17 +149,14 @@ function canvasOf(page: Page): Locator {
  * The live Applet, inside the frame the canvas draws it in.
  *
  * One hop, not two: the canvas frames the Applet's own document directly and
- * titles that frame "Applet". (The Applets Package's page nests a second frame,
- * but that is another surface and not this one.)
+ * titles that frame "Applet".
  */
 function appletUi(page: Page): FrameLocator {
   return appletViewer(page).contentFrame();
 }
 
 /**
- * Open the Applet canvas from the header control that owns it. At every width
- * this is the same gesture; only what it opens differs — a column beside the
- * conversation, or a page over it.
+ * The native picker opens an Applet on a page of its own.
  */
 async function openCanvas(page: Page): Promise<void> {
   const canvas = canvasOf(page);
@@ -174,9 +171,8 @@ async function openCanvas(page: Page): Promise<void> {
 /**
  * The frame the canvas draws the live Applet in.
  *
- * The last one: a canvas the shell has moved — a column at desktop width, a
- * page on the phone — leaves the frame it replaced in the document, and the
- * newest is the one on screen.
+ * The last one: opening a canvas can leave its replaced frame in the
+ * document, and the newest is the one on screen.
  */
 function appletViewer(page: Page): Locator {
   return page.locator('iframe[title="Applet"]').last();
@@ -185,10 +181,8 @@ function appletViewer(page: Page): Locator {
 /**
  * The canvas is showing the Applet rather than its source.
  *
- * The toggle's own halves say nothing about which is chosen — Flutter draws a
- * segmented button as two plain buttons in the accessibility tree — and the
- * code view stays built underneath, so what tells a person which view they are
- * on is the Applet's own document over it. That is what this reads.
+ * The frame stays mounted when Code is selected, so visibility and the live
+ * document's content establish which view is on screen.
  */
 async function expectShowingApp(page: Page): Promise<void> {
   await expect(appletViewer(page)).toBeVisible({ timeout: 60_000 });
@@ -197,16 +191,12 @@ async function expectShowingApp(page: Page): Promise<void> {
   });
 }
 
-function tab(page: Page, name: "App" | "Code"): Locator {
-  return sem(page, "applet-canvas-tabs").getByRole("button", { name });
-}
-
 /** The checked-in record of what this Applet looks like, per the plan's §5a. */
 const shotDirectory = resolve(repoRoot, "docs/screenshots/applets");
 
 /**
- * Wait for the shell to stop moving before a screenshot: the panel animates its
- * width and the canvas fades its view in, and a picture taken mid-way is of a
+ * Wait for the shell to stop moving before a screenshot: the page animates in
+ * and the canvas fades its view in, and a picture taken mid-way is of a
  * layout that exists for 240ms. The canvas is drawn to a canvas element, so
  * there is no animation to wait on in the document — what settles instead is
  * the box the engine gives the semantics node.
@@ -291,6 +281,7 @@ test("a Bot writes, checks and publishes an Applet, and its tool reaches the Bot
     apiBaseUrl: ollamaBaseUrl,
     botName: "Builder",
   });
+  await page.setViewportSize(DESKTOP);
 
   await runTool(page, "Build me a todo list.", "applet_create", {
     displayName: "Weekly Todos",
@@ -318,6 +309,8 @@ test("a Bot writes, checks and publishes an Applet, and its tool reaches the Bot
   await shot(page, "canvas-building");
 
   const appletId = await appletIdNamed(page, "Weekly Todos");
+  await press(sem(page, "applet-canvas-close"));
+  await expect(sem(page, "shell-conversation")).toBeVisible();
 
   // The Bot edits its own source with no Computer anywhere: the file it reads
   // back is the file the check and the publish compile.
@@ -344,9 +337,9 @@ test("a Bot writes, checks and publishes an Applet, and its tool reaches the Bot
   await preview.close();
 
   await runTool(page, "Publish it.", "applet_publish", { appletId });
+  await openCanvas(page);
 
-  // The publish is a generation; the canvas puts the live Applet over the code
-  // view and the header names the generation instead of "no version".
+  // Reopening the published Applet shows its live document immediately.
   await expect(sem(page, "applet-canvas-progress"), {
     message: await recentToolResults(page, userId),
   }).toHaveCount(0, { timeout: 60_000 });
@@ -382,6 +375,8 @@ test("a Bot writes, checks and publishes an Applet, and its tool reaches the Bot
   // generation carrying it, and this next Turn runs on it.
   // Older bubbles can leave Flutter's visible semantics tree as this long
   // thread scrolls. The synchronized todo below proves this send was handled.
+  await press(sem(page, "applet-canvas-close"));
+  await expect(sem(page, "shell-conversation")).toBeVisible();
   await answerInputs([
     [
       composerInput(page),
@@ -390,24 +385,30 @@ test("a Bot writes, checks and publishes an Applet, and its tool reaches the Bot
   ]);
   await press(sem(page, "send-button"));
   await expect(secondUi.getByText("Call mum")).toBeVisible({ timeout: 60_000 });
+  // The second page stays live while the first returns from the conversation.
+  await expectShowingApp(second);
+  await openCanvas(page);
   await expect(ui.getByText("Call mum")).toBeVisible({ timeout: 60_000 });
-  // That Turn wrote no source, so the canvas stayed where the User was. A Turn
-  // that only calls an Applet's tool must not throw either page back to the
-  // code view — which is what the canvas did while it followed the store's
-  // re-reads instead of the files.
+  // A Turn that only calls an Applet's tool must not select its source view.
   for (const open of [page, second]) {
     await expectShowingApp(open);
   }
   await shot(page, "canvas-live");
 
   // The code view is still there behind the Applet, one toggle away.
-  await press(tab(page, "Code"));
+  await expect(
+    canvas.getByRole("button", { name: "Code", exact: true }),
+  ).toHaveCount(1);
+  await press(sem(page, "applet-canvas-tabs"));
   await expect(appletViewer(page)).toBeHidden();
+  await expect(
+    canvas.getByRole("button", { name: "App", exact: true }),
+  ).toHaveCount(1);
   await expect(sem(page, "applet-file-server.ts")).toBeVisible();
   await shot(page, "canvas-code");
   await second.close();
 
-  // The phone: the same published Applet, as a full-height sheet. A phone
+  // The phone: the same published Applet, filling the window. A phone
   // opens on the Bot list, a conversation is a page over it, and the
   // conversation's bar is Back, the Bot's name and the Computer — the Applets
   // are a row on the Bot's page, which that name opens.

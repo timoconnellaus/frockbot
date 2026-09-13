@@ -61,6 +61,7 @@ import 'chat_pane.dart';
 import 'chat_header.dart';
 import 'desktop_layout.dart';
 import 'lifecycle.dart';
+import 'message_actions.dart';
 import 'run_view.dart';
 import 'semantics.dart';
 import 'sidebar.dart';
@@ -708,12 +709,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       final canvas = AppletCanvasController(widget.api, botId);
       appletCanvas = canvas;
       canvas.addListener(_repaint);
-      slots.register(
-        ShellSlot.rightPanel,
-        'applet',
-        (context) => _appletCanvas(botId, canvas),
-        label: 'Applet',
-      );
+      // The Applet is a window of its own at every width, so it is not a
+      // right-panel entry: a page with its own back and its own name, and the
+      // Applet filling everything under that one row.
       unawaited(canvas.load());
     }
     final machine = ComputerController(widget.api, botId);
@@ -743,11 +741,23 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     if (mounted) setState(() {});
   }
 
+  /// The Package doors worth drawing beside the native ones.
+  ///
+  /// The Applets Package declares an entry of its own called Applets. Where
+  /// this client has the built-in Applets entry — the outlined window in the
+  /// bar, the row on the Bot's page — that is the same door, so the Package's
+  /// copy of it is left out and every other destination is kept.
+  List<PackageEntryPage> _packageEntries() => [
+    for (final entry in packageIframeEntriesV1(catalog))
+      if (appletCanvas == null || entry.entry.label.toLowerCase() != 'applets')
+        entry,
+  ];
+
   /// The doors this Bot's Packages declare, as buttons for its own bar.
   /// A Package naming an icon this client does not have still gets a
   /// button, so a declared door is never silently missing.
   List<Widget> _packageEntryActions() => [
-    for (final entry in packageIframeEntriesV1(catalog))
+    for (final entry in _packageEntries())
       identified(
         PackageIds.entry(entry.contribution.packageId, entry.entry.id),
         IconButton(
@@ -817,12 +827,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     );
   }
 
-  /// The canvas, over the thread the progress line is read from.
-  ///
-  /// `holdsFrame` puts the shell's one frame key on the live frame: the
-  /// pushed canvas page on a phone. The panel column at the desk tiers keeps
-  /// its own frame alive by staying built, and never shares the key with a
-  /// page that could be up at the same time across a resize.
+  /// The page takes over the frame pre-mounted behind the conversation.
   Widget _appletCanvas(
     String botId,
     AppletCanvasController canvas, {
@@ -842,7 +847,42 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     );
   }
 
-  /// The live frame, pre-mounted off stage on a phone.
+  /// The Applet, full window, at every width.
+  ///
+  /// One row of chrome — back, the Applet's name, the switch to its code —
+  /// and the Applet under it for the rest of the page. The page takes the
+  /// pre-mounted frame over: the holder lets go in the same frame the page is
+  /// built, so the key moves rather than doubles. It takes the frame back
+  /// only once the page has finished leaving — a route on its way out is
+  /// still in the tree and is not rebuilt, so a holder that reclaimed the key
+  /// on the pop itself would double it.
+  void _pushApplet() {
+    final bot = selected;
+    final canvas = appletCanvas;
+    if (bot == null || canvas == null || _appletPagePresented) return;
+    final route = MaterialPageRoute<void>(
+      builder: (_) => Scaffold(
+        body: SafeArea(
+          child: _appletCanvas(
+            bot.botId.value,
+            canvas,
+            onClose: () => Navigator.of(context).maybePop(),
+            holdsFrame: true,
+          ),
+        ),
+      ),
+    );
+    setState(() => _appletPagePresented = true);
+    push.reading(null);
+    unawaited(Navigator.of(context).push(route));
+    unawaited(
+      route.completed.then((_) {
+        if (mounted) setState(() => _appletPagePresented = false);
+      }),
+    );
+  }
+
+  /// The live frame, pre-mounted off stage behind the conversation.
   ///
   /// Built as soon as the adopted Bot's canvas has a viewer and until the
   /// canvas page takes the frame over. Off stage it is laid out and never
@@ -856,10 +896,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     final canvas = appletCanvas;
     final viewer = canvas?.viewer;
     if (canvas == null || viewer == null || _appletPagePresented) return null;
-    if (shellTierForWidth(MediaQuery.sizeOf(context).width) !=
-        ShellTier.single) {
-      return null;
-    }
     final size = MediaQuery.sizeOf(context);
     return Positioned(
       left: 0,
@@ -975,6 +1011,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// over a full-width conversation is the same thing with less room and a
   /// scrim in the way.
   void _openPanel(String key) {
+    // The Applet is never a panel: it is a full window at every width.
+    if (key == 'applet') {
+      _pushApplet();
+      return;
+    }
     if (shellTierForWidth(MediaQuery.sizeOf(context).width) ==
         ShellTier.single) {
       _pushPanel(key);
@@ -1002,7 +1043,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     });
   }
 
-  Future<void> _messageActions(TranscriptLine line) async {
+  Future<void> _messageActions(TranscriptLine line, {Offset? position}) async {
     final bot = selected;
     if (bot == null) return;
     final copyText = [
@@ -1011,45 +1052,16 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         if (send.type == 'text' && send.payload?['text'] is String)
           send.payload!['text'] as String,
     ].join('\n\n');
-    final action = await showModalBottomSheet<String>(
+    final action = await showMessageActions(
       context: context,
-      showDragHandle: true,
-      builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (activity.unread[bot.botId.value]?.unread == true)
-              ListTile(
-                leading: const Icon(Icons.mark_chat_read_outlined),
-                title: const Text('Mark as read'),
-                enabled: !activity.busy(bot.botId.value) && !activity.loading,
-                onTap: () => Navigator.pop(context, 'read'),
-              ),
-
-            if (copyText.isNotEmpty)
-              ListTile(
-                leading: const Icon(Icons.copy),
-                title: const Text('Copy'),
-                onTap: () => Navigator.pop(context, 'copy'),
-              ),
-
-            if (line.id.endsWith(':user') ||
-                line.id.endsWith(':failed') ||
-                line.id.contains(':send:'))
-              ListTile(
-                leading: const Icon(Icons.mark_chat_unread_outlined),
-                title: const Text('Mark unread from here'),
-                enabled: !activity.busy(bot.botId.value) && !activity.loading,
-                onTap: () => Navigator.pop(context, 'unread'),
-              ),
-            ListTile(
-              leading: const Icon(Icons.receipt_long_outlined),
-              title: const Text('Work details'),
-              onTap: () => Navigator.pop(context, 'work'),
-            ),
-          ],
-        ),
-      ),
+      position: position,
+      canCopy: copyText.isNotEmpty,
+      canMarkUnread:
+          line.id.endsWith(':user') ||
+          line.id.endsWith(':failed') ||
+          line.id.contains(':send:'),
+      hasUnread: activity.unread[bot.botId.value]?.unread == true,
+      readActionsEnabled: !activity.busy(bot.botId.value) && !activity.loading,
     );
     if (!mounted || selected?.botId.value != bot.botId.value) return;
     if (action == 'work') {
@@ -1122,37 +1134,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       );
       return;
     }
-    // On the phone the right panel's entries are pages, which is the same
-    // rule Routines and Bot settings already follow: a drawer over a
-    // full-width conversation is the same thing with less room.
-    if (key == 'applet' && appletCanvas != null) {
-      // The page takes the pre-mounted frame over: the holder lets go in the
-      // same frame the page is built, so the key moves rather than doubles.
-      // It takes the frame back only once the page has finished leaving — a
-      // route on its way out is still in the tree and is not rebuilt, so a
-      // holder that reclaimed the key on the pop itself would double it.
-      final route = MaterialPageRoute<void>(
-        builder: (_) => Scaffold(
-          appBar: AppBar(title: const Text('Applet')),
-          body: SafeArea(
-            top: false,
-            child: _appletCanvas(
-              bot.botId.value,
-              appletCanvas!,
-              onClose: () => Navigator.of(context).maybePop(),
-              holdsFrame: true,
-            ),
-          ),
-        ),
-      );
-      setState(() => _appletPagePresented = true);
-      push.reading(null);
-      unawaited(Navigator.of(context).push(route));
-      unawaited(
-        route.completed.then((_) {
-          if (mounted) setState(() => _appletPagePresented = false);
-        }),
-      );
+    if (key == 'applet') {
+      _pushApplet();
       return;
     }
     if (key == 'computer' && computer != null) {
@@ -1223,13 +1206,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   List<Widget> _botRows() {
     final inbox = routineInbox;
     final canvas = appletCanvas;
-    // The Applets Package declares an entry of its own called Applets. The
-    // row above is the same door, so one of them is enough on a page.
-    final entries = [
-      for (final entry in packageIframeEntriesV1(catalog))
-        if (canvas == null || entry.entry.label.toLowerCase() != 'applets')
-          entry,
-    ];
+    final entries = _packageEntries();
     return [
       const SizedBox(height: 16),
       FrockRowGroup(
@@ -1515,8 +1492,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                             onOpenSettings: _openSettings,
                             outOfCredit: credit?.canSpend == false,
                             onOpenBilling: () => unawaited(_openBilling()),
-                            onMessageActions: (line) =>
-                                unawaited(_messageActions(line)),
+                            onMessageActions: (line, {position}) => unawaited(
+                              _messageActions(line, position: position),
+                            ),
                             onReadLatest: (messageId) =>
                                 _readLatest(bot.botId.value, messageId),
                             unreadFromMessageId: activity

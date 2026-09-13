@@ -267,8 +267,8 @@ class _ComposerState extends State<Composer> {
                     : widget.onStopDictation,
                 style: IconButton.styleFrom(
                   shape: const CircleBorder(),
-                  minimumSize: const Size(40, 40),
-                  fixedSize: const Size(40, 40),
+                  minimumSize: const Size(44, 44),
+                  fixedSize: const Size(44, 44),
                   padding: EdgeInsets.zero,
                 ),
                 icon: voiceIconTransition(
@@ -301,10 +301,10 @@ class _ComposerState extends State<Composer> {
                 tooltip: 'Dictate message',
                 onPressed: widget.onDictate,
                 style: IconButton.styleFrom(
-                  minimumSize: const Size(40, 40),
-                  fixedSize: const Size(40, 40),
+                  minimumSize: const Size(44, 44),
+                  fixedSize: const Size(44, 44),
                   padding: EdgeInsets.zero,
-                  iconSize: 20,
+                  iconSize: chatIconSizeV1,
                   backgroundColor: theme.colorScheme.onSurface.withValues(
                     alpha: 0.08,
                   ),
@@ -321,10 +321,10 @@ class _ComposerState extends State<Composer> {
                 tooltip: 'Send',
                 onPressed: canSend ? _send : null,
                 style: IconButton.styleFrom(
-                  minimumSize: const Size(40, 40),
-                  fixedSize: const Size(40, 40),
+                  minimumSize: const Size(44, 44),
+                  fixedSize: const Size(44, 44),
                   padding: EdgeInsets.zero,
-                  iconSize: 20,
+                  iconSize: chatIconSizeV1,
                   shape: const CircleBorder(),
                   disabledBackgroundColor: theme.colorScheme.onSurface
                       .withValues(alpha: 0.06),
