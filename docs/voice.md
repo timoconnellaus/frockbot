@@ -448,7 +448,10 @@ kept for tests.
   on the next start; a model call is never replayed without its key.
 - `delegation:<runId>` — a Bot delegation: target Bot, text, `runId` derived
   as `sha256(userId, callId, turnId, botId)` (so a retried tool call admits
-  the same Bot Turn once), state `admitted | settled | spoken | expired`.
+  the same Bot Turn once), state
+  `admitted | settled | spoken | cancelled | expired`, the id of the delivery
+  currently being read out, and the composed sentence with its own
+  `admitted | composed | abandoned` state.
 
 Delegations use the Bot's `runVoice` door and the existing agent lane.
 The command records the call, voice Turn and request IDs before dispatch;
@@ -482,8 +485,9 @@ The answer is put into one to three spoken sentences using its original
 question, Bot identity and explicit reply. This composition has durable
 intent, consumes the daily model-turn allowance once, and caches its result
 for playback retries. An admitted composition whose result was lost is
-abandoned rather than paid for again; a correlated plain read-out supplies
-the fallback. The answer remains `settled` until the correct client playback
+abandoned rather than paid for again; a composition that has not answered
+within eight seconds is dropped and a correlated plain read-out supplies the
+fallback. The answer remains `settled` until the correct client playback
 acknowledgment changes it to `spoken`.
 
 Conversation context is bounded and **call-scoped**: the prompt carries the
