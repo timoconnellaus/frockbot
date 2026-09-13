@@ -282,6 +282,7 @@ function turnRefusal(error: unknown): ClientTurnRefusalV1 | undefined {
 async function requireRegisteredBot(
   env: UserApplicationEnv,
   botId: string,
+  allowArchived = false,
 ): Promise<Response | undefined> {
   try {
     await env.BOT_STATE.assertRegistered({ schemaVersion: 1, botId });
@@ -293,11 +294,13 @@ async function requireRegisteredBot(
           404,
           error instanceof Error ? error.message : "Bot not found",
         );
-      if (error.name === "BotArchivedError")
+      if (error.name === "BotArchivedError") {
+        if (allowArchived) return undefined;
         return jsonError(
           409,
           error instanceof Error ? error.message : "Bot is archived",
         );
+      }
       if (error.name === "BotDeletedError")
         return jsonError(
           410,
@@ -867,7 +870,11 @@ function createUserApplicationRoute() {
     } catch {
       return jsonError(400, "invalid bot id");
     }
-    const missingBot = await requireRegisteredBot(env, botId);
+    const missingBot = await requireRegisteredBot(
+      env,
+      botId,
+      request.method === "GET" && Boolean(turnMatch || lookupMatch),
+    );
     if (missingBot) return missingBot;
 
     if (skillsMatch) {

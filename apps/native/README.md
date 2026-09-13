@@ -102,7 +102,9 @@ The main Mac app is distributed directly rather than through the Mac App Store, 
 
 The sidebar Search field and Cmd+K (Ctrl+K on other keyboards) open one search palette. Desktop has category tabs and keyboard selection; phones use a full-screen page with a filter menu above the results. Bots appear immediately, with their descriptions and unread indicators. Search includes conversation messages, shared attachments, links, Routines across Bots and shortcuts to the app's existing settings. Group chats are not yet available.
 
-Files and Links return to the source conversation. They index attachments sent with `send_to_user` and URLs in visible conversation text; tool output stays behind an explicit filter. Recent items appear when those categories have no query. Search options also offer archived Bots and rebuilding the index from stored conversations, which adds existing shared attachments and links to the index after this update.
+Files and Links return to the source conversation. They index attachments sent with `send_to_user` and URLs in visible conversation text; tool output stays behind an explicit filter. Recent items appear when those categories have no query. Search options also offer archived Bots and rebuilding the index from stored conversations.
+
+Release cleanup: after deploying this search change, use **Search options → Rebuild search index** for each existing test account. This repeatable, account-scoped operation replaces only the derived search index: it adds historical attachments and links and removes previously indexed unspoken completion text. Verify a fresh conversation reply appears in Messages, a shared attachment appears in Files, and a shared URL appears in Links. The original conversations are preserved.
 
 ## Web
 
