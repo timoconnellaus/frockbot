@@ -49,6 +49,9 @@ class PcmVoicePlayer extends VoicePlayer {
   bool _configured = false;
   bool _closed = false;
   bool _rebuilding = false;
+  /// The epoch the shared native speaker was last asked to own, so that a
+  /// delayed release cannot tear down a newer owner's device.
+  int? _deviceEpoch;
   Future<void>? _setup;
   DateTime? _retryAt;
 
@@ -82,6 +85,7 @@ class PcmVoicePlayer extends VoicePlayer {
     operation = () async {
       try {
         _channel.setMethodCallHandler(_onDevice);
+        _deviceEpoch = epoch;
         await _channel.invokeMethod<void>('setup', {
           'sampleRate': _sampleRate,
           'epoch': epoch,
@@ -177,6 +181,7 @@ class PcmVoicePlayer extends VoicePlayer {
     _sent.clear();
     _configured = false;
     _rebuilding = false;
+    _deviceEpoch = null;
     _retryAt = null;
     _invalidateDrains();
     notifyListeners();
@@ -243,11 +248,7 @@ class PcmVoicePlayer extends VoicePlayer {
     final epoch = _epoch;
     await _setup;
     if (epoch != _epoch) return;
-    try {
-      await _channel.invokeMethod<void>('release');
-    } on Object {
-      /* Already unavailable. */
-    }
+    await _releaseDevice();
     if (epoch != _epoch) return;
     if (!_closed) await _setUpDevice();
     if (epoch != _epoch) return;
@@ -261,8 +262,18 @@ class PcmVoicePlayer extends VoicePlayer {
     _closed = true;
     _discard();
     await _setup;
+    await _releaseDevice();
+  }
+
+  /// Releases only the device this player set up. A close or interrupt that
+  /// resumes after another player has configured names an epoch the host no
+  /// longer owns, so it leaves the newer speaker alone.
+  Future<void> _releaseDevice() async {
+    final owner = _deviceEpoch;
+    if (owner == null) return;
+    _deviceEpoch = null;
     try {
-      await _channel.invokeMethod<void>('release');
+      await _channel.invokeMethod<void>('release', {'epoch': owner});
     } on Object {
       /* Already unavailable. */
     }

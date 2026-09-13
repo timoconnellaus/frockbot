@@ -90,8 +90,12 @@ private final class PcmSpeaker {
           result(nil)
         case "feed":
           guard let args = call.arguments as? [String: Any],
-                let incomingEpoch = args["epoch"] as? Int, incomingEpoch == self.epoch,
-                let sequence = args["sequence"] as? Int,
+                let incomingEpoch = args["epoch"] as? Int
+          else { throw SpeakerError.invalid }
+          // A feed from a superseded owner is ignored, never a reason to tear
+          // down the device someone else now owns.
+          guard incomingEpoch == self.epoch else { result(nil); return }
+          guard let sequence = args["sequence"] as? Int,
                 let data = args["buffer"] as? FlutterStandardTypedData,
                 !data.data.isEmpty, data.data.count % 2 == 0,
                 let format = self.format, let player = self.player,
@@ -115,6 +119,12 @@ private final class PcmSpeaker {
           }
           result(nil)
         case "release":
+          // Scoped to the caller's own device: a delayed release from a
+          // superseded owner leaves the current speaker playing.
+          if let owner = (call.arguments as? [String: Any])?["epoch"] as? Int, owner != self.epoch {
+            result(nil)
+            return
+          }
           self.release()
           result(nil)
         default:

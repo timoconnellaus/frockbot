@@ -244,6 +244,7 @@ class AssistantSessionController extends ChangeNotifier {
   }
 
   void _onFrame(AudioFrame frame) {
+    if (_disposed) return;
     _micLevel = frame.level;
     final decision = _gate.offer(frame.bytes, frame.level, frame.atMs);
     // Barge-in is judged before mute and before sleep: it is the one thing
@@ -326,7 +327,10 @@ class AssistantSessionController extends ChangeNotifier {
   }
 
   void _onMessage(Object? message) {
-    if (!active || _phase == VoiceSessionPhase.ending) return;
+    // A disposed controller keeps its socket and capture alive until the
+    // teardown's awaits finish; it must issue no further speaker commands,
+    // because the app has already built the next session's player.
+    if (_disposed || !active || _phase == VoiceSessionPhase.ending) return;
     if (message is List<int>) {
       if (message.isNotEmpty) _answer?.bytes += message.length;
       player.write(

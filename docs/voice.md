@@ -773,9 +773,15 @@ whether or not anyone is talking.
 authenticated upgrade `NativeApi.socket()` uses (`connectSocketV1` with the
 bearer header). `record` 7.1.1 captures streaming PCM16 with echo
 cancellation, noise suppression and automatic gain, and requests the
-microphone permission itself; `flutter_pcm_sound` 3.3.3 plays the 24 kHz PCM
-(its `interrupt()` is a release-and-setup because the plugin has no clear, see
-`docs/known-issues.md` 46). Android declares `RECORD_AUDIO` and
+microphone permission itself; the app's own speaker plays the 24 kHz PCM over
+the `com.frockbot/pcm` channel, acknowledging a chunk only once the device
+reports it played (Android's `AudioTrack` playback head, macOS's
+`dataPlayedBack` completion). One device exists at a time, owned by the epoch
+of the most recent `setup`, and `feed` and `release` both name the epoch they
+serve: a superseded player's delayed close, or a feed from a call that has
+already ended, is ignored rather than stopping the current call's speaker, and
+a disposed session issues no further speaker commands while its teardown
+finishes. Android declares `RECORD_AUDIO` and
 `MODIFY_AUDIO_SETTINGS`; macOS carries the microphone usage description and
 entitlement. `AppShell`'s lifecycle observer ends capture and playback when
 the app leaves the foreground; navigation inside the app leaves the footer

@@ -45,8 +45,10 @@ class PcmSpeaker(messenger: BinaryMessenger) {
                         result.success(null)
                     }
                     "feed" -> {
+                        // A feed from a superseded owner is ignored, never a
+                        // reason to tear down the device someone else now owns.
+                        if (call.argument<Int>("epoch") != epoch) { result.success(null); return@setMethodCallHandler }
                         val audio = track ?: error("Speaker is unavailable")
-                        require(call.argument<Int>("epoch") == epoch)
                         val data = call.argument<ByteArray>("buffer")!!
                         require(data.isNotEmpty() && data.size % 2 == 0)
                         val sequence = call.argument<Int>("sequence")!!
@@ -78,7 +80,13 @@ class PcmSpeaker(messenger: BinaryMessenger) {
                         }
                         result.success(null)
                     }
-                    "release" -> { release(); result.success(null) }
+                    // Scoped to the caller's own device: a delayed release from
+                    // a superseded owner leaves the current speaker playing.
+                    "release" -> {
+                        val owner = call.argument<Int>("epoch")
+                        if (owner == null || owner == epoch) release()
+                        result.success(null)
+                    }
                     else -> result.notImplemented()
                 }
             } catch (_: Exception) {
