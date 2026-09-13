@@ -228,6 +228,13 @@ const REPLY_DRAIN_QUIET_MS = 6_000;
  * a nicer phrasing of it, and silence is the one outcome that is not allowed.
  */
 const VOICE_RESULT_COMPOSE_TIMEOUT_MS = 8_000;
+/**
+ * Prompt retries one answer gets on a live call when its audio never arrives.
+ * A provider blip clears in seconds; a provider that is down would otherwise
+ * be asked to synthesize the same answer every few seconds until the call
+ * ends. Past this the answer waits on the slow drain instead, still owed.
+ */
+const DELEGATION_READ_OUT_MAX_ATTEMPTS = 3;
 
 export interface VoiceAssistantEnv {
   AI?: Ai;
@@ -308,8 +315,13 @@ interface LiveCall {
   turnStartedAt?: number;
   /** When that turn's model finished; unset while it is in flight. */
   turnSettledAt?: number;
-  /** The client's own speaker, as it last reported it. */
-  playing: boolean;
+  /**
+   * When the client last reported its own speaker as playing, unset once it
+   * reports quiet. A stamp rather than a flag because a report that is never
+   * withdrawn — a device whose completion never came back — must not hold the
+   * queue for the rest of the call.
+   */
+  playingSince?: number;
   synthesizing: number;
   /**
    * A Bot answer handed to the speaker whose playback nobody has confirmed.
@@ -323,6 +335,8 @@ interface LiveCall {
     text: string;
     audioBytes: number;
     synthesisFailed: boolean;
+    /** This delivery's own synthesis was refused by the speech cap. */
+    suppressed: boolean;
     ready: boolean;
   };
   /**
@@ -337,6 +351,12 @@ interface LiveCall {
    * is happening now.
    */
   speechGeneration: number;
+  /**
+   * Read-outs whose audio never arrived, counted per answer. In memory only:
+   * the loop it bounds cannot outlive the call, and the answer itself stays
+   * durable and owed however many attempts this call spends on it.
+   */
+  readOutFailures: Map<string, number>;
   quotaSaid: boolean;
 }
 
@@ -623,6 +643,15 @@ export class VoiceAssistant extends VoiceAgentBase<
   /** How long a settled reply is left to finish playing; a test shortens it. */
   protected replyDrainQuietMs(): number {
     return REPLY_DRAIN_QUIET_MS;
+  }
+
+  /**
+   * How long an unwithdrawn playback report holds the queue; a test shortens
+   * it. The same bound covers a delivery nobody acknowledged and a speaker
+   * the client never reported quiet again.
+   */
+  protected playbackAckTimeoutMs(): number {
+    return VOICE_ASSISTANT_PLAYBACK_ACK_TIMEOUT_MS_V1;
   }
 
   private workerVar(name: `FROCK_AI_${string}`): string | undefined {
@@ -1095,7 +1124,7 @@ export class VoiceAssistant extends VoiceAgentBase<
       case "voice/speech":
         // The speaker, as the device knows it. Nothing durable turns on this:
         // it is only what decides whether now is a pause.
-        call.playing = custom.playing;
+        call.playingSince = custom.playing ? Date.now() : undefined;
         break;
       case "voice/played":
         await this.notePlayed(connection, call, custom.deliveryId);
@@ -1234,10 +1263,10 @@ export class VoiceAssistant extends VoiceAgentBase<
       reservedSeconds: 0,
       muted: false,
       exhausted: false,
-      playing: false,
       synthesizing: 0,
       speechChain: Promise.resolve(),
       speechGeneration: 0,
+      readOutFailures: new Map(),
       quotaSaid: false,
     };
     this.#calls.set(connection.id, call);
@@ -1428,7 +1457,7 @@ export class VoiceAssistant extends VoiceAgentBase<
     // Whatever was playing was cut off part-way, so nothing is acknowledged:
     // a Bot answer that was mid-sentence stays `settled` and is owed still.
     // The client stops its own player, so the speaker is quiet from here.
-    call.playing = false;
+    call.playingSince = undefined;
     call.speechGeneration += 1;
     call.synthesizing = 0;
     this.#traced.get(connection.id)?.awaitingFirstChunk.clear();
@@ -1539,7 +1568,10 @@ export class VoiceAssistant extends VoiceAgentBase<
     const now = this.now();
     const cap = await ledger.exceededCap(now);
     if (cap === "ttsCharacters") {
-      if (call?.pendingDelivery) call.pendingDelivery.synthesisFailed = true;
+      if (call?.pendingDelivery) {
+        call.pendingDelivery.synthesisFailed = true;
+        call.pendingDelivery.suppressed = true;
+      }
       this.trace(connection, "speech-suppressed", {
         cap,
         chars: text.length,
@@ -1742,23 +1774,36 @@ export class VoiceAssistant extends VoiceAgentBase<
   /**
    * Whether something is still being said, so a Bot answer would cut it off.
    *
-   * Three things count, and only one of them is a clock. A model still
-   * producing a reply is in flight by definition. A speaker the client says is
-   * playing is in flight because the person is hearing it. And a read-out
-   * already handed over whose playback has not been acknowledged is in flight
-   * until it is — bounded, because a client that cannot acknowledge at all
-   * must not be able to wedge the queue for the rest of the call.
+   * Three things count. A model still producing a reply is in flight by
+   * definition. A speaker the client reports as playing is in flight because
+   * the person is hearing it. And a read-out already handed over whose
+   * playback has not been acknowledged is in flight until it is. The last two
+   * are both bounded by the same clock, because a client that cannot report
+   * the end of a sound must not be able to wedge the queue for the rest of
+   * the call.
    */
+  /**
+   * The client says its speaker is playing, recently enough to believe it.
+   * A device whose completion report never comes back — a route change part
+   * way through an answer, a dropped callback — would otherwise hold every
+   * owed answer for the rest of the call. The bound only frees the queue: it
+   * says nothing about whether anything was heard, which stays what
+   * `voice/played` alone decides.
+   */
+  private speakerPlaying(call: LiveCall): boolean {
+    return (
+      call.playingSince !== undefined &&
+      Date.now() - call.playingSince < this.playbackAckTimeoutMs()
+    );
+  }
+
   private replyInFlight(call: LiveCall): boolean {
     if (call.turnStartedAt !== undefined && call.turnSettledAt === undefined) {
       return true;
     }
-    if (call.playing || call.synthesizing > 0) return true;
+    if (this.speakerPlaying(call) || call.synthesizing > 0) return true;
     const pending = call.pendingDelivery;
-    if (
-      pending &&
-      Date.now() - pending.armedAt < VOICE_ASSISTANT_PLAYBACK_ACK_TIMEOUT_MS_V1
-    ) {
+    if (pending && Date.now() - pending.armedAt < this.playbackAckTimeoutMs()) {
       return true;
     }
     // A settled reply whose audio the client never reported on at all: the
@@ -2194,7 +2239,7 @@ export class VoiceAssistant extends VoiceAgentBase<
     if (!live) return;
     if (this.replyInFlight(live.call)) {
       this.trace(live.connection, "delegation-held", {
-        reason: live.call.playing
+        reason: this.speakerPlaying(live.call)
           ? "speaker-playing"
           : live.call.pendingDelivery
             ? "awaiting-played"
@@ -2211,6 +2256,38 @@ export class VoiceAssistant extends VoiceAgentBase<
       return;
     }
     await this.speakDelegation(live.connection, delegation);
+  }
+
+  /**
+   * A read-out whose audio never arrived, booked to run again. The first few
+   * go at the drain interval, because most failures are a blip that clears in
+   * seconds. After that this answer falls back to the slow nudge for the rest
+   * of the call: it stays `settled` and owed either way, and a provider that
+   * is down must not be asked for the same sentence every few seconds.
+   */
+  private async retryFailedReadOut(
+    call: LiveCall,
+    runId: string,
+  ): Promise<void> {
+    const failures = (call.readOutFailures.get(runId) ?? 0) + 1;
+    call.readOutFailures.set(runId, failures);
+    if (failures < DELEGATION_READ_OUT_MAX_ATTEMPTS) {
+      await this.scheduleReadOutRetry(runId);
+      return;
+    }
+    await this.scheduleDelegationDrain();
+  }
+
+  /** The slow nudge that covers a client that never acknowledges. */
+  private async scheduleDelegationDrain(): Promise<void> {
+    // Booked fresh, because it is scheduled from inside the callback that may
+    // be executing right now and an idempotent row would dedup onto it.
+    await this.schedule(
+      Math.max(1, Math.ceil(this.playbackAckTimeoutMs() / 1000)),
+      "drainSettledDelegations",
+      {},
+      { idempotent: false },
+    );
   }
 
   private async scheduleReadOutRetry(runId: string): Promise<void> {
@@ -2325,7 +2402,9 @@ export class VoiceAssistant extends VoiceAgentBase<
       if (this.#calls.get(connection.id) !== call) return;
       if (this.replyInFlight(call)) {
         this.trace(connection, "delegation-held", {
-          reason: call.playing ? "speaker-playing" : "awaiting-played",
+          reason: this.speakerPlaying(call)
+            ? "speaker-playing"
+            : "awaiting-played",
         });
         // Still owed and still oldest-first: the acknowledgement of what is
         // playing now calls `speakNextSettledDelegation`, and the scheduled
@@ -2389,6 +2468,7 @@ export class VoiceAssistant extends VoiceAgentBase<
         text,
         audioBytes: 0,
         synthesisFailed: false,
+        suppressed: false,
         ready: false,
       };
       this.send(connection, {
@@ -2406,7 +2486,7 @@ export class VoiceAssistant extends VoiceAgentBase<
         if (call.pendingDelivery?.deliveryId === deliveryId) {
           call.pendingDelivery = undefined;
         }
-        await this.scheduleReadOutRetry(delegation.runId);
+        await this.retryFailedReadOut(call, delegation.runId);
         return;
       }
       const pending = call.pendingDelivery;
@@ -2420,20 +2500,19 @@ export class VoiceAssistant extends VoiceAgentBase<
       }
       if (!pending.audioBytes || pending.synthesisFailed) {
         // The SDK can finish normally without producing a complete delivery.
-        if (!call.quotaSaid) {
+        // Only this delivery's own suppression means there was no audio to
+        // have: the speech cap refused it, and retrying would refuse again.
+        // Any other cause is recoverable and is retried promptly.
+        if (!pending.suppressed) {
           call.pendingDelivery = undefined;
-          await this.scheduleReadOutRetry(delegation.runId);
+          await this.retryFailedReadOut(call, delegation.runId);
           return;
         }
-        await this.schedule(
-          Math.ceil(VOICE_ASSISTANT_PLAYBACK_ACK_TIMEOUT_MS_V1 / 1000),
-          "drainSettledDelegations",
-          {},
-          { idempotent: false },
-        );
+        await this.scheduleDelegationDrain();
         return;
       }
       pending.ready = true;
+      call.readOutFailures.delete(delegation.runId);
       // `speak` resolving means the last chunk was handed over, not that it
       // was heard. This tells the client that is all of it, so a drain from
       // here on is the whole answer rather than a gap between chunks.
@@ -2446,16 +2525,11 @@ export class VoiceAssistant extends VoiceAgentBase<
       // This is the same nudge for a client that never sends one: booked
       // fresh, because it is scheduled from inside the callback that may be
       // executing right now and an idempotent row would dedup onto it.
-      await this.schedule(
-        Math.ceil(VOICE_ASSISTANT_PLAYBACK_ACK_TIMEOUT_MS_V1 / 1000),
-        "drainSettledDelegations",
-        {},
-        { idempotent: false },
-      );
+      await this.scheduleDelegationDrain();
     });
     call.speechChain = chained.catch(async () => {
       this.trace(connection, "delegation-read-out-failed");
-      await this.scheduleReadOutRetry(delegation.runId);
+      await this.retryFailedReadOut(call, delegation.runId);
     });
     await call.speechChain;
   }

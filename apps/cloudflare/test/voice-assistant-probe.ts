@@ -125,6 +125,7 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
   #releaseCompose: (() => void) | undefined;
   #ttsHeld: Promise<void> | undefined;
   #releaseTts: (() => void) | undefined;
+  #playbackAckTimeoutMs: number | undefined;
   #memoryRequests: VoiceMemoryRequest[] = [];
 
   protected override now(): Date {
@@ -139,6 +140,15 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
   /** A short drain window, so a held answer is read out inside a test. */
   protected override replyDrainQuietMs(): number {
     return 300;
+  }
+
+  /**
+   * The real ninety-second bound, unless a test shortens it: waiting that out
+   * in real time is not something a test can do, and what the bound is for is
+   * the same at either length.
+   */
+  protected override playbackAckTimeoutMs(): number {
+    return this.#playbackAckTimeoutMs ?? super.playbackAckTimeoutMs();
   }
 
   /** Drops the next N dispatches: the intent is durable, the send is lost. */
@@ -416,6 +426,10 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
         messages.find((message) => message.role === "system")?.content ?? ""
       );
     });
+  }
+
+  async probeSetPlaybackAckTimeoutMs(ms: number): Promise<void> {
+    this.#playbackAckTimeoutMs = ms;
   }
 
   async probeSetNow(now: string): Promise<void> {

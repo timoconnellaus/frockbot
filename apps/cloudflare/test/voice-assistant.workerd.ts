@@ -1105,6 +1105,161 @@ describe("the voice session object", () => {
     },
   );
 
+  const settledDelegation = (runId: string) => {
+    const at = new Date().toISOString();
+    return {
+      schemaVersion: 1,
+      runId,
+      turnId: "call:1",
+      callId: "call",
+      botId: "bot",
+      botName: "Workerd Bot",
+      text: "is the launch ready",
+      admittedAt: at,
+      state: "settled",
+      attempts: 0,
+      answer: "The launch is ready.",
+      settledAt: at,
+    };
+  };
+
+  test("a speaker report the client never withdraws stops holding the queue", async () => {
+    const userId = `voice-stale-playing-${crypto.randomUUID()}`;
+    const stub = assistant(userId);
+    await stub.probeSetPlaybackAckTimeoutMs(700);
+    const opened = await open(userId);
+    const speaker = playsAnswers(opened);
+    await startCall(opened);
+    await opened.waitFor(state("awake"), "awake");
+    // The device said it was playing and never said it stopped: a route change
+    // part way through, a completion callback that never came back.
+    opened.socket.send(
+      JSON.stringify({ schemaVersion: 1, type: "voice/speech", playing: true }),
+    );
+    await settle(50);
+    const runId = `voice-${"e".repeat(32)}`;
+    const key = `voice:delegation:${runId}`;
+    await stub.probePutStorage(key, settledDelegation(runId));
+    await stub.probeSpeakConcurrently([runId]);
+    // Held at first, because as far as the server knows a sound is playing.
+    expect(
+      (await stub.probeTraces()).some(
+        (line) =>
+          line.event === "delegation-held" && line.reason === "speaker-playing",
+      ),
+    ).toBe(true);
+    expect(
+      (
+        (await stub.probeStorage("voice:delegation:"))[
+          key
+        ] as VoiceDelegationRecordV1
+      ).state,
+    ).toBe("settled");
+    // Past the bound the answer goes out — and it is the client's own
+    // acknowledgement, not the bound expiring, that makes it spoken.
+    const heard = await eventually(
+      async () =>
+        (await stub.probeStorage("voice:delegation:"))[
+          key
+        ] as VoiceDelegationRecordV1,
+      (record) => record.state === "spoken",
+      "the owed answer once the stale playing report expires",
+      20_000,
+    );
+    expect(speaker.played).toEqual([heard.deliveryId]);
+    expect(opened.audio.some((bytes) => bytes > 0)).toBe(true);
+    opened.socket.close();
+  });
+
+  test("a speech provider that stays down is not retried for the whole call", async () => {
+    const userId = `voice-readout-backoff-${crypto.randomUUID()}`;
+    const stub = assistant(userId);
+    const opened = await open(userId);
+    await startCall(opened);
+    await opened.waitFor(state("awake"), "awake");
+    await stub.probeSetScript({ failTts: true });
+    const runId = `voice-${"f".repeat(32)}`;
+    const key = `voice:delegation:${runId}`;
+    await stub.probePutStorage(key, settledDelegation(runId));
+    await stub.probeSpeakConcurrently([runId]);
+    const readOuts = async () =>
+      (await stub.probeTraces()).filter(
+        (line) => line.event === "delegation-read-out",
+      ).length;
+    await eventually(
+      readOuts,
+      (count) => count >= 3,
+      "the prompt retries a failing provider gets",
+      20_000,
+    );
+    // Retries on the live call stop there rather than asking a provider that
+    // is down for the same sentence every few seconds until the call ends.
+    await settle(4_000);
+    expect(await readOuts()).toBe(3);
+    // The answer is owed still, and a later call reads it out.
+    const still = (await stub.probeStorage("voice:delegation:"))[
+      key
+    ] as VoiceDelegationRecordV1;
+    expect(still.state).toBe("settled");
+    expect(still.spokenAt).toBeUndefined();
+    opened.socket.close();
+  });
+
+  test("a used-up listening allowance does not delay a recoverable read-out", async () => {
+    const userId = `voice-listening-cap-readout-${crypto.randomUUID()}`;
+    const stub = assistant(userId);
+    const today = voiceMeterDayV1(new Date());
+    // Room for the first one-second window but not the second.
+    await stub.probePutStorage(`voice:meter:${today}`, {
+      schemaVersion: 1,
+      day: today,
+      sttSeconds: VOICE_METER_CAPS_V1.sttSeconds - 1.5,
+      ttsCharacters: 0,
+      turns: 0,
+      delegations: 0,
+      dictationSeconds: 0,
+    } satisfies VoiceMeterV1);
+    const opened = await open(userId);
+    const speaker = playsAnswers(opened);
+    await startCall(opened);
+    await opened.waitFor(state("awake"), "awake");
+    const feeder = setInterval(() => {
+      try {
+        opened.socket.send(pcm(9));
+      } catch {
+        // Closed.
+      }
+    }, 40);
+    const refusal = await opened.waitFor(
+      (f) => f.type === "voice/refusal" && f.code === "quota",
+      "the listening allowance refusal",
+    );
+    clearInterval(feeder);
+    expect(String(refusal.message)).toContain("listening allowance");
+    // Speech still works; this answer's synthesis simply fails once, which is
+    // nothing to do with the allowance that ran out.
+    await stub.probeSetScript({ silentTts: true });
+    const runId = `voice-${"7".repeat(32)}`;
+    const key = `voice:delegation:${runId}`;
+    await stub.probePutStorage(key, settledDelegation(runId));
+    await stub.probeSpeakConcurrently([runId]);
+    await settle(100);
+    await stub.probeSetScript({});
+    const heard = await eventually(
+      async () =>
+        (await stub.probeStorage("voice:delegation:"))[
+          key
+        ] as VoiceDelegationRecordV1,
+      (record) => record.state === "spoken",
+      // Well inside the slow drain the listening cap used to push it onto,
+      // and loose enough for a loaded runner's alarms.
+      "the answer retried promptly despite the listening cap",
+      20_000,
+    );
+    expect(speaker.played).toEqual([heard.deliveryId]);
+    opened.socket.close();
+  });
+
   test("speech quota suppression cannot be acknowledged as a played answer", async () => {
     const userId = `voice-quota-answer-${crypto.randomUUID()}`;
     const stub = assistant(userId);

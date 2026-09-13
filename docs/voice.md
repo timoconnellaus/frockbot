@@ -299,7 +299,14 @@ A Bot answer that settles while an utterance, reply, or playback is in flight
 waits for a natural pause. Completed answers are read in order, and the next
 answer waits for the previous delivery's playback acknowledgment. A bounded
 acknowledgment timeout releases the delivery slot without marking the answer
-played. Interrupted, disconnected and failed audio leaves the durable answer
+played; the same bound applies to a client's own `voice/speech` playing report,
+so a device whose completion never comes back cannot hold the queue for the
+rest of the call. A read-out whose audio never arrives is retried promptly a
+few times and then falls back to the slow drain, so a speech provider that
+stays down is not asked for the same sentence every few seconds. Synthesis
+refused by the speech-character cap is the one failure that is not retried on
+the call; a used-up listening allowance does not delay an otherwise
+recoverable read-out. Interrupted, disconnected and failed audio leaves the durable answer
 available for a later read-out. Every delivery names its request and current
 connection owner; duplicate or stale acknowledgments cannot settle another
 answer.
