@@ -65,6 +65,7 @@ const application = shareProvisionedApplication({ botName: "First" });
  */
 test.afterEach(async () => {
   const { page, ollamaBaseUrl } = application();
+  await page.emulateMedia({ reducedMotion: null });
   await setFakeOllamaChatMode(page, ollamaBaseUrl, "ok");
 });
 
@@ -420,6 +421,8 @@ test("a delivered reply is one bubble, wide enough for its own text", async () =
 // the end of the Turn moves nothing horizontally.
 test("the working avatar sits below the bubbles and never shifts them", async () => {
   const { page, ollamaBaseUrl } = application();
+  // Measure layout without the bubble's entrance motion.
+  await page.emulateMedia({ reducedMotion: "reduce" });
   await createBot(page, "Stacker");
   await page.setViewportSize({ width: 1351, height: 831 });
 
@@ -435,7 +438,8 @@ test("the working avatar sits below the bubbles and never shifts them", async ()
 
   // Latched rather than asserted at an instant: the geometry is read the first
   // time a bubble and the working row are both drawn, whenever that happens.
-  let running: { bubbleLeft: number; gap: number } | null = null;
+  let running: { bubbleLeft: number; bubbleTop: number; gap: number } | null =
+    null;
   await expect
     .poll(
       async () => {
@@ -449,6 +453,7 @@ test("the working avatar sits below the bubbles and never shifts them", async ()
         if (!bubble || !row || bubble.width === 0) return false;
         running = {
           bubbleLeft: bubble.x,
+          bubbleTop: bubble.y,
           // How far the row's top is below the bubble's bottom. Negative would
           // mean the two overlap, which is the old side-by-side row.
           gap: row.y - (bubble.y + bubble.height),
@@ -458,7 +463,11 @@ test("the working avatar sits below the bubbles and never shifts them", async ()
       { timeout: 90_000 },
     )
     .toBe(true);
-  const midTurn = running as unknown as { bubbleLeft: number; gap: number };
+  const midTurn = running as unknown as {
+    bubbleLeft: number;
+    bubbleTop: number;
+    gap: number;
+  };
 
   // Below, not beside.
   expect(midTurn.gap).toBeGreaterThanOrEqual(0);
@@ -471,6 +480,7 @@ test("the working avatar sits below the bubbles and never shifts them", async ()
   const settled = await sends(page).first().boundingBox();
   expect(settled).not.toBeNull();
   expect(settled?.x).toBeCloseTo(midTurn.bubbleLeft, 0);
+  expect(settled?.y).toBeCloseTo(midTurn.bubbleTop, 0);
 });
 
 // Tim's report: sending while the Bot is working put the new message *under*
