@@ -54,6 +54,48 @@ async function run(
   }
 }
 
+for (const batched of [false, true]) {
+  test(`an answer can span separate sends ${batched ? "in one model step" : "across model steps"}`, async () => {
+    const parts = [
+      "RAM holds what your computer is using right now.",
+      "Storage keeps your files after the power is off.",
+      "A backup is another copy you can recover if the original is lost.",
+    ];
+    let requests = 0;
+    const events = await run({
+      id: "test",
+      async *stream() {
+        const first = requests++;
+        const last = batched ? parts.length : first + 1;
+        for (let index = first; index < last; index++) {
+          yield {
+            type: "tool-call",
+            call: {
+              id: `part-${index}`,
+              name: "send_to_user",
+              input: {
+                disposition: index === parts.length - 1 ? "finish" : "continue",
+                payload: { type: "text", text: parts[index]! },
+              },
+            },
+          };
+        }
+        yield { type: "finish", reason: "completed" };
+      },
+    });
+    expect(requests).toBe(batched ? 1 : parts.length);
+    expect(
+      events
+        .filter((event) => event.type === "send/to-user")
+        .map((event) => event.payload),
+    ).toEqual(parts.map((text) => ({ type: "text", text })));
+    expect(events.at(-1)).toMatchObject({
+      type: "turn/end",
+      outcome: "completed",
+    });
+  });
+}
+
 test("a plain answer is repaired by an explicit send, never promoted or silently completed", async () => {
   const requests: NormalizedModelRequest[] = [];
   const events = await run({

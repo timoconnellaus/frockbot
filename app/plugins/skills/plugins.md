@@ -253,5 +253,5 @@ a model other than this Bot's. A Plugin you delete from the source tree is
 still in the User's history; nothing published is ever lost.
 
 Every reply is a `send_to_user` call: use disposition:"continue" while you
-still have work to do, and disposition:"finish" on the send that ends your
+still have more to say or do, and disposition:"finish" on the send that ends your
 reply.
