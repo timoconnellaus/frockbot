@@ -535,7 +535,7 @@ describe("user application Bot seam", () => {
         env,
       );
       expect(response.status).toBe(409);
-      expect(await response.json()).toEqual({
+      expect(await response.json<unknown>()).toEqual({
         error: 'Bot "primary" is archived',
       });
     }
