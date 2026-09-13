@@ -8,6 +8,31 @@ import {
 } from "@frockbot/app/voice/history";
 import { provisionBot } from "./provision-bot.ts";
 
+/**
+ * The production host boundary, for the read-only tools alone.
+ *
+ * `turnHost` also grounds anything the turn remembers in the turn itself, so
+ * it wants the live call the turn belongs to. These reads write nothing, so a
+ * stand-in call is enough — and it keeps the tools under test reached the way
+ * a real turn reaches them rather than through a second construction.
+ */
+function readOnlyHost(instance: unknown, userId: string): VoiceAssistantHostV1 {
+  const adapter = instance as unknown as {
+    turnHost(
+      userId: string,
+      call: { callId: string; startedAt: number; sequence: number },
+      turnId: string,
+      timezone?: string,
+    ): VoiceAssistantHostV1;
+  };
+  const startedAt = Date.now();
+  return adapter.turnHost(
+    userId,
+    { callId: "read-only", startedAt, sequence: startedAt },
+    "read-only",
+  );
+}
+
 test("voice reads and searches owned conversation records without admitting Bot work", async () => {
   const suffix = crypto.randomUUID();
   const identity = {
@@ -38,10 +63,7 @@ test("voice reads and searches owned conversation records without admitting Bot 
   await voice.probeStorage("voice:delegation:");
   const result = await runInDurableObject(voice, async (instance) => {
     // Exercise the production host boundary without spending a voice model call.
-    const adapter = instance as unknown as {
-      turnHost(userId: string, turnId: string): VoiceAssistantHostV1;
-    };
-    const host = adapter.turnHost(identity.userId, "read-only");
+    const host = readOnlyHost(instance, identity.userId);
     return {
       history: renderVoiceBotHistoryV1(
         await host.readBotHistory(identity.botId, 6),
@@ -68,10 +90,7 @@ test("voice reads and searches owned conversation records without admitting Bot 
   expect(await voice.probeStorage("voice:delegation:")).toEqual({});
 
   const refused = await runInDurableObject(voice, async (instance) => {
-    const adapter = instance as unknown as {
-      turnHost(userId: string, turnId: string): VoiceAssistantHostV1;
-    };
-    const host = adapter.turnHost(identity.userId, "read-only");
+    const host = readOnlyHost(instance, identity.userId);
     return Promise.all(
       [
         () => host.readBotHistory(stranger.botId, 6),
@@ -114,10 +133,7 @@ test("voice history reads the newest turns when a Bot has more than the limit", 
   }
   const voice = env.VOICE_ASSISTANTS.getByName(identity.userId);
   const history = await runInDurableObject(voice, async (instance) => {
-    const adapter = instance as unknown as {
-      turnHost(userId: string, turnId: string): VoiceAssistantHostV1;
-    };
-    const host = adapter.turnHost(identity.userId, "read-only");
+    const host = readOnlyHost(instance, identity.userId);
     return renderVoiceBotHistoryV1(
       await host.readBotHistory(identity.botId, 1),
       1,
