@@ -78,11 +78,34 @@ describe("voice reads of Bot conversation", () => {
         at,
         role: "assistant",
         to: "voice",
-        messageId: "r1:voice",
+        messageId: "r1:reply:0",
         text: "Your morning is free.",
       },
     ]);
     expect(JSON.stringify(result)).not.toContain("private");
+  });
+
+  test("gives a voice request and its caller replies distinct message ids", () => {
+    const result = JSON.parse(
+      renderVoiceBotHistoryV1({
+        ...bot,
+        runs: [
+          run({
+            via: { kind: "voice" },
+            events: [
+              { type: "reply/to-caller", caller: "voice", text: "First half." },
+              { type: "reply/to-caller", caller: "voice", text: "Second half." },
+            ],
+          }),
+        ],
+      }),
+    );
+    const ids = result.messages.map(
+      (message: { messageId: string }) => message.messageId,
+    );
+    expect(ids).toHaveLength(3);
+    expect(new Set(ids).size).toBe(3);
+    expect(ids[0]).toBe("r1:voice");
   });
 
   test("reads visible questions and file labels without fetching attachments", () => {

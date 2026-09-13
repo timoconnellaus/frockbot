@@ -68,6 +68,7 @@ function visibleDeliveryText(payload: SendToUserPayloadV1): string {
 function visibleMessages(run: ClientRunV1): VoiceHistoryMessageV1[] {
   const source = { runId: run.runId, at: run.admittedAt };
   const messages: VoiceHistoryMessageV1[] = [];
+  let replyCount = 0;
   if (run.input.trim()) {
     messages.push({
       ...source,
@@ -93,7 +94,7 @@ function visibleMessages(run: ClientRunV1): VoiceHistoryMessageV1[] {
         ...source,
         role: "assistant",
         to: "voice",
-        messageId: `${run.runId}:voice`,
+        messageId: `${run.runId}:reply:${replyCount++}`,
         text: clip(event.text, VOICE_HISTORY_TEXT_CHARS_V1),
       });
     }

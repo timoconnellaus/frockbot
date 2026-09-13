@@ -176,6 +176,7 @@ class PcmVoicePlayer extends VoicePlayer {
     _epoch = ++_nextEpoch;
     _sent.clear();
     _configured = false;
+    _rebuilding = false;
     _retryAt = null;
     _invalidateDrains();
     notifyListeners();
