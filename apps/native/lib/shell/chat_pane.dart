@@ -242,6 +242,16 @@ class _ChatPaneState extends State<ChatPane> {
             hasEarlier: c.before != null,
             approvals: widget.approvals,
             storageKey: 'history-${c.botId}',
+            bottomSpace: c.stoppable
+                ? null
+                : const Visibility(
+                    key: ValueKey('row:stop-space'),
+                    visible: false,
+                    maintainSize: true,
+                    maintainAnimation: true,
+                    maintainState: true,
+                    child: ComposerStopButton(),
+                  ),
             focusRunId: c.focusRunId,
             onRefresh: _refresh,
             onOpenRun: widget.onOpenRun ?? (_) {},

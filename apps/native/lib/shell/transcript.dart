@@ -42,6 +42,9 @@ class TranscriptView extends StatefulWidget {
   final void Function(String?)? onReadLatest;
   final String storageKey;
 
+  /// Scrollable space for a control outside the list that has disappeared.
+  final Widget? bottomSpace;
+
   /// A Turn the reader asked to be taken to — a search hit. It is brought into
   /// view and marked, once. A Turn further back than the loaded page is simply
   /// not here, and the thread says nothing rather than pretending to scroll.
@@ -57,6 +60,7 @@ class TranscriptView extends StatefulWidget {
     required this.onRefresh,
     required this.onOpenRun,
     required this.storageKey,
+    this.bottomSpace,
     this.pendingText,
     this.approvals,
     this.onRetryTurn,
@@ -294,6 +298,7 @@ class _TranscriptViewState extends State<TranscriptView> {
                 key: const ValueKey('row:working-space'),
                 height: WorkingIndicator.avatarSize + workingPadding.vertical,
               ),
+            if (widget.bottomSpace != null) widget.bottomSpace!,
           ].reversed.toList(),
         ),
       ),
