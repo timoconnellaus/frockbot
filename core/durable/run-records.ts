@@ -89,9 +89,29 @@ export interface StoredRunBotOriginV1 {
   messageId: string;
 }
 
+/**
+ * The account's voice session asking this Bot a question.
+ *
+ * The three ids are one fixed return address, written before the Bot is asked
+ * anything: which call was live, which spoken Turn the person was taking, and
+ * which request this is. Recovery reads the answer back to *that* request
+ * rather than to whatever the Bot said most recently.
+ */
+export interface StoredRunVoiceOriginV1 {
+  kind: "voice";
+  callId: string;
+  /** The spoken Turn the person was taking when they asked. */
+  voiceTurnId: string;
+  /** The durable voice request id; also this Turn's run id. */
+  requestId: string;
+}
+
 /** What produced a Turn, when it was not a person speaking to the Bot. */
 export type StoredRunOriginV1 =
-  StoredRunRoutineOriginV1 | StoredRunSubagentOriginV1 | StoredRunBotOriginV1;
+  | StoredRunRoutineOriginV1
+  | StoredRunSubagentOriginV1
+  | StoredRunBotOriginV1
+  | StoredRunVoiceOriginV1;
 
 const STORED_RUN_ORIGIN_TRIGGERS: readonly StoredRunTriggerV1[] = [
   "cron",
@@ -462,6 +482,26 @@ function decodeStoredRunOrigin(
       fromBotId: candidate.fromBotId,
       fromBotName: candidate.fromBotName,
       messageId: candidate.messageId,
+    };
+  }
+  if (candidate.kind === "voice") {
+    requireExactOriginFields(
+      candidate,
+      ["kind", "callId", "voiceTurnId", "requestId"],
+      runId,
+    );
+    if (
+      !boundedString(candidate.callId, 128) ||
+      !boundedString(candidate.voiceTurnId, 256) ||
+      !boundedString(candidate.requestId, 128)
+    ) {
+      throw new Error(`run "${runId}" has an invalid admission origin id`);
+    }
+    return {
+      kind: "voice",
+      callId: candidate.callId,
+      voiceTurnId: candidate.voiceTurnId,
+      requestId: candidate.requestId,
     };
   }
   if (candidate.kind !== "routine") {

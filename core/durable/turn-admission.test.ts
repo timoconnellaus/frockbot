@@ -44,6 +44,17 @@ const BOT_ORIGIN: StoredRunOriginV1 = {
   messageId: "agent-message-1",
 };
 
+/**
+ * A voice request's origin: the fixed return address written before the Bot is
+ * asked anything, naming the call, the spoken Turn and the request itself.
+ */
+const VOICE_ORIGIN: StoredRunOriginV1 = {
+  kind: "voice",
+  callId: "call-1",
+  voiceTurnId: "call-1:3",
+  requestId: "voice-0123456789abcdef0123456789abcdef",
+};
+
 const codec = createStoredRunCodecV1<undefined>({
   decodeRunId: (value) => value as string,
   decodeConfigurationSnapshot: () => undefined,
@@ -179,6 +190,43 @@ describe("the admission record names what produced the Turn", () => {
     expect(decoded.admission?.origin).toEqual(BOT_ORIGIN);
     expect(storedRunTurnTypeV1(decoded)).toBe("agent");
     expect(codec.require(structuredClone(decoded))).toEqual(decoded);
+  });
+
+  test("round-trips a voice request and its return address", () => {
+    const decoded = codec.require(
+      legacyRun({
+        admission: {
+          schemaVersion: 1,
+          turnType: "agent",
+          lane: "agent",
+          origin: VOICE_ORIGIN,
+        },
+      }),
+    );
+
+    expect(decoded.admission?.origin).toEqual(VOICE_ORIGIN);
+    expect(storedRunTurnTypeV1(decoded)).toBe("agent");
+    expect(codec.require(structuredClone(decoded))).toEqual(decoded);
+  });
+
+  test("a voice origin cannot borrow another origin's fields", () => {
+    const withOrigin = (origin: unknown) =>
+      legacyRun({
+        admission: { schemaVersion: 1, turnType: "agent", origin },
+      } as never);
+
+    expect(() =>
+      codec.require(withOrigin({ ...VOICE_ORIGIN, fromBotId: "researcher" })),
+    ).toThrow(/invalid admission origin fields/);
+    expect(() =>
+      codec.require(withOrigin({ kind: "voice", callId: "call-1" })),
+    ).toThrow(/invalid admission origin fields/);
+    expect(() =>
+      codec.require(withOrigin({ ...VOICE_ORIGIN, requestId: "" })),
+    ).toThrow(/invalid admission origin id/);
+    expect(() =>
+      codec.require(withOrigin({ ...BOT_ORIGIN, kind: "voice" })),
+    ).toThrow(/invalid admission origin fields/);
   });
 
   test("each origin kind has its own exact fields, and cannot borrow another's", () => {

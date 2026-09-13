@@ -40,6 +40,10 @@
 //    keeps a replayed rename from appending a second announcement.
 import { packageAdmissionCeilingV1 } from "@frockbot/core/contracts";
 import {
+  createReplyToRequestToolV1,
+  REPLY_TO_REQUEST_TOOL_V1,
+} from "@frockbot/app/shell/reply-to-caller";
+import {
   applyBotProfilePatchV1,
   ConfigurationConflictError,
   type BotProfile,
@@ -107,8 +111,13 @@ export interface FlockSelfRuntimeHostV1 {
   createBot(command: CreateBotCommandV1): Promise<FlockReceiptV1>;
   /** Ask another Bot registered to this same User. */
   messageBot(request: BotMessageRequestV1): Promise<BotMessageOutcomeV1>;
-  /** Sender cue for an inbound agent Turn, when this is one. */
-  inboundAgent?: { kind: "bot"; fromBotId: string; fromBotName: string };
+  /**
+   * Who asked, for an inbound agent Turn. Another Bot of the same User, or the
+   * account's voice session — two different callers on one lane, and the Bot
+   * is told which so it answers the one that is actually listening.
+   */
+  inboundAgent?:
+    { kind: "bot"; fromBotId: string; fromBotName: string } | { kind: "voice" };
 }
 
 export interface BotMessageRequestV1 {
@@ -704,8 +713,14 @@ export function createInboundAgentPromptSectionV1(
     id: INBOUND_AGENT_PROMPT_SECTION_V1,
     order: 93,
     render: (context) => {
-      if (context.turnType !== "agent" || !host.inboundAgent) return "";
-      return `Bot ${promptText(host.inboundAgent.fromBotName)} (${promptText(host.inboundAgent.fromBotId)}) asked you the current question. Answer it directly with a send_to_user call carrying disposition:"finish"; that answer returns to the asking Bot.`;
+      const inbound = host.inboundAgent;
+      if (context.turnType !== "agent" || !inbound) return "";
+      if (inbound.kind === "voice") {
+        // Two addressees on one Turn, so the prompt has to name both: the
+        // answer goes back to the caller, anything else is conversation.
+        return `The person asked you the current question out loud, through the account's voice assistant. Answer it with a single \`${REPLY_TO_REQUEST_TOOL_V1}\` call: that answer goes back to the voice session and is read out to them, and it ends this Turn. It is spoken, so keep it short and speakable — a few sentences, no markdown, no lists, no code. \`send_to_user\` still writes in this conversation: use it for progress while you work, and for anything too long to say aloud. Do not finish this Turn with \`send_to_user\`; the person is waiting to hear an answer, and a send is not one.`;
+      }
+      return `Bot ${promptText(inbound.fromBotName)} (${promptText(inbound.fromBotId)}) asked you the current question. Answer it directly with a send_to_user call carrying disposition:"finish"; that answer returns to the asking Bot.`;
     },
   };
 }
@@ -725,6 +740,16 @@ export function createFlockRuntimeFeature(
     const disposers = [
       runtime.systemPrompt.register(createTeammatesPromptSectionV1(host)),
       runtime.systemPrompt.register(createInboundAgentPromptSectionV1(host)),
+      // Mounted only on a Turn that actually has a caller to answer, and
+      // bound to that caller here rather than read from an argument. The
+      // Shell owns the delivery; this Package owns knowing who asked.
+      ...(host.inboundAgent?.kind === "voice"
+        ? [
+            runtime.tools.register(
+              createReplyToRequestToolV1("voice", runtime.sessions),
+            ),
+          ]
+        : []),
       runtime.tools.register(createBotUpdateTool(host)),
       runtime.tools.register(createBotCreateTool(host)),
       runtime.tools.register(

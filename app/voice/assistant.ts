@@ -233,6 +233,122 @@ export function renderVoiceSystemPromptV1(
 }
 
 // ---------------------------------------------------------------------------
+// Reading a Bot's answer back
+
+/**
+ * The answer a Bot recorded, with the question it answers.
+ *
+ * Both halves, always. The point of the pair is that the assistant is saying
+ * something about *this* request rather than reciting whatever the Bot most
+ * recently produced: the question is what makes "yes, it's booked" a sentence
+ * the person can place, and it is what a read-out minutes later needs most.
+ */
+export interface VoiceDelegationResultV1 {
+  botName: string;
+  /** What the person asked, in their own words, as it was sent to the Bot. */
+  question: string;
+  /** When the request was made, so a late read-out can say so. */
+  askedAt: Date;
+  answer?: string;
+  failure?: string;
+}
+
+/** Bounds on the sentence that reads a Bot's answer back. */
+export const VOICE_RESULT_MAX_TOKENS_V1 = 220;
+export const VOICE_RESULT_QUESTION_CHARS_V1 = 400;
+export const VOICE_RESULT_ANSWER_CHARS_V1 = 2_000;
+
+/**
+ * The plain read-out: the Bot's own words under the question they answer.
+ *
+ * This is what the person hears when the model cannot be reached, so it has to
+ * stand on its own rather than read as a broken version of something better.
+ */
+export function renderVoiceDelegationReadOutV1(
+  result: VoiceDelegationResultV1,
+): string {
+  const about = clip(result.question, 120);
+  if (result.answer) {
+    return `${result.botName} answered about ${about}: ${clip(result.answer, 600)}`;
+  }
+  return `${result.botName} could not finish ${about}: ${clip(result.failure ?? "it stopped", 200)}.`;
+}
+
+/**
+ * Marks the one request that is not a spoken turn, so a host can tell the two
+ * apart — and so a test fake can answer the right shape.
+ */
+export const VOICE_RESULT_PROMPT_MARKER_V1 = "<bot-answer-read-out>";
+
+/** What the assistant is asked, to say a Bot's answer in its own voice. */
+export function renderVoiceDelegationPromptV1(
+  result: VoiceDelegationResultV1,
+  now: Date,
+): { system: string; user: string } {
+  const waited = Math.max(0, now.getTime() - result.askedAt.getTime());
+  const minutes = Math.round(waited / 60_000);
+  return {
+    system: [
+      VOICE_RESULT_PROMPT_MARKER_V1,
+      "You are FrockBot's voice assistant, speaking aloud with the person who owns this account.",
+      "Earlier in this conversation you handed a request to one of their Bots. It has now answered, and you are reading that answer back.",
+      "Rules:",
+      "- Say who answered, then the answer, in one to three short spoken sentences. No markdown, no lists, no code.",
+      "- The answer below is the Bot's, about the question below and nothing else. Do not add facts, do not guess at what it meant, and do not answer the question yourself.",
+      "- If the Bot could not finish, say so plainly and say what it said went wrong.",
+      minutes >= 2
+        ? `- This was asked about ${minutes} minutes ago, so open by placing it: name what it was about.`
+        : "- This was asked a moment ago, so the person still has it in mind; do not restate the whole question.",
+    ].join("\n"),
+    user: [
+      `Bot: ${clip(result.botName, 60)}`,
+      `What you asked it, in the person's words: ${clip(result.question, VOICE_RESULT_QUESTION_CHARS_V1)}`,
+      result.answer
+        ? `What it answered: ${clip(result.answer, VOICE_RESULT_ANSWER_CHARS_V1)}`
+        : `It could not finish. What went wrong: ${clip(result.failure ?? "it stopped", 400)}`,
+    ].join("\n"),
+  };
+}
+
+/**
+ * The sentence to speak, composed by the model when it can be, and the plain
+ * read-out when it cannot. Either way the person hears the Bot's own answer;
+ * the model call only changes how naturally it lands.
+ */
+export async function composeVoiceDelegationSpeechV1(
+  host: Pick<VoiceAssistantHostV1, "chat">,
+  result: VoiceDelegationResultV1,
+  now: Date,
+  signal: AbortSignal,
+): Promise<string> {
+  const fallback = renderVoiceDelegationReadOutV1(result);
+  try {
+    const prompt = renderVoiceDelegationPromptV1(result, now);
+    const stream = await host.chat(
+      {
+        messages: [
+          { role: "system", content: prompt.system },
+          { role: "user", content: prompt.user },
+        ],
+        stream: true,
+        stream_options: { include_usage: true },
+        max_tokens: VOICE_RESULT_MAX_TOKENS_V1,
+        temperature: 0.3,
+      },
+      signal,
+    );
+    let spoken = "";
+    for await (const event of parseChatCompletionStreamV1(stream)) {
+      if (event.type === "text") spoken += event.text;
+      if (spoken.length > VOICE_ANSWER_MAX_CHARS_V1) break;
+    }
+    return spoken.trim() || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Tools
 
 export const VOICE_TOOLS_V1 = [

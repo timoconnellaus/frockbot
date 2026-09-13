@@ -59,7 +59,7 @@ function refusal(reason: string): ToolExecutionResult {
  * reconstruction surface, so a send without its turn and step would not
  * replay in place.
  */
-function openStepPositionV1(
+export function openStepPositionV1(
   session: Session,
   tool: string,
 ): { turn: number; step: number } {

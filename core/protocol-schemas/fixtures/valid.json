@@ -10,6 +10,22 @@
     "value": "default"
   },
   {
+    "name": "RunVia from a Bot",
+    "schema": "RunVia",
+    "value": {
+      "kind": "bot",
+      "name": "Researcher",
+      "botId": "researcher"
+    }
+  },
+  {
+    "name": "RunVia from the voice session",
+    "schema": "RunVia",
+    "value": {
+      "kind": "voice"
+    }
+  },
+  {
     "name": "Digest valid",
     "schema": "Digest",
     "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -397,6 +413,15 @@
       "inputTokens": 120,
       "outputTokens": 40,
       "costMicros": 1200
+    }
+  },
+  {
+    "name": "RunEvent reply to the voice caller",
+    "schema": "RunEvent",
+    "value": {
+      "type": "reply/to-caller",
+      "caller": "voice",
+      "text": "Booked for Tuesday."
     }
   },
   {

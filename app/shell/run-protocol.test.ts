@@ -121,6 +121,60 @@ describe("client run protocol v1", () => {
     ).toEqual(projected.via);
   });
 
+  test("projects a voice request with its spoken origin marker", () => {
+    const spoken = {
+      ...storedRun([]),
+      admission: {
+        schemaVersion: 1 as const,
+        turnType: "agent" as const,
+        lane: "agent" as const,
+        origin: {
+          kind: "voice" as const,
+          callId: "call-1",
+          voiceTurnId: "call-1:2",
+          requestId: "voice-0123456789abcdef0123456789abcdef",
+        },
+      },
+    };
+
+    expect(isVisibleRunV1(spoken)).toBe(true);
+    const projected = projectClientRunV1(spoken);
+    expect(projected).toMatchObject({
+      schemaVersion: 3,
+      input: "continue",
+      via: { kind: "voice" },
+    });
+    // The return address stays durable; the wire carries the fact it was
+    // spoken and nothing the transcript cannot use.
+    expect(JSON.stringify(projected)).not.toContain("call-1");
+    expect(
+      decodeClientRunListV1({
+        schemaVersion: 1,
+        runs: [projected],
+        page: { truncated: false },
+      })[0]?.via,
+    ).toEqual({ kind: "voice" });
+  });
+
+  test("refuses a voice origin marker carrying a Bot's fields", () => {
+    const [degraded] = decodeClientRunListV1({
+      schemaVersion: 1,
+      runs: [
+        {
+          ...projectClientRunV1(storedRun([])),
+          schemaVersion: 3,
+          via: { kind: "voice", name: "Researcher", botId: "researcher" },
+        },
+      ],
+      page: { truncated: false },
+    });
+
+    // The list still decodes — one unreadable run never costs a conversation —
+    // but the marker is refused rather than carried through half-decoded.
+    expect(degraded?.via).toBeUndefined();
+    expect(degraded?.status).toBe("failed");
+  });
+
   test("rejects durable runs missing current admission fields", () => {
     const complete = storedRun([], "running");
     for (const field of [
