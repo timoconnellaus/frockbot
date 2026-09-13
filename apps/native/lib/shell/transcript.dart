@@ -226,7 +226,9 @@ class _TranscriptViewState extends State<TranscriptView> {
           ),
         );
       }
-      if (target != null && !marked && line.runId == target) {
+      if (target != null &&
+          !marked &&
+          (line.runId == target || line.id == '$target:user')) {
         marked = true;
         rows.add(
           Container(

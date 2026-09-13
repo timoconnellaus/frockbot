@@ -127,6 +127,7 @@ void main() {
             onRefresh: ({older = false}) async {},
             onOpenRun: (_) {},
             onReadLatest: reports.add,
+            focusRunId: 'original',
             storageKey: 'retry-read',
           ),
         ),
@@ -134,6 +135,15 @@ void main() {
     );
     await tester.pump();
     expect(reports.last, 'retry:failed');
+    expect(
+      find.ancestor(
+        of: find.byKey(const ValueKey('row:original:user')),
+        matching: find.byWidgetPredicate(
+          (widget) => widget is Container && widget.key is GlobalKey,
+        ),
+      ),
+      findsOneWidget,
+    );
   });
 
   test('a queued retry uses the attempt time for its stopping notice', () {
