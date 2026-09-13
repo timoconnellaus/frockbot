@@ -16,6 +16,38 @@
       "maxLength": 128,
       "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$"
     },
+    "RunVia": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "bot"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            },
+            "botId": {
+              "$ref": "#/$defs/BotId"
+            }
+          },
+          "required": ["kind", "name", "botId"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "voice"
+            }
+          },
+          "required": ["kind"],
+          "additionalProperties": false
+        }
+      ]
+    },
     "Digest": {
       "type": "string",
       "minLength": 64,
@@ -1184,6 +1216,24 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "reply/to-caller"
+            },
+            "caller": {
+              "const": "voice"
+            },
+            "text": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 32000
+            }
+          },
+          "required": ["type", "caller", "text"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "wake/parent"
             },
             "message": {
@@ -1383,22 +1433,7 @@
               "maxLength": 64000
             },
             "via": {
-              "type": "object",
-              "properties": {
-                "kind": {
-                  "const": "bot"
-                },
-                "name": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 120
-                },
-                "botId": {
-                  "$ref": "#/$defs/BotId"
-                }
-              },
-              "required": ["kind", "name", "botId"],
-              "additionalProperties": false
+              "$ref": "#/$defs/RunVia"
             },
             "messageRunId": {
               "$ref": "#/$defs/Identifier"
@@ -1614,22 +1649,7 @@
               "additionalProperties": false
             },
             "via": {
-              "type": "object",
-              "properties": {
-                "kind": {
-                  "const": "bot"
-                },
-                "name": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 120
-                },
-                "botId": {
-                  "$ref": "#/$defs/BotId"
-                }
-              },
-              "required": ["kind", "name", "botId"],
-              "additionalProperties": false
+              "$ref": "#/$defs/RunVia"
             },
             "messageRunId": {
               "$ref": "#/$defs/Identifier"
@@ -1851,22 +1871,7 @@
               "additionalProperties": false
             },
             "via": {
-              "type": "object",
-              "properties": {
-                "kind": {
-                  "const": "bot"
-                },
-                "name": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 120
-                },
-                "botId": {
-                  "$ref": "#/$defs/BotId"
-                }
-              },
-              "required": ["kind", "name", "botId"],
-              "additionalProperties": false
+              "$ref": "#/$defs/RunVia"
             },
             "messageRunId": {
               "$ref": "#/$defs/Identifier"
@@ -2088,22 +2093,7 @@
               "additionalProperties": false
             },
             "via": {
-              "type": "object",
-              "properties": {
-                "kind": {
-                  "const": "bot"
-                },
-                "name": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 120
-                },
-                "botId": {
-                  "$ref": "#/$defs/BotId"
-                }
-              },
-              "required": ["kind", "name", "botId"],
-              "additionalProperties": false
+              "$ref": "#/$defs/RunVia"
             },
             "messageRunId": {
               "$ref": "#/$defs/Identifier"
@@ -2326,22 +2316,7 @@
               "additionalProperties": false
             },
             "via": {
-              "type": "object",
-              "properties": {
-                "kind": {
-                  "const": "bot"
-                },
-                "name": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 120
-                },
-                "botId": {
-                  "$ref": "#/$defs/BotId"
-                }
-              },
-              "required": ["kind", "name", "botId"],
-              "additionalProperties": false
+              "$ref": "#/$defs/RunVia"
             },
             "messageRunId": {
               "$ref": "#/$defs/Identifier"

@@ -349,6 +349,28 @@ export interface SessionEventMap {
     payload: SendToUserPayloadV1;
   };
   /**
+   * The Turn's answer to whoever asked for it, when that was not the person
+   * typing in this conversation.
+   *
+   * Its own event rather than a `send/to-user` with a flag, because the two
+   * are genuinely different deliveries. A send is addressed to the User: it
+   * mints a message, advances unread, and wakes a device. This is addressed to
+   * the caller named on the Turn's admission — today the account's voice
+   * session — which is reading it out itself. Routing one as the other is how
+   * a person ends up badged for a sentence being spoken to them.
+   *
+   * It is still part of the conversation, and the transcript draws it: the
+   * exchange happened in this Bot's thread and the person can read it back.
+   */
+  "reply/to-caller": {
+    turn: number;
+    step: number;
+    occurrenceId: string;
+    /** The only caller that can be addressed this way today. */
+    caller: "voice";
+    text: string;
+  };
+  /**
    * A child Turn's hand-off to its parent — the same Bot's user-visible
    * conversation (row 40, §2.13). Recorded here so the hand-off is durable on
    * the child's own log; delivering it to the parent is a later slice, and
@@ -1389,6 +1411,20 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
       step();
       eventString(event.occurrenceId, "session event.occurrenceId");
       decodeSendToUserPayloadV1(event.payload, "session event.payload");
+      break;
+    case "reply/to-caller":
+      requireEventKeys(
+        event,
+        keys("turn", "step", "occurrenceId", "caller", "text"),
+        "session event",
+      );
+      turn();
+      step();
+      eventString(event.occurrenceId, "session event.occurrenceId");
+      if (event.caller !== "voice") {
+        throw new Error("session event.caller is invalid");
+      }
+      eventString(event.text, "session event.text");
       break;
     case "wake/parent":
       requireEventKeys(

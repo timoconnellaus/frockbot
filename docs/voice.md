@@ -188,6 +188,13 @@ Binary frames: PCM16 little-endian, mono, **24 kHz**, arbitrary chunk
 boundaries (a chunk may end on an odd byte; carry the byte). The client plays
 them in order and measures amplitude from what it is playing.
 
+A delegated answer is bracketed by `voice/answer` (`deliveryId`, `botName`)
+and `voice/answer-end` (`deliveryId`). The client sends `voice/played` for
+that delivery only after its complete audio has drained without interruption.
+Sending all bytes, returning from SDK `speak()`, and silence in the waveform
+are not playback acknowledgments. `voice/speech` reports actual playback so
+an arriving Bot answer can wait for a natural pause in ordinary voice speech.
+
 ### Status
 
 `{type:"status",status}` with `idle | listening | thinking | speaking`.
@@ -288,9 +295,23 @@ never worked — and has already torn the call down behind it. The client ends
 the call and shows the failure, rather than leaving a live-looking footer over
 a socket nobody is listening on.
 
-A Bot answer that settles while a reply is being produced or, for six seconds
-after, still being heard is held rather than read out over it (`speak` would
-abort the reply in flight); it is read out once that window has passed.
+A Bot answer that settles while an utterance, reply, or playback is in flight
+waits for a natural pause. Completed answers are read in order, and the next
+answer waits for the previous delivery's playback acknowledgment. A bounded
+acknowledgment timeout releases the delivery slot without marking the answer
+played; the same bound applies to a client's own `voice/speech` playing report,
+so a device whose completion never comes back cannot hold the queue for the
+rest of the call. A read-out whose audio never arrives is retried promptly a
+few times and then falls back to the slow drain, so a speech provider that
+stays down is not asked for the same sentence every few seconds. Synthesis
+refused by the speech-character cap skips those prompt retries and waits on the
+slow drain instead, so it still goes out if the cap resets; a used-up listening
+allowance does not delay an otherwise recoverable read-out. A read-out the
+person talks over, or one whose call is replaced, spends none of those
+retries. Interrupted, disconnected and failed audio leaves the durable answer
+available for a later read-out. Every delivery names its request and current
+connection owner; duplicate or stale acknowledgments cannot settle another
+answer.
 
 ### Sleep and wake (cost control)
 
@@ -427,26 +448,47 @@ kept for tests.
   on the next start; a model call is never replayed without its key.
 - `delegation:<runId>` — a Bot delegation: target Bot, text, `runId` derived
   as `sha256(userId, callId, turnId, botId)` (so a retried tool call admits
-  the same Bot Turn once), state `admitted | settled | spoken | expired`.
+  the same Bot Turn once), state
+  `admitted | settled | spoken | cancelled | expired`, the id of the delivery
+  currently being read out, and the composed sentence with its own
+  `admitted | composed | abandoned` state.
 
-Delegations use the Bot's ordinary user-lane `run` door with that `runId`, so
-the Turn appears in the Bot's own thread, survives the voice socket, and can be
-cancelled only through the explicit `stopRun` command the Bot already honours.
-The assistant's `cancel_bot` tool requires the caller to name the Bot and is
-recorded before the stop command is sent.
+Delegations use the Bot's `runVoice` door and the existing agent lane.
+The command records the call, voice Turn and request IDs before dispatch;
+the target Bot admits the same `runId` once. Active conversations and Routines
+finish normally, then queued voice requests run in FIFO order with User work
+prioritised. A voice request does not supersede existing work. Ending or
+interrupting the voice call does not cancel accepted Bot work. The assistant's
+`cancel_bot` tool requires an explicit request to stop the named Bot and
+records intent before sending its authenticated stop command.
 
-Settlement is durable scheduling, not `waitUntil`: after admitting a
-delegation the object calls `this.schedule(…)` to look the run up with
-`lookupRun(runId)`; a settled answer is stored on the delegation record and,
-if a call is live and no reply is in flight, spoken — otherwise it is held
-and rescheduled, see "A reply that fails". A look-up that finds the Bot never
-admitted the run — the dispatch was lost, or the Bot was busy and refused it —
-sends the same intent again under the same run id (never within 30 s of the last
-send), on a backoff that widens to five minutes, until the Bot takes it or
-the fortieth look-up settles it as an explicit failure the person hears.
-Recovery on `onStart` re-schedules any delegation still `admitted`. A spoken
-turn's own settlement is written before its generator returns, so the SDK's
-history and the ledger never disagree.
+The Bot receives `reply_to_request`, whose `reply/to-caller` event addresses
+this voice request. This is a separate delivery from `send_to_user`: an
+explicit message to the User may still be sent, but cannot substitute for
+the required caller reply. The transcript groups the voice request and its
+answer in a blue waveform-marked exchange, separate from ordinary chat
+bubbles. The reply itself creates no ordinary User message or notification.
+Private model text is never used as the answer.
+
+A terminal Bot Turn records a completion outbox entry in the same durable
+transaction. That wake tells the owning voice object which request to look
+up; the voice object reads the correlated run instead of trusting copied
+answer text. Scheduled `checkDelegation` look-ups remain as recovery for a
+lost dispatch or wake. A callback schedules its next check without deduping
+onto its own executing schedule row, which the scheduler will delete. A
+lookup that finds no admitted run resends the same recorded intent under the
+same ID, with bounded retries and an explicit failure when exhausted.
+`onStart` recreates pending checks from the ledger, and a new call recovers
+settled answers that have not been played.
+
+The answer is put into one to three spoken sentences using its original
+question, Bot identity and explicit reply. This composition has durable
+intent, consumes the daily model-turn allowance once, and caches its result
+for playback retries. An admitted composition whose result was lost is
+abandoned rather than paid for again; a composition that has not answered
+within eight seconds is dropped and a correlated plain read-out supplies the
+fallback. The answer remains `settled` until the correct client playback
+acknowledgment changes it to `spoken`.
 
 Conversation context is bounded and **call-scoped**: the prompt carries the
 newest 12 messages of _this call_, built from the ledger's own `turn:` records
@@ -459,7 +501,30 @@ through `MemoryStore` over the User Durable Object's generation ledger (so
 retractions and shards resolve as they do for Bots), and Project memory is
 read on demand through the same store when the assistant's `recall_project`
 tool asks for it. Live Bot directory and run status are read from
-`UserConfiguration.listBots` and `lookupRun`, never from memory.
+`UserConfiguration.listBots` and the Bot's run projection, never from
+memory.
+
+### Reading a Bot without asking it
+
+`read_bot_history` reads recent visible conversation directly from the Bot's
+run projection. `search_bot_history` queries the existing account transcript
+index for the selected Bot, then reads the matching runs to retain the actual
+speaker. Both tools require a Bot ID checked against the User's directory
+before access. They admit no Bot Turn, call no Bot model, and leave running
+work alone. `bot_status` reads authoritative running, queued and terminal
+state plus the most recent explicit reply; it never quotes partial model
+text or a private model outcome.
+
+History and search default to six messages or excerpts, accept at most eight,
+and bound each text to 320 characters and the encoded result to 3,900
+characters. Results keep speaker roles, run references and available message
+references; voice and other-Bot requests are not labelled as User messages.
+Timestamps are explicitly labelled as Turn admission times, the timestamps
+available in the public projection. The search query is bounded to 256
+characters and only requests User/assistant conversation rows, excluding
+private tool output. Search reports its index state and may lag unsettled
+work; current-progress questions use `bot_status` instead. Returned excerpts
+are quoted data, not instructions for the voice assistant to follow.
 
 ## Session memory
 
@@ -668,7 +733,7 @@ nothing. What is counted per account, durably, per UTC day:
   window past the cap shuts the upstream for the day and tells the client);
 - dictation seconds, booked and renewed the same way (bounded at 120 min/day);
 - TTS characters sent to ElevenLabs (bounded at 200k/day);
-- model turns (bounded at 600/day) and Bot delegations (bounded at 8 per turn burst, 200/day).
+- model turns, including one admitted composition per Bot answer (bounded at 600/day), and Bot delegations (bounded at 8 per turn burst, 200/day).
 
 Exceeding a cap answers `voice/refusal` with `quota` on the next upstream wake
 or turn and leaves the footer open; the day rolls at UTC midnight. One live
@@ -712,9 +777,15 @@ whether or not anyone is talking.
 authenticated upgrade `NativeApi.socket()` uses (`connectSocketV1` with the
 bearer header). `record` 7.1.1 captures streaming PCM16 with echo
 cancellation, noise suppression and automatic gain, and requests the
-microphone permission itself; `flutter_pcm_sound` 3.3.3 plays the 24 kHz PCM
-(its `interrupt()` is a release-and-setup because the plugin has no clear, see
-`docs/known-issues.md` 46). Android declares `RECORD_AUDIO` and
+microphone permission itself; the app's own speaker plays the 24 kHz PCM over
+the `com.frockbot/pcm` channel, acknowledging a chunk only once the device
+reports it played (Android's `AudioTrack` playback head, macOS's
+`dataPlayedBack` completion). One device exists at a time, owned by the epoch
+of the most recent `setup`, and `feed` and `release` both name the epoch they
+serve: a superseded player's delayed close, or a feed from a call that has
+already ended, is ignored rather than stopping the current call's speaker, and
+a disposed session issues no further speaker commands while its teardown
+finishes. Android declares `RECORD_AUDIO` and
 `MODIFY_AUDIO_SETTINGS`; macOS carries the microphone usage description and
 entitlement. `AppShell`'s lifecycle observer ends capture and playback when
 the app leaves the foreground; navigation inside the app leaves the footer

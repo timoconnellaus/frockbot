@@ -59,7 +59,7 @@ function refusal(reason: string): ToolExecutionResult {
  * reconstruction surface, so a send without its turn and step would not
  * replay in place.
  */
-function openStepPositionV1(
+export function openStepPositionV1(
   session: Session,
   tool: string,
 ): { turn: number; step: number } {
@@ -136,7 +136,14 @@ export const TIME_BUDGET_WARNING_MS_V1 = 2 * 60_000;
  */
 export function stepBudgetPromptTextV1(context: {
   step?: { current: number; max: number };
+  replyToCaller?: boolean;
 }): string {
+  const target = context.replyToCaller
+    ? "reply_to_request"
+    : SEND_TO_USER_TOOL_V1;
+  const disposition = context.replyToCaller
+    ? "the answer"
+    : 'disposition:"finish"';
   const step = context.step;
   if (!step) return "";
   const remaining = step.max - step.current;
@@ -144,13 +151,13 @@ export function stepBudgetPromptTextV1(context: {
   if (remaining === 0) {
     return [
       "<step_budget>",
-      `This is the last step of this reply; after it the reply is stopped automatically. Do nothing except call \`${SEND_TO_USER_TOOL_V1}\` once with disposition:"finish" and a short status for the person: what is finished, what is not, and what they can do next.`,
+      `This is the last step of this reply; after it the reply is stopped automatically. Do nothing except call \`${target}\` once with ${disposition} and a short status for the person: what is finished, what is not, and what they can do next.`,
       "</step_budget>",
     ].join("\n");
   }
   return [
     "<step_budget>",
-    `This reply has ${remaining} ${remaining === 1 ? "step" : "steps"} left after this one before it is stopped automatically. Do not start new work. Call \`${SEND_TO_USER_TOOL_V1}\` now with disposition:"finish" and a short status for the person: what is finished, what is not, and what they can do next.`,
+    `This reply has ${remaining} ${remaining === 1 ? "step" : "steps"} left after this one before it is stopped automatically. Do not start new work. Call \`${target}\` now with ${disposition} and a short status for the person: what is finished, what is not, and what they can do next.`,
     "</step_budget>",
   ].join("\n");
 }
@@ -158,7 +165,14 @@ export function stepBudgetPromptTextV1(context: {
 /** Warns by wall-clock budget even when the model has used few steps. */
 export function timeBudgetPromptTextV1(context: {
   deadline?: { at: number; now: number };
+  replyToCaller?: boolean;
 }): string {
+  const target = context.replyToCaller
+    ? "reply_to_request"
+    : SEND_TO_USER_TOOL_V1;
+  const disposition = context.replyToCaller
+    ? "the answer"
+    : 'disposition:"finish"';
   const deadline = context.deadline;
   if (!deadline) return "";
   const remaining = deadline.at - deadline.now;
@@ -167,7 +181,7 @@ export function timeBudgetPromptTextV1(context: {
   }
   return [
     "<time_budget>",
-    `This Turn has fewer than 2 minutes left before it is stopped automatically. Do not start new work. Call \`${SEND_TO_USER_TOOL_V1}\` now with disposition:"finish" and a short status for the person: what is finished, what is not, and what they can do next.`,
+    `This Turn has fewer than 2 minutes left before it is stopped automatically. Do not start new work. Call \`${target}\` now with ${disposition} and a short status for the person: what is finished, what is not, and what they can do next.`,
     "</time_budget>",
   ].join("\n");
 }
@@ -507,12 +521,24 @@ export const shellAgentFeature: RuntimeFeatureV1<AgentRuntimeV1> = (
     runtime.systemPrompt.register({
       id: STEP_BUDGET_PROMPT_SECTION_V1,
       order: STEP_BUDGET_PROMPT_ORDER_V1,
-      render: (context) => stepBudgetPromptTextV1(context),
+      render: (context) =>
+        stepBudgetPromptTextV1({
+          ...context,
+          replyToCaller:
+            runtime.tools.registeredNames?.().includes("reply_to_request") ??
+            false,
+        }),
     }),
     runtime.systemPrompt.register({
       id: TIME_BUDGET_PROMPT_SECTION_V1,
       order: TIME_BUDGET_PROMPT_ORDER_V1,
-      render: (context) => timeBudgetPromptTextV1(context),
+      render: (context) =>
+        timeBudgetPromptTextV1({
+          ...context,
+          replyToCaller:
+            runtime.tools.registeredNames?.().includes("reply_to_request") ??
+            false,
+        }),
     }),
     runtime.tools.register(
       createSendToUserTool(SEND_TO_USER_TOOL_V1, runtime.sessions),

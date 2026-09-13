@@ -1,6 +1,6 @@
 # Messages, unread state and Android notifications
 
-Every explicit `send_to_user` message advances the Bot's cloud-owned message cursor as part of the transaction that persists that send. A Turn can send several messages, and its settlement adds no unread count. Text, approvals, widgets and Routine messages use the same notification preference. Private model text never becomes an alert.
+Every explicit `send_to_user` message advances the Bot's cloud-owned message cursor as part of the transaction that persists that send. A Turn can send several messages, and its settlement adds no unread count. Text, approvals, widgets and Routine messages use the same notification preference. Private model text never becomes an alert, and neither does a Turn's `reply/to-caller` answer: it is addressed to the caller that asked for the Turn — today the account's voice session, which reads it out itself — so it mints no message, advances no cursor and wakes no device (see [voice](voice.md)).
 
 Clients mark the latest displayed message read only while the app/window is focused, the conversation is visible and its viewport is at the latest messages. A background app, another open Bot or a viewport in older history does not mark new messages read. Explicit Mark as read is a separate action. Read cursors only move forwards and name real messages; an older device cannot undo another device's read. Manual unread is a reminder and creates no push.
 

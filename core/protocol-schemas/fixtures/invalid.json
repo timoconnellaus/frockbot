@@ -10,6 +10,22 @@
     "value": null
   },
   {
+    "name": "RunVia unknown caller",
+    "schema": "RunVia",
+    "value": {
+      "kind": "routine"
+    }
+  },
+  {
+    "name": "RunVia voice carrying a Bot's fields",
+    "schema": "RunVia",
+    "value": {
+      "kind": "voice",
+      "name": "Researcher",
+      "botId": "researcher"
+    }
+  },
+  {
     "name": "Digest wrong shape",
     "schema": "Digest",
     "value": null
@@ -1775,6 +1791,28 @@
         "message": "Provider unavailable"
       },
       "canRetry": true
+    }
+  },
+  {
+    "name": "RunEvent reply to an unknown caller",
+    "schema": "RunEvent",
+    "value": {
+      "type": "reply/to-caller",
+      "caller": "bot",
+      "text": "Booked."
+    }
+  },
+  {
+    "name": "RunEvent reply with a send's payload",
+    "schema": "RunEvent",
+    "value": {
+      "type": "reply/to-caller",
+      "caller": "voice",
+      "text": "Booked.",
+      "payload": {
+        "type": "text",
+        "text": "Booked."
+      }
     }
   }
 ]

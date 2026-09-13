@@ -5,8 +5,8 @@
 // chunking and streaming TTS; everything FrockBot cares about — who may
 // connect, what costs money, what a Bot was asked to do — is decided here and
 // recorded in the ledger before anything external runs. The Bot runtime is
-// untouched: a delegation is an ordinary user-lane Turn in the target Bot's
-// own object, admitted through the same door the composer uses.
+// unchanged: voice requests use its existing agent lane and never supersede
+// a User turn or routine.
 //
 // Nothing durable lives only in this object's memory. A call is a ledger row,
 // a delegation is a ledger row plus a scheduled look-up, and an eviction
@@ -28,7 +28,9 @@ import {
 } from "@cloudflare/voice";
 import { ElevenLabsSTT, ElevenLabsTTS } from "@cloudflare/voice-elevenlabs";
 import {
+  composeVoiceDelegationSpeechV1,
   parseChatCompletionStreamV1,
+  renderVoiceDelegationReadOutV1,
   renderVoiceSystemPromptV1,
   runVoiceTurnV1,
   VOICE_PROMPT_HISTORY_MESSAGES_V1,
@@ -43,6 +45,11 @@ import {
   type VoiceDelegationRecordV1,
   type VoiceLedgerStorageV1,
 } from "@frockbot/app/voice/ledger";
+import {
+  renderVoiceBotStatusV1,
+  VOICE_HISTORY_MAX_LIMIT_V1,
+} from "@frockbot/app/voice/history";
+import type { SearchIndexResultsV1 } from "@frockbot/app/search/shared";
 import {
   decodeVoiceMemoryUpdateV1,
   emptyVoiceMemoryRecordV1,
@@ -84,6 +91,7 @@ import {
   VOICE_ASSISTANT_OUTPUT_SAMPLE_RATE_V1,
   VOICE_ASSISTANT_SERVER_IDLE_SLEEP_MS_V1,
   VOICE_ASSISTANT_STT_RESERVE_SECONDS_V1,
+  VOICE_ASSISTANT_PLAYBACK_ACK_TIMEOUT_MS_V1,
   VOICE_ASSISTANT_REJOIN_WINDOW_MS_V1,
   VOICE_DICTATION_LEASE_RENEW_MS_V1,
   VOICE_DICTATION_RESERVE_SECONDS_V1,
@@ -154,6 +162,46 @@ function decodeDictationLeaseRequest(input: unknown): DictationLeaseRequest {
       : {}),
   };
 }
+/**
+ * The answer a Bot addressed to its voice caller on this Turn, if it did.
+ *
+ * The projected run carries the exchange in order, and this reads the last
+ * `reply_to_request` out of it. Correlation is the whole point: it is this
+ * run's own answer, not the Bot's latest send to its User, and not a Turn the
+ * person never asked for.
+ */
+function voiceReplyTextOfRunV1(run: ClientRunV1): string | undefined {
+  for (const event of [...run.events].reverse()) {
+    if (event.type !== "reply/to-caller") continue;
+    const text = (event as { text?: unknown }).text;
+    if (typeof text === "string" && text.trim()) return text;
+  }
+  return undefined;
+}
+
+interface VoiceReplyDeliveryV1 {
+  userId: string;
+  requestId: string;
+}
+
+/** The Bot's hand-off, decoded at the door like every other inbound value. */
+function decodeVoiceReplyDeliveryV1(input: unknown): VoiceReplyDeliveryV1 {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new Error("voice reply delivery is invalid");
+  }
+  const value = input as Record<string, unknown>;
+  if (
+    value.schemaVersion !== 1 ||
+    typeof value.userId !== "string" ||
+    !value.userId ||
+    typeof value.requestId !== "string" ||
+    !/^voice-[0-9a-f]{32}$/.test(value.requestId)
+  ) {
+    throw new Error("voice reply delivery is invalid");
+  }
+  return { userId: value.userId, requestId: value.requestId };
+}
+
 export const VOICE_ASSISTANT_USER_HEADER = "x-frockbot-user-id";
 export const VOICE_ASSISTANT_DEVICE_HEADER = "x-frockbot-voice-device";
 
@@ -174,6 +222,19 @@ const DELEGATION_MAX_CHECK_SECONDS = 5 * 60;
  * this window is held rather than read out over the reply it would cut.
  */
 const REPLY_DRAIN_QUIET_MS = 6_000;
+/**
+ * How long the sentence that reads a Bot's answer back may take to compose.
+ * Past it the plain read-out goes instead: the person is owed the answer, not
+ * a nicer phrasing of it, and silence is the one outcome that is not allowed.
+ */
+const VOICE_RESULT_COMPOSE_TIMEOUT_MS = 8_000;
+/**
+ * Prompt retries one answer gets on a live call when its audio never arrives.
+ * A provider blip clears in seconds; a provider that is down would otherwise
+ * be asked to synthesize the same answer every few seconds until the call
+ * ends. Past this the answer waits on the slow drain instead, still owed.
+ */
+const DELEGATION_READ_OUT_MAX_ATTEMPTS = 3;
 
 export interface VoiceAssistantEnv {
   AI?: Ai;
@@ -254,6 +315,48 @@ interface LiveCall {
   turnStartedAt?: number;
   /** When that turn's model finished; unset while it is in flight. */
   turnSettledAt?: number;
+  /**
+   * When the client last reported its own speaker as playing, unset once it
+   * reports quiet. A stamp rather than a flag because a report that is never
+   * withdrawn — a device whose completion never came back — must not hold the
+   * queue for the rest of the call.
+   */
+  playingSince?: number;
+  synthesizing: number;
+  /**
+   * A Bot answer handed to the speaker whose playback nobody has confirmed.
+   * It holds the next read-out back, and it is cleared — never acknowledged —
+   * when the person interrupts or the call goes.
+   */
+  pendingDelivery?: {
+    deliveryId: string;
+    runId: string;
+    armedAt: number;
+    text: string;
+    audioBytes: number;
+    synthesisFailed: boolean;
+    /** This delivery's own synthesis was refused by the speech cap. */
+    suppressed: boolean;
+    ready: boolean;
+  };
+  /**
+   * Read-outs, one after another. Two answers that settle together queue here
+   * rather than racing into the same speaker.
+   */
+  speechChain: Promise<void>;
+  /**
+   * Bumped every time what this call is saying changes: a new spoken turn, an
+   * interruption. A read-out that was being composed when it changed is stale
+   * — the person has moved on — and is put back rather than spoken into what
+   * is happening now.
+   */
+  speechGeneration: number;
+  /**
+   * Read-outs whose audio never arrived, counted per answer. In memory only:
+   * the loop it bounds cannot outlive the call, and the answer itself stays
+   * durable and owed however many attempts this call spends on it.
+   */
+  readOutFailures: Map<string, number>;
   quotaSaid: boolean;
 }
 
@@ -386,13 +489,63 @@ export class VoiceAssistant extends VoiceAgentBase<
     inner: (TTSProvider & Partial<StreamingTTSProvider>) | undefined,
   ): (TTSProvider & Partial<StreamingTTSProvider>) | undefined {
     if (!inner) return undefined;
-    return guardSpeechProviderV1(inner, (text) =>
+    const guarded = guardSpeechProviderV1(inner, (text) =>
       this.synthesisFailed(text),
-    ) as TTSProvider & Partial<StreamingTTSProvider>;
+    );
+    const self = this;
+    const wrapped: TTSProvider & Partial<StreamingTTSProvider> = {
+      async synthesize(text, signal) {
+        const finish = self.beginSpeechSynthesis(text);
+        try {
+          return await guarded.synthesize(text, signal);
+        } catch (error) {
+          if (!signal?.aborted) self.synthesisFailed(text);
+          throw error;
+        } finally {
+          finish();
+        }
+      },
+    };
+    const stream = guarded.synthesizeStream;
+    if (stream)
+      wrapped.synthesizeStream = async function* (text, signal) {
+        const finish = self.beginSpeechSynthesis(text);
+        try {
+          yield* stream(text, signal);
+        } catch (error) {
+          if (!signal?.aborted) self.synthesisFailed(text);
+          throw error;
+        } finally {
+          finish();
+        }
+      };
+    return wrapped;
+  }
+
+  private beginSpeechSynthesis(text: string): () => void {
+    for (const [connectionId, call] of this.#calls) {
+      if (!this.#traced.get(connectionId)?.awaitingFirstChunk.has(text))
+        continue;
+      const generation = call.speechGeneration;
+      call.synthesizing += 1;
+      return () => {
+        if (
+          this.#calls.get(connectionId) !== call ||
+          call.speechGeneration !== generation
+        )
+          return;
+        call.synthesizing -= 1;
+        // Cover the handoff from the last PCM chunk to the client's playing report.
+        if (call.turnSettledAt !== undefined) call.turnSettledAt = Date.now();
+      };
+    }
+    return () => undefined;
   }
 
   private synthesisFailed(text: string): void {
     for (const connection of this.getConnections()) {
+      const pending = this.#calls.get(connection.id)?.pendingDelivery;
+      if (pending?.text.includes(text)) pending.synthesisFailed = true;
       const traced = this.#traced.get(connection.id);
       const awaiting = traced?.awaitingFirstChunk.get(text) ?? 0;
       if (!traced || awaiting === 0) continue;
@@ -492,6 +645,15 @@ export class VoiceAssistant extends VoiceAgentBase<
     return REPLY_DRAIN_QUIET_MS;
   }
 
+  /**
+   * How long an unwithdrawn playback report holds the queue; a test shortens
+   * it. The same bound covers a delivery nobody acknowledged and a speaker
+   * the client never reported quiet again.
+   */
+  protected playbackAckTimeoutMs(): number {
+    return VOICE_ASSISTANT_PLAYBACK_ACK_TIMEOUT_MS_V1;
+  }
+
   private workerVar(name: `FROCK_AI_${string}`): string | undefined {
     const twin =
       `FLOCK_AI_${name.slice("FROCK_AI_".length)}` as keyof VoiceAssistantEnv;
@@ -562,7 +724,11 @@ export class VoiceAssistant extends VoiceAgentBase<
     if (current) protectedCalls.add(current.callId);
     const recovered = await this.ledger().recover(now, protectedCalls);
     for (const delegation of recovered.pending) {
-      await this.scheduleDelegationCheck(delegation.runId, delegation.attempts);
+      await this.scheduleDelegationCheck(
+        delegation.runId,
+        delegation.attempts,
+        true,
+      );
     }
     for (const job of await memory.pendingJobs()) {
       await this.scheduleMemoryFinalization(job.callId);
@@ -955,7 +1121,42 @@ export class VoiceAssistant extends VoiceAgentBase<
         if (custom.muted) call.session?.sleep();
         this.sendState(connection, call);
         break;
+      case "voice/speech":
+        // The speaker, as the device knows it. Nothing durable turns on this:
+        // it is only what decides whether now is a pause.
+        call.playingSince = custom.playing ? Date.now() : undefined;
+        break;
+      case "voice/played":
+        await this.notePlayed(connection, call, custom.deliveryId);
+        break;
     }
+  }
+
+  /**
+   * One read-out played to its end. The acknowledgement has to name the exact
+   * delivery and come from the connection that holds the call — an old socket
+   * catching up, or an id from a read-out the person already interrupted, is
+   * evidence about something else.
+   */
+  private async notePlayed(
+    connection: Connection,
+    call: LiveCall,
+    deliveryId: string,
+  ): Promise<void> {
+    const pending = call.pendingDelivery;
+    if (!pending || pending.deliveryId !== deliveryId || !pending.ready) {
+      this.trace(connection, "played-ignored", { delivery: deliveryId });
+      return;
+    }
+    call.pendingDelivery = undefined;
+    const marked = await this.ledger().markSpoken(
+      pending.runId,
+      deliveryId,
+      this.now(),
+    );
+    this.trace(connection, "played", { delivery: deliveryId, marked });
+    // Whatever was waiting behind it can go now.
+    await this.speakNextSettledDelegation();
   }
 
   private send(connection: Connection, message: VoiceAssistantServerMessageV1) {
@@ -1062,6 +1263,10 @@ export class VoiceAssistant extends VoiceAgentBase<
       reservedSeconds: 0,
       muted: false,
       exhausted: false,
+      synthesizing: 0,
+      speechChain: Promise.resolve(),
+      speechGeneration: 0,
+      readOutFailures: new Map(),
       quotaSaid: false,
     };
     this.#calls.set(connection.id, call);
@@ -1220,11 +1425,12 @@ export class VoiceAssistant extends VoiceAgentBase<
     }
     this.trace(connection, "listening");
     this.sendState(connection, call);
-    // Answers that settled while nobody was listening are read out first.
-    const unspoken = await this.ledger().unspokenDelegations();
-    for (const delegation of unspoken.slice(0, 3)) {
-      await this.speakDelegation(connection, delegation);
-    }
+    // Answers that settled while nobody was listening are read out first —
+    // the oldest one now, and each of the rest when the one before it has
+    // finished playing. Reading them all out at once would be several
+    // sentences arriving over each other in the first second of a call.
+    const [oldest] = await this.ledger().unspokenDelegations();
+    if (oldest) await this.speakDelegation(connection, oldest);
   }
 
   override async onCallEnd(connection: Connection): Promise<void> {
@@ -1246,6 +1452,22 @@ export class VoiceAssistant extends VoiceAgentBase<
    */
   override onInterrupt(connection: Connection): void {
     this.trace(connection, "interrupted");
+    const call = this.#calls.get(connection.id);
+    if (!call) return;
+    // Whatever was playing was cut off part-way, so nothing is acknowledged:
+    // a Bot answer that was mid-sentence stays `settled` and is owed still.
+    // The client stops its own player, so the speaker is quiet from here.
+    call.playingSince = undefined;
+    call.speechGeneration += 1;
+    call.synthesizing = 0;
+    this.#traced.get(connection.id)?.awaitingFirstChunk.clear();
+    const pending = call.pendingDelivery;
+    if (pending) {
+      call.pendingDelivery = undefined;
+      this.trace(connection, "delegation-interrupted", {
+        delivery: pending.deliveryId,
+      });
+    }
   }
 
   /**
@@ -1258,6 +1480,8 @@ export class VoiceAssistant extends VoiceAgentBase<
     text: string,
     connection: Connection,
   ): Promise<ArrayBuffer | null> {
+    const pending = this.#calls.get(connection.id)?.pendingDelivery;
+    if (pending?.text.includes(text)) pending.audioBytes += audio.byteLength;
     const traced = this.#traced.get(connection.id);
     if (!traced) return audio;
     traced.audioChunks += 1;
@@ -1344,6 +1568,10 @@ export class VoiceAssistant extends VoiceAgentBase<
     const now = this.now();
     const cap = await ledger.exceededCap(now);
     if (cap === "ttsCharacters") {
+      if (call?.pendingDelivery) {
+        call.pendingDelivery.synthesisFailed = true;
+        call.pendingDelivery.suppressed = true;
+      }
       this.trace(connection, "speech-suppressed", {
         cap,
         chars: text.length,
@@ -1394,6 +1622,11 @@ export class VoiceAssistant extends VoiceAgentBase<
     }
     const turnId = admitted.turn.turnId;
     const startedAt = Date.now();
+    // The person is talking, so anything being composed for them to hear is
+    // already about a moment that has passed.
+    call.speechGeneration += 1;
+    call.synthesizing = 0;
+    this.#traced.get(connection.id)?.awaitingFirstChunk.clear();
     call.turnId = turnId;
     call.turnAdmittedAt = admitted.turn.admittedAt;
     call.turnTranscript = transcript;
@@ -1500,7 +1733,7 @@ export class VoiceAssistant extends VoiceAgentBase<
         };
         throw error;
       } finally {
-        call.turnSettledAt = Date.now();
+        if (call.turnId === turnId) call.turnSettledAt = Date.now();
         // Durable before the generator returns, so the SDK's own history
         // write and the ledger never disagree about whether this turn ended.
         await ledger.settleTurn(turnId, settlement);
@@ -1538,11 +1771,49 @@ export class VoiceAssistant extends VoiceAgentBase<
     return history.slice(-VOICE_PROMPT_HISTORY_MESSAGES_V1);
   }
 
-  /** Whether a reply is being produced or, most likely, still being heard. */
+  /**
+   * Whether something is still being said, so a Bot answer would cut it off.
+   *
+   * Three things count. A model still producing a reply is in flight by
+   * definition. A speaker the client reports as playing is in flight because
+   * the person is hearing it. And a read-out already handed over whose
+   * playback has not been acknowledged is in flight until it is. The last two
+   * are both bounded by the same clock, because a client that cannot report
+   * the end of a sound must not be able to wedge the queue for the rest of
+   * the call.
+   */
+  /**
+   * The client says its speaker is playing, recently enough to believe it.
+   * A device whose completion report never comes back — a route change part
+   * way through an answer, a dropped callback — would otherwise hold every
+   * owed answer for the rest of the call. The bound only frees the queue: it
+   * says nothing about whether anything was heard, which stays what
+   * `voice/played` alone decides.
+   */
+  private speakerPlaying(call: LiveCall): boolean {
+    return (
+      call.playingSince !== undefined &&
+      Date.now() - call.playingSince < this.playbackAckTimeoutMs()
+    );
+  }
+
   private replyInFlight(call: LiveCall): boolean {
-    if (call.turnStartedAt === undefined) return false;
-    if (call.turnSettledAt === undefined) return true;
-    return Date.now() - call.turnSettledAt < this.replyDrainQuietMs();
+    if (call.turnStartedAt !== undefined && call.turnSettledAt === undefined) {
+      return true;
+    }
+    if (this.speakerPlaying(call) || call.synthesizing > 0) return true;
+    const pending = call.pendingDelivery;
+    if (pending && Date.now() - pending.armedAt < this.playbackAckTimeoutMs()) {
+      return true;
+    }
+    // A settled reply whose audio the client never reported on at all: the
+    // short drain window is the only evidence there is, and it is treated as
+    // exactly that — a guess that keeps two sentences from colliding, not a
+    // claim that anything was heard.
+    return (
+      call.turnSettledAt !== undefined &&
+      Date.now() - call.turnSettledAt < this.replyDrainQuietMs()
+    );
   }
 
   private turnHost(
@@ -1663,19 +1934,68 @@ export class VoiceAssistant extends VoiceAgentBase<
       botStatus: async (botId) => {
         const bot = await this.ownedBot(userId, botId);
         const runs = await this.recentRuns(userId, botId);
-        const latest = runs[0];
-        if (!latest)
-          return `${bot.initialName} has not been asked anything yet.`;
-        const said =
-          latest.outcome?.type === "completed" && latest.outcome.text
-            ? ` Last it said: ${latest.outcome.text.slice(0, 400)}`
-            : latest.partialText
-              ? ` So far it has written: ${latest.partialText.slice(0, 400)}`
-              : "";
-        return `${bot.initialName} is ${latest.status === "running" ? "working" : latest.status} on "${latest.input.slice(0, 200)}".${said}`;
+        return renderVoiceBotStatusV1({
+          botId,
+          botName: bot.initialName,
+          runs,
+        });
+      },
+      readBotHistory: async (botId, limit) => {
+        const bot = await this.ownedBot(userId, botId);
+        const page = await this.botDoor(userId, botId).listRuns();
+        const runs = page.runs.slice(
+          -Math.max(1, Math.min(limit, VOICE_HISTORY_MAX_LIMIT_V1)),
+        );
+        return {
+          botId,
+          botName: bot.initialName,
+          runs,
+          hasMore: page.page.truncated || page.runs.length > runs.length,
+        };
+      },
+      searchBotHistory: async (botId, query, limit) => {
+        const bot = await this.ownedBot(userId, botId);
+        const results = rpcJsonSnapshotV1(
+          await this.userRpc(userId).searchTranscripts({
+            schemaVersion: 1,
+            userId,
+            query: {
+              schemaVersion: 1,
+              query,
+              botId,
+              kinds: ["user", "assistant"],
+            },
+          }),
+        ) as SearchIndexResultsV1;
+        const runIds = [
+          ...new Set(
+            results.hits
+              .filter((hit) => hit.botId === botId)
+              .map((hit) => hit.runId),
+          ),
+        ].slice(0, Math.min(limit, VOICE_HISTORY_MAX_LIMIT_V1));
+        const lookups = await Promise.all(
+          runIds.map((runId) =>
+            this.botDoor(userId, botId).lookupRun({ schemaVersion: 1, runId }),
+          ),
+        );
+        return {
+          botId,
+          botName: bot.initialName,
+          results,
+          runs: lookups.flatMap((lookup) =>
+            lookup.state === "not-admitted" ? [] : [lookup.run],
+          ),
+        };
       },
       askBot: async (botId, message) => {
-        const bot = await this.ownedBot(userId, botId);
+        // Both reads go out together: the directory says the Bot is the
+        // person's, its own object says what it is doing, and the sentence the
+        // model speaks has to be true about both.
+        const [bot, busy] = await Promise.all([
+          this.ownedBot(userId, botId),
+          this.botIsBusy(userId, botId),
+        ]);
         const admission = await this.ledger().admitDelegation({
           turnId,
           botId,
@@ -1690,7 +2010,12 @@ export class VoiceAssistant extends VoiceAgentBase<
         }
         this.dispatchDelegation(userId, admission.delegation);
         await this.scheduleDelegationCheck(admission.delegation.runId, 0);
-        return `Asked ${bot.initialName}. It is working on it in its own conversation; you will hear the answer when it settles.`;
+        // Never a blanket "working". A Bot that is mid-Turn queues this behind
+        // what it is already doing, and saying otherwise would be a claim the
+        // person could watch turn out to be false.
+        return busy
+          ? `Asked ${bot.initialName}. It is busy with something else right now, so this is queued behind it; you will hear the answer when it gets to it.`
+          : `Asked ${bot.initialName}. It is working on it in its own conversation; you will hear the answer when it settles.`;
       },
       cancelBot: async (botId) => {
         const bot = await this.ownedBot(userId, botId);
@@ -1731,10 +2056,20 @@ export class VoiceAssistant extends VoiceAgentBase<
   // -- delegations ----------------------------------------------------------
 
   /**
-   * Admits the Bot Turn. Detached from the spoken turn on purpose: the Bot's
-   * `run` door answers only when the Turn settles, which may be minutes, and
-   * the voice pipeline must not wait. The scheduled check below is what
-   * carries the answer back, whether or not this object stays resident.
+   * Admits the Bot Turn on the agent lane, under the return address this
+   * request was admitted with.
+   *
+   * Detached from the spoken turn on purpose: the Bot's door answers only when
+   * the Turn settles, which may be minutes, and the voice pipeline must not
+   * wait. The lane is what keeps a person mid-conversation with that Bot, or a
+   * Routine it is running, from being interrupted — a voice request queues
+   * behind them and never supersedes.
+   *
+   * Three things carry the answer back, and none of them is load-bearing on
+   * its own: the Bot's own durable outbox wakes this object the moment the
+   * answer is recorded, this call settling here checks immediately (which is
+   * what makes a failure prompt rather than a poll away), and the scheduled
+   * look-up below recovers whatever both of those lost.
    */
   protected dispatchDelegation(
     userId: string,
@@ -1743,20 +2078,77 @@ export class VoiceAssistant extends VoiceAgentBase<
     const door = this.botDoor(userId, delegation.botId);
     void this.ledger().noteDelegationDispatch(delegation.runId, this.now());
     const run = door
-      .run({
+      .runVoice({
         runId: delegation.runId,
         sessionId: `${userId}:${delegation.botId}`,
         acceptedAt: delegation.admittedAt,
         text: delegation.text,
+        source: {
+          kind: "voice",
+          callId: delegation.callId,
+          voiceTurnId: delegation.turnId,
+          requestId: delegation.runId,
+        },
       })
       .then(
-        () => undefined,
-        () => undefined,
-      );
+        () => this.checkDelegation({ runId: delegation.runId }),
+        () => this.checkDelegation({ runId: delegation.runId }),
+      )
+      .catch(() => undefined);
     this.ctx.waitUntil(run);
   }
 
-  private async scheduleDelegationCheck(runId: string, attempts: number) {
+  /**
+   * Books the next look-up.
+   *
+   * `dedupe` is the whole of the difference between the two callers, and it is
+   * not a preference. An idempotent insert matches on callback and payload
+   * alone, so a reschedule made from *inside* `checkDelegation` dedups onto the
+   * very row the scheduler is executing — and then deletes it. The chain stops
+   * after one attempt, the ledger keeps `attempts: 1` for ever, and the answer
+   * is never read out. Every reschedule from the callback books a fresh row.
+   *
+   * Waking the object is the other case: `onStart` re-books every pending
+   * delegation from the ledger with nothing executing, and there an idempotent
+   * insert is what keeps a cold start from stacking a row per wake.
+   */
+  /**
+   * Whether the Bot has a Turn running right now, read from its own object.
+   *
+   * A read, never a claim: a Bot that cannot be reached is reported as not
+   * busy, because the acknowledgement then falls back to the ordinary wording
+   * and the transcript still shows the truth.
+   */
+  private async botIsBusy(userId: string, botId: string): Promise<boolean> {
+    try {
+      const runs = await this.recentRuns(userId, botId);
+      return runs.some((run) => run.status === "running");
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * The Bot saying an answer is recorded. Its own durable outbox drains into
+   * this, so the wake-up costs one round trip from the settling transaction
+   * rather than a poll interval. It does exactly what the scheduled look-up
+   * does — reads the authoritative run record and settles the request against
+   * it — so a duplicate delivery, or one that races the poll, is a no-op.
+   */
+  async deliverVoiceReply(input: unknown): Promise<{ status: "accepted" }> {
+    const request = decodeVoiceReplyDeliveryV1(input);
+    if (request.userId !== this.name) {
+      throw new Error("not this account's voice object");
+    }
+    await this.checkDelegation({ runId: request.requestId });
+    return { status: "accepted" };
+  }
+
+  private async scheduleDelegationCheck(
+    runId: string,
+    attempts: number,
+    dedupe = false,
+  ) {
     const seconds = Math.min(
       DELEGATION_MAX_CHECK_SECONDS,
       DELEGATION_FIRST_CHECK_SECONDS * 2 ** Math.min(attempts, 8),
@@ -1765,7 +2157,7 @@ export class VoiceAssistant extends VoiceAgentBase<
       seconds,
       "checkDelegation",
       { runId },
-      { idempotent: true },
+      { idempotent: dedupe },
     );
   }
 
@@ -1797,6 +2189,7 @@ export class VoiceAssistant extends VoiceAgentBase<
           { failure: "the Bot never accepted the request" },
           this.now(),
         );
+        await this.speakSettledDelegation({ runId: delegation.runId });
         return;
       }
       const sentAgo = delegation.dispatchedAt
@@ -1814,13 +2207,17 @@ export class VoiceAssistant extends VoiceAgentBase<
     }
     const run = lookup.run;
     const outcome = run.outcome;
+    // Only a reply addressed to voice answers this request.
+    const answered = voiceReplyTextOfRunV1(run);
     const settled = await ledger.settleDelegation(
       delegation.runId,
-      outcome?.type === "completed"
-        ? { answer: outcome.text || "(no reply)" }
-        : run.status === "cancelled" || run.status === "superseded"
-          ? { cancelled: true }
-          : { failure: outcome ? outcome.message : run.status },
+      answered
+        ? { answer: answered }
+        : outcome?.type === "completed"
+          ? { failure: "the Bot finished without answering the voice request" }
+          : run.status === "cancelled" || run.status === "superseded"
+            ? { cancelled: true }
+            : { failure: outcome ? outcome.message : run.status },
       this.now(),
     );
     if (!settled || settled.state !== "settled") return;
@@ -1828,63 +2225,342 @@ export class VoiceAssistant extends VoiceAgentBase<
   }
 
   /**
-   * Reads a settled answer out on the live call, unless the assistant is
-   * mid-reply: the SDK's `speak` would cut that reply off, so the answer is
-   * held and this runs again once the reply has had time to finish. With no
-   * live call it stays `settled` and is read out at the next call's start.
-   * Public because the scheduler calls it by name.
+   * Reads a settled answer out on the live call, unless something is still
+   * being said: `speak` would cut it off, so the answer is held and this runs
+   * again once whatever is speaking has finished. With no live call it stays
+   * `settled` and is read out at the next call's start. Public because the
+   * scheduler calls it by name.
    */
   async speakSettledDelegation(payload: SpeakDelegationPayload): Promise<void> {
     const delegation = await this.ledger().readDelegation(payload.runId);
     if (!delegation || delegation.state !== "settled") return;
-    for (const [connectionId, call] of this.#calls) {
-      for (const connection of this.getConnections()) {
-        if (connection.id !== connectionId) continue;
-        if (this.replyInFlight(call)) {
-          this.trace(connection, "delegation-held", {
-            reason: "reply-in-flight",
-          });
-          // A fresh row every hold, never `idempotent`: an idempotent insert
-          // matches on callback and payload alone, so a re-hold from inside
-          // this very wake-up would dedup onto the row being executed, which
-          // the scheduler then deletes — and the answer would never be read
-          // out. This method re-reads the record and returns unless it is
-          // still `settled`, so an extra row is a harmless no-op.
-          await this.schedule<SpeakDelegationPayload>(
-            Math.max(1, Math.ceil(this.replyDrainQuietMs() / 1000)),
-            "speakSettledDelegation",
-            { runId: delegation.runId },
-            { idempotent: false },
-          );
-          return;
-        }
-        await this.speakDelegation(connection, delegation);
-        return;
-      }
+    const live = this.liveCall();
+    if (!live) return;
+    if (this.replyInFlight(live.call)) {
+      this.trace(live.connection, "delegation-held", {
+        reason: this.speakerPlaying(live.call)
+          ? "speaker-playing"
+          : live.call.pendingDelivery
+            ? "awaiting-played"
+            : "reply-in-flight",
+      });
+      // A fresh row every hold, never `idempotent`: an idempotent insert
+      // matches on callback and payload alone, so a re-hold from inside this
+      // very wake-up would dedup onto the row being executed, which the
+      // scheduler then deletes — and the answer would never be read out. This
+      // method re-reads the record and returns unless it is still `settled`,
+      // so an extra row is a harmless no-op. The client's own `voice/played`
+      // is the fast path; this is what covers a client that never sends one.
+      await this.scheduleReadOutRetry(delegation.runId);
+      return;
     }
+    await this.speakDelegation(live.connection, delegation);
   }
 
+  /**
+   * A read-out whose audio never arrived, booked to run again. The first few
+   * go at the drain interval, because most failures are a blip that clears in
+   * seconds. After that this answer falls back to the slow nudge for the rest
+   * of the call: it stays `settled` and owed either way, and a provider that
+   * is down must not be asked for the same sentence every few seconds.
+   *
+   * Only the speaker actually failing spends that allowance. A read-out the
+   * person talked over, or one whose call was replaced, ends in the same
+   * rejection — the interrupt aborts the synthesis in flight — and says
+   * nothing about the provider, so it takes the uncounted retry instead.
+   */
+  private async retryFailedReadOut(
+    connection: Connection,
+    call: LiveCall,
+    generation: number,
+    runId: string,
+  ): Promise<void> {
+    if (
+      this.#calls.get(connection.id) !== call ||
+      call.speechGeneration !== generation
+    ) {
+      await this.scheduleReadOutRetry(runId);
+      return;
+    }
+    const failures = (call.readOutFailures.get(runId) ?? 0) + 1;
+    call.readOutFailures.set(runId, failures);
+    if (failures < DELEGATION_READ_OUT_MAX_ATTEMPTS) {
+      await this.scheduleReadOutRetry(runId);
+      return;
+    }
+    await this.scheduleDelegationDrain();
+  }
+
+  /** The slow nudge that covers a client that never acknowledges. */
+  private async scheduleDelegationDrain(): Promise<void> {
+    // Booked fresh, because it is scheduled from inside the callback that may
+    // be executing right now and an idempotent row would dedup onto it.
+    await this.schedule(
+      Math.max(1, Math.ceil(this.playbackAckTimeoutMs() / 1000)),
+      "drainSettledDelegations",
+      {},
+      { idempotent: false },
+    );
+  }
+
+  private async scheduleReadOutRetry(runId: string): Promise<void> {
+    if (!this.liveCall()) return;
+    // A callback must not deduplicate its replacement onto its executing row.
+    await this.schedule<SpeakDelegationPayload>(
+      Math.max(1, Math.ceil(this.replyDrainQuietMs() / 1000)),
+      "speakSettledDelegation",
+      { runId },
+      { idempotent: false },
+    );
+  }
+
+  /** The connection holding the live call, when one is here. */
+  private liveCall(): { connection: Connection; call: LiveCall } | undefined {
+    for (const [connectionId, call] of this.#calls) {
+      for (const connection of this.getConnections()) {
+        if (connection.id === connectionId) return { connection, call };
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * The oldest answer still owed, for a client whose acknowledgement never
+   * arrived. Public because the scheduler calls it by name.
+   */
+  async drainSettledDelegations(): Promise<void> {
+    await this.speakNextSettledDelegation();
+  }
+
+  /**
+   * The oldest answer still owed, read out now if the call is quiet. Called
+   * when a read-out finishes playing, so a queue of answers empties at the
+   * person's pace rather than on a timer.
+   */
+  private async speakNextSettledDelegation(): Promise<void> {
+    const [next] = await this.ledger().unspokenDelegations();
+    if (!next) return;
+    await this.speakSettledDelegation({ runId: next.runId });
+  }
+
+  /**
+   * The sentence that reads one answer back, bought at most once.
+   *
+   * Putting an answer into the assistant's own voice is a model call, so it
+   * follows the rule every model call here follows: durable intent and the
+   * day's meter first, the result recorded after, and never repeated for a
+   * call that was admitted and whose outcome is unknown. The plain read-out is
+   * the fallback in every refused case — the person is owed the answer, not a
+   * nicer phrasing of it, and it says the same thing the Bot said.
+   */
+  private async delegationSpeech(
+    ledger: VoiceLedgerV1,
+    delegation: VoiceDelegationRecordV1,
+  ): Promise<string> {
+    const result = {
+      botName: delegation.botName,
+      question: delegation.text,
+      askedAt: new Date(delegation.admittedAt),
+      ...(delegation.answer ? { answer: delegation.answer } : {}),
+      ...(delegation.failure ? { failure: delegation.failure } : {}),
+    };
+    const admission = await ledger.admitDelegationSpeech(
+      delegation.runId,
+      this.now(),
+    );
+    if (admission.status === "cached") return admission.speech;
+    if (admission.status === "refused") {
+      return renderVoiceDelegationReadOutV1(result);
+    }
+    const spoken = await composeVoiceDelegationSpeechV1(
+      { chat: (body, signal) => this.chatCompletion(body, signal) },
+      result,
+      this.now(),
+      AbortSignal.timeout(VOICE_RESULT_COMPOSE_TIMEOUT_MS),
+    );
+    // Durable before the audio: an eviction between here and the speaker
+    // loses the read-out, never the sentence it was going to say.
+    await ledger.recordDelegationSpeech(delegation.runId, spoken);
+    return spoken;
+  }
+
+  /**
+   * Hands one answer to the speaker, on this call's own queue.
+   *
+   * Two things have to hold, and the queue alone gives only the first.
+   *
+   * The queue makes the read-outs sequential: two answers that settle in the
+   * same instant are two `speak` calls one after another, never two racing
+   * into one speaker — the second aborts the first, and the person hears half
+   * of each.
+   *
+   * But `speak` resolves when the last chunk is handed over, not when it is
+   * heard, so a queue that only waited on `speak` would start the next answer
+   * over audio still playing. Every decision is therefore re-made *inside* the
+   * serialized body, against the call as it is by then: whether this
+   * connection still holds the call, whether anything is still being said, and
+   * whether this answer is still owed. An answer that arrives at its turn in
+   * the queue to find the speaker busy is put back — it stays `settled`, and
+   * the acknowledgement that ends the current read-out drains it next.
+   */
   private async speakDelegation(
     connection: Connection,
     delegation: VoiceDelegationRecordV1,
   ) {
-    const text = delegation.answer
-      ? `${delegation.botName} says: ${delegation.answer.slice(0, 600)}`
-      : `${delegation.botName} could not finish that: ${delegation.failure ?? "it stopped"}.`;
-    // This sound belongs to no turn: the last one is over, and its clock
-    // would make this read-out look like a reply that took minutes.
     const call = this.#calls.get(connection.id);
-    if (call) {
+    if (!call) return;
+    let generation = call.speechGeneration;
+    const chained = call.speechChain.then(async () => {
+      // Re-checked here, not at the call site: everything below was decided
+      // before whatever ran ahead of this in the queue.
+      if (this.#calls.get(connection.id) !== call) return;
+      if (this.replyInFlight(call)) {
+        this.trace(connection, "delegation-held", {
+          reason: this.speakerPlaying(call)
+            ? "speaker-playing"
+            : "awaiting-played",
+        });
+        // Still owed and still oldest-first: the acknowledgement of what is
+        // playing now calls `speakNextSettledDelegation`, and the scheduled
+        // nudge already booked by that read-out covers a client that never
+        // acknowledges. Nothing is dropped by returning here.
+        await this.scheduleReadOutRetry(delegation.runId);
+        return;
+      }
+      const ledger = this.ledger();
+      // Composed before anything is claimed, because composing is a model
+      // call that can take seconds and the call is free to change under it.
+      // Nothing durable about the read-out is written until after it.
+      generation = call.speechGeneration;
+      const text = await this.delegationSpeech(ledger, delegation);
+      // The call as it is *now*. A new utterance, a reply that started, or a
+      // socket that went, all happened while the sentence was being written,
+      // and speaking into any of them would cut off the person's own turn or
+      // talk to a connection nobody is on. The sentence is durable by now, so
+      // putting the answer back costs nothing and it is read out next.
+      if (
+        this.#calls.get(connection.id) !== call ||
+        call.speechGeneration !== generation ||
+        this.replyInFlight(call)
+      ) {
+        this.trace(connection, "delegation-held", { reason: "displaced" });
+        await this.scheduleReadOutRetry(delegation.runId);
+        return;
+      }
+      const deliveryId = await ledger.beginDelegationReadOut(
+        delegation.runId,
+        this.now(),
+      );
+      // Settled a moment ago and already read out by another path, or no
+      // longer owed at all. This is also what makes two completion signals for
+      // one request mint one delivery rather than two: the second finds the
+      // record no longer `settled`, or finds this one already in flight.
+      if (!deliveryId) return;
+      // Once more, because minting the delivery was itself an await. Every gap
+      // between deciding to speak and speaking is a gap the person can talk
+      // into, and this is the last one. The record stays `settled`: the
+      // delivery id it now carries is simply never used, and the next read-out
+      // mints another.
+      if (
+        this.#calls.get(connection.id) !== call ||
+        call.speechGeneration !== generation ||
+        this.replyInFlight(call)
+      ) {
+        this.trace(connection, "delegation-held", { reason: "displaced" });
+        await this.scheduleReadOutRetry(delegation.runId);
+        return;
+      }
+      // This sound belongs to no turn: the last one is over, and its clock
+      // would make this read-out look like a reply that took minutes.
       call.turnId = undefined;
       call.turnStartedAt = undefined;
       call.turnSettledAt = undefined;
-    }
-    try {
-      await this.speak(connection, text);
-      await this.ledger().markSpoken(delegation.runId, this.now());
-    } catch {
-      // Left `settled`; it is read out on the next call.
-    }
+      call.pendingDelivery = {
+        deliveryId,
+        runId: delegation.runId,
+        armedAt: Date.now(),
+        text,
+        audioBytes: 0,
+        synthesisFailed: false,
+        suppressed: false,
+        ready: false,
+      };
+      this.send(connection, {
+        schemaVersion: 1,
+        type: "voice/answer",
+        deliveryId,
+        botName: delegation.botName.slice(0, 100),
+      });
+      this.trace(connection, "delegation-read-out", { delivery: deliveryId });
+      try {
+        await this.speak(connection, text);
+      } catch {
+        // The audio never left. It is still `settled`, so it is owed, and the
+        // next call reads it out.
+        if (call.pendingDelivery?.deliveryId === deliveryId) {
+          call.pendingDelivery = undefined;
+        }
+        await this.retryFailedReadOut(
+          connection,
+          call,
+          generation,
+          delegation.runId,
+        );
+        return;
+      }
+      const pending = call.pendingDelivery;
+      if (
+        this.#calls.get(connection.id) !== call ||
+        call.speechGeneration !== generation ||
+        pending?.deliveryId !== deliveryId
+      ) {
+        await this.scheduleReadOutRetry(delegation.runId);
+        return;
+      }
+      if (!pending.audioBytes || pending.synthesisFailed) {
+        // The SDK can finish normally without producing a complete delivery.
+        // Only this delivery's own suppression means there was no audio to
+        // have: the speech cap refused it, and retrying would refuse again.
+        // Any other cause is recoverable and is retried promptly.
+        if (!pending.suppressed) {
+          call.pendingDelivery = undefined;
+          await this.retryFailedReadOut(
+            connection,
+            call,
+            generation,
+            delegation.runId,
+          );
+          return;
+        }
+        await this.scheduleDelegationDrain();
+        return;
+      }
+      pending.ready = true;
+      call.readOutFailures.delete(delegation.runId);
+      // `speak` resolving means the last chunk was handed over, not that it
+      // was heard. This tells the client that is all of it, so a drain from
+      // here on is the whole answer rather than a gap between chunks.
+      this.send(connection, {
+        schemaVersion: 1,
+        type: "voice/answer-end",
+        deliveryId,
+      });
+      // The client's acknowledgement is what normally starts the next answer.
+      // This is the same nudge for a client that never sends one: booked
+      // fresh, because it is scheduled from inside the callback that may be
+      // executing right now and an idempotent row would dedup onto it.
+      await this.scheduleDelegationDrain();
+    });
+    call.speechChain = chained.catch(async () => {
+      this.trace(connection, "delegation-read-out-failed");
+      await this.retryFailedReadOut(
+        connection,
+        call,
+        generation,
+        delegation.runId,
+      );
+    });
+    await call.speechChain;
   }
 
   // -- dictation lease ------------------------------------------------------
@@ -1947,6 +2623,7 @@ export class VoiceAssistant extends VoiceAgentBase<
     return stub as unknown as UserMemoryRpc & {
       listBots(input: unknown): Promise<unknown>;
       readConfiguration(input: unknown): Promise<UserSettingsViewV1>;
+      searchTranscripts(input: unknown): Promise<SearchIndexResultsV1>;
     };
   }
 
@@ -1956,18 +2633,24 @@ export class VoiceAssistant extends VoiceAgentBase<
     );
     // SAFETY: the binding names BotState; these are its reviewed RPC doors.
     const rpc = stub as unknown as {
-      run(input: unknown): Promise<unknown>;
+      runVoice(input: unknown): Promise<unknown>;
       lookupRun(input: unknown): Promise<unknown>;
       listRuns(input: unknown): Promise<unknown>;
       stopRun(input: unknown): Promise<unknown>;
     };
     return {
-      run: (command: {
+      runVoice: (command: {
         runId: string;
         sessionId: string;
         acceptedAt: string;
         text: string;
-      }) => rpc.run({ schemaVersion: 1, userId, botId, command }),
+        source: {
+          kind: "voice";
+          callId: string;
+          voiceTurnId: string;
+          requestId: string;
+        };
+      }) => rpc.runVoice({ schemaVersion: 1, userId, botId, command }),
       lookupRun: async (query: { schemaVersion: 1; runId: string }) =>
         rpcJsonSnapshotV1(
           await rpc.lookupRun({ schemaVersion: 1, userId, botId, query }),
@@ -1980,7 +2663,7 @@ export class VoiceAssistant extends VoiceAgentBase<
             botId,
             query: { schemaVersion: 1 },
           }),
-        ) as { runs: ClientRunV1[] },
+        ) as { runs: ClientRunV1[]; page: { truncated: boolean } },
       stopRun: (command: {
         schemaVersion: 1;
         action: "stop";

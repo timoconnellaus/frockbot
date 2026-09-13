@@ -13,9 +13,11 @@ import androidx.core.view.WindowInsetsControllerCompat
 
 class MainActivity : FlutterActivity() {
     private var fullscreen = false
+    private var speaker: PcmSpeaker? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        speaker = PcmSpeaker(flutterEngine.dartExecutor.binaryMessenger)
         PushNotifications.setup(this)
         val bridge = MethodChannel(flutterEngine.dartExecutor.binaryMessenger,"frockbot/push")
         PushNotifications.bridge = bridge
@@ -64,7 +66,7 @@ class MainActivity : FlutterActivity() {
 
     override fun onResume() { super.onResume(); PushNotifications.foreground = true; PushNotifications.changed("focus",PushNotifications.focused()) }
     override fun onPause() { PushNotifications.foreground = false; PushNotifications.changed("focus",false); super.onPause() }
-    override fun cleanUpFlutterEngine(engine: FlutterEngine) { PushNotifications.bridge = null; super.cleanUpFlutterEngine(engine) }
+    override fun cleanUpFlutterEngine(engine: FlutterEngine) { speaker?.close(); speaker = null; PushNotifications.bridge = null; super.cleanUpFlutterEngine(engine) }
 
     private fun applyFullscreen() {
         val controller = WindowCompat.getInsetsController(window, window.decorView)

@@ -200,6 +200,82 @@ describe("voice ledger delegations", () => {
     expect((await l.meter(t0)).delegations).toBe(1);
   });
 
+  test("answer composition is metered once and playback retries reuse its durable result", async () => {
+    const { ledger: l } = ledger();
+    const admitted = await turn(l);
+    const request = await l.admitDelegation({
+      turnId: admitted.turnId,
+      botId: "remy",
+      botName: "Remy",
+      text: "launch status",
+      at: t0,
+    });
+    if (request.status !== "admitted") throw new Error("expected request");
+    const id = request.delegation.runId;
+    await l.settleDelegation(id, { answer: "The launch is ready." }, t0);
+    expect(await l.admitDelegationSpeech(id, t0)).toEqual({
+      status: "admitted",
+    });
+    expect((await l.meter(t0)).turns).toBe(2);
+    expect((await l.admitDelegationSpeech(id, t0)).status).toBe("refused");
+    await l.recordDelegationSpeech(id, "Remy says the launch is ready.");
+    await l.beginDelegationReadOut(id, t0);
+    expect(await l.admitDelegationSpeech(id, later(1_000))).toEqual({
+      status: "cached",
+      speech: "Remy says the launch is ready.",
+    });
+    expect((await l.meter(t0)).turns).toBe(2);
+  });
+
+  test("an unknown composition outcome is never paid for again after recovery", async () => {
+    const { ledger: l } = ledger();
+    const admitted = await turn(l);
+    const request = await l.admitDelegation({
+      turnId: admitted.turnId,
+      botId: "remy",
+      botName: "Remy",
+      text: "launch status",
+      at: t0,
+    });
+    if (request.status !== "admitted") throw new Error("expected request");
+    const id = request.delegation.runId;
+    await l.settleDelegation(id, { answer: "The launch is ready." }, t0);
+    await l.admitDelegationSpeech(id, t0);
+    await l.recover(later(1_000));
+    expect((await l.readDelegation(id))?.speechState).toBe("abandoned");
+    expect((await l.admitDelegationSpeech(id, later(1_000))).status).toBe(
+      "refused",
+    );
+    expect((await l.meter(t0)).turns).toBe(2);
+    expect(
+      (await l.unspokenDelegations()).map((record) => record.runId),
+    ).toEqual([id]);
+  });
+
+  test("composition respects the same daily model cap as spoken turns", async () => {
+    const { ledger: l } = ledger({
+      sttSeconds: 100,
+      ttsCharacters: 100,
+      turns: 1,
+      delegations: 10,
+      dictationSeconds: 100,
+    });
+    const admitted = await turn(l);
+    const request = await l.admitDelegation({
+      turnId: admitted.turnId,
+      botId: "remy",
+      botName: "Remy",
+      text: "launch status",
+      at: t0,
+    });
+    if (request.status !== "admitted") throw new Error("expected request");
+    const id = request.delegation.runId;
+    await l.settleDelegation(id, { answer: "The launch is ready." }, t0);
+    expect((await l.admitDelegationSpeech(id, t0)).status).toBe("refused");
+    expect((await l.readDelegation(id))?.speechState).toBeUndefined();
+    expect((await l.meter(t0)).turns).toBe(1);
+  });
+
   test("a different question to the same Bot is a different run", async () => {
     const { ledger: l } = ledger();
     const admitted = await turn(l);
@@ -251,9 +327,62 @@ describe("voice ledger delegations", () => {
       later(200),
     );
     expect((await l.readDelegation(a.delegation.runId))?.answer).toBe("done");
-    await l.markSpoken(a.delegation.runId, later(300));
+    // Being read out is not being heard: until an acknowledgement names this
+    // exact delivery, the answer is still owed.
+    const deliveryId = await l.beginDelegationReadOut(
+      a.delegation.runId,
+      later(250),
+    );
+    expect(deliveryId).toBe(`${a.delegation.runId}#1`);
+    expect((await l.unspokenDelegations()).map((d) => d.answer)).toEqual([
+      "done",
+    ]);
+    expect(await l.markSpoken(a.delegation.runId, "wrong", later(280))).toBe(
+      false,
+    );
+    expect((await l.readDelegation(a.delegation.runId))?.state).toBe("settled");
+    expect(
+      await l.markSpoken(a.delegation.runId, deliveryId!, later(300)),
+    ).toBe(true);
     expect(await l.unspokenDelegations()).toEqual([]);
     expect((await l.readDelegation(a.delegation.runId))?.state).toBe("spoken");
+  });
+
+  test("an interrupted read-out is owed again, under a new delivery id", async () => {
+    const { ledger: l } = ledger();
+    const admitted = await turn(l);
+    const a = await l.admitDelegation({
+      turnId: admitted.turnId,
+      botId: "remy",
+      botName: "Remy",
+      text: "one",
+      at: t0,
+    });
+    if (a.status !== "admitted") throw new Error();
+    await l.settleDelegation(a.delegation.runId, { answer: "done" }, later(10));
+    const first = await l.beginDelegationReadOut(a.delegation.runId, later(20));
+    // The person cut it off. Nothing acknowledged it, so it is still unheard.
+    expect((await l.unspokenDelegations()).map((d) => d.runId)).toEqual([
+      a.delegation.runId,
+    ]);
+    const second = await l.beginDelegationReadOut(
+      a.delegation.runId,
+      later(30),
+    );
+    expect(second).not.toBe(first);
+    // The cut-off delivery's acknowledgement arriving late cannot claim the
+    // one that replaced it.
+    expect(await l.markSpoken(a.delegation.runId, first!, later(40))).toBe(
+      false,
+    );
+    expect(await l.markSpoken(a.delegation.runId, second!, later(50))).toBe(
+      true,
+    );
+    expect((await l.readDelegation(a.delegation.runId))?.state).toBe("spoken");
+    // And an answer nobody is reading out has no delivery to acknowledge.
+    expect(
+      await l.beginDelegationReadOut(a.delegation.runId, later(60)),
+    ).toBeUndefined();
   });
 
   test("per-turn and daily caps refuse further delegations", async () => {

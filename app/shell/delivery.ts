@@ -1,5 +1,6 @@
 import type { LoopHooksV1, SessionEvent } from "@frockbot/core/contracts";
 import { turnTypesByTurnV1 } from "./history.js";
+import { REPLY_TO_REQUEST_TOOL_V1 } from "./reply-to-caller.js";
 
 export const UNSENT_REPLY_REASON_V1 =
   "The model finished without sending a reply. Try again.";
@@ -19,9 +20,34 @@ export const UNSENT_REPLY_REASON_V1 =
  *
  * The disposition is already durable in tool/call; tie it to a successful send.
  */
+/**
+ * Whether this Turn owes its answer to a caller rather than to the User.
+ *
+ * Read off the Turn's own model requests: `reply_to_request` is mounted only
+ * on a Turn that has a caller, and every request the Turn dispatched is
+ * durable with the tools it offered. So this survives eviction and replay
+ * without a second record of the same fact, and a Turn with no caller is
+ * byte-for-byte what it always was.
+ */
+function callerAddressedV1(
+  events: readonly SessionEvent[],
+  turn: number,
+): boolean {
+  return events.some(
+    (event) =>
+      "turn" in event &&
+      event.turn === turn &&
+      event.type === "model/request" &&
+      event.request.tools.some(
+        (tool) => tool.name === REPLY_TO_REQUEST_TOOL_V1,
+      ),
+  );
+}
+
 function delivery(events: readonly SessionEvent[], turn: number) {
   let attempts = 0;
   let repair = false;
+  const addressed = callerAddressedV1(events, turn);
   const finalCalls = new Set<string>();
   for (const event of events) {
     if (!("turn" in event) || event.turn !== turn) continue;
@@ -35,11 +61,21 @@ function delivery(events: readonly SessionEvent[], turn: number) {
       )
         finalCalls.add(event.occurrenceId);
     }
+    // The answer a caller asked for is what ends a caller-addressed Turn, and
+    // the only thing that does.
+    if (event.type === "reply/to-caller") {
+      return { required: false, attempts: 0, repair: false };
+    }
     if (event.type === "send/to-user") {
+      // A send still reaches the User, and still proves the Turn can deliver
+      // — but on a Turn somebody is waiting to *hear* from, it is not the
+      // answer. A `disposition: "finish"` send would otherwise end the Turn
+      // with the caller never answered and the person listening to silence.
       if (
-        finalCalls.has(event.occurrenceId) ||
-        event.payload.type === "widget" ||
-        event.payload.type === "approval"
+        !addressed &&
+        (finalCalls.has(event.occurrenceId) ||
+          event.payload.type === "widget" ||
+          event.payload.type === "approval")
       )
         return { required: false, attempts: 0, repair: false };
       attempts = 0;
@@ -72,9 +108,21 @@ export const conversationDeliveryHooksV1: LoopHooksV1 = {
     // Repair the step that failed to deliver, not the rest of the Turn: a Bot
     // that has already spoken keeps every tool it needs to finish the work.
     if (!state.required || !state.repair) return request;
+    // A Turn that has a caller to answer repairs with its own reply tool; one
+    // that does not repairs with the send. Naming a tool the Turn was never
+    // offered is how a repair step turns into a second failed step.
+    const replyTools = request.tools.filter(
+      (tool) =>
+        tool.name === "send_to_user" || tool.name === REPLY_TO_REQUEST_TOOL_V1,
+    );
+    const answerTool = replyTools.some(
+      (tool) => tool.name === REPLY_TO_REQUEST_TOOL_V1,
+    )
+      ? REPLY_TO_REQUEST_TOOL_V1
+      : "send_to_user";
     return {
       ...request,
-      system: `${request.system}\n\nYour previous step ended without delivering a reply. Your assistant text is private. Call \`send_to_user\` now with the answer, result, or blocker. Do not repeat work you have already done.`,
+      system: `${request.system}\n\nYour previous step ended without delivering a reply. Your assistant text is private. Call \`${answerTool}\` now with the answer, result, or blocker. Do not repeat work you have already done.`,
       // Some providers continue the trailing assistant message even when the
       // system prompt changes. A labelled runtime instruction makes this a
       // new model step; it is recorded in the request, never as User input.
@@ -83,10 +131,12 @@ export const conversationDeliveryHooksV1: LoopHooksV1 = {
         {
           role: "user",
           content:
-            '[FrockBot runtime: delivery repair]\nYour previous response was not delivered. Call send_to_user now with the answer, result, or blocker for the original request. For text, use {"disposition":"finish","payload":{"type":"text","text":"your reply"}}. Do not answer in plain text or repeat completed work.',
+            answerTool === REPLY_TO_REQUEST_TOOL_V1
+              ? `[FrockBot runtime: delivery repair]\nYour previous response was not delivered. Call ${REPLY_TO_REQUEST_TOOL_V1} now with the answer, result, or blocker for the original request, as {"answer":"your reply"}. Do not answer in plain text or repeat completed work.`
+              : '[FrockBot runtime: delivery repair]\nYour previous response was not delivered. Call send_to_user now with the answer, result, or blocker for the original request. For text, use {"disposition":"finish","payload":{"type":"text","text":"your reply"}}. Do not answer in plain text or repeat completed work.',
         },
       ],
-      tools: request.tools.filter((tool) => tool.name === "send_to_user"),
+      tools: replyTools,
     };
   },
   async stepContinuation(agent, _decision, turn, _step, _signal, next) {

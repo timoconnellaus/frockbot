@@ -184,7 +184,9 @@ class _TranscriptViewState extends State<TranscriptView> {
       final row = GestureDetector(
         key: ValueKey('row:${line.id}'),
         onLongPress:
-            widget.onMessageActions == null || line.role == LineRole.system
+            widget.onMessageActions == null ||
+                line.role == LineRole.system ||
+                line.voiceExchange != null
             ? null
             : () => widget.onMessageActions!(line),
         onSecondaryTapUp:
@@ -334,6 +336,13 @@ class _TranscriptViewState extends State<TranscriptView> {
     TranscriptLine line,
     SupersedeDrainState drain,
   ) {
+    if (line.voiceExchange != null) {
+      return _VoiceExchangeCard(
+        line: line,
+        onOpenRun: onOpenRun,
+        onOpenLink: onOpenLink,
+      );
+    }
     if (line.role == LineRole.system) {
       return _Announcement(text: line.text);
     }
@@ -598,6 +607,97 @@ class _EmptyThread extends StatelessWidget {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _VoiceExchangeCard extends StatelessWidget {
+  final TranscriptLine line;
+  final void Function(TranscriptLine) onOpenRun;
+  final void Function(String)? onOpenLink;
+  const _VoiceExchangeCard({
+    required this.line,
+    required this.onOpenRun,
+    this.onOpenLink,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final exchange = line.voiceExchange!;
+    final blue = theme.brightness == Brightness.dark
+        ? const Color(0xff91caff)
+        : const Color(0xff185c9a);
+    final status = switch (exchange.status) {
+      VoiceExchangeStatus.queued => 'Queued',
+      VoiceExchangeStatus.working => 'Working',
+      VoiceExchangeStatus.answered => 'Answered',
+      VoiceExchangeStatus.stopped => 'Stopped',
+      VoiceExchangeStatus.failed => 'Couldn’t answer',
+    };
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Container(
+        key: ValueKey('voice-exchange:${line.runId}'),
+        constraints: const BoxConstraints(maxWidth: 720),
+        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        decoration: BoxDecoration(
+          color: blue.withValues(alpha: 0.08),
+          border: Border.all(color: blue.withValues(alpha: 0.3)),
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Theme(
+          data: theme.copyWith(dividerColor: Colors.transparent),
+          child: ExpansionTile(
+            initiallyExpanded: true,
+            leading: Icon(Icons.graphic_eq_rounded, color: blue),
+            iconColor: blue,
+            collapsedIconColor: blue,
+            title: Text(
+              'Voice session',
+              style: theme.textTheme.titleSmall?.copyWith(color: blue),
+            ),
+            subtitle: Text(
+              status,
+              style: theme.textTheme.labelSmall?.copyWith(color: blue),
+            ),
+            childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            expandedCrossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Request to Bot',
+                style: theme.textTheme.labelSmall?.copyWith(color: blue),
+              ),
+              const SizedBox(height: 4),
+              SelectableText(exchange.request),
+              if (exchange.reply != null) ...[
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  child: Divider(height: 1, color: blue.withValues(alpha: 0.2)),
+                ),
+                Text(
+                  'Reply to voice',
+                  style: theme.textTheme.labelSmall?.copyWith(color: blue),
+                ),
+                const SizedBox(height: 4),
+                ShellMarkdown(text: exchange.reply!, onOpenLink: onOpenLink),
+              ],
+              if (exchange.status == VoiceExchangeStatus.queued) ...[
+                const SizedBox(height: 8),
+                Text(
+                  'Waiting for the Bot to finish its current work.',
+                  style: theme.textTheme.bodySmall,
+                ),
+              ],
+              if (line.tools.isNotEmpty || line.pluginCalls.isNotEmpty)
+                TextButton(
+                  onPressed: () => onOpenRun(line),
+                  child: const Text('View activity'),
+                ),
+            ],
+          ),
         ),
       ),
     );

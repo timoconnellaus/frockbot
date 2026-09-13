@@ -65,6 +65,13 @@ interface Opened {
   closed: Promise<{ code: number; reason: string }>;
 }
 
+function binaryFrameBytes(value: unknown): number {
+  if (value instanceof ArrayBuffer || ArrayBuffer.isView(value))
+    return value.byteLength;
+  if (value instanceof Blob) return value.size;
+  throw new Error("unexpected binary voice frame");
+}
+
 async function open(
   userId: string,
   headers: Record<string, string> = {},
@@ -95,7 +102,7 @@ async function open(
   }[] = [];
   socket.addEventListener("message", (event) => {
     if (typeof event.data !== "string") {
-      audio.push((event.data as ArrayBuffer).byteLength);
+      audio.push(binaryFrameBytes(event.data));
       return;
     }
     const frame = JSON.parse(event.data) as Record<string, unknown>;
@@ -135,6 +142,168 @@ async function open(
       });
     },
   };
+}
+
+/**
+ * A client with a working speaker.
+ *
+ * The real one reports its player: sound is going out while a read-out is
+ * arriving, and when the last of it has drained it acknowledges that exact
+ * delivery. A test that only asserted the frames went down the wire would
+ * prove nothing about whether the answer was ever played, which is the whole
+ * of the distinction the server draws.
+ */
+function playsAnswers(opened: Opened): { played: string[] } {
+  const played: string[] = [];
+  const ended = new Set<string>();
+  const audible = new Set<string>();
+  let current: string | undefined;
+  const drain = () => {
+    const delivery = current;
+    if (!delivery || !ended.has(delivery) || !audible.has(delivery)) return;
+    current = undefined;
+    ended.delete(delivery);
+    audible.delete(delivery);
+    opened.socket.send(
+      JSON.stringify({
+        schemaVersion: 1,
+        type: "voice/speech",
+        playing: false,
+      }),
+    );
+    opened.socket.send(
+      JSON.stringify({
+        schemaVersion: 1,
+        type: "voice/played",
+        deliveryId: delivery,
+      }),
+    );
+    played.push(delivery);
+  };
+  opened.socket.addEventListener("message", (event) => {
+    if (opened.socket.readyState !== WebSocket.OPEN) return;
+    if (typeof event.data !== "string") {
+      if (current && binaryFrameBytes(event.data) > 0) {
+        audible.add(current);
+        opened.socket.send(
+          JSON.stringify({
+            schemaVersion: 1,
+            type: "voice/speech",
+            playing: true,
+          }),
+        );
+        drain();
+      }
+      return;
+    }
+    const frame = JSON.parse(event.data) as Record<string, unknown>;
+    if (frame.type === "voice/answer") {
+      current = frame.deliveryId as string;
+    }
+    if (frame.type === "playback_interrupt") current = undefined;
+    if (frame.type === "voice/answer-end") {
+      ended.add(frame.deliveryId as string);
+      drain();
+    }
+  });
+  return { played };
+}
+
+/**
+ * A speaker the test drives by hand: it reports playing, and acknowledges only
+ * when the test says so. What it exists to prove is that the server waits for
+ * the acknowledgement rather than for `speak` to return.
+ */
+function holdsAnswers(opened: Opened): {
+  started: string[];
+  finish(deliveryId: string): void;
+} {
+  const started: string[] = [];
+  const finished = new Set<string>();
+  const ended = new Set<string>();
+  const audible = new Set<string>();
+  let current: string | undefined;
+  const drain = () => {
+    if (
+      !current ||
+      !finished.has(current) ||
+      !ended.has(current) ||
+      !audible.has(current)
+    )
+      return;
+    const deliveryId = current;
+    current = undefined;
+    opened.socket.send(
+      JSON.stringify({
+        schemaVersion: 1,
+        type: "voice/speech",
+        playing: false,
+      }),
+    );
+    opened.socket.send(
+      JSON.stringify({ schemaVersion: 1, type: "voice/played", deliveryId }),
+    );
+  };
+  opened.socket.addEventListener("message", (event) => {
+    if (opened.socket.readyState !== WebSocket.OPEN) return;
+    if (typeof event.data !== "string") {
+      if (current && binaryFrameBytes(event.data) > 0) {
+        audible.add(current);
+        opened.socket.send(
+          JSON.stringify({
+            schemaVersion: 1,
+            type: "voice/speech",
+            playing: true,
+          }),
+        );
+        drain();
+      }
+      return;
+    }
+    const frame = JSON.parse(event.data) as Record<string, unknown>;
+    if (frame.type === "voice/answer") {
+      current = frame.deliveryId as string;
+      started.push(current);
+    }
+    if (frame.type === "voice/answer-end") {
+      ended.add(frame.deliveryId as string);
+      drain();
+    }
+    if (frame.type === "playback_interrupt") current = undefined;
+  });
+  return {
+    started,
+    finish(deliveryId) {
+      finished.add(deliveryId);
+      drain();
+    },
+  };
+}
+
+/** A client whose speaker is cut off part-way: it never acknowledges. */
+function interruptsAnswers(opened: Opened): { armed: string[] } {
+  const armed: string[] = [];
+  let current: string | undefined;
+  opened.socket.addEventListener("message", (event) => {
+    if (opened.socket.readyState !== WebSocket.OPEN) return;
+    if (typeof event.data !== "string") {
+      if (current && binaryFrameBytes(event.data) > 0) {
+        armed.push(current);
+        current = undefined;
+        opened.socket.send(
+          JSON.stringify({
+            schemaVersion: 1,
+            type: "voice/speech",
+            playing: true,
+          }),
+        );
+      }
+      return;
+    }
+    const frame = JSON.parse(event.data) as Record<string, unknown>;
+    if (frame.type === "voice/answer") current = frame.deliveryId as string;
+  });
+  return { armed };
 }
 
 const status = (value: string) => (frame: Record<string, unknown>) =>
@@ -668,19 +837,818 @@ describe("the voice session object", () => {
         typeof settled[0]!.failure === "string",
     ).toBe(true);
 
-    // The next call reads the answer out first and marks it spoken.
+    // The next call reads the answer out first, and it is marked spoken only
+    // once that client's own speaker says it played the whole of it.
     const next = await open(identity.userId);
+    const speaker = playsAnswers(next);
     await startCall(next);
     await next.waitFor(
       (f) =>
         f.type === "transcript_end" && String(f.text).startsWith("Workerd Bot"),
       "answer read out",
     );
+    const spoken = await eventually(
+      async () =>
+        (
+          Object.values(
+            await stub.probeStorage("voice:delegation:"),
+          ) as VoiceDelegationRecordV1[]
+        )[0]!,
+      (record) => record.state === "spoken",
+      "the answer to be marked spoken once its audio played",
+    );
+    expect(speaker.played).toEqual([spoken.deliveryId]);
+    next.socket.close();
+  });
+
+  test("two answers coming due together are read out one at a time", async () => {
+    const suffix = crypto.randomUUID();
+    const identity = {
+      userId: `voice-serial-${suffix}`,
+      botId: `voice-bot-${suffix}`,
+    };
+    await provisionBot(identity);
+    const stub = assistant(identity.userId);
+    const opened = await open(identity.userId);
+    const speaker = holdsAnswers(opened);
+    await startCall(opened);
+    await opened.waitFor(state("awake"), "awake");
+
+    // Two answers already recorded and owed, on a call with nothing being
+    // said. This is the state two held read-outs reach when their scheduled
+    // rows come due in the same instant, and the state two completion wake-ups
+    // from the Bot reach when they land together.
+    const runIds = [`voice-${"a".repeat(32)}`, `voice-${"b".repeat(32)}`];
+    const at = new Date().toISOString();
+    for (const [index, runId] of runIds.entries()) {
+      await stub.probePutStorage(`voice:delegation:${runId}`, {
+        schemaVersion: 1,
+        runId,
+        turnId: `call:${index + 1}`,
+        callId: "call",
+        botId: identity.botId,
+        botName: "Workerd Bot",
+        text: `question ${index + 1}`,
+        admittedAt: at,
+        state: "settled",
+        attempts: 0,
+        answer: `Workerd Bot answer ${index + 1}`,
+        settledAt: at,
+      });
+    }
+
+    // Both fire at once. Exactly one read-out may start.
+    await stub.probeSpeakConcurrently(runIds);
+    await settle(300);
+    expect(speaker.started).toHaveLength(1);
+    const first = speaker.started[0]!;
+    // `speak` returned long ago — the audio is all handed over — and still
+    // nothing else has started, because the person has not heard it out yet.
+    await opened.waitFor(
+      (f) => f.type === "voice/answer-end" && f.deliveryId === first,
+      "the first answer's audio fully handed over",
+      20_000,
+    );
+    await settle(300);
+    expect(speaker.started).toEqual([first]);
+
+    // The person hears it out. Only then does the second one start.
+    speaker.finish(first);
+    const started = await eventually(
+      async () => speaker.started,
+      (starts) => starts.length === 2,
+      "the second answer once the first was played",
+      20_000,
+    );
+    expect(started[1]).not.toBe(first);
+    speaker.finish(started[1]!);
+    await eventually(
+      async () =>
+        Object.values(
+          await stub.probeStorage("voice:delegation:"),
+        ) as VoiceDelegationRecordV1[],
+      (records) =>
+        records.length === 2 &&
+        records.every((record) => record.state === "spoken"),
+      "both answers marked spoken once each was played",
+      20_000,
+    );
+    opened.socket.close();
+  });
+
+  test("a read-out displaced while it is being composed is not spoken, and is still owed", async () => {
+    const suffix = crypto.randomUUID();
+    const identity = {
+      userId: `voice-displaced-${suffix}`,
+      botId: `voice-bot-${suffix}`,
+    };
+    await provisionBot(identity);
+    const stub = assistant(identity.userId);
+    const opened = await open(identity.userId);
+    const speaker = holdsAnswers(opened);
+    await startCall(opened);
+    await opened.waitFor(state("awake"), "awake");
+
+    const runId = `voice-${"c".repeat(32)}`;
+    const at = new Date().toISOString();
+    await stub.probePutStorage(`voice:delegation:${runId}`, {
+      schemaVersion: 1,
+      runId,
+      turnId: "call:1",
+      callId: "call",
+      botId: identity.botId,
+      botName: "Workerd Bot",
+      text: "how did the launch go",
+      admittedAt: at,
+      state: "settled",
+      attempts: 0,
+      answer: "It went out on time.",
+      settledAt: at,
+    });
+
+    // The sentence is being written when the person starts talking again. The
+    // read-out is started detached, exactly as the scheduler starts it: the
+    // test has to act while it is in flight.
+    await stub.probeHoldCompose();
+    await stub.probeSpeakDetached([runId]);
+    try {
+      await eventually(
+        () => stub.probeComposed(),
+        (count) => count === 1,
+        "the read-out to reach the model",
+      );
+      await stub.probeSetScript({ reply: "Right away." });
+      const before = opened.frames.length;
+      expect(await stub.probeUtterance("what else is on today")).toBe(true);
+      await opened.waitFor(
+        (f) =>
+          opened.frames.indexOf(f) >= before &&
+          f.type === "transcript_end" &&
+          String(f.text).includes("Right away"),
+        "the person's own answer, uncut",
+      );
+    } finally {
+      await stub.probeReleaseCompose();
+    }
+    await stub.probeAwaitSpeaking();
+    await settle(300);
+
+    // Nothing was spoken over it, and the answer is still owed.
+    expect(speaker.started).toEqual([]);
+    const displaced = (
+      Object.values(
+        await stub.probeStorage("voice:delegation:"),
+      ) as VoiceDelegationRecordV1[]
+    )[0]!;
+    expect(displaced.state).toBe("settled");
+    expect(displaced.deliveryId).toBeUndefined();
+    // And the sentence it had already paid for is kept, so reading it out
+    // later costs nothing.
+    expect(displaced.speechState).toBe("composed");
+    expect(typeof displaced.speech).toBe("string");
+
+    // The scheduler returns the owed answer without another client request.
+    const started = await eventually(
+      async () => speaker.started,
+      (starts) => starts.length === 1,
+      "the owed answer read out once the call is quiet",
+      20_000,
+    );
+    expect(await stub.probeComposed()).toBe(1);
+    speaker.finish(started[0]!);
+    await eventually(
+      async () =>
+        (
+          Object.values(
+            await stub.probeStorage("voice:delegation:"),
+          ) as VoiceDelegationRecordV1[]
+        )[0]!,
+      (record) => record.state === "spoken",
+      "the answer marked spoken",
+      20_000,
+    );
+    opened.socket.close();
+  });
+
+  test.each(["silent", "failed"] as const)(
+    "a %s read-out stays owed until the provider recovers and real audio plays",
+    async (failure) => {
+      const userId = `voice-tts-recovery-${crypto.randomUUID()}`;
+      const stub = assistant(userId);
+      const opened = await open(userId);
+      const speaker = playsAnswers(opened);
+      await startCall(opened);
+      await opened.waitFor(state("awake"), "awake");
+      const runId = `voice-${"d".repeat(32)}`;
+      const at = new Date().toISOString();
+      const key = `voice:delegation:${runId}`;
+      await stub.probePutStorage(key, {
+        schemaVersion: 1,
+        runId,
+        turnId: "call:1",
+        callId: "call",
+        botId: "bot",
+        botName: "Workerd Bot",
+        text: "is the launch ready",
+        admittedAt: at,
+        state: "settled",
+        attempts: 0,
+        answer: "The launch is ready.",
+        settledAt: at,
+      });
+      await stub.probeSetScript(
+        failure === "silent" ? { silentTts: true } : { failTts: true },
+      );
+      await stub.probeSpeakConcurrently([runId]);
+      await settle(100);
+      const pending = (await stub.probeStorage("voice:delegation:"))[
+        key
+      ] as VoiceDelegationRecordV1;
+      expect(pending.state).toBe("settled");
+      expect(pending.spokenAt).toBeUndefined();
+      expect(opened.audio).toEqual([]);
+      expect(speaker.played).toEqual([]);
+      expect(
+        opened.frames.some((frame) => frame.type === "voice/answer-end"),
+      ).toBe(false);
+      // A premature acknowledgement cannot convert failed synthesis into playback.
+      opened.socket.send(
+        JSON.stringify({
+          schemaVersion: 1,
+          type: "voice/played",
+          deliveryId: pending.deliveryId,
+        }),
+      );
+      await settle(100);
+      expect(
+        (
+          (await stub.probeStorage("voice:delegation:"))[
+            key
+          ] as VoiceDelegationRecordV1
+        ).state,
+      ).toBe("settled");
+      await stub.probeSetScript({});
+      // The application's own recovery alarm retries; the test does not wake it.
+      const heard = await eventually(
+        async () =>
+          (await stub.probeStorage("voice:delegation:"))[
+            key
+          ] as VoiceDelegationRecordV1,
+        (record) => record.state === "spoken",
+        "the retained answer to play after the speech provider recovers",
+        20_000,
+      );
+      expect(speaker.played).toEqual([heard.deliveryId]);
+      expect(opened.audio.some((bytes) => bytes > 0)).toBe(true);
+      expect(await stub.probeComposed()).toBe(1);
+      opened.socket.close();
+    },
+  );
+
+  const settledDelegation = (runId: string) => {
+    const at = new Date().toISOString();
+    return {
+      schemaVersion: 1,
+      runId,
+      turnId: "call:1",
+      callId: "call",
+      botId: "bot",
+      botName: "Workerd Bot",
+      text: "is the launch ready",
+      admittedAt: at,
+      state: "settled",
+      attempts: 0,
+      answer: "The launch is ready.",
+      settledAt: at,
+    };
+  };
+
+  test("a speaker report the client never withdraws stops holding the queue", async () => {
+    const userId = `voice-stale-playing-${crypto.randomUUID()}`;
+    const stub = assistant(userId);
+    await stub.probeSetPlaybackAckTimeoutMs(700);
+    const opened = await open(userId);
+    const speaker = playsAnswers(opened);
+    await startCall(opened);
+    await opened.waitFor(state("awake"), "awake");
+    // The device said it was playing and never said it stopped: a route change
+    // part way through, a completion callback that never came back.
+    opened.socket.send(
+      JSON.stringify({ schemaVersion: 1, type: "voice/speech", playing: true }),
+    );
+    await settle(50);
+    const runId = `voice-${"e".repeat(32)}`;
+    const key = `voice:delegation:${runId}`;
+    await stub.probePutStorage(key, settledDelegation(runId));
+    await stub.probeSpeakConcurrently([runId]);
+    // Held at first, because as far as the server knows a sound is playing.
+    expect(
+      (await stub.probeTraces()).some(
+        (line) =>
+          line.event === "delegation-held" && line.reason === "speaker-playing",
+      ),
+    ).toBe(true);
+    expect(
+      (
+        (await stub.probeStorage("voice:delegation:"))[
+          key
+        ] as VoiceDelegationRecordV1
+      ).state,
+    ).toBe("settled");
+    // Past the bound the answer goes out — and it is the client's own
+    // acknowledgement, not the bound expiring, that makes it spoken.
+    const heard = await eventually(
+      async () =>
+        (await stub.probeStorage("voice:delegation:"))[
+          key
+        ] as VoiceDelegationRecordV1,
+      (record) => record.state === "spoken",
+      "the owed answer once the stale playing report expires",
+      20_000,
+    );
+    expect(speaker.played).toEqual([heard.deliveryId]);
+    expect(opened.audio.some((bytes) => bytes > 0)).toBe(true);
+    opened.socket.close();
+  });
+
+  test("a speech provider that stays down is not retried for the whole call", async () => {
+    const userId = `voice-readout-backoff-${crypto.randomUUID()}`;
+    const stub = assistant(userId);
+    const opened = await open(userId);
+    await startCall(opened);
+    await opened.waitFor(state("awake"), "awake");
+    await stub.probeSetScript({ failTts: true });
+    const runId = `voice-${"f".repeat(32)}`;
+    const key = `voice:delegation:${runId}`;
+    await stub.probePutStorage(key, settledDelegation(runId));
+    await stub.probeSpeakConcurrently([runId]);
+    const readOuts = async () =>
+      (await stub.probeTraces()).filter(
+        (line) => line.event === "delegation-read-out",
+      ).length;
+    await eventually(
+      readOuts,
+      (count) => count >= 3,
+      "the prompt retries a failing provider gets",
+      20_000,
+    );
+    // Retries on the live call stop there rather than asking a provider that
+    // is down for the same sentence every few seconds until the call ends.
+    await settle(4_000);
+    expect(await readOuts()).toBe(3);
+    // The answer is owed still, and a later call reads it out.
+    const still = (await stub.probeStorage("voice:delegation:"))[
+      key
+    ] as VoiceDelegationRecordV1;
+    expect(still.state).toBe("settled");
+    expect(still.spokenAt).toBeUndefined();
+    opened.socket.close();
+  });
+
+  // Interrupting is the person talking, not the speech provider failing: the
+  // interrupt aborts the synthesis in flight and the read-out rejects the same
+  // way a dead provider does. Barging in a few times must not spend the
+  // allowance of prompt retries — three, the same as a failing provider gets —
+  // and leave a ready answer waiting on the slow drain.
+  test("barging in repeatedly does not push a ready answer onto the slow drain", async () => {
+    const userId = `voice-barge-retry-${crypto.randomUUID()}`;
+    const stub = assistant(userId);
+    const opened = await open(userId);
+    const speaker = playsAnswers(opened);
+    // Three read-outs the person talks over, and then they stop.
+    const barged: string[] = [];
+    opened.socket.addEventListener("message", (event) => {
+      if (typeof event.data !== "string") return;
+      const frame = JSON.parse(event.data) as Record<string, unknown>;
+      if (frame.type !== "voice/answer" || barged.length >= 3) return;
+      barged.push(frame.deliveryId as string);
+      opened.socket.send(JSON.stringify({ type: "interrupt" }));
+    });
+    await startCall(opened);
+    await opened.waitFor(state("awake"), "awake");
+    const runId = `voice-${"b".repeat(32)}`;
+    const key = `voice:delegation:${runId}`;
+    await stub.probePutStorage(key, settledDelegation(runId));
+    // Synthesis is held open, so every read-out is still mid-sentence when the
+    // person cuts in — and each retry after the first is the scheduler's.
+    await stub.probeHoldTts();
+    await stub.probeSpeakDetached([runId]);
+    await eventually(
+      async () => barged.length,
+      (count) => count >= 3,
+      "three read-outs talked over",
+      20_000,
+    );
+    await stub.probeReleaseTts();
+    // Nobody talks over the next one, and it arrives on the prompt retry
+    // rather than ninety seconds later.
+    const heard = await eventually(
+      async () =>
+        (await stub.probeStorage("voice:delegation:"))[
+          key
+        ] as VoiceDelegationRecordV1,
+      (record) => record.state === "spoken",
+      "the answer read out promptly after the barge-ins",
+      20_000,
+    );
+    expect(barged).not.toContain(heard.deliveryId);
+    expect(speaker.played).toEqual([heard.deliveryId]);
+    expect(opened.audio.some((bytes) => bytes > 0)).toBe(true);
+    opened.socket.close();
+  });
+
+  test("a used-up listening allowance does not delay a recoverable read-out", async () => {
+    const userId = `voice-listening-cap-readout-${crypto.randomUUID()}`;
+    const stub = assistant(userId);
+    const today = voiceMeterDayV1(new Date());
+    // Room for the first one-second window but not the second.
+    await stub.probePutStorage(`voice:meter:${today}`, {
+      schemaVersion: 1,
+      day: today,
+      sttSeconds: VOICE_METER_CAPS_V1.sttSeconds - 1.5,
+      ttsCharacters: 0,
+      turns: 0,
+      delegations: 0,
+      dictationSeconds: 0,
+    } satisfies VoiceMeterV1);
+    const opened = await open(userId);
+    const speaker = playsAnswers(opened);
+    await startCall(opened);
+    await opened.waitFor(state("awake"), "awake");
+    const feeder = setInterval(() => {
+      try {
+        opened.socket.send(pcm(9));
+      } catch {
+        // Closed.
+      }
+    }, 40);
+    const refusal = await opened.waitFor(
+      (f) => f.type === "voice/refusal" && f.code === "quota",
+      "the listening allowance refusal",
+    );
+    clearInterval(feeder);
+    expect(String(refusal.message)).toContain("listening allowance");
+    // Speech still works; this answer's synthesis simply fails once, which is
+    // nothing to do with the allowance that ran out.
+    await stub.probeSetScript({ silentTts: true });
+    const runId = `voice-${"7".repeat(32)}`;
+    const key = `voice:delegation:${runId}`;
+    await stub.probePutStorage(key, settledDelegation(runId));
+    await stub.probeSpeakConcurrently([runId]);
     await settle(100);
-    const spoken = Object.values(
-      await stub.probeStorage("voice:delegation:"),
-    ) as VoiceDelegationRecordV1[];
-    expect(spoken[0]!.state).toBe("spoken");
+    await stub.probeSetScript({});
+    const heard = await eventually(
+      async () =>
+        (await stub.probeStorage("voice:delegation:"))[
+          key
+        ] as VoiceDelegationRecordV1,
+      (record) => record.state === "spoken",
+      // Well inside the slow drain the listening cap used to push it onto,
+      // and loose enough for a loaded runner's alarms.
+      "the answer retried promptly despite the listening cap",
+      20_000,
+    );
+    expect(speaker.played).toEqual([heard.deliveryId]);
+    opened.socket.close();
+  });
+
+  test("speech quota suppression cannot be acknowledged as a played answer", async () => {
+    const userId = `voice-quota-answer-${crypto.randomUUID()}`;
+    const stub = assistant(userId);
+    const opened = await open(userId);
+    const speaker = playsAnswers(opened);
+    await startCall(opened);
+    await opened.waitFor(state("awake"), "awake");
+    const runId = `voice-${"9".repeat(32)}`;
+    const at = new Date().toISOString();
+    const key = `voice:delegation:${runId}`;
+    const meterKey = `voice:meter:${voiceMeterDayV1(new Date())}`;
+    const meter = (await stub.probeStorage("voice:meter:"))[
+      meterKey
+    ] as VoiceMeterV1;
+    await stub.probePutStorage(meterKey, {
+      ...meter,
+      ttsCharacters: VOICE_METER_CAPS_V1.ttsCharacters,
+    });
+    await stub.probePutStorage(key, {
+      schemaVersion: 1,
+      runId,
+      turnId: "call:1",
+      callId: "call",
+      botId: "bot",
+      botName: "Workerd Bot",
+      text: "is the launch ready",
+      admittedAt: at,
+      state: "settled",
+      attempts: 0,
+      answer: "The launch is ready.",
+      settledAt: at,
+    });
+    await stub.probeSpeakConcurrently([runId]);
+    const pending = (await stub.probeStorage("voice:delegation:"))[
+      key
+    ] as VoiceDelegationRecordV1;
+    opened.socket.send(
+      JSON.stringify({
+        schemaVersion: 1,
+        type: "voice/played",
+        deliveryId: pending.deliveryId,
+      }),
+    );
+    await settle(100);
+    expect(
+      (
+        (await stub.probeStorage("voice:delegation:"))[
+          key
+        ] as VoiceDelegationRecordV1
+      ).state,
+    ).toBe("settled");
+    expect(opened.audio).toEqual([]);
+    expect(speaker.played).toEqual([]);
+    expect(
+      opened.frames.some(
+        (frame) => frame.type === "voice/refusal" && frame.code === "quota",
+      ),
+    ).toBe(true);
+    expect(
+      opened.frames.some((frame) => frame.type === "voice/answer-end"),
+    ).toBe(false);
+    opened.socket.close();
+  });
+
+  test("an acknowledgement before synthesis finishes cannot mark the answer spoken", async () => {
+    const userId = `voice-early-ack-${crypto.randomUUID()}`;
+    const stub = assistant(userId);
+    const opened = await open(userId);
+    const speaker = playsAnswers(opened);
+    await startCall(opened);
+    await opened.waitFor(state("awake"), "awake");
+    const runId = `voice-${"e".repeat(32)}`;
+    const at = new Date().toISOString();
+    const key = `voice:delegation:${runId}`;
+    await stub.probePutStorage(key, {
+      schemaVersion: 1,
+      runId,
+      turnId: "call:1",
+      callId: "call",
+      botId: "bot",
+      botName: "Workerd Bot",
+      text: "is the launch ready",
+      admittedAt: at,
+      state: "settled",
+      attempts: 0,
+      answer: "The launch is ready.",
+      settledAt: at,
+    });
+    await stub.probeHoldTts();
+    await stub.probeSpeakDetached([runId]);
+    try {
+      const frame = await opened.waitFor(
+        (frame) => frame.type === "voice/answer",
+        "answer admission",
+      );
+      opened.socket.send(
+        JSON.stringify({
+          schemaVersion: 1,
+          type: "voice/played",
+          deliveryId: frame.deliveryId,
+        }),
+      );
+      await settle(100);
+      expect(
+        (
+          (await stub.probeStorage("voice:delegation:"))[
+            key
+          ] as VoiceDelegationRecordV1
+        ).state,
+      ).toBe("settled");
+      expect(opened.audio).toEqual([]);
+    } finally {
+      await stub.probeReleaseTts();
+    }
+    await stub.probeAwaitSpeaking();
+    const heard = await eventually(
+      async () =>
+        (await stub.probeStorage("voice:delegation:"))[
+          key
+        ] as VoiceDelegationRecordV1,
+      (record) => record.state === "spoken",
+      "the real playback acknowledgement",
+    );
+    expect(speaker.played).toEqual([heard.deliveryId]);
+    opened.socket.close();
+  });
+
+  test("ending the call during composition retains the answer for the next call without another model call", async () => {
+    const userId = `voice-compose-disconnect-${crypto.randomUUID()}`;
+    const stub = assistant(userId);
+    const opened = await open(userId);
+    await startCall(opened);
+    await opened.waitFor(state("awake"), "awake");
+    const runId = `voice-${"f".repeat(32)}`;
+    const at = new Date().toISOString();
+    const key = `voice:delegation:${runId}`;
+    await stub.probePutStorage(key, {
+      schemaVersion: 1,
+      runId,
+      turnId: "call:1",
+      callId: "call",
+      botId: "bot",
+      botName: "Workerd Bot",
+      text: "is the launch ready",
+      admittedAt: at,
+      state: "settled",
+      attempts: 0,
+      answer: "The launch is ready.",
+      settledAt: at,
+    });
+    await stub.probeHoldCompose();
+    await stub.probeSpeakDetached([runId]);
+    try {
+      await eventually(
+        () => stub.probeComposed(),
+        (count) => count === 1,
+        "composition started",
+      );
+      opened.socket.send(JSON.stringify({ type: "end_call" }));
+      await opened.waitFor(status("idle"), "the call ended");
+      await eventually(
+        () => stub.probeSessions(),
+        (sessions) => sessions.every((session) => session.closed),
+        "the old call released",
+      );
+    } finally {
+      await stub.probeReleaseCompose();
+    }
+    await stub.probeAwaitSpeaking();
+    const pending = (await stub.probeStorage("voice:delegation:"))[
+      key
+    ] as VoiceDelegationRecordV1;
+    expect(pending.state).toBe("settled");
+    expect(pending.speechState).toBe("composed");
+    expect(pending.deliveryId).toBeUndefined();
+    expect(opened.frames.some((frame) => frame.type === "voice/answer")).toBe(
+      false,
+    );
+    opened.socket.close();
+    const next = await open(userId);
+    const speaker = playsAnswers(next);
+    await startCall(next);
+    const heard = await eventually(
+      async () =>
+        (await stub.probeStorage("voice:delegation:"))[
+          key
+        ] as VoiceDelegationRecordV1,
+      (record) => record.state === "spoken",
+      "cached answer on the next call",
+    );
+    expect(speaker.played).toEqual([heard.deliveryId]);
+    expect(await stub.probeComposed()).toBe(1);
+    next.socket.close();
+  });
+
+  test("a Bot answer waits for ordinary speech still being synthesized after the model has finished", async () => {
+    const userId = `voice-ordinary-tts-${crypto.randomUUID()}`;
+    const stub = assistant(userId);
+    const opened = await open(userId);
+    const speaker = playsAnswers(opened);
+    await startCall(opened);
+    await opened.waitFor(state("awake"), "awake");
+    await stub.probeSetScript({ reply: "Your calendar is clear." });
+    await stub.probeHoldTts();
+    const runId = `voice-${"8".repeat(32)}`;
+    const key = `voice:delegation:${runId}`;
+    try {
+      expect(await stub.probeUtterance("check my calendar")).toBe(true);
+      await eventually(
+        () => stub.probeSynthesized(),
+        (sentences) => sentences.length === 1,
+        "ordinary TTS in flight",
+      );
+      await eventually(
+        () => stub.probeTraces(),
+        (traces) => traces.some((trace) => trace.event === "turn-settled"),
+        "the ordinary model to finish",
+      );
+      // Longer than this probe's quiet window, but no ordinary PCM exists yet.
+      await settle(500);
+      const at = new Date().toISOString();
+      await stub.probePutStorage(key, {
+        schemaVersion: 1,
+        runId,
+        turnId: "call:1",
+        callId: "call",
+        botId: "bot",
+        botName: "Workerd Bot",
+        text: "is the launch ready",
+        admittedAt: at,
+        state: "settled",
+        attempts: 0,
+        answer: "The launch is ready.",
+        settledAt: at,
+      });
+      await stub.probeSpeakDetached([runId]);
+      await settle(500);
+      expect(opened.frames.some((frame) => frame.type === "voice/answer")).toBe(
+        false,
+      );
+      expect(opened.audio).toEqual([]);
+      expect(await stub.probeSynthesized()).toEqual([
+        "Your calendar is clear.",
+      ]);
+    } finally {
+      await stub.probeReleaseTts();
+    }
+    await stub.probeAwaitSpeaking();
+    const heard = await eventually(
+      async () =>
+        (await stub.probeStorage("voice:delegation:"))[
+          key
+        ] as VoiceDelegationRecordV1,
+      (record) => record.state === "spoken",
+      "the Bot answer after ordinary speech",
+      20_000,
+    );
+    expect(opened.audio).toEqual([960, 960]);
+    expect(speaker.played).toEqual([heard.deliveryId]);
+    opened.socket.close();
+  });
+
+  test("an answer whose audio is cut off is not marked played, and is owed again", async () => {
+    const suffix = crypto.randomUUID();
+    const identity = {
+      userId: `voice-interrupted-${suffix}`,
+      botId: `voice-bot-${suffix}`,
+    };
+    await provisionBot(identity);
+    const stub = assistant(identity.userId);
+    await stub.probeSetScript({ delegateWord: "plan", botId: identity.botId });
+    const opened = await open(identity.userId);
+    const cut = interruptsAnswers(opened);
+    await startCall(opened);
+    await opened.waitFor(state("awake"), "awake");
+    expect(await stub.probeUtterance("please plan my week")).toBe(true);
+    await opened.waitFor(
+      (f) =>
+        f.type === "transcript_end" && String(f.text).includes("Done: Asked"),
+      "delegation acknowledged aloud",
+    );
+    // The answer is read out, and the person talks over it.
+    await eventually(
+      async () => cut.armed.length,
+      (count) => count > 0,
+      "the answer to be handed to the speaker",
+      30_000,
+    );
+    const readOut = await eventually(
+      async () =>
+        (
+          Object.values(
+            await stub.probeStorage("voice:delegation:"),
+          ) as VoiceDelegationRecordV1[]
+        )[0]!,
+      (record) => record.deliveryId !== undefined,
+      "the read-out to be recorded",
+    );
+    expect(readOut.state).toBe("settled");
+    expect(await stub.probeSpeechStart()).toBe(true);
+    await settle(200);
+
+    // Nothing acknowledged it, so it is still owed — and the next call reads
+    // it out again rather than losing it.
+    const still = (
+      Object.values(
+        await stub.probeStorage("voice:delegation:"),
+      ) as VoiceDelegationRecordV1[]
+    )[0]!;
+    expect(still.state).toBe("settled");
+    expect(still.spokenAt).toBeUndefined();
+    opened.socket.close();
+    await settle(100);
+
+    const next = await open(identity.userId);
+    const speaker = playsAnswers(next);
+    await startCall(next);
+    await next.waitFor(
+      (f) =>
+        f.type === "transcript_end" && String(f.text).startsWith("Workerd Bot"),
+      "the owed answer read out on the next call",
+      20_000,
+    );
+    const spoken = await eventually(
+      async () =>
+        (
+          Object.values(
+            await stub.probeStorage("voice:delegation:"),
+          ) as VoiceDelegationRecordV1[]
+        )[0]!,
+      (record) => record.state === "spoken",
+      "the answer to be marked spoken on the second read-out",
+    );
+    // A new delivery each time, so the cut-off one's late acknowledgement
+    // could never have claimed this one.
+    expect(spoken.deliveryId).not.toBe(readOut.deliveryId);
+    expect(speaker.played).toEqual([spoken.deliveryId]);
     next.socket.close();
   });
 
@@ -745,6 +1713,7 @@ describe("the voice session object", () => {
     const stub = assistant(identity.userId);
     await stub.probeSetScript({ delegateWord: "plan", botId: identity.botId });
     const opened = await open(identity.userId);
+    const speaker = playsAnswers(opened);
     await startCall(opened);
     await opened.waitFor(state("awake"), "awake");
     expect(await stub.probeUtterance("please plan my week")).toBe(true);
@@ -790,11 +1759,17 @@ describe("the voice session object", () => {
       "answer read out",
       10_000,
     );
-    await settle(100);
-    const [spoken] = Object.values(
-      await stub.probeStorage("voice:delegation:"),
-    ) as VoiceDelegationRecordV1[];
-    expect(spoken!.state).toBe("spoken");
+    const spoken = await eventually(
+      async () =>
+        (
+          Object.values(
+            await stub.probeStorage("voice:delegation:"),
+          ) as VoiceDelegationRecordV1[]
+        )[0]!,
+      (record) => record.state === "spoken",
+      "the answer to be marked spoken once its audio played",
+    );
+    expect(speaker.played).toEqual([spoken.deliveryId]);
     // The read-out is nobody's turn: it must not borrow the last turn's
     // clock and report a time to first word of minutes.
     const audioLines = (await stub.probeTraces()).filter(
@@ -816,6 +1791,7 @@ describe("the voice session object", () => {
     const stub = assistant(identity.userId);
     await stub.probeSetScript({ delegateWord: "plan", botId: identity.botId });
     const opened = await open(identity.userId);
+    const speaker = playsAnswers(opened);
     await startCall(opened);
     await opened.waitFor(state("awake"), "awake");
     expect(await stub.probeUtterance("please plan my week")).toBe(true);
@@ -878,11 +1854,17 @@ describe("the voice session object", () => {
       "answer read out after the second hold",
       12_000,
     );
-    await settle(100);
-    const [spoken] = Object.values(
-      await stub.probeStorage("voice:delegation:"),
-    ) as VoiceDelegationRecordV1[];
-    expect(spoken!.state).toBe("spoken");
+    const spoken = await eventually(
+      async () =>
+        (
+          Object.values(
+            await stub.probeStorage("voice:delegation:"),
+          ) as VoiceDelegationRecordV1[]
+        )[0]!,
+      (record) => record.state === "spoken",
+      "the answer to be marked spoken once its audio played",
+    );
+    expect(speaker.played).toEqual([spoken.deliveryId]);
     opened.socket.close();
   });
 
@@ -1110,6 +2092,61 @@ describe("the voice session object", () => {
     expect(settled.attempts).toBe(3);
   });
 
+  // The scheduler drives the whole return path here: nothing below runs a
+  // look-up by hand. The first two dispatches are dropped, so the answer arrives only
+  // if the scheduled check re-books itself, redispatches, and reads the Bot's
+  // completed reply out on the still-open call.
+  //
+  // This is the regression for `{ idempotent: true }` on a reschedule made
+  // from inside the callback being executed: 0.23 deduplicates the new row
+  // onto the executing row, which the scheduler then deletes, so the chain
+  // stops after one attempt and the person hears nothing.
+  test("an automatic scheduled retry delivers a completed Bot reply to the live call", async () => {
+    const suffix = crypto.randomUUID();
+    const identity = {
+      userId: `voice-automatic-${suffix}`,
+      botId: `voice-bot-${suffix}`,
+    };
+    await provisionBot(identity);
+    const stub = assistant(identity.userId);
+    await stub.probeSetScript({ delegateWord: "plan", botId: identity.botId });
+    await stub.probeDropDispatches(2);
+    const opened = await open(identity.userId);
+    await startCall(opened);
+    await opened.waitFor(state("awake"), "awake");
+    expect(await stub.probeUtterance("plan the launch")).toBe(true);
+    await opened.waitFor(
+      (f) => f.type === "transcript_end" && String(f.text).includes("Done:"),
+      "acknowledged",
+    );
+    const [runId] = Object.keys(
+      await stub.probeStorage("voice:delegation:"),
+    ).map((key) => key.slice("voice:delegation:".length));
+    expect(runId).toBeDefined();
+    // SAFETY: names only the read this test makes.
+    const botRpc = env.BOT_STATES.getByName(
+      `${identity.userId}:${identity.botId}`,
+    ) as unknown as { lookupRun(input: unknown): Promise<{ state: string }> };
+    await eventually(
+      () =>
+        botRpc.lookupRun({
+          schemaVersion: 1,
+          ...identity,
+          query: { schemaVersion: 1, runId },
+        }),
+      (lookup) => lookup.state === "terminal",
+      "the Bot to complete after the scheduler redispatched the lost send",
+      40_000,
+    );
+    await opened.waitFor(
+      (f) =>
+        f.type === "transcript_end" && String(f.text).startsWith("Workerd Bot"),
+      "the completed Bot answer read out with no hand-run look-up",
+      40_000,
+    );
+    opened.socket.close();
+  });
+
   // The `agents` 0.23 upgrade moves scheduled work into a new `cf_agents_jobs`
   // queue on a Durable Object's first wake and drops the legacy table, so a
   // schedule can be stranded — by that one-way migration, or by a rollback
@@ -1126,6 +2163,9 @@ describe("the voice session object", () => {
     await provisionBot(identity);
     const stub = assistant(identity.userId);
     await stub.probeSetScript({ delegateWord: "plan", botId: identity.botId });
+    // The Bot never gets the request, so it stays admitted and owed: the only
+    // thing that can ever settle it is a scheduled look-up.
+    await stub.probeDropDispatches(1);
     const opened = await open(identity.userId);
     await startCall(opened);
     await opened.waitFor(state("awake"), "awake");
@@ -1164,6 +2204,7 @@ describe("the voice session object", () => {
     // The person calls back. The call is the wake-up, and `onStart` books the
     // look-up again from the ledger alone.
     const next = await open(identity.userId);
+    playsAnswers(next);
     await startCall(next);
     const rebooked = await eventually(
       () =>
@@ -1235,30 +2276,32 @@ describe("the voice session object", () => {
       (f) => f.type === "transcript_end" && String(f.text).includes("Done:"),
       "acknowledged",
     );
-    opened.socket.close();
+    const speaker = playsAnswers(opened);
     const key = Object.keys(await stub.probeStorage("voice:delegation:"))[0]!;
-    const runId = key.slice("voice:delegation:".length);
     const record = (await stub.probeStorage("voice:delegation:"))[
       key
     ] as VoiceDelegationRecordV1;
     // Skip to the last permitted look-up.
     await stub.probePutStorage(key, { ...record, attempts: 39 });
-    await stub.probeCheckDelegation(runId);
-    const settled = (await stub.probeStorage("voice:delegation:"))[
-      key
-    ] as VoiceDelegationRecordV1;
-    expect(settled.state).toBe("settled");
-    expect(settled.failure).toContain("never accepted");
-    // The next call reads the failure out rather than staying silent.
-    const next = await open(identity.userId);
-    await startCall(next);
-    await next.waitFor(
-      (f) =>
-        f.type === "transcript_end" &&
-        String(f.text).includes("could not finish"),
-      "failure read out",
+    // The scheduled check reaches the bound on this still-open call.
+    await opened.waitFor(
+      (frame) =>
+        frame.type === "transcript_end" &&
+        String(frame.text).includes("could not finish"),
+      "failure read out automatically",
+      20_000,
     );
-    next.socket.close();
+    const heard = await eventually(
+      async () =>
+        (await stub.probeStorage("voice:delegation:"))[
+          key
+        ] as VoiceDelegationRecordV1,
+      (record) => record.state === "spoken",
+      "the failure to be heard",
+    );
+    expect(heard.failure).toContain("never accepted");
+    expect(speaker.played).toEqual([heard.deliveryId]);
+    opened.socket.close();
   });
 });
 

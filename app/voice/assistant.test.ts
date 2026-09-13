@@ -139,6 +139,19 @@ function host(
       { botId: "finch", name: "Finch", activity: "working" },
     ],
     botStatus: async (botId) => `${botId} is idle`,
+    readBotHistory: async (botId) => ({ botId, botName: botId, runs: [] }),
+    searchBotHistory: async (botId, query) => ({
+      botId,
+      botName: botId,
+      runs: [],
+      results: {
+        schemaVersion: 1,
+        query,
+        hits: [],
+        truncated: false,
+        indexState: "ready",
+      },
+    }),
     askBot: async (botId, message) => {
       asked.push(`${botId}:${message}`);
       return `Asked ${botId}.`;
@@ -254,6 +267,151 @@ describe("one voice turn", () => {
       content: "Asked remy.",
     });
     expect(second.at(-2)?.role).toBe("assistant");
+  });
+
+  test("reads and searches Bot history without delegating new work", async () => {
+    const reads: string[] = [];
+    const searches: string[] = [];
+    const h = host(
+      [
+        () => [
+          toolCall(
+            0,
+            "read",
+            "read_bot_history",
+            '{"bot_id":"remy","limit":2}',
+          ),
+          toolCall(
+            1,
+            "search",
+            "search_bot_history",
+            '{"bot_id":"remy","query":"calendar"}',
+          ),
+        ],
+        () => [text("Remy already said your morning is free.")],
+      ],
+      {
+        readBotHistory: async (botId, limit) => {
+          reads.push(`${botId}:${limit}`);
+          return {
+            botId,
+            botName: "Remy",
+            runs: [
+              {
+                schemaVersion: 3,
+                runId: "previous",
+                admittedAt: "2026-09-12T00:00:00.000Z",
+                status: "completed",
+                input: "Read my calendar",
+                via: { kind: "voice" },
+                events: [
+                  {
+                    type: "reply/to-caller",
+                    caller: "voice",
+                    text: "Your morning is free.",
+                  },
+                ],
+              },
+            ],
+          };
+        },
+        searchBotHistory: async (botId, query, limit) => {
+          searches.push(`${botId}:${query}:${limit}`);
+          return {
+            botId,
+            botName: "Remy",
+            runs: [],
+            results: {
+              schemaVersion: 1,
+              query,
+              hits: [],
+              truncated: false,
+              indexState: "ready",
+            },
+          };
+        },
+      },
+    );
+    let result: VoiceTurnResultV1 | undefined;
+    const chunks = await said(
+      runVoiceTurnV1(h, baseInput("what did Remy say?"), (r) => {
+        result = r;
+      }),
+    );
+    expect(chunks.at(-1)).toBe("Remy already said your morning is free.");
+    expect(reads).toEqual(["remy:2"]);
+    expect(searches).toEqual(["remy:calendar:6"]);
+    expect(h.asked).toEqual([]);
+    expect(result?.delegations).toBe(0);
+    const tools = (
+      h.bodies[1]!.messages as { role: string; content: string }[]
+    ).filter((message) => message.role === "tool");
+    expect(
+      JSON.parse(tools[0]!.content).messages.map(
+        (message: { role: string }) => message.role,
+      ),
+    ).toEqual(["voice", "assistant"]);
+    expect(JSON.parse(tools[1]!.content).messages).toEqual([]);
+  });
+
+  test.each([
+    ['{"bot_id":"remy","limit":0}', "read_bot_history"],
+    ['{"bot_id":"remy","limit":1.5}', "read_bot_history"],
+    ['{"bot_id":"remy","limit":9}', "read_bot_history"],
+    ['{"bot_id":"remy","limit":"2"}', "read_bot_history"],
+    ['{"bot_id":"remy","query":""}', "search_bot_history"],
+    [
+      JSON.stringify({ bot_id: "remy", query: "x".repeat(257) }),
+      "search_bot_history",
+    ],
+  ])(
+    "refuses invalid history arguments before touching a Bot: %s",
+    async (args, name) => {
+      let reads = 0;
+      const h = host(
+        [
+          () => [toolCall(0, "invalid", name, args)],
+          () => [text("Please try a shorter request.")],
+        ],
+        {
+          readBotHistory: async () => {
+            reads += 1;
+            throw new Error("unexpected read");
+          },
+          searchBotHistory: async () => {
+            reads += 1;
+            throw new Error("unexpected search");
+          },
+        },
+      );
+      await collect(runVoiceTurnV1(h, baseInput("read it"), () => {}));
+      expect(reads).toBe(0);
+      expect(h.asked).toEqual([]);
+      const messages = h.bodies[1]!.messages as { content: string }[];
+      expect(messages.at(-1)?.content).toStartWith("That failed:");
+    },
+  );
+
+  test("an ownership refusal stays a read failure and never falls back to asking the Bot", async () => {
+    const h = host(
+      [
+        () => [
+          toolCall(0, "foreign", "read_bot_history", '{"bot_id":"foreign"}'),
+        ],
+        () => [text("That Bot is not in your account.")],
+      ],
+      {
+        readBotHistory: async () => {
+          throw new Error("that Bot is not in this account");
+        },
+      },
+    );
+    await collect(runVoiceTurnV1(h, baseInput("read that Bot"), () => {}));
+    expect(h.asked).toEqual([]);
+    const messages = h.bodies[1]!.messages as { content: string }[];
+    expect(messages.at(-1)?.content).toBe(
+      "That failed: that Bot is not in this account",
+    );
   });
 
   test("a tool that throws becomes a result the model hears, not a failed turn", async () => {

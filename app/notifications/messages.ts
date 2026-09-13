@@ -166,6 +166,10 @@ export async function messageRecords(input: {
   read<T>(key: string): Promise<T | undefined>;
 }): Promise<Record<string, unknown>> {
   if (input.run.admission?.turnType === "subagent") return {};
+  // Only a send is a message addressed to the User. An answer the Turn's
+  // caller asked for is `reply/to-caller`, and it reaches that caller by its
+  // own route: it mints no message, raises no badge and wakes no device, which
+  // is why it is a different event rather than a send wearing a flag.
   const sends = input.events.filter((event) => event.type === "send/to-user");
   if (!sends.length) return {};
   const settings =

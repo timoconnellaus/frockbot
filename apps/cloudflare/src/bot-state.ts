@@ -108,6 +108,10 @@ import {
 } from "@frockbot/app/shell/identity";
 import { stopRun } from "@frockbot/app/shell/turn";
 import {
+  isVoiceReplyOutboxEntryV1,
+  VOICE_REPLY_OUTBOX_PREFIX_V1,
+} from "@frockbot/app/shell/voice-reply";
+import {
   acknowledgeNotification,
   listNotifications,
 } from "@frockbot/app/notifications/bot";
@@ -292,6 +296,7 @@ import {
 import {
   decodeBotAgentRunRpcV1,
   decodeBotRunRpcV1,
+  decodeBotVoiceRunRpcV1,
   decodeRpcEnvelopeV1,
   rpcAppletIdOrNull,
   rpcBoolean,
@@ -357,6 +362,13 @@ function frockAiWorkerVarV1(
 
 /** One Vectorize mutation per alarm firing, at the Workers binding limit. */
 export const MEMORY_VECTOR_DELETE_BATCH_SIZE_V1 = 1_000;
+
+/**
+ * Voice answers handed over per drain pass. A call is one person speaking, so
+ * a queue this long already means something upstream is stuck; the bound is
+ * there to keep one pass from being unbounded, not because it is ever reached.
+ */
+export const VOICE_REPLY_DRAIN_LIMIT_V1 = 32;
 const MEMORY_VECTOR_PURGE_JOURNAL_KEY_V1 = "memory:vector-purge:v1";
 const MEMORY_VECTOR_PURGE_RETRY_DELAY_MS_V1 = 1_000;
 
@@ -1492,6 +1504,35 @@ export class BotState extends DurableObject<BotStateEnv> {
     return turn;
   }
 
+  /**
+   * The account's voice session asking this Bot for something.
+   *
+   * The same agent lane a Bot-to-Bot question uses, for the same reason: it
+   * queues behind whatever the person or a Routine already has running and
+   * never takes its place. What differs is the return address — a call and a
+   * spoken Turn rather than a Bot — and that the answer goes back through the
+   * voice reply outbox instead of this call's return value.
+   */
+  async runVoice(input: unknown) {
+    const request = decodeBotVoiceRunRpcV1(input);
+    const identity = { userId: request.userId, botId: request.botId };
+    const { shell } = await this.materialized(identity);
+    const turn = await shell.run({
+      ...identity,
+      runId: request.command.runId,
+      sessionId: request.command.sessionId,
+      acceptedAt: request.command.acceptedAt,
+      text: request.command.text,
+      turnType: "agent",
+      lane: "agent",
+      origin: request.command.source,
+    });
+    await this.projectSettledRun(shell, identity, request.command.runId);
+    await this.projectSettledAudit(shell, identity, request.command.runId);
+    await this.drainVoiceReplyOutbox(identity.userId);
+    return turn;
+  }
+
   /** This object's bounded, durable audit outbox. */
   private auditOutbox(): AuditOutboxV1 {
     return new AuditOutboxV1(this.ctx.storage);
@@ -1867,6 +1908,56 @@ export class BotState extends DurableObject<BotStateEnv> {
       identity,
       request.command as ClientRunStopCommandV1,
     );
+  }
+
+  /**
+   * Hands every answer a voice call is owed to that account's voice object.
+   *
+   * The entry is written in the transaction that recorded the answer, so this
+   * can lose a wake-up without losing the answer: an entry that was not
+   * delivered is still there for the next settlement or this object's own
+   * alarm, and the voice object's scheduled look-up settles it anyway. Delivery
+   * is by request id, and the voice ledger refuses a request that is no longer
+   * `admitted`, so a redelivery is a no-op rather than a second answer.
+   *
+   * An entry is deleted only after the voice object has acknowledged it. One
+   * that names a call the account no longer has is acknowledged all the same:
+   * the answer is in the Bot's thread, and the outbox is not where it lives.
+   */
+  private async drainVoiceReplyOutbox(userId: string): Promise<void> {
+    const namespace = (
+      this.env as BotStateEnv & { VOICE_ASSISTANTS?: DurableObjectNamespace }
+    ).VOICE_ASSISTANTS;
+    if (!namespace) return;
+    const entries = await this.ctx.storage.list<unknown>({
+      prefix: VOICE_REPLY_OUTBOX_PREFIX_V1,
+      limit: VOICE_REPLY_DRAIN_LIMIT_V1,
+    });
+    if (entries.size === 0) return;
+    // SAFETY: the binding names VoiceAssistant; this is its reviewed RPC door.
+    const voice = namespace.get(namespace.idFromName(userId)) as unknown as {
+      deliverVoiceReply(input: unknown): Promise<unknown>;
+    };
+    for (const [key, value] of entries) {
+      const entry = isVoiceReplyOutboxEntryV1(value) ? value : undefined;
+      if (!entry) {
+        // Not a record this build wrote. It cannot be delivered and will never
+        // become deliverable, so it goes rather than blocking the queue.
+        await this.ctx.storage.delete(key);
+        continue;
+      }
+      try {
+        await voice.deliverVoiceReply({
+          schemaVersion: 1,
+          userId,
+          requestId: entry.runId,
+        });
+      } catch {
+        // Still durable, still owed, retried by the next settlement or alarm.
+        return;
+      }
+      await this.ctx.storage.delete(key);
+    }
   }
 
   private pushDrain?: Promise<void>;
@@ -2561,9 +2652,18 @@ export class BotState extends DurableObject<BotStateEnv> {
         // The alarm the Bot already has is also the audit outbox's second
         // chance: entries a settlement could not deliver leave on the next
         // firing rather than waiting for the Bot to be spoken to again.
+        const identity = await this.ctx.storage.get<BotIdentity>(IDENTITY_KEY);
         await Promise.all([
           loggedEntryV1("Bot audit outbox drain", () =>
             this.drainAuditOutbox(),
+          ),
+          // And the voice reply outbox's: an answer whose hand-off could not
+          // reach the voice object leaves here rather than waiting for the
+          // next thing anyone asks this Bot.
+          loggedEntryV1("Bot voice reply outbox drain", () =>
+            identity
+              ? this.drainVoiceReplyOutbox(identity.userId)
+              : Promise.resolve(),
           ),
         ]);
       }

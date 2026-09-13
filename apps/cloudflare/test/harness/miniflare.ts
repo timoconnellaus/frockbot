@@ -690,6 +690,12 @@ export async function ollamaCloudStub(request: Request): Promise<Response> {
     const canSend = wire?.tools?.some(
       (tool) => tool.function?.name === "send_to_user",
     );
+    // A Turn with a caller to answer is offered `reply_to_request`, and a
+    // model that ignored it would leave the person on the other end listening
+    // to silence. The stub answers the caller, exactly as the prompt asks.
+    const canAnswerCaller = wire?.tools?.some(
+      (tool) => tool.function?.name === "reply_to_request",
+    );
     const messages = wire?.messages ?? [];
     const sinceUser = messages.slice(
       messages.findLastIndex((message) => message.role === "user") + 1,
@@ -699,6 +705,19 @@ export async function ollamaCloudStub(request: Request): Promise<Response> {
         (call) => call.function?.name === "send_to_user",
       ),
     );
+    const answered = sinceUser.some((message) =>
+      message.tool_calls?.some(
+        (call) => call.function?.name === "reply_to_request",
+      ),
+    );
+    if (canAnswerCaller && !answered)
+      return toolCallStream([
+        {
+          id: "reply-caller",
+          name: "reply_to_request",
+          arguments: JSON.stringify({ answer: "Ollama answer" }),
+        },
+      ]);
     if (canSend && !sent)
       return toolCallStream([
         {

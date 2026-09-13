@@ -1,6 +1,8 @@
 // Generated from client-wire.schema.json. Do not edit.
 export type Identifier = string;
 export type BotId = string;
+export type RunVia =
+  { kind: "bot"; name: string; botId: BotId } | { kind: "voice" };
 export type Digest = string;
 export type Instant = string;
 export type HttpsUrl = string;
@@ -233,6 +235,7 @@ export type RunEvent =
       }>;
     }
   | { type: "run/events-truncated"; omittedInteractions: number }
+  | { type: "reply/to-caller"; caller: "voice"; text: string }
   | { type: "wake/parent"; message: string }
   | {
       type: "computer/sync";
@@ -274,7 +277,7 @@ export type Run =
       stopRequestedAt?: Instant;
       queued?: true;
       partialText?: string;
-      via?: { kind: "bot"; name: string; botId: BotId };
+      via?: RunVia;
       messageRunId?: Identifier;
       messageAdmittedAt?: Instant;
       retryOf?: Identifier;
@@ -290,7 +293,7 @@ export type Run =
       events: Array<RunEvent>;
       stopRequestedAt?: Instant;
       outcome: { type: "completed"; text: string };
-      via?: { kind: "bot"; name: string; botId: BotId };
+      via?: RunVia;
       messageRunId?: Identifier;
       messageAdmittedAt?: Instant;
       retryOf?: Identifier;
@@ -306,7 +309,7 @@ export type Run =
       events: Array<RunEvent>;
       stopRequestedAt?: Instant;
       outcome: { type: "failed"; message: string; text?: string };
-      via?: { kind: "bot"; name: string; botId: BotId };
+      via?: RunVia;
       messageRunId?: Identifier;
       messageAdmittedAt?: Instant;
       retryOf?: Identifier;
@@ -322,7 +325,7 @@ export type Run =
       events: Array<RunEvent>;
       stopRequestedAt: Instant;
       outcome: { type: "cancelled"; message: string; text?: string };
-      via?: { kind: "bot"; name: string; botId: BotId };
+      via?: RunVia;
       messageRunId?: Identifier;
       messageAdmittedAt?: Instant;
       retryOf?: Identifier;
@@ -338,7 +341,7 @@ export type Run =
       events: Array<RunEvent>;
       stopRequestedAt?: Instant;
       outcome: { type: "superseded"; message: string; text?: string };
-      via?: { kind: "bot"; name: string; botId: BotId };
+      via?: RunVia;
       messageRunId?: Identifier;
       messageAdmittedAt?: Instant;
       retryOf?: Identifier;
@@ -824,6 +827,7 @@ export type MessageCursor = string;
 export interface ProtocolTypes {
   Identifier: Identifier;
   BotId: BotId;
+  RunVia: RunVia;
   Digest: Digest;
   Instant: Instant;
   HttpsUrl: HttpsUrl;

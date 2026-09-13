@@ -49,6 +49,9 @@ export interface ClientTurnEvent {
   payload?: unknown;
   /** A `wake/parent` hand-off message. */
   message?: string;
+  /** A `reply/to-caller` answer and who it was addressed to. */
+  text?: string;
+  caller?: string;
   /** A `task/dispatched` subagent chip. */
   taskId?: string;
   taskType?: string;
@@ -130,7 +133,7 @@ export interface ClientRun {
    */
   partialText?: string;
   /** Source marker for a message admitted on the agent lane. */
-  via?: { kind: "bot"; name: string; botId: string };
+  via?: { kind: "bot"; name: string; botId: string } | { kind: "voice" };
 }
 
 const MAX_RUN_ID_LENGTH = 128;
@@ -270,6 +273,17 @@ export type ClientRunEventV1 =
       ordinal: number;
     }
   /**
+   * The Turn's answer to the caller that asked for it. Projected because it
+   * *is* the conversation — the exchange happened in this Bot's thread and the
+   * person can read it back — but it is not a send: it minted no message,
+   * raised no badge, and reached its caller by its own route.
+   */
+  | {
+      type: "reply/to-caller";
+      caller: "voice";
+      text: string;
+    }
+  /**
    * A child Turn's hand-off to its parent. Projected because it is durable
    * history of that Turn; delivering it into the parent is a later slice.
    */
@@ -374,8 +388,11 @@ export interface ClientRunV1 {
    */
   partialText?: string;
   outcome?: ClientRunOutcomeV1;
-  /** Where an agent-lane question entered this Bot's transcript. */
-  via?: { kind: "bot"; name: string; botId: string };
+  /**
+   * Where an agent-lane question entered this Bot's transcript: another Bot of
+   * the same User, or the account's voice session speaking for the person.
+   */
+  via?: { kind: "bot"; name: string; botId: string } | { kind: "voice" };
 }
 
 export interface ClientRunPageV1 {
@@ -791,6 +808,17 @@ function projectionUnits(
         droppable: true,
       });
       sendCount += 1;
+    } else if (event.type === "reply/to-caller") {
+      units.push({
+        events: [
+          {
+            type: "reply/to-caller",
+            caller: event.caller,
+            text: truncateWireString(event.text, MAX_EVENT_CONTENT_BYTES),
+          },
+        ],
+        droppable: true,
+      });
     } else if (event.type === "wake/parent") {
       units.push({
         events: [
@@ -1062,6 +1090,10 @@ export function projectClientRunV1(
               } satisfies ClientRunOutcomeV1)
             : undefined;
   const origin = run.admission?.origin;
+  // Who asked, for the two agent-lane callers. The voice marker deliberately
+  // carries nothing else: a call id and a spoken turn id name durable voice
+  // state, and the transcript has no use for either — what it needs to draw is
+  // that this exchange was spoken, not typed.
   const via =
     origin?.kind === "bot"
       ? {
@@ -1069,7 +1101,9 @@ export function projectClientRunV1(
           name: truncateWireString(origin.fromBotName, 100),
           botId: truncate(origin.fromBotId, 128),
         }
-      : undefined;
+      : origin?.kind === "voice"
+        ? { kind: "voice" as const }
+        : undefined;
   return {
     // Every attempt carries its message identity, independently of paging.
     schemaVersion: 4,
@@ -1472,6 +1506,17 @@ function decodeEvent(value: unknown): ClientRunEventV1 | undefined {
       ordinal: ordinal as number,
     };
   }
+  if (event.type === "reply/to-caller") {
+    exactKeys(event, ["type", "caller", "text"], "run event");
+    if (event.caller !== "voice") {
+      throw new Error("run event.caller is invalid");
+    }
+    return {
+      type: "reply/to-caller",
+      caller: "voice",
+      text: wireString(event, "text", MAX_EVENT_CONTENT_BYTES, "run event"),
+    };
+  }
   if (event.type === "wake/parent") {
     exactKeys(event, ["type", "message"], "run event");
     return {
@@ -1620,6 +1665,7 @@ function decodeEvents(values: unknown[]): ClientTurnEvent[] {
     // with nothing, so the call/result walk steps straight over them.
     if (
       call?.type === "send/to-user" ||
+      call?.type === "reply/to-caller" ||
       call?.type === "wake/parent" ||
       call?.type === "task/dispatched" ||
       call?.type === "plugin/model-usage" ||
@@ -1755,6 +1801,12 @@ function decodeRun(value: unknown): ClientRun {
         name: wireString(candidate, "name", 100, "run.via"),
         botId: string(candidate, "botId", 128, "run.via"),
       };
+    } else if (candidate.kind === "voice") {
+      // The account has one voice session, so there is nothing to name. A
+      // marker that carried a call id would be an identifier the transcript
+      // cannot use and a decoder would still have to bound.
+      exactKeys(candidate, ["kind"], "run.via");
+      via = { kind: "voice" };
     } else {
       throw new Error("run.via.kind is invalid");
     }
