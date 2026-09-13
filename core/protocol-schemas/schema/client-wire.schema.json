@@ -692,6 +692,9 @@
           },
           "required": [],
           "additionalProperties": false
+        },
+        "retryOf": {
+          "$ref": "#/$defs/Identifier"
         }
       },
       "required": ["schemaVersion", "commandId", "text"],
@@ -1344,7 +1347,7 @@
           "type": "object",
           "properties": {
             "schemaVersion": {
-              "enum": [1, 2, 3]
+              "enum": [1, 2, 3, 4]
             },
             "runId": {
               "$ref": "#/$defs/Identifier"
@@ -1396,6 +1399,18 @@
               },
               "required": ["kind", "name", "botId"],
               "additionalProperties": false
+            },
+            "messageRunId": {
+              "$ref": "#/$defs/Identifier"
+            },
+            "messageAdmittedAt": {
+              "$ref": "#/$defs/Instant"
+            },
+            "retryOf": {
+              "$ref": "#/$defs/Identifier"
+            },
+            "retriedBy": {
+              "$ref": "#/$defs/Identifier"
             }
           },
           "required": [
@@ -1420,7 +1435,111 @@
                 "type": "object",
                 "properties": {
                   "schemaVersion": {
-                    "const": 3
+                    "enum": [3, 4]
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "type": "object",
+                "properties": {
+                  "schemaVersion": {
+                    "const": 4
+                  }
+                },
+                "required": ["schemaVersion"]
+              },
+              "then": {
+                "type": "object",
+                "required": ["messageRunId", "messageAdmittedAt"],
+                "properties": {
+                  "messageRunId": {},
+                  "messageAdmittedAt": {}
+                }
+              }
+            },
+            {
+              "if": {
+                "type": "object",
+                "required": ["messageRunId"],
+                "properties": {
+                  "messageRunId": {}
+                }
+              },
+              "then": {
+                "type": "object",
+                "properties": {
+                  "schemaVersion": {
+                    "const": 4
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "type": "object",
+                "required": ["messageAdmittedAt"],
+                "properties": {
+                  "messageAdmittedAt": {}
+                }
+              },
+              "then": {
+                "type": "object",
+                "properties": {
+                  "schemaVersion": {
+                    "const": 4
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "type": "object",
+                "required": ["retryOf"],
+                "properties": {
+                  "retryOf": {}
+                }
+              },
+              "then": {
+                "type": "object",
+                "properties": {
+                  "schemaVersion": {
+                    "const": 4
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "type": "object",
+                "required": ["retriedBy"],
+                "properties": {
+                  "retriedBy": {}
+                }
+              },
+              "then": {
+                "type": "object",
+                "properties": {
+                  "schemaVersion": {
+                    "const": 4
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "type": "object",
+                "required": ["retriedBy"],
+                "properties": {
+                  "retriedBy": {}
+                }
+              },
+              "then": {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "const": "failed"
                   }
                 }
               }
@@ -1431,7 +1550,7 @@
           "type": "object",
           "properties": {
             "schemaVersion": {
-              "enum": [1, 2, 3]
+              "enum": [1, 2, 3, 4]
             },
             "runId": {
               "$ref": "#/$defs/Identifier"
@@ -1490,6 +1609,18 @@
               },
               "required": ["kind", "name", "botId"],
               "additionalProperties": false
+            },
+            "messageRunId": {
+              "$ref": "#/$defs/Identifier"
+            },
+            "messageAdmittedAt": {
+              "$ref": "#/$defs/Instant"
+            },
+            "retryOf": {
+              "$ref": "#/$defs/Identifier"
+            },
+            "retriedBy": {
+              "$ref": "#/$defs/Identifier"
             }
           },
           "required": [
@@ -1515,7 +1646,111 @@
                 "type": "object",
                 "properties": {
                   "schemaVersion": {
-                    "const": 3
+                    "enum": [3, 4]
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "type": "object",
+                "properties": {
+                  "schemaVersion": {
+                    "const": 4
+                  }
+                },
+                "required": ["schemaVersion"]
+              },
+              "then": {
+                "type": "object",
+                "required": ["messageRunId", "messageAdmittedAt"],
+                "properties": {
+                  "messageRunId": {},
+                  "messageAdmittedAt": {}
+                }
+              }
+            },
+            {
+              "if": {
+                "type": "object",
+                "required": ["messageRunId"],
+                "properties": {
+                  "messageRunId": {}
+                }
+              },
+              "then": {
+                "type": "object",
+                "properties": {
+                  "schemaVersion": {
+                    "const": 4
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "type": "object",
+                "required": ["messageAdmittedAt"],
+                "properties": {
+                  "messageAdmittedAt": {}
+                }
+              },
+              "then": {
+                "type": "object",
+                "properties": {
+                  "schemaVersion": {
+                    "const": 4
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "type": "object",
+                "required": ["retryOf"],
+                "properties": {
+                  "retryOf": {}
+                }
+              },
+              "then": {
+                "type": "object",
+                "properties": {
+                  "schemaVersion": {
+                    "const": 4
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "type": "object",
+                "required": ["retriedBy"],
+                "properties": {
+                  "retriedBy": {}
+                }
+              },
+              "then": {
+                "type": "object",
+                "properties": {
+                  "schemaVersion": {
+                    "const": 4
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "type": "object",
+                "required": ["retriedBy"],
+                "properties": {
+                  "retriedBy": {}
+                }
+              },
+              "then": {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "const": "failed"
                   }
                 }
               }
@@ -1526,7 +1761,7 @@
           "type": "object",
           "properties": {
             "schemaVersion": {
-              "enum": [1, 2, 3]
+              "enum": [1, 2, 3, 4]
             },
             "runId": {
               "$ref": "#/$defs/Identifier"
@@ -1590,6 +1825,18 @@
               },
               "required": ["kind", "name", "botId"],
               "additionalProperties": false
+            },
+            "messageRunId": {
+              "$ref": "#/$defs/Identifier"
+            },
+            "messageAdmittedAt": {
+              "$ref": "#/$defs/Instant"
+            },
+            "retryOf": {
+              "$ref": "#/$defs/Identifier"
+            },
+            "retriedBy": {
+              "$ref": "#/$defs/Identifier"
             }
           },
           "required": [
@@ -1615,7 +1862,111 @@
                 "type": "object",
                 "properties": {
                   "schemaVersion": {
-                    "const": 3
+                    "enum": [3, 4]
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "type": "object",
+                "properties": {
+                  "schemaVersion": {
+                    "const": 4
+                  }
+                },
+                "required": ["schemaVersion"]
+              },
+              "then": {
+                "type": "object",
+                "required": ["messageRunId", "messageAdmittedAt"],
+                "properties": {
+                  "messageRunId": {},
+                  "messageAdmittedAt": {}
+                }
+              }
+            },
+            {
+              "if": {
+                "type": "object",
+                "required": ["messageRunId"],
+                "properties": {
+                  "messageRunId": {}
+                }
+              },
+              "then": {
+                "type": "object",
+                "properties": {
+                  "schemaVersion": {
+                    "const": 4
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "type": "object",
+                "required": ["messageAdmittedAt"],
+                "properties": {
+                  "messageAdmittedAt": {}
+                }
+              },
+              "then": {
+                "type": "object",
+                "properties": {
+                  "schemaVersion": {
+                    "const": 4
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "type": "object",
+                "required": ["retryOf"],
+                "properties": {
+                  "retryOf": {}
+                }
+              },
+              "then": {
+                "type": "object",
+                "properties": {
+                  "schemaVersion": {
+                    "const": 4
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "type": "object",
+                "required": ["retriedBy"],
+                "properties": {
+                  "retriedBy": {}
+                }
+              },
+              "then": {
+                "type": "object",
+                "properties": {
+                  "schemaVersion": {
+                    "const": 4
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "type": "object",
+                "required": ["retriedBy"],
+                "properties": {
+                  "retriedBy": {}
+                }
+              },
+              "then": {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "const": "failed"
                   }
                 }
               }
@@ -1626,7 +1977,7 @@
           "type": "object",
           "properties": {
             "schemaVersion": {
-              "enum": [1, 2, 3]
+              "enum": [1, 2, 3, 4]
             },
             "runId": {
               "$ref": "#/$defs/Identifier"
@@ -1690,6 +2041,18 @@
               },
               "required": ["kind", "name", "botId"],
               "additionalProperties": false
+            },
+            "messageRunId": {
+              "$ref": "#/$defs/Identifier"
+            },
+            "messageAdmittedAt": {
+              "$ref": "#/$defs/Instant"
+            },
+            "retryOf": {
+              "$ref": "#/$defs/Identifier"
+            },
+            "retriedBy": {
+              "$ref": "#/$defs/Identifier"
             }
           },
           "required": [
@@ -1716,7 +2079,111 @@
                 "type": "object",
                 "properties": {
                   "schemaVersion": {
-                    "const": 3
+                    "enum": [3, 4]
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "type": "object",
+                "properties": {
+                  "schemaVersion": {
+                    "const": 4
+                  }
+                },
+                "required": ["schemaVersion"]
+              },
+              "then": {
+                "type": "object",
+                "required": ["messageRunId", "messageAdmittedAt"],
+                "properties": {
+                  "messageRunId": {},
+                  "messageAdmittedAt": {}
+                }
+              }
+            },
+            {
+              "if": {
+                "type": "object",
+                "required": ["messageRunId"],
+                "properties": {
+                  "messageRunId": {}
+                }
+              },
+              "then": {
+                "type": "object",
+                "properties": {
+                  "schemaVersion": {
+                    "const": 4
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "type": "object",
+                "required": ["messageAdmittedAt"],
+                "properties": {
+                  "messageAdmittedAt": {}
+                }
+              },
+              "then": {
+                "type": "object",
+                "properties": {
+                  "schemaVersion": {
+                    "const": 4
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "type": "object",
+                "required": ["retryOf"],
+                "properties": {
+                  "retryOf": {}
+                }
+              },
+              "then": {
+                "type": "object",
+                "properties": {
+                  "schemaVersion": {
+                    "const": 4
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "type": "object",
+                "required": ["retriedBy"],
+                "properties": {
+                  "retriedBy": {}
+                }
+              },
+              "then": {
+                "type": "object",
+                "properties": {
+                  "schemaVersion": {
+                    "const": 4
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "type": "object",
+                "required": ["retriedBy"],
+                "properties": {
+                  "retriedBy": {}
+                }
+              },
+              "then": {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "const": "failed"
                   }
                 }
               }
@@ -1727,7 +2194,7 @@
           "type": "object",
           "properties": {
             "schemaVersion": {
-              "enum": [1, 2, 3]
+              "enum": [1, 2, 3, 4]
             },
             "runId": {
               "$ref": "#/$defs/Identifier"
@@ -1791,6 +2258,18 @@
               },
               "required": ["kind", "name", "botId"],
               "additionalProperties": false
+            },
+            "messageRunId": {
+              "$ref": "#/$defs/Identifier"
+            },
+            "messageAdmittedAt": {
+              "$ref": "#/$defs/Instant"
+            },
+            "retryOf": {
+              "$ref": "#/$defs/Identifier"
+            },
+            "retriedBy": {
+              "$ref": "#/$defs/Identifier"
             }
           },
           "required": [
@@ -1816,7 +2295,111 @@
                 "type": "object",
                 "properties": {
                   "schemaVersion": {
-                    "const": 3
+                    "enum": [3, 4]
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "type": "object",
+                "properties": {
+                  "schemaVersion": {
+                    "const": 4
+                  }
+                },
+                "required": ["schemaVersion"]
+              },
+              "then": {
+                "type": "object",
+                "required": ["messageRunId", "messageAdmittedAt"],
+                "properties": {
+                  "messageRunId": {},
+                  "messageAdmittedAt": {}
+                }
+              }
+            },
+            {
+              "if": {
+                "type": "object",
+                "required": ["messageRunId"],
+                "properties": {
+                  "messageRunId": {}
+                }
+              },
+              "then": {
+                "type": "object",
+                "properties": {
+                  "schemaVersion": {
+                    "const": 4
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "type": "object",
+                "required": ["messageAdmittedAt"],
+                "properties": {
+                  "messageAdmittedAt": {}
+                }
+              },
+              "then": {
+                "type": "object",
+                "properties": {
+                  "schemaVersion": {
+                    "const": 4
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "type": "object",
+                "required": ["retryOf"],
+                "properties": {
+                  "retryOf": {}
+                }
+              },
+              "then": {
+                "type": "object",
+                "properties": {
+                  "schemaVersion": {
+                    "const": 4
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "type": "object",
+                "required": ["retriedBy"],
+                "properties": {
+                  "retriedBy": {}
+                }
+              },
+              "then": {
+                "type": "object",
+                "properties": {
+                  "schemaVersion": {
+                    "const": 4
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "type": "object",
+                "required": ["retriedBy"],
+                "properties": {
+                  "retriedBy": {}
+                }
+              },
+              "then": {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "const": "failed"
                   }
                 }
               }
@@ -4001,7 +4584,7 @@
   "x-frockbot-compatibility": {
     "protocolMin": 1,
     "protocolMax": 1,
-    "minimumNativeVersion": "1.2.0",
+    "minimumNativeVersion": "1.3.0",
     "catalogs": []
   }
 }

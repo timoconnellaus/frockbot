@@ -521,6 +521,7 @@ function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
           sessionId: command.sessionId,
           acceptedAt: command.acceptedAt,
           text: command.text,
+          ...(command.retryOf ? { retryOf: command.retryOf } : {}),
           ...(command.skills ? { skills: command.skills } : {}),
           // The composer's supersede intent and the lane it implies. This
           // rebuilds the command field by field rather than spreading it, so

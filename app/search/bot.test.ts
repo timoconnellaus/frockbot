@@ -27,6 +27,26 @@ function run(overrides: Partial<TestRun> = {}): TestRun {
 }
 
 describe("the settled-run projection", () => {
+  test("a retry contributes its own sends, without another user message or its links", () => {
+    const original = run({ input: "Check https://example.com/build" });
+    const retried = run({
+      runId: "retry-1",
+      retryOf: "run-1",
+      input: original.input,
+    });
+    const rows = [
+      ...searchRowsFromClientRunV1("bot-a", original),
+      ...searchRowsFromClientRunV1("bot-a", retried),
+    ];
+    expect(
+      rows.filter((row) => row.kind === "user").map((row) => row.runId),
+    ).toEqual(["run-1"]);
+    expect(rows.filter((row) => row.kind === "link")).toHaveLength(1);
+    expect(
+      rows.filter((row) => row.kind === "assistant").map((row) => row.runId),
+    ).toEqual(["run-1", "retry-1"]);
+  });
+
   test("a completion with no explicit send contributes no assistant message", () => {
     const rows = searchRowsFromClientRunV1(
       "bot-a",

@@ -1654,5 +1654,71 @@
         "text": "Done"
       }
     }
+  },
+  {
+    "name": "TurnCommand rejects malformed retry target",
+    "schema": "TurnCommand",
+    "value": {
+      "schemaVersion": 1,
+      "commandId": "attempt-2",
+      "retryOf": "attempt/1",
+      "text": "Check the build"
+    }
+  },
+  {
+    "name": "TurnCommand cannot forge root message identity",
+    "schema": "TurnCommand",
+    "value": {
+      "schemaVersion": 1,
+      "commandId": "attempt-2",
+      "retryOf": "attempt-1",
+      "messageRunId": "another",
+      "text": "Check the build"
+    }
+  },
+  {
+    "name": "Run V4 needs the original message timestamp",
+    "schema": "Run",
+    "value": {
+      "schemaVersion": 4,
+      "runId": "attempt-2",
+      "admittedAt": "2026-09-13T01:00:00.000Z",
+      "messageRunId": "attempt-1",
+      "retryOf": "attempt-1",
+      "input": "Check the build",
+      "status": "running",
+      "events": []
+    }
+  },
+  {
+    "name": "Run V3 cannot carry retry lineage",
+    "schema": "Run",
+    "value": {
+      "schemaVersion": 3,
+      "runId": "attempt-2",
+      "admittedAt": "2026-09-13T01:00:00.000Z",
+      "messageRunId": "attempt-1",
+      "messageAdmittedAt": "2026-09-13T00:00:00.000Z",
+      "retryOf": "attempt-1",
+      "input": "Check the build",
+      "status": "running",
+      "events": []
+    }
+  },
+  {
+    "name": "Run V4 cannot be retried while running",
+    "schema": "Run",
+    "value": {
+      "schemaVersion": 4,
+      "runId": "attempt-2",
+      "admittedAt": "2026-09-13T01:00:00.000Z",
+      "messageRunId": "attempt-1",
+      "messageAdmittedAt": "2026-09-13T00:00:00.000Z",
+      "retryOf": "attempt-1",
+      "input": "Check the build",
+      "status": "running",
+      "events": [],
+      "retriedBy": "attempt-3"
+    }
   }
 ]

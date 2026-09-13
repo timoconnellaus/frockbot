@@ -34,6 +34,7 @@ export interface SearchSinkV1 {
 export interface SearchProjectableRunV1 {
   runId: string;
   admittedAt?: string;
+  retryOf?: string;
   input: string;
   status:
     | "running"
@@ -105,7 +106,7 @@ export function searchRowsFromClientRunV1(
       body: bounded,
     });
   };
-  push("user", run.input);
+  if (!run.retryOf) push("user", run.input);
   // Tool text is indexed but excluded from default results: a tool result can
   // carry credentials-adjacent output, so reading it back is an explicit
   // `kinds` opt-in rather than something a stray query surfaces.
@@ -122,7 +123,7 @@ export function searchRowsFromClientRunV1(
     push("tool", result ? `${name}\n${result}` : name);
   }
   const sends = run.events.filter((event) => event.type === "send/to-user");
-  const sharedText: string[] = [run.input];
+  const sharedText: string[] = run.retryOf ? [] : [run.input];
   for (const event of sends) {
     const payload = event.payload;
     if (typeof payload !== "object" || payload === null) continue;
