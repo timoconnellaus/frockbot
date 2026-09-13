@@ -2264,11 +2264,25 @@ export class VoiceAssistant extends VoiceAgentBase<
    * seconds. After that this answer falls back to the slow nudge for the rest
    * of the call: it stays `settled` and owed either way, and a provider that
    * is down must not be asked for the same sentence every few seconds.
+   *
+   * Only the speaker actually failing spends that allowance. A read-out the
+   * person talked over, or one whose call was replaced, ends in the same
+   * rejection — the interrupt aborts the synthesis in flight — and says
+   * nothing about the provider, so it takes the uncounted retry instead.
    */
   private async retryFailedReadOut(
+    connection: Connection,
     call: LiveCall,
+    generation: number,
     runId: string,
   ): Promise<void> {
+    if (
+      this.#calls.get(connection.id) !== call ||
+      call.speechGeneration !== generation
+    ) {
+      await this.scheduleReadOutRetry(runId);
+      return;
+    }
     const failures = (call.readOutFailures.get(runId) ?? 0) + 1;
     call.readOutFailures.set(runId, failures);
     if (failures < DELEGATION_READ_OUT_MAX_ATTEMPTS) {
@@ -2396,6 +2410,7 @@ export class VoiceAssistant extends VoiceAgentBase<
   ) {
     const call = this.#calls.get(connection.id);
     if (!call) return;
+    let generation = call.speechGeneration;
     const chained = call.speechChain.then(async () => {
       // Re-checked here, not at the call site: everything below was decided
       // before whatever ran ahead of this in the queue.
@@ -2417,7 +2432,7 @@ export class VoiceAssistant extends VoiceAgentBase<
       // Composed before anything is claimed, because composing is a model
       // call that can take seconds and the call is free to change under it.
       // Nothing durable about the read-out is written until after it.
-      const generation = call.speechGeneration;
+      generation = call.speechGeneration;
       const text = await this.delegationSpeech(ledger, delegation);
       // The call as it is *now*. A new utterance, a reply that started, or a
       // socket that went, all happened while the sentence was being written,
@@ -2486,7 +2501,12 @@ export class VoiceAssistant extends VoiceAgentBase<
         if (call.pendingDelivery?.deliveryId === deliveryId) {
           call.pendingDelivery = undefined;
         }
-        await this.retryFailedReadOut(call, delegation.runId);
+        await this.retryFailedReadOut(
+          connection,
+          call,
+          generation,
+          delegation.runId,
+        );
         return;
       }
       const pending = call.pendingDelivery;
@@ -2505,7 +2525,12 @@ export class VoiceAssistant extends VoiceAgentBase<
         // Any other cause is recoverable and is retried promptly.
         if (!pending.suppressed) {
           call.pendingDelivery = undefined;
-          await this.retryFailedReadOut(call, delegation.runId);
+          await this.retryFailedReadOut(
+            connection,
+            call,
+            generation,
+            delegation.runId,
+          );
           return;
         }
         await this.scheduleDelegationDrain();
@@ -2529,7 +2554,12 @@ export class VoiceAssistant extends VoiceAgentBase<
     });
     call.speechChain = chained.catch(async () => {
       this.trace(connection, "delegation-read-out-failed");
-      await this.retryFailedReadOut(call, delegation.runId);
+      await this.retryFailedReadOut(
+        connection,
+        call,
+        generation,
+        delegation.runId,
+      );
     });
     await call.speechChain;
   }

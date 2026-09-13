@@ -1205,6 +1205,58 @@ describe("the voice session object", () => {
     opened.socket.close();
   });
 
+  // Interrupting is the person talking, not the speech provider failing: the
+  // interrupt aborts the synthesis in flight and the read-out rejects the same
+  // way a dead provider does. Barging in a few times must not spend the
+  // allowance of prompt retries — three, the same as a failing provider gets —
+  // and leave a ready answer waiting on the slow drain.
+  test("barging in repeatedly does not push a ready answer onto the slow drain", async () => {
+    const userId = `voice-barge-retry-${crypto.randomUUID()}`;
+    const stub = assistant(userId);
+    const opened = await open(userId);
+    const speaker = playsAnswers(opened);
+    // Three read-outs the person talks over, and then they stop.
+    const barged: string[] = [];
+    opened.socket.addEventListener("message", (event) => {
+      if (typeof event.data !== "string") return;
+      const frame = JSON.parse(event.data) as Record<string, unknown>;
+      if (frame.type !== "voice/answer" || barged.length >= 3) return;
+      barged.push(frame.deliveryId as string);
+      opened.socket.send(JSON.stringify({ type: "interrupt" }));
+    });
+    await startCall(opened);
+    await opened.waitFor(state("awake"), "awake");
+    const runId = `voice-${"b".repeat(32)}`;
+    const key = `voice:delegation:${runId}`;
+    await stub.probePutStorage(key, settledDelegation(runId));
+    // Synthesis is held open, so every read-out is still mid-sentence when the
+    // person cuts in — and each retry after the first is the scheduler's.
+    await stub.probeHoldTts();
+    await stub.probeSpeakDetached([runId]);
+    await eventually(
+      async () => barged.length,
+      (count) => count >= 3,
+      "three read-outs talked over",
+      20_000,
+    );
+    await stub.probeReleaseTts();
+    // Nobody talks over the next one, and it arrives on the prompt retry
+    // rather than ninety seconds later.
+    const heard = await eventually(
+      async () =>
+        (await stub.probeStorage("voice:delegation:"))[
+          key
+        ] as VoiceDelegationRecordV1,
+      (record) => record.state === "spoken",
+      "the answer read out promptly after the barge-ins",
+      20_000,
+    );
+    expect(barged).not.toContain(heard.deliveryId);
+    expect(speaker.played).toEqual([heard.deliveryId]);
+    expect(opened.audio.some((bytes) => bytes > 0)).toBe(true);
+    opened.socket.close();
+  });
+
   test("a used-up listening allowance does not delay a recoverable read-out", async () => {
     const userId = `voice-listening-cap-readout-${crypto.randomUUID()}`;
     const stub = assistant(userId);

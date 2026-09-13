@@ -304,9 +304,11 @@ so a device whose completion never comes back cannot hold the queue for the
 rest of the call. A read-out whose audio never arrives is retried promptly a
 few times and then falls back to the slow drain, so a speech provider that
 stays down is not asked for the same sentence every few seconds. Synthesis
-refused by the speech-character cap is the one failure that is not retried on
-the call; a used-up listening allowance does not delay an otherwise
-recoverable read-out. Interrupted, disconnected and failed audio leaves the durable answer
+refused by the speech-character cap skips those prompt retries and waits on the
+slow drain instead, so it still goes out if the cap resets; a used-up listening
+allowance does not delay an otherwise recoverable read-out. A read-out the
+person talks over, or one whose call is replaced, spends none of those
+retries. Interrupted, disconnected and failed audio leaves the durable answer
 available for a later read-out. Every delivery names its request and current
 connection owner; duplicate or stale acknowledgments cannot settle another
 answer.

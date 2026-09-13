@@ -69,6 +69,15 @@ export interface VoiceMemoryRequest {
   instruction: string;
 }
 
+/** Resolves when the pipeline's abort signal fires, and never otherwise. */
+function aborts(signal?: AbortSignal): Promise<void> {
+  return new Promise<void>((resolve) => {
+    if (!signal) return;
+    if (signal.aborted) return resolve();
+    signal.addEventListener("abort", () => resolve(), { once: true });
+  });
+}
+
 function sse(events: unknown[]): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
   return new ReadableStream({
@@ -194,9 +203,14 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
 
   protected override createTts() {
     return {
-      synthesize: async (text: string) => {
+      synthesize: async (text: string, signal?: AbortSignal) => {
         this.#synthesized.push(text);
-        if (this.#ttsHeld) await this.#ttsHeld;
+        // A real provider is an HTTP request carrying this signal: a held
+        // sentence waits, and an interrupt part way through it rejects then
+        // and there rather than handing back audio for a moment that has
+        // passed.
+        if (this.#ttsHeld) await Promise.race([this.#ttsHeld, aborts(signal)]);
+        if (signal?.aborted) throw new DOMException("aborted", "AbortError");
         if (this.#script.failTts)
           throw new Error("speech provider unavailable");
         if (this.#script.silentTts) return null;
