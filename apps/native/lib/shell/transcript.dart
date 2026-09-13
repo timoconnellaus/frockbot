@@ -42,6 +42,9 @@ class TranscriptView extends StatefulWidget {
   final void Function(String?)? onReadLatest;
   final String storageKey;
 
+  /// Scrollable space for a control outside the list that has disappeared.
+  final Widget? bottomSpace;
+
   /// A Turn the reader asked to be taken to — a search hit. It is brought into
   /// view and marked, once. A Turn further back than the loaded page is simply
   /// not here, and the thread says nothing rather than pretending to scroll.
@@ -57,6 +60,7 @@ class TranscriptView extends StatefulWidget {
     required this.onRefresh,
     required this.onOpenRun,
     required this.storageKey,
+    this.bottomSpace,
     this.pendingText,
     this.approvals,
     this.onRetryTurn,
@@ -75,6 +79,8 @@ class TranscriptView extends StatefulWidget {
 }
 
 class _TranscriptViewState extends State<TranscriptView> {
+  static const workingPadding = EdgeInsets.fromLTRB(16, 6, 16, 6);
+
   final GlobalKey focusKey = GlobalKey();
   final ScrollController scroll = ScrollController();
   @override
@@ -303,6 +309,18 @@ class _TranscriptViewState extends State<TranscriptView> {
                 ),
               ),
             ...rows,
+            // Keep the latest messages in place when the working row goes.
+            if (!ordered.any(
+              (line) =>
+                  line.role == LineRole.assistant &&
+                  line.status == LineStatus.streaming &&
+                  line.empty,
+            ))
+              SizedBox(
+                key: const ValueKey('row:working-space'),
+                height: WorkingIndicator.avatarSize + workingPadding.vertical,
+              ),
+            if (widget.bottomSpace != null) widget.bottomSpace!,
           ].reversed.toList(),
         ),
       ),
@@ -345,7 +363,7 @@ class _TranscriptViewState extends State<TranscriptView> {
       // words: a Stop the person asked for and is now waiting on, and a Turn
       // still waiting behind the one it displaced.
       return Padding(
-        padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
+        padding: workingPadding,
         child: WorkingIndicator(
           line: line,
           background: widget.background,

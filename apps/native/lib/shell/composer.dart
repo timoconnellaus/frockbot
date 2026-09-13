@@ -117,6 +117,49 @@ class ComposerDraftStore {
   }
 }
 
+/// Shared with the transcript's idle spacer so text scaling reserves the
+/// same height that the Stop control takes while a Turn is running.
+class ComposerStopButton extends StatelessWidget {
+  final bool stopping;
+  final VoidCallback? onStop;
+  const ComposerStopButton({super.key, this.stopping = false, this.onStop});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Align(
+      alignment: Alignment.centerRight,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(0, 0, 16, 6),
+        child: identified(
+          ShellIds.stopButton,
+          OutlinedButton.icon(
+            key: onStop == null ? null : const ValueKey('stop'),
+            onPressed: stopping || onStop == null
+                ? null
+                : () {
+                    unawaitedHaptic();
+                    onStop!();
+                  },
+            icon: const Icon(Icons.stop_rounded, size: 14),
+            label: Text(stopping ? 'Stopping…' : 'Stop'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: theme.colorScheme.onSurface,
+              minimumSize: const Size(0, 30),
+              padding: const EdgeInsets.fromLTRB(10, 0, 12, 0),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              shape: const StadiumBorder(),
+              side: BorderSide(color: FrockTheme.hairline(theme.colorScheme)),
+              textStyle: theme.textTheme.labelMedium,
+              backgroundColor: theme.colorScheme.surface,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// The composer row: the field, the Skill popover above it, the attached Skill
 /// chips, the counter as the budget runs out, Stop and Send.
 class Composer extends StatefulWidget {
@@ -396,38 +439,7 @@ class _ComposerState extends State<Composer> {
             ),
           ),
         if (widget.stoppable)
-          Align(
-            alignment: Alignment.centerRight,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(0, 0, 16, 6),
-              child: identified(
-                ShellIds.stopButton,
-                OutlinedButton.icon(
-                  key: const ValueKey('stop'),
-                  onPressed: widget.stopping
-                      ? null
-                      : () {
-                          unawaitedHaptic();
-                          widget.onStop();
-                        },
-                  icon: const Icon(Icons.stop_rounded, size: 14),
-                  label: Text(widget.stopping ? 'Stopping…' : 'Stop'),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: theme.colorScheme.onSurface,
-                    minimumSize: const Size(0, 30),
-                    padding: const EdgeInsets.fromLTRB(10, 0, 12, 0),
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    shape: const StadiumBorder(),
-                    side: BorderSide(
-                      color: FrockTheme.hairline(theme.colorScheme),
-                    ),
-                    textStyle: theme.textTheme.labelMedium,
-                    backgroundColor: theme.colorScheme.surface,
-                  ),
-                ),
-              ),
-            ),
-          ),
+          ComposerStopButton(stopping: widget.stopping, onStop: widget.onStop),
         Padding(
           padding: const EdgeInsets.fromLTRB(12, 4, 12, 10),
           child: AnimatedContainer(
