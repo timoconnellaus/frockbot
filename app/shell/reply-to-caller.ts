@@ -1,16 +1,5 @@
-// The Bot's answer to whoever asked, when that was not the person typing.
-//
-// `send_to_user` is the Bot's voice to its User: it mints a message, advances
-// unread, and can wake a device. An agent-lane Turn the account's voice session
-// admitted is owed an answer by a different route — the voice object is holding
-// a durable request and will read the answer out — and routing one delivery as
-// the other is how somebody ends up badged for a sentence being spoken to them.
-//
-// So this is a second, narrow delivery tool with the same shape as the first:
-// it records the answer on the Session log, it ends the Turn, and the exchange
-// is still part of the conversation the person can read back. What differs is
-// only the addressee, which the *host* fixes from the Turn's durable admission
-// — never from an argument the model supplies.
+// Replies to voice are durable caller deliveries, separate from User messages.
+// The host fixes the caller from admission; the model cannot change it.
 import type {
   Session,
   ToolDefinition,
@@ -21,7 +10,7 @@ import { openStepPositionV1 } from "./agent.js";
 
 export const REPLY_TO_REQUEST_TOOL_V1 = "reply_to_request";
 
-/** A spoken answer that runs long stops being an answer and becomes a essay. */
+/** Keep a complete caller answer bounded; the voice assistant can shorten it. */
 export const REPLY_TO_REQUEST_MAX_CHARS_V1 = 4_000;
 
 const DESCRIPTION =
@@ -116,7 +105,7 @@ export function createReplyToRequestToolV1(
         await session.flush();
       }
       return {
-        content: "Answered. It is being read out to the person now.",
+        content: "Answer recorded for the voice session.",
         isError: false,
         endsTurn: true,
       };

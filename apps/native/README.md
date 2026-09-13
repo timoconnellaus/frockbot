@@ -14,6 +14,14 @@ flutter test --no-pub
 
 On this task's restricted Mac, the SDK cache could not be written. An APFS clone of that exact SDK lives under ignored `.native-build/flutter`; `XDG_CONFIG_HOME` and `PUB_CACHE` also point under `.native-build`. It changes no SDK pin or other worktree.
 
+## Voice playback and Bot exchanges
+
+Voice-originated Bot work is one blue **Voice session** exchange, with its request and explicit reply to voice. The card says Queued, Working or Answered from durable Bot state; it does not infer Played from a completed Bot Turn. Explicit `send_to_user` messages remain ordinary messages.
+
+The native speaker uses `com.frockbot/pcm`: Android receipts follow the AudioTrack playback head, and macOS receipts use AVAudioPlayerNode's `dataPlayedBack` callback. Dart acknowledges an exact voice delivery only after `voice/answer-end`, actual PCM received and all device receipts. Silent samples still count as pending audio. Interrupts, discarded audio, device failures and closed/replaced calls invalidate receipts. The browser retains its existing unavailable PCM playback behaviour and cannot acknowledge audio it did not play.
+
+This speaker changes Android native code and removes a native plugin dependency. Its first Android delivery therefore requires a **full enabling APK**, through the release procedure below; it cannot ship as a Dart-only patch. Building or reviewing a PR does not publish or install that APK.
+
 ## Android upgrade
 
 Use `scripts/native-acceptance.sh inventory` to record the installed version and certificate, then follow the Shorebird release procedure below. Phone upgrades use `adb install -r` with the exact published APK; never uninstall or clear app data. The acceptance runner’s stock-Flutter build is for qualification, not routine phone delivery.

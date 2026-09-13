@@ -70,6 +70,19 @@ enum LineStatus { streaming, completed, aborted, error }
 /// again, or opening Billing when the account could not pay for the reply.
 enum LineRetry { resendTurn, openBilling }
 
+enum VoiceExchangeStatus { queued, working, answered, stopped, failed }
+
+class VoiceExchange {
+  final String request;
+  final String? reply;
+  final VoiceExchangeStatus status;
+  const VoiceExchange({
+    required this.request,
+    required this.status,
+    this.reply,
+  });
+}
+
 class TranscriptLine {
   final String id;
   final String runId;
@@ -99,6 +112,7 @@ class TranscriptLine {
   final List<ToolActivity> tools;
   final List<SendPayloadLine> sends;
   final List<PluginModelCall> pluginCalls;
+  final VoiceExchange? voiceExchange;
   const TranscriptLine({
     required this.id,
     required this.runId,
@@ -115,10 +129,15 @@ class TranscriptLine {
     this.tools = const [],
     this.sends = const [],
     this.pluginCalls = const [],
+    this.voiceExchange,
   });
 
   bool get empty =>
-      text.isEmpty && notice == null && sends.isEmpty && retry == null;
+      text.isEmpty &&
+      notice == null &&
+      sends.isEmpty &&
+      retry == null &&
+      voiceExchange == null;
 }
 
 /// Where each Turn sits in the conversation: the timestamp of the message the
@@ -195,7 +214,8 @@ SupersedeDrainState supersedeDrainState(
 ) {
   TranscriptLine? waiting;
   for (final line in lines) {
-    if (line.role == LineRole.assistant &&
+    if (line.voiceExchange == null &&
+        line.role == LineRole.assistant &&
         line.status == LineStatus.streaming &&
         line.pending) {
       waiting = line;
@@ -428,6 +448,61 @@ List<TranscriptLine> projectRuns(List<Map<String, dynamic>> runs) {
         run['messageAdmittedAt'] as String? ?? run['admittedAt'] as String?;
     final messageId = run['messageRunId'] as String? ?? runId;
     final input = (run['input'] as String?) ?? '';
+    final via = run['via'];
+    if (via is Map && via['kind'] == 'voice') {
+      String? reply;
+      for (final event in events) {
+        if (event is Map &&
+            event['type'] == 'reply/to-caller' &&
+            event['caller'] == 'voice' &&
+            event['text'] is String) {
+          reply = event['text'] as String;
+        }
+      }
+      lines.add(
+        TranscriptLine(
+          id: '$runId:voice',
+          runId: runId,
+          role: LineRole.assistant,
+          text: '',
+          at: admittedAt,
+          status: status == 'running'
+              ? LineStatus.streaming
+              : LineStatus.completed,
+          pending: queued,
+          tools: _toolsFrom(events),
+          pluginCalls: _pluginCallsFrom(events),
+          voiceExchange: VoiceExchange(
+            request: input,
+            reply: reply,
+            status: reply != null
+                ? VoiceExchangeStatus.answered
+                : status == 'running'
+                ? (queued
+                      ? VoiceExchangeStatus.queued
+                      : VoiceExchangeStatus.working)
+                : status == 'cancelled' || status == 'superseded'
+                ? VoiceExchangeStatus.stopped
+                : VoiceExchangeStatus.failed,
+          ),
+        ),
+      );
+      // Explicit messages to the User still belong to the ordinary conversation.
+      for (final send in _sendsFrom(events)) {
+        lines.add(
+          TranscriptLine(
+            id: '$runId:send:${send.ordinal}',
+            runId: runId,
+            role: LineRole.assistant,
+            text: '',
+            at: admittedAt,
+            status: LineStatus.completed,
+            sends: [send.send],
+          ),
+        );
+      }
+      continue;
+    }
     // A Routine's Turn is projected with no input at all: nobody typed it. A
     // chat Turn cannot be admitted empty, so an empty input means there is no
     // person's message to draw above the Bot's — not an empty one.

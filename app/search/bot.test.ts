@@ -47,6 +47,22 @@ describe("the settled-run projection", () => {
     ).toEqual(["run-1", "retry-1"]);
   });
 
+  test("indexes a visible reply addressed to voice without indexing private completion text", () => {
+    const rows = searchRowsFromClientRunV1(
+      "bot-a",
+      run({
+        events: [{ type: "reply/to-caller", text: "The launch is ready." }],
+        responseText: "Private reasoning",
+      }),
+    );
+    expect(
+      rows.filter((row) => row.kind === "assistant").map((row) => row.body),
+    ).toEqual(["The launch is ready."]);
+    expect(rows.some((row) => row.body.includes("Private reasoning"))).toBe(
+      false,
+    );
+  });
+
   test("a completion with no explicit send contributes no assistant message", () => {
     const rows = searchRowsFromClientRunV1(
       "bot-a",

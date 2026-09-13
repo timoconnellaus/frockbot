@@ -65,6 +65,13 @@ interface Opened {
   closed: Promise<{ code: number; reason: string }>;
 }
 
+function binaryFrameBytes(value: unknown): number {
+  if (value instanceof ArrayBuffer || ArrayBuffer.isView(value))
+    return value.byteLength;
+  if (value instanceof Blob) return value.size;
+  throw new Error("unexpected binary voice frame");
+}
+
 async function open(
   userId: string,
   headers: Record<string, string> = {},
@@ -95,7 +102,7 @@ async function open(
   }[] = [];
   socket.addEventListener("message", (event) => {
     if (typeof event.data !== "string") {
-      audio.push((event.data as ArrayBuffer).byteLength);
+      audio.push(binaryFrameBytes(event.data));
       return;
     }
     const frame = JSON.parse(event.data) as Record<string, unknown>;
@@ -149,12 +156,14 @@ async function open(
 function playsAnswers(opened: Opened): { played: string[] } {
   const played: string[] = [];
   const ended = new Set<string>();
+  const audible = new Set<string>();
   let current: string | undefined;
   const drain = () => {
     const delivery = current;
-    if (!delivery || !ended.has(delivery)) return;
+    if (!delivery || !ended.has(delivery) || !audible.has(delivery)) return;
     current = undefined;
     ended.delete(delivery);
+    audible.delete(delivery);
     opened.socket.send(
       JSON.stringify({
         schemaVersion: 1,
@@ -172,18 +181,26 @@ function playsAnswers(opened: Opened): { played: string[] } {
     played.push(delivery);
   };
   opened.socket.addEventListener("message", (event) => {
-    if (typeof event.data !== "string") return;
+    if (opened.socket.readyState !== WebSocket.OPEN) return;
+    if (typeof event.data !== "string") {
+      if (current && binaryFrameBytes(event.data) > 0) {
+        audible.add(current);
+        opened.socket.send(
+          JSON.stringify({
+            schemaVersion: 1,
+            type: "voice/speech",
+            playing: true,
+          }),
+        );
+        drain();
+      }
+      return;
+    }
     const frame = JSON.parse(event.data) as Record<string, unknown>;
     if (frame.type === "voice/answer") {
       current = frame.deliveryId as string;
-      opened.socket.send(
-        JSON.stringify({
-          schemaVersion: 1,
-          type: "voice/speech",
-          playing: true,
-        }),
-      );
     }
+    if (frame.type === "playback_interrupt") current = undefined;
     if (frame.type === "voice/answer-end") {
       ended.add(frame.deliveryId as string);
       drain();
@@ -202,28 +219,63 @@ function holdsAnswers(opened: Opened): {
   finish(deliveryId: string): void;
 } {
   const started: string[] = [];
-  opened.socket.addEventListener("message", (event) => {
-    if (typeof event.data !== "string") return;
-    const frame = JSON.parse(event.data) as Record<string, unknown>;
-    if (frame.type !== "voice/answer") return;
-    started.push(frame.deliveryId as string);
+  const finished = new Set<string>();
+  const ended = new Set<string>();
+  const audible = new Set<string>();
+  let current: string | undefined;
+  const drain = () => {
+    if (
+      !current ||
+      !finished.has(current) ||
+      !ended.has(current) ||
+      !audible.has(current)
+    )
+      return;
+    const deliveryId = current;
+    current = undefined;
     opened.socket.send(
-      JSON.stringify({ schemaVersion: 1, type: "voice/speech", playing: true }),
+      JSON.stringify({
+        schemaVersion: 1,
+        type: "voice/speech",
+        playing: false,
+      }),
     );
+    opened.socket.send(
+      JSON.stringify({ schemaVersion: 1, type: "voice/played", deliveryId }),
+    );
+  };
+  opened.socket.addEventListener("message", (event) => {
+    if (opened.socket.readyState !== WebSocket.OPEN) return;
+    if (typeof event.data !== "string") {
+      if (current && binaryFrameBytes(event.data) > 0) {
+        audible.add(current);
+        opened.socket.send(
+          JSON.stringify({
+            schemaVersion: 1,
+            type: "voice/speech",
+            playing: true,
+          }),
+        );
+        drain();
+      }
+      return;
+    }
+    const frame = JSON.parse(event.data) as Record<string, unknown>;
+    if (frame.type === "voice/answer") {
+      current = frame.deliveryId as string;
+      started.push(current);
+    }
+    if (frame.type === "voice/answer-end") {
+      ended.add(frame.deliveryId as string);
+      drain();
+    }
+    if (frame.type === "playback_interrupt") current = undefined;
   });
   return {
     started,
-    finish(deliveryId: string) {
-      opened.socket.send(
-        JSON.stringify({
-          schemaVersion: 1,
-          type: "voice/speech",
-          playing: false,
-        }),
-      );
-      opened.socket.send(
-        JSON.stringify({ schemaVersion: 1, type: "voice/played", deliveryId }),
-      );
+    finish(deliveryId) {
+      finished.add(deliveryId);
+      drain();
     },
   };
 }
@@ -231,14 +283,25 @@ function holdsAnswers(opened: Opened): {
 /** A client whose speaker is cut off part-way: it never acknowledges. */
 function interruptsAnswers(opened: Opened): { armed: string[] } {
   const armed: string[] = [];
+  let current: string | undefined;
   opened.socket.addEventListener("message", (event) => {
-    if (typeof event.data !== "string") return;
+    if (opened.socket.readyState !== WebSocket.OPEN) return;
+    if (typeof event.data !== "string") {
+      if (current && binaryFrameBytes(event.data) > 0) {
+        armed.push(current);
+        current = undefined;
+        opened.socket.send(
+          JSON.stringify({
+            schemaVersion: 1,
+            type: "voice/speech",
+            playing: true,
+          }),
+        );
+      }
+      return;
+    }
     const frame = JSON.parse(event.data) as Record<string, unknown>;
-    if (frame.type !== "voice/answer") return;
-    armed.push(frame.deliveryId as string);
-    opened.socket.send(
-      JSON.stringify({ schemaVersion: 1, type: "voice/speech", playing: true }),
-    );
+    if (frame.type === "voice/answer") current = frame.deliveryId as string;
   });
   return { armed };
 }
@@ -944,9 +1007,7 @@ describe("the voice session object", () => {
     expect(displaced.speechState).toBe("composed");
     expect(typeof displaced.speech).toBe("string");
 
-    // The next read-out says the sentence already bought.
-    await stub.probeSpeakConcurrently([runId]);
-
+    // The scheduler returns the owed answer without another client request.
     const started = await eventually(
       async () => speaker.started,
       (starts) => starts.length === 1,
@@ -966,6 +1027,343 @@ describe("the voice session object", () => {
       "the answer marked spoken",
       20_000,
     );
+    opened.socket.close();
+  });
+
+  test.each(["silent", "failed"] as const)(
+    "a %s read-out stays owed until the provider recovers and real audio plays",
+    async (failure) => {
+      const userId = `voice-tts-recovery-${crypto.randomUUID()}`;
+      const stub = assistant(userId);
+      const opened = await open(userId);
+      const speaker = playsAnswers(opened);
+      await startCall(opened);
+      await opened.waitFor(state("awake"), "awake");
+      const runId = `voice-${"d".repeat(32)}`;
+      const at = new Date().toISOString();
+      const key = `voice:delegation:${runId}`;
+      await stub.probePutStorage(key, {
+        schemaVersion: 1,
+        runId,
+        turnId: "call:1",
+        callId: "call",
+        botId: "bot",
+        botName: "Workerd Bot",
+        text: "is the launch ready",
+        admittedAt: at,
+        state: "settled",
+        attempts: 0,
+        answer: "The launch is ready.",
+        settledAt: at,
+      });
+      await stub.probeSetScript(
+        failure === "silent" ? { silentTts: true } : { failTts: true },
+      );
+      await stub.probeSpeakConcurrently([runId]);
+      await settle(100);
+      const pending = (await stub.probeStorage("voice:delegation:"))[
+        key
+      ] as VoiceDelegationRecordV1;
+      expect(pending.state).toBe("settled");
+      expect(pending.spokenAt).toBeUndefined();
+      expect(opened.audio).toEqual([]);
+      expect(speaker.played).toEqual([]);
+      expect(
+        opened.frames.some((frame) => frame.type === "voice/answer-end"),
+      ).toBe(false);
+      // A premature acknowledgement cannot convert failed synthesis into playback.
+      opened.socket.send(
+        JSON.stringify({
+          schemaVersion: 1,
+          type: "voice/played",
+          deliveryId: pending.deliveryId,
+        }),
+      );
+      await settle(100);
+      expect(
+        (
+          (await stub.probeStorage("voice:delegation:"))[
+            key
+          ] as VoiceDelegationRecordV1
+        ).state,
+      ).toBe("settled");
+      await stub.probeSetScript({});
+      // The application's own recovery alarm retries; the test does not wake it.
+      const heard = await eventually(
+        async () =>
+          (await stub.probeStorage("voice:delegation:"))[
+            key
+          ] as VoiceDelegationRecordV1,
+        (record) => record.state === "spoken",
+        "the retained answer to play after the speech provider recovers",
+        20_000,
+      );
+      expect(speaker.played).toEqual([heard.deliveryId]);
+      expect(opened.audio.some((bytes) => bytes > 0)).toBe(true);
+      expect(await stub.probeComposed()).toBe(1);
+      opened.socket.close();
+    },
+  );
+
+  test("speech quota suppression cannot be acknowledged as a played answer", async () => {
+    const userId = `voice-quota-answer-${crypto.randomUUID()}`;
+    const stub = assistant(userId);
+    const opened = await open(userId);
+    const speaker = playsAnswers(opened);
+    await startCall(opened);
+    await opened.waitFor(state("awake"), "awake");
+    const runId = `voice-${"9".repeat(32)}`;
+    const at = new Date().toISOString();
+    const key = `voice:delegation:${runId}`;
+    const meterKey = `voice:meter:${voiceMeterDayV1(new Date())}`;
+    const meter = (await stub.probeStorage("voice:meter:"))[
+      meterKey
+    ] as VoiceMeterV1;
+    await stub.probePutStorage(meterKey, {
+      ...meter,
+      ttsCharacters: VOICE_METER_CAPS_V1.ttsCharacters,
+    });
+    await stub.probePutStorage(key, {
+      schemaVersion: 1,
+      runId,
+      turnId: "call:1",
+      callId: "call",
+      botId: "bot",
+      botName: "Workerd Bot",
+      text: "is the launch ready",
+      admittedAt: at,
+      state: "settled",
+      attempts: 0,
+      answer: "The launch is ready.",
+      settledAt: at,
+    });
+    await stub.probeSpeakConcurrently([runId]);
+    const pending = (await stub.probeStorage("voice:delegation:"))[
+      key
+    ] as VoiceDelegationRecordV1;
+    opened.socket.send(
+      JSON.stringify({
+        schemaVersion: 1,
+        type: "voice/played",
+        deliveryId: pending.deliveryId,
+      }),
+    );
+    await settle(100);
+    expect(
+      (
+        (await stub.probeStorage("voice:delegation:"))[
+          key
+        ] as VoiceDelegationRecordV1
+      ).state,
+    ).toBe("settled");
+    expect(opened.audio).toEqual([]);
+    expect(speaker.played).toEqual([]);
+    expect(
+      opened.frames.some(
+        (frame) => frame.type === "voice/refusal" && frame.code === "quota",
+      ),
+    ).toBe(true);
+    expect(
+      opened.frames.some((frame) => frame.type === "voice/answer-end"),
+    ).toBe(false);
+    opened.socket.close();
+  });
+
+  test("an acknowledgement before synthesis finishes cannot mark the answer spoken", async () => {
+    const userId = `voice-early-ack-${crypto.randomUUID()}`;
+    const stub = assistant(userId);
+    const opened = await open(userId);
+    const speaker = playsAnswers(opened);
+    await startCall(opened);
+    await opened.waitFor(state("awake"), "awake");
+    const runId = `voice-${"e".repeat(32)}`;
+    const at = new Date().toISOString();
+    const key = `voice:delegation:${runId}`;
+    await stub.probePutStorage(key, {
+      schemaVersion: 1,
+      runId,
+      turnId: "call:1",
+      callId: "call",
+      botId: "bot",
+      botName: "Workerd Bot",
+      text: "is the launch ready",
+      admittedAt: at,
+      state: "settled",
+      attempts: 0,
+      answer: "The launch is ready.",
+      settledAt: at,
+    });
+    await stub.probeHoldTts();
+    await stub.probeSpeakDetached([runId]);
+    try {
+      const frame = await opened.waitFor(
+        (frame) => frame.type === "voice/answer",
+        "answer admission",
+      );
+      opened.socket.send(
+        JSON.stringify({
+          schemaVersion: 1,
+          type: "voice/played",
+          deliveryId: frame.deliveryId,
+        }),
+      );
+      await settle(100);
+      expect(
+        (
+          (await stub.probeStorage("voice:delegation:"))[
+            key
+          ] as VoiceDelegationRecordV1
+        ).state,
+      ).toBe("settled");
+      expect(opened.audio).toEqual([]);
+    } finally {
+      await stub.probeReleaseTts();
+    }
+    await stub.probeAwaitSpeaking();
+    const heard = await eventually(
+      async () =>
+        (await stub.probeStorage("voice:delegation:"))[
+          key
+        ] as VoiceDelegationRecordV1,
+      (record) => record.state === "spoken",
+      "the real playback acknowledgement",
+    );
+    expect(speaker.played).toEqual([heard.deliveryId]);
+    opened.socket.close();
+  });
+
+  test("ending the call during composition retains the answer for the next call without another model call", async () => {
+    const userId = `voice-compose-disconnect-${crypto.randomUUID()}`;
+    const stub = assistant(userId);
+    const opened = await open(userId);
+    await startCall(opened);
+    await opened.waitFor(state("awake"), "awake");
+    const runId = `voice-${"f".repeat(32)}`;
+    const at = new Date().toISOString();
+    const key = `voice:delegation:${runId}`;
+    await stub.probePutStorage(key, {
+      schemaVersion: 1,
+      runId,
+      turnId: "call:1",
+      callId: "call",
+      botId: "bot",
+      botName: "Workerd Bot",
+      text: "is the launch ready",
+      admittedAt: at,
+      state: "settled",
+      attempts: 0,
+      answer: "The launch is ready.",
+      settledAt: at,
+    });
+    await stub.probeHoldCompose();
+    await stub.probeSpeakDetached([runId]);
+    try {
+      await eventually(
+        () => stub.probeComposed(),
+        (count) => count === 1,
+        "composition started",
+      );
+      opened.socket.send(JSON.stringify({ type: "end_call" }));
+      await opened.waitFor(status("idle"), "the call ended");
+      await eventually(
+        () => stub.probeSessions(),
+        (sessions) => sessions.every((session) => session.closed),
+        "the old call released",
+      );
+    } finally {
+      await stub.probeReleaseCompose();
+    }
+    await stub.probeAwaitSpeaking();
+    const pending = (await stub.probeStorage("voice:delegation:"))[
+      key
+    ] as VoiceDelegationRecordV1;
+    expect(pending.state).toBe("settled");
+    expect(pending.speechState).toBe("composed");
+    expect(pending.deliveryId).toBeUndefined();
+    expect(opened.frames.some((frame) => frame.type === "voice/answer")).toBe(
+      false,
+    );
+    opened.socket.close();
+    const next = await open(userId);
+    const speaker = playsAnswers(next);
+    await startCall(next);
+    const heard = await eventually(
+      async () =>
+        (await stub.probeStorage("voice:delegation:"))[
+          key
+        ] as VoiceDelegationRecordV1,
+      (record) => record.state === "spoken",
+      "cached answer on the next call",
+    );
+    expect(speaker.played).toEqual([heard.deliveryId]);
+    expect(await stub.probeComposed()).toBe(1);
+    next.socket.close();
+  });
+
+  test("a Bot answer waits for ordinary speech still being synthesized after the model has finished", async () => {
+    const userId = `voice-ordinary-tts-${crypto.randomUUID()}`;
+    const stub = assistant(userId);
+    const opened = await open(userId);
+    const speaker = playsAnswers(opened);
+    await startCall(opened);
+    await opened.waitFor(state("awake"), "awake");
+    await stub.probeSetScript({ reply: "Your calendar is clear." });
+    await stub.probeHoldTts();
+    const runId = `voice-${"8".repeat(32)}`;
+    const key = `voice:delegation:${runId}`;
+    try {
+      expect(await stub.probeUtterance("check my calendar")).toBe(true);
+      await eventually(
+        () => stub.probeSynthesized(),
+        (sentences) => sentences.length === 1,
+        "ordinary TTS in flight",
+      );
+      await eventually(
+        () => stub.probeTraces(),
+        (traces) => traces.some((trace) => trace.event === "turn-settled"),
+        "the ordinary model to finish",
+      );
+      // Longer than this probe's quiet window, but no ordinary PCM exists yet.
+      await settle(500);
+      const at = new Date().toISOString();
+      await stub.probePutStorage(key, {
+        schemaVersion: 1,
+        runId,
+        turnId: "call:1",
+        callId: "call",
+        botId: "bot",
+        botName: "Workerd Bot",
+        text: "is the launch ready",
+        admittedAt: at,
+        state: "settled",
+        attempts: 0,
+        answer: "The launch is ready.",
+        settledAt: at,
+      });
+      await stub.probeSpeakDetached([runId]);
+      await settle(500);
+      expect(opened.frames.some((frame) => frame.type === "voice/answer")).toBe(
+        false,
+      );
+      expect(opened.audio).toEqual([]);
+      expect(await stub.probeSynthesized()).toEqual([
+        "Your calendar is clear.",
+      ]);
+    } finally {
+      await stub.probeReleaseTts();
+    }
+    await stub.probeAwaitSpeaking();
+    const heard = await eventually(
+      async () =>
+        (await stub.probeStorage("voice:delegation:"))[
+          key
+        ] as VoiceDelegationRecordV1,
+      (record) => record.state === "spoken",
+      "the Bot answer after ordinary speech",
+      20_000,
+    );
+    expect(opened.audio).toEqual([960, 960]);
+    expect(speaker.played).toEqual([heard.deliveryId]);
     opened.socket.close();
   });
 
@@ -1488,7 +1886,7 @@ describe("the voice session object", () => {
   });
 
   // The scheduler drives the whole return path here: nothing below runs a
-  // look-up by hand. The first dispatch is dropped, so the answer arrives only
+  // look-up by hand. The first two dispatches are dropped, so the answer arrives only
   // if the scheduled check re-books itself, redispatches, and reads the Bot's
   // completed reply out on the still-open call.
   //
@@ -1505,7 +1903,7 @@ describe("the voice session object", () => {
     await provisionBot(identity);
     const stub = assistant(identity.userId);
     await stub.probeSetScript({ delegateWord: "plan", botId: identity.botId });
-    await stub.probeDropDispatches(1);
+    await stub.probeDropDispatches(2);
     const opened = await open(identity.userId);
     await startCall(opened);
     await opened.waitFor(state("awake"), "awake");
@@ -1671,30 +2069,32 @@ describe("the voice session object", () => {
       (f) => f.type === "transcript_end" && String(f.text).includes("Done:"),
       "acknowledged",
     );
-    opened.socket.close();
+    const speaker = playsAnswers(opened);
     const key = Object.keys(await stub.probeStorage("voice:delegation:"))[0]!;
-    const runId = key.slice("voice:delegation:".length);
     const record = (await stub.probeStorage("voice:delegation:"))[
       key
     ] as VoiceDelegationRecordV1;
     // Skip to the last permitted look-up.
     await stub.probePutStorage(key, { ...record, attempts: 39 });
-    await stub.probeCheckDelegation(runId);
-    const settled = (await stub.probeStorage("voice:delegation:"))[
-      key
-    ] as VoiceDelegationRecordV1;
-    expect(settled.state).toBe("settled");
-    expect(settled.failure).toContain("never accepted");
-    // The next call reads the failure out rather than staying silent.
-    const next = await open(identity.userId);
-    await startCall(next);
-    await next.waitFor(
-      (f) =>
-        f.type === "transcript_end" &&
-        String(f.text).includes("could not finish"),
-      "failure read out",
+    // The scheduled check reaches the bound on this still-open call.
+    await opened.waitFor(
+      (frame) =>
+        frame.type === "transcript_end" &&
+        String(frame.text).includes("could not finish"),
+      "failure read out automatically",
+      20_000,
     );
-    next.socket.close();
+    const heard = await eventually(
+      async () =>
+        (await stub.probeStorage("voice:delegation:"))[
+          key
+        ] as VoiceDelegationRecordV1,
+      (record) => record.state === "spoken",
+      "the failure to be heard",
+    );
+    expect(heard.failure).toContain("never accepted");
+    expect(speaker.played).toEqual([heard.deliveryId]);
+    opened.socket.close();
   });
 });
 

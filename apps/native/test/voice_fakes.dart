@@ -123,6 +123,32 @@ class FakeVoicePlayer extends VoicePlayer {
   int? sampleRate;
   bool closed = false;
   double _level = 0;
+  bool _playing = false;
+  int _lossCount = 0;
+  final List<Completer<bool>> _drains = [];
+
+  @override
+  bool get playing => _playing || _level > 0;
+  @override
+  int get lossCount => _lossCount;
+  @override
+  Future<bool> drain() {
+    if (!playing) return Future.value(true);
+    final done = Completer<bool>();
+    _drains.add(done);
+    return done.future;
+  }
+
+  void finishPlayback({bool clean = true}) {
+    _playing = false;
+    _level = 0;
+    if (!clean) _lossCount++;
+    for (final done in _drains) {
+      done.complete(clean);
+    }
+    _drains.clear();
+    notifyListeners();
+  }
 
   @override
   double get level => _level;
@@ -136,16 +162,24 @@ class FakeVoicePlayer extends VoicePlayer {
   Future<void> configure(int sampleRate) async => this.sampleRate = sampleRate;
 
   @override
-  void write(Uint8List chunk) => written.add(chunk);
+  void write(Uint8List chunk) {
+    written.add(chunk);
+    if (chunk.isNotEmpty) _playing = true;
+    notifyListeners();
+  }
 
   @override
   Future<void> interrupt() async {
     interrupts++;
     written.clear();
+    finishPlayback(clean: false);
   }
 
   @override
-  Future<void> close() async => closed = true;
+  Future<void> close() async {
+    closed = true;
+    finishPlayback(clean: false);
+  }
 }
 
 /// One PCM16 frame of a constant amplitude, so its RMS is exactly [level].

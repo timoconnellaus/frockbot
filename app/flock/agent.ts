@@ -742,7 +742,7 @@ export function createFlockRuntimeFeature(
       runtime.systemPrompt.register(createInboundAgentPromptSectionV1(host)),
       // Mounted only on a Turn that actually has a caller to answer, and
       // bound to that caller here rather than read from an argument. The
-      // Shell owns the delivery; this Package owns knowing who asked.
+      // Shell owns the delivery; Flock provides the caller identity.
       ...(host.inboundAgent?.kind === "voice"
         ? [
             runtime.tools.register(

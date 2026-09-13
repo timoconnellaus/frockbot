@@ -5,8 +5,8 @@
 // chunking and streaming TTS; everything FrockBot cares about — who may
 // connect, what costs money, what a Bot was asked to do — is decided here and
 // recorded in the ledger before anything external runs. The Bot runtime is
-// untouched: a delegation is an ordinary user-lane Turn in the target Bot's
-// own object, admitted through the same door the composer uses.
+// unchanged: voice requests use its existing agent lane and never supersede
+// a User turn or routine.
 //
 // Nothing durable lives only in this object's memory. A call is a ledger row,
 // a delegation is a ledger row plus a scheduled look-up, and an eviction
@@ -45,6 +45,11 @@ import {
   type VoiceDelegationRecordV1,
   type VoiceLedgerStorageV1,
 } from "@frockbot/app/voice/ledger";
+import {
+  renderVoiceBotStatusV1,
+  VOICE_HISTORY_MAX_LIMIT_V1,
+} from "@frockbot/app/voice/history";
+import type { SearchIndexResultsV1 } from "@frockbot/app/search/shared";
 import {
   decodeVoiceMemoryUpdateV1,
   emptyVoiceMemoryRecordV1,
@@ -305,12 +310,21 @@ interface LiveCall {
   turnSettledAt?: number;
   /** The client's own speaker, as it last reported it. */
   playing: boolean;
+  synthesizing: number;
   /**
    * A Bot answer handed to the speaker whose playback nobody has confirmed.
    * It holds the next read-out back, and it is cleared — never acknowledged —
    * when the person interrupts or the call goes.
    */
-  pendingDelivery?: { deliveryId: string; runId: string; armedAt: number };
+  pendingDelivery?: {
+    deliveryId: string;
+    runId: string;
+    armedAt: number;
+    text: string;
+    audioBytes: number;
+    synthesisFailed: boolean;
+    ready: boolean;
+  };
   /**
    * Read-outs, one after another. Two answers that settle together queue here
    * rather than racing into the same speaker.
@@ -455,13 +469,63 @@ export class VoiceAssistant extends VoiceAgentBase<
     inner: (TTSProvider & Partial<StreamingTTSProvider>) | undefined,
   ): (TTSProvider & Partial<StreamingTTSProvider>) | undefined {
     if (!inner) return undefined;
-    return guardSpeechProviderV1(inner, (text) =>
+    const guarded = guardSpeechProviderV1(inner, (text) =>
       this.synthesisFailed(text),
-    ) as TTSProvider & Partial<StreamingTTSProvider>;
+    );
+    const self = this;
+    const wrapped: TTSProvider & Partial<StreamingTTSProvider> = {
+      async synthesize(text, signal) {
+        const finish = self.beginSpeechSynthesis(text);
+        try {
+          return await guarded.synthesize(text, signal);
+        } catch (error) {
+          if (!signal?.aborted) self.synthesisFailed(text);
+          throw error;
+        } finally {
+          finish();
+        }
+      },
+    };
+    const stream = guarded.synthesizeStream;
+    if (stream)
+      wrapped.synthesizeStream = async function* (text, signal) {
+        const finish = self.beginSpeechSynthesis(text);
+        try {
+          yield* stream(text, signal);
+        } catch (error) {
+          if (!signal?.aborted) self.synthesisFailed(text);
+          throw error;
+        } finally {
+          finish();
+        }
+      };
+    return wrapped;
+  }
+
+  private beginSpeechSynthesis(text: string): () => void {
+    for (const [connectionId, call] of this.#calls) {
+      if (!this.#traced.get(connectionId)?.awaitingFirstChunk.has(text))
+        continue;
+      const generation = call.speechGeneration;
+      call.synthesizing += 1;
+      return () => {
+        if (
+          this.#calls.get(connectionId) !== call ||
+          call.speechGeneration !== generation
+        )
+          return;
+        call.synthesizing -= 1;
+        // Cover the handoff from the last PCM chunk to the client's playing report.
+        if (call.turnSettledAt !== undefined) call.turnSettledAt = Date.now();
+      };
+    }
+    return () => undefined;
   }
 
   private synthesisFailed(text: string): void {
     for (const connection of this.getConnections()) {
+      const pending = this.#calls.get(connection.id)?.pendingDelivery;
+      if (pending?.text.includes(text)) pending.synthesisFailed = true;
       const traced = this.#traced.get(connection.id);
       const awaiting = traced?.awaitingFirstChunk.get(text) ?? 0;
       if (!traced || awaiting === 0) continue;
@@ -1051,7 +1115,7 @@ export class VoiceAssistant extends VoiceAgentBase<
     deliveryId: string,
   ): Promise<void> {
     const pending = call.pendingDelivery;
-    if (!pending || pending.deliveryId !== deliveryId) {
+    if (!pending || pending.deliveryId !== deliveryId || !pending.ready) {
       this.trace(connection, "played-ignored", { delivery: deliveryId });
       return;
     }
@@ -1171,6 +1235,7 @@ export class VoiceAssistant extends VoiceAgentBase<
       muted: false,
       exhausted: false,
       playing: false,
+      synthesizing: 0,
       speechChain: Promise.resolve(),
       speechGeneration: 0,
       quotaSaid: false,
@@ -1365,6 +1430,8 @@ export class VoiceAssistant extends VoiceAgentBase<
     // The client stops its own player, so the speaker is quiet from here.
     call.playing = false;
     call.speechGeneration += 1;
+    call.synthesizing = 0;
+    this.#traced.get(connection.id)?.awaitingFirstChunk.clear();
     const pending = call.pendingDelivery;
     if (pending) {
       call.pendingDelivery = undefined;
@@ -1384,6 +1451,8 @@ export class VoiceAssistant extends VoiceAgentBase<
     text: string,
     connection: Connection,
   ): Promise<ArrayBuffer | null> {
+    const pending = this.#calls.get(connection.id)?.pendingDelivery;
+    if (pending?.text.includes(text)) pending.audioBytes += audio.byteLength;
     const traced = this.#traced.get(connection.id);
     if (!traced) return audio;
     traced.audioChunks += 1;
@@ -1470,6 +1539,7 @@ export class VoiceAssistant extends VoiceAgentBase<
     const now = this.now();
     const cap = await ledger.exceededCap(now);
     if (cap === "ttsCharacters") {
+      if (call?.pendingDelivery) call.pendingDelivery.synthesisFailed = true;
       this.trace(connection, "speech-suppressed", {
         cap,
         chars: text.length,
@@ -1523,6 +1593,8 @@ export class VoiceAssistant extends VoiceAgentBase<
     // The person is talking, so anything being composed for them to hear is
     // already about a moment that has passed.
     call.speechGeneration += 1;
+    call.synthesizing = 0;
+    this.#traced.get(connection.id)?.awaitingFirstChunk.clear();
     call.turnId = turnId;
     call.turnAdmittedAt = admitted.turn.admittedAt;
     call.turnTranscript = transcript;
@@ -1629,7 +1701,7 @@ export class VoiceAssistant extends VoiceAgentBase<
         };
         throw error;
       } finally {
-        call.turnSettledAt = Date.now();
+        if (call.turnId === turnId) call.turnSettledAt = Date.now();
         // Durable before the generator returns, so the SDK's own history
         // write and the ledger never disagree about whether this turn ended.
         await ledger.settleTurn(turnId, settlement);
@@ -1646,7 +1718,6 @@ export class VoiceAssistant extends VoiceAgentBase<
     })();
   }
 
-  /**
   /**
    * This call's conversation so far, newest last, bounded to what the prompt
    * carries. Built from the ledger's own turn records, which are written
@@ -1682,7 +1753,7 @@ export class VoiceAssistant extends VoiceAgentBase<
     if (call.turnStartedAt !== undefined && call.turnSettledAt === undefined) {
       return true;
     }
-    if (call.playing) return true;
+    if (call.playing || call.synthesizing > 0) return true;
     const pending = call.pendingDelivery;
     if (
       pending &&
@@ -1818,16 +1889,60 @@ export class VoiceAssistant extends VoiceAgentBase<
       botStatus: async (botId) => {
         const bot = await this.ownedBot(userId, botId);
         const runs = await this.recentRuns(userId, botId);
-        const latest = runs[0];
-        if (!latest)
-          return `${bot.initialName} has not been asked anything yet.`;
-        const said =
-          latest.outcome?.type === "completed" && latest.outcome.text
-            ? ` Last it said: ${latest.outcome.text.slice(0, 400)}`
-            : latest.partialText
-              ? ` So far it has written: ${latest.partialText.slice(0, 400)}`
-              : "";
-        return `${bot.initialName} is ${latest.status === "running" ? "working" : latest.status} on "${latest.input.slice(0, 200)}".${said}`;
+        return renderVoiceBotStatusV1({
+          botId,
+          botName: bot.initialName,
+          runs,
+        });
+      },
+      readBotHistory: async (botId, limit) => {
+        const bot = await this.ownedBot(userId, botId);
+        const page = await this.botDoor(userId, botId).listRuns();
+        const runs = page.runs.slice(
+          0,
+          Math.min(limit, VOICE_HISTORY_MAX_LIMIT_V1),
+        );
+        return {
+          botId,
+          botName: bot.initialName,
+          runs,
+          hasMore: page.page.truncated || page.runs.length > runs.length,
+        };
+      },
+      searchBotHistory: async (botId, query, limit) => {
+        const bot = await this.ownedBot(userId, botId);
+        const results = rpcJsonSnapshotV1(
+          await this.userRpc(userId).searchTranscripts({
+            schemaVersion: 1,
+            userId,
+            query: {
+              schemaVersion: 1,
+              query,
+              botId,
+              kinds: ["user", "assistant"],
+            },
+          }),
+        ) as SearchIndexResultsV1;
+        const runIds = [
+          ...new Set(
+            results.hits
+              .filter((hit) => hit.botId === botId)
+              .map((hit) => hit.runId),
+          ),
+        ].slice(0, Math.min(limit, VOICE_HISTORY_MAX_LIMIT_V1));
+        const lookups = await Promise.all(
+          runIds.map((runId) =>
+            this.botDoor(userId, botId).lookupRun({ schemaVersion: 1, runId }),
+          ),
+        );
+        return {
+          botId,
+          botName: bot.initialName,
+          results,
+          runs: lookups.flatMap((lookup) =>
+            lookup.state === "not-admitted" ? [] : [lookup.run],
+          ),
+        };
       },
       askBot: async (botId, message) => {
         // Both reads go out together: the directory says the Bot is the
@@ -2030,6 +2145,7 @@ export class VoiceAssistant extends VoiceAgentBase<
           { failure: "the Bot never accepted the request" },
           this.now(),
         );
+        await this.speakSettledDelegation({ runId: delegation.runId });
         return;
       }
       const sentAgo = delegation.dispatchedAt
@@ -2047,17 +2163,14 @@ export class VoiceAssistant extends VoiceAgentBase<
     }
     const run = lookup.run;
     const outcome = run.outcome;
-    // The answer this request asked for, from the Turn that answers it: the
-    // `reply_to_request` the Bot addressed to its caller. The outcome text is
-    // the fallback and nothing more — a Turn that ended some other way still
-    // owes the person a sentence, and this is where it comes from.
+    // Only a reply addressed to voice answers this request.
     const answered = voiceReplyTextOfRunV1(run);
     const settled = await ledger.settleDelegation(
       delegation.runId,
       answered
         ? { answer: answered }
         : outcome?.type === "completed"
-          ? { answer: outcome.text || "(no reply)" }
+          ? { failure: "the Bot finished without answering the voice request" }
           : run.status === "cancelled" || run.status === "superseded"
             ? { cancelled: true }
             : { failure: outcome ? outcome.message : run.status },
@@ -2094,15 +2207,21 @@ export class VoiceAssistant extends VoiceAgentBase<
       // method re-reads the record and returns unless it is still `settled`,
       // so an extra row is a harmless no-op. The client's own `voice/played`
       // is the fast path; this is what covers a client that never sends one.
-      await this.schedule<SpeakDelegationPayload>(
-        Math.max(1, Math.ceil(this.replyDrainQuietMs() / 1000)),
-        "speakSettledDelegation",
-        { runId: delegation.runId },
-        { idempotent: false },
-      );
+      await this.scheduleReadOutRetry(delegation.runId);
       return;
     }
     await this.speakDelegation(live.connection, delegation);
+  }
+
+  private async scheduleReadOutRetry(runId: string): Promise<void> {
+    if (!this.liveCall()) return;
+    // A callback must not deduplicate its replacement onto its executing row.
+    await this.schedule<SpeakDelegationPayload>(
+      Math.max(1, Math.ceil(this.replyDrainQuietMs() / 1000)),
+      "speakSettledDelegation",
+      { runId },
+      { idempotent: false },
+    );
   }
 
   /** The connection holding the live call, when one is here. */
@@ -2212,6 +2331,7 @@ export class VoiceAssistant extends VoiceAgentBase<
         // playing now calls `speakNextSettledDelegation`, and the scheduled
         // nudge already booked by that read-out covers a client that never
         // acknowledges. Nothing is dropped by returning here.
+        await this.scheduleReadOutRetry(delegation.runId);
         return;
       }
       const ledger = this.ledger();
@@ -2231,6 +2351,7 @@ export class VoiceAssistant extends VoiceAgentBase<
         this.replyInFlight(call)
       ) {
         this.trace(connection, "delegation-held", { reason: "displaced" });
+        await this.scheduleReadOutRetry(delegation.runId);
         return;
       }
       const deliveryId = await ledger.beginDelegationReadOut(
@@ -2253,6 +2374,7 @@ export class VoiceAssistant extends VoiceAgentBase<
         this.replyInFlight(call)
       ) {
         this.trace(connection, "delegation-held", { reason: "displaced" });
+        await this.scheduleReadOutRetry(delegation.runId);
         return;
       }
       // This sound belongs to no turn: the last one is over, and its clock
@@ -2264,6 +2386,10 @@ export class VoiceAssistant extends VoiceAgentBase<
         deliveryId,
         runId: delegation.runId,
         armedAt: Date.now(),
+        text,
+        audioBytes: 0,
+        synthesisFailed: false,
+        ready: false,
       };
       this.send(connection, {
         schemaVersion: 1,
@@ -2280,8 +2406,34 @@ export class VoiceAssistant extends VoiceAgentBase<
         if (call.pendingDelivery?.deliveryId === deliveryId) {
           call.pendingDelivery = undefined;
         }
+        await this.scheduleReadOutRetry(delegation.runId);
         return;
       }
+      const pending = call.pendingDelivery;
+      if (
+        this.#calls.get(connection.id) !== call ||
+        call.speechGeneration !== generation ||
+        pending?.deliveryId !== deliveryId
+      ) {
+        await this.scheduleReadOutRetry(delegation.runId);
+        return;
+      }
+      if (!pending.audioBytes || pending.synthesisFailed) {
+        // The SDK can finish normally without producing a complete delivery.
+        if (!call.quotaSaid) {
+          call.pendingDelivery = undefined;
+          await this.scheduleReadOutRetry(delegation.runId);
+          return;
+        }
+        await this.schedule(
+          Math.ceil(VOICE_ASSISTANT_PLAYBACK_ACK_TIMEOUT_MS_V1 / 1000),
+          "drainSettledDelegations",
+          {},
+          { idempotent: false },
+        );
+        return;
+      }
+      pending.ready = true;
       // `speak` resolving means the last chunk was handed over, not that it
       // was heard. This tells the client that is all of it, so a drain from
       // here on is the whole answer rather than a gap between chunks.
@@ -2301,8 +2453,11 @@ export class VoiceAssistant extends VoiceAgentBase<
         { idempotent: false },
       );
     });
-    call.speechChain = chained.catch(() => undefined);
-    await chained.catch(() => undefined);
+    call.speechChain = chained.catch(async () => {
+      this.trace(connection, "delegation-read-out-failed");
+      await this.scheduleReadOutRetry(delegation.runId);
+    });
+    await call.speechChain;
   }
 
   // -- dictation lease ------------------------------------------------------
@@ -2365,6 +2520,7 @@ export class VoiceAssistant extends VoiceAgentBase<
     return stub as unknown as UserMemoryRpc & {
       listBots(input: unknown): Promise<unknown>;
       readConfiguration(input: unknown): Promise<UserSettingsViewV1>;
+      searchTranscripts(input: unknown): Promise<SearchIndexResultsV1>;
     };
   }
 
@@ -2404,7 +2560,7 @@ export class VoiceAssistant extends VoiceAgentBase<
             botId,
             query: { schemaVersion: 1 },
           }),
-        ) as { runs: ClientRunV1[] },
+        ) as { runs: ClientRunV1[]; page: { truncated: boolean } },
       stopRun: (command: {
         schemaVersion: 1;
         action: "stop";

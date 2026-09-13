@@ -58,6 +58,7 @@ export interface SearchProjectableRunV1 {
     };
     callId?: string;
     content?: string;
+    text?: string;
     payload?: unknown;
   }[];
 }
@@ -124,6 +125,11 @@ export function searchRowsFromClientRunV1(
   }
   const sends = run.events.filter((event) => event.type === "send/to-user");
   const sharedText: string[] = run.retryOf ? [] : [run.input];
+  for (const event of run.events) {
+    if (event.type !== "reply/to-caller" || !event.text) continue;
+    push("assistant", event.text);
+    sharedText.push(event.text);
+  }
   for (const event of sends) {
     const payload = event.payload;
     if (typeof payload !== "object" || payload === null) continue;

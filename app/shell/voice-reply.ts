@@ -1,17 +1,5 @@
-// The Bot's half of a voice request: the durable note that an answer is ready.
-//
-// A voice request is admitted on the agent lane and answered like any other
-// agent Turn. What is different is who is owed the answer: a live call in the
-// account's voice object, which may be evicted, asleep, or hung up by the time
-// the Bot finishes. Polling alone would make every answer arrive seconds late,
-// and a fire-and-forget notification would lose the ones that raced an
-// eviction. So the settlement that records the answer also records, in the same
-// transaction, that the answer is owed — and delivery drains that.
-//
-// The entry carries the return address and nothing else. What the Bot actually
-// said is read back out of the authoritative run record when it is delivered,
-// so a redelivery cannot speak a stale copy of an answer that was later
-// superseded, and nothing user-visible is duplicated into a second place.
+// Written in the Bot settlement transaction so eviction cannot lose the wake.
+// The voice object reads the answer from the authoritative run, by request id.
 import type { StoredRunOriginV1 } from "@frockbot/core/durable";
 
 export const VOICE_REPLY_OUTBOX_PREFIX_V1 = "voice-reply:";

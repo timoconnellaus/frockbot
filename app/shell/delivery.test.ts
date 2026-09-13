@@ -9,16 +9,20 @@ import type {
 import { createAgentRuntimeHarness } from "@frockbot/app/testkit";
 import { createWebFetchToolDefinitionV1 } from "@frockbot/app/web/agent";
 import { shellAgentFeature } from "./agent.js";
+import { createReplyToRequestToolV1 } from "./reply-to-caller.js";
 
 async function run(
   provider: LlmProvider,
   turnType: TurnTypeV1 = "chat",
   initial?: SessionEvent[],
+  voice = false,
 ) {
   const root = createAgentRuntimeHarness(
     initial ? { sessions: { initialSessions: { "user:test": initial } } } : {},
   );
   await root.mount(shellAgentFeature);
+  if (voice)
+    root.tools.register(createReplyToRequestToolV1("voice", root.sessions));
   root.tools.register(
     createWebFetchToolDefinitionV1({
       fetch: async () =>
@@ -53,6 +57,92 @@ async function run(
     await root.dispose();
   }
 }
+
+test("a User-directed finish does not settle the answer owed to voice", async () => {
+  let calls = 0;
+  const events = await run(
+    {
+      id: "test",
+      async *stream() {
+        calls++;
+        yield {
+          type: "tool-call",
+          call:
+            calls === 1
+              ? {
+                  id: "update",
+                  name: "send_to_user",
+                  input: {
+                    disposition: "finish",
+                    payload: {
+                      type: "text",
+                      text: "The report is saved here.",
+                    },
+                  },
+                }
+              : {
+                  id: "answer",
+                  name: "reply_to_request",
+                  input: { answer: "The report is ready." },
+                },
+        };
+        yield { type: "finish", reason: "tool-calls" };
+      },
+    },
+    "agent",
+    undefined,
+    true,
+  );
+  expect(calls).toBe(2);
+  expect(events.filter((event) => event.type === "send/to-user")).toHaveLength(
+    1,
+  );
+  expect(
+    events.filter((event) => event.type === "reply/to-caller"),
+  ).toMatchObject([{ caller: "voice", text: "The report is ready." }]);
+  expect(events.at(-1)).toMatchObject({
+    type: "turn/end",
+    outcome: "completed",
+  });
+});
+
+test("an undelivered voice answer is repaired through the caller tool", async () => {
+  const requests: NormalizedModelRequest[] = [];
+  const events = await run(
+    {
+      id: "test",
+      async *stream(request) {
+        requests.push(request);
+        if (requests.length === 1)
+          yield { type: "text-delta", text: "Private draft." };
+        else
+          yield {
+            type: "tool-call",
+            call: {
+              id: "answer",
+              name: "reply_to_request",
+              input: { answer: "The launch went well." },
+            },
+          };
+        yield { type: "finish", reason: "completed" };
+      },
+    },
+    "agent",
+    undefined,
+    true,
+  );
+  expect(requests).toHaveLength(2);
+  expect(events.filter((event) => event.type === "send/to-user")).toHaveLength(
+    0,
+  );
+  expect(
+    events.filter((event) => event.type === "reply/to-caller"),
+  ).toMatchObject([{ caller: "voice", text: "The launch went well." }]);
+  expect(events.at(-1)).toMatchObject({
+    type: "turn/end",
+    outcome: "completed",
+  });
+});
 
 for (const batched of [false, true]) {
   test(`an answer can span separate sends ${batched ? "in one model step" : "across model steps"}`, async () => {

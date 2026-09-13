@@ -200,6 +200,82 @@ describe("voice ledger delegations", () => {
     expect((await l.meter(t0)).delegations).toBe(1);
   });
 
+  test("answer composition is metered once and playback retries reuse its durable result", async () => {
+    const { ledger: l } = ledger();
+    const admitted = await turn(l);
+    const request = await l.admitDelegation({
+      turnId: admitted.turnId,
+      botId: "remy",
+      botName: "Remy",
+      text: "launch status",
+      at: t0,
+    });
+    if (request.status !== "admitted") throw new Error("expected request");
+    const id = request.delegation.runId;
+    await l.settleDelegation(id, { answer: "The launch is ready." }, t0);
+    expect(await l.admitDelegationSpeech(id, t0)).toEqual({
+      status: "admitted",
+    });
+    expect((await l.meter(t0)).turns).toBe(2);
+    expect((await l.admitDelegationSpeech(id, t0)).status).toBe("refused");
+    await l.recordDelegationSpeech(id, "Remy says the launch is ready.");
+    await l.beginDelegationReadOut(id, t0);
+    expect(await l.admitDelegationSpeech(id, later(1_000))).toEqual({
+      status: "cached",
+      speech: "Remy says the launch is ready.",
+    });
+    expect((await l.meter(t0)).turns).toBe(2);
+  });
+
+  test("an unknown composition outcome is never paid for again after recovery", async () => {
+    const { ledger: l } = ledger();
+    const admitted = await turn(l);
+    const request = await l.admitDelegation({
+      turnId: admitted.turnId,
+      botId: "remy",
+      botName: "Remy",
+      text: "launch status",
+      at: t0,
+    });
+    if (request.status !== "admitted") throw new Error("expected request");
+    const id = request.delegation.runId;
+    await l.settleDelegation(id, { answer: "The launch is ready." }, t0);
+    await l.admitDelegationSpeech(id, t0);
+    await l.recover(later(1_000));
+    expect((await l.readDelegation(id))?.speechState).toBe("abandoned");
+    expect((await l.admitDelegationSpeech(id, later(1_000))).status).toBe(
+      "refused",
+    );
+    expect((await l.meter(t0)).turns).toBe(2);
+    expect(
+      (await l.unspokenDelegations()).map((record) => record.runId),
+    ).toEqual([id]);
+  });
+
+  test("composition respects the same daily model cap as spoken turns", async () => {
+    const { ledger: l } = ledger({
+      sttSeconds: 100,
+      ttsCharacters: 100,
+      turns: 1,
+      delegations: 10,
+      dictationSeconds: 100,
+    });
+    const admitted = await turn(l);
+    const request = await l.admitDelegation({
+      turnId: admitted.turnId,
+      botId: "remy",
+      botName: "Remy",
+      text: "launch status",
+      at: t0,
+    });
+    if (request.status !== "admitted") throw new Error("expected request");
+    const id = request.delegation.runId;
+    await l.settleDelegation(id, { answer: "The launch is ready." }, t0);
+    expect((await l.admitDelegationSpeech(id, t0)).status).toBe("refused");
+    expect((await l.readDelegation(id))?.speechState).toBeUndefined();
+    expect((await l.meter(t0)).turns).toBe(1);
+  });
+
   test("a different question to the same Bot is a different run", async () => {
     const { ledger: l } = ledger();
     const admitted = await turn(l);

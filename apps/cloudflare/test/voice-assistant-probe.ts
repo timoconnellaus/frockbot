@@ -34,6 +34,7 @@ export interface VoiceProbeScript {
   reply?: string;
   /** The speech provider answers every sentence with nothing, as a refused key does. */
   silentTts?: boolean;
+  failTts?: boolean;
   /**
    * What the end-of-call memory request answers with. `operations` is
    * serialised as the update envelope; `raw` is sent exactly as given, so a
@@ -122,6 +123,8 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
   #composeHeld: Promise<void> | undefined;
   #speaking: Promise<void> | undefined;
   #releaseCompose: (() => void) | undefined;
+  #ttsHeld: Promise<void> | undefined;
+  #releaseTts: (() => void) | undefined;
   #memoryRequests: VoiceMemoryRequest[] = [];
 
   protected override now(): Date {
@@ -183,6 +186,9 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
     return {
       synthesize: async (text: string) => {
         this.#synthesized.push(text);
+        if (this.#ttsHeld) await this.#ttsHeld;
+        if (this.#script.failTts)
+          throw new Error("speech provider unavailable");
         if (this.#script.silentTts) return null;
         // 20 ms of silence at 24 kHz: enough to be a real binary frame.
         return new ArrayBuffer(24_000 * 2 * 0.02);
@@ -467,6 +473,19 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
     const release = this.#releaseCompose;
     this.#composeHeld = undefined;
     this.#releaseCompose = undefined;
+    release?.();
+  }
+
+  async probeHoldTts(): Promise<void> {
+    this.#ttsHeld = new Promise<void>((resolve) => {
+      this.#releaseTts = resolve;
+    });
+  }
+
+  async probeReleaseTts(): Promise<void> {
+    const release = this.#releaseTts;
+    this.#ttsHeld = undefined;
+    this.#releaseTts = undefined;
     release?.();
   }
 

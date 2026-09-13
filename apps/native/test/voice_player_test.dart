@@ -1,35 +1,17 @@
-/// The speaker: what the level says when the device will not take audio.
-///
-/// The level is not decoration — the assistant reads it to decide whether the
-/// person's microphone is being sent or silenced, so a level left above zero
-/// after a failed feed makes the caller inaudible for the rest of the call.
-library;
-
-import 'dart:typed_data';
-
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/voice/player.dart';
 
-const _channel = MethodChannel('flutter_pcm_sound/methods');
+const channel = MethodChannel('com.frockbot/pcm');
 
-Uint8List _loud(int bytes) {
-  final out = Uint8List(bytes);
-  final view = ByteData.sublistView(out);
-  for (var i = 0; i < bytes ~/ 2; i++) {
-    view.setInt16(i * 2, 12000, Endian.host);
-  }
-  return out;
-}
-
-/// The device asking for the next slice, which is what drives playback.
-Future<void> _askForMore() async {
+Future<void> receipt(
+  Map<Object?, Object?> args, {
+  String method = 'played',
+}) async {
   await TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
       .handlePlatformMessage(
-        _channel.name,
-        const StandardMethodCodec().encodeMethodCall(
-          const MethodCall('OnFeedSamples', {'remaining_frames': 0}),
-        ),
+        channel.name,
+        const StandardMethodCodec().encodeMethodCall(MethodCall(method, args)),
         (_) {},
       );
   await Future<void>.delayed(Duration.zero);
@@ -37,92 +19,173 @@ Future<void> _askForMore() async {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
-
-  tearDown(() {
+  late List<Map<Object?, Object?>> fed;
+  late List<int> configuredRates;
+  bool failSetup = false;
+  bool failFeed = false;
+  setUp(() {
+    fed = [];
+    configuredRates = [];
+    failSetup = failFeed = false;
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(_channel, null);
-  });
-
-  test('a feed the device rejects leaves the speaker idle, not busy', () async {
-    var feedFails = false;
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(_channel, (call) async {
-          if (call.method == 'feed' && feedFails) {
-            throw PlatformException(code: 'feed-failed');
+        .setMockMethodCallHandler(channel, (call) async {
+          if (call.method == 'setup' && failSetup) {
+            throw PlatformException(code: 'no-device');
           }
-          return null;
-        });
-    final player = PcmVoicePlayer();
-    await player.configure(16000);
-    player.write(_loud(32000));
-    await Future<void>.delayed(Duration.zero);
-    expect(player.level, greaterThan(0), reason: 'audio is being heard');
-
-    feedFails = true;
-    await _askForMore();
-    expect(
-      player.level,
-      0,
-      reason: 'a slice the device never took is heard by nobody',
-    );
-
-    // And the next chunk still plays: a failed feed is not the end of the
-    // call, and nothing waits on a feed callback that may never come.
-    feedFails = false;
-    player.write(_loud(32000));
-    await Future<void>.delayed(Duration.zero);
-    expect(player.level, greaterThan(0));
-    await player.close();
-  });
-
-  test('a device that will not set up is tried again, holding five seconds '
-      'of the newest audio', () async {
-    var setupFails = true;
-    var setups = 0;
-    var fedBytes = 0;
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(_channel, (call) async {
           if (call.method == 'setup') {
-            setups += 1;
-            if (setupFails) throw PlatformException(code: 'no-device');
+            configuredRates.add((call.arguments as Map)['sampleRate'] as int);
           }
           if (call.method == 'feed') {
-            fedBytes +=
-                ((call.arguments as Map)['buffer'] as Uint8List).length;
+            if (failFeed) throw PlatformException(code: 'rejected');
+            fed.add(Map<Object?, Object?>.from(call.arguments as Map));
           }
           return null;
         });
+  });
+  tearDown(
+    () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, null),
+  );
+
+  test(
+    'handing all silent samples to the device is not a playback receipt',
+    () async {
+      final player = PcmVoicePlayer();
+      await player.configure(24000);
+      player.write(Uint8List(1600));
+      await Future<void>.delayed(Duration.zero);
+      expect(fed, hasLength(1));
+      expect(player.playing, isTrue);
+      expect(player.level, 0);
+      bool? drained;
+      final pending = player.drain().then((value) => drained = value);
+      await Future<void>.delayed(Duration.zero);
+      expect(drained, isNull);
+      await receipt(fed.single);
+      await pending;
+      expect(drained, isTrue);
+      expect(player.playing, isFalse);
+      await player.close();
+    },
+  );
+
+  test('every device receipt is required, including the queued tail', () async {
     final player = PcmVoicePlayer();
-    // The first setup fails, as it does on a platform without the plugin or a
-    // track another app is holding.
-    await player.configure(16000);
-    expect(setups, 1);
-    expect(player.level, 0);
-
-    // Ten seconds of reply arrives with nowhere to play it. Nothing is tried
-    // again inside the retry window, and only the newest five seconds is kept.
-    for (var second = 0; second < 10; second++) {
-      player.write(_loud(16000 * 2));
-    }
+    await player.configure(24000);
+    player.write(Uint8List(16000));
     await Future<void>.delayed(Duration.zero);
-    expect(setups, 1, reason: 'not retried inside the window');
-
-    // Past the window the next chunk tries the device again, and this time it
-    // takes: the reply is heard rather than written off for the call.
-    setupFails = false;
-    await Future<void>.delayed(
-      PcmVoicePlayer.retryAfter + const Duration(milliseconds: 100),
-    );
-    player.write(_loud(16000 * 2));
-    await Future<void>.delayed(const Duration(milliseconds: 50));
-    expect(setups, 2);
-    expect(player.level, greaterThan(0), reason: 'playing again');
-    for (var i = 0; i < 400; i++) {
-      await _askForMore();
+    bool? drained;
+    final pending = player.drain().then((value) => drained = value);
+    expect(fed, hasLength(6));
+    for (var i = 0; i < 9; i++) {
+      await receipt(fed[i]);
+      expect(drained, isNull);
     }
-    // Five seconds is all that survived the wait: the older six were dropped
-    // rather than queued, so what plays is the reply, not its beginning.
-    expect(fedBytes, 16000 * 2 * 5);
+    await receipt(fed[9]);
+    await pending;
+    expect(drained, isTrue);
     await player.close();
   });
+
+  test(
+    'interruption invalidates drains and stale receipts after rebuilding',
+    () async {
+      final player = PcmVoicePlayer();
+      await player.configure(24000);
+      player.write(Uint8List(1600));
+      await Future<void>.delayed(Duration.zero);
+      final old = fed.single;
+      final pending = player.drain();
+      await player.interrupt();
+      expect(await pending, isFalse);
+      player.write(Uint8List(1600));
+      await Future<void>.delayed(Duration.zero);
+      bool? next;
+      final nextDrain = player.drain().then((value) => next = value);
+      await receipt(old);
+      expect(next, isNull);
+      await receipt(fed.last);
+      await nextDrain;
+      expect(next, isTrue);
+      await player.close();
+    },
+  );
+
+  test(
+    'failed feeds and dropped held samples invalidate the delivery',
+    () async {
+      final player = PcmVoicePlayer();
+      await player.configure(24000);
+      final before = player.lossCount;
+      failFeed = true;
+      player.write(Uint8List(1600));
+      await Future<void>.delayed(Duration.zero);
+      expect(player.lossCount, greaterThan(before));
+      expect(await player.drain(), isFalse);
+      expect(player.playing, isFalse);
+      failFeed = false;
+      failSetup = true;
+      player.write(Uint8List(24000 * 2 * 6));
+      await Future<void>.delayed(Duration.zero);
+      expect(await player.drain(), isFalse);
+      await player.close();
+    },
+  );
+
+  test(
+    'odd sample carry prevents success until its other byte arrives',
+    () async {
+      final player = PcmVoicePlayer();
+      await player.configure(24000);
+      player.write(Uint8List(3));
+      await Future<void>.delayed(Duration.zero);
+      expect(await player.drain(), isFalse);
+      player.write(Uint8List(1));
+      await Future<void>.delayed(Duration.zero);
+      final pending = player.drain();
+      for (final data in fed) {
+        await receipt(data);
+      }
+      expect(await pending, isTrue);
+      await player.close();
+    },
+  );
+  test(
+    'changing rate discards old audio and rebuilds only at the new rate',
+    () async {
+      final player = PcmVoicePlayer();
+      await player.configure(24000);
+      player.write(Uint8List(1600));
+      await Future<void>.delayed(Duration.zero);
+      final pending = player.drain();
+      await player.configure(16000);
+      expect(await pending, isFalse);
+      expect(configuredRates, [24000, 16000]);
+      await player.close();
+    },
+  );
+
+  test(
+    'a receipt from a closed player cannot finish its replacement',
+    () async {
+      final oldPlayer = PcmVoicePlayer();
+      await oldPlayer.configure(24000);
+      oldPlayer.write(Uint8List(1600));
+      await Future<void>.delayed(Duration.zero);
+      final oldReceipt = fed.single;
+      await oldPlayer.close();
+      final player = PcmVoicePlayer();
+      await player.configure(24000);
+      player.write(Uint8List(1600));
+      await Future<void>.delayed(Duration.zero);
+      bool? result;
+      final pending = player.drain().then((value) => result = value);
+      await receipt(oldReceipt);
+      expect(result, isNull);
+      await receipt(fed.last);
+      await pending;
+      expect(result, isTrue);
+      await player.close();
+    },
+  );
 }

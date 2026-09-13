@@ -16,8 +16,7 @@ subprojects {
     project.layout.buildDirectory.value(newSubprojectBuildDir)
 }
 // A plugin that pins an old compileSdk fails the whole build the moment one
-// of its AndroidX dependencies requires a newer one: `flutter_pcm_sound`
-// compiles against 33 and pulls in libraries that require 34 or later. Every
+// of its AndroidX dependencies requires a newer one. Every
 // Android subproject is lifted to the app's own compileSdk here. That is
 // which APIs a plugin may compile against, not which devices it runs on —
 // minSdk and targetSdk are untouched, and so is the plugin's source.
