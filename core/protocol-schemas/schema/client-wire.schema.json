@@ -1411,6 +1411,9 @@
             },
             "retriedBy": {
               "$ref": "#/$defs/Identifier"
+            },
+            "canRetry": {
+              "type": "boolean"
             }
           },
           "required": [
@@ -1452,10 +1455,11 @@
               },
               "then": {
                 "type": "object",
-                "required": ["messageRunId", "messageAdmittedAt"],
+                "required": ["messageRunId", "messageAdmittedAt", "canRetry"],
                 "properties": {
                   "messageRunId": {},
-                  "messageAdmittedAt": {}
+                  "messageAdmittedAt": {},
+                  "canRetry": {}
                 }
               }
             },
@@ -1540,6 +1544,23 @@
                 "properties": {
                   "status": {
                     "const": "failed"
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "type": "object",
+                "required": ["canRetry"],
+                "properties": {
+                  "canRetry": {}
+                }
+              },
+              "then": {
+                "type": "object",
+                "properties": {
+                  "schemaVersion": {
+                    "const": 4
                   }
                 }
               }
@@ -1621,6 +1642,9 @@
             },
             "retriedBy": {
               "$ref": "#/$defs/Identifier"
+            },
+            "canRetry": {
+              "type": "boolean"
             }
           },
           "required": [
@@ -1663,10 +1687,11 @@
               },
               "then": {
                 "type": "object",
-                "required": ["messageRunId", "messageAdmittedAt"],
+                "required": ["messageRunId", "messageAdmittedAt", "canRetry"],
                 "properties": {
                   "messageRunId": {},
-                  "messageAdmittedAt": {}
+                  "messageAdmittedAt": {},
+                  "canRetry": {}
                 }
               }
             },
@@ -1751,6 +1776,23 @@
                 "properties": {
                   "status": {
                     "const": "failed"
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "type": "object",
+                "required": ["canRetry"],
+                "properties": {
+                  "canRetry": {}
+                }
+              },
+              "then": {
+                "type": "object",
+                "properties": {
+                  "schemaVersion": {
+                    "const": 4
                   }
                 }
               }
@@ -1837,6 +1879,9 @@
             },
             "retriedBy": {
               "$ref": "#/$defs/Identifier"
+            },
+            "canRetry": {
+              "type": "boolean"
             }
           },
           "required": [
@@ -1879,10 +1924,11 @@
               },
               "then": {
                 "type": "object",
-                "required": ["messageRunId", "messageAdmittedAt"],
+                "required": ["messageRunId", "messageAdmittedAt", "canRetry"],
                 "properties": {
                   "messageRunId": {},
-                  "messageAdmittedAt": {}
+                  "messageAdmittedAt": {},
+                  "canRetry": {}
                 }
               }
             },
@@ -1967,6 +2013,23 @@
                 "properties": {
                   "status": {
                     "const": "failed"
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "type": "object",
+                "required": ["canRetry"],
+                "properties": {
+                  "canRetry": {}
+                }
+              },
+              "then": {
+                "type": "object",
+                "properties": {
+                  "schemaVersion": {
+                    "const": 4
                   }
                 }
               }
@@ -2053,6 +2116,9 @@
             },
             "retriedBy": {
               "$ref": "#/$defs/Identifier"
+            },
+            "canRetry": {
+              "type": "boolean"
             }
           },
           "required": [
@@ -2096,10 +2162,11 @@
               },
               "then": {
                 "type": "object",
-                "required": ["messageRunId", "messageAdmittedAt"],
+                "required": ["messageRunId", "messageAdmittedAt", "canRetry"],
                 "properties": {
                   "messageRunId": {},
-                  "messageAdmittedAt": {}
+                  "messageAdmittedAt": {},
+                  "canRetry": {}
                 }
               }
             },
@@ -2184,6 +2251,23 @@
                 "properties": {
                   "status": {
                     "const": "failed"
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "type": "object",
+                "required": ["canRetry"],
+                "properties": {
+                  "canRetry": {}
+                }
+              },
+              "then": {
+                "type": "object",
+                "properties": {
+                  "schemaVersion": {
+                    "const": 4
                   }
                 }
               }
@@ -2270,6 +2354,9 @@
             },
             "retriedBy": {
               "$ref": "#/$defs/Identifier"
+            },
+            "canRetry": {
+              "type": "boolean"
             }
           },
           "required": [
@@ -2312,10 +2399,11 @@
               },
               "then": {
                 "type": "object",
-                "required": ["messageRunId", "messageAdmittedAt"],
+                "required": ["messageRunId", "messageAdmittedAt", "canRetry"],
                 "properties": {
                   "messageRunId": {},
-                  "messageAdmittedAt": {}
+                  "messageAdmittedAt": {},
+                  "canRetry": {}
                 }
               }
             },
@@ -2400,6 +2488,23 @@
                 "properties": {
                   "status": {
                     "const": "failed"
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "type": "object",
+                "required": ["canRetry"],
+                "properties": {
+                  "canRetry": {}
+                }
+              },
+              "then": {
+                "type": "object",
+                "properties": {
+                  "schemaVersion": {
+                    "const": 4
                   }
                 }
               }

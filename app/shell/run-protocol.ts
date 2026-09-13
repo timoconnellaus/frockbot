@@ -109,6 +109,7 @@ export interface ClientRun {
   messageAdmittedAt?: string;
   retryOf?: string;
   retriedBy?: string;
+  canRetry?: boolean;
   input: string;
   events: ClientTurnEvent[];
   status: "running" | "completed" | "failed" | "cancelled" | "superseded";
@@ -351,6 +352,8 @@ export interface ClientRunV1 {
   messageAdmittedAt?: string;
   retryOf?: string;
   retriedBy?: string;
+  /** Authority permits a fresh attempt over this failed user message. */
+  canRetry?: boolean;
   input: string;
   status: ClientRunStatusV1;
   events: ClientRunEventV1[];
@@ -1076,6 +1079,14 @@ export function projectClientRunV1(
     messageAdmittedAt: run.messageAdmittedAt ?? run.acceptedAt,
     ...(run.retryOf ? { retryOf: run.retryOf } : {}),
     ...(run.retriedBy ? { retriedBy: run.retriedBy } : {}),
+    canRetry:
+      status === "failed" &&
+      run.retriedBy === undefined &&
+      (run.admission?.turnType ?? "chat") === "chat" &&
+      (run.admission?.lane ?? "user") === "user" &&
+      run.admission?.origin === undefined &&
+      run.directTool === undefined &&
+      run.input.trim().length > 0,
     input:
       run.admission?.turnType === "automation"
         ? ""
@@ -1717,6 +1728,7 @@ function decodeRun(value: unknown): ClientRun {
       "messageAdmittedAt",
       "retryOf",
       "retriedBy",
+      "canRetry",
     ],
     "run",
   );
@@ -1759,9 +1771,13 @@ function decodeRun(value: unknown): ClientRun {
   }
   const lineage: Pick<
     ClientRun,
-    "messageRunId" | "messageAdmittedAt" | "retryOf" | "retriedBy"
+    "messageRunId" | "messageAdmittedAt" | "retryOf" | "retriedBy" | "canRetry"
   > = {};
   if (run.schemaVersion === 4) {
+    if (typeof run.canRetry !== "boolean") {
+      throw new Error("run.canRetry must be a boolean");
+    }
+    lineage.canRetry = run.canRetry;
     lineage.messageRunId = decodeRunIdV1(
       string(run, "messageRunId", MAX_RUN_ID_LENGTH, "run"),
     );
@@ -1797,9 +1813,13 @@ function decodeRun(value: unknown): ClientRun {
       throw new Error("only a failed run may have a retry successor");
     }
   } else if (
-    ["messageRunId", "messageAdmittedAt", "retryOf", "retriedBy"].some(
-      (field) => run[field] !== undefined,
-    )
+    [
+      "messageRunId",
+      "messageAdmittedAt",
+      "retryOf",
+      "retriedBy",
+      "canRetry",
+    ].some((field) => run[field] !== undefined)
   ) {
     throw new Error("run message lineage requires schemaVersion 4");
   }

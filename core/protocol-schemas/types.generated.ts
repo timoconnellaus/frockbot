@@ -279,6 +279,7 @@ export type Run =
       messageAdmittedAt?: Instant;
       retryOf?: Identifier;
       retriedBy?: Identifier;
+      canRetry?: boolean;
     }
   | {
       schemaVersion: 1 | 2 | 3 | 4;
@@ -294,6 +295,7 @@ export type Run =
       messageAdmittedAt?: Instant;
       retryOf?: Identifier;
       retriedBy?: Identifier;
+      canRetry?: boolean;
     }
   | {
       schemaVersion: 1 | 2 | 3 | 4;
@@ -309,6 +311,7 @@ export type Run =
       messageAdmittedAt?: Instant;
       retryOf?: Identifier;
       retriedBy?: Identifier;
+      canRetry?: boolean;
     }
   | {
       schemaVersion: 1 | 2 | 3 | 4;
@@ -324,6 +327,7 @@ export type Run =
       messageAdmittedAt?: Instant;
       retryOf?: Identifier;
       retriedBy?: Identifier;
+      canRetry?: boolean;
     }
   | {
       schemaVersion: 1 | 2 | 3 | 4;
@@ -339,6 +343,7 @@ export type Run =
       messageAdmittedAt?: Instant;
       retryOf?: Identifier;
       retriedBy?: Identifier;
+      canRetry?: boolean;
     };
 export type Announcement =
   | {
