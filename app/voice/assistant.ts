@@ -12,6 +12,12 @@
 // Object adapter.
 import type { MemoryTierReadV1 } from "@frockbot/app/memory/store";
 import { VOICE_ASSISTANT_MAX_DELEGATIONS_PER_TURN_V1 } from "./shared.js";
+import {
+  escapeVoiceTagV1 as escapeTag,
+  renderVoiceMemoryLinesV1,
+  type VoiceMemoryRecordV1,
+  type VoiceMemorySourceTurnV1,
+} from "./memory.js";
 
 export interface VoiceBotSummaryV1 {
   botId: string;
@@ -28,9 +34,25 @@ export interface VoiceAssistantMemoryContextV1 {
   logDays: number;
 }
 
+/**
+ * The spoken session's own memory, as one call sees it.
+ *
+ * `writable` is the honest part: the assistant may only promise to remember
+ * something when there is somewhere to put it. With no store the prompt says
+ * so, and the model tells the person plainly rather than promising.
+ */
+export interface VoiceSessionMemoryContextV1 {
+  record: VoiceMemoryRecordV1;
+  /** The tail of a previous call whose summary has not landed yet. */
+  carried: readonly VoiceMemorySourceTurnV1[];
+  writable: boolean;
+}
+
 export interface VoiceAssistantPromptInputV1 {
   bots: readonly VoiceBotSummaryV1[];
   memory: VoiceAssistantMemoryContextV1;
+  /** What this session remembers of its own previous conversations. */
+  session?: VoiceSessionMemoryContextV1;
   /** Answers from Bots that settled while nobody was listening. */
   unspoken: readonly { botName: string; text: string }[];
   now: Date;
@@ -77,8 +99,34 @@ function clip(text: string, max: number): string {
   return line.length <= max ? line : `${line.slice(0, max - 1)}…`;
 }
 
-function escapeTag(text: string): string {
-  return text.replace(/[<>]/g, (c) => (c === "<" ? "&lt;" : "&gt;"));
+/**
+ * What the assistant is told about its own memory.
+ *
+ * Two things matter here and they pull against each other. The person must
+ * know that what they say is kept — so an explicit "remember this" gets an
+ * ordinary spoken acknowledgment and is acted on at once. And they must never
+ * be told *how*: no summaries, no storage, no background work, no context
+ * windows. "Noted. I'll remember that" is the whole of what they hear.
+ *
+ * When there is nowhere to write, the promise would be false, so the rule
+ * inverts: say plainly that it cannot be kept right now.
+ */
+function voiceMemoryRulesV1(
+  session: VoiceSessionMemoryContextV1 | undefined,
+): string[] {
+  if (!session) return [];
+  if (!session.writable) {
+    return [
+      "- You cannot keep anything from this conversation right now. If they ask you to remember, correct or forget something, say plainly that you can't hold on to it at the moment, and do not promise to.",
+    ];
+  }
+  return [
+    '- You remember this person between conversations, and you keep what they tell you to keep. When they ask you to remember something, or correct or drop something you remember, use the remember or forget tool, acknowledge it in a few ordinary words — "Noted. I\'ll remember that", "Got it", "Of course" — and follow it for the rest of this conversation too.',
+    "- When what they just said changes something you already remember, say so with the remember tool's replaces: give the id of the one it replaces, so only the new one is left. Never leave two answers to the same question in memory.",
+    '- A request with its own timeframe ("just for today", "while I\'m travelling") is remembered as temporary, not as a standing preference: it still holds next time you speak, and it falls away on its own.',
+    "- Never talk about how you remember. No summaries, storage, notes, records, background work, context or resetting. If asked what you remember, just say the thing.",
+    "- Never keep a password, key or token, and say you won't.",
+  ];
 }
 
 /** The system prompt, rendered from durable facts and live Bot state. */
@@ -88,12 +136,13 @@ export function renderVoiceSystemPromptV1(
   const lines: string[] = [
     "You are FrockBot's voice assistant. You are speaking aloud with the person who owns this account, across every Bot they have.",
     "Rules:",
-    "- Answer in one to three short spoken sentences. No markdown, no lists, no code.",
+    "- Answer in one to three short spoken sentences by default. A length this person has asked you for wins over that default, within a few sentences either way. No markdown, no lists, no code.",
     "- Before checking something or delegating work, briefly acknowledge the request aloud, for example: Let me check that. Do not claim success before the tool succeeds.",
     "- Do only light work yourself: answer from what you know, summarise, check on Bots. Anything substantial — research, writing, running tools, changing settings — you delegate with ask_bot to the Bot whose job it is, then say you have asked them.",
     "- Use list_bots or bot_status before claiming what a Bot is doing. Never guess a Bot's state from memory.",
     "- Only cancel a Bot when the person clearly asks you to stop that Bot by name, and confirm which one.",
     "- If you did not understand, say so briefly instead of guessing.",
+    ...voiceMemoryRulesV1(input.session),
     `The current instant is ${input.now.toISOString()} (UTC).`,
     `The person's current local date and time is ${new Intl.DateTimeFormat(
       "en-CA",
@@ -160,6 +209,13 @@ export function renderVoiceSystemPromptV1(
     if (memory.unavailable) {
       lines.push("(Memory could not be read right now.)");
     }
+  }
+  if (input.session) {
+    lines.push(
+      ...renderVoiceMemoryLinesV1(input.session.record, {
+        carried: input.session.carried,
+      }),
+    );
   }
   if (input.unspoken.length > 0) {
     lines.push("<answers>");
@@ -241,6 +297,61 @@ export const VOICE_TOOLS_V1 = [
   {
     type: "function",
     function: {
+      name: "remember",
+      description:
+        "Keep something from this conversation for the next ones. Use when the person asks you to remember something, tells you how they want these conversations to go, or leaves a question open. Never for a password, key or token.",
+      parameters: {
+        type: "object",
+        properties: {
+          text: {
+            type: "string",
+            description: "The thing to remember, in one short sentence.",
+          },
+          kind: {
+            type: "string",
+            enum: ["preference", "open", "temporary"],
+            description:
+              "preference: how they want things done, or a fact that stays true until they say otherwise. open: a question or decision still outstanding. temporary: something they asked for within a timeframe — it holds for the next conversations and falls away on its own.",
+          },
+          replaces: {
+            type: "string",
+            description:
+              "The id of the thing you remember that this one replaces, when it contradicts or updates it.",
+          },
+          until: {
+            type: "string",
+            enum: ["today", "week"],
+            description:
+              "With kind temporary, how long it holds: today (until the end of their day) or week. Defaults to today.",
+          },
+        },
+        required: ["text", "kind"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "forget",
+      description:
+        "Drop something you remember, because the person asked you to or because they just replaced it. Name it in their words or by the id shown in your memory.",
+      parameters: {
+        type: "object",
+        properties: {
+          text: {
+            type: "string",
+            description: "What to drop, in their words or its id.",
+          },
+        },
+        required: ["text"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "recall_project",
       description:
         "Read the shared memory of one of the person's Projects when the question is about it. Use the project id from a Bot's description or the person's words.",
@@ -274,6 +385,23 @@ export interface VoiceModelMessageV1 {
   tool_call_id?: string;
 }
 
+/**
+ * What a spoken "remember this" asks for.
+ *
+ * `temporary` is the one worth naming: "just for today" must still hold the
+ * next time they speak today, so it is remembered — in the handover, which
+ * ages out on its own — rather than written into the standing profile or
+ * thrown away as if the call were the only place it mattered.
+ */
+export type VoiceRememberKindV1 = "preference" | "open" | "temporary";
+
+/**
+ * How long a temporary one holds. Two horizons and no free-form date: the
+ * model says which, the host works out when — a model cannot be trusted with
+ * a clock, and "just for today" has to stop tomorrow.
+ */
+export type VoiceRememberHorizonV1 = "today" | "week";
+
 /** The host the turn loop talks to. Every method is injected. */
 export interface VoiceAssistantHostV1 {
   /** One streamed chat completion. Resolves to SSE bytes. */
@@ -286,6 +414,20 @@ export interface VoiceAssistantHostV1 {
   askBot(botId: string, message: string): Promise<string>;
   cancelBot(botId: string): Promise<string>;
   recallProject(projectId: string): Promise<string>;
+  /**
+   * Writes one thing into the session's memory and answers what happened, in
+   * words the model can repeat. A refusal (a credential, nowhere to write) is
+   * an answer, never a throw, so the assistant can say so rather than promise.
+   */
+  remember(input: {
+    text: string;
+    kind: VoiceRememberKindV1;
+    /** The id this one supersedes, so a corrected preference leaves one answer. */
+    replaces?: string;
+    /** How long a `temporary` one holds. The host, not the model, dates it. */
+    until?: VoiceRememberHorizonV1;
+  }): Promise<string>;
+  forget(text: string): Promise<string>;
 }
 
 export interface VoiceTurnResultV1 {
@@ -462,6 +604,25 @@ async function* voiceTurnChunks(
           }
           case "cancel_bot":
             result = await host.cancelBot(stringArgument(args, "bot_id"));
+            break;
+          case "remember": {
+            const kind = stringArgument(args, "kind");
+            const replaces =
+              typeof args.replaces === "string" && args.replaces.trim()
+                ? args.replaces.trim()
+                : undefined;
+            const until = args.until === "week" ? "week" : "today";
+            result = await host.remember({
+              text: stringArgument(args, "text"),
+              kind:
+                kind === "open" || kind === "temporary" ? kind : "preference",
+              ...(replaces ? { replaces } : {}),
+              until,
+            });
+            break;
+          }
+          case "forget":
+            result = await host.forget(stringArgument(args, "text"));
             break;
           case "recall_project":
             result = await host.recallProject(

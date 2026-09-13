@@ -342,9 +342,12 @@ rather than unmuting them.
 
 `{type:"end_call"}` then close. The server closes the STT session, aborts any
 reply in flight, releases keep-alive, and answers `status: idle`. Closing the
-socket without `end_call` does the same. A Bot Turn the assistant already
-admitted keeps running; its answer is spoken on the next call or dropped after
-24 h.
+socket without `end_call` closes the STT session and settles its meter the
+same way, but does **not** end the call: the call record survives the 60 s
+rejoin window so a client back from a network change continues the same
+conversation, and an alarm ends it if nobody comes back (see "Session
+memory"). A Bot Turn the assistant already admitted keeps running; its answer
+is spoken on the next call or dropped after 24 h.
 
 The client closes with a code and a reason that name the path that ended the
 call, because the server's log is the only record of it: `1000` with
@@ -445,14 +448,215 @@ Recovery on `onStart` re-schedules any delegation still `admitted`. A spoken
 turn's own settlement is written before its generator returns, so the SDK's
 history and the ledger never disagree.
 
-Conversation context is bounded: the SDK's own history table is capped at 40
-messages and the prompt carries the newest 12; the User Memory profile and
-the last 30 days of its log are read at call start through `MemoryStore` over
-the User Durable Object's generation ledger (so retractions and shards resolve
-as they do for Bots), and Project memory is read on demand through the same
-store when the assistant's `recall_project` tool asks for it. Live Bot
-directory and run status are read from `UserConfiguration.listBots` and
-`lookupRun`, never from memory.
+Conversation context is bounded and **call-scoped**: the prompt carries the
+newest 12 messages of _this call_, built from the ledger's own `turn:` records
+rather than the SDK's `cf_voice_messages` table, which is per User and would
+otherwise carry the last conversation — and a Bot answer that settles late —
+into the next one as if it had just been said. The SDK's table is still
+written (`saveMessage` is the mixin's own bookkeeping) and simply not read.
+The User Memory profile and the last 30 days of its log are read at call start
+through `MemoryStore` over the User Durable Object's generation ledger (so
+retractions and shards resolve as they do for Bots), and Project memory is
+read on demand through the same store when the assistant's `recall_project`
+tool asks for it. Live Bot directory and run status are read from
+`UserConfiguration.listBots` and `lookupRun`, never from memory.
+
+## Session memory
+
+The voice session keeps its own memory, separate from the account Memory every
+Bot reads and writes. "Keep your answers short" is a fact about talking to the
+assistant, not a fact about the account, so it does not go into every Bot's
+Memory. It lives in the voice object's own storage
+(`voice:memory:record`, `app/voice/memory.ts`) and holds three kinds:
+
+| Kind        | What it is                                                                      | When it goes                                                                |
+| ----------- | ------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| **durable** | Preferences and facts that stay true: how they want spoken conversations to go. | Only when the person corrects or drops it. Never expired, never evicted.    |
+| **ongoing** | An open question, an undecided thing, work left unfinished.                     | When it resolves, is cancelled, or is superseded.                           |
+| **recent**  | The handover, and anything asked for within a timeframe.                        | At its own expiry, or after 14 days, or past 30 lines — whichever is first. |
+
+Everything stored is rendered into the prompt. The bounds (60 durable, 30
+ongoing) are on _writing_: past one, the new fact is refused and the refusal is
+spoken, because a preference that is stored but never shown would be
+remembered and never acted on.
+
+**Provenance and order.** Every change names the ledger turn it came from and
+takes that turn's own admission time, so a model cannot date a fact and
+re-reading an old conversation cannot make what it held look like today. Each
+entry carries a stamp of `(call start, turn number)`, and every removal leaves
+a tombstone carrying the same. A write is refused when something newer already
+stands where it would go, so a summary that arrives after the conversation
+that corrected it cannot undo the correction, and re-reading an old
+conversation cannot resurrect a fact the person has since dropped. The
+tombstones are counted, but a tombstone is only ever dropped when it sits
+before every call whose turns nothing has finished reading: while an
+unfinished job could still summarise the conversation that stated the fact,
+the fence that would refuse it is kept however many corrections follow. That
+makes the count a soft one, so the tombstones are not kept in the record at
+all: each lives in its own record under `voice:memory:forgotten:<kind>:<id>`,
+holding the latest removal of that one thing, and a write puts the fences
+before the record and deletes the ones the new list no longer holds after it.
+A backlog of protected fences therefore costs storage keys rather than growing
+one value until memory can no longer be written. Because a fence is keyed by
+what it fences rather than by a position in a list, a write that fails part
+way through cannot destroy a fence that was already committed — the only value
+it could have replaced is the same fact's own older fence. A failure between
+the two steps leaves a removal fenced but its entry still present, which the
+person hears as a failed write and says again.
+
+That refusal is exact, and it needs both sides to name the same thing. When
+the fact is already remembered it has an id, and the id is what the removal
+and any later write both carry, so the order is decided in code. When the
+person corrects something no conversation has been summarised for yet, there
+is no id anyone has seen: the correction leaves a fence under the slug of
+their own words, which only bites if the later summary picks that same name
+for the fact. Nothing tries to match wording to wording — a fuzzy match would
+drop things nobody asked to drop — so this case rests on the end-of-call
+instruction, which dates everything already remembered, lists what has been
+dropped since, and tells the model that reading an older conversation is never
+a reason to write a remembered fact back.
+
+### During the call
+
+The system prompt tells the assistant that it remembers this person, and that
+what they ask it to remember, correct or forget is acted on. It acknowledges
+in ordinary words — "Noted. I'll remember that", "Got it", "Of course" — and
+is told never to describe the mechanism: no summaries, storage, notes,
+records, background work, context or resetting. With nowhere to write (the
+record could not be read) the rule inverts and it says plainly that it cannot
+hold on to anything right now, rather than promising.
+
+Two tools write it, so an explicit request takes effect at once rather than at
+the end of the call:
+
+- `remember(text, kind, replaces?, until?)` — `kind` is `preference`
+  (durable), `open` (ongoing) or `temporary` (recent, with an end). `replaces`
+  names the id this one supersedes — an id only, never wording, because a
+  correction deletes and matching on wording would take unrelated facts with
+  it — so a corrected preference leaves one answer and not two. An id the
+  record does not hold is fenced under its own slug in all three kinds. `until` is `today` or `week`; the _host_ works out the
+  date from the person's own timezone, because "just for today" has to stop
+  tomorrow and a model cannot be trusted with a clock.
+- `forget(text)` — matched by id or by their own words, literally; nothing
+  matching is an ordinary answer the assistant says out loud.
+
+The session's memory is re-read for every turn's system prompt (the Bot
+directory, account memory and timezone stay in the call-start snapshot), so
+something remembered thirty seconds ago is in front of the model now, long
+after it has left the 12-message history window.
+
+A credential is refused at both doors — the tool and the end-of-call update —
+by the same `refuseMemorySecretV1` the Memory Package uses.
+
+### After the call
+
+Ending a call queues one durable job (`voice:memory:job:<callId>`) and a
+`finalizeVoiceMemory` scheduled task. The job holds no source: the ledger's
+`turn:` records are the source, and a call whose job is not `applied` keeps its
+turns out of the ledger's retention sweep. So a call of any length costs one
+small record, nothing that was said is copied or clipped, and a call long
+enough to exceed a storage value cannot exist.
+
+The task claims the job (`pending` → `spending`, inside the memory ledger's
+serializing chain — that transition _is_ the claim, so a duplicate end
+notification finds nothing to claim and makes no second model call), asks the
+configured chat model for a JSON update, and applies it. A call longer than 40
+turns is read in as many requests as it takes, each advancing a durable
+cursor, so a request made in the tenth minute is read exactly like one made in
+the first.
+
+End-of-call and recovery scheduling deduplicate the initial callback. A running
+callback queues continuations and retries with a fresh scheduler row: reusing
+its own row would lose the continuation when the scheduler deletes that row
+on return. The durable job claim still prevents duplicate model requests.
+
+The request is the call's own last system message, then the conversation, then
+the instruction. **Only the system message is shared with the call's own
+requests** — the turns below it are the whole conversation rather than the
+twelve the live prompt carried, and that system message itself carries a
+per-turn clock — so a provider that caches prompt prefixes can match that much
+and no more. The cache hit is a bonus; nothing depends on one. An eviction
+mid-call loses the captured system message and the request then goes without a
+prefix, which costs the hint and nothing else.
+
+The instruction lists everything currently in memory — durable, ongoing and
+the handover with its expiries — read at the moment the request is made rather
+than at the call's start, so the model corrects what is actually there and
+does not record the same thing twice.
+
+**Timeframes are words, never dates.** A request with its own timeframe is
+`recent/add` with `"until":"today"` or `"until":"week"`, and the instruction
+forbids recording one as `durable/add`. Any other value is dropped rather than
+interpreted, and a date the model invents is not carried at all: the _applier_
+works out when, from the source turn's own admission time and the person's
+timezone. That is the same policy the spoken `remember` tool goes through, so
+a preference said aloud and the same preference read back at the end of the
+call expire identically — and a "just for today" the person asked for in a
+call nobody ever answered still gets its end from the turn they said it in.
+
+### What ends a call, and what does not
+
+| Event                                | What happens                                                                                                                                                                                                                |
+| ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `end_call`                           | The job is written, _then_ the call record is deleted, then the finalization is scheduled.                                                                                                                                  |
+| The socket closes with no `end_call` | The upstream closes and its meter settles, but the call record **stays**: a client back inside the 60 s rejoin window continues the same conversation. An `abandonVoiceCall` alarm is scheduled for the end of that window. |
+| Nobody comes back                    | The alarm ends the call and queues its memory. Nothing waits for a future request to notice it.                                                                                                                             |
+| Another device takes over            | The displaced call's job is written _before_ the record naming it is replaced.                                                                                                                                              |
+| Eviction                             | `onStart` ends a call already past the rejoin window and queues it; inside the window it schedules the alarm instead.                                                                                                       |
+
+The job is written before the call record is deleted in every one of these,
+because the record is the only place the call id was: the other order leaves a
+call nothing remembers has to be read.
+
+### Spend, and what is never repeated
+
+A gateway model request carries no idempotency key, so a memory update that
+was dispatched is never issued again:
+
+- **Dispatched, no complete answer** — a failed request, a stream cut by the
+  60 s deadline or by the 20k-character output bound, or an eviction between
+  the request and the answer (found as `spending` on the next `onStart`). The
+  job is marked `failed`, its turns stay in the ledger, and the _next_ call's
+  finalization reads them. It is never re-claimed, however many attempts it
+  has left.
+- **A complete answer that is not an update** — the call is known to have
+  finished, so asking again is a new request rather than a possible second
+  payment. Bounded at three attempts, after which it is `failed` and carried
+  the same way.
+
+A finalization also reads up to two earlier `failed` calls alongside its own,
+taking the newest of them first and ordering the turns it reads oldest first.
+A call that finishes leaves the `failed` set, so the backlog still drains
+completely. A call still `pending` is left alone — it has its own scheduled
+path, and reading it here too would put two finalizations over one call's
+source. Carried cursors advance to the highest turn actually covered, never by
+a count added to whatever the cursor says, so two readers that overlap settle
+on the same place instead of stepping over source neither of them read.
+
+Until a previous call's summary lands, the next conversation's prompt carries
+the last six turns of it verbatim under `<last-conversation>`, with their own
+dates. That is temporary continuity, not memory: it disappears the moment the
+finalization applies. A new call never waits for a background summary to open.
+
+**Limitation, stated honestly.** A job that keeps failing is never deleted,
+and its call's turns stay out of the ledger's retention sweep until they have
+actually been read. A model that is unavailable for a long time therefore
+retains source rather than losing it; the daily turn cap (600) bounds how fast
+that can grow. Losing what someone said is the worse failure, and this is the
+side the design takes.
+
+### Memory traces
+
+Beside the per-call lines above, the object writes `memory-queued` (a call's
+memory work recorded), `memory-updated` (status, operation and refusal
+counts), `memory-write` and `memory-forget` (a spoken tool wrote or dropped
+something — the kind and the turn, never the words), `memory-abandoned` (a
+dispatched request that never answered; not repeated), `memory-malformed` (a
+complete answer that was not an update, and whether it will be asked again),
+`memory-uncertain` (found mid-request on waking), `memory-unreadable` (the
+record could not be read, so the assistant promises nothing), `call-memory`
+(this connection's `end_call` left the call's memory work behind it) and
+`call-abandoned` (the rejoin window passed with nobody back).
 
 Caps meter what costs money, never how long the footer has been open: a
 session may stay open silently for hours because a sleeping upstream costs
@@ -564,7 +768,10 @@ barge-in ordering, the playback tail, a feed the device rejects, the
 device-setup retry and the error-frame notice. They also predate the swap of
 the assistant's ears to ElevenLabs Scribe v2 Realtime described under "Ears",
 which adds bun tests for the provider and key resolution and for the Scribe
-options. The numbers below are therefore understated; the next run of the suites should replace them wholesale rather
+options. They also predate session memory, which adds bun tests for the
+memory record, its ordering fences and the finalization job, and workerd
+scenarios driving the scheduler through a long call, a malformed answer and
+an abandoned call. The numbers below are therefore understated; the next run of the suites should replace them wholesale rather
 than add to them.
 
 ### The live endpoint, 2026-09-11
