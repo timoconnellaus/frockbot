@@ -140,7 +140,7 @@ describe("client run protocol v1", () => {
     expect(isVisibleRunV1(spoken)).toBe(true);
     const projected = projectClientRunV1(spoken);
     expect(projected).toMatchObject({
-      schemaVersion: 3,
+      schemaVersion: 4,
       input: "continue",
       via: { kind: "voice" },
     });
@@ -162,7 +162,7 @@ describe("client run protocol v1", () => {
       runs: [
         {
           ...projectClientRunV1(storedRun([])),
-          schemaVersion: 3,
+          schemaVersion: 4,
           via: { kind: "voice", name: "Researcher", botId: "researcher" },
         },
       ],
