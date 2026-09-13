@@ -493,12 +493,16 @@ before every call whose turns nothing has finished reading: while an
 unfinished job could still summarise the conversation that stated the fact,
 the fence that would refuse it is kept however many corrections follow. That
 makes the count a soft one, so the tombstones are not kept in the record at
-all: they live in bounded segments of 25 under `voice:memory:forgotten:`, and
-a write puts the segments before the record and deletes the ones the new list
-no longer occupies after it. A backlog of protected fences therefore costs
-storage keys rather than growing one value until memory can no longer be
-written; a failure between the two steps leaves a removal fenced but its entry
-still present, which the person hears as a failed write and says again.
+all: each lives in its own record under `voice:memory:forgotten:<kind>:<id>`,
+holding the latest removal of that one thing, and a write puts the fences
+before the record and deletes the ones the new list no longer holds after it.
+A backlog of protected fences therefore costs storage keys rather than growing
+one value until memory can no longer be written. Because a fence is keyed by
+what it fences rather than by a position in a list, a write that fails part
+way through cannot destroy a fence that was already committed — the only value
+it could have replaced is the same fact's own older fence. A failure between
+the two steps leaves a removal fenced but its entry still present, which the
+person hears as a failed write and says again.
 
 That refusal is exact, and it needs both sides to name the same thing. When
 the fact is already remembered it has an id, and the id is what the removal

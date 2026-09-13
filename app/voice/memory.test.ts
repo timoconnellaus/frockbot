@@ -18,7 +18,6 @@ import {
   VOICE_MEMORY_MAX_TOMBSTONES_V1,
   VOICE_MEMORY_RECENT_DAYS_V1,
   VOICE_MEMORY_RECORD_KEY_V1,
-  VOICE_MEMORY_TOMBSTONE_SEGMENT_V1,
   VOICE_MEMORY_UNCERTAIN_FAILURE_V1,
   type VoiceMemoryOperationV1,
   type VoiceMemoryRecordV1,
@@ -765,6 +764,29 @@ describe("what a correction drops", () => {
       { kind: "durable", id: "the-morning" },
       { kind: "ongoing", id: "the-morning" },
       { kind: "recent", id: "the-morning" },
+    ]);
+  });
+
+  test("an id the prompt listed lands exactly as it was listed", () => {
+    // `validId` keeps the id the model gave, and it may hold a run of dashes
+    // that slugging the same words would collapse. The prompt lists that id,
+    // so a correction naming it has to find the entry rather than fence a
+    // name nothing answers to.
+    const odd = apply(
+      emptyVoiceMemoryRecordV1(),
+      [
+        {
+          kind: "durable/add",
+          id: "answer--length",
+          text: "Keep answers short.",
+          source: "call-1:1",
+        },
+      ],
+      [turn({ at: "2026-09-01T10:00:00.000Z" })],
+    ).record;
+    expect(odd.durable.map((entry) => entry.id)).toEqual(["answer--length"]);
+    expect(voiceMemoryCorrectionTargetsV1(odd, "answer--length")).toEqual([
+      { kind: "durable", id: "answer--length" },
     ]);
   });
 
@@ -1837,17 +1859,13 @@ describe("the order the finalizer is shown", () => {
 });
 
 describe("where the removal fences are kept", () => {
-  /** Every fence the record composes, and the widest value they are stored in. */
+  /** Every fence record stored, and how much of it the memory record holds. */
   async function fences(storage: ReturnType<typeof ledger>["storage"]) {
-    const segments = [...storage.entries.entries()].filter(([key]) =>
+    const kept = [...storage.entries.entries()].filter(([key]) =>
       key.startsWith(VOICE_MEMORY_FORGOTTEN_PREFIX_V1),
     );
     return {
-      segments: segments.length,
-      widest: Math.max(
-        0,
-        ...segments.map(([, value]) => (value as unknown[]).length),
-      ),
+      keys: kept.map(([key]) => key),
       recordHolds: (
         (
           storage.entries.get(VOICE_MEMORY_RECORD_KEY_V1) as
@@ -1913,8 +1931,8 @@ describe("where the removal fences are kept", () => {
     expect(record.forgotten).toHaveLength(wanted);
     const stored = await fences(storage);
     expect(stored.recordHolds).toBe(0);
-    expect(stored.widest).toBe(VOICE_MEMORY_TOMBSTONE_SEGMENT_V1);
-    expect(stored.segments).toBeGreaterThan(1);
+    // One record per fenced fact, so no single value grows with the backlog.
+    expect(stored.keys).toHaveLength(wanted);
 
     // Memory is not locked out: another write lands normally.
     const next = later.at(-1)!;
@@ -2019,7 +2037,61 @@ describe("where the removal fences are kept", () => {
     expect(stale.skipped.join(" ")).toContain("dropped more recently");
   });
 
-  test("fences pruned by the count leave no segment behind", async () => {
+  test("a failed write cannot destroy a fence already committed", async () => {
+    const { memory, storage } = await backlog(60);
+    const before = await memory.read();
+    expect(before.forgotten).toHaveLength(60);
+
+    // A newer removal of the first fact, alongside two the record has never
+    // fenced, and the second fence write of that batch fails.
+    const next = conversation("call-3", 3_000, 3, "2026-09-06T10:00:00.000Z");
+    const put = storage.put;
+    let fenceWrites = 0;
+    storage.put = async (key: string, value: unknown) => {
+      if (key.startsWith(VOICE_MEMORY_FORGOTTEN_PREFIX_V1)) {
+        fenceWrites += 1;
+        if (fenceWrites === 2) throw new Error("storage full");
+      }
+      return put(key, value);
+    };
+    await expect(
+      memory.apply({
+        operations: next.map((source, index) => ({
+          kind: "durable/remove" as const,
+          id: index === 0 ? "fact-1" : `late-${index}`,
+          source: source.id,
+        })),
+        sources: next,
+        now: new Date(next[0]!.at),
+      }),
+    ).rejects.toThrow("storage full");
+    storage.put = put;
+
+    // Every fence that was on record before the failed write is still on
+    // record: the earliest fact of the backlog cannot come back.
+    const after = await memory.read();
+    const fenced = new Set(after.forgotten.map((fence) => fence.id));
+    for (const fence of before.forgotten) expect(fenced.has(fence.id)).toBe(true);
+
+    // And the fence for the first fact still refuses the stale summary of the
+    // conversation that stated it.
+    const stale = await memory.apply({
+      operations: [
+        {
+          kind: "durable/add",
+          id: "fact-1",
+          text: "Fact one.",
+          source: "call-1:1",
+        },
+      ],
+      sources: [turn({ at: "2026-09-01T10:00:00.000Z" })],
+      now: new Date("2026-09-06T12:00:00.000Z"),
+    });
+    expect(stale.record.durable).toEqual([]);
+    expect(stale.skipped.join(" ")).toContain("dropped more recently");
+  });
+
+  test("fences pruned by the count leave no record behind", async () => {
     const { memory, storage, calls } = ledger();
     const turns = conversation(
       "call-1",
@@ -2057,9 +2129,6 @@ describe("where the removal fences are kept", () => {
       VOICE_MEMORY_MAX_TOMBSTONES_V1,
     );
     const stored = await fences(storage);
-    expect(stored.segments).toBe(
-      VOICE_MEMORY_MAX_TOMBSTONES_V1 / VOICE_MEMORY_TOMBSTONE_SEGMENT_V1,
-    );
-    expect(stored.widest).toBe(VOICE_MEMORY_TOMBSTONE_SEGMENT_V1);
+    expect(stored.keys).toHaveLength(VOICE_MEMORY_MAX_TOMBSTONES_V1);
   });
 });

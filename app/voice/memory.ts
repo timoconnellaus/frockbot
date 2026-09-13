@@ -51,11 +51,15 @@ import type { VoiceLedgerStorageV1 } from "./ledger.js";
 export const VOICE_MEMORY_RECORD_KEY_V1 = "voice:memory:record";
 export const VOICE_MEMORY_JOB_PREFIX_V1 = "voice:memory:job:";
 /**
- * Where the removal fences live, in bounded pieces. A fence that unread
- * source could still argue with is never dropped, so the list has no ceiling
- * — and a list with no ceiling must not share a storage value with the
- * memory it fences, or a long backlog eventually makes that value unwritable
- * and memory stops accepting anything at all.
+ * Where the removal fences live, one record per removed thing. A fence that
+ * unread source could still argue with is never dropped, so the list has no
+ * ceiling — and a list with no ceiling must not share a storage value with
+ * the memory it fences, or a long backlog eventually makes that value
+ * unwritable and memory stops accepting anything at all.
+ *
+ * The key is the thing fenced, never a position in a list. A write that fails
+ * part way through then leaves every other fence exactly as it was, and the
+ * only value it could have overwritten is the same fact's own older fence.
  */
 export const VOICE_MEMORY_FORGOTTEN_PREFIX_V1 = "voice:memory:forgotten:";
 
@@ -72,8 +76,6 @@ export const VOICE_MEMORY_MAX_ONGOING_V1 = 30;
 export const VOICE_MEMORY_MAX_RECENT_V1 = 30;
 /** Removals remembered, so an old reading cannot bring one back. */
 export const VOICE_MEMORY_MAX_TOMBSTONES_V1 = 200;
-/** Removals per stored segment: what bounds each value, not the list. */
-export const VOICE_MEMORY_TOMBSTONE_SEGMENT_V1 = 25;
 /** Removals the end-of-call instruction shows, newest last. */
 export const VOICE_MEMORY_INSTRUCTION_DROPPED_V1 = 10;
 
@@ -466,7 +468,7 @@ function stampOf(turn: VoiceMemorySourceTurnV1): VoiceMemoryStampV1 {
  *
  * So the cap is a soft one and the list has no ceiling. What keeps that from
  * becoming a storage problem is where the fences live: `VoiceMemoryLedgerV1`
- * writes them as bounded segments of their own, never inside the record.
+ * writes each one as its own record, never inside the record it fences.
  */
 function trimVoiceMemoryTombstonesV1(
   forgotten: readonly VoiceMemoryTombstoneV1[],
@@ -573,19 +575,24 @@ export function applyVoiceMemoryUpdateV1(
     }
     // The tombstone goes in whether or not the entry was there: a removal
     // read out of order still has to fence the write that would undo it.
+    // One fence per thing, holding the latest removal of it — a fence only
+    // ever refuses what is older than itself, so the newer of two says
+    // everything the older did.
+    const prior = next.forgotten.find(
+      (tombstone) => tombstone.kind === kind && tombstone.id === id,
+    );
+    const fence =
+      prior && compareVoiceMemoryStampV1(prior.stamp, stamp) > 0
+        ? prior
+        : { kind, id, at: turn.at, stamp };
     next = {
       ...next,
       [kind]: next[kind].filter((item) => item.id !== id),
       forgotten: [
         ...next.forgotten.filter(
-          (tombstone) =>
-            !(
-              tombstone.kind === kind &&
-              tombstone.id === id &&
-              compareVoiceMemoryStampV1(tombstone.stamp, stamp) <= 0
-            ),
+          (tombstone) => !(tombstone.kind === kind && tombstone.id === id),
         ),
-        { kind, id, at: turn.at, stamp },
+        fence,
       ],
     };
     if (existing) changed += 1;
@@ -760,9 +767,9 @@ export function matchVoiceMemoryV1(
  * end-of-call instruction lists the ids to correct — and a correction is a
  * deletion, so it never matches on wording: "the morning" would take the
  * open question about the morning standup along with the preference about
- * morning calls, and nothing would say out loud that it had gone. An id the
- * person said in their own casing or spacing still lands, because that is
- * the same normalisation ids are made with.
+ * morning calls, and nothing would say out loud that it had gone. The id as
+ * stored is tried first, so an id the prompt listed lands exactly as listed;
+ * then the same normalisation a spoken id would need.
  *
  * When the record holds no such id the name itself is fenced in all three
  * kinds. Nothing matching usually means the conversation that stated the old
@@ -781,8 +788,10 @@ export function voiceMemoryCorrectionTargetsV1(
   record: VoiceMemoryRecordV1,
   replaces: string,
 ): { kind: VoiceMemoryKindV1; id: string }[] {
+  const exact = replaces.trim();
   const id = voiceMemoryTextKeyV1(replaces);
-  const named = (entry: VoiceMemoryEntryV1) => entry.id === id;
+  const named = (entry: VoiceMemoryEntryV1) =>
+    entry.id === exact || entry.id === id;
   const matched: { kind: VoiceMemoryKindV1; id: string }[] = [
     ...record.durable
       .filter(named)
@@ -1086,54 +1095,53 @@ export class VoiceMemoryLedgerV1 {
     return this.compose(await this.readForgotten());
   }
 
-  /** The stored fence segments, oldest first; `list` returns them in key order. */
-  private async readForgotten(): Promise<
-    Map<string, VoiceMemoryTombstoneV1[]>
-  > {
-    return this.storage.list<VoiceMemoryTombstoneV1[]>({
+  /** The stored fences, one per removed thing, in key order. */
+  private async readForgotten(): Promise<Map<string, VoiceMemoryTombstoneV1>> {
+    return this.storage.list<VoiceMemoryTombstoneV1>({
       prefix: VOICE_MEMORY_FORGOTTEN_PREFIX_V1,
     });
   }
 
-  /** The record as the pure applier and the prompt want it: fences included. */
+  /**
+   * The record as the pure applier and the prompt want it: fences included,
+   * oldest first. The keys sort by what was fenced rather than by when, so
+   * the order the rest of the code reads in is put back here.
+   */
   private async compose(
-    segments: Map<string, VoiceMemoryTombstoneV1[]>,
+    fences: Map<string, VoiceMemoryTombstoneV1>,
   ): Promise<VoiceMemoryRecordV1> {
     const stored = await this.storage.get<VoiceMemoryRecordV1>(
       VOICE_MEMORY_RECORD_KEY_V1,
     );
     return {
       ...(stored ?? emptyVoiceMemoryRecordV1()),
-      forgotten: [...segments.values()].flatMap((segment) => segment ?? []),
+      forgotten: [...fences.values()]
+        .filter((fence) => fence !== undefined)
+        .sort((left, right) =>
+          compareVoiceMemoryStampV1(left.stamp, right.stamp),
+        ),
     };
   }
 
   /**
-   * Writes the fences, one bounded segment at a time, and says which keys the
-   * new list occupies. Only a segment whose contents changed is written, so an
-   * ordinary removal touches the tail and nothing else.
+   * Writes the fences, one record per fenced thing, and says which keys the
+   * new list occupies. Only a fence that changed is written, and the only
+   * value a write can replace is that same thing's older fence — so a failure
+   * part way through leaves every fence already committed still standing.
    */
   private async writeForgotten(
-    before: Map<string, VoiceMemoryTombstoneV1[]>,
+    before: Map<string, VoiceMemoryTombstoneV1>,
     forgotten: readonly VoiceMemoryTombstoneV1[],
   ): Promise<Set<string>> {
     const keys = new Set<string>();
-    for (
-      let at = 0;
-      at < forgotten.length;
-      at += VOICE_MEMORY_TOMBSTONE_SEGMENT_V1
-    ) {
-      const segment = forgotten.slice(
-        at,
-        at + VOICE_MEMORY_TOMBSTONE_SEGMENT_V1,
-      );
-      const key = forgottenKey(at / VOICE_MEMORY_TOMBSTONE_SEGMENT_V1);
+    for (const fence of forgotten) {
+      const key = forgottenKey(fence.kind, fence.id);
       keys.add(key);
       const existing = before.get(key);
-      if (existing && JSON.stringify(existing) === JSON.stringify(segment)) {
+      if (existing && JSON.stringify(existing) === JSON.stringify(fence)) {
         continue;
       }
-      await this.storage.put(key, segment);
+      await this.storage.put(key, fence);
     }
     return keys;
   }
@@ -1164,8 +1172,8 @@ export class VoiceMemoryLedgerV1 {
           : {}),
       });
       const pruned = pruneVoiceMemoryV1(result.record, input.now);
-      // Fences first, then the memory they fence, and only then the segments
-      // the new list no longer occupies. A failure between the steps leaves a
+      // Fences first, then the memory they fence, and only then the fences
+      // the new list no longer holds. A failure between the steps leaves a
       // removal recorded against an entry that is still there — the person
       // hears that the write failed and says it again — where the other order
       // would drop the entry and lose the fence that keeps a stale summary
@@ -1510,6 +1518,6 @@ function jobKey(callId: string): string {
   return `${VOICE_MEMORY_JOB_PREFIX_V1}${callId}`;
 }
 
-function forgottenKey(index: number): string {
-  return `${VOICE_MEMORY_FORGOTTEN_PREFIX_V1}${String(index).padStart(6, "0")}`;
+function forgottenKey(kind: VoiceMemoryKindV1, id: string): string {
+  return `${VOICE_MEMORY_FORGOTTEN_PREFIX_V1}${kind}:${id}`;
 }
