@@ -13,6 +13,7 @@
 import type { MemoryTierReadV1 } from "@frockbot/app/memory/store";
 import { VOICE_ASSISTANT_MAX_DELEGATIONS_PER_TURN_V1 } from "./shared.js";
 import {
+  escapeVoiceTagV1 as escapeTag,
   renderVoiceMemoryLinesV1,
   type VoiceMemoryRecordV1,
   type VoiceMemorySourceTurnV1,
@@ -96,10 +97,6 @@ export interface VoiceTurnChunkV1 {
 function clip(text: string, max: number): string {
   const line = text.replace(/\s+/g, " ").trim();
   return line.length <= max ? line : `${line.slice(0, max - 1)}…`;
-}
-
-function escapeTag(text: string): string {
-  return text.replace(/[<>]/g, (c) => (c === "<" ? "&lt;" : "&gt;"));
 }
 
 /**

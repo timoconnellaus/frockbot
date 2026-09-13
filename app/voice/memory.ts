@@ -212,6 +212,15 @@ function clip(text: string, max: number): string {
   return line.length <= max ? line : `${line.slice(0, max - 1)}…`;
 }
 
+/**
+ * Anything the person or a Bot wrote, made safe to sit inside a tagged section
+ * of the spoken prompt. Without it a transcript holding `</voice-memory>` ends
+ * the block early and whatever follows it is read as prompt.
+ */
+export function escapeVoiceTagV1(text: string): string {
+  return text.replace(/[<>]/g, (c) => (c === "<" ? "&lt;" : "&gt;"));
+}
+
 /** A recent line's identity is its own words, so re-recording it is a no-op. */
 export function voiceMemoryTextKeyV1(text: string): string {
   const slug = text
@@ -834,13 +843,19 @@ export function renderVoiceMemoryLinesV1(
     const durable = record.durable;
     if (durable.length > 0) {
       lines.push("Keep to these:");
-      for (const entry of durable) lines.push(`- (${entry.id}) ${entry.text}`);
+      for (const entry of durable) {
+        lines.push(
+          `- (${escapeVoiceTagV1(entry.id)}) ${escapeVoiceTagV1(entry.text)}`,
+        );
+      }
     }
     const ongoing = record.ongoing;
     if (ongoing.length > 0) {
       lines.push("Still open:");
       for (const entry of ongoing) {
-        lines.push(`- (${entry.id}) ${entry.text} [since ${day(entry.at)}]`);
+        lines.push(
+          `- (${escapeVoiceTagV1(entry.id)}) ${escapeVoiceTagV1(entry.text)} [since ${day(entry.at)}]`,
+        );
       }
     }
     const recent = record.recent;
@@ -848,7 +863,7 @@ export function renderVoiceMemoryLinesV1(
       lines.push("Recently:");
       for (const entry of recent) {
         lines.push(
-          `- ${day(entry.at)}: ${entry.text}${
+          `- ${day(entry.at)}: ${escapeVoiceTagV1(entry.text)}${
             entry.expiresAt ? ` [until ${day(entry.expiresAt)}]` : ""
           }`,
         );
@@ -864,9 +879,13 @@ export function renderVoiceMemoryLinesV1(
     lines.push("<last-conversation>");
     lines.push("The end of your previous conversation with them:");
     for (const turn of carried) {
-      lines.push(`- ${day(turn.at)} they said: ${clip(turn.said, 240)}`);
+      lines.push(
+        `- ${day(turn.at)} they said: ${escapeVoiceTagV1(clip(turn.said, 240))}`,
+      );
       if (turn.answered) {
-        lines.push(`  you answered: ${clip(turn.answered, 240)}`);
+        lines.push(
+          `  you answered: ${escapeVoiceTagV1(clip(turn.answered, 240))}`,
+        );
       }
     }
     lines.push("</last-conversation>");
