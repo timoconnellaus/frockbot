@@ -565,6 +565,11 @@ turns is read in as many requests as it takes, each advancing a durable
 cursor, so a request made in the tenth minute is read exactly like one made in
 the first.
 
+End-of-call and recovery scheduling deduplicate the initial callback. A running
+callback queues continuations and retries with a fresh scheduler row: reusing
+its own row would lose the continuation when the scheduler deletes that row
+on return. The durable job claim still prevents duplicate model requests.
+
 The request is the call's own last system message, then the conversation, then
 the instruction. **Only the system message is shared with the call's own
 requests** — the turns below it are the whole conversation rather than the

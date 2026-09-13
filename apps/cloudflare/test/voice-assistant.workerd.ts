@@ -7,6 +7,7 @@ import {
   VOICE_ASSISTANT_USER_HEADER,
 } from "../src/voice-assistant.ts";
 import {
+  VoiceLedgerV1,
   VOICE_METER_CAPS_V1,
   voiceMeterDayV1,
   type VoiceDelegationRecordV1,
@@ -14,6 +15,10 @@ import {
 } from "@frockbot/app/voice/ledger";
 import { provisionBot } from "./provision-bot.ts";
 import { VOICE_TURN_BRIDGE_V1 } from "@frockbot/app/voice/assistant";
+import {
+  VoiceMemoryLedgerV1,
+  VOICE_MEMORY_CHUNK_TURNS_V1,
+} from "@frockbot/app/voice/memory";
 
 const touched = new Set<string>();
 const sockets = new Set<WebSocket>();
@@ -1254,6 +1259,135 @@ describe("the voice session object", () => {
       "failure read out",
     );
     next.socket.close();
+  });
+});
+
+describe("scheduled voice memory", () => {
+  async function enqueue(stub: ReturnType<typeof assistant>, turns: number) {
+    // Finish startup before seeding a call; onStart otherwise books its own
+    // recovery schedule while the fixture is arranging the first alarm.
+    await stub.probeMemoryJobs();
+    return runInDurableObject(stub, async (instance, state) => {
+      const at = new Date();
+      const callId = crypto.randomUUID();
+      const ledger = new VoiceLedgerV1(state.storage, instance.name);
+      await ledger.beginCall({
+        callId,
+        connectionId: "ended-connection",
+        deviceKey: "phone",
+        at,
+      });
+      for (let turn = 1; turn <= turns; turn++) {
+        await ledger.admitTurn({
+          connectionId: "ended-connection",
+          transcript: `Remember the subject from turn ${turn}.`,
+          at: new Date(at.getTime() + turn),
+        });
+      }
+      await new VoiceMemoryLedgerV1(state.storage).createJob({
+        callId,
+        sequence: at.getTime(),
+        at,
+      });
+      await ledger.endCall("ended-connection");
+      await instance.schedule(
+        0,
+        "finalizeVoiceMemory",
+        { callId },
+        { idempotent: true },
+      );
+      return callId;
+    });
+  }
+
+  test("the scheduler processes every chunk without another wake-up", async () => {
+    const stub = assistant(`voice-scheduled-chunks-${crypto.randomUUID()}`);
+    const count = VOICE_MEMORY_CHUNK_TURNS_V1 + 2;
+    const callId = await enqueue(stub, count);
+    const jobs = await eventually(
+      () => stub.probeMemoryJobs(),
+      (rows) =>
+        rows.some((job) => job.callId === callId && job.state === "applied"),
+      "all memory chunks to be run by the scheduler",
+    );
+    expect(jobs.find((job) => job.callId === callId)?.cursor).toBe(count);
+    const requests = await stub.probeMemoryRequests();
+    expect(requests).toHaveLength(2);
+    expect(requests[1]!.contents).toContain(
+      `Remember the subject from turn ${count}.`,
+    );
+  });
+
+  test("the scheduler retries a complete malformed answer", async () => {
+    const stub = assistant(`voice-scheduled-retry-${crypto.randomUUID()}`);
+    await stub.probeSetScript({ memory: { raw: "not an update" } });
+    const callId = await enqueue(stub, 1);
+    await eventually(
+      () => stub.probeMemoryJobs(),
+      (rows) =>
+        rows.some(
+          (job) =>
+            job.callId === callId &&
+            job.attempts === 1 &&
+            job.state === "pending",
+        ),
+      "the known-finished malformed answer",
+    );
+    await stub.probeSetScript({ memory: { operations: [] } });
+    await eventually(
+      () => stub.probeMemoryJobs(),
+      (rows) =>
+        rows.some((job) => job.callId === callId && job.state === "applied"),
+      "the retry to run through the scheduler",
+    );
+    expect(await stub.probeMemoryRequests()).toHaveLength(2);
+  });
+
+  test("the abandonment callback leaves a future alarm while rejoining is allowed", async () => {
+    const userId = `voice-scheduled-abandon-${crypto.randomUUID()}`;
+    const stub = assistant(userId);
+    const opened = await open(userId);
+    await startCall(opened);
+    await opened.waitFor(state("awake"), "awake");
+    const callId = (await stub.probeTraces()).find(
+      (trace) => trace.event === "call-admitted",
+    )!.call!;
+    opened.socket.close();
+    await opened.closed;
+    await eventually(
+      () => stub.probeSchedules(),
+      (rows) => rows.some((row) => row.callback === "abandonVoiceCall"),
+      "the socket-close abandonment schedule",
+    );
+    const initialId = await runInDurableObject(stub, async (instance) => {
+      // Bring the real schedule forward while the call is still eligible
+      // to rejoin; the callback itself must arrange its next alarm.
+      for (const schedule of instance.getSchedules()) {
+        if (schedule.callback === "abandonVoiceCall") {
+          await instance.cancelSchedule(schedule.id);
+        }
+      }
+      return (
+        await instance.schedule(
+          0,
+          "abandonVoiceCall",
+          { callId },
+          { idempotent: true },
+        )
+      ).id;
+    });
+    await eventually(
+      () =>
+        runInDurableObject(stub, (instance) =>
+          instance
+            .getSchedules()
+            .filter((schedule) => schedule.callback === "abandonVoiceCall")
+            .map((schedule) => schedule.id),
+        ),
+      (ids) => ids.length === 1 && ids[0] !== initialId,
+      "a new abandonment schedule after the running row is removed",
+    );
+    expect(await stub.probeMemoryJobs()).toHaveLength(0);
   });
 });
 

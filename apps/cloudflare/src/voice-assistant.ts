@@ -636,12 +636,17 @@ export class VoiceAssistant extends VoiceAgentBase<
     return undefined;
   }
 
-  private async scheduleMemoryFinalization(callId: string): Promise<void> {
+  private async scheduleMemoryFinalization(
+    callId: string,
+    idempotent = true,
+  ): Promise<void> {
     await this.schedule<MemoryFinalizationPayload>(
       MEMORY_FINALIZE_DELAY_SECONDS,
       "finalizeVoiceMemory",
       { callId },
-      { idempotent: true },
+      // A continuation needs a new row: the scheduler deletes the running
+      // row when its callback returns, even if a request deduplicated onto it.
+      { idempotent },
     );
   }
 
@@ -650,12 +655,15 @@ export class VoiceAssistant extends VoiceAgentBase<
    * live for the rejoin window — a network change must not cost them the
    * conversation — and this alarm is what finishes it if nobody comes back.
    */
-  private async scheduleCallAbandon(callId: string): Promise<void> {
+  private async scheduleCallAbandon(
+    callId: string,
+    idempotent = true,
+  ): Promise<void> {
     await this.schedule<MemoryFinalizationPayload>(
       Math.ceil(VOICE_ASSISTANT_REJOIN_WINDOW_MS_V1 / 1000) + 5,
       "abandonVoiceCall",
       { callId },
-      { idempotent: true },
+      { idempotent },
     );
   }
 
@@ -671,7 +679,7 @@ export class VoiceAssistant extends VoiceAgentBase<
     if (this.liveCallFor(call.callId)) return;
     if (!voiceCallIsStaleV1(call, this.now())) {
       // Somebody rejoined and has spoken since. Look again after the window.
-      await this.scheduleCallAbandon(call.callId);
+      await this.scheduleCallAbandon(call.callId, false);
       return;
     }
     this.traceMemory("call-abandoned", { call: call.callId });
@@ -732,7 +740,7 @@ export class VoiceAssistant extends VoiceAgentBase<
         { call: payload.callId, attempt: chunk.job.attempts, again },
         "warn",
       );
-      if (again) await this.scheduleMemoryFinalization(payload.callId);
+      if (again) await this.scheduleMemoryFinalization(payload.callId, false);
       return;
     }
     const applied = await memory.applyChunk({
@@ -752,7 +760,7 @@ export class VoiceAssistant extends VoiceAgentBase<
         : {}),
     });
     if (applied.status === "applied" && !applied.done) {
-      await this.scheduleMemoryFinalization(payload.callId);
+      await this.scheduleMemoryFinalization(payload.callId, false);
     }
   }
 
