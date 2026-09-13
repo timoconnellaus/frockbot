@@ -493,6 +493,18 @@ before every call whose turns nothing has finished reading: while an
 unfinished job could still summarise the conversation that stated the fact,
 the fence that would refuse it is kept however many corrections follow.
 
+That refusal is exact, and it needs both sides to name the same thing. When
+the fact is already remembered it has an id, and the id is what the removal
+and any later write both carry, so the order is decided in code. When the
+person corrects something no conversation has been summarised for yet, there
+is no id anyone has seen: the correction leaves a fence under the slug of
+their own words, which only bites if the later summary picks that same name
+for the fact. Nothing tries to match wording to wording — a fuzzy match would
+drop things nobody asked to drop — so this case rests on the end-of-call
+instruction, which dates everything already remembered, lists what has been
+dropped since, and tells the model that reading an older conversation is never
+a reason to write a remembered fact back.
+
 ### During the call
 
 The system prompt tells the assistant that it remembers this person, and that

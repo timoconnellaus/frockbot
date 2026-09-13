@@ -31,7 +31,12 @@
 // something newer already stands where it would go — so a summary that
 // arrives after the conversation that corrected it cannot undo the
 // correction, and re-reading an old conversation cannot resurrect a fact the
-// person has since dropped.
+// person has since dropped. That holds wherever the two sides name the same
+// thing: an id already in the record, or one a later summary chooses again.
+// A correction to a fact nobody has written down yet has no id to agree on,
+// so the fence it leaves is best-effort; what keeps that case right is the
+// end-of-call instruction, which dates what is remembered and says plainly
+// that an older turn is never permission to write a newer fact back.
 //
 // Source material is not copied here. The ledger's turn records are the
 // source, and a call with unfinished memory work keeps its turns out of the
@@ -59,6 +64,8 @@ export const VOICE_MEMORY_MAX_ONGOING_V1 = 30;
 export const VOICE_MEMORY_MAX_RECENT_V1 = 30;
 /** Removals remembered, so an old reading cannot bring one back. */
 export const VOICE_MEMORY_MAX_TOMBSTONES_V1 = 200;
+/** Removals the end-of-call instruction shows, newest last. */
+export const VOICE_MEMORY_INSTRUCTION_DROPPED_V1 = 10;
 
 export const VOICE_MEMORY_MAX_TEXT_CHARS_V1 = 240;
 export const VOICE_MEMORY_MAX_OPERATIONS_V1 = 24;
@@ -744,6 +751,15 @@ export function matchVoiceMemoryV1(
  * all three kinds. Nothing matching usually means the conversation that
  * stated the old fact has not been summarised yet, and the removal has to be
  * on record before that summary lands or it writes the contradiction back.
+ *
+ * The fence from that second case is best-effort: it only refuses the later
+ * summary if the summary happens to choose the same id for the fact that the
+ * person's own words slug to. Nothing here can make two independent model
+ * calls agree on a name, and no fuzzy match is attempted, because one would
+ * drop facts nobody asked to drop. The end-of-call instruction carries the
+ * weight instead: it shows what is remembered with its dates, what has been
+ * dropped since, and says that these turns being older is never a reason to
+ * write a remembered fact back.
  */
 export function voiceMemoryCorrectionTargetsV1(
   record: VoiceMemoryRecordV1,
@@ -832,6 +848,13 @@ function day(at: string): string {
  * The ids it lists are read at the moment the request is made, not at the
  * moment the call started, so an update written since — by the person's own
  * "forget that", or by a chunk already folded in — is what the model sees.
+ *
+ * What is remembered is dated, and what has been dropped since is listed, so
+ * the conversation being read is placed against it: these turns can be older
+ * than the record, and an older turn is never a reason to write a newer fact
+ * back. The stamps refuse that deterministically whenever the ids agree; this
+ * is what makes them agree when the person corrected something in their own
+ * words and no id was ever cited.
  */
 export function renderVoiceMemoryInstructionV1(input: {
   turns: readonly VoiceMemorySourceTurnV1[];
@@ -849,14 +872,17 @@ export function renderVoiceMemoryInstructionV1(input: {
     "Every operation must carry `source`: the id of the turn below that the person said it in. An operation without one is discarded.",
     "Rules: record only what the person said or asked for, never your own guesses and never a Bot's status. Do not re-record anything already remembered below. Never record a password, key or token. Ids are lowercase words joined by hyphens. At most " +
       `${VOICE_MEMORY_MAX_OPERATIONS_V1} operations, each under ${VOICE_MEMORY_MAX_TEXT_CHARS_V1} characters.`,
+    "This conversation may be older than what you already remember: what is remembered below is dated, and these turns are dated too. If a turn says something that a newer remembered line already changed — in different words, or under a name you would have chosen differently — leave the remembered line alone and record nothing for it. Record a change only where these turns are this person's own later word on it.",
     'If there is nothing worth remembering, answer {"operations":[]}.',
   ];
   const remembered = [
     ...input.record.durable.map(
-      (entry) => `- durable (${entry.id}) ${entry.text}`,
+      (entry) =>
+        `- durable (${entry.id}) ${entry.text} [said ${day(entry.at)}]`,
     ),
     ...input.record.ongoing.map(
-      (entry) => `- ongoing (${entry.id}) ${entry.text}`,
+      (entry) =>
+        `- ongoing (${entry.id}) ${entry.text} [since ${day(entry.at)}]`,
     ),
     // The handover too, and what already has an end on it: without this the
     // same "just for today" gets recorded again every call, and the one that
@@ -874,6 +900,17 @@ export function renderVoiceMemoryInstructionV1(input: {
       : "You remember nothing yet.",
   );
   lines.push(...remembered);
+  const dropped = [...input.record.forgotten]
+    .sort((left, right) => compareVoiceMemoryStampV1(left.stamp, right.stamp))
+    .slice(-VOICE_MEMORY_INSTRUCTION_DROPPED_V1);
+  if (dropped.length > 0) {
+    lines.push("What they have since dropped or replaced, and when:");
+    for (const tombstone of dropped) {
+      lines.push(
+        `- ${tombstone.kind} (${tombstone.id}) [dropped ${day(tombstone.at)}]`,
+      );
+    }
+  }
   lines.push("The turns you may cite:");
   for (const turn of input.turns) {
     lines.push(`- ${turn.id}: ${clip(turn.said, 160)}`);

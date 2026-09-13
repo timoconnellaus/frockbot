@@ -866,7 +866,7 @@ describe("the end-of-call job", () => {
     expect(stale.skipped.join(" ")).toContain("dropped more recently");
   });
 
-  test("a correction fences a fact whose conversation was never read", async () => {
+  test("a correction fences a fact whose conversation was never read, when the summary names it the same", async () => {
     const { memory, calls, read } = ledger();
     // They asked for long answers in the first call, and that call's
     // finalization was dispatched and never came back.
@@ -931,7 +931,9 @@ describe("the end-of-call job", () => {
       now: new Date("2026-09-05T10:00:00.000Z"),
     });
 
-    // The first call is finally summarised and says the old preference.
+    // The first call is finally summarised and says the old preference. It
+    // is refused because it named the fact the same way the correction did:
+    // the fence is exact, and this is the case where both sides agree.
     const stale = await memory.apply({
       operations: [
         {
@@ -948,6 +950,121 @@ describe("the end-of-call job", () => {
       "short-answers",
     ]);
     expect(stale.skipped.join(" ")).toContain("dropped more recently");
+  });
+
+  test("when the late summary names it differently the instruction is what carries the order", async () => {
+    const { memory, calls, read } = ledger();
+    // The same shape as above: the first call stated a preference and its
+    // finalization never came back.
+    calls["call-1"] = conversation("call-1", CALL_ONE, 1);
+    await memory.createJob({
+      callId: "call-1",
+      sequence: CALL_ONE,
+      at: new Date("2026-09-01T11:00:00.000Z"),
+    });
+    await memory.claimChunk({
+      callId: "call-1",
+      at: new Date("2026-09-01T11:00:02.000Z"),
+      read,
+    });
+    await memory.abandonChunk(
+      "call-1",
+      "the connection failed",
+      new Date("2026-09-01T11:00:30.000Z"),
+    );
+
+    calls["call-2"] = conversation(
+      "call-2",
+      CALL_TWO,
+      1,
+      "2026-09-05T10:00:00.000Z",
+    );
+    const correcting = calls["call-2"]![0];
+    const replaced = "Give me long answers.";
+    await memory.apply({
+      operations: [
+        ...voiceMemoryCorrectionTargetsV1(await memory.read(), replaced).map(
+          (target): VoiceMemoryOperationV1 =>
+            target.kind === "durable"
+              ? {
+                  kind: "durable/remove",
+                  id: target.id,
+                  source: correcting!.id,
+                }
+              : target.kind === "ongoing"
+                ? {
+                    kind: "ongoing/remove",
+                    id: target.id,
+                    source: correcting!.id,
+                  }
+                : {
+                    kind: "recent/remove",
+                    id: target.id,
+                    source: correcting!.id,
+                  },
+        ),
+        {
+          kind: "durable/add",
+          id: "short-answers",
+          text: "Keep answers short.",
+          source: correcting!.id,
+        },
+      ],
+      sources: [correcting!],
+      now: new Date("2026-09-05T10:00:00.000Z"),
+    });
+
+    // The second call ends and its finalization carries the first one's
+    // unread turns. This is the instruction it is given: it dates what is
+    // remembered, lists what has been dropped since, and says that an older
+    // conversation is not a reason to write a remembered fact back. That
+    // instruction is the whole of what decides this case — whether the model
+    // then names the old preference `answer-length` or leaves it alone is
+    // the model's call, and this test does not stand in for it.
+    await memory.createJob({
+      callId: "call-2",
+      sequence: CALL_TWO,
+      at: new Date("2026-09-07T09:00:00.000Z"),
+    });
+    const chunk = await memory.claimChunk({
+      callId: "call-2",
+      at: new Date("2026-09-07T09:00:01.000Z"),
+      read,
+    });
+    expect(chunk!.turns.map((source) => source.id)).toContain("call-1:1");
+    const instruction = renderVoiceMemoryRequestMessagesV1({
+      turns: chunk!.turns,
+      record: await memory.read(),
+      progress: { from: chunk!.from, total: chunk!.total },
+    }).at(-1)!.content;
+    expect(instruction).toContain(
+      "durable (short-answers) Keep answers short. [said 2026-09-05]",
+    );
+    expect(instruction).toContain("durable (give-me-long-answers) [dropped");
+    expect(instruction).toContain(
+      "may be older than what you already remember",
+    );
+
+    // If it names it differently anyway, nothing in the record refuses it:
+    // there is no id the two sides share. The record then holds a fact the
+    // person has moved on from until they correct it again — the bound of a
+    // fence built from words nobody wrote down.
+    const stale = await memory.apply({
+      operations: [
+        {
+          kind: "durable/add",
+          id: "answer-length",
+          text: replaced,
+          source: calls["call-1"]![0]!.id,
+        },
+      ],
+      sources: calls["call-1"]!,
+      now: new Date("2026-09-07T10:00:00.000Z"),
+    });
+    expect(stale.record.durable.map((entry) => entry.id)).toEqual([
+      "short-answers",
+      "answer-length",
+    ]);
   });
 
   test("a correction made mid-call outlives that call's own summary", async () => {
