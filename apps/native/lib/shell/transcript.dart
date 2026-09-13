@@ -75,6 +75,8 @@ class TranscriptView extends StatefulWidget {
 }
 
 class _TranscriptViewState extends State<TranscriptView> {
+  static const workingPadding = EdgeInsets.fromLTRB(16, 6, 16, 6);
+
   final GlobalKey focusKey = GlobalKey();
   final ScrollController scroll = ScrollController();
   @override
@@ -281,6 +283,17 @@ class _TranscriptViewState extends State<TranscriptView> {
                 ),
               ),
             ...rows,
+            // Keep the latest messages in place when the working row goes.
+            if (!ordered.any(
+              (line) =>
+                  line.role == LineRole.assistant &&
+                  line.status == LineStatus.streaming &&
+                  line.empty,
+            ))
+              SizedBox(
+                key: const ValueKey('row:working-space'),
+                height: WorkingIndicator.avatarSize + workingPadding.vertical,
+              ),
           ].reversed.toList(),
         ),
       ),
@@ -310,7 +323,7 @@ class _TranscriptViewState extends State<TranscriptView> {
       // words: a Stop the person asked for and is now waiting on, and a Turn
       // still waiting behind the one it displaced.
       return Padding(
-        padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
+        padding: workingPadding,
         child: WorkingIndicator(
           line: line,
           background: widget.background,

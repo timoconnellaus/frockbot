@@ -181,6 +181,8 @@ ActivityTrailMemory activityTrailBegin(
 /// The working row: the Bot's avatar with the trail streaming off it, and the
 /// only words it ever says — the ones a supersede drain needs.
 class WorkingIndicator extends StatefulWidget {
+  static const double avatarSize = 28;
+
   final TranscriptLine line;
   final String? label;
 
@@ -287,10 +289,13 @@ class _WorkingIndicatorState extends State<WorkingIndicator>
         label: widget.label ?? 'Working',
         child: Row(
           children: [
-            SheepAvatar(size: 28, background: widget.background),
+            SheepAvatar(
+              size: WorkingIndicator.avatarSize,
+              background: widget.background,
+            ),
             SizedBox(
               width: 96,
-              height: 28,
+              height: WorkingIndicator.avatarSize,
               child: still
                   ? const SizedBox.shrink()
                   : CustomPaint(
