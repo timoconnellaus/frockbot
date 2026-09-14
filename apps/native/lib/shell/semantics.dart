@@ -39,6 +39,7 @@ abstract final class ShellIds {
   static const checkDelivery = 'check-delivery';
   static const updateReady = 'update-ready';
   static const updateRestart = 'update-restart';
+  static const updateControl = 'update-control';
 
   static String sidebarBot(String botId) => 'sidebar-bot-$botId';
   static String sidebarPinned(String botId) => 'sidebar-pinned-$botId';

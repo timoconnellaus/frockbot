@@ -12,6 +12,7 @@ import 'package:flutter/material.dart';
 import '../flock/sheep.dart';
 import '../protocol/client_wire.generated.dart' as wire;
 import '../theme/frock_theme.dart';
+import '../update/desktop_update.dart';
 import 'chat_icons.dart';
 import 'focus.dart';
 import 'semantics.dart';
@@ -692,6 +693,7 @@ class _Header extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final desktopUpdates = DesktopUpdateScope.maybeOf(context);
     // Quiet controls: a glyph and nothing round it until it is pressed. The
     // one exception is the new-Bot button, which is the row's one invitation
     // and wears the accent.
@@ -738,6 +740,18 @@ class _Header extends StatelessWidget {
               ),
             ),
           ),
+          // A desktop app replaces itself to update, and says so right beside
+          // the account; it draws nothing while there is nothing to do.
+          if (desktopUpdates != null)
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.only(left: 4, right: 4),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: DesktopUpdateButton(controller: desktopUpdates),
+                ),
+              ),
+            ),
           if (onMarketplace case final VoidCallback open) ...[
             const SizedBox(width: 2),
             identified(
@@ -750,7 +764,7 @@ class _Header extends StatelessWidget {
               ),
             ),
           ],
-          const Spacer(),
+          if (desktopUpdates == null) const Spacer(),
           identified(
             VoiceIds.sidebarStart,
             IconButton(

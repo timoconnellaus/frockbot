@@ -341,7 +341,10 @@ browser's with a second staleness rule to get wrong.
 session, the `?bot=` deep link, which it hands to the shell through a
 `ValueNotifier` rather than acting on, and one `builder` that puts the mobile
 update header above every screen (`lib/update/update_ready.dart`; the patch
-delivery it serves is [`apps/native/README.md`](../apps/native/README.md)).
+delivery it serves is [`apps/native/README.md`](../apps/native/README.md)). On
+macOS the same `builder` provides the desktop updater, drawn as a control
+beside the profile button (`lib/update/desktop_update.dart`, Sparkle underneath;
+the plan for every platform is [`docs/app-updates.md`](app-updates.md)).
 Everything a person looks at is `lib/shell/`.
 
 Voice is shell-owned chrome shared by web, Android and macOS: the composer

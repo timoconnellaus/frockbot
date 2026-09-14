@@ -9,6 +9,7 @@ on:
       - "app/machine-messages/**"
       - "core/machine-protocol/**"
       - "scripts/mac-release*"
+      - "scripts/mac-appcast*"
       - ".github/workflows/mac-release.yml"
   push:
     tags:
@@ -33,6 +34,7 @@ jobs:
       - run: bun run --filter @frockbot/mac-messages typecheck
       - run: bun test apps/mac-messages app/machine/device.test.ts app/machine/device-runner.test.ts app/machine-messages
       - run: python3 scripts/mac-release-test.py
+      - run: python3 scripts/mac-appcast-test.py
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
         with:
           flutter-version: 3.47.0
@@ -44,7 +46,7 @@ jobs:
       # where the lockfile has no entry to satisfy.
       - run: flutter pub get
         working-directory: apps/native
-      - run: flutter test --no-pub test/mac_messages_test.dart
+      - run: flutter test --no-pub test/mac_messages_test.dart test/desktop_update_test.dart
         working-directory: apps/native
       - run: python3 scripts/mac-release.py 0.0.0
 

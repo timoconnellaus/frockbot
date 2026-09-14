@@ -10,7 +10,8 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:app_links/app_links.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart'
+    show TargetPlatform, defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart' hide ConnectionState;
 
 import 'acceptance_metrics.dart';
@@ -25,6 +26,7 @@ import 'connections/document.dart' show connectReturns, isConnectReturnV1;
 import 'orientation.dart';
 import 'shell/app_shell.dart';
 import 'theme/frock_theme.dart';
+import 'update/desktop_update.dart';
 import 'update/update_ready.dart';
 import 'protocol/client_wire.generated.dart' as wire;
 
@@ -46,7 +48,17 @@ class FrockBotApp extends StatefulWidget {
   final LocalStore? store;
   final NativeApi? api;
   final MobileUpdateService? updateService;
-  const FrockBotApp({super.key, this.store, this.api, this.updateService});
+
+  /// The desktop updater, where this build has one. Defaults to Sparkle on
+  /// macOS and to none elsewhere.
+  final DesktopUpdater? desktopUpdater;
+  const FrockBotApp({
+    super.key,
+    this.store,
+    this.api,
+    this.updateService,
+    this.desktopUpdater,
+  });
   @override
   State<FrockBotApp> createState() => _FrockBotAppState();
 }
@@ -62,6 +74,17 @@ class _FrockBotAppState extends State<FrockBotApp> {
     service: widget.updateService ?? ShorebirdMobileUpdateService(),
     beforeRestart: () => checkpointStore(store),
   );
+  late final DesktopUpdateController? desktopUpdates =
+      switch (widget.desktopUpdater ??
+      (!kIsWeb && defaultTargetPlatform == TargetPlatform.macOS
+          ? MacDesktopUpdater()
+          : null)) {
+        final DesktopUpdater updater => DesktopUpdateController(
+          updater: updater,
+          beforeRestart: () => checkpointStore(store),
+        ),
+        null => null,
+      };
   StreamSubscription<Uri>? links;
   String? userId = localDevelopment ? 'development' : null;
   String? error;
@@ -233,8 +256,13 @@ class _FrockBotAppState extends State<FrockBotApp> {
     theme: FrockTheme.theme(Brightness.light),
     darkTheme: FrockTheme.theme(Brightness.dark),
     themeMode: ThemeMode.dark,
-    builder: (context, child) =>
-        UpdateReadyFrame(controller: updates, child: child!),
+    builder: (context, child) {
+      final framed = UpdateReadyFrame(controller: updates, child: child!);
+      final desktop = desktopUpdates;
+      return desktop == null
+          ? framed
+          : DesktopUpdateFrame(controller: desktop, child: framed);
+    },
     home: userId == null
         ? SignInPage(
             busy: busy,
@@ -261,6 +289,7 @@ class _FrockBotAppState extends State<FrockBotApp> {
     sessions.clear();
     api.close();
     updates.dispose();
+    desktopUpdates?.dispose();
     super.dispose();
   }
 }

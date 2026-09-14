@@ -77,9 +77,15 @@ def build(version, destination, identity=None, profile=None, provisioning=None):
         entitlement_file.write_bytes(plistlib.dumps(app_entitlements))
         # Sign nested frameworks inside-out; the app's permissions belong only to the app.
         frameworks = contents / "Frameworks"
-        nested = sorted([*frameworks.rglob("*.dylib"), *frameworks.rglob("*.framework")], key=lambda p: len(p.parts), reverse=True)
+        # Sparkle nests its own helpers, which notarization checks like any other code.
+        nested = sorted([*frameworks.rglob("*.dylib"), *frameworks.rglob("*.xpc"), *frameworks.rglob("*.app"),
+                         *frameworks.rglob("Autoupdate"), *frameworks.rglob("*.framework")],
+                        key=lambda p: len(p.parts), reverse=True)
         for item in nested:
+            if item.is_symlink():
+                continue
             args = ["codesign", "--force", "--sign", identity or "-", "--options", "runtime"]
+            if item.suffix == ".xpc": args.append("--preserve-metadata=entitlements")
             if identity: args.append("--timestamp")
             run(*args, item)
         for item, entitlements in [(helper, SOURCE / "Agent.entitlements"), (app, entitlement_file)]:
