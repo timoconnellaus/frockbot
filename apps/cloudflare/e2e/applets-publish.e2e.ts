@@ -105,20 +105,22 @@ async function runTool(
 }
 
 /**
- * The one Bot this spec provisions. Applets are listed per Bot (ADR 0027), so
- * every directory read names it.
+ * The Builder Bot this spec provisions. Applets are listed per Bot (ADR 0027),
+ * so every directory read names it rather than the bootstrapped General Bot.
  */
-async function onlyBotId(page: Page): Promise<string> {
+async function builderBotId(page: Page): Promise<string> {
   const response = await page.request.get("/api/bots");
-  const body = (await response.json()) as { bots: Array<{ botId: string }> };
-  const botId = body.bots[0]?.botId;
-  if (!botId) throw new Error("this account has no Bot");
+  const body = (await response.json()) as {
+    bots: Array<{ botId: string; initialName: string }>;
+  };
+  const botId = body.bots.find((bot) => bot.initialName === "Builder")?.botId;
+  if (!botId) throw new Error("this account has no Builder Bot");
   return botId;
 }
 
 async function appletIdNamed(page: Page, displayName: string): Promise<string> {
   const response = await page.request.get(
-    `/api/bots/${encodeURIComponent(await onlyBotId(page))}/applets`,
+    `/api/bots/${encodeURIComponent(await builderBotId(page))}/applets`,
   );
   const body = (await response.json()) as {
     applets: Array<{ appletId: string; displayName: string }>;
