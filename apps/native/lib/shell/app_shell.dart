@@ -127,6 +127,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   late final AppBadgeSync appBadge = AppBadgeSync(
     appBadgePresenterFor(pushReady: () => push.platformReady),
   );
+  /// Whether the push channel has already been seen ready, so the one focus
+  /// report that needs the badge redrawn is told apart from the rest.
+  bool _pushReadySeen = false;
   String? clearManualForBot;
   bool resumed = true;
   Timer? _activityTimer;
@@ -236,10 +239,16 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     // Focus can be reported while this state is still starting, so the
     // repaint the focus rule needs waits for a microtask.
     push.onFocus = () => scheduleMicrotask(() {
-      if (mounted) {
+      if (!mounted) return;
+      // Every other focus report changes the badge's own value — the focused
+      // Bot's count is suppressed — so the repaint below carries it. Only the
+      // platform becoming ready leaves an already-correct badge undrawn,
+      // because the launcher adapter dropped it while the channel was not up.
+      if (push.platformReady && !_pushReadySeen) {
+        _pushReadySeen = true;
         appBadge.invalidate();
-        setState(() {});
       }
+      setState(() {});
     });
     widget.botLinks.addListener(_followBotLink);
     // A lifecycle command nobody has an answer for is adopted here rather than
@@ -518,6 +527,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                 unavailable[bot.botId.value] == 'archived')
               bot,
         ],
+        authoritative: true,
       );
       unawaited(_loadIdentities());
       unawaited(activity.load());
@@ -539,10 +549,15 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     }
   }
 
+  /// [authoritative] is whether [archivedIds] came from the lifecycle read
+  /// beside the directory. The cache holds `/api/bots` alone, so a Bot
+  /// archived on another device is still in it with nothing saying so; the
+  /// badge counts over archived state, and must wait for the read that has it.
   void _adopt(
     List<wire.BotRegistration> active,
     Set<String> archivedIds, {
     List<wire.BotRegistration>? readable,
+    bool authoritative = false,
   }) {
     setState(() {
       bots = active;
@@ -554,7 +569,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       // The cached directory is an answer, so the skeleton goes now rather
       // than waiting on a read that only replaces it.
       loaded = true;
-      directoryLoaded = true;
+      directoryLoaded = directoryLoaded || authoritative;
       selected = selected == null
           ? null
           : active

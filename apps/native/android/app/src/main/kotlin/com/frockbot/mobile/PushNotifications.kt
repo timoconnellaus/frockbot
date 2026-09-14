@@ -68,10 +68,11 @@ object PushNotifications {
     // Launchers badge from active notifications, so this reconciles the ones
     // that exist with the cloud rather than posting any. A silenced Bot (muted
     // or archived) loses its notification; a counted Bot's notification carries
-    // its unread count. A Bot at zero is left to the read cursor, which is the
-    // only thing that discards an alert. A notification the User swiped away is
-    // not brought back: swiping neither reads the conversation nor asks for
-    // the alert again.
+    // its unread count. A Bot the cloud puts at zero loses the stored count and
+    // falls back to the messages its notification still holds: the cloud is
+    // authority on the number, and only a read cursor discards the alert
+    // itself. A notification the User swiped away is not brought back: swiping
+    // neither reads the conversation nor asks for the alert again.
     @Synchronized fun badge(context: Context, bots: Map<String, Int>, silenced: List<String>) {
         val store = prefs(context)
         val manager = NotificationManagerCompat.from(context)
@@ -89,8 +90,13 @@ object PushNotifications {
         }
         val refresh = mutableListOf<String>()
         for ((botId, count) in bots) {
-            if (count <= 0 || store.getInt("count:$botId", -1) == count) continue
-            editor.putInt("count:$botId", count)
+            if (count <= 0) {
+                if (!store.contains("count:$botId")) continue
+                editor.remove("count:$botId")
+            } else {
+                if (store.getInt("count:$botId", -1) == count) continue
+                editor.putInt("count:$botId", count)
+            }
             if (botId in active) refresh.add(botId)
         }
         // Applied before any show(), which reads back the count it draws.

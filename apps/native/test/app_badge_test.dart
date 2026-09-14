@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -448,5 +449,155 @@ void main() {
       api.close();
       debugDefaultTargetPlatformOverride = null;
     });
+
+    testWidgets('and while only a cached directory says who the Bots are', (
+      tester,
+    ) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+      tester.view.physicalSize = const Size(320, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final calls = <MethodCall>[];
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(const MethodChannel('com.frockbot/badge'), (
+            call,
+          ) async {
+            calls.add(call);
+            return null;
+          });
+
+      final store = MemoryStore();
+      // The cache holds `/api/bots` and nothing else. Alpha may have been
+      // archived on another device since it was written, and only the
+      // lifecycle read says so.
+      store.values['directory/test-user'] = jsonEncode({
+        'schemaVersion': 1,
+        'revision': 1,
+        'bots': [registration('alpha', 'Alpha')],
+      });
+      final fanOut = Completer<Object?>()
+        ..complete({
+          'schemaVersion': 1,
+          'unread': [view('alpha', count: 2).toJson()],
+        });
+      final api = _ShellApi(store, [
+        registration('alpha', 'Alpha'),
+      ], fanOut, directoryFails: true);
+      final sessions = BotSessions(api: api, store: store);
+      final links = ValueNotifier<String?>(null);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: FrockTheme.theme(Brightness.dark),
+          home: AppShell(
+            api: api,
+            store: store,
+            sessions: sessions,
+            userId: 'test-user',
+            botLinks: links,
+            onSignOut: () async {},
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // The sidebar draws the cached Bot, because a cached name is a name.
+      // The badge does not count it: its archive state is unknown, so the
+      // dock keeps whatever it was already showing.
+      expect(find.text('Alpha'), findsOneWidget);
+      await tester.pump(const Duration(seconds: 11));
+      await tester.pumpAndSettle();
+      expect(calls, isEmpty);
+
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpAndSettle();
+      sessions.clear();
+      links.dispose();
+      api.close();
+      debugDefaultTargetPlatformOverride = null;
+    });
+
+    testWidgets(
+      'and reconciles the launcher once push is ready, not on every focus '
+      'report',
+      (tester) async {
+        debugDefaultTargetPlatformOverride = TargetPlatform.android;
+        tester.view.physicalSize = const Size(320, 800);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        final calls = <MethodCall>[];
+        final messenger =
+            TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+        messenger.setMockMethodCallHandler(
+          const MethodChannel('frockbot/push'),
+          (call) async {
+            calls.add(call);
+            if (call.method == 'configure') return 'token-1';
+            if (call.method == 'focus') return true;
+            return null;
+          },
+        );
+        addTearDown(
+          () => messenger.setMockMethodCallHandler(
+            const MethodChannel('frockbot/push'),
+            null,
+          ),
+        );
+
+        final store = MemoryStore();
+        final fanOut = Completer<Object?>()
+          ..complete({
+            'schemaVersion': 1,
+            'unread': [view('alpha', count: 2).toJson()],
+          });
+        final api = _ShellApi(store, [
+          registration('alpha', 'Alpha'),
+        ], fanOut);
+        final sessions = BotSessions(api: api, store: store);
+        final links = ValueNotifier<String?>(null);
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: FrockTheme.theme(Brightness.dark),
+            home: AppShell(
+              api: api,
+              store: store,
+              sessions: sessions,
+              userId: 'test-user',
+              botLinks: links,
+              onSignOut: () async {},
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        final badges = calls.where((call) => call.method == 'badge').toList();
+        expect(badges.length, 1);
+        expect((badges.single.arguments as Map)['bots'], {'alpha': 2});
+        calls.clear();
+
+        // The platform reporting focus again changes nothing the badge counts,
+        // so it must not be pushed back across the channel: on Android that
+        // re-runs a whole native notification reconcile.
+        for (final focused in [false, true]) {
+          await messenger.handlePlatformMessage(
+            'frockbot/push',
+            const StandardMethodCodec().encodeMethodCall(
+              MethodCall('focus', focused),
+            ),
+            (_) {},
+          );
+          await tester.pumpAndSettle();
+        }
+        expect(calls.where((call) => call.method == 'badge'), isEmpty);
+
+        await tester.pumpWidget(const SizedBox());
+        await tester.pumpAndSettle();
+        sessions.clear();
+        links.dispose();
+        api.close();
+        debugDefaultTargetPlatformOverride = null;
+      },
+    );
   });
 }
