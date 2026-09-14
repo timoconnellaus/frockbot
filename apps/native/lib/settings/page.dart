@@ -150,6 +150,7 @@ class _SettingsPageState extends State<SettingsPage>
       await Navigator.of(context).push(
         MaterialPageRoute<void>(
           builder: (_) => ConnectionsPage(
+            onFeaturesChanged: widget.onFeaturesChanged,
             api: widget.api,
             store: widget.store,
             userId: widget.userId,
@@ -311,6 +312,7 @@ class _SettingsPageState extends State<SettingsPage>
       onTap: () => Navigator.of(context).push(
         MaterialPageRoute<void>(
           builder: (_) => SettingsPage(
+            onFeaturesChanged: widget.onFeaturesChanged,
             api: widget.api,
             store: widget.store,
             userId: widget.userId,

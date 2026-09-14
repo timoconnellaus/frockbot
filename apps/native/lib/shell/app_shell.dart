@@ -1956,6 +1956,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         ShellTier.single) {
       _push(
         ConnectionsPage(
+          onFeaturesChanged: _featuresChanged,
           api: widget.api,
           store: widget.store,
           userId: widget.userId,
@@ -1967,6 +1968,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       showDialog<void>(
         context: context,
         builder: (_) => MarketplaceDialog(
+          onFeaturesChanged: _featuresChanged,
           api: widget.api,
           store: widget.store,
           userId: widget.userId,
@@ -1976,7 +1978,12 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   }
 
   void _openSettings() => _push(
-    SettingsPage(api: widget.api, store: widget.store, userId: widget.userId),
+    SettingsPage(
+      api: widget.api,
+      store: widget.store,
+      userId: widget.userId,
+      onFeaturesChanged: _featuresChanged,
+    ),
   );
 
   /// Account destinations push above Profile, so Back returns here.
@@ -2083,6 +2090,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                           'Models',
                           () => _push(
                             SettingsPage(
+                              onFeaturesChanged: _featuresChanged,
                               api: widget.api,
                               store: widget.store,
                               userId: widget.userId,

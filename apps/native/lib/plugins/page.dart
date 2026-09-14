@@ -257,7 +257,12 @@ class _PluginsPageState extends State<PluginsPage> {
         userId: userId,
         home: 'models',
       ),
-      'connections' => ConnectionsPage(api: api, store: store, userId: userId),
+      'connections' => ConnectionsPage(
+        api: api,
+        store: store,
+        userId: userId,
+        onFeaturesChanged: widget.onFeaturesChanged,
+      ),
       'user-settings' => SettingsPage(
         onFeaturesChanged: widget.onFeaturesChanged,
         api: api,

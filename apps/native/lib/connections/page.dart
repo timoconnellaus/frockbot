@@ -32,6 +32,7 @@ class ConnectionsPage extends StatefulWidget {
   final bool models;
   final String? packageId;
   final Future<bool> Function(Uri)? openBrowser;
+  final VoidCallback? onFeaturesChanged;
 
   /// Whether the rows are laid out three across: the Marketplace as a desktop
   /// dialog draws it. A phone is always one column, a tablet two.
@@ -47,6 +48,7 @@ class ConnectionsPage extends StatefulWidget {
     required this.store,
     required this.userId,
     this.openBrowser,
+    this.onFeaturesChanged,
     this.models = false,
     this.packageId,
     this.grid = false,
@@ -558,6 +560,7 @@ class _MacMessagesRow extends StatelessWidget {
     onTap: () => Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => SettingsPage(
+          onFeaturesChanged: page.onFeaturesChanged,
           api: page.api,
           store: page.store,
           userId: page.userId,
@@ -1239,6 +1242,7 @@ class MarketplaceDialog extends StatelessWidget {
   final LocalStore store;
   final String userId;
   final Future<bool> Function(Uri)? openBrowser;
+  final VoidCallback? onFeaturesChanged;
 
   const MarketplaceDialog({
     super.key,
@@ -1246,6 +1250,7 @@ class MarketplaceDialog extends StatelessWidget {
     required this.store,
     required this.userId,
     this.openBrowser,
+    this.onFeaturesChanged,
   });
 
   @override
@@ -1260,6 +1265,7 @@ class MarketplaceDialog extends StatelessWidget {
           maxHeight: 760,
         ),
         child: ConnectionsPage(
+          onFeaturesChanged: onFeaturesChanged,
           api: api,
           store: store,
           userId: userId,
