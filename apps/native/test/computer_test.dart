@@ -45,6 +45,43 @@ Map<String, Object?> projection({
 };
 
 void main() {
+  group('Bot Computer activity', () {
+    Map<String, Object?> run(Object call, {String status = 'running'}) => {
+      'status': status,
+      'events': [
+        {'type': 'tool/call', 'call': call},
+      ],
+    };
+
+    test('recognizes native and dynamic Computer calls in a live Turn', () {
+      expect(
+        botComputerRunningV1([
+          run({'name': 'computer_browser'}),
+        ]),
+        isTrue,
+      );
+      expect(
+        botComputerRunningV1([
+          run({
+            'name': 'call_dynamic_tool',
+            'input': {'namespace': 'frockbot', 'toolName': 'computer_exec'},
+          }),
+        ]),
+        isTrue,
+      );
+    });
+
+    test('ignores finished Turns and unrelated tools', () {
+      expect(
+        botComputerRunningV1([
+          run({'name': 'computer_exec'}, status: 'completed'),
+          run({'name': 'memory_search'}),
+        ]),
+        isFalse,
+      );
+    });
+  });
+
   group('the projection', () {
     test('carries the phase, the message and the minted session', () {
       final state = ComputerProjection.fromJson(projection());

@@ -7,6 +7,10 @@ import '../flock/sheep.dart';
 import 'semantics.dart';
 import 'chat_icons.dart';
 
+/// The blue a running Computer's icon wears: a cooler note beside the
+/// accent, so "working" and "yours" never read as the same colour.
+const computerRunningColor = Color(0xff5aa9ff);
+
 /// The conversation's title bar.
 ///
 /// On a phone it is GrokBot's: the way back to the Bot list, the Bot's name as
@@ -37,6 +41,11 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
   final ConnectionState connection;
   final VoidCallback? onApplets;
 
+  /// The doors this Bot's Packages declare, already built and identified.
+  /// They belong to the Bot, so they are drawn in the Bot's own bar rather
+  /// than over the list of every Bot.
+  final List<Widget> packageEntries;
+
   /// Shows or hides the panel beside the conversation. Null on a phone, where
   /// the panel's entries are pages and there is no column to hide.
   final VoidCallback? onTogglePanel;
@@ -56,27 +65,29 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
     this.onPlugins,
     this.connection = ConnectionState.initializing,
     this.onApplets,
+    this.packageEntries = const [],
     this.onTogglePanel,
     this.panelShown = false,
   });
 
-  double get _toolbarHeight => 56 * textScale.clamp(1, 3);
+  double get _toolbarHeight => 52 * textScale.clamp(1, 3);
   @override
   Size get preferredSize => Size.fromHeight(_toolbarHeight);
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     final title = Row(
       mainAxisSize: onOpenBot == null ? MainAxisSize.max : MainAxisSize.min,
       children: [
         Stack(
           clipBehavior: Clip.none,
           children: [
-            SheepAvatar(size: 28, background: background),
+            SheepAvatar(size: 24, background: background),
             if (connection == ConnectionState.reconnecting)
               const Positioned(
-                right: -1,
-                bottom: -1,
+                right: -2,
+                bottom: -2,
                 child: _DelayedConnectionDot(),
               ),
           ],
@@ -87,10 +98,21 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
             name,
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
-            style: Theme.of(context).textTheme.titleMedium
-                ?.copyWith(fontWeight: FontWeight.w500),
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+              letterSpacing: -0.15,
+            ),
           ),
         ),
+        if (onOpenBot != null) ...[
+          const SizedBox(width: 3),
+          Icon(
+            Icons.expand_more_rounded,
+            size: 16,
+            color: scheme.onSurfaceVariant,
+          ),
+        ],
       ],
     );
     return AppBar(
@@ -103,7 +125,10 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
               IconButton(
                 tooltip: 'Your Bots',
                 onPressed: onBack,
-                icon: const Icon(Icons.arrow_back_rounded, size: 22),
+                icon: const Icon(
+                  Icons.arrow_back_rounded,
+                  size: chatIconSizeV1,
+                ),
               ),
             ),
       // With no back arrow the avatar is the first thing in the bar, and it
@@ -125,13 +150,11 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
                   child: TextButton(
                     onPressed: onOpenBot,
                     style: TextButton.styleFrom(
-                      backgroundColor: Theme.of(context)
-                          .colorScheme
-                          .surfaceContainerHighest,
-                      foregroundColor: Theme.of(context).colorScheme.onSurface,
+                      backgroundColor: scheme.onSurface.withValues(alpha: 0.06),
+                      foregroundColor: scheme.onSurface,
                       shape: const StadiumBorder(),
-                      padding: const EdgeInsets.fromLTRB(6, 6, 14, 6),
-                      minimumSize: const Size(0, 40),
+                      padding: const EdgeInsets.fromLTRB(5, 5, 9, 5),
+                      minimumSize: const Size(0, 34),
                       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     ),
                     child: title,
@@ -140,6 +163,7 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
               ),
             ),
       actions: [
+        ...packageEntries,
         if (onApplets != null)
           identified(
             AppletIds.chip,
@@ -150,7 +174,7 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
             'Computer',
             ChatIconKind.computer,
             onComputer,
-            color: computerRunning ? Colors.blue : null,
+            color: computerRunning ? computerRunningColor : null,
           ),
         if (onRoutines != null)
           identified(
@@ -188,16 +212,19 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
     ChatIconKind icon,
     VoidCallback? open, {
     Color? color,
-  }) => IconButton(
-    tooltip: label,
-    color: color,
-    onPressed: open,
-    icon: ChatIcon(icon),
-    style: IconButton.styleFrom(
-      minimumSize: const Size(40, 48),
-      maximumSize: const Size(40, 48),
-      padding: EdgeInsets.zero,
-      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+  }) => Builder(
+    builder: (context) => IconButton(
+      tooltip: label,
+      color: color ?? Theme.of(context).colorScheme.onSurfaceVariant,
+      onPressed: open,
+      icon: ChatIcon(icon),
+      style: IconButton.styleFrom(
+        minimumSize: const Size(44, 46),
+        maximumSize: const Size(44, 46),
+        iconSize: chatIconSizeV1,
+        padding: EdgeInsets.zero,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      ),
     ),
   );
 }

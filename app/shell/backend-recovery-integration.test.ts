@@ -416,7 +416,7 @@ describe("Bot recovery", () => {
       schemaVersion: 1,
       runs: [
         expect.objectContaining({
-          schemaVersion: 3,
+          schemaVersion: 4,
           runId: "run-1",
           status: "completed",
           outcome: { type: "completed", text: "Durable reply" },
@@ -1483,6 +1483,75 @@ describe("Bot recovery", () => {
       });
     }
   }
+
+  test("a retry page carries the off-page root and only the root owns the user-message boundary", async () => {
+    const storage = new MemoryStorage();
+    await writeRunHistory(storage, [
+      { runId: "original", sessionId: "user:primary" },
+      ...Array.from({ length: 34 }, (_, index) => ({
+        runId: `between-${index}`,
+        sessionId: "user:primary",
+      })),
+      { runId: "retry", sessionId: "user:primary" },
+    ]);
+    const original = await storage.get<StoredRun>("run:original");
+    const retry = await storage.get<StoredRun>("run:retry");
+    await storage.put("run:original", {
+      ...original,
+      status: "failed",
+      responseText: undefined,
+      failure: "Provider unavailable",
+      retriedBy: "retry",
+    });
+    await storage.put("run:retry", {
+      ...retry,
+      retryOf: "original",
+      messageRunId: "original",
+      messageAdmittedAt: original!.acceptedAt,
+      status: "failed",
+      responseText: undefined,
+      failure: "Provider unavailable",
+    });
+    const backend = createShellBotBackendContribution({
+      ...shellTestApplicationV1(),
+      state: { storage } as unknown as DurableObjectState,
+      env: {} as never,
+    });
+    const newest = await backend.listRuns();
+    expect(newest.runs.some((run) => run.runId === "original")).toBe(false);
+    expect(newest.runs.find((run) => run.runId === "retry")).toMatchObject({
+      messageRunId: "original",
+      messageAdmittedAt: original!.acceptedAt,
+      retryOf: "original",
+    });
+    const older = await backend.listRuns({
+      schemaVersion: 1,
+      before: newest.page.nextCursor,
+    });
+    expect(older.runs.find((run) => run.runId === "original")).toMatchObject({
+      messageRunId: "original",
+      retriedBy: "retry",
+    });
+    const identity = { userId: "user", botId: "primary" };
+    const mark = (fromMessageId: string, commandId: string) =>
+      executeUnreadCommand(backend.state, identity, {
+        schemaVersion: 1,
+        type: "bot/mark-unread",
+        botId: "primary",
+        commandId,
+        fromMessageId,
+      });
+    expect(
+      (await mark("original:user", "root-boundary")).unread.unreadFromMessageId,
+    ).toBe("original:user");
+    expect(
+      (await mark("retry:failed", "failure-boundary")).unread
+        .unreadFromMessageId,
+    ).toBe("retry:failed");
+    await expect(mark("retry:user", "duplicate-boundary")).rejects.toThrow(
+      /does not name a message/,
+    );
+  });
 
   test("message unread survives reconstruction and rejects a different session", async () => {
     const storage = new MemoryStorage();

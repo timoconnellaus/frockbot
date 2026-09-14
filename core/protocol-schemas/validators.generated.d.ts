@@ -3,6 +3,7 @@ import type { ProtocolTypes } from "./types.generated.js";
 declare const validators: {
   isIdentifier(value: unknown): value is ProtocolTypes["Identifier"];
   isBotId(value: unknown): value is ProtocolTypes["BotId"];
+  isRunVia(value: unknown): value is ProtocolTypes["RunVia"];
   isDigest(value: unknown): value is ProtocolTypes["Digest"];
   isInstant(value: unknown): value is ProtocolTypes["Instant"];
   isHttpsUrl(value: unknown): value is ProtocolTypes["HttpsUrl"];

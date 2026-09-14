@@ -1,15 +1,16 @@
 /**
  * Everything the Shell writes in the transaction that settles a Turn.
  *
- * Three policies share the kernel's one `terminalRecords` seam and none of them
- * knows about the others: unread state advances for a conversational Turn, an
- * automation Turn writes its completion-inbox entry and the pending input it
- * hands off, and any Turn that asked for an approval writes the durable pending
- * decision. The kernel writes the returned keys without reading them, so this
+ * Several policies share the kernel's one `terminalRecords` seam and none of
+ * them knows about the others: unread state advances for a conversational Turn,
+ * an automation Turn writes its completion-inbox entry and the pending input it
+ * hands off, any Turn that asked for an approval writes the durable pending
+ * decision, and a Turn the voice session asked for notes that a call is owed
+ * its answer. The kernel writes the returned keys without reading them, so this
  * is the only place their composition is decided.
  *
  * Two rules the composition itself has to keep, and they are why this is a
- * function with a test rather than three spreads in a method body.
+ * function with a test rather than a row of spreads in a method body.
  *
  *  * **Each producer runs exactly once per settlement.** A settlement that ran
  *    a producer twice would write two records where the Turn earned one — a
@@ -20,13 +21,14 @@
  *    clobber an earlier one with no sign; a collision here is a bug in the key
  *    spaces two Packages chose, so it throws rather than picking a winner.
  *
- * One settlement also gets one `now`. Three producers each reading their own
- * clock would stamp one transaction with three different instants.
+ * One settlement also gets one `now`. Producers each reading their own clock
+ * would stamp one transaction with several different instants.
  */
 import { enqueuePendingBotInputV1 } from "@frockbot/app/routines/inbox-store";
 import type { PendingBotInputV1 } from "@frockbot/app/routines/inbox";
 import { approvalTerminalRecordsV1 } from "./approvals.js";
 import { routineTerminalRecordsForRunV1 } from "@frockbot/app/routines/bot";
+import { voiceReplyOutboxRecordsV1 } from "./voice-reply.js";
 
 /** The settled run a terminal record set is computed from. */
 export interface ShellTerminalRunV1 {
@@ -97,10 +99,26 @@ async function approvalRecordsV1(
   });
 }
 
+/**
+ * The note that a voice call is owed this Turn's answer.
+ *
+ * In the settling transaction rather than after it, for the reason every
+ * durable hand-off here is: between "the answer is recorded" and "somebody has
+ * been told" there must be no instant where an eviction loses the hand-off.
+ */
+function voiceRecordsV1(
+  input: ShellTerminalInputV1,
+): Promise<Record<string, unknown>> {
+  return Promise.resolve(
+    voiceReplyOutboxRecordsV1({ run: input.run, now: input.now }),
+  );
+}
+
 /** The producers, in the order they are composed. Each is called once. */
 const SHELL_TERMINAL_PRODUCERS_V1 = [
   routineRecordsV1,
   approvalRecordsV1,
+  voiceRecordsV1,
 ] as const;
 
 /**

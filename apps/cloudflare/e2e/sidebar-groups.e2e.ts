@@ -37,7 +37,7 @@ test("the sidebar searches from the top and groups Bots only after a label exist
 }) => {
   await openApplication(page, userId);
 
-  // Search sits in the sidebar's header beside the create gesture, and is the
+  // Search sits below the sidebar's header as a full-width input, and is the
   // only search trigger in the shell: there is no second one in the top bar.
   const sidebar = sem(page, "shell-sidebar");
   const search = sem(page, "sidebar-search");
@@ -53,12 +53,10 @@ test("the sidebar searches from the top and groups Bots only after a label exist
   if (!searchBox || !createButtonBox) {
     throw new Error("the sidebar controls are missing geometry");
   }
-  expect(
-    Math.abs(searchBox.height - createButtonBox.height),
-  ).toBeLessThanOrEqual(1);
-  const searchCenter = searchBox.y + searchBox.height / 2;
-  const createButtonCenter = createButtonBox.y + createButtonBox.height / 2;
-  expect(Math.abs(searchCenter - createButtonCenter)).toBeLessThanOrEqual(1);
+  expect(searchBox.y).toBeGreaterThanOrEqual(
+    createButtonBox.y + createButtonBox.height,
+  );
+  expect(searchBox.width).toBeGreaterThan(createButtonBox.width * 3);
 
   await search.click();
   await expect(sem(page, "search-overlay")).toBeVisible();

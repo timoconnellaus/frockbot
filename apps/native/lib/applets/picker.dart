@@ -13,7 +13,12 @@ class AppletPicker extends StatefulWidget {
 }
 
 class _AppletPickerState extends State<AppletPicker> {
-  String? deleting;
+  /// Applets a confirmed delete has already taken off this list, ahead of the
+  /// round trip and the re-read behind it. The confirmation is the decision,
+  /// and a delete the backend no longer has anything to do is already treated
+  /// as the outcome the row asked for, so the row going now says the same
+  /// thing sooner. A delete that genuinely failed puts its row back.
+  final Set<String> removed = {};
   String? error;
 
   @override
@@ -44,7 +49,7 @@ class _AppletPickerState extends State<AppletPicker> {
     );
     if (confirmed != true || !mounted) return;
     setState(() {
-      deleting = id;
+      removed.add(id);
       error = null;
     });
     try {
@@ -57,12 +62,16 @@ class _AppletPickerState extends State<AppletPicker> {
         if (failure.status != 404) rethrow;
       }
       await controller.load();
+      // The re-read is the authority on what is left, so the prediction it
+      // confirms stops standing in for one.
+      if (mounted) setState(() => removed.remove(id));
     } catch (_) {
       if (mounted) {
-        setState(() => error = 'Couldn’t delete this Applet. Try again.');
+        setState(() {
+          removed.remove(id);
+          error = 'Couldn’t delete this Applet. Try again.';
+        });
       }
-    } finally {
-      if (mounted) setState(() => deleting = null);
     }
   }
 
@@ -71,6 +80,10 @@ class _AppletPickerState extends State<AppletPicker> {
     animation: widget.controller,
     builder: (context, _) {
       final controller = widget.controller;
+      final listed = [
+        for (final applet in controller.directory)
+          if (!removed.contains(applet.appletId)) applet,
+      ];
       return AlertDialog(
         title: const Text('Applets'),
         content: SizedBox(
@@ -80,18 +93,21 @@ class _AppletPickerState extends State<AppletPicker> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 if (error != null) Text(error!),
-                if (controller.loading && controller.directory.isEmpty)
+                if (controller.loading && listed.isEmpty)
                   const LinearProgressIndicator(),
                 if (!controller.loading &&
                     controller.directoryFailure == null &&
-                    controller.directory.isEmpty)
+                    listed.isEmpty)
                   const Text('No Applets yet. Ask a Bot to build one.'),
                 if (controller.directoryFailure != null)
                   TextButton(
                     onPressed: controller.retry,
                     child: const Text('Couldn’t load Applets · Retry'),
                   ),
-                for (final applet in controller.directory)
+                // A delete in flight is a row that is already gone, so no other
+                // row waits on it: choosing or deleting a different Applet
+                // never depended on this one's round trip.
+                for (final applet in listed)
                   Row(
                     children: [
                       Expanded(
@@ -100,17 +116,15 @@ class _AppletPickerState extends State<AppletPicker> {
                           ListTile(
                             contentPadding: EdgeInsets.zero,
                             title: Text(applet.displayName),
-                            onTap: deleting == null
-                                ? () => Navigator.pop(context, applet.appletId)
-                                : null,
+                            onTap: () =>
+                                Navigator.pop(context, applet.appletId),
                           ),
                         ),
                       ),
                       IconButton(
                         tooltip: 'Delete ${applet.displayName}',
-                        onPressed: deleting == null
-                            ? () => remove(applet.appletId, applet.displayName)
-                            : null,
+                        onPressed: () =>
+                            remove(applet.appletId, applet.displayName),
                         icon: const Icon(Icons.delete_outline),
                       ),
                     ],

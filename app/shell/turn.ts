@@ -233,6 +233,11 @@ export async function executeTurn(
           },
         }
       : {}),
+    // The other caller on the agent lane. The return address is durable on the
+    // run record; what the Turn needs to know is that a person is listening.
+    ...(input.command.origin?.kind === "voice"
+      ? { inboundAgent: { kind: "voice" as const } }
+      : {}),
   };
   const runtime = await agentRuntime(
     state,

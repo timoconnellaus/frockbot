@@ -128,6 +128,12 @@ describe("searching every Bot's transcript", () => {
     // makes the empty answer above evidence rather than a broken route.
     expect((await search(bob, "q=wollongong")).groups).toEqual([]);
     expect(hitRunIds(await search(bob, "q=ledger"))).toEqual(["bob-1"]);
+    expect(hitRunIds(await search(alice, "q=&kinds=user")).sort()).toEqual([
+      "alice-1",
+      "alice-2",
+    ]);
+    expect(hitRunIds(await search(bob, "q=&kinds=user"))).toEqual(["bob-1"]);
+    expect((await search(alice, "q=&kinds=media,link")).groups).toEqual([]);
   });
 
   it("excludes an archived Bot until the query opts in, and labels it", async () => {

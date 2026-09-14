@@ -1923,8 +1923,11 @@ describe("Cloudflare user application gateway", () => {
     expect(value.page).toEqual({ truncated: false });
     expect(Object.keys(runs[0] ?? {}).sort()).toEqual([
       "admittedAt",
+      "canRetry",
       "events",
       "input",
+      "messageAdmittedAt",
+      "messageRunId",
       "outcome",
       "runId",
       "schemaVersion",

@@ -78,6 +78,48 @@ jobs:
       - name: Test
         run: bun test
 
+  # The Flutter client's own analysis and tests. `apps/native` is the phone
+  # app, the macOS app and the web client at once, and neither `bun test` nor
+  # `flutter build web` reads its `test/` directory, so without this a change
+  # could leave the Dart tree uncompilable with every other check green. That
+  # is not hypothetical: two pull requests that touched different lines of the
+  # same sidebar API merged cleanly on 2026-09-12 and `main` stopped compiling
+  # its tests. It is a job of its own so it runs beside the Bun tier rather
+  # than after it.
+  flutter:
+    name: Flutter
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Pinned to the revision `apps/native/qualification.json` records, the
+      # same SDK the web client is built with.
+      - name: Set up Flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          flutter-version: 3.47.0
+          channel: stable
+          cache: true
+
+      - name: Resolve pinned packages
+        working-directory: apps/native
+        run: flutter pub get --enforce-lockfile
+
+      # Infos are fatal here as they are locally: a lint left standing is one
+      # more line every later run has to read past.
+      - name: Analyze Dart
+        working-directory: apps/native
+        run: flutter analyze --no-pub
+
+      - name: Test Flutter client
+        working-directory: apps/native
+        run: flutter test --no-pub
+
   runtime:
     name: Cloudflare runtime
     runs-on: ubuntu-latest
@@ -372,7 +414,7 @@ jobs:
     # Opt-in through the repository variable `DEPLOY_STAGING`: the job is
     # skipped, not failed, while the environment is unconfigured, so
     # `release` below still cuts the tag.
-    needs: [validate, runtime, integration, e2e]
+    needs: [validate, flutter, runtime, integration, e2e]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.DEPLOY_STAGING == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -661,11 +703,12 @@ jobs:
     # Runs after a skipped staging deploy as well as a successful one, never
     # after a failed one: `!cancelled()` keeps the job eligible when
     # `deploy-staging` was skipped, and the result checks do the gating.
-    needs: [validate, runtime, integration, e2e, deploy-staging]
+    needs: [validate, flutter, runtime, integration, e2e, deploy-staging]
     if: >-
       !cancelled()
       && github.event_name == 'push' && github.ref == 'refs/heads/main'
       && needs.validate.result == 'success'
+      && needs.flutter.result == 'success'
       && needs.runtime.result == 'success'
       && needs.integration.result == 'success'
       && needs.e2e.result == 'success'

@@ -358,3 +358,31 @@ describe("Composition Durable Object RPC boundaries", () => {
     }
   });
 });
+
+test("the run RPC carries retry intent but refuses client-forged lineage", () => {
+  const request = {
+    schemaVersion: 1,
+    userId: "user",
+    botId: "primary",
+    command: {
+      runId: "attempt-2",
+      sessionId: "user:primary",
+      acceptedAt: "2026-09-13T00:00:00.000Z",
+      text: "Check the build",
+      retryOf: "attempt-1",
+    },
+  };
+  expect(decodeBotRunRpcV1(request).command.retryOf).toBe("attempt-1");
+  expect(() =>
+    decodeBotRunRpcV1({
+      ...request,
+      command: { ...request.command, retryOf: "attempt/1" },
+    }),
+  ).toThrow();
+  expect(() =>
+    decodeBotRunRpcV1({
+      ...request,
+      command: { ...request.command, messageRunId: "another" },
+    }),
+  ).toThrow();
+});

@@ -65,6 +65,7 @@ class FakeTransport implements ChatTransport {
     String id,
     String text, {
     String? supersedes,
+    String? retryOf,
   }) async {
     expect(
       (jsonDecode(store.values['chat/user-1/bot-1']!)['pending'] as List)

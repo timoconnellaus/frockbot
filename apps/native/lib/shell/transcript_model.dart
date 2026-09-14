@@ -65,10 +65,23 @@ enum LineRole { user, assistant, system }
 enum LineStatus { streaming, completed, aborted, error }
 
 /// The way out of an ending the person cannot otherwise act on. `resendTurn`
-/// sends this Turn's own message again, unchanged, as a new Turn.
+/// starts a fresh attempt over the same visible user message.
 /// The way out of a failed Turn a client can offer: sending the same message
 /// again, or opening Billing when the account could not pay for the reply.
 enum LineRetry { resendTurn, openBilling }
+
+enum VoiceExchangeStatus { queued, working, answered, stopped, failed }
+
+class VoiceExchange {
+  final String request;
+  final String? reply;
+  final VoiceExchangeStatus status;
+  const VoiceExchange({
+    required this.request,
+    required this.status,
+    this.reply,
+  });
+}
 
 class TranscriptLine {
   final String id;
@@ -92,9 +105,14 @@ class TranscriptLine {
   /// never as the bubble's own text, which reads as the Bot saying it.
   final String? notice;
   final LineRetry? retry;
+
+  /// The cloud counts a failed attempt even when its notice is on the user bubble.
+  final String? failureMessageId;
+  final String? readAt;
   final List<ToolActivity> tools;
   final List<SendPayloadLine> sends;
   final List<PluginModelCall> pluginCalls;
+  final VoiceExchange? voiceExchange;
   const TranscriptLine({
     required this.id,
     required this.runId,
@@ -106,13 +124,20 @@ class TranscriptLine {
     this.stopRequested = false,
     this.notice,
     this.retry,
+    this.failureMessageId,
+    this.readAt,
     this.tools = const [],
     this.sends = const [],
     this.pluginCalls = const [],
+    this.voiceExchange,
   });
 
   bool get empty =>
-      text.isEmpty && notice == null && sends.isEmpty && retry == null;
+      text.isEmpty &&
+      notice == null &&
+      sends.isEmpty &&
+      retry == null &&
+      voiceExchange == null;
 }
 
 /// Where each Turn sits in the conversation: the timestamp of the message the
@@ -189,14 +214,16 @@ SupersedeDrainState supersedeDrainState(
 ) {
   TranscriptLine? waiting;
   for (final line in lines) {
-    if (line.role == LineRole.assistant &&
+    if (line.voiceExchange == null &&
+        line.role == LineRole.assistant &&
         line.status == LineStatus.streaming &&
         line.pending) {
       waiting = line;
     }
   }
   if (waiting == null) return SupersedeDrainState.none;
-  final startedAt = waiting.at == null ? null : DateTime.tryParse(waiting.at!);
+  final admittedAt = waiting.readAt ?? waiting.at;
+  final startedAt = admittedAt == null ? null : DateTime.tryParse(admittedAt);
   if (startedAt == null) return SupersedeDrainState.stopping;
   return now.difference(startedAt) >= supersedeDrainSlowAfter
       ? SupersedeDrainState.slow
@@ -394,29 +421,118 @@ List<PluginModelCall> _pluginCallsFrom(List<Object?> events) {
 ///
 /// One line per `send_to_user` in the order the Bot sent them, then the Turn's
 /// own closing line under them. A bubble is never edited once it is in the
-/// transcript: a later send appends, it does not replace.
+/// transcript: a later send appends, it does not replace. Retry attempts share
+/// one user bubble, whose status comes from the most recent attempt.
 List<TranscriptLine> projectRuns(List<Map<String, dynamic>> runs) {
+  final latest = <String, Map<String, dynamic>>{};
+  for (final run in runs) {
+    final messageId = run['messageRunId'] as String? ?? run['runId'] as String;
+    final previous = latest[messageId];
+    if (previous == null ||
+        run['retryOf'] == previous['runId'] ||
+        (run['admittedAt'] as String? ?? '').compareTo(
+              previous['admittedAt'] as String? ?? '',
+            ) >
+            0) {
+      latest[messageId] = run;
+    }
+  }
+  final emitted = <String>{};
   final lines = <TranscriptLine>[];
   for (final run in runs) {
     final runId = run['runId'] as String;
     final events = (run['events'] as List?) ?? const [];
     final status = run['status'] as String?;
     final queued = run['queued'] == true;
-    final admittedAt = run['admittedAt'] as String?;
+    final admittedAt =
+        run['messageAdmittedAt'] as String? ?? run['admittedAt'] as String?;
+    final messageId = run['messageRunId'] as String? ?? runId;
     final input = (run['input'] as String?) ?? '';
+    final via = run['via'];
+    if (via is Map && via['kind'] == 'voice') {
+      String? reply;
+      for (final event in events) {
+        if (event is Map &&
+            event['type'] == 'reply/to-caller' &&
+            event['caller'] == 'voice' &&
+            event['text'] is String) {
+          reply = event['text'] as String;
+        }
+      }
+      lines.add(
+        TranscriptLine(
+          id: '$runId:voice',
+          runId: runId,
+          role: LineRole.assistant,
+          text: '',
+          at: admittedAt,
+          status: status == 'running'
+              ? LineStatus.streaming
+              : LineStatus.completed,
+          pending: queued,
+          tools: _toolsFrom(events),
+          pluginCalls: _pluginCallsFrom(events),
+          voiceExchange: VoiceExchange(
+            request: input,
+            reply: reply,
+            status: reply != null
+                ? VoiceExchangeStatus.answered
+                : status == 'running'
+                ? (queued
+                      ? VoiceExchangeStatus.queued
+                      : VoiceExchangeStatus.working)
+                : status == 'cancelled' || status == 'superseded'
+                ? VoiceExchangeStatus.stopped
+                : VoiceExchangeStatus.failed,
+          ),
+        ),
+      );
+      // Explicit messages to the User still belong to the ordinary conversation.
+      for (final send in _sendsFrom(events)) {
+        lines.add(
+          TranscriptLine(
+            id: '$runId:send:${send.ordinal}',
+            runId: runId,
+            role: LineRole.assistant,
+            text: '',
+            at: admittedAt,
+            status: LineStatus.completed,
+            sends: [send.send],
+          ),
+        );
+      }
+      continue;
+    }
     // A Routine's Turn is projected with no input at all: nobody typed it. A
     // chat Turn cannot be admitted empty, so an empty input means there is no
     // person's message to draw above the Bot's — not an empty one.
-    if (input.isNotEmpty) {
+    if (input.isNotEmpty && emitted.add(messageId)) {
+      final current = latest[messageId]!;
+      final currentId = current['runId'] as String;
+      final failed =
+          current['status'] == 'failed' && current['retriedBy'] == null;
+      final failure = failed
+          ? failureNotice((current['outcome'] as Map?)?['message'] as String?)
+          : null;
       lines.add(
         TranscriptLine(
-          id: '$runId:user',
-          runId: runId,
+          id: '$messageId:user',
+          runId: currentId,
           role: LineRole.user,
-          text: input,
+          text: current['input'] as String? ?? input,
           at: admittedAt,
-          status: LineStatus.completed,
-          pending: status == 'running' && queued,
+          readAt: current['admittedAt'] as String?,
+          status: failed ? LineStatus.error : LineStatus.completed,
+          pending:
+              current['status'] == 'running' &&
+              (current['queued'] == true || current['retryOf'] != null),
+          notice: failure?.notice,
+          retry:
+              failure?.action == LineRetry.resendTurn &&
+                  current['canRetry'] != true
+              ? null
+              : failure?.action,
+          failureMessageId: failed ? '$currentId:failed' : null,
         ),
       );
     }
@@ -429,6 +545,7 @@ List<TranscriptLine> projectRuns(List<Map<String, dynamic>> runs) {
           role: LineRole.assistant,
           text: '',
           at: admittedAt,
+          readAt: run['admittedAt'] as String?,
           status: LineStatus.completed,
           sends: [sends[index].send],
         ),
@@ -457,6 +574,7 @@ List<TranscriptLine> projectRuns(List<Map<String, dynamic>> runs) {
             role: LineRole.assistant,
             text: text,
             at: admittedAt,
+            readAt: run['admittedAt'] as String?,
             status: LineStatus.streaming,
             // A Turn that has not started shows nothing of its own: the greyed
             // user message is the whole of what the thread says about it.
@@ -477,6 +595,7 @@ List<TranscriptLine> projectRuns(List<Map<String, dynamic>> runs) {
             role: LineRole.assistant,
             text: text,
             at: admittedAt,
+            readAt: run['admittedAt'] as String?,
             status: LineStatus.aborted,
             tools: tools,
             pluginCalls: pluginCalls,
@@ -490,6 +609,7 @@ List<TranscriptLine> projectRuns(List<Map<String, dynamic>> runs) {
             role: LineRole.assistant,
             text: text,
             at: admittedAt,
+            readAt: run['admittedAt'] as String?,
             status: LineStatus.aborted,
             notice: spoken ? null : 'You stopped this.',
             tools: tools,
@@ -517,13 +637,20 @@ List<TranscriptLine> projectRuns(List<Map<String, dynamic>> runs) {
             id: '$runId:failed',
             runId: runId,
             role: LineRole.assistant,
-            // A Turn that broke after it had started talking keeps what it
-            // said, with the reason underneath it.
+            // Chat failures live on the input; background failures need a notice.
             text: text,
             at: admittedAt,
+            readAt: run['admittedAt'] as String?,
             status: LineStatus.error,
-            notice: spoken ? null : failure.notice,
-            retry: spoken ? null : failure.action,
+            failureMessageId: run['retriedBy'] != null ? '$runId:failed' : null,
+            notice: input.isNotEmpty || spoken ? null : failure.notice,
+            retry:
+                input.isNotEmpty ||
+                    spoken ||
+                    (failure.action == LineRetry.resendTurn &&
+                        run['canRetry'] != true)
+                ? null
+                : failure.action,
             tools: tools,
             pluginCalls: pluginCalls,
           ),
@@ -536,6 +663,7 @@ List<TranscriptLine> projectRuns(List<Map<String, dynamic>> runs) {
             role: LineRole.assistant,
             text: text,
             at: admittedAt,
+            readAt: run['admittedAt'] as String?,
             status: LineStatus.completed,
             tools: tools,
             pluginCalls: pluginCalls,
@@ -581,12 +709,4 @@ List<TranscriptLine> projectAnnouncements(List<Object?> announcements) {
     );
   }
   return lines;
-}
-
-/// The text a failed Turn would be retried with, or nothing where there is no
-/// such text. The same size rule as the composer, because a resend is an
-/// ordinary Turn: a message that could not be sent again is not offered again.
-String? resendableTurnText(String? text, {required int maxCharacters}) {
-  final trimmed = text?.trim() ?? '';
-  return trimmed.isNotEmpty && trimmed.length <= maxCharacters ? trimmed : null;
 }

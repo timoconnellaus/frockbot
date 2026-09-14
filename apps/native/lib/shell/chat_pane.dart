@@ -41,7 +41,7 @@ class ChatPane extends StatefulWidget {
   /// a page, because that is a layout question and not this pane's.
   final void Function(TranscriptLine line)? onOpenRun;
   final VoidCallback? onOpenSettings;
-  final void Function(TranscriptLine)? onMessageActions;
+  final void Function(TranscriptLine, {Offset? position})? onMessageActions;
   final String? unreadFromMessageId;
   final void Function(String?)? onReadLatest;
   final void Function(String? runId)? onWorkingChanged;
@@ -147,21 +147,7 @@ class _ChatPaneState extends State<ChatPane> {
     if (mounted) focus.requestFocus();
   }
 
-  /// Sends this Turn's own message again, unchanged, as a new Turn. The words
-  /// come off the person's own line in the thread, not out of the composer,
-  /// which is why an empty composer does not disable it.
-  Future<void> _retry(TranscriptLine line) async {
-    final original = controller.runs
-        .where((run) => run['runId'] == line.runId)
-        .map((run) => run['input'] as String?)
-        .firstOrNull;
-    final text = resendableTurnText(
-      original,
-      maxCharacters: turnTextMaxCharacters,
-    );
-    if (text == null || !controller.canSend) return;
-    await controller.send(text);
-  }
+  Future<void> _retry(TranscriptLine line) => controller.retryRun(line.runId);
 
   Future<void> _refresh({bool older = false}) async {
     try {
@@ -178,9 +164,23 @@ class _ChatPaneState extends State<ChatPane> {
     }
   }
 
+  /// How wide the thread and its composer may grow. A conversation is read
+  /// like a page, and a line that runs the width of a desk is not a line
+  /// anyone reads twice; a phone is narrower than this and never notices.
+  static const double readingWidth = 860;
+
   @override
   Widget build(BuildContext context) {
     final c = controller;
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: readingWidth),
+        child: _column(context, c),
+      ),
+    );
+  }
+
+  Widget _column(BuildContext context, ChatController c) {
     return Column(
       children: [
         if (c.connection == ConnectionState.disconnected ||
@@ -228,6 +228,16 @@ class _ChatPaneState extends State<ChatPane> {
             hasEarlier: c.before != null,
             approvals: widget.approvals,
             storageKey: 'history-${c.botId}',
+            bottomSpace: c.stoppable
+                ? null
+                : const Visibility(
+                    key: ValueKey('row:stop-space'),
+                    visible: false,
+                    maintainSize: true,
+                    maintainAnimation: true,
+                    maintainState: true,
+                    child: ComposerStopButton(),
+                  ),
             focusRunId: c.focusRunId,
             onRefresh: _refresh,
             onOpenRun: widget.onOpenRun ?? (_) {},
@@ -296,7 +306,7 @@ class ConversationView extends StatefulWidget {
   final String botId;
   final void Function(TranscriptLine line) onOpenRun;
   final VoidCallback? onOpenSettings;
-  final void Function(TranscriptLine)? onMessageActions;
+  final void Function(TranscriptLine, {Offset? position})? onMessageActions;
   final String? unreadFromMessageId;
   final void Function(String?)? onReadLatest;
   final void Function(String? runId)? onWorkingChanged;

@@ -1563,9 +1563,12 @@ export async function execute() {
     ).current;
 
     // The trigger dwells on every delivery, so a second copy of one event
-    // reaches the door while the Plugin still holds the first.
+    // reaches the door while the Plugin still holds the first. Three seconds
+    // rather than one: the bound below is the dwell itself, and a CI runner
+    // spends a few hundred milliseconds mounting the Plugin before the first
+    // dwell begins, which a shorter dwell had no room for.
     const SLOW_PLUGIN_ID = "slow-alerts";
-    const DWELL_MS = 1_200;
+    const DWELL_MS = 3_000;
     const SLOW_PLUGIN_SOURCE = `
 export const tools = [
   { name: "slow_noop", description: "Does nothing", inputSchema: {}, idempotent: true },
@@ -1710,7 +1713,10 @@ export async function execute() {
     const [first, second] = await Promise.all([
       bot(identity).deliverRoutineHook(copy),
       (async () => {
-        await new Promise((resolve) => setTimeout(resolve, 200));
+        // Halfway into the dwell: late enough that the first copy is inside
+        // the Plugin even on a slow runner, early enough that a copy which
+        // joined it finishes well inside a dwell of its own.
+        await new Promise((resolve) => setTimeout(resolve, DWELL_MS / 2));
         const startedAt = Date.now();
         const receipt = await bot(identity).deliverRoutineHook(copy);
         return { receipt, elapsedMs: Date.now() - startedAt };

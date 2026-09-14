@@ -100,6 +100,17 @@ describe("the transcript index in Workerd", () => {
     expect(results.hits.every((hit) => hit.kind === "user")).toBe(true);
     expect(results.hits[0]!.snippet).toContain("Wollongong");
 
+    const recent = await search(userId, { query: "", kinds: ["user"] });
+    expect(new Set(recent.hits.map((hit) => hit.runId))).toEqual(
+      new Set(["run-1", "run-2"]),
+    );
+    expect(recent.hits.every((hit) => hit.snippet.includes("Wollongong"))).toBe(
+      true,
+    );
+    expect(
+      (await search(userId, { query: "", kinds: ["media", "link"] })).hits,
+    ).toEqual([]);
+
     // A search naming one Bot returns that Bot alone.
     const scoped = await search(userId, {
       query: "wollongong",

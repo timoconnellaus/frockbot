@@ -20,7 +20,7 @@ import '../applets/picker.dart';
 import '../audit/page.dart';
 import '../client/auth.dart' show developmentAuth;
 import '../client/bot_sessions.dart';
-import '../client/chat_controller.dart' show ConnectionState;
+import '../client/chat_controller.dart' show ChatController, ConnectionState;
 import '../client/transport.dart';
 import '../computer/card.dart';
 import '../computer/client.dart';
@@ -34,12 +34,16 @@ import '../packages/frame.dart';
 import '../plugins/page.dart';
 import '../recovery/page.dart';
 import '../routines/page.dart';
+import '../routines/runs.dart';
+import '../search/controller.dart';
+import '../search/archived_conversation.dart';
 import '../search/overlay.dart';
 import '../settings/billing.dart';
 import '../settings/credit.dart';
 import '../settings/bot_settings.dart';
 import '../settings/page.dart';
 import '../templates/page.dart';
+import '../theme/rows.dart';
 import '../update/app_version.dart';
 import '../view/sample_page.dart';
 import '../voice/assistant.dart';
@@ -57,6 +61,7 @@ import 'chat_pane.dart';
 import 'chat_header.dart';
 import 'desktop_layout.dart';
 import 'lifecycle.dart';
+import 'message_actions.dart';
 import 'run_view.dart';
 import 'semantics.dart';
 import 'sidebar.dart';
@@ -120,6 +125,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   bool resumed = true;
   Timer? _activityTimer;
   List<wire.BotRegistration> bots = [];
+  List<wire.BotRegistration> searchableBots = [];
   Map<String, SidebarProfile> profiles = {};
   Set<String> archived = {};
   wire.BotRegistration? selected;
@@ -144,9 +150,17 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// holder builds nothing, so the one key is in one place.
   bool _appletPagePresented = false;
   ComputerController? computer;
+  ChatController? _headerChat;
+  bool _botComputerRunning = false;
   PackageCatalog? catalog;
+
+  /// Bumped whenever [catalog] changes. A Bot page pushed as its own route
+  /// is a subtree the shell's `setState` does not reach, so the page listens
+  /// to this to redraw the rows its Packages contribute.
+  final ValueNotifier<int> catalogRevision = ValueNotifier(0);
   String? error;
   bool loaded = false;
+  bool _searchOpen = false;
 
   /// On a phone the Bot list is the first screen and a conversation is a
   /// page over it; this is whether that page is up. At the wider tiers the
@@ -217,15 +231,39 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     unawaited(push.syncRead());
   }
 
+  void _repaintHeader() {
+    final running = botComputerRunningV1(
+      _headerChat?.runs ?? const <Map<String, dynamic>>[],
+    );
+    if (running == _botComputerRunning) return;
+    _botComputerRunning = running;
+    // Restoring a cached conversation can notify while its pane is building.
+    scheduleMicrotask(() {
+      if (mounted) setState(() {});
+    });
+  }
+
+  /// The Bot the User is reading right now, or null when none is: the open
+  /// chat, on a window that holds focus, with nothing covering it. One
+  /// definition, because the read receipt and the sidebar's badge are two
+  /// halves of the same answer and must not disagree.
+  String? get _focusedBotId {
+    final open = selected?.botId.value;
+    if (open == null ||
+        !resumed ||
+        !push.focused ||
+        !_conversationVisible ||
+        panelOpen ||
+        openRun != null ||
+        ModalRoute.of(context)?.isCurrent != true) {
+      return null;
+    }
+    return open;
+  }
+
   void _readLatest(String botId, String? messageId) {
     if (!mounted) return;
-    final viewing =
-        resumed &&
-        push.focused &&
-        _conversationVisible &&
-        !panelOpen &&
-        openRun == null &&
-        ModalRoute.of(context)?.isCurrent == true;
+    final viewing = _focusedBotId == botId;
     final view = activity.unread[botId];
     // Presence is only claimed for the message the cloud says is the latest and
     // this device is actually showing. Claiming it for anything else asks the
@@ -238,7 +276,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         (view?.manuallyUnread == true && clearManualForBot != botId)) {
       return;
     }
-    if (activity.loading || activity.saving || activity.pending) return;
+    if (activity.loading || activity.busy(botId)) return;
     clearManualForBot = null;
     unawaited(activity.mark(botId, read: true));
   }
@@ -443,10 +481,19 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         }),
       );
       if (!mounted) return;
-      _adopt(active, {
-        for (final entry in unavailable.entries)
-          if (entry.value == 'archived') entry.key,
-      });
+      _adopt(
+        active,
+        {
+          for (final entry in unavailable.entries)
+            if (entry.value == 'archived') entry.key,
+        },
+        readable: [
+          for (final bot in directory.bots)
+            if (unavailable[bot.botId.value] == null ||
+                unavailable[bot.botId.value] == 'archived')
+              bot,
+        ],
+      );
       unawaited(_loadIdentities());
       unawaited(activity.load());
       unawaited(
@@ -467,9 +514,17 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     }
   }
 
-  void _adopt(List<wire.BotRegistration> active, Set<String> archivedIds) {
+  void _adopt(
+    List<wire.BotRegistration> active,
+    Set<String> archivedIds, {
+    List<wire.BotRegistration>? readable,
+  }) {
     setState(() {
       bots = active;
+      searchableBots = readable ?? active;
+      // The directory is authority on what a Bot wears; whatever it says now
+      // replaces anything drawn ahead of it.
+      _predictedSheep.clear();
       archived = archivedIds;
       // The cached directory is an answer, so the skeleton goes now rather
       // than waiting on a read that only replaces it.
@@ -512,6 +567,14 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       // The registration seed is still a name; nothing is lost but the label.
     }
   }
+
+  /// Draws a Bot profile change before the round trip that confirms it: the
+  /// tile moves, the group changes, the name updates with the control instead
+  /// of six requests later. [_loadIdentities] replaces this map wholesale, so
+  /// the authority's answer reconciles the prediction by overwriting it, and
+  /// a refused save hands back the profile it started from.
+  void predictProfile(String botId, SidebarProfile profile) =>
+      setState(() => profiles = {...profiles, botId: profile});
 
   String _name(wire.BotRegistration bot) =>
       profiles[bot.botId.value]?.name ?? bot.initialName;
@@ -573,6 +636,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         botId;
     botSettings?.dispose();
     routineInbox?.dispose();
+    _headerChat?.removeListener(_repaintHeader);
+    _headerChat = widget.sessions.open(widget.userId, botId).controller
+      ..addListener(_repaintHeader);
+    _repaintHeader();
     final controller = BotSettingsController(widget.api, botId);
     final inbox = RoutineInboxController(widget.api, botId);
     botSettings = controller;
@@ -588,7 +655,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           children: [
             BotSettingsView(
               controller: controller,
-              onSaved: load,
+              // A profile save changes no Bot's lifecycle and no Bot's place
+              // in the directory, so the identities are the only thing worth
+              // reading back.
+              onSaved: _loadIdentities,
+              onPredict: (profile) => predictProfile(botId, profile),
               background: _background(botId),
               onEditAvatar: () => unawaited(_editAvatar(botId, name)),
               dangerZone: _dangerZone(botId, name),
@@ -636,10 +707,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     computer?.dispose();
     appletCanvas = null;
     computer = null;
-    catalog = null;
+    _setCatalog(null);
     slots.remove(ShellSlot.rightPanel, 'applet');
     slots.remove(ShellSlot.rightPanel, 'computer');
-    slots.remove(ShellSlot.headerActions, 'package-entries');
     unawaited(controller.load());
     unawaited(inbox.load());
     unawaited(_adoptComposition(botId));
@@ -652,17 +722,14 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   Future<void> _adoptComposition(String botId) async {
     final read = await readPackageCatalogV1(widget.api, botId);
     if (!mounted || selected?.botId.value != botId) return;
-    setState(() => catalog = read);
+    setState(() => _setCatalog(read));
     if (read != null && read.appletsAvailable) {
       final canvas = AppletCanvasController(widget.api, botId);
       appletCanvas = canvas;
       canvas.addListener(_repaint);
-      slots.register(
-        ShellSlot.rightPanel,
-        'applet',
-        (context) => _appletCanvas(botId, canvas),
-        label: 'Applet',
-      );
+      // The Applet is a window of its own at every width, so it is not a
+      // right-panel entry: a page with its own back and its own name, and the
+      // Applet filling everything under that one row.
       unawaited(canvas.load());
     }
     final machine = ComputerController(widget.api, botId);
@@ -689,28 +756,41 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       _repaint();
     });
     unawaited(machine.read());
-    final entries = packageIframeEntriesV1(read);
-    if (entries.isNotEmpty) {
-      slots.register(
-        ShellSlot.headerActions,
-        'package-entries',
-        (context) => Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            for (final entry in entries)
-              identified(
-                PackageIds.entry(entry.contribution.packageId, entry.entry.id),
-                IconButton(
-                  tooltip: entry.entry.label,
-                  icon: Icon(_packageIcon(entry.entry.icon)),
-                  onPressed: () => _openPackagePage(entry),
-                ),
-              ),
-          ],
-        ),
-      );
-    }
     if (mounted) setState(() {});
+  }
+
+  /// The Package doors worth drawing beside the native ones.
+  ///
+  /// The Applets Package declares an entry of its own called Applets. Where
+  /// this client has the built-in Applets entry — the outlined window in the
+  /// bar, the row on the Bot's page — that is the same door, so the Package's
+  /// copy of it is left out and every other destination is kept.
+  List<PackageEntryPage> _packageEntries() => [
+    for (final entry in packageIframeEntriesV1(catalog))
+      if (appletCanvas == null || entry.entry.label.toLowerCase() != 'applets')
+        entry,
+  ];
+
+  /// The doors this Bot's Packages declare, as buttons for its own bar.
+  /// A Package naming an icon this client does not have still gets a
+  /// button, so a declared door is never silently missing.
+  List<Widget> _packageEntryActions() => [
+    for (final entry in _packageEntries())
+      identified(
+        PackageIds.entry(entry.contribution.packageId, entry.entry.id),
+        IconButton(
+          tooltip: entry.entry.label,
+          icon: Icon(_packageIcon(entry.entry.icon)),
+          onPressed: () => _openPackagePage(entry),
+        ),
+      ),
+  ];
+
+  /// The Composition this Bot is showing, and the one signal a pushed page
+  /// watches for it.
+  void _setCatalog(PackageCatalog? read) {
+    catalog = read;
+    catalogRevision.value++;
   }
 
   /// The icon set a Package may name. A Package naming one this client does
@@ -765,12 +845,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     );
   }
 
-  /// The canvas, over the thread the progress line is read from.
-  ///
-  /// `holdsFrame` puts the shell's one frame key on the live frame: the
-  /// pushed canvas page on a phone. The panel column at the desk tiers keeps
-  /// its own frame alive by staying built, and never shares the key with a
-  /// page that could be up at the same time across a resize.
+  /// The page takes over the frame pre-mounted behind the conversation.
   Widget _appletCanvas(
     String botId,
     AppletCanvasController canvas, {
@@ -790,7 +865,42 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     );
   }
 
-  /// The live frame, pre-mounted off stage on a phone.
+  /// The Applet, full window, at every width.
+  ///
+  /// One row of chrome — back, the Applet's name, the switch to its code —
+  /// and the Applet under it for the rest of the page. The page takes the
+  /// pre-mounted frame over: the holder lets go in the same frame the page is
+  /// built, so the key moves rather than doubles. It takes the frame back
+  /// only once the page has finished leaving — a route on its way out is
+  /// still in the tree and is not rebuilt, so a holder that reclaimed the key
+  /// on the pop itself would double it.
+  void _pushApplet() {
+    final bot = selected;
+    final canvas = appletCanvas;
+    if (bot == null || canvas == null || _appletPagePresented) return;
+    final route = MaterialPageRoute<void>(
+      builder: (_) => Scaffold(
+        body: SafeArea(
+          child: _appletCanvas(
+            bot.botId.value,
+            canvas,
+            onClose: () => Navigator.of(context).maybePop(),
+            holdsFrame: true,
+          ),
+        ),
+      ),
+    );
+    setState(() => _appletPagePresented = true);
+    push.reading(null);
+    unawaited(Navigator.of(context).push(route));
+    unawaited(
+      route.completed.then((_) {
+        if (mounted) setState(() => _appletPagePresented = false);
+      }),
+    );
+  }
+
+  /// The live frame, pre-mounted off stage behind the conversation.
   ///
   /// Built as soon as the adopted Bot's canvas has a viewer and until the
   /// canvas page takes the frame over. Off stage it is laid out and never
@@ -804,10 +914,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     final canvas = appletCanvas;
     final viewer = canvas?.viewer;
     if (canvas == null || viewer == null || _appletPagePresented) return null;
-    if (shellTierForWidth(MediaQuery.sizeOf(context).width) !=
-        ShellTier.single) {
-      return null;
-    }
     final size = MediaQuery.sizeOf(context);
     return Positioned(
       left: 0,
@@ -872,31 +978,44 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           // The panel names what it holds and offers the way out. Choosing
           // what it holds is the chat header's job: its icons are the one set
           // of doors, and a second row of them here was the same doors twice.
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 4, 4),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    slots.labelOf(ShellSlot.rightPanel, key) ?? key,
-                    style: Theme.of(context).textTheme.titleMedium
-                        ?.copyWith(fontWeight: FontWeight.w500),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+          SizedBox(
+            height: 52,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 8, 0),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      slots.labelOf(ShellSlot.rightPanel, key) ?? key,
+                      style: Theme.of(context).textTheme.titleSmall
+                          ?.copyWith(fontSize: 14, fontWeight: FontWeight.w600),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
-                ),
-                identified(
-                  ShellIds.rightPanelClose,
-                  IconButton(
-                    tooltip: 'Close the panel',
-                    onPressed: () => setState(() {
-                      panelOpen = false;
-                      panelCollapsed = true;
-                    }),
-                    icon: const Icon(Icons.close),
+                  identified(
+                    ShellIds.rightPanelClose,
+                    IconButton(
+                      tooltip: 'Close the panel',
+                      onPressed: () => setState(() {
+                        panelOpen = false;
+                        panelCollapsed = true;
+                      }),
+                      style: IconButton.styleFrom(
+                        foregroundColor: Theme.of(context)
+                            .colorScheme
+                            .onSurfaceVariant,
+                        iconSize: 18,
+                        minimumSize: const Size(32, 32),
+                        fixedSize: const Size(32, 32),
+                        padding: EdgeInsets.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      icon: const Icon(Icons.close_rounded),
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
           const Divider(height: 1),
@@ -910,6 +1029,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// over a full-width conversation is the same thing with less room and a
   /// scrim in the way.
   void _openPanel(String key) {
+    // The Applet is never a panel: it is a full window at every width.
+    if (key == 'applet') {
+      _pushApplet();
+      return;
+    }
     if (shellTierForWidth(MediaQuery.sizeOf(context).width) ==
         ShellTier.single) {
       _pushPanel(key);
@@ -937,7 +1061,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     });
   }
 
-  Future<void> _messageActions(TranscriptLine line) async {
+  Future<void> _messageActions(TranscriptLine line, {Offset? position}) async {
     final bot = selected;
     if (bot == null) return;
     final copyText = [
@@ -946,47 +1070,16 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         if (send.type == 'text' && send.payload?['text'] is String)
           send.payload!['text'] as String,
     ].join('\n\n');
-    final action = await showModalBottomSheet<String>(
+    final action = await showMessageActions(
       context: context,
-      showDragHandle: true,
-      builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (activity.unread[bot.botId.value]?.unread == true)
-              ListTile(
-                leading: const Icon(Icons.mark_chat_read_outlined),
-                title: const Text('Mark as read'),
-                enabled:
-                    !activity.saving && !activity.pending && !activity.loading,
-                onTap: () => Navigator.pop(context, 'read'),
-              ),
-
-            if (copyText.isNotEmpty)
-              ListTile(
-                leading: const Icon(Icons.copy),
-                title: const Text('Copy'),
-                onTap: () => Navigator.pop(context, 'copy'),
-              ),
-
-            if (line.id.endsWith(':user') ||
-                line.id.endsWith(':failed') ||
-                line.id.contains(':send:'))
-              ListTile(
-                leading: const Icon(Icons.mark_chat_unread_outlined),
-                title: const Text('Mark unread from here'),
-                enabled:
-                    !activity.saving && !activity.pending && !activity.loading,
-                onTap: () => Navigator.pop(context, 'unread'),
-              ),
-            ListTile(
-              leading: const Icon(Icons.receipt_long_outlined),
-              title: const Text('Work details'),
-              onTap: () => Navigator.pop(context, 'work'),
-            ),
-          ],
-        ),
-      ),
+      position: position,
+      canCopy: copyText.isNotEmpty,
+      canMarkUnread:
+          line.id.endsWith(':user') ||
+          line.id.endsWith(':failed') ||
+          line.id.contains(':send:'),
+      hasUnread: activity.unread[bot.botId.value]?.unread == true,
+      readActionsEnabled: !activity.busy(bot.botId.value) && !activity.loading,
     );
     if (!mounted || selected?.botId.value != bot.botId.value) return;
     if (action == 'work') {
@@ -1016,12 +1109,14 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   Future<void> _openApplet(String appletId) async {
     final canvas = appletCanvas;
     if (canvas == null) return;
+    // The panel opens onto the chosen Applet now, rather than after the write
+    // that records the focus and the read that follows it.
+    canvas.predictFocus(appletId);
+    _openPanel('applet');
     await canvas.setFocus(appletId);
     // A focus read may finish after the person switches Bots.
     if (!mounted || canvas != appletCanvas) return;
-    if (canvas.focusedId == appletId) {
-      _openPanel('applet');
-    } else {
+    if (canvas.focusedId != appletId) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Couldn’t open this Applet. Try again.')),
       );
@@ -1057,37 +1152,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       );
       return;
     }
-    // On the phone the right panel's entries are pages, which is the same
-    // rule Routines and Bot settings already follow: a drawer over a
-    // full-width conversation is the same thing with less room.
-    if (key == 'applet' && appletCanvas != null) {
-      // The page takes the pre-mounted frame over: the holder lets go in the
-      // same frame the page is built, so the key moves rather than doubles.
-      // It takes the frame back only once the page has finished leaving — a
-      // route on its way out is still in the tree and is not rebuilt, so a
-      // holder that reclaimed the key on the pop itself would double it.
-      final route = MaterialPageRoute<void>(
-        builder: (_) => Scaffold(
-          appBar: AppBar(title: const Text('Applet')),
-          body: SafeArea(
-            top: false,
-            child: _appletCanvas(
-              bot.botId.value,
-              appletCanvas!,
-              onClose: () => Navigator.of(context).maybePop(),
-              holdsFrame: true,
-            ),
-          ),
-        ),
-      );
-      setState(() => _appletPagePresented = true);
-      push.reading(null);
-      unawaited(Navigator.of(context).push(route));
-      unawaited(
-        route.completed.then((_) {
-          if (mounted) setState(() => _appletPagePresented = false);
-        }),
-      );
+    if (key == 'applet') {
+      _pushApplet();
       return;
     }
     if (key == 'computer' && computer != null) {
@@ -1115,9 +1181,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// The Bot's page, GrokBot's: one scroll from its face to its danger zone.
   ///
   /// Its settings, then the rows for what else it holds — Routines, Applets,
-  /// the pages its Packages mount — then Advanced. The rows are read off the
-  /// slot registry live, so a Computer or a Package entry that registers
-  /// after the page opened appears on it rather than on the next visit.
+  /// the pages its Packages mount — then Advanced. The Computer's row is read
+  /// off the slot registry live and the Package rows off `catalogRevision`, so
+  /// either arriving after the page opened appears on it rather than on the
+  /// next visit.
   Widget _botPage(wire.BotRegistration bot, BotSettingsController controller) {
     final botId = bot.botId.value;
     return Scaffold(
@@ -1127,7 +1194,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         child: identified(
           SettingsIds.botPage,
           ListenableBuilder(
-            listenable: slots,
+            listenable: Listenable.merge([slots, catalogRevision]),
             builder: (context, _) => SingleChildScrollView(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
               child: Column(
@@ -1135,7 +1202,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                 children: [
                   BotSettingsView(
                     controller: controller,
-                    onSaved: load,
+                    onSaved: _loadIdentities,
+                    onPredict: (profile) => predictProfile(botId, profile),
                     background: _background(botId),
                     onEditAvatar: () =>
                         unawaited(_editAvatar(botId, _name(bot))),
@@ -1156,83 +1224,60 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   List<Widget> _botRows() {
     final inbox = routineInbox;
     final canvas = appletCanvas;
-    // The Applets Package declares an entry of its own called Applets. The
-    // row above is the same door, so one of them is enough on a page.
-    final entries = [
-      for (final entry in packageIframeEntriesV1(catalog))
-        if (canvas == null || entry.entry.label.toLowerCase() != 'applets')
-          entry,
-    ];
-    const chevron = Icon(Icons.chevron_right_rounded);
+    final entries = _packageEntries();
     return [
-      const SizedBox(height: 12),
-      Card(
-        margin: EdgeInsets.zero,
-        child: Column(
-          children: [
+      const SizedBox(height: 16),
+      FrockRowGroup(
+        rows: [
+          identified(
+            RoutineIds.panelToggle,
+            FrockRow(
+              icon: Icons.history_rounded,
+              title: 'Routines',
+              trailing: inbox == null
+                  ? null
+                  : AnimatedBuilder(
+                      animation: inbox,
+                      builder: (context, _) => inbox.unacknowledged > 0
+                          ? Badge(label: Text(inbox.badge))
+                          : const SizedBox.shrink(),
+                    ),
+              onTap: () => _openPanel('routines'),
+            ),
+          ),
+          identified(
+            PluginIds.panelToggle,
+            FrockRow(
+              icon: Icons.extension_outlined,
+              title: 'Plugins',
+              onTap: () => _openPanel('plugins'),
+            ),
+          ),
+          if (canvas != null)
             identified(
-              RoutineIds.panelToggle,
-              ListTile(
-                leading: const Icon(Icons.history_rounded),
-                title: const Text('Routines'),
-                trailing: inbox == null
-                    ? chevron
-                    : AnimatedBuilder(
-                        animation: inbox,
-                        builder: (context, _) => Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            if (inbox.unacknowledged > 0)
-                              Badge(label: Text(inbox.badge)),
-                            chevron,
-                          ],
-                        ),
-                      ),
-                onTap: () => _openPanel('routines'),
+              AppletIds.chip,
+              FrockRow(
+                icon: Icons.widgets_outlined,
+                title: 'Applets',
+                onTap: () async {
+                  final id = await showDialog<String>(
+                    context: context,
+                    builder: (_) => AppletPicker(controller: canvas),
+                  );
+                  if (id != null && mounted) await _openApplet(id);
+                },
               ),
             ),
-            const Divider(height: 1),
+          for (final entry in entries)
             identified(
-              PluginIds.panelToggle,
-              ListTile(
-                leading: const Icon(Icons.extension_outlined),
-                title: const Text('Plugins'),
-                trailing: chevron,
-                onTap: () => _openPanel('plugins'),
+              PackageIds.entry(entry.contribution.packageId, entry.entry.id),
+              FrockRow(
+                icon: _packageIcon(entry.entry.icon),
+                title: entry.entry.label,
+                onTap: () => _openPackagePage(entry),
               ),
             ),
-            if (canvas != null) ...[
-              const Divider(height: 1),
-              identified(
-                AppletIds.chip,
-                ListTile(
-                  leading: const Icon(Icons.widgets_outlined),
-                  title: const Text('Applets'),
-                  trailing: chevron,
-                  onTap: () async {
-                    final id = await showDialog<String>(
-                      context: context,
-                      builder: (_) => AppletPicker(controller: canvas),
-                    );
-                    if (id != null && mounted) await _openApplet(id);
-                  },
-                ),
-              ),
-            ],
-            for (final entry in entries) ...[
-              const Divider(height: 1),
-              identified(
-                PackageIds.entry(entry.contribution.packageId, entry.entry.id),
-                ListTile(
-                  leading: Icon(_packageIcon(entry.entry.icon)),
-                  title: Text(entry.entry.label),
-                  trailing: chevron,
-                  onTap: () => _openPackagePage(entry),
-                ),
-              ),
-            ],
-          ],
-        ),
+        ],
       ),
     ];
   }
@@ -1264,22 +1309,31 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     ];
   }
 
-  /// The sheep a Bot wears, from the registration the directory carries.
-  String? _background(String botId) => bots
-      .where((bot) => bot.botId.value == botId)
-      .map((bot) => bot.sheep.background)
-      .firstOrNull;
+  /// Colours chosen here that the directory has not reported back yet. The
+  /// Flock owns what a Bot looks like, and the client picked the recipe it
+  /// sent, so drawing it now is showing what was chosen rather than guessing.
+  final Map<String, String> _predictedSheep = {};
 
-  /// The Bot's colour, which the Flock owns and the directory carries — so a
-  /// change is read back with everything else rather than patched in here.
+  /// The sheep a Bot wears, from the registration the directory carries — or
+  /// the colour just chosen for it, until the read that confirms it lands.
+  String? _background(String botId) =>
+      _predictedSheep[botId] ??
+      bots
+          .where((bot) => bot.botId.value == botId)
+          .map((bot) => bot.sheep.background)
+          .firstOrNull;
+
   Future<void> _editAvatar(String botId, String botName) async {
     final chosen = await SheepColourSheet.show(
       context,
       api: widget.api,
       botId: botId,
       botName: botName,
+      background: _background(botId),
     );
-    if (chosen != null) await load();
+    if (chosen == null || !mounted) return;
+    setState(() => _predictedSheep[botId] = chosen);
+    await load();
   }
 
   Widget _dangerZone(String botId, String botName) => BotDangerZone(
@@ -1288,14 +1342,60 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     botName: botName,
     archived: archived.contains(botId),
     onChanged: load,
-    // The Bot this panel is about no longer exists, so the panel closes and
-    // the shell falls back to whatever the reload leaves selected.
-    onDeleted: () => setState(() {
-      panelOpen = false;
-      conversationOpen = false;
-      selected = null;
-    }),
+    onDeleted: () => unawaited(_closeDeletedBot(botId)),
   );
+
+  /// A delete the authority applied. Everything open about that Bot closes at
+  /// every tier — the column, the drawer, the pushed page, the conversation —
+  /// but only while it is still the Bot open: a person who moved to another
+  /// Bot while the delete was out keeps the one they chose.
+  Future<void> _closeDeletedBot(String botId) async {
+    if (!mounted) return;
+    final open = selected?.botId.value;
+    if (open != null && open != botId) return;
+    if (open == botId) _closeOpenBot();
+    // A switch made after this point writes its own selection, so only a
+    // saved selection still naming the deleted Bot is cleared.
+    final key = 'selection.${widget.userId}';
+    try {
+      if (await widget.store.read(key) == botId && selected == null) {
+        await widget.store.delete(key);
+      }
+    } catch (_) {
+      // A stale selection only fails to restore: the Bot is not listed.
+    }
+  }
+
+  /// Closes the open Bot's pages, panels and controllers, leaving no Bot open.
+  void _closeOpenBot() {
+    Navigator.of(context).popUntil((route) => route.isFirst);
+    slots.remove(ShellSlot.rightPanel, 'bot-settings');
+    slots.remove(ShellSlot.rightPanel, 'routines');
+    slots.remove(ShellSlot.rightPanel, 'plugins');
+    slots.remove(ShellSlot.rightPanel, 'applet');
+    slots.remove(ShellSlot.rightPanel, 'computer');
+    botSettings?.dispose();
+    routineInbox?.dispose();
+    appletCanvas?.dispose();
+    computer?.dispose();
+    _headerChat?.removeListener(_repaintHeader);
+    botSettings = null;
+    routineInbox = null;
+    appletCanvas = null;
+    computer = null;
+    _headerChat = null;
+    _botComputerRunning = false;
+    setState(() {
+      selected = null;
+      selectedConnection = ConnectionState.initializing;
+      workingRunId = null;
+      openRun = null;
+      conversationOpen = false;
+      panelOpen = false;
+      panelCollapsed = true;
+      _setCatalog(null);
+    });
+  }
 
   /// Adding a Bot: the sheet, then the Bot, then the first thing said to it.
   ///
@@ -1346,9 +1446,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                 children: [
                   ShellLayout(
                     header: bot == null
-                        ? (single
-                              ? null
-                              : AppBar(title: const Text('FrockBot')))
+                        ? null
                         : ChatHeader(
                             name: _name(bot),
                             connection: selectedConnection,
@@ -1366,7 +1464,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                                 : () => _openPanel('bot-settings'),
                             computerRunning:
                                 computer?.available == true &&
-                                computer!.state.running,
+                                (computer!.state.running ||
+                                    _botComputerRunning),
                             onComputer: computer?.available == true
                                 ? () => _openPanel('computer')
                                 : null,
@@ -1382,6 +1481,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                             panelShown: tier == ShellTier.triple
                                 ? !panelCollapsed
                                 : panelOpen,
+                            packageEntries: single
+                                ? const []
+                                : _packageEntryActions(),
                             onApplets: single || appletCanvas == null
                                 ? null
                                 : () async {
@@ -1402,47 +1504,38 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                     panelCollapsed: panelCollapsed,
                     onDismiss: () => setState(() => panelOpen = false),
                     rightPanel: rightPanel,
-                    sidebar: Column(
-                      children: [
-                        // The Package entries beside the list belong to the
-                        // column layout; on a phone they are rows on the Bot's page.
-                        if (!single)
-                          const SlotRegion(
-                            ShellSlot.headerActions,
-                            direction: Axis.horizontal,
-                          ),
-                        Expanded(
-                          child: ShellSidebar(
-                            bots: bots,
-                            profiles: profiles,
-                            unread: activity.unread,
-                            archived: archived,
-                            // A phone's list is a list of doors, not a selection: no row
-                            // is the current one once the conversation is a page.
-                            activeBotId: single ? null : bot?.botId.value,
-                            workingBotId: workingRunId == null
-                                ? null
-                                : bot?.botId.value,
-                            loaded: loaded,
-                            error: error,
-                            showHidden: showHidden,
-                            onSelect: _select,
-                            onCreateBot: () => unawaited(_createBot()),
-                            onSearch: _openSearch,
-                            onProfile: _openProfile,
-                            onMarketplace: _openMarketplace,
-                            phone: single,
-                            onVoice: () => unawaited(_startVoice()),
-                            voiceControl: voiceControlStateV1(
-                              footerOpen: footerOpen,
-                              sessionActive: voiceSession?.active == true,
-                            ),
-                            onToggleHidden: () =>
-                                setState(() => showHidden = !showHidden),
-                            onRetry: load,
-                          ),
-                        ),
-                      ],
+                    sidebar: ShellSidebar(
+                      bots: bots,
+                      profiles: profiles,
+                      unread: activity.unread,
+                      archived: archived,
+                      // The count for the Bot being read is suppressed
+                      // here rather than waited out: the receipt that
+                      // clears it is a round trip behind the message.
+                      focusedBotId: _focusedBotId,
+                      // A phone's list is a list of doors, not a selection: no row
+                      // is the current one once the conversation is a page.
+                      activeBotId: single ? null : bot?.botId.value,
+                      workingBotId: workingRunId == null
+                          ? null
+                          : bot?.botId.value,
+                      loaded: loaded,
+                      error: error,
+                      showHidden: showHidden,
+                      onSelect: _select,
+                      onCreateBot: () => unawaited(_createBot()),
+                      onSearch: _openSearch,
+                      onProfile: _openProfile,
+                      onMarketplace: _openMarketplace,
+                      phone: single,
+                      onVoice: () => unawaited(_startVoice()),
+                      voiceControl: voiceControlStateV1(
+                        footerOpen: footerOpen,
+                        sessionActive: voiceSession?.active == true,
+                      ),
+                      onToggleHidden: () =>
+                          setState(() => showHidden = !showHidden),
+                      onRetry: load,
                     ),
                     conversation: bot == null
                         ? NoConversation(
@@ -1464,8 +1557,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                             onOpenSettings: _openSettings,
                             outOfCredit: credit?.canSpend == false,
                             onOpenBilling: () => unawaited(_openBilling()),
-                            onMessageActions: (line) =>
-                                unawaited(_messageActions(line)),
+                            onMessageActions: (line, {position}) => unawaited(
+                              _messageActions(line, position: position),
+                            ),
                             onReadLatest: (messageId) =>
                                 _readLatest(bot.botId.value, messageId),
                             unreadFromMessageId: activity
@@ -1528,28 +1622,162 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         ],
       ),
     );
-    return ColoredBox(
-      color: Theme.of(context).colorScheme.surface,
-      child: shell,
+    return SearchShortcutListener(
+      onOpen: () => unawaited(_openSearch()),
+      child: ColoredBox(
+        color: Theme.of(context).colorScheme.surface,
+        child: shell,
+      ),
     );
   }
 
-  /// Search over every conversation this account has, which is the backend's
-  /// index rather than the names the sidebar happens to hold. A chosen hit is
-  /// its Bot and its Turn: the shell opens the Bot and the transcript scrolls
-  /// to the Turn.
   Future<void> _openSearch() async {
-    final hit = await showSearchOverlayV1(context, widget.api);
+    if (_searchOpen) return;
+    _searchOpen = true;
+    SearchSelection? hit;
+    try {
+      hit = await showSearchOverlayV1(
+        context,
+        widget.api,
+        bots: [
+          for (final bot in searchableBots)
+            SearchBot(
+              id: bot.botId.value,
+              name: _name(bot),
+              description:
+                  profiles[bot.botId.value]?.title ??
+                  bot.initialDescription ??
+                  '',
+              background: bot.sheep.background,
+              unread: activity.unread[bot.botId.value]?.unread == true,
+              archived: archived.contains(bot.botId.value),
+              hidden: profiles[bot.botId.value]?.hiddenFromSidebar == true,
+            ),
+        ],
+        actions: [
+          if (selected != null)
+            const SearchAction(
+              'chat-settings',
+              'Chat Settings',
+              'Current chat',
+            ),
+          const SearchAction(
+            'settings',
+            'Settings: General',
+            'Personal details',
+          ),
+          if (computer?.available == true)
+            const SearchAction(
+              'computer',
+              'Settings: Computer',
+              'Current chat',
+            ),
+          const SearchAction('billing', 'Settings: Usage & Billing', 'Account'),
+          const SearchAction('plugins', 'Plugins', 'Account'),
+          const SearchAction(
+            'marketplace',
+            'Marketplace',
+            'Connections and services',
+          ),
+          const SearchAction('machines', 'Your computers', 'Account'),
+          if (selected != null)
+            const SearchAction('routines', 'Routines', 'Current chat'),
+        ],
+      );
+    } finally {
+      _searchOpen = false;
+    }
     if (hit == null || !mounted) return;
-    if (bots.every((bot) => bot.botId.value != hit.botId)) await load();
+    if (hit.actionId case final String action) {
+      Navigator.of(context).popUntil((route) => route.isFirst);
+      switch (action) {
+        case 'chat-settings':
+          _openPanel('bot-settings');
+        case 'settings':
+          _openSettings();
+        case 'computer':
+          _openPanel('computer');
+        case 'billing':
+          unawaited(_openBilling());
+        case 'plugins':
+          _push(
+            PluginsPage(
+              api: widget.api,
+              store: widget.store,
+              userId: widget.userId,
+            ),
+          );
+        case 'marketplace':
+          _openMarketplace();
+        case 'machines':
+          _push(
+            MachinesPage(
+              api: widget.api,
+              store: widget.store,
+              userId: widget.userId,
+            ),
+          );
+        case 'routines':
+          _openPanel('routines');
+      }
+      return;
+    }
+    final botId = hit.botId;
+    if (botId == null) return;
+    if (searchableBots.every((bot) => bot.botId.value != botId)) await load();
     if (!mounted) return;
-    _select(hit.botId);
-    // The Turn may sit further back than the newest page, so the transcript is
-    // asked to reach it and says so itself when it cannot.
-    widget.sessions
-        .open(widget.userId, hit.botId)
-        .controller
-        .focusRun(hit.runId);
+    // A desktop destination may be covered by the page from which Cmd+K was
+    // used. Return to the shell before selecting the conversation behind it.
+    Navigator.of(context).popUntil((route) => route.isFirst);
+    final matchedBot = searchableBots
+        .where((bot) => bot.botId.value == botId)
+        .firstOrNull;
+    if (matchedBot == null) {
+      _say('That Bot is no longer available.');
+      return;
+    }
+    if (archived.contains(botId)) {
+      if (hit.routineId case final String routineId) {
+        _push(
+          RoutineRunsPage(api: widget.api, botId: botId, routineId: routineId),
+        );
+      } else {
+        _push(
+          ArchivedConversationPage(
+            api: widget.api,
+            bot: SearchBot(
+              id: botId,
+              name: _name(matchedBot),
+              background: matchedBot.sheep.background,
+              archived: true,
+            ),
+            runId: hit.runId,
+          ),
+        );
+      }
+      return;
+    }
+    _select(botId);
+    if (hit.routineId case final String routineId) {
+      _push(
+        RoutinesView(
+          api: widget.api,
+          store: widget.store,
+          userId: widget.userId,
+          botId: botId,
+          botName:
+              bots
+                  .where((bot) => bot.botId.value == botId)
+                  .map(_name)
+                  .firstOrNull ??
+              botId,
+          initialRoutineId: routineId,
+          onInbox: routineInbox?.adopt,
+        ),
+      );
+    } else if (hit.runId case final String runId) {
+      widget.sessions.open(widget.userId, botId).controller.focusRun(runId);
+    }
   }
 
   /// The Marketplace: a page and a list on a phone, where the list of Bots is
@@ -1607,18 +1835,59 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                     children: [
                       identified(
                         SettingsIds.profileName,
-                        ListTile(
-                          contentPadding: EdgeInsets.zero,
-                          leading: const CircleAvatar(
-                            radius: 24,
-                            child: Icon(Icons.person_outline),
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(4, 8, 4, 8),
+                          child: Row(
+                            children: [
+                              Container(
+                                width: 44,
+                                height: 44,
+                                decoration: BoxDecoration(
+                                  color: Theme.of(context).colorScheme.onSurface
+                                      .withValues(alpha: 0.08),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: Icon(
+                                  Icons.person_rounded,
+                                  size: 22,
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .onSurfaceVariant,
+                                ),
+                              ),
+                              const SizedBox(width: 14),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    FutureBuilder<String>(
+                                      future: _displayName(),
+                                      builder: (context, answer) => Text(
+                                        answer.data ?? widget.userId,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .titleMedium,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      'Signed in',
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodySmall
+                                          ?.copyWith(
+                                            color: Theme.of(context)
+                                                .colorScheme
+                                                .onSurfaceVariant,
+                                          ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
                           ),
-                          title: FutureBuilder<String>(
-                            future: _displayName(),
-                            builder: (context, answer) =>
-                                Text(answer.data ?? widget.userId),
-                          ),
-                          subtitle: const Text('Signed in'),
                         ),
                       ),
                       // What the account can spend, first, because it is the
@@ -1773,17 +2042,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                           identified(
                             SettingsIds.profileSignOut,
                             Builder(
-                              builder: (context) => ListTile(
-                                leading: Icon(
-                                  Icons.logout,
-                                  color: Theme.of(context).colorScheme.error,
-                                ),
-                                title: Text(
-                                  'Sign out',
-                                  style: TextStyle(
-                                    color: Theme.of(context).colorScheme.error,
-                                  ),
-                                ),
+                              builder: (context) => FrockRow(
+                                icon: Icons.logout_rounded,
+                                title: 'Sign out',
+                                color: Theme.of(context).colorScheme.error,
+                                chevron: false,
                                 onTap: () {
                                   Navigator.of(context).pop();
                                   unawaited(
@@ -1831,31 +2094,21 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// One card of rows, with the name of what they have in common above it.
   Widget _profileGroup(String? title, List<Widget> rows) => Builder(
     builder: (context) => Padding(
-      padding: const EdgeInsets.only(top: 16),
+      padding: const EdgeInsets.only(top: 18),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           if (title != null)
             Padding(
-              padding: const EdgeInsets.fromLTRB(4, 0, 4, 6),
+              padding: const EdgeInsets.fromLTRB(12, 0, 4, 6),
               child: Text(
-                title,
-                style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                title.toUpperCase(),
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
               ),
             ),
-          Card(
-            margin: EdgeInsets.zero,
-            child: Column(
-              children: [
-                for (var index = 0; index < rows.length; index++) ...[
-                  if (index > 0) const Divider(height: 1),
-                  rows[index],
-                ],
-              ],
-            ),
-          ),
+          FrockRowGroup(rows: rows),
         ],
       ),
     ),
@@ -1866,15 +2119,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     IconData icon,
     String title,
     VoidCallback onTap,
-  ) => identified(
-    id,
-    ListTile(
-      leading: Icon(icon),
-      title: Text(title),
-      trailing: const Icon(Icons.chevron_right_rounded),
-      onTap: onTap,
-    ),
-  );
+  ) => identified(id, FrockRow(icon: icon, title: title, onTap: onTap));
 
   /// The saved profile name, falling back to the account this session holds.
   /// A name is a courtesy: a read that fails leaves the page usable.
@@ -1912,7 +2157,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     routineInbox?.dispose();
     appletCanvas?.dispose();
     computer?.dispose();
+    _headerChat?.removeListener(_repaintHeader);
     slots.dispose();
+    catalogRevision.dispose();
     voiceSession?.dispose();
     dictation?.removeListener(_repaint);
     dictation?.dispose();

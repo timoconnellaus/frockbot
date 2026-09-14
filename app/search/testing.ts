@@ -169,7 +169,9 @@ export class FakeSearchSql implements SearchSqlV1 {
 
   private select(sql: string, bindings: unknown[]): unknown[] {
     const values = [...bindings];
-    const expression = String(values.shift());
+    const expression = sql.includes(" MATCH ?")
+      ? String(values.shift())
+      : undefined;
     const kindCount = (sql.match(/kind IN \(([^)]*)\)/)?.[1] ?? "").split(
       ",",
     ).length;
@@ -188,14 +190,14 @@ export class FakeSearchSql implements SearchSqlV1 {
     return this.rows
       .filter(
         (row) =>
-          matches(row.body, expression) &&
+          (expression === undefined || matches(row.body, expression)) &&
           kinds.includes(row.kind) &&
           (botId === undefined || row.bot_id === botId) &&
           !excluded.includes(row.bot_id),
       )
       .sort(
         (left, right) =>
-          left.at.localeCompare(right.at) ||
+          right.at.localeCompare(left.at) ||
           left.bot_id.localeCompare(right.bot_id) ||
           left.run_id.localeCompare(right.run_id) ||
           left.seq - right.seq,

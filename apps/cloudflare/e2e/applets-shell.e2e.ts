@@ -1,5 +1,5 @@
-// The Applets shell: a declarative entry, the surface it opens, and the canvas
-// in both of its states, at the desktop size and at 390px.
+// The Applets shell: one native picker and a full-window canvas, in both
+// states, at desktop size and at 390px.
 //
 // The Applet routes are stubbed here the way the fake AI service is stubbed
 // elsewhere, and for one reason: the ready state. An Applet only goes live
@@ -11,21 +11,16 @@
 //
 // The canvas is not a Package page. On the web the shell frames the Applet's
 // own `uiUrl` and posts it the viewer credential, so the page under test here
-// listens for that `init` rather than for a Package state feed — the list page
-// beside it is a Package page, and does.
-import { PACKAGE_IFRAME_HELPER_JS_V1 } from "@frockbot/core/contracts";
+// listens for that `init` rather than for a Package state feed.
 import type { Locator, Page, TestInfo } from "@playwright/test";
 import {
   test,
   expect,
-  action,
-  closeOverlay,
   connectOllama,
   chooseDefaultModel,
   createBot,
   enableApplets,
   expectReadyToSend,
-  group,
   openApplication,
   enablePackage,
   press,
@@ -57,22 +52,7 @@ const DESKTOP = { width: 1280, height: 800 } as const;
 const PROVISIONING_WINDOW = { width: 1280, height: 1800 } as const;
 
 function listPageHtml(): string {
-  return `<!doctype html>
-<html><body><h1 id="heading">Your Applets</h1><output id="list">waiting</output>
-<button id="focus" type="button">Open Todo</button>
-<script>${PACKAGE_IFRAME_HELPER_JS_V1}</script>
-<script>
-window.frockbot.ready.then(() => {
-  window.frockbot.subscribe('applets', value => {
-    document.getElementById('list').textContent =
-      'applets:' + value.list.map(a => a.displayName).join(',');
-  });
-  document.getElementById('focus').addEventListener('click', () => {
-    window.frockbot.focus('${APPLET_ID}');
-  });
-  window.frockbot.resize(160);
-});
-</script></body></html>`;
+  return "<!doctype html><html><body><h1>Your Applets</h1></body></html>";
 }
 
 /**
@@ -82,7 +62,7 @@ window.frockbot.ready.then(() => {
  */
 function appletPageHtml(): string {
   return `<!doctype html>
-<html><body><output id="view">waiting</output>
+<html><body><output id="view">waiting</output><input aria-label="Applet draft">
 <script>
 addEventListener('message', (event) => {
   const message = event.data;
@@ -99,6 +79,7 @@ interface AppletStubs {
   publish(): void;
   /** Whether the delete route has been asked to remove the Applet. */
   deleted(): boolean;
+  focused(): string | null;
 }
 
 async function installAppletRoutes(
@@ -114,7 +95,7 @@ async function installAppletRoutes(
   const artifactOrigin = `http://ui.localhost:${port}`;
   let published = false;
   let removed = false;
-  let focused: string | null = APPLET_ID;
+  let focused: string | null = null;
 
   const summary = () => ({
     appletId: APPLET_ID,
@@ -310,6 +291,9 @@ async function installAppletRoutes(
     deleted() {
       return removed;
     },
+    focused() {
+      return focused;
+    },
   };
 }
 
@@ -404,7 +388,7 @@ async function openCanvas(page: Page) {
   return canvas;
 }
 
-test("a Package entry opens its surface and a focused Applet fills the canvas", async ({
+test("one Applets picker opens the full-window draft and live canvas", async ({
   page,
   userId,
   ollamaBaseUrl,
@@ -418,21 +402,24 @@ test("a Package entry opens its surface and a focused Applet fills the canvas", 
   });
   await page.setViewportSize(DESKTOP);
 
-  // The entry is a manifest declaration: a control in the Bot's header, named
-  // by the Package and the entry it declared, with no code of the Package's
-  // running in the app origin.
-  const entry = sem(page, `package-entry-${PACKAGE_ID}-open`);
-  await expect(entry).toBeVisible({ timeout: 60_000 });
-
-  // The canvas opens on this Session's focused Applet, in its building state:
-  // the source the Bot has written so far, and what the work has got to.
+  // The Package still declares its entry, but the native picker is the one
+  // Applets destination the shell presents.
+  await expect(sem(page, "applet-chip")).toHaveCount(1);
+  await expect(sem(page, `package-entry-${PACKAGE_ID}-open`)).toHaveCount(0);
   const canvas = await openCanvas(page);
+  await expect.poll(() => stubs.focused()).toBe(APPLET_ID);
   await expect(named(canvas, "Todo")).toBeVisible();
+  const box = await canvas.boundingBox();
+  expect(box?.width ?? 0).toBeGreaterThan(DESKTOP.width - 24);
+  expect(box?.height ?? 0).toBeGreaterThan(DESKTOP.height - 24);
+  await expect(sem(page, "shell-conversation")).not.toBeVisible();
+  await expect(
+    canvas.getByRole("button", { name: "Back", exact: true }),
+  ).toHaveCount(1);
   const progress = sem(page, "applet-canvas-progress");
   await expect(progress).toBeVisible();
   await expect(progress).toContainText("The code checks out");
-  // The code view opens on the most recently changed file, and moves to
-  // whichever one is pressed.
+  await expect(sem(page, "applet-canvas-tabs")).toHaveCount(0);
   await expect(fileState(page, "ui.tsx")).toHaveAttribute(
     "aria-checked",
     "true",
@@ -442,59 +429,61 @@ test("a Package entry opens its surface and a focused Applet fills the canvas", 
     "aria-checked",
     "true",
   );
-
-  // The entry's surface hosts the Package's list page, and the page is fed the
-  // Applets state over bridge v2. Applets ships with the product, so the frame
-  // says nothing about where the page came from: an attribution line is for a
-  // page somebody else wrote.
-  await press(entry);
-  const surface = sem(page, `package-page-${PACKAGE_ID}-list`);
-  await expect(surface).toBeVisible({ timeout: 60_000 });
-  await expect(page.getByText("Built by this Bot")).toHaveCount(0);
-  // The page itself, by the name the host frames it under. A framed page is a
-  // platform view: the engine puts its iframe in the scene rather than inside
-  // the semantics node the surface is named by, so it is reached from the page
-  // rather than from that node.
-  const listFrame = page.frameLocator('iframe[title="Applets"]');
-  await expect(listFrame.getByText("applets:Todo")).toBeVisible({
-    timeout: 30_000,
-  });
   await expectNoHorizontalOverflow(page);
   await page.screenshot({ path: testInfo.outputPath("applets-desktop.png") });
 
-  // A publish lands, and the page's own `focus` message re-reads the Applet:
-  // the ready state slides the live Applet in over the code view.
+  // Back returns to the conversation. Selecting the same Applet again reads
+  // its newly published generation through the focus/open routes.
+  await press(sem(page, "applet-canvas-close"));
+  await expect(canvas).toHaveCount(0);
+  await expect(sem(page, "shell-conversation")).toBeVisible();
+  expect(stubs.focused()).toBe(APPLET_ID);
   stubs.publish();
-  await listFrame.getByRole("button", { name: "Open Todo" }).click();
-  // The surface is a page of its own, so the way back to the canvas is the way
-  // back — the shell has no scrim here to click through.
-  await page.goBack();
-  await expect(canvas).toBeVisible();
-
-  // The header names the live generation in words. The exact id is not on the
-  // page at all — it is an internal identifier, and the Applet the frame loads
-  // is what proves the right generation went live.
-  await expect(named(canvas, "Todo")).toHaveAttribute("aria-label", /Live/u);
-  // And the building view is gone: there is a running Applet to look at.
+  await openCanvas(page);
+  await expect(named(canvas, "Todo")).toBeVisible();
+  await expect(canvas.locator('[aria-label*="Live since"]')).toHaveCount(0);
+  await expect(canvas.getByText(/Live since/)).toHaveCount(0);
   await expect(sem(page, "applet-canvas-progress")).toHaveCount(0);
-  const appFrame = page.frameLocator('iframe[title="Applet"]');
+  const appFrame = page.frameLocator('iframe[title="Applet"]').last();
   await expect(appFrame.getByText("live:generation-2")).toBeVisible({
     timeout: 30_000,
   });
+  await appFrame
+    .getByRole("textbox", { name: "Applet draft" })
+    .fill("Keep this draft");
 
-  // The toggle goes back to the code without reloading the Applet.
-  await sem(page, "applet-canvas-tabs").getByText("Code").click();
+  // There is one icon action. Its name changes to describe the other view;
+  // toggling back retains state in the live document.
+  const toggle = sem(page, "applet-canvas-tabs");
+  await expect(
+    canvas.getByRole("button", { name: "Code", exact: true }),
+  ).toHaveCount(1);
+  await expect(
+    canvas.getByRole("button", { name: "App", exact: true }),
+  ).toHaveCount(0);
+  await press(toggle);
+  await expect(openFile(page, "server.ts")).toBeVisible();
+  await press(openFile(page, "server.ts"));
   await expect(fileState(page, "server.ts")).toHaveAttribute(
     "aria-checked",
     "true",
   );
-  await sem(page, "applet-canvas-tabs").getByText("App").click();
+  await expect(
+    canvas.getByRole("button", { name: "App", exact: true }),
+  ).toHaveCount(1);
+  await expect(
+    canvas.getByRole("button", { name: "Code", exact: true }),
+  ).toHaveCount(0);
+  await press(toggle);
   await expect(appFrame.getByText("live:generation-2")).toBeVisible();
+  await expect(
+    appFrame.getByRole("textbox", { name: "Applet draft" }),
+  ).toHaveValue("Keep this draft");
   await expectNoHorizontalOverflow(page);
   await page.screenshot({ path: testInfo.outputPath("applets-ready.png") });
 });
 
-test("the canvas is a full-height sheet on a phone with a composer chip", async ({
+test("the canvas fills a phone window and Back restores the Bot page", async ({
   page,
   userId,
   ollamaBaseUrl,
@@ -523,6 +512,10 @@ test("the canvas is a full-height sheet on a phone with a composer chip", async 
   const canvas = await openCanvas(page);
   const box = await canvas.boundingBox();
   expect(box?.width ?? 0).toBeGreaterThan(PHONE.width - 24);
+  expect(box?.height ?? 0).toBeGreaterThan(PHONE.height - 24);
+  await expect(
+    canvas.getByRole("button", { name: "Back", exact: true }),
+  ).toHaveCount(1);
   await expectNoHorizontalOverflow(page);
   await page.screenshot({ path: testInfo.outputPath("applets-phone.png") });
 

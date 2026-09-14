@@ -5,6 +5,8 @@ import 'package:flutter/rendering.dart';
 
 import '../protocol/client_wire.generated.dart' as wire;
 import '../shell/semantics.dart';
+import 'action.dart';
+import '../theme/rows.dart';
 import 'document.dart';
 import 'embed.dart';
 
@@ -57,7 +59,7 @@ class ViewCardGroups extends StatelessWidget {
                     key: ValueKey(card['title']),
                     margin: EdgeInsets.zero,
                     child: Padding(
-                      padding: const EdgeInsets.all(16),
+                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
                       child: _CapabilityCard(node: card),
                     ),
                   ),
@@ -130,7 +132,7 @@ class ViewGridGroups extends StatelessWidget {
                     key: ValueKey(card['title']),
                     margin: EdgeInsets.zero,
                     child: Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+                      padding: const EdgeInsets.fromLTRB(16, 6, 16, 12),
                       child: ViewNodeView(node: card),
                     ),
                   ),
@@ -211,6 +213,14 @@ class _CapabilityCard extends StatelessWidget {
     final enabled =
         toggle?['actionId'] == 'set-package-enabled' &&
         (toggle?['input'] as Map?)?['enabled'] == false;
+    // Enabling is the client's own answer — the switch it just flipped — so it
+    // is drawn at once. Installing is not: the authority resolves a version
+    // and mounts a Composition generation, and only it knows whether that
+    // worked, so that switch waits for the document.
+    final key = toggle != null && toggle['actionId'] == 'set-package-enabled'
+        ? viewPredictionKeyV1(toggle, without: 'enabled')
+        : null;
+    final drawn = key == null ? null : scope.controller.predicted[key] as bool?;
     return identified(
       viewGroupIdentifierV1(node['title'] as String),
       Column(
@@ -227,10 +237,13 @@ class _CapabilityCard extends StatelessWidget {
                 children: [
                   Expanded(
                     child: Padding(
-                      padding: const EdgeInsets.only(top: 10),
+                      padding: const EdgeInsets.only(top: 6),
                       child: Text(
                         node['title'] as String,
-                        style: Theme.of(context).textTheme.titleMedium,
+                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ),
                   ),
@@ -241,24 +254,35 @@ class _CapabilityCard extends StatelessWidget {
                       Semantics(
                         label: node['title'] as String,
                         child: Switch(
-                          value: enabled,
+                          value: drawn ?? enabled,
+                          // A standing prediction means the node's own input
+                          // is a revision behind: pressing again would send
+                          // the command that has already been sent.
                           onChanged:
                               schema == null ||
+                                  drawn != null ||
                                   scope.controller.busy ||
                                   scope.controller.pending != null
                               ? null
-                              : (_) => scope.controller.submit(toggle, schema),
+                              : (_) => scope.controller.submit(
+                                  toggle,
+                                  schema,
+                                  predictKey: key,
+                                  predictValue:
+                                      (toggle['input'] as Map?)?['enabled'] ==
+                                      true,
+                                ),
                         ),
                       ),
                     ),
                 ],
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 6),
               for (final child in children.where(
                 (child) => !_isCardControls(child),
               ))
                 Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
+                  padding: const EdgeInsets.only(bottom: 6),
                   child: ViewNodeView(node: child),
                 ),
             ],
@@ -381,19 +405,59 @@ class ViewTextNode extends StatelessWidget {
   Widget build(BuildContext context) {
     final text = node['text']! as String;
     final type = Theme.of(context).textTheme;
+    final scheme = Theme.of(context).colorScheme;
     return switch (node['style']) {
       'heading' => Semantics(
         header: true,
         child: Text(text, style: type.titleMedium),
       ),
-      'label' => Text(text, style: type.labelLarge),
+      'label' => Text(
+        text,
+        style: type.labelMedium?.copyWith(color: scheme.onSurfaceVariant),
+      ),
       'status' => Semantics(
         liveRegion: true,
-        child: Text(text, style: type.bodySmall),
+        child: Text(
+          text,
+          style: type.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+        ),
       ),
-      _ => Text(text, style: type.bodyLarge),
+      _ => Text(
+        text,
+        style: type.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
+      ),
     };
   }
+}
+
+/// The actions that take the group they sit in with them.
+///
+/// A delete is the only shape a client can honestly draw: the record is gone,
+/// so the card that drew it is gone. A revoke is not one — the authority keeps
+/// the record and replaces its contents with a notice saying so, and inventing
+/// that notice here would be inventing what the authority said.
+const _removesGroupIds = {'delete-routine'};
+
+/// Whether pressing this action removes the group around it.
+bool viewRemovesGroupV1(Map<String, Object?> node) =>
+    _removesGroupIds.contains(node['actionId']);
+
+/// Whether a prediction has already taken this node off the document: a group
+/// holding a delete this client has sent is a record on its way out, so it
+/// goes now rather than when the read lands.
+bool viewNodeGoneV1(Map<String, Object?> node, Map<String, Object?> predicted) {
+  if (predicted.isEmpty || node['type'] != 'group') return false;
+  bool holdsDelete(Map<String, Object?> node) {
+    if (viewRemovesGroupV1(node) &&
+        predicted[viewPredictionKeyV1(node)] == true) {
+      return true;
+    }
+    return (node['children'] as List? ?? const []).any(
+      (child) => holdsDelete((child as Map).cast<String, Object?>()),
+    );
+  }
+
+  return holdsDelete(node);
 }
 
 class ViewGroupNode extends StatefulWidget {
@@ -410,12 +474,14 @@ class _ViewGroupNodeState extends State<ViewGroupNode> {
   @override
   Widget build(BuildContext context) {
     final title = widget.node['title'] as String?;
+    final predicted = ViewScope.of(context).controller.predicted;
     final children = [
-      for (final child in (widget.node['children']! as List))
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 6),
-          child: ViewNodeView(node: (child as Map).cast<String, Object?>()),
-        ),
+      for (final child in (widget.node['children']! as List).cast<Map>())
+        if (!viewNodeGoneV1(child.cast<String, Object?>(), predicted))
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 5),
+            child: ViewNodeView(node: child.cast<String, Object?>()),
+          ),
     ];
     final body = widget.node['orientation'] == 'row'
         ? Wrap(spacing: 12, runSpacing: 8, children: children)
@@ -435,6 +501,7 @@ class _ViewGroupNodeState extends State<ViewGroupNode> {
             onTap: widget.node.containsKey('collapsed')
                 ? () => setState(() => open = !open)
                 : null,
+            borderRadius: BorderRadius.circular(8),
             child: Padding(
               padding: const EdgeInsets.symmetric(vertical: 8),
               child: Row(
@@ -444,12 +511,21 @@ class _ViewGroupNodeState extends State<ViewGroupNode> {
                       header: true,
                       child: Text(
                         title,
-                        style: Theme.of(context).textTheme.titleMedium,
+                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ),
                   ),
                   if (widget.node.containsKey('collapsed'))
-                    Icon(open ? Icons.expand_less : Icons.expand_more),
+                    Icon(
+                      open
+                          ? Icons.expand_less_rounded
+                          : Icons.expand_more_rounded,
+                      size: 20,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
                 ],
               ),
             ),
@@ -512,6 +588,7 @@ class ViewFieldNode extends StatelessWidget {
     if (field.kind == 'boolean') {
       return SwitchListTile(
         contentPadding: EdgeInsets.zero,
+        visualDensity: VisualDensity.compact,
         title: Text(field.label),
         subtitle: field.hint == null ? null : Text(field.hint!),
         value: value == true,
@@ -602,7 +679,14 @@ class ViewActionNode extends StatelessWidget {
             scope.controller.busy ||
             scope.controller.pending != null
         ? null
-        : () => scope.controller.submit(node, schema);
+        : () => scope.controller.submit(
+            node,
+            schema,
+            predictKey: viewRemovesGroupV1(node)
+                ? viewPredictionKeyV1(node)
+                : null,
+            predictValue: true,
+          );
     return identified(
       viewActionIdentifierV1(node['actionId']! as String),
       Align(
@@ -614,15 +698,34 @@ class ViewActionNode extends StatelessWidget {
         // changes nothing and the button still sits left.
         widthFactor: 1,
         child: switch (node['style']) {
-          'primary' => FilledButton(onPressed: press, child: Text(label)),
-          'danger' => OutlinedButton(
+          'primary' => FilledButton(
             onPressed: press,
-            style: OutlinedButton.styleFrom(
-              foregroundColor: Theme.of(context).colorScheme.error,
+            style: FilledButton.styleFrom(
+              minimumSize: const Size(0, 34),
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              textStyle: Theme.of(context).textTheme.labelMedium
+                  ?.copyWith(fontWeight: FontWeight.w600),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(9),
+              ),
             ),
             child: Text(label),
           ),
-          _ => OutlinedButton(onPressed: press, child: Text(label)),
+          'danger' => OutlinedButton(
+            onPressed: press,
+            style: frockCompactButton(context).copyWith(
+              foregroundColor: WidgetStatePropertyAll(
+                Theme.of(context).colorScheme.error,
+              ),
+            ),
+            child: Text(label),
+          ),
+          _ => OutlinedButton(
+            onPressed: press,
+            style: frockCompactButton(context),
+            child: Text(label),
+          ),
         },
       ),
     );
@@ -643,6 +746,13 @@ class ViewListNode extends StatelessWidget {
         style: Theme.of(context).textTheme.bodySmall,
       );
     }
+    // A choice is one row's: the tapped row is drawn chosen and its siblings
+    // are drawn cleared, which is the whole of what a tap on a list means and
+    // what the read that follows will say.
+    final chosen = rows
+        .map((row) => viewPredictionKeyV1({'actionId': row['actionId']}))
+        .where((key) => scope.controller.predicted[key] == true)
+        .firstOrNull;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
@@ -651,24 +761,37 @@ class ViewListNode extends StatelessWidget {
           Builder(
             builder: (context) {
               final schema = scope.actions[row['actionId']];
+              final key = viewPredictionKeyV1({'actionId': row['actionId']});
+              final selected = chosen == null
+                  ? row['selected'] == true
+                  : chosen == key;
               return ListTile(
                 key: ValueKey('view-row-${row['id']}'),
-                selected: row['selected'] == true,
+                selected: selected,
+                dense: true,
                 contentPadding: const EdgeInsets.symmetric(horizontal: 12),
                 title: ViewNodeView(
                   node: (row['node']! as Map).cast<String, Object?>(),
                 ),
-                trailing: row['selected'] == true
-                    ? const Icon(Icons.check_rounded)
+                trailing: selected
+                    ? Icon(
+                        Icons.check_rounded,
+                        size: 18,
+                        color: Theme.of(context).colorScheme.primary,
+                      )
                     : null,
                 onTap:
                     schema == null ||
+                        chosen != null ||
                         scope.controller.busy ||
                         scope.controller.pending != null
                     ? null
-                    : () => scope.controller.submit({
-                        'actionId': row['actionId'],
-                      }, schema),
+                    : () => scope.controller.submit(
+                        {'actionId': row['actionId']},
+                        schema,
+                        predictKey: key,
+                        predictValue: true,
+                      ),
               );
             },
           ),

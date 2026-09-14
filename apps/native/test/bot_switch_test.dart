@@ -75,6 +75,7 @@ class LatchedPages implements ChatTransport {
     String id,
     String text, {
     String? supersedes,
+    String? retryOf,
   }) async {}
   @override
   Future<Map<String, dynamic>?> lookup(

@@ -89,9 +89,29 @@ export interface StoredRunBotOriginV1 {
   messageId: string;
 }
 
+/**
+ * The account's voice session asking this Bot a question.
+ *
+ * The three ids are one fixed return address, written before the Bot is asked
+ * anything: which call was live, which spoken Turn the person was taking, and
+ * which request this is. Recovery reads the answer back to *that* request
+ * rather than to whatever the Bot said most recently.
+ */
+export interface StoredRunVoiceOriginV1 {
+  kind: "voice";
+  callId: string;
+  /** The spoken Turn the person was taking when they asked. */
+  voiceTurnId: string;
+  /** The durable voice request id; also this Turn's run id. */
+  requestId: string;
+}
+
 /** What produced a Turn, when it was not a person speaking to the Bot. */
 export type StoredRunOriginV1 =
-  StoredRunRoutineOriginV1 | StoredRunSubagentOriginV1 | StoredRunBotOriginV1;
+  | StoredRunRoutineOriginV1
+  | StoredRunSubagentOriginV1
+  | StoredRunBotOriginV1
+  | StoredRunVoiceOriginV1;
 
 const STORED_RUN_ORIGIN_TRIGGERS: readonly StoredRunTriggerV1[] = [
   "cron",
@@ -134,6 +154,13 @@ export interface StoredRunV1<Snapshot = unknown> {
   sessionId: string;
   acceptedAt: string;
   input: string;
+  /** A fresh execution attempt of the same visible user message. */
+  retryOf?: string;
+  /** Recorded on the predecessor in the same transaction as its retry. */
+  retriedBy?: string;
+  /** Self-contained identity and time even when the first attempt is off-page. */
+  messageRunId?: string;
+  messageAdmittedAt?: string;
   events: SessionEvent[];
   /**
    * Inclusive/exclusive coordinates of this Turn in the authoritative Session
@@ -306,6 +333,10 @@ const STORED_RUN_OPTIONAL_KEYS = [
   "supersededBy",
   "admission",
   "directTool",
+  "retryOf",
+  "retriedBy",
+  "messageRunId",
+  "messageAdmittedAt",
 ] as const;
 const UTF8_ENCODER = new TextEncoder();
 
@@ -451,6 +482,26 @@ function decodeStoredRunOrigin(
       fromBotId: candidate.fromBotId,
       fromBotName: candidate.fromBotName,
       messageId: candidate.messageId,
+    };
+  }
+  if (candidate.kind === "voice") {
+    requireExactOriginFields(
+      candidate,
+      ["kind", "callId", "voiceTurnId", "requestId"],
+      runId,
+    );
+    if (
+      !boundedString(candidate.callId, 128) ||
+      !boundedString(candidate.voiceTurnId, 256) ||
+      !boundedString(candidate.requestId, 128)
+    ) {
+      throw new Error(`run "${runId}" has an invalid admission origin id`);
+    }
+    return {
+      kind: "voice",
+      callId: candidate.callId,
+      voiceTurnId: candidate.voiceTurnId,
+      requestId: candidate.requestId,
     };
   }
   if (candidate.kind !== "routine") {
@@ -712,6 +763,39 @@ function requireStoredRunRecordV1<Snapshot>(
   ) {
     throw new Error(`run "${runId}" has an inconsistent event range`);
   }
+  const lineage: Pick<
+    StoredRunV1<Snapshot>,
+    "retryOf" | "retriedBy" | "messageRunId" | "messageAdmittedAt"
+  > = {};
+  for (const field of ["retryOf", "retriedBy", "messageRunId"] as const) {
+    if (candidate[field] === undefined) continue;
+    if (!boundedString(candidate[field], 128)) {
+      throw new Error(`run "${runId}" has invalid ${field}`);
+    }
+    lineage[field] = options.decodeRunId(candidate[field]);
+    if (lineage[field] === runId) {
+      throw new Error(`run "${runId}" cannot name itself in ${field}`);
+    }
+  }
+  if (candidate.retryOf === undefined) {
+    if (
+      candidate.messageRunId !== undefined ||
+      candidate.messageAdmittedAt !== undefined
+    ) {
+      throw new Error(`run "${runId}" has message lineage without a retry`);
+    }
+  } else if (
+    candidate.messageRunId === undefined ||
+    !boundedString(candidate.messageAdmittedAt, 64) ||
+    !Number.isFinite(Date.parse(candidate.messageAdmittedAt))
+  ) {
+    throw new Error(`run "${runId}" has incomplete retry lineage`);
+  } else {
+    lineage.messageAdmittedAt = candidate.messageAdmittedAt;
+  }
+  if (candidate.retriedBy !== undefined && status !== "failed") {
+    throw new Error(`run "${runId}" has a successor but is not failed`);
+  }
   const configurationSnapshot = options.decodeConfigurationSnapshot(
     candidate.configurationSnapshot,
   );
@@ -779,6 +863,7 @@ function requireStoredRunRecordV1<Snapshot>(
     sessionId: candidate.sessionId,
     acceptedAt: candidate.acceptedAt,
     input: candidate.input,
+    ...lineage,
     events,
     ...(eventRange ? { eventRange } : {}),
     effectAdmissions,
@@ -813,6 +898,8 @@ function requireStoredRunRecordV1<Snapshot>(
 
 export interface BotTurnCommand {
   runId: string;
+  /** Explicit retry of one failed attempt, under this command's fresh id. */
+  retryOf?: string;
   sessionId: string;
   acceptedAt: string;
   text: string;
@@ -879,7 +966,8 @@ export function botTurnCommandFingerprintV1(
     skills.length > 0 ||
     command.directTool !== undefined ||
     lane !== defaultRunLaneV1(turnType) ||
-    command.supersedes !== undefined
+    command.supersedes !== undefined ||
+    command.retryOf !== undefined
   ) {
     return `bot-turn-command-v2:${JSON.stringify({
       userId: command.userId,
@@ -899,6 +987,7 @@ export function botTurnCommandFingerprintV1(
       // into "this idempotency key was reused for a different command" and
       // refused the send.
       ...(command.supersedes ? { supersedes: true } : {}),
+      ...(command.retryOf ? { retryOf: command.retryOf } : {}),
       ...(skills.length > 0 ? { skills: skills.map(formatSkillRefV1) } : {}),
       ...(command.directTool ? { directTool: command.directTool } : {}),
     })}`;

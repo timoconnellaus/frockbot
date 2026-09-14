@@ -37,10 +37,13 @@ class TranscriptView extends StatefulWidget {
   final VoidCallback? onOpenBilling;
   final void Function(String url)? onOpenLink;
   final VoidCallback? onOpenSettings;
-  final void Function(TranscriptLine)? onMessageActions;
+  final void Function(TranscriptLine, {Offset? position})? onMessageActions;
   final String? unreadFromMessageId;
   final void Function(String?)? onReadLatest;
   final String storageKey;
+
+  /// Scrollable space for a control outside the list that has disappeared.
+  final Widget? bottomSpace;
 
   /// A Turn the reader asked to be taken to — a search hit. It is brought into
   /// view and marked, once. A Turn further back than the loaded page is simply
@@ -57,6 +60,7 @@ class TranscriptView extends StatefulWidget {
     required this.onRefresh,
     required this.onOpenRun,
     required this.storageKey,
+    this.bottomSpace,
     this.pendingText,
     this.approvals,
     this.onRetryTurn,
@@ -75,6 +79,8 @@ class TranscriptView extends StatefulWidget {
 }
 
 class _TranscriptViewState extends State<TranscriptView> {
+  static const workingPadding = EdgeInsets.fromLTRB(16, 6, 16, 6);
+
   final GlobalKey focusKey = GlobalKey();
   final ScrollController scroll = ScrollController();
   @override
@@ -93,14 +99,25 @@ class _TranscriptViewState extends State<TranscriptView> {
   String? _newestSendId(List<TranscriptLine> ordered) {
     _latestSendSource = widget.lines;
     _latestSendId = null;
+    String? newestAt;
     for (final line in ordered) {
-      // What the cloud counts as a message: a send, or a Turn's failure that
-      // is drawn as its own notice. A failure already said as a message — a
-      // firing that broke before it could speak — is counted by that send.
-      if (line.role == LineRole.assistant &&
-          (line.id.contains(':send:') ||
-              (line.id.endsWith(':failed') && line.notice != null))) {
-        _latestSendId = line.id;
+      final messageId =
+          line.failureMessageId ??
+          (line.role == LineRole.assistant &&
+                  (line.id.contains(':send:') ||
+                      (line.id.endsWith(':failed') && line.notice != null))
+              ? line.id
+              : null);
+      if (messageId == null) continue;
+      // A retry is displayed with its original message, but read order is the
+      // order of the actual attempts, including a reply to an older message.
+      final at = line.readAt ?? line.at ?? '';
+      final followsFailure =
+          at == newestAt && _latestSendId == '${line.runId}:failed';
+      if (newestAt == null ||
+          (at.compareTo(newestAt) >= 0 && !followsFailure)) {
+        newestAt = at;
+        _latestSendId = messageId;
       }
     }
     return _latestSendId;
@@ -167,21 +184,59 @@ class _TranscriptViewState extends State<TranscriptView> {
       final row = GestureDetector(
         key: ValueKey('row:${line.id}'),
         onLongPress:
-            widget.onMessageActions == null || line.role == LineRole.system
+            widget.onMessageActions == null ||
+                line.role == LineRole.system ||
+                line.voiceExchange != null
             ? null
             : () => widget.onMessageActions!(line),
+        onSecondaryTapUp:
+            widget.onMessageActions == null || line.role == LineRole.system
+            ? null
+            : (details) => widget.onMessageActions!(
+                line,
+                position: details.globalPosition,
+              ),
         child: content,
       );
-      if (line.id == widget.unreadFromMessageId) {
+      if (line.id == widget.unreadFromMessageId ||
+          (line.failureMessageId != null &&
+              line.failureMessageId == widget.unreadFromMessageId)) {
         rows.add(
           Padding(
             key: ValueKey('unread:${line.id}'),
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            child: const Center(child: Text('Unread from here')),
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Divider(
+                    color: Theme.of(context).colorScheme.primary
+                        .withValues(alpha: 0.45),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                  child: Text(
+                    'Unread from here',
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                      color: Theme.of(context).colorScheme.primary,
+                      letterSpacing: 0.3,
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: Divider(
+                    color: Theme.of(context).colorScheme.primary
+                        .withValues(alpha: 0.45),
+                  ),
+                ),
+              ],
+            ),
           ),
         );
       }
-      if (target != null && !marked && line.runId == target) {
+      if (target != null &&
+          !marked &&
+          (line.runId == target || line.id == '$target:user')) {
         marked = true;
         rows.add(
           Container(
@@ -240,13 +295,34 @@ class _TranscriptViewState extends State<TranscriptView> {
                 key: const ValueKey('row:earlier'),
                 child: identified(
                   ShellIds.transcriptEarlier,
-                  TextButton(
-                    onPressed: loading ? null : () => onRefresh(older: true),
-                    child: const Text('Earlier messages'),
+                  Center(
+                    child: TextButton(
+                      onPressed: loading ? null : () => onRefresh(older: true),
+                      style: TextButton.styleFrom(
+                        foregroundColor: Theme.of(context)
+                            .colorScheme
+                            .onSurfaceVariant,
+                        textStyle: Theme.of(context).textTheme.labelMedium,
+                        minimumSize: const Size(0, 32),
+                      ),
+                      child: const Text('Earlier messages'),
+                    ),
                   ),
                 ),
               ),
             ...rows,
+            // Keep the latest messages in place when the working row goes.
+            if (!ordered.any(
+              (line) =>
+                  line.role == LineRole.assistant &&
+                  line.status == LineStatus.streaming &&
+                  line.empty,
+            ))
+              SizedBox(
+                key: const ValueKey('row:working-space'),
+                height: WorkingIndicator.avatarSize + workingPadding.vertical,
+              ),
+            if (widget.bottomSpace != null) widget.bottomSpace!,
           ].reversed.toList(),
         ),
       ),
@@ -260,6 +336,13 @@ class _TranscriptViewState extends State<TranscriptView> {
     TranscriptLine line,
     SupersedeDrainState drain,
   ) {
+    if (line.voiceExchange != null) {
+      return _VoiceExchangeCard(
+        line: line,
+        onOpenRun: onOpenRun,
+        onOpenLink: onOpenLink,
+      );
+    }
     if (line.role == LineRole.system) {
       return _Announcement(text: line.text);
     }
@@ -268,7 +351,20 @@ class _TranscriptViewState extends State<TranscriptView> {
         id: line.id,
         mine: true,
         pending: line.pending,
-        child: Text(line.text),
+        failed: line.status == LineStatus.error,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(line.text),
+            if (line.notice != null)
+              _Notice(
+                line: line,
+                onRetry: onRetryTurn,
+                onOpenBilling: onOpenBilling,
+              ),
+          ],
+        ),
       );
     }
     if (line.status == LineStatus.streaming && line.empty) {
@@ -276,7 +372,7 @@ class _TranscriptViewState extends State<TranscriptView> {
       // words: a Stop the person asked for and is now waiting on, and a Turn
       // still waiting behind the one it displaced.
       return Padding(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+        padding: workingPadding,
         child: WorkingIndicator(
           line: line,
           background: widget.background,
@@ -372,31 +468,37 @@ class _Bubble extends StatelessWidget {
               child: Container(
                 constraints: const BoxConstraints(maxWidth: 720),
                 margin: EdgeInsets.fromLTRB(
-                  mine ? 56 : 20,
-                  6,
-                  mine ? 16 : 20,
-                  6,
+                  mine ? 64 : 16,
+                  5,
+                  mine ? 16 : 16,
+                  5,
                 ),
                 padding: mine
-                    ? const EdgeInsets.symmetric(horizontal: 14, vertical: 11)
-                    : const EdgeInsets.symmetric(vertical: 10),
+                    ? const EdgeInsets.symmetric(horizontal: 13, vertical: 9)
+                    : const EdgeInsets.symmetric(vertical: 8),
                 decoration: BoxDecoration(
+                  // The person's words sit on a tinted slab of the raised
+                  // surface — pink enough to be theirs, never a poster.
                   color: mine
-                      ? theme.colorScheme.primary.withValues(alpha: 0.16)
+                      ? Color.alphaBlend(
+                          theme.colorScheme.primary.withValues(alpha: 0.2),
+                          theme.colorScheme.surfaceContainerHighest,
+                        )
                       : Colors.transparent,
                   border: failed
                       ? Border.all(color: theme.colorScheme.error)
                       : null,
                   borderRadius: BorderRadius.only(
-                    topLeft: const Radius.circular(16),
-                    topRight: const Radius.circular(16),
-                    bottomLeft: Radius.circular(mine ? 16 : 6),
-                    bottomRight: Radius.circular(mine ? 6 : 16),
+                    topLeft: const Radius.circular(18),
+                    topRight: const Radius.circular(18),
+                    bottomLeft: Radius.circular(mine ? 18 : 4),
+                    bottomRight: Radius.circular(mine ? 4 : 18),
                   ),
                 ),
                 child: DefaultTextStyle.merge(
                   style: theme.textTheme.bodyLarge?.copyWith(
-                    fontWeight: FontWeight.w300,
+                    fontWeight: FontWeight.w400,
+                    height: 1.5,
                   ),
                   child: Semantics(label: mine ? 'You' : 'Bot', child: child),
                 ),
@@ -465,13 +567,15 @@ class _Announcement extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
+    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
     child: Center(
       child: Text(
         text,
         textAlign: TextAlign.center,
-        style: Theme.of(context).textTheme.bodySmall
-            ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
+        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+          color: Theme.of(context).colorScheme.onSurfaceVariant
+              .withValues(alpha: 0.8),
+        ),
       ),
     ),
   );
@@ -495,14 +599,105 @@ class _EmptyThread extends StatelessWidget {
               'What would you like to work on?',
               style: theme.textTheme.headlineMedium,
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
             Text(
               'Ask a question, make a plan, or give your Bot something to do.',
-              style: theme.textTheme.bodyLarge?.copyWith(
+              style: theme.textTheme.bodyMedium?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _VoiceExchangeCard extends StatelessWidget {
+  final TranscriptLine line;
+  final void Function(TranscriptLine) onOpenRun;
+  final void Function(String)? onOpenLink;
+  const _VoiceExchangeCard({
+    required this.line,
+    required this.onOpenRun,
+    this.onOpenLink,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final exchange = line.voiceExchange!;
+    final blue = theme.brightness == Brightness.dark
+        ? const Color(0xff91caff)
+        : const Color(0xff185c9a);
+    final status = switch (exchange.status) {
+      VoiceExchangeStatus.queued => 'Queued',
+      VoiceExchangeStatus.working => 'Working',
+      VoiceExchangeStatus.answered => 'Answered',
+      VoiceExchangeStatus.stopped => 'Stopped',
+      VoiceExchangeStatus.failed => 'Couldn’t answer',
+    };
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Container(
+        key: ValueKey('voice-exchange:${line.runId}'),
+        constraints: const BoxConstraints(maxWidth: 720),
+        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        decoration: BoxDecoration(
+          color: blue.withValues(alpha: 0.08),
+          border: Border.all(color: blue.withValues(alpha: 0.3)),
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Theme(
+          data: theme.copyWith(dividerColor: Colors.transparent),
+          child: ExpansionTile(
+            initiallyExpanded: true,
+            leading: Icon(Icons.graphic_eq_rounded, color: blue),
+            iconColor: blue,
+            collapsedIconColor: blue,
+            title: Text(
+              'Voice session',
+              style: theme.textTheme.titleSmall?.copyWith(color: blue),
+            ),
+            subtitle: Text(
+              status,
+              style: theme.textTheme.labelSmall?.copyWith(color: blue),
+            ),
+            childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            expandedCrossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Request to Bot',
+                style: theme.textTheme.labelSmall?.copyWith(color: blue),
+              ),
+              const SizedBox(height: 4),
+              SelectableText(exchange.request),
+              if (exchange.reply != null) ...[
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  child: Divider(height: 1, color: blue.withValues(alpha: 0.2)),
+                ),
+                Text(
+                  'Reply to voice',
+                  style: theme.textTheme.labelSmall?.copyWith(color: blue),
+                ),
+                const SizedBox(height: 4),
+                ShellMarkdown(text: exchange.reply!, onOpenLink: onOpenLink),
+              ],
+              if (exchange.status == VoiceExchangeStatus.queued) ...[
+                const SizedBox(height: 8),
+                Text(
+                  'Waiting for the Bot to finish its current work.',
+                  style: theme.textTheme.bodySmall,
+                ),
+              ],
+              if (line.tools.isNotEmpty || line.pluginCalls.isNotEmpty)
+                TextButton(
+                  onPressed: () => onOpenRun(line),
+                  child: const Text('View activity'),
+                ),
+            ],
+          ),
         ),
       ),
     );

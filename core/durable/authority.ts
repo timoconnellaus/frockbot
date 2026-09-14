@@ -665,6 +665,7 @@ export class BotDurableAuthority<Snapshot> {
           sessionId: run.sessionId,
           acceptedAt: run.acceptedAt,
           text: run.input,
+          ...(run.retryOf ? { retryOf: run.retryOf } : {}),
           // Recovery re-mounts on the recorded turn type, so the resumed Turn
           // sees the same trimmed catalog the evicted one did.
           turnType: storedRunTurnTypeV1(run),
@@ -741,11 +742,14 @@ export class BotDurableAuthority<Snapshot> {
         `Turn idempotency key "${runId}" was reused for a different command`,
       );
     }
-    // A Turn the User stopped, or one another user message took the place of,
-    // is an ordinary outcome and not a failure: it settled durably, said
-    // whatever it had already said, and the caller reads the rest from durable
-    // state. A retry of either replays that settlement rather than refusing.
-    if (run.status === "superseded" || run.status === "cancelled") {
+    // Delivery of an already settled command replays its durable result. A
+    // failed attempt was admitted too; another execution requires a fresh id
+    // and explicit retryOf, never replaying its old command.
+    if (
+      run.status === "superseded" ||
+      run.status === "cancelled" ||
+      run.status === "failed"
+    ) {
       return {
         runId,
         text: "",
@@ -1398,6 +1402,35 @@ export class BotDurableAuthority<Snapshot> {
       ) {
         throw new Error("Bot authority does not match its durable identity");
       }
+      let retryTarget: StoredRunV1<Snapshot> | undefined;
+      if (command.retryOf !== undefined) {
+        retryTarget = this.codec.optional(
+          await transaction.get<unknown>(`${RUN_PREFIX}${command.retryOf}`),
+        );
+        if (
+          command.retryOf === command.runId ||
+          !retryTarget ||
+          retryTarget.runId !== command.retryOf ||
+          retryTarget.sessionId !== command.sessionId ||
+          retryTarget.status !== "failed" ||
+          retryTarget.retriedBy !== undefined ||
+          storedRunTurnTypeV1(retryTarget) !== "chat" ||
+          storedRunLaneV1(retryTarget) !== "user" ||
+          retryTarget.admission?.origin !== undefined ||
+          retryTarget.directTool !== undefined ||
+          retryTarget.input !== command.text ||
+          (command.turnType ?? "chat") !== "chat" ||
+          (command.lane ?? "user") !== "user" ||
+          command.origin !== undefined ||
+          command.directTool !== undefined ||
+          (command.skills?.length ?? 0) !== 0
+        ) {
+          throw new BotTurnRefusedError(
+            "fenced",
+            "This message is no longer available to retry. Refresh the conversation and try again.",
+          );
+        }
+      }
       const activeRunId = await transaction.get<string>(ACTIVE_RUN_KEY);
       const pendingUserRunId = await transaction.get<string>(PENDING_RUN_KEY);
       const lane = command.lane ?? defaultRunLaneV1(command.turnType ?? "chat");
@@ -1485,6 +1518,14 @@ export class BotDurableAuthority<Snapshot> {
         sessionId: command.sessionId,
         acceptedAt: command.acceptedAt,
         input: command.text,
+        ...(retryTarget
+          ? {
+              retryOf: retryTarget.runId,
+              messageRunId: retryTarget.messageRunId ?? retryTarget.runId,
+              messageAdmittedAt:
+                retryTarget.messageAdmittedAt ?? retryTarget.acceptedAt,
+            }
+          : {}),
         events: [],
         effectAdmissions: [],
         status: "running",
@@ -1507,6 +1548,16 @@ export class BotDurableAuthority<Snapshot> {
       } satisfies StoredRunV1<Snapshot>);
       await transaction.put({
         [key]: storedRunRecordV2(admittedRun),
+        ...(retryTarget
+          ? {
+              [`${RUN_PREFIX}${retryTarget.runId}`]: storedRunRecordV2(
+                this.codec.require({
+                  ...retryTarget,
+                  retriedBy: command.runId,
+                }),
+              ),
+            }
+          : {}),
         [runIndexKey(command.acceptedAt, command.runId)]: command.runId,
         ...(queued
           ? lane === "agent"
@@ -1832,6 +1883,7 @@ export class BotDurableAuthority<Snapshot> {
       sessionId: run.sessionId,
       acceptedAt: run.acceptedAt,
       text: run.input,
+      ...(run.retryOf ? { retryOf: run.retryOf } : {}),
       turnType: storedRunTurnTypeV1(run),
       lane: storedRunLaneV1(run),
       ...(storedRunSubagentRoleV1(run)
@@ -1976,6 +2028,7 @@ export class BotDurableAuthority<Snapshot> {
         sessionId: recovery.run.sessionId,
         acceptedAt: recovery.run.acceptedAt,
         text: recovery.run.input,
+        ...(recovery.run.retryOf ? { retryOf: recovery.run.retryOf } : {}),
         turnType: storedRunTurnTypeV1(recovery.run),
         lane: storedRunLaneV1(recovery.run),
         ...(storedRunSubagentRoleV1(recovery.run)

@@ -44,7 +44,7 @@ void main() {
       expect(find.byType(MaterialBanner), findsNothing);
       expect(
         tester.widget<AppBar>(find.byType(AppBar)).preferredSize.height,
-        56,
+        52,
       );
 
       await tester.pumpWidget(header(ConnectionState.connected));
@@ -91,9 +91,9 @@ void main() {
       );
       final color = IconTheme.of(tester.element(icon)).color;
       if (running) {
-        expect(color, Colors.blue);
+        expect(color, computerRunningColor);
       } else {
-        expect(color, isNot(Colors.blue));
+        expect(color, isNot(computerRunningColor));
       }
     }
   });

@@ -65,6 +65,7 @@ const application = shareProvisionedApplication({ botName: "First" });
  */
 test.afterEach(async () => {
   const { page, ollamaBaseUrl } = application();
+  await page.emulateMedia({ reducedMotion: null });
   await setFakeOllamaChatMode(page, ollamaBaseUrl, "ok");
 });
 
@@ -420,6 +421,8 @@ test("a delivered reply is one bubble, wide enough for its own text", async () =
 // the end of the Turn moves nothing horizontally.
 test("the working avatar sits below the bubbles and never shifts them", async () => {
   const { page, ollamaBaseUrl } = application();
+  // Measure layout without the bubble's entrance motion.
+  await page.emulateMedia({ reducedMotion: "reduce" });
   await createBot(page, "Stacker");
   await page.setViewportSize({ width: 1351, height: 831 });
 
@@ -435,7 +438,11 @@ test("the working avatar sits below the bubbles and never shifts them", async ()
 
   // Latched rather than asserted at an instant: the geometry is read the first
   // time a bubble and the working row are both drawn, whenever that happens.
-  let running: { bubbleLeft: number; gap: number } | null = null;
+  let running: {
+    bubbleLeft: number;
+    bubbleBottom: number;
+    gap: number;
+  } | null = null;
   await expect
     .poll(
       async () => {
@@ -449,6 +456,7 @@ test("the working avatar sits below the bubbles and never shifts them", async ()
         if (!bubble || !row || bubble.width === 0) return false;
         running = {
           bubbleLeft: bubble.x,
+          bubbleBottom: bubble.y + bubble.height,
           // How far the row's top is below the bubble's bottom. Negative would
           // mean the two overlap, which is the old side-by-side row.
           gap: row.y - (bubble.y + bubble.height),
@@ -458,7 +466,11 @@ test("the working avatar sits below the bubbles and never shifts them", async ()
       { timeout: 90_000 },
     )
     .toBe(true);
-  const midTurn = running as unknown as { bubbleLeft: number; gap: number };
+  const midTurn = running as unknown as {
+    bubbleLeft: number;
+    bubbleBottom: number;
+    gap: number;
+  };
 
   // Below, not beside.
   expect(midTurn.gap).toBeGreaterThanOrEqual(0);
@@ -471,6 +483,11 @@ test("the working avatar sits below the bubbles and never shifts them", async ()
   const settled = await sends(page).first().boundingBox();
   expect(settled).not.toBeNull();
   expect(settled?.x).toBeCloseTo(midTurn.bubbleLeft, 0);
+  // Another send may arrive before completion; the latest reply keeps the
+  // same bottom edge when the working row and Stop control disappear.
+  const latest = await sends(page).last().boundingBox();
+  expect(latest).not.toBeNull();
+  expect(latest!.y + latest!.height).toBeCloseTo(midTurn.bubbleBottom, 0);
 });
 
 // Tim's report: sending while the Bot is working put the new message *under*
@@ -640,7 +657,7 @@ test("a provider that stops accepting the key ends the Turn with a reason", asyn
   // Turns failed with a 401 they never asked for. One failure should report
   // one failure.
   try {
-    await startTurn(page, "will not work");
+    await startTurn(page, `will not work\n${says("Recovered after retry")}`);
 
     /*
      * A failed Turn is a notice, not the Bot speaking.
@@ -668,15 +685,46 @@ test("a provider that stops accepting the key ends the Turn with a reason", asyn
       .toContain(notice);
     // The sentence used to end by telling the person to try again with nothing
     // to press; the retry is beside it now, and it sends the same message.
-    await expect(
-      sem(page, "chat-transcript").locator(
-        '[flt-semantics-identifier^="retry-turn-"]',
-      ),
-    ).toBeVisible();
+    const originalMessage = saidByUser(page);
+    await expect(originalMessage).toHaveCount(1);
+    const messageId = await originalMessage.getAttribute(
+      "flt-semantics-identifier",
+    );
+    const retry = originalMessage.locator(
+      '[flt-semantics-identifier^="retry-turn-"]',
+    );
+    await expect(retry).toBeVisible();
     const transcript = (await sem(page, "chat-transcript").textContent()) ?? "";
     expect(transcript).not.toContain("model-error");
     expect(transcript).not.toContain("outcome");
     expect(transcript).not.toContain("401");
+
+    await answerComposer(page, "Keep my next message");
+    await setFakeOllamaChatMode(page, ollamaBaseUrl, "ok");
+    await press(retry);
+    await expect
+      .poll(() => sendTexts(page), { timeout: 120_000 })
+      .toEqual(["Recovered after retry"]);
+    await expect(retry).toHaveCount(0);
+    await expect(originalMessage).toHaveCount(1);
+    await expect(originalMessage).toHaveAttribute(
+      "flt-semantics-identifier",
+      messageId!,
+    );
+    await expect(composerInput(page)).toHaveValue("Keep my next message");
+
+    await page.reload();
+    await expect
+      .poll(() => sendTexts(page), { timeout: 120_000 })
+      .toEqual(["Recovered after retry"]);
+    await expect(saidByUser(page)).toHaveCount(1);
+    await expect(saidByUser(page)).toHaveAttribute(
+      "flt-semantics-identifier",
+      messageId!,
+    );
+    // Flutter restores the painted draft before opening its DOM editing session.
+    await composerInput(page).focus();
+    await expect(composerInput(page)).toHaveValue("Keep my next message");
   } finally {
     // Switched off however the test ended, not only when it passed.
     await setFakeOllamaChatMode(page, ollamaBaseUrl, "ok");

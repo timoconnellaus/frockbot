@@ -142,7 +142,7 @@ describe("the transcript index", () => {
       { schemaVersion: 1, query: "wollongong" },
       NO_ARCHIVED,
     );
-    expect(results.hits.map((hit) => hit.runId)).toEqual(["run-2", "run-3"]);
+    expect(results.hits.map((hit) => hit.runId)).toEqual(["run-3", "run-2"]);
     expect(results.indexState).toBe("truncated");
   });
 

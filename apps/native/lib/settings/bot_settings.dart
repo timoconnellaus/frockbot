@@ -7,7 +7,9 @@ import '../client/transport.dart';
 import '../flock/sheep.dart';
 import '../protocol/client_wire.generated.dart' as wire;
 import '../shell/semantics.dart';
+import '../shell/sidebar.dart' show SidebarProfile;
 import '../theme/frock_theme.dart';
+import '../theme/rows.dart';
 import '../theme/states.dart';
 import 'model_picker.dart';
 
@@ -45,12 +47,19 @@ class BotSettingsController extends ChangeNotifier {
   String pinnedAt = '';
   bool hidden = false;
   bool notifications = true;
-  String namedBy = 'user';
 
   /// The Bot's model override, as the `custom-models` Package stores it, and
   /// null when this Bot follows the account model.
   Object? model;
   bool modelAvailable = false;
+
+  /// What the authority is known to hold: the last values a read reported or a
+  /// command of ours landed. A command whose values match this is not sent —
+  /// pinning a Bot is one round trip rather than three — and it is where the
+  /// sidebar's prediction goes back to when a save is refused.
+  Map<String, Object?> _saved = const {};
+  bool _savedNotifications = true;
+  Object? _savedModel;
 
   BotSettingsController(this.api, this.botId);
 
@@ -74,7 +83,6 @@ class BotSettingsController extends ChangeNotifier {
       hidden = profile['hiddenFromSidebar'] == true;
       pinnedAt = profile['pinnedAt'] as String? ?? '';
       pinned = pinnedAt.isNotEmpty;
-      namedBy = profile['namedBy'] as String? ?? 'user';
       notifications =
           ((answer['notifications'] as Map?)?['enabled'] ?? true) == true;
       model =
@@ -82,6 +90,9 @@ class BotSettingsController extends ChangeNotifier {
               as Map?)?['model'];
       loaded = true;
       loads += 1;
+      _saved = _profileBody(pinnedAt);
+      _savedNotifications = notifications;
+      _savedModel = model;
       await _loadAccount();
     } catch (_) {
       message = 'Couldn’t load this Bot’s settings. Check your connection and try again.';
@@ -128,18 +139,57 @@ class BotSettingsController extends ChangeNotifier {
     return page;
   }
 
+  Map<String, Object?> _profileBody(String pinInstant) => {
+    'name': name.trim(),
+    'label': label.trim(),
+    'description': description,
+    'title': title.trim(),
+    'hiddenFromSidebar': hidden,
+    'pinnedAt': pinInstant,
+  };
+
+  /// The instant the sidebar orders a pinned Bot by. It is minted once and
+  /// kept, so the tile drawn before the command lands and the one the command
+  /// carries are the same pin rather than two instants a millisecond apart.
+  String _pinInstant() {
+    if (!pinned) return '';
+    if (pinnedAt.isEmpty) pinnedAt = DateTime.now().toUtc().toIso8601String();
+    return pinnedAt;
+  }
+
+  static SidebarProfile _profileOf(Map<String, Object?> body) => SidebarProfile(
+    name: body['name'] as String?,
+    title: body['title'] as String?,
+    label: body['label'] as String?,
+    pinnedAt: body['pinnedAt'] as String?,
+    hiddenFromSidebar: body['hiddenFromSidebar'] == true,
+  );
+
+  /// The profile the sidebar would draw for what is on screen, which is what
+  /// the next save is about to send. Predicting it is honest because the
+  /// client computed every one of these values itself.
+  SidebarProfile predictedProfile() => _profileOf(_profileBody(_pinInstant()));
+
+  /// What the authority last accepted, so a refusal has somewhere to go back
+  /// to.
+  SidebarProfile get savedProfile => _profileOf(_saved);
+
   void edit(void Function() change) {
     change();
     _changed();
   }
 
-  /// Three commands, each idempotent by its own id: the profile, the
-  /// notification policy, and the Bot's model override. A failure leaves what
-  /// already landed in place and says so, rather than pretending nothing did.
+  /// Up to three commands, each idempotent by its own id: the profile, the
+  /// notification policy, and the Bot's model override. Only the ones whose
+  /// values actually changed are sent, so flipping the pin switch is one
+  /// request rather than three. A failure leaves what already landed in place
+  /// and says so, rather than pretending nothing did.
   ///
-  /// Every configuration command is fenced on a revision, and each of these
-  /// three moves it — so the revision the receipt reports is what the next one
-  /// fences on rather than the one the read returned.
+  /// Every configuration command is fenced on a revision, and each one that is
+  /// sent moves it — so the revision the receipt reports is what the next one
+  /// fences on rather than the one the read returned. A command that is
+  /// skipped sends nothing and moves nothing, so the fence stays current
+  /// either way.
   ///
   /// What the fields show is not read back afterwards. The surface saves as
   /// the person edits, and a read landing under a field they are still typing
@@ -149,35 +199,33 @@ class BotSettingsController extends ChangeNotifier {
     saving = true;
     message = null;
     _changed();
-    final pinInstant = pinned
-        ? (pinnedAt.isEmpty ? DateTime.now().toUtc().toIso8601String() : pinnedAt)
-        : '';
+    final profile = _profileBody(_pinInstant());
     try {
-      await _command({
-        'schemaVersion': 1,
-        'commandId': randomId(),
-        'type': 'bot/set-profile',
-        'botId': botId,
-        'profile': {
-          'name': name.trim(),
-          'label': label.trim(),
-          'description': description,
-          'title': title.trim(),
-          'hiddenFromSidebar': hidden,
-          'pinnedAt': pinInstant,
-        },
-      });
+      // Both maps are built by [_profileBody], so their encodings compare.
+      if (jsonEncode(profile) != jsonEncode(_saved)) {
+        await _command({
+          'schemaVersion': 1,
+          'commandId': randomId(),
+          'type': 'bot/set-profile',
+          'botId': botId,
+          'profile': profile,
+        });
+        _saved = profile;
+      }
       // The instant the sidebar orders by is now the one that was written, so
       // the next save keeps it rather than minting a newer one.
-      pinnedAt = pinInstant;
-      await _command({
-        'schemaVersion': 1,
-        'commandId': randomId(),
-        'type': 'bot/update-notifications',
-        'botId': botId,
-        'notifications': {'enabled': notifications},
-      });
-      if (modelAvailable) {
+      pinnedAt = profile['pinnedAt']! as String;
+      if (notifications != _savedNotifications) {
+        await _command({
+          'schemaVersion': 1,
+          'commandId': randomId(),
+          'type': 'bot/update-notifications',
+          'botId': botId,
+          'notifications': {'enabled': notifications},
+        });
+        _savedNotifications = notifications;
+      }
+      if (modelAvailable && jsonEncode(model) != jsonEncode(_savedModel)) {
         await _command({
           'schemaVersion': 1,
           'commandId': randomId(),
@@ -186,6 +234,7 @@ class BotSettingsController extends ChangeNotifier {
           'packageId': 'custom-models',
           if (model != null) 'values': {'model': model} else 'unset': ['model'],
         });
+        _savedModel = model;
       }
       message = 'Saved.';
       return true;
@@ -264,6 +313,12 @@ class BotSettingsView extends StatefulWidget {
   final VoidCallback? onClose;
   final Future<void> Function()? onSaved;
 
+  /// Draws a profile change where the Bot is listed — its tile, its group, its
+  /// name — the moment it is made, and is handed the last accepted profile
+  /// again if the authority refuses the save. Only values this client computed
+  /// and is about to send are predicted.
+  final void Function(SidebarProfile profile)? onPredict;
+
   /// What the host mounts between the Bot's own settings and Advanced: on the
   /// phone, the rows for its Routines, its Applets and its Package pages.
   final List<Widget> sections;
@@ -284,6 +339,7 @@ class BotSettingsView extends StatefulWidget {
     required this.controller,
     this.onClose,
     this.onSaved,
+    this.onPredict,
     this.background,
     this.onEditAvatar,
     this.dangerZone,
@@ -340,7 +396,13 @@ class _BotSettingsViewState extends State<BotSettingsView> {
       return;
     }
     _dirty = false;
+    final predict = widget.onPredict;
+    // Where the sidebar goes back to if this save is refused: what the
+    // authority last accepted, read before the save moves that baseline.
+    final accepted = state.savedProfile;
+    predict?.call(state.predictedProfile());
     final saved = await state.save();
+    if (!saved) predict?.call(accepted);
     if (saved) await widget.onSaved?.call();
     if (_dirty && mounted) {
       _pending = Timer(botSettingsAutosaveDelay, () => unawaited(_save()));
@@ -369,19 +431,36 @@ class _BotSettingsViewState extends State<BotSettingsView> {
     bool required = false,
   }) => identified(
     id,
-    TextFormField(
-      key: ValueKey('$id.${state.loads}'),
-      initialValue: value,
-      minLines: lines,
-      maxLines: lines,
-      maxLength: maxLength,
-      decoration: InputDecoration(labelText: label, helperText: hint),
-      onChanged: (next) => _typed(() => onChanged(next)),
-      validator: required
-          ? (next) => (next ?? '').trim().isEmpty
-                ? 'Enter a name for this Bot.'
-                : null
-          : null,
+    Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: TextFormField(
+        key: ValueKey('$id.${state.loads}'),
+        initialValue: value,
+        minLines: lines,
+        maxLines: lines,
+        maxLength: maxLength,
+        // The counter is news only as the budget runs out; a "7/100" under
+        // every name is a ledger nobody asked for.
+        decoration: InputDecoration(labelText: label, helperText: hint),
+        buildCounter:
+            (
+              context, {
+              required currentLength,
+              required isFocused,
+              required maxLength,
+            }) => maxLength != null && currentLength >= maxLength * 0.9
+            ? Text(
+                '$currentLength/$maxLength',
+                style: Theme.of(context).textTheme.bodySmall,
+              )
+            : null,
+        onChanged: (next) => _typed(() => onChanged(next)),
+        validator: required
+            ? (next) => (next ?? '').trim().isEmpty
+                  ? 'Enter a name for this Bot.'
+                  : null
+            : null,
+      ),
     ),
   );
 
@@ -393,12 +472,16 @@ class _BotSettingsViewState extends State<BotSettingsView> {
     required void Function(bool) onChanged,
   }) => identified(
     id,
-    SwitchListTile(
-      contentPadding: EdgeInsets.zero,
-      title: Text(title),
-      subtitle: Text(detail),
-      value: value,
-      onChanged: (next) => _chose(() => onChanged(next)),
+    Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: SwitchListTile(
+        contentPadding: const EdgeInsets.fromLTRB(2, 0, 0, 0),
+        visualDensity: VisualDensity.compact,
+        title: Text(title),
+        subtitle: Text(detail),
+        value: value,
+        onChanged: (next) => _chose(() => onChanged(next)),
+      ),
     ),
   );
 
@@ -457,23 +540,27 @@ class _BotSettingsViewState extends State<BotSettingsView> {
                   onTap: widget.onEditAvatar,
                   borderRadius: BorderRadius.circular(16),
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    padding: const EdgeInsets.symmetric(vertical: 10),
                     child: Column(
                       children: [
-                        SheepAvatar(size: 72, background: widget.background),
-                        const SizedBox(height: 8),
+                        SheepAvatar(size: 76, background: widget.background),
+                        const SizedBox(height: 10),
                         Text(
                           widget.onEditAvatar == null
                               ? '${state.name.isEmpty ? 'This Bot' : state.name} avatar'
                               : 'Change colour',
-                          style: type.bodySmall,
+                          style: type.labelMedium?.copyWith(
+                            color: widget.onEditAvatar == null
+                                ? Theme.of(context).colorScheme.onSurfaceVariant
+                                : Theme.of(context).colorScheme.primary,
+                          ),
                         ),
                       ],
                     ),
                   ),
                 ),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 12),
               _field(
                 id: SettingsIds.botName,
                 label: 'Name',
@@ -502,7 +589,7 @@ class _BotSettingsViewState extends State<BotSettingsView> {
                 label: 'Description',
                 value: state.description,
                 maxLength: 10000,
-                lines: 6,
+                lines: 4,
                 onChanged: (next) => state.description = next,
               ),
               _switch(
@@ -518,10 +605,17 @@ class _BotSettingsViewState extends State<BotSettingsView> {
               identified(
                 SettingsIds.botAdvanced,
                 ExpansionTile(
-                  title: const Text('Advanced'),
+                  title: Text(
+                    'Advanced',
+                    style: type.bodyMedium?.copyWith(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
                   initiallyExpanded: advanced,
-                  tilePadding: EdgeInsets.zero,
+                  tilePadding: const EdgeInsets.symmetric(horizontal: 2),
                   childrenPadding: EdgeInsets.zero,
+                  dense: true,
                   onExpansionChanged: (open) => setState(() => advanced = open),
                   children: [
                     _field(
@@ -540,25 +634,10 @@ class _BotSettingsViewState extends State<BotSettingsView> {
                       onChanged: (next) => state.hidden = next,
                     ),
                     identified(
-                      SettingsIds.botIdentity,
-                      ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        title: const Text('Identity'),
-                        subtitle: Text(
-                          state.name.isEmpty ? 'This Bot' : state.name,
-                        ),
-                        trailing: Text(
-                          state.namedBy == 'bot'
-                              ? 'Named by this Bot'
-                              : 'Named by you',
-                          style: type.bodySmall,
-                        ),
-                      ),
-                    ),
-                    identified(
                       SettingsIds.botMembers,
                       const ListTile(
-                        contentPadding: EdgeInsets.zero,
+                        contentPadding: EdgeInsets.symmetric(horizontal: 2),
+                        dense: true,
                         title: Text('Members'),
                         subtitle: Text(
                           'This Bot uses what you enable for all of your Bots.',
@@ -610,35 +689,34 @@ class _BotSettingsViewState extends State<BotSettingsView> {
 
   Widget _model(BuildContext context) => identified(
     SettingsIds.botModel,
-    Card(
-      margin: const EdgeInsets.symmetric(vertical: 8),
-      child: ListTile(
-        leading: const Icon(Icons.memory_rounded),
-        title: Text(
-          state.model == null
-              ? 'Follow the account model'
-              : 'This Bot’s own model',
-        ),
-        subtitle: Text(
-          state.model == null
-              ? 'Change it to give this Bot a model of its own.'
-              : jsonEncode(state.model),
-        ),
-        trailing: const Icon(Icons.expand_more_rounded),
-        onTap: () async {
-                final choice = await Navigator.of(context)
-                    .push<wire.SettingChoice>(
-                      MaterialPageRoute(
-                        builder: (_) => ModelPicker(
-                          load: state.options,
-                          selected: state.model,
-                        ),
+    Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: FrockRowGroup(
+        rows: [
+          FrockRow(
+            icon: Icons.memory_rounded,
+            title: state.model == null
+                ? 'Follow the account model'
+                : 'This Bot’s own model',
+            subtitle: state.model == null
+                ? 'Change it to give this Bot a model of its own.'
+                : jsonEncode(state.model),
+            onTap: () async {
+              final choice = await Navigator.of(context)
+                  .push<wire.SettingChoice>(
+                    MaterialPageRoute(
+                      builder: (_) => ModelPicker(
+                        load: state.options,
+                        selected: state.model,
                       ),
-                    );
-                if (choice != null) {
-                  _chose(() => state.model = choice.value.value);
-                }
-              },
+                    ),
+                  );
+              if (choice != null) {
+                _chose(() => state.model = choice.value.value);
+              }
+            },
+          ),
+        ],
       ),
     ),
   );

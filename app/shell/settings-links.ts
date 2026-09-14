@@ -127,13 +127,8 @@ export const SETTINGS_ANCHORS_V1: readonly SettingsAnchorV1[] = [
     scope: "bot",
   },
 
-  // Former info-pane anchors keep working at their new homes.
-  {
-    anchor: "bot-info-identity",
-    surface: "bot-settings",
-    label: "Identity",
-    scope: "bot",
-  },
+  // Former info-pane anchors that still have rows keep working at their new
+  // homes.
   {
     anchor: "bot-info-members",
     surface: "bot-settings",

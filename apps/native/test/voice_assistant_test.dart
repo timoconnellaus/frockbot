@@ -1,9 +1,9 @@
 /// The continuous voice session: the handshake, the meter, and the interrupt.
 ///
 /// The audio policy is the thing under test. An awake upstream gets a frame
-/// every 40 ms — OpenAI's server VAD decides where a turn ends and it needs
-/// the 700 ms of silence after the words (`silence_duration_ms`) to decide
-/// it — silent frames while the reply plays, and the only thing that stops
+/// every 40 ms — the server's transcriber decides where a turn ends and it
+/// needs the half second of silence after the words to decide it — silent
+/// frames while the reply plays, and the only thing that stops
 /// the audio is twenty continuous seconds of quiet, or the person muting.
 library;
 

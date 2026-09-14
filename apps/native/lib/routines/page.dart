@@ -138,13 +138,26 @@ class RoutinesController extends ViewSurfaceController {
       editing = null;
       return applied;
     }
+    final onScreen = unacknowledgedOnScreen;
     final answer = await api.request(
       kind == 'acknowledge-inbox' ? '$_path/inbox' : _path,
       body: kind == 'acknowledge-inbox'
-          ? routineInboxCommandV1(command, botId, unacknowledgedOnScreen)
+          ? routineInboxCommandV1(command, botId, onScreen)
           : routineCommandV1(command, botId),
     );
     final receipt = ((answer as Map?) ?? const {}).cast<String, Object?>();
+    // The badge lives in its own controller and is otherwise told the count
+    // only on the next read, so it would keep saying three for the whole round
+    // trip. The entries acknowledged are the ones this client just sent, so
+    // the count it leaves behind is arithmetic, not a guess.
+    if (kind == 'acknowledge-inbox' && receipt['status'] == 'applied') {
+      final acknowledged = routineEntryIdV1(command) == null
+          ? onScreen.length
+          : 1;
+      onInbox?.call(
+        acknowledged >= onScreen.length ? 0 : onScreen.length - acknowledged,
+      );
+    }
     // A save answers the form: the editor closes and the list it changed is
     // what the reader is left looking at.
     if (kind == 'save-routine' && receipt['status'] == 'applied') {
@@ -188,6 +201,7 @@ class RoutinesView extends StatefulWidget {
 
   /// Off inside the right panel, which draws its own header. On as a page.
   final bool chrome;
+  final String? initialRoutineId;
   const RoutinesView({
     super.key,
     required this.api,
@@ -199,6 +213,7 @@ class RoutinesView extends StatefulWidget {
     this.onInbox,
     this.onClose,
     this.chrome = true,
+    this.initialRoutineId,
   });
 
   @override
@@ -250,7 +265,7 @@ class _RoutinesViewState extends State<RoutinesView> {
     openRuns: _openRuns,
     confirmDelete: _confirmDelete,
     onInbox: widget.onInbox,
-  );
+  )..editing = widget.initialRoutineId;
 
   @override
   Widget build(BuildContext context) => identified(

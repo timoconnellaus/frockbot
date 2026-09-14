@@ -1,21 +1,4 @@
-/// The speaker: PCM16 mono played in order, and stopped the instant it must
-/// be.
-///
-/// Audio comes down the wire in arbitrary chunks — a chunk may end on an odd
-/// byte, which is half a sample — so the carry is this file's job and no
-/// controller's. Barge-in is the reason [interrupt] exists: dropping the queue
-/// is not enough on its own, because what has already been handed to the
-/// platform would keep talking over the person, so the device queue is torn
-/// down and rebuilt.
-///
-/// A device that will not set up is tried again a little later rather than
-/// written off for the call: a platform without the plugin (the web build)
-/// keeps failing quietly, while a track that was busy for a moment comes
-/// back. Until it does, what arrives is held — a few seconds of it — so the
-/// first successful setup plays the reply rather than its tail.
-///
-/// [VoicePlayer] is an interface for the same reason the capture is: an
-/// assistant test must run without a speaker.
+/// PCM16 playback with receipts from the device, separate from waveform level.
 library;
 
 import 'dart:async';
@@ -23,89 +6,118 @@ import 'dart:collection';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter_pcm_sound/flutter_pcm_sound.dart';
+import 'package:flutter/services.dart';
 
 import 'protocol.dart' show voiceAssistantOutputSampleRateV1;
 import 'speech_gate.dart' show pcm16Rms;
 
 abstract class VoicePlayer extends ChangeNotifier {
-  /// The rate the server said it is sending. Called before the first chunk
-  /// and again if `audio_config` names a different one.
   Future<void> configure(int sampleRate);
-
-  /// Queues a chunk. Boundaries are arbitrary; an odd trailing byte is
-  /// carried into the next chunk.
   void write(Uint8List chunk);
-
-  /// Stops now and drops everything queued, here and on the device.
   Future<void> interrupt();
-
   Future<void> close();
-
-  /// RMS of the audio being played, 0..1. Zero when nothing is.
   double get level;
+
+  /// Includes silent samples still queued on the device.
+  bool get playing;
+
+  /// Changes whenever audio is dropped, rejected or interrupted.
+  int get lossCount;
+
+  /// True only when the complete queue has played on the device.
+  Future<bool> drain();
 }
 
-/// The speaker through `flutter_pcm_sound` (Android and macOS).
-///
-/// That plugin has no "drop what is queued" call, so [interrupt] releases the
-/// device track and sets it up again. A rebuilt track is silent immediately,
-/// which is what barge-in means.
 class PcmVoicePlayer extends VoicePlayer {
-  /// How much audio goes to the device at a time: a thirtieth of a second, so
-  /// the level the footer draws is the level being heard.
-  static const _feedFrames = 30;
-
-  /// How long after a failed setup the next chunk tries again.
+  static const _channel = MethodChannel('com.frockbot/pcm');
   static const retryAfter = Duration(seconds: 2);
-
-  /// How much audio is held while the device is not set up: five seconds.
+  static const _feedFrames = 30;
   static const _heldSeconds = 5;
+  static const _ahead = 6;
 
   final ListQueue<Uint8List> _chunks = ListQueue<Uint8List>();
+  final Map<int, double> _sent = {};
+  final List<Completer<bool>> _drains = [];
   int _offset = 0;
   int _available = 0;
   int? _carry;
   int _sampleRate = voiceAssistantOutputSampleRateV1;
+  static int _nextEpoch = 0;
+  int _epoch = ++_nextEpoch;
+  int _sequence = 0;
+  int _lossCount = 0;
   bool _configured = false;
-  bool _settingUp = false;
-  bool _idle = true;
   bool _closed = false;
+  bool _rebuilding = false;
+  /// The epoch the shared native speaker was last asked to own, so that a
+  /// delayed release cannot tear down a newer owner's device.
+  int? _deviceEpoch;
+  Future<void>? _setup;
   DateTime? _retryAt;
-  double _level = 0;
 
   @override
-  double get level => _level;
-
+  int get lossCount => _lossCount;
+  @override
+  bool get playing => _sent.isNotEmpty;
+  @override
+  double get level => _sent.isEmpty ? 0 : _sent.values.first;
   int get _feedBytes => (_sampleRate ~/ _feedFrames) * 2;
 
   @override
   Future<void> configure(int sampleRate) async {
-    if (_closed) return;
     if (_configured && sampleRate == _sampleRate) return;
+    if (_configured) {
+      _sampleRate = sampleRate;
+      await interrupt();
+      return;
+    }
+    _closed = false;
     _sampleRate = sampleRate;
     await _setUpDevice();
+    _pump();
   }
 
-  Future<void> _setUpDevice() async {
-    if (_settingUp) return;
-    _settingUp = true;
-    try {
-      if (_configured) await FlutterPcmSound.release();
-      FlutterPcmSound.setFeedCallback((_) => _pump());
-      await FlutterPcmSound.setup(sampleRate: _sampleRate, channelCount: 1);
-      await FlutterPcmSound.setFeedThreshold(_sampleRate ~/ _feedFrames);
-      _configured = true;
-      _retryAt = null;
-      _idle = true;
-    } on Object {
-      // The call keeps going: the person still speaks and is still heard.
-      // The next chunk after [retryAfter] tries the device again.
-      _configured = false;
-      _retryAt = DateTime.now().add(retryAfter);
-    } finally {
-      _settingUp = false;
+  Future<void> _setUpDevice() {
+    final pending = _setup;
+    if (pending != null) return pending;
+    final epoch = _epoch;
+    late final Future<void> operation;
+    operation = () async {
+      try {
+        _channel.setMethodCallHandler(_onDevice);
+        _deviceEpoch = epoch;
+        await _channel.invokeMethod<void>('setup', {
+          'sampleRate': _sampleRate,
+          'epoch': epoch,
+        });
+        if (epoch != _epoch || _closed) return;
+        _configured = true;
+        _retryAt = null;
+      } on Object {
+        if (epoch != _epoch || _closed) return;
+        _configured = false;
+        _retryAt = DateTime.now().add(retryAfter);
+        _invalidateDrains();
+      } finally {
+        if (identical(_setup, operation)) _setup = null;
+      }
+    }();
+    _setup = operation;
+    return operation;
+  }
+
+  Future<void> _onDevice(MethodCall call) async {
+    final args = call.arguments;
+    if (_closed || args is! Map || args['epoch'] != _epoch) return;
+    if (call.method == 'failed') {
+      _feedFailed(_epoch);
+      return;
     }
+    if (call.method != 'played' || !_sent.containsKey(args['sequence'])) return;
+    _sent.remove(args['sequence']);
+    _pump();
+    _completeDrains();
+    notifyListeners();
   }
 
   @override
@@ -114,68 +126,65 @@ class PcmVoicePlayer extends VoicePlayer {
     var bytes = chunk;
     final carry = _carry;
     if (carry != null) {
-      final joined = Uint8List(chunk.length + 1)
+      bytes = Uint8List(chunk.length + 1)
         ..[0] = carry
         ..setRange(1, chunk.length + 1, chunk);
-      bytes = joined;
       _carry = null;
     }
     if (bytes.length.isOdd) {
-      _carry = bytes[bytes.length - 1];
+      _carry = bytes.last;
       bytes = Uint8List.sublistView(bytes, 0, bytes.length - 1);
     }
     if (bytes.isEmpty) return;
     _chunks.addLast(bytes);
     _available += bytes.length;
     if (!_configured) {
-      _dropBeyondHeld();
-      final retryAt = _retryAt;
-      if (retryAt != null && DateTime.now().isBefore(retryAt)) return;
+      final limit = _sampleRate * 2 * _heldSeconds;
+      while (_available > limit && _chunks.isNotEmpty) {
+        _available -= _chunks.removeFirst().length - _offset;
+        _offset = 0;
+        _invalidateDrains();
+      }
+      if (_rebuilding ||
+          (_retryAt != null && DateTime.now().isBefore(_retryAt!))) {
+        return;
+      }
       unawaited(_setUpDevice().then((_) => _pump()));
       return;
     }
-    if (_idle) _pump();
-  }
-
-  /// Without a device only the newest [_heldSeconds] of audio is kept.
-  void _dropBeyondHeld() {
-    final limit = _sampleRate * 2 * _heldSeconds;
-    while (_available > limit && _chunks.isNotEmpty) {
-      final head = _chunks.removeFirst();
-      _available -= head.length - _offset;
-      _offset = 0;
-    }
+    _pump();
   }
 
   void _pump() {
     if (_closed || !_configured) return;
-    if (_available <= 0) {
-      _idle = true;
-      _setLevel(0);
-      return;
-    }
-    _idle = false;
-    final take = _take(math.min(_feedBytes, _available));
-    _setLevel(pcm16Rms(take));
-    try {
+    while (_available > 0 && _sent.length < _ahead) {
+      final bytes = _take(math.min(_feedBytes, _available));
+      final sequence = ++_sequence;
+      final epoch = _epoch;
+      _sent[sequence] = pcm16Rms(bytes);
       unawaited(
-        FlutterPcmSound.feed(
-          PcmArrayInt16(bytes: ByteData.sublistView(take)),
-        ).catchError((Object _) => _feedFailed()),
+        _channel
+            .invokeMethod<void>('feed', {
+              'buffer': bytes,
+              'epoch': epoch,
+              'sequence': sequence,
+            })
+            .catchError((Object _) => _feedFailed(epoch)),
       );
-    } on Object {
-      _feedFailed();
     }
+    notifyListeners();
   }
 
-  /// A slice the device never took is audio nobody hears, so the level must
-  /// say so — the controller reads it to decide whether the person is being
-  /// heard, and a level stuck above zero mutes them for the rest of the call.
-  /// The next chunk pumps again.
-  void _feedFailed() {
-    if (_closed) return;
-    _idle = true;
-    _setLevel(0);
+  void _feedFailed(int epoch) {
+    if (_closed || epoch != _epoch) return;
+    _epoch = ++_nextEpoch;
+    _sent.clear();
+    _configured = false;
+    _rebuilding = false;
+    _deviceEpoch = null;
+    _retryAt = null;
+    _invalidateDrains();
+    notifyListeners();
   }
 
   Uint8List _take(int wanted) {
@@ -183,53 +192,90 @@ class PcmVoicePlayer extends VoicePlayer {
     var written = 0;
     while (written < wanted && _chunks.isNotEmpty) {
       final head = _chunks.first;
-      final remaining = head.length - _offset;
-      final step = math.min(remaining, wanted - written);
+      final step = math.min(head.length - _offset, wanted - written);
       out.setRange(written, written + step, head, _offset);
       written += step;
       _offset += step;
-      if (_offset >= head.length) {
+      if (_offset == head.length) {
         _chunks.removeFirst();
         _offset = 0;
       }
     }
     _available -= written;
-    return written == wanted ? out : Uint8List.sublistView(out, 0, written);
+    return out;
   }
 
-  void _setLevel(double value) {
-    if ((value - _level).abs() < 0.001) return;
-    _level = value;
+  @override
+  Future<bool> drain() {
+    if (_closed || !_configured || _carry != null) return Future.value(false);
+    if (_available == 0 && _sent.isEmpty) return Future.value(true);
+    final done = Completer<bool>();
+    _drains.add(done);
+    return done.future;
+  }
+
+  void _completeDrains() {
+    if (_available != 0 || _sent.isNotEmpty || _carry != null) return;
+    for (final done in _drains) {
+      done.complete(true);
+    }
+    _drains.clear();
+  }
+
+  void _invalidateDrains() {
+    _lossCount++;
+    for (final done in _drains) {
+      done.complete(false);
+    }
+    _drains.clear();
+  }
+
+  void _discard() {
+    _epoch = ++_nextEpoch;
+    _configured = false;
+    _chunks.clear();
+    _sent.clear();
+    _offset = _available = 0;
+    _carry = null;
+    _invalidateDrains();
     notifyListeners();
   }
 
   @override
   Future<void> interrupt() async {
-    _chunks.clear();
-    _offset = 0;
-    _available = 0;
-    _carry = null;
-    _setLevel(0);
-    if (!_configured) return;
-    await _setUpDevice();
+    _rebuilding = true;
+    _discard();
+    final epoch = _epoch;
+    await _setup;
+    if (epoch != _epoch) return;
+    await _releaseDevice();
+    if (epoch != _epoch) return;
+    if (!_closed) await _setUpDevice();
+    if (epoch != _epoch) return;
+    _rebuilding = false;
+    _pump();
   }
 
   @override
   Future<void> close() async {
     if (_closed) return;
     _closed = true;
-    _chunks.clear();
-    _offset = 0;
-    _available = 0;
-    _carry = null;
-    _setLevel(0);
-    if (_configured) {
-      try {
-        await FlutterPcmSound.release();
-      } on Object {
-        // Nothing is left to release.
-      }
+    _discard();
+    await _setup;
+    await _releaseDevice();
+  }
+
+  /// Releases only the device this player set up. A close or interrupt that
+  /// resumes after another player has configured names an epoch the host no
+  /// longer owns, so it leaves the newer speaker alone.
+  Future<void> _releaseDevice() async {
+    final owner = _deviceEpoch;
+    if (owner == null) return;
+    _deviceEpoch = null;
+    try {
+      await _channel.invokeMethod<void>('release', {'epoch': owner});
+    } on Object {
+      /* Already unavailable. */
     }
-    _configured = false;
   }
 }

@@ -13,12 +13,13 @@ enum ChatIconKind {
   mic,
 }
 
-/// One light stroke weight for the compact chat chrome, independent of the
-/// platform's bundled Material glyph weight.
+/// Shared sizing keeps custom and Material icons consistent across clients.
+const chatIconSizeV1 = 24.0;
+
 class ChatIcon extends StatelessWidget {
   final ChatIconKind kind;
   final double size;
-  const ChatIcon(this.kind, {super.key, this.size = 19});
+  const ChatIcon(this.kind, {super.key, this.size = chatIconSizeV1});
 
   @override
   Widget build(BuildContext context) {
@@ -68,7 +69,7 @@ class _ChatIconPainter extends CustomPainter {
         path.lineTo(12, 12);
         path.lineTo(16, 14);
       case ChatIconKind.settings:
-        // Eight shallow teeth keep the gear legible at 19 logical pixels.
+        // Eight shallow teeth keep the gear legible at the chrome's size.
         for (var i = 0; i < 32; i++) {
           final angle = i * math.pi / 16 - math.pi / 2;
           final radius = i % 4 < 2 ? 9.5 : 7.5;

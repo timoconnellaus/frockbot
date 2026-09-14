@@ -133,7 +133,6 @@ abstract final class SettingsIds {
   static const botAdvanced = 'bot-advanced';
   static const botTitle = 'bot-title';
   static const botHidden = 'bot-hidden-from-sidebar';
-  static const botIdentity = 'bot-info-identity';
   static const botMembers = 'bot-info-members';
   static const botSaveStatus = 'bot-settings-status';
   static const botPage = 'bot-page';
@@ -294,11 +293,21 @@ abstract final class AuditIds {
 abstract final class SearchIds {
   static const trigger = ShellIds.sidebarSearch;
   static const overlay = 'search-overlay';
+  static const archivedConversation = 'search-archived-conversation';
   static const field = 'search-field';
   static const rebuild = 'search-rebuild';
   static const includeArchived = 'search-include-archived';
   static const includeTools = 'search-include-tools';
   static const note = 'search-note';
+  static const close = 'search-close';
+  static const filter = 'search-filter';
+  static const options = 'search-options';
+
+  static String category(String category) => 'search-category-$category';
+  static String bot(String botId) => 'search-bot-$botId';
+  static String routine(String botId, String routineId) =>
+      'search-routine-$botId-$routineId';
+  static String action(String actionId) => 'search-action-$actionId';
 
   static String group(String botId) => 'search-group-$botId';
   static String hit(String runId) => 'search-hit-$runId';

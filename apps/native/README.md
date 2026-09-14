@@ -14,6 +14,14 @@ flutter test --no-pub
 
 On this task's restricted Mac, the SDK cache could not be written. An APFS clone of that exact SDK lives under ignored `.native-build/flutter`; `XDG_CONFIG_HOME` and `PUB_CACHE` also point under `.native-build`. It changes no SDK pin or other worktree.
 
+## Voice playback and Bot exchanges
+
+Voice-originated Bot work is one blue **Voice session** exchange, with its request and explicit reply to voice. The card says Queued, Working or Answered from durable Bot state; it does not infer Played from a completed Bot Turn. Explicit `send_to_user` messages remain ordinary messages.
+
+The native speaker uses `com.frockbot/pcm`: Android receipts follow the AudioTrack playback head, and macOS receipts use AVAudioPlayerNode's `dataPlayedBack` callback. Dart acknowledges an exact voice delivery only after `voice/answer-end`, actual PCM received and all device receipts. Silent samples still count as pending audio. Interrupts, discarded audio, device failures and closed/replaced calls invalidate receipts. The browser retains its existing unavailable PCM playback behaviour and cannot acknowledge audio it did not play.
+
+This speaker changes Android native code and removes a native plugin dependency. Its first Android delivery therefore requires a **full enabling APK**, through the release procedure below; it cannot ship as a Dart-only patch. Building or reviewing a PR does not publish or install that APK.
+
 ## Android upgrade
 
 Use `scripts/native-acceptance.sh inventory` to record the installed version and certificate, then follow the Shorebird release procedure below. Phone upgrades use `adb install -r` with the exact published APK; never uninstall or clear app data. The acceptance runner’s stock-Flutter build is for qualification, not routine phone delivery.
@@ -97,6 +105,14 @@ Configure five repository Actions secrets before tagging: `MACOS_DEVELOPER_ID_P1
 The app uses Apple team `Q444L76529`, bundle `com.frockbot.mobile`, the default protected Keychain group, and the exact associated return domain. Local updates require a matching Apple Development identity and development profile; public releases require the Developer ID equivalents above. Public builds use Hardened Runtime and secure timestamps. Run the updater for native-client and minimum-supported-version changes. Android-only APK releases and Shorebird patches do not need a desktop rebuild. A `CODE_SIGNING_ALLOWED=NO` build plus ad-hoc local signing proves only renderer compilation/launch, never verified links or production credential protection. iOS is not a target in this slice.
 
 The main Mac app is distributed directly rather than through the Mac App Store, with Messages built into Registered machines; the website links a download only once a signed, notarized release is published. Build, signing, notarization and associated-domain requirements are in [the Mac release guide](macos/README.md). The bundle remains `com.frockbot.mobile`; public distribution requires Developer ID signing and a matching profile. Development builds do not prove verified sign-in or distribution readiness. iOS is not a target in this slice.
+
+## Search
+
+The sidebar Search field and Cmd+K (Ctrl+K on other keyboards) open one search palette. Desktop has category tabs and keyboard selection; phones use a full-screen page with a filter menu above the results. Bots appear immediately, with their descriptions and unread indicators. Search includes conversation messages, shared attachments, links, Routines across Bots and shortcuts to the app's existing settings. Group chats are not yet available.
+
+Files and Links return to the source conversation. They index attachments sent with `send_to_user` and URLs in visible conversation text; tool output stays behind an explicit filter. Recent items appear when those categories have no query. Search options also offer archived Bots and rebuilding the index from stored conversations.
+
+Release cleanup: after deploying this search change, use **Search options → Rebuild search index** for each existing test account. This repeatable, account-scoped operation replaces only the derived search index: it adds historical attachments and links and removes previously indexed unspoken completion text. Verify a fresh conversation reply appears in Messages, a shared attachment appears in Files, and a shared URL appears in Links. The original conversations are preserved.
 
 ## Web
 

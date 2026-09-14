@@ -72,8 +72,9 @@ Five classes in the app Worker, exported from `apps/cloudflare/src/index.ts`. `c
 ### `VoiceAssistant` — `apps/cloudflare/src/voice-assistant.ts`
 
 - Binding `VOICE_ASSISTANTS`; one object per User, reached with `getAgentByName(env.VOICE_ASSISTANTS, userId)` and only through the gateway's `GET /api/voice/assistant` upgrade (there is no `/agents/*` route). Migration `v7`, `new_sqlite_classes`.
-- `withVoice(Agent)` from `@cloudflare/voice` 0.4.0 over `agents` 0.22.0: the wire protocol, the per-call transcriber session, sentence chunking and streaming TTS are the SDK's. Providers: OpenAI Realtime transcription (`gpt-transcribe` with server VAD, `app/voice/openai-transcriber.ts`) wrapped in `app/voice/sleeping-transcriber.ts` (closes the upstream when the room is quiet), the Frock AI gateway for the chat model (`app/voice/assistant.ts`, a bounded tool loop with `list_bots`, `bot_status`, `ask_bot`, `cancel_bot`, `recall_project`), and ElevenLabs Flash v2.5 TTS as PCM 24 kHz, wrapped in `app/voice/tts-guard.ts` (a sentence that yields no audio throws rather than settling as answered in silence).
-- Durable state is the ledger in `app/voice/ledger.ts` over the object's key-value storage: the live call, each spoken turn under its idempotency key, each Bot delegation under the run id the Bot fences on, and the day's meters. A delegation is an ordinary user-lane `run` on the target `BotState` plus a scheduled `checkDelegation` look-up, so it survives this object's eviction. The SDK's own `cf_voice_messages` table is capped at 40 rows.
+- `withVoice(Agent)` from `@cloudflare/voice` 0.5.0 (a re-export of `agents/voice`) over `agents` 0.23.0: the wire protocol, the per-call transcriber session, sentence chunking and streaming TTS are the SDK's. Providers: ElevenLabs Scribe v2 Realtime transcription (`ElevenLabsSTT` from `@cloudflare/voice-elevenlabs`, settings and provider choice in `app/voice/scribe-transcriber.ts`; `VOICE_ASSISTANT_STT=openai` swaps in `gpt-transcribe` with server VAD, `app/voice/openai-transcriber.ts`) wrapped in `app/voice/sleeping-transcriber.ts` (closes the upstream when the room is quiet), the Frock AI gateway for the chat model (`app/voice/assistant.ts`, a bounded tool loop with `list_bots`, `bot_status`, `read_bot_history`, `search_bot_history`, `ask_bot`, `cancel_bot`, `remember`, `forget`, `recall_project`), and ElevenLabs Flash v2.5 TTS as PCM 24 kHz, wrapped in `app/voice/tts-guard.ts` (a sentence that yields no audio throws rather than settling as answered in silence).
+- Durable state is the ledger in `app/voice/ledger.ts` over the object's key-value storage: the live call, each spoken turn under its idempotency key, each Bot delegation under the run id the Bot fences on, answer composition and playback delivery, and the day's meters, beside the voice session's own memory in `app/voice/memory.ts` (the record, its removal fences, and one finalization job per call). `BotState.runVoice` admits a distinct voice requester to the existing agent lane, so active chat and Routine Turns finish without interruption. The Bot answers with `reply_to_request`; its `reply/to-caller` event returns to the original request and renders with the voice request as a blue exchange, without an ordinary User notification. Terminal state records a durable completion wake; scheduled `checkDelegation` look-ups recover lost dispatches or wakes, and `onStart` restores checks from the ledger. An answer stays available until its named delivery is acknowledged by the client's drained audio player. The SDK's own `cf_voice_messages` table is capped at 40 rows.
+- Read-only voice history uses the existing Bot run projection and User transcript index (`app/voice/history.ts`). Ownership is checked against the User's Bot directory before each read; search hydrates bounded matches to preserve User, Bot and voice attribution. Explicit sends and caller replies are readable, private model/tool scratch is not. `bot_status` reads current durable progress directly, while search declares that its settled-conversation index may lag. These reads never admit target Bot work or call its model.
 - Full contract, protocol and limits: `docs/voice.md`.
 
 The composer's dictation relay (`apps/cloudflare/src/voice-dictation.ts`) is not a Durable Object: a Worker-level socket pair to OpenAI Realtime transcription, admitting nothing durable.
@@ -177,7 +178,8 @@ Sequential, not parallel. Per occurrence: validate the journal, skip if a result
 - An occurrence with an intent and no result is dispatched again under the same effect id.
 - A throw that is not a cancellation becomes an error result. For a tool not declared `idempotent` the content says the outcome is uncertain, because the loop does not know whether the work happened and does not try to find out.
 - A result carrying `endsTurn: true` closes the Turn unless the `agent/step-continuation` waterfall overrides it.
-- `send_to_user` requires `disposition: "finish" | "continue"`. A final answer ends the Turn immediately; an interim update leaves a final reply owed. Widgets and approvals always end the Turn. The Shell derives completion from the durable tool input and matching send occurrence, including after eviction.
+- `send_to_user` requires `disposition: "finish" | "continue"`. Each call delivers one separate message. Use `continue` when there is more to say or do, including another part of the answer, and `finish` on the last message to end the Turn. A `continue` send leaves a final reply owed. Widgets and approvals always end the Turn. The Shell derives completion from the durable tool input and matching send occurrence, including after eviction.
+- The conversation prompt defaults to plain paragraphs, one thought and a line or two per message. Simple answers use one message; distinct parts can use two to four, keeping the whole reply concise. Headings, bold labels, lists and tables are reserved for requested structured output; links and necessary code remain available, and a request for detail gets it.
 - Chat/agent requests expose only `send_to_user`, `get_dynamic_tools`, and `call_dynamic_tool` initially. Specialist first-party tools live in the `frockbot` namespace: names are listed in the prompt, schemas are read on demand, and execution retains the same admission and authority checks. Background Turns expose `wake_parent` in place of user delivery.
 - A provider that emits private text instead of a final send gets one bounded delivery-repair step. No provider-specific forced-tool option is assumed.
 
@@ -359,11 +361,12 @@ inert to the pointer, to assistive technology and to its own tickers, and one
 scrim serves whichever drawer is open.
 
 **The slot registry.** `lib/shell/slots.dart` is where a feature reaches the
-shell: three named regions — `right-panel`, `overlays`, `header-actions` — that
-a feature registers a `WidgetBuilder` into and the shell draws where the region
-belongs. An empty region draws nothing, so the layout reserves no space for a
-feature that is not there. Trust chrome is never
-a slot: the transcript, the composer and the Bot list are the shell's own.
+shell: two named regions — `right-panel` and `overlays` — that a feature
+registers a `WidgetBuilder` into and the shell draws where the region belongs.
+An empty region draws nothing, so the layout reserves no space for a feature
+that is not there. Trust chrome is never a slot: the transcript, the composer
+and the Bot list are the shell's own, and what one Bot holds belongs to that
+Bot's own surfaces rather than to a region over the list of every Bot.
 
 **Semantics identifiers.** Flutter Web draws to a canvas, so a browser spec can
 only select the engine's accessibility tree. Every interactive widget carries a
@@ -428,8 +431,11 @@ Screens (no router; `MaterialApp(home:)` plus `Navigator.push`):
 - `TemplatesPage` — `lib/templates/page.dart`: the same host twice, a tab
   apiece — what this Bot is packed into, and what this account has imported
 - `AppletCanvas` — `lib/applets/canvas.dart`: the Applet directory, its focus,
-  the building states and the live Applet, in the `right-panel` slot beside Bot
-  settings and a page on the phone
+  the building states and the live Applet, as a page of its own at every width.
+  One row of chrome — the way back, the Applet's own name, and the switch
+  between the Applet and its code — and the Applet filling everything under it.
+  It is not a `right-panel` entry: a 380-point column is not where you read an
+  Applet
 - `AppletPicker` — `lib/applets/picker.dart`: the account's Applets as a
   dialog behind the header's one Applets entry — a row opens an Applet on the
   canvas, and a row's delete asks for confirmation before it destroys the
@@ -456,7 +462,7 @@ Transport is REST over `package:http` behind a conditional import (`lib/client/t
 
 On the phone, auth is PKCE in the system browser (`lib/client/auth.dart:17`), returning over an App Link validated in `accept()` (`:60`); the session token lives in `flutter_secure_storage`, and the directory, drafts, cached transcripts and cursors are plaintext JSON on disk (`lib/client/plain_store_io.dart:13`, `:100`). In the browser the same seams are the hosted better-auth Google redirect (`auth_web.dart`), a cookie the client never sees, and `localStorage` (`plain_store_web.dart`).
 
-`lib/protocol/client_wire.generated.dart` (987 lines) is generated by `scripts/generate-dart-protocol.ts:119` from `core/protocol-schemas/schema/client-wire.schema.json`. Its classes wrap an opaque `Object? _json` and validate; they are not typed models, so call sites index by string.
+`lib/protocol/client_wire.generated.dart` (1021 lines) is generated by `scripts/generate-dart-protocol.ts:119` from `core/protocol-schemas/schema/client-wire.schema.json`. Its classes wrap an opaque `Object? _json` and validate; they are not typed models, so call sites index by string.
 
 A framed web page is `lib/view/host_frame.dart`, one seam over two implementations: on the web a platform view over an `<iframe>` sandboxed to `allow-scripts` (plus `allow-same-origin` only where the document must keep its origin), and on the phone a WebView with every one of those guarantees set by hand. Neither ever receives the app session; a page is loaded anonymously and told who it is by `postMessage` afterwards.
 
@@ -603,12 +609,17 @@ removal without migration on 2026-09-08.
 The native header is one row: Bot identity and direct Bot settings, then
 Applets, Computer and Routines as destinations. Applets is one entry rather
 than a strip of per-Bot Applet buttons — it opens the account-wide directory as
-a picker, so a header holding many Applets is still one control. Bot messages
-have no avatar or tool-count row; the in-chat avatar is reserved for the working
-indicator and its comet trails. Message long-press opens work details or records
-“Mark unread from here”. That boundary names a validated chat message in the
-Bot-owned unread record, is included in the command fingerprint and receipt,
-and is projected to the native transcript after reconnect. An explicit mark-read
+a picker, so a header holding many Applets is still one control. The doors this
+Bot's Packages declare join the same row at the wider tiers, built straight from
+the Package catalog the shell holds (`ChatHeader.packageEntries`): they belong
+to one Bot, so they are never drawn over the list of every Bot. A phone's bar
+stays GrokBot's three things and those doors are rows on the Bot's page instead.
+Bot messages have no avatar or tool-count row; the in-chat avatar is reserved
+for the working indicator and its comet trails. Message long-press opens work
+details or records “Mark unread from here”. That boundary names a validated
+chat message in the Bot-owned unread record, is included in the command
+fingerprint and receipt, and is projected to the native transcript after
+reconnect. An explicit mark-read
 clears it. Applets and Computer continue through their existing backend surfaces;
 header navigation adds no authority or credentials.
 
@@ -829,7 +840,7 @@ Source is the durable root, in R2 through the Workspace store, keyed by `workspa
 
 - **Server.** `env.APPLETS.get(...)` with `globalOutbound: null`, an env of exactly `IDENTITY` and `CAPABILITIES`, and `limits {cpuMs: 5000, subRequests: 10}` (`applet-state.ts`, `#load`). The loaded stub is held per Durable Object instance by loader id, so a socket or a tool call after the first in an instance reads nothing from R2. The loaded class is mounted as a Durable Object facet (`#facet`) under a snapshot, trial and commit publish protocol with `facets.clone` rollback (`#activate`). `AppletState.open({ warm: true })`, which the open route calls, mounts the resident generation behind its answer so the socket that follows finds the facet and its schema up.
 - **UI.** `ui.html` is served from the anonymous origin `ui.<host>` (`apps/cloudflare/src/gateway.ts:139-176`) and nested in an `<iframe sandbox="allow-scripts">` inside the Applets Package's own `canvas.html`, handshaken by postMessage, then connected over a WebSocket gated by an HMAC viewer token (`gateway.ts:434-516`).
-- **Opening.** The canvas reads `GET /api/bots/:bot/applets/open` (`AppletOpenViewV1`): the directory, the Session's focus, and for a published focus the generation, the page URL and a viewer token, from one `AppletState.open` read beside a parallel directory listing and focus read. The frame is given its page before the source or the last build is asked for; those are the code view's, read when it is shown. `/api/applets/:id/ui` and `/token` remain for the chat card and read one directory entry each. The frame's identity is the generation and the page URL; a token re-minted three minutes before expiry reaches the running page as an `init`-shaped `refresh` and the transport reconnects in place. On a phone the frame is held off stage from the moment the Bot is adopted (`_appletFrameHolder`) and moved into the canvas page under one `GlobalKey` when that is pushed. ADR 0025 records why.
+- **Opening.** The canvas reads `GET /api/bots/:bot/applets/open` (`AppletOpenViewV1`): the directory, the Session's focus, and for a published focus the generation, the page URL and a viewer token, from one `AppletState.open` read beside a parallel directory listing and focus read. The frame is given its page before the source or the last build is asked for; those are the code view's, read when it is shown. `/api/applets/:id/ui` and `/token` remain for the chat card and read one directory entry each. The frame's identity is the generation and the page URL; a token re-minted three minutes before expiry reaches the running page as an `init`-shaped `refresh` and the transport reconnects in place. The frame is held off stage from the moment the Bot is adopted (`_appletFrameHolder`) and moved into the canvas page under one `GlobalKey` when that is pushed — at every width, since the canvas is a page everywhere. Looking at the code puts the frame off stage rather than taking it out of the tree, so the document and its socket outlive the switch. ADR 0025 records why.
 
 ### First-party pages
 
@@ -939,7 +950,7 @@ Not used anywhere in the repository: KV namespaces, Queues, Workflows, Hyperdriv
 
 Top-level vars: `NATIVE_SLICE_2_AUTH`, `DEFAULT_APPLICATION_HASH`, `FROCK_AI_GATEWAY_ID`, `FROCK_AI_ACCOUNT_ID`, `FROCK_AI_AUTO_ROUTE`, `UI_ARTIFACT_HOSTS`. `ALLOWED_CLIENT_ORIGINS` is read but set nowhere: the web app is same-origin and the Flutter app sends no `Origin`.
 
-Secrets are declared in `apps/cloudflare/src/production-secrets.ts`. Required: `BETTER_AUTH_URL`, `BETTER_AUTH_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `SPRITES_TOKEN`, `COMPUTER_HOST_TOKEN`, `CREDENTIAL_KEYRING`, `ROUTINE_HOOK_SECRET`, `MACHINE_TOKEN_SECRET`, `APPLET_BUILD_TOKEN`, `APPLET_VIEWER_SECRET`, `OPENAI_API_KEY` (composer dictation), `ELEVENLABS_API_KEY` (the voice session's speech). Optional: `FROCKBOT_ADMIN_EMAILS`, `DEBUG_TOKEN`, `COMPOSIO_API_KEY` (Connected apps, §8), `FROCK_AI_GATEWAY_TOKEN`. `ELEVENLABS_VOICE_ID` is an optional var; `VOICE_DICTATION_UPSTREAM_URL` is a harness-only door the release gate refuses to find live.
+Secrets are declared in `apps/cloudflare/src/production-secrets.ts`. Required: `BETTER_AUTH_URL`, `BETTER_AUTH_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `SPRITES_TOKEN`, `COMPUTER_HOST_TOKEN`, `CREDENTIAL_KEYRING`, `ROUTINE_HOOK_SECRET`, `MACHINE_TOKEN_SECRET`, `APPLET_BUILD_TOKEN`, `APPLET_VIEWER_SECRET`, `OPENAI_API_KEY` (composer dictation), `ELEVENLABS_API_KEY` (the voice session's ears and speech). Optional: `FROCKBOT_ADMIN_EMAILS`, `DEBUG_TOKEN`, `COMPOSIO_API_KEY` (Connected apps, §8), `FROCK_AI_GATEWAY_TOKEN`. `ELEVENLABS_VOICE_ID`, `VOICE_ASSISTANT_STT` and `VOICE_ASSISTANT_MODEL` are optional vars; `VOICE_DICTATION_UPSTREAM_URL` is a harness-only door the release gate refuses to find live.
 
 ---
 

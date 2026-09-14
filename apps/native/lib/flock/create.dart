@@ -372,11 +372,16 @@ class SheepColourSheet extends StatefulWidget {
   final NativeApi api;
   final String botId;
   final String botName;
+
+  /// The colour the Bot wears now, so the sheet opens with it marked rather
+  /// than with six colours and no answer to "which one am I?".
+  final String? background;
   const SheepColourSheet({
     super.key,
     required this.api,
     required this.botId,
     required this.botName,
+    this.background,
   });
 
   /// Opens the sheet and answers with the colour that was saved, or nothing.
@@ -385,11 +390,16 @@ class SheepColourSheet extends StatefulWidget {
     required NativeApi api,
     required String botId,
     required String botName,
+    String? background,
   }) => showModalBottomSheet<String>(
     context: context,
     showDragHandle: true,
-    builder: (sheet) =>
-        SheepColourSheet(api: api, botId: botId, botName: botName),
+    builder: (sheet) => SheepColourSheet(
+      api: api,
+      botId: botId,
+      botName: botName,
+      background: background,
+    ),
   );
 
   @override
@@ -400,12 +410,18 @@ class _SheepColourSheetState extends State<SheepColourSheet> {
   bool busy = false;
   String? message;
 
+  /// The colour under the finger. Marking it the moment it is tapped is what
+  /// says the tap landed; the sheet closes when the write does, and a refusal
+  /// takes the mark back.
+  late String? chosen = widget.background;
+
   String get _path => '/api/bots/${Uri.encodeComponent(widget.botId)}/sheep';
 
   Future<void> _choose(String background) async {
     if (busy) return;
     setState(() {
       busy = true;
+      chosen = background;
       message = null;
     });
     try {
@@ -430,9 +446,15 @@ class _SheepColourSheetState extends State<SheepColourSheet> {
       }
       if (mounted) Navigator.of(context).pop(background);
     } on RequestFailure catch (failure) {
-      setState(() => message = failure.message);
+      setState(() {
+        chosen = widget.background;
+        message = failure.message;
+      });
     } catch (_) {
-      setState(() => message = 'Couldn’t change this Bot’s colour. Try again.');
+      setState(() {
+        chosen = widget.background;
+        message = 'Couldn’t change this Bot’s colour. Try again.';
+      });
     } finally {
       if (mounted) setState(() => busy = false);
     }
@@ -466,7 +488,7 @@ class _SheepColourSheetState extends State<SheepColourSheet> {
                     _Swatch(
                       id: entry.key,
                       label: entry.value,
-                      chosen: false,
+                      chosen: entry.key == chosen,
                       onTap: busy ? null : () => unawaited(_choose(entry.key)),
                     ),
                 ],

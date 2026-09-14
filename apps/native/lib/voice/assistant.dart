@@ -7,8 +7,8 @@
 /// seconds of quiet and wake it on the next onset.
 ///
 /// An awake upstream gets a frame every 40 ms — speech, pauses and the
-/// silence after a sentence alike. OpenAI's server VAD decides where a turn
-/// ends and it needs that silence — 700 ms of it, `silence_duration_ms` — to
+/// silence after a sentence alike. The server's transcriber decides where a
+/// turn ends and it needs that silence — about half a second of it — to
 /// decide it. While the reply is playing the frames sent are silent ones:
 /// the upstream's own detector would otherwise take the speaker's echo for
 /// the person and cut the reply off. The energy gate here is only ever asked
@@ -101,6 +101,8 @@ class AssistantSessionController extends ChangeNotifier {
   /// so a call ended while the person was still answering the permission
   /// prompt cannot resurrect a capture behind them.
   int _generation = 0;
+  _AnswerPlayback? _answer;
+  bool _reportedPlaying = false;
 
   /// Audio captured before `start_call` went out, bounded at 10 s and drained
   /// in order once it has.
@@ -117,7 +119,7 @@ class AssistantSessionController extends ChangeNotifier {
 
   /// Whether the reply is being heard: the server says it is speaking, or the
   /// speaker still has audio to play after the server moved on.
-  bool get _playing => _status == VoiceStatusV1.speaking || player.level > 0;
+  bool get _playing => _status == VoiceStatusV1.speaking || player.playing;
 
   /// Whether this client is sending. Either input is enough to stop it.
   bool get muted => _userMuted || _microphoneHeld;
@@ -153,7 +155,7 @@ class AssistantSessionController extends ChangeNotifier {
     _held.clear();
     _clearNotice();
     _set(VoiceSessionPhase.connecting);
-    player.addListener(_notify);
+    player.addListener(_onPlayback);
     if (!await _openCapture(generation)) return;
     final socket = await _connect(generation);
     if (socket == null) return;
@@ -242,12 +244,14 @@ class AssistantSessionController extends ChangeNotifier {
   }
 
   void _onFrame(AudioFrame frame) {
+    if (_disposed) return;
     _micLevel = frame.level;
     final decision = _gate.offer(frame.bytes, frame.level, frame.atMs);
     // Barge-in is judged before mute and before sleep: it is the one thing
     // that must reach the server while it is talking.
     if (decision.bargeIn && _playing && !muted && !_barged) {
       _barged = true;
+      _answer = null;
       unawaited(player.interrupt());
       final socket = _socket;
       socket?.sendText(encodeAssistantInterruptV1());
@@ -298,9 +302,9 @@ class AssistantSessionController extends ChangeNotifier {
       return;
     }
     // Awake means a frame every 40 ms, speech and silence alike, through
-    // pauses and while the assistant is thinking. OpenAI's server VAD decides
-    // where a turn ends and needs the silence after the words to decide it —
-    // 700 ms, `silence_duration_ms`; a client that cut the audio off a second
+    // pauses and while the assistant is thinking. The server's transcriber
+    // decides where a turn ends and needs the silence after the words to
+    // decide it — about half a second; a client that cut the audio off right
     // after the last syllable would leave the transcript hanging until the
     // upstream timed out. While the reply plays the frame is a silent one, so
     // that detector never hears the speaker; the real audio is held for a
@@ -323,7 +327,12 @@ class AssistantSessionController extends ChangeNotifier {
   }
 
   void _onMessage(Object? message) {
+    // A disposed controller keeps its socket and capture alive until the
+    // teardown's awaits finish; it must issue no further speaker commands,
+    // because the app has already built the next session's player.
+    if (_disposed || !active || _phase == VoiceSessionPhase.ending) return;
     if (message is List<int>) {
+      if (message.isNotEmpty) _answer?.bytes += message.length;
       player.write(
         message is Uint8List ? message : Uint8List.fromList(message),
       );
@@ -333,6 +342,14 @@ class AssistantSessionController extends ChangeNotifier {
     final frame = decodeAssistantServerFrameV1(message);
     if (frame == null) return;
     switch (frame) {
+      case AssistantAnswerV1(:final deliveryId):
+        _answer = _AnswerPlayback(deliveryId, player.lossCount);
+      case AssistantAnswerEndV1(:final deliveryId):
+        final answer = _answer;
+        if (answer != null && answer.id == deliveryId && !answer.ended) {
+          answer.ended = true;
+          unawaited(_finishAnswer(answer, _generation));
+        }
       case AssistantWelcomeV1():
         final socket = _socket;
         if (socket == null || _started) return;
@@ -361,6 +378,7 @@ class AssistantSessionController extends ChangeNotifier {
           player.configure(sampleRate ?? voiceAssistantOutputSampleRateV1),
         );
       case AssistantPlaybackInterruptV1():
+        _answer = null;
         unawaited(player.interrupt());
       case AssistantVoiceStateV1(:final upstream):
         // The server reports its own view of the mute; the two inputs that
@@ -370,6 +388,7 @@ class AssistantSessionController extends ChangeNotifier {
       case AssistantRefusalV1(:final code):
         unawaited(_fail(voiceRefusalMessage(code)));
       case AssistantErrorV1(:final code):
+        _answer = null;
         if (code != null) {
           // A coded error is the call itself failing — the server has already
           // torn it down and stopped listening. Only a per-turn error, which
@@ -385,6 +404,36 @@ class AssistantSessionController extends ChangeNotifier {
         // The footer shows no transcript and no diagnostics.
         break;
     }
+  }
+
+  void _onPlayback() {
+    final playing = player.playing;
+    if (active &&
+        _phase != VoiceSessionPhase.ending &&
+        playing != _reportedPlaying) {
+      _reportedPlaying = playing;
+      _socket?.sendText(encodeVoiceSpeechV1(playing));
+    }
+    _notify();
+  }
+
+  Future<void> _finishAnswer(_AnswerPlayback answer, int generation) async {
+    if (answer.bytes < 2 ||
+        answer.bytes.isOdd ||
+        answer.lossCount != player.lossCount) {
+      return;
+    }
+    final played = await player.drain();
+    if (!played ||
+        generation != _generation ||
+        !identical(_answer, answer) ||
+        answer.lossCount != player.lossCount ||
+        !active ||
+        _disposed) {
+      return;
+    }
+    _answer = null;
+    _socket?.sendText(encodeVoicePlayedV1(answer.id));
   }
 
   void _showNotice(String message) {
@@ -490,6 +539,8 @@ class AssistantSessionController extends ChangeNotifier {
     int code = voiceCloseNormalV1,
     String reason = '',
   }) async {
+    _answer = null;
+    _reportedPlaying = false;
     _startTimer?.cancel();
     _startTimer = null;
     _clearNotice();
@@ -501,7 +552,7 @@ class AssistantSessionController extends ChangeNotifier {
     final socket = _socket;
     _socket = null;
     await _settled(player.close);
-    player.removeListener(_notify);
+    player.removeListener(_onPlayback);
     await _settled(() async => socket?.close(code: code, reason: reason));
     _micLevel = 0;
     _opening.clear();
@@ -533,4 +584,12 @@ class AssistantSessionController extends ChangeNotifier {
     unawaited(_teardown(code: voiceCloseDisposedV1, reason: 'disposed'));
     super.dispose();
   }
+}
+
+class _AnswerPlayback {
+  final String id;
+  final int lossCount;
+  int bytes = 0;
+  bool ended = false;
+  _AnswerPlayback(this.id, this.lossCount);
 }

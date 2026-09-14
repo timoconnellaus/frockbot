@@ -258,6 +258,8 @@ interface Env {
   ELEVENLABS_API_KEY?: string;
   /** The ElevenLabs voice the assistant speaks with; George when unset. */
   ELEVENLABS_VOICE_ID?: string;
+  VOICE_ASSISTANT_STT?: string;
+  VOICE_ASSISTANT_MODEL?: string;
   /** A local dictation stand-in for the test harness; never set in production. */
   VOICE_DICTATION_UPSTREAM_URL?: string;
   COMPUTER_HOST: Fetcher;
@@ -519,6 +521,7 @@ function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
           sessionId: command.sessionId,
           acceptedAt: command.acceptedAt,
           text: command.text,
+          ...(command.retryOf ? { retryOf: command.retryOf } : {}),
           ...(command.skills ? { skills: command.skills } : {}),
           // The composer's supersede intent and the lane it implies. This
           // rebuilds the command field by field rather than spreading it, so

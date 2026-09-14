@@ -425,6 +425,36 @@ void main() {
     expect(notified, 2);
   });
 
+  test(
+    'acknowledging drops the badge on the receipt, not on the next read',
+    () async {
+      final store = MemoryStore();
+      final counts = <int>[];
+      final controller = RoutinesController(
+        SettingsApi(store, (path, body) async {
+          if (body == null) return routinesDocument();
+          return {
+            'schemaVersion': 1,
+            'commandId': (body as Map)['commandId'],
+            'status': 'applied',
+          };
+        }),
+        'bot-1',
+        onInbox: counts.add,
+      );
+      addTearDown(controller.dispose);
+      await controller.load();
+      expect(counts, [1]);
+      // The entry acknowledged was on screen, so what is left is arithmetic.
+      await controller.dispatch({
+        'commandId': 'c1',
+        'actionId': 'acknowledge-inbox',
+        'input': {'kind': 'acknowledge-inbox', 'entryId': 'e1'},
+      });
+      expect(counts, [1, 0]);
+    },
+  );
+
   testWidgets('Routines recovers from offline without raw backend detail', (
     tester,
   ) async {

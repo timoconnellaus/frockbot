@@ -69,6 +69,17 @@ class _ConnectionsPageState extends State<ConnectionsPage>
   /// but only the row that was pressed shows it: the rest stay as they are,
   /// and a press on them while this one settles simply does nothing.
   String? pendingRow;
+
+  /// The account this client just turned on or off, and which way.
+  ///
+  /// `connection/set-enabled` is a boolean this client chose and sent, and the
+  /// pill and the dot read it straight off the account, so the row says it at
+  /// once rather than a round trip later. Nothing else here is the client's to
+  /// say: a key has to be checked, a door has to be opened, a disconnection
+  /// has a `revoking` state of the authority's own — those wait for the read.
+  String? toggledConnection;
+  bool toggledOn = false;
+
   String? loadFailure;
   String? notice;
   int commands = 0;
@@ -149,9 +160,15 @@ class _ConnectionsPageState extends State<ConnectionsPage>
   /// refused. `row` is the row that was pressed, the one that shows the wait.
   Future<void> _send(Map<String, Object?> command, String row) async {
     if (pendingRow != null) return;
+    final input = ((command['input'] as Map?) ?? const {})
+        .cast<String, Object?>();
     setState(() {
       pendingRow = row;
       notice = null;
+      if (input['kind'] == 'set-enabled') {
+        toggledConnection = input['connectionId'] as String?;
+        toggledOn = input['enabled'] == true;
+      }
     });
     try {
       if (connectionActionKindV1(command) == 'authorize') {
@@ -161,17 +178,26 @@ class _ConnectionsPageState extends State<ConnectionsPage>
         await widget.api.request(request.path, body: request.body);
       }
     } on FormatException catch (error) {
-      if (mounted) setState(() => notice = error.message);
+      if (mounted) {
+        setState(() {
+          notice = error.message;
+          toggledConnection = null;
+        });
+      }
     } catch (_) {
       if (mounted) {
-        setState(
-          () => notice =
-              'That didn’t go through. Check your connection and try again.',
-        );
+        setState(() {
+          notice =
+              'That didn’t go through. Check your connection and try again.';
+          toggledConnection = null;
+        });
       }
     } finally {
       if (mounted) setState(() => pendingRow = null);
       await load();
+      // The read is the authority on what the command did, so what this client
+      // drew for itself stops being drawn the moment that read lands.
+      if (mounted) setState(() => toggledConnection = null);
     }
   }
 
@@ -243,6 +269,11 @@ class _ConnectionsPageState extends State<ConnectionsPage>
           (account) =>
               account['packageId'] as String == packageId &&
               account['connectionTypeId'] as String == connectionTypeId,
+        )
+        .map(
+          (account) => account['id'] == toggledConnection
+              ? {...account, 'state': toggledOn ? 'ready' : 'disabled'}
+              : account,
         )
         .toList();
   }
@@ -595,13 +626,30 @@ class _Pill extends StatelessWidget {
   });
 
   /// The pill's height, and so the spinner's, in both states.
-  static const height = 32.0;
+  static const height = 30.0;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    // Quiet by default: the row's name is the loud part. The primary pill
+    // wears the accent as a tint rather than a slab, so six of them in a
+    // column read as six doors and not six alarms.
     final style = ButtonStyle(
       visualDensity: VisualDensity.standard,
+      shape: WidgetStatePropertyAll(
+        RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
+      ),
+      backgroundColor: WidgetStatePropertyAll(
+        primary
+            ? scheme.primary.withValues(alpha: 0.16)
+            : scheme.onSurface.withValues(alpha: 0.07),
+      ),
+      foregroundColor: WidgetStatePropertyAll(
+        primary ? scheme.primary : scheme.onSurface,
+      ),
+      overlayColor: WidgetStatePropertyAll(
+        (primary ? scheme.primary : scheme.onSurface).withValues(alpha: 0.08),
+      ),
       // A fixed height with the label centred on its cap height: the line
       // box the theme's label style carries leaves more room below the
       // letters than above, and the word sat low in the pill.
@@ -613,7 +661,8 @@ class _Pill extends StatelessWidget {
       fixedSize: const WidgetStatePropertyAll(Size.fromHeight(height)),
       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
       textStyle: WidgetStatePropertyAll(
-        Theme.of(context).textTheme.labelLarge?.copyWith(
+        Theme.of(context).textTheme.labelMedium?.copyWith(
+          fontWeight: FontWeight.w600,
           height: 1.0,
           leadingDistribution: TextLeadingDistribution.even,
         ),
@@ -654,9 +703,7 @@ class _Pill extends StatelessWidget {
                   height: 16,
                   child: CircularProgressIndicator(
                     strokeWidth: 2,
-                    color: primary
-                        ? scheme.onPrimary
-                        : scheme.onSecondaryContainer,
+                    color: primary ? scheme.primary : scheme.onSurface,
                   ),
                 ),
               ),

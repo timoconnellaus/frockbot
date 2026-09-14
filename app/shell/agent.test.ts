@@ -415,23 +415,6 @@ describe("the conversation prompt section", () => {
     }
   });
 
-  test("says acknowledge first, then beats, and never the steps between", () => {
-    expect(CONVERSATION_PROMPT_TEXT_V1).toContain("On it.");
-    expect(CONVERSATION_PROMPT_TEXT_V1).toContain(
-      "send only on a real beat: the result, a decision only the user can make, or a blocker",
-    );
-    expect(CONVERSATION_PROMPT_TEXT_V1).toContain(
-      "Never narrate what you are doing",
-    );
-    expect(CONVERSATION_PROMPT_TEXT_V1).toContain(
-      "Never leave a question or a request hanging",
-    );
-    // Short enough to be read as guidance rather than skimmed as a document.
-    expect(CONVERSATION_PROMPT_TEXT_V1.split("\n").length).toBeLessThanOrEqual(
-      12,
-    );
-  });
-
   test("the tool contract admits every payload type the decoder accepts", async () => {
     // The model is handed this schema as the tool's contract, and a strict
     // provider will not let it produce a branch the schema omits. So every
@@ -507,12 +490,6 @@ describe("the conversation prompt section", () => {
       ).toBe(false);
 
       expect(description).toContain("only way to say anything the user sees");
-      // When to call it, not only what it does.
-      expect(description).toContain("Call it once, immediately");
-      expect(description).toContain("Call it again only on a real");
-      expect(description).toContain("narrate a step or a tool");
-      expect(description).toContain("never end your Turn leaving the");
-      expect(description).toContain("keep it short");
     } finally {
       await mounted.dispose();
     }

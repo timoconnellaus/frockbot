@@ -15,15 +15,15 @@
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p test/tsconfig.json && tsc --noEmit -p e2e/tsconfig.json"
   },
   "dependencies": {
-    "@cloudflare/voice": "0.4.0",
-    "@cloudflare/voice-elevenlabs": "0.1.0",
+    "@cloudflare/voice": "0.5.0",
+    "@cloudflare/voice-elevenlabs": "0.2.0",
     "@frockbot/app": "workspace:*",
     "@frockbot/applets": "workspace:*",
     "@frockbot/frock-compose": "workspace:*",
     "@frockbot/computer": "workspace:*",
     "@frockbot/core": "workspace:*",
     "@frockbot/providers": "workspace:*",
-    "agents": "0.22.0",
+    "agents": "0.23.0",
     "ai": "^7.0.0",
     "better-auth": "1.7.2"
   },

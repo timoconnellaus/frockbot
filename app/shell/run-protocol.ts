@@ -49,6 +49,9 @@ export interface ClientTurnEvent {
   payload?: unknown;
   /** A `wake/parent` hand-off message. */
   message?: string;
+  /** A `reply/to-caller` answer and who it was addressed to. */
+  text?: string;
+  caller?: string;
   /** A `task/dispatched` subagent chip. */
   taskId?: string;
   taskType?: string;
@@ -105,6 +108,11 @@ export interface ClientTurnResponse {
 export interface ClientRun {
   runId: string;
   admittedAt?: string;
+  messageRunId?: string;
+  messageAdmittedAt?: string;
+  retryOf?: string;
+  retriedBy?: string;
+  canRetry?: boolean;
   input: string;
   events: ClientTurnEvent[];
   status: "running" | "completed" | "failed" | "cancelled" | "superseded";
@@ -125,7 +133,7 @@ export interface ClientRun {
    */
   partialText?: string;
   /** Source marker for a message admitted on the agent lane. */
-  via?: { kind: "bot"; name: string; botId: string };
+  via?: { kind: "bot"; name: string; botId: string } | { kind: "voice" };
 }
 
 const MAX_RUN_ID_LENGTH = 128;
@@ -265,6 +273,17 @@ export type ClientRunEventV1 =
       ordinal: number;
     }
   /**
+   * The Turn's answer to the caller that asked for it. Projected because it
+   * *is* the conversation — the exchange happened in this Bot's thread and the
+   * person can read it back — but it is not a send: it minted no message,
+   * raised no badge, and reached its caller by its own route.
+   */
+  | {
+      type: "reply/to-caller";
+      caller: "voice";
+      text: string;
+    }
+  /**
    * A child Turn's hand-off to its parent. Projected because it is durable
    * history of that Turn; delivering it into the parent is a later slice.
    */
@@ -335,12 +354,20 @@ export type ClientRunOutcomeV1 =
 /**
  * The run projection. Version 2 added structured `send/to-user` and
  * `wake/parent` events; version 3 adds the bounded `via` marker for agent
- * Turns without exposing the internal origin record.
+ * Turns without exposing the internal origin record. Version 4 gives every
+ * execution attempt the stable identity of its original user message.
  */
 export interface ClientRunV1 {
-  schemaVersion: 1 | 2 | 3;
+  schemaVersion: 1 | 2 | 3 | 4;
   runId: string;
   admittedAt: string;
+  /** Stable user-message identity shared by every execution attempt. */
+  messageRunId?: string;
+  messageAdmittedAt?: string;
+  retryOf?: string;
+  retriedBy?: string;
+  /** Authority permits a fresh attempt over this failed user message. */
+  canRetry?: boolean;
   input: string;
   status: ClientRunStatusV1;
   events: ClientRunEventV1[];
@@ -361,8 +388,11 @@ export interface ClientRunV1 {
    */
   partialText?: string;
   outcome?: ClientRunOutcomeV1;
-  /** Where an agent-lane question entered this Bot's transcript. */
-  via?: { kind: "bot"; name: string; botId: string };
+  /**
+   * Where an agent-lane question entered this Bot's transcript: another Bot of
+   * the same User, or the account's voice session speaking for the person.
+   */
+  via?: { kind: "bot"; name: string; botId: string } | { kind: "voice" };
 }
 
 export interface ClientRunPageV1 {
@@ -418,6 +448,8 @@ export interface ClientRunListQueryV1 {
 export interface ClientTurnCommandV1 {
   schemaVersion: 1;
   commandId: string;
+  /** Retry an exact failed attempt without creating another user message. */
+  retryOf?: string;
   text: string;
   /**
    * The Skills this message invokes, attached in the composer with `/` or `@`.
@@ -776,6 +808,17 @@ function projectionUnits(
         droppable: true,
       });
       sendCount += 1;
+    } else if (event.type === "reply/to-caller") {
+      units.push({
+        events: [
+          {
+            type: "reply/to-caller",
+            caller: event.caller,
+            text: truncateWireString(event.text, MAX_EVENT_CONTENT_BYTES),
+          },
+        ],
+        droppable: true,
+      });
     } else if (event.type === "wake/parent") {
       units.push({
         events: [
@@ -1047,6 +1090,10 @@ export function projectClientRunV1(
               } satisfies ClientRunOutcomeV1)
             : undefined;
   const origin = run.admission?.origin;
+  // Who asked, for the two agent-lane callers. The voice marker deliberately
+  // carries nothing else: a call id and a spoken turn id name durable voice
+  // state, and the transcript has no use for either — what it needs to draw is
+  // that this exchange was spoken, not typed.
   const via =
     origin?.kind === "bot"
       ? {
@@ -1054,12 +1101,26 @@ export function projectClientRunV1(
           name: truncateWireString(origin.fromBotName, 100),
           botId: truncate(origin.fromBotId, 128),
         }
-      : undefined;
+      : origin?.kind === "voice"
+        ? { kind: "voice" as const }
+        : undefined;
   return {
-    // Version 3 adds the origin marker for an agent-lane message.
-    schemaVersion: 3,
+    // Every attempt carries its message identity, independently of paging.
+    schemaVersion: 4,
     runId: truncate(run.runId, MAX_RUN_ID_LENGTH),
     admittedAt: truncate(run.acceptedAt, MAX_TIMESTAMP_LENGTH),
+    messageRunId: run.messageRunId ?? run.runId,
+    messageAdmittedAt: run.messageAdmittedAt ?? run.acceptedAt,
+    ...(run.retryOf ? { retryOf: run.retryOf } : {}),
+    ...(run.retriedBy ? { retriedBy: run.retriedBy } : {}),
+    canRetry:
+      status === "failed" &&
+      run.retriedBy === undefined &&
+      (run.admission?.turnType ?? "chat") === "chat" &&
+      (run.admission?.lane ?? "user") === "user" &&
+      run.admission?.origin === undefined &&
+      run.directTool === undefined &&
+      run.input.trim().length > 0,
     input:
       run.admission?.turnType === "automation"
         ? ""
@@ -1445,6 +1506,17 @@ function decodeEvent(value: unknown): ClientRunEventV1 | undefined {
       ordinal: ordinal as number,
     };
   }
+  if (event.type === "reply/to-caller") {
+    exactKeys(event, ["type", "caller", "text"], "run event");
+    if (event.caller !== "voice") {
+      throw new Error("run event.caller is invalid");
+    }
+    return {
+      type: "reply/to-caller",
+      caller: "voice",
+      text: wireString(event, "text", MAX_EVENT_CONTENT_BYTES, "run event"),
+    };
+  }
   if (event.type === "wake/parent") {
     exactKeys(event, ["type", "message"], "run event");
     return {
@@ -1593,6 +1665,7 @@ function decodeEvents(values: unknown[]): ClientTurnEvent[] {
     // with nothing, so the call/result walk steps straight over them.
     if (
       call?.type === "send/to-user" ||
+      call?.type === "reply/to-caller" ||
       call?.type === "wake/parent" ||
       call?.type === "task/dispatched" ||
       call?.type === "plugin/model-usage" ||
@@ -1697,6 +1770,11 @@ function decodeRun(value: unknown): ClientRun {
       "partialText",
       "outcome",
       "via",
+      "messageRunId",
+      "messageAdmittedAt",
+      "retryOf",
+      "retriedBy",
+      "canRetry",
     ],
     "run",
   );
@@ -1705,14 +1783,15 @@ function decodeRun(value: unknown): ClientRun {
   if (
     run.schemaVersion !== 1 &&
     run.schemaVersion !== 2 &&
-    run.schemaVersion !== 3
+    run.schemaVersion !== 3 &&
+    run.schemaVersion !== 4
   ) {
     throw new Error("run.schemaVersion is invalid");
   }
   let via: ClientRunV1["via"];
   if (run.via !== undefined) {
-    if (run.schemaVersion !== 3) {
-      throw new Error("run.via requires schemaVersion 3");
+    if (run.schemaVersion !== 3 && run.schemaVersion !== 4) {
+      throw new Error("run.via requires schemaVersion 3 or 4");
     }
     const candidate = record(run.via, "run.via");
     if (candidate.kind === "bot") {
@@ -1722,6 +1801,12 @@ function decodeRun(value: unknown): ClientRun {
         name: wireString(candidate, "name", 100, "run.via"),
         botId: string(candidate, "botId", 128, "run.via"),
       };
+    } else if (candidate.kind === "voice") {
+      // The account has one voice session, so there is nothing to name. A
+      // marker that carried a call id would be an identifier the transcript
+      // cannot use and a decoder would still have to bound.
+      exactKeys(candidate, ["kind"], "run.via");
+      via = { kind: "voice" };
     } else {
       throw new Error("run.via.kind is invalid");
     }
@@ -1735,6 +1820,60 @@ function decodeRun(value: unknown): ClientRun {
   const admittedAt = string(run, "admittedAt", MAX_TIMESTAMP_LENGTH, "run");
   if (!Number.isFinite(Date.parse(admittedAt))) {
     throw new Error("run.admittedAt is invalid");
+  }
+  const lineage: Pick<
+    ClientRun,
+    "messageRunId" | "messageAdmittedAt" | "retryOf" | "retriedBy" | "canRetry"
+  > = {};
+  if (run.schemaVersion === 4) {
+    if (typeof run.canRetry !== "boolean") {
+      throw new Error("run.canRetry must be a boolean");
+    }
+    lineage.canRetry = run.canRetry;
+    lineage.messageRunId = decodeRunIdV1(
+      string(run, "messageRunId", MAX_RUN_ID_LENGTH, "run"),
+    );
+    lineage.messageAdmittedAt = string(
+      run,
+      "messageAdmittedAt",
+      MAX_TIMESTAMP_LENGTH,
+      "run",
+    );
+    if (!Number.isFinite(Date.parse(lineage.messageAdmittedAt))) {
+      throw new Error("run.messageAdmittedAt is invalid");
+    }
+    for (const field of ["retryOf", "retriedBy"] as const) {
+      if (run[field] !== undefined) {
+        lineage[field] = decodeRunIdV1(
+          string(run, field, MAX_RUN_ID_LENGTH, "run"),
+        );
+        if (lineage[field] === runId)
+          throw new Error(`run.${field} names itself`);
+      }
+    }
+    if (
+      lineage.retryOf === undefined &&
+      (lineage.messageRunId !== runId ||
+        lineage.messageAdmittedAt !== admittedAt)
+    ) {
+      throw new Error("run has message lineage without a retry");
+    }
+    if (lineage.retryOf !== undefined && lineage.messageRunId === runId) {
+      throw new Error("retry run cannot be its own message root");
+    }
+    if (lineage.retriedBy !== undefined && run.status !== "failed") {
+      throw new Error("only a failed run may have a retry successor");
+    }
+  } else if (
+    [
+      "messageRunId",
+      "messageAdmittedAt",
+      "retryOf",
+      "retriedBy",
+      "canRetry",
+    ].some((field) => run[field] !== undefined)
+  ) {
+    throw new Error("run message lineage requires schemaVersion 4");
   }
   if (!Array.isArray(run.events) || run.events.length > MAX_VISIBLE_EVENTS) {
     throw new Error("run.events must be a bounded array");
@@ -1775,6 +1914,7 @@ function decodeRun(value: unknown): ClientRun {
   return {
     runId,
     admittedAt,
+    ...lineage,
     input: wireString(run, "input", MAX_INPUT_BYTES, "run"),
     status: runStatus,
     events: decodeEvents(run.events),
@@ -2008,7 +2148,7 @@ export function decodeClientTurnCommandV1(input: unknown): ClientTurnCommandV1 {
   const command = record(input, "turn command");
   exactKeys(
     command,
-    ["schemaVersion", "commandId", "text", "skills", "supersedes"],
+    ["schemaVersion", "commandId", "text", "skills", "supersedes", "retryOf"],
     "turn command",
   );
   if (command.schemaVersion !== 1) {
@@ -2055,6 +2195,14 @@ export function decodeClientTurnCommandV1(input: unknown): ClientTurnCommandV1 {
       }
     }
   }
+  const retryOf =
+    command.retryOf === undefined
+      ? undefined
+      : decodeRunIdV1(
+          string(command, "retryOf", MAX_RUN_ID_LENGTH, "turn command"),
+        );
+  if (retryOf === commandId)
+    throw new Error("turn command.retryOf names itself");
   const skills =
     command.skills === undefined
       ? []
@@ -2063,6 +2211,7 @@ export function decodeClientTurnCommandV1(input: unknown): ClientTurnCommandV1 {
     schemaVersion: 1,
     commandId,
     text,
+    ...(retryOf ? { retryOf } : {}),
     ...(skills.length > 0 ? { skills } : {}),
     ...(supersedes ? { supersedes } : {}),
   };

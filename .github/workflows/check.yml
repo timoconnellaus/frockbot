@@ -1,8 +1,9 @@
 name: Check
 
-# The one check a pull request owes before it may merge. It is the fast tier
-# — format, typecheck, unit tests and the two small package suites, a couple
-# of minutes on a cold runner — and it needs no secret, so a fork's pull
+# What a pull request owes before it may merge. It is the fast tier — format,
+# typecheck, unit tests and the two small package suites, plus the Flutter
+# client's analysis and tests beside them, a few minutes on a cold runner —
+# and it needs no secret, so a fork's pull
 # request runs it safely. It runs against the pull request's own head, not a
 # rebase onto current `main`: the ruleset does not require an up-to-date
 # branch, because at this merge rate that requirement was a rebase-and-rerun
@@ -10,7 +11,8 @@ name: Check
 # this tier again and the slow one (workerd, integration, the browser suite)
 # on the merge commit, and gates staging and production on the result.
 #
-# The `main` ruleset requires a check by this job's exact name.
+# The `main` ruleset requires a check by each job's exact name: `Check` and
+# `Flutter`.
 
 on:
   pull_request:
@@ -66,3 +68,45 @@ jobs:
 
       - name: Test Applet build service runtime
         run: bun run --filter @frockbot/applet-build test:workerd
+
+  # The Flutter client's own analysis and tests. `apps/native` is the phone
+  # app, the macOS app and the web client at once, and neither `bun test` nor
+  # `flutter build web` reads its `test/` directory, so without this a change
+  # could leave the Dart tree uncompilable with every other check green. That
+  # is not hypothetical: two pull requests that touched different lines of the
+  # same sidebar API merged cleanly on 2026-09-12 and `main` stopped compiling
+  # its tests. It is a job of its own so it runs beside the Bun tier rather
+  # than after it.
+  flutter:
+    name: Flutter
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Pinned to the revision `apps/native/qualification.json` records, the
+      # same SDK the web client is built with.
+      - name: Set up Flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          flutter-version: 3.47.0
+          channel: stable
+          cache: true
+
+      - name: Resolve pinned packages
+        working-directory: apps/native
+        run: flutter pub get --enforce-lockfile
+
+      # Infos are fatal here as they are locally: a lint left standing is one
+      # more line every later run has to read past.
+      - name: Analyze Dart
+        working-directory: apps/native
+        run: flutter analyze --no-pub
+
+      - name: Test Flutter client
+        working-directory: apps/native
+        run: flutter test --no-pub

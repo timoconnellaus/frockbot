@@ -26,8 +26,13 @@ import 'widget_test.dart' show MemoryStore;
 /// The routes an adopted Bot with one published Applet answers; everything
 /// else is offline, which the shell tolerates.
 class PremountApi extends NativeApi {
-  PremountApi(super.store);
+  PremountApi(super.store, {this.entryLabel = 'Applets'});
   final requested = <String>[];
+
+  /// What the Applets Package's own entry is called. The shell leaves out a
+  /// Package entry that is the same door as its built-in Applets one, so a
+  /// spec about Package entries in general names something else.
+  final String entryLabel;
 
   @override
   Future<Object?> request(
@@ -37,7 +42,7 @@ class PremountApi extends NativeApi {
     bool authenticated = true,
   }) async {
     requested.add(path);
-    if (path.endsWith('/package-ui')) return catalog();
+    if (path.endsWith('/package-ui')) return catalog(entryLabel: entryLabel);
     if (path.endsWith('/applets/open')) {
       return {
         'schemaVersion': 1,

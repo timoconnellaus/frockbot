@@ -484,28 +484,65 @@ describe("user application Bot seam", () => {
     expect(dispatches).toBe(0);
   });
 
-  test("rejects archived Bot routes before dispatch", async () => {
+  test("archived Bots allow history reads but reject commands before dispatch", async () => {
     let dispatches = 0;
+    const reads: string[] = [];
+    const unexpected = () => {
+      dispatches += 1;
+      return Promise.reject(new Error("must not dispatch"));
+    };
     const archived = new Error('Bot "primary" is archived');
     archived.name = "BotArchivedError";
     const env = {
       BOT_STATE: {
         assertRegistered: () => Promise.reject(archived),
-        run: () => {
-          dispatches += 1;
-          return Promise.reject(new Error("must not dispatch"));
+        listRuns: ({ botId }: { botId: string }) => {
+          reads.push(`list:${botId}`);
+          return Promise.resolve({
+            schemaVersion: 1,
+            runs: [],
+            nextCursor: null,
+          });
         },
+        lookupRun: ({ botId }: { botId: string }) => {
+          reads.push(`lookup:${botId}`);
+          return Promise.resolve({ schemaVersion: 1, state: "not-admitted" });
+        },
+        run: unexpected,
+        fenceRunAdmission: unexpected,
+        stopRun: unexpected,
+        listNotifications: unexpected,
+        acknowledgeNotification: unexpected,
       } as unknown as UserBotStateBinding,
       DEPLOYMENT: { userId: "alice", applicationHash: "foundation-v1" },
     } satisfies UserApplicationEnv;
-    const response = await createUserApplication()(
-      new Request("https://frockbot.test/api/bots/primary/turns"),
-      env,
-    );
-    expect(response.status).toBe(409);
-    expect((await response.json()) as { error: string }).toEqual({
-      error: 'Bot "primary" is archived',
-    });
+    const fetchUserApplication = createUserApplication();
+    const base = "https://frockbot.test/api/bots/primary";
+    for (const path of ["/turns", "/turns/run-1"]) {
+      expect(
+        (await fetchUserApplication(new Request(base + path), env)).status,
+      ).toBe(200);
+    }
+    expect(reads).toEqual(["list:primary", "lookup:primary"]);
+    for (const path of [
+      "/turns",
+      "/turns/run-1/fence",
+      "/turns/run-1/stop",
+      "/notifications",
+    ]) {
+      const response = await fetchUserApplication(
+        new Request(base + path, { method: "POST", body: "{}" }),
+        env,
+      );
+      expect(response.status).toBe(409);
+      expect(await response.json<unknown>()).toEqual({
+        error: 'Bot "primary" is archived',
+      });
+    }
+    expect(
+      (await fetchUserApplication(new Request(base + "/notifications"), env))
+        .status,
+    ).toBe(409);
     expect(dispatches).toBe(0);
   });
 
@@ -1222,4 +1259,46 @@ describe("Applet deletion", () => {
     );
     expect(response.status).toBe(503);
   });
+});
+
+test("the public turn route forwards a retry target under its fresh command id", async () => {
+  const calls: unknown[] = [];
+  const binding = rpcBindingFor({} as BotStateBinding);
+  binding.run = async (request) => {
+    calls.push(request);
+    return {
+      schemaVersion: 1,
+      runId: request.command.runId,
+      text: "",
+      events: [],
+    };
+  };
+  const response = await createUserApplication()(
+    new Request("https://app.example/api/bots/primary/turns", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        schemaVersion: 1,
+        commandId: "attempt-2",
+        retryOf: "attempt-1",
+        text: "Check the build",
+      }),
+    }),
+    {
+      BOT_STATE: binding,
+      DEPLOYMENT: { userId: "alice", applicationHash: "foundation-v1" },
+    },
+  );
+  expect(response.status).toBe(200);
+  expect(calls).toEqual([
+    expect.objectContaining({
+      botId: "primary",
+      command: expect.objectContaining({
+        runId: "attempt-2",
+        retryOf: "attempt-1",
+        text: "Check the build",
+        sessionId: "alice:primary",
+      }),
+    }),
+  ]);
 });

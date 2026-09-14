@@ -14,10 +14,60 @@ library;
 
 import 'dart:math' show min;
 
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../theme/frock_theme.dart';
 import 'semantics.dart';
+
+/// Whether this is the Mac app, whose window has no title bar: the shell
+/// draws to the edge and keeps a strip at the top of the Bot list clear for
+/// the traffic lights.
+bool get desktopTitleBarless =>
+    !kIsWeb && defaultTargetPlatform == TargetPlatform.macOS;
+
+/// How tall that strip is. The traffic lights sit 12 points from the top of
+/// a title-less window and are 12 points tall; the strip is what a
+/// title bar would have been, so the eye finds them where it expects to.
+const double desktopTitleBarInset = 28;
+
+/// The window's own gestures, which Flutter cannot perform itself: dragging
+/// the window by the strip where its title bar was, and zooming on a
+/// double-click there.
+abstract final class DesktopWindow {
+  static const _channel = MethodChannel('com.frockbot/window');
+  static Future<void> startDrag() async {
+    try {
+      await _channel.invokeMethod<void>('startDrag');
+    } on MissingPluginException {
+      // A host without the channel — a test, the web — has no window to move.
+    }
+  }
+
+  static Future<void> zoom() async {
+    try {
+      await _channel.invokeMethod<void>('zoom');
+    } on MissingPluginException {
+      // As above.
+    }
+  }
+}
+
+/// The strip at the top of the Bot list where the title bar was. Empty, so
+/// the traffic lights have the room they need, and the window follows a drag
+/// that starts on it.
+class DesktopTitleStrip extends StatelessWidget {
+  const DesktopTitleStrip({super.key});
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+    behavior: HitTestBehavior.opaque,
+    onPanStart: (_) => DesktopWindow.startDrag(),
+    onDoubleTap: DesktopWindow.zoom,
+    child: const SizedBox(height: desktopTitleBarInset, width: double.infinity),
+  );
+}
 
 /// The width at or below which the right panel is a drawer rather than a
 /// column, matching the stylesheet's first breakpoint.
@@ -101,7 +151,7 @@ class ShellLayout extends StatelessWidget {
       // collapsed column at the widest tier is simply gone, not a drawer
       // waiting under a scrim.
       final drawnPanel = tier == ShellTier.dual && panelOpen && panel != null;
-      final divider = Theme.of(context).colorScheme.outlineVariant;
+      final divider = FrockTheme.hairline(Theme.of(context).colorScheme);
       return PopScope(
         canPop: !drawnPanel,
         onPopInvokedWithResult: (didPop, _) {
@@ -124,7 +174,16 @@ class ShellLayout extends StatelessWidget {
                           border: Border(right: BorderSide(color: divider)),
                           child: SafeArea(
                             top: false,
-                            child: identified(ShellIds.sidebar, sidebar),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                if (desktopTitleBarless)
+                                  const DesktopTitleStrip(),
+                                Expanded(
+                                  child: identified(ShellIds.sidebar, sidebar),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
                         // The header is the conversation's, not the window's:

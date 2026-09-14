@@ -289,6 +289,7 @@ export interface DecodedBotRunRpcV1 {
     acceptedAt: string;
     text: string;
     skills?: SkillRefV1[];
+    retryOf?: string;
     /** The lane this command asks for. Only `user` crosses this seam. */
     lane?: "user";
     /** Explicit intent to replace the Turn the client observed running. */
@@ -310,6 +311,7 @@ export const rpcBotTurnCommandOptionalsV1: Readonly<
   Record<string, RpcValueDecoder>
 > = {
   skills: (value, label) => decodeSkillRefsV1(value, label),
+  retryOf: (value) => decodeRunIdV1(value),
   lane: (value, label) => {
     if (value !== "user") throw new Error(`${label} is invalid`);
     return "user" as const;
@@ -380,6 +382,71 @@ export interface DecodedBotAgentRunRpcV1 {
       fromBotName: string;
       messageId: string;
     };
+  };
+}
+
+export interface DecodedBotVoiceRunRpcV1 {
+  schemaVersion: 1;
+  userId: string;
+  botId: string;
+  command: {
+    runId: string;
+    sessionId: string;
+    acceptedAt: string;
+    text: string;
+    source: {
+      kind: "voice";
+      callId: string;
+      voiceTurnId: string;
+      requestId: string;
+    };
+  };
+}
+
+/**
+ * Internal-only voice admission. Its own door rather than a variant of the
+ * agent one: the return address a voice request carries is not a Bot id, and a
+ * door that accepted either could be handed a Bot's name where a call belongs.
+ * The HTTP Turn decoder cannot name this shape at all.
+ */
+export function decodeBotVoiceRunRpcV1(
+  input: unknown,
+): DecodedBotVoiceRunRpcV1 {
+  const source = rpcObject({
+    kind: rpcPattern(/^voice$/, 5),
+    callId: rpcString(128),
+    voiceTurnId: rpcString(256),
+    requestId: rpcString(128),
+  });
+  const request = decodeRpcEnvelopeV1(input, {
+    userId: rpcIdentifier,
+    botId: rpcBotId,
+    command: rpcObject({
+      runId: rpcString(128),
+      sessionId: rpcString(257),
+      acceptedAt: rpcString(64),
+      text: rpcString(32_000),
+      source,
+    }),
+  });
+  const command = request.command as DecodedBotVoiceRunRpcV1["command"];
+  command.runId = decodeRunIdV1(command.runId);
+  // The request the answer goes back to is the Turn that answers it. A door
+  // that let the two differ would let one admission address another's caller.
+  if (command.source.requestId !== command.runId) {
+    throw new Error("voice RPC request.command.source.requestId is invalid");
+  }
+  if (!Number.isFinite(Date.parse(command.acceptedAt))) {
+    throw new Error("voice RPC request.command.acceptedAt is invalid");
+  }
+  if (new TextEncoder().encode(command.text).byteLength > 32_000) {
+    throw new Error("voice RPC request.command.text is invalid");
+  }
+  return {
+    schemaVersion: 1,
+    userId: request.userId as string,
+    botId: request.botId as string,
+    command,
   };
 }
 
