@@ -224,7 +224,10 @@ class BotSettingsController extends ChangeNotifier {
   ///
   /// What the fields show is not read back afterwards. The surface saves as
   /// the person edits, and a read landing under a field they are still typing
-  /// into would replace their text with the server's copy of it.
+  /// into would replace their text with the server's copy of it. The one
+  /// exception is a failed save that may have hidden the Bot: see
+  /// [_reconcileUnacceptedHide], which re-reads the two switches the authority
+  /// couples because their landed values cannot be guessed from here.
   Future<bool> save() async {
     if (saving) return false;
     saving = true;

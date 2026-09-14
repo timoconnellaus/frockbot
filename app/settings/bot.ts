@@ -85,9 +85,7 @@ const HIDDEN_BOT_NOTIFICATIONS_FAILURE =
  * A Bot hidden from the sidebar never alerts. Unread state is untouched: the
  * mute changes whether a message wakes a device, not whether it counts.
  */
-function hiddenBotSettingsV1(
-  settings: BotSettingsViewV1,
-): BotSettingsViewV1 {
+function hiddenBotSettingsV1(settings: BotSettingsViewV1): BotSettingsViewV1 {
   return settings.profile.hiddenFromSidebar === true &&
     settings.notifications.enabled
     ? { ...settings, notifications: { enabled: false } }

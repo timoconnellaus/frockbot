@@ -628,8 +628,9 @@ the rows whose status the code moved:
   admitted Turn whose Session and Turn the write can name
   (`plugin-shell/src/backend-flock.ts`). `bot_update` is a true partial update:
   it takes `name`, `description`, `title`, `hidden_from_sidebar` and
-  `notify_on_updates`, changes only the fields the call carries, and writes
-  nothing at all when the durable record already holds them. A self-rename goes
+  `notify_on_updates`, changes only the fields the call carries — apart from
+  the hidden-implies-muted coupling in row 4 — and writes nothing at all when
+  the durable record already holds them. A self-rename goes
   through `bot/set-profile` with `namedBy: "bot"` and a `writer` naming the Bot,
   Session and Turn, so the `bot/renamed` announcement carries its provenance.
   **There is no delete tool**, matching GrokBot: `bot_update` cannot archive,
