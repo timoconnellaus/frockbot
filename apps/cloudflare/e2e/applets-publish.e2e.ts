@@ -51,10 +51,10 @@ const PHONE = { width: 390, height: 844 } as const;
  */
 async function recentToolResults(page: Page, userId: string): Promise<string> {
   const headers = { authorization: `Bearer ${E2E_DEBUG_TOKEN}` };
-  const bots = (await (
-    await page.request.get(`/api/debug/bots?userId=${userId}`, { headers })
-  ).json()) as { bots?: Array<{ botId: string }> };
-  const botId = bots.bots?.[0]?.botId;
+  const bots = (await (await page.request.get("/api/bots")).json()) as {
+    bots?: Array<{ botId: string; initialName: string }>;
+  };
+  const botId = bots.bots?.find((bot) => bot.initialName === "Builder")?.botId;
   if (!botId) return "no Bot";
   const detail = await page.request.get(
     `/api/debug/bots/${botId}?userId=${userId}&events=true`,

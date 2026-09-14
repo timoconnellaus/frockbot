@@ -40,11 +40,7 @@ const DESKTOP = { width: 1351, height: 831 } as const;
  */
 async function recentToolResults(page: Page, userId: string): Promise<string> {
   const headers = { authorization: `Bearer ${E2E_DEBUG_TOKEN}` };
-  const bots = (await (
-    await page.request.get(`/api/debug/bots?userId=${userId}`, { headers })
-  ).json()) as { bots?: Array<{ botId: string }> };
-  const botId = bots.bots?.[0]?.botId;
-  if (!botId) return "no Bot";
+  const botId = await botIdOf(page, userId);
   const detail = await page.request.get(
     `/api/debug/bots/${botId}?userId=${userId}&events=true`,
     { headers },
@@ -177,11 +173,10 @@ test("a Bot writes, checks and publishes a Plugin; the User approves it; its too
 });
 
 async function botIdOf(page: Page, userId: string): Promise<string> {
-  const headers = { authorization: `Bearer ${E2E_DEBUG_TOKEN}` };
-  const bots = (await (
-    await page.request.get(`/api/debug/bots?userId=${userId}`, { headers })
-  ).json()) as { bots?: Array<{ botId: string }> };
-  const botId = bots.bots?.[0]?.botId;
+  const bots = (await (await page.request.get("/api/bots")).json()) as {
+    bots?: Array<{ botId: string; initialName: string }>;
+  };
+  const botId = bots.bots?.find((bot) => bot.initialName === "Author")?.botId;
   if (!botId) throw new Error("no Bot");
   return botId;
 }
