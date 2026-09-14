@@ -47,8 +47,7 @@ custom user driver that shows nothing itself and reports to Flutter over
 - **Feeds.** `mac/appcast.xml` (stable) and `mac/appcast-staging.xml`
   (prereleases). A prerelease build follows staging; a release build follows
   stable. `scripts/mac-appcast.py` writes one item, refuses to move a feed to an
-  older build, and a release advances staging too unless staging already has a
-  newer prerelease.
+  older build, and a tag writes only the feed its own channel owns.
 - **Version identity.** `sparkle:version` is `CFBundleVersion`, the release
   run number, which only grows. `sparkle:shortVersionString` is the tag.
 - **Development installs.** `scripts/native-desktop-update.py` builds without

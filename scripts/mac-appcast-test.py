@@ -47,15 +47,13 @@ class SigningTests(unittest.TestCase):
         tampered = bytes([data[0] ^ 1]) + data[1:]
         self.assertFalse(appcast.verify(signing.public, signature, chunks(tampered)))
 
-    def test_legacy_export_signs_like_its_seed(self):
+    def test_rejects_a_key_that_is_not_a_32_byte_seed(self):
         seed = appcast.SigningKey(key(SEED))
-        legacy = appcast.SigningKey(base64.b64encode(
-            seed.scalar.to_bytes(32, "little") + seed.prefix + seed.public).decode())
-        self.assertEqual(legacy.sign(chunks(b"frockbot")), seed.sign(chunks(b"frockbot")))
-
-    def test_rejects_a_malformed_key(self):
-        with self.assertRaises(ValueError):
-            appcast.SigningKey(base64.b64encode(b"short").decode())
+        for encoded in (base64.b64encode(b"short").decode(),
+                        base64.b64encode(seed.scalar.to_bytes(32, "little")
+                                         + seed.prefix + seed.public).decode()):
+            with self.assertRaises(ValueError):
+                appcast.SigningKey(encoded)
 
 
 class FeedTests(unittest.TestCase):
@@ -103,7 +101,7 @@ class FeedTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.feed("812", public=other.public_base64)
 
-    def test_command_skips_an_older_build_only_when_asked(self):
+    def test_command_refuses_an_older_build(self):
         current = Path(self.directory.name) / "current.xml"
         current.write_text(self.feed("900"))
         output = Path(self.directory.name) / "appcast.xml"
@@ -112,11 +110,10 @@ class FeedTests(unittest.TestCase):
         command = [sys.executable, str(Path(__file__).with_name("mac-appcast.py")),
                    "--archive", str(self.archive), "--version", "1.4.0", "--build", "812",
                    "--url", "https://downloads.frockbot.com/mac/FrockBot-macos-1.4.0.dmg",
+                   "--minimum-system", "13.0",
                    "--current", str(current), "--output", str(output)]
         refused = subprocess.run(command, env=environment, capture_output=True, text=True)
         self.assertNotEqual(refused.returncode, 0)
-        skipped = subprocess.run([*command, "--if-newer"], env=environment, capture_output=True, text=True)
-        self.assertEqual(skipped.returncode, 0, skipped.stderr)
         self.assertFalse(output.exists())
         current.unlink()
         written = subprocess.run(command, env=environment, capture_output=True, text=True)

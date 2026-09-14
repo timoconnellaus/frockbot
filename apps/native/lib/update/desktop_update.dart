@@ -45,7 +45,6 @@ class DesktopUpdateSnapshot {
   final bool downloaded;
   final int received;
   final int? expected;
-  final String? message;
 
   const DesktopUpdateSnapshot({
     this.phase = DesktopUpdatePhase.idle,
@@ -53,7 +52,6 @@ class DesktopUpdateSnapshot {
     this.downloaded = false,
     this.received = 0,
     this.expected,
-    this.message,
   });
 
   static DesktopUpdateSnapshot decode(Object? value) {
@@ -61,14 +59,12 @@ class DesktopUpdateSnapshot {
     final phase = DesktopUpdatePhase.values.asNameMap()[value['phase']];
     int? integer(Object? raw) => raw is num ? raw.toInt() : null;
     final version = value['version'];
-    final message = value['message'];
     return DesktopUpdateSnapshot(
       phase: phase ?? DesktopUpdatePhase.idle,
       version: version is String && version.isNotEmpty ? version : null,
       downloaded: value['downloaded'] == true,
       received: integer(value['received']) ?? 0,
       expected: integer(value['expected']),
-      message: message is String && message.isNotEmpty ? message : null,
     );
   }
 }

@@ -20,12 +20,10 @@ final class DesktopUpdater: NSObject, SPUUserDriver {
   private var downloaded = false
   private var received: UInt64 = 0
   private var expected: UInt64?
-  private var message: String?
 
   /// Sparkle's open questions. Each is answered exactly once.
   private var pendingFound: ((SPUUserUpdateChoice) -> Void)?
   private var pendingReady: ((SPUUserUpdateChoice) -> Void)?
-  private var retryTermination: (() -> Void)?
 
   /// Set by a press: the offer Sparkle is about to make is accepted at once.
   private var wantsDownload = false
@@ -75,7 +73,6 @@ final class DesktopUpdater: NSObject, SPUUserDriver {
     ]
     if let version { value["version"] = version }
     if let expected { value["expected"] = Int(expected) }
-    if let message { value["message"] = message }
     return value
   }
 
@@ -99,7 +96,6 @@ final class DesktopUpdater: NSObject, SPUUserDriver {
 
   private func download() {
     guard let updater else { return }
-    message = nil
     if let reply = pendingFound {
       pendingFound = nil
       reply(.install)
@@ -118,12 +114,6 @@ final class DesktopUpdater: NSObject, SPUUserDriver {
       pendingReady = nil
       publish("installing")
       reply(.install)
-      return true
-    }
-    if let retry = retryTermination {
-      retryTermination = nil
-      publish("installing")
-      retry()
       return true
     }
     return false
@@ -169,7 +159,6 @@ final class DesktopUpdater: NSObject, SPUUserDriver {
 
   func showUpdaterError(_ error: any Error, acknowledgement: @escaping () -> Void) {
     acknowledgement()
-    message = error.localizedDescription
     wantsDownload = false
     pendingFound = nil
     pendingReady = nil
@@ -216,10 +205,9 @@ final class DesktopUpdater: NSObject, SPUUserDriver {
     withApplicationTerminated applicationTerminated: Bool,
     retryTerminatingApplication: @escaping () -> Void
   ) {
-    if applicationTerminated { return }
-    // Something refused to let the app quit. It keeps running; a press retries.
-    retryTermination = retryTerminatingApplication
-    publish("ready")
+    // Sparkle reaches here on every install; `applicationTerminated` is false
+    // on the ordinary path, where it has just sent this process a quit event.
+    publish("installing")
   }
 
   func showUpdateInstalledAndRelaunched(_ relaunched: Bool, acknowledgement: @escaping () -> Void) {
@@ -245,7 +233,7 @@ final class DesktopUpdater: NSObject, SPUUserDriver {
       }
       return
     }
-    if phase != "failed" && phase != "installing" && retryTermination == nil { reset("idle") }
+    if phase != "failed" && phase != "installing" { reset("idle") }
   }
 
   private func reset(_ next: String) {

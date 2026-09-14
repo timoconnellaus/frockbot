@@ -4,7 +4,7 @@
 The feed names exactly one release — the newest — so an app that has been
 closed through several releases updates once, straight to the latest, rather
 than stepping through each. A feed never moves backwards: writing an older
-build over a newer one is refused, or with --if-newer quietly skipped.
+build over a newer one is refused.
 
 Signing is Ed25519 over the archive bytes, as Sparkle's `sign_update` does,
 implemented here from RFC 8032 so the release job needs no downloaded tool.
@@ -103,27 +103,20 @@ def _hash_int(*parts):
 
 
 class SigningKey:
-    """A Sparkle EdDSA key: a 32-byte seed, or the legacy 96-byte export."""
+    """A Sparkle EdDSA key: the 32-byte seed `generate_keys -x` exports."""
 
     def __init__(self, encoded):
         raw = base64.b64decode(encoded.strip(), validate=True)
-        if len(raw) == 32:
-            expanded = hashlib.sha512(raw).digest()
-            scalar = bytearray(expanded[:32])
-            scalar[0] &= 248
-            scalar[31] &= 127
-            scalar[31] |= 64
-            self.scalar = int.from_bytes(scalar, "little")
-            self.prefix = expanded[32:]
-            self.public = _compress(_multiply(self.scalar, BASE))
-        elif len(raw) == 96:
-            self.scalar = int.from_bytes(raw[:32], "little")
-            self.prefix = raw[32:64]
-            self.public = _compress(_multiply(self.scalar, BASE))
-            if self.public != raw[64:]:
-                raise ValueError("The private key's public half does not match")
-        else:
-            raise ValueError("A Sparkle private key is 32 or 96 bytes of base64")
+        if len(raw) != 32:
+            raise ValueError("A Sparkle private key is 32 bytes of base64")
+        expanded = hashlib.sha512(raw).digest()
+        scalar = bytearray(expanded[:32])
+        scalar[0] &= 248
+        scalar[31] &= 127
+        scalar[31] |= 64
+        self.scalar = int.from_bytes(scalar, "little")
+        self.prefix = expanded[32:]
+        self.public = _compress(_multiply(self.scalar, BASE))
 
     @property
     def public_base64(self):
@@ -219,11 +212,10 @@ def main():
     parser.add_argument("--version", required=True)
     parser.add_argument("--build", required=True)
     parser.add_argument("--url", required=True)
-    parser.add_argument("--minimum-system", default="13.0")
+    parser.add_argument("--minimum-system", required=True,
+                        help="the app bundle's LSMinimumSystemVersion")
     parser.add_argument("--current", type=Path, help="the feed being replaced, if any")
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--if-newer", action="store_true",
-                        help="skip, rather than fail, when the current feed is newer")
     args = parser.parse_args()
     key = os.environ.get("SPARKLE_ED_PRIVATE_KEY", "")
     public_key = os.environ.get("SPARKLE_ED_PUBLIC_KEY", "")
@@ -233,11 +225,7 @@ def main():
     feed = publishable(key=key, public_key=public_key, archive=args.archive, version=args.version,
                        build=args.build, url=args.url, minimum_system=args.minimum_system, current=current)
     if feed is None:
-        message = f"The current feed offers build {feed_build(current)}, newer than {args.build}"
-        if args.if_newer:
-            print(f"Skipped: {message}")
-            return
-        sys.exit(message)
+        sys.exit(f"The current feed offers build {feed_build(current)}, newer than {args.build}")
     args.output.write_text(feed)
     print(f"Wrote {args.output} offering {args.version} ({args.build})")
 

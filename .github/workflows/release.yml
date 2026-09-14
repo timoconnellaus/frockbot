@@ -403,6 +403,8 @@ jobs:
     timeout-minutes: 45
     permissions:
       contents: read
+    outputs:
+      minimum_system: ${{ steps.bundle.outputs.minimum_system }}
     steps:
       - name: Check out the release tag
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -628,6 +630,7 @@ jobs:
           sign --preserve-metadata=entitlements,requirements,flags "$app"
 
       - name: Verify Developer ID signature
+        id: bundle
         env:
           PROFILE_UUID: ${{ steps.signing.outputs.profile_uuid }}
           SIGNING_IDENTITY: ${{ steps.signing.outputs.identity }}
@@ -677,6 +680,9 @@ jobs:
           if not isinstance(groups, list) or "Q444L76529.com.frockbot.mobile" not in groups:
               raise SystemExit("The distributable desktop app lost its protected Keychain group.")
           PY
+          minimum="$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$app/Contents/Info.plist")"
+          [[ -n "$minimum" ]]
+          echo "minimum_system=$minimum" >> "$GITHUB_OUTPUT"
 
       - name: Notarize and staple desktop app and disk image
         env:
@@ -979,13 +985,14 @@ jobs:
         # Last, so a running app is only offered a disk image already archived
         # under its immutable key. Each feed names only the newest build, so an
         # app skips straight to it, and the script refuses to move a feed
-        # backwards. A release also advances the staging feed unless a newer
-        # prerelease is already there; a prerelease touches only staging.
+        # backwards. A tag writes only the feed its own channel owns: a
+        # prerelease staging, a release stable.
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
           SPARKLE_ED_PUBLIC_KEY: ${{ vars.SPARKLE_ED_PUBLIC_KEY }}
+          MINIMUM_SYSTEM: ${{ needs.macos-release.outputs.minimum_system }}
           VERSION: ${{ needs.verify.outputs.version }}
         shell: bash
         run: |
@@ -994,13 +1001,19 @@ jobs:
             echo 'Missing SPARKLE_ED_PRIVATE_KEY secret or SPARKLE_ED_PUBLIC_KEY variable.' >&2
             exit 1
           fi
+          # The feed's floor is the app's own, so raising the deployment target
+          # cannot leave the feed offering the build to Macs that cannot run it.
+          if [[ -z "$MINIMUM_SYSTEM" ]]; then
+            echo 'The macOS build did not report its LSMinimumSystemVersion.' >&2
+            exit 1
+          fi
           asset=".release-assets/FrockBot-macos.dmg"
           bucket="frockbot-downloads"
           url="https://downloads.frockbot.com/mac/FrockBot-macos-$VERSION.dmg"
           zone="eaeb100c3d48f228cdb2309b5b8152cc"
 
           publish() {
-            local name="$1"; shift
+            local name="$1"
             local current="$RUNNER_TEMP/current-$name" next="$RUNNER_TEMP/$name"
             local log="$RUNNER_TEMP/current-$name.log"
             rm -f "$current" "$next" "$log"
@@ -1017,8 +1030,8 @@ jobs:
               fi
             fi
             python3 scripts/mac-appcast.py --archive "$asset" --version "$VERSION" \
-              --build "$GITHUB_RUN_NUMBER" --url "$url" --current "$current" --output "$next" "$@"
-            if [[ ! -f "$next" ]]; then return 0; fi
+              --build "$GITHUB_RUN_NUMBER" --url "$url" --minimum-system "$MINIMUM_SYSTEM" \
+              --current "$current" --output "$next"
             bunx wrangler r2 object put "$bucket/mac/$name" --remote --file "$next" \
               --content-type application/xml --cache-control "public, max-age=300"
             printf '{"files":["https://downloads.frockbot.com/mac/%s"]}' "$name" > "$RUNNER_TEMP/purge.json"
@@ -1050,7 +1063,6 @@ jobs:
             publish appcast-staging.xml
           else
             publish appcast.xml
-            publish appcast-staging.xml --if-newer
           fi
 
   deploy-marketing:
