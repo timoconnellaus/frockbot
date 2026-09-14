@@ -393,6 +393,18 @@ class _DesktopUpdateFrameState extends State<DesktopUpdateFrame>
 /// something to do, and never blocks the app while it works.
 class DesktopUpdateButton extends StatelessWidget {
   static const blue = Color(0xff075fce);
+  static const _labelStyle = TextStyle(
+    fontSize: 13,
+    fontWeight: FontWeight.w600,
+  );
+
+  static double _labelWidth(BuildContext context, String label) => (TextPainter(
+    text: TextSpan(text: label, style: _labelStyle),
+    textDirection: Directionality.of(context),
+    textScaler: MediaQuery.textScalerOf(context),
+    maxLines: 1,
+  )..layout()).width;
+
   final DesktopUpdateController controller;
   const DesktopUpdateButton({super.key, required this.controller});
 
@@ -441,6 +453,11 @@ class DesktopUpdateButton extends StatelessWidget {
         state is UpdateDownloading ||
         state is UpdatePreparing ||
         state is UpdateRestarting;
+    final icon = switch (state) {
+      UpdateReadyToRestart() => Icons.restart_alt_rounded,
+      UpdateFailed() => Icons.refresh_rounded,
+      _ => Icons.arrow_circle_up_rounded,
+    };
     return Semantics(
       identifier: ShellIds.updateControl,
       container: true,
@@ -463,35 +480,44 @@ class DesktopUpdateButton extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 12),
             tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             shape: const StadiumBorder(),
-            textStyle: const TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-            ),
+            textStyle: _labelStyle,
           ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (busy) ...[
-                SizedBox.square(
-                  dimension: 12,
-                  child: CircularProgressIndicator(
-                    value: progress,
-                    strokeWidth: 2,
-                    color: Colors.white,
-                    backgroundColor: Colors.white24,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final mark = busy
+                  ? SizedBox.square(
+                      dimension: 12,
+                      child: CircularProgressIndicator(
+                        value: progress,
+                        strokeWidth: 2,
+                        color: Colors.white,
+                        backgroundColor: Colors.white24,
+                      ),
+                    )
+                  : Icon(icon, size: 16, color: Colors.white);
+              // A narrow window leaves the row no width for a sentence, so the
+              // control keeps its mark and drops to it rather than ellipsising
+              // a half-word; the tooltip and semantics still say the whole
+              // thing.
+              if (_labelWidth(context, label) + (busy ? 18 : 0) >
+                  constraints.maxWidth) {
+                return mark;
+              }
+              return Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (busy) ...[mark, const SizedBox(width: 6)],
+                  Flexible(
+                    child: Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      softWrap: false,
+                    ),
                   ),
-                ),
-                const SizedBox(width: 6),
-              ],
-              Flexible(
-                child: Text(
-                  label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  softWrap: false,
-                ),
-              ),
-            ],
+                ],
+              );
+            },
           ),
         ),
       ),

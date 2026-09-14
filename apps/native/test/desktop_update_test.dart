@@ -75,8 +75,14 @@ Finder byIdentifier(String identifier) => find.byWidgetPredicate(
   (widget) => widget is Semantics && widget.properties.identifier == identifier,
 );
 
-Widget sidebar(DesktopUpdateController? controller, {VoidCallback? onProfile}) {
+Widget sidebar(
+  DesktopUpdateController? controller, {
+  VoidCallback? onProfile,
+  bool phone = false,
+  double width = 640,
+}) {
   final list = ShellSidebar(
+    phone: phone,
     bots: const [],
     profiles: const {},
     unread: const {},
@@ -100,7 +106,7 @@ Widget sidebar(DesktopUpdateController? controller, {VoidCallback? onProfile}) {
     theme: FrockTheme.theme(Brightness.dark),
     home: Scaffold(
       body: SizedBox(
-        width: 320,
+        width: width,
         child: controller == null
             ? list
             : DesktopUpdateScope(controller: controller, child: list),
@@ -363,6 +369,37 @@ void main() {
       await tester.pump();
       await tester.pump();
       expect(updater.installCalls, 1);
+      expect(find.text('Retry restart'), findsOneWidget);
+    });
+
+    testWidgets('keeps its mark when the window is too narrow to read', (
+      tester,
+    ) async {
+      final updater = FakeDesktopUpdater(installs: false);
+      final controller = DesktopUpdateController(updater: updater);
+      addTearDown(controller.dispose);
+      await controller.start();
+      await tester.pumpWidget(sidebar(controller, phone: true, width: 360));
+
+      updater.emit(DesktopUpdatePhase.ready, downloaded: true);
+      await tester.pump();
+      final control = byIdentifier(ShellIds.updateControl);
+      expect(control, findsOneWidget);
+      expect(find.text('Restart to update'), findsNothing);
+      expect(
+        find.descendant(of: control, matching: find.byType(Icon)),
+        findsOneWidget,
+      );
+      expect(tester.getRect(control).width, lessThan(64));
+      expect(tester.takeException(), isNull);
+
+      await tester.tap(control);
+      await tester.pump();
+      await tester.pump();
+      expect(updater.installCalls, 1);
+
+      await tester.pumpWidget(sidebar(controller));
+      await tester.pump();
       expect(find.text('Retry restart'), findsOneWidget);
     });
 
