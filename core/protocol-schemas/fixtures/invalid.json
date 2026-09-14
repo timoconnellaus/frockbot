@@ -583,6 +583,18 @@
     "value": null
   },
   {
+    "name": "UnreadView without notification eligibility",
+    "schema": "UnreadView",
+    "value": {
+      "schemaVersion": 1,
+      "botId": "default",
+      "count": 0,
+      "capped": false,
+      "unread": false,
+      "manuallyUnread": false
+    }
+  },
+  {
     "name": "MarkReadCommand wrong shape",
     "schema": "MarkReadCommand",
     "value": null
@@ -1542,7 +1554,8 @@
         "count": 0,
         "capped": false,
         "unread": false,
-        "manuallyUnread": false
+        "manuallyUnread": false,
+        "notificationsEnabled": true
       }
     }
   },

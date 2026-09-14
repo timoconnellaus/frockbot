@@ -4,8 +4,11 @@ import { sentTextV1 } from "./sent-text.js";
  */
 import {
   canonicalCommandFingerprintV1,
+  decodeBotSettingsViewV1,
   isPublicIdentifier,
+  migrateStoredBotSettingsV1,
 } from "@frockbot/core/configuration";
+import { BOT_CONFIGURATION_KEY } from "@frockbot/app/settings/bot";
 import { NOTIFICATION_PREFIX, type BotIdentity } from "@frockbot/core/durable";
 import {
   optionalProjectedSendV1,
@@ -455,6 +458,12 @@ export interface BotUnreadViewV1 {
    * or one stored before this existed, simply draws no ring.
    */
   working?: boolean;
+  /**
+   * The Bot's Notifications setting. A muted Bot still counts unread on its
+   * row, but adds nothing to the application icon's badge and keeps no alert
+   * on a device.
+   */
+  notificationsEnabled: boolean;
 }
 
 export interface BotUnreadDirectoryViewV1 {
@@ -474,6 +483,7 @@ export function projectBotUnreadViewV1(
   lastMessage?: SidebarMessagePreviewV1,
   /** True while a Turn of this Bot's is running. Drawn as the row's ring. */
   working = false,
+  notificationsEnabled = true,
 ): BotUnreadViewV1 {
   const ceiling = state.lastActivityCursor;
   let counted = 0;
@@ -519,6 +529,7 @@ export function projectBotUnreadViewV1(
       : { lastViewedAt: state.lastViewedAt }),
     ...(lastMessage === undefined ? {} : { lastMessage }),
     ...(working ? { working: true } : {}),
+    notificationsEnabled,
   };
 }
 
@@ -605,7 +616,15 @@ function decodeBotUnreadViewV1(input: unknown): BotUnreadViewV1 {
   const value = record(input, "unread view");
   exactKeys(
     value,
-    ["schemaVersion", "botId", "count", "capped", "unread", "manuallyUnread"],
+    [
+      "schemaVersion",
+      "botId",
+      "count",
+      "capped",
+      "unread",
+      "manuallyUnread",
+      "notificationsEnabled",
+    ],
     [
       "lastActivityCursor",
       "lastMessageId",
@@ -653,6 +672,9 @@ function decodeBotUnreadViewV1(input: unknown): BotUnreadViewV1 {
   if (value.working !== undefined && typeof value.working !== "boolean") {
     throw new UnreadDecodeError("unread view working is invalid");
   }
+  if (typeof value.notificationsEnabled !== "boolean") {
+    throw new UnreadDecodeError("unread view notificationsEnabled is invalid");
+  }
   return {
     schemaVersion: 1,
     botId: value.botId,
@@ -680,6 +702,7 @@ function decodeBotUnreadViewV1(input: unknown): BotUnreadViewV1 {
     ...(lastViewedAt === undefined ? {} : { lastViewedAt }),
     ...(lastMessage === undefined ? {} : { lastMessage }),
     ...(value.working === true ? { working: true } : {}),
+    notificationsEnabled: value.notificationsEnabled,
   };
 }
 
@@ -861,7 +884,22 @@ export async function readUnread(
     [...messages.keys()].map((key) => key.slice(MESSAGE_PREFIX.length)),
     await sidebarPreview(state, storedPreview, index),
     await runWorkingV1(state, index[0]?.runId),
+    await notificationsEnabledV1(state),
   );
+}
+
+/**
+ * The Bot's Notifications setting. A Bot with no settings record alerts, the
+ * same default the push outbox applies.
+ */
+async function notificationsEnabledV1(
+  state: ShellBotStateV1,
+): Promise<boolean> {
+  const stored = await state.ctx.storage.get<unknown>(BOT_CONFIGURATION_KEY);
+  return stored === undefined
+    ? true
+    : decodeBotSettingsViewV1(migrateStoredBotSettingsV1(stored)).notifications
+        .enabled;
 }
 
 /**
@@ -1031,6 +1069,8 @@ export async function executeUnreadCommand(
       // sidebar row it renders from: it owes the same derived preview the
       // fan-out gives every other Bot.
       await sidebarPreview(state, stored.preview, index),
+      false,
+      await notificationsEnabledV1(state),
     ),
   };
 }

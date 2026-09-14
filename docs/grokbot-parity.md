@@ -1143,10 +1143,12 @@ than a silent absence. Row 44 is the only one.
   `bot/mark-read`/`bot/mark-unread` command and never a side effect of a list.
   The sidebar's two bounded fan-outs (`GET /api/bots/unread`,
   `GET /api/bots/notifications`) surface a completion on a Bot nobody is looking
-  at, and `notifications.enabled` — GrokBot's `notify_on_updates` — gates the
-  intent only, so a muted Bot still goes bold. One shape difference, from row 4:
-  a Bot hidden from the sidebar has no row to carry a badge, so its unread rolls
-  into one aggregate on the "Show N hidden" entry.
+  at, and `notifications.enabled` — GrokBot's `notify_on_updates` — gates
+  alerting only: a muted Bot still goes bold, while it is left out of the
+  application-icon badge (see [`notifications.md`](notifications.md)). One
+  shape difference, from row 4: a Bot hidden from the sidebar has no row to
+  carry a badge, so its unread rolls into one aggregate on the "Show N hidden"
+  entry.
 - **51** — landed in the GrokBot-aligned right panel. Its default content is
   the selected Bot's Computer thumbnail and caption followed by the durable
   Routines list and a `+` link to the Advanced editor. The panel header's only

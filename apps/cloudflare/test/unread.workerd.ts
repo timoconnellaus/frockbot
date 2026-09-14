@@ -11,8 +11,9 @@
 //     a second time by the recovery path leaves the count exactly where it was
 //     — a counter could not promise this, a `max()` over a cursor does.
 //
-// The Bot here has notifications disabled (every new Bot does), which makes it
-// the muted case: the intent is suppressed, the unread cursor still advances.
+// A new Bot alerts, so muting is a written setting, not a default: the muted
+// case below turns it off through the settings command and reads the view back
+// — the intent is suppressed, the unread cursor still advances.
 import { env } from "cloudflare:workers";
 import { evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { describe, expect, test } from "vitest";
@@ -25,6 +26,7 @@ interface UnreadRpc {
     capped: boolean;
     unread: boolean;
     manuallyUnread: boolean;
+    notificationsEnabled: boolean;
     lastActivityCursor?: string;
     lastMessage?: { text: string; at: string; role: "assistant" | "user" };
   }>;
@@ -34,10 +36,13 @@ interface UnreadRpc {
       count: number;
       unread: boolean;
       manuallyUnread: boolean;
+      notificationsEnabled: boolean;
       lastMessage?: { text: string; at: string; role: "assistant" | "user" };
     };
   }>;
   listRuns(input: unknown): Promise<{ runs: unknown[] }>;
+  readConfiguration(input: unknown): Promise<{ revision: number }>;
+  executeConfiguration(input: unknown): Promise<unknown>;
 }
 
 function bot(name: string) {
@@ -83,9 +88,14 @@ describe("per-Bot unread in Workerd", () => {
     }
 
     const settled = await unreadRpc(name).readUnread(identity);
-    // A muted Bot: `notifications.enabled` is false on every new Bot, and the
-    // badge advanced anyway.
-    expect(settled).toMatchObject({ count: 2, capped: false, unread: true });
+    // A new Bot alerts: `notifications.enabled` is true the moment the Bot is
+    // materialized, so the view tells the application icon to count it.
+    expect(settled).toMatchObject({
+      count: 2,
+      capped: false,
+      unread: true,
+      notificationsEnabled: true,
+    });
     expect(settled.lastActivityCursor).toMatch(/^message-[0-9]{20}$/);
     expect(settled.lastMessage).toMatchObject({
       text: "Ollama reply",
@@ -113,7 +123,7 @@ describe("per-Bot unread in Workerd", () => {
     });
     expect(receipt).toMatchObject({
       status: "applied",
-      unread: { count: 0, unread: false },
+      unread: { count: 0, unread: false, notificationsEnabled: true },
     });
 
     await evictDurableObject(stub);
@@ -150,6 +160,91 @@ describe("per-Bot unread in Workerd", () => {
       count: 0,
       unread: true,
       manuallyUnread: true,
+    });
+  });
+
+  // Muting is the eligibility rule the application icon runs on, and it is a
+  // setting the fan-out reads out of the Bot's own durable record — not a flag
+  // the client keeps. So mute through the command a person's toggle sends, and
+  // the view that feeds the badge has to say so, still after an eviction.
+  test("muting the Bot turns its badge off in the unread view", async () => {
+    const suffix = crypto.randomUUID();
+    const identity = {
+      schemaVersion: 1 as const,
+      userId: `unread-muted-user-${suffix}`,
+      botId: `unread-muted-bot-${suffix}`,
+    };
+    await provisionBot(identity);
+    const name = `${identity.userId}:${identity.botId}`;
+    const stub = bot(name);
+
+    await stub.run({
+      ...identity,
+      command: {
+        runId: "run-1",
+        sessionId: name,
+        acceptedAt: "2026-09-05T00:00:00.000Z",
+        text: "hello",
+      },
+    });
+    expect(await unreadRpc(name).readUnread(identity)).toMatchObject({
+      count: 1,
+      notificationsEnabled: true,
+    });
+
+    const configuration = await unreadRpc(name).readConfiguration(identity);
+    await unreadRpc(name).executeConfiguration({
+      ...identity,
+      command: {
+        schemaVersion: 1,
+        type: "bot/update-notifications",
+        commandId: `mute-${suffix}`,
+        expectedRevision: configuration.revision,
+        botId: identity.botId,
+        notifications: { enabled: false },
+      },
+    });
+
+    // The mute gates the alert, never the cursor: the row still says one.
+    await evictDurableObject(stub);
+    expect(await unreadRpc(name).readUnread(identity)).toMatchObject({
+      count: 1,
+      unread: true,
+      notificationsEnabled: false,
+    });
+
+    // A Turn on a muted Bot still counts on its row, and still must not badge.
+    await stub.run({
+      ...identity,
+      command: {
+        runId: "run-2",
+        sessionId: name,
+        acceptedAt: "2026-09-05T00:01:00.000Z",
+        text: "again",
+      },
+    });
+    expect(await unreadRpc(name).readUnread(identity)).toMatchObject({
+      count: 2,
+      notificationsEnabled: false,
+    });
+
+    // Unmuting is the same seam, read back the same way.
+    const muted = await unreadRpc(name).readConfiguration(identity);
+    await unreadRpc(name).executeConfiguration({
+      ...identity,
+      command: {
+        schemaVersion: 1,
+        type: "bot/update-notifications",
+        commandId: `unmute-${suffix}`,
+        expectedRevision: muted.revision,
+        botId: identity.botId,
+        notifications: { enabled: true },
+      },
+    });
+    await evictDurableObject(stub);
+    expect(await unreadRpc(name).readUnread(identity)).toMatchObject({
+      count: 2,
+      notificationsEnabled: true,
     });
   });
 

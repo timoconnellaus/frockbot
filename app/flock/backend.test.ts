@@ -121,6 +121,7 @@ describe("Flock gateway Contribution", () => {
             capped: false,
             unread: command.type === "bot/mark-unread",
             manuallyUnread: command.type === "bot/mark-unread",
+            notificationsEnabled: true,
           },
         }),
     });

@@ -14,8 +14,9 @@ The current vertical slice includes:
 - account-wide Package enablement and User-owned Connections;
 - provider-neutral durable User settings independent of external integrations;
 - streamed text, journaled tool calls, durable recovery, and lifecycle cleanup;
-- message-cursor unread state and Android push notifications, described in
-  [`docs/notifications.md`](docs/notifications.md).
+- message-cursor unread state, Android push notifications, and unread
+  application-icon badges on the macOS Dock and supported Android launchers,
+  described in [`docs/notifications.md`](docs/notifications.md).
 
 See [`docs/architecture.md`](docs/architecture.md).
 
@@ -339,7 +340,7 @@ providers/
 docs/
   architecture.md   Current system shape
   grokbot-parity.md The GrokBot capabilities FrockBot must match
-  notifications.md  Messages, unread state and Android notifications
+  notifications.md  Messages, unread state, notifications and icon badges
   plan.md           The current plan
 ```
 

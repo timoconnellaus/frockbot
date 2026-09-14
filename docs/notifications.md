@@ -20,6 +20,16 @@ Each User holds a bounded device registry. Tokens rotate under a stable installa
 
 The server records an external attempt before calling FCM. A known service rejection is retried with backoff. An ambiguous network outcome or interrupted attempt is recorded as uncertain and is not blindly repeated; the message remains available in the conversation. Delivery receipt cursors are bounded to one per Bot/device/update kind. Push is an alert transport, never message history authority.
 
+## Application icon badge
+
+The app icon shows the account's unread messages: the sum of the unread counts of every non-archived Bot whose Notifications setting is on. Each view in `/api/bots/unread`, and the view a read receipt returns, carries `notificationsEnabled`, which the Bot Durable Object reads from its current settings; the cloud stays the only authority on both the count and the eligibility. A muted Bot still counts on its sidebar row and adds nothing to the icon. A Bot marked unread by hand with no unread messages adds nothing either, because the manual flag is a reminder rather than a count. The focused conversation is suppressed exactly as the sidebar suppresses it, so a reply settling into the chat being read does not flash on the icon while its read receipt is in flight.
+
+`apps/native/lib/activity/badge.dart` holds the one counting rule, and the shell reconciles the badge on every build that redraws the sidebar: after an unread refresh, a read prediction or receipt, a focus change, and the refresh that follows a Bot settings save. The platform adapters only draw what it decided.
+
+On macOS the dock tile's `badgeLabel` shows the total, saturating at `99+` when the sum passes 99 or any Bot's count is capped, the same saturation the sidebar uses. Zero removes the label, and sign-out or the signed-in shell being torn down clears it.
+
+Android launchers badge from active notifications, and some draw only a dot, so the app never posts a notification to force a badge. It reconciles the notifications that already exist with the cloud view instead: each Bot's notification carries that Bot's unread count as its number (a capped count is reported as 100, the least the real count can be), and a Bot that is muted or archived loses its notification. A notification the User swiped away is not brought back, and swiping still does not mark the conversation read; only a read cursor discards an alert. Sign-out cancels every notification the account held.
+
 ## Configuration
 
 The Android configuration is `apps/native/android/app/google-services.json`, for Firebase project `frock-bot` and package `com.frockbot.mobile`. It contains Firebase's public app configuration. The release workflow requires `FCM_SERVICE_ACCOUNT` in GitHub Actions and forwards it to the production Worker. The server's dedicated `frockbot-push` service account has the Firebase Cloud Messaging role. Its private JSON credential belongs only in the Cloudflare Worker secret `FCM_SERVICE_ACCOUNT`, never in the APK or repository.
@@ -33,5 +43,7 @@ The one-time, repeatable `notification-state-cleanup.ts` cleanup removes disposa
 Android native Firebase changes require a full Shorebird release through `scripts/native-update.py release`, followed by publishing and `adb install -r`; they cannot ship as a Dart-only patch. Deploy the backend before installing the message-cursor client.
 
 Read cursors are message cursors, which the `1.1.0` build cannot decode, so this release raises both the app version and `minimumNativeVersion` to `1.2.0`: an install that is not upgraded is told to update rather than left with a broken sidebar. The release name comes from `apps/native/pubspec.yaml`, so the APK and the gate cannot disagree. A read command an older build left behind is discarded on load instead of retried.
+
+The app icon badge adds `notificationsEnabled` to the unread view, and the view refuses unknown and missing fields, so a native build without it cannot decode `/api/bots/unread`. This release raises the native app version and `minimumNativeVersion` together to `1.4.0`, and ships the Android half as a full release because it changes Kotlin. Deploy the backend before installing the new native clients. Check the dock badge with the focused chat receiving a reply, a muted Bot, 100 or more unread, and sign-out; check an Android launcher with a muted Bot's notification present, a swiped notification, and a read on another device.
 
 Check real-device delivery with the conversation focused, another Bot selected, the app backgrounded, and the process stopped normally. Verify bursts, notification navigation, mute, notification permission denied, read-on-another-device, logout, and offline catch-up. Android force-stop is a separate OS state: FCM delivery resumes after the user opens the app again.

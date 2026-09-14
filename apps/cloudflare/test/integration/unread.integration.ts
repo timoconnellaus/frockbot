@@ -23,6 +23,7 @@ interface UnreadView {
   capped: boolean;
   unread: boolean;
   manuallyUnread: boolean;
+  notificationsEnabled: boolean;
   lastActivityCursor?: string;
   lastMessage?: { text: string; at: string; role: "assistant" | "user" };
 }
@@ -60,6 +61,11 @@ describe("unread and notifications through the gateway", () => {
 
     const initial = await unreadDirectory(userId);
     expect(initial.map((view) => view.unread)).toEqual([false, false]);
+    // Every new Bot starts with Notifications enabled.
+    expect(initial.map((view) => view.notificationsEnabled)).toEqual([
+      true,
+      true,
+    ]);
 
     // A Turn on A while the User is "viewing" B — the client sends no read
     // receipt for A, so A is the one that goes unread.
@@ -137,8 +143,8 @@ describe("unread and notifications through the gateway", () => {
     const botId = "unread-notify-bot";
     await provisionThroughGateway({ userId, botId });
 
-    // Notifications are off on a new Bot: the mute gates the intent, never the
-    // cursor, so this turns them on before the Turn that should raise one.
+    // The mute gates the intent, never the cursor, so save the setting the
+    // fan-out reads before the Turn that should raise a notification.
     const settings = (await expectOkJson(
       await asUser(userId, `/api/bots/${botId}/settings`),
     )) as { revision: number };
@@ -152,6 +158,11 @@ describe("unread and notifications through the gateway", () => {
         notifications: { enabled: true },
       }),
     );
+    // The fan-out reads the setting the save just wrote, so the application
+    // icon counts this Bot from the next refresh.
+    expect(forBot(await unreadDirectory(userId), botId)).toMatchObject({
+      notificationsEnabled: true,
+    });
 
     expect(
       await postAsUser(userId, `/api/bots/${botId}/turns`, {

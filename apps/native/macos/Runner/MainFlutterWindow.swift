@@ -37,6 +37,20 @@ class MainFlutterWindow: NSWindow {
       }
     }
 
+    // The dock badge. Dart decides the label, including "99+", so the dock
+    // and the sidebar cannot count differently; this only draws it.
+    let badge = FlutterMethodChannel(
+      name: "com.frockbot/badge", binaryMessenger: flutterViewController.engine.binaryMessenger)
+    badge.setMethodCallHandler { call, result in
+      guard call.method == "set" else {
+        result(FlutterMethodNotImplemented)
+        return
+      }
+      let label = (call.arguments as? [String: Any])?["label"] as? String
+      NSApp.dockTile.badgeLabel = label?.isEmpty == false ? label : nil
+      result(nil)
+    }
+
     speaker = PcmSpeaker(flutterViewController.engine.binaryMessenger)
     RegisterGeneratedPlugins(registry: flutterViewController)
     MacMessagesBridge.shared.bind(flutterViewController.engine.binaryMessenger)

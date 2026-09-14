@@ -32,6 +32,7 @@ class ActivityController extends ChangeNotifier {
   bool loading = false;
   bool loaded = false;
   bool _disposed = false;
+  bool _reloadRequested = false;
 
   /// One retained command per Bot, and the Bots whose command is in flight.
   /// Both are keyed by Bot because the controls are a Bot's: a single flag
@@ -55,27 +56,35 @@ class ActivityController extends ChangeNotifier {
   }
 
   Future<void> load() async {
-    if (_disposed || loading || saving) return;
-    loading = true;
-    _notify();
-    try {
-      final saved = await store.read(_key);
-      if (saved != null) await _restore(saved);
-      final views = wire.UnreadDirectory.fromJson(
-        await api.request('/api/bots/unread'),
-      );
-      if (_disposed) return;
-      unread = {for (final view in views.unread) view.botId.value: view};
-      loaded = true;
-      error = null;
-    } catch (_) {
-      if (!_disposed) {
-        error = 'Couldn’t reach FrockBot. Check your connection and try again.';
-      }
-    } finally {
-      loading = false;
-      _notify();
+    if (_disposed || saving) return;
+    if (loading) {
+      _reloadRequested = true;
+      return;
     }
+    do {
+      _reloadRequested = false;
+      loading = true;
+      _notify();
+      try {
+        final saved = await store.read(_key);
+        if (saved != null) await _restore(saved);
+        final views = wire.UnreadDirectory.fromJson(
+          await api.request('/api/bots/unread'),
+        );
+        if (_disposed) return;
+        unread = {for (final view in views.unread) view.botId.value: view};
+        loaded = true;
+        error = null;
+      } catch (_) {
+        if (!_disposed) {
+          error =
+              'Couldn’t reach FrockBot. Check your connection and try again.';
+        }
+      } finally {
+        loading = false;
+        _notify();
+      }
+    } while (_reloadRequested && !_disposed && !saving);
   }
 
   Future<void> mark(
@@ -115,6 +124,9 @@ class ActivityController extends ChangeNotifier {
       'count': 0,
       'capped': false,
       'manuallyUnread': false,
+      // A Bot the directory has not described yet is drawn with the default
+      // a Bot without settings has; its count is zero either way.
+      'notificationsEnabled': true,
       ...?before,
       if (read) ...{
         'count': 0,

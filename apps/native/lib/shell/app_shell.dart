@@ -12,6 +12,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart' hide ConnectionState;
 import 'package:flutter/services.dart';
 
+import '../activity/badge.dart';
 import '../activity/controller.dart';
 import '../activity/push.dart';
 import '../admin/page.dart';
@@ -121,6 +122,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     widget.userId,
     activity,
   );
+
+  /// The application icon's badge, drawn from what the sidebar draws.
+  late final AppBadgeSync appBadge = AppBadgeSync(
+    appBadgePresenterFor(pushReady: () => push.platformReady),
+  );
   String? clearManualForBot;
   bool resumed = true;
   Timer? _activityTimer;
@@ -216,6 +222,14 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     microphone.dictationActive = () => dictation?.active == true;
     microphone.stopDictation = _stopDictation;
     activity.addListener(_repaint);
+    // Focus can be reported while this state is still starting, so the
+    // repaint the focus rule needs waits for a microtask.
+    push.onFocus = () => scheduleMicrotask(() {
+      if (mounted) {
+        appBadge.invalidate();
+        setState(() {});
+      }
+    });
     widget.botLinks.addListener(_followBotLink);
     // A lifecycle command nobody has an answer for is adopted here rather than
     // when the danger zone happens to be opened: it is the account's, and it
@@ -568,6 +582,16 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     }
   }
 
+  /// What a Bot settings save can change outside the settings themselves. A
+  /// save changes no Bot's lifecycle and no Bot's place in the directory; the
+  /// profile moves the identities, and the notification setting decides
+  /// whether the Bot counts on the application badge, which the unread
+  /// fan-out reports.
+  Future<void> _readBackBotSettings() async {
+    await _loadIdentities();
+    await activity.load();
+  }
+
   /// Draws a Bot profile change before the round trip that confirms it: the
   /// tile moves, the group changes, the name updates with the control instead
   /// of six requests later. [_loadIdentities] replaces this map wholesale, so
@@ -655,10 +679,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           children: [
             BotSettingsView(
               controller: controller,
-              // A profile save changes no Bot's lifecycle and no Bot's place
-              // in the directory, so the identities are the only thing worth
-              // reading back.
-              onSaved: _loadIdentities,
+              onSaved: _readBackBotSettings,
               onPredict: (profile) => predictProfile(botId, profile),
               background: _background(botId),
               onEditAvatar: () => unawaited(_editAvatar(botId, name)),
@@ -1202,7 +1223,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                 children: [
                   BotSettingsView(
                     controller: controller,
-                    onSaved: _loadIdentities,
+                    onSaved: _readBackBotSettings,
                     onPredict: (profile) => predictProfile(botId, profile),
                     background: _background(botId),
                     onEditAvatar: () =>
@@ -1426,6 +1447,17 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     final bot = selected;
     final session = voiceSession;
     final rightPanel = _rightPanel();
+    // Every input the badge reads — the fan-out, the directory, and focus —
+    // repaints the shell, so the icon is reconciled on the same build that
+    // redraws the sidebar.
+    appBadge.update(
+      appBadgeFor(
+        unread: activity.unread,
+        botIds: [for (final registration in bots) registration.botId.value],
+        archived: archived,
+        focusedBotId: _focusedBotId,
+      ),
+    );
     final shell = ShellSlotScope(
       slots: slots,
       // The footer is drawn below the whole three-tier layout, so it survives
@@ -2049,6 +2081,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                                 chevron: false,
                                 onTap: () {
                                   Navigator.of(context).pop();
+                                  unawaited(appBadge.clear());
                                   unawaited(
                                     push.logout().then(
                                       (_) => widget.onSignOut(),
@@ -2146,6 +2179,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   @override
   void dispose() {
     unawaited(macMessages.stop(widget.userId));
+    unawaited(appBadge.clear());
+    push.onFocus = null;
     WidgetsBinding.instance.removeObserver(this);
     widget.botLinks.removeListener(_followBotLink);
     _activityTimer?.cancel();
