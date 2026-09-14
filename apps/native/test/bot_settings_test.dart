@@ -636,6 +636,7 @@ void main() {
     ) async {
       final store = MemoryStore();
       final commands = <Map<String, Object?>>[];
+      final predicted = <SidebarProfile>[];
       var landed = false;
       final state = BotSettingsController(
         SettingsApi(store, (path, body) async {
@@ -661,7 +662,7 @@ void main() {
         }),
         'alpha',
       );
-      await open(tester, state);
+      await open(tester, state, onPredict: predicted.add);
       await tapHidden(tester);
       await tester.tap(find.text('Hide and turn off'));
       await tester.pumpAndSettle();
@@ -670,6 +671,12 @@ void main() {
       expect(state.notifications, isFalse);
       expect(notificationsSwitch(tester).value, isFalse);
       expect(notificationsSwitch(tester).onChanged, isNull);
+      // The sidebar settles on the same answer, rather than rolling back to
+      // the visible Bot it drew before the hide landed.
+      expect(predicted.map((profile) => profile.hiddenFromSidebar), [
+        true,
+        true,
+      ]);
       commands.clear();
       await tapHidden(tester);
       await tester.pumpAndSettle();

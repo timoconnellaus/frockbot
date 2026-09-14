@@ -431,12 +431,12 @@ class _BotSettingsViewState extends State<BotSettingsView> {
     }
     _dirty = false;
     final predict = widget.onPredict;
-    // Where the sidebar goes back to if this save is refused: what the
-    // authority last accepted, read before the save moves that baseline.
-    final accepted = state.savedProfile;
     predict?.call(state.predictedProfile());
     final saved = await state.save();
-    if (!saved) predict?.call(accepted);
+    // Where the sidebar goes back to if this save is refused: what the
+    // authority is known to hold once the save has settled that question,
+    // which is not what it held before a hide that landed unanswered.
+    if (!saved) predict?.call(state.savedProfile);
     if (saved) await widget.onSaved?.call();
     if (_dirty && mounted) {
       _pending = Timer(botSettingsAutosaveDelay, () => unawaited(_save()));
