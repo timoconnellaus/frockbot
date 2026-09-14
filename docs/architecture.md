@@ -1035,8 +1035,9 @@ tests and web build checks for explicit qualification runs.
 
 On pull requests touching the Mac desktop path and on push of a tag matching
 `mac-v*.*.*`. `qualify` runs on macOS: the `@frockbot/mac-messages` typecheck,
-the machine and Messages test files, `scripts/mac-release-test.py`, the Flutter
-Mac Messages test, and an unsigned `scripts/mac-release.py` build. On a tag,
+the machine and Messages test files, `scripts/mac-release-test.py`,
+`scripts/mac-appcast-test.py`, the Flutter Mac Messages and desktop update
+tests, and an unsigned `scripts/mac-release.py` build. On a tag,
 `draft` creates a draft GitHub release only; the signed, notarized archive is
 built and uploaded by hand. Mac tags ship independently of the `v*.*.*` cloud
 release. See [the Mac release guide](../apps/native/macos/README.md).
