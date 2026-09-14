@@ -45,7 +45,10 @@ fun badgeReconcileV1(
     for ((botId, count) in bots) {
         if (count <= 0) {
             if (storedCount(botId) != null) drop.add(botId)
-            if (botId in active) refresh.add(botId)
+            if (botId in active) {
+                if (storedMessages(botId)) refresh.add(botId)
+                else cancel.add(botId)
+            }
             continue
         } else {
             if (storedCount(botId) == count) continue

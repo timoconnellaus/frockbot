@@ -83,7 +83,7 @@ object PushNotifications {
             silenced,
             active,
             storedCount = { if (store.contains("count:$it")) store.getInt("count:$it", 0) else null },
-            storedMessages = { store.contains("messages:$it") },
+            storedMessages = { JSONArray(store.getString("messages:$it", "[]")).length() > 0 },
         )
         // One editor for the whole reconcile: this runs on the platform thread
         // for every badge change, and a per-Bot synchronous commit would block

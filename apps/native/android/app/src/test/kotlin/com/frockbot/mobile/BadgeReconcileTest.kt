@@ -44,9 +44,21 @@ class BadgeReconcileTest {
 
     @Test
     fun `a repeated zero redraws an active notification after count removal`() {
-        val plan = reconcile(bots = mapOf("alpha" to 0), active = setOf("alpha"))
+        val plan = reconcile(
+            bots = mapOf("alpha" to 0),
+            active = setOf("alpha"),
+            messages = setOf("alpha"),
+        )
         assertEquals(emptyList<String>(), plan.drop)
         assertEquals(listOf("alpha"), plan.refresh)
+    }
+
+    @Test
+    fun `a repeated zero cancels an active notification after an interrupted read`() {
+        val plan = reconcile(bots = mapOf("alpha" to 0), active = setOf("alpha"))
+        assertEquals(emptyList<String>(), plan.drop)
+        assertEquals(emptyList<String>(), plan.refresh)
+        assertEquals(listOf("alpha"), plan.cancel)
     }
 
     @Test
