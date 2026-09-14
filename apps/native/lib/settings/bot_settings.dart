@@ -187,12 +187,27 @@ class BotSettingsController extends ChangeNotifier {
     if (next) notifications = false;
   }
 
-  /// A hide the authority has not accepted goes back to what it holds, rather
-  /// than leaving the switches drawn hidden and muted over a Bot still listed.
-  void _restoreUnacceptedHide() {
+  /// A hide the authority has not accepted goes back to what it holds. Which
+  /// that is cannot be guessed from here: a hiding write can land and its
+  /// answer be lost, leaving the authority hidden and muted while the client
+  /// still believes neither. So the two switches the authority couples are
+  /// re-read from it, and only a read that fails too falls back to the last
+  /// values known to have landed.
+  Future<void> _reconcileUnacceptedHide() async {
     if (!hidden || _saved['hiddenFromSidebar'] == true) return;
-    hidden = false;
-    notifications = _savedNotifications;
+    try {
+      final answer = (await api.request('/api/bots/$botId/settings'))! as Map;
+      final settled = answer['revision'];
+      if (settled is int) revision = settled;
+      hidden = (answer['profile'] as Map)['hiddenFromSidebar'] == true;
+      notifications =
+          ((answer['notifications'] as Map?)?['enabled'] ?? true) == true;
+      _saved = {..._saved, 'hiddenFromSidebar': hidden};
+      _savedNotifications = notifications;
+    } catch (_) {
+      hidden = false;
+      notifications = _savedNotifications;
+    }
   }
 
   /// Up to three commands, each idempotent by its own id: the profile, the
@@ -257,11 +272,11 @@ class BotSettingsController extends ChangeNotifier {
       return true;
     } on RequestFailure catch (failure) {
       message = failure.message;
-      _restoreUnacceptedHide();
+      await _reconcileUnacceptedHide();
       return false;
     } catch (_) {
       message = 'Couldn’t save these settings. Try again.';
-      _restoreUnacceptedHide();
+      await _reconcileUnacceptedHide();
       return false;
     } finally {
       saving = false;

@@ -631,6 +631,58 @@ void main() {
       state.dispose();
     });
 
+    testWidgets('a hide whose answer is lost settles on what landed', (
+      tester,
+    ) async {
+      final store = MemoryStore();
+      final commands = <Map<String, Object?>>[];
+      var landed = false;
+      final state = BotSettingsController(
+        SettingsApi(store, (path, body) async {
+          if (body != null) {
+            final command = Map<String, Object?>.from(body as Map);
+            commands.add(command);
+            if (command['type'] == 'bot/set-profile' && !landed) {
+              // The Worker commits it; the answer never makes it back.
+              landed = true;
+              throw Exception('connection lost');
+            }
+            return {
+              'schemaVersion': 1,
+              'commandId': command['commandId'],
+              'revision': 4,
+              'status': 'applied',
+            };
+          }
+          if (path.startsWith('/api/settings')) return account();
+          return landed
+              ? botSettings(hidden: true, notifications: false)
+              : botSettings();
+        }),
+        'alpha',
+      );
+      await open(tester, state);
+      await tapHidden(tester);
+      await tester.tap(find.text('Hide and turn off'));
+      await tester.pumpAndSettle();
+      // What the authority holds, not what the client guessed it refused.
+      expect(state.hidden, isTrue);
+      expect(state.notifications, isFalse);
+      expect(notificationsSwitch(tester).value, isFalse);
+      expect(notificationsSwitch(tester).onChanged, isNull);
+      commands.clear();
+      await tapHidden(tester);
+      await tester.pumpAndSettle();
+      expect(commands.map((command) => command['type']), ['bot/set-profile']);
+      expect((commands.single['profile']! as Map)['hiddenFromSidebar'], false);
+      // The mute the authority applied is what the switch now writes against.
+      await tester.tap(find.text('Notifications'));
+      await tester.pumpAndSettle();
+      expect(commands.last['type'], 'bot/update-notifications');
+      expect(commands.last['notifications'], {'enabled': true});
+      state.dispose();
+    });
+
     testWidgets('showing the Bot again leaves notifications off until asked', (
       tester,
     ) async {
