@@ -628,8 +628,9 @@ the rows whose status the code moved:
   admitted Turn whose Session and Turn the write can name
   (`plugin-shell/src/backend-flock.ts`). `bot_update` is a true partial update:
   it takes `name`, `description`, `title`, `hidden_from_sidebar` and
-  `notify_on_updates`, changes only the fields the call carries, and writes
-  nothing at all when the durable record already holds them. A self-rename goes
+  `notify_on_updates`, changes only the fields the call carries — apart from
+  the hidden-implies-muted coupling in row 4 — and writes nothing at all when
+  the durable record already holds them. A self-rename goes
   through `bot/set-profile` with `namedBy: "bot"` and a `writer` naming the Bot,
   Session and Turn, so the `bot/renamed` announcement carries its provenance.
   **There is no delete tool**, matching GrokBot: `bot_update` cannot archive,
@@ -663,7 +664,11 @@ the rows whose status the code moved:
   (`apps/native/lib/shell/sidebar.dart`). The
   durable field is `BotProfile.hiddenFromSidebar`, beside — not inside — the
   notification policy, because it describes how the Bot presents itself rather
-  than when it notifies. GrokBot's `notifyOnAgentUpdates` default is `true`;
+  than when it notifies. The two are still coupled one way, which GrokBot does
+  not do: hiding a Bot turns `notifications.enabled` off in the same
+  configuration write, a hidden Bot's notifications cannot be turned on, and
+  showing it again leaves them off (see [notifications](notifications.md)).
+  GrokBot's `notifyOnAgentUpdates` default is `true`;
   `initializeBotSettingsV1` now matches it, and the Create Bot gesture asks for
   browser notification permission without blocking or changing that durable
   intent when the browser refuses.
