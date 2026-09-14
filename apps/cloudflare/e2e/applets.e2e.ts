@@ -6,7 +6,7 @@
 // Bot Turn calls `applet_create`, and everything after that is production —
 // the artifact-backed Applets member mounted through the isolate host, the
 // User's Applet directory, the durable source root the scaffold is written
-// into, the focus the create sets, the native picker, and the full-window
+// into, the focus the create sets, the Bot's Applets list, and the full-window
 // canvas reading the source back.
 //
 // What is not here, and why: publishing. `applets-publish.e2e.ts` is the whole
@@ -102,7 +102,9 @@ async function provision(
  * counting bubbles counts what is on screen rather than what was said.
  */
 async function directoryHolds(page: Page, name: string): Promise<boolean> {
-  const response = await page.request.get("/api/applets");
+  const response = await page.request.get(
+    `/api/bots/${encodeURIComponent(await onlyBotId(page))}/applets`,
+  );
   const body = (await response.json()) as {
     applets: Array<{ displayName: string }>;
   };
@@ -187,18 +189,22 @@ function fileState(page: Page, path: string): Locator {
     .first();
 }
 
-/** The canvas, opened from the header control that is the whole of its entry. */
+/**
+ * The canvas, opened from the header control: it puts the selected Bot's
+ * Applets in the sidebar (a pushed page on a phone), and a row opens one.
+ */
 async function openCanvas(page: Page): Promise<Locator> {
   await press(sem(page, "applet-chip"));
+  await expect(sem(page, "applet-list")).toBeVisible({ timeout: 60_000 });
   await press(
-    page.locator('[flt-semantics-identifier^="applet-choice-"]').first(),
+    page.locator('[flt-semantics-identifier^="applet-row-"]').first(),
   );
   const canvas = sem(page, "applet-canvas");
   await expect(canvas).toBeVisible({ timeout: 60_000 });
   return canvas;
 }
 
-test("a Bot creates an Applet, the native picker opens its source, and deletion removes it", async ({
+test("a Bot creates an Applet, its Applets list opens the source, and deletion removes it", async ({
   page,
   userId,
   ollamaBaseUrl,
@@ -207,7 +213,7 @@ test("a Bot creates an Applet, the native picker opens its source, and deletion 
   // An Applet with nothing published has no live page, and the route says so
   // with a 404 the canvas reads as its building state. The browser logs it
   // either way.
-  allowedFailures.requests.push(/\/api\/applets\/[^/]+\/ui$/u);
+  allowedFailures.requests.push(/\/api\/bots\/[^/]+\/applets\/[^/]+\/ui$/u);
   allowedFailures.console.push(/Failed to load resource.*404/u);
   await provision(page, {
     userId,
@@ -264,17 +270,19 @@ test("a Bot creates an Applet, the native picker opens its source, and deletion 
   await press(sem(page, "applet-canvas-close"));
   await expect(sem(page, "shell-conversation")).toBeVisible();
 
-  // The native directory lists the durable Applet the Bot created.
+  // The Bot's Applets list shows the durable Applet the Bot created.
   const appletId = await appletIdFromDirectory(page);
   await press(sem(page, "applet-chip"));
-  const choice = sem(page, `applet-choice-${appletId}`);
-  await expect(choice).toBeVisible();
-  await expect(choice).toContainText("Weekly Todos");
+  await expect(sem(page, "applet-list")).toBeVisible({ timeout: 60_000 });
+  const row = sem(page, `applet-row-${appletId}`);
+  await expect(row).toBeVisible();
+  await expect(row).toHaveAccessibleName("Weekly Todos");
   await expectNoHorizontalOverflow(page);
   await page.screenshot({
-    path: testInfo.outputPath("applets-picker-real.png"),
+    path: testInfo.outputPath("applets-list-real.png"),
   });
-  await press(page.getByRole("button", { name: "Close", exact: true }));
+  await press(sem(page, "applet-list-back"));
+  await expect(sem(page, "applet-list")).toHaveCount(0);
 
   // And deleting it takes the canvas and the row with it.
   await runTool(
@@ -286,17 +294,32 @@ test("a Bot creates an Applet, the native picker opens its source, and deletion 
   );
   await expect(sem(page, "applet-chip")).toBeVisible();
   await press(sem(page, "applet-chip"));
+  await expect(sem(page, "applet-list")).toBeVisible({ timeout: 60_000 });
   await expect(
-    page.locator('[flt-semantics-identifier^="applet-choice-"]'),
+    page.locator('[flt-semantics-identifier^="applet-row-"]'),
   ).toHaveCount(0);
-  await expect(
-    page.getByText("No Applets yet. Ask a Bot to build one.", { exact: true }),
-  ).toBeVisible();
+  await expect(sem(page, "applet-list")).toHaveAccessibleName(
+    /No Applets yet\. Ask Builder to build one\./u,
+  );
 });
 
-/** The Applet's id, read from the same directory as the native picker. */
+/**
+ * The one Bot this spec provisions. Applets are listed per Bot (ADR 0027), so
+ * every directory read names it.
+ */
+async function onlyBotId(page: Page): Promise<string> {
+  const response = await page.request.get("/api/bots");
+  const body = (await response.json()) as { bots: Array<{ botId: string }> };
+  const botId = body.bots[0]?.botId;
+  if (!botId) throw new Error("this account has no Bot");
+  return botId;
+}
+
+/** The Applet's id, read from the same directory as the native Applets list. */
 async function appletIdFromDirectory(page: Page): Promise<string> {
-  const response = await page.request.get("/api/applets");
+  const response = await page.request.get(
+    `/api/bots/${encodeURIComponent(await onlyBotId(page))}/applets`,
+  );
   const body = (await response.json()) as {
     applets: Array<{ appletId: string; displayName: string }>;
   };
@@ -313,7 +336,7 @@ test("the Applets canvas fills the phone window", async ({
   ollamaBaseUrl,
   allowedFailures,
 }, testInfo: TestInfo) => {
-  allowedFailures.requests.push(/\/api\/applets\/[^/]+\/ui$/u);
+  allowedFailures.requests.push(/\/api\/bots\/[^/]+\/applets\/[^/]+\/ui$/u);
   allowedFailures.console.push(/Failed to load resource.*404/u);
   await provision(page, {
     userId,

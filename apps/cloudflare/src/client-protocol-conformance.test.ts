@@ -11,6 +11,7 @@ import {
   decodeAppletOpenFocusV1,
   decodeAppletOpenViewV1,
   decodeAppletSummaryV1,
+  decodeBotAppletImpactViewV1,
   decodeSendToUserPayloadV1,
   decodeSkillRefV1,
 } from "@frockbot/core/contracts";
@@ -79,6 +80,7 @@ const existing: Record<string, (value: unknown) => unknown> = {
     return decodeRunCursorV1(value);
   },
   AppletViewerToken: decodeAppletViewerTokenV1,
+  BotAppletImpact: decodeBotAppletImpactViewV1,
   SendPayload: decodeSendToUserPayloadV1,
   SkillRef: decodeSkillRefV1,
   NotificationList: decodeClientNotificationListV1,

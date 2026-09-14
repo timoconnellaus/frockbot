@@ -109,7 +109,7 @@ void main() {
   testWidgets('one Applets door on a desk, the built-in one', (tester) async {
     // The Applets Package declares an entry called Applets, and this client
     // has an Applets entry of its own: the outlined window that opens the
-    // built-in picker. Two buttons meaning the same thing, side by side in
+    // Bot's Applet list. Two buttons meaning the same thing, side by side in
     // one bar, is the duplicate this leaves out.
     final shell = await desk(tester, entryLabel: 'Applets');
 

@@ -46,11 +46,14 @@ const APPLET_MEMBER: CompositionAppletMemberV1 = {
     userId: USER,
     authoredAt: "2026-09-05T00:00:00.000Z",
   },
+  ownerBotId: "bot-1",
+  sharedWithBotIds: ["bot-2"],
 };
 
-async function generationWithApplet(): Promise<CompositionGenerationV1> {
+async function generationWithApplet(
+  applets: CompositionAppletMemberV1[] = [APPLET_MEMBER],
+): Promise<CompositionGenerationV1> {
   const members: CompositionMemberV1[] = [];
-  const applets = [APPLET_MEMBER];
   const artifactSetHash = await compositionArtifactSetHashV1(members, applets);
   return decodeCompositionGenerationV1({
     schemaVersion: 1,
@@ -120,6 +123,50 @@ describe("Applet tools mounted into a Turn's Composition", () => {
       ]);
     } finally {
       await mounted.dispose();
+    }
+  });
+
+  // The generation is the User's and names every available Applet, so the
+  // mount is where a Bot's access is applied — from the access the generation
+  // pinned, not from whatever the directory says mid-Turn (ADR 0027).
+  test("registers only the Applets the mounting Bot owns or is shared", async () => {
+    const generation = await generationWithApplet([
+      APPLET_MEMBER,
+      {
+        ...APPLET_MEMBER,
+        appletId: "applet-2",
+        tools: [{ ...APPLET_MEMBER.tools[0]!, name: "other_bots_tool" }],
+        ownerBotId: "bot-3",
+        sharedWithBotIds: [],
+      },
+    ]);
+    const { signal } = new AbortController();
+    for (const [botId, expected] of [
+      ["bot-1", ["add_todo"]],
+      ["bot-2", ["add_todo"]],
+      ["bot-3", ["other_bots_tool"]],
+      ["bot-4", []],
+    ] as const) {
+      const mounted = await createShellCompositionHost({
+        botId,
+        sessionId: `${USER}:${botId}`,
+        sessionEvents: [],
+        admitEffect: () => Promise.resolve(true),
+        applets: {
+          invokeTool: () =>
+            Promise.resolve({ status: "ok" as const, content: "ok" }),
+        },
+      }).mount(generation, signal);
+      try {
+        await mounted.verify(signal);
+        const names = mounted.runtime.services.tools
+          .schemas({ turnType: "chat" })
+          .map((entry) => entry.name)
+          .filter((name) => name === "add_todo" || name === "other_bots_tool");
+        expect(names).toEqual([...expected]);
+      } finally {
+        await mounted.dispose();
+      }
     }
   });
 });

@@ -188,7 +188,11 @@ export async function appletsRuntimeHost(
   return { applets: capability, turn };
 }
 
-/** The User Durable Object's Applet directory, decoded on arrival. */
+/**
+ * The User Durable Object's Applet directory as this Bot sees it, decoded on
+ * arrival. The Bot is on every call: the directory answers nothing for "the
+ * User" (ADR 0027).
+ */
 function appletUserDirectory(
   state: ShellBotStateV1,
   identity: BotIdentity,
@@ -198,16 +202,32 @@ function appletUserDirectory(
   // types do not expose its Applet directory RPC surface.
   const rpc = state.env.USER_CONFIGURATIONS.get(id) as unknown as {
     listApplets(input: unknown): Promise<unknown>;
+    readApplet(input: unknown): Promise<unknown>;
     readAppletCompositionInput(input: unknown): Promise<unknown>;
+    readAppletToolNameClashes(input: unknown): Promise<unknown>;
     createApplet(input: unknown): Promise<unknown>;
     recordAppletGeneration(input: unknown): Promise<unknown>;
     deleteApplet(input: unknown): Promise<unknown>;
+    shareApplet(input: unknown): Promise<unknown>;
+    unshareApplet(input: unknown): Promise<unknown>;
+    transferApplet(input: unknown): Promise<unknown>;
   };
   const userId = identity.userId;
+  const botId = identity.botId;
+  const access = async (
+    call: (input: unknown) => Promise<unknown>,
+    appletId: string,
+    targetBotId: string,
+  ) =>
+    decodeAppletSummaryV1(
+      rpcJsonSnapshotV1(
+        await call({ schemaVersion: 1, userId, botId, appletId, targetBotId }),
+      ),
+    );
   return {
     async list() {
       const answer = rpcJsonSnapshotV1(
-        await rpc.listApplets({ schemaVersion: 1, userId }),
+        await rpc.listApplets({ schemaVersion: 1, userId, botId }),
       ) as { revision?: unknown; applets?: unknown };
       return {
         revision: Number(answer.revision ?? 0),
@@ -215,6 +235,19 @@ function appletUserDirectory(
           ? answer.applets.map((applet) => decodeAppletSummaryV1(applet))
           : [],
       };
+    },
+    async read(appletId, options) {
+      return decodeAppletSummaryV1(
+        rpcJsonSnapshotV1(
+          await rpc.readApplet({
+            schemaVersion: 1,
+            userId,
+            botId,
+            appletId,
+            ...(options?.owner ? { owner: true } : {}),
+          }),
+        ),
+      );
     },
     async compositionInput() {
       const answer = rpcJsonSnapshotV1(
@@ -225,6 +258,13 @@ function appletUserDirectory(
         applets: (Array.isArray(answer.applets) ? answer.applets : []).map(
           (applet) => {
             const entry = applet as Record<string, unknown>;
+            if (
+              typeof entry.ownerBotId !== "string" ||
+              !Array.isArray(entry.sharedWithBotIds) ||
+              entry.sharedWithBotIds.some((id) => typeof id !== "string")
+            ) {
+              throw new Error("Applet composition input names no access");
+            }
             return {
               appletId: String(entry.appletId),
               generationId: String(entry.generationId),
@@ -236,6 +276,8 @@ function appletUserDirectory(
                   ),
               ),
               provenance: decodeAppletProvenanceV1(entry.provenance),
+              ownerBotId: entry.ownerBotId,
+              sharedWithBotIds: entry.sharedWithBotIds as string[],
             };
           },
         ),
@@ -247,6 +289,7 @@ function appletUserDirectory(
           await rpc.createApplet({
             schemaVersion: 1,
             userId,
+            botId,
             displayName: input.displayName,
             provenance: input.provenance,
           }),
@@ -259,6 +302,7 @@ function appletUserDirectory(
           await rpc.recordAppletGeneration({
             schemaVersion: 1,
             userId,
+            botId,
             appletId: input.appletId,
             generationId: input.generationId,
             tools: input.tools,
@@ -269,20 +313,44 @@ function appletUserDirectory(
     async delete(appletId) {
       return decodeAppletSummaryV1(
         rpcJsonSnapshotV1(
-          await rpc.deleteApplet({ schemaVersion: 1, userId, appletId }),
+          await rpc.deleteApplet({ schemaVersion: 1, userId, botId, appletId }),
         ),
       );
     },
+    async toolNameClashes(appletId, names) {
+      const answer = rpcJsonSnapshotV1(
+        await rpc.readAppletToolNameClashes({
+          schemaVersion: 1,
+          userId,
+          appletId,
+          names,
+        }),
+      );
+      if (
+        !Array.isArray(answer) ||
+        answer.some((name) => typeof name !== "string")
+      ) {
+        throw new Error("Applet tool name clashes are invalid");
+      }
+      return answer as string[];
+    },
+    share: (appletId, targetBotId) =>
+      access((input) => rpc.shareApplet(input), appletId, targetBotId),
+    unshare: (appletId, targetBotId) =>
+      access((input) => rpc.unshareApplet(input), appletId, targetBotId),
+    transfer: (appletId, targetBotId) =>
+      access((input) => rpc.transferApplet(input), appletId, targetBotId),
   };
 }
 
 /**
  * The Session's focused Applet, as the shell and its route read it.
  *
- * Focus lives in this Bot's storage, but what it points at is the User's. A
- * deletion — the Bot's own tool, or the User's own Applets list — reaches only
- * the User's directory, so a focus can outlive its Applet in any Bot that is
- * not the one that asked. It is settled on the read, where the directory is
+ * Focus lives in this Bot's storage, but what it points at is the User's
+ * directory. A deletion, an unshare, a transfer that left this Bot without
+ * access, or the owner Bot's archive reaches only the directory, so a focus
+ * can outlive this Bot's access to its Applet. It is settled on the read,
+ * against this Bot's own listing, where the directory is
  * already reachable: an id the directory no longer lists is cleared durably,
  * so nothing downstream inherits a pointer to an Applet that is gone. A
  * directory that cannot be read says nothing about the Applet, and leaves the
@@ -331,12 +399,20 @@ export async function readFocusedApplet(
   return cleared;
 }
 
+/**
+ * Records the Session's focus, only ever on an Applet this Bot may open: the
+ * directory's refusal is the answer for any other, exactly as for an Applet
+ * that does not exist.
+ */
 export async function setFocusedApplet(
   state: ShellBotStateV1,
   identity: BotIdentity,
   appletId: string | null,
 ): Promise<FocusedAppletV1> {
   await state.authority.validateIdentity(identity);
+  if (appletId !== null) {
+    await appletUserDirectory(state, identity).read(appletId);
+  }
   const focused = decodeFocusedAppletV1({
     schemaVersion: 1,
     appletId,

@@ -6,11 +6,13 @@
 // leaves the prior facet resident and records a durable failure; deleting an
 // Applet deletes its storage, versions, and directory entry; a facet cannot see
 // a host binding or the kernel's own storage; a tool call routes through this
-// object into the facet; and a viewer token is scoped to one User, one Applet,
-// and one generation.
+// object into the facet; and a viewer token is scoped to one User, one Bot, one
+// Applet, and one generation, and stops opening sockets once that Bot loses
+// access.
 import { env, evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { describe, expect, test } from "vitest";
 import { createGateway } from "../src/gateway.js";
+import { provisionBot, provisionSiblingBot } from "./provision-bot.ts";
 import {
   appletStateNameV1,
   mintAppletViewerTokenV1,
@@ -692,32 +694,50 @@ describe("Applet tool calls execute the generation the Turn pinned", () => {
   });
 });
 
-describe("Applet directory", () => {
-  function directoryFor(userId: string) {
-    return env.USER_CONFIGURATIONS.get(
-      env.USER_CONFIGURATIONS.idFromName(userId),
-    );
-  }
+const DIRECTORY_BOT = "bot-1";
 
-  test("create mints an id in the share shape and lists it", async () => {
+/**
+ * A User's Applet directory, with the one active Bot an Applet needs to be
+ * created at all: every Applet is owned by a Bot of the Flock (ADR 0027).
+ */
+async function directoryWithBot(userId: string, botId = DIRECTORY_BOT) {
+  await provisionBot({ userId, botId });
+  return env.USER_CONFIGURATIONS.get(
+    env.USER_CONFIGURATIONS.idFromName(userId),
+  );
+}
+
+describe("Applet directory", () => {
+  test("create mints an id in the share shape, owned by the creating Bot, and lists it", async () => {
     const userId = "user-directory-create";
-    const directory = directoryFor(userId);
+    const botId = DIRECTORY_BOT;
+    const directory = await directoryWithBot(userId);
     const created = await directory.createApplet({
       schemaVersion: 1,
       userId,
+      botId,
       displayName: "Todo",
       provenance: {
         kind: "bot",
-        botId: "bot-1",
-        sessionId: `${userId}:bot-1`,
+        botId,
+        sessionId: `${userId}:${botId}`,
         turnId: "turn-1",
       },
     });
     expect(created.appletId.startsWith(`${userId}.`)).toBe(true);
     expect(created.status).toBe("draft");
     expect(created.tools).toEqual([]);
+    expect(created).toMatchObject({
+      ownerBotId: botId,
+      access: "owner",
+      sharedWithBotIds: [],
+    });
 
-    const listed = await directory.listApplets({ schemaVersion: 1, userId });
+    const listed = await directory.listApplets({
+      schemaVersion: 1,
+      userId,
+      botId,
+    });
     expect(listed.applets.map((applet) => applet.appletId)).toEqual([
       created.appletId,
     ]);
@@ -732,18 +752,22 @@ describe("Applet directory", () => {
 
   test("recording a generation publishes the entry and bumps the revision", async () => {
     const userId = "user-directory-publish";
-    const directory = directoryFor(userId);
+    const botId = DIRECTORY_BOT;
+    const directory = await directoryWithBot(userId);
     const created = await directory.createApplet({
       schemaVersion: 1,
       userId,
+      botId,
       displayName: "Todo",
       provenance: { kind: "user" },
     });
-    const before = (await directory.listApplets({ schemaVersion: 1, userId }))
-      .revision;
+    const before = (
+      await directory.listApplets({ schemaVersion: 1, userId, botId })
+    ).revision;
     const published = await directory.recordAppletGeneration({
       schemaVersion: 1,
       userId,
+      botId,
       appletId: created.appletId,
       generationId: "g1",
       tools: [declaration("add_todo")],
@@ -753,7 +777,11 @@ describe("Applet directory", () => {
       currentGenerationId: "g1",
       tools: ["add_todo"],
     });
-    const after = await directory.listApplets({ schemaVersion: 1, userId });
+    const after = await directory.listApplets({
+      schemaVersion: 1,
+      userId,
+      botId,
+    });
     expect(after.revision).toBeGreaterThan(before);
 
     const composition = await directory.readAppletCompositionInput({
@@ -764,38 +792,49 @@ describe("Applet directory", () => {
     expect(composition.applets[0]).toMatchObject({
       appletId: created.appletId,
       generationId: "g1",
+      ownerBotId: botId,
+      sharedWithBotIds: [],
     });
     expect(composition.applets[0]?.tools[0]?.name).toBe("add_todo");
   });
 
   test("delete drops the entry from the directory and from every resolution", async () => {
     const userId = "user-directory-delete";
-    const directory = directoryFor(userId);
+    const botId = DIRECTORY_BOT;
+    const directory = await directoryWithBot(userId);
     const created = await directory.createApplet({
       schemaVersion: 1,
       userId,
+      botId,
       displayName: "Todo",
       provenance: { kind: "user" },
     });
     await directory.recordAppletGeneration({
       schemaVersion: 1,
       userId,
+      botId,
       appletId: created.appletId,
       generationId: "g1",
       tools: [declaration("add_todo")],
     });
-    const before = (await directory.listApplets({ schemaVersion: 1, userId }))
-      .revision;
+    const before = (
+      await directory.listApplets({ schemaVersion: 1, userId, botId })
+    ).revision;
 
     expect(
       await directory.deleteApplet({
         schemaVersion: 1,
         userId,
+        botId,
         appletId: created.appletId,
       }),
     ).toMatchObject({ status: "deleted", tools: [] });
 
-    const after = await directory.listApplets({ schemaVersion: 1, userId });
+    const after = await directory.listApplets({
+      schemaVersion: 1,
+      userId,
+      botId,
+    });
     expect(after.applets).toEqual([]);
     expect(after.revision).toBeGreaterThan(before);
     expect(
@@ -806,14 +845,22 @@ describe("Applet directory", () => {
         })
       ).applets,
     ).toEqual([]);
+    // The cleanup the delete queued has already run: the to-do is gone.
+    expect(
+      await runInDurableObject(directory, async (_instance, state) =>
+        state.storage.get(`applets:cleanup:${created.appletId}`),
+      ),
+    ).toBeUndefined();
   });
 
   test("one User's directory is not another's", async () => {
     const userId = "user-directory-scope";
-    const directory = directoryFor(userId);
+    const botId = DIRECTORY_BOT;
+    const directory = await directoryWithBot(userId);
     await directory.createApplet({
       schemaVersion: 1,
       userId,
+      botId,
       displayName: "Todo",
       provenance: { kind: "user" },
     });
@@ -822,6 +869,7 @@ describe("Applet directory", () => {
       await directory.listApplets({
         schemaVersion: 1,
         userId: "user-somebody-else",
+        botId,
       });
     } catch (error) {
       refusal = error;
@@ -963,12 +1011,12 @@ describe("opening an Applet", () => {
 
   test("the directory answers one entry without listing, and refuses one it does not hold", async () => {
     const userId = "user-directory-read-one";
-    const directory = env.USER_CONFIGURATIONS.get(
-      env.USER_CONFIGURATIONS.idFromName(userId),
-    );
+    const botId = DIRECTORY_BOT;
+    const directory = await directoryWithBot(userId);
     const created = await directory.createApplet({
       schemaVersion: 1,
       userId,
+      botId,
       displayName: "Todo",
       provenance: { kind: "user" },
     });
@@ -976,6 +1024,7 @@ describe("opening an Applet", () => {
       await directory.readApplet({
         schemaVersion: 1,
         userId,
+        botId,
         appletId: created.appletId,
       }),
     ).toEqual(created);
@@ -983,7 +1032,12 @@ describe("opening an Applet", () => {
     // `expect().rejects` is reported unhandled inside the object as well.
     const refusal = async (appletId: string) => {
       try {
-        await directory.readApplet({ schemaVersion: 1, userId, appletId });
+        await directory.readApplet({
+          schemaVersion: 1,
+          userId,
+          botId,
+          appletId,
+        });
       } catch (error) {
         return String(error);
       }
@@ -993,6 +1047,7 @@ describe("opening an Applet", () => {
     await directory.deleteApplet({
       schemaVersion: 1,
       userId,
+      botId,
       appletId: created.appletId,
     });
     expect(await refusal(created.appletId)).toMatch(/unavailable/);
@@ -1011,6 +1066,7 @@ describe("Applet viewer tokens", () => {
       const secret = "gateway-viewer-proof-secret-0123456789abcdef";
       const token = await mintAppletViewerTokenV1(secret, {
         u: OWNER,
+        b: "bot-1",
         a: applet,
         g: generation.generationId,
         exp: Math.floor((Date.now() + 120_000) / 1_000),
@@ -1029,6 +1085,12 @@ describe("Applet viewer tokens", () => {
         userConfigurationFor: unused,
         botConfigurationFor: unused,
         appletViewerSecret: secret,
+        // The door asks whether the Bot the token names still reaches the
+        // Applet, with exactly the three claims it verified.
+        appletAccessFor: async (userId, botId, appletId) => {
+          expect([userId, botId, appletId]).toEqual([OWNER, "bot-1", applet]);
+          return true;
+        },
         appletStateFor: (userId, appletId) => {
           expect([userId, appletId]).toEqual([OWNER, applet]);
           return {
@@ -1085,6 +1147,7 @@ describe("Applet viewer tokens", () => {
     const other = appletId("tokenother");
     const claims = {
       u: OWNER,
+      b: "bot-1",
       a: applet,
       g: "gen-1",
       exp: Math.floor((Date.now() + APPLET_VIEWER_TOKEN_TTL_MS) / 1_000),
@@ -1109,6 +1172,17 @@ describe("Applet viewer tokens", () => {
       "user-someone-else",
     );
 
+    // The Bot it was opened for travels with it, and the socket door checks
+    // that Bot's access; a token cannot be minted without one.
+    const otherBot = await mintAppletViewerTokenV1(secret, {
+      ...claims,
+      b: "bot-2",
+    });
+    expect((await verifyAppletViewerTokenV1(secret, otherBot)).b).toBe("bot-2");
+    await expect(
+      mintAppletViewerTokenV1(secret, { ...claims, b: "" }),
+    ).rejects.toThrow(/Bot id is invalid/);
+
     // Wrong secret and expiry are both refused outright.
     await expect(
       verifyAppletViewerTokenV1(`${secret}-forged`, token),
@@ -1120,6 +1194,108 @@ describe("Applet viewer tokens", () => {
     await expect(verifyAppletViewerTokenV1(secret, expired)).rejects.toThrow(
       /invalid/,
     );
+  });
+
+  test("a token for a Bot the Applet is later unshared from is a 404 at the socket door", async () => {
+    // The directory, the gateway's access check and the facet are all real:
+    // `appletAccessFor` is wired exactly as `src/index.ts` wires it, over the
+    // User Durable Object's `readApplet`.
+    const owner = { userId: OWNER, botId: "socket-owner" };
+    const guest = { userId: OWNER, botId: "socket-guest" };
+    await provisionBot(owner);
+    await provisionSiblingBot(guest, 1);
+    const directory = env.USER_CONFIGURATIONS.get(
+      env.USER_CONFIGURATIONS.idFromName(OWNER),
+    );
+    const created = await directory.createApplet({
+      schemaVersion: 1,
+      userId: OWNER,
+      botId: owner.botId,
+      displayName: "Shared todo",
+      provenance: { kind: "user" },
+    });
+    const applet = created.appletId;
+    const { generation } = await publishGeneration(applet, {
+      version: "A",
+      tools: ["list_todos"],
+    });
+    await directory.shareApplet({
+      schemaVersion: 1,
+      userId: OWNER,
+      botId: owner.botId,
+      appletId: applet,
+      targetBotId: guest.botId,
+    });
+
+    const secret = env.APPLET_VIEWER_SECRET;
+    const token = await mintAppletViewerTokenV1(secret, {
+      u: OWNER,
+      b: guest.botId,
+      a: applet,
+      g: generation.generationId,
+      exp: Math.floor((Date.now() + 120_000) / 1_000),
+    });
+    const unused = (): never => {
+      throw new Error("A viewer must not enter an app-session path");
+    };
+    let forwarded = 0;
+    const gateway = createGateway({
+      loader: { get: unused },
+      artifacts: { load: unused },
+      auth: { getSession: unused, handler: unused },
+      userExists: unused,
+      readDeploymentPolicy: unused,
+      applicationHashFor: unused,
+      botStateFor: unused,
+      userConfigurationFor: unused,
+      botConfigurationFor: unused,
+      appletViewerSecret: secret,
+      appletAccessFor: async (userId, botId, appletId) => {
+        try {
+          await env.USER_CONFIGURATIONS.get(
+            env.USER_CONFIGURATIONS.idFromName(userId),
+          ).readApplet({ schemaVersion: 1, userId, botId, appletId });
+          return true;
+        } catch (error) {
+          if (error instanceof Error && error.name === "AppletUnavailableError")
+            return false;
+          throw error;
+        }
+      },
+      appletStateFor: () => {
+        forwarded += 1;
+        return { fetch: (request) => stateFor(applet).fetch(request) };
+      },
+    });
+    const open = () => {
+      const url = new URL(`https://bot.example/api/applets/${applet}/socket`);
+      url.searchParams.set("token", token);
+      return gateway(
+        new Request(url, { headers: new Headers({ upgrade: "websocket" }) }),
+      );
+    };
+
+    // Shared: the socket opens and the facet answers.
+    const shared = await open();
+    expect(shared.status).toBe(101);
+    shared.webSocket?.accept();
+    shared.webSocket?.close(1000, "done");
+    expect(forwarded).toBe(1);
+
+    await directory.unshareApplet({
+      schemaVersion: 1,
+      userId: OWNER,
+      botId: owner.botId,
+      appletId: applet,
+      targetBotId: guest.botId,
+    });
+
+    // The token is still unexpired and still verifies, but the Bot it names
+    // no longer reaches the Applet: the next socket is refused as missing and
+    // never reaches the facet.
+    const refused = await open();
+    expect(refused.status).toBe(404);
+    expect(forwarded).toBe(1);
   });
 
   test("a socket forwarded with the wrong applet or generation is refused", async () => {

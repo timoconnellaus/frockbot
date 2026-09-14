@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/applets/canvas.dart';
-import 'package:frockbot_native/applets/picker.dart';
+import 'package:frockbot_native/applets/list.dart';
 import 'package:frockbot_native/applets/client.dart';
 import 'package:frockbot_native/applets/failure.dart';
 import 'package:frockbot_native/applets/progress.dart';
@@ -18,15 +18,41 @@ import 'package:frockbot_native/view/host_frame_messages.dart';
 import 'settings_test.dart' show SettingsApi;
 import 'widget_test.dart' show MemoryStore;
 
-wire.AppletSummary applet({String? generationId}) =>
-    wire.AppletSummary.fromJson({
-      'appletId': 'todo.applet',
-      'displayName': 'Weekly Todos',
-      'status': generationId == null ? 'draft' : 'published',
-      'currentGenerationId': ?generationId,
-      'tools': <String>[],
-      'createdAt': '2026-09-05T01:00:00.000Z',
-    });
+wire.AppletSummary applet({
+  String? generationId,
+  String access = 'owner',
+  String ownerBotId = 'bot-1',
+  List<String> sharedWithBotIds = const [],
+}) => wire.AppletSummary.fromJson(
+  summaryJson(
+    'todo.applet',
+    'Weekly Todos',
+    generationId: generationId,
+    access: access,
+    ownerBotId: ownerBotId,
+    sharedWithBotIds: sharedWithBotIds,
+  ),
+);
+
+/// A directory entry as the Bot-scoped routes answer it.
+Map<String, Object?> summaryJson(
+  String appletId,
+  String name, {
+  String? generationId,
+  String access = 'owner',
+  String ownerBotId = 'bot-1',
+  List<String> sharedWithBotIds = const [],
+}) => {
+  'appletId': appletId,
+  'displayName': name,
+  'status': generationId == null ? 'draft' : 'published',
+  'currentGenerationId': ?generationId,
+  'tools': <String>[],
+  'createdAt': '2026-09-05T01:00:00.000Z',
+  'ownerBotId': ownerBotId,
+  'access': access,
+  'sharedWithBotIds': sharedWithBotIds,
+};
 
 AppletSource source(List<String> paths, {String changedAt = ''}) =>
     AppletSource(
@@ -585,13 +611,7 @@ void main() {
               'schemaVersion': 1,
               'applets': [
                 applet(generationId: 'g1').toJson(),
-                wire.AppletSummary.fromJson({
-                  'appletId': 'draft.applet',
-                  'displayName': 'Reading List',
-                  'status': 'draft',
-                  'tools': <String>[],
-                  'createdAt': '2026-09-05T01:00:00.000Z',
-                }).toJson(),
+                summaryJson('draft.applet', 'Reading List'),
               ],
               // A draft's focus is its id and nothing else: what the route
               // answers for an Applet with nothing published.
@@ -726,17 +746,93 @@ void main() {
       controller.dispose();
       await tester.pumpWidget(const SizedBox());
     });
+
+    Future<AppletCanvasController> openShared(
+      WidgetTester tester, {
+      required bool published,
+      String access = 'shared',
+    }) async {
+      final api = SettingsApi(MemoryStore(), (path, body) async {
+        requested.add(path);
+        if (path.endsWith('/applets/open')) {
+          return {
+            'schemaVersion': 1,
+            'applets': [
+              applet(
+                generationId: published ? 'g1' : null,
+                access: access,
+                ownerBotId: access == 'shared' ? 'bot-2' : 'bot-1',
+              ).toJson(),
+            ],
+            'focused': {
+              'appletId': 'todo.applet',
+              if (published) ...openViewer(),
+            },
+          };
+        }
+        if (path.endsWith('/source') || path.endsWith('/build')) {
+          throw const RequestFailure('not the owner', 403, 'applet-not-owner');
+        }
+        throw const RequestFailure('unexpected', 404);
+      });
+      final controller = AppletCanvasController(api, 'bot-1');
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: FrockTheme.theme(Brightness.dark),
+          home: Scaffold(body: AppletCanvas(controller: controller)),
+        ),
+      );
+      await controller.load();
+      await tester.pumpAndSettle();
+      return controller;
+    }
+
+    testWidgets('a shared Applet is its page alone, with no code to switch to', (
+      tester,
+    ) async {
+      final controller = await openShared(tester, published: true);
+      expect(find.byType(AppletViewerFrame), findsOneWidget);
+      expect(find.byTooltip('Code'), findsNothing);
+      expect(find.byTooltip('App'), findsNothing);
+      // The source is the owner's, so it is never asked for.
+      expect(requested, ['/api/bots/bot-1/applets/open']);
+      controller.dispose();
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('a shared draft says it is being built and reads no code', (
+      tester,
+    ) async {
+      final controller = await openShared(tester, published: false);
+      expect(requested, ['/api/bots/bot-1/applets/open']);
+      expect(find.text('Still being built'), findsOneWidget);
+      expect(find.textContaining('hasn’t been published yet'), findsOneWidget);
+      expect(find.text('This Applet has no source yet.'), findsNothing);
+      expect(controller.failure, isNull);
+      controller.dispose();
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('a source refused to a Bot that is no longer the owner is no '
+        'code view, not a failure', (tester) async {
+      // The directory still says owner; a transfer landed after it was read.
+      final controller = await openShared(
+        tester,
+        published: false,
+        access: 'owner',
+      );
+      expect(controller.codeReadable, isFalse);
+      expect(controller.failure, isNull);
+      expect(find.text('Try again'), findsNothing);
+      expect(find.textContaining('hasn’t been published yet'), findsOneWidget);
+      controller.dispose();
+      await tester.pumpWidget(const SizedBox());
+    });
   });
 
-  group('the picker answers the tap, not the round trip', () {
-    Map<String, Object?> summary(String appletId, String name) => {
-      'appletId': appletId,
-      'displayName': name,
-      'status': 'published',
-      'currentGenerationId': 'g1',
-      'tools': <String>[],
-      'createdAt': '2026-09-05T01:00:00.000Z',
-    };
+  group('the Applet list answers the tap, not the round trip', () {
+    Map<String, Object?> summary(String appletId, String name) =>
+        summaryJson(appletId, name, generationId: 'g1');
 
     testWidgets('a confirmed delete takes the row now and restores it if the '
         'delete genuinely failed', (tester) async {
@@ -751,7 +847,7 @@ void main() {
             ],
           };
         }
-        if (path == '/api/applets/todo.applet/delete') {
+        if (path == '/api/bots/bot-1/applets/todo.applet/delete') {
           await deletes.future;
           throw const RequestFailure('synthetic backend detail', 500);
         }
@@ -761,7 +857,14 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           theme: FrockTheme.theme(Brightness.dark),
-          home: Scaffold(body: AppletPicker(controller: controller)),
+          home: Scaffold(
+            body: AppletList(
+              controller: controller,
+              botName: 'Mira',
+              nameOf: (_) => null,
+              onOpen: (_) {},
+            ),
+          ),
         ),
       );
       await tester.pumpAndSettle();

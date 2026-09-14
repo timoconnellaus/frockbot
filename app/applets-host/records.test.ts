@@ -17,6 +17,7 @@ import {
   type AppletBuildStageV1,
 } from "@frockbot/applets/build-contract";
 import type {
+  AppletSummaryV1,
   WorkspaceFilesV1,
   WorkspacePathV1,
 } from "@frockbot/core/contracts";
@@ -40,6 +41,39 @@ function tool(name: string) {
     name,
     description: `The ${name} tool`,
     inputSchema: { type: "object" },
+  };
+}
+
+/** One Applet as the directory answers it to `bot-1`, its owner by default. */
+function summary(overrides: Partial<AppletSummaryV1> = {}): AppletSummaryV1 {
+  return {
+    appletId: APPLET,
+    displayName: "Todo",
+    status: "published",
+    currentGenerationId: "g1",
+    tools: ["add_todo"],
+    createdAt: "2026-09-03T00:00:00.000Z",
+    ownerBotId: "bot-1",
+    access: "owner",
+    sharedWithBotIds: [],
+    ...overrides,
+  };
+}
+
+/** A composition input owned by `bot-1` and shared with nobody. */
+function input(
+  appletId: string,
+  generationId: string,
+  tools: ReturnType<typeof tool>[],
+  access: { ownerBotId?: string; sharedWithBotIds?: string[] } = {},
+) {
+  return {
+    appletId,
+    generationId,
+    tools,
+    provenance: { kind: "user" as const },
+    ownerBotId: access.ownerBotId ?? "bot-1",
+    sharedWithBotIds: access.sharedWithBotIds ?? [],
   };
 }
 
@@ -71,18 +105,14 @@ function memoryStorage() {
 }
 
 describe("Applet Composition members", () => {
-  test("members are ordered by Applet id and carry their provenance", () => {
+  test("members are ordered by Applet id and carry their provenance and access", () => {
     const members = appletCompositionMembersV1([
+      input(OTHER, "g2", [tool("b_tool")], {
+        ownerBotId: "bot-2",
+        sharedWithBotIds: ["bot-3", "bot-1"],
+      }),
       {
-        appletId: OTHER,
-        generationId: "g2",
-        tools: [tool("b_tool")],
-        provenance: { kind: "user" },
-      },
-      {
-        appletId: APPLET,
-        generationId: "g1",
-        tools: [tool("a_tool")],
+        ...input(APPLET, "g1", [tool("a_tool")]),
         provenance: {
           kind: "bot",
           botId: "bot-1",
@@ -92,7 +122,14 @@ describe("Applet Composition members", () => {
       },
     ]);
     expect(members.map((member) => member.appletId)).toEqual([APPLET, OTHER]);
-    expect(members[0]).toMatchObject({ kind: "applet", generationId: "g1" });
+    expect(members[0]).toMatchObject({
+      kind: "applet",
+      generationId: "g1",
+      ownerBotId: "bot-1",
+      sharedWithBotIds: [],
+    });
+    // Sorted, so the same access always hashes the same.
+    expect(members[1]?.sharedWithBotIds).toEqual(["bot-1", "bot-3"]);
     expect(members[0]?.provenance).toMatchObject({
       kind: "bot",
       packageId: APPLET,
@@ -106,21 +143,18 @@ describe("Applet Composition members", () => {
     const members: CompositionMemberV1[] = [];
     const withoutApplets = await compositionArtifactSetHashV1(members);
     const first = appletCompositionMembersV1([
-      {
-        appletId: APPLET,
-        generationId: "g1",
-        tools: [tool("a_tool")],
-        provenance: { kind: "user" },
-      },
+      input(APPLET, "g1", [tool("a_tool")]),
     ]);
     const second = appletCompositionMembersV1([
-      {
-        appletId: APPLET,
-        generationId: "g2",
-        tools: [tool("a_tool")],
-        provenance: { kind: "user" },
-      },
+      input(APPLET, "g2", [tool("a_tool")]),
     ]);
+    const shared = appletCompositionMembersV1([
+      input(APPLET, "g1", [tool("a_tool")], { sharedWithBotIds: ["bot-2"] }),
+    ]);
+    // Access is pinned with the tools: sharing is a different generation.
+    expect(await compositionArtifactSetHashV1(members, first)).not.toBe(
+      await compositionArtifactSetHashV1(members, shared),
+    );
     // A generation with no Applets hashes exactly as it always did.
     expect(await compositionArtifactSetHashV1(members, [])).toBe(
       withoutApplets,
@@ -133,54 +167,33 @@ describe("Applet Composition members", () => {
     );
   });
 
-  test("a changed tool set, generation, or Applet is a different member set", () => {
+  test("a changed tool set, generation, Applet, owner or share is a different member set", () => {
     const base = appletCompositionMembersV1([
-      {
-        appletId: APPLET,
-        generationId: "g1",
-        tools: [tool("a_tool")],
-        provenance: { kind: "user" },
-      },
+      input(APPLET, "g1", [tool("a_tool")], { sharedWithBotIds: ["bot-2"] }),
     ]);
     expect(appletMembersDifferV1(base, base)).toBe(false);
     expect(appletMembersDifferV1(base, [])).toBe(true);
-    expect(
-      appletMembersDifferV1(
-        base,
-        appletCompositionMembersV1([
-          {
-            appletId: APPLET,
-            generationId: "g2",
-            tools: [tool("a_tool")],
-            provenance: { kind: "user" },
-          },
-        ]),
-      ),
-    ).toBe(true);
-    expect(
-      appletMembersDifferV1(
-        base,
-        appletCompositionMembersV1([
-          {
-            appletId: APPLET,
-            generationId: "g1",
-            tools: [tool("a_tool"), tool("b_tool")],
-            provenance: { kind: "user" },
-          },
-        ]),
-      ),
-    ).toBe(true);
+    for (const changed of [
+      input(APPLET, "g2", [tool("a_tool")], { sharedWithBotIds: ["bot-2"] }),
+      input(APPLET, "g1", [tool("a_tool"), tool("b_tool")], {
+        sharedWithBotIds: ["bot-2"],
+      }),
+      input(APPLET, "g1", [tool("a_tool")], {
+        ownerBotId: "bot-2",
+        sharedWithBotIds: ["bot-1"],
+      }),
+      input(APPLET, "g1", [tool("a_tool")]),
+    ]) {
+      expect(
+        appletMembersDifferV1(base, appletCompositionMembersV1([changed])),
+      ).toBe(true);
+    }
   });
 });
 
 describe("Applet Composition resolution", () => {
   async function resolveWith(
-    applets: {
-      appletId: string;
-      generationId: string;
-      tools: ReturnType<typeof tool>[];
-      provenance: { kind: "user" };
-    }[],
+    applets: ReturnType<typeof input>[],
     options: {
       current?: CompositionGenerationV1;
       revision?: number;
@@ -215,12 +228,7 @@ describe("Applet Composition resolution", () => {
 
   test("a published Applet's tools appear in the Bot's next generation", async () => {
     const { generation, proposed, storage } = await resolveWith([
-      {
-        appletId: APPLET,
-        generationId: "g1",
-        tools: [tool("add_todo")],
-        provenance: { kind: "user" },
-      },
+      input(APPLET, "g1", [tool("add_todo")]),
     ]);
     expect(generation).toBeDefined();
     expect(proposed).toHaveLength(1);
@@ -238,37 +246,43 @@ describe("Applet Composition resolution", () => {
   });
 
   test("an unchanged directory proposes nothing", async () => {
-    const first = await resolveWith([
-      {
-        appletId: APPLET,
-        generationId: "g1",
-        tools: [tool("add_todo")],
-        provenance: { kind: "user" },
-      },
-    ]);
-    const again = await resolveWith(
-      [
-        {
-          appletId: APPLET,
-          generationId: "g1",
-          tools: [tool("add_todo")],
-          provenance: { kind: "user" },
-        },
-      ],
-      { current: first.proposed[0], storage: first.storage, revision: 1 },
-    );
+    const first = await resolveWith([input(APPLET, "g1", [tool("add_todo")])]);
+    const again = await resolveWith([input(APPLET, "g1", [tool("add_todo")])], {
+      current: first.proposed[0],
+      storage: first.storage,
+      revision: 1,
+    });
     expect(again.generation).toBeUndefined();
     expect(again.proposed).toEqual([]);
   });
 
+  test("a share proposes a new generation, so the next Turn pins the new access", async () => {
+    const published = await resolveWith([
+      input(APPLET, "g1", [tool("add_todo")]),
+    ]);
+    const afterShare = await resolveWith(
+      [
+        input(APPLET, "g1", [tool("add_todo")], {
+          sharedWithBotIds: ["bot-2"],
+        }),
+      ],
+      {
+        current: published.proposed[0],
+        storage: published.storage,
+        revision: 2,
+      },
+    );
+    expect(afterShare.proposed).toHaveLength(1);
+    expect(afterShare.proposed[0]?.applets?.[0]?.sharedWithBotIds).toEqual([
+      "bot-2",
+    ]);
+    // What a Turn already admitted pinned is left as it was.
+    expect(published.proposed[0]?.applets?.[0]?.sharedWithBotIds).toEqual([]);
+  });
+
   test("a deleted Applet's tools disappear at the next resolution", async () => {
     const published = await resolveWith([
-      {
-        appletId: APPLET,
-        generationId: "g1",
-        tools: [tool("add_todo")],
-        provenance: { kind: "user" },
-      },
+      input(APPLET, "g1", [tool("add_todo")]),
     ]);
     const afterDelete = await resolveWith([], {
       current: published.proposed[0],
@@ -468,49 +482,45 @@ describe("ctx.applets", () => {
     const artifacts: Record<string, string> = {};
     const puts: string[] = [];
     const workspace = workspaceFiles(options.source);
+    const accessChanges: string[] = [];
     const directory: AppletUserDirectoryV1 = {
-      list: () =>
-        Promise.resolve({
-          revision: 1,
-          applets: [
-            {
-              appletId: APPLET,
-              displayName: "Todo",
-              status: "published" as const,
-              currentGenerationId: "g1",
-              tools: ["add_todo"],
-              createdAt: "2026-09-03T00:00:00.000Z",
-            },
-          ],
-        }),
+      list: () => Promise.resolve({ revision: 1, applets: [summary()] }),
+      read: () => Promise.resolve(summary()),
       compositionInput: () => Promise.resolve({ revision: 1, applets: [] }),
       create: () =>
-        Promise.resolve({
-          appletId: APPLET,
-          displayName: "Todo",
-          status: "draft" as const,
-          tools: [],
-          createdAt: "2026-09-03T00:00:00.000Z",
-        }),
-      recordGeneration: (input) => {
-        recorded.push(input);
-        return Promise.resolve({
-          appletId: input.appletId,
-          displayName: "Todo",
-          status: "published" as const,
-          currentGenerationId: input.generationId,
-          tools: input.tools.map((entry) => entry.name),
-          createdAt: "2026-09-03T00:00:00.000Z",
-        });
+        Promise.resolve(
+          summary({
+            status: "draft",
+            currentGenerationId: undefined,
+            tools: [],
+          }),
+        ),
+      recordGeneration: (entry) => {
+        recorded.push(entry);
+        return Promise.resolve(
+          summary({
+            appletId: entry.appletId,
+            currentGenerationId: entry.generationId,
+            tools: entry.tools.map((declared) => declared.name),
+          }),
+        );
       },
-      delete: () =>
-        Promise.resolve({
-          appletId: APPLET,
-          displayName: "Todo",
-          status: "deleted" as const,
-          tools: [],
-          createdAt: "2026-09-03T00:00:00.000Z",
-        }),
+      delete: () => Promise.resolve(summary({ status: "deleted", tools: [] })),
+      toolNameClashes: () => Promise.resolve([]),
+      share: (appletId, targetBotId) => {
+        accessChanges.push(`share:${appletId}:${targetBotId}`);
+        return Promise.resolve(summary({ sharedWithBotIds: [targetBotId] }));
+      },
+      unshare: (appletId, targetBotId) => {
+        accessChanges.push(`unshare:${appletId}:${targetBotId}`);
+        return Promise.resolve(summary());
+      },
+      transfer: (appletId, targetBotId) => {
+        accessChanges.push(`transfer:${appletId}:${targetBotId}`);
+        return Promise.resolve(
+          summary({ ownerBotId: targetBotId, access: "shared" }),
+        );
+      },
       ...options.directory,
     };
     const instance: AppletInstanceBindingV1 = {
@@ -536,6 +546,7 @@ describe("ctx.applets", () => {
       artifacts,
       puts,
       workspace,
+      accessChanges,
       host: createAppletCapabilityHostV1({
         userId: USER,
         botId: "bot-1",
@@ -760,32 +771,141 @@ describe("ctx.applets", () => {
     );
   });
 
-  test("a tool name another Applet owns is refused at publish", async () => {
+  test("a tool name another Applet of the account declares is refused at publish", async () => {
+    const asked: Array<{ appletId: string; names: string[] }> = [];
     const { host: capability, artifacts } = host({
       source: { ...SOURCE },
       buildService: buildsCleanly(),
       directory: {
-        list: () =>
-          Promise.resolve({
-            revision: 1,
-            applets: [
-              {
-                appletId: OTHER,
-                displayName: "Other",
-                status: "published" as const,
-                currentGenerationId: "g1",
-                tools: ["add_todo"],
-                createdAt: "2026-09-03T00:00:00.000Z",
-              },
-            ],
-          }),
+        // The clash is the account's, not this Bot's listing: the Applet that
+        // holds the name may belong to a Bot this one cannot see.
+        list: () => Promise.resolve({ revision: 1, applets: [] }),
+        toolNameClashes: (appletId, names) => {
+          asked.push({ appletId, names });
+          return Promise.resolve(["add_todo"]);
+        },
       },
     });
     const outcome = await capability.publish({ appletId: APPLET }, scope);
+    expect(asked).toEqual([{ appletId: APPLET, names: ["add_todo"] }]);
     expect(outcome.status === "failed" && outcome.diagnostics).toEqual([
-      '"add_todo" is already a tool of "Other"',
+      '"add_todo" is already a tool of another Applet in this account',
     ]);
     expect(Object.keys(artifacts)).toHaveLength(0);
+  });
+
+  describe("an Applet shared with this Bot", () => {
+    const refusal = Object.assign(
+      new Error(
+        `Applet "${APPLET}" is shared with this Bot; only the Bot that owns it can change it`,
+      ),
+      { name: "AppletNotOwnerError" },
+    );
+    const sharedDirectory: Partial<AppletUserDirectoryV1> = {
+      read: (_appletId, options) =>
+        options?.owner
+          ? Promise.reject(refusal)
+          : Promise.resolve(summary({ ownerBotId: "bot-2", access: "shared" })),
+      recordGeneration: () => Promise.reject(refusal),
+    };
+
+    test("its source, generations and publication are the owner's alone", async () => {
+      let builds = 0;
+      const {
+        host: capability,
+        artifacts,
+        recorded,
+        workspace,
+      } = host({
+        source: { ...SOURCE },
+        directory: sharedDirectory,
+        buildService: {
+          build: () => {
+            builds += 1;
+            throw new Error("a shared Bot never reaches the build");
+          },
+        },
+      });
+      await expect(capability.files({ appletId: APPLET })).rejects.toThrow(
+        /only the Bot that owns it/,
+      );
+      await expect(
+        capability.readFile({ appletId: APPLET, path: "server.ts" }),
+      ).rejects.toThrow(/only the Bot that owns it/);
+      await expect(
+        capability.writeFile(
+          { appletId: APPLET, path: "server.ts", text: "overwritten" },
+          scope,
+        ),
+      ).rejects.toThrow(/only the Bot that owns it/);
+      await expect(
+        capability.check({ appletId: APPLET }, scope),
+      ).rejects.toThrow(/only the Bot that owns it/);
+      await expect(
+        capability.publish({ appletId: APPLET }, scope),
+      ).rejects.toThrow(/only the Bot that owns it/);
+      await expect(
+        capability.revert({ appletId: APPLET, generationId: "g1" }, scope),
+      ).rejects.toThrow(/only the Bot that owns it/);
+      await expect(
+        capability.generations({ appletId: APPLET }),
+      ).rejects.toThrow(/only the Bot that owns it/);
+      expect(builds).toBe(0);
+      expect(recorded).toEqual([]);
+      expect(Object.keys(artifacts)).toHaveLength(0);
+      // The refused write never reached the store.
+      const read = await workspace.read({
+        root: SOURCE_ROOT,
+        path: `${APPLET}/server.ts`,
+      });
+      expect(
+        read.status === "ok" && new TextDecoder().decode(read.file.bytes),
+      ).toBe("export default class {}");
+    });
+
+    test("it can still be focused, because using it is what sharing grants", async () => {
+      const { host: capability } = host({ directory: sharedDirectory });
+      expect(await capability.focus({ appletId: APPLET })).toMatchObject({
+        appletId: APPLET,
+      });
+    });
+  });
+
+  test("an Applet this Bot cannot reach is never focused", async () => {
+    const { host: capability, storage } = host({
+      directory: {
+        read: () =>
+          Promise.reject(
+            Object.assign(new Error(`Applet "${OTHER}" is unavailable`), {
+              name: "AppletUnavailableError",
+            }),
+          ),
+      },
+    });
+    await expect(capability.focus({ appletId: OTHER })).rejects.toThrow(
+      /unavailable/,
+    );
+    expect(storage.values.has(APPLET_FOCUSED_KEY)).toBe(false);
+    // Closing the panel needs no Applet at all.
+    expect(await capability.focus({ appletId: null })).toMatchObject({
+      appletId: null,
+    });
+  });
+
+  test("share, unshare and transfer are the directory's to decide", async () => {
+    const { host: capability, accessChanges } = host({});
+    expect(
+      await capability.share({ appletId: APPLET, botId: "bot-2" }),
+    ).toMatchObject({ sharedWithBotIds: ["bot-2"] });
+    await capability.unshare({ appletId: APPLET, botId: "bot-2" });
+    expect(
+      await capability.transfer({ appletId: APPLET, botId: "bot-2" }),
+    ).toMatchObject({ ownerBotId: "bot-2", access: "shared" });
+    expect(accessChanges).toEqual([
+      `share:${APPLET}:bot-2`,
+      `unshare:${APPLET}:bot-2`,
+      `transfer:${APPLET}:bot-2`,
+    ]);
   });
 
   test("publish is idempotent by effect id", async () => {

@@ -265,6 +265,7 @@ describe("Applet durable records", () => {
 describe("Applet viewer tokens", () => {
   const claims = {
     u: "user-42",
+    b: "scout",
     a: APPLET,
     g: "g1",
     exp: Math.floor((Date.now() + APPLET_VIEWER_TOKEN_TTL_MS) / 1_000),
@@ -306,12 +307,46 @@ describe("Applet viewer tokens", () => {
     );
   });
 
-  test("the token is scoped: the claims name the User, Applet, and generation", async () => {
+  test("the token is scoped: the claims name the User, Bot, Applet, and generation", async () => {
     const token = await mintAppletViewerTokenV1(SECRET, claims);
     const verified = await verifyAppletViewerTokenV1(SECRET, token);
     expect(verified.u).toBe("user-42");
+    expect(verified.b).toBe("scout");
     expect(verified.a).toBe(APPLET);
     expect(verified.g).toBe("g1");
+  });
+
+  test("a token binds the Bot it was opened for", async () => {
+    await expect(
+      mintAppletViewerTokenV1(SECRET, { ...claims, b: "scout#task:1" }),
+    ).rejects.toThrow(/Bot id is invalid/);
+    // A token signed before the Bot was bound names nobody to check access
+    // for, so it is not a token.
+    const { b: _bot, ...unbound } = claims;
+    const payload = btoa(JSON.stringify(unbound))
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/, "");
+    const signature = new Uint8Array(
+      await crypto.subtle.sign(
+        "HMAC",
+        await crypto.subtle.importKey(
+          "raw",
+          new TextEncoder().encode(SECRET),
+          { name: "HMAC", hash: "SHA-256" },
+          false,
+          ["sign"],
+        ),
+        new TextEncoder().encode(payload),
+      ),
+    );
+    const signed = btoa(String.fromCharCode(...signature))
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/, "");
+    await expect(
+      verifyAppletViewerTokenV1(SECRET, `${payload}.${signed}`),
+    ).rejects.toThrow(/invalid/);
   });
 
   test("a short secret is a deployment fault, not a 401", async () => {

@@ -210,7 +210,8 @@ export class AppletCapabilities extends WorkerEntrypoint<
    * TODO(model access): the kernel's model resolution is Bot-scoped today — a
    * binding is admitted onto one Bot's Composition generation and leased
    * against that Bot's Connections (`plugin-shell/src/backend-isolate.ts`).
-   * An Applet is account-wide and holds no Bot, so there is no admitted binding
+   * An Applet's facet holds no Bot — its owner is directory metadata, and a
+   * call may come from any Bot it is shared with — so there is no admitted binding
    * to resolve against, and inventing one would widen authority. Until the
    * User-level model binding of the Applets plan exists this answers
    * `unavailable`, which is a declared outcome the SDK already handles rather

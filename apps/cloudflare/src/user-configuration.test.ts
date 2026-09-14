@@ -114,8 +114,14 @@ function identity(userId: string): {
       toString: () => name,
     }) as unknown as DurableObjectId;
   return {
+    // The constructor's disposable Applet cleanup is exercised against real
+    // storage in `applet-test-state-cleanup.test.ts`; these fakes hold none.
     ctx: (storage: unknown) =>
-      ({ storage, id: idFor(userId) }) as unknown as DurableObjectState,
+      ({
+        storage,
+        id: idFor(userId),
+        blockConcurrencyWhile: () => Promise.resolve(),
+      }) as unknown as DurableObjectState,
     env: {
       USER_CONFIGURATIONS: {
         idFromName: idFor,

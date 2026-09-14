@@ -8,6 +8,8 @@
 // owns the storage (`../composition-store.ts`) and the Package that mounts it
 // owns the host.
 import {
+  APPLET_BOT_ID_V1,
+  APPLET_MAX_SHARES_V1,
   canonicalJson,
   decodePluginDescriptorV1,
   sha256,
@@ -74,6 +76,11 @@ export type CompositionOriginV1 =
  * generation activates at the next admitted Turn, and an in-flight Turn keeps
  * the set it pinned. A tool call routes to the Applet Durable Object, which
  * forwards it to the facet; the facet's storage is never Composition.
+ *
+ * The generation is the User's, but the access is recorded with it: a Bot
+ * registers a member's tools only when it is the owner or a shared Bot, so
+ * the Bots an Applet reached are pinned with the Turn exactly like its tools
+ * (ADR 0027).
  */
 export interface CompositionAppletMemberV1 {
   kind: "applet";
@@ -81,6 +88,16 @@ export interface CompositionAppletMemberV1 {
   generationId: string;
   tools: CompositionAppletToolV1[];
   provenance: PackageProvenanceV1;
+  ownerBotId: string;
+  sharedWithBotIds: string[];
+}
+
+/** Whether one Bot may use an Applet member of a pinned generation. */
+export function compositionAppletMemberReachesV1(
+  member: Pick<CompositionAppletMemberV1, "ownerBotId" | "sharedWithBotIds">,
+  botId: string,
+): boolean {
+  return member.ownerBotId === botId || member.sharedWithBotIds.includes(botId);
 }
 
 /**
@@ -444,11 +461,40 @@ export function decodeCompositionAppletMemberV1(
   const value = record(input, label);
   exactKeys(
     value,
-    ["kind", "appletId", "generationId", "tools", "provenance"],
+    [
+      "kind",
+      "appletId",
+      "generationId",
+      "tools",
+      "provenance",
+      "ownerBotId",
+      "sharedWithBotIds",
+    ],
     [],
     label,
   );
   if (value.kind !== "applet") throw new Error(`${label}.kind is invalid`);
+  if (
+    typeof value.ownerBotId !== "string" ||
+    !APPLET_BOT_ID_V1.test(value.ownerBotId)
+  ) {
+    throw new Error(`${label}.ownerBotId is invalid`);
+  }
+  if (
+    !Array.isArray(value.sharedWithBotIds) ||
+    value.sharedWithBotIds.length > APPLET_MAX_SHARES_V1 ||
+    value.sharedWithBotIds.some(
+      (id) =>
+        typeof id !== "string" ||
+        !APPLET_BOT_ID_V1.test(id) ||
+        id === value.ownerBotId,
+    ) ||
+    new Set(value.sharedWithBotIds).size !== value.sharedWithBotIds.length
+  ) {
+    throw new Error(`${label}.sharedWithBotIds is invalid`);
+  }
+  const ownerBotId = value.ownerBotId;
+  const sharedWithBotIds = [...(value.sharedWithBotIds as string[])];
   if (
     !Array.isArray(value.tools) ||
     value.tools.length > MAX_COMPOSITION_APPLET_TOOLS
@@ -474,6 +520,8 @@ export function decodeCompositionAppletMemberV1(
       value.provenance,
       `${label}.provenance`,
     ),
+    ownerBotId,
+    sharedWithBotIds,
   };
 }
 

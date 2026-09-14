@@ -16,6 +16,7 @@ import {
   APPLET_ID_V1,
   decodeAppletFocusViewV1,
   decodeAppletListViewV1,
+  decodeBotAppletImpactViewV1,
   decodeAppletOpenViewV1,
   decodeAppletUiViewV1,
   decodePackageIframeToolCommandV1,
@@ -239,6 +240,40 @@ function botFailure(error: unknown, fallback: string): Response {
 }
 
 /**
+ * An Applet call that failed, answered by what the directory decided (ADR
+ * 0027). An Applet the Bot cannot reach is a settled 404 — deleting one that
+ * is already gone must settle rather than fail forever — and a shared Bot
+ * asking for something only the owner may do is a 403 the client can name.
+ * The directory's errors are recognised by `name`, which survives the Durable
+ * Object hops; their wording is never read.
+ */
+function appletFailure(error: unknown, fallback: string): Response {
+  const name = error instanceof Error ? error.name : "";
+  const message = error instanceof Error ? error.message : fallback;
+  if (name === "AppletUnavailableError") return jsonError(404, message);
+  if (name === "AppletNotOwnerError") {
+    return Response.json(
+      { error: message, code: "applet-not-owner", definitive: true },
+      { status: 403 },
+    );
+  }
+  /*
+   * A deployment that cannot sign viewer tokens is not a missing Applet and
+   * not a blip: it is settled until somebody changes the deployment. It
+   * answers 503 with the sentence the shell shows and `definitive`, so the
+   * panel stops retrying something that will never start working on its own.
+   */
+  if (message === APPLETS_UNAVAILABLE_MESSAGE_V1) {
+    return jsonError(503, message, { definitive: true });
+  }
+  if (message.includes("no active generation")) return jsonError(404, message);
+  // A Bot deleted mid-read keeps the status the entry boundary gives it; an
+  // unrecognised failure is the retryable 503 the Applet routes always gave.
+  const status = entryFailureStatusV1(error);
+  return jsonError(status === 500 ? 503 : status, message);
+}
+
+/**
  * A Turn the Bot Durable Object declined to admit, told apart from one that
  * broke.
  *
@@ -452,77 +487,104 @@ function createUserApplicationRoute() {
 
     // --- Applets -----------------------------------------------------------
     //
-    // Session-authenticated and User-scoped: the gateway has already proved who
-    // is asking, and an Applet belongs to the User rather than to a Bot. The
-    // token these mint is the only credential an Applet page ever holds, and it
-    // names one User, one Applet, and one generation for fifteen minutes.
-    if (url.pathname === "/api/applets") {
-      if (request.method !== "GET") return jsonError(405, "method not allowed");
-      try {
-        // Projected through the view decoder the client uses, so the two sides
-        // cannot disagree: the durable answer carries a `revision` the view
-        // does not declare, and an exact-keys decoder is right to refuse it.
-        const listed = (await env.BOT_STATE.listApplets()) as {
-          applets: unknown;
-        };
-        return Response.json(
-          decodeAppletListViewV1({
-            schemaVersion: 1,
-            applets: listed.applets,
-          }),
-        );
-      } catch (error) {
-        return jsonError(
-          503,
-          error instanceof Error ? error.message : "Applets are unavailable",
-        );
-      }
-    }
-    const appletDeleteMatch = url.pathname.match(
-      /^\/api\/applets\/([^/]+)\/delete$/,
+    // Session-authenticated, and every route names the Bot acting: the gateway
+    // has already proved who is asking, and the directory answers only what
+    // that Bot owns or is shared (ADR 0027). The token these mint is the only
+    // credential an Applet page ever holds, and it names one User, one Bot, one
+    // Applet, and one generation for fifteen minutes.
+    const appletImpactMatch = url.pathname.match(
+      /^\/api\/bots\/([^/]+)\/applets\/impact$/,
     );
-    if (appletDeleteMatch) {
-      if (request.method !== "POST")
-        return jsonError(405, "method not allowed");
+    const appletListMatch = url.pathname.match(
+      /^\/api\/bots\/([^/]+)\/applets$/,
+    );
+    const appletActionMatch = url.pathname.match(
+      /^\/api\/bots\/([^/]+)\/applets\/([^/]+)\/(delete|ui|token)$/,
+    );
+    if (appletImpactMatch || appletListMatch || appletActionMatch) {
+      let appletBotId: string;
+      try {
+        appletBotId = decodeBotIdV1(
+          decodeURIComponent(
+            (appletImpactMatch ?? appletListMatch ?? appletActionMatch)![1],
+          ),
+        );
+      } catch {
+        return jsonError(400, "invalid bot id");
+      }
+      // Archived Bots answer too: their impact is what a delete from Archived
+      // Bots confirms.
+      const missing = await requireRegisteredBot(
+        env,
+        appletBotId,
+        Boolean(appletImpactMatch),
+      );
+      if (missing) return missing;
+      if (appletImpactMatch) {
+        if (request.method !== "GET")
+          return jsonError(405, "method not allowed");
+        try {
+          return Response.json(
+            decodeBotAppletImpactViewV1(
+              await env.BOT_STATE.readBotAppletImpact({
+                schemaVersion: 1,
+                botId: appletBotId,
+              }),
+            ),
+          );
+        } catch (error) {
+          return appletFailure(error, "Applet impact is unavailable");
+        }
+      }
+      if (appletListMatch) {
+        if (request.method !== "GET")
+          return jsonError(405, "method not allowed");
+        try {
+          // Projected through the view decoder the client uses, so the two
+          // sides cannot disagree: the durable answer carries a `revision` the
+          // view does not declare, and an exact-keys decoder refuses it.
+          const listed = (await env.BOT_STATE.listApplets({
+            schemaVersion: 1,
+            botId: appletBotId,
+          })) as { applets: unknown };
+          return Response.json(
+            decodeAppletListViewV1({
+              schemaVersion: 1,
+              applets: listed.applets,
+            }),
+          );
+        } catch (error) {
+          return appletFailure(error, "Applets are unavailable");
+        }
+      }
+      const action = appletActionMatch![3];
       let appletId: string;
       try {
-        appletId = decodeURIComponent(appletDeleteMatch[1]);
+        appletId = decodeURIComponent(appletActionMatch![2]);
         if (!APPLET_ID_V1.test(appletId)) throw new Error("invalid id");
       } catch {
         return jsonError(400, "invalid applet id");
       }
-      try {
-        await env.BOT_STATE.deleteApplet({ schemaVersion: 1, appletId });
-        return Response.json({ schemaVersion: 1, status: "deleted" });
-      } catch (error) {
-        const message =
-          error instanceof Error ? error.message : "Could not delete Applet";
-        // An id the directory does not list is a settled answer, not a blip:
-        // the Applet is already gone. Saying 503 made a second delete — two
-        // windows, or a Bot that deleted it mid-dialog — a failure that
-        // retrying could never clear. The directory names that answer, so the
-        // classification reads the name and never the message text.
-        const gone =
-          error instanceof Error && error.name === "AppletUnavailableError";
-        return jsonError(gone ? 404 : 503, message);
+      if (action === "delete") {
+        if (request.method !== "POST")
+          return jsonError(405, "method not allowed");
+        try {
+          await env.BOT_STATE.deleteApplet({
+            schemaVersion: 1,
+            botId: appletBotId,
+            appletId,
+          });
+          return Response.json({ schemaVersion: 1, status: "deleted" });
+        } catch (error) {
+          return appletFailure(error, "Could not delete Applet");
+        }
       }
-    }
-    const appletTokenMatch = url.pathname.match(
-      /^\/api\/applets\/([^/]+)\/token$/,
-    );
-    const appletUiMatch = url.pathname.match(/^\/api\/applets\/([^/]+)\/ui$/);
-    if (appletTokenMatch || appletUiMatch) {
       if (request.method !== "GET") return jsonError(405, "method not allowed");
-      let appletId: string;
       try {
-        appletId = decodeURIComponent((appletTokenMatch ?? appletUiMatch)![1]);
-      } catch {
-        return jsonError(400, "invalid applet id");
-      }
-      try {
-        if (appletUiMatch) {
+        if (action === "ui") {
           const ui = await env.BOT_STATE.readAppletUi({
             schemaVersion: 1,
+            botId: appletBotId,
             appletId,
           });
           return Response.json(
@@ -538,6 +600,7 @@ function createUserApplicationRoute() {
         }
         const minted = await env.BOT_STATE.mintAppletViewerToken({
           schemaVersion: 1,
+          botId: appletBotId,
           appletId,
         });
         // The address only. Which carrier the token rides is the page's
@@ -550,24 +613,7 @@ function createUserApplicationRoute() {
           socketUrl: appletSocketUrlV1(url, appletId),
         });
       } catch (error) {
-        const message =
-          error instanceof Error ? error.message : "Applet is unavailable";
-        /*
-         * A deployment that cannot sign viewer tokens is not a missing Applet
-         * and not a blip: it is settled until somebody changes the
-         * deployment. It answers 503 with the sentence the shell shows and
-         * `definitive`, so the panel stops retrying something that will never
-         * start working on its own.
-         */
-        if (message === APPLETS_UNAVAILABLE_MESSAGE_V1) {
-          return jsonError(503, message, { definitive: true });
-        }
-        return jsonError(
-          message.includes("unavailable") || message.includes("no active")
-            ? 404
-            : 503,
-          message,
-        );
+        return appletFailure(error, "Applet is unavailable");
       }
     }
     const appletOpenMatch = url.pathname.match(
@@ -674,6 +720,10 @@ function createUserApplicationRoute() {
           decodeAppletFocusViewV1({ appletId: recorded.appletId }),
         );
       } catch (error) {
+        // Focusing an Applet this Bot cannot open is the same settled answer
+        // as focusing one that does not exist.
+        if (error instanceof Error && error.name === "AppletUnavailableError")
+          return jsonError(404, error.message);
         return jsonError(
           400,
           error instanceof Error ? error.message : "Applet focus failed",
@@ -931,10 +981,11 @@ function createUserApplicationRoute() {
     }
 
     if (appletSourceMatch || appletBuildMatch) {
-      // The Applet canvas's two reads. Both answer from the Workspace store
-      // and the Bot Durable Object's own records, so a hibernated Computer
-      // stays hibernated: rendering what a Bot wrote never wakes the machine
-      // it wrote it on.
+      // The Applet canvas's two reads, for the Applet's owner Bot only: a
+      // shared Bot has no code view (ADR 0027). Both answer from the Workspace
+      // store and the Bot Durable Object's own records, so a hibernated
+      // Computer stays hibernated: rendering what a Bot wrote never wakes the
+      // machine it wrote it on.
       if (request.method !== "GET") return jsonError(405, "method not allowed");
       let appletId: string;
       try {
@@ -962,7 +1013,7 @@ function createUserApplicationRoute() {
               }),
         );
       } catch (error) {
-        return botFailure(error, "Applet read failed");
+        return appletFailure(error, "Applet read failed");
       }
     }
 

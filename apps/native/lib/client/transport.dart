@@ -71,7 +71,11 @@ Object? decodeBoundedJson(String text, {int maxBytes = 512000}) {
 class RequestFailure implements Exception {
   final int? status;
   final String message;
-  const RequestFailure(this.message, [this.status]);
+
+  /// The refusal's machine-readable `code`, where the answer named one: two
+  /// refusals with one status can ask for different things of the client.
+  final String? code;
+  const RequestFailure(this.message, [this.status, this.code]);
   bool get refused => status != null && status! >= 400 && status! < 500;
   @override
   String toString() => message;
@@ -168,7 +172,11 @@ class NativeApi {
             !path.startsWith('/api/auth/native/')) {
           onSessionRejected?.call(message);
         }
-        throw RequestFailure(message, response.statusCode);
+        throw RequestFailure(
+          message,
+          response.statusCode,
+          _refusalCode(bytes),
+        );
       }
       return decodeBoundedJson(utf8.decode(bytes), maxBytes: limit);
     } on RequestFailure {
@@ -194,6 +202,16 @@ class NativeApi {
       }
     } catch (_) {
       // A refusal whose body cannot be read still has the client's own line.
+    }
+    return null;
+  }
+
+  static String? _refusalCode(List<int> bytes) {
+    try {
+      final body = jsonDecode(utf8.decode(bytes));
+      if (body is Map && body['code'] is String) return body['code'] as String;
+    } catch (_) {
+      // A refusal whose body cannot be read names no code.
     }
     return null;
   }

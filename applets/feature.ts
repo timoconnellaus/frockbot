@@ -1,5 +1,5 @@
-// The Applets feature: eleven tools a Bot uses to build the small real-time
-// apps that appear beside the conversation.
+// The Applets feature: fourteen tools a Bot uses to build, share and hand over
+// the small real-time apps that appear beside the conversation.
 //
 // Everything here is text a model reads. A tool that returns a JSON blob makes
 // the model guess; a tool that returns a sentence naming the next command does
@@ -49,7 +49,12 @@ export type AppletCheckResultV1 =
   | { status: "checked"; tools: string[]; previewUrl?: string }
   | { status: "failed"; reason: string; diagnostics: string[] };
 
-/** The Applet authority, as the Bot Durable Object implements it. */
+/**
+ * The Applet authority, as the Bot Durable Object implements it. Every method
+ * acts as this Bot: `list` is what it owns or is shared, and everything that
+ * reads or changes source, generations or access is refused for an Applet it
+ * does not own.
+ */
 export interface AppletCapabilityHostV1 {
   list(): Promise<AppletSummaryV1[]>;
   create(
@@ -81,6 +86,14 @@ export interface AppletCapabilityHostV1 {
     scope: AppletCapabilityCallScopeV1,
   ): Promise<AppletPublishResultV1>;
   delete(input: { appletId: string }): Promise<{ status: "deleted" }>;
+  /** `botId` is the other Bot of this User being given or losing access. */
+  share(input: { appletId: string; botId: string }): Promise<AppletSummaryV1>;
+  unshare(input: { appletId: string; botId: string }): Promise<AppletSummaryV1>;
+  /** Makes `botId` the owner; this Bot keeps shared access. */
+  transfer(input: {
+    appletId: string;
+    botId: string;
+  }): Promise<AppletSummaryV1>;
   focus(input: { appletId: string | null }): Promise<FocusedAppletV1>;
   generations(input: {
     appletId: string;
@@ -107,12 +120,30 @@ function requireString(input: unknown, field: string): string {
 function describe(applet: AppletSummaryV1): string {
   const tools =
     applet.tools.length === 0 ? "no tools yet" : applet.tools.join(", ");
-  return `${applet.displayName} (${applet.appletId}) — ${applet.status}, ${
+  const access =
+    applet.access === "owner"
+      ? applet.sharedWithBotIds.length === 0
+        ? "yours"
+        : `yours, shared with ${applet.sharedWithBotIds.join(", ")}`
+      : `shared with you by ${applet.ownerBotId}`;
+  return `${applet.displayName} (${applet.appletId}) — ${access}, ${applet.status}, ${
     applet.currentGenerationId
       ? `generation ${applet.currentGenerationId}`
       : "never published"
   }, ${tools}`;
 }
+
+function accessText(applet: AppletSummaryV1): string {
+  return applet.sharedWithBotIds.length === 0
+    ? `${applet.appletId} is shared with no other Bot.`
+    : `${applet.appletId} is shared with ${applet.sharedWithBotIds.join(", ")}.`;
+}
+
+const TARGET_BOT_SCHEMA = {
+  type: "string",
+  description:
+    "The other Bot's id, as <teammates> names it. It must be an active Bot of this User.",
+};
 
 /**
  * The template's bytes, from the base64 the build embedded.
@@ -289,7 +320,7 @@ function appletTools(host: AppletsRuntimeHostV1): ToolDefinition[] {
     tool({
       name: "applet_list",
       description:
-        "List this User's Applets: the small real-time apps that appear beside the conversation. Every Bot of this User sees every Applet. Call this before creating one, so you extend an Applet that already exists instead of building a second one.",
+        "List the Applets you can use: the small real-time apps that appear beside the conversation. Each is either yours — you own it and may change it — or shared with you by the Bot that owns it, which lets you open it and call its tools but not change it. Call this before creating one, so you extend an Applet you own instead of building a second one.",
       inputSchema: {
         type: "object",
         properties: {},
@@ -299,7 +330,7 @@ function appletTools(host: AppletsRuntimeHostV1): ToolDefinition[] {
       async answer() {
         const applets = await host.applets.list();
         if (applets.length === 0) {
-          return "This User has no Applets yet. applet_create scaffolds one from a working todo-list starting point.";
+          return "You have no Applets yet, and none is shared with you. applet_create scaffolds one from a working todo-list starting point.";
         }
         return [
           `${applets.length} Applet(s):`,
@@ -310,7 +341,7 @@ function appletTools(host: AppletsRuntimeHostV1): ToolDefinition[] {
     tool({
       name: "applet_create",
       description:
-        "Create a new Applet and scaffold its source. This makes the directory entry, writes a working todo-list starting point, and focuses it so the User watches you build it. It does not publish anything: edit the files with applet_write_file, run applet_check, then call applet_publish. Load the `applets` Skill before you start editing.",
+        "Create a new Applet you own and scaffold its source. This makes the directory entry, writes a working todo-list starting point, and focuses it so the User watches you build it. It does not publish anything: edit the files with applet_write_file, run applet_check, then call applet_publish. No other Bot can use it until you share it. Load the `applets` Skill before you start editing.",
       inputSchema: {
         type: "object",
         properties: {
@@ -351,7 +382,7 @@ function appletTools(host: AppletsRuntimeHostV1): ToolDefinition[] {
     tool({
       name: "applet_files",
       description:
-        "List one Applet's source files and their sizes. This is the Applet's real source: what applet_check builds and what applet_publish publishes.",
+        "List the source files of an Applet you own, and their sizes. This is the Applet's real source: what applet_check builds and what applet_publish publishes. An Applet shared with you has no source you can read.",
       inputSchema: {
         type: "object",
         properties: {
@@ -376,7 +407,7 @@ function appletTools(host: AppletsRuntimeHostV1): ToolDefinition[] {
     tool({
       name: "applet_read_file",
       description:
-        "Read one of an Applet's source files. Read before you write: applet_write_file replaces the whole file, so an edit made from memory loses whatever you did not remember.",
+        "Read one source file of an Applet you own. Read before you write: applet_write_file replaces the whole file, so an edit made from memory loses whatever you did not remember.",
       inputSchema: {
         type: "object",
         properties: {
@@ -400,7 +431,7 @@ function appletTools(host: AppletsRuntimeHostV1): ToolDefinition[] {
     tool({
       name: "applet_write_file",
       description:
-        "Write one of an Applet's source files, replacing it entirely. Nothing is built or published by this: call applet_check when the edit is complete.",
+        "Write one source file of an Applet you own, replacing it entirely. Nothing is built or published by this: call applet_check when the edit is complete.",
       inputSchema: {
         type: "object",
         properties: {
@@ -434,7 +465,7 @@ function appletTools(host: AppletsRuntimeHostV1): ToolDefinition[] {
     tool({
       name: "applet_check",
       description:
-        "Type-check, lint and build an Applet's current source without publishing it. Returns every diagnostic as `file:line:col message`, or — when it builds — the tools it declares and a URL for its page. Do this before every publish.",
+        "Type-check, lint and build the current source of an Applet you own, without publishing it. Returns every diagnostic as `file:line:col message`, or — when it builds — the tools it declares and a URL for its page. Do this before every publish.",
       inputSchema: {
         type: "object",
         properties: {
@@ -458,7 +489,7 @@ function appletTools(host: AppletsRuntimeHostV1): ToolDefinition[] {
     tool({
       name: "applet_publish",
       description:
-        "Build this Applet's current source and publish it. Records an immutable generation, mounts it, and offers its tools to every Bot of this User from your next Turn. Run applet_check first; a publish that does not build is refused and returns the same diagnostics.",
+        "Build the current source of an Applet you own and publish it. Records an immutable generation, mounts it, and offers its tools to you and every Bot it is shared with from the next Turn. Run applet_check first; a publish that does not build is refused and returns the same diagnostics.",
       inputSchema: {
         type: "object",
         properties: {
@@ -482,7 +513,7 @@ function appletTools(host: AppletsRuntimeHostV1): ToolDefinition[] {
     tool({
       name: "applet_revert",
       description:
-        "Move an Applet back to an earlier generation. The revert is itself recorded as a generation, and the Applet's stored data is untouched — reverting the code never clears what the User put in it. Use applet_generations to find the id.",
+        "Move an Applet you own back to an earlier generation. The revert is itself recorded as a generation, and the Applet's stored data is untouched — reverting the code never clears what the User put in it. Use applet_generations to find the id.",
       inputSchema: {
         type: "object",
         properties: {
@@ -511,7 +542,7 @@ function appletTools(host: AppletsRuntimeHostV1): ToolDefinition[] {
     tool({
       name: "applet_delete",
       description:
-        "Delete an Applet permanently: its stored data, its versions, and its entry. This cannot be undone and it is the User's decision, not yours — ask before calling it.",
+        "Delete an Applet you own permanently: its stored data, its versions, and its entry, for you and for every Bot it is shared with. This cannot be undone and it is the User's decision, not yours — ask before calling it. To stop using an Applet another Bot owns, ask that Bot to unshare it.",
       inputSchema: {
         type: "object",
         properties: {
@@ -524,13 +555,76 @@ function appletTools(host: AppletsRuntimeHostV1): ToolDefinition[] {
       async answer(input) {
         const appletId = requireString(input, "appletId");
         await host.applets.delete({ appletId });
-        return `Deleted ${appletId}. Its data, its versions, and its tools are gone; this cannot be undone.`;
+        return `Deleted ${appletId}. Its data, its versions, and its tools are gone for every Bot that used it; this cannot be undone.`;
+      },
+    }),
+    tool({
+      name: "applet_share",
+      description:
+        "Let another active Bot of this User use an Applet you own: it can open the Applet, use its page and call its published tools, but it cannot read or change the source, publish, revert, delete or share it. Its tools reach that Bot from its next Turn.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          appletId: { type: "string", description: "The Applet's id." },
+          botId: TARGET_BOT_SCHEMA,
+        },
+        required: ["appletId", "botId"],
+        additionalProperties: false,
+      },
+      idempotent: true,
+      async answer(input) {
+        const appletId = requireString(input, "appletId");
+        const botId = requireString(input, "botId");
+        const shared = await host.applets.share({ appletId, botId });
+        return `Shared ${appletId} with ${botId}. ${accessText(shared)} Its tools reach ${botId} from its next Turn.`;
+      },
+    }),
+    tool({
+      name: "applet_unshare",
+      description:
+        "Stop another Bot using an Applet you own. It can no longer open the Applet, and its tools leave that Bot from its next Turn; a Turn it is already running keeps them until it ends. Nothing about the Applet's data changes.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          appletId: { type: "string", description: "The Applet's id." },
+          botId: TARGET_BOT_SCHEMA,
+        },
+        required: ["appletId", "botId"],
+        additionalProperties: false,
+      },
+      idempotent: true,
+      async answer(input) {
+        const appletId = requireString(input, "appletId");
+        const botId = requireString(input, "botId");
+        const unshared = await host.applets.unshare({ appletId, botId });
+        return `${botId} no longer has access to ${appletId}. ${accessText(unshared)}`;
+      },
+    }),
+    tool({
+      name: "applet_transfer",
+      description:
+        "Hand an Applet you own to another active Bot of this User. That Bot becomes its owner and is the only one who can change it from now on; you keep shared access, so you can still open it and call its tools. Its source, versions and data move nowhere. Only do this when the User asks.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          appletId: { type: "string", description: "The Applet's id." },
+          botId: TARGET_BOT_SCHEMA,
+        },
+        required: ["appletId", "botId"],
+        additionalProperties: false,
+      },
+      idempotent: false,
+      async answer(input) {
+        const appletId = requireString(input, "appletId");
+        const botId = requireString(input, "botId");
+        await host.applets.transfer({ appletId, botId });
+        return `${botId} now owns ${appletId}. You keep shared access: you can open it and call its tools, and ${botId} is the one to ask for any change to it.`;
       },
     }),
     tool({
       name: "applet_focus",
       description:
-        "Show one Applet in the panel beside this conversation, or clear it. Pass null to close the panel. Creating and publishing already focus the Applet, so use this when the User asks to look at a different one.",
+        "Show one Applet you own or that is shared with you in the panel beside this conversation, or clear it. Pass null to close the panel. Creating and publishing already focus the Applet, so use this when the User asks to look at a different one.",
       inputSchema: {
         type: "object",
         properties: {
@@ -558,7 +652,7 @@ function appletTools(host: AppletsRuntimeHostV1): ToolDefinition[] {
     tool({
       name: "applet_generations",
       description:
-        "List an Applet's version history, newest first: which generation is current, which failed, and what tools each one offered. Read this before applet_revert.",
+        "List the version history of an Applet you own, newest first: which generation is current, which failed, and what tools each one offered. Read this before applet_revert.",
       inputSchema: {
         type: "object",
         properties: {
@@ -579,7 +673,7 @@ function appletTools(host: AppletsRuntimeHostV1): ToolDefinition[] {
   ];
 }
 
-/** The runtime Contribution: the eleven `applet_*` tools, for one Turn. */
+/** The runtime Contribution: the fourteen `applet_*` tools, for one Turn. */
 export function createAppletsFeature(
   host: AppletsRuntimeHostV1,
 ): RuntimeFeatureV1<{ tools: ToolRegistration }> {

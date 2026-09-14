@@ -17,6 +17,7 @@
 import type {
   WorkspaceFilesV1,
   WorkspaceGenerationsV1,
+  WorkspaceRootV1,
 } from "@frockbot/core/contracts";
 import {
   createObjectWorkspaceFilesV1,
@@ -133,6 +134,47 @@ export function createDurableWorkspaceFilesV1(
   });
 }
 
+/** Removes every object under one prefix, a page at a time. Idempotent. */
+async function deleteObjectPrefixV1(
+  store: ObjectBucketV1,
+  prefix: string,
+): Promise<number> {
+  let removed = 0;
+  let cursor: string | undefined;
+  do {
+    const page = await store.list({
+      prefix,
+      ...(cursor === undefined ? {} : { cursor }),
+      limit: 1_000,
+    });
+    for (const object of page.objects) {
+      await store.delete(object.key);
+      removed += 1;
+    }
+    cursor = page.truncated ? page.cursor : undefined;
+  } while (cursor !== undefined);
+  return removed;
+}
+
+/**
+ * One deleted Applet's source, removed from the bucket: the objects under
+ * `applets/source/<appletId>/` in the User's Package-declared root, conflict
+ * copies included. The root is the User's and holds every other Applet, so
+ * the prefix is the Applet's directory, trailing slash and all, and never the
+ * root. Idempotent, like the Applet's own state deletion it runs beside.
+ */
+export async function deleteAppletSourceV1(
+  env: WorkspaceStoreEnv,
+  input: { root: WorkspaceRootV1; appletPrefix: string },
+): Promise<number> {
+  const bucket = env.MEMORY_FILES;
+  if (!bucket) return 0;
+  return deleteObjectPrefixV1(
+    createR2ObjectBucketV1(bucket),
+    `${workspaceObjectPrefixV1(input.root)}${input.appletPrefix}`,
+  );
+}
+
 /**
  * Every object of the two durable roots one Bot owns, removed from the bucket.
  *
@@ -159,24 +201,14 @@ export async function deleteBotWorkspaceRootsV1(
   const store = createR2ObjectBucketV1(bucket);
   let removed = 0;
   for (const kind of ["bot-instructions", "bot-memory"] as const) {
-    const prefix = workspaceObjectPrefixV1({
-      kind,
-      userId: identity.userId,
-      botId: identity.botId,
-    });
-    let cursor: string | undefined;
-    do {
-      const page = await store.list({
-        prefix,
-        ...(cursor === undefined ? {} : { cursor }),
-        limit: 1_000,
-      });
-      for (const object of page.objects) {
-        await store.delete(object.key);
-        removed += 1;
-      }
-      cursor = page.truncated ? page.cursor : undefined;
-    } while (cursor !== undefined);
+    removed += await deleteObjectPrefixV1(
+      store,
+      workspaceObjectPrefixV1({
+        kind,
+        userId: identity.userId,
+        botId: identity.botId,
+      }),
+    );
   }
   return removed;
 }

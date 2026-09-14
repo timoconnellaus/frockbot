@@ -321,10 +321,9 @@ abstract final class SearchIds {
 /// — the canvas region, its progress line, the App/Code toggle, one file
 /// button and the failure's retry — so both specs can be rewritten against
 /// Flutter Web with the same intent rather than re-derived from the widgets.
-/// The chip that opens the canvas is the header's Applet strip: one button per
-/// Applet the Bot holds, named for it. The identifier is on the strip rather
-/// than on a button, because how many buttons are in it is the header's
-/// business and "open the Applets" is one gesture whatever it holds.
+/// [chip] is the one door to the selected Bot's Applet list, on the header's
+/// Applets button and on the Bot page's Applets row: the list is the sidebar's
+/// Applets mode on a wide window and a page of its own on a phone.
 abstract final class AppletIds {
   static const canvas = 'applet-canvas';
   static const chip = 'applet-chip';
@@ -334,7 +333,18 @@ abstract final class AppletIds {
   static const tabs = 'applet-canvas-tabs';
   static const close = 'applet-canvas-close';
   static const source = 'applet-canvas-source';
-  static const directory = 'applet-directory';
+  static const list = 'applet-list';
+  static const listBack = 'applet-list-back';
+  static const listRetry = 'applet-list-retry';
+
+  /// One Applet in the list, which opens it.
+  static String row(String appletId) => 'applet-row-$appletId';
+
+  /// Whether the Bot owns the Applet in that row or has it shared.
+  static String access(String appletId) => 'applet-access-$appletId';
+
+  /// The owner's delete, on rows the Bot owns and no others.
+  static String delete(String appletId) => 'applet-delete-$appletId';
 
   /// A file button in the code view, by the path it opens. Paths carry dots
   /// and slashes, which a selector reads perfectly well and a slug would lose.

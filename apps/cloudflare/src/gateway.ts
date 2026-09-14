@@ -407,10 +407,12 @@ const APPLET_SOCKET_PATH = /^\/api\/applets\/([^/]+)\/socket$/;
  *
  * Ahead of session authentication on purpose, and for the same reason the
  * machine door is: an Applet's page runs in a cookieless sandboxed iframe and
- * carries no session. The signed viewer token is the whole of the decision —
- * it names the User, the Applet, and the generation, it was minted by this
- * deployment, and it expires in fifteen minutes. A token that does not verify
- * never reaches a Durable Object, so an anonymous caller cannot create one.
+ * carries no session. The signed viewer token is the credential — it names the
+ * User, the Bot it was opened for, the Applet, and the generation, it was
+ * minted by this deployment, and it expires in fifteen minutes. A token that
+ * does not verify never reaches a Durable Object, so an anonymous caller cannot
+ * create one. A token that does verify is still refused when its Bot has lost
+ * access since it was minted: access changes reach the next open (ADR 0027).
  */
 async function routeAppletSocket(
   request: Request,
@@ -444,6 +446,22 @@ async function routeAppletSocket(
   if (claims.a !== appletId) {
     return jsonError(401, "Applet viewer token is invalid");
   }
+  if (!dependencies.appletAccessFor) {
+    return jsonError(503, "Applet viewer sessions are not configured");
+  }
+  let reachable: boolean;
+  try {
+    reachable = await dependencies.appletAccessFor(
+      claims.u,
+      claims.b,
+      claims.a,
+    );
+  } catch {
+    return jsonError(503, "Applet access could not be checked");
+  }
+  // The same answer as a token for an Applet that does not exist: a Bot that
+  // lost access learns nothing about what it lost.
+  if (!reachable) return jsonError(404, "Applet is unavailable");
   const forwarded = new URL(url);
   forwarded.searchParams.delete("token");
   forwarded.searchParams.set("u", claims.u);

@@ -784,12 +784,14 @@ describe("the User-owned Composition", () => {
     const applet = await user(userId).createApplet({
       schemaVersion: 1,
       userId,
+      botId: identity.botId,
       displayName: "Expenses",
       provenance: { kind: "user" },
     });
     await user(userId).recordAppletGeneration({
       schemaVersion: 1,
       userId,
+      botId: identity.botId,
       appletId: applet.appletId,
       generationId: "applet-g1",
       tools: [
@@ -827,6 +829,8 @@ describe("the User-owned Composition", () => {
       expect.objectContaining({
         appletId: applet.appletId,
         generationId: "applet-g1",
+        ownerBotId: identity.botId,
+        sharedWithBotIds: [],
       }),
     ]);
   });

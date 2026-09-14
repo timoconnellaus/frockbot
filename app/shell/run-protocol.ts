@@ -654,6 +654,9 @@ const APPLET_ATTRIBUTION_TOOLS = new Set([
   "applet_publish",
   "applet_revert",
   "applet_delete",
+  "applet_share",
+  "applet_unshare",
+  "applet_transfer",
   "applet_focus",
   "applet_generations",
 ]);

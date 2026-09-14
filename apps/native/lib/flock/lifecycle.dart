@@ -15,6 +15,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
+import '../applets/client.dart';
 import '../client/transport.dart';
 import '../protocol/client_wire.generated.dart' as wire;
 import '../shell/semantics.dart';
@@ -40,6 +41,38 @@ const botLifecycleWordsV1 =
       ),
     };
 
+/// What archiving or deleting a Bot does to the Applets it owns, named one by
+/// one, or null when it owns none. [nameOf] resolves a Bot the surface knows;
+/// a share naming one it does not is counted rather than guessed at.
+String? botLifecycleAppletsV1(
+  String type,
+  wire.BotAppletImpact impact, {
+  String? Function(String botId)? nameOf,
+}) {
+  if (impact.applets.isEmpty) return null;
+  String line(Map<String, Object?> applet) {
+    final shared = [
+      for (final id in (applet['sharedWithBotIds'] as List? ?? const []))
+        id as String,
+    ];
+    final name = applet['displayName'] as String;
+    if (shared.isEmpty) return '• $name';
+    final names = [for (final id in shared) nameOf?.call(id)];
+    if (names.every((known) => known != null)) {
+      return '• $name — also used by ${names.join(', ')}';
+    }
+    return '• $name — shared with ${shared.length} other '
+        '${shared.length == 1 ? 'Bot' : 'Bots'}';
+  }
+
+  final lead = type == 'bot/delete'
+      ? 'These Applets and their data are permanently deleted, including for '
+            'the Bots they are shared with:'
+      : 'These Applets become unavailable to every Bot until this Bot is '
+            'restored. Nothing is deleted:';
+  return [lead, for (final applet in impact.applets) line(applet)].join('\n');
+}
+
 /// One retained lifecycle command, shared by every surface that issues one.
 class BotLifecycleCommands extends ChangeNotifier {
   final NativeApi api;
@@ -50,6 +83,11 @@ class BotLifecycleCommands extends ChangeNotifier {
   bool saving = false;
   String? error;
   String? message;
+
+  /// Whether the last delete was refused because the Bot's Applets changed
+  /// since the confirmation named them. The command was never admitted, so
+  /// the answer is to read the impact again and ask again, not to re-send.
+  bool appletImpactChanged = false;
   Map<String, dynamic>? _command;
   bool _closed = false;
 
@@ -73,7 +111,11 @@ class BotLifecycleCommands extends ChangeNotifier {
   }
 
   /// Issues a change, unless one is still unaccounted for.
-  Future<bool> change(String botId, String type) async {
+  ///
+  /// A delete carries the [appletImpact] fingerprint its confirmation read.
+  /// It is retained with the command, so a retry fences on the same list the
+  /// person agreed to.
+  Future<bool> change(String botId, String type, {String? appletImpact}) async {
     if (_closed || saving || pending) return false;
     _command = Map<String, dynamic>.from(
       wire.BotLifecycleCommand.fromJson({
@@ -81,10 +123,55 @@ class BotLifecycleCommands extends ChangeNotifier {
             'type': type,
             'commandId': randomId(),
             'botId': botId,
+            if (type == 'bot/delete' && appletImpact != null)
+              'appletImpact': appletImpact,
           }).toJson()!
           as Map,
     );
     return retry();
+  }
+
+  /// Reads what the change does to the Bot's Applets, asks, and issues it.
+  ///
+  /// [confirm] is handed the Applets paragraph to show, or null when there is
+  /// nothing to name. A delete whose impact cannot be read is not asked at
+  /// all: agreeing to a list nobody saw is not agreeing. An archive destroys
+  /// nothing, so it asks with the generic words instead.
+  Future<bool> confirmChange(
+    String botId,
+    String type, {
+    required Future<bool> Function(String? applets) confirm,
+    String? Function(String botId)? nameOf,
+  }) async {
+    if (_closed || saving || pending) return false;
+    var changed = false;
+    while (true) {
+      wire.BotAppletImpact? impact;
+      if (type != 'bot/restore') {
+        try {
+          impact = await AppletsApi(api).impact(botId);
+        } catch (_) {
+          if (type == 'bot/delete') {
+            error = 'Couldn’t check which Applets this Bot owns, so nothing was deleted. Try again.';
+            _changed();
+            return false;
+          }
+        }
+      }
+      if (_closed) return false;
+      final applets = impact == null
+          ? null
+          : botLifecycleAppletsV1(type, impact, nameOf: nameOf);
+      final shown = changed ? [?error, ?applets].join('\n\n') : applets;
+      if (!await confirm(shown)) return false;
+      final applied = await change(
+        botId,
+        type,
+        appletImpact: impact?.fingerprint.value,
+      );
+      if (applied || !appletImpactChanged || _closed) return applied;
+      changed = true;
+    }
   }
 
   /// Dispatches the retained command, under its own id, however many times it
@@ -93,6 +180,7 @@ class BotLifecycleCommands extends ChangeNotifier {
     if (_closed || saving || _command == null) return false;
     saving = true;
     message = null;
+    appletImpactChanged = false;
     _changed();
     final command = _command!;
     final botId = command['botId'] as String;
@@ -135,6 +223,15 @@ class BotLifecycleCommands extends ChangeNotifier {
         'bot/restore' => 'Bot restored.',
         _ => 'Bot deleted.',
       };
+    } on RequestFailure catch (failure) {
+      if (failure.status == 409 && failure.code == 'applet-impact-changed') {
+        await store.delete(_key);
+        _command = null;
+        appletImpactChanged = true;
+        error = 'This Bot’s Applets changed. Review them and try again.';
+      } else {
+        error = 'Couldn’t confirm that change. Check its status before trying another action.';
+      }
     } catch (_) {
       error = 'Couldn’t confirm that change. Check its status before trying another action.';
     } finally {
@@ -169,6 +266,9 @@ class BotDangerZone extends StatefulWidget {
   /// Called after a delete the authority applied. The Bot this surface is about
   /// is gone, so the surface goes too.
   final VoidCallback? onDeleted;
+
+  /// A Bot's name, for naming who else uses the Applets this one owns.
+  final String? Function(String botId)? nameOf;
   const BotDangerZone({
     super.key,
     required this.lifecycle,
@@ -177,6 +277,7 @@ class BotDangerZone extends StatefulWidget {
     required this.archived,
     this.onChanged,
     this.onDeleted,
+    this.nameOf,
   });
 
   @override
@@ -192,36 +293,46 @@ class _BotDangerZoneState extends State<BotDangerZone> {
 
   Future<void> _change(String type) async {
     final words = botLifecycleWordsV1[type]!;
-    // This State can be reused for another Bot while the command is out. The
-    // receipt still belongs to the surface that issued it, so keep that
-    // identity and its callbacks across every await.
+    // This State can be reused for another Bot while impact is read and the
+    // command settles. Everything after this point still belongs to the Bot
+    // whose danger-zone control was pressed.
+    final lifecycle = widget.lifecycle;
     final botId = widget.botId;
+    final botName = widget.botName;
+    final nameOf = widget.nameOf;
     final onChanged = widget.onChanged;
     final onDeleted = widget.onDeleted;
-    final agreed =
-        await showDialog<bool>(
-          context: context,
-          builder: (dialog) => identified(
-            FlockIds.lifecycleConfirm,
-            AlertDialog(
-              title: Text('${words.title} ${widget.botName}?'),
-              content: SingleChildScrollView(child: Text(words.body)),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(dialog, false),
-                  child: const Text('Cancel'),
+    final applied = await lifecycle.confirmChange(
+      botId,
+      type,
+      nameOf: nameOf,
+      confirm: (applets) async {
+        if (!mounted) return false;
+        return await showDialog<bool>(
+              context: context,
+              builder: (dialog) => identified(
+                FlockIds.lifecycleConfirm,
+                AlertDialog(
+                  title: Text('${words.title} $botName?'),
+                  content: SingleChildScrollView(
+                    child: Text([words.body, ?applets].join('\n\n')),
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(dialog, false),
+                      child: const Text('Cancel'),
+                    ),
+                    FilledButton(
+                      onPressed: () => Navigator.pop(dialog, true),
+                      child: Text(words.verb),
+                    ),
+                  ],
                 ),
-                FilledButton(
-                  onPressed: () => Navigator.pop(dialog, true),
-                  child: Text(words.verb),
-                ),
-              ],
-            ),
-          ),
-        ) ??
-        false;
-    if (!agreed) return;
-    final applied = await widget.lifecycle.change(botId, type);
+              ),
+            ) ??
+            false;
+      },
+    );
     if (!applied) return;
     // The surface closes before the directory is read again: the reload
     // forgets which Bot was open, and that is what decides what to close.

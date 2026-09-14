@@ -6,8 +6,11 @@
 // everything in between — the records the kernel really is the authority for:
 //
 //  - the **directory entry**, in the User Durable Object under
-//    `applets:entry:<appletId>`, plus the `applets:directory-revision` cursor
-//    every Bot's next Composition resolution keys off;
+//    `applets:entry:<appletId>` — including which Bot owns the Applet and
+//    which Bots it is shared with — plus the `applets:directory-revision`
+//    cursor every Bot's next Composition resolution keys off, and the
+//    `applets:cleanup:<appletId>` to-do a deletion leaves until the Applet's
+//    state and source are gone;
 //  - the **generation**, the **current** and **last-known-good** pointers, the
 //    **failure** records, and the **mount input**, in the `AppletState`
 //    Durable Object;
@@ -25,6 +28,7 @@ import {
   type AppletDirectoryEntryV1,
   type AppletGenerationV1,
   type AppletToolDeclarationV1,
+  APPLET_BOT_ID_V1,
   APPLET_ID_V1,
 } from "@frockbot/core/contracts";
 
@@ -46,6 +50,13 @@ export const APPLET_DIRECTORY_ENTRY_PREFIX = "applets:entry:";
  * of the User without the User Durable Object knowing which Bots exist.
  */
 export const APPLET_DIRECTORY_REVISION_KEY = "applets:directory-revision";
+/**
+ * User Durable Object: one deleted Applet whose `AppletState` storage or
+ * source may still exist. Written in the same put as the tombstone and removed
+ * only once both are gone, so a crash between the two is retried from the
+ * alarm rather than forgotten.
+ */
+export const APPLET_CLEANUP_PREFIX = "applets:cleanup:";
 
 /** Applet Durable Object: one recorded generation. */
 export const APPLET_GENERATION_PREFIX = "applet:generation:";
@@ -114,6 +125,10 @@ export const APPLETS_SOURCE_ROOT_ID_V1 = "source";
 
 export function appletDirectoryEntryKey(appletId: string): string {
   return `${APPLET_DIRECTORY_ENTRY_PREFIX}${appletId}`;
+}
+
+export function appletCleanupKey(appletId: string): string {
+  return `${APPLET_CLEANUP_PREFIX}${appletId}`;
 }
 
 export function appletGenerationKey(generationId: string): string {
@@ -520,8 +535,9 @@ export function newAppletIdV1(ownerId: string): string {
 /**
  * The content address of the authority baked into an Applet facet's `env`.
  *
- * `isolateBindingDigestV1`'s inputs for the *User*, because an Applet is
- * account-wide and holds no Bot: the User, the capability surface version, and
+ * `isolateBindingDigestV1`'s inputs for the *User*, because an Applet's state
+ * is the User's and its facet holds no Bot — which Bot owns it is directory
+ * metadata, so a transfer never reloads it: the User, the capability surface version, and
  * the Instance Contract. A change to any of them must produce a new isolate,
  * because a loader id serves the `env` it was first loaded with.
  */
@@ -581,6 +597,11 @@ export function appletGenerationIdV1(
 export interface AppletViewerClaimsV1 {
   /** User. */
   u: string;
+  /**
+   * The Bot the Applet was opened for. The socket door checks this Bot still
+   * has access, so an unshare reaches the next connection.
+   */
+  b: string;
   /** Applet. */
   a: string;
   /** Generation the token was minted against. */
@@ -669,12 +690,14 @@ async function signingKey(secret: string): Promise<CryptoKey> {
 }
 
 /**
- * `HMAC-SHA-256(secret, payload)` over `{ userId, appletId, generationId, exp }`,
- * the same pattern the machine door and the Routine webhook use.
+ * `HMAC-SHA-256(secret, payload)` over
+ * `{ userId, botId, appletId, generationId, exp }`, the same pattern the
+ * machine door and the Routine webhook use.
  *
  * The Applet's page runs in a cookieless sandboxed iframe and can carry no
  * credential, so this token is the whole of its authority — and it is scoped to
- * exactly one User, one Applet, and one generation, for fifteen minutes.
+ * exactly one User, the Bot it was opened for, one Applet, and one generation,
+ * for fifteen minutes.
  */
 export async function mintAppletViewerTokenV1(
   secret: string,
@@ -683,10 +706,14 @@ export async function mintAppletViewerTokenV1(
   if (!APPLET_ID_V1.test(claims.a)) {
     throw new AppletViewerTokenError(400, "Applet id is invalid");
   }
+  if (!APPLET_BOT_ID_V1.test(claims.b)) {
+    throw new AppletViewerTokenError(400, "Bot id is invalid");
+  }
   const payload = base64url(
     TEXT.encode(
       JSON.stringify({
         u: claims.u,
+        b: claims.b,
         a: claims.a,
         g: claims.g,
         exp: claims.exp,
@@ -740,9 +767,11 @@ export async function verifyAppletViewerTokenV1(
   const value = record(decoded, "Applet viewer claims");
   if (
     typeof value.u !== "string" ||
+    typeof value.b !== "string" ||
     typeof value.a !== "string" ||
     typeof value.g !== "string" ||
     !Number.isSafeInteger(value.exp) ||
+    !APPLET_BOT_ID_V1.test(value.b) ||
     !APPLET_ID_V1.test(value.a)
   ) {
     throw new AppletViewerTokenError(401, INVALID_TOKEN);
@@ -753,6 +782,7 @@ export async function verifyAppletViewerTokenV1(
   }
   return {
     u: value.u,
+    b: value.b,
     a: value.a,
     g: value.g,
     exp: value.exp as number,

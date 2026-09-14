@@ -37,6 +37,10 @@ declare const validators: {
   isBotLifecycleCommand(
     value: unknown,
   ): value is ProtocolTypes["BotLifecycleCommand"];
+  isAppletImpactFingerprint(
+    value: unknown,
+  ): value is ProtocolTypes["AppletImpactFingerprint"];
+  isBotAppletImpact(value: unknown): value is ProtocolTypes["BotAppletImpact"];
   isBotCreateCommand(
     value: unknown,
   ): value is ProtocolTypes["BotCreateCommand"];

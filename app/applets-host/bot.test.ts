@@ -23,7 +23,18 @@ function summary(appletId: string) {
     currentGenerationId: "g1",
     tools: [],
     createdAt: "2026-09-05T01:00:00.000Z",
+    ownerBotId: IDENTITY.botId,
+    access: "owner",
+    sharedWithBotIds: [],
   };
+}
+
+function focusOn(values: Map<string, unknown>, appletId: string) {
+  values.set(APPLET_FOCUSED_KEY, {
+    schemaVersion: 1,
+    appletId,
+    changedAt: "2026-09-05T01:00:00.000Z",
+  });
 }
 
 function harness(options: {
@@ -33,9 +44,11 @@ function harness(options: {
 }) {
   const values = new Map<string, unknown>();
   let listed = 0;
+  const asked: unknown[] = [];
   const rpc = {
-    listApplets: async () => {
+    listApplets: async (input: unknown) => {
       listed += 1;
+      asked.push(input);
       if (options.unreachable) throw new Error("the directory is unavailable");
       // The Bot's input gate is open across this call, so anything the
       // harness does here is what another request did while it was in flight.
@@ -44,6 +57,17 @@ function harness(options: {
         revision: 1,
         applets: (options.applets ?? []).map(summary),
       };
+    },
+    readApplet: (input: { botId: string; appletId: string }) => {
+      asked.push(input);
+      return (options.applets ?? []).includes(input.appletId)
+        ? Promise.resolve(summary(input.appletId))
+        : Promise.reject(
+            Object.assign(
+              new Error(`Applet "${input.appletId}" is unavailable`),
+              { name: "AppletUnavailableError" },
+            ),
+          );
     },
   };
   const state = {
@@ -65,7 +89,7 @@ function harness(options: {
     },
     authority: { validateIdentity: () => Promise.resolve() },
   } as unknown as ShellBotStateV1;
-  return { state, values, reads: () => listed };
+  return { state, values, reads: () => listed, asked };
 }
 
 describe("the focused Applet", () => {
@@ -77,20 +101,36 @@ describe("the focused Applet", () => {
     expect(reads()).toBe(0);
   });
 
-  test("a focus the directory still lists is kept", async () => {
-    const { state } = harness({ applets: [APPLET] });
+  test("a focus the directory still lists for this Bot is kept", async () => {
+    const { state, asked } = harness({ applets: [APPLET] });
     await setFocusedApplet(state, IDENTITY, APPLET);
     expect(await readFocusedApplet(state, IDENTITY)).toMatchObject({
       appletId: APPLET,
     });
+    // Both reads are this Bot's view of the directory, never the account's.
+    expect(asked).toEqual([
+      expect.objectContaining({ botId: IDENTITY.botId, appletId: APPLET }),
+      expect.objectContaining({ botId: IDENTITY.botId }),
+    ]);
   });
 
-  test("a focus whose Applet was deleted is cleared durably", async () => {
-    // Deletion through the User's own Applets list reaches the User's
+  test("an Applet this Bot cannot open is never focused", async () => {
+    const { state, values } = harness({ applets: [] });
+    await expect(setFocusedApplet(state, IDENTITY, APPLET)).rejects.toThrow(
+      /unavailable/,
+    );
+    expect(values.has(APPLET_FOCUSED_KEY)).toBe(false);
+    expect(await setFocusedApplet(state, IDENTITY, null)).toMatchObject({
+      appletId: null,
+    });
+  });
+
+  test("a focus whose Applet was deleted or unshared is cleared durably", async () => {
+    // A deletion, an unshare or the owner's archive reaches the User's
     // directory and no Bot's storage, so this Bot's focus is the only place
-    // the deleted id survives.
+    // the id survives.
     const deleted = harness({ applets: [] });
-    await setFocusedApplet(deleted.state, IDENTITY, APPLET);
+    focusOn(deleted.values, APPLET);
     expect(await readFocusedApplet(deleted.state, IDENTITY)).toMatchObject({
       appletId: null,
     });
@@ -122,7 +162,7 @@ describe("the focused Applet", () => {
         await setFocusedApplet(picked.state, IDENTITY, NEXT);
       },
     });
-    await setFocusedApplet(picked.state, IDENTITY, APPLET);
+    focusOn(picked.values, APPLET);
     expect(await readFocusedApplet(picked.state, IDENTITY)).toMatchObject({
       appletId: NEXT,
     });
@@ -188,6 +228,8 @@ function gatedHarness(options: {
             sessionId: TURN.sessionId,
             turnId: TURN.turnId,
           },
+          ownerBotId: "bot-1",
+          sharedWithBotIds: [],
         })),
       });
     },
@@ -255,7 +297,15 @@ describe("the account's Applets switch", () => {
       directory: [{ appletId: APPLET, generationId: "ag1" }],
       current: {
         generationId: "g1",
-        applets: [{ appletId: APPLET, generationId: "ag1", tools: [] }],
+        applets: [
+          {
+            appletId: APPLET,
+            generationId: "ag1",
+            tools: [],
+            ownerBotId: "bot-1",
+            sharedWithBotIds: [],
+          },
+        ],
       },
     });
     await resolveAppletComposition(off.state, IDENTITY, command);
@@ -271,7 +321,14 @@ describe("the account's Applets switch", () => {
     await resolveAppletComposition(on.state, IDENTITY, command);
     expect(on.proposed).toHaveLength(1);
     expect(on.proposed[0]).toMatchObject({
-      applets: [{ appletId: APPLET, generationId: "ag1" }],
+      applets: [
+        {
+          appletId: APPLET,
+          generationId: "ag1",
+          ownerBotId: "bot-1",
+          sharedWithBotIds: [],
+        },
+      ],
     });
   });
 

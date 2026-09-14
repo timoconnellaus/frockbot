@@ -15,11 +15,12 @@
 // service and stores the artifacts it returns under their content hashes. No
 // build output is written back here.
 //
-// The root is User-scoped, like every `package-declared` root: Applets are
-// account-wide, so one User's Bots share the root and an Applet a Bot wrote is
-// an Applet every Bot of that User can edit. It is read-write by the Bot —
-// unlike Memory and the User instruction root, whose single writer is a
-// Package — because writing source is exactly what the Bot is meant to do
+// The root is User-scoped, like every `package-declared` root, so a transfer
+// between two of a User's Bots moves no bytes. Which Bot may read and write an
+// Applet's directory is the directory entry's owner, checked by the Applets
+// host before every source operation (ADR 0027). It is read-write by that Bot
+// — unlike Memory and the User instruction root, whose single writer is a
+// Package — because writing source is exactly what the owner is meant to do
 // here.
 import {
   normalizeWorkspaceRelativePathV1,

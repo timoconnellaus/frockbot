@@ -251,6 +251,8 @@ function rpcBindingFor(state: BotStateBinding): UserBotStateBinding {
     deleteApplet: () => Promise.resolve({ status: "deleted" }),
     listApplets: () =>
       Promise.resolve({ schemaVersion: 1, revision: 0, applets: [] }),
+    readBotAppletImpact: () =>
+      Promise.reject(new Error("no Applets in this test")),
     mintAppletViewerToken: () =>
       Promise.reject(new Error("Applet is unavailable")),
     readAppletUi: () => Promise.reject(new Error("Applet is unavailable")),

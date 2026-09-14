@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type {
+  AppletSummaryV1,
   ToolDefinition,
   ToolExecutionContext,
   ToolRegistration,
@@ -19,24 +20,46 @@ const TURN = { sessionId: `${USER}:bot-1`, runId: "run-1", turnId: "turn-1" };
 interface Recorded {
   writes: { appletId: string; path: string; text: string; effectId: string }[];
   checks: { appletId: string; effectId: string }[];
+  access: string[];
+}
+
+function summary(overrides: Partial<AppletSummaryV1> = {}): AppletSummaryV1 {
+  return {
+    appletId: APPLET,
+    displayName: "Todo",
+    status: "draft",
+    tools: [],
+    createdAt: "2026-09-03T00:00:00.000Z",
+    ownerBotId: "bot-1",
+    access: "owner",
+    sharedWithBotIds: [],
+    ...overrides,
+  };
 }
 
 function harness(capability: Partial<AppletCapabilityHostV1> = {}) {
-  const recorded: Recorded = { writes: [], checks: [] };
+  const recorded: Recorded = { writes: [], checks: [], access: [] };
   const source = new Map<string, string>([
     ["server.ts", "export default class {}"],
     ["ui.tsx", "export default () => null;"],
   ]);
   const applets: AppletCapabilityHostV1 = {
     list: () => Promise.resolve([]),
-    create: () =>
-      Promise.resolve({
-        appletId: APPLET,
-        displayName: "Todo",
-        status: "draft" as const,
-        tools: [],
-        createdAt: "2026-09-03T00:00:00.000Z",
-      }),
+    create: () => Promise.resolve(summary()),
+    share: (input) => {
+      recorded.access.push(`share:${input.appletId}:${input.botId}`);
+      return Promise.resolve(summary({ sharedWithBotIds: [input.botId] }));
+    },
+    unshare: (input) => {
+      recorded.access.push(`unshare:${input.appletId}:${input.botId}`);
+      return Promise.resolve(summary());
+    },
+    transfer: (input) => {
+      recorded.access.push(`transfer:${input.appletId}:${input.botId}`);
+      return Promise.resolve(
+        summary({ ownerBotId: input.botId, access: "shared" }),
+      );
+    },
     files: () =>
       Promise.resolve(
         [...source].map(([path, text]) => ({ path, size: text.length })),
@@ -110,7 +133,7 @@ function harness(capability: Partial<AppletCapabilityHostV1> = {}) {
 }
 
 describe("the Applets tools", () => {
-  test("the catalog is the eleven applet_ verbs", () => {
+  test("the catalog is the fourteen applet_ verbs", () => {
     expect(harness().names).toEqual([
       "applet_list",
       "applet_create",
@@ -121,9 +144,77 @@ describe("the Applets tools", () => {
       "applet_publish",
       "applet_revert",
       "applet_delete",
+      "applet_share",
+      "applet_unshare",
+      "applet_transfer",
       "applet_focus",
       "applet_generations",
     ]);
+  });
+
+  test("applet_list says which Applets are yours and which are shared with you", async () => {
+    const { call } = harness({
+      list: () =>
+        Promise.resolve([
+          summary({ sharedWithBotIds: ["bot-2"] }),
+          summary({
+            appletId: `${USER}.${"b".repeat(32)}`,
+            displayName: "Tracker",
+            ownerBotId: "bot-3",
+            access: "shared",
+          }),
+        ]),
+    });
+    const result = await call("applet_list");
+    expect(result.content).toContain("Todo");
+    expect(result.content).toContain("yours, shared with bot-2");
+    expect(result.content).toContain("Tracker");
+    expect(result.content).toContain("shared with you by bot-3");
+  });
+
+  test("share, unshare and transfer name the other Bot and what it can now do", async () => {
+    const { call, recorded } = harness();
+    const shared = await call("applet_share", {
+      appletId: APPLET,
+      botId: "bot-2",
+    });
+    expect(shared.isError).toBe(false);
+    expect(shared.content).toContain(`${APPLET} is shared with bot-2`);
+    expect(shared.content).toContain("next Turn");
+    const unshared = await call("applet_unshare", {
+      appletId: APPLET,
+      botId: "bot-2",
+    });
+    expect(unshared.content).toContain("no longer has access");
+    const transferred = await call("applet_transfer", {
+      appletId: APPLET,
+      botId: "bot-2",
+    });
+    expect(transferred.content).toContain(`bot-2 now owns ${APPLET}`);
+    expect(transferred.content).toContain("You keep shared access");
+    expect(recorded.access).toEqual([
+      `share:${APPLET}:bot-2`,
+      `unshare:${APPLET}:bot-2`,
+      `transfer:${APPLET}:bot-2`,
+    ]);
+    // The directory's refusal is the whole answer: a shared Bot is told why.
+    const refused = harness({
+      transfer: () =>
+        Promise.reject(
+          new Error(
+            `Applet "${APPLET}" is shared with this Bot; only the Bot that owns it can change it`,
+          ),
+        ),
+    });
+    const refusal = await refused.call("applet_transfer", {
+      appletId: APPLET,
+      botId: "bot-2",
+    });
+    expect(refusal.isError).toBe(true);
+    expect(refusal.content).toContain("only the Bot that owns it");
+    expect(
+      (await harness().call("applet_share", { appletId: APPLET })).isError,
+    ).toBe(true);
   });
 
   test("applet_delete delegates to the authority and reports failures honestly", async () => {

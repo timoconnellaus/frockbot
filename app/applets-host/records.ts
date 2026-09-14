@@ -2,12 +2,14 @@
 // of Applet members into a Bot's Composition.
 //
 // Two things live here and nothing else does. The **capability** a Bot isolate
-// calls — list, create, publish, revert, delete, focus, generations — and the
-// **resolution** that turns the User's Applet directory into the `applet`
-// members of the Bot's next Composition generation. Both are Bot-scoped
-// because they run as one Bot, with exactly that Bot's authority; the directory
-// they read and write is the User's, and the instance they mount is the
-// kernel's Applet Durable Object.
+// calls — list, create, publish, revert, delete, share, unshare, transfer,
+// focus, generations — and the **resolution** that turns the User's Applet
+// directory into the `applet` members of the next Composition generation. Both
+// run as one Bot, with exactly that Bot's authority: the directory they read
+// and write is the User's, and it answers only what this Bot owns or is shared
+// (ADR 0027). Everything that reads or changes an Applet's source, generations
+// or access asks the directory for ownership first; the User Durable Object
+// refuses the directory writes a shared Bot attempts regardless.
 //
 // `publish` is a durable effect, and it is written in the order the
 // constitution's rule requires: record intent, then read the source, then
@@ -93,17 +95,31 @@ export interface AppletPublishIntentV1 {
   outcome?: AppletPublishResultV1;
 }
 
-/** The User Durable Object's Applet directory, as this Bot reads and writes it. */
+/** One Applet a Composition generation resolves, with the Bots it reaches. */
+export interface AppletCompositionInputV1 {
+  appletId: string;
+  generationId: string;
+  tools: AppletToolDeclarationV1[];
+  provenance: AppletProvenanceV1;
+  ownerBotId: string;
+  sharedWithBotIds: string[];
+}
+
+/**
+ * The User Durable Object's Applet directory, as one Bot reads and writes it.
+ * Every method but `compositionInput` is that Bot's view: an Applet it cannot
+ * reach does not exist, and one it is only shared cannot be changed.
+ */
 export interface AppletUserDirectoryV1 {
   list(): Promise<{ revision: number; applets: AppletSummaryV1[] }>;
+  /** With `owner`, a shared Applet is refused rather than read. */
+  read(
+    appletId: string,
+    options?: { owner?: boolean },
+  ): Promise<AppletSummaryV1>;
   compositionInput(): Promise<{
     revision: number;
-    applets: {
-      appletId: string;
-      generationId: string;
-      tools: AppletToolDeclarationV1[];
-      provenance: AppletProvenanceV1;
-    }[];
+    applets: AppletCompositionInputV1[];
   }>;
   create(input: {
     displayName: string;
@@ -115,6 +131,11 @@ export interface AppletUserDirectoryV1 {
     tools: AppletToolDeclarationV1[];
   }): Promise<AppletSummaryV1>;
   delete(appletId: string): Promise<AppletSummaryV1>;
+  /** Names another Applet of the account already declares. */
+  toolNameClashes(appletId: string, names: string[]): Promise<string[]>;
+  share(appletId: string, targetBotId: string): Promise<AppletSummaryV1>;
+  unshare(appletId: string, targetBotId: string): Promise<AppletSummaryV1>;
+  transfer(appletId: string, targetBotId: string): Promise<AppletSummaryV1>;
 }
 
 /** One Applet instance's Durable Object, as this Bot calls it. */
@@ -369,12 +390,7 @@ export function appletDiagnosticTextV1(
  * directory. Ordered by Applet id, so the artifact set hash is stable.
  */
 export function appletCompositionMembersV1(
-  applets: readonly {
-    appletId: string;
-    generationId: string;
-    tools: AppletToolDeclarationV1[];
-    provenance: AppletProvenanceV1;
-  }[],
+  applets: readonly AppletCompositionInputV1[],
 ): CompositionAppletMemberV1[] {
   return [...applets]
     .sort((left, right) => left.appletId.localeCompare(right.appletId))
@@ -394,6 +410,8 @@ export function appletCompositionMembersV1(
         },
       })),
       provenance: appletMemberProvenanceV1(applet),
+      ownerBotId: applet.ownerBotId,
+      sharedWithBotIds: [...applet.sharedWithBotIds].sort(),
     }));
 }
 
@@ -428,7 +446,10 @@ export function appletMemberProvenanceV1(applet: {
   };
 }
 
-/** True when two Applet member sets differ in identity, generation, or tools. */
+/**
+ * True when two Applet member sets differ in identity, generation, tools, or
+ * the Bots they reach — an access change is a new generation like a publish.
+ */
 export function appletMembersDifferV1(
   left: readonly CompositionAppletMemberV1[],
   right: readonly CompositionAppletMemberV1[],
@@ -440,6 +461,9 @@ export function appletMembersDifferV1(
       !other ||
       other.appletId !== member.appletId ||
       other.generationId !== member.generationId ||
+      other.ownerBotId !== member.ownerBotId ||
+      [...other.sharedWithBotIds].sort().join(" ") !==
+        [...member.sharedWithBotIds].sort().join(" ") ||
       other.tools.length !== member.tools.length ||
       other.tools.some((tool, at) => tool.name !== member.tools[at]?.name)
     );
@@ -747,28 +771,31 @@ export function createAppletCapabilityHostV1(
   }
 
   /**
-   * A tool name another Applet already owns, refused here rather than at the
-   * mount. Every Applet's tools share one Bot tool catalog, and the registry
-   * refuses a duplicate at mount — which would fail the whole Composition
-   * closed for a name clash. At publish the Bot can rename it and try again.
+   * A tool name another Applet already declares, refused here rather than at
+   * the mount. Names are unique across the account, not only across what this
+   * Bot can see, so no share or transfer can put two tools of one name in one
+   * Bot's catalog — where the registry would refuse the duplicate and fail the
+   * whole Composition closed. At publish the Bot can rename it and try again.
+   * The other Applet may be one this Bot cannot see, so it is not named.
    */
   async function toolNameClashes(
     appletId: string,
     tools: readonly AppletToolDeclarationV1[],
   ): Promise<string[]> {
-    const others = (await options.directory.list()).applets.filter(
-      (applet) => applet.appletId !== appletId && applet.status !== "deleted",
+    const clashes = await options.directory.toolNameClashes(
+      appletId,
+      tools.map((tool) => tool.name),
     );
-    const taken = new Map<string, string>();
-    for (const other of others) {
-      for (const name of other.tools) taken.set(name, other.displayName);
-    }
-    return tools
-      .filter((tool) => taken.has(tool.name))
-      .map(
-        (tool) =>
-          `"${tool.name}" is already a tool of "${taken.get(tool.name)}"`,
-      );
+    return clashes.map(
+      (name) => `"${name}" is already a tool of another Applet in this account`,
+    );
+  }
+
+  /** The Applet this Bot owns, or the directory's own refusal. */
+  async function requireOwner(appletId: string): Promise<AppletSummaryV1> {
+    return decodeAppletSummaryV1(
+      await options.directory.read(appletId, { owner: true }),
+    );
   }
 
   /** The page a built UI artifact is served at, when an origin is configured. */
@@ -879,6 +906,7 @@ export function createAppletCapabilityHostV1(
     },
 
     async files(input) {
+      await requireOwner(input.appletId);
       const listed = await listAppletSourceV1(
         options.workspace,
         options.userId,
@@ -889,6 +917,7 @@ export function createAppletCapabilityHostV1(
     },
 
     async readFile(input) {
+      await requireOwner(input.appletId);
       const outcome = await options.workspace.read(
         appletSourceFilePathV1(options.userId, input.appletId, input.path),
       );
@@ -899,6 +928,7 @@ export function createAppletCapabilityHostV1(
     },
 
     async writeFile(input, scope) {
+      await requireOwner(input.appletId);
       const path = appletSourceFilePathV1(
         options.userId,
         input.appletId,
@@ -934,6 +964,7 @@ export function createAppletCapabilityHostV1(
     },
 
     async check(input, scope) {
+      await requireOwner(input.appletId);
       const outcome = await build(input.appletId, scope.effectId);
       if ("failure" in outcome) {
         return {
@@ -958,6 +989,7 @@ export function createAppletCapabilityHostV1(
       const key = publishEffectKey(scope.effectId);
       const recorded = await options.storage.get<AppletPublishIntentV1>(key);
       if (recorded?.outcome) return recorded.outcome;
+      await requireOwner(input.appletId);
       // Intent first, before a byte is read or written. A recovery reads this
       // back and settles the effect rather than repeating it.
       const intent: AppletPublishIntentV1 = recorded ?? {
@@ -1050,6 +1082,7 @@ export function createAppletCapabilityHostV1(
     },
 
     async revert(input, scope) {
+      await requireOwner(input.appletId);
       const instance = options.instanceFor(input.appletId);
       const state = await instance.read({ appletId: input.appletId });
       const target = state.generations.find(
@@ -1092,6 +1125,8 @@ export function createAppletCapabilityHostV1(
     },
 
     async delete(input) {
+      // The directory refuses a shared Bot itself; it is the one authority
+      // for who may destroy an Applet other Bots use.
       await options.directory.delete(input.appletId);
       const focused = await options.storage.get<unknown>(APPLET_FOCUSED_KEY);
       if (
@@ -1103,11 +1138,33 @@ export function createAppletCapabilityHostV1(
       return { status: "deleted" };
     },
 
-    focus(input) {
+    async share(input) {
+      return decodeAppletSummaryV1(
+        await options.directory.share(input.appletId, input.botId),
+      );
+    },
+
+    async unshare(input) {
+      return decodeAppletSummaryV1(
+        await options.directory.unshare(input.appletId, input.botId),
+      );
+    },
+
+    async transfer(input) {
+      return decodeAppletSummaryV1(
+        await options.directory.transfer(input.appletId, input.botId),
+      );
+    },
+
+    async focus(input) {
+      // A focus is always an Applet this Bot can open, so the Canvas never
+      // points at one the open route would refuse.
+      if (input.appletId !== null) await options.directory.read(input.appletId);
       return setFocus(input.appletId);
     },
 
     async generations(input) {
+      await requireOwner(input.appletId);
       const state = await options
         .instanceFor(input.appletId)
         .read({ appletId: input.appletId });

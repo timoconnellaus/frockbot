@@ -7,7 +7,7 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, test } from "vitest";
 import { frockbotToolCallPrompt } from "./harness/miniflare.ts";
-import { provisionBot } from "./provision-bot.ts";
+import { provisionBot, provisionSiblingBot } from "./provision-bot.ts";
 
 function suffix(): string {
   return crypto.randomUUID().slice(0, 8);
@@ -125,6 +125,83 @@ describe("the Applets feature inside a real Bot", () => {
     });
     const relisted = toolResult(again as never);
     expect(relisted.content).toContain("Weekly Todos");
+  });
+
+  test("an Applet is its creating Bot's, and applet_share is how a sibling Bot gets to use it", async () => {
+    const id = suffix();
+    const owner = {
+      userId: `applets-share-${id}`,
+      botId: `applets-owner-${id}`,
+    };
+    const sibling = { userId: owner.userId, botId: `applets-sibling-${id}` };
+    await provisionBot(owner);
+    await provisionSiblingBot(sibling, 1);
+    await setApplets(owner.userId, true);
+    let runs = 0;
+    const call = async (
+      identity: { userId: string; botId: string },
+      name: string,
+      input?: Record<string, unknown>,
+    ) =>
+      toolResult(
+        (await botStub(identity.userId, identity.botId).run({
+          schemaVersion: 1,
+          ...identity,
+          command: {
+            runId: `run-${name}-${(runs += 1)}-${id}`,
+            sessionId: `${identity.userId}:${identity.botId}`,
+            acceptedAt: new Date().toISOString(),
+            text: frockbotToolCallPrompt(name, input),
+          },
+        })) as never,
+      );
+
+    expect(
+      (await call(owner, "applet_create", { displayName: "Shared Todos" }))
+        .isError,
+    ).toBe(false);
+    const directory = env.USER_CONFIGURATIONS.getByName(
+      owner.userId,
+    ) as unknown as {
+      listApplets(input: unknown): Promise<{
+        applets: Array<{ appletId: string; displayName: string }>;
+      }>;
+    };
+    const [created] = (
+      await directory.listApplets({ schemaVersion: 1, ...owner })
+    ).applets;
+    expect(created?.displayName).toBe("Shared Todos");
+
+    // The sibling is not offered what it was not given.
+    const unseen = await call(sibling, "applet_list");
+    expect(unseen.isError).toBe(false);
+    expect(unseen.content).not.toContain("Shared Todos");
+
+    const shared = await call(owner, "applet_share", {
+      appletId: created!.appletId,
+      botId: sibling.botId,
+    });
+    expect(shared.isError, shared.content).toBe(false);
+    expect((await call(sibling, "applet_list")).content).toContain(
+      "Shared Todos",
+    );
+
+    // Use, never authorship: the shared Bot cannot delete it or pass it on.
+    expect(
+      (await call(sibling, "applet_delete", { appletId: created!.appletId }))
+        .isError,
+    ).toBe(true);
+    expect(
+      (
+        await call(sibling, "applet_transfer", {
+          appletId: created!.appletId,
+          botId: sibling.botId,
+        })
+      ).isError,
+    ).toBe(true);
+    expect(
+      (await directory.listApplets({ schemaVersion: 1, ...owner })).applets,
+    ).toHaveLength(1);
   });
 
   test("the page catalog carries both pages, the sidebar entry, and FrockBot provenance", async () => {

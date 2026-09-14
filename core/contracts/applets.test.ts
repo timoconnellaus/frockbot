@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
+  appletImpactFingerprintV1,
   appletSourceArtefactPathV1,
+  decodeBotAppletImpactViewV1,
   decodeAppletDirectoryEntryV1,
   decodeAppletGenerationSummaryV1,
   decodeAppletGenerationV1,
@@ -50,10 +52,42 @@ describe("Applet directory entry v1", () => {
     },
     createdAt: "2026-09-03T00:00:00.000Z",
     status: "published",
+    ownerBotId: "bot-1",
+    sharedWithBotIds: ["bot-2"],
+    available: true,
   };
 
   test("round-trips the exact record", () => {
     expect(decodeAppletDirectoryEntryV1(entry)).toEqual(entry as never);
+  });
+
+  test("an entry names exactly one owner, apart from the Bots it is shared with", () => {
+    // Written before Applets had an owner: there is none to infer, so the
+    // record does not decode and the disposable cleanup removes it.
+    const {
+      ownerBotId: _owner,
+      sharedWithBotIds: _shared,
+      available: _available,
+      ...legacy
+    } = entry;
+    expect(() => decodeAppletDirectoryEntryV1(legacy)).toThrow(
+      "invalid fields",
+    );
+    expect(() =>
+      decodeAppletDirectoryEntryV1({ ...entry, sharedWithBotIds: ["bot-1"] }),
+    ).toThrow("names the owner");
+    expect(() =>
+      decodeAppletDirectoryEntryV1({
+        ...entry,
+        sharedWithBotIds: ["bot-2", "bot-2"],
+      }),
+    ).toThrow("duplicate Bots");
+    expect(() =>
+      decodeAppletDirectoryEntryV1({ ...entry, ownerBotId: "bot#task:1" }),
+    ).toThrow("ownerBotId is invalid");
+    expect(() =>
+      decodeAppletDirectoryEntryV1({ ...entry, available: "yes" }),
+    ).toThrow("available must be a boolean");
   });
 
   test("accepts a draft with no current generation and User provenance", () => {
@@ -154,8 +188,14 @@ describe("Applet views and viewer tokens", () => {
       currentGenerationId: "generation-2",
       tools: ["add_todo"],
       createdAt: "2026-09-03T00:00:00.000Z",
+      ownerBotId: "bot-1",
+      access: "shared",
+      sharedWithBotIds: [],
     };
     expect(decodeAppletSummaryV1(summary)).toEqual(summary as never);
+    expect(() =>
+      decodeAppletSummaryV1({ ...summary, access: "viewer" }),
+    ).toThrow("access is invalid");
     const generationSummary = {
       generationId: "generation-2",
       parentGenerationId: "generation-1",
@@ -229,6 +269,9 @@ describe("Applet canvas projections", () => {
     currentGenerationId: "generation-2",
     tools: ["add_todo"],
     createdAt: "2026-09-03T00:00:00.000Z",
+    ownerBotId: "bot-1",
+    access: "owner" as const,
+    sharedWithBotIds: ["bot-2"],
   };
 
   test("decodes the Applet list a canvas reads", () => {
@@ -362,6 +405,75 @@ describe("Applet canvas projections", () => {
     expect(() =>
       decodeAppletUiViewV1({ ...ui, uiUrl: "ftp://example.com/x" }),
     ).toThrow("uiUrl is invalid");
+  });
+});
+
+describe("Bot Applet impact", () => {
+  const applets = [
+    {
+      appletId: "u1abc.todo",
+      displayName: "Todo",
+      status: "published" as const,
+      sharedWithBotIds: ["bot-2", "bot-3"],
+    },
+    {
+      appletId: "u1abc.notes",
+      displayName: "Notes",
+      status: "draft" as const,
+      sharedWithBotIds: [],
+    },
+  ];
+
+  test("the fingerprint names which Applets and who shares them, in no order", () => {
+    const fingerprint = appletImpactFingerprintV1(applets);
+    expect(fingerprint).toMatch(/^[0-9a-f]{16}$/);
+    expect(
+      appletImpactFingerprintV1([
+        applets[1]!,
+        { ...applets[0]!, sharedWithBotIds: ["bot-3", "bot-2"] },
+      ]),
+    ).toBe(fingerprint);
+    // A share gained, a share lost, an Applet more or fewer: a different set.
+    expect(
+      appletImpactFingerprintV1([
+        applets[0]!,
+        { ...applets[1]!, sharedWithBotIds: ["bot-2"] },
+      ]),
+    ).not.toBe(fingerprint);
+    expect(appletImpactFingerprintV1([applets[0]!])).not.toBe(fingerprint);
+    expect(appletImpactFingerprintV1([])).not.toBe(fingerprint);
+    // The display name is not what a deletion destroys.
+    expect(
+      appletImpactFingerprintV1([
+        { ...applets[0]!, displayName: "Renamed" },
+        applets[1]!,
+      ]),
+    ).toBe(fingerprint);
+  });
+
+  test("decodes the confirmation's read exactly", () => {
+    const view = {
+      schemaVersion: 1,
+      botId: "bot-1",
+      fingerprint: appletImpactFingerprintV1(applets),
+      applets,
+    };
+    expect(decodeBotAppletImpactViewV1(view)).toEqual(view as never);
+    expect(() =>
+      decodeBotAppletImpactViewV1({ ...view, fingerprint: "stale" }),
+    ).toThrow("fingerprint is invalid");
+    expect(() =>
+      decodeBotAppletImpactViewV1({
+        ...view,
+        applets: [{ ...applets[0]!, status: "deleted" }],
+      }),
+    ).toThrow("status is invalid");
+    expect(() =>
+      decodeBotAppletImpactViewV1({
+        ...view,
+        applets: [...applets, applets[0]],
+      }),
+    ).toThrow("duplicate Applets");
   });
 });
 
