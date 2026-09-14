@@ -68,7 +68,9 @@ test("a User with old-shape Applets drops them, keeps its Plugins, and converses
   expect(before.text).toBe("Ollama reply");
 
   const userStub = env.USER_CONFIGURATIONS.getByName(userId);
-  const legacyApplet = `${userId}.legacy`;
+  // Old Applets were minted with the same 32-hex secret as current Applets;
+  // only their directory and Composition records lacked Bot ownership.
+  const legacyApplet = `${userId}.${"a".repeat(32)}`;
   const legacyCreatedAt = "2026-09-02T00:00:00.000Z";
 
   // The User as the deployment finds it: an Applet entry and a pinned
