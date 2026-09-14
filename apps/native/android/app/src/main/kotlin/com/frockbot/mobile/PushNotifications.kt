@@ -75,17 +75,30 @@ object PushNotifications {
     @Synchronized fun badge(context: Context, bots: Map<String, Int>, silenced: List<String>) {
         val store = prefs(context)
         val manager = NotificationManagerCompat.from(context)
-        for (botId in silenced) {
-            store.edit().remove("messages:$botId").remove("count:$botId").commit()
-            manager.cancel(botId, 1)
-        }
         val active = context.getSystemService(NotificationManager::class.java).activeNotifications
             .filter { it.id == 1 }.mapNotNull { it.tag }.toSet()
+        // One editor for the whole reconcile: this runs on the platform thread
+        // for every badge change, and a per-Bot synchronous commit would block
+        // it once per Bot in the account.
+        val editor = store.edit()
+        val cancel = mutableListOf<String>()
+        for (botId in silenced) {
+            if (botId in active) cancel.add(botId)
+            else if (!store.contains("messages:$botId") && !store.contains("count:$botId")) continue
+            editor.remove("messages:$botId").remove("count:$botId")
+        }
+        val refresh = mutableListOf<String>()
         for ((botId, count) in bots) {
             if (count <= 0 || store.getInt("count:$botId", -1) == count) continue
-            store.edit().putInt("count:$botId", count).commit()
+            editor.putInt("count:$botId", count)
+            if (botId in active) refresh.add(botId)
+        }
+        // Applied before any show(), which reads back the count it draws.
+        editor.apply()
+        for (botId in cancel) manager.cancel(botId, 1)
+        for (botId in refresh) {
             val messages = JSONArray(store.getString("messages:$botId", "[]"))
-            if (botId in active && messages.length() > 0) show(context, botId, messages, false)
+            if (messages.length() > 0) show(context, botId, messages, false)
         }
     }
     @Synchronized fun receive(context: Context, data: Map<String,String>) {

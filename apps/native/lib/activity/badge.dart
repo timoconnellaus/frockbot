@@ -9,7 +9,6 @@
 library;
 
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -33,6 +32,13 @@ class BotBadge {
   /// The best number a launcher can show for this Bot: a capped count is at
   /// least one more than the cap, and that lower bound is all that is known.
   int get launcherCount => capped ? count + 1 : count;
+
+  @override
+  bool operator ==(Object other) =>
+      other is BotBadge && other.count == count && other.capped == capped;
+
+  @override
+  int get hashCode => Object.hash(count, capped);
 }
 
 @immutable
@@ -68,16 +74,27 @@ class AppBadge {
 
   @override
   bool operator ==(Object other) =>
-      other is AppBadge && jsonEncode(toJson()) == jsonEncode(other.toJson());
+      identical(this, other) ||
+      other is AppBadge &&
+          mapEquals(bots, other.bots) &&
+          setEquals(silenced, other.silenced);
 
   @override
-  int get hashCode => jsonEncode(toJson()).hashCode;
+  int get hashCode => Object.hash(
+    Object.hashAllUnordered([
+      for (final entry in bots.entries) Object.hash(entry.key, entry.value),
+    ]),
+    Object.hashAllUnordered(silenced),
+  );
 }
 
 /// The badge for this account right now.
 ///
-/// [botIds] is the non-archived directory, [archived] the archived one; a Bot
-/// the fan-out mentions outside both is left alone rather than guessed at.
+/// [botIds] is the non-archived directory, so it is the whole of what counts.
+/// [archived] is silenced rather than counted: an archived Bot can still hold
+/// an alert posted before it was archived, and that alert would badge the
+/// launcher for a count this rule does not include. A Bot the fan-out mentions
+/// outside both directories is left alone rather than guessed at.
 /// [focusedBotId] is the Bot the shell says is being read, whose count the
 /// read receipt in flight is about to clear.
 AppBadge appBadgeFor({
@@ -89,7 +106,6 @@ AppBadge appBadgeFor({
   final bots = <String, BotBadge>{};
   final silenced = <String>{...archived};
   for (final botId in botIds) {
-    if (archived.contains(botId)) continue;
     final view = unread[botId];
     if (view == null) continue;
     if (!view.notificationsEnabled) {
@@ -147,9 +163,10 @@ class LauncherBadgePresenter implements AppBadgePresenter {
   @override
   Future<void> show(AppBadge badge) async {
     if (!ready()) return;
+    final json = badge.toJson();
     await channel.invokeMethod<void>('badge', {
-      'bots': badge.toJson()['bots'],
-      'silenced': badge.toJson()['silenced'],
+      'bots': json['bots'],
+      'silenced': json['silenced'],
     });
   }
 
