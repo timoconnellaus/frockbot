@@ -276,7 +276,7 @@ test("a Bot creates an Applet, its Applets list opens the source, and deletion r
   await expect(sem(page, "applet-list")).toBeVisible({ timeout: 60_000 });
   const row = sem(page, `applet-row-${appletId}`);
   await expect(row).toBeVisible();
-  await expect(row).toContainText("Weekly Todos");
+  await expect(row).toHaveAccessibleName("Weekly Todos");
   await expectNoHorizontalOverflow(page);
   await page.screenshot({
     path: testInfo.outputPath("applets-list-real.png"),
@@ -298,9 +298,9 @@ test("a Bot creates an Applet, its Applets list opens the source, and deletion r
   await expect(
     page.locator('[flt-semantics-identifier^="applet-row-"]'),
   ).toHaveCount(0);
-  await expect(
-    page.getByText(/^No Applets yet\. Ask .+ to build one\.$/),
-  ).toBeVisible();
+  await expect(sem(page, "applet-list")).toHaveAccessibleName(
+    /No Applets yet\. Ask Builder to build one\./u,
+  );
 });
 
 /**

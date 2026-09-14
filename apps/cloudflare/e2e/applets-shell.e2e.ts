@@ -561,7 +561,14 @@ test("the canvas fills a phone window and Back restores the Bot page", async ({
   const list = sem(page, "applet-list");
   if (await list.isVisible().catch(() => false)) {
     await expect(sem(page, `applet-row-${APPLET_ID}`)).toBeVisible();
-    await press(sem(page, "applet-list-back"));
+    // On a phone the Applets list is a pushed page, so its Back control is
+    // the page AppBar's rather than the desktop sidebar's identified button.
+    await press(
+      page
+        .locator('[role="button"]')
+        .filter({ hasText: /^Back$/u })
+        .first(),
+    );
   }
   await expect(chip).toBeVisible();
 });
@@ -631,9 +638,9 @@ test("the Applets button lists the Bot's Applets, a Bot embeds one as a live car
   await expect(page.getByText("Delete Todo?", { exact: true })).toBeVisible();
   await press(page.getByRole("button", { name: "Delete", exact: true }));
   await expect(row).toHaveCount(0, { timeout: 60_000 });
-  await expect(
-    page.getByText(/^No Applets yet\. Ask .+ to build one\.$/),
-  ).toBeVisible();
+  await expect(list).toHaveAccessibleName(
+    /No Applets yet\. Ask Builder to build one\./u,
+  );
   expect(stubs.deleted()).toBe(true);
   await page.screenshot({ path: testInfo.outputPath("applets-deleted.png") });
 
