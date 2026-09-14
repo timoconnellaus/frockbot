@@ -7,12 +7,14 @@ class BadgeReconcileTest {
     private fun reconcile(
         bots: Map<String, Int> = emptyMap(),
         silenced: List<String> = emptyList(),
+        suppressed: List<String> = emptyList(),
         active: Set<String> = emptySet(),
         counts: Map<String, Int> = emptyMap(),
         messages: Set<String> = emptySet(),
     ) = badgeReconcileV1(
         bots,
         silenced,
+        suppressed,
         active,
         storedCount = { counts[it] },
         storedMessages = { it in messages },
@@ -87,6 +89,66 @@ class BadgeReconcileTest {
         assertEquals(emptyList<String>(), plan.drop)
         assertEquals(emptyList<String>(), plan.refresh)
         assertEquals(listOf("alpha"), plan.cancel)
+    }
+
+    @Test
+    fun `a suppressed focused Bot is cancelled without changing retained state`() {
+        val plan = reconcile(
+            bots = mapOf("alpha" to 2, "beta" to 3),
+            suppressed = listOf("beta"),
+            active = setOf("beta"),
+            counts = mapOf("alpha" to 2, "beta" to 5),
+            messages = setOf("beta"),
+        )
+        val counts = mutableMapOf("alpha" to 2, "beta" to 5)
+        val messages = mutableSetOf("beta")
+        val effects = mutableListOf<String>()
+
+        executeBadgeReconcileV1(
+            plan,
+            forget = {
+                counts.remove(it)
+                messages.remove(it)
+            },
+            drop = { counts.remove(it) },
+            store = { botId, count -> counts[botId] = count },
+            persist = { effects.add("persist") },
+            cancel = { effects.add("cancel:$it") },
+            refresh = { effects.add("refresh:$it") },
+        )
+
+        assertEquals(mapOf("alpha" to 2, "beta" to 5), counts)
+        assertEquals(setOf("beta"), messages)
+        assertEquals(listOf("persist", "cancel:beta"), effects)
+        assertEquals(emptyList<String>(), plan.forget)
+        assertEquals(emptyList<String>(), plan.drop)
+        assertEquals(emptyMap<String, Int>(), plan.store)
+        assertEquals(emptyList<String>(), plan.refresh)
+    }
+
+    @Test
+    fun `a focused Bot at true cloud zero still runs zero effects`() {
+        val plan = reconcile(
+            bots = mapOf("beta" to 0),
+            active = setOf("beta"),
+            counts = mapOf("beta" to 5),
+            messages = setOf("beta"),
+        )
+        val counts = mutableMapOf("beta" to 5)
+        val effects = mutableListOf<String>()
+
+        executeBadgeReconcileV1(
+            plan,
+            forget = {},
+            drop = { counts.remove(it) },
+            store = { botId, count -> counts[botId] = count },
+            persist = { effects.add("persist") },
+            cancel = { effects.add("cancel:$it") },
+            refresh = { effects.add("refresh:$it:${counts[it]}") },
+        )
+
+        assertEquals(emptyMap<String, Int>(), counts)
+        assertEquals(listOf("persist", "refresh:beta:null"), effects)
     }
 
     @Test

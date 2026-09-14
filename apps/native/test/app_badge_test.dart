@@ -158,9 +158,20 @@ void main() {
           focusedBotId: 'alpha',
         );
         expect(badge.label, '1');
-        expect(badge.bots['alpha']?.launcherCount, 0);
+        expect(badge.bots['alpha']?.launcherCount, 4);
+        expect(badge.suppressed, {'alpha'});
       },
     );
+
+    test('a focused chat at cloud zero still reports authoritative zero', () {
+      final badge = appBadgeFor(
+        unread: directory([view('beta')]),
+        botIds: ['beta'],
+        focusedBotId: 'beta',
+      );
+      expect(badge.launcherCounts, {'beta': 0});
+      expect(badge.suppressed, isEmpty);
+    });
 
     test('saturates at 99+ over the sum and over any capped Bot', () {
       expect(
@@ -324,6 +335,47 @@ void main() {
         expect(calls.single.arguments, {
           'bots': {'alpha': 100, 'beta': 0},
           'silenced': ['muted'],
+          'suppressed': <String>[],
+        });
+      },
+    );
+
+    test(
+      'the launcher receives focus suppression separately from counts',
+      () async {
+        final calls = record('frockbot/push');
+        final badge = appBadgeFor(
+          unread: directory([view('alpha', count: 2), view('beta', count: 3)]),
+          botIds: ['alpha', 'beta'],
+          focusedBotId: 'beta',
+        );
+
+        await LauncherBadgePresenter(ready: () => true).show(badge);
+
+        expect(calls.single.arguments, {
+          'bots': {'alpha': 2, 'beta': 3},
+          'silenced': <String>[],
+          'suppressed': ['beta'],
+        });
+      },
+    );
+
+    test(
+      'the launcher sends focused cloud zero as authoritative zero',
+      () async {
+        final calls = record('frockbot/push');
+        final badge = appBadgeFor(
+          unread: directory([view('beta')]),
+          botIds: ['beta'],
+          focusedBotId: 'beta',
+        );
+
+        await LauncherBadgePresenter(ready: () => true).show(badge);
+
+        expect(calls.single.arguments, {
+          'bots': {'beta': 0},
+          'silenced': <String>[],
+          'suppressed': <String>[],
         });
       },
     );
@@ -428,9 +480,12 @@ void main() {
           'schemaVersion': 1,
           'unread': [view('alpha', count: 2).toJson()],
         });
-      final api = _ShellApi(store, [
-        registration('alpha', 'Alpha'),
-      ], fanOut, directoryFails: true);
+      final api = _ShellApi(
+        store,
+        [registration('alpha', 'Alpha')],
+        fanOut,
+        directoryFails: true,
+      );
       final sessions = BotSessions(api: api, store: store);
       final links = ValueNotifier<String?>(null);
       await tester.pumpWidget(
@@ -495,9 +550,12 @@ void main() {
           'schemaVersion': 1,
           'unread': [view('alpha', count: 2).toJson()],
         });
-      final api = _ShellApi(store, [
-        registration('alpha', 'Alpha'),
-      ], fanOut, directoryFails: true);
+      final api = _ShellApi(
+        store,
+        [registration('alpha', 'Alpha')],
+        fanOut,
+        directoryFails: true,
+      );
       final sessions = BotSessions(api: api, store: store);
       final links = ValueNotifier<String?>(null);
       await tester.pumpWidget(
@@ -559,9 +617,12 @@ void main() {
           'schemaVersion': 1,
           'unread': [view('alpha', count: 2).toJson()],
         });
-      final api = _ShellApi(store, [
-        registration('alpha', 'Alpha'),
-      ], fanOut, directoryFails: true);
+      final api = _ShellApi(
+        store,
+        [registration('alpha', 'Alpha')],
+        fanOut,
+        directoryFails: true,
+      );
       final sessions = BotSessions(api: api, store: store);
       final links = ValueNotifier<String?>(null);
       await tester.pumpWidget(
@@ -606,9 +667,12 @@ void main() {
       final store = MemoryStore();
       final fanOut = Completer<Object?>()
         ..complete({'schemaVersion': 1, 'unread': const []});
-      final api = _ShellApi(store, [
-        registration('alpha', 'Alpha'),
-      ], fanOut, directoryFails: true);
+      final api = _ShellApi(
+        store,
+        [registration('alpha', 'Alpha')],
+        fanOut,
+        directoryFails: true,
+      );
       final sessions = BotSessions(api: api, store: store);
       final links = ValueNotifier<String?>(null);
       await tester.pumpWidget(
@@ -685,9 +749,7 @@ void main() {
             'schemaVersion': 1,
             'unread': [view('alpha', count: 2).toJson()],
           });
-        final api = _ShellApi(store, [
-          registration('alpha', 'Alpha'),
-        ], fanOut);
+        final api = _ShellApi(store, [registration('alpha', 'Alpha')], fanOut);
         final sessions = BotSessions(api: api, store: store);
         final links = ValueNotifier<String?>(null);
         await tester.pumpWidget(

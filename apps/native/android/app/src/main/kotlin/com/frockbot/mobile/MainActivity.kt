@@ -44,7 +44,8 @@ class MainActivity : FlutterActivity() {
                 "badge" -> {
                     val bots = call.argument<Map<String, Int>>("bots") ?: emptyMap()
                     val silenced = call.argument<List<String>>("silenced") ?: emptyList()
-                    PushNotifications.badge(this, bots, silenced)
+                    val suppressed = call.argument<List<String>>("suppressed") ?: emptyList()
+                    PushNotifications.badge(this, bots, silenced, suppressed)
                     result.success(null)
                 }
                 "logout" -> { PushNotifications.account(this,null); result.success(null) }

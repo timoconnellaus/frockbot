@@ -22,12 +22,14 @@ data class BadgeReconcile(
  * Reconciles the cloud's answer with what this device holds. [active] is the
  * set of Bots that still have a notification up; [storedCount] is null for a
  * Bot with no count held, and [storedMessages] is whether any message text is
- * retained. Nothing here invents a notification: a Bot is only refreshed or
- * cancelled when it already has one.
+ * retained. A [suppressed] Bot loses only its active notification, retaining
+ * its cloud count and messages. Nothing here invents a notification: a Bot is
+ * only refreshed or cancelled when it already has one.
  */
 fun badgeReconcileV1(
     bots: Map<String, Int>,
     silenced: List<String>,
+    suppressed: List<String>,
     active: Set<String>,
     storedCount: (String) -> Int?,
     storedMessages: (String) -> Boolean,
@@ -39,10 +41,16 @@ fun badgeReconcileV1(
         else if (storedCount(botId) == null && !storedMessages(botId)) continue
         forget.add(botId)
     }
+    val silencedSet = silenced.toSet()
+    for (botId in suppressed) {
+        if (botId !in silencedSet && botId in active) cancel.add(botId)
+    }
+    val suppressedSet = suppressed.toSet()
     val drop = mutableListOf<String>()
     val store = LinkedHashMap<String, Int>()
     val refresh = mutableListOf<String>()
     for ((botId, count) in bots) {
+        if (botId in silencedSet || botId in suppressedSet) continue
         if (count <= 0) {
             if (storedCount(botId) != null) drop.add(botId)
             if (botId in active) {

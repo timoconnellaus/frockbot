@@ -72,8 +72,9 @@ object PushNotifications {
     // falls back to the messages its notification still holds: the cloud is
     // authority on the number, and only a read cursor discards the alert
     // itself. A notification the User swiped away is not brought back: swiping
-    // neither reads the conversation nor asks for the alert again.
-    @Synchronized fun badge(context: Context, bots: Map<String, Int>, silenced: List<String>) {
+    // neither reads the conversation nor asks for the alert again. A locally
+    // suppressed Bot loses its active notification without losing stored state.
+    @Synchronized fun badge(context: Context, bots: Map<String, Int>, silenced: List<String>, suppressed: List<String>) {
         val store = prefs(context)
         val manager = NotificationManagerCompat.from(context)
         val active = context.getSystemService(NotificationManager::class.java).activeNotifications
@@ -81,6 +82,7 @@ object PushNotifications {
         val plan = badgeReconcileV1(
             bots,
             silenced,
+            suppressed,
             active,
             storedCount = { if (store.contains("count:$it")) store.getInt("count:$it", 0) else null },
             storedMessages = { JSONArray(store.getString("messages:$it", "[]")).length() > 0 },

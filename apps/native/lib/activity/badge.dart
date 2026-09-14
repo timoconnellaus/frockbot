@@ -14,7 +14,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import '../protocol/client_wire.generated.dart' as wire;
-import '../shell/focus.dart';
 
 /// Where the dock label stops counting, matching the sidebar's "99+".
 const appBadgeCap = 99;
@@ -22,7 +21,7 @@ const appBadgeCap = 99;
 /// One Bot's contribution to the application badge.
 @immutable
 class BotBadge {
-  /// Unread messages after the focus rule; the cloud caps it at 99.
+  /// Unread messages reported by the cloud; the cloud caps it at 99.
   final int count;
 
   /// Whether the cloud said the real count is above [count].
@@ -49,17 +48,31 @@ class AppBadge {
 
   /// Bots whose alerts must not contribute: muted, or archived.
   final Set<String> silenced;
-  const AppBadge({this.bots = const {}, this.silenced = const {}});
+
+  /// The focused eligible Bot when it has unread messages.
+  final Set<String> suppressed;
+  const AppBadge({
+    this.bots = const {},
+    this.silenced = const {},
+    this.suppressed = const {},
+  });
 
   static const empty = AppBadge();
 
-  int get total => bots.values.fold(0, (sum, bot) => sum + bot.count);
+  int get total => bots.entries.fold(
+    0,
+    (sum, entry) =>
+        sum + (suppressed.contains(entry.key) ? 0 : entry.value.count),
+  );
 
   /// The dock's text, or null for no badge.
   String? get label {
     if (total == 0) return null;
     final saturated =
-        total > appBadgeCap || bots.values.any((bot) => bot.capped);
+        total > appBadgeCap ||
+        bots.entries.any(
+          (entry) => !suppressed.contains(entry.key) && entry.value.capped,
+        );
     return saturated ? '$appBadgeCap+' : '$total';
   }
 
@@ -73,7 +86,8 @@ class AppBadge {
       identical(this, other) ||
       other is AppBadge &&
           mapEquals(bots, other.bots) &&
-          setEquals(silenced, other.silenced);
+          setEquals(silenced, other.silenced) &&
+          setEquals(suppressed, other.suppressed);
 
   @override
   int get hashCode => Object.hash(
@@ -81,6 +95,7 @@ class AppBadge {
       for (final entry in bots.entries) Object.hash(entry.key, entry.value),
     ]),
     Object.hashAllUnordered(silenced),
+    Object.hashAllUnordered(suppressed),
   );
 }
 
@@ -91,8 +106,8 @@ class AppBadge {
 /// an alert posted before it was archived, and that alert would badge the
 /// launcher for a count this rule does not include. A Bot the fan-out mentions
 /// outside both directories is left alone rather than guessed at.
-/// [focusedBotId] is the Bot the shell says is being read, whose count the
-/// read receipt in flight is about to clear.
+/// [focusedBotId] is the Bot the shell says is being read. Its positive cloud
+/// count is preserved while its local contribution is suppressed.
 AppBadge appBadgeFor({
   required Map<String, wire.UnreadView> unread,
   required Iterable<String> botIds,
@@ -101,6 +116,7 @@ AppBadge appBadgeFor({
 }) {
   final bots = <String, BotBadge>{};
   final silenced = <String>{...archived};
+  final suppressed = <String>{};
   for (final botId in botIds) {
     final view = unread[botId];
     if (view == null) continue;
@@ -108,13 +124,10 @@ AppBadge appBadgeFor({
       silenced.add(botId);
       continue;
     }
-    final focused = botId == focusedBotId;
-    bots[botId] = BotBadge(
-      sidebarUnreadFor(view, focused: focused).count,
-      capped: !focused && view.capped,
-    );
+    bots[botId] = BotBadge(view.count, capped: view.capped);
+    if (botId == focusedBotId && view.count > 0) suppressed.add(botId);
   }
-  return AppBadge(bots: bots, silenced: silenced);
+  return AppBadge(bots: bots, silenced: silenced, suppressed: suppressed);
 }
 
 /// What draws the badge on one platform.
@@ -145,9 +158,9 @@ class DockBadgePresenter implements AppBadgePresenter {
 ///
 /// Nothing here posts a notification to force a badge: it reconciles the
 /// ones that already exist with the cloud — each one's number becomes the
-/// Bot's unread count, and a silenced Bot's notification goes. A Bot at zero
-/// is left alone; only a read cursor discards an alert, and swiping one away
-/// never marks the conversation read. Some launchers only draw a dot.
+/// Bot's unread count, a silenced Bot's notification goes, and a locally
+/// suppressed Bot loses only its active notification. Swiping one away never
+/// marks the conversation read. Some launchers only draw a dot.
 class LauncherBadgePresenter implements AppBadgePresenter {
   final MethodChannel channel;
   final bool Function() ready;
@@ -162,6 +175,7 @@ class LauncherBadgePresenter implements AppBadgePresenter {
     await channel.invokeMethod<void>('badge', {
       'bots': badge.launcherCounts,
       'silenced': badge.silenced.toList()..sort(),
+      'suppressed': badge.suppressed.toList()..sort(),
     });
   }
 
