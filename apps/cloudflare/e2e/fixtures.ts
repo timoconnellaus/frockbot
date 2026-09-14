@@ -441,21 +441,19 @@ export async function answerInputs(
   for (let attempt = 0; attempt < 3; attempt += 1) {
     for (const [input, value] of entries) {
       if ((await read(input)) === value) continue;
-      // Typed rather than filled, from the first attempt. `fill` writes the
-      // element's value and dispatches `input`, which the engine reads only
-      // while it is holding an editing session open on that field — and
-      // `inputValue()` then reads back the very value the engine ignored, so
-      // the check below can agree about a widget that holds nothing at all.
-      // A form that looked answered and was not is how a credential reached
-      // the product half-typed, and no read on this side could have caught
-      // it. Typing into a focused field always reaches the widget.
-      //
-      // Focused rather than clicked. A click needs coordinates, and on a form
-      // whose fields' semantics nodes overlap it opens the editing session on
-      // whichever field is really under the pointer — `pressSequentially` then
-      // types into that one. Forcing the click only turns off the check that
-      // would have caught it: this is how a base URL ended up in the API key.
-      // `focus()` names the element and involves no geometry at all.
+      // Activate the named semantics field before focusing its DOM input:
+      // DOM focus alone can leave Flutter's editing session unopened. Dispatch
+      // without coordinates because overlapping semantics nodes can send a
+      // pointer click to a different field.
+      await input.dispatchEvent("click");
+      // Let Flutter open the editing session before keystrokes arrive. The
+      // DOM can echo them even when the widget has not accepted them.
+      await input.evaluate(
+        () =>
+          new Promise<void>((resolve) => {
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+          }),
+      );
       await input.focus();
       await input.press("ControlOrMeta+a");
       // Emptying a field is a keystroke of its own: selecting everything and
