@@ -1489,13 +1489,14 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     // Every input the badge reads — the fan-out, the directory, and focus —
     // repaints the shell, so the icon is reconciled on the same build that
     // redraws the sidebar.
-    appBadge.update(
+    appBadge.reconcile(
       appBadgeFor(
         unread: activity.unread,
         botIds: [for (final registration in bots) registration.botId.value],
         archived: archived,
         focusedBotId: _focusedBotId,
       ),
+      authoritative: activity.loaded,
     );
     final shell = ShellSlotScope(
       slots: slots,

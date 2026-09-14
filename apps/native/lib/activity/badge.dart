@@ -201,6 +201,15 @@ class AppBadgeSync {
   /// safely reconcile native notifications.
   void invalidate() => _sent = null;
 
+  /// Reconciles a value only after the cloud has supplied the account's unread
+  /// fan-out. The shell builds once before that first load; treating its empty
+  /// local map as an authoritative zero would clear a badge another shell
+  /// state just drew while the real unread counts are still in flight.
+  void reconcile(AppBadge badge, {required bool authoritative}) {
+    if (!authoritative) return;
+    update(badge);
+  }
+
   void update(AppBadge badge) {
     final presenter = this.presenter;
     if (presenter == null || _cleared) return;

@@ -175,6 +175,29 @@ void main() {
       ]);
     });
 
+    test('startup keeps the old badge until every Bot is known, then suppresses only the focused Bot', () async {
+      final calls = record('com.frockbot/badge');
+      final sync = AppBadgeSync(const DockBadgePresenter());
+
+      // The shell's first build has no fan-out yet. That is unknown, not an
+      // authoritative zero, so it must not clear the Dock badge.
+      sync.reconcile(AppBadge.empty, authoritative: false);
+      sync.reconcile(
+        appBadgeFor(
+          unread: directory([view('alpha', count: 2), view('beta', count: 3)]),
+          botIds: ['alpha', 'beta'],
+          focusedBotId: 'beta',
+        ),
+        authoritative: true,
+      );
+      await sync.clear();
+
+      expect(calls.map((call) => (call.arguments as Map)['label']), [
+        '2',
+        null,
+      ]);
+    });
+
     test(
       'a replaced shell does not clear the badge its successor drew',
       () async {
