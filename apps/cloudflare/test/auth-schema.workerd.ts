@@ -58,7 +58,7 @@ test("a closed deployment refuses to create an account on first sign-in", async 
       GOOGLE_CLIENT_SECRET: "auth-schema-client-secret",
     },
     {
-      mayCreateAccount: async (email) => {
+      mayCreateIdentity: async ({ email }) => {
         refused.push(email);
         return false;
       },

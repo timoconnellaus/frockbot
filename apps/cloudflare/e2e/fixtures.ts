@@ -457,6 +457,14 @@ export async function answerInputs(
       // would have caught it: this is how a base URL ended up in the API key.
       // `focus()` names the element and involves no geometry at all.
       await input.focus();
+      // Flutter attaches its editing listeners during the semantics update
+      // after focus. DOM focus alone can precede that update and lose input.
+      await input.evaluate(
+        () =>
+          new Promise<void>((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+          ),
+      );
       await input.press("ControlOrMeta+a");
       // Emptying a field is a keystroke of its own: selecting everything and
       // then typing nothing leaves the selection standing and the text where

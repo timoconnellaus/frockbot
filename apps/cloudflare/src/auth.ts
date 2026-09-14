@@ -118,11 +118,14 @@ export function gatewayAuth(
     };
   }
 
-  const auth = createAuth(configured, dependencies);
+  // Public native-start requests need no identity lookup. Starting async auth
+  // initialization there leaves work unfinished when the request ends.
+  let auth: ReturnType<typeof createAuth> | undefined;
+  const getAuth = () => (auth ??= createAuth(configured, dependencies));
   return {
     profile: async (userId) => {
       const user = await (
-        await auth.$context
+        await getAuth().$context
       ).internalAdapter.findUserById(userId);
       return user
         ? {
@@ -132,9 +135,9 @@ export function gatewayAuth(
           }
         : null;
     },
-    handler: (request) => auth.handler(request),
+    handler: (request) => getAuth().handler(request),
     getSession: async (headers) => {
-      const session = await auth.api.getSession({ headers });
+      const session = await getAuth().api.getSession({ headers });
       return session
         ? {
             user: {
