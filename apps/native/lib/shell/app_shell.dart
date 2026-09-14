@@ -176,9 +176,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// is unknown rather than an account with nothing unread.
   bool directoryLoaded = false;
 
-  /// Whether [load] is in flight, so the retry the poll makes while the
+  /// The read [load] is waiting on, and the single follow-up read the callers
+  /// that arrived during it share, so the retry the poll makes while the
   /// directory is still unknown cannot stack reads on top of each other.
-  bool _loadingDirectory = false;
+  Future<void>? _directoryLoad;
+  Future<void>? _queuedDirectoryLoad;
   bool _searchOpen = false;
 
   /// On a phone the Bot list is the first screen and a conversation is a
@@ -493,9 +495,19 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     await _readCredit();
   }
 
-  Future<void> load() async {
-    if (_loadingDirectory) return;
-    _loadingDirectory = true;
+  /// Reads the directory, and completes when a read the caller asked for has
+  /// finished: one that arrives mid-read waits for a fresh read behind it
+  /// rather than returning on the read already in flight.
+  Future<void> load() {
+    final inFlight = _directoryLoad;
+    if (inFlight == null) return _directoryLoad = _loadDirectory();
+    return _queuedDirectoryLoad ??= inFlight.then((_) {
+      _queuedDirectoryLoad = null;
+      return _directoryLoad = _loadDirectory();
+    });
+  }
+
+  Future<void> _loadDirectory() async {
     unawaited(_readIdentity());
     unawaited(_readCredit());
     try {
@@ -560,7 +572,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         });
       }
     } finally {
-      _loadingDirectory = false;
+      _directoryLoad = null;
       if (mounted) setState(() => loaded = true);
     }
   }

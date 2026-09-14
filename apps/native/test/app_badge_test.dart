@@ -25,6 +25,10 @@ class _ShellApi extends NativeApi {
   /// Whether `/api/bots` fails, leaving the shell with no directory at all
   /// while the fan-out still answers. A test flips it to bring the read back.
   bool directoryFails;
+
+  /// Holds the next `/api/bots` answer open, so a test can act inside the
+  /// window a directory read spends in flight.
+  Completer<void>? directoryGate;
   @override
   Future<Object?> request(
     String path, {
@@ -34,7 +38,13 @@ class _ShellApi extends NativeApi {
   }) async {
     if (path == '/api/bots') {
       if (directoryFails) throw const FormatException('directory unreachable');
-      return {'schemaVersion': 1, 'revision': 1, 'bots': bots};
+      final answered = [...bots];
+      final gate = directoryGate;
+      if (gate != null) {
+        directoryGate = null;
+        await gate.future;
+      }
+      return {'schemaVersion': 1, 'revision': 1, 'bots': answered};
     }
     if (path == '/api/bots/lifecycles') {
       return {'schemaVersion': 1, 'lifecycles': const []};
@@ -581,6 +591,60 @@ void main() {
       links.dispose();
       api.close();
       debugDefaultTargetPlatformOverride = null;
+    });
+
+    testWidgets('and still serves a Retry asked for mid-poll', (tester) async {
+      tester.view.physicalSize = const Size(320, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final store = MemoryStore();
+      final fanOut = Completer<Object?>()
+        ..complete({'schemaVersion': 1, 'unread': const []});
+      final api = _ShellApi(store, [
+        registration('alpha', 'Alpha'),
+      ], fanOut, directoryFails: true);
+      final sessions = BotSessions(api: api, store: store);
+      final links = ValueNotifier<String?>(null);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: FrockTheme.theme(Brightness.dark),
+          home: AppShell(
+            api: api,
+            store: store,
+            sessions: sessions,
+            userId: 'test-user',
+            botLinks: links,
+            onSignOut: () async {},
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Retry'), findsOneWidget);
+
+      // The poll's own retry is mid-read when the User asks for one too. The
+      // read in flight cannot answer for them: it was issued before the Bot
+      // they are waiting on existed.
+      api.directoryFails = false;
+      final gate = Completer<void>();
+      api.directoryGate = gate;
+      await tester.pump(const Duration(seconds: 11));
+      await tester.pump();
+      await tester.tap(find.text('Retry'));
+      await tester.pump();
+      api.bots.add(registration('beta', 'Beta'));
+      gate.complete();
+      await tester.pumpAndSettle();
+
+      expect(find.text('Alpha'), findsOneWidget);
+      expect(find.text('Beta'), findsOneWidget);
+
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpAndSettle();
+      sessions.clear();
+      links.dispose();
+      api.close();
     });
 
     testWidgets(
