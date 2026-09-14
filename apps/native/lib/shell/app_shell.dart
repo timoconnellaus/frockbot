@@ -522,7 +522,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     try {
       final cached = await widget.store.read('directory/${widget.userId}');
       if (cached != null && bots.isEmpty) {
-        _adopt(wire.BotDirectory.fromJson(jsonDecode(cached)).bots, const {});
+        _adopt(
+          wire.BotDirectory.fromJson(jsonDecode(cached)).bots,
+          const {},
+          fromCache: true,
+        );
       }
       final directory = wire.BotDirectory.fromJson(
         await widget.api.request('/api/bots'),
@@ -597,6 +601,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     Set<String> archivedIds, {
     List<wire.BotRegistration>? readable,
     bool authoritative = false,
+    bool fromCache = false,
   }) {
     setState(() {
       bots = active;
@@ -616,13 +621,20 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                 .firstOrNull;
       error = null;
     });
+    final pendingBotId = widget.botLinks.value;
+    if (pendingBotId != null) {
+      if (!fromCache || bots.any((bot) => bot.botId.value == pendingBotId)) {
+        _resolveBotLink();
+      }
+      return;
+    }
     unawaited(_restoreSelection());
   }
 
   Future<void> _restoreSelection() async {
-    if (selected != null) return;
+    if (selected != null || widget.botLinks.value != null) return;
     final saved = await widget.store.read('selection.${widget.userId}');
-    if (!mounted || selected != null) return;
+    if (!mounted || selected != null || widget.botLinks.value != null) return;
     if (saved == null) {
       _openGeneral();
       return;
@@ -692,10 +704,19 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   void _followBotLink() {
     final botId = widget.botLinks.value;
     if (botId == null) return;
+    if (bots.every((bot) => bot.botId.value != botId)) {
+      unawaited(load());
+      return;
+    }
+    _resolveBotLink();
+  }
+
+  void _resolveBotLink() {
+    final botId = widget.botLinks.value;
+    if (botId == null) return;
     widget.botLinks.value = null;
     final bot = bots.where((bot) => bot.botId.value == botId).firstOrNull;
     if (bot == null) {
-      unawaited(load());
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(

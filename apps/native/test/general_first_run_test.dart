@@ -387,6 +387,7 @@ void main() {
       WidgetTester tester, {
       Size size = const Size(1200, 900),
       String? saved,
+      ValueNotifier<String?>? botLinks,
     }) async {
       tester.view.physicalSize = size;
       tester.view.devicePixelRatio = 1;
@@ -396,7 +397,7 @@ void main() {
       if (saved != null) store.values['selection.test-user'] = saved;
       final api = FirstRunApi(store);
       final sessions = BotSessions(api: api, store: store);
-      final links = ValueNotifier<String?>(null);
+      final links = botLinks ?? ValueNotifier<String?>(null);
       addTearDown(links.dispose);
       await tester.pumpWidget(
         MaterialApp(
@@ -583,6 +584,46 @@ void main() {
         );
         await close(tester, harness);
       });
+    }
+
+    for (final size in [const Size(360, 800), const Size(1200, 900)]) {
+      for (final pendingAtMount in [true, false]) {
+        testWidgets(
+          'a Bot link ${pendingAtMount ? 'at mount' : 'during loading'} '
+          'opens before General at width ${size.width}',
+          (tester) async {
+            final links = ValueNotifier<String?>(
+              pendingAtMount ? 'bot-one' : null,
+            );
+            final harness = await shell(tester, size: size, botLinks: links);
+            if (!pendingAtMount) links.value = 'bot-one';
+            await tester.pump();
+            expect(links.value, 'bot-one');
+            expect(harness.store.values['selection.test-user'], isNull);
+            expect(
+              find.textContaining('That Bot isn’t available'),
+              findsNothing,
+            );
+
+            harness.api.directory.complete(
+              directoryOf([
+                registration(generalId, 'General'),
+                registration('bot-one', 'Rosemary'),
+              ]),
+            );
+            await tester.pumpAndSettle();
+            expect(find.widgetWithText(AppBar, 'Rosemary'), findsOneWidget);
+            expect(find.widgetWithText(AppBar, 'General'), findsNothing);
+            expect(harness.store.values['selection.test-user'], 'bot-one');
+            expect(links.value, isNull);
+            expect(
+              find.textContaining('That Bot isn’t available'),
+              findsNothing,
+            );
+            await close(tester, harness);
+          },
+        );
+      }
     }
 
     testWidgets('a saved selection is kept rather than replaced by General', (
