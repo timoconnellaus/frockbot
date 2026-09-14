@@ -56,7 +56,7 @@ Five classes in the app Worker, exported from `apps/cloudflare/src/index.ts`. `c
 - Its constructor runs the receipted, disposable Applet cleanup (`applet-test-state-cleanup.ts`) under `blockConcurrencyWhile`.
 - The only class that uses SQLite, and it does not own the tables. `ctx.storage.sql` is handed to two plugin stores: transcript search FTS5 (`app/search/index-store.ts:143-177`) and audit (`app/audit/store.ts:166-175`). All other state is key-value.
 - One `alarm()` serving credential leases, publisher and template recovery, flock sagas, archived-Bot sweeps and deleted Applets' state and source cleanup.
-- Provisions General. `assertUserIdentity`, which every admitted request passes through, calls `provisionGeneral` (`app/flock/user.ts`) once per instance before answering: an account whose directory is empty and holds no `flock:bootstrap:v1` marker gets a Bot named General under a freshly minted `general-<hex>` id, registered in the same transaction as the marker that names it; an account found already owning Bots gets only the marker. `GET /api/bots/bootstrap` answers which Bot General is while it is still registered. The client opens General when this device has no saved selection, no Bot link and no page over the shell, and General's empty thread offers starter suggestions gated on the Bot's Plugins frame (`apps/native/lib/shell/starters.dart`) that fill the composer without sending.
+- Owns [General bootstrap](../app/flock/README.md#general-bootstrap); the [first-run guidance](../README.md#getting-started) describes how the shared Flutter client opens it and offers editable suggestions.
 - No `fetch()`, no WebSockets.
 
 ### `AppletState` — `apps/cloudflare/src/applet-state.ts:228`
