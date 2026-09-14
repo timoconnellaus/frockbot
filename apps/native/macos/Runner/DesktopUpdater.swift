@@ -149,8 +149,8 @@ final class DesktopUpdater: NSObject, SPUUserDriver {
     received = 0
     expected = nil
     if wantsDownload {
-      reply(.install)
       publish(downloaded ? "preparing" : "downloading")
+      reply(.install)
       return
     }
     pendingFound = reply
