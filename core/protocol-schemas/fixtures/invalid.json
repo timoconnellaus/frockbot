@@ -1136,6 +1136,11 @@
     }
   },
   {
+    "name": "AppletImpactFingerprint wrong shape",
+    "schema": "AppletImpactFingerprint",
+    "value": "not-a-fingerprint"
+  },
+  {
     "name": "BotAppletImpact wrong fingerprint",
     "schema": "BotAppletImpact",
     "value": {

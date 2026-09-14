@@ -1198,6 +1198,11 @@
     }
   },
   {
+    "name": "AppletImpactFingerprint valid",
+    "schema": "AppletImpactFingerprint",
+    "value": "cbf29ce484222325"
+  },
+  {
     "name": "BotAppletImpact valid",
     "schema": "BotAppletImpact",
     "value": {
