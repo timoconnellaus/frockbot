@@ -43,10 +43,10 @@ class BadgeReconcileTest {
     }
 
     @Test
-    fun `a zero for a Bot holding no count is left alone`() {
+    fun `a repeated zero redraws an active notification after count removal`() {
         val plan = reconcile(bots = mapOf("alpha" to 0), active = setOf("alpha"))
         assertEquals(emptyList<String>(), plan.drop)
-        assertEquals(emptyList<String>(), plan.refresh)
+        assertEquals(listOf("alpha"), plan.refresh)
     }
 
     @Test

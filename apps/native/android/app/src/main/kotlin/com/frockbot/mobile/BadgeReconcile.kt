@@ -44,8 +44,9 @@ fun badgeReconcileV1(
     val refresh = mutableListOf<String>()
     for ((botId, count) in bots) {
         if (count <= 0) {
-            if (storedCount(botId) == null) continue
-            drop.add(botId)
+            if (storedCount(botId) != null) drop.add(botId)
+            if (botId in active) refresh.add(botId)
+            continue
         } else {
             if (storedCount(botId) == count) continue
             store[botId] = count
