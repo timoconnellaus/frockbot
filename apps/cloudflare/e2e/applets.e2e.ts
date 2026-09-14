@@ -298,7 +298,9 @@ test("a Bot creates an Applet, its Applets list opens the source, and deletion r
   await expect(
     page.locator('[flt-semantics-identifier^="applet-row-"]'),
   ).toHaveCount(0);
-  await expect(page.getByText(/^No Applets yet\. Ask .+ to build one\.$/)).toBeVisible();
+  await expect(
+    page.getByText(/^No Applets yet\. Ask .+ to build one\.$/),
+  ).toBeVisible();
 });
 
 /**

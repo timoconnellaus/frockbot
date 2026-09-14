@@ -631,7 +631,9 @@ test("the Applets button lists the Bot's Applets, a Bot embeds one as a live car
   await expect(page.getByText("Delete Todo?", { exact: true })).toBeVisible();
   await press(page.getByRole("button", { name: "Delete", exact: true }));
   await expect(row).toHaveCount(0, { timeout: 60_000 });
-  await expect(page.getByText(/^No Applets yet\. Ask .+ to build one\.$/)).toBeVisible();
+  await expect(
+    page.getByText(/^No Applets yet\. Ask .+ to build one\.$/),
+  ).toBeVisible();
   expect(stubs.deleted()).toBe(true);
   await page.screenshot({ path: testInfo.outputPath("applets-deleted.png") });
 

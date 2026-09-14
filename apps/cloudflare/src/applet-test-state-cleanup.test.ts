@@ -151,7 +151,9 @@ describe("the Bot-owned Applets cleanup", () => {
         storage.values.has(compositionGenerationKey(generation.generationId)),
       ).toBe(false);
       expect(
-        storage.values.has(compositionIndexKey(CREATED, generation.generationId)),
+        storage.values.has(
+          compositionIndexKey(CREATED, generation.generationId),
+        ),
       ).toBe(false);
     }
     const pin = storage.values.get(COMPOSITION_CURRENT_KEY) as {
@@ -178,9 +180,9 @@ describe("the Bot-owned Applets cleanup", () => {
       revision: 1,
       bots: [],
     });
-    expect(storage.values.get(BOT_OWNED_APPLETS_CLEANUP_RECEIPT_KEY)).toMatchObject(
-      { removedApplets: 1, removedGenerations: 2 },
-    );
+    expect(
+      storage.values.get(BOT_OWNED_APPLETS_CLEANUP_RECEIPT_KEY),
+    ).toMatchObject({ removedApplets: 1, removedGenerations: 2 });
   });
 
   test("runs once: a second load finds the receipt and touches nothing", async () => {
@@ -199,7 +201,10 @@ describe("the Bot-owned Applets cleanup", () => {
     await storage.put({ [appletDirectoryEntryKey(NEW)]: currentEntry });
     await cleanAppletTestStateV1(storage as unknown as DurableObjectStorage);
     expect([...storage.values.keys()].sort()).toEqual(
-      [appletDirectoryEntryKey(NEW), BOT_OWNED_APPLETS_CLEANUP_RECEIPT_KEY].sort(),
+      [
+        appletDirectoryEntryKey(NEW),
+        BOT_OWNED_APPLETS_CLEANUP_RECEIPT_KEY,
+      ].sort(),
     );
   });
 });

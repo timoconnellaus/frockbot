@@ -31,7 +31,9 @@ interface Summary {
 }
 
 interface UserRpc {
-  listApplets(input: unknown): Promise<{ revision: number; applets: Summary[] }>;
+  listApplets(
+    input: unknown,
+  ): Promise<{ revision: number; applets: Summary[] }>;
   readApplet(input: unknown): Promise<Summary>;
   readAppletCompositionInput(input: unknown): Promise<{
     revision: number;
@@ -482,8 +484,9 @@ describe("the Bot lifecycle saga carries the Applet consequence", () => {
     // to-do is drained and the Applet's storage is empty.
     expect(await bots.cleanups()).toEqual([]);
     expect(
-      await runInDurableObject(state, async (_instance, durable) =>
-        (await durable.storage.list()).size,
+      await runInDurableObject(
+        state,
+        async (_instance, durable) => (await durable.storage.list()).size,
       ),
     ).toBe(0);
   });

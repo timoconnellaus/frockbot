@@ -451,7 +451,11 @@ async function routeAppletSocket(
   }
   let reachable: boolean;
   try {
-    reachable = await dependencies.appletAccessFor(claims.u, claims.b, claims.a);
+    reachable = await dependencies.appletAccessFor(
+      claims.u,
+      claims.b,
+      claims.a,
+    );
   } catch {
     return jsonError(503, "Applet access could not be checked");
   }

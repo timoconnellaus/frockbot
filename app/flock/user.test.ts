@@ -496,7 +496,9 @@ describe("Flock User contribution", () => {
         settle: async (transaction, lifecycleCommand, lifecycle) => {
           // In the settling transaction: what it writes lands with the receipt.
           await transaction.put(`effect:${lifecycleCommand.commandId}`, true);
-          settled.push(`settle:${lifecycleCommand.commandId}:${lifecycle.status}`);
+          settled.push(
+            `settle:${lifecycleCommand.commandId}:${lifecycle.status}`,
+          );
         },
       },
     });

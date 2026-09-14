@@ -1119,7 +1119,9 @@ describe("the Applet viewer token route", () => {
       DEPLOYMENT: { userId: "alice", applicationHash: "foundation-v1" },
     };
     const response = await createUserApplication()(
-      new Request("https://frockbot.test/api/bots/bot-1/applets/alice.todo/token"),
+      new Request(
+        "https://frockbot.test/api/bots/bot-1/applets/alice.todo/token",
+      ),
       env,
     );
     expect(response.status).toBe(503);
@@ -1157,7 +1159,9 @@ describe("the Applet viewer token route", () => {
       DEPLOYMENT: { userId: "alice", applicationHash: "foundation-v1" },
     };
     const response = await createUserApplication()(
-      new Request("https://frockbot.test/api/bots/bot-1/applets/alice.todo/token"),
+      new Request(
+        "https://frockbot.test/api/bots/bot-1/applets/alice.todo/token",
+      ),
       env,
     );
     expect(response.status).toBe(200);
@@ -1282,11 +1286,18 @@ describe("a Bot's Applets", () => {
     };
     const app = createUserApplication();
     for (const request of [
-      new Request("https://frockbot.test/api/bots/bot-2/applets/alice.todo/source"),
-      new Request("https://frockbot.test/api/bots/bot-2/applets/alice.todo/build"),
-      new Request("https://frockbot.test/api/bots/bot-2/applets/alice.todo/delete", {
-        method: "POST",
-      }),
+      new Request(
+        "https://frockbot.test/api/bots/bot-2/applets/alice.todo/source",
+      ),
+      new Request(
+        "https://frockbot.test/api/bots/bot-2/applets/alice.todo/build",
+      ),
+      new Request(
+        "https://frockbot.test/api/bots/bot-2/applets/alice.todo/delete",
+        {
+          method: "POST",
+        },
+      ),
     ]) {
       const response = await app(request, env);
       expect(response.status).toBe(403);
@@ -1335,7 +1346,9 @@ describe("Applet deletion", () => {
     expect(
       (
         await app(
-          new Request("https://frockbot.test/api/bots/bot-1/applets/alice.todo/delete"),
+          new Request(
+            "https://frockbot.test/api/bots/bot-1/applets/alice.todo/delete",
+          ),
           env,
         )
       ).status,
@@ -1343,18 +1356,24 @@ describe("Applet deletion", () => {
     expect(
       (
         await app(
-          new Request("https://frockbot.test/api/bots/bot-1/applets/invalid/delete", {
-            method: "POST",
-          }),
+          new Request(
+            "https://frockbot.test/api/bots/bot-1/applets/invalid/delete",
+            {
+              method: "POST",
+            },
+          ),
           env,
         )
       ).status,
     ).toBe(400);
     expect(calls).toEqual([]);
     const response = await app(
-      new Request("https://frockbot.test/api/bots/bot-1/applets/alice.todo/delete", {
-        method: "POST",
-      }),
+      new Request(
+        "https://frockbot.test/api/bots/bot-1/applets/alice.todo/delete",
+        {
+          method: "POST",
+        },
+      ),
       env,
     );
     expect(response.status).toBe(200);
@@ -1379,9 +1398,12 @@ describe("Applet deletion", () => {
     };
     const app = createUserApplication();
     const response = await app(
-      new Request("https://frockbot.test/api/bots/bot-1/applets/alice.todo/delete", {
-        method: "POST",
-      }),
+      new Request(
+        "https://frockbot.test/api/bots/bot-1/applets/alice.todo/delete",
+        {
+          method: "POST",
+        },
+      ),
       env,
     );
     expect(response.status).toBe(404);
@@ -1399,9 +1421,12 @@ describe("Applet deletion", () => {
     };
     const app = createUserApplication();
     const response = await app(
-      new Request("https://frockbot.test/api/bots/bot-1/applets/alice.todo/delete", {
-        method: "POST",
-      }),
+      new Request(
+        "https://frockbot.test/api/bots/bot-1/applets/alice.todo/delete",
+        {
+          method: "POST",
+        },
+      ),
       env,
     );
     expect(response.status).toBe(503);
@@ -1419,9 +1444,12 @@ describe("Applet deletion", () => {
     };
     const app = createUserApplication();
     const response = await app(
-      new Request("https://frockbot.test/api/bots/bot-1/applets/alice.todo/delete", {
-        method: "POST",
-      }),
+      new Request(
+        "https://frockbot.test/api/bots/bot-1/applets/alice.todo/delete",
+        {
+          method: "POST",
+        },
+      ),
       env,
     );
     expect(response.status).toBe(503);

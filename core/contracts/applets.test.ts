@@ -469,7 +469,10 @@ describe("Bot Applet impact", () => {
       }),
     ).toThrow("status is invalid");
     expect(() =>
-      decodeBotAppletImpactViewV1({ ...view, applets: [...applets, applets[0]] }),
+      decodeBotAppletImpactViewV1({
+        ...view,
+        applets: [...applets, applets[0]],
+      }),
     ).toThrow("duplicate Applets");
   });
 });

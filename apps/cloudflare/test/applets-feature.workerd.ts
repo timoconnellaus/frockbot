@@ -129,7 +129,10 @@ describe("the Applets feature inside a real Bot", () => {
 
   test("an Applet is its creating Bot's, and applet_share is how a sibling Bot gets to use it", async () => {
     const id = suffix();
-    const owner = { userId: `applets-share-${id}`, botId: `applets-owner-${id}` };
+    const owner = {
+      userId: `applets-share-${id}`,
+      botId: `applets-owner-${id}`,
+    };
     const sibling = { userId: owner.userId, botId: `applets-sibling-${id}` };
     await provisionBot(owner);
     await provisionSiblingBot(sibling, 1);

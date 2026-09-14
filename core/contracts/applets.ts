@@ -773,7 +773,9 @@ export function appletImpactFingerprintV1(
     .sort()
     .join("\n");
   let hash = 0xcbf29ce484222325n;
-  for (const byte of new TextEncoder().encode(`applet-impact-v1\n${canonical}`)) {
+  for (const byte of new TextEncoder().encode(
+    `applet-impact-v1\n${canonical}`,
+  )) {
     hash ^= BigInt(byte);
     hash = (hash * 0x100000001b3n) & 0xffffffffffffffffn;
   }
@@ -787,7 +789,12 @@ export function decodeBotAppletImpactViewV1(
   label = "Bot Applet impact",
 ): BotAppletImpactViewV1 {
   const value = record(input, label);
-  exactKeys(value, ["schemaVersion", "botId", "fingerprint", "applets"], [], label);
+  exactKeys(
+    value,
+    ["schemaVersion", "botId", "fingerprint", "applets"],
+    [],
+    label,
+  );
   if (value.schemaVersion !== 1)
     throw new Error(`${label} version is unsupported`);
   if (

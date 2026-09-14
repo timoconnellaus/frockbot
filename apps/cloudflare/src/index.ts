@@ -2469,7 +2469,10 @@ export default {
           } catch (error) {
             // Only the directory's settled "no access" closes the door; a
             // blip is thrown so the socket fails as retryable, not as gone.
-            if (error instanceof Error && error.name === "AppletUnavailableError")
+            if (
+              error instanceof Error &&
+              error.name === "AppletUnavailableError"
+            )
               return false;
             throw error;
           }

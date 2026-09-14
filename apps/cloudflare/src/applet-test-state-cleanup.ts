@@ -72,7 +72,9 @@ export async function cleanAppletTestStateV1(
 
   const pinned = await storage.get<unknown>(COMPOSITION_CURRENT_KEY);
   const currentId =
-    pinned === undefined ? undefined : decodeCompositionPinV1(pinned).generationId;
+    pinned === undefined
+      ? undefined
+      : decodeCompositionPinV1(pinned).generationId;
   const lastKnownGoodId = await storage.get<string>(
     COMPOSITION_LAST_KNOWN_GOOD_KEY,
   );

@@ -42,7 +42,11 @@ function memory(): AppletDirectoryStorage & { values: Map<string, unknown> } {
 }
 
 function tool(name: string): AppletToolDeclarationV1 {
-  return { name, description: `The ${name} tool`, inputSchema: { type: "object" } };
+  return {
+    name,
+    description: `The ${name} tool`,
+    inputSchema: { type: "object" },
+  };
 }
 
 function directory(
@@ -91,9 +95,9 @@ describe("who may reach an Applet", () => {
       sharedWithBotIds: [],
       status: "draft",
     });
-    expect((await subject.list("scout")).applets.map((a) => a.appletId)).toEqual(
-      [todo.appletId],
-    );
+    expect(
+      (await subject.list("scout")).applets.map((a) => a.appletId),
+    ).toEqual([todo.appletId]);
     expect((await subject.list("sage")).applets).toEqual([]);
     await expect(subject.read("sage", todo.appletId)).rejects.toMatchObject({
       name: "AppletUnavailableError",
@@ -297,7 +301,9 @@ describe("the Composition input", () => {
         sharedWithBotIds: ["sage"],
       }),
     ]);
-    expect(input.applets.some((a) => a.appletId === draft.appletId)).toBe(false);
+    expect(input.applets.some((a) => a.appletId === draft.appletId)).toBe(
+      false,
+    );
   });
 });
 
@@ -327,14 +333,14 @@ describe("a Bot's lifecycle", () => {
     expect((await subject.list("sage")).applets).toEqual([]);
     expect((await subject.compositionInput()).applets).toEqual([]);
     // Nothing was deleted: the entry, its generation and its shares remain.
-    expect(storage.values.get(appletDirectoryEntryKey(todo.appletId))).toMatchObject(
-      {
-        status: "published",
-        currentGenerationId: "g1",
-        sharedWithBotIds: ["sage"],
-        available: false,
-      },
-    );
+    expect(
+      storage.values.get(appletDirectoryEntryKey(todo.appletId)),
+    ).toMatchObject({
+      status: "published",
+      currentGenerationId: "g1",
+      sharedWithBotIds: ["sage"],
+      available: false,
+    });
     expect(await subject.pendingCleanups()).toEqual([]);
     // A replayed settle is free.
     await subject.applyBotLifecycle("scout", "archived");
@@ -353,9 +359,9 @@ describe("a Bot's lifecycle", () => {
     const { cleanups } = await subject.applyBotLifecycle("scout", "deleted");
     expect(cleanups).toEqual([todo.appletId]);
     expect((await subject.list("sage")).applets).toEqual([]);
-    expect(storage.values.get(appletDirectoryEntryKey(todo.appletId))).toMatchObject(
-      { status: "deleted", tools: [], sharedWithBotIds: [] },
-    );
+    expect(
+      storage.values.get(appletDirectoryEntryKey(todo.appletId)),
+    ).toMatchObject({ status: "deleted", tools: [], sharedWithBotIds: [] });
     expect(await subject.pendingCleanups()).toEqual([todo.appletId]);
     expect(storage.values.has(`${APPLET_CLEANUP_PREFIX}${todo.appletId}`)).toBe(
       true,

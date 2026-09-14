@@ -90,9 +90,9 @@ async function expectDeletionCarriesImpact(
   expect(response?.status()).toBe(200);
   // The Bot is gone now, so its impact cannot be read back; a Bot with no
   // Applets has the fingerprint of the empty set, which a fresh Bot shares.
-  const probe = (await (
-    await page.request.get("/api/bots")
-  ).json()) as { bots: Array<{ botId: string }> };
+  const probe = (await (await page.request.get("/api/bots")).json()) as {
+    bots: Array<{ botId: string }>;
+  };
   const survivor = probe.bots[0]?.botId;
   if (survivor) {
     const impact = (await (

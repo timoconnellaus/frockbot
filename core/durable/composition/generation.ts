@@ -97,9 +97,7 @@ export function compositionAppletMemberReachesV1(
   member: Pick<CompositionAppletMemberV1, "ownerBotId" | "sharedWithBotIds">,
   botId: string,
 ): boolean {
-  return (
-    member.ownerBotId === botId || member.sharedWithBotIds.includes(botId)
-  );
+  return member.ownerBotId === botId || member.sharedWithBotIds.includes(botId);
 }
 
 /**

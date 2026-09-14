@@ -563,7 +563,12 @@
                 }
               }
             },
-            "required": ["appletId", "displayName", "status", "sharedWithBotIds"],
+            "required": [
+              "appletId",
+              "displayName",
+              "status",
+              "sharedWithBotIds"
+            ],
             "additionalProperties": false
           }
         }

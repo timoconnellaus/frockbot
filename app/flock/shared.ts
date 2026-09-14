@@ -478,7 +478,11 @@ export function decodeBotLifecycleCommandV1(
   input: unknown,
 ): BotLifecycleCommandV1 {
   const value = record(input, "Bot lifecycle command");
-  exact(value, ["schemaVersion", "type", "commandId", "botId"], ["appletImpact"]);
+  exact(
+    value,
+    ["schemaVersion", "type", "commandId", "botId"],
+    ["appletImpact"],
+  );
   if (
     value.schemaVersion !== 1 ||
     (value.type !== "bot/archive" &&

@@ -109,7 +109,10 @@ import {
 } from "./applet-directory.js";
 import type { AppletState } from "./applet-state.js";
 import { cleanAppletTestStateV1 } from "./applet-test-state-cleanup.js";
-import { appletSourcePathV1, appletsSourceRootV1 } from "@frockbot/applets/root";
+import {
+  appletSourcePathV1,
+  appletsSourceRootV1,
+} from "@frockbot/applets/root";
 import { deleteAppletSourceV1 } from "./workspace.js";
 import type { FlockUserTransaction } from "@frockbot/app/flock/user";
 import {
@@ -226,8 +229,12 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     this.ctx.blockConcurrencyWhile(async () => {
       await cleanAppletTestStateV1(this.ctx.storage);
       if (
-        (await this.ctx.storage.list({ prefix: APPLET_CLEANUP_PREFIX, limit: 1 }))
-          .size > 0 &&
+        (
+          await this.ctx.storage.list({
+            prefix: APPLET_CLEANUP_PREFIX,
+            limit: 1,
+          })
+        ).size > 0 &&
         (await this.ctx.storage.getAlarm()) === null
       ) {
         await this.ctx.storage.setAlarm(Date.now());

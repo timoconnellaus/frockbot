@@ -246,23 +246,26 @@ describe("Applet Composition resolution", () => {
   });
 
   test("an unchanged directory proposes nothing", async () => {
-    const first = await resolveWith([
-      input(APPLET, "g1", [tool("add_todo")]),
-    ]);
-    const again = await resolveWith(
-      [
-        input(APPLET, "g1", [tool("add_todo")]),
-      ],
-      { current: first.proposed[0], storage: first.storage, revision: 1 },
-    );
+    const first = await resolveWith([input(APPLET, "g1", [tool("add_todo")])]);
+    const again = await resolveWith([input(APPLET, "g1", [tool("add_todo")])], {
+      current: first.proposed[0],
+      storage: first.storage,
+      revision: 1,
+    });
     expect(again.generation).toBeUndefined();
     expect(again.proposed).toEqual([]);
   });
 
   test("a share proposes a new generation, so the next Turn pins the new access", async () => {
-    const published = await resolveWith([input(APPLET, "g1", [tool("add_todo")])]);
+    const published = await resolveWith([
+      input(APPLET, "g1", [tool("add_todo")]),
+    ]);
     const afterShare = await resolveWith(
-      [input(APPLET, "g1", [tool("add_todo")], { sharedWithBotIds: ["bot-2"] })],
+      [
+        input(APPLET, "g1", [tool("add_todo")], {
+          sharedWithBotIds: ["bot-2"],
+        }),
+      ],
       {
         current: published.proposed[0],
         storage: published.storage,
@@ -486,7 +489,11 @@ describe("ctx.applets", () => {
       compositionInput: () => Promise.resolve({ revision: 1, applets: [] }),
       create: () =>
         Promise.resolve(
-          summary({ status: "draft", currentGenerationId: undefined, tools: [] }),
+          summary({
+            status: "draft",
+            currentGenerationId: undefined,
+            tools: [],
+          }),
         ),
       recordGeneration: (entry) => {
         recorded.push(entry);
@@ -804,7 +811,12 @@ describe("ctx.applets", () => {
 
     test("its source, generations and publication are the owner's alone", async () => {
       let builds = 0;
-      const { host: capability, artifacts, recorded, workspace } = host({
+      const {
+        host: capability,
+        artifacts,
+        recorded,
+        workspace,
+      } = host({
         source: { ...SOURCE },
         directory: sharedDirectory,
         buildService: {
@@ -846,8 +858,9 @@ describe("ctx.applets", () => {
         root: SOURCE_ROOT,
         path: `${APPLET}/server.ts`,
       });
-      expect(read.status === "ok" && new TextDecoder().decode(read.file.bytes))
-        .toBe("export default class {}");
+      expect(
+        read.status === "ok" && new TextDecoder().decode(read.file.bytes),
+      ).toBe("export default class {}");
     });
 
     test("it can still be focused, because using it is what sharing grants", async () => {

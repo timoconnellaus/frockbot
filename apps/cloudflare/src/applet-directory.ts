@@ -195,7 +195,10 @@ export class AppletDirectory {
   }
 
   /** The entry the acting Bot owns, or the error that says why not. */
-  async owned(botId: string, appletId: string): Promise<AppletDirectoryEntryV1> {
+  async owned(
+    botId: string,
+    appletId: string,
+  ): Promise<AppletDirectoryEntryV1> {
     const entry = await this.access(botId, appletId);
     if (entry.ownerBotId !== botId) throw new AppletNotOwnerError(appletId);
     return entry;
@@ -272,7 +275,10 @@ export class AppletDirectory {
     const revision = (await this.revision()) + 1;
     await this.#storage.put({
       ...Object.fromEntries(
-        entries.map((entry) => [appletDirectoryEntryKey(entry.appletId), entry]),
+        entries.map((entry) => [
+          appletDirectoryEntryKey(entry.appletId),
+          entry,
+        ]),
       ),
       ...extra,
       [APPLET_DIRECTORY_REVISION_KEY]: revision,

@@ -34,9 +34,7 @@ function userRpc(userId: string): UserAppletRpc {
   // names only the methods the test calls. There is no client route that
   // creates or shares an Applet — a Bot's tools do — so the test stands in for
   // the Bot at the User Durable Object.
-  return env.USER_CONFIGURATIONS.getByName(
-    userId,
-  ) as unknown as UserAppletRpc;
+  return env.USER_CONFIGURATIONS.getByName(userId) as unknown as UserAppletRpc;
 }
 
 /** What an admin does before an account's Bots see the Applets surfaces. */
@@ -107,8 +105,13 @@ describe("Bot-scoped Applet routes", () => {
 
     // Not shared: the other Bot cannot reach it, which answers as missing.
     expect(
-      (await postAsUser(userId, `/api/bots/${other}/applets/${appletId}/delete`, {}))
-        .status,
+      (
+        await postAsUser(
+          userId,
+          `/api/bots/${other}/applets/${appletId}/delete`,
+          {},
+        )
+      ).status,
     ).toBe(404);
     expect(
       (
@@ -142,7 +145,11 @@ describe("Bot-scoped Applet routes", () => {
     // Shared: use, not authorship. The delete and the source read are the
     // owner's, and the refusal is one the client can name.
     for (const response of [
-      await postAsUser(userId, `/api/bots/${other}/applets/${appletId}/delete`, {}),
+      await postAsUser(
+        userId,
+        `/api/bots/${other}/applets/${appletId}/delete`,
+        {},
+      ),
       await asUser(userId, `/api/bots/${other}/applets/${appletId}/source`),
     ]) {
       expect(response.status).toBe(403);
@@ -155,12 +162,21 @@ describe("Bot-scoped Applet routes", () => {
     // The owner's delete settles, and a repeat is the settled 404.
     expect(
       await expectOkJson(
-        await postAsUser(userId, `/api/bots/${owner}/applets/${appletId}/delete`, {}),
+        await postAsUser(
+          userId,
+          `/api/bots/${owner}/applets/${appletId}/delete`,
+          {},
+        ),
       ),
     ).toEqual({ schemaVersion: 1, status: "deleted" });
     expect(
-      (await postAsUser(userId, `/api/bots/${owner}/applets/${appletId}/delete`, {}))
-        .status,
+      (
+        await postAsUser(
+          userId,
+          `/api/bots/${owner}/applets/${appletId}/delete`,
+          {},
+        )
+      ).status,
     ).toBe(404);
     for (const botId of [owner, other]) {
       expect(

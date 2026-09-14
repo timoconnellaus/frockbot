@@ -221,8 +221,9 @@ test("a User with old-shape Applets drops them, keeps its Plugins, and converses
     { timeout: 10_000, interval: 100 },
   );
   expect(
-    await runInDurableObject(appletState, async (_instance, state) =>
-      (await state.storage.list()).size,
+    await runInDurableObject(
+      appletState,
+      async (_instance, state) => (await state.storage.list()).size,
     ),
   ).toBe(0);
 
