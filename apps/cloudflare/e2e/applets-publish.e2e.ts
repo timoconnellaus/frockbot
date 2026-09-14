@@ -60,7 +60,9 @@ async function recentToolResults(page: Page, userId: string): Promise<string> {
     `/api/debug/bots/${botId}?userId=${userId}&events=true`,
     { headers },
   );
-  const applets = await page.request.get("/api/applets");
+  const applets = await page.request.get(
+    `/api/bots/${encodeURIComponent(botId)}/applets`,
+  );
   return `${JSON.stringify(await applets.json(), null, 2)}\n${JSON.stringify(await detail.json(), null, 2)}`;
 }
 
@@ -102,8 +104,22 @@ async function runTool(
   await sendMessage(page, `${text}\n${e2eFrockbotToolCallPrompt(name, input)}`);
 }
 
+/**
+ * The one Bot this spec provisions. Applets are listed per Bot (ADR 0027), so
+ * every directory read names it.
+ */
+async function onlyBotId(page: Page): Promise<string> {
+  const response = await page.request.get("/api/bots");
+  const body = (await response.json()) as { bots: Array<{ botId: string }> };
+  const botId = body.bots[0]?.botId;
+  if (!botId) throw new Error("this account has no Bot");
+  return botId;
+}
+
 async function appletIdNamed(page: Page, displayName: string): Promise<string> {
-  const response = await page.request.get("/api/applets");
+  const response = await page.request.get(
+    `/api/bots/${encodeURIComponent(await onlyBotId(page))}/applets`,
+  );
   const body = (await response.json()) as {
     applets: Array<{ appletId: string; displayName: string }>;
   };
@@ -156,14 +172,16 @@ function appletUi(page: Page): FrameLocator {
 }
 
 /**
- * The native picker opens an Applet on a page of its own.
+ * The Bot's Applets list — the sidebar's Applets mode, or a pushed page on a
+ * phone — opens an Applet on a page of its own.
  */
 async function openCanvas(page: Page): Promise<void> {
   const canvas = canvasOf(page);
   if (await canvas.isVisible().catch(() => false)) return;
   await press(sem(page, "applet-chip"));
+  await expect(sem(page, "applet-list")).toBeVisible({ timeout: 60_000 });
   await press(
-    page.locator('[flt-semantics-identifier^="applet-choice-"]').first(),
+    page.locator('[flt-semantics-identifier^="applet-row-"]').first(),
   );
   await expect(canvas).toBeVisible({ timeout: 60_000 });
 }
@@ -426,8 +444,9 @@ test("a Bot writes, checks and publishes an Applet, and its tool reaches the Bot
   await expect(chip).toBeVisible({ timeout: 60_000 });
   await shot(page, "phone-chip");
   await press(chip);
+  await expect(sem(page, "applet-list")).toBeVisible({ timeout: 60_000 });
   await press(
-    page.locator('[flt-semantics-identifier^="applet-choice-"]').first(),
+    page.locator('[flt-semantics-identifier^="applet-row-"]').first(),
   );
   await expect(canvasOf(page)).toBeVisible({ timeout: 60_000 });
   await expect(appletUi(page).getByText("Buy milk")).toBeVisible({

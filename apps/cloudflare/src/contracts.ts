@@ -259,15 +259,25 @@ export interface UserBotStateBinding {
     path: unknown;
   }): Promise<ClientWorkspaceFileV1>;
   /**
-   * The User's Applets, and the two short-lived projections an open Applet
-   * needs. Account-wide, so they take no Bot: they sit on this User-scoped
+   * One Bot's Applets, and the two short-lived projections an open Applet
+   * needs. Each names the Bot acting (ADR 0027); they sit on this User-scoped
    * binding because it is the only door the hosted application has to the
    * User Durable Object.
    */
-  deleteApplet(input: { schemaVersion: 1; appletId: string }): Promise<unknown>;
-  listApplets(input?: { schemaVersion: 1 }): Promise<unknown>;
+  deleteApplet(input: {
+    schemaVersion: 1;
+    botId: string;
+    appletId: string;
+  }): Promise<unknown>;
+  listApplets(input: { schemaVersion: 1; botId: string }): Promise<unknown>;
+  /** What archiving or deleting the Bot does to the Applets it owns. */
+  readBotAppletImpact(input: {
+    schemaVersion: 1;
+    botId: string;
+  }): Promise<unknown>;
   mintAppletViewerToken(input: {
     schemaVersion: 1;
+    botId: string;
     appletId: string;
   }): Promise<{
     token: string;
@@ -275,7 +285,11 @@ export interface UserBotStateBinding {
     appletId: string;
     generationId: string;
   }>;
-  readAppletUi(input: { schemaVersion: 1; appletId: string }): Promise<{
+  readAppletUi(input: {
+    schemaVersion: 1;
+    botId: string;
+    appletId: string;
+  }): Promise<{
     appletId: string;
     generationId: string;
     contentHash: string;
@@ -307,8 +321,8 @@ export interface UserBotStateBinding {
   }): Promise<unknown>;
   /**
    * An Applet's source, for the Applet canvas's building state. The root is
-   * User-scoped, so any of the User's Bots reads the same files; the Bot names
-   * the Durable Object that holds the Workspace binding and nothing more.
+   * User-scoped, but only the Applet's owner Bot may read it: a shared Bot is
+   * refused before the Durable Object holding the Workspace binding is asked.
    */
   readAppletSourceV1(input: {
     schemaVersion: 1;
@@ -738,6 +752,16 @@ export interface GatewayDependencies {
     userId: string,
     appletId: string,
   ): { fetch(request: Request): Promise<Response> };
+  /**
+   * Whether the Bot a viewer token names may still open the Applet. Asked at
+   * every socket open, so an unshare, a transfer or the owner's archive
+   * reaches the next connection rather than waiting out the token.
+   */
+  appletAccessFor?(
+    userId: string,
+    botId: string,
+    appletId: string,
+  ): Promise<boolean>;
   /** Authenticated observer transport into the Bot Durable Object. */
   openBotStateChannel?(
     userId: string,

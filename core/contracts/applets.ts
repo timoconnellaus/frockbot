@@ -1,8 +1,10 @@
 // The Applet DTOs.
 //
 // An Applet is one durable instance per User of a Package's Instance
-// Contribution. The kernel is the authority for its directory entry, its
-// generations, its viewer sessions, and its deletion — never for its contents.
+// Contribution, owned by one of that User's Bots and shared with others of
+// them (ADR 0027). The kernel is the authority for its directory entry, its
+// access, its generations, its viewer sessions, and its deletion — never for
+// its contents.
 // These are the narrow, versioned records and views that cross
 // between the User Durable Object, the Applet Durable Object, the Bot isolate
 // capability, and the hosted client, so they are declared once here and every
@@ -73,10 +75,21 @@ export interface AppletDirectoryEntryV1 {
   /** Absent until the first successful publish. */
   currentGenerationId?: string;
   tools: AppletToolDeclarationV1[];
+  /** Who created it. Never changes; ownership is `ownerBotId`. */
   provenance: AppletProvenanceV1;
   createdAt: string;
+  /** Publication, and the `deleted` tombstone. Not whether it may be used. */
   status: AppletStatusV1;
+  /** The one Bot that may change it. Ownership implies access. */
+  ownerBotId: string;
+  /** Same-User Bots that may use it. Never contains the owner. */
+  sharedWithBotIds: string[];
+  /** False while the owner Bot is archived: unusable by every Bot, kept whole. */
+  available: boolean;
 }
+
+/** How the acting Bot holds an Applet it can see. */
+export type AppletAccessV1 = "owner" | "shared";
 
 /** Applet Durable Object, key `applet:generation:<generationId>`. */
 export interface AppletGenerationV1 {
@@ -99,7 +112,10 @@ export interface AppletGenerationV1 {
   status: AppletGenerationStatusV1;
 }
 
-/** What `ctx.applets.list` and `create` return to a Bot isolate. */
+/**
+ * One Applet as the acting Bot sees it. Always projected for a Bot: the
+ * directory never answers "every Applet of this User".
+ */
 export interface AppletSummaryV1 {
   appletId: string;
   displayName: string;
@@ -107,6 +123,30 @@ export interface AppletSummaryV1 {
   currentGenerationId?: string;
   tools: string[];
   createdAt: string;
+  ownerBotId: string;
+  access: AppletAccessV1;
+  /** Who else may use it. Only the owner is told; a shared Bot reads `[]`. */
+  sharedWithBotIds: string[];
+}
+
+/** One Applet a Bot owns, as archiving or deleting that Bot would find it. */
+export interface BotAppletImpactEntryV1 {
+  appletId: string;
+  displayName: string;
+  status: "draft" | "published";
+  sharedWithBotIds: string[];
+}
+
+/**
+ * `GET /api/bots/:bot/applets/impact`: the Applets archiving or deleting this
+ * Bot takes away, and from whom. A `bot/delete` carries `fingerprint` back as
+ * `appletImpact`, so it destroys exactly what the confirmation named.
+ */
+export interface BotAppletImpactViewV1 {
+  schemaVersion: 1;
+  botId: string;
+  fingerprint: string;
+  applets: BotAppletImpactEntryV1[];
 }
 
 /** One row of an Applet's version history. */
@@ -191,7 +231,7 @@ export interface AppletOpenViewV1 {
   focused?: AppletOpenFocusV1;
 }
 
-/** The Applets the User owns, as a client reads them. */
+/** The Applets one Bot has access to, as a client reads them. */
 export interface AppletListViewV1 {
   schemaVersion: 1;
   applets: AppletSummaryV1[];
@@ -280,6 +320,10 @@ export const APPLET_ID_V1 = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,95}\.[a-z0-9-]{1,64}$/;
 export const APPLET_TOOL_NAME_V1 = /^[a-z][a-z0-9_]{0,63}$/;
 export const APPLET_MAX_TOOLS_V1 = 64;
 export const APPLET_MAX_GENERATIONS_PAGE_V1 = 64;
+/** A Bot id exactly as the Flock mints one. */
+export const APPLET_BOT_ID_V1 = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
+/** Most Bots one Applet is shared with: the Flock's own directory bound. */
+export const APPLET_MAX_SHARES_V1 = 100;
 
 function record(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -320,6 +364,21 @@ function appletId(value: unknown, label: string): string {
   const id = boundedString(value, label, 129);
   if (!APPLET_ID_V1.test(id)) throw new Error(`${label} is invalid`);
   return id;
+}
+
+function botId(value: unknown, label: string): string {
+  if (typeof value !== "string" || !APPLET_BOT_ID_V1.test(value))
+    throw new Error(`${label} is invalid`);
+  return value;
+}
+
+function botIds(value: unknown, label: string): string[] {
+  if (!Array.isArray(value) || value.length > APPLET_MAX_SHARES_V1)
+    throw new Error(`${label} must be a bounded array`);
+  const ids = value.map((id, index) => botId(id, `${label}[${index}]`));
+  if (new Set(ids).size !== ids.length)
+    throw new Error(`${label} contains duplicate Bots`);
+  return ids;
 }
 
 function json(value: unknown, label: string, depth = 0): void {
@@ -534,41 +593,28 @@ export function decodeAppletDirectoryEntryV1(
       "provenance",
       "createdAt",
       "status",
+      "ownerBotId",
+      "sharedWithBotIds",
+      "available",
     ],
     ["currentGenerationId"],
     label,
   );
   if (value.schemaVersion !== 1)
     throw new Error(`${label}.schemaVersion is unsupported`);
-  const provenance = record(value.provenance, `${label}.provenance`);
-  let decodedProvenance: AppletProvenanceV1;
-  if (provenance.kind === "user") {
-    exactKeys(provenance, ["kind"], [], `${label}.provenance`);
-    decodedProvenance = { kind: "user" };
-  } else if (provenance.kind === "bot") {
-    exactKeys(
-      provenance,
-      ["kind", "botId", "sessionId", "turnId"],
-      [],
-      `${label}.provenance`,
-    );
-    decodedProvenance = {
-      kind: "bot",
-      botId: boundedString(provenance.botId, `${label}.provenance.botId`, 256),
-      sessionId: boundedString(
-        provenance.sessionId,
-        `${label}.provenance.sessionId`,
-        256,
-      ),
-      turnId: boundedString(
-        provenance.turnId,
-        `${label}.provenance.turnId`,
-        256,
-      ),
-    };
-  } else {
-    throw new Error(`${label}.provenance.kind is invalid`);
-  }
+  const decodedProvenance = decodeAppletProvenanceV1(
+    value.provenance,
+    `${label}.provenance`,
+  );
+  const ownerBotId = botId(value.ownerBotId, `${label}.ownerBotId`);
+  const sharedWithBotIds = botIds(
+    value.sharedWithBotIds,
+    `${label}.sharedWithBotIds`,
+  );
+  if (sharedWithBotIds.includes(ownerBotId))
+    throw new Error(`${label}.sharedWithBotIds names the owner`);
+  if (typeof value.available !== "boolean")
+    throw new Error(`${label}.available must be a boolean`);
   return {
     schemaVersion: 1,
     appletId: appletId(value.appletId, `${label}.appletId`),
@@ -586,6 +632,9 @@ export function decodeAppletDirectoryEntryV1(
     provenance: decodedProvenance,
     createdAt: timestamp(value.createdAt, `${label}.createdAt`),
     status: status(value.status, `${label}.status`),
+    ownerBotId,
+    sharedWithBotIds,
+    available: value.available,
   };
 }
 
@@ -668,10 +717,21 @@ export function decodeAppletSummaryV1(
   const value = record(input, label);
   exactKeys(
     value,
-    ["appletId", "displayName", "status", "tools", "createdAt"],
+    [
+      "appletId",
+      "displayName",
+      "status",
+      "tools",
+      "createdAt",
+      "ownerBotId",
+      "access",
+      "sharedWithBotIds",
+    ],
     ["currentGenerationId"],
     label,
   );
+  if (value.access !== "owner" && value.access !== "shared")
+    throw new Error(`${label}.access is invalid`);
   return {
     appletId: appletId(value.appletId, `${label}.appletId`),
     displayName: boundedString(value.displayName, `${label}.displayName`, 128),
@@ -687,6 +747,88 @@ export function decodeAppletSummaryV1(
         }),
     tools: toolNames(value.tools, `${label}.tools`),
     createdAt: timestamp(value.createdAt, `${label}.createdAt`),
+    ownerBotId: botId(value.ownerBotId, `${label}.ownerBotId`),
+    access: value.access,
+    sharedWithBotIds: botIds(
+      value.sharedWithBotIds,
+      `${label}.sharedWithBotIds`,
+    ),
+  };
+}
+
+/**
+ * The fingerprint of what deleting a Bot would destroy: which Applets it owns
+ * and who each is shared with. FNV-1a over a canonical line per Applet — a
+ * staleness fence between a confirmation and its command, not a secret, so it
+ * needs to be deterministic and cheap enough to compute inside a transaction
+ * rather than collision-resistant.
+ */
+export function appletImpactFingerprintV1(
+  applets: readonly { appletId: string; sharedWithBotIds: readonly string[] }[],
+): string {
+  const canonical = [...applets]
+    .map((applet) =>
+      [applet.appletId, ...[...applet.sharedWithBotIds].sort()].join(" "),
+    )
+    .sort()
+    .join("\n");
+  let hash = 0xcbf29ce484222325n;
+  for (const byte of new TextEncoder().encode(`applet-impact-v1\n${canonical}`)) {
+    hash ^= BigInt(byte);
+    hash = (hash * 0x100000001b3n) & 0xffffffffffffffffn;
+  }
+  return hash.toString(16).padStart(16, "0");
+}
+
+export const APPLET_IMPACT_FINGERPRINT_V1 = /^[0-9a-f]{16}$/;
+
+export function decodeBotAppletImpactViewV1(
+  input: unknown,
+  label = "Bot Applet impact",
+): BotAppletImpactViewV1 {
+  const value = record(input, label);
+  exactKeys(value, ["schemaVersion", "botId", "fingerprint", "applets"], [], label);
+  if (value.schemaVersion !== 1)
+    throw new Error(`${label} version is unsupported`);
+  if (
+    typeof value.fingerprint !== "string" ||
+    !APPLET_IMPACT_FINGERPRINT_V1.test(value.fingerprint)
+  )
+    throw new Error(`${label}.fingerprint is invalid`);
+  if (!Array.isArray(value.applets) || value.applets.length > 256)
+    throw new Error(`${label}.applets must be a bounded array`);
+  const applets = value.applets.map((candidate, index) => {
+    const entryLabel = `${label}.applets[${index}]`;
+    const entry = record(candidate, entryLabel);
+    exactKeys(
+      entry,
+      ["appletId", "displayName", "status", "sharedWithBotIds"],
+      [],
+      entryLabel,
+    );
+    if (entry.status !== "draft" && entry.status !== "published")
+      throw new Error(`${entryLabel}.status is invalid`);
+    return {
+      appletId: appletId(entry.appletId, `${entryLabel}.appletId`),
+      displayName: boundedString(
+        entry.displayName,
+        `${entryLabel}.displayName`,
+        128,
+      ),
+      status: entry.status,
+      sharedWithBotIds: botIds(
+        entry.sharedWithBotIds,
+        `${entryLabel}.sharedWithBotIds`,
+      ),
+    } satisfies BotAppletImpactEntryV1;
+  });
+  if (new Set(applets.map((applet) => applet.appletId)).size !== applets.length)
+    throw new Error(`${label}.applets contains duplicate Applets`);
+  return {
+    schemaVersion: 1,
+    botId: botId(value.botId, `${label}.botId`),
+    fingerprint: value.fingerprint,
+    applets,
   };
 }
 

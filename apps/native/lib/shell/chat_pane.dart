@@ -398,6 +398,7 @@ class _ConversationViewState extends State<ConversationView>
   @override
   Widget build(BuildContext context) => AppletChatScope(
     api: widget.api,
+    botId: widget.botId,
     child: ChatPane(
       background: widget.background,
       controller: session.controller,

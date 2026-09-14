@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/applets/canvas.dart';
 import 'package:frockbot_native/applets/chat_card.dart';
-import 'package:frockbot_native/applets/picker.dart';
 import 'package:frockbot_native/client/transport.dart';
 
 import 'package:frockbot_native/shell/transcript.dart';
@@ -11,50 +10,14 @@ import 'applets_test.dart' show applet;
 import 'settings_test.dart' show SettingsApi;
 import 'widget_test.dart' show MemoryStore;
 
-void main() {
-  testWidgets('picker deletes only after confirmation and removes the entry', (
-    tester,
-  ) async {
-    var deleted = false;
-    final api = SettingsApi(MemoryStore(), (path, body) async {
-      if (path.endsWith('/applets/open')) {
-        return {
-          'schemaVersion': 1,
-          'applets': [if (!deleted) applet().toJson()],
-        };
-      }
-      if (path.endsWith('/delete')) {
-        deleted = true;
-        return {'schemaVersion': 1, 'status': 'deleted'};
-      }
-      throw StateError(path);
-    });
-    final controller = AppletCanvasController(api, 'bot-1');
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(body: AppletPicker(controller: controller)),
-      ),
-    );
-    await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('Delete Weekly Todos'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Cancel'));
-    await tester.pumpAndSettle();
-    expect(deleted, isFalse);
-    await tester.tap(find.byTooltip('Delete Weekly Todos'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Delete'));
-    await tester.pumpAndSettle();
-    expect(deleted, isTrue);
-    expect(find.text('Weekly Todos'), findsNothing);
-    expect(
-      find.text('No Applets yet. Ask a Bot to build one.'),
-      findsOneWidget,
-    );
-    await tester.pumpWidget(const SizedBox());
-    controller.dispose();
-  });
+/// The token a card mints, as the Bot-scoped route answers it.
+Map<String, Object?> viewerToken() => {
+  'token': 'viewer-token',
+  'expiresAt': '2027-01-01T00:00:00.000Z',
+  'socketUrl': 'wss://bot.frockbot.com/api/applets/todo.applet/socket',
+};
 
+void main() {
   testWidgets(
     'live card holds its viewer across refresh and clears it on deletion without focusing',
     (tester) async {
@@ -63,26 +26,21 @@ void main() {
       final api = SettingsApi(MemoryStore(), (path, body) async {
         expect(body, isNull);
         expect(path.contains('/focus'), isFalse);
-        if (path == '/api/applets') {
+        if (path == '/api/bots/bot-1/applets') {
           return {
             'schemaVersion': 1,
             'applets': [if (!deleted) applet(generationId: 'g1').toJson()],
           };
         }
-        if (path.endsWith('/ui')) {
+        if (path == '/api/bots/bot-1/applets/todo.applet/ui') {
           return {
             'uiUrl': 'https://ui.example/applet.html',
             'generationId': 'g1',
           };
         }
-        if (path.endsWith('/token')) {
+        if (path == '/api/bots/bot-1/applets/todo.applet/token') {
           tokens++;
-          return {
-            'token': 'viewer-token',
-            'expiresAt': '2027-01-01T00:00:00.000Z',
-            'socketUrl':
-                'wss://bot.frockbot.com/api/applets/todo.applet/socket',
-          };
+          return viewerToken();
         }
         throw StateError(path);
       });
@@ -91,6 +49,7 @@ void main() {
           home: Scaffold(
             body: AppletChatScope(
               api: api,
+              botId: 'bot-1',
               child: const AppletChatCard(appletId: 'todo.applet'),
             ),
           ),
@@ -114,47 +73,39 @@ void main() {
     },
   );
 
-  testWidgets(
-    'a failed directory read offers a retry instead of the empty state',
-    (tester) async {
-      var down = true;
-      final api = SettingsApi(MemoryStore(), (path, body) async {
-        if (down) throw const RequestFailure('applets are unavailable', 503);
-        if (path.endsWith('/applets/open')) {
-          return {
-            'schemaVersion': 1,
-            'applets': [applet().toJson()],
-          };
-        }
-        throw StateError(path);
-      });
-      final controller = AppletCanvasController(api, 'bot-1');
-      await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(body: AppletPicker(controller: controller)),
+  testWidgets('a card is read as the Bot of the transcript it is in', (
+    tester,
+  ) async {
+    final requested = <String>[];
+    final api = SettingsApi(MemoryStore(), (path, body) async {
+      requested.add(path);
+      // Scout has not been shared this Applet, so its directory does not
+      // name it.
+      if (path == '/api/bots/scout/applets') {
+        return {'schemaVersion': 1, 'applets': <Object?>[]};
+      }
+      throw StateError(path);
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AppletChatScope(
+            api: api,
+            botId: 'scout',
+            child: const AppletChatCard(appletId: 'todo.applet'),
+          ),
         ),
-      );
-      await tester.pumpAndSettle();
-      expect(
-        find.text('No Applets yet. Ask a Bot to build one.'),
-        findsNothing,
-      );
-      expect(
-        find.text('Couldn\u2019t load Applets \u00b7 Retry'),
-        findsOneWidget,
-      );
-      down = false;
-      await tester.tap(find.text('Couldn\u2019t load Applets \u00b7 Retry'));
-      await tester.pumpAndSettle();
-      expect(find.text('Weekly Todos'), findsOneWidget);
-      expect(
-        find.text('No Applets yet. Ask a Bot to build one.'),
-        findsNothing,
-      );
-      await tester.pumpWidget(const SizedBox());
-      controller.dispose();
-    },
-  );
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(requested, ['/api/bots/scout/applets']);
+    expect(find.byType(AppletViewerFrame), findsNothing);
+    expect(
+      find.text('This Applet has been deleted or is unavailable.'),
+      findsOneWidget,
+    );
+    await tester.pumpWidget(const SizedBox());
+  });
 
   testWidgets('a live card keeps its frame through a failed refresh', (
     tester,
@@ -162,8 +113,8 @@ void main() {
     var down = false;
     var tokens = 0;
     final api = SettingsApi(MemoryStore(), (path, body) async {
-      if (down) throw const RequestFailure('FrockBot didn\u2019t answer');
-      if (path == '/api/applets') {
+      if (down) throw const RequestFailure('FrockBot didn’t answer');
+      if (path == '/api/bots/bot-1/applets') {
         return {
           'schemaVersion': 1,
           'applets': [applet(generationId: 'g1').toJson()],
@@ -177,11 +128,7 @@ void main() {
       }
       if (path.endsWith('/token')) {
         tokens++;
-        return {
-          'token': 'viewer-token',
-          'expiresAt': '2027-01-01T00:00:00.000Z',
-          'socketUrl': 'wss://bot.frockbot.com/api/applets/todo.applet/socket',
-        };
+        return viewerToken();
       }
       throw StateError(path);
     });
@@ -190,6 +137,7 @@ void main() {
         home: Scaffold(
           body: AppletChatScope(
             api: api,
+            botId: 'bot-1',
             child: const AppletChatCard(appletId: 'todo.applet'),
           ),
         ),
@@ -204,7 +152,7 @@ void main() {
     expect(find.byType(AppletViewerFrame), findsOneWidget);
     // The frame stays up, and the card says why it stopped refreshing and
     // offers the read that re-mints its credential.
-    expect(find.text('FrockBot didn\u2019t answer.'), findsOneWidget);
+    expect(find.text('FrockBot didn’t answer.'), findsOneWidget);
     expect(find.text('Retry'), findsOneWidget);
     expect(
       find.text('This Applet has been deleted or is unavailable.'),
@@ -215,7 +163,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(AppletViewerFrame), findsOneWidget);
     expect(find.text('Retry'), findsNothing);
-    expect(find.text('FrockBot didn\u2019t answer.'), findsNothing);
+    expect(find.text('FrockBot didn’t answer.'), findsNothing);
     expect(tokens, 1);
     await tester.pumpWidget(const SizedBox());
   });
@@ -225,7 +173,7 @@ void main() {
     (tester) async {
       var tokens = 0;
       final api = SettingsApi(MemoryStore(), (path, body) async {
-        if (path == '/api/applets') {
+        if (path == '/api/bots/bot-1/applets') {
           return {
             'schemaVersion': 1,
             'applets': [applet(generationId: 'g1').toJson()],
@@ -239,12 +187,7 @@ void main() {
         }
         if (path.endsWith('/token')) {
           tokens++;
-          return {
-            'token': 'viewer-token',
-            'expiresAt': '2027-01-01T00:00:00.000Z',
-            'socketUrl':
-                'wss://bot.frockbot.com/api/applets/todo.applet/socket',
-          };
+          return viewerToken();
         }
         throw StateError(path);
       });
@@ -253,6 +196,7 @@ void main() {
           home: Scaffold(
             body: AppletChatScope(
               api: api,
+              botId: 'bot-1',
               child: ListView(
                 children: const [
                   AppletChatCard(appletId: 'todo.applet'),
@@ -284,86 +228,12 @@ void main() {
     },
   );
 
-  testWidgets('deleting an Applet that is already gone is not a failure', (
-    tester,
-  ) async {
-    var deleted = false;
-    final api = SettingsApi(MemoryStore(), (path, body) async {
-      if (path.endsWith('/applets/open')) {
-        return {
-          'schemaVersion': 1,
-          'applets': [if (!deleted) applet().toJson()],
-        };
-      }
-      if (path.endsWith('/delete')) {
-        // Another window already deleted it, so the route answers with the
-        // settled truth that there is no such Applet.
-        deleted = true;
-        throw const RequestFailure('Applet "todo.applet" is unavailable', 404);
-      }
-      throw StateError(path);
-    });
-    final controller = AppletCanvasController(api, 'bot-1');
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(body: AppletPicker(controller: controller)),
-      ),
-    );
-    await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('Delete Weekly Todos'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Delete'));
-    await tester.pumpAndSettle();
-    expect(
-      find.text('Couldn\u2019t delete this Applet. Try again.'),
-      findsNothing,
-    );
-    expect(find.text('Weekly Todos'), findsNothing);
-    expect(
-      find.text('No Applets yet. Ask a Bot to build one.'),
-      findsOneWidget,
-    );
-    await tester.pumpWidget(const SizedBox());
-    controller.dispose();
-  });
-
-  testWidgets('a focused Applet that will not open is not a picker failure', (
-    tester,
-  ) async {
-    final api = SettingsApi(MemoryStore(), (path, body) async {
-      if (path.endsWith('/applets/open')) {
-        // The open read answered, and the focused Applet is unpublished, so
-        // its code is what there is to show.
-        return {
-          'schemaVersion': 1,
-          'applets': [applet().toJson()],
-          'focused': {'appletId': 'todo.applet'},
-        };
-      }
-      // The directory read answered; only this Applet's own code is down.
-      throw const RequestFailure('applets are unavailable', 503);
-    });
-    final controller = AppletCanvasController(api, 'bot-1');
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(body: AppletPicker(controller: controller)),
-      ),
-    );
-    await tester.pumpAndSettle();
-    expect(controller.failure, isNotNull);
-    expect(find.text('Weekly Todos'), findsOneWidget);
-    expect(find.text('Couldn\u2019t load Applets \u00b7 Retry'), findsNothing);
-    expect(find.text('No Applets yet. Ask a Bot to build one.'), findsNothing);
-    await tester.pumpWidget(const SizedBox());
-    controller.dispose();
-  });
-
   testWidgets(
     'an off-screen card stops refreshing and catches up when it returns',
     (tester) async {
       var reads = 0;
       final api = SettingsApi(MemoryStore(), (path, body) async {
-        if (path == '/api/applets') {
+        if (path == '/api/bots/bot-1/applets') {
           reads++;
           return {
             'schemaVersion': 1,
@@ -376,14 +246,7 @@ void main() {
             'generationId': 'g1',
           };
         }
-        if (path.endsWith('/token')) {
-          return {
-            'token': 'viewer-token',
-            'expiresAt': '2027-01-01T00:00:00.000Z',
-            'socketUrl':
-                'wss://bot.frockbot.com/api/applets/todo.applet/socket',
-          };
-        }
+        if (path.endsWith('/token')) return viewerToken();
         throw StateError(path);
       });
       await tester.pumpWidget(
@@ -391,6 +254,7 @@ void main() {
           home: Scaffold(
             body: AppletChatScope(
               api: api,
+              botId: 'bot-1',
               child: ListView(
                 children: const [
                   AppletChatCard(appletId: 'todo.applet'),
@@ -431,7 +295,7 @@ void main() {
     (tester) async {
       var tokens = 0;
       final api = SettingsApi(MemoryStore(), (path, body) async {
-        if (path == '/api/applets') {
+        if (path == '/api/bots/bot-1/applets') {
           return {
             'schemaVersion': 1,
             'applets': [applet(generationId: 'g1').toJson()],
@@ -445,12 +309,7 @@ void main() {
         }
         if (path.endsWith('/token')) {
           tokens++;
-          return {
-            'token': 'viewer-token',
-            'expiresAt': '2027-01-01T00:00:00.000Z',
-            'socketUrl':
-                'wss://bot.frockbot.com/api/applets/todo.applet/socket',
-          };
+          return viewerToken();
         }
         throw StateError(path);
       });
@@ -481,6 +340,7 @@ void main() {
         home: Scaffold(
           body: AppletChatScope(
             api: api,
+            botId: 'bot-1',
             child: SizedBox(
               height: 500,
               child: TranscriptView(

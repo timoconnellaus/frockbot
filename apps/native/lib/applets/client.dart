@@ -178,8 +178,8 @@ class AppletViewer {
   }
 
   /// The `init` the Applet SDK waits for. The token is the only credential an
-  /// Applet page ever holds, and it names one User, one Applet and one
-  /// generation for fifteen minutes.
+  /// Applet page ever holds, and it names one User, one Bot, one Applet and
+  /// one generation for fifteen minutes.
   Map<String, Object?> init(Map<String, String> themeTokens) =>
       _message('init', themeTokens);
 
@@ -218,8 +218,19 @@ class AppletsApi {
   final NativeApi api;
   const AppletsApi(this.api);
 
-  Future<List<wire.AppletSummary>> list() async =>
-      wire.AppletDirectory.fromJson(await api.request('/api/applets')).applets;
+  /// Every read names the Bot acting. An Applet that Bot neither owns nor has
+  /// been shared answers exactly as one that does not exist.
+  Future<List<wire.AppletSummary>> list(String botId) async =>
+      wire.AppletDirectory.fromJson(
+        await api.request('/api/bots/${_bot(botId)}/applets'),
+      ).applets;
+
+  /// The Applets archiving or deleting this Bot takes with it, and the
+  /// fingerprint a delete presents so it cannot destroy one it did not name.
+  Future<wire.BotAppletImpact> impact(String botId) async =>
+      wire.BotAppletImpact.fromJson(
+        await api.request('/api/bots/${_bot(botId)}/applets/impact'),
+      );
 
   /// The canvas's one read: the directory, the Session's focus, and for the
   /// focused Applet the generation, its page and a viewer credential. What
@@ -230,26 +241,32 @@ class AppletsApi {
         await api.request('/api/bots/${_bot(botId)}/applets/open'),
       );
 
-  Future<void> delete(String appletId) async {
+  /// Owner only: a shared Bot is refused with `applet-not-owner`.
+  Future<void> delete(String botId, String appletId) async {
     await api.request(
-      '/api/applets/${_applet(appletId)}/delete',
+      '/api/bots/${_bot(botId)}/applets/${_applet(appletId)}/delete',
       body: {'schemaVersion': 1},
     );
   }
 
-  Future<AppletUi> ui(String appletId) async => AppletUi.fromJson(
-    await api.request('/api/applets/${_applet(appletId)}/ui'),
-  );
-
-  Future<wire.AppletViewerToken> token(String appletId) async =>
-      wire.AppletViewerToken.fromJson(
-        await api.request('/api/applets/${_applet(appletId)}/token'),
+  Future<AppletUi> ui(String botId, String appletId) async =>
+      AppletUi.fromJson(
+        await api.request(
+          '/api/bots/${_bot(botId)}/applets/${_applet(appletId)}/ui',
+        ),
       );
 
-  /// The canvas's two Workspace-backed reads are Bot-scoped in the URL and
-  /// User-scoped in what they answer: the Applets root belongs to the User,
-  /// and the Bot in the path only names the Durable Object holding the
-  /// Workspace binding. Reading them wakes no Computer.
+  Future<wire.AppletViewerToken> token(String botId, String appletId) async =>
+      wire.AppletViewerToken.fromJson(
+        await api.request(
+          '/api/bots/${_bot(botId)}/applets/${_applet(appletId)}/token',
+        ),
+      );
+
+  /// The canvas's two Workspace-backed reads are the owner Bot's alone: who
+  /// may read the source is who may change what its tools say to every Bot
+  /// that calls them. A shared Bot is refused with `applet-not-owner`.
+  /// Reading them wakes no Computer.
   Future<AppletSource> source(String botId, String appletId) async =>
       AppletSource.fromJson(
         await api.request(

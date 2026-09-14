@@ -8,11 +8,20 @@ import 'canvas.dart';
 import 'client.dart';
 import 'failure.dart';
 
+/// The transport, and the Bot whose transcript the cards are in: a card is
+/// read as that Bot, so an Applet it has lost access to reads as gone.
 class AppletChatScope extends InheritedWidget {
   final NativeApi api;
-  const AppletChatScope({super.key, required this.api, required super.child});
+  final String botId;
+  const AppletChatScope({
+    super.key,
+    required this.api,
+    required this.botId,
+    required super.child,
+  });
   @override
-  bool updateShouldNotify(AppletChatScope oldWidget) => api != oldWidget.api;
+  bool updateShouldNotify(AppletChatScope oldWidget) =>
+      api != oldWidget.api || botId != oldWidget.botId;
 }
 
 /// Each card holds its own viewer; opening one never changes Session focus.
@@ -26,6 +35,7 @@ class AppletChatCard extends StatefulWidget {
 class _AppletChatCardState extends State<AppletChatCard>
     with AutomaticKeepAliveClientMixin {
   AppletsApi? api;
+  String? botId;
   AppletViewer? viewer;
   String title = 'Applet';
   String? error;
@@ -38,11 +48,12 @@ class _AppletChatCardState extends State<AppletChatCard>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final transport = context
-        .dependOnInheritedWidgetOfExactType<AppletChatScope>()
-        ?.api;
-    if (transport != null && api?.api != transport) {
-      api = AppletsApi(transport);
+    final scope = context
+        .dependOnInheritedWidgetOfExactType<AppletChatScope>();
+    if (scope != null && (api?.api != scope.api || botId != scope.botId)) {
+      api = AppletsApi(scope.api);
+      botId = scope.botId;
+      viewer = null;
       load();
       refresh?.cancel();
       refresh = Timer.periodic(const Duration(seconds: 30), (_) => _tick());
@@ -105,11 +116,12 @@ class _AppletChatCardState extends State<AppletChatCard>
 
   Future<void> load() async {
     final client = api;
-    if (client == null) return;
+    final bot = botId;
+    if (client == null || bot == null) return;
     final read = ++epoch;
     final id = widget.appletId;
     try {
-      final directory = await client.list();
+      final directory = await client.list(bot);
       final applet = directory
           .where((entry) => entry.appletId == id)
           .firstOrNull;
@@ -122,7 +134,7 @@ class _AppletChatCardState extends State<AppletChatCard>
         return;
       }
       title = applet.displayName;
-      final ui = await client.ui(id);
+      final ui = await client.ui(bot, id);
       if (!mounted || read != epoch) return;
       final generationId = ui.generationId;
       if (generationId == null) {
@@ -137,7 +149,7 @@ class _AppletChatCardState extends State<AppletChatCard>
         appletId: id,
         generationId: generationId,
       )) {
-        final token = await client.token(id);
+        final token = await client.token(bot, id);
         if (!mounted || read != epoch) return;
         viewer = AppletViewer(
           appletId: id,

@@ -17,7 +17,7 @@ import '../activity/controller.dart';
 import '../activity/push.dart';
 import '../admin/page.dart';
 import '../applets/canvas.dart';
-import '../applets/picker.dart';
+import '../applets/list.dart';
 import '../audit/page.dart';
 import '../client/auth.dart' show developmentAuth;
 import '../client/bot_sessions.dart';
@@ -172,6 +172,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// page over it; this is whether that page is up. At the wider tiers the
   /// conversation is a column and this is not consulted.
   bool conversationOpen = false;
+
+  /// Whether the sidebar shows the selected Bot's Applets in place of the
+  /// Bots. Only where the sidebar is a column: a phone's list is the first
+  /// screen, so its Applets are a page over it instead.
+  bool appletsMode = false;
   bool panelOpen = false;
 
   /// Whether the person has hidden the right panel where it is a column. The
@@ -638,6 +643,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     // delays the pane behind a store write.
     setState(() {
       selected = bot;
+      // A switch arrives from search, a link or a new Bot, never from the
+      // Applet list, which offers no Bots. It is a way to a conversation, so
+      // the sidebar goes back to the Bots rather than showing Applets of a Bot
+      // nobody asked the Applets of.
+      if (switching) appletsMode = false;
       if (switching) selectedConnection = ConnectionState.initializing;
       conversationOpen = true;
       openRun = null;
@@ -1127,6 +1137,40 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     }
   }
 
+  String? _botNameOf(String botId) =>
+      bots.where((bot) => bot.botId.value == botId).map(_name).firstOrNull;
+
+  /// The selected Bot's Applets, from the header's Applets button or the Bot
+  /// page's row: the sidebar's Applets mode beside the conversation, and a
+  /// page on a phone. A row opens its Applet over whichever it is.
+  void _openApplets() {
+    final bot = selected;
+    final canvas = appletCanvas;
+    if (bot == null || canvas == null) return;
+    if (shellTierForWidth(MediaQuery.sizeOf(context).width) ==
+        ShellTier.single) {
+      _push(
+        Scaffold(
+          appBar: AppBar(),
+          body: SafeArea(
+            top: false,
+            child: AppletList(
+              controller: canvas,
+              botName: _name(bot),
+              nameOf: _botNameOf,
+              onOpen: (appletId) => unawaited(_openApplet(appletId)),
+            ),
+          ),
+        ),
+      );
+      return;
+    }
+    // The Bot page may be over the shell when the window is wide enough for a
+    // sidebar; the mode is drawn in the shell, so that is where this returns.
+    Navigator.of(context).popUntil((route) => route.isFirst);
+    setState(() => appletsMode = true);
+  }
+
   Future<void> _openApplet(String appletId) async {
     final canvas = appletCanvas;
     if (canvas == null) return;
@@ -1280,13 +1324,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
               FrockRow(
                 icon: Icons.widgets_outlined,
                 title: 'Applets',
-                onTap: () async {
-                  final id = await showDialog<String>(
-                    context: context,
-                    builder: (_) => AppletPicker(controller: canvas),
-                  );
-                  if (id != null && mounted) await _openApplet(id);
-                },
+                onTap: _openApplets,
               ),
             ),
           for (final entry in entries)
@@ -1362,6 +1400,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     botId: botId,
     botName: botName,
     archived: archived.contains(botId),
+    nameOf: _botNameOf,
     onChanged: load,
     onDeleted: () => unawaited(_closeDeletedBot(botId)),
   );
@@ -1518,17 +1557,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                                 : _packageEntryActions(),
                             onApplets: single || appletCanvas == null
                                 ? null
-                                : () async {
-                                    final id = await showDialog<String>(
-                                      context: context,
-                                      builder: (_) => AppletPicker(
-                                        controller: appletCanvas!,
-                                      ),
-                                    );
-                                    if (id != null && mounted) {
-                                      await _openApplet(id);
-                                    }
-                                  },
+                                : _openApplets,
                           ),
                     conversationOpen: bot != null && conversationOpen,
                     onBack: _openBack,
@@ -1536,7 +1565,16 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                     panelCollapsed: panelCollapsed,
                     onDismiss: () => setState(() => panelOpen = false),
                     rightPanel: rightPanel,
-                    sidebar: ShellSidebar(
+                    sidebar: appletsMode && !single && bot != null && appletCanvas != null
+                        ? AppletList(
+                            controller: appletCanvas!,
+                            botName: _name(bot),
+                            nameOf: _botNameOf,
+                            onOpen: (appletId) =>
+                                unawaited(_openApplet(appletId)),
+                            onBack: () => setState(() => appletsMode = false),
+                          )
+                        : ShellSidebar(
                       bots: bots,
                       profiles: profiles,
                       unread: activity.unread,

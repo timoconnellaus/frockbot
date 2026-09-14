@@ -509,9 +509,66 @@
         },
         "botId": {
           "$ref": "#/$defs/BotId"
+        },
+        "appletImpact": {
+          "$ref": "#/$defs/AppletImpactFingerprint"
         }
       },
       "required": ["schemaVersion", "type", "commandId", "botId"],
+      "additionalProperties": false
+    },
+    "AppletImpactFingerprint": {
+      "type": "string",
+      "minLength": 16,
+      "maxLength": 16,
+      "pattern": "^[0-9a-f]{16}$"
+    },
+    "BotAppletImpact": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "botId": {
+          "$ref": "#/$defs/BotId"
+        },
+        "fingerprint": {
+          "$ref": "#/$defs/AppletImpactFingerprint"
+        },
+        "applets": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "properties": {
+              "appletId": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 129,
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]{0,95}\\.[a-z0-9-]{1,64}$"
+              },
+              "displayName": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "status": {
+                "enum": ["draft", "published"]
+              },
+              "sharedWithBotIds": {
+                "type": "array",
+                "maxItems": 100,
+                "items": {
+                  "$ref": "#/$defs/BotId"
+                }
+              }
+            },
+            "required": ["appletId", "displayName", "status", "sharedWithBotIds"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": ["schemaVersion", "botId", "fingerprint", "applets"],
       "additionalProperties": false
     },
     "BotCreateCommand": {
@@ -3641,9 +3698,31 @@
         },
         "createdAt": {
           "$ref": "#/$defs/Instant"
+        },
+        "ownerBotId": {
+          "$ref": "#/$defs/BotId"
+        },
+        "access": {
+          "enum": ["owner", "shared"]
+        },
+        "sharedWithBotIds": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/$defs/BotId"
+          }
         }
       },
-      "required": ["appletId", "displayName", "status", "tools", "createdAt"],
+      "required": [
+        "appletId",
+        "displayName",
+        "status",
+        "tools",
+        "createdAt",
+        "ownerBotId",
+        "access",
+        "sharedWithBotIds"
+      ],
       "additionalProperties": false
     },
     "AppletOpenFocus": {

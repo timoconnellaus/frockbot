@@ -1123,6 +1123,29 @@
     }
   },
   {
+    "name": "AppletSummary without its owner",
+    "schema": "AppletSummary",
+    "value": {
+      "appletId": "tim.counter",
+      "displayName": "Counter",
+      "status": "published",
+      "tools": ["increment"],
+      "createdAt": "2026-09-05T00:00:00.000Z",
+      "access": "owner",
+      "sharedWithBotIds": []
+    }
+  },
+  {
+    "name": "BotAppletImpact wrong fingerprint",
+    "schema": "BotAppletImpact",
+    "value": {
+      "schemaVersion": 1,
+      "botId": "default",
+      "fingerprint": "not-a-fingerprint",
+      "applets": []
+    }
+  },
+  {
     "name": "AppletDirectory invalid",
     "schema": "AppletDirectory",
     "value": {

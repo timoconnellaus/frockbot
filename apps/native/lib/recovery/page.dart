@@ -253,26 +253,35 @@ class _BotRecoveryDetailState extends State<BotRecoveryDetail> {
   Future<void> change(String type) async {
     final deleting = type == 'bot/delete';
     final restoring = type == 'bot/restore';
-    if (!await confirm(
-      '${deleting
-          ? 'Delete'
-          : restoring
-          ? 'Restore'
-          : 'Archive'} ${widget.bot.initialName}?',
-      deleting
-          ? 'This removes its conversation and Applets. It cannot be undone.'
-          : restoring
-          ? 'Bring this Bot back to your active list. Its history will still be there.'
-          : 'This Bot will leave your active list and stop accepting new messages. Its history is preserved, and you can restore it later.',
-      deleting
-          ? 'Delete Bot'
-          : restoring
-          ? 'Restore Bot'
-          : 'Archive Bot',
-    )) {
-      return;
-    }
-    await controller.change(botId, type);
+    var agreed = false;
+    await controller.confirmChange(
+      botId,
+      type,
+      confirm: (applets) async {
+        if (!mounted) return false;
+        return agreed = await confirm(
+          '${deleting
+              ? 'Delete'
+              : restoring
+              ? 'Restore'
+              : 'Archive'} ${widget.bot.initialName}?',
+          [
+            deleting
+                ? 'This removes its conversation and Applets. It cannot be undone.'
+                : restoring
+                ? 'Bring this Bot back to your active list. Its history will still be there.'
+                : 'This Bot will leave your active list and stop accepting new messages. Its history is preserved, and you can restore it later.',
+            ?applets,
+          ].join('\n\n'),
+          deleting
+              ? 'Delete Bot'
+              : restoring
+              ? 'Restore Bot'
+              : 'Archive Bot',
+        );
+      },
+    );
+    if (!agreed) return;
     await widget.onChanged?.call();
     if (mounted &&
         deleting &&

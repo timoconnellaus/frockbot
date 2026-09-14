@@ -772,11 +772,15 @@ function userAuditStub(env: Env, userId: string): UserAuditRpc {
   return env.USER_CONFIGURATIONS.get(id) as unknown as UserAuditRpc;
 }
 
-/** The User Durable Object's Applet directory, addressed by User. */
+/**
+ * The User Durable Object's Applet directory, addressed by User and always
+ * asked as one of that User's Bots (ADR 0027).
+ */
 interface UserAppletDirectoryRpc {
   listApplets(input: unknown): Promise<unknown>;
   readApplet(input: unknown): Promise<unknown>;
   deleteApplet(input: unknown): Promise<unknown>;
+  readBotAppletImpact(input: unknown): Promise<unknown>;
 }
 
 function userAppletDirectoryStub(
@@ -953,10 +957,11 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
   // (`apps/cloudflare/src/production-secrets.ts`); this is what happens if it
   // ever goes missing anyway.
   //
-  // Applets are the User's, not a Bot's, so these three sit on the User-scoped
-  // entrypoint the hosted application already holds. The application Worker
-  // reaches the User Durable Object only through here; it never gets a
-  // namespace of its own.
+  // Every one of these acts as the Bot the route names: the directory answers
+  // only what that Bot owns or is shared, and a viewer token names that Bot
+  // (ADR 0027). They sit on the User-scoped entrypoint the hosted application
+  // already holds, because the application Worker reaches the User Durable
+  // Object only through here; it never gets a namespace of its own.
 
   /**
    * The account's Applets switch, as an administrator set it. Off is silence
@@ -978,37 +983,63 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
     }
   }
 
+  /** The owner Bot's deletion; a shared Bot is refused by the directory. */
   async deleteApplet(input: unknown): Promise<unknown> {
-    const request = decodeRpcEnvelopeV1(input, { appletId: rpcString(129) });
+    const request = decodeRpcEnvelopeV1(input, {
+      botId: rpcBotId,
+      appletId: rpcString(129),
+    });
     const userId = this.ctx.props.userId;
     await this.requireApplets();
     return rpcJsonSnapshot(
       await userAppletDirectoryStub(this.env, userId).deleteApplet({
         schemaVersion: 1,
         userId,
+        botId: request.botId,
         appletId: request.appletId,
       }),
     );
   }
 
-  async listApplets(_input?: unknown): Promise<unknown> {
+  /** The Applets one Bot owns or is shared. */
+  async listApplets(input: unknown): Promise<unknown> {
+    const request = decodeRpcEnvelopeV1(input, { botId: rpcBotId });
     const userId = this.ctx.props.userId;
     await this.requireApplets();
     return rpcJsonSnapshot(
       await userAppletDirectoryStub(this.env, userId).listApplets({
         schemaVersion: 1,
         userId,
+        botId: request.botId,
       }),
     );
   }
 
   /**
-   * A short-lived viewer token for one Applet, minted only for the User this
-   * entrypoint is scoped to and only against the Applet's *current* generation.
+   * What archiving or deleting a Bot does to the Applets it owns. Not behind
+   * the Applets switch: an account whose feature is off still holds its
+   * Applets, and deleting its Bots still deletes them.
+   */
+  async readBotAppletImpact(input: unknown): Promise<unknown> {
+    const request = decodeRpcEnvelopeV1(input, { botId: rpcBotId });
+    const userId = this.ctx.props.userId;
+    return rpcJsonSnapshot(
+      await userAppletDirectoryStub(this.env, userId).readBotAppletImpact({
+        schemaVersion: 1,
+        userId,
+        botId: request.botId,
+      }),
+    );
+  }
+
+  /**
+   * A short-lived viewer token for one Applet, minted only for a Bot of the
+   * User this entrypoint is scoped to that may open it, and only against the
+   * Applet's *current* generation.
    *
    * The Applet's page runs in a cookieless sandboxed iframe and can carry no
    * credential, so this is the whole of its authority — and it names the User,
-   * the Applet, and the generation, for fifteen minutes.
+   * the Bot, the Applet, and the generation, for fifteen minutes.
    */
   async mintAppletViewerToken(input: unknown): Promise<{
     token: string;
@@ -1016,32 +1047,44 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
     appletId: string;
     generationId: string;
   }> {
-    const request = decodeRpcEnvelopeV1(input, { appletId: rpcString(129) });
+    const request = decodeRpcEnvelopeV1(input, {
+      botId: rpcBotId,
+      appletId: rpcString(129),
+    });
     const userId = this.ctx.props.userId;
+    const botId = request.botId as string;
     const appletId = request.appletId as string;
     await this.requireApplets();
     const secret = this.env.APPLET_VIEWER_SECRET;
     if (!secret) throw appletsUnconfigured();
-    const state = await this.appletCurrentGeneration(userId, appletId);
+    const state = await this.appletCurrentGeneration(userId, botId, appletId);
     const minted = await this.mintViewerToken(secret, {
       userId,
+      botId,
       appletId,
       generationId: state.generationId,
     });
     return { ...minted, appletId, generationId: state.generationId };
   }
 
-  /** The current generation's UI artifact, for the canvas to nest. */
+  /** The current generation's UI artifact, for a Bot that may open it. */
   async readAppletUi(input: unknown): Promise<{
     appletId: string;
     generationId: string;
     contentHash: string;
   }> {
-    const request = decodeRpcEnvelopeV1(input, { appletId: rpcString(129) });
+    const request = decodeRpcEnvelopeV1(input, {
+      botId: rpcBotId,
+      appletId: rpcString(129),
+    });
     const userId = this.ctx.props.userId;
     const appletId = request.appletId as string;
     await this.requireApplets();
-    const state = await this.appletCurrentGeneration(userId, appletId);
+    const state = await this.appletCurrentGeneration(
+      userId,
+      request.botId as string,
+      appletId,
+    );
     return {
       appletId,
       generationId: state.generationId,
@@ -1076,7 +1119,7 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
     await this.requireApplets();
     const directory = userAppletDirectoryStub(this.env, userId);
     const [listed, focus] = await Promise.all([
-      directory.listApplets({ schemaVersion: 1, userId }),
+      directory.listApplets({ schemaVersion: 1, userId, botId }),
       botStateStub(this.env, userId, botId).readFocusedApplet({
         schemaVersion: 1,
         userId,
@@ -1095,7 +1138,7 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
       // listing has never heard of is a stale listing rather than a stale
       // focus: list once more.
       applets = appletsOf(
-        await directory.listApplets({ schemaVersion: 1, userId }),
+        await directory.listApplets({ schemaVersion: 1, userId, botId }),
       );
       entry = applets.find((applet) => applet.appletId === focusedId);
       if (!entry) return { schemaVersion: 1, applets };
@@ -1111,6 +1154,7 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
     if (!secret) throw appletsUnconfigured();
     const minted = await this.mintViewerToken(secret, {
       userId,
+      botId,
       appletId: focusedId,
       generationId: state.generationId,
     });
@@ -1129,12 +1173,18 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
 
   private async mintViewerToken(
     secret: string,
-    claims: { userId: string; appletId: string; generationId: string },
+    claims: {
+      userId: string;
+      botId: string;
+      appletId: string;
+      generationId: string;
+    },
   ): Promise<{ token: string; expiresAt: string }> {
     const expiresAt = new Date(Date.now() + APPLET_VIEWER_TOKEN_TTL_MS);
     return {
       token: await mintAppletViewerTokenV1(secret, {
         u: claims.userId,
+        b: claims.botId,
         a: claims.appletId,
         g: claims.generationId,
         exp: Math.floor(expiresAt.getTime() / 1_000),
@@ -1170,10 +1220,11 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
    */
   private async appletCurrentGeneration(
     userId: string,
+    botId: string,
     appletId: string,
   ): Promise<{ generationId: string; uiContentHash: string }> {
     const directory = decodeAppletSummaryV1(
-      await this.requireAppletSummary(userId, appletId),
+      await this.requireAppletSummary(userId, botId, appletId),
     );
     if (directory.status === "deleted" || !directory.currentGenerationId) {
       throw new Error(`Applet "${appletId}" has no active generation`);
@@ -1185,15 +1236,23 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
     return state;
   }
 
+  /**
+   * One Applet as the Bot sees it, or the directory's settled refusal. With
+   * `owner`, a shared Bot is refused as `AppletNotOwnerError`.
+   */
   private async requireAppletSummary(
     userId: string,
+    botId: string,
     appletId: string,
+    options: { owner?: boolean } = {},
   ): Promise<unknown> {
     return rpcJsonSnapshot(
       await userAppletDirectoryStub(this.env, userId).readApplet({
         schemaVersion: 1,
         userId,
+        botId,
         appletId,
+        ...(options.owner ? { owner: true } : {}),
       }),
     );
   }
@@ -1230,12 +1289,19 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
     );
   }
 
+  /** An Applet's source, for its owner Bot only. */
   async readAppletSourceV1(input: unknown): Promise<AppletSourceViewV1> {
     const request = decodeRpcEnvelopeV1(input, {
       botId: rpcBotId,
       appletId: rpcPattern(APPLET_ID_V1, 129),
     });
     await this.requireApplets();
+    await this.requireAppletSummary(
+      this.ctx.props.userId,
+      request.botId as string,
+      request.appletId as string,
+      { owner: true },
+    );
     return botStateStub(
       this.env,
       this.ctx.props.userId,
@@ -1243,12 +1309,19 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
     ).readAppletSourceV1(request.appletId as string);
   }
 
+  /** An Applet's last build, for its owner Bot only. */
   async readAppletBuildV1(input: unknown): Promise<AppletBuildViewV1> {
     const request = decodeRpcEnvelopeV1(input, {
       botId: rpcBotId,
       appletId: rpcPattern(APPLET_ID_V1, 129),
     });
     await this.requireApplets();
+    await this.requireAppletSummary(
+      this.ctx.props.userId,
+      request.botId as string,
+      request.appletId as string,
+      { owner: true },
+    );
     return botStateStub(
       this.env,
       this.ctx.props.userId,
@@ -2384,6 +2457,23 @@ export default {
           env.APPLET_STATES.get(
             env.APPLET_STATES.idFromName(appletStateNameV1(userId, appletId)),
           ),
+        appletAccessFor: async (userId, botId, appletId) => {
+          try {
+            await userAppletDirectoryStub(env, userId).readApplet({
+              schemaVersion: 1,
+              userId,
+              botId,
+              appletId,
+            });
+            return true;
+          } catch (error) {
+            // Only the directory's settled "no access" closes the door; a
+            // blip is thrown so the socket fails as retryable, not as gone.
+            if (error instanceof Error && error.name === "AppletUnavailableError")
+              return false;
+            throw error;
+          }
+        },
         openBotStateChannel: (userId, botId, request, context) =>
           openOwnedBotStateChannel(env, userId, botId, request, context),
         voice: voiceGatewayDependencies(env),

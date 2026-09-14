@@ -203,4 +203,92 @@ describe("Flock gateway Contribution", () => {
       identities: [{ botId: "alpha", name: "Alpha", namedBy: "user" }],
     });
   });
+
+  test("a person's Bot deletion names the Applets it confirmed, and a stale one is a 409", async () => {
+    const issued: unknown[] = [];
+    let stale = false;
+    const contribution = createFlockBackendContribution({
+      listBots: () =>
+        Promise.resolve({ schemaVersion: 1, revision: 0, bots: [] }),
+      createBot: () => Promise.reject(new Error("not used")),
+      listBotLifecycles: () =>
+        Promise.resolve({ schemaVersion: 1, lifecycles: [] }),
+      executeBotLifecycle: (_user, command) => {
+        issued.push(command);
+        // The User Durable Object's refusal, as RPC serializes it: a name.
+        if (stale)
+          return Promise.reject({
+            name: "AppletImpactConflictError",
+            message: "the Applets this Bot owns changed",
+          });
+        return Promise.resolve({
+          schemaVersion: 1,
+          commandId: command.commandId,
+          botId: command.botId,
+          status: "applied",
+          lifecycle: {
+            schemaVersion: 1,
+            botId: command.botId,
+            status: "deleted",
+            revision: 1,
+          },
+        });
+      },
+      readSheep: () => Promise.reject(new Error("not used")),
+      updateSheep: () => Promise.reject(new Error("not used")),
+      listBotIdentities: () =>
+        Promise.resolve({ schemaVersion: 1 as const, identities: [] }),
+      listBotUnread: () =>
+        Promise.resolve({ schemaVersion: 1 as const, unread: [] }),
+      listBotNotifications: () =>
+        Promise.resolve({ schemaVersion: 1 as const, notifications: [] }),
+      executeBotUnreadCommand: () => Promise.reject(new Error("not used")),
+    });
+    const context = { userId: "user-1", client: "browser" as const };
+    const url = new URL("https://bot.example/api/bots/alpha/lifecycle");
+    const remove = {
+      schemaVersion: 1,
+      type: "bot/delete",
+      commandId: "delete-1",
+      botId: "alpha",
+    };
+    const unconfirmed = await contribution.route(
+      request("/api/bots/alpha/lifecycle", remove),
+      url,
+      context,
+    );
+    expect(unconfirmed?.status).toBe(400);
+    expect(await unconfirmed?.json()).toMatchObject({
+      code: "invalid-request",
+      definitive: true,
+    });
+    expect(issued).toEqual([]);
+
+    const confirmed = await contribution.route(
+      request("/api/bots/alpha/lifecycle", {
+        ...remove,
+        appletImpact: "0123456789abcdef",
+      }),
+      url,
+      context,
+    );
+    expect(confirmed?.status).toBe(200);
+    expect(issued).toEqual([{ ...remove, appletImpact: "0123456789abcdef" }]);
+
+    stale = true;
+    const changed = await contribution.route(
+      request("/api/bots/alpha/lifecycle", {
+        ...remove,
+        commandId: "delete-2",
+        appletImpact: "0123456789abcdef",
+      }),
+      url,
+      context,
+    );
+    expect(changed?.status).toBe(409);
+    expect(await changed?.json()).toMatchObject({
+      code: "applet-impact-changed",
+      definitive: true,
+    });
+  });
 });

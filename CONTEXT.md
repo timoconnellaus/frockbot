@@ -119,8 +119,32 @@ A User attaching a Skill ref to a message, which expands that Skill's body into 
 _Avoid_: Run a skill, trigger, call
 
 **Applet**:
-A small real-time application a Bot builds for its User and the User opens beside the conversation: one Package's Instance Contribution, one durable instance of it, its UI, and the tools it exposes to every Bot of that User. Its code is a Package; its state is not.
+A small real-time application a Bot builds and the User opens beside the conversation: one Package's Instance Contribution, one durable instance of it, its UI, and the tools it exposes to the Bots with access to it. Its code is a Package; its state is not. Its source, state, generations and data are the User's, so which Bot owns it is metadata ([ADR 0027](docs/adr/0027-bot-owned-applets.md)).
 _Avoid_: App, gadget, application, widget
+
+**Owner Bot**:
+The one Bot an Applet names as `ownerBotId`. Ownership implies access, and only the owner may read or change the source, check, publish, revert, read the generations, delete, share, unshare or transfer. Every Applet has exactly one.
+_Avoid_: Author, creator (the provenance, which never changes), User-owned Applet
+
+**Shared Bot**:
+An active Bot of the same User named in an Applet's `sharedWithBotIds`. A shared Bot may list the Applet, open or focus it, use its page and call its published tools, and nothing else.
+_Avoid_: Collaborator, member, viewer
+
+**Applet access**:
+Being the owner Bot or a shared Bot of an Applet that is available. Every list, Composition, focus, open, chat card and viewer token is scoped to the Bot acting; a Bot without access is told the Applet does not exist. Access changes reach new Turns and new opens; an admitted Turn keeps the Applet tools its Composition pinned.
+_Avoid_: Permission, grant (a Plugin's), visibility
+
+**Transfer**:
+The owner Bot making another active Bot of the same User the owner. The former owner keeps shared access. Metadata only: the source, state, generations and data stay where they are.
+_Avoid_: Move, reassign, copy
+
+**Applet availability**:
+Whether an Applet is usable at all, separate from its publication status (`draft` or `published`). Archiving its owner Bot makes it unavailable to every Bot without deleting anything; restoring the owner makes it available again. Deleting the owner deletes it.
+_Avoid_: Status, archived Applet, hidden
+
+**Applet impact**:
+What archiving or deleting a Bot does to Applets: the Applets it owns and the Bots they are shared with, with a fingerprint a delete must present so it cannot destroy an Applet the confirmation did not name.
+_Avoid_: Preview, dependents, blast radius
 
 **Account feature**:
 A capability an administrator turns on for one account from Site administration; Applets is the first, Plugin authoring the second. Off is silence on every surface — no tools, no Composition members, no canvas, no managed Skill — and the account's data is kept. Held by the User, set only by an admin.
@@ -139,7 +163,7 @@ The surface beside the conversation where the Session's focused Applet renders. 
 _Avoid_: Preview pane, right panel (the slot, not the surface)
 
 **Focused Applet**:
-The one Applet a Session is currently building or using; what the Canvas shows and what `applet_*` tools act on when no Applet is named.
+The one Applet a Session is currently building or using, always one its Bot has access to; what the Canvas shows and what `applet_*` tools act on when no Applet is named.
 _Avoid_: Active app, selected gadget
 
 **Applets SDK**:

@@ -1,4 +1,4 @@
-// The Applets shell: one native picker and a full-window canvas, in both
+// The Applets shell: the Bot's Applets list and a full-window canvas, in both
 // states, at desktop size and at 390px.
 //
 // The Applet routes are stubbed here the way the fake AI service is stubbed
@@ -97,14 +97,21 @@ async function installAppletRoutes(
   let removed = false;
   let focused: string | null = null;
 
-  const summary = () => ({
+  // Every Applet read names the Bot acting (ADR 0027); the stubbed Applet is
+  // owned by whichever Bot asks, so the one Bot this spec creates owns it.
+  const summary = (botId: string) => ({
     appletId: APPLET_ID,
     displayName: "Todo",
     status: published ? "published" : "draft",
     ...(published ? { currentGenerationId: "generation-2" } : {}),
     tools: ["add_todo"],
     createdAt: "2026-09-03T00:00:00.000Z",
+    ownerBotId: botId,
+    access: "owner",
+    sharedWithBotIds: [],
   });
+  const botOf = (url: string) =>
+    decodeURIComponent(new URL(url).pathname.split("/")[3] ?? "");
 
   await page.route(/\/api\/bots\/[^/]+\/package-ui$/, async (route) => {
     const url = new URL(route.request().url());
@@ -164,18 +171,40 @@ async function installAppletRoutes(
     }),
   );
 
-  await page.route("**/api/applets", (route) =>
+  await page.route(/\/api\/bots\/[^/]+\/applets$/, (route) =>
     route.fulfill({
       contentType: "application/json",
       body: JSON.stringify({
         schemaVersion: 1,
-        applets: removed ? [] : [summary()],
+        applets: removed ? [] : [summary(botOf(route.request().url()))],
+      }),
+    }),
+  );
+  // What archiving or deleting the Bot would take: the stubbed Applet, shared
+  // with nobody.
+  await page.route(/\/api\/bots\/[^/]+\/applets\/impact$/, (route) =>
+    route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        schemaVersion: 1,
+        botId: botOf(route.request().url()),
+        fingerprint: "0123456789abcdef",
+        applets: removed
+          ? []
+          : [
+              {
+                appletId: APPLET_ID,
+                displayName: "Todo",
+                status: published ? "published" : "draft",
+                sharedWithBotIds: [],
+              },
+            ],
       }),
     }),
   );
   // A delete is permanent: the directory stops listing the Applet, which is
   // the whole of what a person sees afterwards.
-  await page.route(/\/api\/applets\/[^/]+\/delete$/, (route) => {
+  await page.route(/\/api\/bots\/[^/]+\/applets\/[^/]+\/delete$/, (route) => {
     removed = true;
     route.fulfill({
       contentType: "application/json",
@@ -190,7 +219,7 @@ async function installAppletRoutes(
       contentType: "application/json",
       body: JSON.stringify({
         schemaVersion: 1,
-        applets: removed ? [] : [summary()],
+        applets: removed ? [] : [summary(botOf(route.request().url()))],
         ...(focused === null || removed
           ? {}
           : {
@@ -254,7 +283,7 @@ async function installAppletRoutes(
   );
   // A draft has no live page, and the route says so with a 404 — which is the
   // building state rather than a failed canvas.
-  await page.route(/\/api\/applets\/[^/]+\/ui$/, (route) =>
+  await page.route(/\/api\/bots\/[^/]+\/applets\/[^/]+\/ui$/, (route) =>
     published
       ? route.fulfill({
           contentType: "application/json",
@@ -269,7 +298,7 @@ async function installAppletRoutes(
           body: JSON.stringify({ error: "not published" }),
         }),
   );
-  await page.route(/\/api\/applets\/[^/]+\/token$/, (route) =>
+  await page.route(/\/api\/bots\/[^/]+\/applets\/[^/]+\/token$/, (route) =>
     route.fulfill({
       contentType: "application/json",
       body: JSON.stringify({
@@ -377,18 +406,22 @@ function fileState(page: Page, path: string): Locator {
     .first();
 }
 
-/** The canvas, opened from the header control that is the whole of its entry. */
+/**
+ * The canvas, opened from the header control: it puts the selected Bot's
+ * Applets in the sidebar (a pushed page on a phone), and a row opens one.
+ */
 async function openCanvas(page: Page) {
   await press(sem(page, "applet-chip"));
+  await expect(sem(page, "applet-list")).toBeVisible({ timeout: 60_000 });
   await press(
-    page.locator('[flt-semantics-identifier^="applet-choice-"]').first(),
+    page.locator('[flt-semantics-identifier^="applet-row-"]').first(),
   );
   const canvas = sem(page, "applet-canvas");
   await expect(canvas).toBeVisible({ timeout: 60_000 });
   return canvas;
 }
 
-test("one Applets picker opens the full-window draft and live canvas", async ({
+test("the Bot's Applets list opens the full-window draft and live canvas", async ({
   page,
   userId,
   ollamaBaseUrl,
@@ -402,8 +435,8 @@ test("one Applets picker opens the full-window draft and live canvas", async ({
   });
   await page.setViewportSize(DESKTOP);
 
-  // The Package still declares its entry, but the native picker is the one
-  // Applets destination the shell presents.
+  // The Package still declares its entry, but the header's Applets button is
+  // the one Applets destination the shell presents.
   await expect(sem(page, "applet-chip")).toHaveCount(1);
   await expect(sem(page, `package-entry-${PACKAGE_ID}-open`)).toHaveCount(0);
   const canvas = await openCanvas(page);
@@ -519,13 +552,21 @@ test("the canvas fills a phone window and Back restores the Bot page", async ({
   await expectNoHorizontalOverflow(page);
   await page.screenshot({ path: testInfo.outputPath("applets-phone.png") });
 
-  // And the way out gives the Bot's page back, with the row still on it.
+  // And the way out gives the page it was opened from back: the Applets list
+  // pushed over the Bot's page, whose Back returns to the Bot.
   await press(sem(page, "applet-canvas-close"));
   await expect(sem(page, "applet-canvas")).toHaveCount(0);
+  // Closing the canvas returns to whatever pushed it: the Applets page when
+  // it was opened from there, the Bot's page otherwise.
+  const list = sem(page, "applet-list");
+  if (await list.isVisible().catch(() => false)) {
+    await expect(sem(page, `applet-row-${APPLET_ID}`)).toBeVisible();
+    await press(sem(page, "applet-list-back"));
+  }
   await expect(chip).toBeVisible();
 });
 
-test("the Applets button picks one, a Bot embeds one as a live card, and a delete is confirmed", async ({
+test("the Applets button lists the Bot's Applets, a Bot embeds one as a live card, and a delete is confirmed", async ({
   page,
   userId,
   ollamaBaseUrl,
@@ -543,17 +584,17 @@ test("the Applets button picks one, a Bot embeds one as a live card, and a delet
   await page.setViewportSize(DESKTOP);
 
   // One Applets control, before Computer and Routines, and what it opens is a
-  // choice rather than an Applet: the Bot's Applets, by name.
+  // list rather than an Applet: the Bot's Applets, by name, in the sidebar.
   const chip = sem(page, "applet-chip");
   await expect(chip).toBeVisible({ timeout: 60_000 });
   await press(chip);
-  const choice = page.locator(
-    `[flt-semantics-identifier="applet-choice-${APPLET_ID}"]`,
-  );
-  await expect(choice).toBeVisible({ timeout: 60_000 });
-  await page.screenshot({ path: testInfo.outputPath("applets-picker.png") });
-  await press(page.getByRole("button", { name: "Close", exact: true }));
-  await expect(choice).toHaveCount(0);
+  const list = sem(page, "applet-list");
+  const row = sem(page, `applet-row-${APPLET_ID}`);
+  await expect(list).toBeVisible({ timeout: 60_000 });
+  await expect(row).toBeVisible({ timeout: 60_000 });
+  await page.screenshot({ path: testInfo.outputPath("applets-list.png") });
+  await press(sem(page, "applet-list-back"));
+  await expect(row).toHaveCount(0);
 
   // A Bot embeds the Applet in chat. The card is live in the thread — its own
   // viewer credential, not the Session's focus — so the Applet's page runs
@@ -575,29 +616,29 @@ test("the Applets button picks one, a Bot embeds one as a live card, and a delet
   await page.screenshot({ path: testInfo.outputPath("applets-chat-card.png") });
 
   // Deleting is permanent, so it asks first, and answering no deletes nothing.
+  // The owner's row carries the delete; a shared Bot's would not.
   await press(chip);
-  await expect(choice).toBeVisible({ timeout: 60_000 });
-  await press(page.getByRole("button", { name: "Delete Todo", exact: true }));
+  await expect(row).toBeVisible({ timeout: 60_000 });
+  const remove = sem(page, `applet-delete-${APPLET_ID}`);
+  await press(remove);
   await expect(page.getByText("Delete Todo?", { exact: true })).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("applets-confirm.png") });
   await press(page.getByRole("button", { name: "Cancel", exact: true }));
   expect(stubs.deleted()).toBe(false);
-  await expect(choice).toBeVisible();
+  await expect(row).toBeVisible();
 
-  await press(page.getByRole("button", { name: "Delete Todo", exact: true }));
+  await press(remove);
   await expect(page.getByText("Delete Todo?", { exact: true })).toBeVisible();
   await press(page.getByRole("button", { name: "Delete", exact: true }));
-  await expect(choice).toHaveCount(0, { timeout: 60_000 });
-  await expect(
-    page.getByText("No Applets yet. Ask a Bot to build one.", { exact: true }),
-  ).toBeVisible();
+  await expect(row).toHaveCount(0, { timeout: 60_000 });
+  await expect(page.getByText(/^No Applets yet\. Ask .+ to build one\.$/)).toBeVisible();
   expect(stubs.deleted()).toBe(true);
   await page.screenshot({ path: testInfo.outputPath("applets-deleted.png") });
 
   // The card that was live is a card for an Applet that no longer exists. Its
   // own refresh is what finds that out, and what it does about it is say so
   // and take the frame down rather than keep a deleted Applet on screen.
-  await press(page.getByRole("button", { name: "Close", exact: true }));
+  await press(sem(page, "applet-list-back"));
   // The card's own words reach the accessibility tree on the container the
   // engine merged them into, so this reads the label rather than a text node.
   await expect(

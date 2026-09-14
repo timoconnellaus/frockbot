@@ -13,6 +13,7 @@ import {
 import type { AgentEffectAdmission } from "@frockbot/core/agent-loop/agent";
 import {
   bootstrapGeneration,
+  compositionAppletMemberReachesV1,
   CompositionMountFailureError,
   type CompositionFailurePhaseV1,
   type CompositionGenerationV1,
@@ -294,9 +295,14 @@ export function createShellCompositionHost(
       // Applet Durable Object. An Applet contributes no module and no manifest,
       // so there is nothing here to mount, load, or health-check: the
       // instance's own health check ran when its generation was published, and
-      // its failure is recorded there.
+      // its failure is recorded there. The generation is the User's, so it
+      // names every available Applet; this Bot registers only the ones it owns
+      // or is shared, as they stood when the generation was resolved (ADR
+      // 0027).
       const unregisterApplets: (() => void)[] = [];
-      for (const applet of generation.applets ?? []) {
+      for (const applet of (generation.applets ?? []).filter((member) =>
+        compositionAppletMemberReachesV1(member, options.botId),
+      )) {
         if (!options.applets) {
           failures.push({
             phase: "resolve",

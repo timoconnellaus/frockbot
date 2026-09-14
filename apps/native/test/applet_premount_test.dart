@@ -111,8 +111,8 @@ void main() {
         find.byType(HostFrameView, skipOffstage: false),
       );
 
-      // The Applets row, the picker, the one Applet: the page comes up holding
-      // the same frame rather than building another.
+      // The Applets row, the Applet list page, the one Applet: the page comes
+      // up holding the same frame rather than building another.
       await tester.tap(identifiedBy(ShellIds.botPanelToggle));
       await tester.pumpAndSettle();
       // The row sits under the settings, below the fold on a phone.
@@ -120,7 +120,10 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(identifiedBy(AppletIds.chip));
       await tester.pumpAndSettle();
-      await tester.tap(identifiedBy('applet-choice-todo.applet'));
+      // A page with its own back, not a sidebar mode: a phone has no column.
+      expect(identifiedBy(AppletIds.list), findsOneWidget);
+      expect(identifiedBy(AppletIds.listBack), findsNothing);
+      await tester.tap(identifiedBy(AppletIds.row('todo.applet')));
       await tester.pumpAndSettle();
       expect(identifiedBy(AppletIds.canvas), findsOneWidget);
       expect(find.byType(AppletViewerFrame), findsOneWidget);
@@ -128,7 +131,7 @@ void main() {
       // One frame in the tree, not one on the page and one off stage.
       expect(find.byType(HostFrameView, skipOffstage: false), findsOneWidget);
 
-      // Opening from the picker posted the focus and read the open route; it
+      // Opening from the list posted the focus and read the open route; it
       // did not read the source.
       final afterTap = api.requested.skip(
         api.requested.indexWhere((path) => path.endsWith('/applets/focus')),

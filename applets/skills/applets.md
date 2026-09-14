@@ -7,20 +7,51 @@ description: Use this whenever you are creating or changing an Applet — a smal
 
 An Applet is a real application. It has its own SQLite storage that survives
 every code change, a React page the User opens beside this conversation, and
-tools every Bot of this User can call. You write it in TypeScript with the
-`applet_*` tools, check it, and publish it. The source lives in the cloud, a
-build service compiles it, and the published code runs in the kernel's
-loader — no Computer is involved at any point.
+tools you — and the Bots you share it with — can call. You write it in
+TypeScript with the `applet_*` tools, check it, and publish it. The source
+lives in the cloud, a build service compiles it, and the published code runs in
+the kernel's loader — no Computer is involved at any point.
+
+## Who may do what
+
+Every Applet has exactly one owner Bot. The Applets you create are yours.
+
+- **The owner** reads and writes the source, checks, publishes, reverts, reads
+  the generations, deletes, shares, unshares and transfers.
+- **A Bot it is shared with** can see it in `applet_list`, open or focus it,
+  send it as a chat card and call its published tools — nothing else. Reading
+  its source, publishing over it or deleting it is refused. If it needs a
+  change, ask the Bot that owns it with `bot_message`.
+- `applet_list` says which is which: `yours`, or `shared with you by <bot>`.
+
+Sharing is the owner's call:
+
+- **`applet_share`** with the Applet's id and another Bot's id from
+  `<teammates>` lets that Bot use it. The Bot must be active.
+- **`applet_unshare`** takes that away. Its tools leave the other Bot from its
+  next Turn; a Turn it is already running keeps them until it ends.
+- **`applet_transfer`** makes another active Bot the owner. You keep shared
+  access, and from then on only the new owner can change it. The source, the
+  generations and the data do not move. Transfer only when the User asks.
+
+Tool names are unique across the whole account, not just across the Applets
+you can see, so a publish can be refused for a name you have never seen used.
+Rename the tool and publish again.
+
+If the owner Bot is archived, its Applets are unavailable to every Bot until it
+is restored, and nothing is lost. If the owner Bot is deleted, its Applets are
+deleted too, including for the Bots they were shared with.
 
 Two files are yours: `server.ts` (the tables and the tools) and `ui.tsx` (the
 page). Nothing else.
 
 ## The loop
 
-1. **`applet_create`** with a display name. It makes the Applet, scaffolds a
-   working todo list, and puts it in the panel beside the conversation. Do not
-   create a second Applet for a change to an existing one — `applet_list`
-   first.
+1. **`applet_create`** with a display name. It makes an Applet you own,
+   scaffolds a working todo list, and puts it in the panel beside the
+   conversation. Do not create a second Applet for a change to one you already
+   own — `applet_list` first. An Applet shared with you is not yours to change;
+   ask its owner rather than building a copy.
 2. **`applet_files`** and **`applet_read_file`** to see what is there, then
    **`applet_write_file`** to change it. A write replaces the whole file, so
    read before you write. Two files are yours: `server.ts` and `ui.tsx`. The
@@ -32,7 +63,7 @@ page). Nothing else.
    publish is refused and returns the same lines.
 4. **`applet_publish`** with the Applet's id. It builds the current source
    again, records an immutable generation, mounts it, and offers its tools to
-   every Bot of this User from your next Turn — not this one.
+   you and every Bot it is shared with from the next Turn — not this one.
 
 The tool list is derived by _running_ your server inside the build, so a tool
 that does not boot is a build failure rather than a surprise later.
@@ -42,7 +73,8 @@ the page renders, not that the Applet works. Publishing is what makes it real.
 
 `applet_generations` lists the history; `applet_revert` moves back to an
 earlier generation and is itself recorded. Reverting code never touches the
-Applet's data. `applet_delete` destroys the data too, so ask the User first.
+Applet's data. `applet_delete` destroys the data too — for every Bot it is
+shared with — so ask the User first.
 
 ## `server.ts`
 
@@ -185,6 +217,8 @@ Every one of these is an error from `applet_check`, not a warning.
 | `the build service is unavailable`          | nothing you did; say so to the User rather than retrying in a loop                     |
 | a publish reports `failed` with diagnostics | the generation did not mount; the previous one is still live and its data is untouched |
 | the tools do not appear                     | a published generation activates on your **next** Turn, not the one that published it  |
+| `only the Bot that owns it can change it`   | the Applet is shared with you; ask its owner with `bot_message`                        |
+| `Applet "…" is unavailable`                 | it was deleted, unshared from you, or its owner Bot is archived                        |
 
 Report a publish failure to the User with the diagnostics as they were
 printed. Never claim an Applet is working because the build passed: publishing

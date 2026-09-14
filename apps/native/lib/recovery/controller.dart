@@ -77,6 +77,26 @@ class BotRecoveryController extends ChangeNotifier {
     if (await lifecycle.change(botId, type) && !_disposed) await load();
   }
 
+  /// The change as this page asks it: the Applets it takes named first, and
+  /// the directory read again once the authority applied it.
+  Future<void> confirmChange(
+    String botId,
+    String type, {
+    required Future<bool> Function(String? applets) confirm,
+  }) async {
+    if (_disposed) return;
+    final applied = await lifecycle.confirmChange(
+      botId,
+      type,
+      confirm: confirm,
+      nameOf: (id) => bots
+          .where((bot) => bot.botId.value == id)
+          .map((bot) => bot.initialName)
+          .firstOrNull,
+    );
+    if (applied && !_disposed) await load();
+  }
+
   Future<void> retry() async {
     if (_disposed) return;
     if (await lifecycle.retry() && !_disposed) await load();

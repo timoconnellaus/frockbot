@@ -224,6 +224,17 @@
     }
   },
   {
+    "name": "BotLifecycleCommand delete fenced on its Applet impact",
+    "schema": "BotLifecycleCommand",
+    "value": {
+      "schemaVersion": 1,
+      "type": "bot/delete",
+      "commandId": "command-2",
+      "botId": "default",
+      "appletImpact": "cbf29ce484222325"
+    }
+  },
+  {
     "name": "BotCreateCommand valid",
     "schema": "BotCreateCommand",
     "value": {
@@ -1032,7 +1043,10 @@
       "status": "published",
       "currentGenerationId": "generation-1",
       "tools": ["increment"],
-      "createdAt": "2026-09-05T00:00:00.000Z"
+      "createdAt": "2026-09-05T00:00:00.000Z",
+      "ownerBotId": "default",
+      "access": "owner",
+      "sharedWithBotIds": ["helper"]
     }
   },
   {
@@ -1047,7 +1061,10 @@
           "status": "published",
           "currentGenerationId": "generation-1",
           "tools": ["increment"],
-          "createdAt": "2026-09-05T00:00:00.000Z"
+          "createdAt": "2026-09-05T00:00:00.000Z",
+          "ownerBotId": "default",
+          "access": "shared",
+          "sharedWithBotIds": []
         }
       ]
     }
@@ -1064,7 +1081,10 @@
           "status": "published",
           "currentGenerationId": "generation-1",
           "tools": ["increment"],
-          "createdAt": "2026-09-05T00:00:00.000Z"
+          "createdAt": "2026-09-05T00:00:00.000Z",
+          "ownerBotId": "default",
+          "access": "shared",
+          "sharedWithBotIds": []
         }
       ],
       "focused": {
@@ -1171,7 +1191,37 @@
       "status": "published",
       "currentGenerationId": "2026-09-05T00:52:26.826Z:e0e3ce78fabf9eca",
       "tools": ["increment"],
-      "createdAt": "2026-09-05T00:00:00.000Z"
+      "createdAt": "2026-09-05T00:00:00.000Z",
+      "ownerBotId": "default",
+      "access": "owner",
+      "sharedWithBotIds": []
+    }
+  },
+  {
+    "name": "BotAppletImpact valid",
+    "schema": "BotAppletImpact",
+    "value": {
+      "schemaVersion": 1,
+      "botId": "default",
+      "fingerprint": "cbf29ce484222325",
+      "applets": [
+        {
+          "appletId": "tim.counter",
+          "displayName": "Counter",
+          "status": "published",
+          "sharedWithBotIds": ["helper"]
+        }
+      ]
+    }
+  },
+  {
+    "name": "BotAppletImpact with no owned Applets",
+    "schema": "BotAppletImpact",
+    "value": {
+      "schemaVersion": 1,
+      "botId": "default",
+      "fingerprint": "cbf29ce484222325",
+      "applets": []
     }
   },
   {

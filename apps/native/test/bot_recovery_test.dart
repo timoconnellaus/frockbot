@@ -75,6 +75,21 @@ void main() {
               'indexState': 'ready',
             };
           }
+          if (path == '/api/bots/alpha/applets/impact') {
+            return {
+              'schemaVersion': 1,
+              'botId': 'alpha',
+              'fingerprint': '0123456789abcdef',
+              'applets': [
+                {
+                  'appletId': 'todo.applet',
+                  'displayName': 'Weekly Todos',
+                  'status': 'published',
+                  'sharedWithBotIds': ['beta'],
+                },
+              ],
+            };
+          }
           return setup();
         });
         final controller = BotRecoveryController(api, store, 'tim');
@@ -110,6 +125,11 @@ void main() {
         await tester.tap(button);
         await tester.pumpAndSettle();
         expect(find.byType(AlertDialog), findsOneWidget);
+        // The Bot this page has not loaded is counted rather than named.
+        expect(
+          find.textContaining('• Weekly Todos — shared with 1 other Bot'),
+          findsOneWidget,
+        );
         expect(writes, isEmpty);
         await tester.tap(find.text('Cancel'));
         await tester.pumpAndSettle();
@@ -119,6 +139,7 @@ void main() {
         await tester.tap(find.widgetWithText(FilledButton, 'Delete Bot'));
         await tester.pumpAndSettle();
         expect(writes, hasLength(1));
+        expect(writes.single['appletImpact'], '0123456789abcdef');
         expect(controller.pending, isTrue);
         expect(tester.takeException(), isNull);
         await tester.pumpWidget(const SizedBox());

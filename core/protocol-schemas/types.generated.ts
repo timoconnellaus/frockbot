@@ -107,6 +107,19 @@ export type BotLifecycleCommand = {
   type: "bot/archive" | "bot/restore" | "bot/delete";
   commandId: Identifier;
   botId: BotId;
+  appletImpact?: AppletImpactFingerprint;
+};
+export type AppletImpactFingerprint = string;
+export type BotAppletImpact = {
+  schemaVersion: 1;
+  botId: BotId;
+  fingerprint: AppletImpactFingerprint;
+  applets: Array<{
+    appletId: string;
+    displayName: string;
+    status: "draft" | "published";
+    sharedWithBotIds: Array<BotId>;
+  }>;
 };
 export type BotCreateCommand = {
   schemaVersion: 1;
@@ -608,6 +621,9 @@ export type AppletSummary = {
   currentGenerationId?: GenerationId;
   tools: Array<string>;
   createdAt: Instant;
+  ownerBotId: BotId;
+  access: "owner" | "shared";
+  sharedWithBotIds: Array<BotId>;
 };
 export type AppletOpenFocus = {
   appletId: string;
@@ -850,6 +866,8 @@ export interface ProtocolTypes {
   BotDirectory: BotDirectory;
   BotLifecycle: BotLifecycle;
   BotLifecycleCommand: BotLifecycleCommand;
+  AppletImpactFingerprint: AppletImpactFingerprint;
+  BotAppletImpact: BotAppletImpact;
   BotCreateCommand: BotCreateCommand;
   BotLifecycleReceipt: BotLifecycleReceipt;
   SheepIdentity: SheepIdentity;

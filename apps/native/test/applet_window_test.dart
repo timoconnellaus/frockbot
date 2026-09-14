@@ -63,8 +63,8 @@ void main() {
       expect(find.text('Applet'), findsNothing);
 
       // The way in: the header's Applets control at a desk, the row on the
-      // Bot's page on a phone. Both open the picker, and the picker opens the
-      // Applet.
+      // Bot's page on a phone. Both open the Bot's Applet list — the sidebar's
+      // Applets mode, or a page — and a row there opens the Applet.
       if (width > 640) {
         await tester.tap(identifiedBy(AppletIds.chip));
       } else {
@@ -75,7 +75,7 @@ void main() {
         await tester.tap(identifiedBy(AppletIds.chip));
       }
       await tester.pumpAndSettle();
-      await tester.tap(identifiedBy('applet-choice-todo.applet'));
+      await tester.tap(identifiedBy(AppletIds.row('todo.applet')));
       await tester.pumpAndSettle();
 
       // A window, not a column: the canvas is as wide as the app itself.

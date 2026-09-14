@@ -219,7 +219,7 @@ const SEND_TO_USER_DESCRIPTION = [
   '{"type":"attachment","url":"https://…","name":"…","mediaType":"…"}',
   '{"type":"widget","widget":{"prompt":"…","helpText":"…","options":["…"],"allowCustom":false,"dismissOnMoveOn":false}}',
   '{"type":"secret-request","prompt":"…","secretName":"…"}',
-  '{"type":"applet","appletId":"the id returned by applet_list or applet_create"} — embed the live Applet as an interactive chat card.',
+  '{"type":"applet","appletId":"the id returned by applet_list or applet_create"} — embed the live Applet as an interactive chat card. Only an Applet you own or that is shared with you opens; the card opens it as you.',
   '{"type":"agent-card","agentId":"…","title":"…","body":"…"}',
   '{"type":"approval","approvalId":"…","action":"…","rationale":"…","risk":"low|medium|high","expiresInSeconds":86400}',
   "A widget asks the user a question with 1 to 6 options and ends your Turn;",

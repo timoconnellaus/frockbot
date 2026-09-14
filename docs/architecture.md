@@ -52,8 +52,10 @@ Five classes in the app Worker, exported from `apps/cloudflare/src/index.ts`. `c
 
 - Binding `USER_CONFIGURATIONS`; id `idFromName(userId)`.
 - Authoritative for the User's Composition — the installed Plugin set, its generations, last known good and quarantine — reached through the composition RPCs a Bot calls (§5).
+- Authoritative for the Applet directory: which Bot owns each Applet, which Bots it is shared with, and whether it is available (§9). The Bot lifecycle saga applies each lifecycle's Applet consequence in the same transaction.
+- Its constructor runs the receipted, disposable Applet cleanup (`applet-test-state-cleanup.ts`) under `blockConcurrencyWhile`.
 - The only class that uses SQLite, and it does not own the tables. `ctx.storage.sql` is handed to two plugin stores: transcript search FTS5 (`app/search/index-store.ts:143-177`) and audit (`app/audit/store.ts:166-175`). All other state is key-value.
-- One `alarm()` at `:1739` serving credential leases, publisher and template recovery, flock sagas and archived-Bot sweeps.
+- One `alarm()` serving credential leases, publisher and template recovery, flock sagas, archived-Bot sweeps and deleted Applets' state and source cleanup.
 - No `fetch()`, no WebSockets.
 
 ### `AppletState` — `apps/cloudflare/src/applet-state.ts:228`
@@ -439,10 +441,13 @@ Screens (no router; `MaterialApp(home:)` plus `Navigator.push`):
   between the Applet and its code — and the Applet filling everything under it.
   It is not a `right-panel` entry: a 380-point column is not where you read an
   Applet
-- `AppletPicker` — `lib/applets/picker.dart`: the account's Applets as a
-  dialog behind the header's one Applets entry — a row opens an Applet on the
-  canvas, and a row's delete asks for confirmation before it destroys the
-  Applet's data and versions for every Bot
+- `AppletList` — `lib/applets/list.dart`: the selected Bot's Applets, each
+  labelled Owner or Shared by its owner Bot. At the wider tiers it is the left
+  sidebar's Applets mode, with a way back to the Bots; on the phone the same
+  list is a pushed page. The header's Applets button and the Bot page's
+  Applets row both open it. A row opens the Applet on the canvas; only an
+  owned row offers delete, which names the Bots that also use the Applet
+  before it destroys its data and versions
 - `AppletChatCard` — `lib/applets/chat_card.dart`: a live Applet embedded in
   the thread, from a `send_to_user` payload of type `applet`. It keeps its
   in-progress state while scrolled off-screen and suspends its refresh until
@@ -611,8 +616,9 @@ removal without migration on 2026-09-08.
 
 The native header is one row: Bot identity and direct Bot settings, then
 Applets, Computer and Routines as destinations. Applets is one entry rather
-than a strip of per-Bot Applet buttons — it opens the account-wide directory as
-a picker, so a header holding many Applets is still one control. The doors this
+than a strip of Applet buttons — it turns the sidebar into that Bot's Applets
+(a pushed page on the phone), so a header holding many Applets is still one
+control. The doors this
 Bot's Packages declare join the same row at the wider tiers, built straight from
 the Package catalog the shell holds (`ChatHeader.packageEntries`): they belong
 to one Bot, so they are never drawn over the list of every Bot. A phone's bar
@@ -659,7 +665,12 @@ Bots, which now shares it rather than keeping a second copy. The zone is
 contributed by the Flock rather than rebuilt inside the settings surface,
 because the directory a delete changes is the Flock's. The route answers
 `pending` for a saga that has not settled, which is why the zone locks rather
-than offering a second command.
+than offering a second command. Both surfaces read
+`GET /api/bots/:bot/applets/impact` before they ask: archive names the Applets
+that become unavailable, delete names the Applets it destroys and the Bots
+that also use them, and a delete carries the impact's fingerprint as
+`appletImpact`. A 409 `applet-impact-changed` drops the retained command, which
+was never admitted, and asks again over the new list.
 
 Three more projections in the settings-document family:
 
@@ -823,7 +834,19 @@ Adjacent, outside the loop: image generation uses Workers AI ids directly (`app/
 
 ### Authoring
 
-The Bot writes Applet code with the Applets tools; no Computer is in the path. `applets/` exposes eleven tools — `applet_list`, `applet_create`, `applet_files`, `applet_read_file`, `applet_write_file`, `applet_check`, `applet_publish`, `applet_revert`, `applet_delete`, `applet_focus`, `applet_generations` — as an ordinary first-party runtime feature, `createAppletsFeature` (`applets/feature.ts`), mounted for one admitted Turn beside Memory and Skills (`app/runtime.ts`). Its host is `createAppletCapabilityHostV1` (`app/applets-host/records.ts`), wired for one Bot by `app/applets-host/bot.ts`. Source lives in the durable root `applets/source/<appletId>/` (`applets/root.ts`): `applet_create` scaffolds the SDK template into it, `applet_write_file` supersedes one file's generation, and both read and write through the one Workspace surface the Bot Durable Object holds. That root is object storage and nothing else — the Applets Package declares no root to the Computer (`applets/definition.ts`), so nothing is mirrored onto a Sprite. Guidance ships at `applets/skills/applets.md`.
+The Bot writes Applet code with the Applets tools; no Computer is in the path. `applets/` exposes fourteen tools — `applet_list`, `applet_create`, `applet_files`, `applet_read_file`, `applet_write_file`, `applet_check`, `applet_publish`, `applet_revert`, `applet_delete`, `applet_share`, `applet_unshare`, `applet_transfer`, `applet_focus`, `applet_generations` — as an ordinary first-party runtime feature, `createAppletsFeature` (`applets/feature.ts`), mounted for one admitted Turn beside Memory and Skills (`app/runtime.ts`). Its host is `createAppletCapabilityHostV1` (`app/applets-host/records.ts`), wired for one Bot by `app/applets-host/bot.ts`. Source lives in the durable root `applets/source/<appletId>/` (`applets/root.ts`): `applet_create` scaffolds the SDK template into it, `applet_write_file` supersedes one file's generation, and both read and write through the one Workspace surface the Bot Durable Object holds. That root is object storage and nothing else — the Applets Package declares no root to the Computer (`applets/definition.ts`), so nothing is mirrored onto a Sprite. Guidance ships at `applets/skills/applets.md`.
+
+### Ownership and access
+
+Every Applet has one owner Bot and may be shared with other active Bots of the same User ([ADR 0027](adr/0027-bot-owned-applets.md)). The directory entry (`AppletDirectoryEntryV1`, `apps/cloudflare/src/applet-directory.ts`) carries `ownerBotId`, `sharedWithBotIds` and `available` beside the publication `status`, and every User Durable Object RPC over it names the Bot acting: `listApplets`, `readApplet` (with `owner` to require ownership), `createApplet`, `recordAppletGeneration`, `deleteApplet`, `shareApplet`, `unshareApplet`, `transferApplet` and `readBotAppletImpact`. An Applet the Bot cannot reach is `AppletUnavailableError`, answered exactly as a missing one; a shared Bot asking for an owner's verb is `AppletNotOwnerError`, a 403 with `code: "applet-not-owner"` on the routes. The Applets host (`app/applets-host/records.ts`) asks for ownership before every source read or write, check, publish, revert and generations read; the directory refuses the writes itself. A transfer changes two fields: the source root, the `AppletState` object, the generations and the data are the User's. Tool names stay unique across the account (`readAppletToolNameClashes`), so no share or transfer can put two tools of one name in one Bot's catalog.
+
+A Composition generation is still the User's. Its Applet members carry `ownerBotId` and `sharedWithBotIds`, so the access a Turn runs under is pinned and hashed with the generation; `createShellCompositionHost` registers only the members that reach the mounting Bot (`compositionAppletMemberReachesV1`). An access change advances `applets:directory-revision` and reaches the next admitted Turn; an admitted Turn keeps what it pinned. The management verbs check the directory when called.
+
+The Bot lifecycle saga (`app/flock/user.ts`) carries the Applet consequence through `lifecycleEffects`, which the User Durable Object implements over the same storage transaction: archiving the owner sets `available` false on its Applets, restoring sets it back, deleting it tombstones them — shared or not — and takes the deleted Bot off every share, each with one revision advance. A deletion writes an `applets:cleanup:<appletId>` to-do with the tombstone; the object then deletes the `AppletState` storage and the source prefix (`deleteAppletSourceV1`) and drops the to-do, and its alarm retries whatever did not finish. `GET /api/bots/:bot/applets/impact` answers the owned Applets and who shares them with an FNV-1a fingerprint (`appletImpactFingerprintV1`); a `bot/delete` from a person carries it as `appletImpact`, the saga's `admit` compares it before recording anything, and a stale one is a 409 `applet-impact-changed`.
+
+`cleanAppletTestStateV1` (`apps/cloudflare/src/applet-test-state-cleanup.ts`) runs once per User Durable Object in its constructor under the receipt `maintenance:bot-owned-applets:2026-09-14`: it removes directory entries of the pre-ownership shape and queues their cleanup, and replaces a Composition generation holding old-shape Applet members with one holding the same Plugins and no Applets.
+
+### The loop
 
 The loop is `applet_write_file` → `applet_check` → `applet_publish`. A check builds and stores the artifacts without recording a generation, and answers with the tools the built code declares and a preview URL — `https://ui.<host>/packages/<uiHash>.html`, the same anonymous artifact route a published page is served from, so the hash is the whole of the capability and the page reaches no data. A failure at either verb is the build's own diagnostics, `path:line:col message`, returned as the tool result.
 
@@ -837,13 +860,13 @@ One thing runs it: `apps/applet-build`, a Worker with no routes, reached through
 
 ### Storage
 
-Source is the durable root, in R2 through the Workspace store, keyed by `workspaceObjectKeyV1` (`core/workspace-store/keys.ts`). Artifacts are R2 `APPLICATION_ARTIFACTS`, content-addressed as `packages/<sha256>.mjs` and `.html`, written by the app Worker (`app/applets-host/bot.ts`) after verifying the hash. The server bundle is hashed in full when a generation activates, and the R2 etag of the object that was hashed is pinned in the durable mount input; a later mount that finds that etag under the same key is holding the same object version and skips the hash, and any other etag is hashed in full (`apps/cloudflare/src/applet-artifact.ts`, ADR 0025). The UI page is served through the Workers Cache in front of the bucket (`servePackageUiArtifact`); a miss reads and hash-verifies, a hit does neither. A content-addressed put is idempotent by its own key, so a check followed by a publish of unchanged source stores one pair of objects. Generations, pointers and failures live in `AppletState`; the account directory lives in `UserConfiguration`.
+Source is the durable root, in R2 through the Workspace store, keyed by `workspaceObjectKeyV1` (`core/workspace-store/keys.ts`). Artifacts are R2 `APPLICATION_ARTIFACTS`, content-addressed as `packages/<sha256>.mjs` and `.html`, written by the app Worker (`app/applets-host/bot.ts`) after verifying the hash. The server bundle is hashed in full when a generation activates, and the R2 etag of the object that was hashed is pinned in the durable mount input; a later mount that finds that etag under the same key is holding the same object version and skips the hash, and any other etag is hashed in full (`apps/cloudflare/src/applet-artifact.ts`, ADR 0025). The UI page is served through the Workers Cache in front of the bucket (`servePackageUiArtifact`); a miss reads and hash-verifies, a hit does neither. A content-addressed put is idempotent by its own key, so a check followed by a publish of unchanged source stores one pair of objects. Generations, pointers and failures live in `AppletState`; the directory, with its ownership and shares, lives in `UserConfiguration`.
 
 ### Execution
 
 - **Server.** `env.APPLETS.get(...)` with `globalOutbound: null`, an env of exactly `IDENTITY` and `CAPABILITIES`, and `limits {cpuMs: 5000, subRequests: 10}` (`applet-state.ts`, `#load`). The loaded stub is held per Durable Object instance by loader id, so a socket or a tool call after the first in an instance reads nothing from R2. The loaded class is mounted as a Durable Object facet (`#facet`) under a snapshot, trial and commit publish protocol with `facets.clone` rollback (`#activate`). `AppletState.open({ warm: true })`, which the open route calls, mounts the resident generation behind its answer so the socket that follows finds the facet and its schema up.
-- **UI.** `ui.html` is served from the anonymous origin `ui.<host>` (`apps/cloudflare/src/gateway.ts:139-176`) and nested in an `<iframe sandbox="allow-scripts">` inside the Applets Package's own `canvas.html`, handshaken by postMessage, then connected over a WebSocket gated by an HMAC viewer token (`gateway.ts:434-516`).
-- **Opening.** The canvas reads `GET /api/bots/:bot/applets/open` (`AppletOpenViewV1`): the directory, the Session's focus, and for a published focus the generation, the page URL and a viewer token, from one `AppletState.open` read beside a parallel directory listing and focus read. The frame is given its page before the source or the last build is asked for; those are the code view's, read when it is shown. `/api/applets/:id/ui` and `/token` remain for the chat card and read one directory entry each. The frame's identity is the generation and the page URL; a token re-minted three minutes before expiry reaches the running page as an `init`-shaped `refresh` and the transport reconnects in place. The frame is held off stage from the moment the Bot is adopted (`_appletFrameHolder`) and moved into the canvas page under one `GlobalKey` when that is pushed — at every width, since the canvas is a page everywhere. Looking at the code puts the frame off stage rather than taking it out of the tree, so the document and its socket outlive the switch. ADR 0025 records why.
+- **UI.** `ui.html` is served from the anonymous origin `ui.<host>` (`apps/cloudflare/src/gateway.ts:139-176`) and nested in an `<iframe sandbox="allow-scripts">` inside the Applets Package's own `canvas.html`, handshaken by postMessage, then connected over a WebSocket gated by an HMAC viewer token (`gateway.ts`, `routeAppletSocket`). The token's claims are `{u, b, a, g, exp}` — the User, the Bot the Applet was opened for, the Applet and the generation — and the door asks `appletAccessFor` whether that Bot may still reach the Applet before it forwards, so an unshare, a transfer or the owner's archive reaches the next connection.
+- **Opening.** The canvas reads `GET /api/bots/:bot/applets/open` (`AppletOpenViewV1`): that Bot's directory, the Session's focus, and for a published focus the generation, the page URL and a viewer token, from one `AppletState.open` read beside a parallel directory listing and focus read. The frame is given its page before the source or the last build is asked for; those are the code view's, read when it is shown, and only for an Applet the Bot owns — a shared Applet has no Code tab. `/api/bots/:bot/applets/:id/ui` and `/token` serve the chat card, as the Bot whose conversation holds it, and read one directory entry each. The frame's identity is the generation and the page URL; a token re-minted three minutes before expiry reaches the running page as an `init`-shaped `refresh` and the transport reconnects in place. The frame is held off stage from the moment the Bot is adopted (`_appletFrameHolder`) and moved into the canvas page under one `GlobalKey` when that is pushed — at every width, since the canvas is a page everywhere. Looking at the code puts the frame off stage rather than taking it out of the tree, so the document and its socket outlive the switch. ADR 0025 records why.
 
 ### First-party pages
 
@@ -855,7 +878,7 @@ Source is the durable root, in R2 through the Workspace store, keyed by `workspa
 
 ### Persistence
 
-The facet's own SQLite inside the per-`<userId>:<appletId>` Durable Object, with additive `ALTER TABLE` migration and a 2000-row `_applet_changes` log (`applets/sdk/src/server/store.ts:32-80`). Data is account-wide and shared across viewers, survives publish and revert, and is destroyed only by a deletion: the Bot's `applet_delete`, or the User's own from the Applets picker over `POST /api/applets/<appletId>/delete`. Both reach the same `UserConfiguration.deleteApplet` — the directory entry is marked deleted and the Applet's Durable Object state is destroyed. An id the directory does not list is an `AppletUnavailableError` (`apps/cloudflare/src/applet-directory.ts`), recognised by its `name` and answered as a 404 rather than a retryable failure, so deleting an Applet that is already gone settles instead of failing forever.
+The facet's own SQLite inside the per-`<userId>:<appletId>` Durable Object, with additive `ALTER TABLE` migration and a 2000-row `_applet_changes` log (`applets/sdk/src/server/store.ts:32-80`). Data is the User's and shared across viewers and across the Bots with access, survives publish, revert and transfer, and is destroyed only by a deletion: the owner Bot's `applet_delete`, the User's own from the owner Bot's Applets list over `POST /api/bots/<botId>/applets/<appletId>/delete`, or the owner Bot's deletion. All three tombstone the entry and queue the cleanup that destroys the Applet's Durable Object state and its source. An id the directory does not list is an `AppletUnavailableError` (`apps/cloudflare/src/applet-directory.ts`), recognised by its `name` and answered as a 404 rather than a retryable failure, so deleting an Applet that is already gone settles instead of failing forever.
 
 ---
 

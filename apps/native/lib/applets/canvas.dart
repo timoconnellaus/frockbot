@@ -53,10 +53,10 @@ class AppletCanvasController extends ChangeNotifier {
   AppletViewer? viewer;
   AppletCanvasFailure? failure;
 
-  /// Why the Applet *directory* could not be read, which is a different thing
-  /// from why the focused Applet's detail could not be: the picker lists the
-  /// directory and nothing else, so a source read that failed is not its
-  /// failure to report.
+  /// Why this Bot's Applet *directory* could not be read, which is a different
+  /// thing from why the focused Applet's detail could not be: the Applet list
+  /// shows the directory and nothing else, so a source read that failed is not
+  /// its failure to report.
   AppletCanvasFailure? directoryFailure;
   bool loading = true;
   bool loaded = false;
@@ -80,8 +80,17 @@ class AppletCanvasController extends ChangeNotifier {
   /// adopted whatever the held one's expiry reads.
   bool _credentialDue = false;
 
+  /// The focused Applet the backend refused this Bot the source of, although
+  /// the directory last said the Bot owned it: a transfer landed in between.
+  String? _notOwner;
+
   wire.AppletSummary? get focused =>
       directory.where((applet) => applet.appletId == focusedId).firstOrNull;
+
+  /// Whether this Bot may read the focused Applet's code. Only the owner may;
+  /// a shared Bot uses the Applet and never sees what it is made of.
+  bool get codeReadable =>
+      focused?.access != 'shared' && _notOwner != focusedId;
 
   /// Whether the code view has anything to draw yet for the focused Applet.
   bool get codeRead => source != null && source?.appletId == focusedId;
@@ -227,15 +236,25 @@ class AppletCanvasController extends ChangeNotifier {
 
   Future<void> _readCode(int epoch) async {
     final appletId = focusedId;
-    if (appletId == null) return;
-    final results = await Future.wait([
-      applets.source(botId, appletId),
-      applets.build(botId, appletId),
-    ]);
-    if (epoch != _epoch || focusedId != appletId) return;
-    source = results[0] as AppletSource;
-    build = results[1] as AppletBuild;
-    appletTimingV1('code-read');
+    if (appletId == null || !codeReadable) return;
+    try {
+      final results = await Future.wait([
+        applets.source(botId, appletId),
+        applets.build(botId, appletId),
+      ]);
+      if (epoch != _epoch || focusedId != appletId) return;
+      source = results[0] as AppletSource;
+      build = results[1] as AppletBuild;
+      appletTimingV1('code-read');
+    } on RequestFailure catch (failure) when (failure.code ==
+        'applet-not-owner') {
+      // Not a failure of the canvas: this Bot may use the Applet and not read
+      // it, which is what the code view going away says.
+      if (epoch != _epoch || focusedId != appletId) return;
+      _notOwner = appletId;
+      source = null;
+      build = null;
+    }
   }
 
   /// A network that might come back is retried on a widening backoff; a
@@ -256,7 +275,7 @@ class AppletCanvasController extends ChangeNotifier {
 
   /// Moves the canvas onto the chosen Applet before the write that records it.
   ///
-  /// The picker already decided which Applet this is, so drawing it now shows
+  /// The Applet list already decided which Applet this is, so drawing it now shows
   /// the choice rather than guessing at an answer. The backend answers with
   /// what it *kept*, which need not be what was asked, so [setFocus]
   /// reconciles against that answer and the caller compares the two.
@@ -272,8 +291,8 @@ class AppletCanvasController extends ChangeNotifier {
   }
 
   /// Records the focus, then reads the open route: the frame for the new
-  /// Applet is loading before its code is asked for, and a picker tap is one
-  /// write and one read.
+  /// Applet is loading before its code is asked for, and a tap on the Applet
+  /// list is one write and one read.
   Future<void> setFocus(String? appletId) async {
     final before = focusedId;
     predictFocus(appletId);
@@ -518,8 +537,11 @@ class _AppletCanvasState extends State<AppletCanvas> {
     setState(() {});
   }
 
+  /// A shared Applet has no code view to switch to, so its live page is all
+  /// there is whenever it has one.
   bool get _showingApp =>
-      controller.viewer != null && (_chosenApp ?? _followedApp);
+      controller.viewer != null &&
+      (!controller.codeReadable || (_chosenApp ?? _followedApp));
 
   /// The reader asked for one side of the Applet. The code is read when it is
   /// looked at, never ahead of the frame.
@@ -590,7 +612,9 @@ class _AppletCanvasState extends State<AppletCanvas> {
                           Positioned.fill(
                             child: Offstage(
                               offstage: _showingApp,
-                              child: _code(context),
+                              child: controller.codeReadable
+                                  ? _code(context)
+                                  : _unpublished(context),
                             ),
                           ),
                           // The running Applet is kept, not rebuilt, while the
@@ -666,7 +690,7 @@ class _AppletCanvasState extends State<AppletCanvas> {
                 ),
               ),
             ),
-            if (viewer != null)
+            if (viewer != null && controller.codeReadable)
               identified(
                 AppletIds.tabs,
                 IconButton(
@@ -766,6 +790,28 @@ class _AppletCanvasState extends State<AppletCanvas> {
         ],
       ),
     ),
+  );
+
+  /// A shared Applet with nothing published: the progress line above says
+  /// where it has got to, and there is no source this Bot may be shown.
+  Widget _unpublished(BuildContext context) => ListView(
+    padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
+    children: [
+      if (controller.failure case final AppletCanvasFailure failure)
+        _failure(
+          context,
+          failure.retry == AppletRetry.auto
+              ? '${failure.message} Trying again…'
+              : failure.message,
+        )
+      else if (_timedOut)
+        _failure(context, 'This is taking longer than it should.'),
+      Text(
+        'This Applet hasn’t been published yet. The Bot that owns it is still '
+        'building it.',
+        style: Theme.of(context).textTheme.bodySmall,
+      ),
+    ],
   );
 
   /// Building: the source as it is written, and the last check.

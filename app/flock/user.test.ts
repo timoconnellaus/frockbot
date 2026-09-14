@@ -450,6 +450,113 @@ describe("Flock User contribution", () => {
     }
   });
 
+  test("a lifecycle's consequence is refused at admission or applied as it settles", async () => {
+    const storage = new MemoryStorage();
+    const settled: string[] = [];
+    let refuse = false;
+    let archiveStatus: "applied" | "rejected" = "applied";
+    const contribution = createFlockUserBackendContribution({
+      storage,
+      commandBotLifecycle: (_userId, lifecycleCommand) =>
+        Promise.resolve({
+          schemaVersion: 1,
+          commandId: lifecycleCommand.commandId,
+          botId: lifecycleCommand.botId,
+          status:
+            lifecycleCommand.type === "bot/archive" ? archiveStatus : "applied",
+          lifecycle: {
+            schemaVersion: 1,
+            botId: lifecycleCommand.botId,
+            status:
+              lifecycleCommand.type === "bot/archive" &&
+              archiveStatus === "applied"
+                ? "archived"
+                : lifecycleCommand.type === "bot/delete"
+                  ? "deleted"
+                  : "active",
+            revision: 1,
+          },
+          ...(archiveStatus === "rejected" &&
+          lifecycleCommand.type === "bot/archive"
+            ? { failure: "Bot has active or reconciling work" }
+            : {}),
+        }),
+      readBotLifecycle: () => Promise.reject(new Error("not used")),
+      lifecycleEffects: {
+        admit: (_transaction, lifecycleCommand) => {
+          if (refuse)
+            return Promise.reject(
+              Object.assign(new Error("the Applets changed"), {
+                name: "AppletImpactConflictError",
+              }),
+            );
+          settled.push(`admit:${lifecycleCommand.commandId}`);
+          return Promise.resolve();
+        },
+        settle: async (transaction, lifecycleCommand, lifecycle) => {
+          // In the settling transaction: what it writes lands with the receipt.
+          await transaction.put(`effect:${lifecycleCommand.commandId}`, true);
+          settled.push(`settle:${lifecycleCommand.commandId}:${lifecycle.status}`);
+        },
+      },
+    });
+    await contribution.createBot("user-1", command());
+
+    archiveStatus = "rejected";
+    expect(
+      await contribution.executeLifecycle("user-1", {
+        schemaVersion: 1,
+        type: "bot/archive",
+        commandId: "archive-busy",
+        botId: "alpha",
+      }),
+    ).toMatchObject({ status: "rejected" });
+    archiveStatus = "applied";
+    await contribution.executeLifecycle("user-1", {
+      schemaVersion: 1,
+      type: "bot/archive",
+      commandId: "archive-1",
+      botId: "alpha",
+    });
+    // A rejected change has no consequence; an applied one has exactly one.
+    expect(settled).toEqual([
+      "admit:archive-busy",
+      "admit:archive-1",
+      "settle:archive-1:archived",
+    ]);
+    expect(storage.values.get("effect:archive-1")).toBe(true);
+    expect(storage.values.has("effect:archive-busy")).toBe(false);
+
+    refuse = true;
+    const stale = {
+      schemaVersion: 1 as const,
+      type: "bot/delete" as const,
+      commandId: "delete-stale",
+      botId: "alpha",
+      appletImpact: "0123456789abcdef",
+    };
+    await expect(
+      contribution.executeLifecycle("user-1", stale),
+    ).rejects.toMatchObject({ name: "AppletImpactConflictError" });
+    // Refused before anything was recorded: no receipt, no saga, no lock, and
+    // the Bot is still registered, so a fresh confirmation can try again.
+    expect(storage.values.has("flock:lifecycle-receipt:delete-stale")).toBe(
+      false,
+    );
+    expect(storage.values.has("flock:lifecycle-saga:delete-stale")).toBe(false);
+    expect(storage.values.has("flock:lifecycle-operation:alpha")).toBe(false);
+    expect((await contribution.listBots()).bots).toHaveLength(1);
+
+    refuse = false;
+    expect(
+      await contribution.executeLifecycle("user-1", {
+        ...stale,
+        commandId: "delete-fresh",
+      }),
+    ).toMatchObject({ status: "applied", lifecycle: { status: "deleted" } });
+    expect(settled.at(-1)).toBe("settle:delete-fresh:deleted");
+  });
+
   test("durably rejects duplicate IDs and the bounded directory limit", async () => {
     const storage = new MemoryStorage();
     const contribution = createFlockUserBackendContribution({
