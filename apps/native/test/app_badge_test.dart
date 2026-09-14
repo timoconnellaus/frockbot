@@ -23,8 +23,8 @@ class _ShellApi extends NativeApi {
   final Completer<Object?> fanOut;
 
   /// Whether `/api/bots` fails, leaving the shell with no directory at all
-  /// while the fan-out still answers.
-  final bool directoryFails;
+  /// while the fan-out still answers. A test flips it to bring the read back.
+  bool directoryFails;
   @override
   Future<Object?> request(
     String path, {
@@ -508,6 +508,72 @@ void main() {
       await tester.pump(const Duration(seconds: 11));
       await tester.pumpAndSettle();
       expect(calls, isEmpty);
+
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpAndSettle();
+      sessions.clear();
+      links.dispose();
+      api.close();
+      debugDefaultTargetPlatformOverride = null;
+    });
+
+    testWidgets('and draws it once a failed directory read comes back', (
+      tester,
+    ) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+      tester.view.physicalSize = const Size(320, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final calls = <MethodCall>[];
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(const MethodChannel('com.frockbot/badge'), (
+            call,
+          ) async {
+            calls.add(call);
+            return null;
+          });
+
+      final store = MemoryStore();
+      store.values['directory/test-user'] = jsonEncode({
+        'schemaVersion': 1,
+        'revision': 1,
+        'bots': [registration('alpha', 'Alpha')],
+      });
+      final fanOut = Completer<Object?>()
+        ..complete({
+          'schemaVersion': 1,
+          'unread': [view('alpha', count: 2).toJson()],
+        });
+      final api = _ShellApi(store, [
+        registration('alpha', 'Alpha'),
+      ], fanOut, directoryFails: true);
+      final sessions = BotSessions(api: api, store: store);
+      final links = ValueNotifier<String?>(null);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: FrockTheme.theme(Brightness.dark),
+          home: AppShell(
+            api: api,
+            store: store,
+            sessions: sessions,
+            userId: 'test-user',
+            botLinks: links,
+            onSignOut: () async {},
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(calls, isEmpty);
+
+      // Connectivity returns. Nothing the User does asks for the directory
+      // again, so the poll has to: until it lands the icon is frozen for the
+      // rest of the session while the sidebar keeps counting.
+      api.directoryFails = false;
+      await tester.pump(const Duration(seconds: 11));
+      await tester.pumpAndSettle();
+      expect(calls.map((call) => call.method), ['set']);
+      expect((calls.single.arguments as Map)['label'], '2');
 
       await tester.pumpWidget(const SizedBox());
       await tester.pumpAndSettle();

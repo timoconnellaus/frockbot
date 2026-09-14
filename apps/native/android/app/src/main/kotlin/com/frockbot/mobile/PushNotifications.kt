@@ -78,31 +78,24 @@ object PushNotifications {
         val manager = NotificationManagerCompat.from(context)
         val active = context.getSystemService(NotificationManager::class.java).activeNotifications
             .filter { it.id == 1 }.mapNotNull { it.tag }.toSet()
+        val plan = badgeReconcileV1(
+            bots,
+            silenced,
+            active,
+            storedCount = { if (store.contains("count:$it")) store.getInt("count:$it", 0) else null },
+            storedMessages = { store.contains("messages:$it") },
+        )
         // One editor for the whole reconcile: this runs on the platform thread
         // for every badge change, and a per-Bot synchronous commit would block
         // it once per Bot in the account.
         val editor = store.edit()
-        val cancel = mutableListOf<String>()
-        for (botId in silenced) {
-            if (botId in active) cancel.add(botId)
-            else if (!store.contains("messages:$botId") && !store.contains("count:$botId")) continue
-            editor.remove("messages:$botId").remove("count:$botId")
-        }
-        val refresh = mutableListOf<String>()
-        for ((botId, count) in bots) {
-            if (count <= 0) {
-                if (!store.contains("count:$botId")) continue
-                editor.remove("count:$botId")
-            } else {
-                if (store.getInt("count:$botId", -1) == count) continue
-                editor.putInt("count:$botId", count)
-            }
-            if (botId in active) refresh.add(botId)
-        }
+        for (botId in plan.forget) editor.remove("messages:$botId").remove("count:$botId")
+        for (botId in plan.drop) editor.remove("count:$botId")
+        for ((botId, count) in plan.store) editor.putInt("count:$botId", count)
         // Applied before any show(), which reads back the count it draws.
         editor.apply()
-        for (botId in cancel) manager.cancel(botId, 1)
-        for (botId in refresh) {
+        for (botId in plan.cancel) manager.cancel(botId, 1)
+        for (botId in plan.refresh) {
             val messages = JSONArray(store.getString("messages:$botId", "[]"))
             if (messages.length() > 0) show(context, botId, messages, false)
         }

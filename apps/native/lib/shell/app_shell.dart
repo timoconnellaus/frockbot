@@ -175,6 +175,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// directory, so an empty one that was never read — or whose read failed —
   /// is unknown rather than an account with nothing unread.
   bool directoryLoaded = false;
+
+  /// Whether [load] is in flight, so the retry the poll makes while the
+  /// directory is still unknown cannot stack reads on top of each other.
+  bool _loadingDirectory = false;
   bool _searchOpen = false;
 
   /// On a phone the Bot list is the first screen and a conversation is a
@@ -325,7 +329,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     _activityTimer?.cancel();
     _activityTimer = Timer.periodic(
       const Duration(seconds: 10),
-      (_) => unawaited(activity.load()),
+      (_) => _refresh(),
     );
   }
 
@@ -343,8 +347,17 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       unawaited(_stopDictation());
       return;
     }
-    unawaited(activity.load());
+    _refresh();
     _startPolling();
+  }
+
+  /// The unread counts, and the directory again while its read has never
+  /// succeeded. The badge counts over the directory, so a failed first read
+  /// would otherwise leave the icon unreconciled for the rest of the session
+  /// while the sidebar's own counts kept moving.
+  void _refresh() {
+    unawaited(activity.load());
+    if (!directoryLoaded) unawaited(load());
   }
 
   /// Opens the footer and starts the call in the one gesture.
@@ -481,6 +494,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   }
 
   Future<void> load() async {
+    if (_loadingDirectory) return;
+    _loadingDirectory = true;
     unawaited(_readIdentity());
     unawaited(_readCredit());
     try {
@@ -545,6 +560,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         });
       }
     } finally {
+      _loadingDirectory = false;
       if (mounted) setState(() => loaded = true);
     }
   }

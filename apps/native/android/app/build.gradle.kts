@@ -87,4 +87,7 @@ dependencies {
     implementation(platform("com.google.firebase:firebase-bom:34.18.0"))
     implementation("com.google.firebase:firebase-messaging")
     implementation("androidx.core:core-ktx:1.17.0")
+    // The badge reconcile rule is pure Kotlin so it can be run here rather
+    // than on a device; `./gradlew :app:testDebugUnitTest` covers it.
+    testImplementation("junit:junit:4.13.2")
 }
