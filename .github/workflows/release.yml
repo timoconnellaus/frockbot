@@ -458,6 +458,21 @@ jobs:
             printf 'Missing macOS release secrets: %s\n' "${missing[*]}" >&2
             exit 1
           fi
+          python3 - <<'PY'
+          import importlib.util
+          import os
+          import sys
+
+          spec = importlib.util.spec_from_file_location("mac_appcast", "scripts/mac-appcast.py")
+          appcast = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(appcast)
+          try:
+              key = appcast.SigningKey(os.environ["SPARKLE_ED_PRIVATE_KEY"])
+          except ValueError as error:
+              sys.exit(f"SPARKLE_ED_PRIVATE_KEY is not a Sparkle EdDSA key: {error}")
+          if key.public_base64 != os.environ["SPARKLE_ED_PUBLIC_KEY"].strip():
+              sys.exit("SPARKLE_ED_PRIVATE_KEY does not match the SPARKLE_ED_PUBLIC_KEY the app is built with.")
+          PY
 
       - name: Import Developer ID identity and profile
         id: signing
@@ -980,10 +995,20 @@ jobs:
           publish() {
             local name="$1"; shift
             local current="$RUNNER_TEMP/current-$name" next="$RUNNER_TEMP/$name"
-            rm -f "$current" "$next"
+            local log="$RUNNER_TEMP/current-$name.log"
+            rm -f "$current" "$next" "$log"
             # Read the bucket, not the edge: a stale cached copy must not let
-            # an older build overwrite a newer feed.
-            bunx wrangler r2 object get "$bucket/mac/$name" --remote --file "$current" || rm -f "$current"
+            # an older build overwrite a newer feed. Only a feed that is really
+            # absent counts as empty; any other read failure stops the publish,
+            # because a feed we could not read cannot be compared against.
+            if ! bunx wrangler r2 object get "$bucket/mac/$name" --remote --file "$current" > "$log" 2>&1; then
+              rm -f "$current"
+              if ! grep -qiE 'does not exist|[^0-9]10007[^0-9]|not found' "$log"; then
+                cat "$log" >&2
+                echo "Could not read the current $name from R2; refusing to overwrite it." >&2
+                return 1
+              fi
+            fi
             python3 scripts/mac-appcast.py --archive "$asset" --version "$VERSION" \
               --build "$GITHUB_RUN_NUMBER" --url "$url" --current "$current" --output "$next" "$@"
             if [[ ! -f "$next" ]]; then return 0; fi
