@@ -15,7 +15,13 @@ import {
   type NativeAuthOptions,
 } from "./native-auth.js";
 import { createGateway } from "./gateway.js";
-import type { AccountAdmissionDecisionV1 } from "@frockbot/app/admin/shared";
+import type {
+  AccountAccessV1,
+  AccountAdmissionDecisionV1,
+  AdmissionModeV1,
+  EmailInvitationV1,
+} from "@frockbot/app/admin/shared";
+import { evaluateAdmissionV1 } from "./account-admission.js";
 import {
   nativeSessionOperation,
   type NativeSessionStorage,
@@ -772,6 +778,132 @@ describe("beta access on the native door", () => {
     return { authorization: `Bearer ${view.sessionToken}` };
   }
 
+  test.each([false, true])(
+    "a used authorization cannot activate access or redeem an invitation (revoked=%s)",
+    async (revoked) => {
+      let mode: AdmissionModeV1 = "open";
+      let access: AccountAccessV1 | null = null;
+      let invitation: EmailInvitationV1 | null = null;
+      let admissionCalls = 0;
+      const f = fixture({
+        admit: async (userId) => {
+          admissionCalls++;
+          const evaluation = evaluateAdmissionV1({
+            mode,
+            identity: {
+              schemaVersion: 1,
+              userId,
+              email: "owner@example.com",
+              emailVerified: true,
+              isAdmin: false,
+            },
+            access,
+            invitation,
+          });
+          if (evaluation.activate) {
+            access = {
+              schemaVersion: 1,
+              userId,
+              state: "active",
+              revision: (access?.revision ?? 0) + 1,
+              updatedAt: new Date(f.now()).toISOString(),
+              updatedBy: "admission",
+            };
+          }
+          if (evaluation.redeemInvitation) invitation = null;
+          return evaluation.decision;
+        },
+      });
+      const command = await f.authorize();
+      const issued = await f.auth.route(
+        f.request("/api/auth/native/exchange", command),
+      );
+      expect(issued?.status).toBe(200);
+      const session = decodeProtocol("AuthSessionView", await issued!.json());
+      if (revoked) {
+        const response = await f.auth.route(
+          f.request(
+            "/api/auth/native/revoke",
+            {
+              schemaVersion: 1,
+              commandId: "sign-out-1",
+              action: "sign-out",
+              sessionId: session.sessionId,
+            },
+            { authorization: `Bearer ${session.sessionToken}` },
+          ),
+        );
+        expect(response?.status).toBe(200);
+      }
+      f.advance(1_000);
+      for (const grant of ["account", "email", "open"] as const) {
+        mode = grant === "open" ? "open" : "invite-only";
+        access =
+          grant === "account"
+            ? {
+                schemaVersion: 1,
+                userId: "user-1",
+                state: "invited",
+                revision: 2,
+                updatedAt: new Date(f.now()).toISOString(),
+                updatedBy: "admin",
+              }
+            : null;
+        invitation =
+          grant === "email"
+            ? {
+                schemaVersion: 1,
+                email: "owner@example.com",
+                invitedAt: new Date(f.now()).toISOString(),
+                invitedBy: "admin",
+              }
+            : null;
+        const before = structuredClone({ access, invitation });
+        const sessionsBefore = structuredClone(f.values);
+        const replay = await f.auth.route(
+          f.request("/api/auth/native/exchange", command),
+        );
+        expect(replay?.status).toBe(400);
+        expect(admissionCalls).toBe(1);
+        expect({ access, invitation }).toEqual(before);
+        expect(f.values).toEqual(sessionsBefore);
+        expect(
+          evaluateAdmissionV1({
+            mode: "closed",
+            identity: {
+              schemaVersion: 1,
+              userId: "user-1",
+              email: "owner@example.com",
+              emailVerified: true,
+              isAdmin: false,
+            },
+            access,
+            invitation,
+          }).decision,
+        ).toMatchObject({ admitted: false, reason: "admission-closed" });
+      }
+    },
+  );
+
+  test("session authority failure on exchange cannot invoke admission", async () => {
+    let admissions = 0;
+    const f = fixture({
+      admit: async () => {
+        admissions++;
+        return activeDecision;
+      },
+      session: async () => {
+        throw new Error("Session authority unavailable");
+      },
+    });
+    const response = await f.auth.route(
+      f.request("/api/auth/native/exchange", await f.authorize()),
+    );
+    expect(response?.status).toBe(400);
+    expect(admissions).toBe(0);
+    expect(f.values.size).toBe(0);
+  });
+
   test("a refused exchange names its reason and issues nothing", async () => {
     for (const reason of [
       "admission-closed",
@@ -787,7 +919,7 @@ describe("beta access on the native door", () => {
         code: "account-access-refused",
         reason,
       });
-      expect(g.operations).toEqual([]);
+      expect(g.operations).toEqual(["check-issue"]);
       expect(g.values.size).toBe(0);
     }
   });
@@ -801,13 +933,13 @@ describe("beta access on the native door", () => {
     expect(await response.json()).toMatchObject({
       code: "account-access-unavailable",
     });
-    expect(g.operations).toEqual([]);
+    expect(g.operations).toEqual(["check-issue"]);
   });
 
   test("a valid session is read before its bearer is re-admitted", async () => {
     const g = gated();
     const headers = await signIn(g);
-    expect(g.operations).toEqual(["issue"]);
+    expect(g.operations).toEqual(["check-issue", "issue"]);
 
     const admitted = await g.auth.authenticate(
       g.request("/api/identity", undefined, headers),
@@ -818,7 +950,7 @@ describe("beta access on the native door", () => {
       emailVerified: true,
     });
     expect(admitted?.admission).toEqual(activeDecision);
-    expect(g.operations).toEqual(["issue", "read"]);
+    expect(g.operations).toEqual(["check-issue", "issue", "read"]);
 
     g.set(paused);
     const refused = await g.auth.authenticate(
@@ -829,7 +961,7 @@ describe("beta access on the native door", () => {
     expect(await refused?.refusal?.json()).toMatchObject({
       reason: "account-paused",
     });
-    expect(g.operations).toEqual(["issue", "read", "read"]);
+    expect(g.operations).toEqual(["check-issue", "issue", "read", "read"]);
 
     g.set("unavailable");
     const unavailable = await g.auth.authenticate(
@@ -837,7 +969,13 @@ describe("beta access on the native door", () => {
     );
     expect(unavailable?.session).toBeNull();
     expect(unavailable?.refusal?.status).toBe(503);
-    expect(g.operations).toEqual(["issue", "read", "read", "read"]);
+    expect(g.operations).toEqual([
+      "check-issue",
+      "issue",
+      "read",
+      "read",
+      "read",
+    ]);
 
     // An identity that no longer exists is a sign-in problem, and only that is.
     g.set(null);
@@ -845,7 +983,14 @@ describe("beta access on the native door", () => {
       g.request("/api/identity", undefined, headers),
     );
     expect(gone).toEqual({ session: null });
-    expect(g.operations).toEqual(["issue", "read", "read", "read", "read"]);
+    expect(g.operations).toEqual([
+      "check-issue",
+      "issue",
+      "read",
+      "read",
+      "read",
+      "read",
+    ]);
   });
 
   test("the gateway answers a refused or unreachable bearer as the authority did, and asks once", async () => {
@@ -892,7 +1037,13 @@ describe("beta access on the native door", () => {
 
     g.set("unavailable");
     expect((await identity()).status).toBe(503);
-    expect(g.operations).toEqual(["issue", "read", "read", "read"]);
+    expect(g.operations).toEqual([
+      "check-issue",
+      "issue",
+      "read",
+      "read",
+      "read",
+    ]);
   });
 
   test("a refused account cannot open settings but can revoke its session", async () => {
@@ -921,7 +1072,7 @@ describe("beta access on the native door", () => {
     );
     // Sign-out persists revocation even though product access is paused.
     expect(signOut?.status).toBe(200);
-    expect(g.operations).toEqual(["issue", "read", "revoke"]);
+    expect(g.operations).toEqual(["check-issue", "issue", "read", "revoke"]);
 
     g.set("unavailable");
     const unavailable = await g.auth.route(
@@ -937,7 +1088,13 @@ describe("beta access on the native door", () => {
       ),
     );
     expect(unavailable?.status).toBe(200);
-    expect(g.operations).toEqual(["issue", "read", "revoke", "revoke"]);
+    expect(g.operations).toEqual([
+      "check-issue",
+      "issue",
+      "read",
+      "revoke",
+      "revoke",
+    ]);
     g.set(activeDecision);
     const admissionCalls = g.admitted.length;
     expect(

@@ -646,6 +646,10 @@ export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
             hello: claims.hello,
             expires: now() + 7 * 86400_000,
           };
+          await options.session(
+            session.userId,
+            operation(session, "check-issue"),
+          );
           const admitted = await admitBeforeUser(session.userId);
           if (admitted instanceof Response) return admitted;
           if (admitted === null) return error(401);
