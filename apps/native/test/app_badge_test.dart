@@ -816,135 +816,137 @@ void main() {
       debugDefaultTargetPlatformOverride = null;
     });
 
-    testWidgets('and syncs each Bot once while reapplying capped focused suppression', (
-      tester,
-    ) async {
-      debugDefaultTargetPlatformOverride = TargetPlatform.android;
-      tester.view.physicalSize = const Size(800, 800);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.resetPhysicalSize);
-      addTearDown(tester.view.resetDevicePixelRatio);
-      final badges = <Map<Object?, Object?>>[];
-      final activeNotifications = <String, int>{'alpha': 2, 'beta': 100};
-      final reads = <Map<Object?, Object?>>[];
-      final readCompleted = {
-        for (final botId in ['alpha', 'beta', 'gamma'])
-          botId: Completer<void>(),
-      };
-      final messenger =
-          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
-      messenger.setMockMethodCallHandler(const MethodChannel('frockbot/push'), (
-        call,
-      ) async {
-        if (call.method == 'configure') return 'token-1';
-        if (call.method == 'focus') return true;
-        if (call.method == 'read') {
-          final payload = call.arguments as Map<Object?, Object?>;
-          reads.add(payload);
-          final botId = payload['botId'] as String;
-          await readCompleted[botId]!.future;
-          if (botId == 'beta') activeNotifications['beta'] = 100;
-        }
-        if (call.method == 'badge') {
-          final payload = call.arguments as Map<Object?, Object?>;
-          badges.add(payload);
-          for (final botId in payload['suppressed'] as List) {
-            activeNotifications.remove(botId);
-          }
-        }
-        return null;
-      });
-      addTearDown(
-        () => messenger.setMockMethodCallHandler(
+    testWidgets(
+      'and syncs each Bot once while reapplying capped focused suppression',
+      (tester) async {
+        debugDefaultTargetPlatformOverride = TargetPlatform.android;
+        tester.view.physicalSize = const Size(800, 800);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        final badges = <Map<Object?, Object?>>[];
+        final activeNotifications = <String, int>{'alpha': 2, 'beta': 100};
+        final reads = <Map<Object?, Object?>>[];
+        final readCompleted = {
+          for (final botId in ['alpha', 'beta', 'gamma'])
+            botId: Completer<void>(),
+        };
+        final messenger =
+            TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+        messenger.setMockMethodCallHandler(
           const MethodChannel('frockbot/push'),
-          null,
-        ),
-      );
-
-      final store = MemoryStore();
-      store.values['selection.test-user'] = 'beta';
-      final fanOut = Completer<Object?>();
-      final api = _ShellApi(store, [
-        registration('alpha', 'Alpha'),
-        registration('beta', 'Beta'),
-        registration('gamma', 'Gamma'),
-      ], fanOut);
-      final sessions = BotSessions(api: api, store: store);
-      final links = ValueNotifier<String?>(null);
-      await tester.pumpWidget(
-        MaterialApp(
-          theme: FrockTheme.theme(Brightness.dark),
-          home: AppShell(
-            api: api,
-            store: store,
-            sessions: sessions,
-            userId: 'test-user',
-            botLinks: links,
-            onSignOut: () async {},
+          (call) async {
+            if (call.method == 'configure') return 'token-1';
+            if (call.method == 'focus') return true;
+            if (call.method == 'read') {
+              final payload = call.arguments as Map<Object?, Object?>;
+              reads.add(payload);
+              final botId = payload['botId'] as String;
+              await readCompleted[botId]!.future;
+              if (botId == 'beta') activeNotifications['beta'] = 100;
+            }
+            if (call.method == 'badge') {
+              final payload = call.arguments as Map<Object?, Object?>;
+              badges.add(payload);
+              for (final botId in payload['suppressed'] as List) {
+                activeNotifications.remove(botId);
+              }
+            }
+            return null;
+          },
+        );
+        addTearDown(
+          () => messenger.setMockMethodCallHandler(
+            const MethodChannel('frockbot/push'),
+            null,
           ),
-        ),
-      );
-      await tester.pumpAndSettle();
-      expect(badges, isEmpty);
-      fanOut.complete({
-        'schemaVersion': 1,
-        'unread': [
-          view('alpha', count: 2).toJson(),
-          view('beta', count: 99, capped: true).toJson(),
-          view('gamma').toJson(),
-        ],
-      });
-      await tester.pumpAndSettle();
-      final expected = {
-        'bots': {'alpha': 2, 'beta': 100, 'gamma': 0},
-        'silenced': <String>[],
-        'suppressed': ['beta'],
-      };
-      expect(badges, [expected]);
-      expect(activeNotifications, {'alpha': 2});
-      final requestsBeforeRead = api.unreadRequests;
-      api.fanOut = Completer<Object?>()
-        ..complete({
+        );
+
+        final store = MemoryStore();
+        store.values['selection.test-user'] = 'beta';
+        final fanOut = Completer<Object?>();
+        final api = _ShellApi(store, [
+          registration('alpha', 'Alpha'),
+          registration('beta', 'Beta'),
+          registration('gamma', 'Gamma'),
+        ], fanOut);
+        final sessions = BotSessions(api: api, store: store);
+        final links = ValueNotifier<String?>(null);
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: FrockTheme.theme(Brightness.dark),
+            home: AppShell(
+              api: api,
+              store: store,
+              sessions: sessions,
+              userId: 'test-user',
+              botLinks: links,
+              onSignOut: () async {},
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(badges, isEmpty);
+        fanOut.complete({
           'schemaVersion': 1,
           'unread': [
-            for (final unread in [
-              view('alpha', count: 2),
-              view('beta', count: 99, capped: true),
-              view('gamma'),
-            ])
-              {
-                ...unread.toJson() as Map,
-                'lastSeenCursor': 'message-00000000000000000005',
-              },
+            view('alpha', count: 2).toJson(),
+            view('beta', count: 99, capped: true).toJson(),
+            view('gamma').toJson(),
           ],
         });
-      await tester.pump(const Duration(seconds: 11));
-      await tester.pumpAndSettle();
-      expect(api.unreadRequests, requestsBeforeRead + 1);
-      final expectedReads = [
-        for (final botId in readCompleted.keys)
-          {'botId': botId, 'cursor': 'message-00000000000000000005'},
-      ];
-      expect(reads, expectedReads.take(1).toList());
-      expect(badges, [expected]);
-
-      for (var index = 0; index < expectedReads.length; index++) {
-        readCompleted[expectedReads[index]['botId']]!.complete();
         await tester.pumpAndSettle();
-        expect(reads, expectedReads.take(index + 2).toList());
-        expect(badges, List.filled(index + 2, expected));
+        final expected = {
+          'bots': {'alpha': 2, 'beta': 100, 'gamma': 0},
+          'silenced': <String>[],
+          'suppressed': ['beta'],
+        };
+        expect(badges, [expected]);
         expect(activeNotifications, {'alpha': 2});
-      }
-      expect(reads, expectedReads);
-      expect(api.unreadRequests, requestsBeforeRead + 1);
+        final requestsBeforeRead = api.unreadRequests;
+        api.fanOut = Completer<Object?>()
+          ..complete({
+            'schemaVersion': 1,
+            'unread': [
+              for (final unread in [
+                view('alpha', count: 2),
+                view('beta', count: 99, capped: true),
+                view('gamma'),
+              ])
+                {
+                  ...unread.toJson() as Map,
+                  'lastSeenCursor': 'message-00000000000000000005',
+                },
+            ],
+          });
+        await tester.pump(const Duration(seconds: 11));
+        await tester.pumpAndSettle();
+        expect(api.unreadRequests, requestsBeforeRead + 1);
+        final expectedReads = [
+          for (final botId in readCompleted.keys)
+            {'botId': botId, 'cursor': 'message-00000000000000000005'},
+        ];
+        expect(reads, expectedReads.take(1).toList());
+        expect(badges, [expected]);
 
-      await tester.pumpWidget(const SizedBox());
-      await tester.pumpAndSettle();
-      sessions.clear();
-      links.dispose();
-      api.close();
-      debugDefaultTargetPlatformOverride = null;
-    });
+        for (var index = 0; index < expectedReads.length; index++) {
+          readCompleted[expectedReads[index]['botId']]!.complete();
+          await tester.pumpAndSettle();
+          expect(reads, expectedReads.take(index + 2).toList());
+          expect(badges, List.filled(index + 2, expected));
+          expect(activeNotifications, {'alpha': 2});
+        }
+        expect(reads, expectedReads);
+        expect(api.unreadRequests, requestsBeforeRead + 1);
+
+        await tester.pumpWidget(const SizedBox());
+        await tester.pumpAndSettle();
+        sessions.clear();
+        links.dispose();
+        api.close();
+        debugDefaultTargetPlatformOverride = null;
+      },
+    );
 
     testWidgets(
       'and reconciles the launcher once push is ready, not on every focus '
