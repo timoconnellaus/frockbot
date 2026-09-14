@@ -1724,6 +1724,11 @@ describe("the voice session object", () => {
     const speaker = playsAnswers(opened);
     await startCall(opened);
     await opened.waitFor(state("awake"), "awake");
+    // The acknowledgement is still being synthesized when the Bot settles.
+    // Racing a real Bot Turn against the short drain window instead let a
+    // slow runner read the answer out at once, and the only hold left to see
+    // was a second completion signal finding that read-out in flight.
+    await stub.probeHoldTts();
     expect(await stub.probeUtterance("please plan my week")).toBe(true);
     await opened.waitFor(
       (f) =>
@@ -1760,6 +1765,7 @@ describe("the voice session object", () => {
     expect(
       (await stub.probeSynthesized()).some((t) => t.startsWith("Workerd Bot")),
     ).toBe(false);
+    await stub.probeReleaseTts();
     // Once the window has passed the scheduled read-out lands.
     await opened.waitFor(
       (f) =>
