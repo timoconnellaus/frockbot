@@ -403,6 +403,8 @@ jobs:
     timeout-minutes: 45
     permissions:
       contents: read
+    outputs:
+      minimum_system: ${{ steps.bundle.outputs.minimum_system }}
     steps:
       - name: Check out the release tag
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -439,6 +441,8 @@ jobs:
           MACOS_DEVELOPER_ID_PROFILE_BASE64: ${{ secrets.MACOS_DEVELOPER_ID_PROFILE_BASE64 }}
           APPLE_NOTARIZATION_ID: ${{ secrets.APPLE_NOTARIZATION_ID }}
           APPLE_NOTARIZATION_PASSWORD: ${{ secrets.APPLE_NOTARIZATION_PASSWORD }}
+          SPARKLE_ED_PUBLIC_KEY: ${{ vars.SPARKLE_ED_PUBLIC_KEY }}
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
         shell: bash
         run: |
           missing=()
@@ -447,13 +451,30 @@ jobs:
             MACOS_DEVELOPER_ID_P12_PASSWORD \
             MACOS_DEVELOPER_ID_PROFILE_BASE64 \
             APPLE_NOTARIZATION_ID \
-            APPLE_NOTARIZATION_PASSWORD; do
+            APPLE_NOTARIZATION_PASSWORD \
+            SPARKLE_ED_PUBLIC_KEY \
+            SPARKLE_ED_PRIVATE_KEY; do
             if [[ -z "${!name}" ]]; then missing+=("$name"); fi
           done
           if (( ${#missing[@]} > 0 )); then
             printf 'Missing macOS release secrets: %s\n' "${missing[*]}" >&2
             exit 1
           fi
+          python3 - <<'PY'
+          import importlib.util
+          import os
+          import sys
+
+          spec = importlib.util.spec_from_file_location("mac_appcast", "scripts/mac-appcast.py")
+          appcast = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(appcast)
+          try:
+              key = appcast.SigningKey(os.environ["SPARKLE_ED_PRIVATE_KEY"])
+          except ValueError as error:
+              sys.exit(f"SPARKLE_ED_PRIVATE_KEY is not a Sparkle EdDSA key: {error}")
+          if key.public_base64 != os.environ["SPARKLE_ED_PUBLIC_KEY"].strip():
+              sys.exit("SPARKLE_ED_PRIVATE_KEY does not match the SPARKLE_ED_PUBLIC_KEY the app is built with.")
+          PY
 
       - name: Import Developer ID identity and profile
         id: signing
@@ -555,10 +576,18 @@ jobs:
         env:
           PROFILE_UUID: ${{ steps.signing.outputs.profile_uuid }}
           SIGNING_IDENTITY: ${{ steps.signing.outputs.identity }}
+          SPARKLE_ED_PUBLIC_KEY: ${{ vars.SPARKLE_ED_PUBLIC_KEY }}
           VERSION: ${{ needs.verify.outputs.version }}
         shell: bash
         run: |
           set -euo pipefail
+          # A prerelease follows the staging feed, so a tester who installs one
+          # keeps receiving prereleases; a release follows the stable feed.
+          if [[ "$VERSION" == *-* ]]; then
+            feed="https://downloads.frockbot.com/mac/appcast-staging.xml"
+          else
+            feed="https://downloads.frockbot.com/mac/appcast.xml"
+          fi
           python3 ../../scripts/check-native-pins.py
           flutter pub get --enforce-lockfile
           flutter build macos \
@@ -580,12 +609,32 @@ jobs:
             FROCKBOT_PROVISIONING_PROFILE_SPECIFIER="$PROFILE_UUID" \
             CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO \
             ENABLE_HARDENED_RUNTIME=YES \
-            OTHER_CODE_SIGN_FLAGS=--timestamp
+            OTHER_CODE_SIGN_FLAGS=--timestamp \
+            FROCKBOT_UPDATE_FEED_URL="$feed" \
+            FROCKBOT_UPDATE_PUBLIC_KEY="$SPARKLE_ED_PUBLIC_KEY"
+
+          # Xcode signs the embedded Sparkle framework but not the helpers
+          # nested inside it, and notarization rejects any executable without
+          # the Developer ID, a timestamp and the hardened runtime. Sign them
+          # inside-out as Sparkle documents, then reseal the app with the
+          # entitlements Xcode already gave it.
+          app="$RUNNER_TEMP/FrockBot.xcarchive/Products/Applications/FrockBot.app"
+          sparkle="$app/Contents/Frameworks/Sparkle.framework"
+          test -d "$sparkle"
+          sign() { codesign --force --sign "$SIGNING_IDENTITY" --options runtime --timestamp "$@"; }
+          sign "$sparkle/Versions/B/XPCServices/Installer.xpc"
+          sign --preserve-metadata=entitlements "$sparkle/Versions/B/XPCServices/Downloader.xpc"
+          sign "$sparkle/Versions/B/Autoupdate"
+          sign "$sparkle/Versions/B/Updater.app"
+          sign "$sparkle"
+          sign --preserve-metadata=entitlements,requirements,flags "$app"
 
       - name: Verify Developer ID signature
+        id: bundle
         env:
           PROFILE_UUID: ${{ steps.signing.outputs.profile_uuid }}
           SIGNING_IDENTITY: ${{ steps.signing.outputs.identity }}
+          SPARKLE_ED_PUBLIC_KEY: ${{ vars.SPARKLE_ED_PUBLIC_KEY }}
           VERSION: ${{ needs.verify.outputs.version }}
         shell: bash
         run: |
@@ -597,6 +646,18 @@ jobs:
           [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist")" == com.frockbot.mobile ]]
           [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")" == "${VERSION%%-*}" ]]
           [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$app/Contents/Info.plist")" == "$GITHUB_RUN_NUMBER" ]]
+          # The feed's build numbers are this run number; an app that cannot
+          # name its feed and key would never update again, and a prerelease
+          # baked against the stable feed would move its testers off staging
+          # for good.
+          if [[ "$VERSION" == *-* ]]; then
+            expected_feed="https://downloads.frockbot.com/mac/appcast-staging.xml"
+          else
+            expected_feed="https://downloads.frockbot.com/mac/appcast.xml"
+          fi
+          [[ "$(/usr/libexec/PlistBuddy -c 'Print :SUFeedURL' "$app/Contents/Info.plist")" == "$expected_feed" ]]
+          [[ "$(/usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' "$app/Contents/Info.plist")" == "$SPARKLE_ED_PUBLIC_KEY" ]]
+          codesign --verify --strict "$app/Contents/Frameworks/Sparkle.framework/Versions/B/Autoupdate"
           security cms -D -i "$app/Contents/embedded.provisionprofile" > "$embedded_profile"
           [[ "$(/usr/libexec/PlistBuddy -c 'Print :UUID' "$embedded_profile")" == "$PROFILE_UUID" ]]
           codesign --verify --deep --strict --verbose=2 "$app"
@@ -619,6 +680,9 @@ jobs:
           if not isinstance(groups, list) or "Q444L76529.com.frockbot.mobile" not in groups:
               raise SystemExit("The distributable desktop app lost its protected Keychain group.")
           PY
+          minimum="$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$app/Contents/Info.plist")"
+          [[ -n "$minimum" ]]
+          echo "minimum_system=$minimum" >> "$GITHUB_OUTPUT"
 
       - name: Notarize and staple desktop app and disk image
         env:
@@ -916,6 +980,90 @@ jobs:
             exit 1
           fi
           echo "Verified https://frockbot.com/download/mac serves $VERSION ($expected bytes)." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish the in-app update feed
+        # Last, so a running app is only offered a disk image already archived
+        # under its immutable key. Each feed names only the newest build, so an
+        # app skips straight to it, and the script refuses to move a feed
+        # backwards. A tag writes only the feed its own channel owns: a
+        # prerelease staging, a release stable.
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+          SPARKLE_ED_PUBLIC_KEY: ${{ vars.SPARKLE_ED_PUBLIC_KEY }}
+          MINIMUM_SYSTEM: ${{ needs.macos-release.outputs.minimum_system }}
+          VERSION: ${{ needs.verify.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "$SPARKLE_ED_PRIVATE_KEY" || -z "$SPARKLE_ED_PUBLIC_KEY" ]]; then
+            echo 'Missing SPARKLE_ED_PRIVATE_KEY secret or SPARKLE_ED_PUBLIC_KEY variable.' >&2
+            exit 1
+          fi
+          # The feed's floor is the app's own, so raising the deployment target
+          # cannot leave the feed offering the build to Macs that cannot run it.
+          if [[ -z "$MINIMUM_SYSTEM" ]]; then
+            echo 'The macOS build did not report its LSMinimumSystemVersion.' >&2
+            exit 1
+          fi
+          asset=".release-assets/FrockBot-macos.dmg"
+          bucket="frockbot-downloads"
+          url="https://downloads.frockbot.com/mac/FrockBot-macos-$VERSION.dmg"
+          zone="eaeb100c3d48f228cdb2309b5b8152cc"
+
+          publish() {
+            local name="$1"
+            local current="$RUNNER_TEMP/current-$name" next="$RUNNER_TEMP/$name"
+            local log="$RUNNER_TEMP/current-$name.log"
+            rm -f "$current" "$next" "$log"
+            # Read the bucket, not the edge: a stale cached copy must not let
+            # an older build overwrite a newer feed. Only a feed that is really
+            # absent counts as empty; any other read failure stops the publish,
+            # because a feed we could not read cannot be compared against.
+            if ! bunx wrangler r2 object get "$bucket/mac/$name" --remote --file "$current" > "$log" 2>&1; then
+              rm -f "$current"
+              if ! grep -qF 'does not exist' "$log"; then
+                cat "$log" >&2
+                echo "Could not read the current $name from R2; refusing to overwrite it." >&2
+                return 1
+              fi
+            fi
+            python3 scripts/mac-appcast.py --archive "$asset" --version "$VERSION" \
+              --build "$GITHUB_RUN_NUMBER" --url "$url" --minimum-system "$MINIMUM_SYSTEM" \
+              --current "$current" --output "$next"
+            bunx wrangler r2 object put "$bucket/mac/$name" --remote --file "$next" \
+              --content-type application/xml --cache-control "public, max-age=300"
+            printf '{"files":["https://downloads.frockbot.com/mac/%s"]}' "$name" > "$RUNNER_TEMP/purge.json"
+            local response
+            response="$(curl -sS -X POST "https://api.cloudflare.com/client/v4/zones/$zone/purge_cache" \
+              -H "authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "content-type: application/json" \
+              --data "@$RUNNER_TEMP/purge.json")"
+            if ! printf '%s' "$response" | python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin).get("success") else 1)'; then
+              echo "Failed to purge $name from cache." >&2
+              # The overwhelmingly likely cause, and invisible otherwise: the
+              # upload above needs Workers R2 Storage, this needs Zone Cache
+              # Purge, and a token can hold the first without the second.
+              echo 'CLOUDFLARE_API_TOKEN may be missing the "Zone: Cache Purge" permission for frockbot.com.' >&2
+              printf '%s\n' "$response" >&2
+              return 1
+            fi
+            for attempt in 1 2 3 4 5; do
+              if curl -fsSL "https://downloads.frockbot.com/mac/$name" | cmp -s - "$next"; then
+                echo "Update feed $name now offers $VERSION (build $GITHUB_RUN_NUMBER)." >> "$GITHUB_STEP_SUMMARY"
+                return 0
+              fi
+              sleep 15
+            done
+            echo "The served $name does not match what was published." >&2
+            return 1
+          }
+
+          if [[ "$VERSION" == *-* ]]; then
+            publish appcast-staging.xml
+          else
+            publish appcast.xml
+          fi
 
   deploy-marketing:
     name: Deploy marketing site

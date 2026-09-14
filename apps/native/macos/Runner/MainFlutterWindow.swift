@@ -40,6 +40,7 @@ class MainFlutterWindow: NSWindow {
     speaker = PcmSpeaker(flutterViewController.engine.binaryMessenger)
     RegisterGeneratedPlugins(registry: flutterViewController)
     MacMessagesBridge.shared.bind(flutterViewController.engine.binaryMessenger)
+    DesktopUpdater.shared.bind(flutterViewController.engine.binaryMessenger)
 
     super.awakeFromNib()
   }

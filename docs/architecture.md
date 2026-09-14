@@ -341,7 +341,10 @@ browser's with a second staleness rule to get wrong.
 session, the `?bot=` deep link, which it hands to the shell through a
 `ValueNotifier` rather than acting on, and one `builder` that puts the mobile
 update header above every screen (`lib/update/update_ready.dart`; the patch
-delivery it serves is [`apps/native/README.md`](../apps/native/README.md)).
+delivery it serves is [`apps/native/README.md`](../apps/native/README.md)). On
+macOS the same `builder` provides the desktop updater, drawn as a control
+beside the profile button (`lib/update/desktop_update.dart`, Sparkle underneath;
+the plan for every platform is [`docs/app-updates.md`](app-updates.md)).
 Everything a person looks at is `lib/shell/`.
 
 Voice is shell-owned chrome shared by web, Android and macOS: the composer
@@ -1032,8 +1035,9 @@ tests and web build checks for explicit qualification runs.
 
 On pull requests touching the Mac desktop path and on push of a tag matching
 `mac-v*.*.*`. `qualify` runs on macOS: the `@frockbot/mac-messages` typecheck,
-the machine and Messages test files, `scripts/mac-release-test.py`, the Flutter
-Mac Messages test, and an unsigned `scripts/mac-release.py` build. On a tag,
+the machine and Messages test files, `scripts/mac-release-test.py`,
+`scripts/mac-appcast-test.py`, the Flutter Mac Messages and desktop update
+tests, and an unsigned `scripts/mac-release.py` build. On a tag,
 `draft` creates a draft GitHub release only; the signed, notarized archive is
 built and uploaded by hand. Mac tags ship independently of the `v*.*.*` cloud
 release. See [the Mac release guide](../apps/native/macos/README.md).
