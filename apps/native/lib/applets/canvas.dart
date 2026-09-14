@@ -246,8 +246,8 @@ class AppletCanvasController extends ChangeNotifier {
       source = results[0] as AppletSource;
       build = results[1] as AppletBuild;
       appletTimingV1('code-read');
-    } on RequestFailure catch (failure) when (failure.code ==
-        'applet-not-owner') {
+    } on RequestFailure catch (failure) {
+      if (failure.code != 'applet-not-owner') rethrow;
       // Not a failure of the canvas: this Bot may use the Applet and not read
       // it, which is what the code view going away says.
       if (epoch != _epoch || focusedId != appletId) return;

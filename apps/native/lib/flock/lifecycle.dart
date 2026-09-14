@@ -152,8 +152,7 @@ class BotLifecycleCommands extends ChangeNotifier {
           impact = await AppletsApi(api).impact(botId);
         } catch (_) {
           if (type == 'bot/delete') {
-            error =
-                'Couldn’t check which Applets this Bot owns, so nothing was deleted. Try again.';
+            error = 'Couldn’t check which Applets this Bot owns, so nothing was deleted. Try again.';
             _changed();
             return false;
           }
@@ -163,9 +162,7 @@ class BotLifecycleCommands extends ChangeNotifier {
       final applets = impact == null
           ? null
           : botLifecycleAppletsV1(type, impact, nameOf: nameOf);
-      final shown = changed
-          ? [?error, ?applets].join('\n\n')
-          : applets;
+      final shown = changed ? [?error, ?applets].join('\n\n') : applets;
       if (!await confirm(shown)) return false;
       final applied = await change(
         botId,
@@ -226,12 +223,15 @@ class BotLifecycleCommands extends ChangeNotifier {
         'bot/restore' => 'Bot restored.',
         _ => 'Bot deleted.',
       };
-    } on RequestFailure catch (failure) when (failure.status == 409 &&
-        failure.code == 'applet-impact-changed') {
-      await store.delete(_key);
-      _command = null;
-      appletImpactChanged = true;
-      error = 'This Bot’s Applets changed. Review them and try again.';
+    } on RequestFailure catch (failure) {
+      if (failure.status == 409 && failure.code == 'applet-impact-changed') {
+        await store.delete(_key);
+        _command = null;
+        appletImpactChanged = true;
+        error = 'This Bot’s Applets changed. Review them and try again.';
+      } else {
+        error = 'Couldn’t confirm that change. Check its status before trying another action.';
+      }
     } catch (_) {
       error = 'Couldn’t confirm that change. Check its status before trying another action.';
     } finally {
@@ -315,9 +315,7 @@ class _BotDangerZoneState extends State<BotDangerZone> {
                 AlertDialog(
                   title: Text('${words.title} $botName?'),
                   content: SingleChildScrollView(
-                    child: Text(
-                      [words.body, ?applets].join('\n\n'),
-                    ),
+                    child: Text([words.body, ?applets].join('\n\n')),
                   ),
                   actions: [
                     TextButton(
