@@ -740,18 +740,6 @@ class _Header extends StatelessWidget {
               ),
             ),
           ),
-          // A desktop app replaces itself to update, and says so right beside
-          // the account; it draws nothing while there is nothing to do.
-          if (desktopUpdates != null)
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.only(left: 4, right: 4),
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: DesktopUpdateButton(controller: desktopUpdates),
-                ),
-              ),
-            ),
           if (onMarketplace case final VoidCallback open) ...[
             const SizedBox(width: 2),
             identified(
@@ -764,7 +752,20 @@ class _Header extends StatelessWidget {
               ),
             ),
           ],
-          if (desktopUpdates == null) const Spacer(),
+          // A desktop app replaces itself to update, and says so beside the
+          // account; the row's slack is where it speaks, and it draws nothing
+          // while there is nothing to do.
+          Expanded(
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: desktopUpdates == null
+                  ? const SizedBox.shrink()
+                  : Padding(
+                      padding: const EdgeInsets.only(left: 6, right: 4),
+                      child: DesktopUpdateButton(controller: desktopUpdates),
+                    ),
+            ),
+          ),
           identified(
             VoiceIds.sidebarStart,
             IconButton(
