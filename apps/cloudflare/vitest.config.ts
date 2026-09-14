@@ -1,4 +1,5 @@
-import { cloudflareTest } from "@cloudflare/vitest-plugin";
+import { cloudflareTest, readD1Migrations } from "@cloudflare/vitest-plugin";
+import { resolve } from "node:path";
 import { defineConfig } from "vitest/config";
 import {
   createComputerHostFake,
@@ -22,6 +23,13 @@ import {
 // One instance for the whole project. It runs in Node, so the suites reach its
 // state over the same binding, under `/__fake/*`.
 const computerHost = createComputerHostFake();
+
+// better-auth's D1 schema, so `auth-schema.workerd.ts` can boot the real
+// `gatewayAuth()` against the migrations a deployment actually applies. A
+// column better-auth refuses is a live sign-in outage no other check sees.
+const authMigrations = await readD1Migrations(
+  resolve(import.meta.dirname, "migrations"),
+);
 
 export default defineConfig({
   plugins: [
@@ -50,6 +58,7 @@ export default defineConfig({
           createVectorizeFakeWorker("2026-08-27"),
         ],
         r2Buckets: ["APPLICATION_ARTIFACTS", "MEMORY_FILES"],
+        d1Databases: ["AUTH_DB"],
         durableObjects: {
           BOT_ISOLATES: "BotIsolateProbe",
           BOT_STATES: "WorkerdBotState",
@@ -85,6 +94,7 @@ export default defineConfig({
         },
         bindings: {
           BETTER_AUTH_URL: "https://bot.frockbot.com",
+          TEST_MIGRATIONS: authMigrations,
           CREDENTIAL_KEYRING: TEST_CREDENTIAL_KEYRING,
           // Signs the `mcp-oauth` callback state. Fixed, so a test can mint a
           // state the gateway accepts and forge one it must refuse; strong
