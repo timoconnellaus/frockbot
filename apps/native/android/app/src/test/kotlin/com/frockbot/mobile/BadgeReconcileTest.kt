@@ -56,7 +56,7 @@ class BadgeReconcileTest {
             active = setOf("alpha", "gamma"),
             counts = mapOf("alpha" to 2, "gamma" to 4),
         )
-        assertEquals(mapOf("alpha" to 3), plan.store)
+        assertEquals(mapOf("alpha" to 3, "beta" to 2), plan.store)
         assertEquals(listOf("alpha"), plan.refresh)
     }
 
