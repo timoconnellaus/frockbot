@@ -78,14 +78,14 @@ interface StoredConfigurationReceipt {
   receipt: OperationReceiptV1;
 }
 
-export const HIDDEN_BOT_NOTIFICATIONS_FAILURE =
+const HIDDEN_BOT_NOTIFICATIONS_FAILURE =
   "A Bot hidden from the sidebar can’t send notifications. Show it in the sidebar first.";
 
 /**
  * A Bot hidden from the sidebar never alerts. Unread state is untouched: the
  * mute changes whether a message wakes a device, not whether it counts.
  */
-export function hiddenBotSettingsV1(
+function hiddenBotSettingsV1(
   settings: BotSettingsViewV1,
 ): BotSettingsViewV1 {
   return settings.profile.hiddenFromSidebar === true &&
