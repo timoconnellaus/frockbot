@@ -1003,7 +1003,7 @@ jobs:
             # because a feed we could not read cannot be compared against.
             if ! bunx wrangler r2 object get "$bucket/mac/$name" --remote --file "$current" > "$log" 2>&1; then
               rm -f "$current"
-              if ! grep -qiE 'does not exist|[^0-9]10007[^0-9]|not found' "$log"; then
+              if ! grep -qF 'does not exist' "$log"; then
                 cat "$log" >&2
                 echo "Could not read the current $name from R2; refusing to overwrite it." >&2
                 return 1
