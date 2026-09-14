@@ -30,6 +30,8 @@ class FirstRunApi extends NativeApi {
   final Completer<Map<String, dynamic>> directory = Completer();
   String? general = generalId;
   Set<String>? features;
+  int featuresRevision = 0;
+  bool rejectFeatureChange = false;
   final requests = <String>[];
   FirstRunApi(super.store);
 
@@ -62,6 +64,60 @@ class FirstRunApi extends NativeApi {
       return {'schemaVersion': 1, 'generalBotId': general};
     }
     final plugins = features;
+    if (path == '/api/bots/$generalId/plugins' && body is Map) {
+      if (rejectFeatureChange) return {'status': 'rejected'};
+      final id = body['pluginId'] as String;
+      if (body['enabled'] == true) {
+        plugins!.add(id);
+      } else {
+        plugins!.remove(id);
+      }
+      featuresRevision += 1;
+      return {'status': 'applied'};
+    }
+    if (path == '/api/bots/$generalId/plugins?as=document' && plugins != null) {
+      return {
+        'schemaVersion': 1,
+        'surfaceId': 'bot-plugins',
+        'revision': featuresRevision,
+        'root': {
+          'type': 'group',
+          'orientation': 'column',
+          'children': [
+            for (final id in ['web', 'routines'])
+              {
+                'type': 'action',
+                'actionId': 'set-plugin-enabled',
+                'label': '${plugins.contains(id) ? 'Disable' : 'Enable'} $id',
+                'input': {
+                  'pluginId': id,
+                  'enabled': !plugins.contains(id),
+                  'expectedRevision': featuresRevision,
+                },
+              },
+          ],
+        },
+        'actions': [
+          {
+            'id': 'set-plugin-enabled',
+            'schema': {
+              'type': 'object',
+              'properties': {
+                'pluginId': {'type': 'string', 'maxLength': 128},
+                'enabled': {'type': 'boolean'},
+                'expectedRevision': {
+                  'type': 'number',
+                  'minimum': 0,
+                  'maximum': 1000000,
+                },
+              },
+              'required': ['pluginId', 'enabled', 'expectedRevision'],
+              'additionalProperties': false,
+            },
+          },
+        ],
+      };
+    }
     if (path.endsWith('/plugins') && plugins != null) {
       return {
         'schemaVersion': 1,
@@ -297,6 +353,51 @@ void main() {
       expect(
         harness.api.requests.where((path) => path.startsWith('POST ')),
         isEmpty,
+      );
+      await close(tester, harness);
+    });
+
+    testWidgets('General refreshes starters after successful Plugins changes', (
+      tester,
+    ) async {
+      final harness = await shell(tester, size: const Size(1600, 1000));
+      harness.api.features = {'web', 'routines'};
+      harness.api.directory.complete(
+        directoryOf([registration(generalId, 'General')]),
+      );
+      await tester.pumpAndSettle();
+      final conversation = tester.state(find.byType(ConversationView));
+      await tester.tap(find.byTooltip('Plugins'));
+      await tester.pumpAndSettle();
+
+      for (final entry in {
+        'web': 'research',
+        'routines': 'recurring',
+      }.entries) {
+        final starter = identifiedBy(StarterIds.suggestion(entry.value));
+        expect(starter, findsOneWidget);
+        await tester.tap(find.text('Disable ${entry.key}'));
+        await tester.pumpAndSettle();
+        expect(starter, findsNothing);
+        expect(identifiedBy(StarterIds.suggestion('project')), findsOneWidget);
+        expect(
+          identifiedBy(StarterIds.suggestion('specialist')),
+          findsOneWidget,
+        );
+
+        await tester.tap(find.text('Enable ${entry.key}'));
+        await tester.pumpAndSettle();
+        expect(starter, findsOneWidget);
+      }
+
+      harness.api.rejectFeatureChange = true;
+      await tester.tap(find.text('Disable web'));
+      await tester.pumpAndSettle();
+      expect(identifiedBy(StarterIds.suggestion('research')), findsOneWidget);
+      expect(tester.state(find.byType(ConversationView)), same(conversation));
+      expect(
+        harness.api.requests.where((path) => path.startsWith('POST ')),
+        everyElement('POST /api/bots/$generalId/plugins'),
       );
       await close(tester, harness);
     });

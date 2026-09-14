@@ -143,6 +143,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
 
   /// The Bot the account was given as General, from the authority.
   String? generalBotId;
+  int featuresRevision = 0;
   String? workingRunId;
   ConnectionState selectedConnection = ConnectionState.initializing;
   BotSettingsController? botSettings;
@@ -741,6 +742,12 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     );
   }
 
+  void _featuresChanged(String botId) {
+    if (mounted && selected?.botId.value == botId) {
+      setState(() => featuresRevision += 1);
+    }
+  }
+
   /// The Bot's own settings and its Routines are features in the `right-panel`
   /// region, which is what that region is for: the shell draws the region and
   /// never imports what goes in it.
@@ -805,6 +812,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       // with, so a Bot switch must be a new page rather than a rebuilt one.
       (context) => PluginsPage(
         key: ValueKey('plugins-$botId'),
+        onFeaturesChanged: () => _featuresChanged(botId),
         api: widget.api,
         store: widget.store,
         userId: widget.userId,
@@ -1275,6 +1283,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     if (key == 'plugins') {
       _push(
         PluginsPage(
+          onFeaturesChanged: () => _featuresChanged(bot.botId.value),
           api: widget.api,
           store: widget.store,
           userId: widget.userId,
@@ -1709,6 +1718,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                             userId: widget.userId,
                             botId: bot.botId.value,
                             general: bot.botId.value == generalBotId,
+                            featuresRevision: featuresRevision,
                             onOpenRun: _openRun,
                             onOpenSettings: _openSettings,
                             outOfCredit: credit?.canSpend == false,

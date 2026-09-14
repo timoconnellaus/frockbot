@@ -343,6 +343,7 @@ class ConversationView extends StatefulWidget {
 
   /// Whether this is General, whose empty thread offers starter suggestions.
   final bool general;
+  final int featuresRevision;
   const ConversationView({
     super.key,
     required this.sessions,
@@ -365,6 +366,7 @@ class ConversationView extends StatefulWidget {
     this.dictationLevel,
     this.background,
     this.general = false,
+    this.featuresRevision = 0,
   });
 
   @override
@@ -414,7 +416,10 @@ class _ConversationViewState extends State<ConversationView>
   @override
   void didUpdateWidget(ConversationView old) {
     super.didUpdateWidget(old);
-    if (old.general == widget.general) return;
+    if (old.general == widget.general &&
+        old.featuresRevision == widget.featuresRevision) {
+      return;
+    }
     if (widget.general) {
       starters = startersForV1(null);
       unawaited(_loadStarters());
@@ -424,8 +429,9 @@ class _ConversationViewState extends State<ConversationView>
   }
 
   Future<void> _loadStarters() async {
+    final revision = widget.featuresRevision;
     final features = await readBotFeaturesV1(widget.api, widget.botId);
-    if (mounted && widget.general) {
+    if (mounted && widget.general && revision == widget.featuresRevision) {
       setState(() => starters = startersForV1(features));
     }
   }
