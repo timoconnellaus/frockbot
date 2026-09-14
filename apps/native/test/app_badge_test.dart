@@ -1,7 +1,60 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/activity/badge.dart';
+import 'package:frockbot_native/client/bot_sessions.dart';
+import 'package:frockbot_native/client/transport.dart';
 import 'package:frockbot_native/protocol/client_wire.generated.dart' as wire;
+import 'package:frockbot_native/shell/app_shell.dart';
+import 'package:frockbot_native/theme/frock_theme.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
+
+import 'widget_test.dart' show MemoryStore;
+
+/// A two-Bot account whose unread fan-out a test holds open, so it can act
+/// inside the window the shell spends with a directory and no counts.
+class _ShellApi extends NativeApi {
+  _ShellApi(super.store, this.bots, this.fanOut);
+  final List<Map<String, Object?>> bots;
+  final Completer<Object?> fanOut;
+  @override
+  Future<Object?> request(
+    String path, {
+    Object? body,
+    int limit = 512000,
+    bool authenticated = true,
+  }) async {
+    if (path == '/api/bots') {
+      return {'schemaVersion': 1, 'revision': 1, 'bots': bots};
+    }
+    if (path == '/api/bots/lifecycles') {
+      return {'schemaVersion': 1, 'lifecycles': const []};
+    }
+    if (path == '/api/bots/unread') return fanOut.future;
+    throw const FormatException('offline fixture');
+  }
+
+  @override
+  Future<WebSocketChannel> socket(String botId, String? cursor) async =>
+      throw const FormatException('offline fixture');
+}
+
+Map<String, Object?> registration(String botId, String name) => {
+  'schemaVersion': 1,
+  'botId': botId,
+  'registeredAt': '2026-09-05T00:00:00.000Z',
+  'initialName': name,
+  'sheep': {
+    'schemaVersion': 1,
+    'background': 'a',
+    'upper': 'b',
+    'middle': 'c',
+    'lower': 'd',
+  },
+};
 
 wire.UnreadView view(
   String botId, {
@@ -258,5 +311,78 @@ void main() {
         });
       },
     );
+  });
+
+  group('the shell wires the badge to the cloud fan-out', () {
+    tearDown(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(
+            const MethodChannel('com.frockbot/badge'),
+            null,
+          );
+    });
+
+    testWidgets('keeping the dock quiet until it arrives, then drawing it', (
+      tester,
+    ) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+      tester.view.physicalSize = const Size(320, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final calls = <MethodCall>[];
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(const MethodChannel('com.frockbot/badge'), (
+            call,
+          ) async {
+            calls.add(call);
+            return null;
+          });
+
+      final store = MemoryStore();
+      final fanOut = Completer<Object?>();
+      final api = _ShellApi(store, [
+        registration('alpha', 'Alpha'),
+        registration('beta', 'Beta'),
+      ], fanOut);
+      final sessions = BotSessions(api: api, store: store);
+      final links = ValueNotifier<String?>(null);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: FrockTheme.theme(Brightness.dark),
+          home: AppShell(
+            api: api,
+            store: store,
+            sessions: sessions,
+            userId: 'test-user',
+            botLinks: links,
+            onSignOut: () async {},
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // The shell has drawn its directory, and still has no fan-out. That
+      // empty local map is unknown, not an authoritative zero, so nothing may
+      // cross the dock channel and take an existing badge away.
+      expect(find.text('Alpha'), findsOneWidget);
+      expect(find.text('Beta'), findsOneWidget);
+      expect(calls, isEmpty);
+
+      fanOut.complete({
+        'schemaVersion': 1,
+        'unread': [view('alpha', count: 2).toJson(), view('beta').toJson()],
+      });
+      await tester.pumpAndSettle();
+      expect(calls.map((call) => call.method), ['set']);
+      expect((calls.single.arguments as Map)['label'], '2');
+
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpAndSettle();
+      sessions.clear();
+      links.dispose();
+      api.close();
+      debugDefaultTargetPlatformOverride = null;
+    });
   });
 }
