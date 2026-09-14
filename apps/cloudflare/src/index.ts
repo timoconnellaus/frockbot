@@ -85,6 +85,7 @@ import {
 } from "@frockbot/app/subagents/shared";
 import {
   decodeMachineClaimReceiptV1,
+  MachineTokenError,
   decodeMachineEnrollmentReceiptV1,
   decodeMachineListViewV1,
   decodeMachinePairingOfferV1,
@@ -114,6 +115,7 @@ import {
 } from "@frockbot/core/template";
 import {
   accessEmailV1,
+  ADMISSION_REFUSAL_COPY_V1,
   decodeAccountAdmissionDecisionV1,
   type AccountAdmissionDecisionV1,
   type AdmissionIdentityV1,
@@ -180,6 +182,8 @@ import {
   DeploymentPolicy,
 } from "./deployment-policy.js";
 import { createDeploymentPolicyAdminHost } from "./deployment-policy-admin-host.js";
+import { ACCOUNT_ADMISSION_UNAVAILABLE_MESSAGE } from "./account-admission.js";
+import { RoutineHookError } from "@frockbot/app/routines/hook";
 
 import {
   appletStateNameV1,
@@ -684,6 +688,27 @@ async function admitStoredAccount(
       env.FROCKBOT_ADMIN_EMAILS,
     ),
   });
+}
+
+async function externalAccountRefusal(
+  env: Env,
+  userId: string,
+): Promise<{ status: number; message: string } | undefined> {
+  if (developmentAuthAllowed(env)) return;
+  let decision;
+  try {
+    decision = await admitStoredAccount(env, userId);
+  } catch {
+    return { status: 503, message: ACCOUNT_ADMISSION_UNAVAILABLE_MESSAGE };
+  }
+  if (!decision)
+    return { status: 401, message: "Account identity is unavailable" };
+  if (!decision.admitted) {
+    return {
+      status: 403,
+      message: ADMISSION_REFUSAL_COPY_V1[decision.reason].title,
+    };
+  }
 }
 
 /**
@@ -2179,8 +2204,10 @@ const createGatewayBackendContributions = (env: Env) =>
           }),
         ),
       ),
-    enrollMachine: async (userId, input) =>
-      decodeMachineEnrollmentReceiptV1(
+    enrollMachine: async (userId, input) => {
+      const refusal = await externalAccountRefusal(env, userId);
+      if (refusal) throw new MachineTokenError(refusal.status, refusal.message);
+      return decodeMachineEnrollmentReceiptV1(
         rpcJsonSnapshot(
           await userMachineStub(env, userId).enrollMachine({
             schemaVersion: 1,
@@ -2189,7 +2216,8 @@ const createGatewayBackendContributions = (env: Env) =>
             enrollment: input.enrollment,
           }),
         ),
-      ),
+      );
+    },
     pollMachine: async (userId, call) =>
       decodeMachinePollResultV1(
         rpcJsonSnapshot(
@@ -2262,13 +2290,16 @@ const createGatewayBackendContributions = (env: Env) =>
     ...(typeof env.ROUTINE_HOOK_SECRET === "string"
       ? { routineHookSecret: env.ROUTINE_HOOK_SECRET }
       : {}),
-    deliverRoutineHook: async (userId, botId, delivery) =>
-      botStateStub(env, userId, botId).deliverRoutineHook({
+    deliverRoutineHook: async (userId, botId, delivery) => {
+      const refusal = await externalAccountRefusal(env, userId);
+      if (refusal) throw new RoutineHookError(refusal.status, refusal.message);
+      return botStateStub(env, userId, botId).deliverRoutineHook({
         schemaVersion: 1,
         userId,
         botId,
         delivery,
-      }),
+      });
+    },
     listRoutineRuns: async (userId, botId, routineId) =>
       decodeRoutineRunListViewV1(
         await botStateStub(env, userId, botId).listRoutineRuns({
