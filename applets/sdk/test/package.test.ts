@@ -21,7 +21,7 @@ describe("the published package", () => {
       "@types/react": "19.2.18",
       "@types/react-dom": "19.2.7",
       esbuild: "0.28.2",
-      eslint: "10.9.1",
+      eslint: "10.10.0",
       miniflare: "5.20260828.0-alpha",
       react: "19.2.8",
       "react-dom": "19.2.8",

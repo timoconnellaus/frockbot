@@ -9,6 +9,12 @@ Two Vitest projects run in local workerd, and they answer different questions.
 Durable Objects and probe subclasses directly. Hermetic; it does not read or
 expose a Sprites credential.
 
+It also binds a local D1 `AUTH_DB`, and `vitest.config.ts` reads `migrations/`
+into `TEST_MIGRATIONS` so `auth-schema.workerd.ts` can apply the real schema and
+drive `/api/auth/*` through a configured `gatewayAuth()`. Every other suite here
+sees an unconfigured stub instead, so that file is the only place a better-auth
+schema mismatch — a live sign-in outage — is caught before deploy.
+
 ## `bun run test:integration` — the `SELF.fetch` integration layer
 
 `vitest.integration.config.ts`, files `test/integration/**/*.integration.ts`.

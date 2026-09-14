@@ -9,9 +9,12 @@ import type { UserConfiguration } from "../src/user-configuration.ts";
 import type { AppletState } from "../src/applet-state.ts";
 import type { DeploymentPolicy } from "../src/deployment-policy.ts";
 import type { WorkerdVoiceAssistant } from "./voice-assistant-probe.ts";
+import type { D1Migration } from "cloudflare:test";
 
 interface ComputerTestEnv {
   APPLICATION_ARTIFACTS: R2Bucket;
+  AUTH_DB: D1Database;
+  TEST_MIGRATIONS: D1Migration[];
   AI: Ai;
   BOT_ISOLATES: DurableObjectNamespace<BotIsolateProbe>;
   BOT_STATES: DurableObjectNamespace<WorkerdBotState>;
