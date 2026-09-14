@@ -192,7 +192,7 @@ Staging isolates everything that holds state or identity — its own D1 database
 
 Unlike production, the staging deploy provisions its own resources. Each step is create-if-absent, so the first deploy creates the D1 database, the two R2 buckets, and the Vectorize index, and every later deploy finds them and moves on. The D1 identifier is resolved at deploy time and written into the staging `database_id`, so no variable records it.
 
-**Staging admits exactly one identity.** Signups default to closed and nothing in the deploy opens them, so the only way in is the admin allowlist: `FROCKBOT_ADMIN_EMAILS` is a **required** staging secret, and the deploy fails without it rather than publishing a deployment nobody can sign in to. Anyone else who completes Google sign-in is refused at the gateway — the signup gate turns on whether a User has been provisioned, not on whether Better Auth has a row — so no Durable Object is ever created for them.
+**Staging requires an admin allowlist.** `FROCKBOT_ADMIN_EMAILS` is a required staging secret; the deploy fails without it so an administrator can always sign in and manage access. Staging uses the same [beta-access authority](docs/beta-access.md) as production.
 
 Configure these GitHub `staging` environment values. They are the production set minus `CLOUDFLARE_D1_DATABASE_ID`, which staging resolves for itself:
 
@@ -256,7 +256,7 @@ Configure these GitHub `production` environment values:
 | Secret   | `MACHINE_TOKEN_SECRET`      | HMAC secret every registered-machine token and pairing code is signed with; generate it                               |
 | Secret   | `FCM_SERVICE_ACCOUNT`       | Firebase service-account JSON authorizing Android push delivery; see [`docs/notifications.md`](docs/notifications.md) |
 
-New signups are closed by default. Set `FROCKBOT_ADMIN_EMAILS` to one or more comma-separated email addresses in the GitHub `production` environment; those identities can open **Admin** from the profile menu and change the durable signup policy. The allowlist stays in the gateway and only an `isAdmin` boolean reaches the client. Existing Users continue to sign in while signups are closed.
+Admission is closed by default. Set `FROCKBOT_ADMIN_EMAILS` to one or more comma-separated email addresses in the GitHub `production` environment; those identities are always admitted, can open **Admin** from the profile menu, and choose whether the deployment is closed, invite-only or open. The allowlist stays in the gateway and only an `isAdmin` boolean reaches the client. Every other account needs access from the beta-access authority, and having signed in before is not access; see [`docs/beta-access.md`](docs/beta-access.md), including the release step that retired the signups switch.
 
 `ROUTINE_HOOK_SECRET` is generated too, once, with `openssl rand -hex 32` — `./scripts/setup-production.sh` does it if the secret is absent and preserves it if it is not. Every Routine webhook key is `HMAC-SHA256` over its own claims under this secret, and the gateway verifies that signature before any Durable Object is addressed. Rotating it invalidates every webhook key already handed out, which each Routine's owner then has to re-mint; without it set, the delivery route answers `503` and a webhook Routine is recorded without a key rather than given one nothing could verify.
 

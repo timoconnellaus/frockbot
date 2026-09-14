@@ -162,7 +162,7 @@ export const OPTIONAL_PRODUCTION_SECRETS_V1: readonly OptionalProductionSecretV1
       name: "FROCKBOT_ADMIN_EMAILS",
       why: "The identities allowed to open Admin.",
       degraded:
-        "nobody can administer the signup policy, though signups stay closed and existing Users keep signing in",
+        "nobody can administer beta access, so admission stays closed and only accounts already granted access can sign in",
     },
     {
       name: "DEBUG_TOKEN",

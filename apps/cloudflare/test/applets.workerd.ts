@@ -1055,10 +1055,15 @@ describe("opening an Applet", () => {
 });
 
 describe("Applet viewer tokens", () => {
-  test.each(["query", "subprotocol"])(
-    "the %s viewer handshake crosses the gateway and real facet without forwarding credentials",
-    async (transport) => {
-      const applet = appletId(`gateway-${transport}`);
+  test.each([
+    { transport: "query", development: false },
+    { transport: "subprotocol", development: false },
+    { transport: "query", development: true },
+    { transport: "subprotocol", development: true },
+  ])(
+    "the $transport viewer handshake (development=$development) crosses the gateway and real facet without forwarding credentials",
+    async ({ transport, development }) => {
+      const applet = appletId(`gateway-${transport}-${development}`);
       const { generation } = await publishGeneration(applet, {
         version: "A",
         tools: ["list_todos"],
@@ -1074,12 +1079,19 @@ describe("Applet viewer tokens", () => {
       const unused = (): never => {
         throw new Error("A viewer must not enter an app-session path");
       };
+      let admissionChecks = 0;
       const gateway = createGateway({
         loader: { get: unused },
         artifacts: { load: unused },
         auth: { getSession: unused, handler: unused },
-        userExists: unused,
-        readDeploymentPolicy: unused,
+        admitAccount: unused,
+        admitAppletViewer: async (userId) => {
+          admissionChecks += 1;
+          if (development) return null;
+          expect(userId).toBe(OWNER);
+          return { schemaVersion: 1, admitted: true, basis: "active" };
+        },
+        allowDevelopmentIdentity: development,
         applicationHashFor: unused,
         botStateFor: unused,
         userConfigurationFor: unused,
@@ -1123,6 +1135,7 @@ describe("Applet viewer tokens", () => {
       else url.searchParams.set("token", token);
       const response = await gateway(new Request(url, { headers }));
       expect(response.status).toBe(101);
+      expect(admissionChecks).toBe(development ? 0 : 1);
       expect(response.headers.get("sec-websocket-protocol")).toBe(
         transport === "subprotocol" ? "frockbot.applet.v1" : null,
       );
@@ -1141,6 +1154,79 @@ describe("Applet viewer tokens", () => {
     },
   );
   const secret = env.APPLET_VIEWER_SECRET;
+
+  test.each([
+    {
+      name: "a missing stored identity",
+      admit: () => Promise.resolve(null),
+      status: 401,
+      body: { error: "Applet viewer token is invalid" },
+    },
+    {
+      name: "revoked account access",
+      admit: () =>
+        Promise.resolve({
+          schemaVersion: 1 as const,
+          admitted: false as const,
+          reason: "account-paused" as const,
+        }),
+      status: 403,
+      body: { code: "account-access-refused" },
+    },
+    {
+      name: "an authority failure",
+      admit: () => Promise.reject(new Error("authority unavailable")),
+      status: 503,
+      body: { code: "account-access-unavailable" },
+    },
+  ])(
+    "$name refuses an unexpired token before User access",
+    async (scenario) => {
+      const applet = appletId("account-access");
+      const token = await mintAppletViewerTokenV1(secret, {
+        u: OWNER,
+        b: "bot-1",
+        a: applet,
+        g: "gen-1",
+        exp: Math.floor((Date.now() + 120_000) / 1_000),
+      });
+      let userScopedReads = 0;
+      const unused = (): never => {
+        throw new Error("A viewer must not enter an app-session path");
+      };
+      const gateway = createGateway({
+        loader: { get: unused },
+        artifacts: { load: unused },
+        auth: { getSession: unused, handler: unused },
+        admitAccount: unused,
+        admitAppletViewer: scenario.admit,
+        allowDevelopmentIdentity: false,
+        applicationHashFor: unused,
+        botStateFor: unused,
+        userConfigurationFor: unused,
+        botConfigurationFor: unused,
+        appletViewerSecret: secret,
+        appletAccessFor: () => {
+          userScopedReads += 1;
+          return Promise.resolve(true);
+        },
+        appletStateFor: () => {
+          userScopedReads += 1;
+          return { fetch: unused };
+        },
+      });
+      const url = new URL(`https://bot.example/api/applets/${applet}/socket`);
+      url.searchParams.set("token", token);
+
+      const response = await gateway(
+        new Request(url, { headers: { "x-frockbot-user-id": OWNER } }),
+      );
+
+      expect(response.status).toBe(scenario.status);
+      expect(await response.json()).toMatchObject(scenario.body);
+      expect(userScopedReads).toBe(0);
+    },
+  );
 
   test("a scoped token verifies, and one for another Applet or User does not", async () => {
     const applet = appletId("token");
@@ -1243,8 +1329,9 @@ describe("Applet viewer tokens", () => {
       loader: { get: unused },
       artifacts: { load: unused },
       auth: { getSession: unused, handler: unused },
-      userExists: unused,
-      readDeploymentPolicy: unused,
+      admitAccount: unused,
+      admitAppletViewer: () =>
+        Promise.resolve({ schemaVersion: 1, admitted: true, basis: "active" }),
       applicationHashFor: unused,
       botStateFor: unused,
       userConfigurationFor: unused,

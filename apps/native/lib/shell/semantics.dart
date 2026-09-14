@@ -385,7 +385,7 @@ abstract final class PackageIds {
 /// Admin: the deployment's own surface, reachable only by an admin.
 abstract final class AdminIds {
   static const refresh = 'admin-refresh';
-  static const signups = 'admin-signups';
+  static String admissionMode(String mode) => 'admin-admission-$mode';
   static const accounts = 'admin-accounts';
   static const profileEntry = 'profile-admin';
 

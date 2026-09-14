@@ -8,6 +8,11 @@ import {
   CLIENT_HELLO_HEADER,
 } from "./client-compatibility.js";
 import { returnPageV1 } from "@frockbot/app/return-page";
+import type { AccountAdmissionDecisionV1 } from "@frockbot/app/admin/shared";
+import {
+  admissionRefusedResponse,
+  admissionUnavailableResponse,
+} from "./account-admission.js";
 import type { AuthSession, GatewayAuth } from "./contracts.js";
 import type {
   NativeSessionOperation,
@@ -108,8 +113,14 @@ export interface NativeAuthOptions {
   auth: GatewayAuth;
   // Only associated, signed targets belong here. No request can add an entry.
   returnUris: readonly string[];
-  /** Existing account/signup policy, checked before the first User-DO write. */
-  canIssueSession(userId: string): Promise<boolean>;
+  /**
+   * The beta-access authority, asked after a bearer passes its read-only
+   * session check, or before a session is issued. Reads never provision a User.
+   * `null` means the identity no longer exists; a throw means the authority
+   * could not answer.
+   * Never asked for `developmentUserId`, which only a development stack sets.
+   */
+  admit(userId: string): Promise<AccountAdmissionDecisionV1 | null>;
   session(
     userId: string,
     operation: NativeSessionOperation,
@@ -127,9 +138,18 @@ export interface NativeAuthOptions {
 
 export interface NativeAuth {
   route(request: Request): Promise<Response | undefined>;
-  authenticate(
-    request: Request,
-  ): Promise<{ session: AuthSession | null; refusal?: Response } | undefined>;
+  /**
+   * `admission` is the authority's answer for this bearer, so the gateway
+   * does not ask twice; it is absent for the development identity.
+   */
+  authenticate(request: Request): Promise<
+    | {
+        session: AuthSession | null;
+        refusal?: Response;
+        admission?: AccountAdmissionDecisionV1;
+      }
+    | undefined
+  >;
 }
 
 function base64(bytes: Uint8Array): string {
@@ -361,6 +381,26 @@ export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
       return error();
     return redirect(providerUrl.toString(), response.headers);
   }
+  async function admitBeforeUser(
+    userId: string,
+  ): Promise<AccountAdmissionDecisionV1 | "development" | Response | null> {
+    if (
+      options.developmentUserId !== undefined &&
+      userId === options.developmentUserId
+    ) {
+      return "development";
+    }
+    let decision: AccountAdmissionDecisionV1 | null;
+    try {
+      decision = await options.admit(userId);
+    } catch {
+      return admissionUnavailableResponse();
+    }
+    if (decision && !decision.admitted) {
+      return admissionRefusedResponse(decision.reason, false);
+    }
+    return decision;
+  }
   return {
     async authenticate(request) {
       const bearer = request.headers.get("authorization");
@@ -370,16 +410,31 @@ export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
         new URL(`${origin}/api/native/session`),
       );
       if (refusal) return { session: null, refusal };
+      let claims: Claims;
       try {
-        const claims = await verify(bearer.slice(7 + PREFIX.length), "session");
+        claims = await verify(bearer.slice(7 + PREFIX.length), "session");
         if (claims.kind !== "session") return { session: null };
         // The app recovers a rejected session through sign-in; 426 asks for an update.
         if (!sameClient(hello(request), claims.hello)) return { session: null };
-        const record = await options.session(
+      } catch {
+        return { session: null };
+      }
+      let record: NativeSessionRecord | null;
+      try {
+        record = await options.session(
           claims.userId,
           operation(claims, "read"),
         );
-        if (!record) return { session: null };
+      } catch {
+        return { session: null };
+      }
+      if (!record) return { session: null };
+      const admitted = await admitBeforeUser(claims.userId);
+      if (admitted instanceof Response) {
+        return { session: null, refusal: admitted };
+      }
+      if (admitted === null) return { session: null };
+      try {
         // The email, not just the id: admission and the admin check read it,
         // so a native session that omitted it made a listed admin ordinary on
         // the phone while the same account was an admin in a browser.
@@ -389,8 +444,10 @@ export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
             user: {
               id: record.userId,
               ...(profile?.email ? { email: profile.email } : {}),
+              ...(profile?.emailVerified ? { emailVerified: true } : {}),
             },
           },
+          ...(admitted === "development" ? {} : { admission: admitted }),
         };
       } catch {
         return { session: null };
@@ -590,11 +647,13 @@ export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
             hello: claims.hello,
             expires: now() + 7 * 86400_000,
           };
-          if (!(await options.canIssueSession(session.userId)))
-            return error(
-              403,
-              "FrockBot isn’t accepting new accounts right now.",
-            );
+          await options.session(
+            session.userId,
+            operation(session, "check-issue"),
+          );
+          const admitted = await admitBeforeUser(session.userId);
+          if (admitted instanceof Response) return admitted;
+          if (admitted === null) return error(401);
           // Admission is committed before the bearer is returned. Replaying the
           // same authorization, including a repeated callback, cannot issue twice.
           const issued = await options.session(
@@ -644,6 +703,8 @@ export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
           // A 401 lets the app discard the unusable session and finish signing out.
           if (!sameClient(hello(request), claims.hello))
             return error(401, "Please sign in again.");
+          // Signing out narrows authority even while access is paused. The
+          // session owner revokes existing records without provisioning a User.
           await options.session(claims.userId, operation(claims, "revoke"));
           return Response.json(
             { schemaVersion: 1, status: "signed-out" },

@@ -45,10 +45,8 @@ const foundationArtifact = readBuiltArtifact(
   resolve(import.meta.dirname, "../native/lib"),
 );
 
-// better-auth's D1 schema. `gatewayAuth` degrades to an unconfigured stub when
-// the Google/better-auth secrets are absent (they are, and the suite adds
-// none), but the binding is still real and migrated so the auth seam is a
-// database and not a hole.
+// better-auth's D1 schema. Placeholder provider credentials enable browser
+// session verification for native sign-in; no test sends a request to Google.
 const authMigrations = await readD1Migrations(
   resolve(import.meta.dirname, "migrations"),
 );
@@ -107,6 +105,8 @@ export default defineConfig({
         },
         bindings: {
           BETTER_AUTH_URL: "https://bot.frockbot.com",
+          GOOGLE_CLIENT_ID: "integration.apps.googleusercontent.com",
+          GOOGLE_CLIENT_SECRET: "integration-google-client-secret",
           TEST_MIGRATIONS: authMigrations,
           FOUNDATION_ARTIFACT: foundationArtifact,
           DEFAULT_APPLICATION_HASH: "foundation-v1",

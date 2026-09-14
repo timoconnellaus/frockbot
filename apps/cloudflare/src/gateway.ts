@@ -9,7 +9,11 @@ import {
   botPluginsDocumentV1,
   decodeBotPluginsCommandV1,
 } from "@frockbot/app/plugins/page";
-import { accountIsAdmitted } from "./account-admission.js";
+import { accessEmailV1 } from "@frockbot/app/admin/shared";
+import {
+  admissionRefusedResponse,
+  admissionUnavailableResponse,
+} from "./account-admission.js";
 import { isNativeAuthPath, readNativeJsonBody } from "./native-auth.js";
 import { clientCompatibilityResponse } from "./client-compatibility.js";
 import {
@@ -134,9 +138,6 @@ export function packageUiCspV1(url: URL): string {
     .join(" ");
   return `${PACKAGE_UI_CSP}; connect-src ${connect} ${INSIGHTS_REPORT_ORIGIN}; frame-src ${url.origin}`;
 }
-export const SIGNUPS_CLOSED_MESSAGE =
-  "FrockBot isn't taking new signups right now.";
-
 export function applicationDeploymentId(
   identity: UserApplicationIdentity,
 ): string {
@@ -232,40 +233,6 @@ function answerArtifact(
   return request.method === "HEAD"
     ? new Response(null, { headers: response.headers })
     : response;
-}
-
-function signupClosedResponse(request: Request, url: URL): Response {
-  if (request.method !== "GET" || url.pathname !== "/") {
-    return jsonError(403, SIGNUPS_CLOSED_MESSAGE);
-  }
-  return new Response(
-    `<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>FrockBot</title>
-</head>
-<body>
-  <main>
-    <p>FrockBot</p>
-    <h1>${SIGNUPS_CLOSED_MESSAGE}</h1>
-    <p>If you already have access, ask whoever invited you to check your sign-in email.</p>
-    <a href="/sign-out">Sign out</a>
-  </main>
-</body>
-</html>`,
-    {
-      status: 403,
-      headers: {
-        "content-type": "text/html; charset=utf-8",
-        "cache-control": "no-store",
-        "content-security-policy":
-          "default-src 'none'; base-uri 'none'; frame-ancestors 'none'",
-        "x-content-type-options": "nosniff",
-      },
-    },
-  );
 }
 
 async function routeSignOut(
@@ -446,8 +413,20 @@ async function routeAppletSocket(
   if (claims.a !== appletId) {
     return jsonError(401, "Applet viewer token is invalid");
   }
-  if (!dependencies.appletAccessFor) {
+  if (!dependencies.admitAppletViewer || !dependencies.appletAccessFor) {
     return jsonError(503, "Applet viewer sessions are not configured");
+  }
+  if (!dependencies.allowDevelopmentIdentity) {
+    let admission;
+    try {
+      admission = await dependencies.admitAppletViewer(claims.u);
+    } catch {
+      return admissionUnavailableResponse();
+    }
+    if (!admission) return jsonError(401, "Applet viewer token is invalid");
+    if (!admission.admitted) {
+      return admissionRefusedResponse(admission.reason, false);
+    }
   }
   let reachable: boolean;
   try {
@@ -736,20 +715,35 @@ export function createGateway(dependencies: GatewayDependencies) {
         },
         dependencies.adminEmails,
       );
+    // Every authenticated request asks, so pausing an account takes effect on
+    // its next request rather than at its next sign-in. An admin is never
+    // asked: the allowlist admits them even while the authority is down.
     if (
       userId !== PUBLIC_APPLICATION_USER_ID &&
       !development.userId &&
       !isAdmin
     ) {
-      try {
-        if (!(await accountIsAdmitted(userId, isAdmin, dependencies)))
-          return signupClosedResponse(request, url);
-      } catch (error) {
-        return jsonError(
-          503,
-          error instanceof Error
-            ? error.message
-            : "Signup policy is unavailable",
+      // A native bearer was already admitted by `nativeAuth`, which had to
+      // ask after verifying its existing session without provisioning a User.
+      let admission = nativeIdentity?.admission;
+      if (!admission) {
+        const email = accessEmailV1(session?.user.email);
+        try {
+          admission = await dependencies.admitAccount({
+            schemaVersion: 1,
+            userId,
+            ...(email === undefined ? {} : { email }),
+            emailVerified: session?.user.emailVerified === true,
+            isAdmin,
+          });
+        } catch {
+          return admissionUnavailableResponse();
+        }
+      }
+      if (!admission.admitted) {
+        return admissionRefusedResponse(
+          admission.reason,
+          request.method === "GET" && url.pathname === "/",
         );
       }
     }

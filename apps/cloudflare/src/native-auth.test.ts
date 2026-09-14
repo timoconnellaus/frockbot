@@ -1,4 +1,7 @@
-import { decodeProtocol } from "@frockbot/core/protocol-schemas";
+import {
+  decodeProtocol,
+  MINIMUM_NATIVE_VERSION,
+} from "@frockbot/core/protocol-schemas";
 import { describe, expect, test } from "bun:test";
 import {
   createNativeAuth,
@@ -12,6 +15,13 @@ import {
   type NativeAuthOptions,
 } from "./native-auth.js";
 import { createGateway } from "./gateway.js";
+import type {
+  AccountAccessV1,
+  AccountAdmissionDecisionV1,
+  AdmissionModeV1,
+  EmailInvitationV1,
+} from "@frockbot/app/admin/shared";
+import { evaluateAdmissionV1 } from "./account-admission.js";
 import {
   nativeSessionOperation,
   type NativeSessionStorage,
@@ -40,7 +50,7 @@ function fixture(overrides: Partial<NativeAuthOptions> = {}) {
   const auth = createNativeAuth({
     secret: "test-only-secret-that-is-not-a-credential",
     returnUris: [NATIVE_RETURN_ANDROID],
-    canIssueSession: async () => true,
+    admit: async () => ({ schemaVersion: 1, admitted: true, basis: "active" }),
     now: () => time,
     auth: {
       handler: async () =>
@@ -562,8 +572,7 @@ function gateway(nativeAuth?: ReturnType<typeof createNativeAuth>) {
       },
       loader: { get: unexpected },
       artifacts: { load: unexpected },
-      userExists: unexpected,
-      readDeploymentPolicy: unexpected,
+      admitAccount: unexpected,
       applicationHashFor: unexpected,
       botStateFor: unexpected,
       userConfigurationFor: unexpected,
@@ -701,42 +710,398 @@ test("failed durable issuance cannot return a bearer", async () => {
   expect(await response.text()).not.toContain("sessionToken");
 });
 
-test("closed or unavailable signup policy refuses before User provisioning", async () => {
-  for (const unavailable of [false, true]) {
-    const f = fixture({
-      canIssueSession: async () => {
-        if (unavailable) throw new Error("Policy unavailable");
-        return false;
+describe("beta access on the native door", () => {
+  type Decision = AccountAdmissionDecisionV1 | null | "unavailable";
+
+  function gated(initial: Decision = activeDecision) {
+    let decision: Decision = initial;
+    const admitted: string[] = [];
+    const operations: string[] = [];
+    // The fixture signs the start and the browser leg; the recording door
+    // below shares its secret and storage and is the one under test.
+    const f = fixture();
+    const recording = createNativeAuth({
+      secret: SECRET,
+      returnUris: [NATIVE_RETURN_ANDROID],
+      now: f.now,
+      admit: async (userId) => {
+        admitted.push(userId);
+        if (decision === "unavailable") {
+          throw new Error("Durable Object reset while responding");
+        }
+        return decision;
+      },
+      auth: {
+        handler: async () => new Response(null, { status: 404 }),
+        getSession: async (headers) =>
+          headers.get("cookie") === "test=signed-in"
+            ? { user: { id: "user-1" } }
+            : null,
+        profile: async () => ({
+          email: "member@example.com",
+          emailVerified: true,
+        }),
+      },
+      session: async (_user, input) => {
+        operations.push(input.action);
+        return nativeSessionOperation(f.storage, input, f.now());
       },
     });
-    const response = await gateway(f.auth).fetch(
+    return {
+      ...f,
+      auth: recording,
+      admitted,
+      operations,
+      set(next: Decision) {
+        decision = next;
+      },
+    };
+  }
+
+  const activeDecision: AccountAdmissionDecisionV1 = {
+    schemaVersion: 1,
+    admitted: true,
+    basis: "active",
+  };
+  const paused: AccountAdmissionDecisionV1 = {
+    schemaVersion: 1,
+    admitted: false,
+    reason: "account-paused",
+  };
+
+  async function signIn(g: ReturnType<typeof gated>) {
+    const response = await g.auth.route(
+      g.request("/api/auth/native/exchange", await g.authorize()),
+    );
+    expect(response?.status).toBe(200);
+    const view = decodeProtocol("AuthSessionView", await response!.json());
+    return { authorization: `Bearer ${view.sessionToken}` };
+  }
+
+  test.each([false, true])(
+    "a used authorization cannot activate access or redeem an invitation (revoked=%s)",
+    async (revoked) => {
+      let mode: AdmissionModeV1 = "open";
+      let access: AccountAccessV1 | null = null;
+      let invitation: EmailInvitationV1 | null = null;
+      let admissionCalls = 0;
+      const f = fixture({
+        admit: async (userId) => {
+          admissionCalls++;
+          const evaluation = evaluateAdmissionV1({
+            mode,
+            identity: {
+              schemaVersion: 1,
+              userId,
+              email: "owner@example.com",
+              emailVerified: true,
+              isAdmin: false,
+            },
+            access,
+            invitation,
+          });
+          if (evaluation.activate) {
+            access = {
+              schemaVersion: 1,
+              userId,
+              state: "active",
+              revision: (access?.revision ?? 0) + 1,
+              updatedAt: new Date(f.now()).toISOString(),
+              updatedBy: "admission",
+            };
+          }
+          if (evaluation.redeemInvitation) invitation = null;
+          return evaluation.decision;
+        },
+      });
+      const command = await f.authorize();
+      const issued = await f.auth.route(
+        f.request("/api/auth/native/exchange", command),
+      );
+      expect(issued?.status).toBe(200);
+      const session = decodeProtocol("AuthSessionView", await issued!.json());
+      if (revoked) {
+        const response = await f.auth.route(
+          f.request(
+            "/api/auth/native/revoke",
+            {
+              schemaVersion: 1,
+              commandId: "sign-out-1",
+              action: "sign-out",
+              sessionId: session.sessionId,
+            },
+            { authorization: `Bearer ${session.sessionToken}` },
+          ),
+        );
+        expect(response?.status).toBe(200);
+      }
+      f.advance(1_000);
+      for (const grant of ["account", "email", "open"] as const) {
+        mode = grant === "open" ? "open" : "invite-only";
+        access =
+          grant === "account"
+            ? {
+                schemaVersion: 1,
+                userId: "user-1",
+                state: "invited",
+                revision: 2,
+                updatedAt: new Date(f.now()).toISOString(),
+                updatedBy: "admin",
+              }
+            : null;
+        invitation =
+          grant === "email"
+            ? {
+                schemaVersion: 1,
+                email: "owner@example.com",
+                invitedAt: new Date(f.now()).toISOString(),
+                invitedBy: "admin",
+              }
+            : null;
+        const before = structuredClone({ access, invitation });
+        const sessionsBefore = structuredClone(f.values);
+        const replay = await f.auth.route(
+          f.request("/api/auth/native/exchange", command),
+        );
+        expect(replay?.status).toBe(400);
+        expect(admissionCalls).toBe(1);
+        expect({ access, invitation }).toEqual(before);
+        expect(f.values).toEqual(sessionsBefore);
+        expect(
+          evaluateAdmissionV1({
+            mode: "closed",
+            identity: {
+              schemaVersion: 1,
+              userId: "user-1",
+              email: "owner@example.com",
+              emailVerified: true,
+              isAdmin: false,
+            },
+            access,
+            invitation,
+          }).decision,
+        ).toMatchObject({ admitted: false, reason: "admission-closed" });
+      }
+    },
+  );
+
+  test("session authority failure on exchange cannot invoke admission", async () => {
+    let admissions = 0;
+    const f = fixture({
+      admit: async () => {
+        admissions++;
+        return activeDecision;
+      },
+      session: async () => {
+        throw new Error("Session authority unavailable");
+      },
+    });
+    const response = await f.auth.route(
       f.request("/api/auth/native/exchange", await f.authorize()),
     );
-    expect(response.status).toBe(unavailable ? 400 : 403);
+    expect(response?.status).toBe(400);
+    expect(admissions).toBe(0);
     expect(f.values.size).toBe(0);
-  }
-});
-
-test.each([
-  "http://accounts.google.com/auth",
-  "https://accounts.google.com:444/auth",
-  "https://accounts.google.com.evil.test/auth",
-  "https://user@accounts.google.com/auth",
-])("gateway refuses provider redirect %s", async (url) => {
-  const f = fixture({
-    auth: {
-      getSession: async () => null,
-      handler: async () => Response.json({ url }),
-    },
   });
-  const g = gateway(f.auth);
-  const view = decodeProtocol(
-    "AuthStartView",
-    await (await g.fetch(f.request("/api/auth/native/start", f.start))).json(),
-  );
-  const response = await g.fetch(new Request(view.authorizationUrl));
-  expect(response.status).toBe(400);
-  expect(response.headers.get("location")).toBeNull();
+
+  test("a refused exchange names its reason and issues nothing", async () => {
+    for (const reason of [
+      "admission-closed",
+      "invitation-required",
+      "account-blocked",
+    ] as const) {
+      const g = gated({ schemaVersion: 1, admitted: false, reason });
+      const response = await gateway(g.auth).fetch(
+        g.request("/api/auth/native/exchange", await g.authorize()),
+      );
+      expect(response.status).toBe(403);
+      expect(await response.json()).toMatchObject({
+        code: "account-access-refused",
+        reason,
+      });
+      expect(g.operations).toEqual(["check-issue"]);
+      expect(g.values.size).toBe(0);
+    }
+  });
+
+  test("an unreachable authority on exchange is a 503, not a failed sign-in", async () => {
+    const g = gated("unavailable");
+    const response = await gateway(g.auth).fetch(
+      g.request("/api/auth/native/exchange", await g.authorize()),
+    );
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({
+      code: "account-access-unavailable",
+    });
+    expect(g.operations).toEqual(["check-issue"]);
+  });
+
+  test("a valid session is read before its bearer is re-admitted", async () => {
+    const g = gated();
+    const headers = await signIn(g);
+    expect(g.operations).toEqual(["check-issue", "issue"]);
+
+    const admitted = await g.auth.authenticate(
+      g.request("/api/identity", undefined, headers),
+    );
+    expect(admitted?.session?.user).toEqual({
+      id: "user-1",
+      email: "member@example.com",
+      emailVerified: true,
+    });
+    expect(admitted?.admission).toEqual(activeDecision);
+    expect(g.operations).toEqual(["check-issue", "issue", "read"]);
+
+    g.set(paused);
+    const refused = await g.auth.authenticate(
+      g.request("/api/identity", undefined, headers),
+    );
+    expect(refused?.session).toBeNull();
+    expect(refused?.refusal?.status).toBe(403);
+    expect(await refused?.refusal?.json()).toMatchObject({
+      reason: "account-paused",
+    });
+    expect(g.operations).toEqual(["check-issue", "issue", "read", "read"]);
+
+    g.set("unavailable");
+    const unavailable = await g.auth.authenticate(
+      g.request("/api/identity", undefined, headers),
+    );
+    expect(unavailable?.session).toBeNull();
+    expect(unavailable?.refusal?.status).toBe(503);
+    expect(g.operations).toEqual([
+      "check-issue",
+      "issue",
+      "read",
+      "read",
+      "read",
+    ]);
+
+    // An identity that no longer exists is a sign-in problem, and only that is.
+    g.set(null);
+    const gone = await g.auth.authenticate(
+      g.request("/api/identity", undefined, headers),
+    );
+    expect(gone).toEqual({ session: null });
+    expect(g.operations).toEqual([
+      "check-issue",
+      "issue",
+      "read",
+      "read",
+      "read",
+      "read",
+    ]);
+  });
+
+  test("the gateway answers a refused or unreachable bearer as the authority did, and asks once", async () => {
+    const g = gated();
+    const headers = await signIn(g);
+    const hello = {
+      "x-frockbot-client": JSON.stringify({
+        schemaVersion: 1,
+        protocolVersion: 1,
+        nativeVersion: MINIMUM_NATIVE_VERSION,
+        catalogs: [],
+      }),
+    };
+    const identity = () =>
+      createGateway({
+        nativeAuth: g.auth,
+        auth: {
+          getSession: async () => null,
+          handler: async () => new Response("browser auth"),
+        },
+        loader: { get: () => ({}) as never },
+        artifacts: { load: async () => "" },
+        admitAccount: () => {
+          throw new Error("a native bearer is admitted by nativeAuth");
+        },
+        applicationHashFor: async () => "foundation-v1",
+        botStateFor: () => ({}) as never,
+        userConfigurationFor: () => ({}) as never,
+        botConfigurationFor: () => ({}) as never,
+      })(
+        new Request(`${NATIVE_ORIGIN}/api/identity`, {
+          headers: { ...hello, ...headers },
+        }),
+      );
+    const before = g.admitted.length;
+    const ok = await identity();
+    expect(ok.status).toBe(200);
+    expect(g.admitted.length - before).toBe(1);
+
+    g.set(paused);
+    const refused = await identity();
+    expect(refused.status).toBe(403);
+    expect(await refused.json()).toMatchObject({ reason: "account-paused" });
+
+    g.set("unavailable");
+    expect((await identity()).status).toBe(503);
+    expect(g.operations).toEqual([
+      "check-issue",
+      "issue",
+      "read",
+      "read",
+      "read",
+    ]);
+  });
+
+  test("a refused account cannot open settings but can revoke its session", async () => {
+    const g = gated();
+    const headers = await signIn(g);
+    g.set(paused);
+    const handoff = await g.auth.route(
+      g.request(
+        "/api/auth/native/settings",
+        { schemaVersion: 1, home: "models" },
+        headers,
+      ),
+    );
+    expect(handoff?.status).toBe(403);
+    const signOut = await g.auth.route(
+      g.request(
+        "/api/auth/native/revoke",
+        {
+          schemaVersion: 1,
+          commandId: "sign-out-1",
+          action: "sign-out",
+          sessionId: "sign-in-1",
+        },
+        headers,
+      ),
+    );
+    // Sign-out persists revocation even though product access is paused.
+    expect(signOut?.status).toBe(200);
+    expect(g.operations).toEqual(["check-issue", "issue", "read", "revoke"]);
+
+    g.set("unavailable");
+    const unavailable = await g.auth.route(
+      g.request(
+        "/api/auth/native/revoke",
+        {
+          schemaVersion: 1,
+          commandId: "sign-out-2",
+          action: "sign-out",
+          sessionId: "sign-in-1",
+        },
+        headers,
+      ),
+    );
+    expect(unavailable?.status).toBe(200);
+    expect(g.operations).toEqual([
+      "check-issue",
+      "issue",
+      "read",
+      "revoke",
+      "revoke",
+    ]);
+    g.set(activeDecision);
+    const admissionCalls = g.admitted.length;
+    expect(
+      await g.auth.authenticate(g.request("/api/identity", undefined, headers)),
+    ).toEqual({ session: null });
+    expect(g.admitted).toHaveLength(admissionCalls);
+  });
 });
 
 test("ambiguous browser callbacks are refused before identity resolution", async () => {

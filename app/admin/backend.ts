@@ -1,16 +1,26 @@
 import {
+  decodeAccountAccessV1,
+  decodeAccountAccessViewV1,
   decodeAdminUserBillingV1,
   decodeAdminUserListViewV1,
   decodeDeploymentPolicyV1,
+  decodeEmailInvitationV1,
   decodeGrantUserCreditCommandV1,
-  decodeSetSignupsCommandV1,
+  decodeInviteEmailCommandV1,
+  decodeSetAccountAccessCommandV1,
+  decodeSetAdmissionModeCommandV1,
   decodeSetUserFeaturesCommandV1,
   decodeUserFeaturesV1,
+  type AccountAccessV1,
+  type AccountAccessViewV1,
   type AdminUserBillingV1,
   type AdminUserViewV1,
   type DeploymentPolicyV1,
+  type EmailInvitationV1,
   type GrantUserCreditCommandV1,
-  type SetSignupsCommandV1,
+  type InviteEmailCommandV1,
+  type SetAccountAccessCommandV1,
+  type SetAdmissionModeCommandV1,
   type SetUserFeaturesCommandV1,
   type UserFeaturesV1,
 } from "./shared.js";
@@ -26,10 +36,22 @@ export interface AdminListedUserV1 {
 
 export interface AdminGatewayHost {
   readDeploymentPolicy(): Promise<DeploymentPolicyV1>;
-  setDeploymentSignups(
-    command: SetSignupsCommandV1,
+  /** Throws `DeploymentPolicyConflictError` when the revision is stale. */
+  setAdmissionMode(
+    command: SetAdmissionModeCommandV1,
     updatedBy: string,
   ): Promise<DeploymentPolicyV1>;
+  readAccountAccess(userId: string): Promise<AccountAccessViewV1>;
+  /** Throws `AccountAccessConflictError` when the revision is stale. */
+  setAccountAccess(
+    userId: string,
+    command: SetAccountAccessCommandV1,
+    updatedBy: string,
+  ): Promise<AccountAccessV1>;
+  inviteEmail(
+    command: InviteEmailCommandV1,
+    invitedBy: string,
+  ): Promise<EmailInvitationV1>;
   /** Every account the identity store holds, newest first. */
   listUsers(): Promise<AdminListedUserV1[]>;
   readUserFeatures(userId: string): Promise<UserFeaturesV1>;
@@ -61,17 +83,34 @@ export interface AdminBackendRouteContribution {
 
 const USER_FEATURES_PATH = /^\/api\/admin\/users\/([^/]+)\/features$/;
 const USER_CREDIT_PATH = /^\/api\/admin\/users\/([^/]+)\/credit$/;
+const USER_ACCESS_PATH = /^\/api\/admin\/users\/([^/]+)\/access$/;
 
 function jsonError(status: number, message: string): Response {
   return Response.json({ error: message }, { status });
 }
 
-function isPolicyConflict(error: unknown): boolean {
-  return (
+function conflictRevision(error: unknown, name: string): number | undefined {
+  if (
     typeof error === "object" &&
     error !== null &&
     "name" in error &&
-    error.name === "DeploymentPolicyConflictError"
+    error.name === name &&
+    "currentRevision" in error &&
+    Number.isSafeInteger(error.currentRevision)
+  ) {
+    return error.currentRevision as number;
+  }
+  return undefined;
+}
+
+function conflictResponse(label: string, currentRevision: number): Response {
+  return Response.json(
+    {
+      error: `${label} revision is ${currentRevision}`,
+      code: "revision-conflict",
+      currentRevision,
+    },
+    { status: 409 },
   );
 }
 
@@ -100,33 +139,102 @@ async function routePolicy(
   if (request.method !== "POST") {
     return jsonError(405, "method not allowed");
   }
-  let command: SetSignupsCommandV1;
+  let command: SetAdmissionModeCommandV1;
   try {
-    command = decodeSetSignupsCommandV1(await request.json());
+    command = decodeSetAdmissionModeCommandV1(await request.json());
   } catch (error) {
     return jsonError(400, failure(error, "Admin policy was refused"));
   }
   try {
     return Response.json(
-      decodeDeploymentPolicyV1(
-        await host.setDeploymentSignups(command, updatedBy),
+      decodeDeploymentPolicyV1(await host.setAdmissionMode(command, updatedBy)),
+    );
+  } catch (error) {
+    const current = conflictRevision(error, "DeploymentPolicyConflictError");
+    if (current !== undefined) {
+      return conflictResponse("deployment policy", current);
+    }
+    return jsonError(500, failure(error, "Admin policy could not be changed"));
+  }
+}
+
+/**
+ * One account's beta access. There is no list of these: the admin page does
+ * not show them yet, and the seam exists so an admin can pause, end, block or
+ * grant an account without anyone editing storage by hand.
+ */
+async function routeUserAccess(
+  request: Request,
+  url: URL,
+  host: AdminGatewayHost,
+  encodedUserId: string,
+  updatedBy: string,
+): Promise<Response> {
+  if ([...url.searchParams.keys()].length > 0) {
+    return jsonError(400, "Admin access query is invalid");
+  }
+  const userId = decodeAccountId(encodedUserId);
+  if (!userId) return jsonError(400, "Account id is invalid");
+  if (request.method === "GET") {
+    try {
+      return Response.json(
+        decodeAccountAccessViewV1(await host.readAccountAccess(userId)),
+      );
+    } catch (error) {
+      return jsonError(500, failure(error, "Account access could not be read"));
+    }
+  }
+  if (request.method !== "POST") return jsonError(405, "method not allowed");
+  let command: SetAccountAccessCommandV1;
+  try {
+    command = decodeSetAccountAccessCommandV1(await request.json());
+  } catch (error) {
+    return jsonError(400, failure(error, "Account access was refused"));
+  }
+  try {
+    return Response.json(
+      decodeAccountAccessV1(
+        await host.setAccountAccess(userId, command, updatedBy),
       ),
     );
   } catch (error) {
-    if (isPolicyConflict(error)) {
-      const current = decodeDeploymentPolicyV1(
-        await host.readDeploymentPolicy(),
-      );
-      return Response.json(
-        {
-          error: `deployment policy revision is ${current.revision}`,
-          code: "revision-conflict",
-          currentRevision: current.revision,
-        },
-        { status: 409 },
-      );
+    const current = conflictRevision(error, "AccountAccessConflictError");
+    if (current !== undefined) {
+      return conflictResponse("account access", current);
     }
-    return jsonError(500, failure(error, "Admin policy could not be changed"));
+    return jsonError(
+      500,
+      failure(error, "Account access could not be changed"),
+    );
+  }
+}
+
+/**
+ * Invites an address that may not have signed in yet. Only a sign-in whose
+ * identity provider verified that address can redeem it.
+ */
+async function routeInvitations(
+  request: Request,
+  url: URL,
+  host: AdminGatewayHost,
+  invitedBy: string,
+): Promise<Response> {
+  if (request.method !== "POST") return jsonError(405, "method not allowed");
+  if ([...url.searchParams.keys()].length > 0) {
+    return jsonError(400, "Admin invitation query is invalid");
+  }
+  let command: InviteEmailCommandV1;
+  try {
+    command = decodeInviteEmailCommandV1(await request.json());
+  } catch (error) {
+    return jsonError(400, failure(error, "Invitation was refused"));
+  }
+  try {
+    return Response.json(
+      decodeEmailInvitationV1(await host.inviteEmail(command, invitedBy)),
+    );
+  } catch (error) {
+    return jsonError(500, failure(error, "Invitation could not be written"));
   }
 }
 
@@ -285,6 +393,13 @@ export function createAdminBackendContribution(
       }
       if (url.pathname === "/api/admin/users") {
         return routeUsers(request, url, host, context.userId);
+      }
+      if (url.pathname === "/api/admin/invitations") {
+        return routeInvitations(request, url, host, context.userId);
+      }
+      const access = url.pathname.match(USER_ACCESS_PATH);
+      if (access) {
+        return routeUserAccess(request, url, host, access[1], context.userId);
       }
       const credit = url.pathname.match(USER_CREDIT_PATH);
       if (credit) {

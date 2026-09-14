@@ -10,30 +10,44 @@ export interface AuthEnvironment {
   GOOGLE_CLIENT_SECRET: string;
 }
 
+/** What better-auth is about to write, as the access authority reads it. */
+export interface IdentityCandidateV1 {
+  email: string;
+  emailVerified: boolean;
+}
+
 export interface AuthDependencies {
   /**
-   * Decides whether a first-time sign-in may create an account. The gateway's
+   * Decides whether a first-time sign-in may write an identity. The gateway's
    * admission check runs after better-auth has already handled `/api/auth/*`,
    * so without this a closed deployment still writes `user` rows.
    */
-  readonly mayCreateAccount?: (email: string) => Promise<boolean>;
+  readonly mayCreateIdentity?: (
+    candidate: IdentityCandidateV1,
+  ) => Promise<boolean>;
 }
 
 /**
- * Refuses the account creation better-auth is about to perform.
+ * Refuses the identity creation better-auth is about to perform.
  *
  * `/api/auth/*` is served before the gateway's admission check, so this is the
- * only place a closed deployment can stop a `user` row being written. An
- * existing account is unaffected: better-auth consults this only on create.
+ * only place a closed deployment can stop a `user` row being written. It is
+ * not admission: an identity it lets through is still refused on every
+ * request the access authority does not admit.
  */
-export function signupDatabaseHooksV1(
-  mayCreateAccount: (email: string) => Promise<boolean>,
+export function identityCreationHooksV1(
+  mayCreateIdentity: (candidate: IdentityCandidateV1) => Promise<boolean>,
 ) {
   return {
     user: {
       create: {
-        before: async (user: { email?: string }) =>
-          (await mayCreateAccount(user.email ?? "")) ? { data: user } : false,
+        before: async (user: { email?: string; emailVerified?: boolean }) =>
+          (await mayCreateIdentity({
+            email: user.email ?? "",
+            emailVerified: user.emailVerified === true,
+          }))
+            ? { data: user }
+            : false,
       },
     },
   };
@@ -58,8 +72,12 @@ export function createAuth(
     account: {
       encryptOAuthTokens: true,
     },
-    ...(dependencies.mayCreateAccount
-      ? { databaseHooks: signupDatabaseHooksV1(dependencies.mayCreateAccount) }
+    ...(dependencies.mayCreateIdentity
+      ? {
+          databaseHooks: identityCreationHooksV1(
+            dependencies.mayCreateIdentity,
+          ),
+        }
       : {}),
     plugins: [bearer()],
   });
@@ -100,19 +118,34 @@ export function gatewayAuth(
     };
   }
 
-  const auth = createAuth(configured, dependencies);
+  // Public native-start requests need no identity lookup. Starting async auth
+  // initialization there leaves work unfinished when the request ends.
+  let auth: ReturnType<typeof createAuth> | undefined;
+  const getAuth = () => (auth ??= createAuth(configured, dependencies));
   return {
     profile: async (userId) => {
       const user = await (
-        await auth.$context
+        await getAuth().$context
       ).internalAdapter.findUserById(userId);
-      return user ? { name: user.name, email: user.email } : null;
+      return user
+        ? {
+            name: user.name,
+            email: user.email,
+            emailVerified: user.emailVerified === true,
+          }
+        : null;
     },
-    handler: (request) => auth.handler(request),
+    handler: (request) => getAuth().handler(request),
     getSession: async (headers) => {
-      const session = await auth.api.getSession({ headers });
+      const session = await getAuth().api.getSession({ headers });
       return session
-        ? { user: { id: session.user.id, email: session.user.email } }
+        ? {
+            user: {
+              id: session.user.id,
+              email: session.user.email,
+              emailVerified: session.user.emailVerified === true,
+            },
+          }
         : null;
     },
   };

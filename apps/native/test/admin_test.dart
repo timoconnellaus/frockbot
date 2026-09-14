@@ -8,10 +8,10 @@ import 'package:frockbot_native/theme/frock_theme.dart';
 import 'settings_test.dart' show SettingsApi;
 import 'widget_test.dart' show MemoryStore;
 
-Map<String, Object?> policy({bool open = true, int revision = 3}) => {
+Map<String, Object?> policy({String mode = 'open', int revision = 3}) => {
   'schemaVersion': 1,
   'revision': revision,
-  'signups': {'open': open},
+  'admission': {'mode': mode},
   'updatedAt': '2026-09-05T10:00:00.000Z',
   'updatedBy': 'tim',
 };
@@ -57,17 +57,17 @@ Map<String, Object?> accounts({
 };
 
 void main() {
-  testWidgets('an admin opens signups and the answer is what is shown', (
+  testWidgets('an admin chooses invite only and sees the answer', (
     tester,
   ) async {
-    var open = false;
+    var mode = 'closed';
     final sent = <Map<String, Object?>>[];
     final api = SettingsApi(MemoryStore(), (_, body) async {
-      if (body == null) return policy(open: open);
+      if (body == null) return policy(mode: mode);
       final command = (body as Map).cast<String, Object?>();
       sent.add(command);
-      open = command['open'] == true;
-      return policy(open: open, revision: 4);
+      mode = command['mode']! as String;
+      return policy(mode: mode, revision: 4);
     });
     await tester.pumpWidget(
       MaterialApp(
@@ -76,22 +76,21 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(
-      find.text('Only people who already have an account can sign in.'),
-      findsOneWidget,
+    ListTile row(String title) => tester.widget<ListTile>(
+      find.ancestor(of: find.text(title), matching: find.byType(ListTile)),
     );
-    await tester.tap(find.byType(SwitchListTile));
+    expect(row('Closed').selected, isTrue);
+    expect(row('Invite only').selected, isFalse);
+    await tester.tap(find.text('Invite only'));
     await tester.pumpAndSettle();
     expect(sent.single, {
       'schemaVersion': 1,
-      'type': 'deployment/set-signups',
-      'open': true,
+      'type': 'deployment/set-admission-mode',
+      'mode': 'invite-only',
       'revision': 3,
     });
-    expect(
-      find.text('Anyone with the link can create an account.'),
-      findsOneWidget,
-    );
+    expect(row('Invite only').selected, isTrue);
+    expect(row('Closed').selected, isFalse);
   });
 
   testWidgets('an admin turns Applets on for one account', (tester) async {
@@ -123,6 +122,8 @@ void main() {
       matching: find.byType(SwitchListTile),
     );
     expect(tester.widget<SwitchListTile>(guest).value, isFalse);
+    await tester.ensureVisible(guest);
+    await tester.pumpAndSettle();
     await tester.tap(guest);
     await tester.pumpAndSettle();
     expect(sent, {
@@ -145,6 +146,8 @@ void main() {
       matching: find.byType(SwitchListTile),
     );
     expect(tester.widget<SwitchListTile>(authoring).value, isFalse);
+    await tester.ensureVisible(authoring);
+    await tester.pumpAndSettle();
     await tester.tap(authoring);
     await tester.pumpAndSettle();
     expect(sent, {
@@ -326,6 +329,8 @@ void main() {
       of: find.bySemanticsIdentifier(AdminIds.applets('guest-id')),
       matching: find.byType(SwitchListTile),
     );
+    await tester.ensureVisible(guest);
+    await tester.pumpAndSettle();
     await tester.tap(guest);
     await tester.pumpAndSettle();
     expect(

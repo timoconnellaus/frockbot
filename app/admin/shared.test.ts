@@ -1,10 +1,19 @@
 import { describe, expect, test } from "bun:test";
 import {
+  ADMISSION_REFUSAL_COPY_V1,
+  accessEmailV1,
+  decodeAccountAccessV1,
+  decodeAccountAccessViewV1,
+  decodeAccountAdmissionDecisionV1,
   decodeAdminUserFeaturesV1,
   decodeAdminUserListViewV1,
+  decodeAdmissionIdentityV1,
   decodeDeploymentPolicyV1,
-  decodeSetSignupsCommandV1,
-  decodeSetSignupsRequestV1,
+  decodeIdentityCreationRequestV1,
+  decodeInviteEmailCommandV1,
+  decodeSetAccountAccessCommandV1,
+  decodeSetAdmissionModeCommandV1,
+  decodeSetAdmissionModeRequestV1,
   decodeSetUserFeaturesCommandV1,
   decodeUserFeaturesV1,
   defaultUserFeaturesV1,
@@ -14,60 +23,214 @@ import {
 const policy = {
   schemaVersion: 1,
   revision: 2,
-  signups: { open: false },
+  admission: { mode: "invite-only" },
   updatedAt: "2026-09-01T00:00:00.000Z",
   updatedBy: "owner@example.com",
 } as const;
 
+const access = {
+  schemaVersion: 1,
+  userId: "u1",
+  state: "paused",
+  revision: 3,
+  updatedAt: "2026-09-01T00:00:00.000Z",
+  updatedBy: "owner-id",
+} as const;
+
 describe("deployment policy codecs", () => {
-  test("decode the exact policy and signup command shapes", () => {
+  test("decode the exact policy and admission mode command shapes", () => {
     expect(decodeDeploymentPolicyV1(policy)).toEqual(policy);
+    const command = {
+      schemaVersion: 1,
+      type: "deployment/set-admission-mode",
+      mode: "open",
+      revision: 2,
+    } as const;
+    expect(decodeSetAdmissionModeCommandV1(command)).toEqual(command);
     expect(
-      decodeSetSignupsCommandV1({
+      decodeSetAdmissionModeRequestV1({
+        schemaVersion: 1,
+        command,
+        updatedBy: "owner-id",
+      }),
+    ).toMatchObject({ updatedBy: "owner-id", command: { mode: "open" } });
+  });
+
+  test("the retired signups shape does not decode anywhere", () => {
+    expect(() =>
+      decodeDeploymentPolicyV1({
+        schemaVersion: 1,
+        revision: 2,
+        signups: { open: true },
+        updatedAt: "2026-09-01T00:00:00.000Z",
+        updatedBy: "owner-id",
+      }),
+    ).toThrow("unknown fields");
+    expect(() =>
+      decodeSetAdmissionModeCommandV1({
         schemaVersion: 1,
         type: "deployment/set-signups",
         open: true,
         revision: 2,
       }),
-    ).toEqual({
-      schemaVersion: 1,
-      type: "deployment/set-signups",
-      open: true,
-      revision: 2,
-    });
-    expect(
-      decodeSetSignupsRequestV1({
-        schemaVersion: 1,
-        command: {
-          schemaVersion: 1,
-          type: "deployment/set-signups",
-          open: true,
-          revision: 2,
-        },
-        updatedBy: "owner-id",
-      }),
-    ).toMatchObject({ updatedBy: "owner-id", command: { open: true } });
+    ).toThrow("unknown fields");
   });
 
-  test("rejects unknown fields at every seam", () => {
+  test("rejects unknown fields and unknown modes at every seam", () => {
     expect(() => decodeDeploymentPolicyV1({ ...policy, extra: true })).toThrow(
       "unknown fields",
     );
     expect(() =>
       decodeDeploymentPolicyV1({
         ...policy,
-        signups: { open: false, extra: true },
+        admission: { mode: "closed", extra: true },
       }),
     ).toThrow("unknown fields");
     expect(() =>
-      decodeSetSignupsCommandV1({
+      decodeDeploymentPolicyV1({ ...policy, admission: { mode: "waitlist" } }),
+    ).toThrow("invalid");
+    expect(() =>
+      decodeSetAdmissionModeCommandV1({
         schemaVersion: 1,
-        type: "deployment/set-signups",
-        open: true,
+        type: "deployment/set-admission-mode",
+        mode: "open",
         revision: 2,
         expectedRevision: 2,
       }),
     ).toThrow("unknown fields");
+  });
+});
+
+describe("account access codecs", () => {
+  test("decode the exact access record, view and command", () => {
+    expect(decodeAccountAccessV1(access)).toEqual(access);
+    expect(
+      decodeAccountAccessViewV1({ schemaVersion: 1, userId: "u1", access }),
+    ).toEqual({ schemaVersion: 1, userId: "u1", access });
+    expect(
+      decodeAccountAccessViewV1({
+        schemaVersion: 1,
+        userId: "u1",
+        access: null,
+      }),
+    ).toEqual({ schemaVersion: 1, userId: "u1", access: null });
+    expect(
+      decodeSetAccountAccessCommandV1({
+        schemaVersion: 1,
+        type: "account/set-access",
+        state: "blocked",
+        revision: 0,
+      }),
+    ).toMatchObject({ state: "blocked", revision: 0 });
+  });
+
+  test("refuses unknown states, zero revisions, strays and mismatched views", () => {
+    expect(() => decodeAccountAccessV1({ ...access, state: "trial" })).toThrow(
+      "invalid",
+    );
+    expect(() => decodeAccountAccessV1({ ...access, revision: 0 })).toThrow(
+      "invalid",
+    );
+    expect(() => decodeAccountAccessV1({ ...access, credit: 5 })).toThrow(
+      "unknown fields",
+    );
+    expect(() =>
+      decodeAccountAccessViewV1({ schemaVersion: 1, userId: "u2", access }),
+    ).toThrow("another account");
+  });
+
+  test("an invitation names one normalized address and nothing else", () => {
+    expect(
+      decodeInviteEmailCommandV1({
+        schemaVersion: 1,
+        type: "access/invite-email",
+        email: "  Person@Example.COM",
+      }).email,
+    ).toBe("person@example.com");
+    for (const email of ["", "person", "person@", "a b@example.com"]) {
+      expect(() =>
+        decodeInviteEmailCommandV1({
+          schemaVersion: 1,
+          type: "access/invite-email",
+          email,
+        }),
+      ).toThrow("invalid");
+    }
+    expect(accessEmailV1("nobody")).toBeUndefined();
+    expect(accessEmailV1(undefined)).toBeUndefined();
+  });
+
+  test("an admission identity must say whether its email was verified", () => {
+    expect(
+      decodeAdmissionIdentityV1({
+        schemaVersion: 1,
+        userId: "u1",
+        email: "U1@example.com",
+        emailVerified: true,
+        isAdmin: false,
+      }),
+    ).toEqual({
+      schemaVersion: 1,
+      userId: "u1",
+      email: "u1@example.com",
+      emailVerified: true,
+      isAdmin: false,
+    });
+    expect(() =>
+      decodeAdmissionIdentityV1({
+        schemaVersion: 1,
+        userId: "u1",
+        isAdmin: false,
+      }),
+    ).toThrow("unknown fields");
+    expect(() =>
+      decodeIdentityCreationRequestV1({
+        schemaVersion: 1,
+        email: "u1@example.com",
+        emailVerified: "yes",
+        isAdmin: false,
+      }),
+    ).toThrow("invalid");
+  });
+
+  test("a decision is either an admission with its basis or a refusal with a known reason", () => {
+    expect(
+      decodeAccountAdmissionDecisionV1({
+        schemaVersion: 1,
+        admitted: true,
+        basis: "invitation",
+      }),
+    ).toEqual({ schemaVersion: 1, admitted: true, basis: "invitation" });
+    for (const reason of Object.keys(ADMISSION_REFUSAL_COPY_V1)) {
+      expect(
+        decodeAccountAdmissionDecisionV1({
+          schemaVersion: 1,
+          admitted: false,
+          reason,
+        }),
+      ).toMatchObject({ admitted: false, reason });
+    }
+    expect(() =>
+      decodeAccountAdmissionDecisionV1({
+        schemaVersion: 1,
+        admitted: false,
+        reason: "signups-closed",
+      }),
+    ).toThrow("invalid");
+    expect(() =>
+      decodeAccountAdmissionDecisionV1({
+        schemaVersion: 1,
+        admitted: true,
+        basis: "open",
+        reason: "account-paused",
+      }),
+    ).toThrow("unknown fields");
+  });
+
+  test("no refusal copy claims an invitation exists", () => {
+    for (const copy of Object.values(ADMISSION_REFUSAL_COPY_V1)) {
+      expect(`${copy.title} ${copy.detail}`).not.toMatch(/invited|invitation/i);
+    }
   });
 });
 

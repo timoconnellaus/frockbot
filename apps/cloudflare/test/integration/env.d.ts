@@ -6,6 +6,9 @@ import type { D1Migration } from "cloudflare:test";
  */
 interface IntegrationTestEnv {
   BETTER_AUTH_SECRET: string;
+  BETTER_AUTH_URL: string;
+  GOOGLE_CLIENT_ID: string;
+  GOOGLE_CLIENT_SECRET: string;
   APPLICATION_ARTIFACTS: R2Bucket;
   AUTH_DB: D1Database;
   DEFAULT_APPLICATION_HASH: string;

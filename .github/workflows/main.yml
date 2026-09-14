@@ -500,9 +500,8 @@ jobs:
         run: |
           missing=()
           # FROCKBOT_ADMIN_EMAILS is required here, unlike production. Staging
-          # signups are closed and stay closed, so the admin allowlist is the
-          # only way any identity reaches the deployment: without it, nobody
-          # can sign in and nobody can open Admin to change that.
+          # needs an administrator to grant access while admission is closed;
+          # requiring the allowlist prevents publishing an unmanageable stage.
           for name in \
             CLOUDFLARE_API_TOKEN \
             CLOUDFLARE_ACCOUNT_ID \

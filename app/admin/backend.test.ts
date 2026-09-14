@@ -4,10 +4,13 @@ import {
   type AdminGatewayHost,
 } from "./backend.js";
 import {
+  AccountAccessConflictError,
   DeploymentPolicyConflictError,
   defaultUserFeaturesV1,
+  type AccountAccessV1,
   type AdminUserBillingV1,
   type DeploymentPolicyV1,
+  type EmailInvitationV1,
   type UserFeaturesV1,
 } from "./shared.js";
 
@@ -15,9 +18,78 @@ function initialPolicy(): DeploymentPolicyV1 {
   return {
     schemaVersion: 1,
     revision: 0,
-    signups: { open: false },
+    admission: { mode: "closed" },
     updatedAt: "2026-09-01T00:00:00.000Z",
     updatedBy: "deployment-default",
+  };
+}
+
+/** The access authority's half of the host, in memory, with its compare-and-swap. */
+function policyHost(): Pick<
+  AdminGatewayHost,
+  | "readDeploymentPolicy"
+  | "setAdmissionMode"
+  | "readAccountAccess"
+  | "setAccountAccess"
+  | "inviteEmail"
+> & {
+  access: Map<string, AccountAccessV1>;
+  invitations: Map<string, EmailInvitationV1>;
+} {
+  let policy = initialPolicy();
+  const access = new Map<string, AccountAccessV1>();
+  const invitations = new Map<string, EmailInvitationV1>();
+  return {
+    access,
+    invitations,
+    readDeploymentPolicy: () => Promise.resolve(policy),
+    setAdmissionMode: (command, updatedBy) => {
+      if (command.revision !== policy.revision) {
+        return Promise.reject(
+          new DeploymentPolicyConflictError(policy.revision),
+        );
+      }
+      policy = {
+        schemaVersion: 1,
+        revision: policy.revision + 1,
+        admission: { mode: command.mode },
+        updatedAt: "2026-09-01T01:00:00.000Z",
+        updatedBy,
+      };
+      return Promise.resolve(policy);
+    },
+    readAccountAccess: (userId) =>
+      Promise.resolve({
+        schemaVersion: 1,
+        userId,
+        access: access.get(userId) ?? null,
+      }),
+    setAccountAccess: (userId, command, updatedBy) => {
+      const revision = access.get(userId)?.revision ?? 0;
+      if (command.revision !== revision) {
+        return Promise.reject(new AccountAccessConflictError(revision));
+      }
+      const next: AccountAccessV1 = {
+        schemaVersion: 1,
+        userId,
+        state: command.state,
+        revision: revision + 1,
+        updatedAt: "2026-09-01T01:00:00.000Z",
+        updatedBy,
+      };
+      access.set(userId, next);
+      return Promise.resolve(next);
+    },
+    inviteEmail: (command, invitedBy) => {
+      const invitation = invitations.get(command.email) ?? {
+        schemaVersion: 1,
+        email: command.email,
+        invitedAt: "2026-09-01T01:00:00.000Z",
+        invitedBy,
+      };
+      invitations.set(command.email, invitation);
+      return Promise.resolve(invitation);
+    },
   };
 }
 
@@ -97,12 +169,12 @@ describe("admin gateway contribution", () => {
   test("refuses non-admins before reading deployment policy", async () => {
     let reads = 0;
     const contribution = createAdminBackendContribution({
+      ...policyHost(),
+      ...accountsHost([]),
       readDeploymentPolicy: () => {
         reads += 1;
         return Promise.resolve(initialPolicy());
       },
-      setDeploymentSignups: () => Promise.resolve(initialPolicy()),
-      ...accountsHost([]),
     });
 
     const response = await contribution.route(
@@ -115,24 +187,10 @@ describe("admin gateway contribution", () => {
     expect(reads).toBe(0);
   });
 
-  test("reads and updates the policy with an optimistic revision", async () => {
-    let policy = initialPolicy();
+  test("reads and updates the admission mode with an optimistic revision", async () => {
     const contribution = createAdminBackendContribution({
       ...accountsHost([]),
-      readDeploymentPolicy: () => Promise.resolve(policy),
-      setDeploymentSignups: (command, updatedBy) => {
-        if (command.revision !== policy.revision) {
-          throw new DeploymentPolicyConflictError(policy.revision);
-        }
-        policy = {
-          schemaVersion: 1,
-          revision: policy.revision + 1,
-          signups: { open: command.open },
-          updatedAt: "2026-09-01T01:00:00.000Z",
-          updatedBy,
-        };
-        return Promise.resolve(policy);
-      },
+      ...policyHost(),
     });
     const context = {
       userId: "owner-id",
@@ -153,8 +211,8 @@ describe("admin gateway contribution", () => {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           schemaVersion: 1,
-          type: "deployment/set-signups",
-          open: true,
+          type: "deployment/set-admission-mode",
+          mode: "invite-only",
           revision: 0,
         }),
       }),
@@ -164,7 +222,7 @@ describe("admin gateway contribution", () => {
     expect(update?.status).toBe(200);
     expect(await update?.json()).toMatchObject({
       revision: 1,
-      signups: { open: true },
+      admission: { mode: "invite-only" },
       updatedBy: "owner-id",
     });
 
@@ -174,8 +232,8 @@ describe("admin gateway contribution", () => {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           schemaVersion: 1,
-          type: "deployment/set-signups",
-          open: false,
+          type: "deployment/set-admission-mode",
+          mode: "open",
           revision: 0,
         }),
       }),
@@ -194,8 +252,7 @@ describe("admin gateway contribution", () => {
       { userId: "guest", email: "guest@example.com", name: "Guest" },
     ]);
     const contribution = createAdminBackendContribution({
-      readDeploymentPolicy: () => Promise.resolve(initialPolicy()),
-      setDeploymentSignups: () => Promise.resolve(initialPolicy()),
+      ...policyHost(),
       ...host,
     });
     const context = {
@@ -274,8 +331,7 @@ describe("admin gateway contribution", () => {
       { userId: "guest", email: "guest@example.com", name: "Guest" },
     ]);
     const contribution = createAdminBackendContribution({
-      readDeploymentPolicy: () => Promise.resolve(initialPolicy()),
-      setDeploymentSignups: () => Promise.resolve(initialPolicy()),
+      ...policyHost(),
       ...host,
     });
     const context = {
@@ -369,8 +425,7 @@ describe("admin gateway contribution", () => {
       "development",
     );
     const contribution = createAdminBackendContribution({
-      readDeploymentPolicy: () => Promise.resolve(initialPolicy()),
-      setDeploymentSignups: () => Promise.resolve(initialPolicy()),
+      ...policyHost(),
       ...host,
       readUserFeatures: (userId) =>
         userId === "wedged"
@@ -411,8 +466,7 @@ describe("admin gateway contribution", () => {
     let writes = 0;
     const host = accountsHost([]);
     const contribution = createAdminBackendContribution({
-      readDeploymentPolicy: () => Promise.resolve(initialPolicy()),
-      setDeploymentSignups: () => Promise.resolve(initialPolicy()),
+      ...policyHost(),
       ...host,
       setUserFeatures: (...args) => {
         writes += 1;
@@ -459,5 +513,158 @@ describe("admin gateway contribution", () => {
     );
     expect(unknown?.status).toBe(404);
     expect(writes).toBe(0);
+  });
+  test("the retired signups command is refused, not translated", async () => {
+    const contribution = createAdminBackendContribution({
+      ...accountsHost([]),
+      ...policyHost(),
+    });
+    const response = await contribution.route(
+      new Request("https://frockbot.test/api/admin/policy", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          schemaVersion: 1,
+          type: "deployment/set-signups",
+          open: true,
+          revision: 0,
+        }),
+      }),
+      new URL("https://frockbot.test/api/admin/policy"),
+      { userId: "owner-id", client: "browser", isAdmin: true },
+    );
+    expect(response?.status).toBe(400);
+  });
+
+  test("an admin reads and sets one account's access under its revision", async () => {
+    const host = policyHost();
+    const contribution = createAdminBackendContribution({
+      ...accountsHost([]),
+      ...host,
+    });
+    const context = {
+      userId: "owner-id",
+      client: "browser" as const,
+      isAdmin: true,
+    };
+    const path = "https://frockbot.test/api/admin/users/guest/access";
+    const set = (body: unknown, admin = context) =>
+      contribution.route(
+        new Request(path, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        }),
+        new URL(path),
+        admin,
+      );
+
+    const unread = await contribution.route(
+      new Request(path),
+      new URL(path),
+      context,
+    );
+    expect(await unread?.json<unknown>()).toEqual({
+      schemaVersion: 1,
+      userId: "guest",
+      access: null,
+    });
+
+    const paused = await set({
+      schemaVersion: 1,
+      type: "account/set-access",
+      state: "paused",
+      revision: 0,
+    });
+    expect(paused?.status).toBe(200);
+    expect(await paused?.json()).toMatchObject({
+      userId: "guest",
+      state: "paused",
+      revision: 1,
+      updatedBy: "owner-id",
+    });
+
+    const stale = await set({
+      schemaVersion: 1,
+      type: "account/set-access",
+      state: "active",
+      revision: 0,
+    });
+    expect(stale?.status).toBe(409);
+    expect(await stale?.json()).toMatchObject({
+      code: "revision-conflict",
+      currentRevision: 1,
+    });
+    expect(host.access.get("guest")?.state).toBe("paused");
+
+    for (const bad of [
+      {
+        schemaVersion: 1,
+        type: "account/set-access",
+        state: "gone",
+        revision: 1,
+      },
+      { schemaVersion: 1, type: "account/set-access", state: "active" },
+      {
+        schemaVersion: 1,
+        type: "account/set-access",
+        state: "active",
+        revision: 1,
+        userId: "someone-else",
+      },
+    ]) {
+      expect((await set(bad))?.status).toBe(400);
+    }
+    expect(
+      (
+        await set(
+          {
+            schemaVersion: 1,
+            type: "account/set-access",
+            state: "active",
+            revision: 1,
+          },
+          { ...context, isAdmin: false },
+        )
+      )?.status,
+    ).toBe(403);
+    expect(host.access.get("guest")?.revision).toBe(1);
+  });
+
+  test("an admin invites a normalized address, once", async () => {
+    const host = policyHost();
+    const contribution = createAdminBackendContribution({
+      ...accountsHost([]),
+      ...host,
+    });
+    const path = "https://frockbot.test/api/admin/invitations";
+    const invite = (body: unknown, isAdmin = true) =>
+      contribution.route(
+        new Request(path, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        }),
+        new URL(path),
+        { userId: "owner-id", client: "browser", isAdmin },
+      );
+    const command = {
+      schemaVersion: 1,
+      type: "access/invite-email",
+      email: " Guest@Example.com ",
+    };
+    const invited = await invite(command);
+    expect(invited?.status).toBe(200);
+    expect(await invited?.json()).toMatchObject({
+      email: "guest@example.com",
+      invitedBy: "owner-id",
+    });
+    expect((await invite(command))?.status).toBe(200);
+    expect([...host.invitations.keys()]).toEqual(["guest@example.com"]);
+    expect(
+      (await invite({ ...command, email: "not-an-address" }))?.status,
+    ).toBe(400);
+    expect((await invite({ ...command, userId: "u1" }))?.status).toBe(400);
+    expect((await invite(command, false))?.status).toBe(403);
   });
 });

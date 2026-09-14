@@ -20,7 +20,7 @@ export interface NativeSessionStorage {
 export type NativeSessionOperation = {
   schemaVersion: 1;
   userId: string;
-  action: "issue" | "read" | "revoke";
+  action: "check-issue" | "issue" | "read" | "revoke";
   sessionId: string;
   hello: ClientHello;
   expiresAt: number;
@@ -39,7 +39,10 @@ export function decodeNativeSessionOperation(
     !isProtocolValue("Identifier", v.userId) ||
     !isProtocolValue("Identifier", v.sessionId) ||
     !isProtocolValue("ClientHello", v.hello) ||
-    (v.action !== "issue" && v.action !== "read" && v.action !== "revoke") ||
+    (v.action !== "check-issue" &&
+      v.action !== "issue" &&
+      v.action !== "read" &&
+      v.action !== "revoke") ||
     typeof v.expiresAt !== "number" ||
     !Number.isSafeInteger(v.expiresAt)
   )
@@ -83,7 +86,7 @@ export function nativeSessionOperation(
     })
     .filter((record) => record.expiresAt > now);
   let record = current.find((item) => item.sessionId === op.sessionId);
-  if (op.action === "issue") {
+  if (op.action === "issue" || op.action === "check-issue") {
     if (record)
       throw new Error("This sign-in has already been used. Sign in again.");
     // Active ones only. A revoked session is a device that has signed out,
@@ -94,6 +97,7 @@ export function nativeSessionOperation(
       throw new Error("Too many active sign-ins. Sign out on another device.");
     if (op.expiresAt <= now || op.expiresAt > now + 7 * 86400_000)
       throw new Error("Invalid native session expiry");
+    if (op.action === "check-issue") return null;
     record = {
       schemaVersion: 1,
       userId: op.userId,
