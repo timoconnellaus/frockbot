@@ -644,8 +644,15 @@ jobs:
           [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")" == "${VERSION%%-*}" ]]
           [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$app/Contents/Info.plist")" == "$GITHUB_RUN_NUMBER" ]]
           # The feed's build numbers are this run number; an app that cannot
-          # name its feed and key would never update again.
-          [[ "$(/usr/libexec/PlistBuddy -c 'Print :SUFeedURL' "$app/Contents/Info.plist")" == https://downloads.frockbot.com/mac/appcast*.xml ]]
+          # name its feed and key would never update again, and a prerelease
+          # baked against the stable feed would move its testers off staging
+          # for good.
+          if [[ "$VERSION" == *-* ]]; then
+            expected_feed="https://downloads.frockbot.com/mac/appcast-staging.xml"
+          else
+            expected_feed="https://downloads.frockbot.com/mac/appcast.xml"
+          fi
+          [[ "$(/usr/libexec/PlistBuddy -c 'Print :SUFeedURL' "$app/Contents/Info.plist")" == "$expected_feed" ]]
           [[ "$(/usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' "$app/Contents/Info.plist")" == "$SPARKLE_ED_PUBLIC_KEY" ]]
           codesign --verify --strict "$app/Contents/Frameworks/Sparkle.framework/Versions/B/Autoupdate"
           security cms -D -i "$app/Contents/embedded.provisionprofile" > "$embedded_profile"
@@ -1015,9 +1022,19 @@ jobs:
             bunx wrangler r2 object put "$bucket/mac/$name" --remote --file "$next" \
               --content-type application/xml --cache-control "public, max-age=300"
             printf '{"files":["https://downloads.frockbot.com/mac/%s"]}' "$name" > "$RUNNER_TEMP/purge.json"
-            curl -fsS -X POST "https://api.cloudflare.com/client/v4/zones/$zone/purge_cache" \
+            local response
+            response="$(curl -sS -X POST "https://api.cloudflare.com/client/v4/zones/$zone/purge_cache" \
               -H "authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "content-type: application/json" \
-              --data "@$RUNNER_TEMP/purge.json" > /dev/null
+              --data "@$RUNNER_TEMP/purge.json")"
+            if ! printf '%s' "$response" | python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin).get("success") else 1)'; then
+              echo "Failed to purge $name from cache." >&2
+              # The overwhelmingly likely cause, and invisible otherwise: the
+              # upload above needs Workers R2 Storage, this needs Zone Cache
+              # Purge, and a token can hold the first without the second.
+              echo 'CLOUDFLARE_API_TOKEN may be missing the "Zone: Cache Purge" permission for frockbot.com.' >&2
+              printf '%s\n' "$response" >&2
+              return 1
+            fi
             for attempt in 1 2 3 4 5; do
               if curl -fsSL "https://downloads.frockbot.com/mac/$name" | cmp -s - "$next"; then
                 echo "Update feed $name now offers $VERSION (build $GITHUB_RUN_NUMBER)." >> "$GITHUB_STEP_SUMMARY"
