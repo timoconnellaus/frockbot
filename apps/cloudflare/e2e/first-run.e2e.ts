@@ -42,7 +42,9 @@ test("a new User lands in General and can still create a Bot of their own", asyn
     /^Help me plan and complete \[project\]/,
     { timeout: 60_000 },
   );
-  await page.screenshot({ path: testInfo.outputPath("general-project-draft.png") });
+  await page.screenshot({
+    path: testInfo.outputPath("general-project-draft.png"),
+  });
   await testInfo.attach("general-project-draft.png", {
     path: testInfo.outputPath("general-project-draft.png"),
     contentType: "image/png",
@@ -92,7 +94,9 @@ test("a new User lands in General and can still create a Bot of their own", asyn
   expect(selection).toBeTruthy();
   expect(selection).not.toBe(generalBotId);
   await page.reload();
-  await expect(sem(page, "shell-conversation")).toBeVisible({ timeout: 120_000 });
+  await expect(sem(page, "shell-conversation")).toBeVisible({
+    timeout: 120_000,
+  });
   await expect(sem(page, "starter-suggestions")).toHaveCount(0);
   expect(
     await page.evaluate(

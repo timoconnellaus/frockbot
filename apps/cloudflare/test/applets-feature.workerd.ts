@@ -135,7 +135,7 @@ describe("the Applets feature inside a real Bot", () => {
     };
     const sibling = { userId: owner.userId, botId: `applets-sibling-${id}` };
     await provisionBot(owner);
-    await provisionSiblingBot(sibling, 1);
+    await provisionSiblingBot(sibling);
     await setApplets(owner.userId, true);
     let runs = 0;
     const call = async (

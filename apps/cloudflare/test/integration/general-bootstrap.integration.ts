@@ -50,7 +50,9 @@ test("legacy empty account is backfilled once without reviving an old general to
     initialName: "General",
   });
   await evictDurableObject(user);
-  expect(await expectOkJson(await asUser(userId, "/api/bots"))).toEqual(directory);
+  expect(await expectOkJson(await asUser(userId, "/api/bots"))).toEqual(
+    directory,
+  );
   expect(
     await expectOkJson(await asUser(userId, "/api/bots/bootstrap")),
   ).toEqual(bootstrap);

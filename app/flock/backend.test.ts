@@ -226,6 +226,8 @@ describe("Flock gateway Contribution", () => {
       createBot: () => Promise.reject(new Error("not used")),
       listBotLifecycles: () =>
         Promise.resolve({ schemaVersion: 1, lifecycles: [] }),
+      readFlockBootstrap: () =>
+        Promise.resolve({ schemaVersion: 1, generalBotId: null }),
       executeBotLifecycle: (_user, command) => {
         issued.push(command);
         // The User Durable Object's refusal, as RPC serializes it: a name.

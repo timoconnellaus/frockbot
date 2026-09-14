@@ -20,7 +20,9 @@ for (const width of [390, 1280]) {
     ).json();
     await expect(sem(page, "starter-research")).toBeVisible();
     await expect(sem(page, "starter-recurring")).toBeVisible();
-    await page.screenshot({ path: testInfo.outputPath(`general-${width}.png`) });
+    await page.screenshot({
+      path: testInfo.outputPath(`general-${width}.png`),
+    });
     await testInfo.attach(`general-${width}.png`, {
       path: testInfo.outputPath(`general-${width}.png`),
       contentType: "image/png",
@@ -69,7 +71,9 @@ test("General's research and recurring starters follow its live feature switches
         .locator(`${node}[flt-tappable], ${node} [flt-tappable]`)
         .first()
         .click();
-      const toggle = page.getByRole("switch", { name: title, exact: true }).first();
+      const toggle = page
+        .getByRole("switch", { name: title, exact: true })
+        .first();
       await expect(toggle).toBeVisible();
       await page.waitForTimeout(700);
       await toggle.click();
@@ -108,7 +112,9 @@ test("racing account reads make one General and deleting it survives re-entry", 
   );
   const { generalBotId } = answers[0];
   expect(generalBotId).toMatch(/^general-[0-9a-f]{16}$/);
-  expect(answers.every((answer) => answer.generalBotId === generalBotId)).toBe(true);
+  expect(answers.every((answer) => answer.generalBotId === generalBotId)).toBe(
+    true,
+  );
   const before = await read("/api/bots");
   expect(before.bots).toHaveLength(1);
   expect(before.bots[0]).toMatchObject({
@@ -121,16 +127,19 @@ test("racing account reads make one General and deleting it survives re-entry", 
   await page.evaluate(() => localStorage.clear());
   await page.goto("about:blank");
   const impact = await read(`/api/bots/${generalBotId}/applets/impact`);
-  const response = await page.request.post(`/api/bots/${generalBotId}/lifecycle`, {
-    headers,
-    data: {
-      schemaVersion: 1,
-      type: "bot/delete",
-      botId: generalBotId,
-      commandId: crypto.randomUUID(),
-      appletImpact: impact.fingerprint,
+  const response = await page.request.post(
+    `/api/bots/${generalBotId}/lifecycle`,
+    {
+      headers,
+      data: {
+        schemaVersion: 1,
+        type: "bot/delete",
+        botId: generalBotId,
+        commandId: crypto.randomUUID(),
+        appletImpact: impact.fingerprint,
+      },
     },
-  });
+  );
   expect(response.status()).toBe(200);
   const receipt = await response.json();
   expect(receipt).toMatchObject({ status: "applied" });
@@ -146,7 +155,11 @@ test("racing account reads make one General and deleting it survives re-entry", 
     contentType: "image/png",
   });
   await testInfo.attach("bootstrap-and-deletion.json", {
-    body: JSON.stringify({ answers, before, receipt, after, bootstrap }, null, 2),
+    body: JSON.stringify(
+      { answers, before, receipt, after, bootstrap },
+      null,
+      2,
+    ),
     contentType: "application/json",
   });
 });
@@ -157,7 +170,9 @@ test("a Profile page opened during first load stays above General", async ({
 }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 900 });
   let release!: () => void;
-  const held = new Promise<void>((resolve) => { release = resolve; });
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
   await page.route(/\/api\/bots$/, async (route) => {
     await held;
     await route.continue();
@@ -169,17 +184,25 @@ test("a Profile page opened during first load stays above General", async ({
     const loaded = page.waitForResponse(/\/api\/bots$/);
     release();
     await loaded;
-    await expect.poll(() => page.evaluate(
-      (id) => localStorage.getItem(`frockbot.native.v1.directory/${id}`),
-      userId,
-    )).not.toBeNull();
+    await expect
+      .poll(() =>
+        page.evaluate(
+          (id) => localStorage.getItem(`frockbot.native.v1.directory/${id}`),
+          userId,
+        ),
+      )
+      .not.toBeNull();
     await expect(sem(page, "profile-sign-out")).toBeVisible();
     await expect(sem(page, "starter-suggestions")).toHaveCount(0);
-    expect(await page.evaluate(
-      (id) => localStorage.getItem(`frockbot.native.v1.selection.${id}`),
-      userId,
-    )).toBeNull();
-    await page.screenshot({ path: testInfo.outputPath("profile-before-general.png") });
+    expect(
+      await page.evaluate(
+        (id) => localStorage.getItem(`frockbot.native.v1.selection.${id}`),
+        userId,
+      ),
+    ).toBeNull();
+    await page.screenshot({
+      path: testInfo.outputPath("profile-before-general.png"),
+    });
     await testInfo.attach("profile-before-general.png", {
       path: testInfo.outputPath("profile-before-general.png"),
       contentType: "image/png",
