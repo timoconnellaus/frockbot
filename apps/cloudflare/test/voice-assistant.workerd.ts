@@ -1974,8 +1974,14 @@ describe("the voice session object", () => {
         state("awake")(f) && opened.frames.filter(state("awake")).length >= 2,
       "awake again",
     );
-    const booked = await meter();
-    expect(booked).toBeGreaterThanOrEqual(reconciled + 1);
+    // The awake frame is emitted before the asynchronous reservation write
+    // completes. Observe the durable condition this test is proving instead
+    // of racing that write when the full workerd suite is under load.
+    const booked = await eventually(
+      meter,
+      (value) => value >= reconciled + 1,
+      "second transcription window booked",
+    );
     opened.socket.close();
     await settle(100);
     await evictDurableObject(stub);
