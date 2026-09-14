@@ -555,7 +555,8 @@
       "count": 0,
       "capped": false,
       "unread": false,
-      "manuallyUnread": false
+      "manuallyUnread": false,
+      "notificationsEnabled": true
     }
   },
   {
@@ -1300,7 +1301,8 @@
         "count": 0,
         "capped": false,
         "unread": false,
-        "manuallyUnread": false
+        "manuallyUnread": false,
+        "notificationsEnabled": true
       }
     }
   },

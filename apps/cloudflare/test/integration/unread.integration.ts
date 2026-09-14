@@ -23,6 +23,7 @@ interface UnreadView {
   capped: boolean;
   unread: boolean;
   manuallyUnread: boolean;
+  notificationsEnabled: boolean;
   lastActivityCursor?: string;
   lastMessage?: { text: string; at: string; role: "assistant" | "user" };
 }
@@ -60,6 +61,11 @@ describe("unread and notifications through the gateway", () => {
 
     const initial = await unreadDirectory(userId);
     expect(initial.map((view) => view.unread)).toEqual([false, false]);
+    // Every new Bot starts muted.
+    expect(initial.map((view) => view.notificationsEnabled)).toEqual([
+      false,
+      false,
+    ]);
 
     // A Turn on A while the User is "viewing" B — the client sends no read
     // receipt for A, so A is the one that goes unread.
@@ -152,6 +158,11 @@ describe("unread and notifications through the gateway", () => {
         notifications: { enabled: true },
       }),
     );
+    // The fan-out reads the setting the save just wrote, so the application
+    // icon counts this Bot from the next refresh.
+    expect(forBot(await unreadDirectory(userId), botId)).toMatchObject({
+      notificationsEnabled: true,
+    });
 
     expect(
       await postAsUser(userId, `/api/bots/${botId}/turns`, {

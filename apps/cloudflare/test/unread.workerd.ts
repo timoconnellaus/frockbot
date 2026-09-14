@@ -25,6 +25,7 @@ interface UnreadRpc {
     capped: boolean;
     unread: boolean;
     manuallyUnread: boolean;
+    notificationsEnabled: boolean;
     lastActivityCursor?: string;
     lastMessage?: { text: string; at: string; role: "assistant" | "user" };
   }>;
@@ -34,6 +35,7 @@ interface UnreadRpc {
       count: number;
       unread: boolean;
       manuallyUnread: boolean;
+      notificationsEnabled: boolean;
       lastMessage?: { text: string; at: string; role: "assistant" | "user" };
     };
   }>;
@@ -84,8 +86,14 @@ describe("per-Bot unread in Workerd", () => {
 
     const settled = await unreadRpc(name).readUnread(identity);
     // A muted Bot: `notifications.enabled` is false on every new Bot, and the
-    // badge advanced anyway.
-    expect(settled).toMatchObject({ count: 2, capped: false, unread: true });
+    // badge advanced anyway. The view says so, so the application icon leaves
+    // it out.
+    expect(settled).toMatchObject({
+      count: 2,
+      capped: false,
+      unread: true,
+      notificationsEnabled: false,
+    });
     expect(settled.lastActivityCursor).toMatch(/^message-[0-9]{20}$/);
     expect(settled.lastMessage).toMatchObject({
       text: "Ollama reply",
@@ -113,7 +121,7 @@ describe("per-Bot unread in Workerd", () => {
     });
     expect(receipt).toMatchObject({
       status: "applied",
-      unread: { count: 0, unread: false },
+      unread: { count: 0, unread: false, notificationsEnabled: false },
     });
 
     await evictDurableObject(stub);

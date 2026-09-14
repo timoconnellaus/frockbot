@@ -41,6 +41,7 @@ void main() {
       'capped': false,
       'unread': false,
       'manuallyUnread': false,
+      'notificationsEnabled': true,
       'lastSeenCursor': 'message-00000000000000000002',
     });
     final push = PushController(api, store, 'tim', activity, channel: channel);
@@ -211,6 +212,7 @@ void main() {
         'capped': false,
         'unread': false,
         'manuallyUnread': false,
+        'notificationsEnabled': true,
         'lastSeenCursor': cursor,
       });
     }

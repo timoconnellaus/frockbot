@@ -115,6 +115,9 @@ class ActivityController extends ChangeNotifier {
       'count': 0,
       'capped': false,
       'manuallyUnread': false,
+      // A Bot the directory has not described yet is drawn with the default
+      // a Bot without settings has; its count is zero either way.
+      'notificationsEnabled': true,
       ...?before,
       if (read) ...{
         'count': 0,

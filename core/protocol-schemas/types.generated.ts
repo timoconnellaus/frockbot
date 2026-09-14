@@ -432,6 +432,7 @@ export type UnreadView = {
     role: "assistant" | "user";
   };
   working?: boolean;
+  notificationsEnabled: boolean;
   unreadFromMessageId?: string;
   lastSeenCursor?: MessageCursor;
   lastMessageId?: string;

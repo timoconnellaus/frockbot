@@ -41,6 +41,12 @@ class MainActivity : FlutterActivity() {
                     if (bot != null && cursor != null) PushNotifications.read(this,bot,cursor)
                     result.success(null)
                 }
+                "badge" -> {
+                    val bots = call.argument<Map<String, Int>>("bots") ?: emptyMap()
+                    val silenced = call.argument<List<String>>("silenced") ?: emptyList()
+                    PushNotifications.badge(this, bots, silenced)
+                    result.success(null)
+                }
                 "logout" -> { PushNotifications.account(this,null); result.success(null) }
                 else -> result.notImplemented()
             }

@@ -230,6 +230,35 @@ describe("the unread projection", () => {
     expect(view).toMatchObject({ count: UNREAD_COUNT_CAP, capped: true });
   });
 
+  test("states whether the Bot's notifications may reach the app badge", () => {
+    const state = advanceUnreadActivityV1(emptyUnreadStateV1(), {
+      cursor: cursor(2),
+      at: "2026-08-31T00:02:00.000Z",
+    });
+    const muted = projectBotUnreadViewV1(
+      "alpha",
+      state,
+      index(2),
+      undefined,
+      false,
+      false,
+    );
+    // Muting is about alerting: the row still counts.
+    expect(muted).toMatchObject({
+      count: 2,
+      unread: true,
+      notificationsEnabled: false,
+    });
+    expect(
+      decodeBotUnreadDirectoryViewV1({ schemaVersion: 1, unread: [muted] })
+        .unread[0]?.notificationsEnabled,
+    ).toBe(false);
+    const { notificationsEnabled: _dropped, ...unstated } = muted;
+    expect(() =>
+      decodeBotUnreadDirectoryViewV1({ schemaVersion: 1, unread: [unstated] }),
+    ).toThrow();
+  });
+
   test("nothing settled means nothing unread", () => {
     const view = projectBotUnreadViewV1(
       "alpha",

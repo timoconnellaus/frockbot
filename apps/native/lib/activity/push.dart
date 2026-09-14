@@ -30,6 +30,10 @@ class PushController {
   String? readingBot;
   bool focused = true;
   bool disposed = false;
+
+  /// Told when [focused] may have changed. Losing focus reads nothing new, but
+  /// the badges drawn through the focus rule still change.
+  VoidCallback? onFocus;
   Timer? timer;
   Future<void> _registration = Future.value();
   Future<void> start() async {
@@ -37,6 +41,7 @@ class PushController {
       focused = active && windowFocus.focused;
       _renewWhileFocused();
       unawaited(register());
+      onFocus?.call();
       if (active) unawaited(activity.load());
     });
     deviceId = await store.read('push-device');
@@ -54,6 +59,7 @@ class PushController {
         if (call.method == 'focus') {
           focused = call.arguments == true;
           _renewWhileFocused();
+          onFocus?.call();
           await register();
           if (focused) await activity.load();
         }
@@ -66,6 +72,7 @@ class PushController {
         focused =
             await channel.invokeMethod<bool>('focus', {'botId': readingBot}) ??
             false;
+        onFocus?.call();
         if (await store.read('push-permission-asked') == null) {
           await channel.invokeMethod<void>('permission');
           await store.write('push-permission-asked', 'true');
@@ -125,6 +132,7 @@ class PushController {
   void lifecycle(bool active) {
     focused = active && windowFocus.focused;
     _renewWhileFocused();
+    onFocus?.call();
     unawaited(register());
   }
 

@@ -2816,6 +2816,9 @@
         "working": {
           "type": "boolean"
         },
+        "notificationsEnabled": {
+          "type": "boolean"
+        },
         "unreadFromMessageId": {
           "type": "string",
           "minLength": 1,
@@ -2836,7 +2839,8 @@
         "count",
         "capped",
         "unread",
-        "manuallyUnread"
+        "manuallyUnread",
+        "notificationsEnabled"
       ],
       "additionalProperties": false
     },

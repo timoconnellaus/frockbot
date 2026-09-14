@@ -27,6 +27,7 @@ void main() {
           'capped': false,
           'unread': command['type'] != 'bot/mark-read',
           'manuallyUnread': command['type'] == 'bot/mark-unread',
+          'notificationsEnabled': true,
           'lastActivityCursor': 'message-00000000000000000002',
           'lastActivityAt': '2026-09-05T10:00:00.000Z',
         },
@@ -40,6 +41,7 @@ void main() {
       'capped': false,
       'unread': true,
       'manuallyUnread': false,
+      'notificationsEnabled': true,
       'lastActivityCursor': 'message-00000000000000000002',
       'lastActivityAt': '2026-09-05T10:00:00.000Z',
     });
@@ -82,6 +84,7 @@ void main() {
                     'capped': false,
                     'unread': true,
                     'manuallyUnread': false,
+                    'notificationsEnabled': true,
                     'lastActivityCursor': 'message-00000000000000000002',
                     'lastActivityAt': '2026-09-05T10:00:00.000Z',
                   },
@@ -102,6 +105,7 @@ void main() {
           'capped': false,
           'unread': false,
           'manuallyUnread': false,
+          'notificationsEnabled': true,
         },
       };
     });
@@ -154,6 +158,7 @@ void main() {
             'capped': false,
             'unread': true,
             'manuallyUnread': true,
+            'notificationsEnabled': true,
           },
         };
       });
@@ -180,6 +185,7 @@ void main() {
       'capped': false,
       'unread': count > 0,
       'manuallyUnread': false,
+      'notificationsEnabled': true,
       'lastActivityCursor': 'message-00000000000000000002',
       'lastActivityAt': '2026-09-05T10:00:00.000Z',
     };

@@ -47,6 +47,7 @@ wire.UnreadView unread({
   'capped': capped,
   'unread': isUnread,
   'manuallyUnread': manual,
+  'notificationsEnabled': true,
   'working': working,
 });
 
