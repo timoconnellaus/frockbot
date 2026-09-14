@@ -304,8 +304,8 @@ test("a Bot creates an Applet, its Applets list opens the source, and deletion r
 });
 
 /**
- * The one Bot this spec provisions. Applets are listed per Bot (ADR 0027), so
- * every directory read names it.
+ * The Builder Bot this spec provisions. Applets are listed per Bot (ADR 0027),
+ * so every directory read names it rather than the bootstrapped General Bot.
  */
 async function builderBotId(page: Page): Promise<string> {
   const response = await page.request.get("/api/bots");
