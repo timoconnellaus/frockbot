@@ -311,7 +311,7 @@ class ShellSidebar extends StatelessWidget {
                       children: [
                         Icon(
                           Icons.search_rounded,
-                          size: chatIconSizeV1,
+                          size: chatIconSize,
                           color: Theme.of(context).colorScheme.onSurfaceVariant,
                         ),
                         const SizedBox(width: 8),
@@ -699,10 +699,10 @@ class _Header extends StatelessWidget {
     // and wears the accent.
     final quiet = IconButton.styleFrom(
       foregroundColor: scheme.onSurfaceVariant,
-      minimumSize: const Size(44, 44),
-      fixedSize: const Size(44, 44),
+      minimumSize: Size.square(chatControlExtent),
+      fixedSize: Size.square(chatControlExtent),
       padding: EdgeInsets.zero,
-      iconSize: chatIconSizeV1,
+      iconSize: chatIconSize,
       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
     );
@@ -838,7 +838,7 @@ class _Foot extends StatelessWidget {
                   children: [
                     Icon(
                       Icons.storefront_outlined,
-                      size: chatIconSizeV1,
+                      size: chatIconSize,
                       color: theme.colorScheme.onSurfaceVariant,
                     ),
                     const SizedBox(width: 11),

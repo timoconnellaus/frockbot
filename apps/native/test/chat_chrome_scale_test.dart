@@ -1,12 +1,15 @@
-/// The chrome's glyphs are one size, and that size is big enough to read on a
-/// phone.
+/// The chrome's glyphs are one size per platform: big enough to read on a
+/// phone, compact at a desk.
 ///
 /// The painted icons started at a 19-point box with smaller geometry inside
 /// it, beside Material peers at 20 and 24 — three sizes in one bar, all of
-/// them small. [chatIconSizeV1] is the one box they share now, and every
-/// control drawn round one carries at least a 44-point target.
+/// them small. [chatIconSizeV1] is the one box they share on a phone, and
+/// every control drawn round one carries at least a 44-point target. Native
+/// desktops draw the same glyphs at [chatIconSizeDesktop] in tighter controls,
+/// because 24 points of line art beside 14-point text reads as massive.
 library;
 
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart' hide ConnectionState;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/client/chat_controller.dart';
@@ -45,10 +48,45 @@ Widget _sidebar({required bool phone}) => MaterialApp(
   ),
 );
 
+const _desktops = {
+  TargetPlatform.macOS,
+  TargetPlatform.windows,
+  TargetPlatform.linux,
+};
+
+final _phones = TargetPlatformVariant({
+  TargetPlatform.iOS,
+  TargetPlatform.android,
+});
+
+Widget _header() => MaterialApp(
+  theme: FrockTheme.theme(Brightness.dark),
+  home: Scaffold(
+    appBar: ChatHeader(
+      name: 'Rosemary',
+      connection: ConnectionState.connected,
+      onSettings: () {},
+      onComputer: () {},
+      onRoutines: () {},
+      onApplets: () {},
+    ),
+  ),
+);
+
+const _headerDoors = ['Applets', 'Computer', 'Routines', 'Bot settings'];
+
 void main() {
-  test('the shared glyph is Material\'s own size, not a compact one', () {
+  test('a phone\'s glyph is Material\'s own size, a desk\'s compact', () {
     expect(chatIconSizeV1, 24);
+    expect(chatIconSizeDesktop, 19);
   });
+
+  testWidgets('the chrome\'s sizes follow the platform', (tester) async {
+    final desktop = _desktops.contains(defaultTargetPlatform);
+    expect(chatDesktopChrome, desktop);
+    expect(chatIconSize, desktop ? 19 : 24);
+    expect(chatControlExtent, desktop ? 36 : 44);
+  }, variant: TargetPlatformVariant.all());
 
   testWidgets('every painted glyph in the chrome takes the same box', (
     tester,
@@ -107,7 +145,7 @@ void main() {
       final glyph = button.style?.iconSize?.resolve({});
       if (glyph != null) expect(glyph, chatIconSizeV1, reason: id);
     }
-  });
+  }, variant: _phones);
 
   testWidgets('a desk names the Marketplace in the list\'s own weight', (
     tester,
@@ -136,24 +174,10 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: FrockTheme.theme(Brightness.dark),
-        home: Scaffold(
-          appBar: ChatHeader(
-            name: 'Rosemary',
-            connection: ConnectionState.connected,
-            onSettings: () {},
-            onComputer: () {},
-            onRoutines: () {},
-            onApplets: () {},
-          ),
-        ),
-      ),
-    );
+    await tester.pumpWidget(_header());
     await tester.pumpAndSettle();
 
-    for (final name in ['Applets', 'Computer', 'Routines', 'Bot settings']) {
+    for (final name in _headerDoors) {
       final size = tester.getSize(find.byTooltip(name));
       expect(size.width, greaterThanOrEqualTo(42), reason: name);
       expect(size.height, greaterThanOrEqualTo(44), reason: name);
@@ -168,5 +192,80 @@ void main() {
         reason: name,
       );
     }
-  });
+  }, variant: _phones);
+
+  testWidgets(
+    'a desk\'s header draws 19-point glyphs in compact 36 by 40 doors',
+    (tester) async {
+      tester.view.physicalSize = const Size(1200, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await tester.pumpWidget(_header());
+      await tester.pumpAndSettle();
+
+      for (final name in _headerDoors) {
+        expect(
+          tester.getSize(find.byTooltip(name)),
+          const Size(36, 40),
+          reason: name,
+        );
+        expect(
+          tester.getSize(
+            find.descendant(
+              of: find.byTooltip(name),
+              matching: find.byType(ChatIcon),
+            ),
+          ),
+          const Size.square(chatIconSizeDesktop),
+          reason: name,
+        );
+      }
+    },
+    variant: TargetPlatformVariant.desktop(),
+  );
+
+  testWidgets(
+    'a desk\'s Bot list draws its controls compact',
+    (tester) async {
+      tester.view.physicalSize = const Size(1000, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await tester.pumpWidget(_sidebar(phone: false));
+      await tester.pumpAndSettle();
+
+      for (final id in [VoiceIds.sidebarStart, ShellIds.sidebarCreateBot]) {
+        final button = tester.widget<IconButton>(
+          find.descendant(
+            of: byIdentifier(id),
+            matching: find.byType(IconButton),
+          ),
+        );
+        expect(
+          tester.getSize(
+            find.descendant(
+              of: byIdentifier(id),
+              matching: find.byType(IconButton),
+            ),
+          ),
+          const Size.square(36),
+          reason: id,
+        );
+        expect(
+          button.style?.iconSize?.resolve({}),
+          chatIconSizeDesktop,
+          reason: id,
+        );
+      }
+      final marketplaceGlyph = tester.widget<Icon>(
+        find.descendant(
+          of: byIdentifier(ShellIds.sidebarMarketplace),
+          matching: find.byIcon(Icons.storefront_outlined),
+        ),
+      );
+      expect(marketplaceGlyph.size, chatIconSizeDesktop);
+    },
+    variant: TargetPlatformVariant.desktop(),
+  );
 }

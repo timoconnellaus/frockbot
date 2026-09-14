@@ -14,6 +14,8 @@ library;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
+import '../theme/frock_theme.dart';
+
 /// Renders [text] as a column of blocks. [onOpenLink] is given every link the
 /// person taps; a null handler draws links as ordinary emphasis, because a
 /// link that cannot be followed should not look like one.
@@ -50,9 +52,7 @@ class _ShellMarkdownState extends State<ShellMarkdown> {
     }
     _recognizers.clear();
     final theme = Theme.of(context);
-    final base =
-        widget.style ??
-        theme.textTheme.bodyLarge!.copyWith(fontWeight: FontWeight.w400);
+    final base = widget.style ?? FrockTheme.message(theme);
     final blocks = parseMarkdownBlocks(widget.text);
     final children = <Widget>[];
     for (final block in blocks) {
@@ -148,7 +148,9 @@ class _ShellMarkdownState extends State<ShellMarkdown> {
     final spans = <InlineSpan>[];
     for (final run in parseMarkdownInline(source)) {
       var style = base;
-      if (run.bold) style = style.copyWith(fontWeight: FontWeight.w600);
+      if (run.bold) {
+        style = style.copyWith(fontWeight: FrockTheme.messageStrong);
+      }
       if (run.italic) style = style.copyWith(fontStyle: FontStyle.italic);
       if (run.code) {
         style = style.copyWith(

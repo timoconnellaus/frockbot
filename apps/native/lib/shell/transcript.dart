@@ -503,10 +503,7 @@ class _Bubble extends StatelessWidget {
                   ),
                 ),
                 child: DefaultTextStyle.merge(
-                  style: theme.textTheme.bodyLarge?.copyWith(
-                    fontWeight: FontWeight.w400,
-                    height: 1.5,
-                  ),
+                  style: FrockTheme.message(theme),
                   child: Semantics(label: mine ? 'You' : 'Bot', child: child),
                 ),
               ),

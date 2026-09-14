@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
 import 'package:flutter/services.dart';
@@ -33,6 +34,32 @@ abstract final class FrockTheme {
   static const radiusControl = 12.0;
   static const radiusCard = 16.0;
   static const radiusSheet = 24.0;
+
+  /// Inter ships here at 400 and up, so a desktop cannot read lighter by
+  /// weight. The Mac draws the phone's 15-point regular heavy on a dark
+  /// window, so a message at a desk is a point smaller and its emphasis
+  /// medium. The phone keeps the theme body as it is.
+  static bool get _desktopType =>
+      !kIsWeb &&
+      switch (defaultTargetPlatform) {
+        TargetPlatform.macOS ||
+        TargetPlatform.windows ||
+        TargetPlatform.linux => true,
+        _ => false,
+      };
+
+  /// The style a message is read in, the person's and the Bot's.
+  static TextStyle message(ThemeData theme) {
+    final body = theme.textTheme.bodyLarge!.copyWith(
+      fontWeight: FontWeight.w400,
+      height: 1.5,
+    );
+    return _desktopType ? body.copyWith(fontSize: 14) : body;
+  }
+
+  /// The weight of `**emphasis**` inside a message.
+  static FontWeight get messageStrong =>
+      _desktopType ? FontWeight.w500 : FontWeight.w600;
 
   static Duration motion(BuildContext context, [Duration duration = enter]) =>
       MediaQuery.disableAnimationsOf(context) ? Duration.zero : duration;

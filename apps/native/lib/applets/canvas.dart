@@ -671,10 +671,7 @@ class _AppletCanvasState extends State<AppletCanvas> {
               IconButton(
                 tooltip: 'Back',
                 onPressed: _leave,
-                icon: const Icon(
-                  Icons.arrow_back_rounded,
-                  size: chatIconSizeV1,
-                ),
+                icon: Icon(Icons.arrow_back_rounded, size: chatIconSize),
               ),
             ),
             const SizedBox(width: 2),
@@ -698,7 +695,7 @@ class _AppletCanvasState extends State<AppletCanvas> {
                   color: theme.colorScheme.onSurfaceVariant,
                   onPressed: () => _show(app: !_showingApp),
                   icon: _showingApp
-                      ? const Icon(Icons.code_rounded, size: chatIconSizeV1)
+                      ? Icon(Icons.code_rounded, size: chatIconSize)
                       : const ChatIcon(ChatIconKind.applet),
                 ),
               ),
