@@ -122,6 +122,8 @@ void main() {
       matching: find.byType(SwitchListTile),
     );
     expect(tester.widget<SwitchListTile>(guest).value, isFalse);
+    await tester.ensureVisible(guest);
+    await tester.pumpAndSettle();
     await tester.tap(guest);
     await tester.pumpAndSettle();
     expect(sent, {
@@ -144,6 +146,8 @@ void main() {
       matching: find.byType(SwitchListTile),
     );
     expect(tester.widget<SwitchListTile>(authoring).value, isFalse);
+    await tester.ensureVisible(authoring);
+    await tester.pumpAndSettle();
     await tester.tap(authoring);
     await tester.pumpAndSettle();
     expect(sent, {
@@ -325,6 +329,8 @@ void main() {
       of: find.bySemanticsIdentifier(AdminIds.applets('guest-id')),
       matching: find.byType(SwitchListTile),
     );
+    await tester.ensureVisible(guest);
+    await tester.pumpAndSettle();
     await tester.tap(guest);
     await tester.pumpAndSettle();
     expect(
